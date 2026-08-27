@@ -313,6 +313,26 @@ class ChangeKindMeta:
         memo[id(self)] = new
         return new
 
+    def __setstate__(self, state: dict[str, Any]) -> None:
+        # Pickle's default protocol restores a frozen dataclass by setting
+        # __dict__ directly from the pickled state (via this method, when
+        # defined) — it never calls __init__/__post_init__. A pickle
+        # written before policy_overrides became an _ImmutableDict (or one
+        # produced by any code that had a plain dict at this field) would
+        # therefore silently install a plain, mutable dict on the restored
+        # instance, bypassing every validation/immutability guarantee
+        # __post_init__ establishes — confirmed with a real pickle from
+        # before the _ImmutableDict change: type(loaded.policy_overrides)
+        # is dict, and loaded.policy_overrides["x"] = y succeeds (Codex
+        # review, PR #882, fresh evidence). Normalize on load instead, so
+        # every restored instance's policy_overrides is provably an
+        # _ImmutableDict regardless of which version produced the pickle.
+        overrides = state.get("policy_overrides")
+        if not isinstance(overrides, _ImmutableDict):
+            state = dict(state)
+            state["policy_overrides"] = _ImmutableDict(overrides or {})
+        self.__dict__.update(state)
+
 
 #: Representative ``str.format(**...)`` kwarg sets used to *actually execute*
 #: a ``description_template`` at registry-construction time (see

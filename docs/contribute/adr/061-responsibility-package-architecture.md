@@ -1133,9 +1133,10 @@ space reasons). The eight now-fully-migrated flat sibling files were
 deleted; `change_registry.py` is now a ~65-line pure assembly point that
 imports each taxonomy's entry list and constructs the single production
 `REGISTRY` from their concatenation — it holds no `ChangeKindMeta` entries
-itself. `change_registry_types.py` remains as the pre-existing compatibility
-re-export shim for `Verdict`/`ChangeKindMeta`/`ChangeKindRegistry` (unrelated
-to this migration, unchanged by it). Verified content-preserving: reconstructing
+itself. `change_registry_types.py` — already turned into a compatibility
+re-export shim for `Verdict`/`ChangeKindMeta`/`ChangeKindRegistry` by an
+earlier step in this same PR (the registry-core-types move described below)
+— is untouched by this taxonomy repartition specifically. Verified content-preserving: reconstructing
 `ChangeKindRegistry` from the five taxonomy modules' concatenated entry
 lists produces byte-for-byte identical `ChangeKindMeta` content (via
 `dataclasses.asdict()` equality) for all 397 entries, compared directly
@@ -1485,7 +1486,8 @@ without promising a new export.
    modules.yaml`'s `frozen_root_families["change_registry_"]` and
    `legacy_root_modules` both dropped the same eight now-nonexistent
    entries (keeping `change_registry.py`, now the assembly point, and
-   `change_registry_types.py`, the unrelated pre-existing compat shim),
+   `change_registry_types.py`, the compat shim an earlier step in this
+   same PR already created — untouched by this taxonomy step itself),
    and the matching stale `no_growth` debt entry for `change_registry.py`
    in `architecture/debt.yaml` was removed — its own rationale ("cannot
    move safely without a behavior-preserving vertical slice") no longer

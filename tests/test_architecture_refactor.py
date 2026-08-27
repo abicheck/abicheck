@@ -438,6 +438,43 @@ class TestChangeKindRegistry:
         with pytest.raises(TypeError):
             entry.policy_overrides["plugin_abi"] = Verdict.BREAKING
 
+    def test_setstate_normalizes_a_legacy_plain_dict_policy_overrides(self):
+        """Loading a pre-``_ImmutableDict`` pickle must still be immutable.
+
+        Pickle's default protocol restores an object's state by setting
+        ``__dict__`` directly (via ``__setstate__``, when defined) — it
+        never calls ``__init__``/``__post_init__``. A pickle produced
+        before ``policy_overrides`` became an ``_ImmutableDict`` (or any
+        hand-built state carrying a plain dict there) would therefore
+        silently install a plain, mutable dict on the restored instance,
+        bypassing every validation/immutability guarantee
+        ``__post_init__`` establishes (Codex review, PR #882, fresh
+        evidence — confirmed against a real pre-fix pickle). Fixed with
+        ``ChangeKindMeta.__setstate__``, which normalizes on load
+        regardless of which version produced the pickle.
+        """
+        import pytest
+
+        entry = ChangeKindMeta(
+            "test_kind", Verdict.BREAKING,
+            policy_overrides={"plugin_abi": Verdict.COMPATIBLE},
+        )
+        # Simulate a legacy pickle's restored state: a plain dict, not the
+        # _ImmutableDict __post_init__ would have wrapped it into.
+        legacy_state = dict(entry.__dict__)
+        legacy_state["policy_overrides"] = {"plugin_abi": Verdict.COMPATIBLE}
+        assert type(legacy_state["policy_overrides"]) is dict
+
+        restored = object.__new__(ChangeKindMeta)
+        restored.__setstate__(legacy_state)
+
+        from abicheck.model.change_catalog.registry import _ImmutableDict
+
+        assert isinstance(restored.policy_overrides, _ImmutableDict)
+        assert dict(restored.policy_overrides) == {"plugin_abi": Verdict.COMPATIBLE}
+        with pytest.raises(TypeError):
+            restored.policy_overrides["unknown"] = Verdict.API_BREAK
+
     def test_description_template_with_unknown_placeholder_raises(self):
         """A description_template referencing an out-of-vocabulary field is rejected.
 
