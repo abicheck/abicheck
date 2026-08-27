@@ -108,7 +108,7 @@ still open.
 The user's request separates into two deliverables, and they are sized very
 differently on purpose:
 
-* **Process change (this PR, immediate):** stop treating "a test for the
+* **Process change (implemented):** stop treating "a test for the
   reported input, plus a prose description of the class" as sufficient.
   The bug-fix contract already *asks* for a bug class and a general
   invariant (`.github/PULL_REQUEST_TEMPLATE.md`'s "Bug class" /
@@ -219,7 +219,7 @@ escapes the class explains) rather than by size — per AGENTS.md's
 decision-making principles, size/time is not a sequencing criterion here,
 expected defect-catching value is.
 
-### Phase 0 — process change (this PR)
+### Phase 0 — process change (implemented)
 
 * Reword the bug-fix test contract's "General invariant" / "Regression
   test fails on base" rows (`.github/PULL_REQUEST_TEMPLATE.md`) and the
@@ -227,9 +227,9 @@ expected defect-catching value is.
   (`scripts/check_bugfix_test_contract.py`) to require the invariant be
   backed by a *generalized* test (generated/adversarial inputs beyond
   the one reported, or an exhaustive enumeration for a small domain) —
-  not a single fixed-input assertion plus prose. Point at this plan
-  file and, once Phase 1 lands, at `tests/regressions/manifest.py` for
-  "does this class already have a home."
+  not a single fixed-input assertion plus prose. Points at this plan
+  file and, now that Phase 1 has landed, at `tests/regressions/manifest.py`
+  for "does this class already have a home."
 * Add the corresponding normative statement to `AGENTS.md`'s
   "Decision-making principles" section, alongside the existing
   "Fix the cause, not the instance" bullet it already extends.
@@ -237,23 +237,33 @@ expected defect-catching value is.
   half (code change ⇒ test change) is unaffected; only the declared
   half's required *content* is redefined. A stricter, automatically
   enforced version (does the named test actually generate more than one
-  input; does it name an oracle) is Phase 1's `check_regressions_manifest.py`
-  gate, deliberately kept separate so this phase ships immediately
-  without new CI surface.
+  input; does it name an oracle) is left for a later, optional
+  `check_regressions_manifest.py` CI gate once the registry has enough
+  entries to make false positives rare (see Phase 1 below) — deliberately
+  not built yet, so this phase ships without new CI surface.
 
-### Phase 1 — regression-class registry + manifest gate
+### Phase 1 — regression-class registry + manifest gate (implemented)
 
-* `tests/regressions/manifest.py` — the `BugClass` registry described
-  above, seeded with the nine classes this plan names.
-* `tests/test_regressions_manifest.py` — integrity checks (paths exist,
-  tests are collected somewhere, `known_gaps` entries are real).
-* `scripts/check_regressions_manifest.py` (optional CI wiring) — the
-  same "declared but unverifiable" pattern `check_bugfix_test_contract.py`
-  already uses: a `fix:` PR whose "Bug class" answer matches an existing
-  registry `id` gets a soft nudge (not a hard gate in this phase) if the
-  class's own test set does not appear to have changed — full enforcement
-  is deferred until the registry has enough entries to make false
-  positives rare.
+* `tests/regressions/manifest.py` — the `BugClass`/`KnownGap` registry
+  described above, seeded with the nine classes this plan names, each
+  pointing at the real generalized/property test(s) that already exist
+  for it (see the "Coverage gaps found" sections below for what each
+  class's tests still need to grow into) and, where applicable, a
+  `known_gaps` entry recording a residual this registry does not yet
+  claim to close.
+* `tests/test_regressions_manifest.py` — integrity checks: every
+  registered id is unique and dotted, every class states a non-empty
+  invariant and traces to at least one real fix, every `seed_tests`/
+  `known_gaps.canary_test` path resolves to a real, `test_`-prefixed
+  file under `tests/` (so a stale or typo'd path fails the suite instead
+  of silently reading as verified coverage), and the lookup helpers
+  (`get`/`all_ids`) round-trip against the registry.
+* `scripts/check_regressions_manifest.py` (optional CI wiring, e.g. a
+  soft nudge when a `fix:` PR's "Bug class" answer matches a registered
+  id but that class's own test set didn't change) — **not built in this
+  phase**, deliberately: with nine entries the false-positive risk of an
+  automated nudge isn't worth it yet; revisit once the registry has grown
+  from later phases' work.
 
 ### Phase 2 — AST wrapper-chain traversal invariant
 
@@ -463,8 +473,9 @@ silently-wrong result).
 * `AGENTS.md` — new "Decision-making principles" bullet (Phase 0).
 * `.github/PULL_REQUEST_TEMPLATE.md`, `scripts/check_bugfix_test_contract.py`
   — reworded guidance text (Phase 0); no structural gate change.
-* `tests/regressions/manifest.py`, `tests/test_regressions_manifest.py`,
-  `scripts/check_regressions_manifest.py` (Phase 1, new).
+* `tests/regressions/manifest.py`, `tests/test_regressions_manifest.py`
+  (Phase 1, implemented). `scripts/check_regressions_manifest.py` — not
+  built (see Phase 1's own note on why).
 * One new or extended test module per bug class (Phases 2–9), named in
   each phase section above; extends rather than replaces the existing
   property/oracle test files the audit found already doing this well

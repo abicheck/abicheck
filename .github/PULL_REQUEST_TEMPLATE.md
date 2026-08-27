@@ -39,10 +39,11 @@ is not satisfied by prose alone: name the test exercising it with inputs
 beyond the reported one (generated/property-based, an exhaustive
 small-domain enumeration, or several independently-chosen sibling cases)
 against a stated oracle that is not the same formula/helper the
-implementation itself uses. Once that plan's Phase 1 lands
-(`tests/regressions/manifest.py`), check there first for a matching bug
-class before restating the invariant from scratch — until then, that
-registry does not exist yet, so name the invariant directly.
+implementation itself uses. Check `tests/regressions/manifest.py`
+(`BUG_CLASSES`/`get()`) first for a matching bug class before restating
+the invariant from scratch — name its `id` here if it already has a home,
+or add a new entry there (not just prose) if this fix closes a genuinely
+new class.
 -->
 
 - Bug class:

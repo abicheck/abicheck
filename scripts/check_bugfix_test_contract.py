@@ -36,8 +36,9 @@ into "a test for the reported input, plus a paragraph describing the class":
 the invariant must be backed by a test that exercises it with inputs beyond
 the one reported, against a named oracle — not restated as prose alone. See
 docs/contribute/plans/bug-class-regression-testing.md for the full analysis
-and the named bug classes it identifies; that plan's Phase 1 will add a
-queryable ``tests/regressions/manifest.py`` registry, not yet landed.
+and the named bug classes it identifies. ``tests/regressions/manifest.py``
+(that plan's Phase 1) is the queryable registry: check it first for a
+matching class before restating an invariant from scratch.
 
 Two kinds of check, deliberately separated:
 
@@ -343,9 +344,10 @@ REQUIREMENTS: tuple[Requirement, ...] = (
         "a test does not satisfy this row (AGENTS.md 'A bug fix's regression "
         "test targets the bug class, not the one reported input'; see "
         "docs/contribute/plans/bug-class-regression-testing.md for the "
-        "analysis this requirement is based on — once its Phase 1 "
-        "tests/regressions/manifest.py registry lands, check there first "
-        "for a matching class before restating the invariant from scratch). "
+        "analysis this requirement is based on). Check "
+        "tests/regressions/manifest.py (BUG_CLASSES/get()) first for a "
+        "matching class before restating the invariant from scratch — name "
+        "its id here if it already has a home. "
         "'None — documented as a known gap' is an acceptable answer; "
         "silence is not.",
     ),
