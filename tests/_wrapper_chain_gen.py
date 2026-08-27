@@ -158,3 +158,21 @@ def chain_with_non_list_inner(
         cur = cur["inner"][0]
     cur["inner"] = bad_inner
     return root, cur
+
+
+def add_irrelevant_metadata(node: dict[str, Any], metadata: dict[str, Any]) -> None:
+    """Recursively stamp *metadata* onto *node* and every node reachable
+    through its ``inner`` chain, in place -- a real clang AST node always
+    carries volatile bookkeeping fields (``id``, ``loc``, ``range``, ...)
+    alongside the structural ones this generator otherwise builds, and no
+    traversal/value-extraction primitive is meant to depend on them. Chosen
+    metadata keys (``id``/``loc``/``range``) never collide with a key this
+    generator's own chain/leaf builders set, so this only ever ADDS noise,
+    never masks the structural fields a test actually checks."""
+    if not isinstance(node, dict):
+        return
+    node.update(metadata)
+    inner = node.get("inner")
+    if isinstance(inner, list):
+        for child in inner:
+            add_irrelevant_metadata(child, metadata)

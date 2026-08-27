@@ -77,6 +77,7 @@ from abicheck import dumper_clang, dumper_clang_expr
 from abicheck.buildsource.source_extractors import clang_nodes
 from tests._wrapper_chain_gen import (
     NON_LITERAL_LEAF_KIND,
+    add_irrelevant_metadata,
     build_wrapper_chain,
     chain_with_ambiguous_branch,
     chain_with_missing_inner,
@@ -133,6 +134,32 @@ _LITERAL_LEAF_KINDS = sorted(_EXPECTED_LITERAL_LEAF_KINDS)
 _kinds_strategy = st.lists(st.sampled_from(_WRAPPER_KINDS), min_size=0, max_size=6)
 _nonempty_kinds_strategy = st.lists(
     st.sampled_from(_WRAPPER_KINDS), min_size=1, max_size=6
+)
+
+#: A real clang AST node carries volatile bookkeeping fields (a compile-
+#: time-only pointer ``id``, source ``loc``/``range`` offsets) alongside
+#: the structural fields this generator's chains build -- irrelevant noise
+#: no traversal/value-extraction primitive here is meant to depend on, per
+#: the Phase 2 generator contract's "extra irrelevant metadata" clause
+#: (Codex review, PR #888: every chain this suite generated omitted it
+#: entirely, so a regression accidentally keying off one of these volatile
+#: fields would have passed unnoticed).
+_IRRELEVANT_METADATA_STRATEGY = st.fixed_dictionaries(
+    {
+        "id": st.text(alphabet="0123456789abcdef", min_size=4, max_size=12),
+        "loc": st.fixed_dictionaries(
+            {
+                "line": st.integers(min_value=1, max_value=100_000),
+                "col": st.integers(min_value=1, max_value=200),
+            }
+        ),
+        "range": st.fixed_dictionaries(
+            {
+                "begin": st.integers(min_value=0, max_value=1_000_000),
+                "end": st.integers(min_value=0, max_value=1_000_000),
+            }
+        ),
+    }
 )
 
 
@@ -192,6 +219,23 @@ def test_unwrap_expr_is_a_no_op_on_a_bare_leaf(kinds: list[str]) -> None:
     leaf = {"kind": NON_LITERAL_LEAF_KIND}
     assert dumper_clang_expr._unwrap_expr(leaf) is leaf
     assert clang_nodes._unwrap_expr(leaf) is leaf
+
+
+@given(kinds=_kinds_strategy, metadata=_IRRELEVANT_METADATA_STRATEGY)
+@settings(max_examples=150)
+def test_unwrap_expr_ignores_irrelevant_metadata(
+    kinds: list[str], metadata: dict[str, Any]
+) -> None:
+    """Per the Phase 2 generator contract's "extra irrelevant metadata"
+    clause (Codex review, PR #888): every chain this suite generated
+    previously omitted the volatile bookkeeping fields (``id``/``loc``/
+    ``range``) a real clang AST node always carries, so a regression that
+    accidentally keyed traversal off one of them would have passed
+    unnoticed."""
+    root, leaf = build_wrapper_chain(kinds, leaf_kind=NON_LITERAL_LEAF_KIND)
+    add_irrelevant_metadata(root, metadata)
+    assert dumper_clang_expr._unwrap_expr(root) is leaf
+    assert clang_nodes._unwrap_expr(root) is leaf
 
 
 # --------------------------------------------------------------------------
@@ -328,6 +372,26 @@ def test_evaluated_int_value_finds_a_value_folded_at_any_position(
     value, encoding = value_and_encoding
     value_at = data.draw(st.integers(min_value=0, max_value=len(kinds)))
     root, _leaf = build_wrapper_chain(kinds, value_at=value_at, value=encoding)
+    assert dumper_clang._evaluated_int_value(root) == value
+
+
+@given(
+    kinds=_kinds_strategy,
+    value_and_encoding=_int_with_encoding_strategy,
+    metadata=_IRRELEVANT_METADATA_STRATEGY,
+    data=st.data(),
+)
+@settings(max_examples=150)
+def test_evaluated_int_value_ignores_irrelevant_metadata(
+    kinds: list[str],
+    value_and_encoding: tuple[int, str],
+    metadata: dict[str, Any],
+    data: Any,
+) -> None:
+    value, encoding = value_and_encoding
+    value_at = data.draw(st.integers(min_value=0, max_value=len(kinds)))
+    root, _leaf = build_wrapper_chain(kinds, value_at=value_at, value=encoding)
+    add_irrelevant_metadata(root, metadata)
     assert dumper_clang._evaluated_int_value(root) == value
 
 
@@ -482,6 +546,24 @@ def test_initializer_value_and_expr_value_agree_on_a_literal_at_any_depth(
     root, _leaf = build_wrapper_chain(
         kinds, value_at=len(kinds), value=str(value), leaf_kind=leaf_kind
     )
+    assert dumper_clang_expr._initializer_value(_decl_wrapping(root)) == str(value)
+    assert clang_nodes._expr_value(root) == str(value)
+
+
+@given(
+    kinds=_kinds_strategy,
+    value=st.integers(min_value=-1000, max_value=1000),
+    leaf_kind=st.sampled_from(_LITERAL_LEAF_KINDS),
+    metadata=_IRRELEVANT_METADATA_STRATEGY,
+)
+@settings(max_examples=150)
+def test_initializer_value_and_expr_value_ignore_irrelevant_metadata(
+    kinds: list[str], value: int, leaf_kind: str, metadata: dict[str, Any]
+) -> None:
+    root, _leaf = build_wrapper_chain(
+        kinds, value_at=len(kinds), value=str(value), leaf_kind=leaf_kind
+    )
+    add_irrelevant_metadata(root, metadata)
     assert dumper_clang_expr._initializer_value(_decl_wrapping(root)) == str(value)
     assert clang_nodes._expr_value(root) == str(value)
 
