@@ -13,6 +13,7 @@ Phase 0 modules use (root `AGENTS.md`'s "Primitive-level property tests").
 from __future__ import annotations
 
 import unicodedata
+from collections.abc import Mapping
 from typing import Any
 
 import pytest
@@ -692,6 +693,47 @@ class TestObjectStoreContract:
             store.get(value)
         with pytest.raises(TypeError):
             store.has(value)
+
+    def test_put_hashes_and_stores_the_same_normalized_snapshot(self) -> None:
+        """`put()` must normalize `content` exactly once, then derive both
+        the returned digest and the stored value from that same snapshot --
+        not re-traverse the caller's own `content` independently for each.
+        A stateful custom `Mapping` (accepted by `canonical_form`) whose
+        traversal yields different data each time it's iterated is the
+        adversarial case: before the fix, the digest was computed from one
+        traversal (this test's first, `{"x": 1}`) while the stored value
+        came from a second, independent traversal (`{"x": 2}`), so the
+        returned digest identified content that was never actually stored.
+        """
+
+        class _StatefulMapping(Mapping):
+            # `canonical_form` calls `.items()` exactly once per top-level
+            # `canonical_form(value)` invocation for a given Mapping object
+            # (it never re-derives `.items()` mid-traversal), so overriding
+            # `items()` itself -- rather than `__getitem__`/`__iter__`,
+            # which the default `.items()` implementation may probe more
+            # than once per call -- gives a call count that lines up
+            # exactly with the number of times this object was normalized.
+            def __init__(self) -> None:
+                self.calls = 0
+
+            def __getitem__(self, key: str) -> int:
+                return {"x": 1}[key]
+
+            def __iter__(self) -> Any:
+                return iter({"x": 1})
+
+            def __len__(self) -> int:
+                return 1
+
+            def items(self) -> Any:
+                self.calls += 1
+                data = {"x": 1} if self.calls == 1 else {"x": 2}
+                return data.items()
+
+        store = InMemoryObjectStore()
+        digest = store.put(_StatefulMapping())
+        assert digest == semantic_digest(store.get(digest))
 
     def test_get_never_depends_on_which_capture_variant_was_put_first(
         self,

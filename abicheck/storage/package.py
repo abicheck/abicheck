@@ -767,13 +767,17 @@ class InMemoryObjectStore:
         self._objects: dict[str, Any] = {}
 
     def put(self, content: Any) -> str:
-        digest = semantic_digest(content)
+        # Normalize `content` exactly once, then hash and store from that
+        # same snapshot -- two separate calls would each re-traverse the
+        # caller's own `content` independently, which for a stateful custom
+        # `Mapping` (or one mutated between the calls) could make the
+        # returned digest identify different content than what gets stored
+        # (Codex review). `stripped` is a fresh, plain-typed structure, so
+        # re-hashing it traverses our own copy, not the caller's.
+        stripped = strip_capture_metadata(content)
+        digest = semantic_digest(stripped)
         if digest not in self._objects:
-            # Store the *hash-domain* form (capture metadata stripped, same
-            # as what was hashed), not the full canonical form -- else two
-            # capture-only-differing values sharing a digest would make
-            # `get()` depend on which one's `put()` ran first (Codex review).
-            self._objects[digest] = strip_capture_metadata(content)
+            self._objects[digest] = stripped
         return digest
 
     def get(self, digest: str) -> Any:
