@@ -674,19 +674,46 @@ class ChangeKindRegistry:
         Without this, pickle's default protocol restores an instance by
         calling ``cls.__new__(cls)`` and then setting ``__dict__`` directly
         from the pickled state — ``__init__`` (and therefore
-        ``_validate_entry()``/the duplicate-key check) never runs. A pickle
-        produced by an older revision of this class — before a given
-        ``_validate_entry()`` rule existed, or simply written from a
-        registry someone assembled by hand — would load here as a fully
-        "real" ``ChangeKindRegistry`` despite carrying state this revision
-        would reject at construction time (e.g. the 48-entries-with-no-
-        ``impact`` state the "complete metadata" property closed off).
-        Returning ``(ChangeKindRegistry, (entries,))`` instead makes
-        unpickling call ``ChangeKindRegistry(entries)`` exactly like any
-        other construction path, so a restored registry is re-validated
-        every time, not just the first time it was built.
+        ``_validate_entry()``/the duplicate-key check) never runs. Returning
+        ``(ChangeKindRegistry, (entries,))`` instead makes unpickling call
+        ``ChangeKindRegistry(entries)`` exactly like any other construction
+        path, so a registry pickled *under this revision* is re-validated
+        every time it is restored, not just the first time it was built.
+
+        This governs only pickles this revision *writes* — see
+        ``__setstate__`` below for the pickles this revision merely *reads*
+        (a pickle already on disk, written by a revision before this
+        method existed).
         """
         return (ChangeKindRegistry, (list(self._entries.values()),))
+
+    def __setstate__(self, state: dict[str, Any]) -> None:
+        """Revalidate state restored from a pickle written *before* ``__reduce__``
+        existed (Codex review, PR #882, fresh evidence).
+
+        ``__reduce__`` is encoded into the pickle bytes at *write* time —
+        it only changes what a newly-written pickle looks like, not how an
+        already-written one is read back. A real production ``REGISTRY``
+        pickle written before this class defined ``__reduce__`` still
+        carries the default protocol's ``__newobj__``-plus-raw-``__dict__``
+        payload, and loading *that* payload bypasses ``__init__`` (and
+        ``_validate_entry()``) exactly the way ``__reduce__``'s own
+        docstring describes — a 397-entry registry with 48 empty-``impact``
+        entries loads here as fully "real", contradicting the "complete
+        metadata" guarantee. Python's unpickling machinery decides whether
+        to call ``__setstate__`` by checking the *current*, in-memory class
+        for the method — not by what the pickle's writer-time class
+        defined — so simply defining this method retroactively covers that
+        legacy payload too, with no version marker needed. Reconstructs
+        through ``__init__`` exactly like ``__reduce__``'s own path, so a
+        restored registry is re-validated regardless of which pickle
+        format produced it. Never invoked for a pickle this revision wrote
+        itself: ``__reduce__`` returns a 2-tuple with no state component,
+        so pickle reconstructs directly via ``ChangeKindRegistry(entries)``
+        and this method never runs for that path.
+        """
+        entries_by_kind = state.get("_entries", {}) if isinstance(state, dict) else {}
+        self.__init__(list(entries_by_kind.values()))  # type: ignore[misc]
 
     def __len__(self) -> int:
         return len(self._entries)

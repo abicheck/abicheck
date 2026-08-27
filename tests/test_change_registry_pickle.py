@@ -60,3 +60,29 @@ def test_registry_pickle_revalidates_on_load():
     payload = pickle.dumps(bad_reg)
     with pytest.raises(ValueError, match="impact must be non-empty"):
         pickle.loads(payload)
+
+
+def test_registry_setstate_revalidates_a_pre_reduce_legacy_pickle():
+    """A pickle written *before* ``__reduce__`` existed is also revalidated.
+
+    Codex review, PR #882, fresh evidence: ``__reduce__`` only governs
+    pickles written under this revision — a real production ``REGISTRY``
+    pickle written by an older revision (before ``__reduce__`` existed)
+    still carries the default protocol's raw ``__dict__`` payload, which
+    ``ChangeKindRegistry.__setstate__`` must intercept instead. Simulated
+    directly (as the existing ``ChangeKindMeta.__setstate__`` legacy-pickle
+    tests do) since Python's unpickling machinery decides whether to call
+    ``__setstate__`` by checking the *current* class, not by re-executing
+    the writer's original pickle bytes — so calling it directly on a
+    freshly ``__new__``-created instance exercises the exact code path a
+    real legacy pickle would hit.
+    """
+    ok_entry = ChangeKindMeta("ok_kind", Verdict.BREAKING, impact="i")
+    restored = object.__new__(ChangeKindRegistry)
+    restored.__setstate__({"_entries": {"ok_kind": ok_entry}})
+    assert set(restored.entries) == {"ok_kind"}
+
+    bad_entry = ChangeKindMeta("bad_kind", Verdict.BREAKING)  # impact=""
+    restored_bad = object.__new__(ChangeKindRegistry)
+    with pytest.raises(ValueError, match="impact must be non-empty"):
+        restored_bad.__setstate__({"_entries": {"bad_kind": bad_entry}})
