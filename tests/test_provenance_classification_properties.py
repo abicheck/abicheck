@@ -61,7 +61,7 @@ import pytest
 from hypothesis import assume, given, settings, strategies as st
 
 from abicheck.model import ScopeOrigin
-from abicheck.provenance import build_public_set, classify_origin
+from abicheck.provenance import _GENERATED_BASENAME, build_public_set, classify_origin
 
 pytestmark = pytest.mark.slow
 
@@ -104,7 +104,21 @@ _SEGMENT = st.text(
     ),
     min_size=1,
     max_size=8,
-).filter(lambda s: s.lower() not in _RESERVED_TOKENS and s not in (".", ".."))
+).filter(
+    lambda s: (
+        s.lower() not in _RESERVED_TOKENS
+        and s not in (".", "..")
+        # A segment used as a filename (`f"{s}.h"`) must not itself look
+        # generated (a `moc_`/`ui_`/`_generated` shape under this alphabet) --
+        # several properties below assert PRIVATE_HEADER unconditionally for a
+        # header built from this strategy, and classify_origin checks the
+        # generated heuristic before falling through to PRIVATE_HEADER, so an
+        # unfiltered Hypothesis-generated "moc_1"/"ui_x"/"x_generated" would
+        # make that assertion seed-dependent instead of a real invariant
+        # (Codex review, PR #894).
+        and not _GENERATED_BASENAME.match(f"{s}.h")
+    )
+)
 _SEGMENT_LIST = st.lists(_SEGMENT, min_size=1, max_size=3, unique=True)
 
 
