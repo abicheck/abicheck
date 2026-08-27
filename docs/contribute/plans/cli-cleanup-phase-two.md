@@ -664,19 +664,21 @@ this section, already reads:
 With that in place the Action does not parse stderr, does not re-run any
 comparison, does not guess why the exit was `1`, renders annotations from the
 persisted findings and the Job Summary from the same object, and behaves
-identically for a single pair and a release fan-out — once PR E lands
-`exit` for `scan --against` at whichever location this section's `scan`
-resolution above settles on, while still reading `verdict`/`changes` (or
-that operand's own equivalent) unchanged. The `exit` block is the
+identically for a single pair and a release fan-out — **including
+`scan --against`, whose own `exit` block landed as PR E's first half (see
+above: `report["diff"].exit`, schema 1.18)**, while still reading
+`verdict`/`changes` (or that operand's own equivalent) unchanged. The `exit`
+block is the
 same object PR 4/G formalizes as `ExitDecision`. Build it once and consume it
-once — which is why PR G is split, and the split is load-bearing for this
-section rather than cosmetic: **G1** builds the decision object and emits its
-report block (no CLI behaviour change, no flag removed) and lands *before* PR
+once — which is why PR G is split, and the split was load-bearing for this
+section rather than cosmetic: **G1** built the decision object and emitted its
+report block (no CLI behaviour change, no flag removed) and landed *before* PR
 E; **G2** makes today's `auto` the only gate algorithm and deletes
-`--exit-code-scheme`. Without that split PR E would have to either depend on
-unlanded work or invent the second, Action-shaped spelling this section
-prohibits. If G1 slips, PR E ships its annotations half and leaves the
-gate-explanation half — not a private `exit` block of its own.
+`--exit-code-scheme` (still open — see PR 4's own section). Without that split
+PR E would have had to either depend on unlanded work or invent the second,
+Action-shaped spelling this section prohibits — moot now that G1 landed
+first, exactly as planned: PR E shipped both its annotations half and the
+`scan --against` `exit` block, not merely the former.
 
 **Tests.** A saved report fixture (both a single-library and a release-style
 report) must produce, through the Action's renderer, byte-identical
@@ -1937,8 +1939,11 @@ pipelines a fourth time.
   > (`git_commit`, `version`).
   >
   > **What still blocks routing `dump_cmd`'s real run through
-  > `execute_dump_request` — narrowed to two items, both real** (as of the note
-  > below, narrowed further to one). Blocker 4 is
+  > `execute_dump_request` — narrowed to two items, both real** (as of the
+  > notes below, item 1 itself later split into two: castxml plus the
+  > untested Flow-2 `--inputs` fold — see "Item 2 (castxml) is unchanged,
+  > but is not the *sole* remaining blocker" further down for the current,
+  > correct count). Blocker 4 is
   > closed on measurement, not just on reading: `service.run_dump`'s ELF branch
   > already runs every post-processing pass `perform_elf_dump` does (SYCL,
   > `python_ext`, `python_api`, `numpy_capi`, the G31 header graph, the G28
