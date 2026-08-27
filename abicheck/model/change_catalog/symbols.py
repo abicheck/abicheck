@@ -162,9 +162,12 @@ SYMBOLS_ENTRIES: list[ChangeKindMeta] = [
        description_template="Function explicitly deleted (= delete): {name}"),
     _E("func_deprecated_added", _C,
        impact="Function gained [[deprecated]]; callers now get a compiler "
-              "warning when calling it, but its signature and ABI are "
-              "unchanged — informational advance notice for a consumer "
-              "compiling with warnings-as-warnings. A consumer whose own "
+              "warning when calling it. This detector matches functions by "
+              "mangled name and only checks the deprecated flag — it "
+              "doesn't verify the signature is otherwise unchanged (a "
+              "return-type change, for instance, doesn't affect Itanium "
+              "mangling), so a companion finding for such a change is "
+              "possible. A consumer whose own "
               "build treats warnings as errors (e.g. "
               "-Werror=deprecated-declarations) has this turn a previously "
               "clean build into a failing one, so it isn't unconditionally "
@@ -587,10 +590,14 @@ SYMBOLS_ENTRIES: list[ChangeKindMeta] = [
        impact="Variable moved to read-only section; old code writing to it gets SIGSEGV."),
     _E("var_deprecated_added", _C,
        impact="Variable gained [[deprecated]]; consumers get a compiler "
-              "warning when referencing it, but its type, size, and "
-              "address are unchanged. A consumer building with warnings "
-              "as errors (e.g. -Werror=deprecated-declarations) has this "
-              "turn a previously clean build into a failing one.",
+              "warning when referencing it. This detector matches "
+              "variables by mangled name and only checks the deprecated "
+              "flag — it doesn't verify the type is otherwise unchanged "
+              "(a variable's type isn't encoded in its mangled name the "
+              "way a function's parameters are), so a companion finding "
+              "for a type change is possible. A consumer building with "
+              "warnings as errors (e.g. -Werror=deprecated-declarations) "
+              "has this turn a previously clean build into a failing one.",
        description_template="Variable marked deprecated: {name} ({detail})"),
     _E("var_deprecated_removed", _C,
        impact="Variable's [[deprecated]] marker was removed; the compiler "

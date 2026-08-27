@@ -60,11 +60,17 @@ TYPES_ENTRIES: list[ChangeKindMeta] = [
               "binaries read the wrong addresses.",
        description_template="Base class '{detail}' moved within '{name}' ({old} → {new} bits). The `this`-pointer adjustment for that base and the offset of every field after it shift; existing binaries read the wrong addresses."),
     _E("base_class_position_changed", _B,
-       impact="Base classes were reordered; this shifts every subobject's "
-              "offset within the derived class (the this-pointer "
-              "adjustment needed to reach a given base changes), so a "
-              "caller compiled against the old layout accesses inherited "
-              "members and virtual dispatch through the wrong offset.",
+       impact="Base classes were reordered (same base set, different "
+              "order); this detector reports the reorder from the base-name "
+              "list alone and never inspects the bases' actual offsets, so "
+              "it can't distinguish a real subobject-offset shift from a "
+              "supported layout-neutral case — e.g. reordering two empty "
+              "bases under the empty-base optimization, which can leave "
+              "every offset unchanged. Where the reorder does shift "
+              "offsets, the this-pointer adjustment needed to reach a "
+              "given base changes, so a caller compiled against the old "
+              "layout accesses inherited members and virtual dispatch "
+              "through the wrong offset.",
        description_template="Base class order reordered: {name} — this-pointer adjustments changed"),
     _E("base_class_virtual_changed", _B,
        impact="A base class's virtual-inheritance mode changed (virtual ↔ "
@@ -228,8 +234,12 @@ TYPES_ENTRIES: list[ChangeKindMeta] = [
        description_template="Field lost its default initializer: {name}::{detail}"),
     _E("field_deprecated_added", _C,
        impact="A field gained [[deprecated]]; consumers get a compiler "
-              "warning when accessing it, but its offset and type are "
-              "unchanged. A consumer building with warnings as errors "
+              "warning when accessing it. This detector matches fields by "
+              "name and only checks the deprecated flag — it doesn't "
+              "verify the field's offset or type are also unchanged, so a "
+              "companion finding for either is possible and takes "
+              "precedence over this one's stability claim. A consumer "
+              "building with warnings as errors "
               "(e.g. -Werror=deprecated-declarations) has this turn a "
               "previously clean build into a failing one.",
        description_template="Field marked deprecated: {name}::{detail} ({new})"),
@@ -534,8 +544,11 @@ TYPES_ENTRIES: list[ChangeKindMeta] = [
        description_template="Type became opaque (forward-declaration only): {name} — stack allocation no longer possible"),
     _E("type_deprecated_added", _C,
        impact="Type gained [[deprecated]]; consumers get a compiler "
-              "warning when naming it, but its layout and ABI are "
-              "unchanged. A consumer building with warnings as errors "
+              "warning when naming it. This detector matches types by "
+              "identity and only checks the deprecated flag — it doesn't "
+              "verify the matched pair's layout or ABI are also "
+              "unchanged, so a companion finding for either is possible. "
+              "A consumer building with warnings as errors "
               "(e.g. -Werror=deprecated-declarations) has this turn a "
               "previously clean build into a failing one.",
        description_template="Type marked deprecated: {name} ({detail})"),
