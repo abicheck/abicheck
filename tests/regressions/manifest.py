@@ -266,6 +266,7 @@ BUG_CLASSES: tuple[BugClass, ...] = (
             "tests/test_lambda_identity_ordinal.py",
             "tests/test_identity_taint_end_to_end.py",
         ),
+        axes={"frontend": ("clang", "castxml")},
         known_gaps=(
             KnownGap(
                 description=(

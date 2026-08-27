@@ -612,9 +612,26 @@ class TestFindingIdentityIsCheckoutPathInvariant:
         confirming this fix's own effect on finding-identity stability."""
         _require_toolchain()
 
-        def _closure_param_spelling(root: Path) -> str:
+        # Root A compiles _HEADER as-is; root B compiles a semantics-
+        # preserving variant with unrelated comments/blank lines inserted
+        # BEFORE the closure, shifting its line number -- varying the raw
+        # coordinates the ordinal-renumbering mechanism (not just the
+        # checkout-path-stripping one) exists to neutralize (Codex review,
+        # PR #898: comparing the SAME header/line/col under two roots would
+        # still pass this assertion even if ordinal renumbering itself
+        # stopped running, since only checkout-path taint -- not line
+        # drift -- would differ between the two calls in that case).
+        drifted_header = _HEADER.replace(
+            "namespace lib {",
+            "namespace lib {\n// unrelated inserted comment\n\n// another one\n",
+            1,
+        )
+        assert drifted_header != _HEADER  # sanity: a real, non-trivial edit
+        assert drifted_header.count("\n") != _HEADER.count("\n")  # line count differs
+
+        def _closure_param_spelling(root: Path, header_text: str) -> str:
             root.mkdir(parents=True)
-            so, header = _build(root, _HEADER, _SOURCE)
+            so, header = _build(root, header_text, _SOURCE)
             snap = _dump(so, header)
             for f in snap.functions:  # type: ignore[attr-defined]
                 for p in f.params:
@@ -625,9 +642,9 @@ class TestFindingIdentityIsCheckoutPathInvariant:
                 "instantiation in the snapshot"
             )
 
-        spelling_a = _closure_param_spelling(tmp_path / "checkout_a")
+        spelling_a = _closure_param_spelling(tmp_path / "checkout_a", _HEADER)
         spelling_b = _closure_param_spelling(
-            tmp_path / "an/unrelated/deeper/checkout_b"
+            tmp_path / "an/unrelated/deeper/checkout_b", drifted_header
         )
 
         from abicheck.checker_policy import ChangeKind
