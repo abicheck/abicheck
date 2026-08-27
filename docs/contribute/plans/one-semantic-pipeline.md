@@ -1540,10 +1540,44 @@ sibling:
   `compare()`'s own pipeline), `SurfaceGraph.public_roots()` falls
   back to its pre-existing `Visibility.PUBLIC` filter — an explicit,
   narrow, named residual for a caller this phase cannot reach, not a
-  second silent implementation competing with the real one; every call
-  reachable from `checker.compare()` itself — which is what `idioms.py`/
-  `pattern_verdicts.py`/`diff_surface_metrics.py` actually run under in
-  production — receives the real, resolved, side-specific ids. **`PublicSurfaceQuery.
+  second silent implementation competing with the real one.
+
+  **That residual turned out to be reachable from production after all —
+  a review round found a second, documented entry point that calls
+  `checker.compare()` directly and is never resolved, the exact gap the
+  paragraph above claimed didn't exist.** `service.compare_snapshots()`
+  is a real, documented Tier-2 production verb
+  (its own docstring: "Thin wrapper over the Tier-1 core... so that
+  *front-ends never call the core directly*") that forwards
+  `pattern_verdicts`/`surface_metrics` straight into `compare()` with no
+  resolved-ids parameter at all — confirmed by reading `service.py`'s
+  `compare_snapshots()` directly, not assumed. Any caller reaching
+  `compare()` through this path (not only `service_compare_pipeline.
+  classify_compare_pair`'s typed-pipeline path) with `pattern_verdicts=
+  True`/`surface_metrics=True` hits the `Visibility.PUBLIC` fallback named
+  above, producing findings that can genuinely differ from the equivalent
+  CLI/typed-pipeline comparison of the same two snapshots — not a
+  theoretical caller this phase cannot reach, but the second of exactly
+  two production routes into `compare()`. Fixed by giving
+  `compare_snapshots()` the identical per-side resolution
+  `classify_compare_pair` performs — calling the same `resolve_public_
+  surface()` wrapper for `old`/`new` independently before invoking
+  `compare()`, and passing the two resulting `frozenset[EntityId] | None`
+  through as the same two parameters `compare()` itself gains — rather
+  than inventing a second resolution path. `service.py` is not itself
+  gated by the ADR-061 `compare -> policy` direction restriction (it is a
+  flat, unmigrated module today, same as the other residuals this plan
+  already tracks under its architecture-boundary notes), so this call is
+  not a new violation; it is a second call site doing exactly what the
+  workflow layer's own resolution call already does. Every documented
+  production route into `compare()` — the typed pipeline and this direct
+  Tier-2 verb — now resolves and passes real, side-specific ids; the
+  `Visibility.PUBLIC` fallback is reachable only from a caller that
+  imports `checker.compare()` directly, bypassing both documented
+  entry points, which is exactly the ADR-037 D1/D10.1 violation the CLI-
+  contract gate already exists to catch.
+
+  **`PublicSurfaceQuery.
   resolve()`'s result is not already a function/variable-only set, and a
   first draft of this phase's mapping step assumed it was — `resolve()`
   traverses `declares` and type-reference edges, so it genuinely returns
@@ -2007,6 +2041,37 @@ sibling:
   part is not itself safety-critical once the alias prevents the silent
   `None` regression — but it is no longer a precondition for this phase
   to ship without breaking existing behavior.
+
+  **The in-memory alias does not, by itself, survive a save/load round
+  trip — a review round correctly traced what actually happens on
+  serialization and found the "one object, two attribute paths" guarantee
+  breaks exactly there.** `serialization.snapshot_to_dict()` already
+  encodes `BuildSourcePack.to_embedded_dict()` (which includes
+  `source_graph`) for any snapshot carrying build-source evidence, and
+  this phase's own `AbiSnapshot.surface_graph` field is additionally
+  serialized at the top level (the schema-version-bump field named below)
+  — so a snapshot with both populated writes the identical graph twice,
+  as two independently-encoded blobs. On load, decoding each field
+  separately reconstructs two distinct (if currently equal) `SourceGraph
+  Summary` objects rather than rebinding one to the other — a real
+  mutable-object alias that held in memory is gone the moment a snapshot
+  is saved and reloaded, silently doubling on-disk size for a real,
+  potentially large L5 graph and letting legacy and new readers diverge
+  after deserialization if either is mutated afterward. Fixed by treating
+  the write side the same way the in-memory assembly step already does:
+  `snapshot_to_dict()` encodes `AbiSnapshot.surface_graph` once, and
+  `BuildSourcePack.to_embedded_dict()` omits `source_graph` whenever the
+  owning snapshot already has one (the ordinary case for every snapshot
+  this phase's assembly step touches) rather than re-encoding the same
+  object a second time. `snapshot_from_dict()` decodes the top-level
+  `surface_graph` once and rebinds `build_source.source_graph` to that
+  same decoded instance — restoring the alias on load, not just on
+  construction — and, for a legacy document written before this phase
+  (one carrying only the nested `source_graph`, no top-level
+  `surface_graph` key at all), decodes the nested field and aliases it
+  forward into `AbiSnapshot.surface_graph` instead, so an old document
+  gets the identical one-object guarantee a new one does rather than two
+  independently-decoded copies in either direction.
 - **The relevance query** — `abicheck/policy/public_surface.py` (new):
   `PublicSurfaceQuery.resolve(graph, explicit_roots) -> frozenset[EntityId]`,
   a traversal from explicit public roots through `includes`/`declares`
@@ -2152,7 +2217,12 @@ already orchestrates `checker.compare()` for the typed pipeline —
 `service_compare_pipeline.py`'s `classify_compare_pair` (or wherever the
 Phase 4 `AnalysisPlan` resolution already runs, since both need the same
 graph) resolves the ids once, which is the `workflows -> model, storage,
-extract, compare, policy` edge ADR-061 already permits.
+extract, compare, policy` edge ADR-061 already permits. **`service.
+compare_snapshots()` — the second, documented Tier-2 production verb that
+also calls `checker.compare()` directly, per the residual fix above —
+performs the identical per-side `resolve_public_surface()` call before
+forwarding into `compare()`, rather than being left to fall back to the
+`Visibility.PUBLIC` default `classify_compare_pair`'s callers never hit.**
 
 **Whether `compare()`'s own new parameter is optional (with a fallback)
 or required was left as this phase's second open design question, and
@@ -3005,6 +3075,38 @@ which backend's value won, per declaration, per fact — applied to
    when both are non-empty and unequal (the real TU-collision case this
    mechanism exists for: two backends that can *both* derive a TU-context
    signal and that signal genuinely differs).
+
+   **That corrected rule is still not enough on its own, and a further
+   review round found the gap it leaves: it silently assumes each
+   `EntityId` maps to at most one `OccurrenceId` per side, which this
+   same phase's own Design section explicitly says is false.** Phase 6's
+   own text states `SemanticIR.occurrences` is "keyed by `OccurrenceId`,
+   **not** collapsed to one entry" precisely because a real ODR-duplicate
+   pair, or an incomplete-declaration/complete-definition pair, shares one
+   `EntityId` across multiple occurrences on a single backend's own
+   snapshot. "Match first by bare `EntityId`" is therefore not
+   automatically a one-to-one match whenever either side's candidate set
+   for that `EntityId` has more than one member — an arbitrary CastXML
+   occurrence could be paired against the wrong Clang occurrence sharing
+   the same identity (or vice versa), backfilling facts from a
+   declaration that is not actually the same physical entity, or
+   collapsing two genuinely distinct occurrences into one. Fixed by
+   checking candidate-set size before attempting the disambiguator
+   comparison above, not only after: for a given `EntityId`, if either
+   side has more than one occurrence, the disambiguator-based check from
+   above is applied per-candidate-pair and a match is accepted only when
+   it identifies a *unique* compatible pair (a pairing where, after
+   excluding candidates whose non-empty disambiguators disagree, exactly
+   one pair remains) — any `EntityId` for which this leaves more than one
+   viable pairing, or leaves an imbalance the comparison cannot resolve (a
+   side's extra occurrence with no remaining candidate to pair against),
+   is left entirely unmerged for that identity: every occurrence from both
+   sides is unioned in verbatim as its own entry, under rule 3 below,
+   rather than guessing at a pairing. This is the same fail-closed
+   direction the disambiguator fix above already takes — an ambiguous
+   group produces no merge rather than an arbitrary one — applied at the
+   cardinality check that has to run before the pairwise comparison is
+   even meaningful, not a new principle invented for it.
 2. **CastXML's `CanonicalEntity` is the base for every matched pair**,
    mirroring every other reconciled field in this function: Clang's
    matching occurrence backfills only the specific facts CastXML's own
