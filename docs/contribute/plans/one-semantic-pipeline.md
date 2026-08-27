@@ -1529,7 +1529,7 @@ sibling:
   `SurfaceGraph.public_roots()` calling `PublicSurfaceQuery.resolve()`
   directly would make `surface_graph.py` — a comparison/index-layer
   module (ADR-025's A1-A4 surface-intelligence substrate, the same role
-  `idiom.py`/`pattern_verdicts.py`/`diff_surface_metrics.py` already play)
+  `idioms.py`/`pattern_verdicts.py`/`diff_surface_metrics.py` already play)
   — import `policy/public_surface.py`, reversing ADR-061's required
   `policy -> compare` direction (`policy/` is allowed to depend on
   `compare/`, never the reverse). Second, `PublicSurfaceQuery.resolve()`
