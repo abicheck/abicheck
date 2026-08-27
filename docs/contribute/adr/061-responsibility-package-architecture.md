@@ -1320,20 +1320,35 @@ logic and reproduce the exact `model -> policy` edge this ADR exists to
 remove (and would itself need `checker_policy.py`'s own split done first,
 for the same `ChangeKind`/policy-set imports), while `policy` or `compare`
 would leave `ReclassifyRule` behind a layer a `model`-owned protocol still
-can't import. The actual third co-prerequisite is narrower than "classify
-`reclassify.py`": extract `ReclassifyRule` (the dataclass alone) into its
-own model-owned leaf, the same `*_metadata.py`-style split this document
-already rejected for `PolicyFile` as a whole but that applies cleanly here,
-since `ReclassifyRule` itself (unlike `PolicyFile`) carries no methods of
-its own — leaving `effective_verdict_for_change`/`reclassify_rule_for_change`
-behind in `reclassify.py`, still classified as `policy`/`compare` once
-`checker_policy.py`'s own split lands. So the protocol is the better
-mechanism to use *once* **three** co-prerequisites have happened, not two:
-`checker_policy.py`'s split (for `ChangeKind`), that same split reaching
-`reclassify.py`'s own `checker_policy` imports, and `ReclassifyRule`
-extracted into a model-owned leaf — none satisfied by deferral — worth
-recording for whoever does that, but none is a protocol in place of doing
-it, and `policy_file.py` staying unclassified for now is unchanged.
+can't import. This pass first proposed "extract `ReclassifyRule` — the
+dataclass alone, no methods of its own — into a model-owned leaf," on the
+premise that it is a plain data holder the way `*_metadata.py`'s facts
+classes are. **A sixteenth Codex review round found that premise wrong too,
+checked directly against the class body rather than assumed**:
+`ReclassifyRule` is not a plain dataclass. `__post_init__` constructs and
+stores a suppression selector (`self._selector = _suppression_cls()(...)`,
+`_suppression_cls()` a lazy import of `suppression.py`), and `matches()`,
+`is_expired()`, `describe()`, and `to_report_dict()` are real methods policy
+evaluation and reporting call. So `ReclassifyRule` is method-bearing with a
+runtime dependency on `suppression.py`'s own policy machinery in exactly the
+shape `PolicyFile` itself is — the same problem this whole investigation
+exists to answer for `PolicyFile`, recurring one leaf class down, not a
+smaller, separately-solvable case of it. Moving the intact class into
+`model` keeps a `model -> policy` (suppression) edge; splitting fields from
+methods changes the type `PolicyFile`'s own `reclassify` list actually holds
+and calls methods on, the identical field-narrowing problem already rejected
+above for `PolicyFile` proper. This investigation does not have a design for
+it — recording that rather than asserting one. So the third co-prerequisite
+is not "extract `ReclassifyRule`" but "resolve `ReclassifyRule`'s own
+model-vs-policy split," an unsolved instance of this same document's central
+question, not a mechanical follow-up to it. The protocol therefore remains
+blocked on **two** co-prerequisites that are actually scoped today
+(`checker_policy.py`'s split, for `ChangeKind`, and that split reaching
+`reclassify.py`'s own `checker_policy` imports) plus this third, open-ended
+one — none satisfied by deferral, and the third not yet reduced to
+actionable work — worth recording for whoever does that, but none is a
+protocol in place of doing it, and `policy_file.py` staying unclassified for
+now is unchanged.
 
 Reclassifying
 `policy_file.py`/`suppression.py` as `compare` instead was rejected too:
@@ -1385,23 +1400,28 @@ or its own consumers, per the fourth Codex round above). **Decided, but not
 yet actionable**: the `Protocol`-based facade is the *selected* mechanism for
 whenever `policy_file.py`'s ownership is finally resolved — see the
 paragraph above ("the protocol is the better mechanism to use *once*..."),
-not a third rejected option; it is blocked today only by its three
-co-prerequisites (`checker_policy.py`'s split for `ChangeKind`, that split
-reaching `reclassify.py`'s own `checker_policy` imports, and `ReclassifyRule`
-extracted into its own model-owned leaf), not by any objection to the
-mechanism itself. **Not decided**:
-`policy_file.py`'s final layer ownership, and therefore *when* those three
-prerequisites get satisfied and the Protocol actually lands. "Deliberately
+not a third rejected option; it is blocked today by two scoped
+co-prerequisites (`checker_policy.py`'s split for `ChangeKind`, and that
+split reaching `reclassify.py`'s own `checker_policy` imports) plus a third,
+open-ended one — `ReclassifyRule`'s own model-vs-policy split, itself an
+unsolved recurrence of this document's central question rather than a
+mechanical follow-up (it is method-bearing, with a runtime dependency on
+`suppression.py`, exactly the shape that makes `PolicyFile` hard) — not by
+any objection to the Protocol mechanism itself. **Not decided**:
+`policy_file.py`'s final layer ownership, `ReclassifyRule`'s, and therefore
+*when* the Protocol actually becomes buildable. "Deliberately
 unclassified" is this ADR's recorded
 *treatment* of the module for now, not its destination — the module stays
 outside `architecture/modules.yaml`'s classified set, `check_architecture.py`
 enforces nothing about which layer may import it, and the actual owner is
 named here as a known open question (`checker_policy.py`'s own
-model-vs-policy split) rather than resolved. Since this ADR is the
+model-vs-policy split, and now `ReclassifyRule`'s own instance of the same
+question) rather than resolved. Since this ADR is the
 authoritative ownership contract, a reader relying on it for `policy_file.py`
 should read this as: no physical move is safe today, no `may_import` edge
-exists for it yet, and the three co-prerequisites above are what unblock
-deciding its owner — not a settled classification to build on.
+exists for it yet, and the co-prerequisites above — two scoped, one still
+needing its own design — are what unblock deciding its owner, not a settled
+classification to build on.
 
 **A tenth Codex review round named the risk every number in this whole
 investigation shares, worth stating once rather than re-litigating per
