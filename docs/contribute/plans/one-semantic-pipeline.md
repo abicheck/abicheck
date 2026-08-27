@@ -621,11 +621,50 @@ and silently suppresses or demotes the finding. Fixed two ways, not one:
 the `diff_*.py` modules above, and the AI-readiness gate's module scope
 widens from "every module under `diff_*.py`" to an explicit allowlist of
 every module this phase identifies as a semantic reader of the three
-converted fields (the four `diff_*.py` modules plus `internal_leak.py`) —
-a glob that happens to match today's known readers is not the same
-invariant as "every known reader is checked," and the next non-`diff_*.py`
-reader this plan's own drafting process misses should fail the gate, not
-silently bypass it the way this one did.
+converted fields — a glob that happens to match today's known readers is
+not the same invariant as "every known reader is checked," and the next
+non-`diff_*.py` reader this plan's own drafting process misses should fail
+the gate, not silently bypass it the way this one did.
+
+**A further repo-wide check found the allowlist-by-hand-enumeration
+itself is exactly the failure mode the previous paragraph just diagnosed,
+reproduced one round later: four more direct `rec.bases`/`record.bases`
+readers exist outside both `diff_*.py` and the just-added
+`internal_leak.py`, confirming a hand-curated list converges more slowly
+than real code grows new readers.** `contract_evidence_collect.py`'s
+`build_type_graph()` and `diff_time64.py`'s `_fold_record_tokens()` both
+walk `list(rec.bases) + list(rec.virtual_bases)`;
+`diff_stdlib_impl.py`'s `_public_by_value_records()` walks
+`(*record.bases, *record.virtual_bases)`; `surface_graph.py`'s
+`_build_type_refs()` walks `rec.bases` directly. Each has its own
+distinct consequence, not a repeat of the same one: `build_type_graph()`
+feeds the contract-evidence type graph's own closure walk, so a missing
+inheritance edge here can make `export_surface.py`'s `exclusion_is_provable`
+gate wrongly treat a type as out-of-contract rather than failing closed on
+incomplete evidence, the opposite of what that gate exists to guarantee;
+`diff_time64.py`/`diff_stdlib_impl.py` can each suppress or omit their own
+derived findings the same way the vtable/base-list detectors already do;
+`surface_graph.py` can under-populate the ADR-057 consumer graph's type
+references. All four are added to this phase's migration file list
+alongside `internal_leak.py`, and — since a fifth hand-missed reader is
+now a demonstrated, repeating pattern rather than a one-off — the
+AI-readiness check itself stops being a hand-maintained module allowlist:
+it becomes a real static scan for any direct attribute access naming
+`bases`/`vtable`/`is_va_list` (or `virtual_bases`, read by three of these
+five readers without itself being one of the three fields this phase
+converts — see Scope, below) on a value whose declared type resolves to
+`RecordType`/`Param`, repository-wide, with the five named modules above
+becoming the check's own initial known-failures baseline (mirroring
+`check_ai_readiness.py`'s existing `MYPY_ERROR_BASELINE`/
+`LARGE_FILE_ALLOWLIST` pattern: a reviewed, shrinking allowlist of
+*known* violations, not a permanent exemption list a new violation can
+quietly join). **`RecordType.virtual_bases` is explicitly out of this
+phase's Scope, and a later pass should not assume naming it here converts
+it**: the Design section above converts `bases`/`vtable`/
+`vptr_offset_bits`/`Param.is_va_list` only; `virtual_bases` sharing the
+identical unavailable-vs-empty ambiguity is a real, separate finding
+worth its own follow-up phase, not silently folded into this one's
+already-large surface by virtue of cooccurring in the same loop bodies.
 
 **Tests.** A direct test on `Fact[T]`'s actual comparison contract, added
 before any detector migration depends on it: `if fact:` raises
@@ -1719,14 +1758,41 @@ sibling:
   same names nested in a namespace, the exact distinction Phase 2's own
   widened `entry.scope` exists to preserve and this backfill has no way
   to recover) can merge onto one synthesized `EntityId` that a fresh
-  extraction would have kept separate. The rule is fail-closed, not
-  best-effort: whenever the backfill merges two or more distinct
-  qualified-name+kind pairs onto one synthesized key, that key is added
-  to `ambiguous_type_names` (never to `exact_type_identities`, which
-  stays reserved for a spelling the backfill resolved through a single,
-  uncontended qualified-name+kind pair) — mirroring exactly how
-  `PublicSurface.ambiguous_type_names`/`exact_type_identities` already
-  divide this same collision class today. `resolvable` itself is
+  extraction would have kept separate.
+
+  **The first version of this rule could not actually detect the
+  collision it names, and a review round caught why: "two or more
+  distinct qualified-name+kind pairs onto one synthesized key" is not a
+  condition that can ever hold — the synthesized key *is* a function of
+  the qualified-name+kind pair, so two genuinely distinct pairs can never
+  map onto the same key in the first place; by the time the backfill
+  runs, a real collision (different original `ScopePath`, identical
+  flattened spelling) has already reduced to one, not two, observable
+  pairs.** The corrected, observable signal is different: not "distinct
+  pairs merged," but "the same pair was produced by more than one
+  separate flat declaration" — i.e. two or more entries in
+  `snapshot.types`/`snapshot.functions`/etc. that already share an
+  identical qualified-name+kind spelling before the backfill ever
+  touches them, the same producer-side namespace-dropping collision
+  class AGENTS.md's own `type_reachability.py`/opaque-type entries
+  already document for this codebase's bare/partially-qualified-name
+  matching. Any such duplicate lands the shared key in
+  `ambiguous_type_names`. **But an *unduplicated* key is not, on that
+  basis alone, promoted to `exact_type_identities` either — a second
+  correction past the first fix's remaining gap.** A single observed flat
+  entry for a given spelling is not proof that no collision occurred:
+  this codebase's own upstream producers already first-wins-dedup by
+  identity in several places (`model.py`'s `function_map`/`variable_map`/
+  `type_by_name`), so two genuinely distinct declarations sharing a
+  flattened spelling could already have been silently reduced to one
+  surviving flat entry *before* this backfill ever sees the snapshot —
+  leaving no duplicate for it to observe. The backfill therefore never
+  promotes any of its own synthesized keys to `exact_type_identities` at
+  all, duplicate-observed or not; a key is in `ambiguous_type_names` when
+  a collision is actually observed, and in neither set otherwise (simply
+  absent from the anti-hiding mechanism, not asserted safe) — strictly
+  more conservative than the first draft's rule, and the only rule this
+  backfill's own inputs can actually support. `resolvable` itself is
   unaffected by the approximation: it answers "does this snapshot have
   header-derived visibility at all" (a question the flat fields already
   answer on their own, independent of `EntityId` fidelity), not "is this
@@ -1734,15 +1800,24 @@ sibling:
   incorrectly downgrade a genuinely resolvable old snapshot's surface to
   the unscoped-everything fallback merely because it predates typed
   `ScopePath` data, which is a strictly worse outcome than the accepted
-  ambiguity-tracking loss this paragraph already owns. A same-name,
-  different-scope-kind pair is exactly the regression test this fix
-  needs and the parity-test requirement below (Phase 3's own) gains it:
-  a legacy snapshot with a record `Foo` nested in a record `Outer` and a
-  separate, unrelated function `Outer::Foo` (a record scope and a
-  namespace-like scope producing the identical collapsed-`ScopePath`
-  qualified spelling `Outer::Foo`) resolves through the backfill with
-  both landing in `ambiguous_type_names`, confirmed to fail against a
-  version of the backfill that treats the collapsed key as unambiguous.
+  ambiguity-tracking loss this paragraph already owns.
+
+  **The regression test this fix needs is also corrected: a first draft
+  paired a record and a function sharing one spelling, which `EntityId`'s
+  own kind discriminator already keeps apart (they could never
+  synthesize onto the same key to begin with), so that fixture exercised
+  no real collision at all.** The actual regression test and the
+  parity-test requirement below (Phase 3's own) instead fixture two
+  *same-kind* declarations sharing one flattened spelling: two separate
+  `RecordType` entries in `snapshot.types`, both with qualified name
+  `Outer::Foo` (the realistic trigger being the producer-side
+  namespace-dropping collision this codebase already documents
+  elsewhere, not a hand-contrived input) — resolving through the
+  backfill with the shared key landing in `ambiguous_type_names` and
+  absent from `exact_type_identities`, confirmed to fail against a
+  version of the backfill that either treats the collapsed key as
+  unambiguous or promotes an unduplicated key to `exact_type_identities`
+  on the strength of its single observed occurrence alone.
   The backfilled
   graph is not written back onto the loaded `snapshot` object (no silent,
   surprising mutation of a caller's loaded snapshot) -- a query against
@@ -1783,19 +1858,38 @@ sibling:
   own dependency closure first, just failed here by not checking
   `SourceGraphSummary`'s. The resolution is the protocol option this
   paragraph named but didn't choose: `model/graph.py` gains a narrow,
-  structural `typing.Protocol` (e.g. `SurfaceGraphLike`, declaring only
-  `add_node(self, node: GraphNode) -> None`/`add_edge(self, edge:
-  GraphEdge) -> None` — the two methods every builder this phase's Design
-  section describes actually calls on the shared instance, not
-  `resolve_entities` or any other method only an L5-specific consumer
-  reaches). `AbiSnapshot.surface_graph: SurfaceGraphLike | None` in
+  structural `typing.Protocol` (e.g. `SurfaceGraphLike`) — **covering both
+  the write side *and* the read side, not only `add_node`/`add_edge` as a
+  first draft of this fix had it.** That first draft checked only what
+  the Design section's *builders* call on the shared instance, and missed
+  the one caller who actually needs to *read* the graph back:
+  `PublicSurfaceQuery.resolve()`/`resolve_public_domain()` must traverse
+  whatever `AbiSnapshot.surface_graph` already holds — closing reachability
+  through `includes`/`declares`/`references`/`instantiates` edges is this
+  phase's whole Goal — and a protocol exposing only two write-only methods
+  gives that traversal nothing to read, forcing exactly the
+  `buildsource.SourceGraphSummary`-importing cast this protocol exists to
+  avoid. `SurfaceGraphLike` therefore also declares the two plain,
+  already-existing attributes a traversal actually needs —
+  `nodes: Sequence[GraphNode]`/`edges: Sequence[GraphEdge]` (`Sequence`,
+  not `list`, since the protocol only ever needs read access, and widening
+  to a broader container type is exactly what a `Protocol` is for) — plus
+  `has_node(self, node_id: str) -> bool`, `SourceGraphSummary`'s own
+  existing O(1) membership check a naive `node in self.nodes` linear scan
+  would otherwise have to reimplement. All three already exist on
+  `SourceGraphSummary` exactly as declared, so this widening needs no
+  change to that class, only to the protocol's own declared surface.
+  `AbiSnapshot.surface_graph: SurfaceGraphLike | None` in
   `model/snapshot.py` needs no import from `buildsource` at all —
   `SourceGraphSummary` already structurally satisfies the protocol (Python
   `Protocol`s check structurally, not by inheritance, so the existing class
   needs no base-class change either) — and every caller that actually needs
   `resolve_entities`/other `SourceGraphSummary`-specific methods narrows
   back from the protocol to the concrete type at its own call site (an
-  ordinary, localized `isinstance`/`cast`, not a model-layer concern). The
+  ordinary, localized `isinstance`/`cast`, not a model-layer concern) —
+  `SurfaceGraphLike` is declared `@runtime_checkable` precisely so that
+  narrowing can use `isinstance(graph, SourceGraphSummary)` directly rather
+  than an unchecked `cast()`. The
   second item, below, is the one still left to the implementation PR, for
   the reason already stated — it depends on auditing and migrating real
   existing readers, not on a type-contract decision a planning document can
@@ -3186,6 +3280,33 @@ reason the compare/aggregate counters are bumped above — a freshly
 regenerated `scan` report with the new fields but an unbumped
 `scan_schema_version` reads as the old schema to any version-aware
 consumer and defeats the whole point of versioning the additive change.
+
+**Two more writers, found after the synthetic-writer correction above,
+are the ones this phase exists for most directly and were still missing:
+the two paths that actually produce a `verdict: null` NOT_COMPARABLE
+report.** `report/not_comparable.py`'s `not_comparable_document()` — the
+ADR-050 D2 comparability-refusal document `checker.compare`'s own gate
+raises before any `DiffResult` exists to build a report from — and
+`cli_compare_release.py`'s per-library refusal branch (the release
+fan-out's own inline `report_schema_version: REPORT_SCHEMA_VERSION`
+construction for the identical refusal, independent of the shared
+document builder) both stamp `REPORT_SCHEMA_VERSION` directly with no
+`RunOutcome` fields at all. Once this phase's schema bump lands, a freshly
+produced refusal report from either path claims the current schema while
+omitting `RunOutcome.operational = NOT_COMPARABLE` — the exact axis this
+whole phase exists to make structured-first — forcing `GateInfo.
+from_report_data`'s new reader back onto the legacy-decode fallback this
+phase means to reserve for genuinely old reports, on a report that isn't
+old at all. Both gain `RunOutcome.operational = NOT_COMPARABLE` alongside
+their existing `verdict: null`/`reason` fields; `not_comparable_document()`
+takes the value as an explicit parameter the same way it already does for
+`report_schema_version` (per that function's own stated reason — a report
+schema version it does not itself own — which applies identically to a
+`RunOutcome` axis it likewise must not hardcode), and `cli_compare_
+release.py`'s refusal branch passes it through the identical way it
+already threads `report_schema_version`. Added to this phase's writer
+inventory and to the schema-version parity tests alongside the other
+writers above.
 
 **A fourth writer-adjacent call site needs this phase's attention, and it
 is not a new writer — it is an existing *neutralizer*, missed by the
