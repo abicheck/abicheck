@@ -51,18 +51,37 @@ more restrictive of the two wins per check, so applying this Ruleset
 alongside an existing classic config is safe even if consolidating them
 isn't done in the same pass).
 
-**If a matching Ruleset already exists** (`gh api
+**If a Ruleset with this exact name already exists** (`gh api
 /repos/abicheck/abicheck/rulesets` returns one — this is what `main`'s repo
 settings show today, since `protected: true` alone doesn't say which
-mechanism supplies it), don't create a second one — find its id and `PUT`
-the same body instead:
+mechanism supplies it), **do not blindly `PUT` this file's payload over
+it.** A `PUT` replaces the *entire* ruleset object — if the existing one
+also carries pull-request-review requirements, signed-commit rules,
+merge-queue settings, or `bypass_actors`, overwriting it with this file's
+`rules`/`bypass_actors` (`required_status_checks`/`non_fast_forward` only,
+empty `bypass_actors`) silently deletes those unrelated protections. Fetch
+the existing ruleset first and decide from there:
 
 ```bash
 gh api /repos/abicheck/abicheck/rulesets | jq '.[] | {id, name}'
-gh api --method PUT -H "Accept: application/vnd.github+json" \
-  /repos/abicheck/abicheck/rulesets/<id> \
-  --input .github/branch-protection-ruleset.json
+gh api /repos/abicheck/abicheck/rulesets/<id> > /tmp/existing-ruleset.json
 ```
+
+- If `/tmp/existing-ruleset.json`'s `rules`/`bypass_actors` already match
+  what's checked in here (e.g. it was created from an earlier version of
+  this same file), `PUT` this file's payload — there's nothing to lose.
+- If it carries anything else, **merge by hand**: start from
+  `/tmp/existing-ruleset.json`, add/update only the
+  `required_status_checks`/`non_fast_forward` rule entries from
+  `branch-protection-ruleset.json`, keep its other rules and
+  `bypass_actors` untouched, and `PUT` the merged result — not this file
+  verbatim.
+- When merging feels risky or the existing ruleset's purpose is unclear,
+  the safe fallback is a **separate, additionally-named** Ruleset (the
+  `POST` command in "Apply" above, under a distinct `name`) rather than
+  touching the existing one at all — GitHub enforces every active ruleset
+  matching a ref simultaneously, so a second ruleset adds to the existing
+  protections instead of risking removing them.
 
 **If `main` is instead protected by *classic* branch protection** (the
 `GET /repos/.../rulesets` call above returns nothing, but
