@@ -1581,10 +1581,14 @@ sibling:
   old_ids)`/`build_surface_graph(new, public_entity_ids=new_ids)`), never
   the same set to both. `checker.py`'s
   `_apply_pattern_verdicts_step`/`_apply_surface_metrics` both gain the
-  two-snapshot pair, resolved from `compare()`'s own two separate
-  `PublicSurfaceQuery.resolve()` calls (one per side — `compute_public_
-  surface()` already resolves old and new independently for the identical
-  reason) and passed straight through to `apply_pattern_verdicts()`/
+  two-snapshot pair — **received as an already-resolved `compare()`
+  parameter from its caller, not computed by `compare()` itself; see the
+  correction a few paragraphs down for why `checker.compare()` may not
+  call `PublicSurfaceQuery.resolve()` directly (the same `compare ->
+  policy` direction violation `surface_graph.py`'s own fix above already
+  closed once, reappearing here at a second call site if `compare()`
+  resolved this itself)** — and passed straight through to
+  `apply_pattern_verdicts()`/
   `diff_surface_metrics()`, which pass the matching half of the pair
   through as the single `public_entity_ids` argument to `build_surface_
   graph()`/`compute_surface_metrics()`
@@ -2344,8 +2348,11 @@ None = None` — and the pair lives only at the two-snapshot callers below,
 each of which passes its own side's set to its own matching call:
 `build_surface_graph(old, public_entity_ids=old_ids)`/
 `build_surface_graph(new, public_entity_ids=new_ids)`. `SurfaceGraph.
-public_roots()` maps a given set of ids back to their
-mangled/symbol-name spelling, preserving its existing `frozenset[str]`
+public_roots()` maps a given set of ids back to the existing
+`Function.name`/`Variable.name` declaration spelling — not a mangled/
+symbol spelling, per the correction above (`_root_seed_types`/
+`reachable_types`/`idioms.py`'s create/destroy regexes are all keyed on
+this plain name already) — preserving its existing `frozenset[str]`
 return type exactly — `surface_graph.py` itself still never imports
 `policy/public_surface.py`, per the note above); `pattern_verdicts.py`
 (`apply_pattern_verdicts()` gains the two-snapshot `old_public_entity_ids`/
