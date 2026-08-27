@@ -151,28 +151,48 @@ def test_classification_is_invariant_to_checkout_relocation(
     header_rel: list[str],
     filename: str,
 ) -> None:
-    """The #843 path-taint bug generalized one layer up: the SAME relative
-    structure (a public directory, and a header somewhere under or outside
-    it) must classify identically regardless of which absolute checkout
-    root it's rooted at.
+    """The #843 path-taint bug generalized one layer up, and stated the way
+    ``provenance.py``'s own module docstring actually motivates it: "Source
+    locations recorded by the DWARF/castxml parsers are frequently absolute
+    *build* paths... that bear no resemblance to the paths the user passes
+    on the command line." So the public directory is described WITHOUT
+    ``root`` at all (a bare relative path, as a real ``-H``/
+    ``--public-header-dir`` argument commonly is) while only the header's
+    own recorded absolute path relocates between ``root_a``/``root_b`` --
+    the header's build-machine root and the user's own public-header
+    description are independent inputs, not the same string relocated in
+    lockstep.
+
+    An earlier revision built both the public directory AND the header
+    under the identical ``root`` for a given call, which a checkout-tainted
+    implementation requiring an exact rooted-prefix match could still pass
+    (both sides always moved together), missing exactly the decoupled-root
+    scenario the docstring describes (Codex review, PR #894, fresh
+    evidence: verified empirically that `classify_origin` already handles
+    a bare relative public directory matching a header recorded under a
+    wholly different absolute root, which the coupled-root construction
+    could never exercise).
 
     Both an inside-public-dir and an OUTSIDE-public-dir header are checked,
     each against its own expected ``ScopeOrigin`` (not just cross-root
-    equality) -- a header nested under ``pub_rel`` for every root classifies
-    trivially the same way regardless of relocation sensitivity, so that
-    case alone can't distinguish this property from a checkout-tainted
-    implementation (e.g. one keying off the raw absolute root string) that
-    happens to move both sides consistently. The outside-public-dir header
-    lives under a UUID-rooted sibling disjoint from ``root``/``pub_rel``/
-    ``header_rel``, so it can never accidentally land under the public
-    directory via `_contiguous_subsequence` containment."""
+    equality). The outside-public-dir header lives under a UUID-rooted
+    sibling disjoint from ``root``/``pub_rel``/``header_rel``, so it can
+    never accidentally land under the public directory via
+    `_contiguous_subsequence` containment."""
     assume(root_a != root_b)
+    # pub_rel must be disjoint from every root/header_rel segment: since
+    # public_dir no longer includes root at all, a coincidentally-shared
+    # segment could make `_contiguous_subsequence` match pub_rel inside the
+    # PRIVATE header's own tail purely by chance, unrelated to the actual
+    # public/private structure under test.
+    assume(all(p not in root_a and p not in root_b for p in pub_rel))
+    assume(all(p not in header_rel for p in pub_rel))
+    public_dir = _abspath(pub_rel)  # root-independent: a bare relative path
     public_tail = (*pub_rel, *header_rel, f"{filename}.h")
     private_sibling = (str(uuid.uuid4()), str(uuid.uuid4()))
     private_tail = (*private_sibling, f"{filename}.h")
 
     def classify_under(root: list[str], header_tail: tuple[str, ...]) -> ScopeOrigin:
-        public_dir = _abspath((*root, *pub_rel))
         header = _abspath((*root, *header_tail))
         return _classify(header, [public_dir])
 
