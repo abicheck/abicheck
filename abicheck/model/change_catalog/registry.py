@@ -22,16 +22,19 @@ target owner ADR-061 names for this logic — it used to live in the legacy
 flat ``abicheck/change_registry_types.py``, which now re-exports every name
 here unchanged (``from abicheck.change_registry_types import Verdict`` and
 the transitive ``from abicheck.change_registry import Verdict`` are both
-still valid). The 397-entry data table itself (``change_registry.py`` and
-its ``change_registry_<topic>.py`` siblings) has not yet been repartitioned
-into this package — see the ADR's Phase 5 section for the remaining scope.
+still valid). The 397-entry data table itself is fully repartitioned into
+five sibling taxonomy modules in this same package — ``symbols.py``,
+``types.py``, ``platform.py``, ``build.py``, ``source.py`` — which this
+module's own ``ChangeKindMeta``/``Verdict`` back, and which
+``abicheck/change_registry.py`` imports and concatenates into the single
+production ``REGISTRY``.
 
 This module has zero internal imports (a true leaf, per ADR-061's ``model``
 layer contract of ``may_import: []``), which is what lets both
 ``checker_policy.py`` (imports ``REGISTRY`` from ``change_registry.py``,
-which imports the legacy shim, which imports this module) and
-``diff_helpers.py`` (same shape) import ``VALID_BASE_POLICIES``/
-``TEMPLATE_VOCAB`` from here without an import cycle.
+which imports this module directly) and ``diff_helpers.py`` (same shape)
+import ``VALID_BASE_POLICIES``/``TEMPLATE_VOCAB`` from here without an
+import cycle.
 """
 
 from __future__ import annotations

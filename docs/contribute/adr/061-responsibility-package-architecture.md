@@ -1,7 +1,7 @@
 # ADR-061: Responsibility-Package Architecture and Flat-Namespace Migration
 
 **Date:** 2026-08-24
-**Status:** Accepted — partially implemented (Phases 0-1 implemented; Phases 2-4 in progress; Phase 5 begun — the `model` package and the `*_metadata.py` dataclass/parser split have landed; the change catalog now enforces all 4 of D9's registry-validation properties (unique identifiers, valid references, non-contradictory defaults, complete metadata), with the D9 taxonomy repartition itself (moving the 397 entries into `model/change_catalog/{symbols,types,platform,build,source}.py`) not started — and otherwise incremental).
+**Status:** Accepted — partially implemented (Phases 0-1 implemented; Phases 2-4 in progress; Phase 5 begun — the `model` package and the `*_metadata.py` dataclass/parser split have landed; D9's change-catalog work (item 3) is fully done — all 4 registry-validation properties (unique identifiers, valid references, non-contradictory defaults, complete metadata) are enforced, and the 397 entries have been repartitioned into `model/change_catalog/{symbols,types,platform,build,source}.py` by taxonomy; the CastXML/Clang parser split and source-graph separation (Phase 5 items 1-2) and the bulk of item 4's cycle-exception cleanup remain — and otherwise incremental).
 **Decision maker:** abicheck maintainers
 
 ## Context
@@ -1105,28 +1105,41 @@ owed. Splitting it means separating a dataclass from its own load/write
 methods without changing what `BuildSourcePack(...)` constructs for callers
 this repository cannot see, which is its own slice.
 
-**Item 3 stays open — its *taxonomy-partition* half only.** D9 specifies
-two separable things: the target file shape (declarative modules named by
-taxonomy — `symbols.py`, `types.py`, `platform.py`, `build.py`,
-`source.py` — under `model/change_catalog/`, feeding one `registry.py`)
-and what that `registry.py` validates — "globally unique identifiers,
-complete metadata, valid references, and non-contradictory defaults." The
-taxonomy partition is not started; **all four** validation properties are
-now enforced (see below for the full chronology of getting there —
-several earlier drafts of this section under-claimed or over-claimed this
-count before landing on the accurate one).
+**Item 3 is now fully closed.** D9 specifies two separable things: the
+target file shape (declarative modules named by taxonomy — `symbols.py`,
+`types.py`, `platform.py`, `build.py`, `source.py` — under
+`model/change_catalog/`, feeding one `registry.py`) and what that
+`registry.py` validates — "globally unique identifiers, complete metadata,
+valid references, and non-contradictory defaults." Both are now done (see
+below for the full chronology of getting there — several earlier drafts of
+this section under-claimed or over-claimed the validation half's progress
+before landing on the accurate count, and the taxonomy half itself went
+through the same "mark it done prematurely, get corrected" pattern once
+more before actually being completed — see the taxonomy-partition entry
+in the chronology below).
 
-The taxonomy shape isn't started: what exists today — `change_registry.py`
-plus `change_registry_{buildsource,castxml,composition,coverage,numpy,
-parity,suppression,wheel,types}.py` — per this repository's own
-`AGENTS.md` ("Adding a new ChangeKind"), was "split out only to stay under
-the file-size cap," so `change_registry.py` still holds most entries
-across many taxonomies and `change_registry_buildsource.py`/
-`change_registry_parity.py` each place entries there purely for space
-(unrelated bundle entries and a size-relief split respectively), not
-because either is that entry's taxonomy home (a first Codex review round
-on this PR caught an earlier draft marking this done on the strength of
-the validation claim alone).
+The taxonomy shape is done: the flat `change_registry.py` plus
+`change_registry_{buildsource,castxml,composition,coverage,numpy,parity,
+suppression,wheel}.py` — which, per this repository's own `AGENTS.md`
+("Adding a new ChangeKind") prior to this change, were "split out only to
+stay under the file-size cap," not by taxonomy — have been fully
+repartitioned. All 397 `ChangeKindMeta` entries now live in exactly one of
+`model/change_catalog/{symbols,types,platform,build,source}.py`, chosen by
+which detector module actually produces the kind (see each module's own
+docstring for its scope and the categorization methodology — verified
+against the real `ChangeKind.X` construction sites across the codebase,
+not guessed from which flat sibling file an entry happened to live in for
+space reasons). The eight now-fully-migrated flat sibling files were
+deleted; `change_registry.py` is now a ~65-line pure assembly point that
+imports each taxonomy's entry list and constructs the single production
+`REGISTRY` from their concatenation — it holds no `ChangeKindMeta` entries
+itself. `change_registry_types.py` remains as the pre-existing compatibility
+re-export shim for `Verdict`/`ChangeKindMeta`/`ChangeKindRegistry` (unrelated
+to this migration, unchanged by it). Verified content-preserving: reconstructing
+`ChangeKindRegistry` from the five taxonomy modules' concatenated entry
+lists produces byte-for-byte identical `ChangeKindMeta` content (via
+`dataclasses.asdict()` equality) for all 397 entries, compared directly
+against the pre-migration production `REGISTRY`.
 
 All four of D9's registry-validation properties are now enforced by
 `ChangeKindRegistry` during construction (the production `REGISTRY` is built
@@ -1441,20 +1454,18 @@ without promising a new export.
 
 1. split CastXML and Clang parsing by entity and shared parser context;
 2. separate source-graph values, construction, and comparison;
-3. repartition the change catalog into D9's `model/change_catalog/
-   {symbols,types,platform,build,source}.py` taxonomy (global uniqueness,
-   valid references, non-contradictory defaults, **and now complete
-   metadata** are all done — see above). **Two slices landed**: `registry.py`
-   itself — the one file D9 says every taxonomy module should feed — now
-   physically exists at `abicheck/model/change_catalog/registry.py` and
-   holds the real `Verdict`/`ChangeKindMeta`/`ChangeKindRegistry`/
-   validation implementation, not just a stub; and the 48 missing `impact`
-   strings are written, closing D9's fourth validation property entirely.
-   What remains is the taxonomy modules themselves (`symbols.py`/
-   `types.py`/`platform.py`/`build.py`/`source.py`) and moving the 397
-   entries into them; and
+3. **Done.** Repartitioned the change catalog into D9's `model/change_catalog/
+   {symbols,types,platform,build,source}.py` taxonomy — all four
+   registry-validation properties (global uniqueness, valid references,
+   non-contradictory defaults, complete metadata) enforced, and all 397
+   entries moved into the five taxonomy modules by which detector actually
+   produces each kind (see that section's own account above for the
+   categorization methodology and the content-equality verification). The
+   eight now-empty flat sibling files (`change_registry_{buildsource,
+   castxml,composition,coverage,numpy,parity,suppression,wheel}.py`) were
+   deleted; `change_registry.py` is now a pure assembly point; and
 4. remove superseded private re-exports, migration edges, and cycle
-   exceptions. **A first, verified slice landed**: `architecture/
+   exceptions. **Two slices landed**: `architecture/
    modules.yaml`'s `frozen_root_families["cli_"]` and `legacy_root_modules`
    both still named `cli_contract_options.py`, `cli_help.py`,
    `cli_options_contract.py`, and `cli_profiles.py` — the four flat modules
@@ -1469,6 +1480,16 @@ without promising a new export.
    observe — purely bookkeeping that had drifted from the physical tree.
    `python scripts/check_architecture.py` stays at 0 errors either way,
    since the glob these lists gate only ever matches a file that exists.
+   The second slice landed alongside item 3's own completion: once the
+   eight flat `change_registry_*.py` siblings were deleted, `architecture/
+   modules.yaml`'s `frozen_root_families["change_registry_"]` and
+   `legacy_root_modules` both dropped the same eight now-nonexistent
+   entries (keeping `change_registry.py`, now the assembly point, and
+   `change_registry_types.py`, the unrelated pre-existing compat shim),
+   and the matching stale `no_growth` debt entry for `change_registry.py`
+   in `architecture/debt.yaml` was removed — its own rationale ("cannot
+   move safely without a behavior-preserving vertical slice") no longer
+   applied once this migration *was* that slice.
    The rest of item 4 (the CLI-registration `IMPORT_CYCLE_ALLOWLIST` in
    `scripts/check_ai_readiness.py` and any other stale `legacy_paths`
    entries) is unstarted — that allowlist is a large, deliberately
@@ -1476,13 +1497,13 @@ without promising a new export.
    to touch without an ADR or explicit maintainer sign-off, so auditing it
    is out of scope for an incremental cleanup pass.
 
-**Acceptance:** parser fixtures demonstrate byte/fact parity where applicable;
-catalog validation proves all four of D9's properties — global uniqueness,
-valid references, non-contradictory defaults, and complete metadata are
-all done; the taxonomy repartition itself (moving the 397 entries into
-`model/change_catalog/{symbols,types,platform,build,source}.py`) is the
-one piece of item 3 still open; no parser imports
-policy/report/workflows/frontends; corresponding debt entries are removed.
+**Acceptance:** parser fixtures demonstrate byte/fact parity where
+applicable; catalog validation proves all four of D9's properties — global
+uniqueness, valid references, non-contradictory defaults, and complete
+metadata — and item 3's taxonomy repartition (moving the 397 entries into
+`model/change_catalog/{symbols,types,platform,build,source}.py`) are both
+**done**; no parser imports policy/report/workflows/frontends; corresponding
+debt entries are removed.
 
 ## Migration rules for every phase
 

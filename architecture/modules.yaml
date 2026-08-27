@@ -298,15 +298,7 @@
       "dumper_toolchain.py"
     ],
     "change_registry_": [
-      "change_registry_buildsource.py",
-      "change_registry_castxml.py",
-      "change_registry_composition.py",
-      "change_registry_coverage.py",
-      "change_registry_numpy.py",
-      "change_registry_parity.py",
-      "change_registry_suppression.py",
-      "change_registry_types.py",
-      "change_registry_wheel.py"
+      "change_registry_types.py"
     ]
   },
   "legacy_root_directories": [
@@ -364,15 +356,7 @@
     "castxml_policy.py",
     "cc_wrapper.py",
     "change_registry.py",
-    "change_registry_buildsource.py",
-    "change_registry_castxml.py",
-    "change_registry_composition.py",
-    "change_registry_coverage.py",
-    "change_registry_numpy.py",
-    "change_registry_parity.py",
-    "change_registry_suppression.py",
     "change_registry_types.py",
-    "change_registry_wheel.py",
     "checker.py",
     "checker_policy.py",
     "checker_types.py",

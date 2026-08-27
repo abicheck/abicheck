@@ -352,16 +352,6 @@
       "review_by": "2026-11-30"
     },
     {
-      "path": "abicheck/change_registry.py",
-      "baseline_lines": 2000,
-      "target": "model",
-      "rule": "no_growth",
-      "category": "legacy_model_or_catalog_monolith",
-      "owner": "abicheck maintainers",
-      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice.",
-      "review_by": "2026-11-30"
-    },
-    {
       "path": "abicheck/checker.py",
       "baseline_lines": 1286,
       "target": "compare",

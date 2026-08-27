@@ -13,13 +13,15 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""ADR-061 D9's target owner for the ``ChangeKind`` catalog's core types.
+"""ADR-061 D9's target owner for the ``ChangeKind`` catalog.
 
 ``registry.py`` holds ``Verdict``, ``ChangeKindMeta``, ``ChangeKindRegistry``,
 and the catalog-validation logic D9 assigns to the assembled registry. The
-397-entry data table itself (``change_registry.py`` and its
-``change_registry_<topic>.py`` siblings) has not yet been repartitioned into
-this package — see the ADR's Phase 5 section for the remaining scope.
+397-entry data table itself is fully repartitioned by taxonomy into five
+sibling modules — ``symbols.py``, ``types.py``, ``platform.py``,
+``build.py``, ``source.py`` (see each module's own docstring for its scope
+and categorization methodology) — which ``abicheck/change_registry.py``
+imports and concatenates into the single production ``REGISTRY``.
 """
 
 from __future__ import annotations
