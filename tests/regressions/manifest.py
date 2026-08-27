@@ -151,13 +151,18 @@ BUG_CLASSES: tuple[BugClass, ...] = (
     BugClass(
         id="extraction.ast_wrapper_chain_traversal",
         invariant=(
-            "Extracting a semantic value (e.g. an enum constant, an "
-            "initializer's literal value or identity) from a clang/castxml "
-            "AST subtree gives the same answer regardless of which "
-            "semantics-preserving wrapper nodes (implicit casts, parens, "
-            "constant-folding wrappers) sit between the declaration and "
-            "its value — and every independently-maintained copy of this "
-            "same wrapper-descent primitive agrees with the others."
+            "Extracting a semantic value (e.g. an enum constant, or "
+            "whether an initializer is a bare literal) from a "
+            "clang/castxml AST subtree gives the same answer regardless "
+            "of which semantics-preserving wrapper nodes (implicit "
+            "casts, parens, constant-folding wrappers) sit between the "
+            "declaration and its value — and every independently-"
+            "maintained copy of this same wrapper-descent primitive "
+            "agrees with the others. Scoped deliberately: this does NOT "
+            "extend to a non-literal initializer's own structural "
+            "fingerprint, which is by design sensitive to the exact "
+            "wrapper shape (a different cast/paren nesting hashes "
+            "differently), not a residual gap of this invariant."
         ),
         fixed_by=(839,),
         seed_tests=(

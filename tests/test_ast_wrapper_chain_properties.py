@@ -50,6 +50,20 @@ formula restated" rule. The malformed-input properties are the Phase 2
 "negative control": a malformed/ambiguous tree must produce a typed
 incomplete-analysis result (``None``, or a clean stop at the ambiguous
 node) -- never a fabricated value and never a raised exception.
+
+**Scope of the wrapper-invariance invariant (Codex review, PR #888):** it
+holds for ``_unwrap_expr``'s reached leaf, ``_evaluated_int_value``'s
+located value, and ``_initializer_value``/``_expr_value``'s LITERAL
+detection (all fully unwrap before deciding) -- but deliberately NOT for
+``_initializer_value``/``_expr_value``'s FINGERPRINT fallback on a
+non-literal expression, which hashes the whole subtree including every
+wrapper node's own ``kind`` (per ``dumper_clang_expr.py``'s own docstring:
+"any compound expression is fingerprinted as a whole"). Two independently-
+generated wrapper chains around the identical non-literal leaf therefore
+produce DIFFERENT fingerprints today, by design -- confirmed empirically,
+not assumed. This is pinned explicitly (not just asserted as "not None")
+so a future reader doesn't mistake it for an oversight this suite's own
+invariant should have caught.
 """
 
 from __future__ import annotations
@@ -389,6 +403,39 @@ def test_initializer_value_and_expr_value_fingerprint_a_non_literal_leaf(
     assert init_value is not None
     assert not init_value.isdigit() and not init_value.lstrip("-").isdigit()
     assert expr_value is not None
+
+
+@given(kinds_a=_kinds_strategy, kinds_b=_kinds_strategy)
+@settings(max_examples=150)
+def test_fingerprint_is_sensitive_to_wrapper_shape_by_design(
+    kinds_a: list[str], kinds_b: list[str]
+) -> None:
+    """Pins the scope carve-out documented in this module's own docstring
+    (Codex review, PR #888): the SAME non-literal leaf content, wrapped in
+    two INDEPENDENTLY generated wrapper chains, produces the SAME
+    fingerprint through both ``_initializer_value`` and ``_expr_value``
+    only when the chains' own kind sequences match, and a DIFFERENT one
+    otherwise -- a different wrapper shape always changes at least one
+    ``kind`` in the hashed subtree, so equal fingerprints for unequal
+    chains would mean a real hash/structural collision, not a false
+    positive this suite should tolerate. This makes the "fingerprint is
+    NOT wrapper-invariant" half of the class explicit and executable,
+    rather than only a claim in prose."""
+    leaf_kind = "SharedLeafKind"
+    root_a, _ = build_wrapper_chain(kinds_a, leaf_kind=leaf_kind)
+    root_b, _ = build_wrapper_chain(kinds_b, leaf_kind=leaf_kind)
+
+    init_a = dumper_clang_expr._initializer_value(_decl_wrapping(root_a))
+    init_b = dumper_clang_expr._initializer_value(_decl_wrapping(root_b))
+    expr_a = clang_nodes._expr_value(root_a)
+    expr_b = clang_nodes._expr_value(root_b)
+
+    if kinds_a == kinds_b:
+        assert init_a == init_b
+        assert expr_a == expr_b
+    else:
+        assert init_a != init_b
+        assert expr_a != expr_b
 
 
 @given(
