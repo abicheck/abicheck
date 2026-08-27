@@ -47,6 +47,17 @@ already prove is comparability-safe) -- repeating it here as a fifth
 transformation would just re-derive that existing coverage under a new
 name, not close a real gap.
 
+The shared ``_HEADER``/``_SOURCE`` fixture (and every one of its
+transformed variants) deliberately includes a lambda-parameterized
+``invoke_with<...>`` instantiation alongside the ordinary named
+declarations -- an ordinary named struct/function's identity does not
+embed its source location at all, so a fixture built only from those
+would pass every transformation below regardless of whether path/line
+taint is actually handled correctly (Codex review, PR #898). Each
+positive test asserts (``_assert_exercises_closure_taint``) that this
+closure-tainted symbol is genuinely present before trusting the
+NO_CHANGE oracle below.
+
 Oracle: for every transformation, comparing the base library against the
 transformed one must produce ``Verdict.NO_CHANGE`` with zero emitted
 findings -- the two are, semantically, the exact same library.
@@ -121,6 +132,8 @@ public:
 private:
     int hidden_;
 };
+template <class F> inline int invoke_with(F f) { return f(); }
+inline int uses_lambda() { return invoke_with([]() { return 7; }); }
 }
 """
 
@@ -129,6 +142,7 @@ _SOURCE = """
 namespace lib {
 int add(int a, int b) noexcept { return a + b; }
 int Widget::value() const { return hidden_; }
+int touch_lambda() { return uses_lambda(); }
 }
 """
 
@@ -136,6 +150,21 @@ int Widget::value() const { return hidden_; }
 def _require_toolchain() -> None:
     if not (_have("clang") and _have("g++")):
         pytest.skip("clang and g++ are required for this end-to-end test")
+
+
+def _assert_exercises_closure_taint(snap: object) -> None:
+    """The positive (NO_CHANGE-expected) cases in this module are only
+    meaningful if the fixture actually produces a closure/lambda-embedded
+    identity -- otherwise a regression in path/line-drift handling for
+    exactly that identity shape (the historical taint mechanism) would go
+    uncaught while the test stays green for an unrelated reason (ordinary
+    named declarations don't embed source location in their identity at
+    all). Fails loudly, not silently, if the fixture stops producing one."""
+    names = {f.mangled for f in snap.functions}  # type: ignore[attr-defined]
+    assert any("invoke_with" in n for n in names), (
+        f"expected a lambda-parameterized invoke_with<...> instantiation "
+        f"in the snapshot, found: {names}"
+    )
 
 
 class TestRelocatingTheCheckoutRootIsANoOp:
@@ -156,6 +185,8 @@ class TestRelocatingTheCheckoutRootIsANoOp:
         snap_a = _dump(so_a, header_a)
         snap_b = _dump(so_b, header_b)
 
+        _assert_exercises_closure_taint(snap_a)
+        _assert_exercises_closure_taint(snap_b)
         result = compare(snap_a, snap_b)
         assert result.verdict is Verdict.NO_CHANGE
         assert result.changes == []
@@ -170,10 +201,13 @@ class TestRelocatingTheCheckoutRootIsANoOp:
         backend here too, not only direct-clang above -- marked
         ``integration`` since it needs castxml in addition to clang/g++
         (see ``test_clang_castxml_origin_parity.py`` for the identical
-        marker-discipline reasoning)."""
-        if not _have("castxml"):
-            pytest.skip("castxml required for this cross-backend variant")
-        _require_toolchain()
+        marker-discipline reasoning). Only g++ (to build the .so) and
+        castxml (the header backend under test) are actually invoked here
+        -- deliberately does NOT gate on clang, unlike the direct-clang
+        variant above, since this variant never touches it (Codex review,
+        PR #898)."""
+        if not (_have("g++") and _have("castxml")):
+            pytest.skip("g++ and castxml are required for this cross-backend variant")
         root_a = tmp_path / "checkout_a"
         root_b = tmp_path / "an/unrelated/deeper/checkout_b"
         root_a.mkdir(parents=True)
@@ -185,6 +219,8 @@ class TestRelocatingTheCheckoutRootIsANoOp:
         snap_a = _dump(so_a, header_a, header_backend="castxml")
         snap_b = _dump(so_b, header_b, header_backend="castxml")
 
+        _assert_exercises_closure_taint(snap_a)
+        _assert_exercises_closure_taint(snap_b)
         result = compare(snap_a, snap_b)
         assert result.verdict is Verdict.NO_CHANGE
         assert result.changes == []
@@ -211,6 +247,8 @@ class TestSymlinkedCheckoutRootIsANoOp:
         snap_direct = _dump(so, header)
         snap_via_symlink = _dump(so_via_link, header_via_link)
 
+        _assert_exercises_closure_taint(snap_direct)
+        _assert_exercises_closure_taint(snap_via_symlink)
         result = compare(snap_direct, snap_via_symlink)
         assert result.verdict is Verdict.NO_CHANGE
         assert result.changes == []
@@ -231,6 +269,14 @@ class TestUnrelatedLineDriftIsANoOp:
         root_a.mkdir()
         root_b.mkdir()
 
+        # The closure-bearing declarations sit BELOW the inserted
+        # comments/blank lines, so their line:col actually shifts relative
+        # to _HEADER -- this is the exact #868 shape (a lambda's identity
+        # embeds its own source line, so unrelated earlier drift changes
+        # it), and is what makes this test a genuine exercise of the
+        # taint-handling fix rather than a vacuous pass on declarations
+        # whose identity never depended on line number to begin with
+        # (Codex review, PR #898).
         noisy_header = """
 #pragma once
 // A comment that was not here before.
@@ -247,6 +293,8 @@ public:
 private:
     int hidden_;
 };
+template <class F> inline int invoke_with(F f) { return f(); }
+inline int uses_lambda() { return invoke_with([]() { return 7; }); }
 }
 """
         so_a, header_a = _build(root_a, _HEADER, _SOURCE)
@@ -255,6 +303,8 @@ private:
         snap_a = _dump(so_a, header_a)
         snap_b = _dump(so_b, header_b)
 
+        _assert_exercises_closure_taint(snap_a)
+        _assert_exercises_closure_taint(snap_b)
         result = compare(snap_a, snap_b)
         assert result.verdict is Verdict.NO_CHANGE
         assert result.changes == []
@@ -272,9 +322,16 @@ class TestReorderingUnrelatedDeclarationsIsANoOp:
         root_a.mkdir()
         root_b.mkdir()
 
+        # The closure-bearing declarations moved to the FRONT (a different
+        # position than in _HEADER, hence a different line:col too), so
+        # this exercises the same taint mechanism as the line-drift case
+        # above under a reordering rather than an insertion (Codex review,
+        # PR #898).
         reordered_header = """
 #pragma once
 namespace lib {
+template <class F> inline int invoke_with(F f) { return f(); }
+inline int uses_lambda() { return invoke_with([]() { return 7; }); }
 class Widget {
 public:
     int value() const;
@@ -291,6 +348,8 @@ struct Point { int x; int y; };
         snap_a = _dump(so_a, header_a)
         snap_b = _dump(so_b, header_b)
 
+        _assert_exercises_closure_taint(snap_a)
+        _assert_exercises_closure_taint(snap_b)
         result = compare(snap_a, snap_b)
         assert result.verdict is Verdict.NO_CHANGE
         assert result.changes == []
