@@ -1032,9 +1032,55 @@ imports `policy_file`/`contract_relevance_types` — `compare -> policy` and
 design decision about where a policy-parameterised comparison belongs, not a
 mechanical move.
 
-So Phase 4's `service.py` half is **blocked on Phase 5**, with the dependency
-now stated concretely rather than as "the destination does not exist". The
-`cli.py` half is complete.
+**Re-measured again, and the `*_metadata.py` half of the blocker is now
+closed** — Phase 5's dataclass/parser split "has landed" (see that phase's own
+status line), and `service.py`, `checker_types.py`, `cli_params.py`, and
+`analysis_assurance.py` are all now classified in `architecture/modules.yaml`
+(`python scripts/check_architecture.py` reports 0 errors against the tree as
+it stands). So `service.py`'s destination now exists in the literal sense —
+it just hasn't been used yet: `service.py` is still 1763 flat lines, and
+Phase 4's acceptance criterion ("root `service.py` [reduced] to documented
+typed functions") is unmet. **What remains for `service.py` is not a
+classification problem, it is thinning it** — moving its actual
+`resolve_input`/`_dump_elf`/`_dump_pe`/`_dump_macho`/`compare_snapshots`
+implementation into the `workflows`/`extract` owners Phase 3 already
+established, verified against the same test suite, the way `cli.py` moved
+into `frontends/cli/commands/*.py`. That is real, engine-level surgery on the
+public dump/compare entry points, not a follow-on to this note.
+
+The second inversion was investigated on its own terms, since it looked like
+the smaller of the two and a plausible next physical move
+(`cli_params.py` now has zero first-party imports of its own, qualifying it
+for the same zero-import relocation four sibling option modules already used
+— except its `TYPE_CHECKING` block and one function-local import reach
+`policy_file`/`suppression`/`policies`, which is the same `model -> policy`
+edge one level removed: `frontends -> policy` is equally forbidden).
+Reading `PolicyFile` itself before proposing a fix mattered: it is not a
+`*_metadata.py`-shaped dataclass-plus-parser. `load()`, `evidence_verdict()`,
+`compute_verdict()`, `describe()`, and `validate_overrides()` are instance
+methods on the same class `checker_types.py` needs to reference — `compute_
+verdict()` in particular *is* policy's resolution algorithm, not a fact about
+a policy document. Splitting the type from the algorithm the way the
+metadata split did would mean turning documented public methods
+(`pf.compute_verdict(changes)`) into free functions taking the instance as an
+argument — a breaking Python API change (`CLAUDE.md`: "changing their public
+surface is a breaking change... coordinate it") made reactively inside an
+architecture-classification slice, not something to force through here.
+Reclassifying `policy_file.py`/`suppression.py` as `compare` instead was
+rejected too: `compute_verdict` is policy logic by any reading, and mislabeling
+it only relocates the ambiguity this ADR exists to remove.
+
+`policy_file.py` is left **deliberately unclassified**, the same treatment
+`reclassify.py` and `contract_gating.py` already have above for the identical
+reason: it is a leaf type `compare`'s model layer and `policy`'s algorithms
+both legitimately depend on, and which layer finally owns it is
+`checker_policy.py`'s own model-vs-policy split to answer, not this
+investigation's. `cli_params.py`'s physical move stays blocked for the same
+reason — correctly, not because a quick fix was overlooked.
+
+So Phase 4's `service.py` half is **blocked on its own size, not on
+Phase 5 or on this classification question** — both of those are now closed;
+what is left is the thinning itself. The `cli.py` half is complete.
 
 1. Move command input translation into `frontends/cli/commands` and reusable
    Click-only option declaration into `frontends/cli/options`.
