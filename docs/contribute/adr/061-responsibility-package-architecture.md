@@ -1374,12 +1374,23 @@ level down. A second, model-owned structural protocol
 `ReclassifyRule` itself never imported by `model` and never moved out of
 `reclassify.py`. The one real code change this needs is widening
 `active_reclassify_rules()`'s and `first_matching_reclassify_verdict()`'s
-parameter types from the concrete `list[ReclassifyRule]` to
+*parameter* types from the concrete `list[ReclassifyRule]` to
 `Sequence[ReclassifyRuleProtocol]`, so a caller holding the protocol-typed
-`DiffResult.policy_file.reclassify` can still pass it through — verified
-clean end to end (`DiffResult` → `PolicyFileProtocol` → `Sequence
-[ReclassifyRuleProtocol]` → `active_reclassify_rules`) with `mypy --strict`
-against a minimal repro of that exact call chain.
+`DiffResult.policy_file.reclassify` can still pass it through — a twentieth
+Codex review round found the first version of this claim incomplete,
+reproduced directly: `active_reclassify_rules()`'s own list comprehension
+(`[r for r in rules if not r.is_expired(today)]`) infers
+`list[ReclassifyRuleProtocol]` once its parameter widens, which mypy
+correctly rejects against the *unchanged* `-> list[ReclassifyRule]` return
+annotation (`List comprehension has incompatible type`) — its **return**
+type needs the identical widening, to `list[ReclassifyRuleProtocol]`.
+`first_matching_reclassify_verdict()` doesn't share this shape (it returns
+a `Verdict | None`, not a list of rules) so only its parameter needs
+widening. Verified clean end to end (`DiffResult` → `PolicyFileProtocol` →
+`Sequence[ReclassifyRuleProtocol]` → `active_reclassify_rules`, with both
+the incomplete and the corrected signature run through `mypy --strict`
+against a minimal repro of that exact call chain, confirming the former
+fails and the latter passes).
 
 **An eighteenth Codex review round found the first repro's protocol itself
 incomplete, checked against `reclassify.py`'s real function bodies rather
