@@ -122,7 +122,6 @@ class TestStructuralRequirement:
             # satisfied this gate with zero executable test evidence.
             "tests/regressions/manifest.py",
             "tests/canonical_identity_contract.py",
-            "tests/conftest.py",
             "tests/_workflow_exec.py",
         ],
     )
@@ -186,6 +185,32 @@ class TestStructuralRequirement:
         path = "tests/summarize_validate_results.py"
         assert path not in gate._STANDALONE_TEST_RUNNERS
         assert not gate.adds_or_modifies_a_test([("M", path)], _content_diff(path))
+
+    @pytest.mark.parametrize(
+        "path",
+        [
+            "tests/conftest.py",
+            "contrib/abicheck-clang-plugin/tests/conftest.py",
+            "tests/some_subdir/conftest.py",
+        ],
+    )
+    def test_a_modified_conftest_is_evidence(self, path: str) -> None:
+        """A `conftest.py` at any depth is accepted despite not matching
+        `test_*.py`/`*_test.py` naming — pytest auto-discovers and applies
+        every `conftest.py` to every test in its own directory and below,
+        unconditionally, so widening a parametrized fixture there can
+        genuinely exercise new test runs with no `test_*.py` file touched
+        at all (Codex review, PR #885, fifth round)."""
+        assert gate.adds_or_modifies_a_test([("M", path)], _content_diff(path))
+
+    def test_conftest_is_still_not_credited_when_unchanged(self) -> None:
+        """Negative control: naming `conftest.py` isn't a free pass on its
+        own — the status/content requirements (added, modified — not
+        deleted; real added content, not a comment/whitespace edit) still
+        apply exactly as they do to any other recognized test file."""
+        assert not gate.adds_or_modifies_a_test(
+            [("D", "tests/conftest.py")], _deletion_diff("tests/conftest.py")
+        )
 
 
 def _git_repo_with(tmp_path: Path, *, second_commit: dict[str, str]) -> Path:

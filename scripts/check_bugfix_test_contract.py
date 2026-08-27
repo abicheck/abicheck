@@ -672,8 +672,30 @@ def _is_collected_python_test_module(path: str) -> bool:
     <path> ...` by a checked-in workflow rather than collected by pytest, so
     they never needed `test_*.py` naming in the first place — see
     `_STANDALONE_TEST_RUNNERS`'s own docstring (Codex review, PR #885).
+
+    A `conftest.py` at any depth is also accepted, despite being neither
+    `test_*.py`-named nor CI-invoked directly — pytest auto-discovers and
+    applies *every* `conftest.py` under its rootdir to every test in that
+    file's own directory and below, unconditionally, by pytest's own
+    collection contract (not by anything this PR-specific diff does). A
+    fix that only widens an existing parametrized fixture there (adding a
+    case to a `params=[...]` list an existing test already iterates)
+    exercises genuinely new test runs without touching any `test_*.py`
+    file at all (Codex review, PR #885, fifth round). This is deliberately
+    narrower than the review's own broader framing ("count executable
+    Python fixture changes as test evidence" generally, for any imported
+    fixture/data module) — `conftest.py` is special because *pytest
+    itself* guarantees it is wired into collection; an arbitrary imported
+    module like `canonical_identity_contract.py`/`_workflow_exec.py`/this
+    file's own `tests/regressions/manifest.py` carries no such guarantee
+    (whether it actually affects a collected test is PR-specific and
+    content-dependent), and crediting those unconditionally is the exact
+    loophole `_is_collected_python_test_module` exists to close — widening
+    it to "any file some test happens to import" would reopen it.
     """
     if path in _STANDALONE_TEST_RUNNERS:
+        return True
+    if PurePosixPath(path).name == "conftest.py":
         return True
     return path.endswith(".py") and (
         PurePosixPath(path).name.startswith("test_") or path.endswith("_test.py")
