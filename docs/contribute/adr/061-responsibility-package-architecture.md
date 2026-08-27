@@ -1342,6 +1342,39 @@ input type cannot satisfy). Verified directly (`m.policy_overrides |=
 unchanged afterward) and pinned by a new test,
 `test_policy_overrides_blocks_augmented_union_assignment`.
 
+**`_ImmutableDict` was redesigned once more, superseding the "genuine
+`dict` subclass" shape above — it is no longer a `dict` at all** (Codex
+review, PR #882, fresh evidence): being a real `dict` instance meant its
+storage was still reachable through `dict`'s own *unbound* methods called
+directly — `dict.__setitem__(entry.policy_overrides, "unknown",
+Verdict.API_BREAK)` mutates the underlying hash table in C, bypassing
+every overridden Python-level method entirely, since no override can
+intercept a call to the base type's own descriptor. The only way to close
+that is to not be a `dict` at all: `dict.__setitem__(obj, ...)` requires
+its first argument to *be* a `dict` instance (or subclass) and raises
+`TypeError` immediately for anything else. `_ImmutableDict` now implements
+the read-only `collections.abc.Mapping` protocol instead, storing its data
+in a private `types.MappingProxyType` view (not a plain private dict — a
+plain dict there would itself be reachable one attribute access away via
+`entry.policy_overrides._data["unknown"] = ...`, a second review round
+caught after the first `Mapping` rewrite landed). `Mapping` supplies no
+`__setitem__`/`update`/`pop`/`__or__`/`__ior__` at all (those are
+`MutableMapping` only), so `entry.policy_overrides["x"] = y` and `|=` both
+raise from Python's own attribute/operator resolution with no per-method
+overriding needed; `__init__` and `__setattr__` are still overridden to
+close the two remaining reflection-level gaps (re-invoking `__init__`
+directly, and reassigning `_data`/`_initialized` directly). Consequently
+`isinstance(policy_overrides, dict)` no longer holds — checked against
+every consumer in this codebase, none relies on `dict`-ness specifically,
+only the `Mapping` protocol. `dataclasses.asdict()` is the one place
+`dict`-ness is observable indirectly, since its generic branch reaches any
+non-dict field via `copy.deepcopy()`: `_ImmutableDict.__deepcopy__` is
+overridden to deliberately return a plain, mutable `dict` — matching
+exactly what an ordinary `dict` field would produce — while the *original*
+entry's own `policy_overrides` stays immutable regardless, and pickling
+(a separate mechanism, `__reduce__`) keeps reconstructing a genuine,
+immutable `_ImmutableDict`.
+
 **The fourth, "complete metadata", is now also enforced** — closed in a
 later pass, on its own, separate from the taxonomy repartition item 3
 still names below. `ChangeKindMeta.description_template` stays genuinely
