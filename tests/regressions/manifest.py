@@ -263,25 +263,61 @@ BUG_CLASSES: tuple[BugClass, ...] = (
         seed_tests=(
             "tests/test_castxml_anonymous_type_location.py",
             "tests/test_anon_type_location_properties.py",
+            "tests/test_lambda_identity_ordinal.py",
+            "tests/test_identity_taint_end_to_end.py",
         ),
         known_gaps=(
             KnownGap(
                 description=(
                     "The L5 source graph's own node identities are not "
                     "renumbered alongside the flat snapshot's closure "
-                    "markers (AGENTS.md, PR #868's own follow-up note)."
+                    "markers (AGENTS.md, PR #868's own follow-up note). "
+                    "Phase 4 (bug-class-regression-testing.md) added a "
+                    "dedicated canary asserting this residual's own bound "
+                    "in tests/test_lambda_identity_ordinal.py's "
+                    "TestL5SourceGraphIdentitiesAreNotRenumbered — a real "
+                    "L5 fix now fails this test loudly instead of the gap "
+                    "silently closing or widening unnoticed."
                 ),
                 reference="PR #868",
+                canary_test="tests/test_lambda_identity_ordinal.py",
             ),
             KnownGap(
                 description=(
-                    "Both seed tests feed a hand-built AST-node/XML "
-                    "fragment into an internal parser class directly — no "
-                    "real castxml/clang subprocess, no CLI, no python-api "
-                    "call — so there is no cross-backend (castxml/clang) "
-                    "or cross-surface (CLI/python-api) test for this class "
-                    "yet, despite the invariant itself being backend-"
-                    "agnostic (Codex review, PR #885)."
+                    "The two original seed tests still feed a hand-built "
+                    "AST-node/XML fragment into an internal parser class "
+                    "directly. Phase 4 closed the real-subprocess/cross-"
+                    "surface gap this entry originally flagged: a third "
+                    "seed test, tests/test_identity_taint_end_to_end.py, "
+                    "runs real g++ + direct-clang (plus one castxml-marked "
+                    "cross-backend variant of the core #843 checkout-"
+                    "relocation case) end to end through compare(), "
+                    "covering checkout relocation, a symlinked root, "
+                    "unrelated blank-line/comment drift, and declaration "
+                    "reordering — each asserted NO_CHANGE — plus the "
+                    "negative-control counterexamples from the using-"
+                    "declaration known-gap entry below (two lambdas in one "
+                    "header, two same-named nested records in different "
+                    "namespaces), confirming they stay distinct across the "
+                    "identical relocation. Two transformations from the "
+                    "plan's own list are deliberately NOT attempted, and "
+                    "recorded honestly rather than faked: Windows-style "
+                    "path separators (no such filesystem in this sandbox "
+                    "to produce a genuine backslash-separated compiler-"
+                    "recorded path) and archive member order (a .a "
+                    "static-archive concept; every extraction path this "
+                    "class's own escape history and this suite exercise is "
+                    "ELF .so-only). A compilation-database-root change is "
+                    "real and reproducible but already covered by the "
+                    "pre-existing L3-focused test_build_context_"
+                    "completeness.py/test_dump_scan_l3_comparability.py "
+                    "suites, so it was not re-derived here under a new "
+                    "name. Still not through a real CLI invocation or "
+                    "abicheck.service (the registry's own stricter bar for "
+                    "the 'cli'/'python-api' public_surfaces tags) — only "
+                    "direct abicheck.dumper.dump()/abicheck.checker."
+                    "compare() calls — so public_surfaces stays empty per "
+                    "this registry's own rule."
                 ),
                 reference="docs/contribute/plans/bug-class-regression-testing.md#phase-4",
             ),
