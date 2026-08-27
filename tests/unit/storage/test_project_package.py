@@ -737,6 +737,22 @@ class TestObjectStoreContract:
         assert store.get(raw_digest_value) == b"{}"
         assert store.get(json_digest_value) == {}
 
+    @pytest.mark.parametrize(
+        "algorithm",
+        sorted(hashlib.algorithms_available - hashlib.algorithms_guaranteed),
+    )
+    def test_put_refuses_an_available_but_unguaranteed_algorithm(
+        self, algorithm: str
+    ) -> None:
+        """`put()` must not mint a digest `ObjectRef` would then refuse --
+        before this fix, `put(content, algorithm="sm3")` succeeded while
+        `ObjectRef(kind=..., digest=that_digest)` raised, so the store could
+        produce an object no reference could ever address (Codex review).
+        """
+        store = InMemoryObjectStore()
+        with pytest.raises(ValueError, match="algorithms_guaranteed"):
+            store.put({"x": 1}, algorithm=algorithm)
+
     def test_put_honors_a_non_default_algorithm(self) -> None:
         """An `ObjectRef` built with a non-default algorithm (`object_relpath`
         accepts any real, fixed-size hashlib algorithm) must be resolvable

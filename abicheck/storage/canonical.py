@@ -423,6 +423,22 @@ def _digest_from_payload(payload: bytes, *, algorithm: str, domain: bytes) -> st
             "digest size; a content address needs a fixed-length digest, so "
             "choose a fixed-length algorithm such as sha256"
         )
+    if digester.name not in hashlib.algorithms_guaranteed:
+        # `hashlib.algorithms_available` is whatever this host's OpenSSL
+        # happens to expose (`sm3`/`ripemd160`/`sha512_224`/`sha512_256` on
+        # a typical Linux build) -- real and fixed-size, so nothing above
+        # would refuse it, but `object_relpath`/`ObjectRef` already refuse
+        # such an algorithm for the identical portability reason. Without
+        # this check here too, `put()` could mint a digest no `ObjectRef`
+        # could ever be built from -- a store producing an unreferenceable
+        # object (Codex review). Checked on `digester.name` (the resolved
+        # canonical spelling), not the caller's own, so an alias for a
+        # guaranteed algorithm isn't rejected by its unresolved spelling.
+        raise ValueError(
+            f"{digester.name!r} is not in hashlib.algorithms_guaranteed, so "
+            "it is not portable to every platform this package might be "
+            "read on"
+        )
     # `digester.name`, not the caller's spelling. `hashlib` accepts aliases
     # (`SHA256`, `sha-256`, `SHA-512`), and preserving one gave the same
     # logical object several content addresses whose hex halves were

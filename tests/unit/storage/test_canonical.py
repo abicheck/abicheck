@@ -757,3 +757,37 @@ class TestRawDigest:
         assert raw_digest(b"{}") != semantic_digest({})
         assert raw_digest(b"null") != semantic_digest(None)
         assert raw_digest(b"[]") != semantic_digest([])
+
+
+class TestAlgorithmPortability:
+    """`semantic_digest`/`raw_digest` must agree with `object_relpath`/
+    `ObjectRef` (`abicheck.storage.package`) on which algorithms are
+    accepted -- both enforce ADR-062 D7's portability rule, and drift
+    between the two would let `put()` mint a digest no `ObjectRef` could
+    ever be built from (the store producing an unreferenceable object).
+    """
+
+    @pytest.mark.parametrize(
+        "algorithm",
+        sorted(hashlib.algorithms_available - hashlib.algorithms_guaranteed),
+    )
+    def test_semantic_digest_refuses_an_available_but_unguaranteed_algorithm(
+        self, algorithm: str
+    ) -> None:
+        with pytest.raises(ValueError, match="algorithms_guaranteed"):
+            semantic_digest({"x": 1}, algorithm=algorithm)
+
+    @pytest.mark.parametrize(
+        "algorithm",
+        sorted(hashlib.algorithms_available - hashlib.algorithms_guaranteed),
+    )
+    def test_raw_digest_refuses_an_available_but_unguaranteed_algorithm(
+        self, algorithm: str
+    ) -> None:
+        with pytest.raises(ValueError, match="algorithms_guaranteed"):
+            raw_digest(b"x", algorithm=algorithm)
+
+    def test_a_guaranteed_algorithm_is_still_accepted(self) -> None:
+        # The control: this isn't "reject everything", only what isn't
+        # guaranteed portable.
+        assert semantic_digest({"x": 1}, algorithm="sha3_256").startswith("sha3_256:")
