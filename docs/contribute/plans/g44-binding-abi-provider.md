@@ -80,7 +80,14 @@ which shares a global native type with `_core.so` under incompatible
 internals. This pair did not exist in the old release's own module-pair
 graph at all — `compare()` must still report a real cross-module
 incompatibility for it (absent → disagreeing), not silently pass because
-neither side of the pair existed on both releases.
+neither side of the pair existed on both releases. **A fifth variant,
+added per the module-identity-matching correction below**: `_geometry.so`
+from the old release is renamed to `_geometry_v2.so` in the new release,
+with the identical incompatible internals mismatch against `_core.so`
+preserved unchanged. `compare()` must recognize this as the *same* pair
+via stable module identity (not filename) and report **no** relationship-
+level change — the naive filename-keyed reading (old pair vanishes, a
+new one appears) must not fire as a fresh incompatibility.
 
 ## Design
 
@@ -259,6 +266,38 @@ this plan sketched:
        respectively.
      - **absent → agreeing** / **agreeing → absent**: no finding either
        way — nothing incompatible existed or exists.
+
+     **This transition table is only correct once module-pair identity is
+     matched across releases by something more durable than a bare module
+     filename — a second real gap in the same area, confirmed by a fresh
+     review round.** The table above decides "absent" vs. "present" by
+     graph-key presence, but says nothing about how a pair's *key* is
+     derived or matched between the old release's graph and the new
+     release's graph. If the key is (or reduces to) the module's own
+     filename, a module that is merely **renamed** between releases while
+     keeping the identical relationship — `_geometry.so` renamed to
+     `_geometry_v2.so` in the new release, still sharing the same
+     incompatible internals with `_core.so` as before — reads as two
+     independent events under naive filename-keyed matching: the old pair
+     `(_core.so, _geometry.so)` disappears (disagreeing → absent) and a
+     new pair `(_core.so, _geometry_v2.so)` appears (absent →
+     disagreeing) — the latter is then wrongly gated as a newly
+     introduced break by the rule above, when nothing about the actual
+     relationship changed at all, only the file's name. Closing this
+     needs module identity matched across releases by a **stable,
+     content-based identity** before the transition table is ever applied
+     — analogous to (though for a different artifact kind than) this
+     codebase's own existing `binary_fingerprint.py` rename-detection
+     precedent for whole-library renames (`RenameCandidate`/
+     `match_renamed_functions`'s exact/size/fuzzy matching cascade) — not
+     a second, independent invention of rename detection for Python
+     binding modules. A real candidate identity signal: the module's own
+     resolved internals/registration identity from `identify()`/
+     `collect()` above (the same framework/version/internals-tag facts
+     this provider already extracts), which does not change merely
+     because the `.so` file was renamed. This is genuinely new matching
+     logic this phase must design and test — a renamed-module fixture is
+     a required acceptance case, not an edge case to defer.
   This may be implemented as `compare()` itself internally invoking stage
   1 for both releases before diffing the two graphs, or as a separate
   bundle-level reconciliation stage this plan's own coordination

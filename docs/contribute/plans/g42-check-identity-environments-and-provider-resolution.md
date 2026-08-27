@@ -603,6 +603,55 @@ job, a second check-id qualifier segment, and an expanded expected-target
 projection — not an extension of the in-process mutation-safety fix
 above; the "Effort & risk" section below is revised accordingly.
 
+4. **Two checks that deliberately do *not* group (because they differ on
+   the extraction key) still need distinct `check_id`s — a gap this
+   plan's own "Check identity" acceptance test reproduces exactly, and
+   which a fresh review round found unaddressed, confirmed by reading
+   `run_plan.py`'s existing duplicate-id guard directly.** Two checks
+   sharing (target, profile, channel, requested_depth) but differing in
+   `analysis_evidence`/`analysis_policy`/`analysis_assurance_requirement`
+   are, correctly, generated as two separate, single-entry
+   `RunPlanCheck`s (they must not share one extraction). Each single-entry
+   check omits the `!<environment_id>` qualifier by the rule above (no
+   environment to qualify with), and `analysis_evidence`/`analysis_
+   policy`/`analysis_assurance_requirement` were never part of the
+   generated `check_id` string (only target/profile/channel/depth feed
+   `build_check_id()`) — so absent an explicit `id:` from the project
+   author, both checks generate the byte-identical `check_id`.
+   `run_plan.py`'s own pre-existing duplicate-id guard (`seen_ids`/
+   `duplicate_ids`, added specifically to catch exactly this class of
+   collision before the matrix even runs, per its own comment) then
+   rejects the whole run plan outright — directly contradicting this
+   plan's own "Check identity" acceptance test, which requires this exact
+   two-check, same-target/profile/channel/depth shape to succeed and
+   produce two separate reports. Fixed one of two ways (either closes the
+   gap; pick whichever composes more simply with the qualifier work
+   above):
+   - **Require an explicit `id:` whenever the base tuple collides across
+     differing analysis axes** — extend `run_plan.py`'s existing
+     duplicate-id guard to detect this specific case (same base tuple,
+     differing analysis fields, no explicit `id:` on at least one of the
+     colliding checks) and produce a clear, actionable error naming the
+     colliding checks and pointing at `id:` as the fix, rather than the
+     generic "give it a distinct channel/depth/profile" message (which is
+     wrong advice here — the profile/channel/depth are deliberately
+     identical); or
+   - **Deterministically qualify the generated identity by the differing
+     analysis axes themselves** — extend `build_check_id()` to fold
+     `analysis_evidence`/`analysis_policy`/`analysis_assurance_requirement`
+     into the generated string whenever any is set to a non-default value
+     (mirroring how the environment qualifier is appended only when an
+     environment is actually declared), so two checks differing only in
+     `analysis:` fields disambiguate automatically with no explicit `id:`
+     required — matching the acceptance test's own expectation that this
+     "just works" without every project author having to hand-name every
+     analysis-differentiated check.
+   Either way, `run_plan.py`'s duplicate-id guard and its error message
+   must be updated to reflect whichever fix is chosen, since the guard's
+   current wording assumes profile/channel/depth are the only axes a
+   colliding pair could differ on — no longer true once `analysis:`
+   exists.
+
 This applies equally to whatever new
 system-provider classification function this plan adds in the next
 section, if it follows the same "mutate in place, skip if already
