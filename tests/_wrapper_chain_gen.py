@@ -135,3 +135,26 @@ def chain_with_non_dict_child(
         cur = cur["inner"][0]
     cur["inner"] = ["not-a-node"]
     return root, cur
+
+
+def chain_with_non_list_inner(
+    kinds: list[str],
+    bad_at: int,
+    bad_inner: Any,
+    leaf_kind: str = NON_LITERAL_LEAF_KIND,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """A chain where the wrapper at *bad_at*'s ``inner`` field is itself not
+    a list at all (e.g. a bare int or dict, rather than the expected list of
+    children) -- a shape distinct from a missing ``inner`` key (that one is
+    ``None``/absent, this one is present but the wrong TYPE). A naive
+    ``for c in cur.get("inner", [])`` degrades cleanly on a missing key
+    (falls back to ``[]``) but raises ``TypeError`` on a present,
+    non-iterable-as-expected value -- confirmed against all three
+    production copies before this builder was added. Returns ``(root,
+    stopping_node)``, as above."""
+    root, _ = build_wrapper_chain(kinds, leaf_kind=leaf_kind)
+    cur = root
+    for _ in range(bad_at):
+        cur = cur["inner"][0]
+    cur["inner"] = bad_inner
+    return root, cur

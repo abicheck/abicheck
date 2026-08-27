@@ -81,6 +81,7 @@ from tests._wrapper_chain_gen import (
     chain_with_ambiguous_branch,
     chain_with_missing_inner,
     chain_with_non_dict_child,
+    chain_with_non_list_inner,
 )
 
 pytestmark = pytest.mark.slow
@@ -227,6 +228,45 @@ def test_unwrap_expr_stops_on_a_non_dict_child(kinds: list[str], data: Any) -> N
     # being checked, not just the returned identity.
     assert dumper_clang_expr._unwrap_expr(root) is stopping_node
     assert clang_nodes._unwrap_expr(root) is stopping_node
+
+
+#: Values a real ``inner`` key must never actually hold (clang's JSON AST
+#: always emits a list when the key is present at all), but which a
+#: malformed/adversarial AST fragment could -- a shape distinct from a
+#: MISSING ``inner`` (that's ``None``/absent; this is present but the wrong
+#: TYPE). Confirmed this previously raised ``TypeError`` on all three
+#: production copies before this suite's own review found it (Codex
+#: review, PR #888).
+_BAD_INNER_VALUES = (1, "x", {"kind": "Foo"}, True, 3.5)
+
+
+@given(
+    kinds=_nonempty_kinds_strategy,
+    bad_inner=st.sampled_from(_BAD_INNER_VALUES),
+    data=st.data(),
+)
+@settings(max_examples=200)
+def test_unwrap_expr_stops_on_a_non_list_inner(
+    kinds: list[str], bad_inner: Any, data: Any
+) -> None:
+    bad_at = data.draw(st.integers(min_value=0, max_value=len(kinds) - 1))
+    root, stopping_node = chain_with_non_list_inner(kinds, bad_at, bad_inner)
+    assert dumper_clang_expr._unwrap_expr(root) is stopping_node
+    assert clang_nodes._unwrap_expr(root) is stopping_node
+
+
+@given(
+    kinds=_nonempty_kinds_strategy,
+    bad_inner=st.sampled_from(_BAD_INNER_VALUES),
+    data=st.data(),
+)
+@settings(max_examples=150)
+def test_evaluated_int_value_survives_a_non_list_inner(
+    kinds: list[str], bad_inner: Any, data: Any
+) -> None:
+    at = data.draw(st.integers(min_value=0, max_value=len(kinds) - 1))
+    root, _stopping_node = chain_with_non_list_inner(kinds, at, bad_inner)
+    assert dumper_clang._evaluated_int_value(root) is None
 
 
 @given(kinds=_nonempty_kinds_strategy, data=st.data())

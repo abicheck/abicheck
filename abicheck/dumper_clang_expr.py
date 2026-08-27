@@ -95,7 +95,12 @@ def _unwrap_expr(node: dict[str, Any]) -> dict[str, Any]:
     """Descend through single-child wrapper expressions (casts, ConstantExpr…)."""
     cur = node
     while isinstance(cur, dict) and cur.get("kind") in _WRAPPER_EXPR_KINDS:
-        inner = [c for c in cur.get("inner", []) or [] if isinstance(c, dict)]
+        raw_inner = cur.get("inner")
+        inner = (
+            [c for c in raw_inner if isinstance(c, dict)]
+            if isinstance(raw_inner, list)
+            else []
+        )
         if len(inner) != 1:
             break
         cur = inner[0]

@@ -1852,7 +1852,12 @@ def _evaluated_int_value(node: dict[str, Any]) -> int | None:
                 pass
         if cur.get("kind") not in _WRAPPER_EXPR_KINDS:
             break
-        inner = [c for c in cur.get("inner", []) or [] if isinstance(c, dict)]
+        raw_inner = cur.get("inner")
+        inner = (
+            [c for c in raw_inner if isinstance(c, dict)]
+            if isinstance(raw_inner, list)
+            else []
+        )
         if len(inner) != 1:
             break
         cur = inner[0]
