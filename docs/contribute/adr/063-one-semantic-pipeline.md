@@ -660,6 +660,26 @@ example of. Detector logic stays hand-written — this only removes the
 already draws between "the registry entry" and "implement detection in the
 appropriate diff module."
 
+**This decision's initial realization is narrower than "every fact,"
+and a review round correctly found the implementation plan's own Phase 5
+scope (availability-ambiguous fields guarded by a backend-reliability
+flag — the ELF-binding incident's own shape) does not cover the full
+population this paragraph names, without that gap being stated
+anywhere.** An ordinary, always-present fact with no availability
+ambiguity at all — an entity's name, a type's size, a symbol's binding,
+a report-only derived value — has no "unavailable vs. genuinely absent"
+question for `Fact[T]`/a reliability flag to resolve, so registering it
+carries none of D7's stated benefit (closing exactly that ambiguity) and
+would, at the scale of this codebase's model, mean an inventory entry for
+essentially every dataclass field that exists — a different, much larger
+project than the one Phase 5 actually ships. D7's own scope is therefore
+the availability-bearing subset Phase 5 implements; registering the
+remaining, unambiguous fact population is a real, legitimate directional
+extension of this same registry, not ruled out by this ADR, but it is an
+explicit, separately-justified future amendment — per this ADR's own
+"don't attempt a change with no real caller" discipline (D1) — not a
+claim this decision already covers.
+
 A fact also carries an explicit lifecycle state (`MODELLED → PRODUCED →
 NORMALIZED → PERSISTED → CONSUMED → REPORTED → PUBLIC`). A capability is
 documented or exposed as a CLI option only once it reaches `PUBLIC` —

@@ -495,6 +495,47 @@ unwidened annotation, and round-trips correctly through `dataclasses.
 asdict()` for both the omitted and explicit-value cases, including the
 explicit-empty-list case staying distinct from omission.
 
+**This choice has a real, named consequence for every *existing*
+direct-construction call site in this codebase's own test suite, and a
+later review round asked this plan to actually own that consequence
+rather than only justify the choice that causes it.** Once a migrated
+detector reads `.status` and skips rather than reports when it sees
+`Fact.not_collected()` (the whole point of the migration), a pre-existing
+test fixture built as `RecordType(name="Foo")` with no `bases`/
+`bases_fact` — because that field didn't exist before this phase, not
+because the test intended "unknown evidence" — now feeds that detector a
+`not_collected` signal it never meant to assert, and a test that expects
+a `TYPE_BASE_CHANGED`/`TYPE_VTABLE_CHANGED`/`PARAM_BECAME_VA_LIST`/
+`PARAM_LOST_VA_LIST`-family finding from such a fixture can start failing
+the moment its detector migrates — not the moment this phase lands the
+sentinel itself, which is a no-op until a detector actually reads
+`.status`. That ordering is what keeps this self-auditing *within* this
+codebase: each detector's own migration PR (already its own Files/Tests
+entry elsewhere in this plan) runs the existing suite and any fixture
+whose real intent was "confirmed empty/non-variadic" surfaces as a loud,
+specific test failure at that PR, which is fixed by making the fixture
+say what it actually means — `RecordType(name="Foo", bases_fact=Fact.
+present([]))` — not by reverting the detector's new, correct behavior.
+Each detector-migration task in this plan's own Files sections gains this
+as an explicit sub-task: audit and update every fixture the newly-migrated
+detector's tests touch, in the same PR, rather than leaving a fixed
+fixture as an unplanned follow-up discovered by a later, unrelated CI run.
+**This is not self-auditing for an external Python-API caller who builds
+an `AbiSnapshot` by direct construction outside this repo's own test
+suite**, though — that caller has no test of this codebase's own to fail,
+and their comparison now silently reads "no evidence" where it used to
+read "confirmed empty," a genuine behavioral change with nothing to force
+them to notice it. That is disclosed, not silently shipped: this phase's
+changelog fragment (this repo's own `scriv create` convention, already
+required for any change touching `abicheck/**/*.py`) states the behavior
+change explicitly — direct construction of `RecordType`/`Param` without
+the new sibling `Fact` field now represents unrecorded evidence, not a
+confirmed empty/non-variadic value, to any `Fact`-aware consumer; a caller
+that wants the old, confirmed-empty semantics passes the sibling field
+explicitly (`bases_fact=Fact.present([])`) — which is exactly the
+compatibility bridge already documented above, just invoked deliberately
+instead of relied on implicitly.
+
 **A third field shape needs a third mechanism, and a later review round
 found it missing: `RecordType.vptr_offset_bits` is also converted by
 this phase (named in the Scope section above) and is `int | None`,
@@ -1908,7 +1949,23 @@ is named explicitly rather than left for a future reader to discover the
 two notes disagree. `abicheck/policy/public_surface.py`
 (new — `PublicSurfaceQuery`, migrated from `surface.py`'s existing
 traversal logic); `surface.py` (`compute_public_surface(snapshot,
-public_entity_ids: frozenset[EntityId])` — **the parameter is required,
+resolution: PublicSurfaceResolution)` — **not `public_entity_ids:
+frozenset[EntityId]`, which a first draft of this Files entry still said,
+predating (and left un-synced with) the structured-result fix a few
+paragraphs above.** A bare frozenset is exactly the membership-only
+collapse that fix exists to prevent: `compute_public_surface()`'s own
+`PublicSurface` result carries `resolvable`/`has_typed_roots`/
+`has_provenance`/`ambiguous_type_names`/`exact_type_identities`/both
+origin indices, none of which a set of ids can express, and
+`FilterNonPublicSurface`'s `surf_old.resolvable or surf_new.resolvable`
+check (among others) runs *before* `compute_public_surface()` has any
+membership set to offer at all — there is no point reconstructing that
+state a second time from a bare id set once the workflow-layer caller
+already computed it via `PublicSurfaceQuery.resolve_public_domain()`.
+`compute_public_surface()` takes that structured `PublicSurfaceResolution`
+directly and projects it into the existing `PublicSurface` field shape,
+so every existing reader of `PublicSurface`'s own fields is unaffected by
+where the computation happened. **The parameter is required,
 not optional with a `None` fallback, unlike `surface_graph.py`'s
 functions above.** The two modules have genuinely different retirement
 plans, not an inconsistency: `SurfaceGraph`'s own traversal is explicitly
@@ -2204,7 +2261,14 @@ completeness` check mirroring its existing `changekind-partition`/
 **Scope.** This phase converts the *remaining* model fields Phase 0 left
 alone into `Fact[T]` + a registry entry, mechanically, field by field —
 each conversion is its own small commit (not one repository-wide diff),
-so a regression is attributable to one field's conversion. **"Remaining
+so a regression is attributable to one field's conversion. This is
+deliberately the availability-bearing subset of ADR-063 D7's stated
+"every persisted, detected, or reported fact," per that decision's own
+amendment scoping its initial realization this way — an ordinary,
+always-present fact with no unavailable-vs-absent ambiguity has nothing
+for this registry to resolve, and registering the full, unambiguous field
+population is named there as a real but separately-justified future
+extension, not this phase's own bar to clear. **"Remaining
 model fields" means every availability-ambiguous field on every
 fact-bearing model dataclass, not only the files named `model/*_facts.py`
 — a first draft of this phase scoped itself to that filename pattern and
@@ -2813,6 +2877,29 @@ expected `FactStatus` for the facts only one of them can produce (e.g.
 only the clang backend extracts) — stated as one parameterized test with
 two assertions per fixture, not one assertion claiming full equality.
 
+**If Phase 2's implementation PR resolves its own open option-(a)-vs-(b)
+question (above) as option (b), this phase's Files/Tests/Acceptance
+criteria above do not by themselves cover what that choice defers here —
+a review round correctly found the dependency stated in Phase 2 has no
+corresponding landing task in this phase, which would leave `diff_
+filtering.py`'s/`type_reachability.py`'s deferred post-parse consumers
+permanently unmigrated, completing neither D3 nor this phase's own
+acceptance bar, with nothing in either phase's checklist to catch the
+gap.** Stated here explicitly, conditional on that choice rather than
+asserted as this phase's work unconditionally: under option (b), this
+phase's own `SemanticIR` assembly is exactly where every declaration/type
+first receives a real, resolved `EntityId` (`CanonicalEntity`'s own
+identity, built from the typed scope data Phase 2 establishes), so the
+Files list above additionally migrates `diff_filtering.py`'s ambiguity-
+tracking helpers and `type_reachability.py`'s remaining post-parse
+consumers (named in Phase 2's own finding) to read that resolved
+`EntityId` off the assembled `SemanticIR` instead of re-deriving ambiguity
+from bare qualified-name strings, with their existing bespoke trackers
+deleted in the same PR (folding Phase 2's own Phase-3-deletion-checklist
+row for these two modules into this phase's PR when, and only when,
+option (b) is the one actually chosen) — not left as a dangling forward
+reference two phases back with no phase left to claim it.
+
 ---
 
 ### Phase 7 — `RunOutcome` and the last inline exit-code computation
@@ -2998,9 +3085,21 @@ change needs its version bumped the same way every prior
 `report_schema_version`-gated field addition already did, per that
 constant's own changelog comments; a first draft of this phase named the
 field addition without the version bump, schema-file edit, or
-regeneration that addition requires); `docs/reference/schemas/v1/
+regeneration that addition requires); `abicheck/schemas/
 compare_report.schema.json`/`aggregate_report.schema.json` (the new
-fields, regenerated via `scripts/publish_schemas.py`, not hand-edited).
+fields — **the authoritative package schemas, not their
+`docs/reference/schemas/v1/` mirror, which a first draft of this row
+named instead.** `scripts/publish_schemas.py`'s own docstring states the
+direction plainly — "the package copy is the source of truth" — copying
+`abicheck/schemas/*.schema.json` onto the docs mirror, never the reverse;
+editing the mirror directly would have its hand-added fields silently
+overwritten the next time anyone runs the publisher, and in the meantime
+leaves the actual schema package validates fresh reports against
+unchanged, so a freshly-generated report carrying `RunOutcome` fields
+would fail validation against its own schema rather than the mirror
+merely drifting). Edit the two package schema files, then run
+`scripts/publish_schemas.py` to regenerate the
+`docs/reference/schemas/v1/` mirror from them — never the other order.
 
 **Three more writers are not report-reading fallback paths but
 *synthetic* report builders, each stamping `REPORT_SCHEMA_VERSION`
