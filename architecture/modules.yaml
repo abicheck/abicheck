@@ -11,8 +11,6 @@
       "path": "abicheck/model",
       "may_import": [],
       "legacy_paths": [
-        "abicheck/buildsource/entity_identity.py",
-        "abicheck/buildsource/entity_resolver.py",
         "abicheck/buildsource/graph_facts.py",
         "abicheck/buildsource/model.py",
         "abicheck/buildsource/pack.py",

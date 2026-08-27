@@ -3,8 +3,8 @@
 - **ADR-061 continuation**: 19 more of `buildsource/`'s 73 flat modules (24
   total, plus its pre-existing 5) are now classified into the `extract`
   responsibility layer in `architecture/modules.yaml`, alongside 5 into
-  `compare`, 1 into `storage`, 3 into `model` (plus its pre-existing 2), and
-  1 into `workflows` -- 36 of 73 `buildsource/` files classified overall.
+  `compare`, 1 into `storage`, 1 into `model` (plus its pre-existing 2), and
+  1 into `workflows` -- 34 of 73 `buildsource/` files classified overall.
   Verified via `scripts/check_architecture.py` (0 errors).
 
   - `extract`: raw fact-extraction/graph-building modules
@@ -21,32 +21,41 @@
     extraction.
   - `model`: `graph_facts.py` -- defines the shared `GraphFact`/
     `FactConflict`/`GraphNode`/`GraphEdge` schema multiple layers consume,
-    not an extraction algorithm -- and, moved here in a fifth review round
-    (see below), `entity_identity.py`/`entity_resolver.py`.
+    not an extraction algorithm.
   - `workflows`: `baseline_publish.py` -- bridges an already-validated
     `BuildOutput` to a CI Action's payload shape, orchestration rather than
     fact-reading.
 
-  **`entity_identity.py`/`entity_resolver.py` moved `compare` -> `model`, a
-  fifth review round.** An earlier round classified both `compare` to
-  unblock `graph_reconcile.py`'s old/new-matching cascade -- reasoning by
-  analogy to `finding_identity.py` (already `compare`), which is
-  old/new-matching-only. Fresh evidence broke that analogy:
-  `source_graph.py` (a *single*-graph schema, no old/new pairing at all)
-  imports `EntityResolver` directly, stores it as `SourceGraphSummary.
-  entity_resolver`, and populates it from `resolve_entities()` walking the
-  graph's own node set -- confirmed by reading the code, not assumed.
-  `entity_identity.py`/`entity_resolver.py` are genuinely single-graph
-  identity/schema state consumed by both a single graph and cross-graph
-  reconciliation, the same shape `graph_facts.py` already established for
-  `model`, not exclusively compare-shaped matching machinery. Reclassifying
-  `compare` would have forced `source_graph.py`'s own eventual owner
-  (almost certainly `model`, per the schema/construction split
-  `source_graph_findings.py`'s docstring already establishes) to import
-  outward from `compare` once classified -- `model`'s own `may_import: []`
-  makes that impossible by construction. `graph_reconcile.py` (`compare`)
-  still imports both cleanly, since `compare`'s `may_import: [model]`
-  already allows it -- confirmed with `check_architecture.py`.
+  **`entity_identity.py`/`entity_resolver.py`: two more review rounds, two
+  reclassifications, ending unclassified.** A fifth round moved both
+  `compare` -> `model`: an earlier round had classified them `compare` to
+  unblock `graph_reconcile.py`'s old/new-matching cascade, reasoning by
+  analogy to `finding_identity.py` (already `compare`, old/new-matching
+  only) -- but `source_graph.py` (a *single*-graph schema, no old/new
+  pairing at all) imports `EntityResolver` directly, stores it as
+  `SourceGraphSummary.entity_resolver`, and populates it from
+  `resolve_entities()` walking the graph's own node set (confirmed by
+  reading the code), the same single-graph-schema shape `graph_facts.py`
+  already established for `model`.
+
+  A sixth round found that resolution itself doesn't belong in `model`
+  either: `EntityResolver.resolve()` calls `resolve_identity_for_node()`,
+  whose `normalize_mangled_name()` invokes `demangle.demangle()` --
+  confirmed by reading both functions -- which can shell out to the
+  external `c++filt` binary via `subprocess.run()` (confirmed in
+  `demangle.py` itself). `model`'s own established contract (`graph_facts.
+  py`/`model/change_catalog/registry.py`'s `may_import: []`, "a true leaf")
+  is a dependency-free, executable-subprocess-free innermost ring;
+  `entity_identity.py`/`entity_resolver.py` are executable identity-
+  resolution machinery with a real subprocess dependency, not inert
+  schema/value types, even though `demangle.py` itself is currently
+  unclassified so no mechanical violation fires today. Per Codex's own
+  suggested fallback ("split the serialized shapes from active resolution/
+  demangling, or leave the active modules unclassified until that
+  separation is made"), reverted both to unclassified rather than force a
+  third classification without a genuinely clean fit. `graph_reconcile.py`
+  (`compare`) still imports both without a `dependency-direction` error,
+  since an unclassified target is not itself a forbidden layer.
 
   `source_graph_findings.py` and `graph_impact.py` -- also flagged as
   compare-shaped, and they are (both emit/enrich findings rather than raw
@@ -117,7 +126,7 @@
   docstring says: pure mangled-name classification over already-extracted
   snapshot/export data, `extract`'s job.
 
-  The remaining 36 `buildsource/` files stay unclassified: 30 of them are
+  The remaining 38 `buildsource/` files stay unclassified: 30 of them are
   directly imported by `frontends`-layer `cli_*.py` modules (a pre-existing
   `frontends -> buildsource` direct-import pattern that bypasses the target
   `frontends -> workflows -> extract` routing -- ADR-061 D9's own worked
