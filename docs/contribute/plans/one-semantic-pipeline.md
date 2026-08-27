@@ -115,6 +115,44 @@ of `None`), and `Param.is_va_list` (the reliability-flag entry). Every
 other model field stays as-is in this phase — a blanket conversion is
 Phase 5's job, after D7's registry exists to drive it mechanically.
 
+**Where the `Fact[...]` value actually comes from (both directions —
+fresh extraction and loading a legacy persisted snapshot).** This phase is
+incomplete without both halves; a detector switched to read `Fact[...]`
+with nothing populating it correctly would either suppress every existing
+finding (if unpopulated defaults to `not_collected()`) or silently
+recreate the exact ambiguity this phase exists to remove (if derived
+naively from the existing raw value with no producer-aware distinction).
+Concretely, this repository already has the mechanism this phase
+generalizes, in the form of `AbiSnapshot`'s per-field, per-producer
+reliability flags (`clang_vtable_facts_reliable`, `clang_va_list_facts_
+reliable`, and their siblings for other fields not converted in this
+phase) — each already encodes, in careful hand-written prose, exactly the
+producer/schema-version distinction `Fact[...]` generalizes into a typed
+value instead of a side boolean:
+- **Fresh extraction** (`dumper_castxml.py`, `dumper_clang.py`/
+  `dumper_clang_vtable.py`, `dwarf_snapshot.py`): each producer now
+  constructs the field's value directly as a `Fact[...]` at parse time —
+  `Fact.present(vtable_list)` when it actually reconstructed a vtable,
+  `Fact.unsupported()` for a producer that has never populated this fact
+  at all (castxml for `is_va_list`, per that field's own existing
+  docstring), `Fact.not_collected()` when the run's evidence depth never
+  reached that extractor. No snapshot-level reliability flag is needed for
+  a freshly-built snapshot, since the per-field `Fact[...]` states it
+  directly — this is the generalization's actual payoff, not an
+  afterthought.
+- **Loading a legacy, pre-`Fact[...]` persisted snapshot**
+  (`serialization.py`): the existing reliability flag is read *once*, at
+  load time, to reconstruct the correct `Fact[...]` value for that
+  snapshot's schema version and producer — `clang_vtable_facts_reliable ==
+  True` backfills `Fact.present(raw_vtable)`; `== False` backfills
+  `Fact.not_collected()` (never `Fact.present([])` — the old field's
+  "blanket empty" value on an unreliable snapshot is not a confirmed
+  absence, exactly the "real but WRONG data" distinction that flag's own
+  docstring already draws). The reliability flags themselves become
+  write-only after this phase (kept only so pre-Fact[...] snapshots still
+  load correctly) and are deleted in Phase 9 once no pre-conversion
+  snapshot needs to be read anymore — not before.
+
 **Files.** `abicheck/model/availability.py` (new — the relocated
 `FactStatus`/`Confidence`/order-tuple vocabulary); `abicheck/storage/
 availability_status.py` (trimmed to a re-export shim); `abicheck/model/
@@ -122,8 +160,12 @@ fact.py` (new — `Fact[T]`); `abicheck/model/snapshot.py`'s `RecordType`/
 `Param` dataclasses (new `Fact[...]`-typed fields alongside the existing
 ones, old field deprecated-but-present for one release to keep
 `asdict`-based external consumers working — removed in Phase 5's
-registry-driven sweep, not here); `diff_layout.py`/`diff_types.py`'s
-vtable/base-list detectors (read `Fact[...]`, not raw `None`).
+registry-driven sweep, not here); `dumper_castxml.py`/`dumper_clang.py`/
+`dumper_clang_vtable.py`/`dwarf_snapshot.py` (each producer constructs the
+`Fact[...]` value directly, per the design above); `serialization.py`
+(the legacy-schema backfill path, reading the existing reliability flags
+exactly once on load); `diff_layout.py`/`diff_types.py`'s vtable/base-list
+detectors (read `Fact[...]`, not raw `None`).
 
 **Tests.** Port the existing `tests/test_vtable_evidence_guard.py`
 Hypothesis properties to assert over `Fact[...]` states directly, not only
@@ -131,7 +173,15 @@ derived booleans; add a property asserting no detector in `diff_types.py`/
 `diff_layout.py` pattern-matches a `Fact[...]`-typed field without handling
 every `FactStatus` variant (a static AST check, mirroring
 `check_ai_readiness.py`'s own style, is preferable to a runtime check here
-since the failure mode is a missing `case`, not a bad value).
+since the failure mode is a missing `case`, not a bad value). Add a direct
+`serialization.py` round-trip test per converted field pinning the
+backfill rule itself: a pre-conversion fixture snapshot with the
+reliability flag `True` loads as `Fact.present(...)`, one with the flag
+`False` loads as `Fact.not_collected()` — **not** `Fact.present([])`/
+`Fact.present(False)` — since that exact confusion (a placeholder value
+read as a confirmed fact) is the bug this phase exists to make
+unrepresentable; a freshly-extracted snapshot round-trips through every
+backend's real parser and never consults the legacy flag at all.
 
 **Acceptance criteria.** The three converted fields cannot be read by any
 detector without explicit availability handling (enforced by a new
@@ -272,50 +322,69 @@ by traversing one authoritative evidence graph, not by independently
 reconstructing include/reference/export relationships from the flat
 snapshot a second time.
 
-**Design.** `abicheck/compare/surface_graph.py` (new — the `extract`
-package produces raw facts per ADR-061's ring structure, so the graph
-*itself*, being a reconciliation of those facts for comparison/policy use,
-lands in `compare/`, alongside today's `surface.py`, not in `extract/`):
-typed nodes (`Header`, `TranslationUnit`, `Declaration`, `Type`, `Symbol`,
-`Target`) and typed edges (`Includes`, `Declares`, `References`,
-`Instantiates`, `Exports`, `OwnedByTarget`) built once per snapshot side
-from facts the existing extraction layer already produces (the header
-origin/scoping data `dumper_scoping.py` reads, the export-table data
-`export_surface.py` already computes for `contract=exports`, the
-declaration/reference data `type_reachability.py`/`surface.py` each
-independently reconstruct today). Nodes reference entities by the
-`EntityId` Phase 2 already established — this phase is ordered after
-Phase 2 for exactly that reason, the same dependency Phase 5
-(`SemanticIR`) has on Phase 2, stated explicitly here so the plan's
-phase order is never read as arbitrary.
+**Design.** This phase is deliberately split across two packages, because
+"is this declaration public" is a **relevance decision** — AGENTS.md's own
+task-routing table assigns exactly that class of question ("decide
+relevance, suppression, classification, severity, or gating") to
+`policy/`, not to `compare/` ("match old/new entities or identify a raw
+change"). Putting the decision itself in `compare/` would make that
+package own policy behavior, and ADR-061's fixed import direction
+(`policy -> model, compare`; nothing imports the reverse) means `compare/`
+can never import a relevance decision back out of `policy/` later without
+creating the cycle ADR-061 already forbids. So:
 
-`compute_public_surface()` becomes `PublicSurfaceQuery.resolve(graph,
-explicit_roots) -> frozenset[EntityId]`: a traversal from explicit public
-roots through `Includes`/`Declares` edges (closing the reachable-header
-surface) and `References`/`Instantiates` edges (closing the reachable-type
-surface), with `Exports` edges answering the `contract=exports` domain
-from the *same* graph instead of `export_surface.py`'s separate walk.
-`type_reachability.py`'s `directly_referenced_stdlib_types()` becomes a
-second, narrower query over the same graph (a one-hop `References` filter)
-rather than its own independent scan with its own ambiguity-tracking
-machinery — the machinery this phase removes is exactly what Phase 2
-already started removing for the identity half of the same problem; this
-phase removes the *reachability* half.
+- **The graph substrate** — `abicheck/compare/surface_graph.py` (new):
+  typed nodes (`Header`, `TranslationUnit`, `Declaration`, `Type`,
+  `Symbol`, `Target`) and typed edges (`Includes`, `Declares`,
+  `References`, `Instantiates`, `Exports`, `OwnedByTarget`), built once per
+  snapshot side from facts the existing extraction layer already produces
+  (the header origin/scoping data `dumper_scoping.py` reads, the
+  export-table data `export_surface.py` already computes for
+  `contract=exports`, the declaration/reference data `type_reachability.
+  py`/`surface.py` each independently reconstruct today). This is a
+  reconciliation of raw per-format facts into one structural shape —
+  identifying *what references what*, not deciding what is public — which
+  fits `compare/`'s charter and, critically, `policy -> compare` is an
+  already-allowed import edge, so `policy/` can consume this graph
+  directly. Nodes reference entities by the `EntityId` Phase 2 already
+  established — this phase is ordered after Phase 2 for exactly that
+  reason, the same dependency Phase 5 (`SemanticIR`) has on Phase 2,
+  stated explicitly here so the plan's phase order is never read as
+  arbitrary.
+- **The relevance query** — `abicheck/policy/public_surface.py` (new):
+  `PublicSurfaceQuery.resolve(graph, explicit_roots) -> frozenset[EntityId]`,
+  a traversal from explicit public roots through `Includes`/`Declares`
+  edges (closing the reachable-header surface) and `References`/
+  `Instantiates` edges (closing the reachable-type surface), with
+  `Exports` edges answering the `contract=exports` domain from the *same*
+  graph instead of `export_surface.py`'s separate walk. This is where
+  `compute_public_surface()`'s actual decision logic — which declarations
+  count as part of the public contract — lives after migration, consuming
+  the `compare/`-built graph rather than rebuilding it.
 
-**Files.** `abicheck/compare/surface_graph.py` (new); `surface.py`
-(`compute_public_surface()` becomes a thin wrapper calling
-`PublicSurfaceQuery.resolve`, with its existing traversal logic migrated
-into the graph builder rather than kept as a parallel implementation);
-`dumper_scoping.py`/`export_surface.py`/`type_reachability.py` (each
-becomes a graph *builder* contributing nodes/edges, or a graph *query*,
-not an independent reachability algorithm); `abicheck/workflows/
-consumer_graph.py` (ADR-057's consumer graph) and ADR-053's TU→link-unit→
-DSO attribution are explicitly **not** migrated in this phase — each is
-noted here as a candidate for a later, separate phase once this phase's
-graph has a real consumer to validate the generalization against, per
-this plan's own "don't attempt a change with no real caller" discipline
-(see AGENTS.md's "shape first, wiring later" gap and ADR-063 D7's
-capability-lifecycle states).
+`type_reachability.py`'s `directly_referenced_stdlib_types()` — itself a
+relevance decision (it un-filters a record for suppression purposes) —
+becomes a second, narrower query in `policy/public_surface.py` over the
+same graph (a one-hop `References` filter) rather than its own independent
+scan with its own ambiguity-tracking machinery — the machinery this phase
+removes is exactly what Phase 2 already started removing for the identity
+half of the same problem; this phase removes the *reachability* half.
+
+**Files.** `abicheck/compare/surface_graph.py` (new — graph builder only,
+no relevance logic); `abicheck/policy/public_surface.py` (new —
+`PublicSurfaceQuery`, migrated from `surface.py`'s existing traversal
+logic); `surface.py` (`compute_public_surface()` becomes a thin wrapper
+calling `PublicSurfaceQuery.resolve`); `dumper_scoping.py`/
+`export_surface.py`/`type_reachability.py` (each becomes a graph
+*builder* contributing nodes/edges in `compare/`, or a relevance *query* in
+`policy/`, not an independent reachability algorithm); `abicheck/
+workflows/consumer_graph.py` (ADR-057's consumer graph) and ADR-053's
+TU→link-unit→DSO attribution are explicitly **not** migrated in this
+phase — each is noted here as a candidate for a later, separate phase once
+this phase's graph has a real consumer to validate the generalization
+against, per this plan's own "don't attempt a change with no real caller"
+discipline (see AGENTS.md's "shape first, wiring later" gap and ADR-063
+D7's capability-lifecycle states).
 
 **Tests.** Every existing `surface.py`/`type_reachability.py` regression
 test (including the namespace-collision property suite Phase 2 already
@@ -373,8 +442,9 @@ is incomplete and should not be landed yet.
 
 ### Phase 5 — the fact/capability registry (generalizes `change_registry.py`)
 
-**Goal.** A new model field requires one registry entry, not nine touched
-files.
+**Goal.** A new fact requires declaring the model field plus one registry
+entry, not nine touched files spread across serialization, diff,
+suppression, and hand-maintained docs.
 
 **Design.** `abicheck/model/fact_registry.py`: `FactDefinition` (id, value
 type, producing backends, persisted/identity-relevant/comparable/
@@ -406,11 +476,25 @@ individually risk detector-logic drift, but the cumulative change to every
 
 **Acceptance criteria.** PR #734's exact touch list (model, ELF dumper,
 serialization, `Change`, diff, suppression, capability matrix, docs,
-fixtures) shrinks, for a comparably-scoped new fact added after this
-phase, to: registry entry + parser + detector + test. Demonstrate this
-directly — the phase's own PR adds one new, real fact end-to-end as a
-worked example and states the old-vs-new touch-list diff in its
-description.
+fixtures — nine files) shrinks, for a comparably-scoped new fact added
+after this phase, to: the model dataclass field itself + one registry
+entry + parser + detector + test. **The registry does not generate the
+model field** — `FactDefinition` describes and validates an existing
+`Fact[...]`-typed field on a `model/*_facts.py` dataclass; it is not a
+schema from which that field is code-generated, so adding the field by
+hand is still required and is explicitly counted in this acceptance
+criterion rather than silently omitted from it, per this corrected draft
+(a reviewer caught an earlier version of this criterion listing only four
+items). Designing and validating real generation of the model field
+itself from the registry — which would shrink the list further, to
+registry entry + parser + detector + test — is out of scope for this
+phase; it would need its own dataclass-field-codegen design (interacting
+with `from __future__ import annotations`, `dataclasses.field(kw_only=
+True)` placement, and the "new field appended last" convention every
+public dataclass in this repo already follows) and is not attempted here.
+Demonstrate the stated (five-item) reduction directly — the phase's own PR
+adds one new, real fact end-to-end as a worked example and states the
+old-vs-new touch-list diff in its description.
 
 ---
 
@@ -452,11 +536,26 @@ retire now-redundant backend-local duplicates of the same assertion (e.g.
 two nearly-identical closure-identity tests, one per backend, collapsing
 into one normalizer test parameterized over both backends' raw fixtures).
 
-**Acceptance criteria.** A single shared test fixture (one closure-
-parameterized template, one partially-qualified nested type, one using-
-re-exported constant) produces the *identical* `SemanticIR` regardless of
-source backend — stated as one parameterized test, not an assertion
-repeated per backend.
+**Acceptance criteria.** **Not** "an identical `SemanticIR` regardless of
+source backend" — backends genuinely differ in what evidence they can
+produce (DWARF may see only emitted template instantiations where a
+header AST sees uninstantiated declarations too; a given backend may be
+structurally unable to produce a given fact at all, which is exactly
+`Fact.unsupported()`'s job from Phase 0), and requiring bit-identical
+output across backends could only be satisfied by discarding real
+backend-specific evidence or fabricating a fact a backend never actually
+observed — the opposite of what `Fact[T]` exists to prevent. The real bar
+is narrower and is what this phase actually fixes: for the subset of
+facts two backends **both** produce for a shared fixture, canonical
+identity and spelling (`EntityId`/`ScopePath`, template-argument/
+anonymous-marker/CV-qualification rendering) must agree exactly — a single
+shared test fixture (one closure-parameterized template, one
+partially-qualified nested type, one using-re-exported constant) asserts
+that agreement on the intersection, and separately asserts each backend's
+expected `FactStatus` for the facts only one of them can produce (e.g.
+`dumper_castxml.py` genuinely reporting `Fact.unsupported()` for a fact
+only the clang backend extracts) — stated as one parameterized test with
+two assertions per fixture, not one assertion claiming full equality.
 
 ---
 
