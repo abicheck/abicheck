@@ -14,16 +14,33 @@ The primitive's own contract is covered in
 `tests/unit/compare/test_dedup_key.py`; these tests pin the caller-level
 consequences the primitive alone cannot state.
 
-`TestRealCollisionReachesCompareOutput` (Phase 5 of
-``docs/contribute/plans/bug-class-regression-testing.md`` -- the
-``matching.dedup_key_soundness`` bug class's own first known-gap entry)
-closes one more layer than the rest of this file: every other test here
-calls `_deduplicate_ast_dwarf`/`cross_tier_transition` directly, so none of
-them proves a real, list-valued collision actually survives the FULL
-`checker.compare()` pipeline `DeduplicateAstDwarf`'s post-processing step
-runs inside -- a different post-processing step re-merging the two changes
-downstream, or the finding never reaching this pass at all, would be
-invisible to a test that calls the primitive in isolation.
+Two distinct engine-level layers, closed by two distinct classes below
+(Codex review, PR #905 -- an earlier draft of this file conflated them):
+
+- `_dedup_cross_kind` only ever calls `cross_tier_transition` for a change
+  whose kind is one of `_DWARF_TO_AST_EQUIV`'s keys/values (the five
+  struct/type size-alignment-field kinds it bridges AST vs. DWARF findings
+  for) -- every other kind, `PYTHON_STABLE_ABI_VIOLATION` included, never
+  reaches this function's own `cross_tier_transition` calls at all,
+  regardless of what its value looks like. `TestListValuedFindingSurvives
+  TheRealDedupCrossKind` proves the mechanism itself is safe when it *is*
+  reached, using one of those five in-scope kinds (no real producer emits a
+  list-valued transition for them today -- this states the primitive's
+  contract for the slot regardless of which kind currently exercises it,
+  the same "don't test only the input you already thought of" reasoning
+  `tests/unit/compare/test_dedup_key.py`'s own module docstring states).
+- `TestRealCollisionReachesCompareOutput` proves something narrower but
+  still real: a genuine, non-synthetic producer
+  (`diff_python._diff_stable_abi_violations`/`_diff_abi3_floor_raised`)
+  emitting two distinct list-valued findings survives the *whole*
+  `checker.compare()` post-processing pipeline uncollapsed -- not
+  specifically `_dedup_cross_kind`'s own transition set, since
+  `PYTHON_STABLE_ABI_VIOLATION` never reaches that one, but every other
+  post-processing step `compare()` runs (`_dedup_exact`'s (kind,
+  description) key, `_deduplicate_cross_detector`'s identity-based key,
+  and anything downstream), which a test that only calls
+  `_deduplicate_ast_dwarf`/`cross_tier_transition` directly cannot rule out
+  either mishandling or re-merging the same list value.
 """
 
 from __future__ import annotations
@@ -39,9 +56,15 @@ from abicheck.model import AbiSnapshot
 from abicheck.model.python_facts import PythonExtMetadata
 
 
-def _change(symbol: str, old: object, new: object, description: str = "d") -> Change:
+def _change(
+    symbol: str,
+    old: object,
+    new: object,
+    description: str = "d",
+    kind: ChangeKind = ChangeKind.FUNC_PARAMS_CHANGED,
+) -> Change:
     c = Change(
-        kind=ChangeKind.FUNC_PARAMS_CHANGED,
+        kind=kind,
         symbol=symbol,
         description=description,
     )
@@ -89,12 +112,92 @@ def test_a_scalar_value_slot_still_keys_as_itself() -> None:
     assert cross_tier_transition(_change("sym", "old", "new")) == ("old", "new")
 
 
+class TestListValuedFindingSurvivesTheRealDedupCrossKind:
+    """`_dedup_cross_kind` itself, driven with an in-scope kind.
+
+    Unlike the module-level tests above (which use the default
+    ``FUNC_PARAMS_CHANGED`` -- a kind `_dedup_cross_kind` never indexes at
+    all, so those tests exercise `_deduplicate_ast_dwarf`'s outer dedup
+    passes and `cross_tier_transition` directly, not this specific
+    function's own transition-set logic), these two use
+    ``TYPE_SIZE_CHANGED``/``STRUCT_SIZE_CHANGED`` -- a real key/value pair
+    from ``_DWARF_TO_AST_EQUIV`` -- so `cross_tier_transition` is reached
+    via `_dedup_cross_kind`'s own index-build (line ~1395) and match/drop
+    decision (line ~1424), the exact call sites Codex review (PR #905)
+    named as unreached by the compare()-level test below.
+    """
+
+    def test_matching_list_valued_transitions_are_deduped(self) -> None:
+        """A DWARF finding whose list-valued transition agrees with the
+        AST-tier finding for the same symbol is dropped as redundant."""
+        result = _deduplicate_ast_dwarf(
+            [
+                _change(
+                    "Widget",
+                    ["old-repr"],
+                    ["new-repr"],
+                    description="ast",
+                    kind=ChangeKind.TYPE_SIZE_CHANGED,
+                ),
+                _change(
+                    "Widget",
+                    ["old-repr"],
+                    ["new-repr"],
+                    description="dwarf",
+                    kind=ChangeKind.STRUCT_SIZE_CHANGED,
+                ),
+            ]
+        )
+
+        assert [c.kind for c in result] == [ChangeKind.TYPE_SIZE_CHANGED]
+
+    def test_disagreeing_list_valued_transitions_are_not_over_merged(
+        self,
+    ) -> None:
+        """A DWARF finding whose list-valued transition DISAGREES with the
+        AST-tier finding for the same symbol must survive independently --
+        collapsing it here would be the over-merge this whole class exists
+        to prevent."""
+        result = _deduplicate_ast_dwarf(
+            [
+                _change(
+                    "Widget",
+                    ["old-repr"],
+                    ["new-repr"],
+                    description="ast",
+                    kind=ChangeKind.TYPE_SIZE_CHANGED,
+                ),
+                _change(
+                    "Widget",
+                    ["different-old"],
+                    ["different-new"],
+                    description="dwarf",
+                    kind=ChangeKind.STRUCT_SIZE_CHANGED,
+                ),
+            ]
+        )
+
+        assert {c.kind for c in result} == {
+            ChangeKind.TYPE_SIZE_CHANGED,
+            ChangeKind.STRUCT_SIZE_CHANGED,
+        }
+
+
 class TestRealCollisionReachesCompareOutput:
     """A real, publicly-documented producer of list-valued findings
     (``diff_python._diff_stable_abi_violations``/``_diff_abi3_floor_raised``,
     both PEP-Limited-API "abi3" detectors) run through the actual
     ``checker.compare()`` entry point, not a hand-built `Change` fed
-    directly into `_deduplicate_ast_dwarf`."""
+    directly into `_deduplicate_ast_dwarf`.
+
+    Deliberately does NOT claim to reach `_dedup_cross_kind`'s own
+    `cross_tier_transition` calls -- `PYTHON_STABLE_ABI_VIOLATION` is not
+    one of `_DWARF_TO_AST_EQUIV`'s keys/values, so it never does (see
+    `TestListValuedFindingSurvivesTheRealDedupCrossKind` above for that).
+    What this proves instead: the *rest* of `compare()`'s post-processing
+    pipeline -- `_dedup_exact`, `_deduplicate_cross_detector`, and anything
+    else a future change adds -- doesn't crash on or silently re-merge a
+    real, non-synthetic producer's list-valued findings either."""
 
     def test_two_distinct_list_valued_findings_both_survive_compare(self) -> None:
         # old: an abi3 build with no CPython imports yet (empty baseline).

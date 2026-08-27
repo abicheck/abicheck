@@ -340,7 +340,7 @@ BUG_CLASSES: tuple[BugClass, ...] = (
             "TestBatchShapedChangeIgnoresTheSample), and order-invariance "
             "for unordered inputs."
         ),
-        fixed_by=(753, 759, 879),
+        fixed_by=(753, 759, 879, 905),
         seed_tests=(
             "tests/test_cross_tier_dedup_unhashable_value.py",
             "tests/test_finding_identity_properties.py",
@@ -348,6 +348,30 @@ BUG_CLASSES: tuple[BugClass, ...] = (
             "tests/test_diff_namespaces.py",
         ),
         known_gaps=(
+            KnownGap(
+                description=(
+                    "PR #905 found and fixed a real instance of this class "
+                    "while closing Phase 5's own known gaps below, via the "
+                    "new `TestListValuedFindingSurvivesTheRealDedupCrossKind` "
+                    "class: `cross_tier_transition`'s byte-value "
+                    "(`STRUCT_SIZE_CHANGED`/`STRUCT_ALIGNMENT_CHANGED`/"
+                    "`STRUCT_FIELD_OFFSET_CHANGED`) and type-spelling "
+                    "(`STRUCT_FIELD_TYPE_CHANGED`/`TYPE_FIELD_TYPE_CHANGED`) "
+                    "special cases both bypassed `hashable_value` entirely "
+                    "and crashed with an unhandled `TypeError`/"
+                    "`AttributeError` on a list-valued slot — for exactly "
+                    "the five kinds `_dedup_cross_kind` (the only real "
+                    "caller of `cross_tier_transition`) actually indexes, "
+                    "which the compare()-level test below cannot reach "
+                    "(`PYTHON_STABLE_ABI_VIOLATION` isn't one of them). "
+                    "Fixed with a `_both_str_or_none` guard in "
+                    "`diff_helpers.cross_tier_transition` that falls back "
+                    "to the generic `hashable_value` path whenever a slot "
+                    "isn't the plain `str | None` shape those two "
+                    "conversions assume."
+                ),
+                reference="docs/contribute/plans/bug-class-regression-testing.md#phase-5",
+            ),
             KnownGap(
                 description=(
                     "Phase 5 closed most of this entry's original gaps, at "

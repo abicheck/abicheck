@@ -491,7 +491,11 @@ def fact_known_qualified(
     *name* alone) since a matched pair's two sides can carry different
     qualified identities."""
     return both_known_backed_fact_qualified(
-        old, new, old_qualified_key, new_qualified_key, bare_key,
+        old,
+        new,
+        old_qualified_key,
+        new_qualified_key,
+        bare_key,
         old_bare_unambiguous=old_map.bare_name_is_unambiguous(name),
         new_bare_unambiguous=new_map.bare_name_is_unambiguous(name),
     )
@@ -516,7 +520,11 @@ def fact_same_producer_qualified(
     why the two need different answers.
     """
     return same_producer_backed_fact_qualified(
-        old, new, old_qualified_key, new_qualified_key, bare_key,
+        old,
+        new,
+        old_qualified_key,
+        new_qualified_key,
+        bare_key,
         old_bare_unambiguous=old_map.bare_name_is_unambiguous(name),
         new_bare_unambiguous=new_map.bare_name_is_unambiguous(name),
     )
@@ -686,8 +694,7 @@ _ANON_TYPE_RE = re.compile(
 
 
 def _normalize_type_name(name: str) -> str:
-    """Normalize a C/C++ type name for stable DWARF↔castxml comparison: strips whitespace, CV-qualifiers, pointer/reference decorations, and 'struct'/'class'/'union' tag keywords ("struct Foo" -> "Foo", "const struct Foo *" -> "Foo"). Lossy by design, for comparison only -- Change.old_value/new_value keep the original spelling. Moved here from diff_platform.py (Codex review): cross_tier_transition below needs a sibling of it, and diff_platform.py already imports from this module, so importing back from there would grow the import-cycle-growth gate's tracked SCC.
-    """
+    """Normalize a C/C++ type name for stable DWARF↔castxml comparison: strips whitespace, CV-qualifiers, pointer/reference decorations, and 'struct'/'class'/'union' tag keywords ("struct Foo" -> "Foo", "const struct Foo *" -> "Foo"). Lossy by design, for comparison only -- Change.old_value/new_value keep the original spelling. Moved here from diff_platform.py (Codex review): cross_tier_transition below needs a sibling of it, and diff_platform.py already imports from this module, so importing back from there would grow the import-cycle-growth gate's tracked SCC."""
     return _normalize_type_spelling(name, strip_indirection=True)
 
 
@@ -759,6 +766,24 @@ def _bits_str_from_bytes_str(value: str | None) -> str | None:
         return value
 
 
+def _both_str_or_none(old: object, new: object) -> bool:
+    """Whether both slots hold the plain-string shape the byte-value/
+    type-spelling conversions below are written for.
+
+    Neither conversion tolerates anything else: `_bits_str_from_bytes_str`
+    only catches `ValueError` (not the `TypeError` `int(a_list)` raises),
+    and `_normalize_type_spelling` calls `.strip()` unconditionally (an
+    `AttributeError` on anything without one). Both crashed, unhandled, the
+    moment a list-valued slot reached one of these kinds (Codex review,
+    PR #905, reproduced directly) -- exactly the class of crash this
+    module's `hashable_value` import exists to prevent, just reached
+    through a special-cased branch that bypassed it entirely.
+    """
+    return (old is None or isinstance(old, str)) and (
+        new is None or isinstance(new, str)
+    )
+
+
 def cross_tier_transition(c: Change) -> tuple[object, object] | None:
     """The (old_value, new_value) pair to require agreement on across tiers.
 
@@ -773,14 +798,19 @@ def cross_tier_transition(c: Change) -> tuple[object, object] | None:
     The caller keys on this result through a ``set``, so a value slot
     returned unchanged goes through :func:`~abicheck.compare.dedup_key.
     hashable_value` -- the annotation on those slots is not enforced and
-    real detectors do store lists in them.
+    real detectors do store lists in them. The byte-value/type-spelling
+    branches below are written for a plain ``str | None`` shape and neither
+    tolerates anything else, so a slot that isn't that shape (a list,
+    still) falls back to the same always-safe ``hashable_value`` path the
+    final branch already uses, rather than crashing inside either
+    conversion -- see :func:`_both_str_or_none`.
     """
     if c.kind in (ChangeKind.STRUCT_FIELD_REMOVED, ChangeKind.TYPE_FIELD_REMOVED):
         return None
     old, new = c.old_value, c.new_value
-    if c.kind in _DWARF_BYTE_VALUE_KINDS:
+    if c.kind in _DWARF_BYTE_VALUE_KINDS and _both_str_or_none(old, new):
         return _bits_str_from_bytes_str(old), _bits_str_from_bytes_str(new)
-    if c.kind in _TYPE_SPELLING_VALUE_KINDS:
+    if c.kind in _TYPE_SPELLING_VALUE_KINDS and _both_str_or_none(old, new):
         return (
             _normalize_type_spelling(old, strip_indirection=False)
             if old is not None
