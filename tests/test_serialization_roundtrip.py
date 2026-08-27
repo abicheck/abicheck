@@ -1085,9 +1085,7 @@ class TestFactFieldRoundTrip:
     to make unrepresentable.
     """
 
-    def test_fresh_snapshot_round_trips_present_fact_and_is_json_serializable(
-        self,
-    ) -> None:
+    def test_fresh_snapshot_round_trips_present_fact_and_is_json_serializable(self) -> None:
         rec = RecordType(
             name="Widget",
             kind="struct",
@@ -1102,26 +1100,20 @@ class TestFactFieldRoundTrip:
         restored = snapshot_from_dict(json.loads(raw_json))
 
         r = restored.types[0]
-        assert r.vtable_fact is not None
         assert r.vtable_fact.status is FactStatus.PRESENT
         assert r.vtable_fact.value == ["_ZN6WidgetD1Ev"]
-        assert r.bases_fact is not None
         assert r.bases_fact.status is FactStatus.PRESENT
         assert r.bases_fact.value == ["Base"]
 
         p = restored.functions[0].params[0]
-        assert p.is_va_list_fact is not None
         assert p.is_va_list_fact.status is FactStatus.PRESENT
         assert p.is_va_list_fact.value is True
 
-    def test_fresh_snapshot_confirmed_empty_survives_as_present_not_not_collected(
-        self,
-    ) -> None:
+    def test_fresh_snapshot_confirmed_empty_survives_as_present_not_not_collected(self) -> None:
         rec = RecordType(name="Plain", kind="struct", vtable=[])
         snap = _make_snap(types=[rec])
         restored = snapshot_from_dict(json.loads(json.dumps(snapshot_to_dict(snap))))
         r = restored.types[0]
-        assert r.vtable_fact is not None
         assert r.vtable_fact.status is FactStatus.PRESENT
         assert r.vtable_fact.value == []
 
@@ -1132,7 +1124,6 @@ class TestFactFieldRoundTrip:
         snap = _make_snap(types=[rec])
         restored = snapshot_from_dict(json.loads(json.dumps(snapshot_to_dict(snap))))
         r = restored.types[0]
-        assert r.vtable_fact is not None
         assert r.vtable_fact.status is FactStatus.NOT_COLLECTED
         assert r.vtable_fact.diagnostics == ("depth capped",)
         assert r.vtable == []
@@ -1147,15 +1138,12 @@ class TestFactFieldRoundTrip:
         )
         restored = snapshot_from_dict(d)
         r = restored.types[0]
-        assert r.vtable_fact is not None
         assert r.vtable_fact.status is FactStatus.PRESENT
         assert r.vtable_fact.value == ["_ZN3FooD1Ev"]
 
     def test_legacy_snapshot_with_unreliable_flag_backfills_not_collected(self) -> None:
-        """The core backfill rule this phase exists for: an unreliable
-        legacy snapshot's vtable must NOT become Fact.present([]) — that
-        would misread "we don't trust this producer's vtable facts" as
-        "confirmed, this class has no vtable"."""
+        # Core backfill rule: an unreliable legacy vtable must NOT become
+        # Fact.present([]) — that misreads "untrusted" as "confirmed empty".
         d = _minimal_dict(
             schema_version=20,
             ast_producer="clang",
@@ -1165,7 +1153,6 @@ class TestFactFieldRoundTrip:
         )
         restored = snapshot_from_dict(d)
         r = restored.types[0]
-        assert r.vtable_fact is not None
         assert r.vtable_fact.status is FactStatus.NOT_COLLECTED
         assert r.vtable == []
 
@@ -1188,25 +1175,18 @@ class TestFactFieldRoundTrip:
         )
         restored = snapshot_from_dict(d)
         p = restored.functions[0].params[0]
-        assert p.is_va_list_fact is not None
         assert p.is_va_list_fact.status is FactStatus.NOT_COLLECTED
         assert p.is_va_list is False
 
-    def test_legacy_snapshot_bases_always_backfills_present_unconditionally(
-        self,
-    ) -> None:
-        """bases/virtual_bases have no equivalent reliability flag to
-        condition on (AGENTS.md's type_base_changed entry) — a legacy
-        snapshot's raw bases list always backfills to Fact.present(raw),
-        the zero-behavior-change choice for a field whose status quo never
-        suppressed on capture-gap grounds."""
+    def test_legacy_snapshot_bases_always_backfills_present_unconditionally(self) -> None:
+        # bases/virtual_bases have no reliability flag (AGENTS.md's
+        # type_base_changed entry) — always backfills to Fact.present(raw).
         d = _minimal_dict(
             schema_version=20,
             types=[{"name": "Foo", "kind": "struct", "bases": ["Base"]}],
         )
         restored = snapshot_from_dict(d)
         r = restored.types[0]
-        assert r.bases_fact is not None
         assert r.bases_fact.status is FactStatus.PRESENT
         assert r.bases_fact.value == ["Base"]
 

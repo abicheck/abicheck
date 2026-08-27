@@ -205,6 +205,17 @@ class RecordType:
             None,
         )
 
+    @staticmethod
+    def sync_vptr_offset_bits_fact(updates: dict[str, object]) -> None:
+        """Dict-form sibling of :func:`resolve_vptr_offset_bits` (ADR-063 Phase
+        0): a caller building a ``dataclasses.replace(rec, **updates)`` update
+        dict must add the matching ``Fact[T]`` alongside a ``vptr_offset_bits``
+        update too, or the replaced object's stale, carried-forward Fact wins
+        over the freshly-supplied scalar in ``__post_init__``.
+        """
+        if "vptr_offset_bits" in updates:
+            updates["vptr_offset_bits_fact"] = Fact.present(updates["vptr_offset_bits"])
+
 
 @dataclass
 class EnumMember:

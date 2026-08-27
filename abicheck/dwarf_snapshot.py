@@ -1289,22 +1289,21 @@ class _DwarfSnapshotBuilder:
         # SHARE one vptr slot at offset 0 with no local `_vptr.E` member of
         # E's own — GCC emits no such member here, unlike every other
         # virtual-base case this fix already handles (`struct D : virtual A
-        # { virtual void d(); int di; };`, which DOES get its own
-        # `_vptr.D`, confirmed by DIE dump, since D has a real data member
-        # forcing a non-degenerate layout). Because E's only base is
-        # virtual, it's entirely absent from `bases`/`base_edges` (mirroring
-        # `base_offsets`'s own long-standing exclusion of virtual bases —
-        # their offset is dynamic, not a fixed one this resolution walks),
-        # so the loop above never even considers it. Every class this
-        # applies to has `own_vptr_offset_bits is None` (no local member)
-        # AND is unreachable via the primary-base walk (no resolvable
-        # non-virtual base, or none at all) — exactly the shape the
-        # original heuristic covered by assuming 0 for any type with a
-        # non-empty `vtable`, so restoring it here for the specific
-        # remaining unresolved set is a pure regression fix, not a
-        # reintroduction of the original guess for cases this pass already
-        # resolves more precisely (those are excluded here since their
-        # `vptr_offset_bits` is already set).
+        # { virtual void d(); int di; };`, which DOES get its own `_vptr.D`,
+        # confirmed by DIE dump, since D has a real data member forcing a
+        # non-degenerate layout). Because E's only base is virtual, it's
+        # entirely absent from `bases`/`base_edges` (mirroring `base_offsets`'s
+        # own long-standing exclusion of virtual bases — their offset is
+        # dynamic, not a fixed one this resolution walks), so the loop above
+        # never even considers it. Every class this applies to has
+        # `own_vptr_offset_bits is None` (no local member) AND is unreachable
+        # via the primary-base walk (no resolvable non-virtual base, or none
+        # at all) — exactly the shape the original heuristic covered by
+        # assuming 0 for any type with a non-empty `vtable`, so restoring it
+        # here for the specific remaining unresolved set is a pure regression
+        # fix, not a reintroduction of the original guess for cases this pass
+        # already resolves more precisely (those are excluded here since
+        # their `vptr_offset_bits` is already set).
         for rec in self.types:
             if rec.vptr_offset_bits is None and rec.vtable:
                 resolve_vptr_offset_bits(rec, 0)

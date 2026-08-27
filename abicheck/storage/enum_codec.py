@@ -15,12 +15,13 @@
 
 """Encode ELF/PE/Mach-O metadata enums as plain strings for JSON.
 
-Split out of ``serialization.snapshot_to_dict()`` into a sibling leaf
-module purely for line-count headroom (``serialization.py`` is at this
+Split out of ``serialization.snapshot_to_dict()`` into a ``storage``-owned
+leaf module for line-count headroom (``serialization.py`` is at this
 repo's 2000-line AI-readiness hard cap) — no behavior change from the
 inline version this replaces. ``dataclasses.asdict()`` leaves each of
 these fields holding the raw enum member; ``json.dump()`` rejects that
-directly.
+directly. Takes no dependency beyond stdlib, fitting ADR-061's
+``storage`` layer just as cleanly as ``fact_codec.py``.
 """
 
 from __future__ import annotations

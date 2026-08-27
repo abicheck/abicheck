@@ -904,8 +904,9 @@ real and tested (`tests/test_model_fact.py`,
 `serialization.py` encodes/decodes the new fields and bumps
 `SCHEMA_VERSION` to 26, backfilling a legacy snapshot correctly from the
 existing `clang_vtable_facts_reliable`/`clang_va_list_facts_reliable`
-flags (split into `serialization_fact.py`/`serialization_enums.py` to
-stay under the 2000-line file-size cap). **Not landed in this slice**:
+flags (split into `storage/fact_codec.py`/`storage/enum_codec.py` — both
+ADR-061 `storage`-layer leaf modules, depending on nothing beyond `model` —
+to stay under the 2000-line file-size cap). **Not landed in this slice**:
 no producer (`dumper_castxml.py`/`dumper_clang.py`/`dwarf_snapshot.py`)
 constructs a `Fact[...]` value directly yet — every fresh extraction
 still only populates the legacy field, so every `*_fact` sibling on a

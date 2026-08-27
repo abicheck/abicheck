@@ -15,22 +15,22 @@
 
 """``Fact[T]`` encode/decode/legacy-backfill helpers for ``serialization.py``.
 
-Split out into a sibling leaf module rather than inlined in
+Split out into a ``storage``-owned leaf module rather than inlined in
 ``serialization.py`` (ADR-063 Phase 0, schema v26): that module is already
-at this repo's 2000-line AI-readiness hard cap, and this is a
-self-contained, ADR-063-specific concern the same way `snapshot_io.py`
-carries the storage-envelope concern out of `serialization.py`'s
-neighbours.
+at this repo's 2000-line AI-readiness hard cap, and this encode/decode
+concern only depends on ``model`` — exactly what ADR-061's ``storage``
+layer owns — the same way `snapshot_io.py` carries the storage-envelope
+concern out of `serialization.py`'s neighbours.
 """
 
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from .model import Fact, FactStatus
+from ..model import Fact, FactStatus
 
 if TYPE_CHECKING:
-    from .model import Function, RecordType
+    from ..model import Function, RecordType
 
 __all__ = [
     "apply_legacy_fact_backfill",

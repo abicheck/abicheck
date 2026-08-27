@@ -809,3 +809,19 @@ class TestBackfilledRecordFactSync:
         assert merged.vptr_offset_bits == 64
         assert merged.vptr_offset_bits_fact is not None
         assert merged.vptr_offset_bits_fact.value == 64
+
+    def test_hybrid_merge_snapshots_keeps_vptr_fact_in_sync_too(self) -> None:
+        # Same bug, reached via dumper_hybrid.merge_snapshots's castxml+clang
+        # RecordType.replace() path rather than this module's DWARF backfill.
+        from abicheck.dumper_hybrid import merge_snapshots
+        from abicheck.model import AbiSnapshot
+
+        old = RecordType(name="Widget", kind="class", size_bits=64, vptr_offset_bits=None)
+        new = RecordType(name="Widget", kind="class", size_bits=64, vptr_offset_bits=0)
+        merged_t = merge_snapshots(
+            AbiSnapshot(library="l", version="1", types=[old], from_headers=True, ast_producer="castxml"),
+            AbiSnapshot(library="l", version="1", types=[new], from_headers=True, ast_producer="clang"),
+        ).type_by_name("Widget")
+        assert merged_t.vptr_offset_bits == 0
+        assert merged_t.vptr_offset_bits_fact.status is FactStatus.PRESENT
+        assert merged_t.vptr_offset_bits_fact.value == 0

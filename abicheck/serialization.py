@@ -46,8 +46,8 @@ from .model import (
     Variable,
     Visibility,
 )
-from .serialization_enums import encode_platform_enums
-from .serialization_fact import (
+from .storage.enum_codec import encode_platform_enums
+from .storage.fact_codec import (
     apply_legacy_fact_backfill,
     decode_fact,
     decode_record_facts,
@@ -289,8 +289,7 @@ from .serialization_fact import (
 #     available" rather than being misread as a real fact.
 #   26 — ADR-063 Phase 0: `Fact[T]` siblings for `RecordType.bases_fact`/
 #     `virtual_bases_fact`/`vtable_fact`/`vptr_offset_bits_fact` and
-#     `Param.is_va_list_fact` (see `serialization_fact.py` for the
-#     encode/decode/legacy-backfill logic and its full reasoning).
+#     `Param.is_va_list_fact` — see `storage/fact_codec.py`.
 #
 # Reading an OLDER snapshot (the direction every CI baseline actually hits —
 # a baseline is committed once and outlives however many abicheck pin bumps
@@ -392,12 +391,10 @@ def snapshot_to_dict(snap: AbiSnapshot) -> dict[str, Any]:
     if snap.from_headers_inferred:
         d.pop("from_headers", None)
 
-    # Serialize ElfMetadata/PeMetadata/MachoMetadata enums to strings for
-    # JSON compatibility. Split into serialization_enums.py for line-count
-    # headroom.
+    # ElfMetadata/PeMetadata/MachoMetadata enums -> strings (storage/enum_codec.py).
     encode_platform_enums(d)
 
-    # ADR-063 Phase 0 (schema v26): see serialization_fact.py.
+    # ADR-063 Phase 0 (schema v26): see storage/fact_codec.py.
     encode_fact_fields(d)
 
     # Convert all sets → sorted lists (needed for AdvancedDwarfMetadata.packed_structs
@@ -1298,7 +1295,7 @@ def snapshot_from_dict(d: dict[str, Any]) -> AbiSnapshot:
             or _schema_version >= _MIN_SCHEMA_VERSION_FOR_CLANG_VA_LIST_FACTS
         )
 
-    # ADR-063 Phase 0 (schema v26): see serialization_fact.py.
+    # ADR-063 Phase 0 (schema v26): see storage/fact_codec.py.
     apply_legacy_fact_backfill(
         d,
         types,
@@ -1932,31 +1929,14 @@ def _validated_filename_map(raw: object) -> dict[str, str]:
     return filenames
 
 
-def load_bundle_facts(
-    path: str | Path, *, format: str = "auto", max_json_object_nodes: int | None = None
-) -> BundleFacts:
+def load_bundle_facts(path: str | Path, *, format: str = "auto", max_json_object_nodes: int | None = None) -> BundleFacts:
     """Load a BundleFacts; see ``storage.bundle_facts_validation.load_bundle_facts_dispatch`` for the ``format="auto"``/G40-archive dispatch and the ``max_json_object_nodes`` budget override."""
     from . import bundle_facts as _bundle_facts
     from .snapshot_io import read_snapshot_text
     from .storage.bundle_facts_validation import load_bundle_facts_dispatch
 
-    budget = (
-        _bundle_facts.DEFAULT_MAX_JSON_OBJECT_NODES
-        if max_json_object_nodes is None
-        else max_json_object_nodes
-    )
-    return cast(
-        "BundleFacts",
-        load_bundle_facts_dispatch(
-            path,
-            format,
-            read_snapshot_text=read_snapshot_text,
-            maybe_read_bundle_facts_archive=_bundle_facts.maybe_read_bundle_facts_archive,
-            bundle_facts_from_dict=bundle_facts_from_dict,
-            snapshot_from_dict=snapshot_from_dict,
-            max_json_object_nodes=budget,
-        ),
-    )
+    budget = _bundle_facts.DEFAULT_MAX_JSON_OBJECT_NODES if max_json_object_nodes is None else max_json_object_nodes
+    return cast("BundleFacts", load_bundle_facts_dispatch(path, format, read_snapshot_text=read_snapshot_text, maybe_read_bundle_facts_archive=_bundle_facts.maybe_read_bundle_facts_archive, bundle_facts_from_dict=bundle_facts_from_dict, snapshot_from_dict=snapshot_from_dict, max_json_object_nodes=budget))
 
 
 def save_bundle_facts(
@@ -1971,14 +1951,9 @@ def save_bundle_facts(
     from .bundle_facts import maybe_write_bundle_facts_archive
     from .snapshot_io import SnapshotCompression, write_snapshot_text
 
-    if format == "archive" and SnapshotCompression(compression) not in (
-        SnapshotCompression.AUTO,
-        SnapshotCompression.NONE,
-    ):
+    if format == "archive" and SnapshotCompression(compression) not in (SnapshotCompression.AUTO, SnapshotCompression.NONE):
         raise ValueError('compression= is JSON-only; format="archive" is always zstd')
-    archived = maybe_write_bundle_facts_archive(
-        facts, path, format, snapshot_to_dict=snapshot_to_dict
-    )
+    archived = maybe_write_bundle_facts_archive(facts, path, format, snapshot_to_dict=snapshot_to_dict)
     if archived is not None:
         return archived
 
