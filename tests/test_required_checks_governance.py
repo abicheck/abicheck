@@ -261,14 +261,30 @@ class TestVerifyMergeChecksWorkflow:
         assert on_block["push"]["branches"] == ["main"]
 
     def test_required_checks_list_present_in_script(self) -> None:
+        """Parses the actual `const REQUIRED_CHECKS = [...]` array literal
+        and compares its string-literal entries against `REQUIRED_CHECK_NAMES`
+        as two sets -- not a substring search over the whole file. A loose
+        substring check would pass even if the array gained an entry
+        `REQUIRED_CHECK_NAMES` doesn't have, or dropped one whose name still
+        lingers in a nearby comment (Codex review on #887, round 3: the same
+        one-way/whole-file gap already fixed for the AGENTS.md paragraph
+        above, found again here)."""
         raw = (WORKFLOWS / "verify-merge-checks.yml").read_text(encoding="utf-8")
         assert "REQUIRED_CHECKS" in raw
-        # Every unconditional required check in the shared REQUIRED_CHECK_NAMES
-        # list should appear in the script's own list literal -- a loose
-        # substring check (not a full JS parse), but enough to catch a check
-        # silently dropped from one place and not the other.
-        for name in REQUIRED_CHECK_NAMES:
-            assert name in raw, f"{name!r} missing from verify-merge-checks.yml"
+        match = re.search(r"const REQUIRED_CHECKS = \[(.*?)\];", raw, re.S)
+        assert match is not None, (
+            "verify-merge-checks.yml's `const REQUIRED_CHECKS = [...]` array "
+            "literal was not found with this test's regex -- reword the "
+            "regex here if the script's own wording/formatting changed"
+        )
+        array_body = match.group(1)
+        script_checks = frozenset(re.findall(r"'([^']*)'", array_body))
+        assert script_checks == set(REQUIRED_CHECK_NAMES), (
+            "verify-merge-checks.yml's REQUIRED_CHECKS array and "
+            "REQUIRED_CHECK_NAMES disagree.\n"
+            f"  only in the workflow's array: {script_checks - set(REQUIRED_CHECK_NAMES)}\n"
+            f"  only in REQUIRED_CHECK_NAMES:  {set(REQUIRED_CHECK_NAMES) - script_checks}"
+        )
 
     def test_does_not_require_the_path_filtered_aggregate_checks(self) -> None:
         """`build-docs`/`test-action summary` are deliberately excluded --

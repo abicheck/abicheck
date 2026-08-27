@@ -71,14 +71,23 @@ gh api /repos/abicheck/abicheck/rulesets/<id> > /tmp/existing-ruleset.json
 - If `/tmp/existing-ruleset.json`'s `conditions`, `rules`, and
   `bypass_actors` **all** already match what's checked in here (e.g. it was
   created from an earlier version of this same file) — check every one of
-  those three, not just `rules`/`bypass_actors` — `PUT` this file's
-  payload; there's nothing to lose.
+  those three, not just `rules`/`bypass_actors` — it's safe to `PUT` this
+  file's payload verbatim:
+
+  ```bash
+  gh api --method PUT -H "Accept: application/vnd.github+json" \
+    /repos/abicheck/abicheck/rulesets/<id> \
+    --input .github/branch-protection-ruleset.json
+  ```
+
 - If it carries anything else in *any* of those three fields, **merge by
-  hand**: start from `/tmp/existing-ruleset.json`, add/update only the
+  hand instead of running the command above**: start from
+  `/tmp/existing-ruleset.json`, add/update only the
   `required_status_checks`/`non_fast_forward` rule entries from
   `branch-protection-ruleset.json`, keep its `conditions` and every other
-  rule/`bypass_actors` entry untouched, and `PUT` the merged result — not
-  this file verbatim.
+  rule/`bypass_actors` entry untouched, save the merged result to a file,
+  and `PUT` *that* file (same command as above, with `--input` pointed at
+  the merged file) — not `branch-protection-ruleset.json` verbatim.
 - When merging feels risky or the existing ruleset's purpose is unclear,
   the safe fallback is a **separate, additionally-named** Ruleset (the
   `POST` command in "Apply" above, under a distinct `name`) rather than
@@ -130,6 +139,10 @@ list without re-deriving it from `AGENTS.md`'s rule first (see that file's
 "Required-status-check configuration" section) — apply the rule fresh
 against the current "Required vs. informational workflows" table, update
 `AGENTS.md`'s list, `workflows/verify-merge-checks.yml`'s `REQUIRED_CHECKS`
-array, and this JSON file together, then re-apply the ruleset with the `PUT`
-form above. `tests/test_required_checks_governance.py` fails if any of the
-three drift apart.
+array, and this JSON file together, then re-apply the ruleset with the `gh
+api --method PUT ... /rulesets/<id> --input .github/branch-protection-
+ruleset.json` command under "Update instead of duplicate" above (after
+confirming `conditions`/`rules`/`bypass_actors` still only differ in the
+required-check list itself, per that section's own check).
+`tests/test_required_checks_governance.py` fails if any of the three drift
+apart.
