@@ -2031,12 +2031,19 @@ that backend — an unregistered real producer is exactly the kind of
 silent drift a registry meant to be the single source of truth cannot
 tolerate either. A third direction closes the gap this finding raised:
 the check also scans every dataclass field under `model/` for the
-*eligible-but-unconverted* shape (raw `bool`/`list`/`int | None` with no
-matching `Fact[...]` sibling, documented as backend-dependent) and fails
+*eligible-but-unconverted* shape — a field with a sibling
+`*_facts_reliable` flag and no matching `Fact[...]` sibling, per the
+Design section's own corrected eligibility rule above, not restricted to
+any particular annotation shape — and fails
 if any exists once this phase claims completion — not only auditing the
 fields the registry already knows about, so a field the conversion missed
 entirely (not just one the registry forgot to register) fails this check
-too. A direct `serialization.py` round-trip test per converted field (the
+too. The regression fixture for this check includes at least one `str |
+None` field (`Function.deprecated`/`TypeField.default`-shaped) and one
+enum field (`Variable.access`-shaped) alongside the `bool`/`list`/`int |
+None` cases, confirming the check catches a field the annotation-shape
+enumeration would have missed, not only the three shapes Phase 0 happened
+to use. A direct `serialization.py` round-trip test per converted field (the
 same shape Phase 0's own tests already pin for its three fields) is
 required for each field this phase converts — a freshly-extracted
 snapshot round-trips through `snapshot_to_dict()`/`snapshot_from_dict()`
