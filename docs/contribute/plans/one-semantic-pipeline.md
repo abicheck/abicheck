@@ -2384,8 +2384,33 @@ Checking each against the real code narrows what's actually missing,
 rather than treating all three as equally unconverged: `cli_compare_
 release.py`'s `_run_compare_pair` already routes through `service.
 run_compare` — ADR-037 D1's existing single Tier-2 chokepoint, confirmed
-by that function's own docstring — so the release fan-out is not a second
-*implementation* of compare orchestration; `bundle.py`'s `compare_bundle()`
+by that function's own docstring — so the release fan-out's *main* path
+is not a second *implementation* of compare orchestration.
+
+**That claim held only for `_run_compare_pair`, and a review round found
+two more branches in the same file that it doesn't cover — `cli_compare_
+release.py` is not uniformly converged, just its main path.**
+`_collect_matrix_result()` (the `--probe-matrix-*` release-global
+build-configuration feature) calls `checker.compare()` directly over a
+pair of empty snapshots with `extra_changes`, by that function's own
+docstring's own admission — not through `service.run_compare`/
+`resolve_compare_request` at all, so it never constructs an `AnalysisPlan`
+either and has no pre-flight check for its own inputs.
+`_resolve_stranded_library()` (the `--bundle-facts-out` path's own
+fallback for a library missing from the normal per-pair comparison) calls
+`cli_resolve._resolve_input()` directly — the same Tier-2 resolution
+`resolve_compare_request` itself calls, but reached independently, bypassing
+the `AnalysisPlan`-producing wrapper around it, with its own bespoke ELF
+fallback (`except Exception: ... AbiSnapshot(...)`) on top. Neither is
+this phase's own Goal to migrate (an `AnalysisPlan` pre-flight check for a
+probe-matrix build-config diff or a deliberately-degrading stranded-library
+fallback is a real, separate design question, not a drive-by widening of
+this phase's Files list) — named here explicitly instead, as a residual
+this phase does **not** close: `cli_compare_release.py`'s release fan-out
+is converged for its main per-pair comparison path only; these two
+narrower branches remain outside the typed `AnalysisPlan` pipeline, a gap
+for a future, separately-scoped pass to close rather than a silent
+omission from this plan's own accounting. `bundle.py`'s `compare_bundle()`
 takes already-computed `per_library_results` as an input rather than
 calling `checker.compare`/`service.run_compare` itself, so it isn't an
 orchestrator at all, just an aggregator over results the release fan-out
@@ -3196,7 +3221,35 @@ consumers (named in Phase 2's own finding) to read that resolved
 from bare qualified-name strings, with their existing bespoke trackers
 deleted in the same PR (folding Phase 2's own Phase-3-deletion-checklist
 row for these two modules into this phase's PR when, and only when,
-option (b) is the one actually chosen) — not left as a dangling forward
+option (b) is the one actually chosen).
+
+**That covers only the two consumers Phase 2's own finding named —
+Phase 3 itself is a third, and the larger one, and a further review
+round found it still wasn't rescheduled anywhere.** Phase 2's own
+"not contained to Phase 2" paragraph already states the consequence for
+Phase 3 directly: under option (b), Phase 3's graph builder has no
+resolved `EntityId` to key `declaration`/`type` nodes by, since it is a
+post-parse consumer in the identical position `type_reachability.py`'s
+other consumers are in, and that paragraph names "move Phase 3's
+identity-dependent parts to land with or after Phase 6" as one of the two
+ways to resolve it — but named the obligation without any phase's own
+Files/Tests/Acceptance section actually carrying it out, leaving option
+(b) a choice with no landing task for the larger of the two things it
+defers. Under option (b), this phase's Files list gains Phase 3's own
+identity-dependent work too, not only the two narrower consumers above:
+the public-surface graph builder (`compare/surface_graph.py`'s node/edge
+construction, keyed by `EntityId`/`canonical_key(occurrence_id)`),
+`PublicSurfaceQuery.resolve()`/`resolve_public_domain()`/
+`resolve_export_domain()` (which need that same graph to query), and the
+`model/graph.py`/`AbiSnapshot.surface_graph` persistence work Phase 3
+otherwise lands on its own — each moves to land with or after this phase
+instead of before it, since `SemanticIR` assembly is the first point any
+of them has a real `EntityId` to build from under this choice. Phase 3's
+own Files/Tests/Acceptance sections stay written exactly as they are
+(they are still the correct description of the work, option (a) or (b))
+— what changes under option (b) is purely *when* that work lands, stated
+here rather than asserted silently resolved by a partial Phase 6 entry
+covering only the smaller of the two deferred obligations — not left as a dangling forward
 reference two phases back with no phase left to claim it.
 
 ---

@@ -582,11 +582,26 @@ raw integer read back off a persisted report a second time; "no integer
 in the comparison" describes `gate.py`'s own fold of the two typed axes,
 not `fold.py`'s aggregation across targets, which has always been (and
 remains) an integer `max()` by design. Converting a `PolicyGateDecision` to `severity.GateDecision.
-exit_code` is confined to the same boundary encoders D6 already names (the
-CLI's `_exit_with_severity_or_verdict`, the Action's encoder, and
-`aggregate`'s own `exit_code()` method) — every one of them already exists
-today and already owns exactly this conversion for the legacy-scheme case,
-so this is a new input type for an existing function, not a new encoder.
+exit_code` is confined to the same boundary encoders D6 already names —
+**a first draft of this list omitted `gate.py` itself, contradicting the
+fold this same decision just described two sentences earlier: folding
+`PolicyGateDecision` and `OperationalStatus` together "by `max()` over the
+shared exit-code scheme" is exactly this conversion, performed inside
+`gate.py`, not deferred past it.** The real, complete list is four
+encoders, not three: `gate.py` (folding both typed axes into one
+`GateInfo.exit_code`, once per target, the read-time boundary), the CLI's
+`_exit_with_severity_or_verdict`, the Action's encoder, and `aggregate`'s
+own `exit_code()` method (each converting an already-folded `GateInfo`/
+`RunOutcome` into the final process exit code or JSON integer, the
+write-time boundary) — every one of them already exists today and already
+owns exactly this conversion for the legacy-scheme case, so this is a new
+input type for an existing function, not a new encoder. The two boundaries
+stay genuinely distinct rather than one encoder duplicating the other's
+work: `gate.py` is the only place a `RunOutcome` axis is *decoded from raw
+fields* at all (structured-first, with the legacy `exit_code` decode as
+the named fallback); the other three only ever consume `gate.py`'s already
+-folded `GateInfo`/`fold.py`'s own cross-target aggregation of it, never
+re-deriving the same fold from `RunOutcome` a second time.
 
 No domain or workflow code computes a *new* semantic decision by
 branching on an integer exit code. **The one stated exception is a
