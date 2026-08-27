@@ -2089,11 +2089,35 @@ separate matrix cells, no baseline `BundleFacts` to compare against, and
 no per-member comparison results to build the promised topology/
 signature-evidence/diff-result graphs from (step 4) — this is genuine,
 new workflow-owned publication/assembly work: each `check-project.yml`
-member cell must upload its own snapshot (and, where `BundleFacts` needs
-extending to actually carry per-member comparison outcomes, that
-schema-widening work too) as a real artifact, and a bundle-dispatch step
-must download and assemble them into one `BundleFacts` before step (4)
-can run against real data.
+member cell must upload its own snapshot as a real artifact, and a
+bundle-dispatch step must download and assemble them into one
+`BundleFacts` before step (4) can run against real data.
+
+**`BundleFacts` itself must stay snapshot-only — extending its own schema
+to also carry per-member comparison outcomes, an earlier draft of this
+correction floated as a parenthetical, is architecturally wrong, and a
+fresh review round caught it.** `BundleFacts` is a *reusable, one-release*
+facts artifact by design (its own docstring: "everything `compare_bundle()`
+needs, decoupled from live `.so` files") — it describes one release's
+snapshots, nothing about any particular comparison of them. A member's
+`DiffResult`/assurance result, by contrast, is inherently specific to one
+*old/new pairing* plus the candidate and policy that produced it —
+`compare_bundle_sides()` already receives `per_library_results` as a
+*separate* parameter precisely because the stored `BundleFacts` snapshots
+are the reusable input those results get computed *from*, not a place to
+cache one particular computation's output. Folding comparison outcomes
+into `BundleFacts`'s own schema would either permanently bind a baseline
+artifact to whichever specific candidate/policy happened to produce it —
+so a *different* later candidate compared against the same stored
+baseline would find stale, wrong-context results sitting in what should
+be a policy-neutral facts artifact — or require re-deriving/discarding
+those fields on every new comparison, defeating the point of storing them
+at all. The correct shape: member snapshots publish as `BundleFacts`
+(facts only, exactly as Phase 2 already defines it); per-member reports/
+`DiffResult`/assurance results are transported to the bundle-dispatch job
+as their **own**, separate artifacts (mirroring how ordinary per-target
+check reports already flow to `check-project.yml`'s aggregate step today)
+— never folded into `BundleFacts`'s own schema.
 
 (3) build/restore `BundleFacts` from an already-assembled input — done
 (Phase 2), *once step (2)'s assembly problem above is solved*.
