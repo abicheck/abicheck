@@ -327,17 +327,24 @@ dependency direction. D5 does not move a relevance decision into
 `compare/`; see the implementation plan's Phase 3 for the exact package
 split.
 
-Sharing one primitive and one node identity (Phase 2's `EntityId`) is what
-actually closes ADR-053's TU→link-unit→DSO attribution and ADR-057's
+Sharing one node identity (Phase 2's `EntityId`) alone does **not** merge
+two independently-built graph objects — `merge_graph_facts` only folds the
+facts already attached to *one* node within one `SourceGraphSummary`
+instance; it is not itself what combines two builders' separate outputs.
+What actually closes ADR-053's TU→link-unit→DSO attribution and ADR-057's
 consumer graph risk of permanently disagreeing with the public-surface
-graph about the same declaration — when L3-L5 evidence is present, both
-builders register the same node id and `merge_graph_facts` folds them
-automatically, without needing every consumer migrated in the same phase.
-Migrating ADR-053/057's own query logic onto this graph directly is still
-explicitly **not** part of this decision's first implementation phase —
-see the implementation plan's Phase 3 for exactly what is and is not
-migrated, and why sharing the primitive is sufficient to close the
-disagreement risk even before those consumers move.
+graph about the same declaration is a real assembly step: when L3-L5
+evidence is present, both the public-surface builder and the L5 source-
+graph builder are handed the *same* `SourceGraphSummary` instance — by the
+orchestrating workflow code, since this is exactly where two independent
+builder packages can be made to share state without either importing the
+other — and both call its real `add_node`/`add_edge`, which is what
+invokes the merge. Migrating ADR-053/057's own query logic onto this
+shared graph directly is still explicitly **not** part of this decision's
+first implementation phase — see the implementation plan's Phase 3 for
+the exact assembly mechanism, the full file list, and why sharing one
+instance is sufficient to close the disagreement risk even before those
+consumers' own query logic moves.
 
 ### D6 — `RunOutcome` as independent axes; no `exit_code` inside the domain
 

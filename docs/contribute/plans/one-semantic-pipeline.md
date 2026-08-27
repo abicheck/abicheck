@@ -355,17 +355,24 @@ ADR-048's normalized identity already establish — mangled name first when
 one exists (the common case, already globally unique per overload), and
 only for the genuinely mangling-free case (a non-`extern "C"` function on
 a DWARF-only snapshot) the same normalized-signature fallback tuple that
-code already computes: canonicalized parameter types plus `is_const`/
-`is_volatile`/ref-qualifier (an `extern "C"` function's parameter list is
-deliberately excluded from its own identity, per that function's own
-docstring, since C has no overload resolution — a changed parameter list
-there is a modification of the one function, not a different overload,
-and folding param types in would break the existing name-based extern-C
-match). `EntityId`'s function variant is therefore `(ScopePath, "function",
-mangled_name | normalized_signature_tuple)`, not a bare `(ScopePath,
-"function")` — generalizing the existing tiered primitive into the one
-identity every consumer reads, rather than proposing a simpler one that
-regresses what the codebase already gets right.
+code already computes. **That fallback tuple includes the callable's own
+qualified name, not only its parameter types and CV-qualifiers — a first
+draft of this phase omitted the name**, which would have collapsed two
+genuinely distinct functions with the same scope and the same parameter
+types (`ns::f(int)` and `ns::g(int)`) into one `EntityId`, exactly the
+collision class this phase exists to close rather than introduce. The
+real primitive, `finding_identity.normalized_signature(qualified_name,
+kind, param_types)`, already puts `qualified_name` first in its tuple for
+precisely this reason ("two identically-declared overloads never
+collide" — but that guarantee only holds because the qualified name is
+*in* the tuple); this phase's fallback keeps that shape, it does not
+narrow it. `EntityId`'s function variant is therefore `(ScopePath,
+"function", mangled_name | (qualified_name, param_types,
+cv_qualifiers))`, not a bare `(ScopePath, "function")` and not a
+signature tuple with the name left out — generalizing the existing tiered
+primitive into the one identity every consumer reads, rather than
+proposing a simpler one that regresses what the codebase already gets
+right.
 
 This phase explicitly targets, and closes, the specific collision bugs
 AGENTS.md's "Known gaps" records as already-found-and-patched-locally:
@@ -685,8 +692,17 @@ so a regression is attributable to one field's conversion.
 matrix.py` (new, generates what is today a hand-maintained capability doc).
 
 **Tests.** `tests/test_fact_registry_completeness.py`: every `Fact[T]`-
-typed model field has exactly one registry entry; every registry entry's
-declared producing backends match at least one real parser. Re-run the
+typed model field has exactly one registry entry; **every registry
+entry's declared producing backend is checked individually against a
+real parser, not merely "at least one of them is real"** — a first draft
+of this test accepted an entry naming one genuine producer plus any
+number of nonexistent ones, which would let the generated capability
+matrix falsely advertise a backend that never actually produces the fact.
+The check also runs in the other direction: for each backend, every fact
+that backend's own parser actually populates has a registry entry naming
+that backend — an unregistered real producer is exactly the kind of
+silent drift a registry meant to be the single source of truth cannot
+tolerate either. Re-run the
 full FP-rate/mutation-score gates once after this phase's field-by-field
 conversion is complete (not per-field — the mechanical conversions don't
 individually risk detector-logic drift, but the cumulative change to every
@@ -734,15 +750,36 @@ model-field generation above, not attempted in either phase.
 **Goal.** Type-spelling, scope, template-argument, anonymous/lambda, and
 CV-qualification canonicalization happens once, not once per backend.
 
-**Design.** `abicheck/extract/semantic_normalizer.py`: one
-`normalize(raw: RawCastXmlFacts | RawClangFacts | RawDwarfFacts | ...) ->
-SemanticIR`. Each backend's existing parser (`dumper_castxml.py`,
-`dumper_clang.py`, `dwarf_snapshot.py`, `pdb_metadata.py`) is narrowed to
-produce only its own `RawXFacts` — today's `parse_types()`/`parse_
-typedefs()`-style functions stop doing their own ad hoc namespace-joining,
-anonymous-marker handling, and closure-identity stripping, and instead
-emit the backend's literal output for the normalizer to canonicalize via
-the `EntityId`/`ScopePath` primitives Phase 2 already built.
+**Design.** `SemanticIR` is defined and tested *before* any parser is
+narrowed to feed it — an earlier draft of this phase specified only the
+normalizer function's signature (`normalize(raw) -> SemanticIR`) and
+never the type itself, which would have let each backend's migration
+converge on a different ad hoc shape behind the same name, defeating the
+whole point of "one canonical IR." `abicheck/model/semantic_ir.py` (new):
+`SemanticIR` is a collection of canonicalized entities keyed by the
+`EntityId` Phase 2 established — one entry per declaration, each carrying
+its resolved `ScopePath`, canonical type spelling, template-argument
+list, and CV-qualification, independent of which backend produced it —
+plus the `Fact[...]`-wrapped per-field availability Phase 0 established,
+so a canonicalized entity can state "this backend didn't produce this
+particular fact" rather than only "here is the value." This model file,
+and a primitive-level test suite pinning its shape directly (construct a
+few entities by hand, assert the `EntityId`→entity mapping and the
+canonicalization rules independent of any real backend), land as their
+own first step in this phase, before any of the following narrowing work.
+
+Only once `SemanticIR` itself is real does `abicheck/extract/
+semantic_normalizer.py`'s `normalize(raw: RawCastXmlFacts | RawClangFacts
+| RawDwarfFacts | ...) -> SemanticIR` have a concrete target to produce.
+Each backend's existing parser (`dumper_castxml.py`, `dumper_clang.py`,
+`dwarf_snapshot.py`, `pdb_metadata.py`) is narrowed to produce only its
+own `RawXFacts` — today's `parse_types()`/`parse_typedefs()`-style
+functions stop doing their own ad hoc namespace-joining, anonymous-marker
+handling, and closure-identity stripping, and instead emit the backend's
+literal output for the normalizer to canonicalize via the `EntityId`/
+`ScopePath` primitives Phase 2 already built, converging on the one
+`SemanticIR` shape just defined rather than each backend's own
+reading of "canonical."
 
 **Why this phase is ordered after Phase 2, not before.** Every
 cross-backend disagreement AGENTS.md records in this area (the lambda-
@@ -752,7 +789,9 @@ disagreement *about identity specifically* — Phase 2's `EntityId`/
 `ScopePath` is the primitive this normalizer is built on, not a parallel
 concern.
 
-**Files.** `abicheck/extract/semantic_normalizer.py` (new);
+**Files.** `abicheck/model/semantic_ir.py` (new — `SemanticIR` itself,
+landed and tested before any of the files below are touched);
+`abicheck/extract/semantic_normalizer.py` (new);
 `dumper_castxml.py`/`dumper_clang.py`/`dwarf_snapshot.py`/`pdb_metadata.py`
 (narrowed to raw-fact production, each losing its own copy of
 anonymous-marker/closure-identity/namespace-join logic as that logic moves
@@ -891,7 +930,15 @@ legacy `exit_code` decoding becomes the named fallback path, not the only
 path); `abicheck/workflows/aggregate/fold.py` (`exit_code()`'s aggregation
 reads `RunOutcome.gate` per target, `max()`-over-raw-integers deleted);
 the report-writing side of `reporter.py`/`aggregate.py` (emit the new
-structured fields alongside the unchanged `exit_code`).
+structured fields alongside the unchanged `exit_code`); `scan_engine.
+ScanOutcome.to_dict()` (a separate, independent report writer a first
+draft of this phase's file list missed entirely — not a sibling of
+`reporter.py`'s compare-report writer, and `gate.py`'s `GateInfo.
+from_scan_report` is the matching separate *reader* already in this
+phase's file list, so leaving the writer unmigrated would mean every
+freshly-generated `scan` report still lacks the structured fields and
+keeps forcing `from_scan_report` onto the legacy-decode path D6 means to
+reserve for genuinely old reports, not new ones).
 
 **Tests.** A parity test asserting `junit_report.py`'s exit-relevant
 output (failure count, failure classification) is unchanged for the
@@ -904,7 +951,14 @@ fixture, run twice — once against a report carrying only the legacy
 `exit_code` field (proving the fallback decode path reproduces today's
 behavior exactly) and once against a report regenerated with the new
 structured fields (proving the new path agrees with the old one on every
-existing fixture, not only on fixtures written after this phase).
+existing fixture, not only on fixtures written after this phase). A third
+parity test covers the writer this phase adds: a freshly-generated `scan`
+report (`ScanOutcome.to_dict()`) carries the new structured fields, and
+`GateInfo.from_scan_report()` reading that fresh report takes the
+structured-field path, not the legacy-decode fallback — confirmed by
+asserting which path actually ran (not only that the output matches),
+since a test that only checks the output could pass with the writer
+changed and the reader still silently falling back.
 
 **Acceptance criteria.** Zero remaining inline exit-code/severity
 computation outside the one designated encoder per front end — enforced
