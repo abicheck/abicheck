@@ -679,10 +679,13 @@ cover the surrounding first-party trees this file doesn't detail.
   against a stated oracle that is not the same formula/helper the
   implementation itself uses. See
   [`docs/contribute/plans/bug-class-regression-testing.md`](docs/contribute/plans/bug-class-regression-testing.md)
-  for the full analysis, the registry of named bug classes this applies
-  to today, and the phased plan closing the specific generalized-test gaps
-  that analysis found still open — check there before writing a narrow
-  reproducer for a mechanism a class already covers.
+  for the full analysis, the named bug classes it identifies, and the
+  phased plan closing the specific generalized-test gaps that analysis
+  found still open — check there before writing a narrow reproducer for a
+  mechanism a class already covers. That plan's Phase 1 adds a queryable
+  `tests/regressions/manifest.py` registry; until it lands, check the
+  plan document itself rather than looking up a registry entry that does
+  not exist yet.
 
 ## Known mypy issues
 

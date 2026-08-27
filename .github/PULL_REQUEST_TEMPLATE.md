@@ -33,14 +33,16 @@ executing the attack).
 
 The regression test targets the bug CLASS, not only the one reported input
 (AGENTS.md "Decision-making principles" -> "A bug fix's regression test
-targets the bug class, not the one reported input"; full analysis and the
-named-class registry: docs/contribute/plans/bug-class-regression-testing.md).
-"General invariant" is not satisfied by prose alone: name the test exercising
-it with inputs beyond the reported one (generated/property-based, an
-exhaustive small-domain enumeration, or several independently-chosen sibling
-cases) against a stated oracle that is not the same formula/helper the
-implementation itself uses. If the class already has a home in that plan's
-registry, name its id instead of restating the invariant from scratch.
+targets the bug class, not the one reported input"; full analysis:
+docs/contribute/plans/bug-class-regression-testing.md). "General invariant"
+is not satisfied by prose alone: name the test exercising it with inputs
+beyond the reported one (generated/property-based, an exhaustive
+small-domain enumeration, or several independently-chosen sibling cases)
+against a stated oracle that is not the same formula/helper the
+implementation itself uses. Once that plan's Phase 1 lands
+(`tests/regressions/manifest.py`), check there first for a matching bug
+class before restating the invariant from scratch — until then, that
+registry does not exist yet, so name the invariant directly.
 -->
 
 - Bug class:
