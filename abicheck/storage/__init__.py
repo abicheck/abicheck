@@ -19,11 +19,14 @@ This is a narrow *external* re-export surface, not an internal service
 locator: code inside this package imports its siblings' implementation
 modules directly (see ``AGENTS.md``).
 
-ADR-062 Phase 0 primitives only. Nothing here is wired into a producer,
-reader, or comparison path yet, so every existing snapshot, baseline set,
-and ``BundleFacts`` document is unchanged. ADR-059's physical envelope
-(compression, atomic writes, decompression-bomb limits) stays in
-``abicheck/snapshot_io.py`` and is deliberately not reimplemented here.
+ADR-062 Phase 0's availability/identity/canonical-encoding/versioning
+primitives, plus Phase 1's ``package`` module (the storage-format-v2 plan's
+A1.1: the ``ProjectSnapshot`` manifest/ref/object-store *model*, not yet a
+writer). Nothing here is wired into a producer, reader, or comparison path
+yet, so every existing snapshot, baseline set, and ``BundleFacts`` document
+is unchanged. ADR-059's physical envelope (compression, atomic writes,
+decompression-bomb limits) stays in ``abicheck/snapshot_io.py`` and is
+deliberately not reimplemented here.
 """
 
 from __future__ import annotations
@@ -38,6 +41,7 @@ from .canonical import (
     CAPTURE_METADATA_KEY,
     canonical_form,
     canonical_json,
+    raw_digest,
     semantic_digest,
     strip_capture_metadata,
 )
@@ -50,6 +54,19 @@ from .identity import (
     OccurrenceSet,
     elf_symbol_occurrence,
 )
+from .package import (
+    MANIFEST_RELPATH,
+    SECTION_KINDS,
+    ArtifactRef,
+    InMemoryObjectStore,
+    ObjectRef,
+    ObjectStore,
+    PackageManifest,
+    VariantRef,
+    artifact_ref_relpath,
+    object_relpath,
+    variant_ref_relpath,
+)
 from .versioning import (
     COMPARISON_CONTRACT_VERSION,
     PACKAGE_FORMAT_VERSION,
@@ -61,6 +78,7 @@ from .versioning import (
 )
 
 __all__ = [
+    "ArtifactRef",
     "AvailabilityLedger",
     "CAPTURE_METADATA_KEY",
     "COMPARISON_CONTRACT_VERSION",
@@ -70,18 +88,29 @@ __all__ = [
     "FactAvailability",
     "FactStatus",
     "IdentityConflict",
+    "InMemoryObjectStore",
+    "MANIFEST_RELPATH",
+    "ObjectRef",
+    "ObjectStore",
     "ObservationKind",
     "OccurrenceId",
     "OccurrenceSet",
     "PACKAGE_FORMAT_VERSION",
+    "PackageManifest",
     "ProducerIdentity",
     "ReaderCompatibility",
+    "SECTION_KINDS",
     "StorageVersions",
     "UNSTATED_VERSION",
+    "VariantRef",
+    "artifact_ref_relpath",
     "canonical_form",
     "canonical_json",
     "check_reader_compatibility",
     "elf_symbol_occurrence",
+    "object_relpath",
+    "raw_digest",
     "semantic_digest",
     "strip_capture_metadata",
+    "variant_ref_relpath",
 ]

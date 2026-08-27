@@ -15,6 +15,7 @@ this docstring itself had already drawn by naming two subjects.
 from __future__ import annotations
 
 import array
+import hashlib
 import itertools
 import json
 import os
@@ -26,6 +27,7 @@ from abicheck.storage.canonical import (
     CAPTURE_METADATA_KEY,
     canonical_form,
     canonical_json,
+    raw_digest,
     semantic_digest,
     strip_capture_metadata,
 )
@@ -686,3 +688,106 @@ class TestTheDigestIsAPureFunctionOfTheDocument:
         """
         assert canonical_json([2, 1]) != canonical_json([1, 2])
         assert semantic_digest([2, 1]) != semantic_digest([1, 2])
+
+
+class TestRawDigest:
+    """`raw_digest` -- D7's counterpart to `semantic_digest` for content
+    `canonical_form` cannot represent at all (a binary buffer)."""
+
+    def test_is_deterministic(self) -> None:
+        payload = b"\x00\x01\xff some bytes \xfe"
+        assert raw_digest(payload) == raw_digest(payload)
+
+    def test_different_payloads_get_different_digests(self) -> None:
+        assert raw_digest(b"a") != raw_digest(b"b")
+
+    @pytest.mark.parametrize("wrapper", [bytearray, memoryview])
+    def test_accepts_bytearray_and_memoryview(self, wrapper: object) -> None:
+        payload = b"same content"
+        assert raw_digest(wrapper(payload)) == raw_digest(payload)  # type: ignore[operator]
+
+    def test_honors_a_non_default_algorithm(self) -> None:
+        payload = b"raw bytes"
+        digest = raw_digest(payload, algorithm="sha3_256")
+        assert digest.startswith("sha3_256:")
+        assert (
+            len(digest.removeprefix("sha3_256:")) == hashlib.sha3_256().digest_size * 2
+        )
+
+    def test_rejects_a_non_binary_value(self) -> None:
+        with pytest.raises(TypeError):
+            raw_digest("not bytes")  # type: ignore[arg-type]
+
+    def test_rejects_an_extendable_output_function(self) -> None:
+        """Same fixed-digest-size rule `semantic_digest` enforces -- shared
+        through `_digest_from_payload`, so the two cannot drift apart."""
+        with pytest.raises(ValueError, match="extendable-output"):
+            raw_digest(b"x", algorithm="shake_128")
+
+    def test_rejects_a_noncanonical_algorithm_alias(self) -> None:
+        """`hashlib.new` accepts `SHA256`, but the emitted address always
+        uses the canonical spelling `hashlib` itself reports -- matching
+        `semantic_digest`'s own rule so the two functions can't produce two
+        different addresses for what a reader would consider one algorithm.
+        """
+        payload = b"x"
+        assert raw_digest(payload, algorithm="SHA256") == raw_digest(
+            payload, algorithm="sha256"
+        )
+
+    def test_never_strips_anything_shaped_like_capture_metadata(self) -> None:
+        """A raw payload has no JSON structure at all, so a byte sequence
+        that happens to spell `{"capture": ...}` hashes differently from the
+        same bytes with that block actually removed -- unlike
+        `semantic_digest`'s root-capture-stripping rule for JSON content,
+        there is no document here to inspect a root key of."""
+        with_capture = b'{"capture": {"timestamp": "now"}, "x": 1}'
+        without_capture = b'{"x": 1}'
+        assert raw_digest(with_capture) != raw_digest(without_capture)
+
+    def test_never_collides_with_an_equivalent_json_value(self) -> None:
+        """The bug this fix closes: `b"{}"` and `{}` both encode to the
+        identical two bytes `b"{}"`, so without a domain separator the two
+        functions would compute the same digest for genuinely different
+        stored representations -- `InMemoryObjectStore.put()` would then
+        keep whichever was stored first and silently discard the other,
+        regardless of which one a later caller asked to store (Codex
+        review).
+        """
+        assert raw_digest(b"{}") != semantic_digest({})
+        assert raw_digest(b"null") != semantic_digest(None)
+        assert raw_digest(b"[]") != semantic_digest([])
+
+
+class TestAlgorithmPortability:
+    """`semantic_digest`/`raw_digest` must agree with `object_relpath`/
+    `ObjectRef` (`abicheck.storage.package`) on which algorithms are
+    accepted -- both enforce ADR-062 D7's portability rule, and drift
+    between the two would let `put()` mint a digest no `ObjectRef` could
+    ever be built from (the store producing an unreferenceable object).
+    """
+
+    @pytest.mark.parametrize(
+        "algorithm",
+        sorted(hashlib.algorithms_available - hashlib.algorithms_guaranteed),
+    )
+    def test_semantic_digest_refuses_an_available_but_unguaranteed_algorithm(
+        self, algorithm: str
+    ) -> None:
+        with pytest.raises(ValueError, match="algorithms_guaranteed"):
+            semantic_digest({"x": 1}, algorithm=algorithm)
+
+    @pytest.mark.parametrize(
+        "algorithm",
+        sorted(hashlib.algorithms_available - hashlib.algorithms_guaranteed),
+    )
+    def test_raw_digest_refuses_an_available_but_unguaranteed_algorithm(
+        self, algorithm: str
+    ) -> None:
+        with pytest.raises(ValueError, match="algorithms_guaranteed"):
+            raw_digest(b"x", algorithm=algorithm)
+
+    def test_a_guaranteed_algorithm_is_still_accepted(self) -> None:
+        # The control: this isn't "reject everything", only what isn't
+        # guaranteed portable.
+        assert semantic_digest({"x": 1}, algorithm="sha3_256").startswith("sha3_256:")

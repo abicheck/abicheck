@@ -51,19 +51,19 @@ Callers wanting a real `BundleFacts` in one of these archives go through
 `serialization.py`'s `save_bundle_facts`/`load_bundle_facts`
 (`format="archive"`), which delegates the glue to `bundle_facts.py`.
 
-### ADR-062 Phase 0 primitives
+### ADR-062 Phase 0 primitives, plus Phase 1's object model
 
-Four independent primitives. Each is consumed directly by its implementation
-module — there is no service locator, and `__init__.py` is a narrow
-re-export surface, not a namespace to import through internally.
+Five primitives (four Phase 0, one Phase 1), each consumed directly by its
+own module — no service locator; `__init__.py` is a re-export surface only.
 
 | Module | Owns |
 |---|---|
-| `availability.py` | `FactStatus`/`FactAvailability`/`AvailabilityLedger` — why a fact is or is not present (ADR-062 D3) |
-| `identity.py` | `EntityId`/`OccurrenceId`/`OccurrenceSet`/`IdentityConflict` — logical vs. observed identity, with multiplicity preserved (D4) |
+| `availability.py` | `FactStatus`/`FactAvailability`/`AvailabilityLedger` — why a fact is or is not present (D3) |
+| `identity.py` | `EntityId`/`OccurrenceId`/`OccurrenceSet`/`IdentityConflict` — logical vs. observed identity, multiplicity preserved (D4) |
 | `canonical.py` | `canonical_form`/`canonical_json`/`semantic_digest` — the one canonical logical encoding (D5) |
 | `versioning.py` | `StorageVersions`/`ProducerIdentity`/`check_reader_compatibility` — the separated version axes (D2) |
-| `guards.py` | the value guards all four apply at their doors — internal, not re-exported (see invariant 6) |
+| `package.py` | `PackageManifest`/`VariantRef`/`ArtifactRef`/`ObjectRef`/`ObjectStore`/`InMemoryObjectStore` — D6/D7's package object model and path layout (plan A1.1; no directory-backed store yet) |
+| `guards.py` | the value guards all five apply at their doors — internal, not re-exported (invariant 6) |
 
 ## Invariants this package must not break
 
