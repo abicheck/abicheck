@@ -130,10 +130,30 @@ reached. This plan must therefore also cover:
   new required-when-present field, per this repo's existing schema-versioning
   discipline for `build-output.json`-shaped documents.
 
-Prototype `project_targets.py`'s relaxation and `build_output.py`'s model/
-validator change together — a design that only touches one half will not
-produce a working end-to-end path, which is exactly the gap a first
-implementation attempt found here.
+**This discriminator/schema-version work is itself subject to the exact
+same ADR-061 package routing this plan already applies to the separate
+`emit-build` helper below — it must not land as a direct extension of
+`abicheck/buildsource/build_output.py`, which is a `legacy_root_modules`
+no-growth entry per `architecture/modules.yaml`.** The target-kind field
+is a shared value every consumer of `BuildOutputTarget` needs to agree on
+(`model/`, per ADR-061's routing table); the schema/version bump and
+`_binary_issues()`'s validation-skip logic are exactly the schema/write/
+validate responsibility `storage/` already owns for this document class
+(see the "Files & surfaces" entry for `storage/` below, which routes the
+*new* `build-output.json` write path there for the identical reason); and
+whatever coordinates "does this target's declared kind exempt it from the
+binary check" belongs in `workflows/`, not inline in the legacy module.
+`abicheck/buildsource/build_output.py` keeps only a thin delegation shim
+importing from these owners, matching the "delegation-only facade"
+pattern this repo's `AGENTS.md` already establishes for exactly this
+situation — extending the legacy module's *behavior* in place, even for
+what looks like a small discriminator field, is the growth the no-growth
+inventory exists to prevent.
+
+Prototype `project_targets.py`'s relaxation and the routed model/storage/
+workflows validator change together — a design that only touches one half
+will not produce a working end-to-end path, which is exactly the gap a
+first implementation attempt found here.
 
 ### `build-output.json` emit helper
 
@@ -174,11 +194,18 @@ inline.
 
 - `abicheck/buildsource/project_targets.py` — header-only target
   kind/relaxation and its depth-gating.
-- `abicheck/buildsource/build_output.py` — `BuildOutputTarget`'s target-kind
-  discriminator, `_binary_issues()`'s header-only exemption, and the
-  accompanying schema-version bump — see the Design section above; without
-  this, the target still fails `project validate-build` regardless of what
-  `project_targets.py` allows.
+- **`abicheck/model/` / `abicheck/storage/` / `abicheck/workflows/`, not
+  `abicheck/buildsource/build_output.py` directly** — `BuildOutputTarget`'s
+  target-kind discriminator (`model/`, a shared value), the schema/
+  version-bump and `_binary_issues()` validation-skip logic (`storage/`,
+  the same schema/write/validate owner the new `emit-build` helper below
+  routes to), and the coordination deciding which target kind exempts the
+  binary check (`workflows/`) — see the Design section above for why this
+  is subject to the identical routing rule already applied to the separate
+  emit helper, not a special case. `abicheck/buildsource/build_output.py`
+  keeps only a thin delegation shim. Without this validator change landing
+  somewhere in the chain, the target still fails `project validate-build`
+  regardless of what `project_targets.py` allows.
 - `abicheck/buildsource/baseline_publish.py` — header-only baseline
   handling (no fabricated binary fields).
 - **`actions/baseline/action.yml`/`actions/baseline/run.sh`** — required,

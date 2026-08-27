@@ -127,7 +127,56 @@ is the backward-compatibility guarantee, verified against the actual
 regex now, not assumed. `abicheck/workflows/aggregate/contracts.py` (the
 `_CHECK_ID_RE`/`CheckIdParts`/`parse_check_id()` definitions) is therefore
 part of this plan's own required file surface, not merely a downstream
-consumer to leave alone. The `analysis:` block is one nested,
+consumer to leave alone.
+
+**`contracts.py`'s regex is not the only gate a `~<explicit_id>` string
+must pass, and updating it alone is insufficient — confirmed by reading
+the actual production call chain, not assumed.** `build_check_id()`
+(`abicheck/buildsource/check_report.py`) is what actually *constructs* the
+`check_id` string, and it ends by calling `validate_check_id(check_id)`
+(`abicheck/checker_types.py`) before returning — so a builder that simply
+appended `~<id>` to its result would raise `ValueError` at construction
+time, long before `contracts.py`'s parser ever saw the string.
+`validate_check_id()` matches against `CHECK_ID_PATTERN`, which is itself
+end-anchored on the depth segment
+(`` @(binary|headers|build|source)$ ``) — the identical anchoring bug the
+"Generated identity" paragraph above already diagnosed for `_CHECK_ID_RE`,
+just one module earlier in the pipeline. The JSON report schema
+(`abicheck/schemas/compare_report.schema.json`, `check_id` property's
+`pattern`, mirrored to `docs/reference/schemas/v1/compare_report.schema.json`
+via `scripts/publish_schemas.py`) carries the byte-identical anchored
+pattern as its own independent copy, per `CHECK_ID_PATTERN`'s own comment
+("Mirrors the `pattern` in compare_report.schema.json's `check_id`
+property"). All three must extend in lockstep, or the feature fails at a
+different point depending on which layer runs first:
+
+- `checker_types.CHECK_ID_PATTERN`/`validate_check_id()` — extend with the
+  identical `(?:~[A-Za-z0-9][A-Za-z0-9._-]*)?` optional tail
+  `_CHECK_ID_RE` above adds, so a builder-constructed id with an explicit
+  suffix passes the same fail-fast check `reporter._add_check_identity`
+  already relies on production code hitting (not just the JSON Schema,
+  which "production code never runs against" per this function's own
+  docstring).
+- `build_check_id()` — gains a new, optional `explicit_id: str | None`
+  parameter, appending the validated `~<explicit_id>` tail to the
+  generated string before the existing `validate_check_id(check_id)` call
+  (not after — the whole point is that the *same* validator must accept
+  the extended string, not a second, separately-validated concatenation).
+- `abicheck/schemas/compare_report.schema.json`'s `check_id` property
+  `pattern` — extended identically, plus a schema version bump per this
+  file's own versioning convention, with `docs/reference/schemas/v1/
+  compare_report.schema.json` re-synced via `scripts/publish_schemas.py`
+  in the same change (not left to drift until the next unrelated schema
+  edit notices it).
+
+Without all three, a project author supplying `id: l4-plugin-rhel8` would
+either fail at `build_check_id()` (if only `contracts.py` and the schema
+were extended) or produce a `check_id` the schema itself rejects on
+validation (if only the builder and parser were extended) — this plan's
+own acceptance test for explicit check identifiers must exercise the full
+construct → validate-against-schema → parse chain, not just the parser
+in isolation, to catch either half being missed. The `analysis:` block is
+one nested,
 named object (or a reference to a named preset resolved the same way
 `environments:` below resolves) — not another flat family of
 workflow-global inputs growing on `check-project.yml`. `evidence` selects
@@ -251,6 +300,19 @@ from the report.
   matching `explicit_id` field (see "Explicit check identifiers" above) —
   without this, the whole `id:` feature silently breaks profile/
   finding-matrix grouping the moment it's used.
+- **`abicheck/checker_types.py` (`CHECK_ID_PATTERN`/`validate_check_id()`)
+  and `abicheck/buildsource/check_report.py` (`build_check_id()`) —
+  equally required, not optional.** These run *before* `contracts.py`
+  ever sees the string: `build_check_id()` calls `validate_check_id()`
+  unconditionally, so a `check_id` builder that appended `~<explicit_id>`
+  without extending this pattern first would raise at construction time.
+  Both need the identical `(?:~[A-Za-z0-9][A-Za-z0-9._-]*)?` extension.
+- **`abicheck/schemas/compare_report.schema.json`'s `check_id` `pattern`**
+  (plus a schema version bump and the `docs/reference/schemas/v1/`
+  re-sync via `scripts/publish_schemas.py`) — an independent copy of the
+  same anchored regex per `CHECK_ID_PATTERN`'s own comment; must extend
+  in lockstep with the two Python-side validators above or JSON Schema
+  validation of a real report becomes the new failure point.
 - Project schema (wherever `.abicheck.yml`'s `checks:`/`environments:` are
   validated — near `abicheck/buildsource/project_targets.py`) — new
   `environments:` top-level block, new `id`/`analysis:`/`environment:` check
