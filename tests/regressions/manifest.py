@@ -300,10 +300,11 @@ BUG_CLASSES: tuple[BugClass, ...] = (
             "relevant consumer with identical semantics, or is rejected "
             "at the public boundary — no third state."
         ),
-        fixed_by=(860, 883),
+        fixed_by=(860, 883, 886),
         seed_tests=(
             "tests/test_run_plan.py",
             "tests/test_project_targets_consumer_compile.py",
+            "tests/test_cli_compare_release_bundle_signature_wiring.py",
         ),
         known_gaps=(
             KnownGap(
