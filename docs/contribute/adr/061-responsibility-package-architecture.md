@@ -1283,6 +1283,23 @@ thinning into the destination that work would unblock. Neither is closed by
 this investigation; only the `PolicyFile` design question is. The `cli.py`
 half is complete.
 
+**A tenth Codex review round named the risk every number in this whole
+investigation shares, worth stating once rather than re-litigating per
+figure: nothing here is gated.** The module lists, line counts, and site
+inventories above are re-verified against the tree at the time each
+paragraph was written — several rounds of this same PR corrected exactly
+this note for drifting from a re-check it hadn't actually run — but no CI
+job or test ties this prose to `scripts/check_architecture.py`'s own output,
+so the same drift can happen again silently the next time a listed import
+moves. Building that link (having this section generated from, or a test
+asserting parity with, the checker's own scan) is a real, if small, tooling
+project of its own — genuinely out of scope for a documentation
+investigation, not a reason to defer the investigation's findings. Treat
+every count and line number above as a snapshot from this PR's own commits,
+to be re-measured (`python scripts/check_architecture.py` against a
+temporary classification, the same method used throughout) rather than
+trusted verbatim by whoever picks this up next.
+
 1. Move command input translation into `frontends/cli/commands` and reusable
    Click-only option declaration into `frontends/cli/options`.
 2. Make workflows the sole operation owners and reports the sole rendering
