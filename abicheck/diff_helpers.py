@@ -40,6 +40,7 @@ from collections.abc import Callable, ItemsView, Iterable, Iterator, Mapping, Va
 from typing import Any, Protocol, TypeVar, cast
 
 from .change_registry import REGISTRY
+from .change_registry_types import TEMPLATE_VOCAB as TEMPLATE_VOCAB
 from .checker_policy import ChangeKind
 from .checker_types import Change
 from .compare.dedup_key import hashable_value
@@ -53,17 +54,6 @@ from .qualified_name_segments import strip_inline_abi_namespaces
 K = TypeVar("K")
 V = TypeVar("V")
 W = TypeVar("W")
-
-# Fixed placeholder vocabulary a ``ChangeKind.description_template`` may use
-# (C6). ``make_change`` formats the template from exactly these structured
-# fields, so the wording for a kind is owned by the registry rather than
-# reinvented at each call site:
-#   {symbol} — the mangled / exported symbol (or type) name (the Change.symbol)
-#   {name}   — the human-facing declared name (demangled, e.g. ``f_old.name``)
-#   {old}    — old value (also populates Change.old_value unless overridden)
-#   {new}    — new value (also populates Change.new_value unless overridden)
-#   {detail} — any extra computed snippet the template wants to interpolate
-TEMPLATE_VOCAB = frozenset({"symbol", "name", "old", "new", "detail"})
 
 # Sentinel detection for enum members is name-pattern based, not value based:
 # a max-value heuristic accidentally downgrades an ordinary member that merely

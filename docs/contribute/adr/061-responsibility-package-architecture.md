@@ -1145,21 +1145,33 @@ would pass a naive "differs from default_verdict" check while silently
 disagreeing with actual runtime behavior, a real gap a Codex review round on
 this PR caught in the first cut of this validator; and an `is_addition=True`
 entry whose `default_verdict` isn't `Verdict.COMPATIBLE`, since
-`addition_kinds()` is documented as a subset of `COMPATIBLE_KINDS`; pinned
-by eight new cases in the same test class, including
+`addition_kinds()` is documented as a subset of `COMPATIBLE_KINDS`.
+"Valid references" extends past `policy_overrides` too: a second Codex
+review round on this PR found that `ChangeKindMeta.description_template`
+carries the identical shape of gap — `diff_helpers.make_change()` formats a
+kind's template via a keyword-only `template.format(symbol=..., name=...,
+old=..., new=..., detail=...)` call, so a template referencing a field
+outside `TEMPLATE_VOCAB` (`{symbol} {name} {old} {new} {detail}`) —
+including a bare positional `{}`/`{0}`, which that keyword-only call could
+never satisfy — previously raised `KeyError`/`IndexError` only the first
+time a finding of that kind was actually formatted, not at registry
+construction. The constructor now rejects it the same way. Pinned by eleven
+new cases in the same test class, including
 `test_real_registry_satisfies_reference_and_default_validation`, which
 reconstructs the real production `REGISTRY` from its own entries to prove
-every one of its 397 entries already satisfied every property before the
+every one of its 397 entries — including all 284 that carry a
+`description_template` — already satisfied every property before the
 corresponding check existed, and `test_verdict_blind_policy_matches_runtime_
 behavior`, which exercises `policy_kind_sets()` directly to confirm the
 verdict-blind-policy list itself doesn't drift from what the runtime
-actually does). `VALID_BASE_POLICIES` — the canonical policy-name set the
-reference check validates against — moved from `checker_policy.py` to the
-leaf `change_registry_types.py` (re-exported unchanged from
-`checker_policy`, so no importer needed to change), since `checker_policy`
-imports `REGISTRY` from `change_registry.py`, which in turn imports
-`change_registry_types` — a `checker_policy`-side definition would have
-been a cycle.
+actually does. `VALID_BASE_POLICIES` and `TEMPLATE_VOCAB` — the canonical
+policy-name set and template-field vocabulary the two reference checks
+validate against — moved from `checker_policy.py`/`diff_helpers.py` to the
+leaf `change_registry_types.py` (re-exported unchanged from their old
+locations, so no importer needed to change), since both of those modules
+import `REGISTRY` from `change_registry.py`, which in turn imports
+`change_registry_types` — a definition in either of the old locations would
+have been a cycle.
 
 The fourth, "complete metadata", is not enforced, and is a *content* gap
 rather than a missing check: `ChangeKindMeta.impact`/`.description_template`

@@ -25,6 +25,7 @@ re-exports every name here, so the public import surface
 
 from __future__ import annotations
 
+import string
 from dataclasses import dataclass, field
 from enum import Enum
 
@@ -63,6 +64,17 @@ VALID_BASE_POLICIES: frozenset[str] = frozenset(
 #: Keep this in sync with ``policy_kind_sets()`` — if a future policy's
 #: implementation genuinely consumes the declared verdict, remove it here.
 _VERDICT_BLIND_POLICIES: frozenset[str] = frozenset({"sdk_vendor", "plugin_abi"})
+
+#: Fixed placeholder vocabulary a ``ChangeKindMeta.description_template`` may
+#: use. Moved from ``diff_helpers.py`` (re-exported unchanged from there, so
+#: every existing ``from abicheck.diff_helpers import TEMPLATE_VOCAB`` caller
+#: is unaffected) for the same import-cycle reason ``VALID_BASE_POLICIES``
+#: moved: ``diff_helpers`` imports ``REGISTRY`` from ``change_registry.py``,
+#: which imports this module, so a ``diff_helpers``-side definition would be
+#: a cycle. ``diff_helpers.make_change`` formats a kind's template from
+#: exactly these structured fields (``{symbol} {name} {old} {new} {detail}``)
+#: — see that module for the per-field meaning.
+TEMPLATE_VOCAB = frozenset({"symbol", "name", "old", "new", "detail"})
 
 
 @dataclass(frozen=True)
@@ -152,6 +164,30 @@ def _validate_references_and_defaults(e: ChangeKindMeta) -> None:
             f"Verdict.COMPATIBLE (addition_kinds() is a subset of "
             f"COMPATIBLE_KINDS), got {e.default_verdict!r}"
         )
+    if e.description_template is not None:
+        # diff_helpers.make_change() formats description_template via
+        # ``template.format(symbol=..., name=..., old=..., new=...,
+        # detail=...)`` — a keyword-only call, so any field name outside
+        # TEMPLATE_VOCAB (including a positional `{}`/`{0}`, which that call
+        # shape can never satisfy) raises KeyError/IndexError, but only the
+        # first time a finding of this kind is actually formatted — not at
+        # registry construction. That is D9's "valid references" property
+        # for this field, the same shape as the policy_overrides checks
+        # above (Codex review, PR #882): a bad reference must fail here,
+        # not silently reach a live comparison.
+        bad_fields = {
+            field_name
+            for _, field_name, _, _ in string.Formatter().parse(
+                e.description_template
+            )
+            if field_name is not None and field_name not in TEMPLATE_VOCAB
+        }
+        if bad_fields:
+            raise ValueError(
+                f"{e.kind!r}: description_template references "
+                f"{sorted(bad_fields)}, outside TEMPLATE_VOCAB "
+                f"{sorted(TEMPLATE_VOCAB)}"
+            )
 
 
 class ChangeKindRegistry:

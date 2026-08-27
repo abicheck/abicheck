@@ -241,6 +241,57 @@ class TestChangeKindRegistry:
         registry = ChangeKindRegistry(entries)
         assert len(registry) == 2
 
+    def test_description_template_with_unknown_placeholder_raises(self):
+        """A description_template referencing an out-of-vocabulary field is rejected.
+
+        diff_helpers.make_change() formats a template via
+        ``template.format(symbol=..., name=..., old=..., new=...,
+        detail=...)`` — a keyword-only call, so a field outside
+        TEMPLATE_VOCAB would only fail the first time a finding of that kind
+        is actually formatted, not at registry construction. This is D9's
+        "valid references" property extended to description_template
+        (Codex review, PR #882 — the same shape of gap as the
+        policy_overrides checks, found after those already landed).
+        """
+        import pytest
+
+        entries = [
+            ChangeKindMeta(
+                "test_kind", Verdict.BREAKING,
+                description_template="Changed: {bogus}",
+            ),
+        ]
+        with pytest.raises(ValueError, match="bogus"):
+            ChangeKindRegistry(entries)
+
+    def test_description_template_with_positional_placeholder_raises(self):
+        """A bare positional `{}`/`{0}` placeholder is rejected too.
+
+        make_change()'s .format() call is keyword-only, so a positional
+        field can never be satisfied — the same "fails only when this kind's
+        finding is actually formatted" gap as an unknown named field.
+        """
+        import pytest
+
+        entries = [
+            ChangeKindMeta(
+                "test_kind", Verdict.BREAKING, description_template="Changed: {}"
+            ),
+        ]
+        with pytest.raises(ValueError, match="description_template"):
+            ChangeKindRegistry(entries)
+
+    def test_description_template_using_only_vocab_is_accepted(self):
+        """A template using only TEMPLATE_VOCAB fields passes construction."""
+        entries = [
+            ChangeKindMeta(
+                "test_kind", Verdict.BREAKING,
+                description_template="{symbol} changed from {old} to {new}",
+            ),
+        ]
+        registry = ChangeKindRegistry(entries)
+        assert len(registry) == 1
+
     def test_real_registry_satisfies_reference_and_default_validation(self):
         """The production REGISTRY was already valid before these checks existed.
 
