@@ -576,6 +576,234 @@ long touch_detail(detail::Outer::Inner x) { return x.c; }
         assert result.verdict is Verdict.NO_CHANGE
         assert result.changes == []
 
+    # The two tests above only apply the RELOCATION transformation to the
+    # negative-control fixtures. Since neither fixture's declaration order
+    # changes under relocation, they can't distinguish "distinct identities
+    # stay distinct" from "distinct identities were never at risk of
+    # merging in the first place" -- the Phase 4 plan asks for the
+    # distinct-entity control under every transformation, and the two
+    # transformations that could plausibly make an ordinal-assignment bug
+    # over-merge two distinct closures (unrelated line drift, reordering)
+    # were untested here (Codex review, PR #898).
+
+    def test_two_lambdas_stay_distinct_across_unrelated_line_drift(
+        self, tmp_path: Path
+    ) -> None:
+        _require_toolchain()
+        header_text = """
+#pragma once
+namespace lib {
+template <class F> int call_with(F f) { return f(); }
+inline int run_one() { return call_with([]() { return 1; }); }
+inline int run_two() { return call_with([]() { return 2; }); }
+}
+"""
+        drifted_header = """
+#pragma once
+// An unrelated comment inserted before everything below.
+
+
+namespace lib {
+// Another unrelated comment.
+template <class F> int call_with(F f) { return f(); }
+inline int run_one() { return call_with([]() { return 1; }); }
+inline int run_two() { return call_with([]() { return 2; }); }
+}
+"""
+        source_text = """
+#include "api.h"
+namespace lib { int touch() { return run_one() + run_two(); } }
+"""
+
+        def _lambda_param_spellings(functions: object) -> set[str]:
+            return {
+                p.type
+                for f in functions  # type: ignore[attr-defined]
+                if "call_with" in f.mangled
+                for p in f.params
+                if p.type and "(lambda" in p.type
+            }
+
+        root_a = tmp_path / "plain"
+        root_b = tmp_path / "with_drift"
+        root_a.mkdir()
+        root_b.mkdir()
+        so_a, header_a = _build(root_a, header_text, source_text)
+        so_b, header_b = _build(root_b, drifted_header, source_text)
+        snap_a = _dump(so_a, header_a)
+        snap_b = _dump(so_b, header_b)
+
+        assert len(_lambda_param_spellings(snap_a.functions)) >= 2
+        assert len(_lambda_param_spellings(snap_b.functions)) >= 2
+
+        result = compare(snap_a, snap_b)
+        assert result.verdict is Verdict.NO_CHANGE
+        assert result.changes == []
+
+    def test_two_lambdas_stay_distinct_after_reordering(self, tmp_path: Path) -> None:
+        """Reordering two SAME-KIND lambdas RELATIVE TO EACH OTHER is a
+        documented, accepted limitation of the ordinal-renumbering fix
+        itself, not a NO_CHANGE case:
+        qualified_name_segments.py's own module docstring states the scope
+        boundary explicitly -- "As long as an edit doesn't reorder or
+        add/remove same-header, same-kind lambdas relative to each other,
+        both sides of a comparison assign the identical ordinal to the
+        identical closure." Swapping run_one/run_two's declaration order
+        swaps which one gets ordinal #1 vs #2 -- and since compare()
+        matches functions by their real, order-independent mangled symbol
+        (stable across reordering, since it encodes the enclosing
+        function's own name), the matched pair's ORDINAL-derived parameter
+        spelling genuinely differs, producing a real (accepted) finding.
+        This test pins BOTH halves: the two closures never collapse into
+        ONE shared identity within either single snapshot (the actual
+        negative-control invariant), while confirming compare() reports
+        this documented boundary honestly rather than silently swallowing
+        it as NO_CHANGE (Codex review, PR #898 -- confirmed empirically:
+        asserting NO_CHANGE here fails against the real fix, as expected)."""
+        header_text = """
+#pragma once
+namespace lib {
+template <class F> int call_with(F f) { return f(); }
+inline int run_one() { return call_with([]() { return 1; }); }
+inline int run_two() { return call_with([]() { return 2; }); }
+}
+"""
+        reordered_header = """
+#pragma once
+namespace lib {
+template <class F> int call_with(F f) { return f(); }
+inline int run_two() { return call_with([]() { return 2; }); }
+inline int run_one() { return call_with([]() { return 1; }); }
+}
+"""
+        source_text = """
+#include "api.h"
+namespace lib { int touch() { return run_one() + run_two(); } }
+"""
+
+        def _lambda_param_spellings(functions: object) -> set[str]:
+            return {
+                p.type
+                for f in functions  # type: ignore[attr-defined]
+                if "call_with" in f.mangled
+                for p in f.params
+                if p.type and "(lambda" in p.type
+            }
+
+        root_a = tmp_path / "original_order"
+        root_b = tmp_path / "reordered"
+        root_a.mkdir()
+        root_b.mkdir()
+        so_a, header_a = _build(root_a, header_text, source_text)
+        so_b, header_b = _build(root_b, reordered_header, source_text)
+        snap_a = _dump(so_a, header_a)
+        snap_b = _dump(so_b, header_b)
+
+        spellings_a = _lambda_param_spellings(snap_a.functions)
+        spellings_b = _lambda_param_spellings(snap_b.functions)
+        assert len(spellings_a) >= 2
+        assert len(spellings_b) >= 2
+
+        # The documented, accepted limitation: reordering swaps which
+        # closure gets which ordinal, so the two sides' matched-by-mangled-
+        # symbol pair genuinely differs -- a real finding, not NO_CHANGE.
+        result = compare(snap_a, snap_b)
+        assert result.verdict is not Verdict.NO_CHANGE
+        assert result.changes != []
+
+    def test_nested_records_stay_distinct_across_unrelated_line_drift(
+        self, tmp_path: Path
+    ) -> None:
+        _require_toolchain()
+        header_text = """
+#pragma once
+namespace api { struct Outer { struct Inner { int a; }; }; }
+namespace detail { struct Outer { struct Inner { int b; long c; }; }; }
+"""
+        drifted_header = """
+#pragma once
+// An unrelated comment inserted before everything below.
+
+
+namespace api { struct Outer { struct Inner { int a; }; }; }
+namespace detail { struct Outer { struct Inner { int b; long c; }; }; }
+"""
+        source_text = """
+#include "api.h"
+namespace lib {
+int touch_api(api::Outer::Inner x) { return x.a; }
+long touch_detail(detail::Outer::Inner x) { return x.c; }
+}
+"""
+
+        def _inner_qualified(types: object) -> set[str]:
+            return {
+                t.qualified_name
+                for t in types  # type: ignore[attr-defined]
+                if t.name == "Inner" and t.qualified_name
+            }
+
+        root_a = tmp_path / "plain"
+        root_b = tmp_path / "with_drift"
+        root_a.mkdir()
+        root_b.mkdir()
+        so_a, header_a = _build(root_a, header_text, source_text)
+        so_b, header_b = _build(root_b, drifted_header, source_text)
+        snap_a = _dump(so_a, header_a)
+        snap_b = _dump(so_b, header_b)
+
+        assert len(_inner_qualified(snap_a.types)) >= 2
+        assert len(_inner_qualified(snap_b.types)) >= 2
+
+        result = compare(snap_a, snap_b)
+        assert result.verdict is Verdict.NO_CHANGE
+        assert result.changes == []
+
+    def test_nested_records_stay_distinct_after_reordering(
+        self, tmp_path: Path
+    ) -> None:
+        _require_toolchain()
+        header_text = """
+#pragma once
+namespace api { struct Outer { struct Inner { int a; }; }; }
+namespace detail { struct Outer { struct Inner { int b; long c; }; }; }
+"""
+        reordered_header = """
+#pragma once
+namespace detail { struct Outer { struct Inner { int b; long c; }; }; }
+namespace api { struct Outer { struct Inner { int a; }; }; }
+"""
+        source_text = """
+#include "api.h"
+namespace lib {
+int touch_api(api::Outer::Inner x) { return x.a; }
+long touch_detail(detail::Outer::Inner x) { return x.c; }
+}
+"""
+
+        def _inner_qualified(types: object) -> set[str]:
+            return {
+                t.qualified_name
+                for t in types  # type: ignore[attr-defined]
+                if t.name == "Inner" and t.qualified_name
+            }
+
+        root_a = tmp_path / "original_order"
+        root_b = tmp_path / "reordered"
+        root_a.mkdir()
+        root_b.mkdir()
+        so_a, header_a = _build(root_a, header_text, source_text)
+        so_b, header_b = _build(root_b, reordered_header, source_text)
+        snap_a = _dump(so_a, header_a)
+        snap_b = _dump(so_b, header_b)
+
+        assert len(_inner_qualified(snap_a.types)) >= 2
+        assert len(_inner_qualified(snap_b.types)) >= 2
+
+        result = compare(snap_a, snap_b)
+        assert result.verdict is Verdict.NO_CHANGE
+        assert result.changes == []
+
 
 class TestFindingIdentityIsCheckoutPathInvariant:
     """Every positive case above compares semantically identical libraries
