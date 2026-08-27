@@ -468,6 +468,28 @@ def test_bare_dot_import_of_forbidden_submodule_is_enforced(tmp_path: Path) -> N
     assert "dependency-direction" in _rules(root)
 
 
+def test_absolute_import_of_forbidden_submodule_is_enforced(tmp_path: Path) -> None:
+    """The identical bug, in the absolute-import form (Codex review finding,
+    abicheck/abicheck#903, on the bare-dot fix itself): `from abicheck import
+    legacy_compare` has a nonempty `node.module` (`"abicheck"`), so the
+    narrower fix above -- gated on `node.module` being empty -- never applied
+    the `target.<name>` expansion here, leaving this shape exactly as
+    invisible to `dependency-direction` as the relative form was pre-fix.
+    Same `legacy_paths` shape as the bare-dot test, only the import spelling
+    differs.
+    """
+    root = _tree(tmp_path)
+    config = json.loads((root / "architecture/modules.yaml").read_text())
+    config["layers"]["extract"]["legacy_paths"] = ["abicheck/legacy_extract.py"]
+    config["layers"]["compare"]["legacy_paths"] = ["abicheck/legacy_compare.py"]
+    config["legacy_root_modules"].extend(["legacy_extract.py", "legacy_compare.py"])
+    _write(root / "architecture/modules.yaml", json.dumps(config))
+    _write(root / "abicheck/legacy_compare.py", "VALUE = 1\n")
+    _write(root / "abicheck/legacy_extract.py", "from abicheck import legacy_compare\n")
+
+    assert "dependency-direction" in _rules(root)
+
+
 def test_bare_dot_import_of_own_symbol_is_not_a_false_violation(
     tmp_path: Path,
 ) -> None:
