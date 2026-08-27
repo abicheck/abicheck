@@ -73,8 +73,8 @@ illustrative:
   _build_new_snapshot`, the header-graph second pass, three independent
   AST cache keys, and the legacy `-p`/`--compile-db` auto-match
   overlapping the new fold instead of composing with it.
-- **`scan` severity folding** (commit `73b5576c5` / PR #700, `feat: honor
-  severity/exit-code-scheme in \`scan --against\``): teaching `scan
+- **`scan` severity folding** (commit `73b5576c5` / PR #700, titled
+  `feat: honor severity/exit-code-scheme in scan --against`): teaching `scan
   --against` to respect a configured severity scheme required widening
   the exit-code space, which broke `aggregate.py`'s own assumption that a
   gated target reading non-blocking under the old scheme meant it was
@@ -236,9 +236,21 @@ entries, the `Param.is_va_list` reliability-flag entry, the per-finding
 evidence-provider gap) as a root cause of fabricated or suppressed
 findings. A detector cannot write `if old.default != new.default` without
 first unwrapping availability — the invalid comparison becomes a type
-error, not an untested branch (`Fact.__bool__` is defined to raise rather
-than merely left undefined, since an object with no `__bool__` is still
-truthy in Python). `abicheck/storage/availability.py`'s existing
+error, not an untested branch. This needs two separate, explicit
+overrides, not one: `Fact.__bool__` is defined to raise rather than
+merely left undefined (an object with no `__bool__` is still truthy in
+Python), **and, independently, `Fact.__eq__`/`Fact.__ne__` are defined to
+raise the same way** — a frozen dataclass's auto-generated `__eq__`
+(the default Python gives any dataclass with `eq=True`, the default)
+would otherwise compare two `Fact`s structurally (status, value, and
+diagnostics together) and return a plain `bool` without ever calling
+`__bool__` at all, silently answering `old.default != new.default` with a
+comparison the detector didn't intend (wrapper equality, not value
+equality) rather than raising. Both overrides exist so neither truth
+testing nor equality comparison can accidentally collapse the status
+space; a detector that genuinely needs structural equality (comparing two
+full `Fact` objects, diagnostics included, in a test assertion) calls a
+named helper instead of `==`. `abicheck/storage/availability.py`'s existing
 `FactAvailability`/`FactStatus` vocabulary is reused verbatim as the wire
 encoding `Fact[T]` serializes to — but because ADR-061 fixes the
 dependency direction as `storage -> model`, the vocabulary itself
@@ -264,10 +276,11 @@ documents repeatedly for opaque-type suppression, typedef dedup, and
 patched locally, each sharing the identical root cause.
 
 Backend-internal implementation keys (castxml's synthetic ctor/dtor key
-being the canonical example — PR #582 introduced the key format, and PR
-#761, `fix: reconcile castxml synthetic ctor/dtor key format drift (PR
-#582)`, is the real incident: the key-generation algorithm changed and a
-persisted snapshot's old-format key stopped matching its own unchanged
+being the canonical example — PR #582 introduced the key format, and the
+follow-up fix, PR #761 (titled `fix: reconcile castxml synthetic
+ctor/dtor key format drift (PR #582)`), is the real incident: the
+key-generation algorithm changed and a persisted snapshot's old-format
+key stopped matching its own unchanged
 constructor) are explicitly **not** persisted identity; `EntityId` is
 produced once, downstream of backend-specific extraction, not re-derived
 from a backend-specific string at comparison time.
@@ -385,8 +398,21 @@ so this is a new input type for an existing function, not a new encoder.
 
 No domain or workflow code computes or branches on an integer exit code.
 Exactly one function per front end (the CLI's `_exit_with_severity_or_
-verdict`, the Action's own encoder) maps `RunOutcome` to that front end's
-exit-code scheme. This directly targets the PR #700 failure mode (a
+verdict`, the Action's own encoder, and `aggregate`'s own `fold.py::
+exit_code()` — restated here explicitly rather than only in the paragraph
+above, so this sentence's own list doesn't read as narrower than it is)
+maps `RunOutcome` to that front end's
+exit-code scheme. For the aggregate path specifically: `gate.py` reads a
+report's structured `RunOutcome` fields (falling back to legacy
+`exit_code` decoding only for a report that predates this change),
+`fold.py`'s own aggregation orders and `max()`s the resulting
+`PolicyGateDecision` values per target, and `fold.py::exit_code()` is the
+one place that final aggregated value is converted back to the integer
+`aggregate`'s own JSON output and process exit code need — the same
+three-step shape (structured read, semantic aggregation, one final
+integer encode) the CLI/Action encoders collapse into a single function
+call, just spread across `aggregate`'s own multi-target pipeline. This
+directly targets the PR #700 failure mode (a
 downstream consumer decoding semantic meaning from an exit-code integer)
 and finishes what ADR-042 started: `mcp_server.py`'s removal already
 deleted one of the remaining inline exit-code computations AGENTS.md

@@ -137,6 +137,22 @@ has no truth value — read .is_present or .value_or(...)")` — plain
 absence of `__bool__` leaves ordinary Python object truthiness in effect
 (every `Fact[T]` instance would be truthy regardless of status), so the
 no-implicit-truthiness invariant needs the raise, not silence.
+**A second, independent override is needed for the same reason, and a
+first draft of this phase defined only `__bool__`**: `Fact.__eq__`/
+`Fact.__ne__` are also explicitly defined to raise the identical
+`TypeError`, rather than left to the dataclass-generated structural
+`__eq__` (comparing `status`/`value`/`diagnostics` together) that `eq=True`
+— the dataclass default — would otherwise provide. Without this second
+override, `old.default != new.default` does not raise at all: it silently
+returns a plain `bool` from comparing the two `Fact` *wrappers*
+structurally, never calling `__bool__`, and never raising — exactly the
+kind of untested, accidentally-succeeding branch this phase's whole
+"comparison becomes a type error, not an untested branch" claim depends
+on not existing. A detector that genuinely needs full structural equality
+(two `Fact` objects, diagnostics included — a test assertion, not
+detection logic) calls a named helper (`fact.same_as(other)`) instead of
+`==`, keeping `==`/`!=` reserved for the error case that forces unwrapping
+first.
 
 **Scope for this phase (deliberately narrow).** Convert exactly the three
 fields AGENTS.md's "Known gaps" names as actively causing fabricated
@@ -311,7 +327,16 @@ the full set is enforced mechanically once written, but the file list
 itself must name all of them as phase-0 work, not assume the gate alone
 will surface the rest as a later, unplanned fixup.
 
-**Tests.** Port the existing `tests/test_vtable_evidence_guard.py`
+**Tests.** A direct test on `Fact[T]`'s two raising overrides, added
+before any detector migration depends on them: `if fact:` raises
+`TypeError`; `fact_a != fact_b` and `fact_a == fact_b` both raise the
+identical `TypeError` (pinning the exact counterexample this finding
+raised — confirmed to fail against a version of `Fact` that defines only
+`__bool__` and leaves equality to the dataclass default, which returns a
+plain `bool` instead of raising); and `fact_a.same_as(fact_b)` performs
+the real structural comparison for the one legitimate caller shape (a
+test asserting two `Fact` objects are fully equal, diagnostics included).
+Port the existing `tests/test_vtable_evidence_guard.py`
 Hypothesis properties to assert over `Fact[...]` states directly, not only
 derived booleans; add a property asserting no detector in `diff_types.py`/
 `diff_layout.py` pattern-matches a `Fact[...]`-typed field without handling
@@ -1832,7 +1857,15 @@ data, or a `max()`/comparison over a `.exit_code` attribute, outside
 what actually closes the gap the first draft's narrower, `Change`-only
 check left open: `fold.py`'s `max()` over `TargetGate.exit_code` never
 touches `Change` at all, so a check scoped to `Change` comparisons alone
-would never have flagged it).
+would never have flagged it). Stated explicitly, matching ADR-063 D6's
+own restated encoder list: `gate.py` reads structured `RunOutcome` fields
+first (legacy `exit_code` decoding as the named fallback, never the only
+path for a fresh report); `fold.py`'s aggregation orders and `max()`s
+`PolicyGateDecision` values, never raw integers; and `fold.py::exit_code()`
+is the one place that aggregated value converts to the integer `aggregate`'s
+own JSON output and process exit code need — three steps, not one
+function call, because `aggregate` has a multi-target pipeline the CLI's
+single-report `_exit_with_severity_or_verdict` doesn't.
 
 ---
 
