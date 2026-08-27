@@ -311,13 +311,28 @@ claim), and `__post_init__` backfills it from the legacy field when still
 None else self.vtable_fact`, mirroring the shape `Param`'s own
 `__post_init__`-based validation already uses elsewhere in this codebase
 for exactly this kind of defaulting. **Precedence is explicit and
-one-directional**: an explicitly-supplied `Fact[...]` field always wins
-regardless of what the legacy field says (it's the newer, authoritative
-channel); the legacy field only ever backfills the `Fact[...]` field when
-the latter was never supplied, never the other way around — so a caller
-combining both consistently sees the `Fact[...]` value it gave, and a
-caller giving only the legacy value sees it faithfully reconstructed
-rather than silently demoted to not-collected.
+one-directional for which value wins, but — a later review round caught
+this too — "wins" has to mean the legacy field is resynchronized from it,
+not merely that the `Fact[...]` field ends up correct while the legacy
+field is left stale.** `RecordType(vtable=["old"], vtable_fact=Fact.
+present(["new"]))` is a real, constructible case (not a hypothetical): if
+`__post_init__` only ever reads the legacy field to backfill the `Fact`
+and never writes the legacy field back, a migrated detector reading
+`vtable_fact` sees `["new"]` while `dataclasses.asdict()` and every
+existing, unmigrated Python consumer reading `rec.vtable` directly still
+sees `["old"]` — two disagreeing representations on the same object,
+which is the exact defect this whole phase exists to eliminate,
+reintroduced by the one compatibility path meant to prevent it. The
+actual rule, corrected: whichever value is authoritative for a given
+construction — the explicit `Fact[...]` when supplied, the backfilled one
+derived from the legacy field otherwise — is written to **both** fields
+before `__post_init__` returns, the same single-source-of-truth guarantee
+every producer's own construction call already gives for free (Design
+section, above) now given to a direct caller combining both forms too.
+`RecordType(vtable=["old"], vtable_fact=Fact.present(["new"]))` ends
+construction with `self.vtable == ["new"]`, not `["old"]` — the explicit
+`Fact[...]` value also overwrites the legacy field, not only the other
+way around.
 
 **This bridge as just described is still wrong for the common case, and a
 later review round caught it: `RecordType.bases`/`vtable` already default
@@ -361,12 +376,48 @@ backfills identically, and then normalizes the field to a real `bool`
 (`False` if it was `None`) before returning — so after construction every
 reader still sees a plain `bool`, never `None`; only the *constructor's*
 accepted input type genuinely widens, which is what "an explicit union
-and normalization" means concretely here. Both mechanisms end at the
+and normalization" means concretely here.
+
+**A third field shape needs a third mechanism, and a later review round
+found it missing: `RecordType.vptr_offset_bits` is also converted by
+this phase (named in the Scope section above) and is `int | None`,
+already defaulting to `None` today — where `None` is already a real,
+meaningful value ("no vptr observed"), not an unused slot the way `bool`'s
+two values are both already spoken for.** Unlike `is_va_list`, `None`
+cannot double as this field's omission marker — `RecordType()` (omitted)
+and `RecordType(vptr_offset_bits=None)` (explicit: confirmed no vptr) must
+backfill differently (`Fact.not_collected()` vs. `Fact.present(None)`),
+but both already leave `self.vptr_offset_bits is None` with no way to
+tell them apart, the identical ambiguity the `bases`/`is_va_list` fixes
+above each close for their own field. `int` does not have `bool`'s
+two-instance problem, though — it has the opposite problem from `list`
+this field shares the fix with: a fresh private sentinel *object* (not a
+literal value, and not reusing `None`) works exactly like the `list` case,
+since nothing short of that exact object will ever compare identical to
+it. The field's *actual* dataclass default becomes a private,
+identity-checkable sentinel (`_OMITTED_VPTR_OFFSET_BITS`, never exported,
+declared as `int | None` is widened to accept it structurally the same
+way the other two fields' constructors widen) rather than the literal
+`None` — `__post_init__` checks `self.vptr_offset_bits is
+_OMITTED_VPTR_OFFSET_BITS` (identity) to tell omission from an explicit,
+confirmed-`None`, backfills `Fact.not_collected()` only for the
+true-omission case and `Fact.present(self.vptr_offset_bits)` (`None`
+included) for an explicit value, then normalizes the field to a real
+`int | None` (`None` if it was the sentinel) before `__post_init__`
+returns — the same post-condition the other two fields reach, by the same
+"a genuinely fresh object can't collide with anything a caller passes"
+mechanism `list` already uses, just applied to a field whose natural
+resting value happens to coincide with Python's only singleton `None`
+the way `bool`'s natural resting values coincide with its only two.
+
+All three mechanisms end at the
 identical post-condition (the legacy field is a plain, fully-populated
 value after `__post_init__`, the sentinel/`None` never leaks to a reader)
 — they differ only in which type each field's omission marker can
-actually be, which is the one extra degree of freedom `list` has that
-`bool` doesn't.
+actually be: a fresh object identity works for `list`- and `int`-typed
+fields (both have room for one), and only the strictly two-valued `bool`
+needs the constructor's own accepted type widened to make room for a
+third.
 
 Continuing the Files list: `serialization.py`
 (`snapshot_to_dict()`'s `Fact[...]`-status-to-string encoding, extending
@@ -450,7 +501,21 @@ field shape. A fifth test pins the type itself: `Param.is_va_list`'s
 declared annotation is `bool | None`, and after construction (with or
 without the argument) `self.is_va_list` is always a plain `bool` — never
 `None` — confirming the widened constructor input normalizes away before
-any reader, including `asdict()`-based serialization, can observe it.
+any reader, including `asdict()`-based serialization, can observe it. A
+sixth test pins `vptr_offset_bits`'s own third mechanism, the exact
+counterexample that caught this field shape missing entirely: a bare
+`RecordType()` backfills `vptr_offset_bits_fact` to `Fact.not_collected()`,
+while `RecordType(vptr_offset_bits=None)` (an explicit, confirmed-no-vptr
+value) backfills to `Fact.present(None)` — distinct from the previous
+case despite both leaving `self.vptr_offset_bits is None` — confirmed to
+fail against a version of the bridge that reuses `None` itself as both
+the field's natural value and its omission marker. A seventh test pins
+the legacy-field-resync fix: `RecordType(vtable=["old"],
+vtable_fact=Fact.present(["new"]))` ends construction with `self.vtable ==
+["new"]`, not `["old"]` — confirmed to fail against a version of the
+bridge that lets the explicit `Fact[...]` value win for `vtable_fact`
+itself while leaving `self.vtable` unsynchronized, which is the exact
+two-disagreeing-representations counterexample this fix closes.
 
 **Acceptance criteria.** The three converted fields cannot be read by any
 detector without explicit availability handling — enforced by a new
