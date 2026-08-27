@@ -106,14 +106,30 @@ def _marker_decorator_calls(tree: ast.AST, marker_name: str) -> list[ast.Call | 
     return results
 
 
+def _is_literal_bool(node: ast.expr, value: bool) -> bool:
+    return isinstance(node, ast.Constant) and node.value is value
+
+
 def _xfail_is_strict(call: ast.Call) -> bool:
     """Does *call* (a `pytest.mark.xfail(...)` decorator) carry
     `strict=True` as a literal boolean — not a string, a variable, or a
-    conditional expression that only sometimes evaluates to `True`?"""
+    conditional expression that only sometimes evaluates to `True` — and
+    is it not configured with `run=False`?
+
+    `run=False` tells pytest to never execute the test body at all and
+    report XFAIL unconditionally, regardless of `strict` — a canary using
+    it can never XPASS even after the tracked residual closes, the same
+    "never actually runs" failure `@pytest.mark.skip` already has, just
+    reached through a different keyword (Codex review, PR #885, sixth
+    round, fresh evidence — verified against pytest's own documented
+    `run` semantics)."""
+    strict_ok = False
     for kw in call.keywords:
         if kw.arg == "strict":
-            return isinstance(kw.value, ast.Constant) and kw.value.value is True
-    return False
+            strict_ok = _is_literal_bool(kw.value, True)
+        elif kw.arg == "run" and _is_literal_bool(kw.value, False):
+            return False
+    return strict_ok
 
 
 def _canary_strictness_violation(source: str) -> str | None:
@@ -152,9 +168,11 @@ def _canary_strictness_violation(source: str) -> str | None:
     for call in _marker_decorator_calls(tree, "xfail"):
         if call is None or not _xfail_is_strict(call):
             return (
-                "uses a non-strict @pytest.mark.xfail — an unexpected pass "
-                "(XPASS) stays green with no `xfail_strict` ini option set; "
-                "use a literal `strict=True` instead"
+                "uses a non-strict @pytest.mark.xfail (either missing a "
+                "literal `strict=True`, so an unexpected pass stays green "
+                "with no `xfail_strict` ini option set, or configured with "
+                "`run=False`, so the test body never executes and it "
+                "always reports XFAIL regardless of `strict`)"
             )
     return None
 
@@ -489,6 +507,18 @@ class TestCanaryStrictnessViolation:
             "    def test_x(self): ...\n"
         )
         assert _canary_strictness_violation(source) is not None
+
+    def test_strict_xfail_with_run_false_is_rejected(self) -> None:
+        """`run=False` tells pytest to never execute the test body at all
+        and unconditionally report XFAIL — a canary configured this way
+        can never XPASS even after the tracked residual genuinely closes,
+        regardless of `strict=True` (Codex review, PR #885, sixth round)."""
+        source = "@pytest.mark.xfail(strict=True, run=False)\ndef test_x(): ...\n"
+        assert _canary_strictness_violation(source) is not None
+
+    def test_strict_xfail_with_run_true_is_still_accepted(self) -> None:
+        source = "@pytest.mark.xfail(strict=True, run=True)\ndef test_x(): ...\n"
+        assert _canary_strictness_violation(source) is None
 
     def test_unparseable_source_is_rejected(self) -> None:
         """A canary file that isn't valid Python at all fails closed rather
