@@ -2223,6 +2223,15 @@ pipelines a fourth time.
   > layer's own serialized payload: the real compile unit's `standard`
   > (L3), the real `source_decl_to_binary_symbol` mapping entry for the
   > compiled symbol (L4), and a non-empty `source_graph.nodes` list (L5).
+  > The dependency-scope resolution step is checked too, and separately
+  > from every fact above (Codex review, fresh evidence — an earlier
+  > revision asserted only provenance/`build_source` facts, none of which
+  > `resolve_dependency_scope` touches, so it would have passed unchanged
+  > even with that call removed entirely): `execute_dump_request`'s own
+  > result carries `dependency_scope == "full"` (it never calls this
+  > step), so asserting the *written* JSON's `dependency_scope ==
+  > "filtered"` is real evidence the step ran on the already-embedded
+  > snapshot, not a value merely carried through.
   > A second case pins the depth gate's own negative direction (a
   > `depth="binary"` resolve-time result — no header parse at all, so
   > `build_source` stays genuinely `None` — still raises

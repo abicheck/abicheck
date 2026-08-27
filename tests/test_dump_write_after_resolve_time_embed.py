@@ -190,6 +190,12 @@ def test_write_snapshot_output_accepts_a_resolve_time_embedded_snapshot(
     # not about whether the fixture reached the depth it claims to.
     assert snap.build_source is not None
     assert result.effective_depth == "source"
+    # `execute_dump_request` never calls `resolve_dependency_scope` itself
+    # (that step is `_write_snapshot_output`'s own, dump-CLI-only concern —
+    # see the module docstring) -- ground truth for the assertion below,
+    # so a flip from "full" is genuine evidence that step ran on this
+    # already-embedded snapshot, not a value it already carried in.
+    assert snap.dependency_scope == "full"
 
     import abicheck.cli_buildsource as cli_buildsource
 
@@ -240,6 +246,19 @@ def test_write_snapshot_output_accepts_a_resolve_time_embedded_snapshot(
     }
     assert coverage["L3_build"] == "present"
     assert coverage["L4_source_abi"] == "present"
+
+    # The dependency-scope resolution step (`resolve_dependency_scope`,
+    # `--include-system-declarations`'s off-by-default counterpart) is the
+    # other half of this prerequisite's own name -- and it is genuinely
+    # independent of the embed guard above: nothing before this call flips
+    # `dependency_scope` off "full" (asserted above, straight off
+    # `execute_dump_request`'s own result), so this is real evidence the
+    # step ran on an already-embedded snapshot, not a value carried in
+    # from resolution (Codex review, fresh evidence -- an earlier revision
+    # of this test asserted only provenance/build_source facts, none of
+    # which `resolve_dependency_scope` touches, so it would have passed
+    # unchanged even with that call removed entirely).
+    assert payload["dependency_scope"] == "filtered"
 
     # L3: the real compile unit this side's build evidence collected.
     compile_units = build_source["build_evidence"]["compile_units"]
