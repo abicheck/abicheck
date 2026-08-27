@@ -35,6 +35,7 @@ from __future__ import annotations
 from collections.abc import Callable
 
 from abicheck.checker_policy import ChangeKind
+from abicheck.elf_metadata import ElfMetadata
 from abicheck.model import (
     AbiSnapshot,
     AccessLevel,
@@ -234,13 +235,57 @@ def _m_overload_added(tag: int):
             ChangeKind.OVERLOAD_ADDED, False)
 
 
+def _m_stack_canary_removed(tag: int):
+    """A binary-level (not function/type) mutation, unlike every entry above:
+    ``diff_platform_elf_dynamic._diff_security_hardening`` reads only
+    ``old.elf``/``new.elf`` container-level flags, so this fragment sets
+    ``elf`` instead of ``functions``/``types`` (see ``build_snapshot``'s
+    ``elf=extra.get("elf", ...)`` merge). ``tag`` is unused — there is no
+    per-instance identifier to keep unique, unlike the symbol-mangling
+    mutations above.
+
+    Only the weakening direction (canary present -> absent) is a finding;
+    the reverse (canary added) is a compatible improvement and emits
+    nothing (see ``ASYMMETRIC`` below) — G39 Phase 1 evidence_provenance:
+    ``("both:l0:elf_symtab",)``, since ``has_stack_canary`` is derived
+    purely from ``.dynsym`` import/symbol names."""
+    del tag
+    return (
+        {"elf": ElfMetadata(has_stack_canary=True)},
+        {"elf": ElfMetadata(has_stack_canary=False)},
+        ChangeKind.STACK_CANARY_REMOVED,
+        False,
+    )
+
+
+def _m_fortify_source_weakened(tag: int):
+    """Same shape as ``_m_stack_canary_removed`` above — a binary-level
+    (``elf``-fragment) mutation, weakening-direction-only."""
+    del tag
+    return (
+        {"elf": ElfMetadata(has_fortify_source=True)},
+        {"elf": ElfMetadata(has_fortify_source=False)},
+        ChangeKind.FORTIFY_SOURCE_WEAKENED,
+        False,
+    )
+
+
 # Mutations whose reverse is legitimately a non-change, so touched-symbol
 # direction-symmetry does NOT hold and must not be asserted: making a virtual
 # method pure is a break, but the reverse (providing a concrete implementation)
 # is ABI-compatible and emits nothing. Adding an overload flags the original
 # declaration, but the reverse (removing the new overload) touches a different
 # symbol, so it is asymmetric too.
-ASYMMETRIC = {"_m_method_became_pure", "_m_overload_added"}
+ASYMMETRIC = {
+    "_m_method_became_pure",
+    "_m_overload_added",
+    # Both weakening-only hardening detectors (diff_platform_elf_dynamic.
+    # _diff_security_hardening): the reverse edit (canary/FORTIFY added) is
+    # a compatible improvement, deliberately not reported (see each
+    # mutation's own docstring above).
+    "_m_stack_canary_removed",
+    "_m_fortify_source_weakened",
+}
 
 
 MUTATIONS: list[Mutation] = [
@@ -260,11 +305,21 @@ MUTATIONS: list[Mutation] = [
     _m_method_became_pure,
     _m_virtual_method_added,
     _m_overload_added,
+    _m_stack_canary_removed,
+    _m_fortify_source_weakened,
 ]
 
 
 def build_snapshot(version: str, context: dict, extra: dict) -> AbiSnapshot:
-    """Merge a shared *context* with a mutation *extra* into a snapshot."""
+    """Merge a shared *context* with a mutation *extra* into a snapshot.
+
+    ``elf`` falls back to the context's own value (never set by any
+    existing context builder — see ``_context()`` in
+    ``test_detector_properties.py`` — so this is always ``None`` there
+    today) when the mutation fragment itself doesn't set one, the same
+    "context provides the default, extra provides the override" pattern
+    the four list-valued fields already use.
+    """
     return AbiSnapshot(
         library="liboracle.so.1",
         version=version,
@@ -272,6 +327,7 @@ def build_snapshot(version: str, context: dict, extra: dict) -> AbiSnapshot:
         types=context.get("types", []) + extra.get("types", []),
         enums=context.get("enums", []) + extra.get("enums", []),
         variables=context.get("variables", []) + extra.get("variables", []),
+        elf=extra.get("elf", context.get("elf")),
     )
 
 

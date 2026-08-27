@@ -855,8 +855,8 @@ def _diff_security_hardening(old_elf: Any, new_elf: Any) -> list[Change]:
             make_change(
                 ChangeKind.STACK_CANARY_REMOVED,
                 symbol="__stack_chk_fail",
-                old_value="canary",
-                new_value="none",
+                old_value="canary", new_value="none",
+                evidence_provenance=("both:l0:elf_symtab",),
             )
         )
 
@@ -867,8 +867,8 @@ def _diff_security_hardening(old_elf: Any, new_elf: Any) -> list[Change]:
             make_change(
                 ChangeKind.FORTIFY_SOURCE_WEAKENED,
                 symbol="_FORTIFY_SOURCE",
-                old_value="fortified",
-                new_value="none",
+                old_value="fortified", new_value="none",
+                evidence_provenance=("both:l0:elf_symtab",),
             )
         )
 

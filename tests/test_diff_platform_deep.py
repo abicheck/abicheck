@@ -287,11 +287,17 @@ class TestSecurityHardeningDrift:
         r = compare(_snap(elf=ElfMetadata(has_stack_canary=True)),
                     _snap(elf=ElfMetadata(has_stack_canary=False)))
         assert ChangeKind.STACK_CANARY_REMOVED in _kinds(r)
+        # G39 Phase 1: has_stack_canary is .dynsym-derived (imported/defined
+        # symbol names), not a .dynamic-section read.
+        canary = [c for c in r.changes if c.kind == ChangeKind.STACK_CANARY_REMOVED]
+        assert canary[0].evidence_provenance == ("both:l0:elf_symtab",)
 
     def test_fortify_source_weakened(self):
         r = compare(_snap(elf=ElfMetadata(has_fortify_source=True)),
                     _snap(elf=ElfMetadata(has_fortify_source=False)))
         assert ChangeKind.FORTIFY_SOURCE_WEAKENED in _kinds(r)
+        fortify = [c for c in r.changes if c.kind == ChangeKind.FORTIFY_SOURCE_WEAKENED]
+        assert fortify[0].evidence_provenance == ("both:l0:elf_symtab",)
 
     def test_writable_executable_segment_introduced(self):
         r = compare(_snap(elf=ElfMetadata(has_writable_executable_segment=False)),

@@ -65,8 +65,19 @@ The contract
 from __future__ import annotations
 
 #: Producers set a constant evidence_provenance tuple for every instance of
-#: this kind. Empty until Phase 1's first slice wires one.
-PROVENANCE_STATIC: frozenset[str] = frozenset()
+#: this kind. G39 Phase 1's first slice (L0/L1-only detectors,
+#: diff_platform_elf_dynamic._diff_security_hardening): both kinds read
+#: only old_elf.has_stack_canary/has_fortify_source, themselves derived
+#: purely from .dynsym import/symbol names (elf_metadata._finalize_
+#: hardening) -- both:l0:elf_symtab on every instance, verified by
+#: tests/_detector_mutations.py's _m_stack_canary_removed/
+#: _m_fortify_source_weakened.
+PROVENANCE_STATIC: frozenset[str] = frozenset(
+    {
+        "fortify_source_weakened",
+        "stack_canary_removed",
+    }
+)
 
 #: Producers compute evidence_provenance per instance. Empty until Phase 1's
 #: L2+ slice wires one.
@@ -178,7 +189,6 @@ PROVENANCE_UNVERIFIED = frozenset(
         "field_renamed",
         "flexible_array_member_changed",
         "float_abi_changed",
-        "fortify_source_weakened",
         "frame_register_changed",
         "func_added",
         "func_became_inline",
@@ -348,7 +358,6 @@ PROVENANCE_UNVERIFIED = frozenset(
         "source_level_kind_changed",
         "source_surface_dso_mismatch",
         "source_to_binary_mapping_changed",
-        "stack_canary_removed",
         "standard_layout_lost",
         "static_tls_introduced",
         "static_tls_removed",
