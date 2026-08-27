@@ -151,14 +151,17 @@ PLATFORM_ENTRIES: list[ChangeKindMeta] = [
     _E("dwarf_info_missing", _C,
        impact="The new binary carries no DWARF debug info — this detector "
               "only checks whether DWARF is present, not why it's absent, "
-              "so this fires identically whether the binary was never "
-              "compiled with -g or was compiled with -g and then stripped "
-              "during packaging. Either way, DWARF-derived struct/enum "
-              "layout comparisons couldn't run for it, so layout changes "
-              "in this release, if any, went unchecked. Not itself an ABI "
-              "break; ensure debug info is present (compiled in, or "
-              "supplied separately, e.g. via a matching unstripped/"
-              "debuginfo build) and re-scan to restore full coverage.",
+              "so this fires whether the binary was never compiled with "
+              "-g or was compiled with -g and then stripped. Either way, "
+              "DWARF-derived layout comparisons couldn't run for it — but "
+              "layout isn't necessarily unchecked entirely: a separate "
+              "detector compares layout from header-AST evidence "
+              "independently of DWARF and still runs when both sides "
+              "carry it, so a normal header-plus-binary comparison can "
+              "still catch a layout change here. Only an ELF/DWARF-only "
+              "comparison (no header evidence) loses coverage entirely. "
+              "Not itself an ABI break; ensure debug info is present and "
+              "re-scan to restore full DWARF-derived coverage.",
        description_template="New binary has no DWARF debug info — struct/enum layout comparison was skipped. Ensure debug info is present (compiled in or supplied separately) to enable."),
     _E("dynamic_loading_flags_changed", _R,
        impact="DF_1_NODELETE / DF_1_NOOPEN / DF_1_ORIGIN toggled in "
@@ -733,15 +736,15 @@ PLATFORM_ENTRIES: list[ChangeKindMeta] = [
        impact="A type's calling-convention-relevant triviality/copy-"
               "semantics trait changed (the DWARF-derived heuristic for "
               "whether a value type is 'trivial enough' to pass in "
-              "registers per the platform ABI, e.g. the Itanium C++ ABI's "
-              "non-trivial-for-calls rule). This detector reports this kind "
-              "specifically when the register-vs-hidden-pointer return "
-              "mechanism did NOT flip (see struct_return_convention_changed "
-              "for that case) — the underlying fingerprint still changed, "
-              "which can affect how the type participates in parameter "
-              "passing or copy/move semantics under the platform ABI's own "
-              "rules, so a caller compiled against the old trait should be "
-              "treated as at risk.",
+              "registers per the platform ABI). On SysV AMD64 this kind "
+              "means the register-vs-hidden-pointer return mechanism did "
+              "NOT flip (see struct_return_convention_changed for that "
+              "case). On any other target (AArch64, i386, mixed-arch, "
+              "...) this detector's model is SysV-AMD64-only, so this "
+              "kind covers every trait change there — including one that "
+              "did flip the actual return mechanism; it's simply unknown "
+              "there, not ruled out. A caller compiled against the old "
+              "trait should be treated as at risk.",
        policy_overrides={"plugin_abi": _C}),
     _E("vector_abi_changed", _B,
        impact="Vector-function (SIMD clone) ABI selection changed (-mveclibabi/-fveclib/-vecabi); vectorized call variants resolve to a different ABI, so callers of the vector entry points pass/return data in the wrong registers.",
