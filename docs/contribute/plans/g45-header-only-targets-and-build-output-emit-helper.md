@@ -194,11 +194,15 @@ file can never itself fail the validator it's meant to satisfy.
   compare-mode dispatch does `CMD+=("${INPUT_NEW_LIBRARY:?new-library is
   required}")` — a hard failure with no binary operand. Confirmed by
   reading both files directly. This plan must relax `new-library` to
-  optional (mirroring how the dump/compare CLI's own `--depth headers`
-  path already accepts no binary operand) and add the equivalent
-  "no binary, headers/source-only" branch to `run.sh`'s dispatch — without
-  this, the `build-output.json` exemption above is necessary but not
-  sufficient: the target still can't run a candidate check end to end.
+  optional and make this Action branch depend explicitly on the new
+  binary-less `dump`/`compare` capability described next — **there is no
+  existing binary-less CLI path to mirror here**: the next bullet's own
+  fresh evidence (`dump_source_only()` discards `-H`; `compare.py` has no
+  header-only operand shape at all) rules that out. This Action relaxation
+  and the new CLI capability are one dependent pair, not two independent
+  fixes — without this, the `build-output.json` exemption above is
+  necessary but not sufficient: the target still can't run a candidate
+  check end to end.
 - **`abicheck/frontends/cli/commands/dump.py`/`compare.py`** — this is a
   real implementation gap, not a confirmation task (an earlier draft of
   this plan wrongly assumed the underlying CLI already supported this).

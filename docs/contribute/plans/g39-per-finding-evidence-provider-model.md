@@ -2657,11 +2657,33 @@ clause is Phases 0-3's own acceptance bar, restated here to make explicit
 that this phase and Phases 0-3 together are what the review's item 10
 acceptance test actually requires).
 
-**Files & surfaces:** `abicheck/buildsource/build_output.py` (receipt
-fields, schema version bump), a new validation entry point consumed by
-`check-project.yml`'s evidence-routing step (see G41 Phase 1/G43 for the
-sibling consumers of the same pack manifest), `abicheck/comparability.py`
-(the fail-closed rejection pattern to extend).
+**Files & surfaces — routed through ADR-061's canonical owners, matching
+the same correction already applied to G41/G45's manifest-schema work,
+not `abicheck/buildsource/build_output.py` directly:**
+
+- **`abicheck/model/`** — the receipt's own field shapes (producer kind,
+  version identifiers, digests, TU inventory) as a shared value type, per
+  ADR-061's "add an ABI entity/value shared across stages" routing.
+- **`abicheck/storage/`** — the receipt's schema/serialization and version
+  bump, per ADR-061's "own their schemas/migrations" routing — the same
+  home G41 Phase 1 routes the baseline-manifest schema to; keep the two
+  receipts (this phase's producer/compatibility receipt, G43's
+  attribution receipt) as clearly separated sections of one manifest
+  schema rather than one undifferentiated blob, as already noted above.
+- **`abicheck/workflows/`** — the new validation entry point
+  `check-project.yml`'s evidence-routing step consults, coordinating the
+  fail-closed rejection.
+- `abicheck/buildsource/build_output.py` — orchestration only (calling the
+  `storage/` reader/writer), not schema logic grown here directly.
+- `abicheck/comparability.py`'s existing fail-closed rejection pattern
+  (`ScopeMismatchError`) is the *pattern* to extend, not necessarily the
+  *module* — `comparability.py` is itself an unclassified `legacy_root_
+  modules` entry per `architecture/modules.yaml`, so whether this phase's
+  new rejection lives there or in a `policy/`-owned sibling is a decision
+  for whoever migrates `comparability.py` into the classified inventory,
+  not a blocking prerequisite for this phase (the same "don't relocate an
+  unrelated legacy module as a side effect" reasoning G41 Phase 2 already
+  states for `run_plan.py`).
 
 **Effort:** M — mostly additive schema fields plus one new validation
 entry point; the design risk is keeping this receipt's fields cleanly

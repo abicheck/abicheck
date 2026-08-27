@@ -97,10 +97,37 @@ checks:
       assurance: complete
 ```
 
-Generated identity stays backward-compatible
-(`target@profile#channel@depth`) when `id` is absent; when present, the
-generated identity gains a suffix derived from `id` so existing consumers of
-the un-suffixed form are unaffected. The `analysis:` block is one nested,
+**Generated identity — a plain trailing suffix breaks parsing, confirmed by
+reading `workflows/aggregate/contracts.py` directly.** `_CHECK_ID_RE` (the
+regex `parse_check_id()` matches every `target_id` against for
+profile/finding-matrix grouping) is *end-anchored* on the depth segment:
+`` @(?P<depth>binary|headers|build|source)$ ``. Appending anything after
+the generated `target@profile#channel@depth` string — as an earlier draft
+of this plan proposed — makes the whole id fail that match, so
+`parse_check_id()` silently returns `None` and the check drops out of
+every profile/finding-matrix grouping this plan's own acceptance test
+depends on. The fix has to extend the regex itself, not merely produce a
+string and hope it still parses:
+
+```
+_CHECK_ID_RE = re.compile(
+    r"^(?P<target>.+)@(?P<profile>[A-Za-z0-9][A-Za-z0-9._-]*)"
+    r"#(?P<channel>[A-Za-z0-9][A-Za-z0-9._-]*)"
+    r"@(?P<depth>binary|headers|build|source)"
+    r"(?:~(?P<explicit_id>[A-Za-z0-9][A-Za-z0-9._-]*))?$"
+)
+```
+
+— an optional, non-capturing-when-absent `~<id>` tail (the `~` is not
+already produced by `build_check_id`/`_IDENTIFIER_RE`, so it can't collide
+with an existing target/profile/channel value), with `CheckIdParts` gaining
+a matching `explicit_id: str | None` field. Absent `id`, the generated
+string and its parse are bit-for-bit unchanged (`explicit_id=None`) — this
+is the backward-compatibility guarantee, verified against the actual
+regex now, not assumed. `abicheck/workflows/aggregate/contracts.py` (the
+`_CHECK_ID_RE`/`CheckIdParts`/`parse_check_id()` definitions) is therefore
+part of this plan's own required file surface, not merely a downstream
+consumer to leave alone. The `analysis:` block is one nested,
 named object (or a reference to a named preset resolved the same way
 `environments:` below resolves) — not another flat family of
 workflow-global inputs growing on `check-project.yml`. `evidence` selects
@@ -197,6 +224,11 @@ from the report.
   `analysis_evidence`/`analysis_policy`/`analysis_assurance_requirement`
   fields, following the exact structural precedent `consumer_compile_*`
   already set (see G34 Phase 0).
+- **`abicheck/workflows/aggregate/contracts.py`** — required, not optional:
+  `_CHECK_ID_RE`'s extended `~<explicit_id>` suffix and `CheckIdParts`'
+  matching `explicit_id` field (see "Explicit check identifiers" above) —
+  without this, the whole `id:` feature silently breaks profile/
+  finding-matrix grouping the moment it's used.
 - Project schema (wherever `.abicheck.yml`'s `checks:`/`environments:` are
   validated — near `abicheck/buildsource/project_targets.py`) — new
   `environments:` top-level block, new `id`/`analysis:`/`environment:` check
@@ -224,8 +256,15 @@ from the report.
   resolution logic itself.
 - `.github/workflows/check-project.yml` — per-cell environment id/digest
   forwarding into the report envelope.
-- `abicheck/cli_aggregate.py` — environment axis in the profile/evaluation
-  matrix, reusing G34 Phase D's `finding_matrix` reconciliation shape.
+- **`abicheck/workflows/aggregate/`** — the environment axis in the
+  profile/evaluation matrix, reusing G34 Phase D's `finding_matrix`
+  reconciliation shape. This package (confirmed to already own
+  `finding_matrix`) is the canonical home per ADR-061's routing table
+  ("Coordinate dump, compare, scan, release, aggregate, project, or
+  dependency behavior" names `aggregate` explicitly) — `abicheck/
+  cli_aggregate.py`, a `frozen_root_families["cli_"]` no-growth entry,
+  gains only the thin CLI presentation call, not the reconciliation logic
+  itself.
 
 ## Tests
 
