@@ -93,10 +93,10 @@ still open.
    this class" before writing a fifth narrow reproducer for the same
    mechanism.
 3. Each bug class identified below and now registered in
-   `tests/regressions/manifest.py` (nine as of this writing —
-   `BUG_CLASSES`/`all_ids()` is the source of truth for the current
-   count and membership, not this sentence) has at least one
-   generalized test — property-based, metamorphic, or exhaustive —
+   `tests/regressions/manifest.py` (`BUG_CLASSES`/`all_ids()` is the
+   source of truth for the current count and membership — not restated
+   here) has at least one generalized test — property-based, metamorphic,
+   or exhaustive —
    that is shown to catch a deliberately reintroduced instance of the
    class's own already-fixed bug (not just the literal historical
    input).

@@ -219,22 +219,43 @@ def _xfail_is_strict(call: ast.Call) -> bool:
     return strict_ok and run_ok
 
 
+def _is_statically_truthy_literal(node: ast.expr) -> bool:
+    """Would Python's own truthiness rule find *node* true, for a literal
+    constant (`ast.Constant`) — not just the exact spelling `True`?
+
+    pytest's `skipif` treats *any* truthy `condition` as "skip" — `1`,
+    `"True"` (a non-empty string), `"anything"` are all skip just as
+    surely as the literal `True` is, and none of them are the literal
+    `True` a narrower `is True` check would require (Codex review, PR
+    #885, eleventh round, fresh evidence after the `skipif(True, ...)`
+    fix). Generalizing to `bool(node.value)` for any `ast.Constant`
+    closes the whole class in one shot rather than adding a fourth,
+    fifth, ... special-cased literal spelling — `ast.Constant.value` is
+    always one of `str`/`bytes`/`int`/`float`/`complex`/`bool`/`None`/
+    `Ellipsis`/a tuple of constants, all safe to call `bool()` on. A
+    non-literal condition (a variable, a comparison, a call) is still
+    left alone — this only ever fires on a constant the checker can prove
+    the truthiness of without executing anything.
+    """
+    return isinstance(node, ast.Constant) and bool(node.value)
+
+
 def _skipif_condition_is_unconditionally_true(call: ast.Call) -> bool:
     """Does *call* (a `pytest.mark.skipif(...)` application) pass a
-    literal `True` as its `condition` — positional or `condition=` keyword
-    — so it behaves exactly like a bare `@pytest.mark.skip` regardless of
-    environment (Codex review, PR #885, tenth round)?
+    statically-truthy literal as its `condition` — positional or
+    `condition=` keyword — so it behaves exactly like a bare
+    `@pytest.mark.skip` regardless of environment?
 
     A genuine, environment-dependent `skipif` (`sys.platform == "win32"`,
     a version check, a variable) is deliberately left alone — only a
-    condition that is *provably* always `True` is rejected, the same
+    condition that is *provably* always truthy is rejected, the same
     "provably safe/unsafe, not merely not-provably-otherwise" bar
     `strict`/`run` are already held to.
     """
-    if call.args and _is_literal_bool(call.args[0], True):
+    if call.args and _is_statically_truthy_literal(call.args[0]):
         return True
     return any(
-        kw.arg == "condition" and _is_literal_bool(kw.value, True)
+        kw.arg == "condition" and _is_statically_truthy_literal(kw.value)
         for kw in call.keywords
     )
 
@@ -278,8 +299,9 @@ def _canary_strictness_violation(source: str) -> str | None:
     for call in _marker_decorator_calls(tree, "skipif"):
         if call is not None and _skipif_condition_is_unconditionally_true(call):
             return (
-                "uses @pytest.mark.skipif(True, ...), which never executes "
-                "and so cannot fail loudly"
+                "uses @pytest.mark.skipif(...) with a statically-truthy "
+                "condition literal (e.g. True, 1, or a non-empty string), "
+                "which never executes and so cannot fail loudly"
             )
     for call in _marker_decorator_calls(tree, "xfail"):
         if call is None or not _xfail_is_strict(call):
@@ -766,6 +788,32 @@ class TestCanaryStrictnessViolation:
             "@pytest.mark.skipif(sys.platform == 'win32', reason='posix only')\n"
             "def test_x(): ...\n"
         )
+        assert _canary_strictness_violation(source) is None
+
+    @pytest.mark.parametrize("condition", ["1", "'True'", "'x'", "2.5"])
+    def test_other_statically_truthy_skipif_conditions_are_rejected(
+        self, condition: str
+    ) -> None:
+        """`1`/`"True"` (a non-empty string)/any other truthy literal skip
+        the test just as surely as the literal `True` does — pytest's own
+        `skipif` treats any truthy `condition` as "skip" (Codex review,
+        PR #885, eleventh round, fresh evidence). Scoped to values that
+        parse as a single `ast.Constant` node — a tuple/list/dict literal
+        parses as its own `ast.Tuple`/`ast.List`/`ast.Dict` node, not a
+        `Constant`, and is deliberately not handled here (no real canary
+        would spell a condition that way, and this checker only needs to
+        be sound over literal-constant conditions, not exhaustive over
+        every truthy Python expression shape)."""
+        source = f"@pytest.mark.skipif({condition}, reason='x')\ndef test_x(): ...\n"
+        assert _canary_strictness_violation(source) is not None
+
+    @pytest.mark.parametrize("condition", ["0", "''", "None", "False"])
+    def test_statically_falsy_skipif_conditions_are_not_flagged(
+        self, condition: str
+    ) -> None:
+        """A statically-falsy literal condition means `skipif` never
+        actually skips — not a "never executes" violation at all."""
+        source = f"@pytest.mark.skipif({condition}, reason='x')\ndef test_x(): ...\n"
         assert _canary_strictness_violation(source) is None
 
 
