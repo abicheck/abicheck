@@ -13,8 +13,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""FUNC_LOST_INLINE fires for a ``static`` function the same way as a
-non-``static`` one.
+"""FUNC_LOST_INLINE fires for a ``static`` function, and for a C++
+unnamed-namespace function, the same way as an ordinary external one.
 
 Split out rather than added to test_diff_symbols_deep.py, which is at its
 architecture-gate no-growth debt baseline.
@@ -61,5 +61,35 @@ def test_lost_inline_fires_even_for_a_static_function():
     """
     f_v1 = _pub_func("helper", "_Z6helperv", is_inline=True, is_static=True)
     f_v2 = _pub_func("helper", "_Z6helperv", is_inline=False, is_static=True)
+    r = compare(_snap([f_v1]), _snap([f_v2]))
+    assert ChangeKind.FUNC_LOST_INLINE in {c.kind for c in r.changes}
+
+
+def test_lost_inline_fires_even_for_an_unnamed_namespace_function():
+    """The detector fires for a C++ unnamed-namespace function too.
+
+    Codex review, PR #882, fresh evidence: ``Function.is_static`` captures
+    only the ``static`` keyword, not C++ unnamed-namespace membership —
+    which gives a function the identical internal linkage ``static``
+    does, without setting ``is_static``. With no ELF export table (a
+    header-only snapshot, as here), ``_public_functions()`` has no other
+    signal to exclude it either, so this reproduces the same false
+    "external linkage" premise the impact text's `static`-only caveat
+    didn't cover. Pinned the same way as the ``static`` sibling test: the
+    finding still fires here, only the impact text now scopes the C++
+    external-linkage claim conditionally.
+    """
+    f_v1 = _pub_func(
+        "(anonymous namespace)::helper",
+        "_ZN12_GLOBAL__N_16helperEv",
+        is_inline=True,
+        is_static=False,
+    )
+    f_v2 = _pub_func(
+        "(anonymous namespace)::helper",
+        "_ZN12_GLOBAL__N_16helperEv",
+        is_inline=False,
+        is_static=False,
+    )
     r = compare(_snap([f_v1]), _snap([f_v2]))
     assert ChangeKind.FUNC_LOST_INLINE in {c.kind for c in r.changes}
