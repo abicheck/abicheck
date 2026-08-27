@@ -39,7 +39,11 @@ from __future__ import annotations
 import pathlib
 
 #: Modules that are not ADR-062 Phase 0 primitives. G40's content-addressed
-#: bundle archive and its guards, per `abicheck/storage/AGENTS.md`.
+#: bundle archive and its guards, per `abicheck/storage/AGENTS.md`, plus
+#: ADR-063 Phase 0's Fact[T] snapshot encode/decode/legacy-backfill helpers
+#: (fact_codec, enum_codec) — a third, independent body of work in this
+#: package, unrelated to either ADR-062's Phase 0 primitives or G40's
+#: container.
 NON_ADR062_MODULES = frozenset(
     {
         "bundle_archive",
@@ -48,6 +52,8 @@ NON_ADR062_MODULES = frozenset(
         "bundle_facts_validation",
         "json_budget",
         "zstd_frame_guard",
+        "fact_codec",
+        "enum_codec",
     }
 )
 
