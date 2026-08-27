@@ -327,21 +327,40 @@ existing test fixtures, for a start) that never asserted anything about
 the field at all. That is the identical unavailable-vs-empty collapse
 Phase 0 exists to eliminate, reintroduced through the one compatibility
 path meant to *preserve* callers, not create a new instance of the bug
-for them. The fix needs an omission sentinel, not a truthiness check: the
-legacy field's *actual* dataclass default becomes a private, identity-
-checkable sentinel object (`_OMITTED_BASES`/`_OMITTED_VTABLE`/
-`_OMITTED_IS_VA_LIST`, one `list`/`bool`-typed singleton per field, never
-exported) rather than a literal `[]`/`False` — `__post_init__` checks
-`self.bases is _OMITTED_BASES` (identity, not equality — an explicitly
-passed *different* empty list is a distinct object and compares
-unequal-by-identity even though it is equal-by-value) to tell omission
-from explicit confirmed-empty, backfills `Fact.not_collected()` only for
-the true-omission case and `Fact.present(self.bases)` for an explicit
-value (empty or not), and then normalizes the field to an ordinary `[]`/
-`False` before `__post_init__` returns, so every reader of `self.bases`
-after construction still sees the identical plain value it always has —
-the sentinel is an internal construction-time signal, never a value a
-consumer observes.
+for them. The fix needs an omission sentinel, not a truthiness check, and
+the two field shapes (`list`-typed, `bool`-typed) need two different
+mechanisms — **a first draft of this fix proposed one uniform mechanism
+for both, and it is unimplementable for the boolean field**: Python has
+exactly two `bool` instances, `True` and `False`; there is no third,
+distinct `bool`-typed object a sentinel could be, so `self.is_va_list is
+_OMITTED_IS_VA_LIST` can never be true for *any* caller-supplied value —
+whichever of `True`/`False` the sentinel is defined to equal, that
+identity check collides with a caller legitimately passing the same
+value. For `RecordType.bases`/`vtable` (`list`-typed), the mechanism from
+before stands unchanged: the field's *actual* dataclass default becomes a
+private, identity-checkable empty-list singleton (`_OMITTED_BASES`/
+`_OMITTED_VTABLE`, never exported) rather than a literal `[]` —
+`__post_init__` checks `self.bases is _OMITTED_BASES` (identity, not
+equality — an explicitly passed *different*, even equal-valued, empty
+list is a distinct object) to tell omission from explicit confirmed-empty,
+backfills `Fact.not_collected()` only for the true-omission case and
+`Fact.present(self.bases)` for an explicit value (empty or not), then
+normalizes the field to an ordinary `[]` before `__post_init__` returns —
+a `list` is mutable and has real per-construction identity, so this works
+exactly as stated. For `Param.is_va_list` (`bool`-typed), the field's
+declared type widens to `bool | None`, default `None` — `None` is the
+omission marker (distinct from both `True` and `False`, not a third
+`bool`), `__post_init__` checks `self.is_va_list is None` the same way,
+backfills identically, and then normalizes the field to a real `bool`
+(`False` if it was `None`) before returning — so after construction every
+reader still sees a plain `bool`, never `None`; only the *constructor's*
+accepted input type genuinely widens, which is what "an explicit union
+and normalization" means concretely here. Both mechanisms end at the
+identical post-condition (the legacy field is a plain, fully-populated
+value after `__post_init__`, the sentinel/`None` never leaks to a reader)
+— they differ only in which type each field's omission marker can
+actually be, which is the one extra degree of freedom `list` has that
+`bool` doesn't.
 
 Continuing the Files list: `serialization.py`
 (`snapshot_to_dict()`'s `Fact[...]`-status-to-string encoding, extending
@@ -408,17 +427,24 @@ than the backfilled one, pinning the stated precedence directly; and a
 bare `Param(is_va_list=True)` with no `is_va_list_fact` given backfills
 the same way — each confirmed to fail against a version of the dataclass
 that defaults the new field to `Fact.not_collected()` instead of `None`.
-A fourth test pins the omission-sentinel fix directly, the exact
-counterexample that caught the gap in the first design: `RecordType()`
+A fourth test pins the omission-marker fix directly, the exact
+counterexample that caught the gap in the first design, across both
+mechanisms: `RecordType()`
 (nothing touched — the common case, not the nonempty/`True` cases the
 third test above already covers) backfills `vtable_fact`/`bases_fact` to
 `Fact.not_collected()`, never `Fact.present([])`; `RecordType(bases=[])`
 (an explicit, confirmed-empty base list) backfills to `Fact.present([])`,
 distinct from the previous case despite both leaving `self.bases == []`;
 and a bare `Param()` backfills `is_va_list_fact` to `Fact.not_collected()`,
-never `Fact.present(False)` — each confirmed to fail against the
-truthiness-based (non-sentinel) version of the bridge, which cannot tell
-the two cases apart.
+never `Fact.present(False)`, while `Param(is_va_list=False)` (an explicit,
+confirmed-not-variadic value) backfills to `Fact.present(False)` — each
+confirmed to fail against the truthiness-based (non-sentinel, non-`None`)
+version of the bridge, which cannot tell the two cases apart for either
+field shape. A fifth test pins the type itself: `Param.is_va_list`'s
+declared annotation is `bool | None`, and after construction (with or
+without the argument) `self.is_va_list` is always a plain `bool` — never
+`None` — confirming the widened constructor input normalizes away before
+any reader, including `asdict()`-based serialization, can observe it.
 
 **Acceptance criteria.** The three converted fields cannot be read by any
 detector without explicit availability handling — enforced by a new
@@ -481,6 +507,36 @@ as the *sole* source of compile-database-derived context when the fold
 applies (already decided and landed per AGENTS.md's "legacy-match
 overlap" entry) rather than re-deciding it here.
 
+**A third dump execution path exists, untouched by either of the two
+above, and review caught this plan not naming it: the binary-less
+`dump --sources`/`--build-info` branch (no SO_PATH), which calls
+`cli_buildsource.dump_source_only()` — a pipeline that collects L3-L5
+evidence into an otherwise-empty snapshot with no `resolve_input` call at
+all, confirmed by reading the real code.** `execute_dump_request()`
+already refuses this shape explicitly (`ValidationError` when `InputSpec.
+path is None`), with its own docstring stating exactly why this plan must
+not paper over: `InputSpec.path` was deliberately widened to `Path | None`
+so the shape is *expressible* as a typed request (letting `--dry-run`
+resolve one through `resolve_dump_request()`), but *executing* it is "a
+genuinely different pipeline... and routing it through here is its own
+slice, not part of making the model able to say it" — the exact words the
+function's own comment already uses. Landing this phase's two named
+routings (`perform_elf_dump`/`handle_non_elf_dump`, `scan_engine.
+_build_new_snapshot`) while leaving `dump_source_only()` as a third,
+independent assembler would leave exactly the outcome this phase's own
+goal forbids — more than one real dump pipeline after the phase ships,
+just one fewer than before. **Not migrated in this phase**: routing
+`dump_source_only()`'s L3-L5-only collection through `execute_dump_
+request()` needs the executor to support a snapshot with no binary-derived
+L0-L2 facts at all, which is a real, separate design question (what does
+"the executor's post-processing hooks" — ADR-039's collector, the G31
+header-graph attach — even mean for a snapshot with no ELF/PE/Mach-O side
+to attach them to?), not a drive-by extension of the two routings this
+phase already does. Tracked explicitly as this phase's own named residual,
+the same way AGENTS.md tracks its other incomplete-migration findings,
+rather than silently left for a future reader to discover was never
+covered.
+
 **Files.** `abicheck/cli_dump_helpers.py` (`perform_elf_dump`/
 `handle_non_elf_dump` → call `execute_dump_request` instead of `dumper.
 dump()` directly, keeping every existing post-processing hook —
@@ -501,12 +557,17 @@ carry (a real repro, a named mechanism, not a guess).
 
 **Acceptance criteria.** `dump`'s CLI path and `execute_dump_request`
 produce bit-for-bit identical snapshots (modulo timestamps/provenance) for
-every build shape in the parity corpus **under the clang backend** —
-this phase does not claim convergence for `--ast-frontend castxml`, the
-actual default, while option (b) above is in force; a reader checking this
-phase's own status must be able to see "clang: converged and verified;
-castxml: not yet verified, tracked as a named incomplete prerequisite"
-without inferring it from the Design section. `cli_dump_helpers.
+every build shape in the parity corpus **under the clang backend, and for
+the binary-having (SO_PATH) case only** — this phase does not claim
+convergence for `--ast-frontend castxml`, the
+actual default, while option (b) above is in force, **nor for the
+binary-less `dump --sources`/`--build-info` shape, which still executes
+through `cli_buildsource.dump_source_only()`, a third pipeline this phase
+explicitly does not migrate** (per the named residual above); a reader
+checking this phase's own status must be able to see "clang + SO_PATH:
+converged and verified; castxml: not yet verified; source-only: not
+migrated at all" without inferring any of the three from the Design
+section. `cli_dump_helpers.
 render_dump_dry_run()` is deleted and `--dry-run` renders from the real
 `ResolvedDumpRequest` for both backends (the dry-run path itself has no
 castxml-specific execution to be blocked on). PR 3C (removing `dump
@@ -779,16 +840,32 @@ f()` vs. `void f() const`) always produce distinct `EntityId`s**, pinned
 directly against the exact counterexample a reviewer raised for this
 design, with an `extern "C"` sibling case confirming the deliberate
 opposite rule (a changed parameter list there stays the same identity).
-A separate test asserts the no-new-carrier design directly: calling
-`entity_id_for_record`/siblings twice on two separately-constructed but
-field-identical `RecordType`/`Function` objects (not the same Python
-object) produces equal `EntityId`s — proving the resolver is a pure
-function of the declaration's existing fields, with nothing cached on
-either object that a second, independent instance wouldn't also have;
-and a static check (mirroring the AST-based checks this plan already
-uses elsewhere) confirms no `model/` dataclass gains a new `entity_id`-
-shaped field in this phase, so a future change can't quietly reintroduce
-the stored-field design this phase explicitly rejected.
+**The carrier-vs-no-carrier tests below are conditional on which option
+the open design question (above) actually resolves to — a first draft of
+this phase stated both as unconditional requirements, which is
+self-contradictory: the no-new-field test forbids option (a) outright,
+and the pure-function-of-existing-fields test cannot pass for option (b)
+at all, since a post-parse `RecordType`/`Function`'s own flattened fields
+are exactly what that open question found insufficient to reconstruct a
+typed `ScopePath` from.** Whichever option this phase's implementation PR
+selects gets exactly one of these two test shapes, not both: if option
+(a) (a real `entity_id`-shaped field, populated at parse time) is chosen,
+the test suite asserts that field is populated for every declaration kind
+immediately after parsing, round-trips through `serialization.py`
+unchanged, and a static check confirms the resolver function itself is
+never called on an already-parsed `RecordType`/`Function` outside the
+parser (since by that option's own design, the field is read thereafter,
+never recomputed). If option (b) (resolution deferred to Phase 6's
+raw-fact capture) is chosen, this phase's own test suite is narrower: it
+pins the resolver's contract against the *raw facts* Phase 6's normalizer
+will eventually supply (not against already-parsed model objects), and
+the "calling the resolver twice on separately-constructed field-identical
+objects produces equal `EntityId`s" property and the "no new `entity_id`-
+shaped field" static check both apply only to *this* narrower scope —
+Phase 6's own implementation is where the real, structurally-sufficient
+input actually gets threaded through, tested there, not asserted
+prematurely here against a model shape this phase already found
+insufficient.
 A separate test on the relocation covers `storage/entity_ids.py`'s new v2
 wire schema: a primitive-level round-trip property test constructing
 domain `EntityId`s across every `ScopePath` segment kind (including two
@@ -928,8 +1005,22 @@ sibling:
   second silent implementation competing with the real one; every call
   reachable from `checker.compare()` itself — which is what `idioms.py`/
   `pattern_verdicts.py`/`diff_surface_metrics.py` actually run under in
-  production — receives the real, resolved ids. `SurfaceGraph.
-  public_roots()` maps each received `EntityId` back to the snapshot's own
+  production — receives the real, resolved ids. **`PublicSurfaceQuery.
+  resolve()`'s result is not already a function/variable-only set, and a
+  first draft of this phase's mapping step assumed it was — `resolve()`
+  traverses `declares` and type-reference edges, so it genuinely returns
+  record/enum/typedef `EntityId`s too (a public function's return type, a
+  public struct reachable from a public signature), which is correct for
+  `compute_public_surface()`'s own purpose (deciding what's public at all,
+  types included) but has no symbol/mangled-name spelling to map to for
+  `SurfaceGraph.public_roots()`'s specific contract — that function's own
+  docstring already states its root set is "`Visibility.PUBLIC` functions
+  and variables," never types.** `SurfaceGraph.
+  public_roots()` therefore filters the received `EntityId` set to
+  `kind in (FUNCTION, VARIABLE)` *before* mapping — a type-kind id in the
+  resolved set is simply not part of this particular root set and is
+  dropped, not mapped-and-failed — then maps each remaining `EntityId`
+  back to the snapshot's own
   symbol/mangled-name spelling (via the `Function`/`Variable` the identity
   already resolves to — `EntityId`'s function variant carries the mangled
   name directly in `extra` when one exists, the same primitive Phase 2
@@ -1235,7 +1326,15 @@ consumable by `re.Pattern.match()` with no caller change — agrees with
 pre-migration `SurfaceGraph` for this exact input; and a second case
 asserting `surface_graph.py` imports nothing from `policy/`, enforced by
 the same architecture-gate mechanism this plan already uses elsewhere for
-a leaf module's import direction.
+a leaf module's import direction. A sixth regression pins the kind-filter
+fix directly: a fixture where `PublicSurfaceQuery.resolve()`'s resolved
+set genuinely includes a record/enum/typedef `EntityId` (a public
+function's return type, reachable via a `declares`/type-reference edge)
+alongside function/variable ids, asserting `SurfaceGraph.public_roots()`
+still returns a clean `frozenset[str]` of only the function/variable
+spellings — the type-kind id silently excluded from the root set, not
+attempted-and-failed — confirmed to fail against a version of
+`public_roots()` that maps every received id unconditionally.
 
 **Acceptance criteria.** `surface.py`'s own traversal implementation and
 `export_surface.py`'s independent closure walk are deleted, not kept
