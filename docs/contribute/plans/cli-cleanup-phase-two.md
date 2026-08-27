@@ -2125,9 +2125,10 @@ pipelines a fourth time.
   > 2. **The L4 extractor default still diverges** between `scan` (clang, via
   >    `embed_build_source`'s `"auto"`) and `dump`/`compare` (castxml, via
   >    `effective_frontend`). Removing the flags does not cause this, but it
-  >    is a live "two interpreters of one config" instance, and it remains
-  >    unverifiable without castxml — re-checked and still absent in the
-  >    2026-08-21 environment.
+  >    is a live "two interpreters of one config" instance. **No longer
+  >    "unverifiable without castxml"** — see the 2026-08-27 note below this
+  >    block, which obtained a real one and reproduced the divergence
+  >    directly; the fix itself is still not attempted, deliberately.
   > 3. **Prerequisite 3's own remaining `-H`-directory gap**, below, is
   >    unchanged.
   >
@@ -2269,6 +2270,62 @@ pipelines a fourth time.
   > output byte-identical to today's write-time-embed path under the
   > *default* castxml backend — "the migration itself," and it remains
   > exactly as blocked on castxml as this note already said.
+  >
+  > **Item 2 (the L4 extractor default divergence) is now empirically
+  > confirmed, not merely reasoned about — but deliberately still not fixed
+  > (2026-08-27).** Every prior note on this item said the divergence was
+  > "unverifiable without castxml" because no environment this work had been
+  > done in had one. That changed this session: a genuine, policy-compliant
+  > castxml (0.7.0, conda-forge, within `castxml_policy.py`'s
+  > `>=0.6.11,<0.8.0` range, bundled Clang 20) was obtained and installed —
+  > `.conda` files are zip archives around zstd-compressed tarballs, not
+  > tarballs themselves, and the extracted binary needs its `share/castxml/`
+  > resource tree alongside it at a real install prefix, not just the bare
+  > executable on `PATH` — and verified via
+  > `castxml_policy.evaluate_castxml_version()` returning `supported=True`.
+  > With it, `tests/test_dump_scan_l3_comparability.py`'s two
+  > `_SCAN_KNOWN_DIVERGENT_FRONTENDS = frozenset({"castxml"})` xfail cases
+  > (`test_scan_against_real_dump_baseline_is_comparable_on_unchanged_source`
+  > and `test_scan_against_real_dump_baseline_matches_reported_cli_invocation`)
+  > were run for real for the first time and reproduce exactly the divergence
+  > their own long-standing module docstring already predicted: `scan`'s
+  > candidate resolution uses `source_extractor="auto"` (`scan_engine.py`,
+  > `_build_new_snapshot`), which `_make_source_extractor`
+  > (`buildsource/inline.py`) resolves to clang, while `dump`/`compare` reach
+  > `effective_frontend(...)` (`service_compare_evidence.py`), which resolves
+  > `"auto"` through `dumper._resolve_header_backend` to castxml
+  > unconditionally (no clang fallback). The rest of the `integration`-marked
+  > suite for this area — `test_dump_cli_typed_api_parity.py`,
+  > `test_dump_scan_l3_comparability.py`'s non-xfailed cases,
+  > `test_dump_write_after_resolve_time_embed.py`,
+  > `test_dump_embed_idempotence.py` — is 23 passed / 9 deselected / 2 xfailed
+  > under real castxml, i.e. this is the *only* known divergence this suite
+  > can currently see.
+  >
+  > Deliberately **not** changed as part of confirming this: flipping
+  > `scan_engine.py`'s `source_extractor="auto"` to
+  > `effective_frontend(compile_context, header_backend)` (or an equivalent
+  > shared resolver — `buildsource/source_extractors.py` already has one,
+  > `resolve_source_extractor`, independent of `_make_source_extractor`,
+  > worth checking for reuse before hand-rolling a call site) would make
+  > `scan --depth source` require castxml at its defaults for every user who
+  > doesn't already have one installed — that line's own existing comment
+  > already names this precisely: "a real behaviour change for real users...
+  > unverifiable without a castxml-capable lane," calling for "its own
+  > dedicated verification against real castxml/clang divergence in
+  > production usage, not a side effect of hardening this module's test
+  > coverage." Having castxml available for the first time closes the
+  > *unverifiable* half of that sentence, not the *dedicated verification in
+  > production usage* half — the two xfail tests exercise one project shape
+  > each, not the breadth "production usage" implies, and a default-changing
+  > fix here is exactly the class of decision this file's own established
+  > pattern (see `AGENTS.md`'s "Known gaps" entries throughout this same
+  > code area) treats as needing explicit maintainer sign-off before
+  > landing, not something to flip as a side effect of narrating a plan
+  > document. Left as item 2, unchanged in substance, with its
+  > "unverifiable" framing corrected to "verified and reproduced, fix not
+  > yet attempted" so a future session does not have to redo the castxml
+  > acquisition to pick this up.
 
 `dump --build-query` and `dump --build-compile-db` describe how the *project*
 is built, not what this snapshot is. They are already documented as CLI
