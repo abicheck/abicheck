@@ -206,21 +206,45 @@ BUG_CLASSES: tuple[BugClass, ...] = (
         seed_tests=(
             "tests/test_surface_property.py",
             "tests/test_surface_seed_predicate_properties.py",
+            "tests/test_provenance_classification_properties.py",
+            "tests/test_clang_castxml_origin_parity.py",
         ),
         known_gaps=(
             KnownGap(
                 description=(
-                    "Both seed tests run on synthetic snapshots built "
-                    "directly (no castxml/clang, no CLI) — the "
-                    "cross-surface (CLI) and cross-backend (castxml/clang) "
-                    "coverage this class's own invariant is stated over "
-                    "does not exist yet, and the direct-clang path-"
-                    "normalization and nested/anonymous-namespace record "
-                    "gaps AGENTS.md's 'Known gaps' section documents from "
-                    "PR #843 are unmonitored (Codex review, PR #885 — "
-                    "public_surfaces/axes here previously overclaimed "
-                    "'cli'/'castxml'/'clang' coverage neither seed test "
-                    "exercises)."
+                    "The two pre-existing seed tests run on synthetic "
+                    "snapshots built directly (no castxml/clang, no CLI). "
+                    "Phase 3 (bug-class-regression-testing.md) added a "
+                    "third seed test targeting the path/segment-based "
+                    "'abicheck.provenance' origin classifier "
+                    "('classify_origin'/'_matches_public') with metamorphic "
+                    "(checkout relocation, './..' spelling), independent-"
+                    "oracle (real directory containment vs. a sibling-"
+                    "directory string-prefix false positive), and mutant-"
+                    "killing properties, plus a fourth seed test "
+                    "(a new sibling module, 'test_clang_castxml_origin_"
+                    "parity.py' — kept separate from 'test_clang_header_"
+                    "backend_integration.py' rather than folded into it, "
+                    "since that pre-existing module carries an ADR-061 "
+                    "'debt.yaml' no-growth line-count baseline a new test "
+                    "there would have breached) adding cross-backend "
+                    "(castxml vs. direct-clang) agreement on PUBLIC_HEADER/"
+                    "PRIVATE_HEADER origin for a mixed public+private "
+                    "header pair, complementing the pre-existing plain "
+                    "public-surface-parity test already in the older file. "
+                    "Deliberately NOT attempted: the full generated "
+                    "include-DAG model ('-I'/'-isystem'/'-idirafter' "
+                    "resolution order, '#include' cycles, symlinked roots) "
+                    "the plan document sketches for this phase — flagged "
+                    "there as needing its own design review before "
+                    "implementation, so building it inside the same PR "
+                    "risked the under-designed, maintenance-burden outcome "
+                    "the plan warns against. (An earlier draft of this "
+                    "entry also claimed AGENTS.md's 'Known gaps' section "
+                    "documents a direct-clang path-normalization gap and "
+                    "nested/anonymous-namespace record gaps from PR #843; "
+                    "that claim could not be verified — no matching text "
+                    "was found there — so it is not repeated here.)"
                 ),
                 reference="PR #843",
             ),
