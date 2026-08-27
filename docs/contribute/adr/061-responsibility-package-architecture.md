@@ -1228,12 +1228,17 @@ investigation's. `suppression.py`/`policies` (the package) are left
 unclassified alongside it for now, for the narrower reason that nothing has
 yet checked whether either has the same shape of problem — that check is
 still owed, not done by implication. `cli_params.py`'s physical move stays
-blocked on that plus its own `buildsource.scan_levels` edge (also
-unclassified, and not yet checked either); `buildsource.scan_levels` looks
-like a plausible `model` leaf on its face — it is exactly the kind of
-small, dependency-free vocabulary module `evidence_depth.py` was classified
-as in Phase 3 — but that is a claim to verify against the module's actual
-imports, not something this note establishes.
+blocked on that plus its own `buildsource.scan_levels` edge — a different
+kind of open item, worth stating precisely rather than leaving both halves
+as "not yet checked" (a CodeRabbit review round on this PR caught this
+paragraph still saying that after a later paragraph had already verified
+the imports): `buildsource.scan_levels`'s *imports* are checked and
+confirmed stdlib-only, so it is a plausible `model` leaf on those grounds —
+exactly the kind of small, dependency-free vocabulary module
+`evidence_depth.py` was classified as in Phase 3 — but its *classification*
+is not yet decided; nothing has assigned it `model` (or anywhere else) in
+`architecture/modules.yaml`, and that decision, not the import check, is
+what `cli_params.py`'s move still waits on.
 
 So Phase 4's `service.py` half is **blocked on real, unfinished work at both
 levels this note originally distinguished**: the two dozen imports named
