@@ -511,23 +511,41 @@ merely a safer mutator once inside one job:
      system-derived environment qualifier unambiguous against a
      user-supplied explicit id, and the two compose (a check may declare
      both an explicit `id:` and belong to a multi-environment group).
-   - This qualifier is **mandatory, not optional, whenever a grouped
-     `RunPlanCheck` carries more than one environment** — each of the N
-     emitted reports stamps its own `target_id` with `!<environment_id>`
-     so all N are distinct and individually addressable to the aggregate,
-     the same way N separately-run jobs' reports would have been. A
-     `RunPlanCheck` with exactly one environment (or none) omits the
-     qualifier entirely, so every existing invocation's `target_id` shape
-     is bit-for-bit unchanged.
+   - **This qualifier is mandatory for every *named*-environment entry
+     whenever a grouped `RunPlanCheck` carries more than one
+     `EnvironmentEvaluation` — but the `None` (no-environment) entry
+     added above always stays unqualified, in every group shape, not
+     only the single-entry case.** A fresh review round found the
+     original phrasing ("mandatory whenever the group has more than one
+     environment") conflicts directly with that `None` entry: it has no
+     `environment_id` to qualify with, so a rule requiring *every* entry
+     in a multi-entry group to carry `!<environment_id>` either makes the
+     `None` entry's own report id impossible to construct, or forces a
+     fabricated qualifier onto it, contradicting its own definition above
+     (no `!<environment_id>` segment at all for that entry). The
+     acceptance test itself — one unconfigured evaluation plus two named
+     environments, all from one extraction — requires exactly this mixed
+     shape to work. Restated precisely: each named-environment entry in
+     the group stamps its report's `target_id` with `!<environment_id>`;
+     the `None` entry, if present in the same group, stamps its report
+     with the plain, unqualified `target_id` — the same shape a
+     single-environment or no-environment `RunPlanCheck` already
+     produces today. A `RunPlanCheck` with exactly one entry (named or
+     `None`) omits the qualifier entirely regardless of this rule, so
+     every existing invocation's `target_id` shape is bit-for-bit
+     unchanged.
    - **The aggregate's expected-target contract must expand too, not stay
      one entry per grouped check.** `ExpectedTargets` (built from
      `run-plan.json`'s own manifest projection) is keyed by target_id
      string with one entry expected per planned check; a grouped
-     `RunPlanCheck` with N environments must therefore project to **N**
-     expected target-id entries (one per `!<environment_id>` qualifier),
-     not one — otherwise `on_missing_required`'s coverage check reads
-     N-1 of the produced reports as unexpected/extra and the single
-     expected entry as satisfied by whichever report happens to load
+     `RunPlanCheck` with N environment entries must therefore project to
+     **N** expected target-id entries — one `!<environment_id>`-qualified
+     entry per named environment, plus one *unqualified* entry for the
+     `None` entry when present — not one collapsed entry, and not N
+     qualified entries with the `None` case silently dropped. Otherwise
+     `on_missing_required`'s coverage check reads N-1 of the produced
+     reports as unexpected/extra and the single expected entry as
+     satisfied by whichever report happens to load
      first, silently losing the missing-required guarantee for every
      environment but one.
 

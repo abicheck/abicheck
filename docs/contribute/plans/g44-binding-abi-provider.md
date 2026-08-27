@@ -73,7 +73,14 @@ no relationship-level delta. A third variant: the mismatch is present in
 the old release and genuinely fixed in the new one (both modules rebuilt
 against the same pybind11 internals version) — this *must* report a
 relationship-level change (the pair moved from disagreeing to agreeing),
-distinguishing "the break was fixed" from "nothing changed."
+distinguishing "the break was fixed" from "nothing changed." **A fourth
+variant, added per the pair-creation/deletion correction below**: the old
+release contains only `_core.so`; the new release adds `_geometry.so`,
+which shares a global native type with `_core.so` under incompatible
+internals. This pair did not exist in the old release's own module-pair
+graph at all — `compare()` must still report a real cross-module
+incompatibility for it (absent → disagreeing), not silently pass because
+neither side of the pair existed on both releases.
 
 ## Design
 
@@ -218,9 +225,40 @@ this plan sketched:
      per-module, the module's own `SurfaceFacts` across releases,
      whichever the SciPy roadmap's own `SurfaceProvider` contract
      specifies more precisely once read against this shape) — emitting a
-     `Change` only for a pair whose *relationship* changed (a previously
-     agreeing pair now disagrees, or vice versa), never for a
+     `Change` only for a pair whose *relationship* changed, never for a
      relationship merely re-observed as unchanged.
+
+     **The diff must cover pair creation/deletion explicitly, not only
+     the two flip transitions on an already-existing pair — a real gap
+     confirmed by a fresh review round.** "A previously agreeing pair now
+     disagrees, or vice versa" only names the two transitions where the
+     pair exists on *both* sides. It silently misses the case a new
+     release actually introduces a break through: a new module
+     (`_geometry.so`) is added in the new release and shares a global
+     native type with an existing module (`_core.so`) under incompatible
+     internals — the new graph contains a disagreeing pair with *no old
+     counterpart at all*, so "previously agreeing... now disagrees"
+     doesn't apply (there is no "previously" state for a pair that didn't
+     exist), and the stated rule emits nothing even though the release
+     genuinely introduced a real cross-module incompatibility. The full
+     transition table this stage must handle:
+     - **absent → disagreeing**: a pair that didn't exist in the old
+       release (one or both modules new, or the shared type wasn't
+       candidate-eligible yet) now disagrees in the new release — **emit
+       a `Change`**; this is exactly as real a break as an
+       agreeing-to-disagreeing flip, just introduced by addition rather
+       than regression.
+     - **disagreeing → absent**: a disagreeing pair from the old release
+       no longer exists in the new one (a module removed, or the shared
+       type no longer candidate-eligible) — the incompatibility is moot
+       (nothing to break at runtime any more); record it as an
+       informational/resolved-by-removal note if this plan's reporting
+       shape has room for one, but it is not a regression to gate on.
+     - **agreeing → disagreeing** / **disagreeing → agreeing**: the two
+       transitions already named — a real regression and a real fix,
+       respectively.
+     - **absent → agreeing** / **agreeing → absent**: no finding either
+       way — nothing incompatible existed or exists.
   This may be implemented as `compare()` itself internally invoking stage
   1 for both releases before diffing the two graphs, or as a separate
   bundle-level reconciliation stage this plan's own coordination
