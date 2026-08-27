@@ -2607,7 +2607,7 @@ Clang/plugin major
 compiler path and digest
 compile-context fingerprint
 source-tree digest
-target id
+projection identity (see below — not a bare singular target id)
 public-header-root digest
 translation-unit inventory
 ```
@@ -2621,6 +2621,30 @@ error several steps later. This is the same "fail closed with a named
 reason" discipline `comparability.py`'s existing `ScopeMismatchError`
 already establishes for the scope-fingerprint axis — extend that pattern to
 the producer-receipt axis rather than inventing a second one.
+
+**A bare singular "target id" field is wrong here, confirmed by a fresh
+review round cross-checking this phase against G43's own scenario, not
+assumed.** G43's inferred-projection case is exactly one build-wide
+`abicheck_inputs/` pack intentionally consumed by *several* targets, with
+`attribute_sources_to_targets()`/`_filter_tus_by_attribution()` selecting
+each target's own TUs out of that one shared pack — the pack itself has no
+honest single target it "belongs to." A singular `target id` field
+combined with fail-closed equality matching would force one of two wrong
+outcomes: either the pack is stamped with one target's id and every other
+target's legitimate consumption of the identical pack is rejected as a
+receipt mismatch, or the field is left blank/absent for a shared pack and
+loses fail-closed validation for this class of pack entirely — both defeat
+the purpose of this phase for precisely the scenario G43 exists to wire
+up. The receipt's identity field must therefore be **projection-aware**:
+either a single target id (the ordinary, non-shared case — validated by
+equality exactly as before) *or* a build-wide/shared-scope marker paired
+with the attribution digest G43's `attribution_path` mechanism already
+computes (validated by checking that the *consumer's resolved projection*
+— this target, selected via attribution — is one the pack's own
+attribution digest actually covers, not by requiring the whole pack to
+name one target). A consumer validates whichever shape the receipt
+declares; a shared pack is never forced through the single-target equality
+check that only applies to the non-shared case.
 
 **Relationship to Phases 0-3 above:** the per-finding provenance tags this
 plan's earlier phases add (`l0:elf_symtab`, `l2:castxml`, `l4:source_
@@ -2714,7 +2738,11 @@ not `abicheck/buildsource/build_output.py` directly:**
 entry point; the design risk is keeping this receipt's fields cleanly
 separated from the existing `attribution_path` fields in the same manifest
 rather than letting the two blur into one field family that answers
-neither question cleanly.
+neither question cleanly. The projection-aware identity field (single
+target vs. shared/build-wide-plus-attribution-digest) adds one real design
+decision — a two-shape union rather than a bare string — but stays
+additive schema work, not new extraction logic; it does not change this
+phase's overall M estimate.
 
 ## Design
 

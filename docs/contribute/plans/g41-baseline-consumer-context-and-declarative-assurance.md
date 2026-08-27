@@ -206,6 +206,62 @@ already-resolved, already-typed values by this point — G42's own
 if G41 and G42 land in either order) rather than assumed to be implied by
 the fingerprint.
 
+**Widening the selection key alone does not make the extra baselines
+exist — confirmed by reading the actual publication mechanism, not
+assumed.** `publish-baseline.yml`/`update-main-baseline.yml` both run one
+job per contract profile, and the `actions/baseline` composite Action
+those jobs call accepts exactly one workflow-global `depth` input plus one
+`libraries` JSON array, producing exactly one `.abicheck.json` snapshot
+per uniquely-named library entry (confirmed directly in
+`actions/baseline/run.sh`: `DEPTH="${INPUT_DEPTH:-}"` is applied
+identically to every library's `abicheck dump` call, and each library name
+maps to exactly one output file). When one (target, profile, channel)
+genuinely needs *two* baselines under the widened key — e.g. a project
+declaring both a `headers`-depth check and a `source`-depth check against
+the same target — today's publication mechanism can still only produce
+**one** snapshot for that library name, whichever depth the single Action
+invocation happened to run with; the other selection-key entry has no
+baseline to select at all, regardless of how correctly the storage layer
+now distinguishes the two keys. Closing this needs baseline publication
+itself to fan out over every *resolved check context* that requires a
+distinct baseline, not just over the library list:
+
+- `derive_baseline_libraries()` (`baseline_publish.py`) must resolve the
+  full set of (target, profile, channel, depth, evidence-producer)
+  contexts a project's `checks:` declarations actually require baselines
+  for — not one row per library name — the same run-plan-derived grouping
+  G42's own multi-environment work establishes the precedent for (group by
+  everything except the axis that must fan out, here depth/evidence-
+  producer rather than environment).
+  - **Grouping key, stated explicitly rather than left to guesswork,
+    consistent with G42's own corrected mistake in the identical
+    situation**: group by (target, profile, channel) and fan out over
+    every distinct (depth, evidence-producer) pair that context needs —
+    not the reverse, and not a coarser or finer grouping. This is
+    deliberately the *complement* of G42's environment grouping (which
+    groups on everything *except* environment and fans out over
+    environments): here depth/evidence-producer are the axis needing
+    distinct baselines, so they are excluded from the group key and
+    become the fan-out dimension instead.
+- `actions/baseline/action.yml`/`run.sh` gain support for either (a) a
+  per-library-entry depth/evidence-producer override in the `libraries`
+  JSON array (each entry names its own distinct output identity, not
+  relying on the library's bare name alone to key the output file), or
+  (b) the calling workflow invoking the Action once per distinct
+  (depth, evidence-producer) group with a distinct output artifact name
+  per invocation — either closes the gap; a per-entry override is likely
+  the smaller change given the Action already parses a structured
+  `libraries` JSON array per-entry.
+- The baseline-set artifact naming/discovery `check-project.yml` already
+  uses (`<baseline-artifact-prefix><profile-id>-<channel>`) must widen to
+  disambiguate by depth/evidence-producer too, or two distinct baselines
+  for the same target/profile/channel collide on the same artifact name
+  the moment both are published.
+
+This is real, new publication-orchestration logic, not merely a
+consequence of the wider storage key — the "Effort & risk" section below
+reflects it as such.
+
 **Historical-correctness constraint, stated explicitly because it is easy to
 get backwards**: an old baseline must contain facts extracted from the old
 project's generated/public headers as they existed *at baseline publish
@@ -405,6 +461,12 @@ mistake (see `AGENTS.md`'s numbered findings on the L3→L2-fold entry).
   fingerprint disagrees with the candidate's resolved fingerprint fails
   *before* the compare runs (a clear, typed rejection reason), not merely
   as an eventual `NOT_COMPARABLE` from the generic comparability gate.
+- A multi-depth/evidence-producer publication test: one project fixture
+  declaring both a `headers`-depth and a `source`-depth check against the
+  same (target, profile, channel), asserting that baseline publication
+  produces **two** distinct, separately-selectable baseline entries rather
+  than one overwriting the other — the regression case for the publication
+  fan-out gap above.
 
 ## Example fixtures
 
@@ -423,7 +485,16 @@ before starting the next):
   `actions/baseline` inputs to actually carry the resolved
   `consumer_compile_*` values into the dump command that Action
   constructs (confirmed by reading `actions/baseline/run.sh` directly —
-  the workflow-level resolution alone doesn't reach it).
+  the workflow-level resolution alone doesn't reach it), **and,
+  confirmed by a fresh review round, a genuine publication fan-out**:
+  `derive_baseline_libraries()`/`actions/baseline` currently produce
+  exactly one snapshot per library name regardless of how many distinct
+  (depth, evidence-producer) contexts the widened selection key now
+  distinguishes, so a target needing both a `headers`-depth and a
+  `source`-depth baseline gets only one of the two published today. This
+  is new orchestration logic on top of the manifest/selection-key
+  widening, not a consequence of it — see the "Baseline publication" note
+  above.
 - Phase 2 (per-target header projection): M — schema + `RunPlanCheck` +
   workflow forwarding, following an established precedent
   (`consumer_compile_*`) closely.

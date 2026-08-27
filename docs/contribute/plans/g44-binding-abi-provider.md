@@ -136,8 +136,34 @@ two incompatible plugin shapes for the same evidence-provider concept."
 Adopt that contract here rather than the ad hoc matcher an earlier draft of
 this plan sketched:
 
-- **`identify(artifact)`** — recognize a pybind11/nanobind-built extension
-  module (reusing `python_ext.py`'s existing builder recognition).
+- **`identify(artifact)`** — **needs a real, new pybind11/nanobind-specific
+  discriminator; `python_ext.py`'s existing recognition cannot be reused
+  directly for this, confirmed by reading it, not assumed.**
+  `detect_python_extension()`'s own module docstring states its
+  recognition is *deliberately* uniform across builders: "Cython/pybind11/
+  nanobind/C all land here because they all emit the same `PyInit_*`
+  export and link `libpython`" — it answers "is this a CPython extension
+  module at all," not "which framework built it." Using it directly as
+  `BindingAbiProvider.identify()` would misclassify every Cython or
+  hand-written C extension as a pybind11/nanobind candidate, producing
+  false incomplete-coverage findings (this provider reporting on a module
+  it has no business analyzing) or false binding-ABI findings (comparing
+  two unrelated Cython modules' unrelated internals as if they were a
+  pybind11 type-registration pair). `python_ext.detect_python_extension()`
+  is still useful here, but only as the **broad prefilter** — "is this a
+  CPython extension at all" — that this provider's own, new, narrower
+  discriminator runs after, not instead of. That new discriminator needs
+  real, verified framework-specific evidence (no such recognition exists
+  anywhere in this codebase today, confirmed by grep — every other
+  `pybind11`/`nanobind` mention is prose, not a binary signal check):
+  framework-specific mangled-symbol namespaces (`pybind11::`/`nb::`
+  appearing in the module's own exported/imported symbol names), an
+  RTTI `type_info` string identifiable as one of those frameworks'
+  internal registration types, or an explicit build-emitted manifest
+  field (this plan's own "optional build-emitted manifest" fallback,
+  already planned for `collect()`, extended to also carry a declared
+  framework identity) — verified against real compiled pybind11/nanobind
+  extensions before being trusted, not assumed from documentation alone.
 - **`collect(artifact, context) -> SurfaceFacts`** — the normalized binding
   surface described in "Goal & acceptance criteria" above (framework,
   version, internals identity, registration scope, declared shared native
@@ -252,6 +278,13 @@ conservatively" for older/unusual builds rather than guessing. Scope the
 first slice to whatever pybind11/nanobind versions are readily buildable
 in this repo's own test/CI toolchain, and treat broader version coverage
 as a follow-on rather than a blocker to shipping the first real detector.
+The `identify()` framework discriminator (see "Comparison semantics" above)
+carries the identical empirical risk one step earlier: no existing
+recognition to build on, so its mangled-symbol-namespace/RTTI signal
+choice needs the same real-fixture validation before being trusted as a
+gate for whether this provider runs on a module at all — a false negative
+here means the whole provider silently never fires; a false positive means
+it misclassifies an unrelated Cython/hand-written extension.
 
 ## Out of scope
 

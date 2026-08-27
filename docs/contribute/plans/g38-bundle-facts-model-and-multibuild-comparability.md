@@ -1889,26 +1889,50 @@ change" question) — but the shipped bundle still breaks at load/call time,
 and today's diff-derived detectors are starved of the evidence needed to
 say so.
 
-**The sibling-import reachability gate applies to two of the three
-detectors, not all three — verified against `_detect_provider_changed()`
-directly, not assumed.** `bundle_intra_dep_signature_changed` and
-`bundle_intra_type_changed` promote a *specific* provider-side change only
-when a sibling actually consumes the changed symbol/type (mirroring
-`bundle_intra_dep_removed`'s own established reachability gate) — for
-those two, an unscoped-but-unreached change is correctly not bundle-
-relevant. `_detect_provider_changed()` (`bundle.py`) is structurally
-different: it emits `bundle_provider_changed` whenever a mangled symbol is
-removed from one library and added, under the same name, to a different
-library in the same release — **unconditionally, with no sibling-import
-check today** — because a provider move is exactly as breaking for an
-*external* consumer statically/dynamically linked against the old
-provider's DSO as it is for a bundle sibling; ADR-023 and the current
-implementation both treat the finding as protecting that external-consumer
-case, not only an intra-bundle one. Requiring a sibling `DT_NEEDED` import
-before promoting `bundle_provider_changed` would silently drop that
-existing protection for the (arguably more common) external-consumer case
-whenever no *sibling* happens to import the moved symbol — a real
-regression relative to today's behavior, not a refinement of it.
+**Each of the three detectors has its own, already-shipped reachability
+mechanism, and none of them should be replaced with a uniform "actual
+sibling `DT_NEEDED` import" gate — verified against all three functions
+directly, correcting an earlier draft of this section that got one of the
+three wrong.**
+
+- `_detect_intra_dep_signature_changed()` genuinely does gate on an import-
+  resolution edge already: it calls `new.resolution.consumers_of(change.
+  symbol)` and `_consumer_resolves_via_provider()`, i.e. a real "does this
+  sibling actually import and resolve this exact symbol against this
+  provider" check — this part of the earlier description was correct.
+- **`_detect_intra_type_changed()` is not gated on an import edge at
+  all, and must not become so.** Verified directly: its reachability
+  computation (`consumer_reach`) is a **name-embedding match against every
+  other library's own symbol table** — "does `stripped(type_name)` appear
+  as a substring in some sibling's exported (`public_hit`) or internal
+  (`internal_hit`) symbol name" — with no call to `resolution.consumers_of`
+  or any other import-graph primitive anywhere in the function. Its own
+  docstring documents this explicitly as a "conservative heuristic," not
+  an import-based check, and states the reason: a type layout change
+  affects every mangled symbol that embeds the type's name in its
+  template/signature encoding, regardless of whether the consumer's own
+  build happens to import a *specific symbol* from the provider —
+  requiring an actual `DT_NEEDED`-resolved import edge here would be a
+  **new, strictly narrower** gate than the detector's shipped semantics,
+  dropping a case its own reachability rule is designed to catch: a
+  sibling that publicly re-exposes the provider's type in its own exported
+  signature (embedding the type name in its own mangled symbols) without
+  necessarily having an import-resolution edge to the *specific* changed
+  symbol the provider-side diff names.
+- `_detect_provider_changed()` (`bundle.py`) is a third, distinct shape
+  again: it emits `bundle_provider_changed` whenever a mangled symbol is
+  removed from one library and added, under the same name, to a different
+  library in the same release — **unconditionally, with no reachability
+  check of any kind today** — because a provider move is exactly as
+  breaking for an *external* consumer statically/dynamically linked
+  against the old provider's DSO as it is for a bundle sibling; ADR-023
+  and the current implementation both treat the finding as protecting that
+  external-consumer case, not only an intra-bundle one. Adding any
+  reachability requirement here — import-edge or otherwise — before
+  promoting `bundle_provider_changed` would silently drop that existing
+  protection for the (arguably more common) external-consumer case
+  whenever no bundle sibling happens to reach the moved symbol — a real
+  regression relative to today's behavior, not a refinement of it.
 
 **Planned fix:** maintain two separate views rather than one scoped
 `DiffResult` feeding both questions:
@@ -1923,24 +1947,32 @@ regression relative to today's behavior, not a refinement of it.
   continues to determine the standalone library's own verdict; it must
   never again be the mechanism that silently erases evidence needed to
   prove a sibling DSO no longer works.
-- **on top of the unscoped view**, `bundle_intra_dep_signature_changed`/
-  `bundle_intra_type_changed` additionally require the same bundle-specific
-  consumer/provider reachability (an actual sibling `DT_NEEDED` import, per
-  the "Graph-native detectors" reasoning already established) before
-  promoting — matching their existing, correct gated behavior, just against
-  unscoped rather than scoped evidence. `bundle_provider_changed` keeps its
-  current, unconditional promotion rule unchanged (unscoped evidence only,
-  no new reachability requirement added) — the fix for this detector is
-  purely "stop losing the underlying change to public-header scoping," not
-  a new gate.
+- **on top of the unscoped view, each detector keeps its own,
+  already-shipped reachability rule unchanged — none is replaced with a
+  uniform import-edge gate:**
+  - `bundle_intra_dep_signature_changed` continues requiring the same
+    `resolution.consumers_of()`/`_consumer_resolves_via_provider()`
+    import-resolution check it already has, just evaluated against
+    unscoped rather than scoped evidence.
+  - `bundle_intra_type_changed` continues requiring the same
+    name-embedding symbol-table match (`consumer_reach`, `public_hit`/
+    `internal_hit`) it already has — **not** an import-resolution edge —
+    also evaluated against unscoped evidence. Its existing
+    internal-vs-public demotion (`Verdict.COMPATIBLE_WITH_RISK` when the
+    match is only against a sibling's internal symbols) is unaffected.
+  - `bundle_provider_changed` keeps its current, unconditional promotion
+    rule unchanged (unscoped evidence only, no reachability requirement of
+    any kind added) — the fix for this detector is purely "stop losing the
+    underlying change to public-header scoping," not a new gate.
 
-The reachability gate matters as much as the unscoping, for the two
-detectors it applies to: an internal, headerless change with **no** sibling
-consumer must not become a `bundle_intra_dep_signature_changed`/
-`bundle_intra_type_changed` finding just because scoping no longer filters
-it — only a change reaching an actual cross-DSO import edge should promote
-for those two kinds. `bundle_provider_changed` is not subject to this
-gate, per the previous paragraph.
+The reachability requirement matters as much as the unscoping, for the two
+detectors that have one: an internal, headerless change with **no**
+sibling reaching it under that detector's *own* existing rule must not
+become a `bundle_intra_dep_signature_changed` (no resolved import edge) or
+`bundle_intra_type_changed` (no name-embedding match, public or internal)
+finding just because scoping no longer filters it. `bundle_provider_changed`
+is not subject to any reachability requirement, per the previous
+paragraph.
 
 **Acceptance tests:** (1) an internal, headerless C export consumed by a
 sibling changes from `int(int)` to `long(long)`. The standalone external
@@ -1954,6 +1986,17 @@ may demote/filter the per-library removal (unaffected, by design). The
 bundle report must still emit `bundle_provider_changed` for the move —
 confirming the fix does not regress the existing external-consumer
 protection by requiring a sibling import that this detector never
+required before. (3) an internal, headerless type changes layout in
+`libcore.so`, and a sibling `libmath.so` publicly re-exports the type by
+embedding its name in one of `libmath.so`'s own exported (mangled) symbols
+— with **no** `DT_NEEDED` import-resolution edge from `libmath.so` to the
+specific changed symbol in `libcore.so` (e.g. the type reaches `libmath.so`
+only via a shared header, not via a call to a provider symbol). The
+standalone external report may demote/filter the per-library change
+(unaffected, by design). The bundle report must still emit
+`bundle_intra_type_changed` for this case — confirming the unscoping fix
+does not regress `_detect_intra_type_changed()`'s existing name-embedding
+reachability rule by wrongly requiring an import edge this detector never
 required before.
 
 **Files & surfaces — routed through ADR-061's canonical package owners, not
@@ -1968,12 +2011,15 @@ existing legacy entry point):
   logic itself (a `compare/`-owned sibling to today's
   `_detect_intra_dep_signature_changed`/`_detect_intra_type_changed`/
   `_detect_provider_changed`, since this is "match old/new entities or
-  identify a raw change" per ADR-061's routing table) plus the
-  bundle-specific consumer/provider reachability gate — the gate applies
-  only to the `_detect_intra_dep_signature_changed`/`_detect_intra_type_
-  changed` siblings; the `_detect_provider_changed` sibling consumes the
-  unscoped view unconditionally, matching its current no-reachability-check
-  behavior (see the "Finding"/"Planned fix" sections above).
+  identify a raw change" per ADR-061's routing table) plus each sibling's
+  own, already-shipped reachability rule, unchanged in kind: an
+  import-resolution check (`resolution.consumers_of()`/
+  `_consumer_resolves_via_provider()`) for `_detect_intra_dep_signature_
+  changed`, a name-embedding symbol-table match (`consumer_reach`) for
+  `_detect_intra_type_changed` — **not** the same mechanism as its
+  sibling, despite both being "gated" in some sense — and no reachability
+  check at all for `_detect_provider_changed`, which consumes the unscoped
+  view unconditionally (see the "Finding"/"Planned fix" sections above).
 - **`abicheck/workflows/`** — coordination that decides when to invoke the
   new `compare/` matcher (alongside the existing graph-native detectors)
   and folds its output into `BundleDiffResult`, rather than this decision

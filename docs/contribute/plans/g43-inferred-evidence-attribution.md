@@ -258,23 +258,51 @@ would have no way to pass the value through). The design, corrected:
   merely from ordinary multi-target attribution). (3) `ingest_inputs_pack()`
   surfaces the new count on its own return value (mirroring how it already
   surfaces `tu_count`), and the caller that embeds an `IngestedInputs`
-  pack into a `BuildSourcePack`/`AbiSnapshot.build_source` threads the
-  count into the same structured, unsuppressible coverage-ledger shape
-  `contract_coverage_ledger.py` already establishes for G41 Phase 3's
-  assurance gate (AGENTS.md's own description: derived from evidence
-  records, not a `Change`, so ordinary suppression cannot reach it) —
-  a new `CoverageFailure`-shaped entry (or an extension of the existing
-  ledger's inputs) rather than a bespoke second unsuppressible mechanism.
-  (4) G41 Phase 3's `assurance:` contract reads this entry the same way it
-  reads every other coverage-ledger failure, so a target with one
-  genuinely unresolved TU fails the declared assurance contract even
-  though `ExtractorRecord.status` stayed `"ok"` and no `Change`-level
-  suppression could have hidden it either way. This four-step path — new
-  return tuple, new `IngestedInputs` field, ledger wiring, Phase 3
-  consumption — is the "real, if narrow, piece of new logic" the effort
-  estimate below already budgets for; it was previously described only as
-  "fold... into a structured incomplete-coverage signal" with no field
-  name or consumer named, which is what this correction fixes.
+  pack into a `BuildSourcePack`/`AbiSnapshot.build_source` carries it
+  forward on the pack itself.
+
+  **The consumer is `analysis_assurance.compute_analysis_assurance()`, not
+  `contract_coverage_ledger.py` — corrected after a fresh review round
+  confirmed the ledger is the wrong mechanism for G41 Phase 3's actual
+  scope.** `coverage_failures_for_context()` (`contract_coverage_ledger.py`)
+  is derived exclusively from a `PersistedContractContext` and returns `()`
+  outright when that context is `None` — i.e. for every ordinary check that
+  doesn't pass `--contract`. G41 Phase 3's `assurance:`/
+  `require_complete_analysis` declaration, by contrast, is a general
+  per-check floor with no `--contract` precondition at all (its own
+  `require_target_resolution`/`require_all_selected_translation_units`
+  fields apply to a plain `checks:` entry) — routing this signal through
+  the contract-only ledger would mean a normal project check using
+  `require_complete_analysis` (G41 Phase 3's own stated acceptance
+  scenario) sees a clean, empty ledger and reports complete assurance even
+  with a genuinely unmapped TU, exactly the false negative this whole
+  signal exists to prevent. `analysis_assurance.compute_analysis_assurance()`
+  is the actual general mechanism — computed unconditionally for every
+  comparison (`checker.compare()` calls it regardless of `--contract`),
+  already accepts `old_pack`/`new_pack: BuildSourcePack | None` explicitly,
+  and already rolls up "existing pipeline signals... into an
+  `AnalysisAssurance`" per its own docstring. (4)
+  `compute_analysis_assurance()` reads the new
+  `unresolved_attribution_tu_count` field off the `BuildSourcePack`(s) it's
+  given and folds it into `AnalysisAssurance` as a new, named
+  incompleteness reason (not silently absorbed into an existing status
+  value), so a target with one genuinely unresolved TU reports incomplete
+  assurance even though `ExtractorRecord.status` stayed `"ok"`. G41
+  Phase 3's `assurance:` contract then reads `AnalysisAssurance` the same
+  way it already reads every other assurance signal — no separate
+  consumption path needed, since this *is* the mechanism Phase 3 already
+  names as the engine to reuse. The `--contract`-scoped
+  `contract_coverage_ledger.py` stays untouched by this plan; it remains
+  the right, additional, unsuppressible signal for the narrower
+  public/export contract-evaluation case, but it is not — and was
+  incorrectly described here as — the general-purpose one. This four-step
+  path — new return tuple, new `IngestedInputs`/`BuildSourcePack` field,
+  `compute_analysis_assurance()` wiring, Phase 3 consumption — is the
+  "real, if narrow, piece of new logic" the effort estimate below already
+  budgets for; it was previously described only as "fold... into a
+  structured incomplete-coverage signal" with no field name or consumer
+  named, and then (incorrectly) routed to the wrong, contract-only
+  consumer — both of which this correction fixes.
 - `abicheck/buildsource/build_output.py` — no new logic expected;
   `_inferred_evidence_projection_issues()` already validates the
   `attribution_path` this plan's CLI wiring reads.
