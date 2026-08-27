@@ -291,13 +291,45 @@ this plan sketched:
      precedent for whole-library renames (`RenameCandidate`/
      `match_renamed_functions`'s exact/size/fuzzy matching cascade) — not
      a second, independent invention of rename detection for Python
-     binding modules. A real candidate identity signal: the module's own
-     resolved internals/registration identity from `identify()`/
-     `collect()` above (the same framework/version/internals-tag facts
-     this provider already extracts), which does not change merely
-     because the `.so` file was renamed. This is genuinely new matching
-     logic this phase must design and test — a renamed-module fixture is
-     a required acceptance case, not an edge case to defer.
+     binding modules.
+
+     **The candidate identity this section first proposed — the module's
+     own resolved internals/registration identity — is wrong, and a
+     second review round caught it: it is the compatibility axis being
+     *compared*, not an independent module identity, and using it as the
+     matching key breaks in both directions the rename-matching problem
+     was trying to fix.** (1) It is not module-*unique*: two genuinely
+     distinct sibling modules built with the same toolchain/pybind11
+     version legitimately share the identical internals tag — matching on
+     it risks collapsing two different modules into one graph node. (2) It
+     is not *stable* across exactly the event this detector exists to
+     catch: a module whose internals tag genuinely changes between
+     releases (a real ABI break) would, under this key, fail to match its
+     own prior-release self at all — reading as pair deletion plus an
+     unrelated pair creation, which the already-fixed
+     absent-→-disagreeing rule then wrongly gates as a "new" break, for a
+     module that was simply upgraded in place, not added. A module that is
+     *both* renamed *and* has a genuinely changed internals tag in the
+     same release is the sharpest failure case: neither the filename nor
+     the internals identity survives the transition, so nothing proposed
+     so far can match it to its old self.
+
+     This needs a genuinely independent identity signal, not reached for
+     in this pass — candidates worth evaluating, none yet validated
+     against real fixtures: the module's own Python import name/path
+     (survives a `.so` filename rename, though not a Python-level module
+     rename — a narrower but real class of stability); the set of
+     natively-registered type/class names the module exports (independent
+     of the internals *version* tag, though it can still collide across
+     modules that happen to register identically-named types); or an
+     ambiguity-safe fingerprint cascade in the literal shape
+     `binary_fingerprint.py` already establishes (exact match, then a
+     narrower heuristic, then explicit "no confident match" rather than
+     guessing) rather than a single field. This is genuinely new matching
+     logic this phase must design and test against real fixtures — a
+     renamed-module fixture (and the compounding renamed-*and*-changed
+     case above) is a required acceptance case, not an edge case to
+     defer, and this plan does not yet have a validated answer for it.
   This may be implemented as `compare()` itself internally invoking stage
   1 for both releases before diffing the two graphs, or as a separate
   bundle-level reconciliation stage this plan's own coordination

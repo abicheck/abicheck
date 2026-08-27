@@ -115,6 +115,33 @@ symbol table) and is explicit about that omission rather than leaving
 those fields as an ambiguous absence indistinguishable from "binary
 evidence wasn't collected this run."
 
+**Stating that requirement is not the same as designing where the
+"explicit" marker actually lives, and a fresh review round found this
+plan never did — the discriminator below is scoped to `build-output.json`
+only, which does not survive a dump/reload.** `BuildOutputTarget`'s new
+target-kind discriminator (below) lives in the *pre-dump* `build-output.json`
+schema — it answers "was this target declared header-only before the
+dump ran," not anything persisted in the *output* of that dump. Once a
+header-only target is actually dumped and its baseline serialized to disk
+(a `.abi.json` snapshot, or a baseline-manifest entry per G41's shape),
+nothing in `AbiSnapshot`/the baseline manifest schema records that this
+snapshot's absent ELF/PE/Mach-O fields are *expected* rather than a
+collection failure — after serialize/reload, a header-only baseline is
+indistinguishable from one where binary evidence collection simply broke,
+which is exactly the ambiguity this requirement exists to close and
+exactly the state a later `scan --against`/assurance check could
+misread as "evidence missing" rather than "no binary, by design." Closing
+this needs the discriminator threaded one layer deeper than
+`build-output.json`: a new field on `AbiSnapshot` itself (`model/`-owned,
+per this plan's own routing discipline below) recording the target kind
+the snapshot was captured under, persisted through the same baseline
+storage envelope (`storage/`-owned schema/serialization, with the
+matching schema-version bump) G41 Phase 1 already routes baseline-manifest
+work through — not a second, independent schema decision. Downstream
+consumers (assurance, baseline selection) read this field directly rather
+than inferring "header-only" from the mere absence of binary fields,
+which is precisely the ambiguous inference this requirement forbids.
+
 **Relaxing `project_targets.py` alone is not sufficient — `build-output.json`'s
 own model and validator must change too, or the target can never pass
 `project validate-build` regardless of what the project schema allows.**
@@ -216,6 +243,15 @@ inline.
   keeps only a thin delegation shim. Without this validator change landing
   somewhere in the chain, the target still fails `project validate-build`
   regardless of what `project_targets.py` allows.
+- **`abicheck/model/snapshot.py`'s `AbiSnapshot` and the baseline storage
+  envelope (`abicheck/storage/`), required in addition to the
+  `build-output.json` discriminator above, not instead of it** — see the
+  "Baseline publication" correction above: a target-kind discriminator
+  that exists only pre-dump does not survive serialize/reload, so a real
+  `AbiSnapshot` field recording the captured target kind (and its
+  persistence through the same baseline schema/version-bump G41 Phase 1
+  already routes to `storage/`) is required for a reloaded header-only
+  baseline to be distinguishable from a failed binary-evidence capture.
 - `abicheck/buildsource/baseline_publish.py` — header-only baseline
   handling (no fabricated binary fields).
 - **`actions/baseline/action.yml`/`actions/baseline/run.sh`** — required,
