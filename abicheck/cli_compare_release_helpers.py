@@ -815,10 +815,11 @@ def _fold_release_global_severity(
         # `BundleDiffResult.bundle_verdict` already honors via its own
         # `.policy` field) never reached the severity-aware exit code,
         # letting the displayed verdict and the process exit disagree.
+        # G38 Phase 16 (Codex review): `policy_file` had the identical gap.
         bundle_changes = [f.to_change() for f in bundle_result.bundle_findings]
         worst = max(
             worst,
-            compute_exit_code(bundle_changes, config, policy=bundle_result.policy),
+            compute_exit_code(bundle_changes, config, policy=bundle_result.policy, policy_file=bundle_result.policy_file),
         )
     if matrix_result is not None and matrix_result.changes:
         worst = max(

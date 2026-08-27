@@ -2308,6 +2308,26 @@ application) -- the latter deliberately lives alongside the former rather
 than in `test_pack_application.py`, since that test module carries its
 own `architecture/debt.yaml` no-growth pin too.
 
+**A second, sibling gap found by the same review round (Codex, fresh
+evidence), fixed alongside the above:** `_fold_release_global_severity()`
+(`cli_compare_release_helpers.py`) folds bundle findings into the
+severity-aware process exit code via `compute_exit_code(bundle_changes,
+config, policy=bundle_result.policy)` -- forwarding `.policy` (the fix a
+prior Phase 10 entry already made) but not `.policy_file`. Once
+`BundleDiffResult.policy_file` started being genuinely set by this phase's
+own fix, that gap became live: a `bundle_intra_dep_removed: ignore`
+override already changed the *displayed* `bundle_verdict` (a `.policy_
+file`-aware property) while the severity-aware exit code still scored the
+unmodified bare-policy classification -- the identical displayed-verdict-
+vs-exit-code disagreement Phase 10 already fixed for `.policy` alone,
+just for the field this phase added. Fixed by forwarding `policy_file=
+bundle_result.policy_file` at that one call site (a single-line edit, no
+line growth in the pinned file). Regression coverage:
+`tests/test_config_review.py::TestReleaseSeverityPolicyAndGlobal::
+test_fold_bundle_honors_the_bundle_result_own_policy_file` (confirmed to
+fail against the pre-fix code -- asserted exit 0 under the override,
+observed exit 4).
+
 ---
 
 ## Out of scope
