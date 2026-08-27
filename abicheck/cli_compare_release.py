@@ -65,7 +65,6 @@ from .cli_compare_release_helpers import (  # noqa: F401
     _release_md_changed_libraries,
     _release_md_libraries_table,
     _release_md_matrix_findings,
-    _resolve_bundle_policy_file,
     _resolve_release_headers,
     _resolve_release_severity_config,
     _run_bundle_analysis,
@@ -91,6 +90,7 @@ from .frontends.cli.options import (
     secondary_output_options,
 )
 from .model import AbiSnapshot
+from .pack_application import resolve_bundle_policy_file
 from .reporter import to_json
 
 if TYPE_CHECKING:
@@ -590,9 +590,7 @@ def _compare_release_libraries(
                 click.echo(
                     f"Not comparable: {entry['library']}: {entry['reason']}", err=True
                 )
-        if _RELEASE_VERDICT_ORDER.get(v, 0) > _RELEASE_VERDICT_ORDER.get(
-            worst_verdict, 0
-        ):
+        if _RELEASE_VERDICT_ORDER.get(v, 0) > _RELEASE_VERDICT_ORDER.get(worst_verdict, 0):
             worst_verdict = v
 
     # Cross-library coupling: a coordinated SONAME bump across the release is not
@@ -1758,7 +1756,7 @@ def compare_release_cmd(
             )
 
             bundle_result: BundleDiffResult | None = None
-            if not no_bundle_analysis:  # G38 Phase 16 -- see _resolve_bundle_policy_file
+            if not no_bundle_analysis:
                 bundle_result, worst_verdict = _collect_bundle_result(
                     library_results,
                     old_map,
@@ -1768,7 +1766,7 @@ def compare_release_cmd(
                     bundle_system_providers=bundle_system_providers,
                     bundle_cohorts=bundle_cohorts,
                     policy=policy,
-                    policy_file=_resolve_bundle_policy_file(suppress, policy, policy_file_path, pack_application),
+                    policy_file=resolve_bundle_policy_file(suppress, policy, policy_file_path, pack_application),
                 )
 
             # Strip _diff_result from entries and bump verdict for removed libraries.

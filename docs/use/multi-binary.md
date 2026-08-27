@@ -70,10 +70,14 @@ through) accepts and forwards the same parameter. The **stored
 `bundle_side_input.compare_bundle_sides()`/
 `compare_release_against_bundle_facts()` — resolves and threads a real
 `policy_file` through to it, and so does the CLI's directory/package
-`compare-release` fan-out (`cli_compare_release_helpers.py`'s
-`_resolve_bundle_policy_file()`, called from `cli_compare_release.py`
-immediately before `_collect_bundle_result`/`_run_bundle_analysis`) —
-so a `--policy custom.yaml` document's `overrides:` entry for e.g.
+`compare-release` fan-out: `pack_application.resolve_bundle_policy_file()`
+resolves it (called from `cli_compare_release.py`), and
+`cli_compare_release_helpers._collect_bundle_result()` sets it on the
+`BundleDiffResult` it already got back from `_run_bundle_analysis()`
+before reading `bundle_verdict` — `policy_file` is a plain mutable field
+and `bundle_verdict` a lazily-computed property, so this reaches the
+identical outcome without changing `_run_bundle_analysis()`'s own
+signature — so a `--policy custom.yaml` document's `overrides:` entry for e.g.
 `bundle_intra_dep_removed` now reaches the release fan-out's aggregate
 bundle verdict on every entry point. See
 [G38's plan, Phase 16](../contribute/plans/g38-bundle-facts-model-and-multibuild-comparability.md)

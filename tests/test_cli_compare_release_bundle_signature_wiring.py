@@ -582,40 +582,75 @@ class TestBundleAnalysisForwardsPolicyFile:
         assert overridden.bundle_verdict == Verdict.COMPATIBLE
         assert overridden_verdict != unmodified_verdict
 
-    def test_run_bundle_analysis_forwards_policy_file_to_analyze_bundle(
+    def test_collect_bundle_result_sets_policy_file_before_verdict_is_read(
         self, monkeypatch
     ) -> None:
-        """Direct plumbing check: ``_run_bundle_analysis`` must pass its
-        *policy_file* argument through to ``analyze_bundle`` verbatim,
-        independent of what any particular ChangeKind override happens to
-        do to a verdict."""
+        """Direct plumbing check: ``_collect_bundle_result`` must set its
+        *policy_file* argument on the ``BundleDiffResult`` it gets back from
+        ``_run_bundle_analysis`` -- and do so *before* it reads
+        ``bundle_verdict`` to fold into ``worst_verdict`` -- independent of
+        what any particular ChangeKind override happens to do to a verdict.
+        ``_run_bundle_analysis`` itself takes no ``policy_file`` parameter;
+        ``BundleDiffResult.policy_file`` is a plain mutable field, set by the
+        caller after construction (G38 Phase 16)."""
         from abicheck.policy_file import PolicyFile
 
         monkeypatch.setattr(bundle_mod, "build_bundle_snapshot", self._fake_snapshot)
-
-        from abicheck.bundle_analysis import analyze_bundle as real_analyze_bundle
-
-        captured: dict[str, object] = {}
-
-        def _spy_analyze_bundle(*args, **kwargs):
-            captured["policy_file"] = kwargs.get("policy_file")
-            return real_analyze_bundle(*args, **kwargs)
-
-        monkeypatch.setattr(
-            "abicheck.bundle_analysis.analyze_bundle", _spy_analyze_bundle
-        )
 
         old_map = {"libcore.so": Path("libcore.so")}
         new_map = dict(old_map)
         sentinel_pf = PolicyFile()
 
-        _run_bundle_analysis(
+        bundle_result, _ = _collect_bundle_result(
+            self._entries(
+                _snap("libcore.so", functions=[], elf_only_mode=True),
+                _snap("libcore.so", functions=[], elf_only_mode=True),
+            ),
             old_map,
             new_map,
-            [_diff("libcore.so")],
+            "NO_CHANGE",
             manifest_path=None,
             bundle_system_providers="",
             policy_file=sentinel_pf,
         )
 
-        assert captured["policy_file"] is sentinel_pf
+        assert bundle_result is not None
+        assert bundle_result.policy_file is sentinel_pf
+
+
+class TestResolveBundlePolicyFile:
+    """``pack_application.resolve_bundle_policy_file`` (G38 Phase 16) --
+    the primitive the ``compare-release`` fan-out uses to resolve the
+    ``PolicyFile`` bundle analysis should score against. Lives in
+    ``pack_application.py``, not ``cli_compare_release_helpers.py``,
+    because the latter (and its sibling ``cli_compare_release.py``) are
+    pinned at a no-growth line-count baseline (``architecture/debt.yaml``,
+    ADR-061); tested here rather than in ``test_pack_application.py``
+    because that file is pinned at one too (Codex review, fresh evidence)."""
+
+    def test_no_policy_file_and_no_pack_resolves_none(self) -> None:
+        from abicheck.pack_application import resolve_bundle_policy_file
+
+        assert resolve_bundle_policy_file(None, "strict_abi", None, None) is None
+
+    def test_resolves_a_real_policy_document(self, tmp_path: Path) -> None:
+        from abicheck.pack_application import resolve_bundle_policy_file
+
+        pol = tmp_path / "policy.yaml"
+        pol.write_text("base_policy: strict_abi\noverrides:\n  func_removed: ignore\n")
+        pf = resolve_bundle_policy_file(None, "strict_abi", pol, None)
+        assert pf is not None
+        assert pf.overrides[ChangeKind.FUNC_REMOVED] == Verdict.COMPATIBLE
+
+    def test_folds_a_resolved_pack_application(self, tmp_path: Path) -> None:
+        from abicheck.pack_application import (
+            PackApplication,
+            resolve_bundle_policy_file,
+        )
+
+        application = PackApplication(
+            policy_overrides={ChangeKind.BUNDLE_INTRA_DEP_REMOVED: Verdict.COMPATIBLE}
+        )
+        pf = resolve_bundle_policy_file(None, "strict_abi", None, application)
+        assert pf is not None
+        assert pf.overrides[ChangeKind.BUNDLE_INTRA_DEP_REMOVED] == Verdict.COMPATIBLE

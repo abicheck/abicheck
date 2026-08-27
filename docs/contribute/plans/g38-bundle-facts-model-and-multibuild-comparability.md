@@ -2256,24 +2256,57 @@ this phase adds no new flag, only forwards an already-resolved local
 variable one call deeper, so it is not blocked by that constraint the way
 Phase 15 is.
 
-**Shipped.** `cli_compare_release_helpers._resolve_bundle_policy_file()` is
-the new one-shot resolver (`_load_suppression_and_policy()` then, when a
-`--pack` was resolved, `policy_file_with_packs()` — the identical pattern
-`_collect_matrix_result()` already used a few functions over), called from
-`cli_compare_release.compare_release_cmd()` immediately before
-`_collect_bundle_result()`. Landed as its own function rather than inlined
-at the call site because `cli_compare_release.py` was already at (1995 of)
-the 2000-line AI-readiness hard cap — an inlined 15-line resolve-then-fold
-block would have pushed it over; the resolver itself lives in
-`cli_compare_release_helpers.py`, which had headroom, keeping the call site
-to a single expression. `docs/use/multi-binary.md`'s "release fan-out
-doesn't forward policy files" section was updated to describe the shipped
-behavior. Regression coverage: `tests/test_cli_compare_release_bundle_
-signature_wiring.py::TestBundleAnalysisForwardsPolicyFile` (a
-`policy_file` override actually demoting `BundleDiffResult.bundle_verdict`
-through `_collect_bundle_result`, and a direct plumbing check pinning that
-`_run_bundle_analysis` forwards its `policy_file` argument to
-`analyze_bundle()` verbatim).
+**Shipped**, in a materially different shape than the first pass, once
+`architecture/debt.yaml`'s no-growth pin on `cli_compare_release.py`
+*and* `cli_compare_release_helpers.py` (ADR-061 -- both are frozen at
+their exact adoption-time line count, not merely the AI-readiness
+2000-line hard cap) turned out to also gate this phase, caught by Codex
+review after the first pass landed a new resolver function inside
+`cli_compare_release_helpers.py` and grew both frozen files. Two changes
+from that finding:
+
+- **The resolver lives in `abicheck/pack_application.py`**
+  (`resolve_bundle_policy_file()`), not in `cli_compare_release_helpers.py`
+  -- the same `_load_suppression_and_policy()` then, when a `--pack` was
+  resolved, `policy_file_with_packs()` pattern `_collect_matrix_result()`
+  already uses a few functions over in `cli_compare_release.py`, just
+  homed in a module with no no-growth pin (`pack_application.py` isn't in
+  `architecture/debt.yaml` at all) rather than one that is.
+- **`_run_bundle_analysis()` itself is untouched -- no `policy_file`
+  parameter, no forwarding to `analyze_bundle()`.** `BundleDiffResult.
+  policy_file` is a plain mutable dataclass field (not frozen) and
+  `bundle_verdict` is a lazily-computed `@property` that reads it at
+  *access* time, not construction time -- so `_collect_bundle_result()`
+  (which does still gain a `policy_file` parameter, since it's the one
+  place both the resolved value and the `BundleDiffResult` it must land on
+  are both in scope) simply does `bundle_result.policy_file = policy_file`
+  right after `_run_bundle_analysis()` returns, *before* reading
+  `bundle_result.bundle_verdict` to fold into the release's `worst_verdict`
+  a few lines later. This reaches the identical outcome as threading a new
+  parameter through `_run_bundle_analysis()`/`analyze_bundle()` -- confirmed
+  by reading `BundleDiffResult.bundle_verdict`'s own implementation, which
+  is the *only* place `policy_file` is ever consulted anywhere in the
+  bundle-analysis pipeline -- while touching one frozen file's line count
+  instead of two, and touching it for only a parameter-line and a
+  one-line mutation (offset by compacting two pre-existing multi-line
+  `if`-conditions in `cli_compare_release.py`/`cli_compare_release_
+  helpers.py` down to one line each, a legitimate, behavior-preserving
+  trim of code these files already contained, so both files land at or
+  under their exact pinned baseline rather than merely under the separate
+  2000-line hard cap).
+
+`docs/use/multi-binary.md`'s "release fan-out doesn't forward policy
+files" section was updated to describe the shipped behavior. Regression
+coverage: `tests/test_cli_compare_release_bundle_signature_wiring.py`'s
+`TestBundleAnalysisForwardsPolicyFile` (a `policy_file` override actually
+demoting `BundleDiffResult.bundle_verdict` through `_collect_bundle_
+result`, with a negative control, plus a direct plumbing check pinning
+that `_collect_bundle_result` sets `policy_file` on the result *before*
+reading `bundle_verdict`) and `TestResolveBundlePolicyFile` (the resolver
+itself: no-op with nothing given, a real policy document, a resolved pack
+application) -- the latter deliberately lives alongside the former rather
+than in `test_pack_application.py`, since that test module carries its
+own `architecture/debt.yaml` no-growth pin too.
 
 ---
 
