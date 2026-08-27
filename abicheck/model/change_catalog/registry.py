@@ -36,7 +36,6 @@ which imports the legacy shim, which imports this module) and
 
 from __future__ import annotations
 
-import string
 from dataclasses import dataclass, field
 from enum import Enum
 
@@ -104,31 +103,56 @@ class ChangeKindMeta:
     description_template: str | None = None
 
 
-def _template_bad_fields(template: str) -> set[str]:
-    """Return every out-of-vocabulary reference in a format template.
+#: Representative ``str.format(**...)`` kwarg sets used to *actually execute*
+#: a ``description_template`` at registry-construction time (see
+#: ``_check_template_formats`` below), rather than re-implementing Python's
+#: own replacement-field grammar by hand. Two sets, not one: real callers
+#: (``diff_helpers.make_change()``) always pass a real ``str`` for
+#: ``symbol``, but ``name``/``old``/``new``/``detail`` are all
+#: ``str | None`` and frequently ``None`` in practice — and a format spec
+#: that works for a ``str`` value can still raise ``TypeError`` for ``None``
+#: (``format(None, ">10")`` raises; ``format(None, "")`` — i.e. a bare
+#: ``{old}`` — does not), so probing only with strings would miss that
+#: failure mode.
+_TEMPLATE_PROBE_VALUE_SETS: tuple[dict[str, str | None], ...] = (
+    {
+        "symbol": "probe",
+        "name": "probe",
+        "old": "probe",
+        "new": "probe",
+        "detail": "probe",
+    },
+    {"symbol": "probe", "name": None, "old": None, "new": None, "detail": None},
+)
 
-    ``string.Formatter().parse()`` only yields the *outer* field name of each
-    replacement field — it does not recurse into a nested replacement field
-    inside a format spec (e.g. ``{name:{bogus}}``, where ``bogus`` is
-    invisible to a single non-recursive pass) and does not itself validate a
-    conversion specifier (only ``r``/``s``/``a``/``None`` are legal for
-    ``str.format`` — anything else raises ``ValueError`` at format time, not
-    at parse time). Both gaps let a bad template pass this function's own
-    earlier, single-level check and only fail the first time
-    ``diff_helpers.make_change()`` actually formats a finding of that kind
-    (Codex review, PR #882). This recurses into every format spec that itself
-    contains a nested field, and flags an illegal conversion the same way a
-    bad field name is flagged, so both fail at registry-construction time.
+
+def _check_template_formats(template: str) -> None:
+    """Raise ``ValueError`` if ``template`` cannot be formatted by ``make_change()``.
+
+    Actually executes ``template.format(**probe)`` for each of
+    ``_TEMPLATE_PROBE_VALUE_SETS`` — the exact operation
+    ``diff_helpers.make_change()`` performs at finding-emission time — rather
+    than hand-parsing the template's replacement-field grammar. An earlier
+    version of this check used ``string.Formatter().parse()`` to inspect only
+    each replacement field's outer field name, which missed a field nested
+    inside a format spec (``{name:{bogus}}``), an illegal ``!conversion``
+    (``{name!x}`` — only ``r``/``s``/``a``/none are legal), and an outright
+    invalid format *code* (``{name:q}`` — ``q`` is not a real presentation
+    type, raising ``ValueError: Unknown format code 'q'`` only at format
+    time). Executing the real call catches all of these — and anything else
+    ``str.format`` can raise — by construction, since it does not depend on
+    this function correctly re-deriving Python's own formatting grammar
+    (Codex review, PR #882, two rounds: nested fields/conversions, then
+    format codes).
     """
-    bad: set[str] = set()
-    for _, field_name, format_spec, conversion in string.Formatter().parse(template):
-        if field_name is not None and field_name not in TEMPLATE_VOCAB:
-            bad.add(field_name)
-        if conversion is not None and conversion not in ("r", "s", "a"):
-            bad.add(f"!{conversion}")
-        if format_spec and "{" in format_spec:
-            bad |= _template_bad_fields(format_spec)
-    return bad
+    for probe in _TEMPLATE_PROBE_VALUE_SETS:
+        try:
+            template.format(**probe)
+        except Exception as exc:  # noqa: BLE001 - re-raised with kind context below
+            raise ValueError(
+                f"description_template {template!r} fails to format with "
+                f"representative values {probe!r}: {exc}"
+            ) from exc
 
 
 def _validate_references_and_defaults(e: ChangeKindMeta) -> None:
@@ -201,20 +225,17 @@ def _validate_references_and_defaults(e: ChangeKindMeta) -> None:
         # diff_helpers.make_change() formats description_template via
         # ``template.format(symbol=..., name=..., old=..., new=...,
         # detail=...)`` — a keyword-only call, so any field name outside
-        # TEMPLATE_VOCAB (including a positional `{}`/`{0}`, which that call
-        # shape can never satisfy), or an illegal conversion, or a bad field
-        # nested inside a format spec, raises at format time — but only the
-        # first time a finding of this kind is actually formatted, not at
-        # registry construction. That is D9's "valid references" property
-        # for this field, the same shape as the policy_overrides checks
-        # above (Codex review, PR #882).
-        bad_fields = _template_bad_fields(e.description_template)
-        if bad_fields:
-            raise ValueError(
-                f"{e.kind!r}: description_template references "
-                f"{sorted(bad_fields)}, outside TEMPLATE_VOCAB "
-                f"{sorted(TEMPLATE_VOCAB)}"
-            )
+        # TEMPLATE_VOCAB, a positional `{}`/`{0}` (which that call shape can
+        # never satisfy), an illegal conversion, a bad field nested inside a
+        # format spec, or an invalid format code, all raise at format time —
+        # but only the first time a finding of this kind is actually
+        # formatted, not at registry construction. That is D9's "valid
+        # references" property for this field, the same shape as the
+        # policy_overrides checks above (Codex review, PR #882).
+        try:
+            _check_template_formats(e.description_template)
+        except ValueError as exc:
+            raise ValueError(f"{e.kind!r}: {exc}") from exc
 
 
 class ChangeKindRegistry:

@@ -31,3 +31,11 @@ from .registry import (
     ChangeKindRegistry as ChangeKindRegistry,
     Verdict as Verdict,
 )
+
+__all__ = [
+    "TEMPLATE_VOCAB",
+    "VALID_BASE_POLICIES",
+    "ChangeKindMeta",
+    "ChangeKindRegistry",
+    "Verdict",
+]

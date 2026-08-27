@@ -300,7 +300,10 @@ class TestChangeKindRegistry:
         invisible to a single non-recursive pass, so a naive check would
         accept this template and only fail the first time make_change()
         actually formats it (Codex review, PR #882, fresh evidence beyond
-        the top-level check above).
+        the top-level check above). The registry validates by actually
+        executing ``.format()`` with representative values, so this is
+        caught as a plain ``KeyError`` surfaced through the wrapping
+        ``ValueError``, not by re-parsing the template's grammar by hand.
         """
         import pytest
 
@@ -329,7 +332,53 @@ class TestChangeKindRegistry:
                 description_template="Changed: {name!x}",
             ),
         ]
-        with pytest.raises(ValueError, match=r"!x"):
+        with pytest.raises(ValueError, match="conversion specifier"):
+            ChangeKindRegistry(entries)
+
+    def test_description_template_with_invalid_format_code_raises(self):
+        """An invalid format *code* (not just a bad field/conversion) is rejected.
+
+        ``string.Formatter().parse()``-based validation never actually
+        formats anything, so a syntactically well-formed but semantically
+        invalid format spec like ``{name:q}`` (``q`` is not a real
+        presentation type) passed the earlier construction-time check and
+        only raised ``ValueError: Unknown format code 'q'`` the first time
+        ``make_change()`` actually formatted a finding of that kind (Codex
+        review, PR #882, fresh evidence beyond the nested-field/conversion
+        fix above). The registry now actually executes ``.format()`` with
+        representative values at construction time, which catches this the
+        same way it catches every other formatting failure.
+        """
+        import pytest
+
+        entries = [
+            ChangeKindMeta(
+                "test_kind", Verdict.BREAKING,
+                description_template="Changed: {name:q}",
+            ),
+        ]
+        with pytest.raises(ValueError, match="format code"):
+            ChangeKindRegistry(entries)
+
+    def test_description_template_none_value_with_format_spec_raises(self):
+        """A format spec that fails for a real None value is rejected too.
+
+        ``old``/``new``/``detail`` (and ``name``) are all ``str | None`` in
+        make_change()'s real call shape and are frequently ``None`` in
+        practice — a format spec that works for a ``str`` value can still
+        raise ``TypeError`` for ``None`` (``format(None, '>10')`` raises,
+        while a bare ``{old}`` does not). Probing with only string values
+        would miss this failure mode.
+        """
+        import pytest
+
+        entries = [
+            ChangeKindMeta(
+                "test_kind", Verdict.BREAKING,
+                description_template="Changed: {old:>10}",
+            ),
+        ]
+        with pytest.raises(ValueError, match="description_template"):
             ChangeKindRegistry(entries)
 
     def test_real_registry_satisfies_reference_and_default_validation(self):

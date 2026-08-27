@@ -1213,6 +1213,34 @@ its `change_registry_<topic>.py` siblings) still has not been split into
 one, unchanged in this pass to stay within its own 2000-line adoption-debt
 ceiling.
 
+A fifth Codex review round on this PR, run against the new `model/
+change_catalog/registry.py` module, found two more issues in the same
+area. (P1) The new package's `__init__.py` re-exported five names but
+declared no `__all__`, contrary to `abicheck/model/AGENTS.md`'s own stated
+contract for a model-package `__init__.py` ("stays a re-export list with
+`__all__`") — fixed by declaring it. (P2) The `_template_bad_fields()`
+helper from the third round above still only re-implemented *part* of
+Python's formatting grammar: it never validated a format *code*, so a
+syntactically well-formed but semantically invalid spec like `{name:q}`
+(`q` is not a real presentation type) passed construction and only raised
+`ValueError: Unknown format code 'q'` the first time a finding was
+actually formatted — the third round's own fix had closed two specific
+gaps in a hand-rolled parser without closing the general problem that a
+hand-rolled parser can always have one more gap. Replaced the whole
+approach: rather than re-deriving Python's replacement-field grammar by
+hand, `_check_template_formats()` actually executes
+`template.format(**probe)` — the exact operation `make_change()` performs
+— against two representative kwarg sets (all-strings, and all-`None` for
+everything but `symbol`, since `name`/`old`/`new`/`detail` are frequently
+`None` in real invocations and a format spec that works for a `str` can
+still raise `TypeError` for `None`). This catches every one of the earlier
+gaps (unknown field, positional field, nested bad field, illegal
+conversion, invalid format code) as a side effect of correctness rather
+than as a list of individually-discovered cases, and removes the
+`string.Formatter().parse()`-based `_template_bad_fields()` helper
+entirely. Two new test cases cover the format-code gap and the
+None-with-format-spec gap.
+
 The fourth, "complete metadata", is not enforced, and is a *content* gap
 rather than a missing check: `ChangeKindMeta.impact`/`.description_template`
 are both declared optional, and today 48 of 397 real entries have no
