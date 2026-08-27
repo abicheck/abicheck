@@ -1358,8 +1358,13 @@ in a private `types.MappingProxyType` view (not a plain private dict — a
 plain dict there would itself be reachable one attribute access away via
 `entry.policy_overrides._data["unknown"] = ...`, a second review round
 caught after the first `Mapping` rewrite landed). `Mapping` supplies no
-`__setitem__`/`update`/`pop`/`__or__`/`__ior__` at all (those are
-`MutableMapping` only), so `entry.policy_overrides["x"] = y` and `|=` both
+`__setitem__`/`update`/`pop`/etc. at all — those are `MutableMapping`-only
+mixin methods, and this class implements only the read-only `Mapping`
+protocol. Separately, *neither* ABC defines `__or__`/`__ior__` at all (a
+later review round corrected an earlier revision of this same paragraph
+that mis-attributed them to `MutableMapping`): PEP 584's `|`/`|=` are a
+`dict`-specific addition to the concrete type, not a mixin any ABC
+provides. Either way, `entry.policy_overrides["x"] = y` and `|=` both
 raise from Python's own attribute/operator resolution with no per-method
 overriding needed; `__init__` and `__setattr__` are still overridden to
 close the two remaining reflection-level gaps (re-invoking `__init__`

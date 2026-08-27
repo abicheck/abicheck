@@ -128,10 +128,16 @@ class _ImmutableDict(Mapping[str, Verdict]):
     review, PR #882, fresh evidence; the earlier "wrap a mutable dict, only
     guard access through this class's own methods" framing missed exactly
     this). ``Mapping`` supplies no ``__setitem__``/``update``/``pop``/etc.
-    at all (those are ``MutableMapping`` only) and no ``__or__``/``__ior__``,
-    so ``entry.policy_overrides["x"] = y`` and ``entry.policy_overrides |=
-    {...}`` both raise ``TypeError`` from Python's own attribute/operator
-    resolution — no per-method overriding needed to block them. Two methods
+    at all — those are ``MutableMapping``-only mixin methods, and this
+    class implements only the read-only ``Mapping`` protocol. Separately,
+    neither ABC defines ``__or__``/``__ior__`` at all (Codex review, PR
+    #882, fresh evidence corrected an earlier revision of this docstring
+    that mis-attributed them to ``MutableMapping``): PEP 584's `|`/`|=`
+    are a ``dict``-specific addition to the concrete type, not a mixin any
+    ABC provides. Either way, ``entry.policy_overrides["x"] = y`` and
+    ``entry.policy_overrides |= {...}`` both raise ``TypeError`` from
+    Python's own attribute/operator resolution — no per-method overriding
+    needed to block them. Two methods
     are still overridden below to close the remaining reflection-level
     gaps: ``__init__`` guards against ``entry.policy_overrides.__init__
     ({...})`` re-invoking it directly on an already-constructed instance
