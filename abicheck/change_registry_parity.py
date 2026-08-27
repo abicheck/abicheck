@@ -62,12 +62,17 @@ PARITY_EXTENSION_ENTRIES: list[ChangeKindMeta] = [
 
     # ── DWARF layout coverage ──────────────────────────────────────────────
     _E("dwarf_info_missing", _C,
-       impact="The new binary was built without debug info (no -g), so "
-              "DWARF-derived struct/enum layout comparisons couldn't run "
-              "for it — layout changes in this release, if any, went "
-              "unchecked. Not itself an ABI break; recompile with -g and "
-              "re-scan to restore full coverage.",
-       description_template="New binary has no DWARF debug info — struct/enum layout comparison was skipped. Recompile with -g to enable."),
+       impact="The new binary carries no DWARF debug info — this detector "
+              "only checks whether DWARF is present, not why it's absent, "
+              "so this fires identically whether the binary was never "
+              "compiled with -g or was compiled with -g and then stripped "
+              "during packaging. Either way, DWARF-derived struct/enum "
+              "layout comparisons couldn't run for it, so layout changes "
+              "in this release, if any, went unchecked. Not itself an ABI "
+              "break; ensure debug info is present (compiled in, or "
+              "supplied separately, e.g. via a matching unstripped/"
+              "debuginfo build) and re-scan to restore full coverage.",
+       description_template="New binary has no DWARF debug info — struct/enum layout comparison was skipped. Ensure debug info is present (compiled in or supplied separately) to enable."),
 
     # ── DWARF advanced (Sprint 4) — calling-convention/layout signals with
     #    no dedicated detector wired yet (declared for future use; see
@@ -247,12 +252,20 @@ PARITY_EXTENSION_ENTRIES: list[ChangeKindMeta] = [
               "observe meaningful, non-zero data there.",
        description_template="Reserved field put into use: {name}::{old} → {new}"),
     _E("param_restrict_changed", _C,
-       impact="A parameter's restrict qualifier was added or removed; the "
-              "calling convention is unchanged, but the compiler's "
-              "aliasing assumptions for that argument differ, which can "
-              "change optimization behavior for code recompiled against "
-              "the new signature — restrict is a compiler hint, not a "
-              "binary-layout change.",
+       impact="A parameter's restrict qualifier was added or removed "
+              "(direction recorded in this finding's own detail); restrict "
+              "is a compiler hint affecting how the library's own "
+              "implementation of the function is optimized, not the "
+              "calling convention. The two directions carry different "
+              "risk: when restrict is ADDED, the new library's own "
+              "compiled code may now assume the parameter doesn't alias "
+              "other arguments — an already-compiled caller that still "
+              "passes aliased pointers for that parameter can hit "
+              "undefined behavior in the new callee's optimized code, with "
+              "no recompilation of the caller involved. When restrict is "
+              "REMOVED, the callee simply becomes more conservative "
+              "(drops an optimization assumption), which is safe for every "
+              "caller.",
        description_template="Parameter restrict qualifier {detail}: {name} param {old}"),
     _E("param_became_va_list", _C,
        impact="A parameter's type became va_list; source recompiled "

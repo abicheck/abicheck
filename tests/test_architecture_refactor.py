@@ -333,6 +333,31 @@ class TestChangeKindRegistry:
             dict.__setitem__(entry.policy_overrides, "unknown", Verdict.API_BREAK)
         assert dict(entry.policy_overrides) == {"plugin_abi": Verdict.COMPATIBLE}
 
+    def test_policy_overrides_blocks_private_data_attribute_bypass(self):
+        """Neither the private storage nor the attribute itself is reachable.
+
+        ``entry.policy_overrides._data["unknown"] = Verdict.API_BREAK`` (or
+        reassigning ``_data``/``_initialized`` wholesale) would otherwise
+        mutate the mapping one attribute access away from every other
+        blocked path — "no public mutator" only protects the ``Mapping``
+        interface, not a private attribute a caller can still reach (Codex
+        review, PR #882, fresh evidence). Fixed by storing ``_data`` as a
+        ``types.MappingProxyType`` (so item assignment on it also raises)
+        and overriding ``__setattr__`` to reject any attribute write once
+        construction has completed.
+        """
+        import pytest
+
+        entry = ChangeKindMeta(
+            "test_kind", Verdict.BREAKING,
+            policy_overrides={"plugin_abi": Verdict.COMPATIBLE},
+        )
+        with pytest.raises(TypeError):
+            entry.policy_overrides._data["unknown"] = Verdict.API_BREAK
+        with pytest.raises(TypeError):
+            entry.policy_overrides._data = {"unknown": Verdict.API_BREAK}
+        assert dict(entry.policy_overrides) == {"plugin_abi": Verdict.COMPATIBLE}
+
     def test_policy_overrides_immutability_survives_serialization(self):
         """The immutable policy_overrides still round-trips like an ordinary dict.
 

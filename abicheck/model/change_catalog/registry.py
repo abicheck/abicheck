@@ -40,6 +40,7 @@ import string
 from collections.abc import Iterable, Iterator, Mapping
 from dataclasses import dataclass, field
 from enum import Enum
+from types import MappingProxyType
 from typing import Any
 
 
@@ -117,19 +118,28 @@ class _ImmutableDict(Mapping[str, Verdict]):
     for anything else. This class implements the read-only
     ``collections.abc.Mapping`` protocol (``__getitem__``/``__iter__``/
     ``__len__``, which is all ``Mapping`` needs to derive ``__contains__``/
-    ``keys()``/``values()``/``items()``/``get()``) over a private ``dict``
-    stored in ``self._data`` — reachable only through this class's own
-    methods, none of which mutate it. ``Mapping`` supplies no
-    ``__setitem__``/``update``/``pop``/etc. at all (those are
-    ``MutableMapping`` only) and no ``__or__``/``__ior__``, so
-    ``entry.policy_overrides["x"] = y`` and ``entry.policy_overrides |=
+    ``keys()``/``values()``/``items()``/``get()``) over ``self._data`` — a
+    private ``types.MappingProxyType`` view (not a plain ``dict``: a plain
+    dict there would itself be reachable and mutable one attribute access
+    away, via ``entry.policy_overrides._data["unknown"] = ...`` — Codex
+    review, PR #882, fresh evidence; the earlier "wrap a mutable dict, only
+    guard access through this class's own methods" framing missed exactly
+    this). ``Mapping`` supplies no ``__setitem__``/``update``/``pop``/etc.
+    at all (those are ``MutableMapping`` only) and no ``__or__``/``__ior__``,
+    so ``entry.policy_overrides["x"] = y`` and ``entry.policy_overrides |=
     {...}`` both raise ``TypeError`` from Python's own attribute/operator
-    resolution — no per-method overriding needed to block them. The one
-    method still overridden below, ``__init__``, guards against
-    ``entry.policy_overrides.__init__({...})`` re-invoking it directly on an
-    already-constructed instance (the same shape of bypass a plain dict
-    subclass has, just for this class's own constructor instead of
-    ``dict.__init__``).
+    resolution — no per-method overriding needed to block them. Two methods
+    are still overridden below to close the remaining reflection-level
+    gaps: ``__init__`` guards against ``entry.policy_overrides.__init__
+    ({...})`` re-invoking it directly on an already-constructed instance
+    (the same shape of bypass a plain dict subclass has, just for this
+    class's own constructor instead of ``dict.__init__``), and
+    ``__setattr__`` guards against reassigning ``_data``/``_initialized``
+    directly (``entry.policy_overrides._data = {...}``), which would
+    otherwise swap in an unvalidated mapping wholesale without going
+    through ``__init__`` at all — the two guards share the same
+    ``_initialized`` flag, so together they reject every attribute write on
+    a real instance after its one legitimate ``__init__`` call.
 
     ``isinstance(x, dict)`` does not hold for this class, unlike the earlier
     dict-subclass design — checked against every consumer of
@@ -159,11 +169,37 @@ class _ImmutableDict(Mapping[str, Verdict]):
         # otherwise silently replace ``_data`` with unvalidated content —
         # ``__init__`` is legitimately invoked exactly once per real object,
         # by ``ChangeKindMeta.__post_init__`` and by ``__reduce__``'s
-        # reconstruction below, always on a brand-new instance.
+        # reconstruction below, always on a brand-new instance. This also
+        # doubles as the guard ``__setattr__`` below relies on.
         if getattr(self, "_initialized", False):
             raise TypeError("policy_overrides is immutable after construction")
-        self._data = dict(source)
+        # ``_data`` is itself a ``types.MappingProxyType`` view over a
+        # private dict with no other reference anywhere, not a plain dict —
+        # a plain dict here would still be reachable and mutable through
+        # ``entry.policy_overrides._data["unknown"] = ...`` (Codex review,
+        # PR #882, fresh evidence): "no public mutator" only protects the
+        # ``Mapping`` interface, not an attribute one attribute-access away.
+        # This has none of MappingProxyType's earlier pickling problems —
+        # those applied to the *field's* own type (asdict()/deepcopy()/
+        # pickle handling a bare mappingproxy value), not to something used
+        # purely as this class's own private storage, which its own
+        # __reduce__/__deepcopy__ above already convert to a plain dict
+        # before handing off to pickle/deepcopy's machinery.
+        self._data = MappingProxyType(dict(source))
         self._initialized = True
+
+    def __setattr__(self, name: str, value: Any) -> None:
+        # Blocks the sibling bypass to the one above: reassigning ``_data``
+        # directly (``entry.policy_overrides._data = {...}``) would swap in
+        # an unvalidated mapping wholesale, without going through
+        # ``__init__`` at all (Codex review, PR #882, fresh evidence).
+        # ``_initialized`` is only ever ``True`` after ``__init__`` has
+        # already set both slots, so this rejects every later attribute
+        # write on a real instance while still allowing ``__init__`` itself
+        # to set them the first time.
+        if getattr(self, "_initialized", False):
+            raise TypeError("policy_overrides is immutable after construction")
+        object.__setattr__(self, name, value)
 
     def __getitem__(self, key: str) -> Verdict:
         return self._data[key]
