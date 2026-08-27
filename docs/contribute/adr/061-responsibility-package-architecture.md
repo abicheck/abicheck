@@ -1057,10 +1057,16 @@ handful this note originally sampled before concluding classification was
 `environment_matrix`, `compat.abicc_dump_import`, `snapshot_io`,
 `symvers_metadata`, `btf_metadata`, `ctf_metadata`, `provenance`,
 `pe_metadata`, `macho_metadata`, `contract_relevance_types`, `pdb_metadata`,
-`pdb_utils`, `pdb_model`, `post_manifest`, and — missing from an earlier
-revision of this list, a ninth Codex review round caught it — `serialization`
-(line 54). `api_types` (also imported, line 36) is deliberately *not* on this
-list any more, for the opposite reason `serialization` was added to it:
+`pdb_utils`, `pdb_model`, `post_manifest`, `serialization` (line 54, added
+after a ninth Codex review round caught its omission), and —
+`from . import X` bare-relative imports, which the AST-walk script used to
+build this list silently dropped by only handling `from .module import X`,
+a thirteenth Codex review round caught it — `qualified_name_segments`
+(line 35) and `dumper_cache` (line 658). Both fixed in the same pass:
+verified with a corrected scanner, and cross-checked against the full
+classified-layer set to confirm no third instance of the same scanner bug
+survives in this list. `api_types` (also imported, line 36) is deliberately
+*not* on this list, for the opposite reason `serialization` was added to it:
 `api_types` is one of `modules.yaml`'s two `public_root_surfaces`, the
 explicit exemption `check_architecture.py`'s `unclassified-import` check
 carves out — so importing it is not actually a blocker the way every other
