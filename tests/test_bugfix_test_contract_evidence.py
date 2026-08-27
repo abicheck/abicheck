@@ -203,18 +203,32 @@ class TestStructuralRequirement:
         "path",
         [
             "tests/conftest.py",
-            "contrib/abicheck-clang-plugin/tests/conftest.py",
             "tests/some_subdir/conftest.py",
         ],
     )
     def test_a_modified_conftest_is_evidence(self, path: str) -> None:
-        """A `conftest.py` at any depth is accepted despite not matching
-        `test_*.py`/`*_test.py` naming — pytest auto-discovers and applies
-        every `conftest.py` to every test in its own directory and below,
-        unconditionally, so widening a parametrized fixture there can
-        genuinely exercise new test runs with no `test_*.py` file touched
-        at all (Codex review, PR #885, fifth round)."""
+        """A `conftest.py` at any depth *under the root `tests/` tree* is
+        accepted despite not matching `test_*.py`/`*_test.py` naming —
+        pytest auto-discovers and applies every `conftest.py` under its
+        `testpaths = ["tests"]` rootdir to every test in its own directory
+        and below, unconditionally, so widening a parametrized fixture
+        there can genuinely exercise new test runs with no `test_*.py`
+        file touched at all (Codex review, PR #885, fifth round)."""
         assert gate.adds_or_modifies_a_test([("M", path)], _content_diff(path))
+
+    def test_a_conftest_outside_the_root_tests_tree_is_not_evidence(self) -> None:
+        """Negative control: `contrib/abicheck-clang-plugin/tests/` is a
+        real, sibling `tests/` directory in this repo, but this
+        repository's own `testpaths = ["tests"]` means pytest never
+        collects it (its own tests are invoked directly with `python
+        <path> ...`, never through pytest — see `_STANDALONE_TEST_RUNNERS`)
+        — so a `conftest.py` placed there is never loaded by pytest at
+        all, and crediting it as evidence would be exactly the same
+        unearned credit `_is_collected_python_test_module` exists to
+        reject (Codex review, PR #885, ninth round)."""
+        path = "contrib/abicheck-clang-plugin/tests/conftest.py"
+        assert gate.is_test_path(path), f"{path} should still read as a test path"
+        assert not gate.adds_or_modifies_a_test([("M", path)], _content_diff(path))
 
     def test_conftest_is_still_not_credited_when_unchanged(self) -> None:
         """Negative control: naming `conftest.py` isn't a free pass on its
