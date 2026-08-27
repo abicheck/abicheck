@@ -86,3 +86,23 @@ def test_registry_setstate_revalidates_a_pre_reduce_legacy_pickle():
     restored_bad = object.__new__(ChangeKindRegistry)
     with pytest.raises(ValueError, match="impact must be non-empty"):
         restored_bad.__setstate__({"_entries": {"bad_kind": bad_entry}})
+
+
+def test_registry_setstate_refuses_to_mutate_an_already_initialized_instance():
+    """``__setstate__`` is a public method, callable directly on a live registry.
+
+    Codex review, PR #882, fresh evidence: calling it on an
+    already-constructed instance (not only the blank instance the
+    unpickler creates) would silently replace that instance's
+    ``_entries`` in place — on the production ``REGISTRY`` this would
+    desync it from every classification set derived from it at import
+    time. Guarded the same way ``ChangeKindMeta.__setstate__`` guards
+    its own instance.
+    """
+    ok_entry = ChangeKindMeta("ok_kind", Verdict.BREAKING, impact="i")
+    reg = ChangeKindRegistry([ok_entry])
+    with pytest.raises(TypeError, match="already-initialized"):
+        reg.__setstate__({"_entries": {}})
+    # The guard must reject before doing anything -- the live registry's
+    # own state is untouched.
+    assert set(reg.entries) == {"ok_kind"}

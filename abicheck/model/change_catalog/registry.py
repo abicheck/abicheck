@@ -711,7 +711,24 @@ class ChangeKindRegistry:
         itself: ``__reduce__`` returns a 2-tuple with no state component,
         so pickle reconstructs directly via ``ChangeKindRegistry(entries)``
         and this method never runs for that path.
+
+        Being a public method, it is directly callable on an already-
+        constructed instance too — including the live, import-time-built
+        production ``REGISTRY`` — not only on the blank instance the
+        unpickler creates via ``cls.__new__(cls)``. Calling it there would
+        re-run ``__init__`` on an object already in use, silently
+        replacing its ``_entries`` in place while every classification
+        set derived from the *original* ``REGISTRY`` at import time
+        (``BREAKING_KINDS`` and siblings in ``checker_policy.py``) stays
+        frozen and now disagrees with it. Guarded out the same way
+        ``ChangeKindMeta.__setstate__`` guards its own instance (Codex
+        review, PR #882, fresh evidence).
         """
+        if hasattr(self, "_entries"):
+            raise TypeError(
+                "ChangeKindRegistry.__setstate__ refuses to overwrite an "
+                "already-initialized instance"
+            )
         entries_by_kind = state.get("_entries", {}) if isinstance(state, dict) else {}
         self.__init__(list(entries_by_kind.values()))  # type: ignore[misc]
 
