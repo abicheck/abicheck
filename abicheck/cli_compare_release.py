@@ -70,7 +70,6 @@ from .cli_compare_release_helpers import (  # noqa: F401
     apply_release_gate_pack,
     reject_bundle_facts_out_collision,
     reject_bundle_facts_out_dir_collision,
-    stamp_release_evaluation_config,
     write_bundle_facts_out,
 )
 from .cli_options import (
@@ -91,6 +90,7 @@ from .frontends.cli.options import (
 )
 from .model import AbiSnapshot
 from .reporter import to_json
+from .workflows.release_evaluation import stamp_release_evaluation_config
 
 if TYPE_CHECKING:
     from .compile_context import CompileContext
@@ -200,9 +200,7 @@ def _run_compare_pair(
         ),
         compile_context=compile_context,
     )
-    # PR B effective-config parity -- see stamp_release_evaluation_config's
-    # own docstring for why.
-    stamp_release_evaluation_config(result.diff, pack_application)
+    stamp_release_evaluation_config(result.diff, pack_application)  # PR B parity
     return result
 
 

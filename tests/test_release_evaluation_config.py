@@ -1,0 +1,237 @@
+# Copyright 2026 Nikolay Petrov
+# SPDX-License-Identifier: Apache-2.0
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+"""CLI cleanup phase two, "PR B" effective-config parity, first slice.
+
+Split out of ``test_effective_config_digest.py`` rather than appended to it
+(ADR-061 no-growth debt ledger: that file, like ``cli_compare_release.py``/
+``cli_compare_release_helpers.py``, is a ``debt.yaml``-tracked legacy module
+already sitting at its adoption baseline, so a new behavior axis gets its own
+focused module instead of growing it) -- see ``abicheck.workflows.
+release_evaluation.stamp_release_evaluation_config``'s own docstring for what
+this covers and why.
+
+Duplicates the three small fixture helpers (`_identity`/
+`_minimal_evaluation_config`/`_result`) from ``test_effective_config_digest.
+py`` rather than importing them from that sibling test module -- each test
+file in this suite is conventionally self-contained.
+"""
+
+from __future__ import annotations
+
+from pathlib import Path
+from unittest.mock import patch
+
+from abicheck.change_registry_types import Verdict
+from abicheck.checker import DiffResult
+from abicheck.compatibility_evaluation_config import (
+    AssuranceConfig,
+    CompatibilityEvaluationConfig,
+    CompatibilityPolicyConfig,
+    ContractConfig,
+    EvidenceConfig,
+    GateConfig,
+    ImmutableIdentity,
+    SurfaceConfig,
+)
+from abicheck.contract_relevance_types import ContractMode
+from abicheck.effective_config_digest import (
+    effective_config_digest,
+    effective_config_fields,
+)
+
+
+def _identity(
+    identity_id: str, version: int = 1, sha256: str = "digest"
+) -> ImmutableIdentity:
+    return ImmutableIdentity(id=identity_id, version=version, sha256=sha256)
+
+
+def _minimal_evaluation_config(**overrides) -> CompatibilityEvaluationConfig:
+    fields = dict(
+        contract=ContractConfig(mode=ContractMode.PUBLIC),
+        evidence=EvidenceConfig(),
+        surface=SurfaceConfig(),
+        assurance=AssuranceConfig(),
+        policy=CompatibilityPolicyConfig(base=_identity("strict_abi")),
+        gate=GateConfig(),
+    )
+    fields.update(overrides)
+    return CompatibilityEvaluationConfig(**fields)
+
+
+def _result(**overrides) -> DiffResult:
+    base = dict(
+        old_version="1.0",
+        new_version="2.0",
+        library="libtest.so.1",
+        verdict=Verdict.NO_CHANGE,
+    )
+    base.update(overrides)
+    return DiffResult(**base)
+
+
+class TestReleaseFanOutStampsResolvedConfig:
+    """CLI cleanup phase two, "PR B" effective-config parity: the directory/
+    package release fan-out's own per-library digest stayed at the baseline
+    tier even under ``--pack``, because ``cli_compare_release._run_compare_
+    pair`` never stamped the release's already-resolved
+    ``CompatibilityEvaluationConfig`` onto each library's own ``DiffResult``
+    the way ``cli_compare_receipt.record_resolved_config`` does for
+    single-pair ``compare`` -- see ``effective_config_digest``'s own module
+    docstring, "Known, documented gap" section, for the full description.
+    Closed by threading the resolved config through
+    ``pack_application.PackApplication.resolved_config`` (set once, for the
+    whole release, by the ``pack_application()`` factory both paths share)
+    and stamping it in ``_run_compare_pair`` via
+    ``abicheck.workflows.release_evaluation.stamp_release_evaluation_config``,
+    right after ``service.run_compare`` returns.
+    """
+
+    @staticmethod
+    def _snap(version: str = "1.0"):
+        from abicheck.model import AbiSnapshot
+
+        return AbiSnapshot(library="libfoo.so", version=version)
+
+    def _run_compare_pair_with(self, pack_application, tmp_path: Path):
+        from abicheck.api_types import CompareResult
+
+        fake_diff = _result()
+        fake_result = CompareResult(
+            diff=fake_diff,
+            old_snapshot=self._snap("1.0"),
+            new_snapshot=self._snap("2.0"),
+        )
+        old = tmp_path / "old.so"
+        new = tmp_path / "new.so"
+        old.write_bytes(b"")
+        new.write_bytes(b"")
+        with (
+            patch("abicheck.service.run_compare", return_value=fake_result),
+            patch(
+                "abicheck.cli_compare_release._normalize_binary_input",
+                side_effect=lambda p: (p, None),
+            ),
+        ):
+            from abicheck.cli_compare_release import _run_compare_pair as _rcp
+
+            returned = _rcp(
+                old,
+                new,
+                [],
+                [],
+                [],
+                [],
+                "1.0",
+                "2.0",
+                "c++",
+                None,
+                "strict_abi",
+                None,
+                None,
+                None,
+                pack_application=pack_application,
+            )
+        assert returned is fake_result
+        return fake_diff
+
+    def test_no_pack_application_leaves_evaluation_config_unset(
+        self, tmp_path: Path
+    ) -> None:
+        diff = self._run_compare_pair_with(None, tmp_path)
+        assert diff.evaluation_config is None
+
+    def test_pack_with_no_resolved_config_leaves_evaluation_config_unset(
+        self, tmp_path: Path
+    ) -> None:
+        """A hand-built ``PackApplication`` with no ``resolved_config`` (the
+        pre-this-fix shape, and what every direct-construction test/caller
+        that doesn't go through the ``pack_application()`` factory still
+        produces) must not be treated as "config resolved" -- staying at the
+        baseline tier is correct for it, not a regression."""
+        from abicheck.pack_application import PackApplication
+
+        diff = self._run_compare_pair_with(
+            PackApplication(policy_overrides={}), tmp_path
+        )
+        assert diff.evaluation_config is None
+
+    def test_pack_application_stamps_the_resolved_config(self, tmp_path: Path) -> None:
+        from abicheck.pack_application import PackApplication
+
+        config = _minimal_evaluation_config()
+        diff = self._run_compare_pair_with(
+            PackApplication(policy_overrides={}, resolved_config=config),
+            tmp_path,
+        )
+        assert diff.evaluation_config is config
+
+    def test_stamped_config_reaches_the_rich_tier_digest(self) -> None:
+        """End to end from the stamped attribute to the actual digest --
+        proving the fix closes the documented gap, not just that an
+        attribute got set."""
+        result = _result()
+        result.evaluation_config = _minimal_evaluation_config()
+        fields = effective_config_fields(
+            result, severity_config=None, exit_code_scheme="legacy"
+        )
+        assert fields["_tier"] == "contract"
+
+    def test_two_pack_revisions_with_identical_assignments_differ_by_identity(
+        self,
+    ) -> None:
+        """The exact scenario the documented gap names: two pack *revisions*
+        that happen to project the same current field assignments must still
+        produce different digests, because pack *identity* (id/version/
+        sha256), not just the values it currently assigns, is part of the
+        rich tier's ``packs`` field (``ContractConfig.packs`` here -- one of
+        the three sections, alongside policy/gate, that carry a selected
+        pack's ``ImmutableIdentity``)."""
+        rev1 = _minimal_evaluation_config(
+            contract=ContractConfig(
+                mode=ContractMode.PUBLIC,
+                packs=(_identity("ignore_removals", version=1),),
+            )
+        )
+        rev2 = _minimal_evaluation_config(
+            contract=ContractConfig(
+                mode=ContractMode.PUBLIC,
+                packs=(_identity("ignore_removals", version=2),),
+            )
+        )
+        result1, result2 = _result(), _result()
+        result1.evaluation_config = rev1
+        result2.evaluation_config = rev2
+        fields1 = effective_config_fields(
+            result1, severity_config=None, exit_code_scheme="legacy"
+        )
+        fields2 = effective_config_fields(
+            result2, severity_config=None, exit_code_scheme="legacy"
+        )
+        assert fields1["_tier"] == fields2["_tier"] == "contract"
+        assert effective_config_digest(fields1) != effective_config_digest(fields2)
+
+    def test_pack_application_factory_populates_resolved_config(self) -> None:
+        """Direct unit test of the shared factory both single-pair `compare`
+        (via `resolve_and_apply`) and the release fan-out (via
+        `resolve_release_pack_application`) call -- confirms the field is
+        wired at the source, not only through `_run_compare_pair`'s own
+        stamp."""
+        from abicheck.pack_application import pack_application
+
+        config = _minimal_evaluation_config()
+        application = pack_application(config, policy_file=None)
+        assert application.resolved_config is config
