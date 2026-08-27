@@ -11,6 +11,7 @@
       "path": "abicheck/model",
       "may_import": [],
       "legacy_paths": [
+        "abicheck/buildsource/graph_facts.py",
         "abicheck/buildsource/model.py",
         "abicheck/buildsource/pack.py",
         "abicheck/change_registry_types.py",
@@ -24,6 +25,9 @@
       "path": "abicheck/storage",
       "may_import": [
         "model"
+      ],
+      "legacy_paths": [
+        "abicheck/buildsource/build_cache.py"
       ]
     },
     "extract": {
@@ -38,9 +42,7 @@
         "abicheck/buildsource/archive_graph.py",
         "abicheck/buildsource/baseline_publish.py",
         "abicheck/buildsource/baseline_set.py",
-        "abicheck/buildsource/build_cache.py",
         "abicheck/buildsource/build_config_schema.py",
-        "abicheck/buildsource/build_diff.py",
         "abicheck/buildsource/call_graph.py",
         "abicheck/buildsource/callback_graph.py",
         "abicheck/buildsource/clang_ast_run.py",
@@ -51,7 +53,6 @@
         "abicheck/buildsource/entity_identity.py",
         "abicheck/buildsource/entity_resolver.py",
         "abicheck/buildsource/export_accounting.py",
-        "abicheck/buildsource/graph_facts.py",
         "abicheck/buildsource/graph_impact.py",
         "abicheck/buildsource/graph_reconcile.py",
         "abicheck/buildsource/header_compile_context.py",
@@ -67,8 +68,6 @@
         "abicheck/buildsource/pack_shape.py",
         "abicheck/buildsource/providers.py",
         "abicheck/buildsource/risk.py",
-        "abicheck/buildsource/source_diff.py",
-        "abicheck/buildsource/source_graph_findings.py",
         "abicheck/buildsource/template_graph.py",
         "abicheck/buildsource/template_graph_extractor.py",
         "abicheck/buildsource/template_graph_value_decls.py",
@@ -88,6 +87,8 @@
         "model"
       ],
       "legacy_paths": [
+        "abicheck/buildsource/build_diff.py",
+        "abicheck/buildsource/source_diff.py",
         "abicheck/confidence.py",
         "abicheck/diff_build_config.py",
         "abicheck/diff_cxx_rules.py",
