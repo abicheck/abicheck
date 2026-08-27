@@ -26,7 +26,7 @@ from __future__ import annotations
 import importlib.util
 import subprocess
 import sys
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 import pytest
 import tomllib
@@ -157,6 +157,25 @@ class TestStructuralRequirement:
         assert not gate.adds_or_modifies_a_test(
             [("T", "tests/test_x.py")], _content_diff("tests/test_x.py")
         )
+
+    @pytest.mark.parametrize(
+        "path",
+        sorted(gate._STANDALONE_TEST_RUNNERS),
+    )
+    def test_a_modified_standalone_test_runner_is_evidence(self, path: str) -> None:
+        """The naming-convention check alone is too narrow the other way:
+        these files are real, CI-executed tests (invoked directly as
+        `python <path> ...` by a workflow, never collected by pytest), so
+        they must count as evidence despite not matching `test_*.py`/
+        `*_test.py` (Codex review, PR #885 — the reported gap was
+        `contrib/abicheck-clang-plugin/tests/conformance.py`/`scan_flow.py`
+        specifically, blocking any fix confined to the clang facts plugin)."""
+        assert not (
+            PurePosixPath(path).name.startswith("test_") or path.endswith("_test.py")
+        ), (
+            f"{path} already matches the naming convention — remove it from the allowlist"
+        )
+        assert gate.adds_or_modifies_a_test([("M", path)], _content_diff(path))
 
 
 def _git_repo_with(tmp_path: Path, *, second_commit: dict[str, str]) -> Path:

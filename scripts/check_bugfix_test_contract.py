@@ -171,6 +171,39 @@ _DOC_SUFFIXES = (".md", ".rst")
 #: genuine test change. Verified against tests/golden/*.md.
 _TEST_DATA_DIR = "golden"
 
+#: `.py` files under a `tests/` tree that are real, executable tests despite
+#: not matching pytest's `test_*.py`/`*_test.py` collection convention — each
+#: is invoked directly as `python <path> ...` by a checked-in CI workflow,
+#: not through pytest, so `_is_collected_python_test_module()`'s naming check
+#: alone would credit zero test evidence to a fix confined to editing one of
+#: these (Codex review, PR #885 — the reported gap was the two clang-plugin
+#: entries; the `examples-validation`/nightly entries are the same bug class,
+#: found by re-checking every `python .../tests/*.py` invocation across
+#: `.github/workflows/*.yml`, not just the reported pair). Allowlist-and-grow,
+#: mirroring `CLI_CONTRACT_ALLOWLIST`/`ENGINE_CLI_BOUNDARY_ALLOWLIST`'s own
+#: convention in `check_ai_readiness.py`: a new standalone runner belongs here
+#: only once it is genuinely invoked directly by a workflow step, verified the
+#: same way (grep `.github/workflows/*.yml` for `python .../<name>.py`).
+_STANDALONE_TEST_RUNNERS = frozenset(
+    {
+        # contrib/abicheck-clang-plugin/tests/ — clang-plugin.yml's C.6
+        # differential-conformance and scan-flow legs (test_public_roots_
+        # diagnostic.py, the third script that workflow runs, already
+        # matches the test_*.py convention and needs no entry here).
+        "contrib/abicheck-clang-plugin/tests/conformance.py",
+        "contrib/abicheck-clang-plugin/tests/scan_flow.py",
+        # tests/ — examples-validation.yml and examples-validation-nightly.yml
+        # run these directly as the real-binary example-catalog validation
+        # lane (as opposed to test_abi_examples.py's own pytest-collected
+        # ground-truth checks, which import some of the same helpers).
+        "tests/validate_examples.py",
+        "tests/check_validate_results.py",
+        "tests/check_stripped_fp.py",
+        "tests/example_shards.py",
+        "tests/summarize_validate_results.py",
+    }
+)
+
 
 def _is_conditional_subject(path: str) -> bool:
     """Can this path carry the runtime behaviour a conditional asks about?
@@ -626,7 +659,15 @@ def _is_collected_python_test_module(path: str) -> bool:
     review). Scoped to `.py` files only — a non-`.py` file under `tests/`
     is still recognised as test *data* (fixtures, golden snapshots) by
     `is_test_path()`'s own docstring, unaffected by this narrower check.
+
+    The naming convention alone is also too narrow in the other direction: a
+    handful of real, CI-executed tests are invoked directly as `python
+    <path> ...` by a checked-in workflow rather than collected by pytest, so
+    they never needed `test_*.py` naming in the first place — see
+    `_STANDALONE_TEST_RUNNERS`'s own docstring (Codex review, PR #885).
     """
+    if path in _STANDALONE_TEST_RUNNERS:
+        return True
     return path.endswith(".py") and (
         PurePosixPath(path).name.startswith("test_") or path.endswith("_test.py")
     )
