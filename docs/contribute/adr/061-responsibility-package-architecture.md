@@ -1409,11 +1409,35 @@ not four, and this is the complete list checked directly against every
 second time. So the third
 co-prerequisite collapses back to what the fourteenth round already scoped
 for `ChangeKind`: `ReclassifyRule` needs no split of its own, only a second
-model-owned protocol mirroring the first, once its two real blockers
-(`checker_policy.py`'s split, and that split reaching `reclassify.py`'s own
-imports) are done. Neither satisfied by deferral — worth recording for
-whoever does that, but neither is a protocol in place of doing it, and
-`policy_file.py` staying unclassified for now is unchanged.
+model-owned protocol mirroring the first.
+
+**A twenty-first Codex review round found even that was one prerequisite
+too many, checked directly against `check_architecture.py`'s own gating
+logic rather than assumed**: this note previously also required
+"`checker_policy.py`'s split reaching `reclassify.py`'s own imports" — on
+the reasoning that once `ChangeKind` moves out of `checker_policy.py`,
+`reclassify.py`'s pre-existing imports of it would need to land somewhere
+`reclassify.py` is still allowed to import from. That reasoning assumed
+`reclassify.py`'s own imports are checked at all, which they aren't:
+`check_architecture.py`'s per-file loop computes `source_layer =
+_source_layer_for(path, ...)` and `continue`s immediately when it's
+`None` (`scripts/check_architecture.py:717-719`) — `reclassify.py` carries
+no `path`/`legacy_paths` entry in `modules.yaml` today (the whole reason it
+is "deliberately unclassified"), so `source_layer` is `None` for it and
+**none** of its own imports, from `checker_policy` or anywhere else, are
+ever checked — neither `unclassified-import` (which additionally requires
+`migrated_source`) nor `dependency-direction` (which requires a *classified*
+source). Neither `checker_policy.py`'s split nor anything else changes that,
+since `reclassify.py` staying unclassified is unaffected by what layer
+`checker_policy.py`'s own contents end up in. So the second protocol has
+exactly one real prerequisite, not two: `checker_policy.py`'s split, moving
+`ChangeKind` somewhere the *protocol module itself* (physically placed
+under the already-migrated `model/`, hence `migrated_source`) can import
+without tripping `unclassified-import` — `reclassify.py`'s own, separate,
+never-checked imports of `checker_policy` are not a blocker at all.
+Not satisfied by deferral — worth recording for whoever does that, but not
+a protocol in place of doing it, and `policy_file.py` staying unclassified
+for now is unchanged.
 
 Reclassifying
 `policy_file.py`/`suppression.py` as `compare` instead was rejected too:
@@ -1465,15 +1489,17 @@ or its own consumers, per the fourth Codex round above). **Decided, but not
 yet actionable**: the `Protocol`-based facade is the *selected* mechanism for
 whenever `policy_file.py`'s ownership is finally resolved — see the
 paragraph above ("the protocol is the better mechanism to use *once*..."),
-not a third rejected option; it is blocked today only by two co-prerequisites
-that are now both fully scoped — `checker_policy.py`'s split (for
-`ChangeKind`), and that same split reaching `reclassify.py`'s own
-`checker_policy` imports — plus a second, mirroring protocol
-(`ReclassifyRuleProtocol`) for `ReclassifyRule`'s own consumed methods,
-verified buildable (see above) rather than needing its own unsolved design.
-Not by any objection to the Protocol mechanism itself. **Not decided**:
-`policy_file.py`'s final layer ownership, and therefore *when* the two
-co-prerequisites get satisfied and the Protocol pair actually lands.
+not a third rejected option; it is blocked today only by one
+co-prerequisite — `checker_policy.py`'s split (for `ChangeKind`; its own
+imports never need to reach `reclassify.py`, which stays exempt from every
+architecture check by remaining unclassified regardless of what layer
+`checker_policy.py` lands in, per `check_architecture.py`'s own gating
+logic) — plus a second, mirroring protocol (`ReclassifyRuleProtocol`) for
+`ReclassifyRule`'s own consumed methods, verified buildable (see above)
+rather than needing its own unsolved design. Not by any objection to the
+Protocol mechanism itself. **Not decided**:
+`policy_file.py`'s final layer ownership, and therefore *when* that
+co-prerequisite gets satisfied and the Protocol pair actually lands.
 "Deliberately unclassified" is this ADR's recorded
 *treatment* of the module for now, not its destination — the module stays
 outside `architecture/modules.yaml`'s classified set, `check_architecture.py`
@@ -1482,7 +1508,7 @@ named here as a known open question (`checker_policy.py`'s own
 model-vs-policy split) rather than resolved. Since this ADR is the
 authoritative ownership contract, a reader relying on it for `policy_file.py`
 should read this as: no physical move is safe today, no `may_import` edge
-exists for it yet, and the two co-prerequisites above are what unblock
+exists for it yet, and the co-prerequisite above is what unblocks
 deciding its owner, not a settled classification to build on.
 
 **A tenth Codex review round named the risk every number in this whole
