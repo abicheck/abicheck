@@ -8,6 +8,8 @@
   header files: ...`) — the check already existed for real execution but
   was never run on the `--dry-run` path. Both paths now share the identical
   check, raised before either branch, so `--dry-run` never predicts success
-  for an invocation the real run would immediately fail. Closes the last
+  for an invocation the real run would immediately fail. A source-only dump
+  (no `SO_PATH`) is unaffected — `-H` is already documented as inert there
+  (warn, never reject), and this fix does not change that. Closes the last
   open case of CLI cleanup phase two's PR 3C prerequisite 3
   (`docs/contribute/plans/cli-cleanup-phase-two.md`).
