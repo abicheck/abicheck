@@ -164,10 +164,27 @@ value instead of a side boolean:
   `Fact.not_collected()` (never `Fact.present([])` — the old field's
   "blanket empty" value on an unreliable snapshot is not a confirmed
   absence, exactly the "real but WRONG data" distinction that flag's own
-  docstring already draws). The reliability flags themselves become
-  write-only after this phase (kept only so pre-Fact[...] snapshots still
-  load correctly) and are deleted in Phase 10 once no pre-conversion
-  snapshot needs to be read anymore — not before.
+  docstring already draws). **The reliability flags themselves become
+  write-only after this phase, but are not deleted at Phase 10 — an
+  earlier draft of this plan said they were, and that contradicts Phase
+  8's own commitment.** ADR-062 Phase 1's v1-v25 import adapter is
+  explicitly a *permanent* capability (`ProjectSnapshot` must always be
+  able to import any snapshot version this project ever shipped, not only
+  versions newer than some cutoff), and a pre-`Fact[...]` snapshot's
+  reliability flags are the *only* evidence that lets the importer tell a
+  trustworthy empty value apart from one that was never collected — once
+  deleted, that information is gone from the input entirely, and no
+  later code can reconstruct it. So `clang_vtable_facts_reliable`/
+  `clang_va_list_facts_reliable` (and every sibling this pattern applies
+  to) stay in `serialization.py`'s read path, and in the wire format, for
+  exactly as long as a pre-`Fact[...]` schema version remains importable
+  — which, per Phase 8's own commitment, is indefinitely. What *does*
+  go away is the *domain*-side boolean field (`AbiSnapshot.clang_vtable_
+  facts_reliable` as a live, queryable attribute on a freshly-built
+  snapshot) — nothing in the current codebase reads it once every
+  consumer reads `Fact[...]` instead, so the attribute itself is the one
+  piece of this that is genuinely removable, not the wire-level decode
+  logic that still has to run for a historical input.
 
 **Writing a freshly-extracted snapshot back out needs its own fix, not
 just a reader-side backfill.** `serialization.snapshot_to_dict()` calls
@@ -736,11 +753,20 @@ disagreement *about identity specifically* — Phase 2's `EntityId`/
 concern.
 
 **Files.** `abicheck/extract/semantic_normalizer.py` (new);
-`dumper_castxml.py`/`dumper_clang.py`/`dwarf_snapshot.py` (narrowed to
-raw-fact production, each losing its own copy of anonymous-marker/
-closure-identity/namespace-join logic as that logic moves to the shared
-normalizer); `name_classification.py` (its `_ANONYMOUS_TYPE_MARKERS` and
-sibling helpers become the normalizer's, used once).
+`dumper_castxml.py`/`dumper_clang.py`/`dwarf_snapshot.py`/`pdb_metadata.py`
+(narrowed to raw-fact production, each losing its own copy of
+anonymous-marker/closure-identity/namespace-join logic as that logic moves
+to the shared normalizer); `btf_metadata.py`/`ctf_metadata.py` (their own
+`BtfType`/`CtfType`/`_TypeResolver` pairs narrowed the same way — included
+per ADR-063 D9 on the same architectural grounds as the other
+type-declaration-producing backends, even though neither has a specific
+AGENTS.md incident motivating it yet); `name_classification.py` (its
+`_ANONYMOUS_TYPE_MARKERS` and sibling helpers become the normalizer's,
+used once). `elf_metadata.py`/`pe_metadata.py`/`macho_metadata.py` are
+explicitly **not** touched by this phase — see ADR-063 D9's own
+"deliberately excluded, not an oversight" note: binary-symbol-table
+extraction has no type spelling/scope/template-argument concern for this
+normalizer to canonicalize in the first place.
 
 **Tests.** Every existing per-backend regression test that currently
 proves "backend X handles construct Y" is kept and re-targeted at the
@@ -792,17 +818,31 @@ severity mapping have already run on it — exactly the per-change
 granularity ADR-042 already records `_is_failure` as needing, and an
 aggregate whole-report gate/compatibility value cannot answer "does
 *this* change fail" for a report where only some category blocks. The fix
-this phase makes is narrower than "read `RunOutcome` instead of `changes`":
-each `Change` gains the already-resolved `compatibility_decision`/gate
-contribution as a carried field (mirroring how `contract_context.py`
-already persists a per-finding decision, per ADR-049 D1) during
-resolution, and `junit_report.py`'s `_is_failure` reads *that* per-finding
-field instead of re-deriving severity inline from raw `Change` data —
-`RunOutcome` is what the report's own top-level `compatibility_decision`
-summary still renders from, unchanged. "Stops computing inline" means
-`_is_failure` stops re-running severity/policy logic itself, not that it
-starts asking the aggregate report outcome a per-test-case question it
-cannot answer.
+this phase makes is narrower than "read `RunOutcome` instead of `changes`",
+and it does **not** reuse `Change.compatibility_decision` for this — a
+first draft of this phase proposed exactly that and a reviewer correctly
+rejected it: `compatibility_decision` is `None`/`NOT_EVALUATED` by design
+on an ordinary, non-`--contract` run, and for a `--contract` run's
+excluded findings, meaning "policy did not run on this finding," per
+ADR-049 D1's own documented contract — reading it as a pass/fail signal
+for JUnit would either read every ordinary breaking change as an
+unclassified non-failure, or require universally populating a field whose
+whole point is to distinguish "evaluated" from "not evaluated," silently
+erasing that distinction from the existing JSON/SARIF output every
+external consumer already relies on. Instead, each `Change` gains a new,
+separate field — `gate_classification` (or similarly named; always
+resolved, never `None`, independent of whether contract evaluation ran) —
+carrying exactly the pass/fail/severity-category decision `_is_failure`
+needs, computed once during resolution (mirroring how `contract_context.py`
+already persists its own, separately-scoped per-finding decision, per
+ADR-049 D1 — a sibling field, not a reuse of that one). `junit_report.py`'s
+`_is_failure` reads *that* new field instead of re-deriving severity
+inline from raw `Change` data; `compatibility_decision` keeps its existing
+meaning and existing callers completely unchanged. `RunOutcome` is what
+the report's own top-level `compatibility_decision` summary still renders
+from, unchanged. "Stops computing inline" means `_is_failure` stops
+re-running severity/policy logic itself, not that it starts asking the
+aggregate report outcome a per-test-case question it cannot answer.
 
 **`junit_report.py` is not the only remaining inline exit-code consumer —
 a first draft of this phase missed the multi-target aggregate path
@@ -930,7 +970,16 @@ is removed because the cycle it works around no longer exists.
 `checker_types`, `suppression.py`, `reclassify.py`, or `reporter`, per
 ADR-063 D10): the selector grammar (`symbol`/`symbol_pattern`/
 `type_pattern`/`member_name`/`namespace`/`entity_namespace`/
-`cause_namespace`/`source_location`/`change_kind`/`expires`) extracted from
+`cause_namespace`/`source_location`/`change_kind`/`binding`/`expires`) —
+**`binding` is listed explicitly here because a first draft of this phase
+omitted it**, even though both `Suppression` and `ReclassifyRule` already
+expose it (ELF symbol-linkage matching, `Suppression._matches_binding`)
+and existing tests cover weak/global binding rules; dropping it from the
+shared grammar would either lose a supported selector outright or leave
+its matching logic as a second, un-consolidated implementation sitting
+next to the new leaf module — exactly what this phase exists to remove,
+not reintroduce. The corrected list above is every selector field either
+class currently supports, not a subset — extracted from
 `suppression.Suppression`'s existing `selector_matches()` — already the
 real, shared logic `reclassify.py` calls today, just reached through the
 import-cycle workaround rather than a dependency-free module. Once the
@@ -987,9 +1036,14 @@ not new design.
 
 **Checklist (one row per phase, each a real PR removing code):**
 
-- Phase 0: the raw `None`/`bool` reliability-flag fields Phase 0 added
-  `Fact[...]` siblings for are removed once every consumer reads the
-  `Fact[...]` field.
+- Phase 0: the *domain-side* `AbiSnapshot.clang_*_facts_reliable` boolean
+  attributes are removed once every consumer reads the `Fact[...]` field
+  instead. **Not removed, ever, per Phase 0's own corrected design**: the
+  wire-level decode of those same keys for a pre-`Fact[...]` persisted
+  snapshot — `serialization.py`'s legacy-schema backfill path is a
+  permanent reader, the same way every other schema-version branch in
+  that module is, for as long as ADR-062's v1-v25 import adapter promises
+  to keep importing that version at all.
 - Phase 1: `cli_dump_helpers.render_dump_dry_run()`'s independent
   resolution logic; the legacy `-p`/`--compile-db` auto-match's standalone
   code path once the fold fully subsumes it (already partly done per
@@ -1035,9 +1089,20 @@ history. This checklist is re-run, and re-verified, at the end of the
   this plan (`Fact[T]`, `EntityId`, `AnalysisPlan`, `RunOutcome`) is
   internal until a specific phase's own PR explicitly promotes it, per
   ADR-063's own "Explicitly not done by this ADR" section.
-- **No schema version bump beyond what ADR-062 already plans.** Phase 8
-  follows ADR-062's own phase boundaries; this plan does not add an
-  independent schema migration.
+- **No *`ProjectSnapshot`/storage-v2* schema version bump beyond what
+  ADR-062 already plans — this is narrower than "no schema bump at all,"
+  and an earlier draft of this section stated it too broadly, contradicting
+  Phase 0's own design a few hundred lines earlier.** Phase 8 follows
+  ADR-062's own phase boundaries for the `ProjectSnapshot`/DTO schema
+  specifically; it adds no independent migration *there*. This plan does,
+  deliberately, bump two schema versions ADR-062 does not own: Phase 0
+  bumps `serialization.SCHEMA_VERSION` (the pre-existing `AbiSnapshot`
+  schema — the same counter every prior `clang_*_facts_reliable` flag
+  addition already bumped, v21/v23/etc.), and Phase 7 adds new report-JSON
+  fields alongside the unchanged `exit_code`. Both are real,
+  intentional, additive migrations to formats that predate and are
+  independent of ADR-062's `ProjectSnapshot` — not a contradiction of this
+  bullet, which is scoped to the one schema ADR-062 actually owns.
 - **No attempt to resolve every AGENTS.md "Known gaps" entry.** Several
   entries there are accepted, permanent limitations (e.g. the reverted
   linkage-blind-removal attempts, the `type_base_changed` evidence gap

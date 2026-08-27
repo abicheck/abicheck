@@ -423,18 +423,37 @@ ADR-062's phasing; it is an added constraint on Phase 1/2's implementation.
 
 ### D9 — A canonical semantic IR between raw backend output and the checker
 
-CastXML, direct-clang, DWARF, PDB, BTF/CTF, and ELF-symbol extraction each
-produce `RawXFacts`; a single `SemanticNormalizer` (not duplicated per
-backend) turns each into one `SemanticIR` that the comparison layer
-consumes. Canonicalization of type spelling, scope, template arguments,
-anonymous/lambda naming, CV-qualification, and identity happens exactly
-once, downstream of the backend, rather than once per backend — closing
-the repeated-fix pattern AGENTS.md documents across more than a dozen
-numbered findings in the `type_reachability.py`/`dumper_clang.py`/
-`dumper_castxml.py` entries, each an instance of one backend normalizing a
-construct the other backend handles differently (or not at all). A backend
-adapter's contract narrows to "what did the tool actually say" — it no
-longer decides how abicheck identifies a C++ entity.
+CastXML, direct-clang, DWARF, PDB, and BTF/CTF (the Linux kernel debug
+formats — each has its own type representation, `BtfType`/`CtfType`, and
+its own `_TypeResolver`, genuinely exposed to the identical class of
+scope/spelling-normalization disagreement the header-AST/DWARF backends
+already have, even though no specific AGENTS.md incident has been filed
+against them yet) each produce `RawXFacts`; a single `SemanticNormalizer`
+(not duplicated per backend) turns each into one `SemanticIR` that the
+comparison layer consumes. Canonicalization of type spelling, scope,
+template arguments, anonymous/lambda naming, CV-qualification, and
+identity happens exactly once, downstream of the backend, rather than once
+per backend — closing the repeated-fix pattern AGENTS.md documents across
+more than a dozen numbered findings in the `type_reachability.py`/
+`dumper_clang.py`/`dumper_castxml.py` entries, each an instance of one
+backend normalizing a construct the other backend handles differently (or
+not at all). A backend adapter's contract narrows to "what did the tool
+actually say" — it no longer decides how abicheck identifies a C++ entity.
+
+**ELF/PE/Mach-O binary-symbol extraction is deliberately excluded from
+this normalizer, not an oversight of scope.** A first draft of this
+decision named it alongside the type-declaration-producing backends above;
+review correctly pointed out the implementation plan never actually
+migrated it, and on inspection there is nothing there *to* migrate in the
+same sense: `elf_metadata.py`/`pe_metadata.py`/`macho_metadata.py` extract
+symbol-table facts (a name string, a binding, a section/offset) with no
+AST-level type declaration, template argument, or anonymous/lambda-naming
+concern of the kind `SemanticNormalizer` exists to canonicalize — there is
+no cross-backend type-spelling disagreement to close for a binary symbol
+table, because there is no type spelling there at all. Scoped out
+explicitly here rather than left as a silently-unmigrated item the
+implementation plan's own completeness check would otherwise have to
+explain away.
 
 ### D10 — Selector/identity/availability as dependency-free leaf packages
 
@@ -536,8 +555,19 @@ their already-accepted decisions generalize and finish converging:
   explicitly promotes one to public API (and updates ADR-055's typed
   surface accordingly).
 - No existing persisted schema (snapshot v25, `BundleFacts` v1, baseline
-  set manifests) changes as a result of accepting this ADR. Schema
-  migrations are ADR-062's own concern and happen on ADR-062's phasing.
+  set manifests) changes as a result of *accepting this ADR alone* —
+  before any of its phases land, nothing about today's schemas is
+  different. Once the implementation plan's phases do land, several
+  schema migrations are explicit and intentional parts of specific
+  phases, stated there and nowhere hidden: Phase 0 bumps
+  `serialization.SCHEMA_VERSION` for the new `Fact[...]` fields (the
+  same counter every prior reliability-flag addition already bumped),
+  Phase 7 adds structured `RunOutcome` fields to the report JSON
+  alongside the unchanged `exit_code`, and Phase 8 is ADR-062's own
+  `ProjectSnapshot`/DTO schema migration, on ADR-062's own phasing,
+  unchanged by this ADR. This bullet is about the decision to *adopt*
+  ADR-063, not a blanket freeze on every schema touched by its own
+  implementation.
 - No existing exit code, JSON field, or CLI flag changes meaning as a
   result of accepting this ADR alone; D6/D7's changes are internal until a
   phase's own plan states an external contract change and the usual
