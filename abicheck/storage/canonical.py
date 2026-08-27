@@ -56,6 +56,7 @@ __all__ = [
     "CAPTURE_METADATA_KEY",
     "canonical_form",
     "canonical_json",
+    "raw_digest",
     "semantic_digest",
     "strip_capture_metadata",
 ]
@@ -374,6 +375,16 @@ def semantic_digest(value: Any, *, algorithm: str = "sha256") -> str:
         sort_keys=True,
         separators=(",", ":"),
     ).encode("ascii")
+    return _digest_from_payload(payload, algorithm=algorithm)
+
+
+def _digest_from_payload(payload: bytes, *, algorithm: str) -> str:
+    """Shared `<algorithm>:<hex>` formatting for an already-encoded payload.
+
+    Used by both :func:`semantic_digest` (JSON-encoded content) and
+    :func:`raw_digest` (raw binary content) so the two rules below can't
+    drift between two independent copies:
+    """
     digester = hashlib.new(algorithm, payload)
     if digester.digest_size == 0:
         # SHAKE and friends are extendable-output functions: `hashlib.new`
@@ -403,3 +414,30 @@ def semantic_digest(value: Any, *, algorithm: str = "sha256") -> str:
     # property of the content, so nothing incidental to the caller may reach
     # it.
     return f"{digester.name}:{digester.hexdigest()}"
+
+
+def raw_digest(
+    payload: bytes | bytearray | memoryview, *, algorithm: str = "sha256"
+) -> str:
+    """Content digest of a raw binary payload -- D7's counterpart to
+    :func:`semantic_digest` for content :func:`canonical_form` cannot
+    represent at all (it raises ``TypeError`` on any binary buffer, by
+    design -- its own docstring already directs a caller with such a
+    payload here: "store binary payloads as raw objects and reference them
+    by digest"). Hashes the payload's bytes directly: no JSON encoding, and
+    no capture-metadata stripping, since a raw payload carries no such
+    structure to strip.
+
+    Same ``"<algorithm>:<hex>"`` format and the same fixed-digest-size and
+    canonical-spelling rules as `semantic_digest` (via the shared
+    `_digest_from_payload`), so a caller building an `ObjectRef` for a raw
+    artifact and the `ObjectStore` that stores it always agree on its
+    address.
+    """
+    if not _is_binary_buffer(payload):
+        raise TypeError(
+            f"{type(payload).__name__} is not a binary buffer; raw_digest "
+            "hashes bytes-like payloads only -- use semantic_digest for "
+            "JSON-shaped content"
+        )
+    return _digest_from_payload(bytes(payload), algorithm=algorithm)

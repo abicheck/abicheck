@@ -19,7 +19,11 @@ from typing import Any
 import pytest
 from hypothesis import given, strategies as st
 
-from abicheck.storage.canonical import semantic_digest, strip_capture_metadata
+from abicheck.storage.canonical import (
+    raw_digest,
+    semantic_digest,
+    strip_capture_metadata,
+)
 from abicheck.storage.package import (
     MANIFEST_RELPATH,
     ArtifactRef,
@@ -651,6 +655,42 @@ class TestObjectStoreContract:
         store = InMemoryObjectStore()
         content = {"declarations": [1, 2, 3]}
         assert store.put(content) == semantic_digest(content)
+
+    def test_put_stores_a_raw_binary_payload(self) -> None:
+        """`canonical_form`/`semantic_digest` reject a binary buffer outright
+        (by design -- it has no JSON-shaped structure to canonicalize), but
+        this package's own job description is "stores and retrieves bytes a
+        caller already produced" (`AGENTS.md`) -- so a raw extractor
+        artifact (a `bytes`/`bytearray`/`memoryview` payload, per D7) must
+        still be storable. Before the fix, `put()` routed every payload
+        through `strip_capture_metadata`/`canonical_form`, so a raw payload
+        raised `TypeError` instead of being stored.
+        """
+        store = InMemoryObjectStore()
+        payload = b"\x00\x01\xffnot json at all"
+        digest = store.put(payload)
+        assert digest == raw_digest(payload)
+        assert store.has(digest)
+        assert store.get(digest) == payload
+
+    @pytest.mark.parametrize("wrapper", [bytearray, memoryview])
+    def test_put_accepts_bytearray_and_memoryview(self, wrapper: Any) -> None:
+        store = InMemoryObjectStore()
+        payload = wrapper(b"raw bytes")
+        digest = store.put(payload)
+        assert digest == raw_digest(bytes(payload))
+        assert store.get(digest) == b"raw bytes"
+
+    def test_a_raw_payload_reference_resolves_through_the_store(self) -> None:
+        """The D7 round-trip guarantee for a raw artifact, mirroring
+        `test_a_reference_built_from_a_stored_digest_resolves` below for
+        JSON-shaped content.
+        """
+        store = InMemoryObjectStore()
+        payload = b"raw extractor artifact bytes"
+        digest = store.put(payload)
+        ref = ObjectRef(kind="raw_refs", digest=digest)
+        assert store.get(ref.digest) == payload
 
     def test_put_honors_a_non_default_algorithm(self) -> None:
         """An `ObjectRef` built with a non-default algorithm (`object_relpath`

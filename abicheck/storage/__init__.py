@@ -41,6 +41,7 @@ from .canonical import (
     CAPTURE_METADATA_KEY,
     canonical_form,
     canonical_json,
+    raw_digest,
     semantic_digest,
     strip_capture_metadata,
 )
@@ -108,6 +109,7 @@ __all__ = [
     "check_reader_compatibility",
     "elf_symbol_occurrence",
     "object_relpath",
+    "raw_digest",
     "semantic_digest",
     "strip_capture_metadata",
     "variant_ref_relpath",

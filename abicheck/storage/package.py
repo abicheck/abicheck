@@ -27,11 +27,10 @@ one content-addressed layout::
       indexes/index.sqlite     # optional, rebuildable, never canonical truth
 
 This module is the *logical* half of that layout: the manifest and ref
-records a reader assembles before it decides what section content to load,
-the path-layout functions that let every writer agree on where a given
-record or object lives, and :class:`ObjectStore` — the digest-addressed
-`put`/`get`/`has` abstraction D7's "stored once, referenced by digest"
-evidence is built on.
+records a reader assembles before deciding what section content to load,
+the path-layout functions every writer agrees on, and :class:`ObjectStore`
+— the digest-addressed `put`/`get`/`has` abstraction D7's "stored once,
+referenced by digest" evidence is built on.
 
 It is deliberately **not** the physical half. ADR-059's envelope
 (compression detection, atomic writes, decompression-bomb limits) stays in
@@ -39,24 +38,21 @@ It is deliberately **not** the physical half. ADR-059's envelope
 package's own `AGENTS.md`, a migrated layer may import only `model`, so this
 module could not wrap `snapshot_io` even if that were the right layering.
 :class:`ObjectStore` is therefore a protocol, not a filesystem client: a
-real, `.tar.zst`-transportable store is a concrete implementation that lives
-outside this package, built over both this module and `snapshot_io`, the
-same way `InMemoryObjectStore` here is built over nothing but this module's
-own digest function. Nothing in this module reads or writes a byte of an
-actual file.
+real, `.tar.zst`-transportable store is a concrete implementation built over
+both this module and `snapshot_io`, the same way `InMemoryObjectStore` is
+built over nothing but this module's own digest functions. Nothing here
+reads or writes a byte of an actual file.
 
 `PackageManifest`, `VariantRef`, and `ArtifactRef` are the in-memory
 document model of `manifest.json`'s content plus the per-variant and
 per-artifact ref documents it names — one Python object graph, split across
 files only by whatever writer chooses to serialize it that way. Splitting
 the *object model* to match today would be premature: no writer exists yet
-to honor the split, and a single in-memory root that a future writer fans
-out to disk is strictly easier to get right than three independently-loaded
-models kept consistent by convention. `variant_ref_relpath`/
-`artifact_ref_relpath`/`object_relpath` already fix the path convention such
-a writer must follow, so this module and a future filesystem-backed
-implementation cannot independently invent two different layouts for the
-same D6 directory.
+to honor the split, and one in-memory root a future writer fans out to disk
+is easier to get right than three independently-loaded models kept
+consistent by convention. `variant_ref_relpath`/`artifact_ref_relpath`/
+`object_relpath` already fix the path convention such a writer must follow,
+so a future filesystem-backed implementation can't invent a second layout.
 """
 
 from __future__ import annotations
@@ -68,8 +64,14 @@ from dataclasses import dataclass, field
 from types import MappingProxyType
 from typing import Any, Protocol, runtime_checkable
 
-from .canonical import canonical_form, semantic_digest, strip_capture_metadata
+from .canonical import (
+    canonical_form,
+    raw_digest,
+    semantic_digest,
+    strip_capture_metadata,
+)
 from .guards import (
+    binary_buffer as _is_binary_buffer,
     decision_key as _decision_key,
     identity_text as _identity_text,
     instance_of as _instance_of,
@@ -103,9 +105,8 @@ _OBJECT_DIR = "objects"
 
 #: D8's section kinds. Membership in `ArtifactRef.sections` is deliberately
 #: not restricted to this set at the data-model level — a new section kind
-#: is a producer decision, not something this leaf should have to be
-#: re-released to allow — but it is the vocabulary D8 names, kept here for
-#: reference and for a caller that wants to validate against it explicitly.
+#: is a producer decision, not something this leaf should gate — but it is
+#: the vocabulary D8 names, kept here for a caller that wants it explicitly.
 SECTION_KINDS = (
     "binary",
     "declarations",
@@ -718,34 +719,30 @@ class ObjectStore(Protocol):
     `storage/AGENTS.md`'s "Permitted imports"), so it cannot itself import
     `snapshot_io`. A filesystem-backed store lives outside this package.
 
-    `put`/`get` operate on a value's *logical* content — whatever
-    `abicheck.storage.canonical.semantic_digest` accepts — so the digest a
-    caller computes to build an `ObjectRef` and the digest the store assigns
-    can never disagree, the way they would if the store hashed its own
-    serialization of the value instead of sharing this module's canonical
-    form.
+    `content` is either a value `semantic_digest` accepts (JSON-shaped
+    facts) or a raw binary buffer (`bytes`/`bytearray`/`memoryview`, hashed
+    via `raw_digest`) -- this package's job is "stores and retrieves bytes
+    a caller already produced" (`AGENTS.md`), not just JSON facts (Codex
+    review). Either way the digest a caller uses to build an `ObjectRef`
+    and the digest the store assigns can never disagree.
     """
 
     def put(self, content: Any, *, algorithm: str = "sha256") -> str:
         """Store `content`, returning its content digest.
 
-        Storing the same logical content twice must return the same digest
-        and must not create a second copy. `algorithm` is forwarded to
-        `semantic_digest` as-is, so an `ObjectRef` built with a non-default
-        algorithm round-trips through this same call (Codex review).
+        Storing the same content twice must return the same digest and must
+        not create a second copy. `algorithm` is forwarded to
+        `semantic_digest`/`raw_digest` as-is (Codex review).
         """
         ...
 
     def get(self, digest: str) -> Any:
         """The stored object's hash-domain form -- what `digest` addresses.
 
-        This is `canonical_form(content)` with the reserved root `capture`
-        block removed (`strip_capture_metadata`), matching what
-        `semantic_digest` hashed: two values differing only in `capture`
-        share a digest by design (D3), so a store keeps at most one and must
-        not let which one survive depend on insertion order.
-
-        Raises `KeyError` if nothing is stored under it.
+        For JSON-shaped content, `canonical_form(content)` with the
+        reserved root `capture` block removed, matching what
+        `semantic_digest` hashed (D3). For a raw payload, the stored bytes
+        unchanged. Raises `KeyError` if nothing is stored under `digest`.
         """
         ...
 
@@ -768,12 +765,19 @@ class InMemoryObjectStore:
         self._objects: dict[str, Any] = {}
 
     def put(self, content: Any, *, algorithm: str = "sha256") -> str:
-        # Normalize `content` exactly once, then hash and store from that
-        # same snapshot -- two separate calls would each re-traverse the
-        # caller's `content` independently, which for a stateful `Mapping`
-        # (or one mutated in between) could make the digest identify
-        # different content than what gets stored (Codex review).
         algorithm = _identity_text(algorithm, "algorithm")
+        if _is_binary_buffer(content):
+            # `canonical_form` rejects a binary buffer, so `raw_digest`
+            # hashes it directly; `bytes(content)` copies a `bytearray`/
+            # `memoryview`, closing the mutation hazard `get()` guards below.
+            payload = bytes(content)
+            digest = raw_digest(payload, algorithm=algorithm)
+            if digest not in self._objects:
+                self._objects[digest] = payload
+            return digest
+        # Normalize once, then hash and store from that same snapshot -- a
+        # second independent traversal of a stateful `Mapping` could digest
+        # different content than what gets stored (Codex review).
         stripped = strip_capture_metadata(content)
         digest = semantic_digest(stripped, algorithm=algorithm)
         if digest not in self._objects:
@@ -786,14 +790,10 @@ class InMemoryObjectStore:
             stored = self._objects[digest]
         except KeyError:
             raise KeyError(f"no object stored under digest {digest!r}") from None
-        # An isolated copy, not the store's own internal object: returning
-        # `stored` directly would let a caller mutate a list/dict in place,
-        # silently corrupting content that no longer matches the digest it
-        # is stored under -- and a later `put` of the original value
-        # couldn't repair it, since that digest already exists (Codex
-        # review). `canonical_form` is idempotent and always builds fresh
-        # containers, so re-deriving it here is a real copy, not another
-        # reference to the same one.
+        if isinstance(stored, bytes):
+            return stored  # immutable already -- no copy needed
+        # An isolated copy, not the store's own object -- else a caller
+        # could mutate it in place, uncorrectably (Codex review).
         return canonical_form(stored)
 
     def has(self, digest: str) -> bool:
