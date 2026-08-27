@@ -134,6 +134,18 @@ _WINDOWS_RESERVED_NAMES = frozenset(
 #: separators `_safe_ref_id` already rejects on every platform.
 _WINDOWS_FORBIDDEN_CHARS = frozenset('<>:"|?*')
 
+#: The literal suffix `variant_ref_relpath`/`artifact_ref_relpath` append to
+#: a ref id to form its ref document's filename.
+_REF_SUFFIX = ".json"
+
+#: The common filesystem path-component limit (ext4, NTFS, APFS, ...) an id
+#: plus `_REF_SUFFIX` must fit under. Measured in encoded bytes, not
+#: characters: POSIX filesystems count bytes, and the UTF-8 encoding of a
+#: non-ASCII id can be several bytes per character, so a character count
+#: alone would accept an id whose actual on-disk name is longer than this
+#: limit.
+_MAX_REF_COMPONENT_BYTES = 255
+
 
 def _safe_ref_id(value: str, field_name: str) -> str:
     """A ref id, made safe to use as a bare, cross-platform filename component.
@@ -163,10 +175,18 @@ def _safe_ref_id(value: str, field_name: str) -> str:
         or any(char in _WINDOWS_FORBIDDEN_CHARS for char in value)
         or value[-1] in (".", " ")
         or value.split(".", 1)[0].upper() in _WINDOWS_RESERVED_NAMES
+        # The id never appears on disk alone -- it is always rendered as
+        # `<id>.json` -- so what must fit under the filesystem's component
+        # limit is the id *plus* that suffix, not the id by itself. Checked
+        # against the UTF-8 encoding, since that is what actually reaches
+        # the filesystem's own byte-counted limit.
+        or len(value.encode("utf-8")) + len(_REF_SUFFIX) > _MAX_REF_COMPONENT_BYTES
     ):
         raise ValueError(
             f"{field_name} must be a non-empty, cross-platform-path-safe "
-            f"identifier, got {value!r}"
+            f"identifier no more than "
+            f"{_MAX_REF_COMPONENT_BYTES - len(_REF_SUFFIX)} UTF-8 bytes long, "
+            f"got {value!r}"
         )
     return value
 
@@ -196,12 +216,14 @@ def _reject_case_insensitive_collisions(ids: list[str], record_kind: str) -> Non
 
 def variant_ref_relpath(variant_id: str) -> str:
     """The package-relative path of one variant's ref document — D6."""
-    return f"{_VARIANT_REF_DIR}/{_safe_ref_id(variant_id, 'variant_id')}.json"
+    return f"{_VARIANT_REF_DIR}/{_safe_ref_id(variant_id, 'variant_id')}{_REF_SUFFIX}"
 
 
 def artifact_ref_relpath(artifact_id: str) -> str:
     """The package-relative path of one artifact's ref document — D6."""
-    return f"{_ARTIFACT_REF_DIR}/{_safe_ref_id(artifact_id, 'artifact_id')}.json"
+    return (
+        f"{_ARTIFACT_REF_DIR}/{_safe_ref_id(artifact_id, 'artifact_id')}{_REF_SUFFIX}"
+    )
 
 
 def object_relpath(digest: str) -> str:

@@ -185,6 +185,27 @@ class TestPathLayout:
         with pytest.raises(ValueError):
             variant_ref_relpath("CON.json")
 
+    def test_an_id_at_the_component_limit_is_accepted(self) -> None:
+        # 250 bytes + len(".json") == 255, the common filesystem limit --
+        # the boundary itself must still work.
+        at_limit = "a" * 250
+        assert variant_ref_relpath(at_limit) == f"refs/variants/{at_limit}.json"
+
+    def test_an_id_over_the_component_limit_is_refused(self) -> None:
+        with pytest.raises(ValueError):
+            variant_ref_relpath("a" * 251)
+        with pytest.raises(ValueError):
+            artifact_ref_relpath("a" * 251)
+
+    def test_the_limit_is_measured_in_encoded_bytes_not_characters(self) -> None:
+        # Each "é" is two UTF-8 bytes, so 126 of them is 252 bytes -- over
+        # the 250-byte id budget even though the character count (126) is
+        # not.
+        with pytest.raises(ValueError):
+            variant_ref_relpath("é" * 126)
+        # 125 of them is exactly 250 bytes -- right at the budget.
+        assert variant_ref_relpath("é" * 125) == f"refs/variants/{'é' * 125}.json"
+
 
 class TestVariantRef:
     def test_round_trips(self) -> None:
