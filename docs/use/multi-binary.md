@@ -53,24 +53,34 @@ shows up in the report under any `--policy` profile; only
 `--scope-public-headers` (or suppression, a third, separate mechanism —
 see below) decides whether it's there at all.
 
-**A built-in policy profile name reaches bundle findings; a custom
-`--policy custom.yaml` document does not.**
-`compare_bundle()`'s own `policy` parameter is a bare string, resolved
-through `policy_kind_sets()` — the same three-way switch
-(`strict_abi`/`sdk_vendor`/`plugin_abi`) `compute_verdict()`'s own docstring
-describes. It never receives the resolved `PolicyFile` object a `--policy
-custom.yaml` document produces, unlike the per-library path
-(`checker.compare()` calls `policy_file.compute_verdict(...)` directly when
-a real `PolicyFile` was resolved). So a `--policy custom.yaml`'s
-`overrides:` entry for `bundle_intra_dep_removed` has **no effect on the
-bundle verdict** — the CLI passes the raw `--policy` string through
-unconditionally, and an unrecognized name (a YAML path) silently falls back
-to `strict_abi` for bundle-verdict purposes specifically, per
+**A custom `--policy custom.yaml` document now reaches the release
+fan-out's bundle verdict too, not only a built-in profile name.**
+`compare_bundle()` gained a second, optional `policy_file: PolicyFile |
+None` parameter alongside its original bare `policy: str` name — when
+supplied, `BundleDiffResult.bundle_verdict` scores `bundle_*` findings
+through `policy_file.compute_verdict(changes)` directly (the same call the
+per-library path already made), instead of always falling back to the
+coarse three-way `policy_kind_sets()` switch
+(`strict_abi`/`sdk_vendor`/`plugin_abi`) `compute_verdict()`'s own
+docstring describes. `cli_compare_release_helpers.py`'s directory/package
+release fan-out (`_run_bundle_analysis`/`_collect_bundle_result`, plus the
+release-global build-config-matrix fan-out) already resolves and forwards
+this `policy_file` — so on that entry point, a `--policy custom.yaml`
+document's `overrides:` entry for e.g. `bundle_intra_dep_removed` **does**
+reach the aggregate bundle verdict today, the same way it reaches a
+per-library one.
+
+What this does *not* yet cover: `policy_file` is a parameter
+`compare_bundle()`'s caller must resolve and pass — a caller that never
+threads a real `PolicyFile` through (rather than the bare `policy` name)
+still falls back to the coarse three-way switch above, and an unrecognized
+bare `policy` name (e.g. a YAML path passed where a profile name is
+expected) still silently resolves to `strict_abi` for whichever findings
+aren't covered by the passed-in `policy_file`'s own overrides, per
 `compute_verdict()`'s own "Unknown policy names fall back to `strict_abi`"
-contract. Only the three built-in profile *names* can reach a bundle
-finding's classification today, and even then via the same coarse
-kind-family-level rules `compute_verdict()` documents — a *custom* override
-document reaches per-library findings only.
+contract. Direct, per-finding suppression of a `bundle_*` kind is still
+not supported on any entry point — see the suppression section below,
+unchanged by this.
 
 **Graph-native detectors ignore public-surface scoping entirely.**
 `bundle_intra_dep_removed`, `bundle_library_removed`/`bundle_library_added`,

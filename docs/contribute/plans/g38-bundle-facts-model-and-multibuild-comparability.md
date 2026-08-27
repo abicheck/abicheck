@@ -1855,6 +1855,146 @@ own monkeypatch) and `test_per_library_overrides_win_over_the_uniform_fallback`
 doesn't leak onto a library absent from that same map, which still receives
 the uniform `headers`/`compile` default).
 
+### Phase 14 — Decouple diff-derived bundle detectors from public-surface scoping
+
+**Origin:** external upstream-only review (base commit `327df7b5616bcf
+aea8c330aad418b796c17f3970`, PRs #860/#883 merged), items 7 and 8 of its
+P1 list. Read alongside `docs/use/multi-binary.md`'s own "Diff-derived
+detectors inherit scoping indirectly, through starvation" section, which
+already documents the mechanism this phase exists to fix — that section
+stays accurate as a description of *today's* behavior; this phase is what
+makes it stop being the correct behavior for the bundle-internal case.
+
+**Finding:** the bundle layer has two detector families, and only one of
+them is safe against public-header scoping. Graph-native detectors
+(`bundle_intra_dep_removed`, `bundle_library_removed`/`_added`,
+version-drift, manifest enforcement — see the "Graph-native detectors
+ignore public-surface scoping entirely" section of `multi-binary.md`) work
+directly from the bundle's own ELF resolution graph and are unaffected.
+Diff-derived detectors (`bundle_intra_dep_signature_changed`,
+`bundle_intra_type_changed`, `bundle_provider_changed`) are computed by
+scanning each library's *already public-surface-scoped* `DiffResult.
+changes` for the specific kinds they promote — so when `--scope-public-
+headers` removes the underlying provider-side change because the changed
+symbol isn't part of that library's own public API, the bundle detector
+never sees it and never promotes it, even though the symbol is very much
+part of the *bundle's* internal linkage contract between two sibling DSOs.
+
+This is unsafe specifically for an internal C ABI between siblings:
+`libcore.so` exports an internal C function with no public header at all;
+`libmath.so` imports it via `DT_NEEDED`; the function's signature changes
+incompatibly. The external SDK report may correctly classify the symbol as
+non-public (that classification is *correct* for the "did the public API
+change" question) — but the shipped bundle still breaks at load/call time,
+and today's diff-derived detectors are starved of the evidence needed to
+say so.
+
+**Planned fix:** maintain two separate views rather than one scoped
+`DiffResult` feeding both questions:
+
+- the **external public-contract view** — today's already-scoped
+  `DiffResult`, unchanged, answering "did the public API change" for the
+  standalone per-library report;
+- a **bundle-internal linkage-contract view** — either the unscoped raw
+  per-library changes, or raw old/new signature and type evidence computed
+  independently of `--scope-public-headers` — that the three diff-derived
+  bundle detectors consume instead, with bundle-specific consumer/provider
+  reachability (an actual sibling `DT_NEEDED` import, per the "Graph-native
+  detectors" reasoning already established) applied on top to decide
+  *which* unscoped changes are actually bundle-relevant. Public scoping
+  continues to determine the standalone library's own verdict; it must
+  never again be the mechanism that silently erases evidence needed to
+  prove a sibling DSO no longer works.
+
+The reachability gate matters as much as the unscoping: an internal,
+headerless change with **no** sibling consumer must not become a bundle
+finding just because scoping no longer filters it — only a change reaching
+an actual cross-DSO import edge should promote.
+
+**Acceptance test:** an internal, headerless C export consumed by a
+sibling changes from `int(int)` to `long(long)`. The standalone external
+API report may demote/filter it (unaffected, by design). The bundle report
+must emit a consumer-attributed breaking finding. The identical change with
+no sibling consumer must not become a bundle break.
+
+**Files & surfaces:** `abicheck/bundle.py`'s `_detect_intra_dep_signature_
+changed`/`_detect_intra_type_changed`/`_detect_provider_changed` (the three
+diff-derived detectors); `compare_bundle()`'s own call sites
+(`cli_compare_release.py`, `bundle_side_input.py`) need to supply the
+unscoped evidence alongside the already-scoped `per_library_results` they
+pass today — likely as a second, parallel `unscoped_results`/raw-evidence
+argument rather than re-running the per-library compare a second time
+with scoping disabled (that would double the extraction cost this
+initiative's own Phase 8/13-follow-up work is careful to bound).
+
+**Effort:** M — the reachability-gating logic already exists in spirit for
+the graph-native detectors; the new work is threading a second, unscoped
+evidence view to the three diff-derived detectors without doubling
+per-library compare cost, plus updating `docs/use/multi-binary.md`'s
+"Diff-derived detectors inherit scoping indirectly" section once this
+phase ships (it will no longer be an accurate description of the shipped
+behavior).
+
+### Phase 15 — Declarative-pipeline wiring: `check-project.yml`/Action/CLI for `BundleFacts` and variants
+
+**Origin:** same external review, item 8. Narrower than it may first read:
+Phase 13/13-follow-up above already shipped the *Python-API* half of
+exactly what item 8 asks for — `BundleSideInput`/`resolve_bundle_side()`/
+`compare_bundle_sides()` (live/live, stored/live, live/stored, stored/
+stored all through one `analyze_bundle()` orchestrator), plus
+`bundle_variants_config.parse_bundle_variants_config()`/
+`run_bundle_variant_pairing()`, which already implement the exact
+`bundle_variants:` shape (`target_triple`/`feature_toggles`/`required`)
+the review's own sketch proposes, including the "never union, pair only
+matching variants" invariant and the fingerprint-verification check from
+the Phase 13 follow-up. **This is not still to design — it is shipped and
+tested, just not reachable from the CLI or a real `.abicheck.yml`.**
+
+What remains, restated against the review's own five-step sequence so nothing
+is lost: (1) run each member's ordinary target check once — already how
+`check-project.yml` works per target; (2) persist/retain each member's
+snapshot, assurance, and `DiffResult` — this is what `--bundle-facts-out`/
+`StoredBundleFactsInput` already do; (3) build/restore `BundleFacts` — done
+(Phase 2); (4) run bundle analysis over member topology/signature evidence/
+diff results/variant identity — done (`compare_bundle_sides`); (5) produce
+one bundle report referencing the member reports it consumed — the one
+piece that still needs a real dispatch site.
+
+**Blocked on the same, already-diagnosed constraint as Phase 13's "Known
+gap":** every file that would host a new `.abicheck.yml` `bundle_variants:`
+block parse or a new CLI dispatch branch is within two lines of (or
+already at) the 2000-line AI-readiness hard cap (see Phase 13's own table,
+re-measure before starting — it will have moved). This phase cannot land
+before (or without) a dedicated file-split pass on at least one of
+`cli_compare_release.py`/`cli.py`/`buildsource/inline.py`/`bundle.py` — do
+not attempt to force the new surface into an already-at-cap file, per this
+codebase's own "known gaps over risky reactive patches" convention.
+
+**Do not implement `depth: source` for bundles by simply passing headers
+and sources to a directory operand** (the review's own explicit caution) —
+that reintroduces exactly the per-binary extraction-cost regression Phase
+9 was written to close and the mixed-toolchain per-library-compile-context
+gap Phase 13-follow-up's fix #3 closed. Route `depth: source` bundle checks
+through the already-shipped `compare_release_against_bundle_facts()`/
+per-library override maps instead.
+
+**Acceptance test (unchanged from the review, now restated against what's
+already shipped vs. still open):** for a CPU/DPC release — old CPU pairs
+only with new CPU, old DPC pairs only with new DPC (already true today via
+`pair_variants()`); missing required DPC is a coverage regression (already
+true today via the `required: true/false` escalation); facts from variants
+are never unioned (already true — `pair_variants()`'s whole design);
+live/live and stored/live runs produce equivalent normalized findings
+(already true, Phase 12's guarantee, extended by Phase 13). What is **not**
+yet demonstrable end to end: declaring all of the above from a real
+`.abicheck.yml`/`check-project.yml` invocation with no hand-written Python
+driver step. That is this phase's actual, remaining acceptance bar.
+
+**Effort:** M once the file-split prerequisite is done (S risk on the
+wiring itself, since the underlying logic is already tested); the file
+split itself is its own, separately-scoped refactor (see Phase 13's table)
+and should not be bundled into the same PR as the new surface it enables.
+
 ---
 
 ## Out of scope

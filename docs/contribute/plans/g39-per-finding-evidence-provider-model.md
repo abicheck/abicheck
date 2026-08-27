@@ -2583,6 +2583,89 @@ header-only" to "was *this finding* header-only, uncorroborated" — a
 strictly more precise version of the same signal, using data this plan
 produces rather than requiring new extraction.
 
+### Phase 5 — Pack-level producer receipt (prerequisite for declarative-project consumers)
+
+**Origin:** external upstream-only review (base commit `327df7b5616bcf
+aea8c330aad418b796c17f3970`, PRs #860/#883 merged), item 10. Distinct from
+Phases 0-3 above, which answer *per-finding* provenance ("which extractor
+and evidence tier produced or corroborated this one `Change`"). This phase
+answers a coarser, prerequisite question at the *evidence pack* level: does
+the pack a `check-project.yml` target consumes carry enough of a receipt to
+be validated and normalized before its facts ever reach a finding at all?
+
+`build-output.json` today carries a coarse top-level `evidence_producer`
+(`abicheck/buildsource/build_output.py`) — enough to answer "what kind of
+tool produced this," not enough to reject a pack that is subtly
+incompatible with the context consuming it. Extend the pack-level receipt
+to carry:
+
+```
+producer kind
+abicheck version
+facts schema version
+Clang/plugin major
+compiler path and digest
+compile-context fingerprint
+source-tree digest
+target id
+public-header-root digest
+translation-unit inventory
+```
+
+This receipt must be **validated and normalized, not merely informational**
+— a consumer (`check-project.yml`'s evidence-routing step, or a direct
+Python API caller) rejects a pack whose receipt disagrees with the
+resolved consumption context, with a typed reason, rather than accepting it
+and letting a downstream mismatch surface as a confusing comparability
+error several steps later. This is the same "fail closed with a named
+reason" discipline `comparability.py`'s existing `ScopeMismatchError`
+already establishes for the scope-fingerprint axis — extend that pattern to
+the producer-receipt axis rather than inventing a second one.
+
+**Relationship to Phases 0-3 above:** the per-finding provenance tags this
+plan's earlier phases add (`l0:elf_symtab`, `l2:castxml`, `l4:source_
+replay`, ...) name *which evidence tier* produced or corroborated a
+finding; this phase's pack-level receipt is what lets a consumer trust that
+tier's claim in the first place — a `l4:source_replay` tag is only as
+trustworthy as the receipt proving the L4 replay ran against the compiler
+version, source tree, and target it claims to. Sequence this phase before
+relying on per-finding tags in a fail-closed consumer (a declarative
+project's evidence-routing gate); the report-surface work in Phase 3 above
+does not depend on it and can ship independently.
+
+**Relationship to other plans:** the attribution-source/confidence fields
+G43 ([`g43-inferred-evidence-attribution.md`](g43-inferred-evidence-attribution.md))
+adds to a shared pack are a sibling concern (TU→target ownership) to this
+phase's producer/compatibility receipt (TU→compiler/context fidelity) — the
+two receipts live in the same pack manifest but answer different
+questions, and should be designed to compose (one pack manifest, two
+receipt sections) rather than merged into one undifferentiated blob. G34's
+`consumer_compile`/toolchain-binding work is the source of the
+"compile-context fingerprint"/"compiler path and digest" fields this phase
+reuses rather than re-deriving.
+
+**Acceptance test:** a Clang-18 plugin pack consumed by an incompatible
+producer context is rejected with a typed reason. A stale source-tree
+digest is rejected. A clean-job reuse of a valid pack (identical receipt,
+re-run in a fresh CI job) reproduces the same normalized L4 findings. Every
+reported finding can identify its producing and corroborating evidence
+without reconstructing that answer from the whole snapshot (this last
+clause is Phases 0-3's own acceptance bar, restated here to make explicit
+that this phase and Phases 0-3 together are what the review's item 10
+acceptance test actually requires).
+
+**Files & surfaces:** `abicheck/buildsource/build_output.py` (receipt
+fields, schema version bump), a new validation entry point consumed by
+`check-project.yml`'s evidence-routing step (see G41 Phase 1/G43 for the
+sibling consumers of the same pack manifest), `abicheck/comparability.py`
+(the fail-closed rejection pattern to extend).
+
+**Effort:** M — mostly additive schema fields plus one new validation
+entry point; the design risk is keeping this receipt's fields cleanly
+separated from G43's attribution fields in the same manifest rather than
+letting the two blur into one field family that answers neither question
+cleanly.
+
 ## Design
 
 Almost no new extraction. Every phase above threads a fact the producing
