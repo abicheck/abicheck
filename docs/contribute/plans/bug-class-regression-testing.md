@@ -190,7 +190,8 @@ generalized test added under this plan states, in its own docstring or a
 one-line comment, which of the following its *oracle* is — matching the
 repository's own existing convention for this
 (`docs/contribute/adr/`-referenced fact-conservation tests, and
-`tests/test_castxml_oracle_properties.py`'s existing style):
+`tests/test_clang_header_backend_integration.py`'s existing CastXML-
+parity-oracle style):
 
 * an independent, structurally different implementation (a
   from-scratch tree walker, a graph-reachability computation, a
@@ -487,8 +488,9 @@ clean, silently-wrong result).
   one production helper — the resulting analysis status, report content,
   compatibility verdict, gate decision, process exit code, and aggregate
   result. This generalizes the existing fact-conservation suite
-  (`tests/test_detector_properties.py`'s fact-conservation tests) from
-  its current selected-detector-family scope to cover every `ChangeKind`
+  (`tests/test_fact_conservation_properties.py`'s
+  `TestFunctionRemovalFactConservation`/`TestVariableRemovalFactConservation`)
+  from its current selected-detector-family scope to cover every `ChangeKind`
   family and every evidence-completeness failure mode named in AGENTS.md's
   "Known gaps" section (#838's rejected `-H` combination, #834's
   transitively-included-header misclassification, #860/#883's dropped
@@ -513,8 +515,8 @@ clean, silently-wrong result).
   property/oracle test files the audit found already doing this well
   (`tests/test_detector_properties.py`,
   `tests/canonical_identity_contract.py`,
-  `tests/test_castxml_oracle_properties.py`, the #758 shell-execution
-  harness).
+  `tests/test_clang_header_backend_integration.py`'s CastXML-parity-
+  oracle tests, the #758 shell-execution harness).
 
 ## Tests
 

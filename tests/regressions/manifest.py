@@ -246,6 +246,22 @@ BUG_CLASSES: tuple[BugClass, ...] = (
                 ),
                 reference="docs/contribute/plans/bug-class-regression-testing.md#phase-5",
             ),
+            KnownGap(
+                description=(
+                    "Neither seed test's generator covers the specific "
+                    "shapes Phase 5's own '#879's own history' section "
+                    "names as previously missing (sets, varied mapping "
+                    "insertion order, NaN/signed-zero/infinities, "
+                    "structurally-equal copies, objects sharing a `repr()` "
+                    "but not an identity) — the seeds exercise fixed list/"
+                    "dict values and function/variable identities, not a "
+                    "generated adversarial corpus over those shapes, so "
+                    "the invariant's totality/injectivity/order-invariance "
+                    "claims are untested for exactly the inputs that "
+                    "caused #879 in the first place."
+                ),
+                reference="docs/contribute/plans/bug-class-regression-testing.md#phase-5",
+            ),
         ),
     ),
     BugClass(
