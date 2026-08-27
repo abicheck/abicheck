@@ -37,7 +37,13 @@ changes what a CI job's exit code means.
 > [#883](https://github.com/abicheck/abicheck/pull/883)).** Re-checked every
 > claim in this plan against current `main` rather than trusting the prior
 > checkpoints' status cells. Confirmed unchanged: PR 1 (presentation) and PR 2
-> (aggregate policy) are done; pack parity now covers `compare`, the
+> (aggregate policy) are done — **and so is PR E/1b (annotations moved to the
+> Action), missed by this checkpoint's own summary and caught in a later docs
+> sync pass verifying against `abicheck/cli.py`/`action.yml` directly: no
+> `annotate` reference remains in the CLI, and `action.yml` carries real
+> `annotate`/`annotate-additions` inputs. See PR 1b's own section, whose
+> "blocked on a persistence prerequisite" subtitle was itself stale until
+> that pass corrected it.** Pack parity now covers `compare`, the
 > release fan-out, *and* `scan --against` for both policy/contract
 > assignments and `gate.*` fields (PR B's scope is wider than the 2026-08-16
 > update above states — see that section for the current breakdown); the
@@ -96,7 +102,7 @@ simplification).
 | `--require-complete-analysis` (compare, scan; new in #780) | **Keep** | Real, distinct axis — but move its semantics into the resolved gate/assurance policy instead of leaving it a CLI-only boolean |
 | `compare --stat`, `compare --recommend` | Remove | `--format review` replaces `--stat`; recommendation becomes an unconditional renderer output |
 | `scan --artifact-set` | **Keep** | Refine the value syntax only (repeatable option / manifest); do not overload positional `DIRECTORY` |
-| `--annotate`, `--annotate-additions` | Remove from CLI (PR 1b, not PR 1) | Options on `compare` alone, shared by both operand shapes (no CLI-level split is possible) — blocked on a release-report persistence prerequisite; see PR 1b |
+| `--annotate`, `--annotate-additions` | **Removed** (PR 1b/E — done) | Options on `compare` alone, shared by both operand shapes (no CLI-level split was possible); the release-report persistence prerequisite landed and the flags are deleted — `compare --annotate` now exits `64` with `No such option`; see PR 1b |
 | `dump --build-query`, `dump --build-compile-db` | Remove from CLI | Move to `.abicheck.yml`; only `build.query` (an executable command) needs the explicit-`--config` trust gate — `build.compile_db` is a data path and carries the ordinary dry-run contract only |
 | `aggregate --on-missing-required`, `--on-unexpected-target` | Remove from CLI | Move the policy into the manifest / run-plan schema alongside the expected target set |
 
@@ -415,7 +421,16 @@ unreachable).
 
 **Risk:** low — no analysis, verdict, or exit code changes.
 
-## PR 1b — annotations move to the Action (blocked on a persistence prerequisite)
+## PR 1b — annotations move to the Action (done)
+
+**Status: fully landed** (all three steps in "What this means for
+sequencing" below, plus the `scan --against` half of PR E) — verified
+directly against `abicheck/cli.py` (no `annotate` reference remains) and
+`action.yml` (`annotate`/`annotate-additions` are now real, documented
+inputs). This heading's original "(blocked on a persistence prerequisite)"
+qualifier is stale; kept as a section title change rather than rewritten
+prose below, since the body already records each landed slice with its own
+dated status note.
 
 `--annotate`/`--annotate-additions` only do anything when `GITHUB_ACTIONS=true`;
 they emit `::error`/`::warning`/`::notice` workflow commands and are inert in an
@@ -2894,9 +2909,10 @@ PR G1 canonical exit decision, part 1 — ExitDecision + reasons + the report
                                        tests; NO CLI change, no flag removed.
                                        Lands before PR E, which consumes it
 PR E  Action machine-report           = PR 1b — uncapped persisted release
-                                       findings, no comparison re-run, no
+      (DONE)                           findings, no comparison re-run, no
                                        stderr inference; reads G1's block
-      └─ then DELETE --annotate, --annotate-additions
+      └─ DELETE --annotate, --annotate-additions — DONE, verified against
+         current abicheck/cli.py and action.yml
 PR F  trusted build config            = PR 3C — build.query executes only
                                        from an explicit --config (a data
                                        path like build.compile_db carries no
@@ -2912,7 +2928,10 @@ PR H  artifact-set semantics          = PR 5 — provider ownership, moved and
 ```
 
 Independent of the chain, unblocked at any time: PR 1 (**done**), PR 2
-(**done**, minus its `.abicheck.yml` gate-policy sourcing follow-up).
+(**done**, minus its `.abicheck.yml` gate-policy sourcing follow-up), PR E /
+1b (**done** — annotations moved to the Action; see PR 1b's own section,
+whose "blocked on a persistence prerequisite" subtitle was stale until this
+pass corrected it).
 
 **Superseded original ordering:**
 
