@@ -1180,7 +1180,27 @@ The remaining Phase 5 work:
    (global uniqueness, valid references, and non-contradictory defaults are
    done — see above); and
 4. remove superseded private re-exports, migration edges, and cycle
-   exceptions.
+   exceptions. **A first, verified slice landed**: `architecture/
+   modules.yaml`'s `frozen_root_families["cli_"]` and `legacy_root_modules`
+   both still named `cli_contract_options.py`, `cli_help.py`,
+   `cli_options_contract.py`, and `cli_profiles.py` — the four flat modules
+   Phase 4 physically moved into `frontends/cli/options/`/`frontends/cli/
+   help.py` (see that phase's own table above). Confirmed via git history
+   (`85b5515`, "move four CLI option/help leaves into frontends") and a
+   direct import check (`abicheck.cli_profiles` no longer resolves — no
+   compatibility shim was ever published for these, unlike `cli.py`'s own
+   `frontends/cli/moved.py`, which only re-exports individual private
+   symbols other modules still reference, not whole module names) that
+   removing the four stale entries changes nothing a real import can
+   observe — purely bookkeeping that had drifted from the physical tree.
+   `python scripts/check_architecture.py` stays at 0 errors either way,
+   since the glob these lists gate only ever matches a file that exists.
+   The rest of item 4 (the CLI-registration `IMPORT_CYCLE_ALLOWLIST` in
+   `scripts/check_ai_readiness.py` and any other stale `legacy_paths`
+   entries) is unstarted — that allowlist is a large, deliberately
+   pre-existing, by-design cluster this file's own AGENTS.md instructs not
+   to touch without an ADR or explicit maintainer sign-off, so auditing it
+   is out of scope for an incremental cleanup pass.
 
 **Acceptance:** parser fixtures demonstrate byte/fact parity where applicable;
 catalog validation proves all four of D9's properties — global uniqueness,
