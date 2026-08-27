@@ -252,17 +252,29 @@ BUG_CLASSES: tuple[BugClass, ...] = (
             "at the public boundary — no third state."
         ),
         fixed_by=(860, 883),
-        seed_tests=("tests/test_project_targets_consumer_compile.py",),
+        seed_tests=(
+            "tests/test_run_plan.py",
+            "tests/test_project_targets_consumer_compile.py",
+        ),
         known_gaps=(
             KnownGap(
                 description=(
                     "No generalized sentinel-propagation matrix exists yet "
                     "covering every public entry point named in "
-                    "bug-class-regression-testing.md's Phase 6 — today's "
-                    "seed test calls "
-                    "`abicheck.buildsource.project_targets` directly "
-                    "(no CLI, no python-api) and covers one concrete "
-                    "config path, not the full matrix."
+                    "bug-class-regression-testing.md's Phase 6. Of the two "
+                    "seed tests, only `test_run_plan.py`'s "
+                    "`TestConsumerCompileOverlayProjection` covers the "
+                    "'reaches every consumer' half of this class's own "
+                    "invariant (`profiles.<id>.consumer_compile` reaching "
+                    "the generated run-plan cell, via `generate_run_plan` "
+                    "directly — no CLI, no python-api); "
+                    "`test_project_targets_consumer_compile.py` only "
+                    "exercises the 'rejected at the public boundary' half "
+                    "(schema parsing/round-tripping) and on its own would "
+                    "leave a dropped forwarding edge undetected — it was "
+                    "the sole seed here until this was found to be a real "
+                    "gap (Codex review, PR #885). Neither reaches every "
+                    "config path Phase 6 names, only this one."
                 ),
                 reference="docs/contribute/plans/bug-class-regression-testing.md#phase-6",
             ),
@@ -304,6 +316,21 @@ BUG_CLASSES: tuple[BugClass, ...] = (
         fixed_by=(705, 758),
         seed_tests=("tests/test_reusable_workflow_execution.py",),
         public_surfaces=("github-action",),
+        known_gaps=(
+            KnownGap(
+                description=(
+                    "The seed test's own hostile-input corpus is scoped "
+                    "to `check-single.yml`'s shell steps only "
+                    '(`CHECK_SINGLE = "check-single.yml"`) — not every '
+                    "scalar input across the repository's other shell "
+                    "scripts and composite-action steps, which "
+                    "bug-class-regression-testing.md's Phase 8 names as "
+                    "the full target-script inventory this class's "
+                    "invariant is stated over (Codex review, PR #885)."
+                ),
+                reference="docs/contribute/plans/bug-class-regression-testing.md#phase-8",
+            ),
+        ),
     ),
     BugClass(
         id="registry.kind_completeness",
