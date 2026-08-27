@@ -262,6 +262,36 @@ backfilled `RecordType` ends up with a legacy field holding the
 DWARF-corroborated value while its `Fact[...]` field still holds the
 header parser's pre-backfill one — exactly the split-source drift this
 phase exists to prevent, reached through a second call site rather than a
+different producer.
+
+**A second named exception: `RecordType`/`Param` are public API
+dataclasses — AGENTS.md's own convention on this file's public types
+means an external Python-API caller can construct one directly
+(`RecordType(..., bases=["Base"])`, `Param(..., is_va_list=True)`),
+bypassing every producer call site named above entirely, and a first
+draft of this phase didn't account for that.** If the new `Fact[...]`
+sibling field defaulted to `Fact.not_collected()` the way an ordinary
+dataclass field default would, a direct caller supplying only the legacy
+field gets a migrated detector reading "not collected" for a value the
+caller explicitly gave it — silently discarding caller-supplied data this
+phase must not break. Making the sibling field required instead breaks
+every existing direct-construction call site outright, which is the
+opposite failure. The fix: the new field's real default is `None` (not
+`Fact.not_collected()` — a caller can still explicitly pass
+`Fact.not_collected()` and have that honored, since `None` is reserved
+purely as "nothing supplied," distinct from an explicit not-collected
+claim), and `__post_init__` backfills it from the legacy field when still
+`None` — `vtable_fact = Fact.present(self.vtable) if self.vtable_fact is
+None else self.vtable_fact`, mirroring the shape `Param`'s own
+`__post_init__`-based validation already uses elsewhere in this codebase
+for exactly this kind of defaulting. **Precedence is explicit and
+one-directional**: an explicitly-supplied `Fact[...]` field always wins
+regardless of what the legacy field says (it's the newer, authoritative
+channel); the legacy field only ever backfills the `Fact[...]` field when
+the latter was never supplied, never the other way around — so a caller
+combining both consistently sees the `Fact[...]` value it gave, and a
+caller giving only the legacy value sees it faithfully reconstructed
+rather than silently demoted to not-collected.
 second producer; `serialization.py`
 (`snapshot_to_dict()`'s `Fact[...]`-status-to-string encoding, extending
 its existing ElfMetadata-enum-encoding pattern; `snapshot_from_dict()`'s
@@ -300,7 +330,15 @@ second, direct test asserting `snapshot_to_dict()` on a freshly-built
 snapshot never emits a raw `FactStatus` enum member anywhere in the
 resulting `dict` (walk the tree and assert every value is a JSON-primitive
 type) — confirmed to fail against the pre-fix `asdict()`-only path, which
-is exactly the failure mode a reviewer caught in this design.
+is exactly the failure mode a reviewer caught in this design. A third test
+covers the direct-construction compatibility bridge: `RecordType(...,
+vtable=["f"])` with no `vtable_fact` given backfills to
+`Fact.present(["f"])`; `RecordType(..., vtable=["f"],
+vtable_fact=Fact.not_collected())` keeps the explicit `Fact` value rather
+than the backfilled one, pinning the stated precedence directly; and a
+bare `Param(is_va_list=True)` with no `is_va_list_fact` given backfills
+the same way — each confirmed to fail against a version of the dataclass
+that defaults the new field to `Fact.not_collected()` instead of `None`.
 
 **Acceptance criteria.** The three converted fields cannot be read by any
 detector without explicit availability handling — enforced by a new
@@ -404,7 +442,10 @@ the strength of clang-only convergence alone, since `--build-query`/
 
 **Goal.** Every place that currently computes identity from a string
 (dict key, `name`, `qualified_name`, a synthetic ctor/dtor key) instead
-reads one `EntityId`, computed once, downstream of backend extraction.
+computes it through one shared `EntityId` resolver — **"computed once"
+here means one algorithm, called the same way everywhere, not a value
+cached anywhere on the model; see the carrier note below for why, and for
+where genuine per-snapshot caching actually lands.**
 
 **Design.** `abicheck/model/identity.py`: `ScopePath` (an immutable tuple
 of typed segments — `Namespace(name)`, `Record(name, access)`,
@@ -467,6 +508,37 @@ with the name left out — generalizing the existing tiered primitive into
 the one identity every consumer reads, rather than proposing a simpler one
 that regresses what the codebase already gets
 right.
+
+**There is no new carrier field on `RecordType`/`Function`/any other model
+dataclass in this phase, and consumers do not read a stored `EntityId` off
+a declaration — both would be the wrong fix, and a first draft of this
+phase left the question open rather than answering it, which review
+correctly read as "nowhere for the promised identity to live."** The
+resolver function (`model.identity.entity_id_for_record(rec)` and its
+siblings for enum/typedef/function/variable/constant) derives `ScopePath`
+from the same raw data the ad hoc `"::".join([*entry.scope, name])`/
+namespace-suffix machinery already parses today — `RecordType.
+qualified_name`/`name` (and the equivalent fields on every other kind) —
+so no new field is needed to *compute* it: every caller already has
+enough to call the resolver directly. A consumer like `_find_opaque_types`
+calls `entity_id_for_record(rec)` instead of reading `rec.name` directly,
+which is the actual fix this phase makes (one shared, tested algorithm
+instead of nine independently-invented ones) — it is not, and was never
+meant to be, a caching optimization. Caching belongs to whichever
+structure is built once per snapshot and handed to every consumer
+afterward, which is a genuinely separate design question this phase
+correctly defers rather than answers prematurely: Phase 6's `SemanticIR`
+is exactly that structure (`dict[OccurrenceId, CanonicalEntity]`, built
+once during snapshot assembly), and its `canonical_entities()` projection
+is where a future consumer reads a pre-resolved `EntityId` without
+recomputing it. Until Phase 6 lands, every `EntityId`-consuming call site
+this phase migrates calls the resolver function directly, on demand — a
+cheap, pure computation (tuple construction from already-available
+strings), not a serialization or round-trip concern, since nothing is
+persisted. Round-tripping `EntityId` through storage is Phase 2's own
+`storage/entity_ids.py` DTO work (above), which is unrelated to this
+question — that DTO exists for ADR-062's persisted `ProjectSnapshot`, not
+for `AbiSnapshot`'s in-memory `RecordType`/`Function` objects.
 
 This phase explicitly targets, and closes, the specific collision bugs
 AGENTS.md's "Known gaps" records as already-found-and-patched-locally:
@@ -584,6 +656,16 @@ f()` vs. `void f() const`) always produce distinct `EntityId`s**, pinned
 directly against the exact counterexample a reviewer raised for this
 design, with an `extern "C"` sibling case confirming the deliberate
 opposite rule (a changed parameter list there stays the same identity).
+A separate test asserts the no-new-carrier design directly: calling
+`entity_id_for_record`/siblings twice on two separately-constructed but
+field-identical `RecordType`/`Function` objects (not the same Python
+object) produces equal `EntityId`s — proving the resolver is a pure
+function of the declaration's existing fields, with nothing cached on
+either object that a second, independent instance wouldn't also have;
+and a static check (mirroring the AST-based checks this plan already
+uses elsewhere) confirms no `model/` dataclass gains a new `entity_id`-
+shaped field in this phase, so a future change can't quietly reintroduce
+the stored-field design this phase explicitly rejected.
 A separate test on the relocation covers `storage/entity_ids.py`'s new v2
 wire schema: a primitive-level round-trip property test constructing
 domain `EntityId`s across every `ScopePath` segment kind (including two
@@ -690,20 +772,47 @@ sibling:
   call: the workflow/compare orchestration code that already calls
   `PublicSurfaceQuery.resolve()` for `compute_public_surface()` (the same
   assembly step this phase's earlier bullets already describe) resolves
-  the public `EntityId` set *once* and passes it into `build_surface_graph
-  (snapshot, public_entity_ids: frozenset[EntityId])` as a new parameter
-  — `surface_graph.py` itself never imports `policy/public_surface.py`,
-  it only receives an already-resolved answer, same direction as every
-  other `policy -> compare` edge in this plan. `SurfaceGraph.public_roots()`
-  then maps each received `EntityId` back to the snapshot's own
+  the public `EntityId` set *once* and threads it down to
+  `build_surface_graph`/`compute_surface_metrics` — `surface_graph.py`
+  itself never imports `policy/public_surface.py`, it only receives an
+  already-resolved answer, same direction as every other `policy ->
+  compare` edge in this plan.
+
+  **Threading it down means widening real call chains, not declaring the
+  three consumers unaffected — a first draft of this phase claimed the
+  latter and a reviewer checked the actual call sites and found it false.**
+  `pattern_verdicts.py:196-197` calls `build_surface_graph(old)`/
+  `build_surface_graph(new)` directly inside `apply_pattern_verdicts()`,
+  and `surface_graph.py:371`'s own `compute_surface_metrics()` does the
+  same — neither receives anything from a policy-layer caller today, and
+  both are themselves reached from `checker.py`'s own explicit call sites
+  (`_apply_pattern_verdicts_step`/`_apply_surface_metrics`, not the generic
+  detector registry, so widening their signatures doesn't touch dispatch
+  machinery). `build_surface_graph`/`compute_surface_metrics` both gain an
+  **optional** `public_entity_ids: frozenset[EntityId] | None = None`
+  parameter — optional so a test or script calling either function
+  directly, with no policy-layer caller in the chain at all, does not
+  break — and `checker.py`'s `_apply_pattern_verdicts_step`/
+  `_apply_surface_metrics` both gain the identical parameter, threaded in
+  from `compare()`'s own `PublicSurfaceQuery.resolve()` call (the same
+  resolved set `compute_public_surface()` already uses) and passed straight
+  through to `apply_pattern_verdicts()`/`diff_surface_metrics()`, which
+  pass it straight through to `build_surface_graph()`/
+  `compute_surface_metrics()` in turn. When `None` (the only case possible
+  outside `compare()`'s own pipeline), `SurfaceGraph.public_roots()` falls
+  back to its pre-existing `Visibility.PUBLIC` filter — an explicit,
+  narrow, named residual for a caller this phase cannot reach, not a
+  second silent implementation competing with the real one; every call
+  reachable from `checker.compare()` itself — which is what `idioms.py`/
+  `pattern_verdicts.py`/`diff_surface_metrics.py` actually run under in
+  production — receives the real, resolved ids. `SurfaceGraph.
+  public_roots()` maps each received `EntityId` back to the snapshot's own
   symbol/mangled-name spelling (via the `Function`/`Variable` the identity
   already resolves to — `EntityId`'s function variant carries the mangled
   name directly in `extra` when one exists, the same primitive Phase 2
   already built), preserving its existing `frozenset[str]` return type
-  and its existing consumers' string-based contract exactly — `idioms.py`/
-  `pattern_verdicts.py`/`diff_surface_metrics.py` need no change at all,
-  inheriting the corrected answer through the same string keys they
-  already read. `SurfaceGraph` itself
+  and its existing consumers' string-based contract exactly. `SurfaceGraph`
+  itself
   is not deleted or folded into `model/graph.py` — it answers a genuinely
   different question from the evidence graph (a snapshot-local
   declaration-reference index for surface-intelligence metrics, not a
@@ -893,15 +1002,22 @@ the new location, `NODE_KINDS`/`EDGE_KINDS` and L5-specific construction
 logic unchanged in place); `abicheck/compare/surface_graph.py` (new —
 public-surface node/edge *kind vocabulary* and builder, using `model/
 graph.py`'s primitive, not a new one); `abicheck/surface_graph.py`
-(`build_surface_graph()` gains a `public_entity_ids: frozenset[EntityId]`
-parameter, resolved by the calling workflow/compare orchestration via
-`PublicSurfaceQuery.resolve()` — never imported by `surface_graph.py`
-itself — and `SurfaceGraph.public_roots()` maps those ids back to their
+(`build_surface_graph()`/`compute_surface_metrics()` each gain an optional
+`public_entity_ids: frozenset[EntityId] | None = None` parameter, and
+`SurfaceGraph.public_roots()` maps a given set of ids back to their
 mangled/symbol-name spelling, preserving its existing `frozenset[str]`
-return type exactly, per the note above — its
-three real consumers, `idioms.py`/`pattern_verdicts.py`/
-`diff_surface_metrics.py`, are unaffected beyond inheriting the corrected
-answer through the same string keys); `abicheck/policy/public_surface.py`
+return type exactly — `surface_graph.py` itself still never imports
+`policy/public_surface.py`, per the note above); `pattern_verdicts.py`
+(`apply_pattern_verdicts()` gains the identical optional parameter,
+threaded straight through to `build_surface_graph()`); `diff_surface_
+metrics.py` (`diff_surface_metrics()` gains the identical optional
+parameter, threaded straight through to `compute_surface_metrics()`);
+`checker.py` (`_apply_pattern_verdicts_step`/`_apply_surface_metrics` both
+gain the identical parameter, populated from the same `PublicSurfaceQuery.
+resolve()` result `compare()` already computes for `compute_public_surface()`,
+and thread it into the two functions above — this is what makes every
+call reachable from `compare()`'s own pipeline receive the real, resolved
+ids rather than the `None`-triggered legacy fallback); `abicheck/policy/public_surface.py`
 (new — `PublicSurfaceQuery`, migrated from `surface.py`'s existing
 traversal logic); `surface.py` (`compute_public_surface()` becomes a thin
 wrapper calling `PublicSurfaceQuery.resolve`); `dumper_scoping.py`/
@@ -973,12 +1089,22 @@ than crashing or returning an empty surface — and assert the loaded
 snapshot object's own `surface_graph` attribute is still `None` afterward,
 proving the backfill is genuinely not persisted back onto it. A fourth
 regression covers `abicheck/surface_graph.py`'s own migration: every
-existing `idioms.py`/`pattern_verdicts.py`/`diff_surface_metrics.py` test
+existing `idioms.py`/`pattern_verdicts.py`/`diff_surface_metrics.py` unit
+test calling `build_surface_graph()`/`compute_surface_metrics()` directly
 is re-run unchanged (behavior-preserving, same as the `surface.py`
-migration bar above, now passing a resolved `public_entity_ids` set into
-`build_surface_graph()`), plus one new case constructing a snapshot where
-`Visibility.PUBLIC` and real reachability disagree (a declaration tagged
-public but unreachable through header inclusion): asserting
+migration bar above) — these keep their existing call shape and the
+`None`-triggered legacy fallback, since they have no policy-layer caller
+in their chain. A fifth, new regression covers the threaded path itself:
+a `checker.compare()` run over a fixture where `Visibility.PUBLIC` and
+real reachability disagree, asserting the pattern-verdict/surface-metrics
+findings `compare()` actually produces reflect the resolved `EntityId`
+answer, not the legacy `Visibility.PUBLIC`-only one — confirmed by
+patching `build_surface_graph`/`compute_surface_metrics` to assert they
+were called with a non-`None` `public_entity_ids` when reached through
+`compare()`, not only by comparing output, so a future regression that
+silently stops threading the parameter through `checker.py` fails this
+test even if it happens not to change the specific fixture's output.
+Separately, asserting
 `SurfaceGraph.public_roots()` — still returning `frozenset[str]`, still
 consumable by `re.Pattern.match()` with no caller change — agrees with
 `PublicSurfaceQuery.resolve()`'s answer rather than the old
@@ -1222,7 +1348,32 @@ used once); `dumper.py`/`dumper_manifest.py` (the assembly call sites —
 call `semantic_normalizer.normalize()` on each backend's raw facts,
 project into the existing `AbiSnapshot` field shapes, and attach the
 `SemanticIR` itself on the new `semantic_ir` field, per the Design section
-above); `model/snapshot.py` (the new `AbiSnapshot.semantic_ir` field);
+above). **`dumper.py`/`dumper_manifest.py` are not the only production
+assembly call sites — `service.py` has two more of its own, each
+independent, and a first draft of this phase's Files list named neither.**
+`service.py`'s own BTF/CTF dispatch (around where it parses a raw BTF/CTF
+blob and constructs an `AbiSnapshot` directly from `btf.to_dwarf_metadata()`/
+`_typeinfo_functions(btf.func_protos)`/`dict(btf.typedefs)`, and the
+identical CTF branch beside it) is a third production assembler —
+narrowing `btf_metadata.py`/`ctf_metadata.py` to raw-fact production
+without also routing *this* call site through `semantic_normalizer.
+normalize()` would leave it assembling an `AbiSnapshot` from facts whose
+shape just changed out from under it, breaking every BTF/CTF-backed
+`dump`/`compare` rather than merely leaving `SemanticIR` inert.
+`service.py`'s PE/PDB path is a fourth: it calls `pdb_model.
+model_types_from_dwarf_metadata(dwarf_meta)` to convert PDB-derived DWARF
+metadata into `RecordType`/`EnumType` objects before assembling the
+snapshot — narrowing `pdb_metadata.py` alone, as the first draft's Files
+list already named, leaves this second, PDB-model-specific conversion
+step untouched and still producing the pre-normalization shape. Both are
+updated the same way `dumper.py`/`dumper_manifest.py` are: call
+`semantic_normalizer.normalize()` on the raw facts and project through the
+existing `AbiSnapshot` field shapes, attaching `semantic_ir` identically
+— `model/snapshot.py` (the new `AbiSnapshot.semantic_ir` field);
+`pdb_model.py` (`model_types_from_dwarf_metadata` narrowed to raw-fact
+production the same way `pdb_metadata.py` itself is, per the Design
+section's own parser-narrowing rule, since it's a second conversion layer
+for the identical backend, not a different one);
 `serialization.py` (`SCHEMA_VERSION` bump and the field's encode/decode).
 `elf_metadata.py`/`pe_metadata.py`/`macho_metadata.py` are
 explicitly **not** touched by this phase — see ADR-063 D9's own
@@ -1279,12 +1430,16 @@ every existing detector keeps reading `AbiSnapshot.functions`/`types`/...
 exactly as it does today; only a detector written to consume `SemanticIR`
 directly (none exist yet) would read the new field. Without this wiring,
 landing the Files list above either breaks every `dump`/`compare`
-invocation (the parsers stop returning what `dumper.py` assembles from) or
+invocation (the parsers stop returning what `dumper.py`/`service.py`
+assemble from) or
 leaves `SemanticIR` fully built and fully inert beside an unchanged
 production pipeline — neither is an acceptable state to merge this phase
 in. An end-to-end parity test (`dump`/`compare` over a real fixture,
 before and after this phase, asserting identical `AbiSnapshot` output) is
-required alongside the per-backend unit tests below, to prove the
+required for **each of the four assembly call sites** — `dumper.py`,
+`dumper_manifest.py`, `service.py`'s BTF/CTF dispatch, and `service.py`'s
+PDB path via `pdb_model.model_types_from_dwarf_metadata` — not only the
+first two, alongside the per-backend unit tests below, to prove the
 normalizer-mediated assembly path is behavior-preserving for the existing
 pipeline rather than asserted — **and that fixture must include a real
 ODR-duplicate or incomplete/complete declaration pair sharing one
@@ -1476,7 +1631,23 @@ from_scan_report` is the matching separate *reader* already in this
 phase's file list, so leaving the writer unmigrated would mean every
 freshly-generated `scan` report still lacks the structured fields and
 keeps forcing `from_scan_report` onto the legacy-decode path D6 means to
-reserve for genuinely old reports, not new ones). `scan` reports carry
+reserve for genuinely old reports, not new ones). **`scan_engine.
+ScanOutcome` is not the only scan-report writer — a later review round
+found two more, independent of it and of each other, missed by the first
+fix in turn: `service_scan.py`'s `ScanResult.to_dict()` (the typed-API
+single-binary scan result) and `ScanSetResult.to_dict()` (the
+`--artifact-set` sibling, ADR-056) each build their own dict directly —
+`verdict`/`exit_code` as raw fields, no call into `ScanOutcome` or any
+shared writer — so migrating `scan_engine.ScanOutcome` alone would leave
+exactly these two typed-API paths (and `ScanArtifactResult.to_dict()`,
+which wraps `ScanResult.to_dict()`'s output unchanged) emitting the old,
+unstructured shape while stamping the newly-bumped `SCAN_SCHEMA_VERSION`
+— a document claiming a schema version it doesn't actually carry the
+fields of, which is a worse state than not bumping the version at all.**
+Both gain the identical structured `RunOutcome`-axis fields
+`ScanOutcome.to_dict()` adds, alongside their existing `verdict`/
+`exit_code` fields (additive, same as every other writer in this phase).
+`scan` reports carry
 their own independent `SCAN_SCHEMA_VERSION` (`schemas.py`) — genuinely
 separate from `REPORT_SCHEMA_VERSION`/`AGGREGATE_SCHEMA_VERSION`, not
 another name for one of them, since `scan_engine.py`/`service_scan.py`
@@ -1499,10 +1670,13 @@ fixture, run twice — once against a report carrying only the legacy
 behavior exactly) and once against a report regenerated with the new
 structured fields (proving the new path agrees with the old one on every
 existing fixture, not only on fixtures written after this phase). A third
-parity test covers the writer this phase adds: a freshly-generated `scan`
-report (`ScanOutcome.to_dict()`) carries the new structured fields, and
-`GateInfo.from_scan_report()` reading that fresh report takes the
-structured-field path, not the legacy-decode fallback — confirmed by
+parity test covers the writers this phase adds — all three of them, not
+only `scan_engine.ScanOutcome`: a freshly-generated `scan` report
+(`ScanOutcome.to_dict()`), a freshly-run typed-API `ScanResult.to_dict()`,
+and a freshly-run `--artifact-set` `ScanSetResult.to_dict()` each carry
+the new structured fields, and `GateInfo.from_scan_report()` reading any
+of the three fresh reports takes the structured-field path, not the
+legacy-decode fallback — confirmed by
 asserting which path actually ran (not only that the output matches),
 since a test that only checks the output could pass with the writer
 changed and the reader still silently falling back. A fourth test
