@@ -199,6 +199,36 @@ value instead of a side boolean:
   a freshly-built snapshot, since the per-field `Fact[...]` states it
   directly — this is the generalization's actual payoff, not an
   afterthought.
+
+  **"Constructs the field's value directly at parse time" is not quite
+  true for `vptr_offset_bits` on the DWARF backend, and a first draft of
+  this phase missed the gap.** `dwarf_snapshot.py` runs a fixed-point
+  resolution pass *after* every `RecordType` already exists
+  (`rec.vptr_offset_bits = resolved`, at the sites resolving an inherited
+  vptr offset through a virtual-primary-base fallback — confirmed by
+  reading the real code, not assumed) — this has to run post-construction
+  because it needs cross-references between already-built records a
+  single object's own `__post_init__` cannot see. A `vptr_offset_bits_fact`
+  constructed only inside `__post_init__`, at the point each `RecordType`
+  is first built, would freeze at that record's *pre-resolution* state —
+  typically `Fact.not_collected()`, since `vptr_offset_bits is None` is
+  exactly the condition that put the record on this pass's own worklist —
+  while the legacy `vptr_offset_bits` field goes on to hold the correctly
+  resolved value a moment later. A migrated detector reading the `Fact`
+  field would then see "not collected" for a record the legacy field
+  (and, for a caller that didn't migrate, every existing behavior)
+  correctly resolved — silently losing exactly the fact this conversion
+  exists to make visible, for the one DWARF-specific case that resolves
+  in two passes instead of one. Fixed by updating both representations at
+  each of these fixed-point call sites, not by deferring `Fact`
+  construction (which would mean every *other*, single-pass record
+  waiting on a cross-record pass that in practice never touches it):
+  `rec.vptr_offset_bits_fact = Fact.present(resolved)` alongside
+  `rec.vptr_offset_bits = resolved` wherever this pass resolves a value,
+  the same "both representations move together" discipline this phase's
+  legacy-field-resync fix already establishes for the explicit-constructor
+  direction, just applied to a producer-internal write instead of a
+  caller-supplied one.
 - **Loading a legacy, pre-`Fact[...]` persisted snapshot**
   (`serialization.py`): the existing reliability flag is read *once*, at
   load time, to reconstruct the correct `Fact[...]` value for that
@@ -583,7 +613,18 @@ vtable_fact=Fact.present(["new"]))` ends construction with `self.vtable ==
 ["new"]`, not `["old"]` — confirmed to fail against a version of the
 bridge that lets the explicit `Fact[...]` value win for `vtable_fact`
 itself while leaving `self.vtable` unsynchronized, which is the exact
-two-disagreeing-representations counterexample this fix closes.
+two-disagreeing-representations counterexample this fix closes. An
+eighth test pins the DWARF fixed-point-resolution fix directly, through
+the real `dwarf_snapshot.py` resolution pass rather than a hand-built
+`RecordType`: a base class with a real vtable and a derived class
+inheriting its vptr through the virtual-primary-base fallback (the exact
+shape that pass exists to resolve), asserting the derived record's
+`vptr_offset_bits_fact` reads `Fact.present(resolved)` — not
+`Fact.not_collected()` — after the pass runs, matching its own
+now-resolved `vptr_offset_bits` value; confirmed to fail against a
+version of the fix that updates only the legacy field at the resolution
+site and leaves the `Fact` field frozen at its pre-resolution,
+construction-time state.
 
 **Acceptance criteria.** The three converted fields cannot be read by any
 detector without explicit availability handling — enforced by a new
@@ -1366,12 +1407,32 @@ sibling:
   merges any two registrations sharing one `id`, so a record nested in a
   record and the same names nested in a namespace would coalesce into one
   graph node, mixing their `GraphFact`s and corrupting public-surface
-  reachability for both. The fix reuses the same injective scheme Phase
-  2's storage DTO fix already established rather than inventing a second
-  one: `model/graph.py`'s `GraphNode.id` for a `declaration`/`type` node is
-  the deterministic serialization of the typed segment list (the identical
-  `{"kind": ..., "name": ..., ...}` records `storage/entity_ids.py`
-  encodes) plus `kind`/`leaf_name`/`extra`, not the display spelling —
+  reachability for both. **This key must be built from `model.identity`'s
+  own *identity-only* encoding, not `storage/entity_ids.py`'s `to_dto()` —
+  a first draft of this phase pointed the graph key at the same `{"kind":
+  ..., "name": ..., ...}` segment records the storage DTO encodes, and
+  review correctly caught that those two encodings answer different
+  questions and must not share one function.** `to_dto()` is deliberately
+  a *lossless, full-structure* round trip — it preserves `Record.access`
+  as real payload, because storage wants to recover everything a
+  `ScopePath` carries, access included. But `Record.__eq__`/`__hash__`
+  (this phase's own ScopePath-identity section, above) deliberately
+  *excludes* `access` from identity — two `EntityId`s differing only in a
+  member's access level are the same identity by design, so that a real
+  access-level change reads as "this declaration changed," not "removed,
+  then added." A graph key built from the full-structure DTO encoding
+  would give those two equal `EntityId`s two *different* node ids, which
+  re-introduces this section's own target bug from the opposite direction:
+  instead of two different scopes colliding into one node, one same scope
+  would now silently split into two. The fix is a second, narrower
+  function, `model.identity.canonical_key(entity_id) -> str`, built only
+  from the fields each segment's own `__eq__`/`__hash__` already uses (so
+  it is injective *on identity*, never on full structure) — used by both
+  `model/graph.py`'s `GraphNode.id` for a `declaration`/`type` node and any
+  other consumer that needs a collision-free, equality-consistent key
+  (`kind`/`leaf_name`/`extra` plus each segment's identity-only fields),
+  while `storage/entity_ids.py`'s `to_dto()` stays the separate,
+  intentionally fuller encoding for its own persistence purpose —
   `GraphNode`'s own pre-existing `label: str` field (already documented as
   "human-readable name/path") is where the flattened, lossy `qualified_name`
   spelling belongs instead, exactly the role that field already plays for
@@ -2240,7 +2301,44 @@ optional `semantic_ir: SemanticIR | None` field, populated by `dumper.py`/
 `dumper_manifest.py` alongside the projected fields — one assembly call
 produces both the backward-compatible `AbiSnapshot` shape existing
 detectors read and the canonical `SemanticIR` a future detector can read
-instead, rather than two independent channels that could disagree. This is
+instead.
+
+**"Rather than two independent channels that could disagree" overclaims
+what one shared assembly call actually guarantees, and a first draft of
+this phase left it at that — review correctly pointed out that the
+guarantee is one-time, not ongoing.** Both `AbiSnapshot.functions`/
+`types`/... and `AbiSnapshot.semantic_ir` are ordinary, independently
+mutable dataclass fields once construction returns — nothing stops a
+direct Python caller, a post-processing pass, or a deserializer from
+mutating or constructing one without the other afterward, and Phase 10
+does not retire either representation (each is read by real consumers:
+every existing detector reads the legacy fields, a future `SemanticIR`-
+aware detector reads the new one). So after this phase, a snapshot that
+went through any path other than the one assembly call this phase adds
+*can* carry a legacy projection and a `SemanticIR` that disagree — the
+one-time construction guarantee does not survive the object's own
+mutability, and this plan should not claim it does. **Not made read-only
+or derived-on-access in this phase, and that is a real, named limitation
+rather than a silent gap**: a `@property`-derived legacy field was already
+rejected twice elsewhere in this same plan (the `vtable`/`bases` `Fact`
+bridge in Phase 0, the `CanonicalEntity`/`ScopePath` duplication in this
+same phase, above) for the identical reason — `dataclasses.asdict()` walks
+real fields, not properties, so deriving one from the other would rename
+or drop a JSON key every existing `asdict`-based consumer reads today, the
+exact compatibility break this phase's own "backward-compatible
+`AbiSnapshot` shape" commitment exists to avoid. What this phase *does*
+add: the end-to-end parity tests below exercise every real assembly call
+site and would catch the one-time guarantee failing at construction, and
+retiring the legacy fields (making them genuinely derived, or deleting
+them outright) is explicitly deferred — not to an unscheduled "eventually,"
+but to whichever future phase first has a real `SemanticIR`-only detector
+population large enough that the legacy fields have no remaining reader,
+the same retirement bar Phase 10's other removals already use elsewhere
+in this plan. Until then, a caller that mutates one representation
+directly and not the other is responsible for keeping them consistent
+itself — this phase does not enforce it at every mutation/load boundary,
+since doing so would mean exactly the derived-field redesign just rejected
+above. This is
 additive to `AbiSnapshot` (another `serialization.SCHEMA_VERSION` bump,
 same shape as Phase 0/Phase 3's), not a replacement for the existing
 fields, so `checker.compare()` itself needs no change in this phase —
