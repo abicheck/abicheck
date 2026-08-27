@@ -34,6 +34,7 @@ to `test-action.yml` escaping its own aggregate's `needs:` list.
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 from typing import Any
 
@@ -369,19 +370,92 @@ class TestBranchRulesetArtifact:
         assert "gh api" in runbook
         assert "/repos/abicheck/abicheck/rulesets" in runbook
 
+    # Backtick-quoted tokens inside AGENTS.md's authoritative paragraph
+    # (below) that are asides, not check names -- the branch name it was
+    # written against, a workflow filename, an internal cross-reference
+    # word, and the two gate jobs' *job ids* (immediately followed by their
+    # emitted check names, which ARE real entries). Listed explicitly so a
+    # real check name silently landing in this set (instead of being
+    # compared) fails loudly rather than being quietly excluded.
+    _AGENTS_MD_PARAGRAPH_ASIDES = frozenset(
+        {
+            "main",
+            "fair-metadata",
+            "name:",
+            "ci.yml",
+            "docs-pr-required",
+            "test-action-required",
+        }
+    )
+
     def test_shared_list_is_actually_documented_in_agents_md(self) -> None:
         """The two tests above only prove the JSON agrees with
         `REQUIRED_CHECK_NAMES` -- a hard-coded tuple in *this* file, which
         could itself drift from `AGENTS.md`'s prose without anything
-        failing. Close that gap the same way
-        `test_gate_job_check_name_is_documented_as_required` already does
-        for the two neutral-aggregate gate checks: every name must appear
-        backtick-quoted in `AGENTS.md`'s own required-check list, so a name
-        added to/removed from one place and not the other is a real
-        failure, not just a same-file tautology (Codex review on #887)."""
+        failing. A first fix (Codex review on #887, round 1) closed that by
+        substring-searching the *whole file* -- but a first-round-fixed
+        follow-up finding (round 2) pointed out that's still one-way and
+        file-wide: a name removed from the authoritative list but still
+        mentioned elsewhere in the file (the workflow table, explanatory
+        prose) passes the substring check regardless, and a name newly
+        added to the authoritative list but missing from
+        `REQUIRED_CHECK_NAMES` is never caught either, since nothing was
+        parsed as *the* list.
+
+        This version parses the actual authoritative paragraph -- the one
+        `.github/AGENTS.md`'s own "Required-status-check configuration"
+        section calls out by that name -- and compares its backtick-quoted
+        tokens against `REQUIRED_CHECK_NAMES` as two sets (modulo the small,
+        explicit list of non-check-name asides in that same paragraph:
+        `main`/`fair-metadata`/etc., itself pinned by
+        `test_paragraph_asides_are_still_accurate` below), not a
+        file-wide one-directional substring scan. A name dropped from the
+        paragraph, or a new one added there without a matching
+        `REQUIRED_CHECK_NAMES` update, now fails this test even if that
+        name still appears somewhere else in the file."""
         agents_md = (ROOT / ".github" / "AGENTS.md").read_text(encoding="utf-8")
-        for name in REQUIRED_CHECK_NAMES:
-            assert f"`{name}`" in agents_md, (
-                f"{name!r} is in REQUIRED_CHECK_NAMES but not documented, "
-                f"backtick-quoted, in .github/AGENTS.md"
+        match = re.search(
+            r"\*\*The required-check list, applying this rule to the table "
+            r"above.*?actually requires\)\.",
+            agents_md,
+            re.S,
+        )
+        assert match is not None, (
+            "AGENTS.md's authoritative required-check-list paragraph "
+            "(opening 'The required-check list, applying this rule to the "
+            "table above') was not found -- reword the anchor phrase here "
+            "if that paragraph's own wording changed"
+        )
+        paragraph = match.group(0)
+        tokens = frozenset(re.findall(r"`([^`]+)`", paragraph))
+        documented_checks = tokens - self._AGENTS_MD_PARAGRAPH_ASIDES
+        assert documented_checks == set(REQUIRED_CHECK_NAMES), (
+            "AGENTS.md's authoritative required-check-list paragraph and "
+            "REQUIRED_CHECK_NAMES disagree.\n"
+            f"  only in AGENTS.md's paragraph: {documented_checks - set(REQUIRED_CHECK_NAMES)}\n"
+            f"  only in REQUIRED_CHECK_NAMES:  {set(REQUIRED_CHECK_NAMES) - documented_checks}\n"
+            "(if a genuinely new aside token was added to that paragraph's "
+            "own prose, add it to _AGENTS_MD_PARAGRAPH_ASIDES above instead)"
+        )
+
+    def test_paragraph_asides_are_still_accurate(self) -> None:
+        """Guards the guard: every token in `_AGENTS_MD_PARAGRAPH_ASIDES`
+        must actually still appear, backtick-quoted, in the authoritative
+        paragraph -- an aside that no longer appears there (the prose was
+        reworded) would otherwise sit unused and silently widen what the
+        test above tolerates without anyone noticing."""
+        agents_md = (ROOT / ".github" / "AGENTS.md").read_text(encoding="utf-8")
+        match = re.search(
+            r"\*\*The required-check list, applying this rule to the table "
+            r"above.*?actually requires\)\.",
+            agents_md,
+            re.S,
+        )
+        assert match is not None
+        tokens = frozenset(re.findall(r"`([^`]+)`", match.group(0)))
+        for aside in self._AGENTS_MD_PARAGRAPH_ASIDES:
+            assert aside in tokens, (
+                f"{aside!r} is listed as an aside but no longer appears, "
+                f"backtick-quoted, in AGENTS.md's authoritative paragraph -- "
+                f"remove it from _AGENTS_MD_PARAGRAPH_ASIDES"
             )

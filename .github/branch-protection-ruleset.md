@@ -55,27 +55,30 @@ isn't done in the same pass).
 /repos/abicheck/abicheck/rulesets` returns one — this is what `main`'s repo
 settings show today, since `protected: true` alone doesn't say which
 mechanism supplies it), **do not blindly `PUT` this file's payload over
-it.** A `PUT` replaces the *entire* ruleset object — if the existing one
-also carries pull-request-review requirements, signed-commit rules,
-merge-queue settings, or `bypass_actors`, overwriting it with this file's
-`rules`/`bypass_actors` (`required_status_checks`/`non_fast_forward` only,
-empty `bypass_actors`) silently deletes those unrelated protections. Fetch
-the existing ruleset first and decide from there:
+it.** A `PUT` replaces the *entire* ruleset object, every top-level field —
+if the existing one also carries pull-request-review requirements,
+signed-commit rules, merge-queue settings, `bypass_actors`, or broader
+`conditions` (e.g. it also targets release branches, not just `main`),
+overwriting it with this file's payload silently deletes or narrows every
+one of those, not just `rules`/`bypass_actors`. Fetch the existing ruleset
+first and decide from there:
 
 ```bash
 gh api /repos/abicheck/abicheck/rulesets | jq '.[] | {id, name}'
 gh api /repos/abicheck/abicheck/rulesets/<id> > /tmp/existing-ruleset.json
 ```
 
-- If `/tmp/existing-ruleset.json`'s `rules`/`bypass_actors` already match
-  what's checked in here (e.g. it was created from an earlier version of
-  this same file), `PUT` this file's payload — there's nothing to lose.
-- If it carries anything else, **merge by hand**: start from
-  `/tmp/existing-ruleset.json`, add/update only the
+- If `/tmp/existing-ruleset.json`'s `conditions`, `rules`, and
+  `bypass_actors` **all** already match what's checked in here (e.g. it was
+  created from an earlier version of this same file) — check every one of
+  those three, not just `rules`/`bypass_actors` — `PUT` this file's
+  payload; there's nothing to lose.
+- If it carries anything else in *any* of those three fields, **merge by
+  hand**: start from `/tmp/existing-ruleset.json`, add/update only the
   `required_status_checks`/`non_fast_forward` rule entries from
-  `branch-protection-ruleset.json`, keep its other rules and
-  `bypass_actors` untouched, and `PUT` the merged result — not this file
-  verbatim.
+  `branch-protection-ruleset.json`, keep its `conditions` and every other
+  rule/`bypass_actors` entry untouched, and `PUT` the merged result — not
+  this file verbatim.
 - When merging feels risky or the existing ruleset's purpose is unclear,
   the safe fallback is a **separate, additionally-named** Ruleset (the
   `POST` command in "Apply" above, under a distinct `name`) rather than
