@@ -149,19 +149,27 @@ BugClass(
     ),
     fixed_by=(837, 843, 846, 868),           # issue/PR numbers, for traceability
     seed_tests=("tests/test_castxml_anonymous_type_location.py",),
-    property_tests=("tests/test_identity_environment_taint_properties.py",),
-    public_surfaces=("python-api", "cli"),
-    axes={"frontend": ("castxml", "clang"), "storage": ("live", "json")},
-    known_gaps=(),                            # each entry names an issue + xfail/canary test
+    public_surfaces=(),                       # () until a seed genuinely invokes one
+    axes={},                                  # {} until a seed genuinely covers an axis
+    known_gaps=(),                            # each entry names a reference + optional canary
 )
 ```
 
+(This is the shape the implemented `BugClass`/`KnownGap` dataclasses in
+`tests/regressions/manifest.py` actually carry — see that module for the
+authoritative field list and each field's own docstring, not this
+illustrative snippet, if the two ever disagree.)
+
 `tests/test_regressions_manifest.py` (Phase 1) enforces the registry's own
-integrity mechanically — every named test path exists and is collected by
-at least one CI lane, every `known_gaps` entry names a real issue and a
-real xfail/canary test — the same "a registry entry is checked, not just
-written" discipline `check_ai_readiness.py`'s `changekind-*` checks already
-apply to `ChangeKind`. It does **not** replace or duplicate the bug-fix
+integrity mechanically — every named `seed_tests` path exists and is a
+real, pytest-collected `test_*.py` file, every `known_gaps` entry names a
+non-empty reference, and, when a `known_gaps` entry sets `canary_test`
+(optional — many current entries deliberately leave it `None`, an honest
+"tracked, not yet monitored by a canary" rather than a fabricated pointer),
+that path resolves the same way — the same "a registry entry is checked,
+not just written" discipline `check_ai_readiness.py`'s `changekind-*`
+checks already apply to `ChangeKind`. It does **not** replace or duplicate
+the bug-fix
 contract's PR-time gate; it is the durable, cross-PR index that gate's
 per-PR answers accumulate into. A future `fix:` PR's "Bug class" field
 should, where the class already exists in the registry, name the existing
