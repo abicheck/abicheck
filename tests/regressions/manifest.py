@@ -482,7 +482,7 @@ BUG_CLASSES: tuple[BugClass, ...] = (
             "actually needs, or the scoping gap is documented as a known, "
             "accepted limitation, never left silent."
         ),
-        fixed_by=(894,),
+        fixed_by=(896,),
         seed_tests=("tests/test_bundle_diff_derived_scoping.py",),
         known_gaps=(
             KnownGap(
