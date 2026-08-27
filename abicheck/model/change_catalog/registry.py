@@ -274,6 +274,42 @@ class ChangeKindMeta:
             self, "policy_overrides", _ImmutableDict(self.policy_overrides)
         )
 
+    def __deepcopy__(self, memo: dict[int, Any]) -> ChangeKindMeta:
+        # copy.deepcopy(entry) (the whole ChangeKindMeta, not one field)
+        # has no custom __deepcopy__/__reduce__ to intercept by default, so
+        # Python's generic object-copying mechanism would build a new
+        # instance and set each field's own deep copy directly via
+        # object.__setattr__ — bypassing __post_init__ entirely. For
+        # policy_overrides that field-level deep copy is
+        # _ImmutableDict.__deepcopy__, which deliberately returns a plain,
+        # mutable dict (see that method's own docstring — required for
+        # dataclasses.asdict()'s JSON-serialization use case). Without this
+        # override, the resulting ChangeKindMeta.policy_overrides would
+        # therefore be a bare mutable dict, silently defeating the
+        # immutability guarantee for any copy later placed back into a
+        # registry or otherwise treated as a validated entry (Codex
+        # review, PR #882, fresh evidence). Reconstructing via the
+        # constructor instead re-runs __post_init__, which wraps a fresh
+        # copy of policy_overrides into a genuinely immutable
+        # _ImmutableDict again.
+        #
+        # dataclasses.asdict() never reaches this method at all — for a
+        # dataclass instance it walks fields directly (getattr + recurse),
+        # never calling copy.deepcopy() on the instance itself — so the
+        # two paths stay genuinely independent: asdict()'s field-level
+        # copy stays a plain dict, while copy.deepcopy() of the whole
+        # entry stays immutable.
+        new = ChangeKindMeta(
+            kind=self.kind,
+            default_verdict=self.default_verdict,
+            impact=self.impact,
+            is_addition=self.is_addition,
+            policy_overrides=dict(self.policy_overrides),
+            description_template=self.description_template,
+        )
+        memo[id(self)] = new
+        return new
+
 
 #: Representative ``str.format(**...)`` kwarg sets used to *actually execute*
 #: a ``description_template`` at registry-construction time (see

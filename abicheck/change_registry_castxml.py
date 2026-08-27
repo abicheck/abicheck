@@ -116,7 +116,12 @@ CASTXML_EXTENSION_ENTRIES: list[ChangeKindMeta] = [
     _E("func_deprecated_added", _C,
        impact="Function gained [[deprecated]]; callers now get a compiler "
               "warning when calling it, but its signature and ABI are "
-              "unchanged — informational advance notice, not a break.",
+              "unchanged — informational advance notice for a consumer "
+              "compiling with warnings-as-warnings. A consumer whose own "
+              "build treats warnings as errors (e.g. "
+              "-Werror=deprecated-declarations) has this turn a previously "
+              "clean build into a failing one, so it isn't unconditionally "
+              "\"not a break\" for source compatibility.",
        description_template="Function marked deprecated: {name} ({detail})"),
     _E("func_deprecated_removed", _C,
        impact="Function's [[deprecated]] marker was removed; the compiler "
@@ -125,7 +130,9 @@ CASTXML_EXTENSION_ENTRIES: list[ChangeKindMeta] = [
     _E("var_deprecated_added", _C,
        impact="Variable gained [[deprecated]]; consumers get a compiler "
               "warning when referencing it, but its type, size, and "
-              "address are unchanged.",
+              "address are unchanged. A consumer building with warnings "
+              "as errors (e.g. -Werror=deprecated-declarations) has this "
+              "turn a previously clean build into a failing one.",
        description_template="Variable marked deprecated: {name} ({detail})"),
     _E("var_deprecated_removed", _C,
        impact="Variable's [[deprecated]] marker was removed; the compiler "
@@ -134,7 +141,9 @@ CASTXML_EXTENSION_ENTRIES: list[ChangeKindMeta] = [
     _E("type_deprecated_added", _C,
        impact="Type gained [[deprecated]]; consumers get a compiler "
               "warning when naming it, but its layout and ABI are "
-              "unchanged.",
+              "unchanged. A consumer building with warnings as errors "
+              "(e.g. -Werror=deprecated-declarations) has this turn a "
+              "previously clean build into a failing one.",
        description_template="Type marked deprecated: {name} ({detail})"),
     _E("type_deprecated_removed", _C,
        impact="Type's [[deprecated]] marker was removed; the compiler "
@@ -143,7 +152,9 @@ CASTXML_EXTENSION_ENTRIES: list[ChangeKindMeta] = [
     _E("enum_deprecated_added", _C,
        impact="Enum type gained [[deprecated]]; consumers get a compiler "
               "warning when naming it, but its underlying type, size, and "
-              "enumerator values are unchanged.",
+              "enumerator values are unchanged. A consumer building with "
+              "warnings as errors (e.g. -Werror=deprecated-declarations) "
+              "has this turn a previously clean build into a failing one.",
        description_template="Enum marked deprecated: {name} ({detail})"),
     _E("enum_deprecated_removed", _C,
        impact="Enum type's [[deprecated]] marker was removed; the "
@@ -152,7 +163,9 @@ CASTXML_EXTENSION_ENTRIES: list[ChangeKindMeta] = [
     _E("field_deprecated_added", _C,
        impact="A field gained [[deprecated]]; consumers get a compiler "
               "warning when accessing it, but its offset and type are "
-              "unchanged.",
+              "unchanged. A consumer building with warnings as errors "
+              "(e.g. -Werror=deprecated-declarations) has this turn a "
+              "previously clean build into a failing one.",
        description_template="Field marked deprecated: {name}::{detail} ({new})"),
     _E("field_deprecated_removed", _C,
        impact="A field's [[deprecated]] marker was removed; the compiler "

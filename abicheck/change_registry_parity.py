@@ -211,14 +211,21 @@ PARITY_EXTENSION_ENTRIES: list[ChangeKindMeta] = [
 
     # ── Anonymous struct/union ─────────────────────────────────────────────
     _E("anon_field_changed", _B,
-       impact="An anonymous struct/union member's own layout changed; "
-              "since it has no name to distinguish it, every named member "
-              "reached through it may have shifted offset — an "
-              "already-compiled consumer (or a mixed build linking old "
+       impact="An anonymous struct/union member changed — either its type "
+              "changed at the same offset, or it was removed entirely (this "
+              "detector reports both under one kind). When the type "
+              "changed: since it has no name to distinguish it, every "
+              "named member reached through it may have shifted offset — "
+              "an already-compiled consumer (or a mixed build linking old "
               "objects against the new library) still reading/writing at "
-              "the old offsets now hits the wrong bytes. Source recompiled "
-              "against the new headers picks up the new offsets and is "
-              "unaffected."),
+              "the old offsets now hits the wrong bytes, while source "
+              "recompiled against the new headers picks up the new "
+              "offsets and is unaffected. When it was removed: every "
+              "named member promoted from it (e.g. `s.member`, reached "
+              "directly through the enclosing struct/union) is simply "
+              "gone, so source referencing any of them fails to compile "
+              "against the new headers too — recompilation does not make "
+              "this case safe."),
 
     # ── ABICC full parity — remaining gaps ─────────────────────────────────
     _E("var_value_changed", _C,

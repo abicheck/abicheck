@@ -366,57 +366,77 @@ class TestChangeKindRegistry:
         ``pickle.dumps()`` all raised ``TypeError: cannot pickle 'mappingproxy'
         object`` (Codex review, PR #882, fresh evidence). The fix (a
         read-only ``collections.abc.Mapping`` implementation, not a ``dict``
-        subclass) must support all three the same way an ordinary ``dict``
-        field would — which for ``asdict()``/``copy.deepcopy()`` means the
-        *disconnected copy* is an ordinary, mutable, JSON-serializable
-        ``dict`` (a non-dict ``Mapping`` in that copy would make
-        ``json.dumps(asdict(entry))`` fail where a plain dict field would
-        have succeeded — Codex review, PR #882, fresh evidence). Pickling
-        goes through a different mechanism (``__reduce__``) and keeps
-        reconstructing a genuinely immutable ``_ImmutableDict``, since its
-        job is faithfully reconstructing the same object/type rather than
-        producing JSON-primitive-friendly output. The *original* entry's own
-        ``policy_overrides`` stays immutable throughout, regardless of what
-        any copy of it looks like.
+        subclass) must support all three, and does so with two distinct
+        contracts depending on *which* object gets copied:
+
+        - ``dataclasses.asdict(entry)['policy_overrides']`` — asdict() never
+          calls ``copy.deepcopy()`` on the whole ``ChangeKindMeta`` (it walks
+          dataclass fields directly), only on the ``policy_overrides`` field
+          value itself, which is ``_ImmutableDict.__deepcopy__`` — an
+          ordinary, mutable, JSON-serializable ``dict`` (a non-dict
+          ``Mapping`` in that copy would make ``json.dumps(asdict(entry))``
+          fail where a plain dict field would have succeeded — Codex
+          review, PR #882, fresh evidence).
+        - ``copy.deepcopy(entry)`` (the whole ``ChangeKindMeta``) —
+          ``ChangeKindMeta.__deepcopy__`` reconstructs via the constructor,
+          re-running ``__post_init__``, so the copy's own
+          ``policy_overrides`` is a fresh, genuinely immutable
+          ``_ImmutableDict`` — a plain mutable dict here would let a
+          validated copy be silently corrupted after the fact (e.g. if
+          placed back into a registry) with no way to catch it (Codex
+          review, PR #882, fresh evidence).
+        - ``pickle`` goes through a different mechanism (``__reduce__``) and
+          also reconstructs a genuinely immutable ``_ImmutableDict``.
+
+        The *original* entry's own ``policy_overrides`` stays immutable
+        throughout, regardless of what any copy of it looks like.
         """
         import copy
         import dataclasses
         import json
         import pickle
 
+        import pytest
+
         entry = ChangeKindMeta(
             "test_kind", Verdict.BREAKING,
             policy_overrides={"plugin_abi": Verdict.COMPATIBLE},
         )
 
+        # asdict(): field-level copy, plain mutable dict, JSON-serializable.
         as_dict = dataclasses.asdict(entry)
         assert as_dict["policy_overrides"] == {"plugin_abi": Verdict.COMPATIBLE}
         assert type(as_dict["policy_overrides"]) is dict
         json.dumps(as_dict["policy_overrides"])  # must not raise
+        as_dict["policy_overrides"]["plugin_abi"] = Verdict.BREAKING
+        assert entry.policy_overrides["plugin_abi"] == Verdict.COMPATIBLE
 
+        # copy.deepcopy() of the whole entry: genuinely immutable copy.
         deep = copy.deepcopy(entry)
         assert deep.policy_overrides == {"plugin_abi": Verdict.COMPATIBLE}
         assert deep == entry
-        assert type(deep.policy_overrides) is dict
-        # The deep copy is an ordinary, disconnected, mutable dict — exactly
-        # what copy.deepcopy() would give you for an ordinary dict field.
-        # Mutating it must not reach back into the original.
-        deep.policy_overrides["plugin_abi"] = Verdict.BREAKING
+        with pytest.raises(TypeError):
+            deep.policy_overrides["plugin_abi"] = Verdict.BREAKING
+
+        # Directly deep-copying the field value alone (not through the whole
+        # entry) still hits _ImmutableDict.__deepcopy__ and stays a plain,
+        # mutable dict — this is the asdict()-supporting behavior, pinned
+        # independently of ChangeKindMeta.__deepcopy__.
+        field_copy = copy.deepcopy(entry.policy_overrides)
+        assert type(field_copy) is dict
+        field_copy["plugin_abi"] = Verdict.BREAKING
         assert entry.policy_overrides["plugin_abi"] == Verdict.COMPATIBLE
 
+        # pickle: genuinely immutable reconstruction.
         rehydrated = pickle.loads(pickle.dumps(entry))
         assert rehydrated.policy_overrides == {"plugin_abi": Verdict.COMPATIBLE}
         assert rehydrated == entry
-
-        # The original entry, and the pickle-reconstructed copy (a genuine
-        # _ImmutableDict, unlike the deepcopy/asdict case above), both stay
-        # immutable.
-        import pytest
-
-        with pytest.raises(TypeError):
-            entry.policy_overrides["plugin_abi"] = Verdict.BREAKING
         with pytest.raises(TypeError):
             rehydrated.policy_overrides["plugin_abi"] = Verdict.BREAKING
+
+        # The original entry stays immutable throughout all of the above.
+        with pytest.raises(TypeError):
+            entry.policy_overrides["plugin_abi"] = Verdict.BREAKING
 
     def test_description_template_with_unknown_placeholder_raises(self):
         """A description_template referencing an out-of-vocabulary field is rejected.
