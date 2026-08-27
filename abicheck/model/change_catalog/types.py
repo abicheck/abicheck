@@ -172,23 +172,37 @@ TYPES_ENTRIES: list[ChangeKindMeta] = [
               "users see whether a replacement was published.",
        description_template="Experimental {detail} '{old}' was removed and no {detail} with leaf '{name}' was published at a stable namespace in the new headers."),
     _E("field_became_const", _C,
-       impact="A struct/class field gained const; the field's offset and "
-              "size are unchanged, but source code that wrote to it "
-              "directly (not through a cast) no longer compiles.",
+       impact="A struct/class field gained const. This detector matches "
+              "fields by name and only compares the const flag — it "
+              "doesn't check whether the same-named field's type or offset "
+              "also changed, so a companion finding for either is possible "
+              "and takes precedence. When only the qualifier changed, the "
+              "field's offset and size are unaffected, but source code "
+              "that wrote to it directly (not through a cast) no longer "
+              "compiles.",
        description_template="Field became const: {name}::{detail}"),
     _E("field_became_mutable", _C,
        impact="A field gained mutable, letting it be modified even "
-              "through a const object/method; layout is unchanged, but "
-              "this weakens the const-correctness guarantee callers "
-              "holding a const reference could previously rely on.",
+              "through a const object/method. This detector matches "
+              "fields by name and only compares the mutable flag — it "
+              "doesn't check whether the same-named field's type or offset "
+              "also changed, so a companion finding for either is possible "
+              "and takes precedence. When only the qualifier changed, "
+              "layout is unaffected, but this weakens the const-correctness "
+              "guarantee callers holding a const reference could previously "
+              "rely on.",
        description_template="Field became mutable: {name}::{detail}"),
     _E("field_became_volatile", _C,
-       impact="A field gained volatile; its offset and size are unchanged, "
-              "but the compiler now treats every access as observable and "
-              "suppresses caching/reordering around it — code recompiled "
-              "against the new declaration may see more memory traffic "
-              "where it previously assumed the compiler could cache a "
-              "read.",
+       impact="A field gained volatile. This detector matches fields by "
+              "name and only compares the volatile flag — it doesn't check "
+              "whether the same-named field's type or offset also changed, "
+              "so a companion finding for either is possible and takes "
+              "precedence. When only the qualifier changed, offset and "
+              "size are unaffected, but the compiler now treats every "
+              "access as observable and suppresses caching/reordering "
+              "around it — code recompiled against the new declaration may "
+              "see more memory traffic where it previously assumed the "
+              "compiler could cache a read.",
        description_template="Field became volatile: {name}::{detail}"),
     _E("field_bitfield_changed", _B,
        impact="Bit-field width or offset changed; old code reads/writes wrong bits.",
@@ -221,22 +235,36 @@ TYPES_ENTRIES: list[ChangeKindMeta] = [
               "warning stops, with no effect on the field's layout.",
        description_template="Field no longer marked deprecated: {name}::{detail}"),
     _E("field_lost_const", _C,
-       impact="A field lost const; its offset and size are unchanged, but "
-              "code that relied on the compiler enforcing (or optimizing "
-              "based on) read-only access to it no longer gets that "
-              "guarantee.",
+       impact="A field lost const. This detector matches fields by name "
+              "and only compares the const flag — it doesn't check "
+              "whether the same-named field's type or offset also "
+              "changed, so a companion finding for either is possible and "
+              "takes precedence. When only the qualifier changed, offset "
+              "and size are unaffected, but code that relied on the "
+              "compiler enforcing (or optimizing based on) read-only "
+              "access to it no longer gets that guarantee.",
        description_template="Field lost const: {name}::{detail}"),
     _E("field_lost_mutable", _C,
-       impact="A field lost mutable; it can no longer be modified through "
-              "a const object/method — source code doing so via a "
-              "const-qualified path no longer compiles.",
+       impact="A field lost mutable. This detector matches fields by name "
+              "and only compares the mutable flag — it doesn't check "
+              "whether the same-named field's type or offset also "
+              "changed, so a companion finding for either is possible and "
+              "takes precedence. When only the qualifier changed, it can "
+              "no longer be modified through a const object/method — "
+              "source code doing so via a const-qualified path no longer "
+              "compiles.",
        description_template="Field lost mutable: {name}::{detail}"),
     _E("field_lost_volatile", _C,
-       impact="A field lost volatile; its offset and size are unchanged, "
-              "but a recompiled consumer may now have accesses to it "
-              "cached or reordered by the compiler — code relying on every "
-              "access reaching memory (e.g. memory-mapped hardware state) "
-              "can break once recompiled against the new declaration.",
+       impact="A field lost volatile. This detector matches fields by "
+              "name and only compares the volatile flag — it doesn't "
+              "check whether the same-named field's type or offset also "
+              "changed, so a companion finding for either is possible and "
+              "takes precedence. When only the qualifier changed, offset "
+              "and size are unaffected, but a recompiled consumer may now "
+              "have accesses to it cached or reordered by the compiler — "
+              "code relying on every access reaching memory (e.g. "
+              "memory-mapped hardware state) can break once recompiled "
+              "against the new declaration.",
        description_template="Field lost volatile: {name}::{detail}"),
     _E("field_renamed", _A,
        impact="Field name changed but offset is the same; source code using old name won't compile.",
@@ -529,10 +557,18 @@ TYPES_ENTRIES: list[ChangeKindMeta] = [
        description_template="Field type changed: {name}::{detail}"),
     _E("type_kind_changed", _B,
        impact="An aggregate's declared kind changed (e.g. struct/class ↔ "
-              "union); a struct/class↔union change reinterprets "
-              "overlapping vs. non-overlapping member storage — code "
-              "compiled against the old kind reads/writes members at the "
-              "wrong effective location.",
+              "union); this detector fires whenever a union is involved on "
+              "either side, without checking whether the transition "
+              "actually moved any member's effective location. For an "
+              "aggregate with two or more members, a struct/class↔union "
+              "change genuinely reinterprets overlapping vs. "
+              "non-overlapping member storage — code compiled against the "
+              "old kind reads/writes members at the wrong effective "
+              "location. A single-member aggregate is the layout-neutral "
+              "edge case: that one member sits at offset 0 either way, so "
+              "if its own type/offset/size are otherwise unchanged, old "
+              "code accessing it is unaffected — the risk is specifically "
+              "in the multi-member overlap.",
        description_template="Aggregate kind changed: {name} ({old} → {new})"),
     _E("type_lost_abstract", _C,
        impact="A class/struct is no longer abstract (every pure virtual now "
