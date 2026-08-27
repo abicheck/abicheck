@@ -588,12 +588,16 @@ cover the surrounding first-party trees this file doesn't detail.
 ## Adding a new ChangeKind
 
 1. Add to `ChangeKind` enum in `checker_policy.py`.
-2. Add ONE `ChangeKindMeta` entry (kind string, `default_verdict`, optional
-   `impact`/`description_template`) to `abicheck/change_registry.py` or one
-   of its sibling `change_registry_<topic>.py` files (`_castxml`,
-   `_buildsource`, `_composition`, `_coverage`, `_numpy`, `_suppression` —
-   split out only to stay under the file-size cap; declaring an entry in any
-   of them is equivalent). **Do NOT hand-edit `BREAKING_KINDS`/
+2. Add ONE `ChangeKindMeta` entry (kind string, `default_verdict`, required
+   `impact`, optional `description_template`) to `abicheck/change_registry.py`
+   or one of its sibling `change_registry_<topic>.py` files (`_castxml`,
+   `_buildsource`, `_composition`, `_coverage`, `_numpy`, `_parity`,
+   `_suppression`, `_wheel` — split out only to stay under the file-size cap;
+   declaring an entry in any of them is equivalent). `impact` must be
+   non-empty — `ChangeKindRegistry` rejects an entry with no `impact` text at
+   construction time (the production `REGISTRY` is built at import time, so
+   this fires then in practice); `description_template` stays genuinely
+   optional. **Do NOT hand-edit `BREAKING_KINDS`/
    `API_BREAK_KINDS`/`COMPATIBLE_KINDS`/`RISK_KINDS` in `checker_policy.py`
    directly** — those are `frozenset`s *derived* from the registry at import
    time (`_kinds_for(...)`); the registry entry's `default_verdict` is what

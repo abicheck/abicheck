@@ -90,12 +90,17 @@ PARITY_EXTENSION_ENTRIES: list[ChangeKindMeta] = [
               "boundary can fail to find the expected typeinfo/vtable once "
               "the visibility narrows."),
     _E("frame_register_changed", _B,
-       impact="The function's stack-unwinding convention changed (e.g. "
-              "frame-pointer-based vs. CFI-only, or a different canonical-"
-              "frame-address rule); a debugger, exception unwinder, or "
-              "profiler built against the old convention can no longer "
-              "correctly walk the stack through this function, though "
-              "ordinary calls into it are unaffected.",
+       impact="The dominant canonical-frame-address register recorded in "
+              "the function's CFI (.eh_frame/.debug_frame) changed — e.g. "
+              "rbp vs. rsp, commonly from a `-fomit-frame-pointer` "
+              "rebuild. A tool that reads the real CFI (a standard "
+              "DWARF-aware debugger or unwinder) walks the new frame "
+              "correctly regardless, since the new CFI describes it; only "
+              "a tool that assumes a frame-pointer chain instead of "
+              "reading CFI, or one working from stale/cached unwind "
+              "information for this function, can misinterpret the new "
+              "convention. Ordinary calls into the function are "
+              "unaffected either way.",
        policy_overrides={"plugin_abi": _C}),
 
     # ── Sprint 2 — gap detectors ──────────────────────────────────────────
