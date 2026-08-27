@@ -13,27 +13,21 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Compatibility re-export shim for the ChangeKind registry's core types.
+"""ADR-061 D9's target owner for the ``ChangeKind`` catalog's core types.
 
-The real implementation (``Verdict``, ``ChangeKindMeta``,
-``ChangeKindRegistry``, ``VALID_BASE_POLICIES``, ``TEMPLATE_VOCAB``, and the
-D9 catalog-validation logic) moved to ``abicheck.model.change_catalog.registry``
-(ADR-061 Phase 5, D9's target owner for this logic) — this module re-exports
-every name unchanged so every existing import path
-(``from abicheck.change_registry_types import Verdict``, and the transitive
-``from abicheck.change_registry import Verdict``) keeps working. New callers
-should import from ``abicheck.model.change_catalog.registry`` directly rather
-than through this shim.
+``registry.py`` holds ``Verdict``, ``ChangeKindMeta``, ``ChangeKindRegistry``,
+and the catalog-validation logic D9 assigns to the assembled registry. The
+397-entry data table itself (``change_registry.py`` and its
+``change_registry_<topic>.py`` siblings) has not yet been repartitioned into
+this package — see the ADR's Phase 5 section for the remaining scope.
 """
 
 from __future__ import annotations
 
-from .model.change_catalog.registry import (
-    _VERDICT_BLIND_POLICIES as _VERDICT_BLIND_POLICIES,
+from .registry import (
     TEMPLATE_VOCAB as TEMPLATE_VOCAB,
     VALID_BASE_POLICIES as VALID_BASE_POLICIES,
     ChangeKindMeta as ChangeKindMeta,
     ChangeKindRegistry as ChangeKindRegistry,
     Verdict as Verdict,
-    _validate_references_and_defaults as _validate_references_and_defaults,
 )

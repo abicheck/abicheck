@@ -1155,8 +1155,8 @@ outside `TEMPLATE_VOCAB` (`{symbol} {name} {old} {new} {detail}`) —
 including a bare positional `{}`/`{0}`, which that keyword-only call could
 never satisfy — previously raised `KeyError`/`IndexError` only the first
 time a finding of that kind was actually formatted, not at registry
-construction. The constructor now rejects it the same way. Pinned by eleven
-new cases in the same test class, including
+construction. The constructor now rejects it the same way. Pinned by
+thirteen new cases in the same test class, including
 `test_real_registry_satisfies_reference_and_default_validation`, which
 reconstructs the real production `REGISTRY` from its own entries to prove
 every one of its 397 entries — including all 284 that carry a
@@ -1172,6 +1172,46 @@ locations, so no importer needed to change), since both of those modules
 import `REGISTRY` from `change_registry.py`, which in turn imports
 `change_registry_types` — a definition in either of the old locations would
 have been a cycle.
+
+A third Codex review round on this PR found the `description_template`
+check itself was incomplete: `string.Formatter().parse()` only ever yields
+the *outer* field name of a replacement field, so a field nested inside a
+format spec (`{name:{bogus}}`) or an illegal `!conversion` specifier
+(`{name!x}`, where only `r`/`s`/`a`/none are legal for `str.format`) both
+passed construction-time validation and would still only fail the first
+time `make_change()` actually formatted a finding of that kind — the exact
+gap "valid references" exists to close, just one level deeper than the
+first fix reached. Fixed with a small recursive helper,
+`_template_bad_fields()`, that walks into a nested format spec and flags an
+illegal conversion the same way an unknown field name is flagged; pinned by
+two new cases in the same test class.
+
+A fourth Codex review round found the growing validation logic (by then
+100+ new lines) itself belonged somewhere else: this repository's own
+`AGENTS.md` requires new behavior to route to its ADR-061 target owner
+rather than deepen a legacy flat module, and D9 already names
+`model/change_catalog/registry.py` as this logic's destination.
+`Verdict`, `ChangeKindMeta`, `ChangeKindRegistry`, the
+`_validate_references_and_defaults`/`_template_bad_fields` validation
+logic, `VALID_BASE_POLICIES`, and `TEMPLATE_VOCAB` now live in a new
+`abicheck/model/change_catalog/registry.py` (a true leaf — zero internal
+imports, matching the `model` layer's `may_import: []` contract);
+`change_registry_types.py` is now a pure compatibility re-export shim
+(mirroring the same "old module keeps the public path, new module owns the
+implementation" pattern the `*_metadata.py`/`model/*_facts.py` split
+already established — see the "Model" section of the module map above), and
+`checker_policy.py`/`diff_helpers.py` import `VALID_BASE_POLICIES`/
+`TEMPLATE_VOCAB` directly from the new canonical location rather than
+through the shim (migration rule 3). This is real, if partial, progress on
+item 3 below: it gives D9's `registry.py` a physical, correctly-owned home
+containing the actual validating logic, but it is not the taxonomy
+repartition itself — the 397-entry *data table* (`change_registry.py` and
+its `change_registry_<topic>.py` siblings) still has not been split into
+`symbols.py`/`types.py`/`platform.py`/`build.py`/`source.py`, and
+`change_registry.py` continues to import `ChangeKindMeta`/
+`ChangeKindRegistry` from the (now-shimmed) old path rather than the new
+one, unchanged in this pass to stay within its own 2000-line adoption-debt
+ceiling.
 
 The fourth, "complete metadata", is not enforced, and is a *content* gap
 rather than a missing check: `ChangeKindMeta.impact`/`.description_template`
@@ -1203,7 +1243,13 @@ The remaining Phase 5 work:
    {symbols,types,platform,build,source}.py` taxonomy, and write the 48
    missing `impact` strings needed for "complete metadata" enforcement
    (global uniqueness, valid references, and non-contradictory defaults are
-   done — see above); and
+   done — see above). **A first slice landed**: `registry.py` itself — the
+   one file D9 says every taxonomy module should feed — now physically
+   exists at `abicheck/model/change_catalog/registry.py` and holds the real
+   `Verdict`/`ChangeKindMeta`/`ChangeKindRegistry`/validation
+   implementation, not just a stub; what remains is the taxonomy modules
+   themselves (`symbols.py`/`types.py`/`platform.py`/`build.py`/
+   `source.py`) and moving the 397 entries into them; and
 4. remove superseded private re-exports, migration edges, and cycle
    exceptions. **A first, verified slice landed**: `architecture/
    modules.yaml`'s `frozen_root_families["cli_"]` and `legacy_root_modules`

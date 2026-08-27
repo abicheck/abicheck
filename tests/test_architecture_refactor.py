@@ -211,11 +211,11 @@ class TestChangeKindRegistry:
         this module treats as verdict-blind — the empirical fact the new
         validator's rejection rests on, not just an assertion about it.
         """
-        from abicheck.change_registry_types import (
+        from abicheck.checker_policy import policy_kind_sets
+        from abicheck.model.change_catalog.registry import (
             _VERDICT_BLIND_POLICIES,
             VALID_BASE_POLICIES,
         )
-        from abicheck.checker_policy import policy_kind_sets
 
         for policy in VALID_BASE_POLICIES - {"strict_abi"}:
             if policy not in _VERDICT_BLIND_POLICIES:
@@ -291,6 +291,46 @@ class TestChangeKindRegistry:
         ]
         registry = ChangeKindRegistry(entries)
         assert len(registry) == 1
+
+    def test_description_template_with_nested_bad_field_raises(self):
+        """A field nested inside a format spec is caught too, not just the outer one.
+
+        ``string.Formatter().parse()`` only yields the *outer* field name of
+        each replacement field — ``{name:{bogus}}``'s inner ``bogus`` is
+        invisible to a single non-recursive pass, so a naive check would
+        accept this template and only fail the first time make_change()
+        actually formats it (Codex review, PR #882, fresh evidence beyond
+        the top-level check above).
+        """
+        import pytest
+
+        entries = [
+            ChangeKindMeta(
+                "test_kind", Verdict.BREAKING,
+                description_template="Changed: {name:{bogus}}",
+            ),
+        ]
+        with pytest.raises(ValueError, match="bogus"):
+            ChangeKindRegistry(entries)
+
+    def test_description_template_with_invalid_conversion_raises(self):
+        """An illegal !conversion specifier is rejected at construction time.
+
+        Only ``!r``/``!s``/``!a`` (or no conversion) are legal for
+        ``str.format`` — anything else raises ``ValueError`` at format time,
+        which construction-time validation must catch instead (Codex
+        review, PR #882).
+        """
+        import pytest
+
+        entries = [
+            ChangeKindMeta(
+                "test_kind", Verdict.BREAKING,
+                description_template="Changed: {name!x}",
+            ),
+        ]
+        with pytest.raises(ValueError, match=r"!x"):
+            ChangeKindRegistry(entries)
 
     def test_real_registry_satisfies_reference_and_default_validation(self):
         """The production REGISTRY was already valid before these checks existed.

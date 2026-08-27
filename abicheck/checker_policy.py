@@ -44,11 +44,11 @@ from typing import Protocol
 
 from .change_registry import REGISTRY as _REGISTRY, Verdict as Verdict
 
-# Imported directly from the leaf module rather than via change_registry's
-# own re-export, so this doesn't grow change_registry.py past its 2000-line
-# adoption-debt ceiling (ADR-061) for a name nothing external currently
-# imports through that path.
-from .change_registry_types import VALID_BASE_POLICIES as VALID_BASE_POLICIES
+# Imported from the canonical model-layer location (ADR-061 D9's target
+# owner) rather than via change_registry's re-export, so this doesn't grow
+# change_registry.py past its 2000-line adoption-debt ceiling for a name
+# nothing external imports through that path.
+from .model.change_catalog.registry import VALID_BASE_POLICIES as VALID_BASE_POLICIES
 
 
 class ChangeKind(str, Enum):

@@ -40,7 +40,6 @@ from collections.abc import Callable, ItemsView, Iterable, Iterator, Mapping, Va
 from typing import Any, Protocol, TypeVar, cast
 
 from .change_registry import REGISTRY
-from .change_registry_types import TEMPLATE_VOCAB as TEMPLATE_VOCAB
 from .checker_policy import ChangeKind
 from .checker_types import Change
 from .compare.dedup_key import hashable_value
@@ -49,6 +48,13 @@ from .fact_provenance import (
     same_producer_backed_fact_qualified,
 )
 from .model import AbiSnapshot
+
+# Imported directly from the canonical model-layer location (ADR-061 D9's
+# target owner for this catalog logic) rather than via change_registry's own
+# re-export, so this doesn't grow change_registry.py past its 2000-line
+# adoption-debt ceiling for a name nothing external currently imports
+# through that path.
+from .model.change_catalog.registry import TEMPLATE_VOCAB as TEMPLATE_VOCAB
 from .qualified_name_segments import strip_inline_abi_namespaces
 
 K = TypeVar("K")
