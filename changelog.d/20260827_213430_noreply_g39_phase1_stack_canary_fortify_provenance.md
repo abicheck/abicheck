@@ -12,9 +12,10 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   (`elf_metadata._finalize_hardening`), read identically on both sides of
   a comparison, with a single confirmed producer
   (`diff_platform_elf_dynamic._diff_security_hardening`). No user-visible
-  behavior changes beyond the new, optional field on affected `Change`
-  objects (JSON/SARIF/JUnit reports gain the field for these two kinds
-  only; every other finding is unaffected). The valid provider-ID
+  behavior change: the field is set only on the in-memory `Change` object
+  today — `reporter.py`/`sarif.py`/`junit_report.py` don't read
+  `evidence_provenance` yet (that projection is G39 Phase 3, not this
+  slice), so JSON/SARIF/JUnit output is unaffected. The valid provider-ID
   vocabulary now has a single code-level owner,
   `model.vocabulary.EVIDENCE_PROVENANCE_TAGS`, checked by a new
   completeness-gate test.
