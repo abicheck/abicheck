@@ -413,22 +413,37 @@ CLI's `_exit_with_severity_or_verdict`, the Action's encoder, and
 today and already owns exactly this conversion for the legacy-scheme case,
 so this is a new input type for an existing function, not a new encoder.
 
-No domain or workflow code computes or branches on an integer exit code.
+No domain or workflow code computes a *new* semantic decision by
+branching on an integer exit code. **The one stated exception is a
+compatibility adapter, not a gap in this rule**: `gate.py`'s decode of a
+legacy report's raw `exit_code` — a report that predates this decision and
+carries no structured `RunOutcome` fields at all — is reading a *persisted
+external wire value* back into the semantics this decision defines, the
+same "read once, decode for legacy, never for fresh" backfill shape D0's
+`Fact[T]` bridge already establishes against the pre-existing reliability
+flags. It is scoped narrowly (named fallback path only, never reached for
+a report carrying the new fields) and is the mechanism that keeps every
+already-published report decodable rather than orphaned by this decision.
 Exactly one function per front end (the CLI's `_exit_with_severity_or_
 verdict`, the Action's own encoder, and `aggregate`'s own `fold.py::
 exit_code()` — restated here explicitly rather than only in the paragraph
 above, so this sentence's own list doesn't read as narrower than it is)
 maps `RunOutcome` to that front end's
 exit-code scheme. For the aggregate path specifically: `gate.py` reads a
-report's structured `RunOutcome` fields (falling back to legacy
-`exit_code` decoding only for a report that predates this change),
-`fold.py`'s own aggregation orders and `max()`s the resulting
-`PolicyGateDecision` values per target, and `fold.py::exit_code()` is the
+report's structured `RunOutcome.gate`/`.operational` fields and folds both
+into the one `GateInfo` it returns, by `max()` over the shared exit-code
+scheme — `PolicyGateDecision`'s own ordering for the compatibility
+contribution, `OperationalStatus`'s blocking set for the operational one —
+falling back to legacy `exit_code` decoding only for a report that
+predates this change; `fold.py`'s own aggregation (unchanged by this
+decision) `max()`s the resulting per-target `GateInfo.exit_code` values the
+way it already does today, and `fold.py::exit_code()` is the
 one place that final aggregated value is converted back to the integer
-`aggregate`'s own JSON output and process exit code need — the same
-three-step shape (structured read, semantic aggregation, one final
-integer encode) the CLI/Action encoders collapse into a single function
-call, just spread across `aggregate`'s own multi-target pipeline. This
+`aggregate`'s own JSON output and process exit code need — two steps
+(structured read-and-fold at `gate.py`, one final integer encode at
+`fold.py::exit_code()`), not three, since folding both axes together at
+the read boundary is what lets `fold.py`'s own pre-existing aggregation
+stay exactly as it is. This
 directly targets the PR #700 failure mode (a
 downstream consumer decoding semantic meaning from an exit-code integer)
 and finishes what ADR-042 started: `mcp_server.py`'s removal already

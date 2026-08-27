@@ -378,6 +378,26 @@ reader still sees a plain `bool`, never `None`; only the *constructor's*
 accepted input type genuinely widens, which is what "an explicit union
 and normalization" means concretely here.
 
+**The field's own *static* declared type — what a type checker or
+`dataclasses.fields(Param)` reports — stays `bool | None` even though no
+constructed instance can ever hold `None` at runtime; this is a
+deliberate, accepted trade-off, not an oversight, for the identical reason
+already stated a few paragraphs above for the new-field-vs-old-field
+relationship.** The alternative a reviewer proposed — an `InitVar[bool |
+None]` consumed by `__post_init__`, with the real, `bool`-typed storage
+kept under a different attribute name and exposed back as `is_va_list`
+through a `@property` — was considered and rejected for the same reason
+this phase's Design section already rules out a live `@property` deriving
+`vtable`/`bases` from their new `Fact` fields: `dataclasses.asdict()` walks
+`dataclasses.fields()`, not properties, so renaming the real stored
+attribute to something like `_is_va_list` to make room for a
+property-shaped public `is_va_list` would silently rename (or drop) the
+JSON key every `asdict`-based external consumer reads today — breaking
+exactly the compatibility this bridge exists to preserve, in exchange for
+a cleaner static type on a field whose runtime behavior is already fully
+pinned by the fifth test above. A `bool | None` annotation a consumer
+never actually observes `None` through is judged the smaller cost.
+
 **A third field shape needs a third mechanism, and a later review round
 found it missing: `RecordType.vptr_offset_bits` is also converted by
 this phase (named in the Scope section above) and is `int | None`,
@@ -663,7 +683,41 @@ where genuine per-snapshot caching actually lands.**
 of typed segments — `Namespace(name)`, `Record(name, access)`,
 `InlineNamespace(name, version_tag)`, `Anonymous(kind, ordinal)`,
 `LocalToFunction(owner)`) names only the *containing* scope, never the
-leaf declaration itself. **`EntityId` therefore always carries the leaf
+leaf declaration itself.
+
+**Each segment type states which of its own fields are identity and which
+are payload — a bare `@dataclass(frozen=True)` would make every field
+identity by default, which is wrong for at least one of the five.**
+`Record(name, access)`'s `access` (public/protected/private) is carried
+*on* the segment because a nested record's access is a real fact a
+consumer may want, but it is not part of *where* the nesting scope is —
+two snapshots of the same class with a member's access level changed
+still name the identical containing scope, and `EntityId` is what diff
+matching keys on (Phase 2's own stated purpose). Making `access` part of
+`Record`'s equality/hash would turn an access-level change into a
+spurious identity mismatch — the matcher would see "removed, then added"
+at a different `EntityId` instead of "this declaration changed," for a
+property this plan does not intend identity to track. `Record` therefore
+defines `__eq__`/`__hash__` over `name` alone (`access` stays a plain,
+non-identity field, the dataclass equivalent of `field(compare=False)`).
+`Anonymous(kind, ordinal)`/`LocalToFunction(owner)` are the opposite case:
+both fields *are* identity, deliberately, since nothing else disambiguates
+two sibling anonymous structs or two same-named locals in one function —
+an `ordinal`/`owner` that is dropped from identity would silently
+re-introduce exactly the sibling-collision class this phase's own
+`(ScopePath, kind, leaf_name, extra)` correction exists to close, one
+level down. `ordinal` is a stable, deterministic per-parent sequence
+number assigned at parse time (the same position-in-the-scope-stack
+counter `entry.scope`'s widening already has to track to build
+`Anonymous` segments at all, not a second counter invented for this), not
+a DWARF offset or other environment-sensitive value that could differ
+between an otherwise-identical old/new pair. `Namespace(name)`/
+`InlineNamespace(name, version_tag)` are identity on every field
+unconditionally — a namespace has no non-identity payload to exclude, and
+an inline namespace's `version_tag` is exactly the dimension ADR-025's own
+versioned-inline-namespace-alias handling already keys matching on, so
+excluding it here would silently re-widen the `v1`/`v2`-shaped collision
+that machinery exists to avoid. **`EntityId` therefore always carries the leaf
 declaration's own name as an explicit component, for every kind — not
 only for functions.** A first draft of this phase defined `EntityId` as
 just `(ScopePath, kind)`, which collides any two sibling declarations of
@@ -818,6 +872,27 @@ question for its implementation PR to resolve, the same way this plan
 has already done for the `SourceGraphSummary`-relocation and
 `compare()`'s-own-public-surface-parameter questions elsewhere, rather than
 asserting a fourth, unverified answer here.
+
+**This choice is not contained to Phase 2 — it determines whether Phase
+3, as sequenced below (after Phase 2, before Phase 6), is buildable at
+all.** Phase 3's public-surface graph keys its `declaration`/`type` nodes
+by `EntityId` (see that phase's own injective-key fix, above), which
+needs a real, resolved `EntityId` for every declaration/type node the
+graph builder visits. Under option (a), that identity is already sitting
+on the model object by the time Phase 3 runs, same as every other field —
+no conflict. Under option (b), no post-parse consumer has one yet
+(resolution is deferred to Phase 6's `SemanticIR` assembly, which is
+exactly why option (b) exists), and Phase 3's graph builder is a post-parse
+consumer by construction — it walks an already-built `AbiSnapshot`, the
+same position `type_reachability.py`'s other consumers are in per the
+finding above. Under option (b), Phase 3 therefore cannot be built as
+sequenced: either its identity-dependent parts move to land *with* or
+after Phase 6 (the same deferral option (b) already applies to every
+other post-parse consumer, generalized to this one), or the Phase 2
+implementation PR resolves the open question as option (a) before Phase 3
+starts. Not decided here, for the same reason the question itself is
+left open above — but the dependency is stated explicitly so Phase 3's
+own implementation PR does not discover it mid-flight.
 
 This phase explicitly targets, and closes, the specific collision bugs
 AGENTS.md's "Known gaps" records as already-found-and-patched-locally:
@@ -1156,9 +1231,28 @@ sibling:
   already a plain string with its own per-kind URI scheme for exactly
   these non-declaration kinds (`header://`, `source://`, `target://`,
   `symbol://`, ...), which this phase reuses unchanged rather than
-  replacing. So: a `declaration`/`type` node's id is `EntityId`-derived
-  (rendered to the same string form `model/graph.py`'s `GraphNode.id`
-  already expects); every other kind keeps the existing URI-scheme id.
+  replacing. **A `declaration`/`type` node's id must be an injective
+  encoding of its `EntityId`, not the lossy flattened `qualified_name`
+  string — a first draft of this phase used the flattened string
+  directly, which is exactly the collision this plan's own Phase 2
+  section warns against two sections above** ("Two domain `EntityId`s
+  whose `ScopePath`s differ only in segment kind... can render to the
+  identical `qualified_name` string"): `SourceGraphSummary.add_node()`
+  merges any two registrations sharing one `id`, so a record nested in a
+  record and the same names nested in a namespace would coalesce into one
+  graph node, mixing their `GraphFact`s and corrupting public-surface
+  reachability for both. The fix reuses the same injective scheme Phase
+  2's storage DTO fix already established rather than inventing a second
+  one: `model/graph.py`'s `GraphNode.id` for a `declaration`/`type` node is
+  the deterministic serialization of the typed segment list (the identical
+  `{"kind": ..., "name": ..., ...}` records `storage/entity_ids.py`
+  encodes) plus `kind`/`leaf_name`/`extra`, not the display spelling —
+  `GraphNode`'s own pre-existing `label: str` field (already documented as
+  "human-readable name/path") is where the flattened, lossy `qualified_name`
+  spelling belongs instead, exactly the role that field already plays for
+  the existing URI-scheme node kinds below. Every other kind keeps the
+  existing URI-scheme id (`header://`, `source://`, ...), which was never
+  the display spelling and was never at risk of this collision.
   This phase is ordered after Phase 2 because the declaration/type half
   needs it — the same dependency Phase 6 (`SemanticIR`) has on Phase 2 —
   not because every node kind does.
@@ -2072,8 +2166,8 @@ logic, which this phase now leaves alone entirely.
 
 **`junit_report.py` is not the only remaining inline exit-code consumer —
 a first draft of this phase missed the multi-target aggregate path
-entirely.** `abicheck/workflows/aggregate/gate.py`'s `TargetGate.
-from_report` decodes a persisted report's raw `exit_code` integer back
+entirely.** `abicheck/workflows/aggregate/gate.py`'s `GateInfo.
+from_report_data`/`from_scan_report` decode a persisted report's raw `exit_code` integer back
 into `blocking`/severity semantics, and `abicheck/workflows/aggregate/
 fold.py`'s own `exit_code()` aggregates every target's gate by `max()`-ing
 their integer codes and branches `blocking`/filtering directly on
@@ -2092,7 +2186,7 @@ structured axes (`compatibility`/`assurance`/`gate`/`operational`/
 `lifecycle`) alongside the existing `exit_code` field — never replacing
 it, since `exit_code` is the documented external contract
 (`docs/reference/exit-codes.md`) and stays exactly as it is for every
-external consumer. `TargetGate.from_report` reads the structured fields
+external consumer. `GateInfo.from_report_data` reads the structured fields
 when a report carries them, and falls back to decoding the legacy
 `exit_code` only for a report that predates this change (the same
 "read once, decode for legacy, never for fresh" backfill shape Phase 0
@@ -2110,30 +2204,43 @@ and 6 are real, independent blocking conditions today's raw-code fallback
 (`gate.py::from_scan_report`'s existing discriminated-on-raw-code branch)
 correctly keeps blocking, per that function's own docstring. `RunOutcome`
 carries this as the separate `operational: OperationalStatus` axis for
-exactly this reason — but a fold that reads only `.gate` for a *fresh*
-report, once the legacy-decode fallback stops running for it, silently
-drops that axis: a fresh `scan` report hitting budget overflow would
-carry `gate = NONE` (no compatibility category fired) and an
-`operational` status recording the overflow, and a fold that never
-inspects `operational` at all would aggregate it as passing — the opposite
-of what the pre-existing raw-code path already gets right. The fix:
-`fold.py`'s aggregation reads *both* axes and folds each into the
-aggregate's blocking decision independently — `PolicyGateDecision`'s own
-ordering for the compatibility contribution, plus a defined blocking set
-over `OperationalStatus` (budget overflow, not-comparable/evidence-
+exactly this reason.
+
+**A later draft of this phase's fix routed the operational axis through a
+new field on `fold.py`/`TargetReport`, reviewed and found to be the wrong
+layer — `fold.py` does not need to change at all, and `TargetReport` does
+not need a new field, because `GateInfo` is already the single
+representation `fold.py`'s `exit_code()` reads (`max(t.gate.exit_code for
+t in gated ...)`, plus `.blocking`/`.blocking_categories` elsewhere in the
+same module) and the existing codebase already folds conditions outside
+`PolicyGateDecision`'s compatibility categories into exactly that same
+representation — `load.py`'s own loader already synthesizes a blocking
+`GateInfo(blocking_categories=("operational_error",))`/`("not_comparable",)`
+for a report that never arrived or carried an ADR-050 D2 `verdict: null`
+result, and `from_scan_report`'s raw-code branch maps scan's 5/6 onto a
+blocking `GateInfo` the identical way. The operational axis is simply a
+third source feeding the one representation those two already populate,
+not a second channel `fold.py` additionally has to consult.** The fix:
+`gate.py`'s own readers — `GateInfo.from_report_data`/`from_scan_report` —
+fold `RunOutcome.operational` into the `GateInfo` they return, for a
+fresh report that carries the new structured fields: a blocking
+`OperationalStatus` value (budget overflow, not-comparable/evidence-
 contract-error, and any sibling operational failure this phase's
-`RunOutcome` construction populates) for the operational contribution —
-combined with the same orthogonal `max()`-style fold ADR-049 Phase 7's
-contract-coverage axis already uses elsewhere in this codebase for
-exactly this "two independent failure axes, neither allowed to mask the
-other" shape, not a single combined ordering that could let one axis's
-`NONE` silently override the other's real failure. `fold.py`'s own
-aggregation then operates on both folded values (never `max()` over raw
-integers) for every report new enough to carry them, and its
-`exit_code()` method becomes the *one* place — the aggregate's own
-external encoder, mirroring the CLI's `_exit_with_severity_or_verdict` —
-that turns the aggregated `RunOutcome` back into the integer `aggregate`'s
-own JSON output and process exit code still need.
+`RunOutcome` construction populates) is combined with
+`PolicyGateDecision`'s own compatibility contribution by `max()` over the
+exit-code scheme both already share — the same orthogonal-axes shape
+ADR-049 Phase 7's contract-coverage axis already uses elsewhere in this
+codebase for "two independent failure axes, neither allowed to mask the
+other," resolved once, inside `gate.py`, rather than carried as two
+values for every later consumer to remember to fold themselves.
+`fold.py` is therefore **unchanged by this phase** beyond no longer being
+fed a `GateInfo` whose `exit_code` came from decoding a raw integer for a
+fresh report — it already aggregates whatever `GateInfo` it is handed,
+which is exactly what makes this the right layer: every existing
+consumer of `TargetReport.gate` (`fold.py`'s `blocking_targets`/
+`coverage_blocking`/`exit_code()`, the CLI summary's `blocking_categories`
+join) sees the operational axis automatically, with no second read path to
+keep in sync.
 
 **Files.** `abicheck/policy/outcome.py` (new — `RunOutcome` and the new,
 exit-code-free `PolicyGateDecision` ordered type, per the Design section
@@ -2147,11 +2254,17 @@ already is. `html_report.py`'s CI Gate card (already `RunOutcome`-shaped
 per ADR-042 — confirm it reads the new object directly rather than a
 precursor shape, closing ADR-036 Increment 3 as a side effect if it
 hasn't landed separately by then); `abicheck/workflows/aggregate/gate.py`
-(`TargetGate.from_report` reads structured `RunOutcome` fields first,
-legacy `exit_code` decoding becomes the named fallback path, not the only
-path); `abicheck/workflows/aggregate/fold.py` (`exit_code()`'s aggregation
-reads `RunOutcome.gate` per target, `max()`-over-raw-integers deleted);
-the report-writing side of `reporter.py`/`aggregate.py` (emit the new
+(`GateInfo.from_report_data`/`from_scan_report` read structured
+`RunOutcome.gate`/`.operational` fields first, folding both into the one
+returned `GateInfo` by `max()` over the shared exit-code scheme; legacy
+`exit_code` decoding becomes the named fallback path, not the only path).
+**`abicheck/workflows/aggregate/fold.py` needs no change in this phase** —
+per the Design section's own correction above, it already aggregates
+whatever `GateInfo` each target's reader returns, so folding the
+operational axis into `GateInfo` at the `gate.py` layer is what makes
+`max()`-over-raw-integers disappear everywhere downstream at once, not a
+second deletion this file list has to separately track.
+The report-writing side of `reporter.py`/`aggregate.py` (emit the new
 structured fields alongside the unchanged `exit_code`, and bump
 `REPORT_SCHEMA_VERSION`/`AGGREGATE_SCHEMA_VERSION` — an additive schema
 change needs its version bumped the same way every prior
@@ -2209,7 +2322,7 @@ field left a nested `diff.severity` block, or the orthogonal
 contract-coverage contribution, still driving the trailing `aggregate`
 job to a nonzero exit, each caught and fixed in turn. `RunOutcome.gate`/
 `.operational` are a **fourth** axis this function does not know about
-yet, and `TargetGate.from_report`'s own new structured-field-first
+yet, and `GateInfo.from_report_data`'s own new structured-field-first
 reading (this phase's own change, a few paragraphs above) is exactly what
 makes the omission land: once a fresh report's structured fields are
 preferred over the legacy ones this function *does* zero, an unchanged,
@@ -2241,11 +2354,13 @@ existing fixture, not only on fixtures written after this phase).
 incidentally: the two `scan`-specific exit codes `PolicyGateDecision`
 alone cannot represent** — a fresh `scan` report carrying exit 5 (budget
 overflow) and one carrying exit 6 (not-comparable), each constructed with
-the new structured `RunOutcome` fields, asserted to still aggregate as
-blocking through the new operational-axis fold — confirmed to fail
-against a fold that reads only `RunOutcome.gate` and ignores
-`.operational` entirely, which is the exact regression this finding
-caught. A third
+the new structured `RunOutcome` fields, asserted to still produce a
+blocking `GateInfo` from `gate.py`'s own reader and to still aggregate as
+blocking through `fold.py`'s unchanged `exit_code()` — confirmed to fail
+against a `gate.py` reader that folds only `RunOutcome.gate` into the
+returned `GateInfo` and ignores `.operational` entirely, which is the
+exact regression this finding caught (`fold.py` itself needs no
+corresponding test change, since it is not touched by this phase). A third
 parity test covers the writers this phase adds — all three of them, not
 only `scan_engine.ScanOutcome`: a freshly-generated `scan` report
 (`ScanOutcome.to_dict()`), a freshly-run typed-API `ScanResult.to_dict()`,
@@ -2259,7 +2374,7 @@ changed and the reader still silently falling back. A parity test for
 `_neutralize_gate()` pins the new-axis gap directly: a fresh report
 carrying a blocking `RunOutcome.gate`/`.operational` value, run through
 `_neutralize_gate()` under `gate-mode: advisory`, then read back through
-the same `TargetGate.from_report`/`from_scan_report` this phase's reader
+the same `GateInfo.from_report_data`/`from_scan_report` this phase's reader
 changes use — asserting the aggregate sees a non-blocking result,
 confirmed to fail against a version of `_neutralize_gate()` that zeroes
 only the pre-existing legacy axes and leaves the new structured ones
@@ -2277,22 +2392,34 @@ mirror, not only in the Python writer.
 computation outside the one designated encoder per front end — enforced
 by a new `check_ai_readiness.py` check (`no-inline-gate-computation`,
 WARN) flagging a severity/exit-code literal compared against `Change`
-data, or a `max()`/comparison over a `.exit_code` attribute, outside
-`policy/outcome.py` and the per-front-end encoders (the widened check is
-what actually closes the gap the first draft's narrower, `Change`-only
-check left open: `fold.py`'s `max()` over `TargetGate.exit_code` never
-touches `Change` at all, so a check scoped to `Change` comparisons alone
-would never have flagged it). Stated explicitly, matching ADR-063 D6's
-own restated encoder list: `gate.py` reads structured `RunOutcome` fields
-first (legacy `exit_code` decoding as the named fallback, never the only
-path for a fresh report); `fold.py`'s aggregation orders and `max()`s
-`PolicyGateDecision` values **and independently folds `OperationalStatus`'s
-own blocking set, per the finding above** — never raw integers, and never
-the compatibility axis alone; and `fold.py::exit_code()`
-is the one place that aggregated value converts to the integer `aggregate`'s
-own JSON output and process exit code need — three steps, not one
-function call, because `aggregate` has a multi-target pipeline the CLI's
-single-report `_exit_with_severity_or_verdict` doesn't.
+data, or a `.gate`/`.operational`-shaped `RunOutcome` axis decoded by
+`max()`/comparison against a raw integer, outside `policy/outcome.py` and
+the per-front-end encoders (the widened check is what actually closes the
+gap the first draft's narrower, `Change`-only check left open: `gate.py`'s
+decode of a persisted report's raw `exit_code` never touches `Change` at
+all, so a check scoped to `Change` comparisons alone would never have
+flagged it). `fold.py`'s own `max(t.gate.exit_code for t in gated ...)`
+is **not** a violation this check should flag — per the Design section's
+own correction above, `GateInfo.exit_code` is by that point already the
+*output* of `gate.py`'s structured decode (both axes already folded by
+`max()` over the shared exit-code scheme), not a raw integer read back
+off the persisted report a second time; the check distinguishes the two
+by scope (`gate.py` and `policy/outcome.py` are where a `RunOutcome` axis
+may be decoded from raw fields at all) rather than by forbidding every
+`max()` over a `.exit_code` attribute outright, which would also flag
+`fold.py`'s own legitimate aggregation-by-`max()` over many targets'
+already-decoded gates. Stated explicitly, matching ADR-063 D6's own
+restated encoder list: `gate.py` reads structured `RunOutcome.gate`/
+`.operational` fields first and folds both into the one `GateInfo` it
+returns (legacy `exit_code` decoding as the named fallback, never the
+only path for a fresh report); `fold.py` aggregates those already-folded
+`GateInfo` values across targets, unchanged by this phase; and
+`fold.py::exit_code()` is the one place that aggregated value converts to
+the integer `aggregate`'s own JSON output and process exit code need —
+two decode/encode steps (`gate.py` in, `fold.py::exit_code()` out), not
+three, because folding the operational axis into `GateInfo` at the read
+boundary means there is no longer a third, separate step left over to
+name.
 
 ---
 
@@ -2483,9 +2610,11 @@ not new design.
   generator now produces.
 - Phase 6: each backend parser's own copy of anonymous-marker/closure-
   identity/namespace-join logic.
-- Phase 7: `fold.py`'s `max()`-over-raw-`exit_code`
-  aggregation (replaced outright by `RunOutcome.gate`-ordering aggregation
-  in the same phase, not left running alongside it). **Not removed, ever,
+- Phase 7: `gate.py`'s raw-`exit_code`-decode-as-the-only-path for a
+  *fresh* report (replaced outright by the structured-`RunOutcome`-first
+  read in the same phase, not left running alongside it for new reports —
+  `fold.py` itself needs no corresponding row, since it was never the
+  file doing the raw decode). **Not removed, ever,
   per Phase 7's own corrected design**: `junit_report.py`'s own
   `_is_failure` computation — its answer is a per-render function of each
   call's own `SeverityConfig`/`relevant_ids`, not a property a finding
