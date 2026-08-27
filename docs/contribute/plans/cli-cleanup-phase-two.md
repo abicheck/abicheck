@@ -1990,14 +1990,7 @@ pipelines a fourth time.
   > routing `dump_cmd`'s real run through `execute_dump_request` — castxml is
   > still unavailable in every environment this work has been done in.
   >
-  > A further review round on the same slice found (and fixed) a real
-  > regression it introduced: `InputSpec.of()` — the loose-value convenience
-  > factory every front end besides a direct dataclass construction uses — had
-  > no `compile_db_filter` parameter, so it was reachable only by constructing
-  > `InputSpec` directly despite being advertised as public typed-API surface;
-  > and the scope guard was wired into `resolve_dump_request` only, leaving
-  > `CompareRequest`'s identical exposure through `resolve_side_snapshot`
-  > unguarded until the extraction above. A CI-caught regression from an
+  > Separately, a CI-caught regression from an
   > unrelated fix in the same session — the write-time-embed fix that gave
   > `dump`'s L4 replay real `public_headers`/`public_header_dirs` (the "second
   > real bug" two paragraphs up) — asymmetrically widened `scan`'s own
@@ -2005,8 +1998,8 @@ pipelines a fourth time.
   > `source_decl_binary_symbol_mismatch` on an unchanged library; fixed with an
   > opt-in `l4_public_headers`/`l4_public_header_dirs` override on
   > `embed_side_build_source`, scoped to `scan`'s candidate resolution alone
-  > (`compare`/`dump`'s typed pipeline are unaffected). Both are documented in
-  > full in the same root `AGENTS.md` entry.
+  > (`compare`/`dump`'s typed pipeline are unaffected). Documented in full in
+  > the same root `AGENTS.md` entry.
   >
   > PR 3C therefore stays blocked on item 2 (castxml) alone, per this section's
   > own ordering rule.
