@@ -290,8 +290,16 @@ PARITY_EXTENSION_ENTRIES: list[ChangeKindMeta] = [
        description_template="Preprocessor constant value changed: {name} ({old} → {new})"),
     _E("constant_added", _C, is_addition=True,
        impact="A new preprocessor constant appeared in the public "
-              "headers; existing compiled code and existing source both "
-              "continue to work unmodified — purely additive API surface.",
+              "headers; an already-compiled binary is unaffected (macros "
+              "are purely a compile-time textual substitution, absent from "
+              "the ABI). Source is not unconditionally safe, though: this "
+              "detector checks only that the constant is new, not whether "
+              "its name collides with a consumer's own identifier — a "
+              "macro sharing the name of a consumer's variable, function, "
+              "or parameter (e.g. a new `#define min ...` ahead of a "
+              "consumer's own `min(...)`) gets textually substituted into "
+              "that consumer's source and can break a previously-valid "
+              "build.",
        description_template="New preprocessor constant: {name}"),
     _E("constant_removed", _A,
        impact="A preprocessor constant was removed from the public "

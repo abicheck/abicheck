@@ -136,7 +136,16 @@ class _ImmutableDict(Mapping[str, Verdict]):
     ``ChangeKindMeta.policy_overrides``/``ChangeKindRegistry.
     policy_overrides_for()`` in this codebase: none relies on ``dict``-ness
     specifically, only on the ``Mapping`` protocol (``.items()``,
-    ``[key]``, ``in``), which this class provides.
+    ``[key]``, ``in``), which this class provides. ``dataclasses.asdict()``
+    is the one place ``dict``-ness *is* observable indirectly: its generic
+    branch reaches every non-dict/list/tuple/dataclass field via
+    ``copy.deepcopy()``, so ``__deepcopy__`` below deliberately returns a
+    plain, mutable ``dict`` — the disconnected copy ``asdict()``/
+    ``copy.deepcopy()`` produce is ordinary and JSON-serializable, matching
+    exactly what an ordinary ``dict`` field would give you, while the
+    *original* entry's own ``policy_overrides`` stays immutable regardless.
+    Pickling is a different mechanism (``__reduce__``) and keeps
+    reconstructing a genuine, immutable ``_ImmutableDict``.
     """
 
     __slots__ = ("_data", "_initialized")
@@ -167,6 +176,26 @@ class _ImmutableDict(Mapping[str, Verdict]):
 
     def __repr__(self) -> str:
         return f"{type(self).__name__}({self._data!r})"
+
+    def __deepcopy__(self, memo: dict[int, Any]) -> dict[str, Verdict]:
+        # Deliberately returns a plain, ordinary (mutable) dict rather than
+        # another _ImmutableDict — matching exactly what an *ordinary* dict
+        # field would produce under copy.deepcopy() (a disconnected copy,
+        # unremarkable in every way, keys/values already immutable so a
+        # shallow dict() copy is a real deep copy here). This is also what
+        # makes dataclasses.asdict() work: its generic-value branch calls
+        # copy.deepcopy() on any field that isn't itself a dict/list/tuple/
+        # dataclass, so without this override asdict()'s output kept the
+        # live _ImmutableDict — a non-dict Mapping json.dumps() cannot
+        # serialize, unlike the plain dict an ordinary field would have
+        # produced (Codex review, PR #882, fresh evidence). The *original*
+        # entry's own policy_overrides attribute is completely unaffected —
+        # this only governs what a disconnected copy of it looks like.
+        # pickle round-trips take a different path (__reduce__ below) and
+        # keep reconstructing a genuine, immutable _ImmutableDict, since
+        # pickle's job is faithfully reconstructing the same object/type,
+        # not producing JSON-primitive-friendly output.
+        return dict(self._data)
 
     def __reduce__(self) -> tuple[Any, ...]:
         return (self.__class__, (dict(self._data),))

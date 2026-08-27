@@ -341,11 +341,22 @@ class TestChangeKindRegistry:
         ``pickle.dumps()`` all raised ``TypeError: cannot pickle 'mappingproxy'
         object`` (Codex review, PR #882, fresh evidence). The fix (a
         read-only ``collections.abc.Mapping`` implementation, not a ``dict``
-        subclass, with a custom ``__reduce__``) must support all three the
-        same way an ordinary ``dict`` field would.
+        subclass) must support all three the same way an ordinary ``dict``
+        field would — which for ``asdict()``/``copy.deepcopy()`` means the
+        *disconnected copy* is an ordinary, mutable, JSON-serializable
+        ``dict`` (a non-dict ``Mapping`` in that copy would make
+        ``json.dumps(asdict(entry))`` fail where a plain dict field would
+        have succeeded — Codex review, PR #882, fresh evidence). Pickling
+        goes through a different mechanism (``__reduce__``) and keeps
+        reconstructing a genuinely immutable ``_ImmutableDict``, since its
+        job is faithfully reconstructing the same object/type rather than
+        producing JSON-primitive-friendly output. The *original* entry's own
+        ``policy_overrides`` stays immutable throughout, regardless of what
+        any copy of it looks like.
         """
         import copy
         import dataclasses
+        import json
         import pickle
 
         entry = ChangeKindMeta(
@@ -355,21 +366,30 @@ class TestChangeKindRegistry:
 
         as_dict = dataclasses.asdict(entry)
         assert as_dict["policy_overrides"] == {"plugin_abi": Verdict.COMPATIBLE}
+        assert type(as_dict["policy_overrides"]) is dict
+        json.dumps(as_dict["policy_overrides"])  # must not raise
 
         deep = copy.deepcopy(entry)
         assert deep.policy_overrides == {"plugin_abi": Verdict.COMPATIBLE}
         assert deep == entry
+        assert type(deep.policy_overrides) is dict
+        # The deep copy is an ordinary, disconnected, mutable dict — exactly
+        # what copy.deepcopy() would give you for an ordinary dict field.
+        # Mutating it must not reach back into the original.
+        deep.policy_overrides["plugin_abi"] = Verdict.BREAKING
+        assert entry.policy_overrides["plugin_abi"] == Verdict.COMPATIBLE
 
         rehydrated = pickle.loads(pickle.dumps(entry))
         assert rehydrated.policy_overrides == {"plugin_abi": Verdict.COMPATIBLE}
         assert rehydrated == entry
 
-        # The reconstructed copies are independently immutable too, not just
-        # sharing the original's protection.
+        # The original entry, and the pickle-reconstructed copy (a genuine
+        # _ImmutableDict, unlike the deepcopy/asdict case above), both stay
+        # immutable.
         import pytest
 
         with pytest.raises(TypeError):
-            deep.policy_overrides["plugin_abi"] = Verdict.BREAKING
+            entry.policy_overrides["plugin_abi"] = Verdict.BREAKING
         with pytest.raises(TypeError):
             rehydrated.policy_overrides["plugin_abi"] = Verdict.BREAKING
 
