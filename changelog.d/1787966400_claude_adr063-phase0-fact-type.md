@@ -1,0 +1,33 @@
+### Added
+
+- **`Fact[T]`, a typed availability/value wrapper, for the model fields
+  most prone to fabricated findings from absent evidence
+  (`RecordType.bases`/`virtual_bases`/`vtable`/`vptr_offset_bits`,
+  `Param.is_va_list`).** ADR-063 Phase 0 (see the "One Semantic Pipeline"
+  plan): `abicheck.model.fact.Fact` pairs a value with a `FactStatus`
+  (`PRESENT`/`PARTIAL`/`NOT_COLLECTED`/`UNSUPPORTED`/`FAILED`/
+  `NOT_APPLICABLE`) so a detector can no longer observe a field's value
+  without first observing whether it was actually collected — `None`/`[]`
+  no longer has to double as both "confirmed absent" and "not collected".
+  Each of the five fields above gains a `*_fact` sibling
+  (`bases_fact`, `virtual_bases_fact`, `vtable_fact`,
+  `vptr_offset_bits_fact`, `is_va_list_fact`); the plain field stays for
+  one release for `dataclasses.asdict()`-based external-consumer
+  compatibility, kept in sync with its `Fact[...]` sibling at every
+  construction site rather than independently assigned. Snapshot schema
+  bumped to v26 to persist the new fields; a pre-v26 snapshot backfills
+  correctly from the existing `clang_vtable_facts_reliable`/
+  `clang_va_list_facts_reliable` reliability flags rather than misreading
+  an untrusted placeholder as a confirmed fact.
+
+### Documentation
+
+- **Not yet done in this pass, tracked explicitly**: no detector migrated
+  to read the new `Fact[...]` fields yet (every producer still populates
+  only the legacy fields, so every `*_fact` sibling is `Fact.present(...)`
+  today regardless of true availability — migrating a detector now would
+  add complexity with no behavior change until producer-side `Fact`
+  construction lands), and no static AI-readiness check yet flags a
+  detector reading the legacy field directly. Both are named, scoped
+  follow-ups in the ADR-063 plan doc's own Phase 0 section, not silent
+  gaps.

@@ -18,7 +18,11 @@ from abicheck.model import (
     EnumMember,
     EnumType,
     ExtractionContract,
+    Fact,
+    FactStatus,
     Function,
+    Param,
+    RecordType,
 )
 from abicheck.serialization import (
     SCHEMA_VERSION,
@@ -223,7 +227,7 @@ class TestHeaderCvFactsReliableRoundTrip:
     def test_fresh_dump_serializes_current_schema_version(self) -> None:
         snap = _make_snap()
         j = json.loads(snapshot_to_json(snap))
-        assert j["schema_version"] == SCHEMA_VERSION == 25
+        assert j["schema_version"] == SCHEMA_VERSION == 26
 
     def test_legacy_castxml_header_snapshot_loads_as_unreliable(self) -> None:
         d = _minimal_dict(schema_version=8, from_headers=True, ast_producer="castxml")
@@ -1065,3 +1069,151 @@ class TestExtractionContractRoundTrip:
         save_snapshot(snap, p)
         restored = load_snapshot(p)
         assert restored.contract == contract
+
+
+# ── ADR-063 Phase 0: Fact[T] round-trip and legacy-schema backfill ─────────
+
+
+class TestFactFieldRoundTrip:
+    """A freshly-built snapshot's Fact[...] fields survive a real
+    snapshot_to_dict()/json.dumps()/snapshot_from_dict() round-trip, and a
+    pre-v26 (schema_version < 26) snapshot with no *_fact keys backfills
+    correctly from the existing clang_vtable_facts_reliable/
+    clang_va_list_facts_reliable flags — never Fact.present([])/
+    Fact.present(False) for the unreliable case, which is the exact
+    confusion (a placeholder read as a confirmed fact) this phase exists
+    to make unrepresentable.
+    """
+
+    def test_fresh_snapshot_round_trips_present_fact_and_is_json_serializable(
+        self,
+    ) -> None:
+        rec = RecordType(
+            name="Widget",
+            kind="struct",
+            vtable=["_ZN6WidgetD1Ev"],
+            bases=["Base"],
+        )
+        param = Param(name="args", type="va_list", is_va_list=True)
+        func = Function(name="f", mangled="_Z1fz", return_type="void", params=[param])
+        snap = _make_snap(types=[rec], functions=[func])
+        d = snapshot_to_dict(snap)
+        raw_json = json.dumps(d)  # must not raise on a raw FactStatus enum
+        restored = snapshot_from_dict(json.loads(raw_json))
+
+        r = restored.types[0]
+        assert r.vtable_fact is not None
+        assert r.vtable_fact.status is FactStatus.PRESENT
+        assert r.vtable_fact.value == ["_ZN6WidgetD1Ev"]
+        assert r.bases_fact is not None
+        assert r.bases_fact.status is FactStatus.PRESENT
+        assert r.bases_fact.value == ["Base"]
+
+        p = restored.functions[0].params[0]
+        assert p.is_va_list_fact is not None
+        assert p.is_va_list_fact.status is FactStatus.PRESENT
+        assert p.is_va_list_fact.value is True
+
+    def test_fresh_snapshot_confirmed_empty_survives_as_present_not_not_collected(
+        self,
+    ) -> None:
+        rec = RecordType(name="Plain", kind="struct", vtable=[])
+        snap = _make_snap(types=[rec])
+        restored = snapshot_from_dict(json.loads(json.dumps(snapshot_to_dict(snap))))
+        r = restored.types[0]
+        assert r.vtable_fact is not None
+        assert r.vtable_fact.status is FactStatus.PRESENT
+        assert r.vtable_fact.value == []
+
+    def test_explicit_not_collected_fact_survives_round_trip(self) -> None:
+        rec = RecordType(
+            name="Gapped", kind="struct", vtable_fact=Fact.not_collected("depth capped")
+        )
+        snap = _make_snap(types=[rec])
+        restored = snapshot_from_dict(json.loads(json.dumps(snapshot_to_dict(snap))))
+        r = restored.types[0]
+        assert r.vtable_fact is not None
+        assert r.vtable_fact.status is FactStatus.NOT_COLLECTED
+        assert r.vtable_fact.diagnostics == ("depth capped",)
+        assert r.vtable == []
+
+    def test_legacy_snapshot_with_reliable_flag_backfills_present(self) -> None:
+        d = _minimal_dict(
+            schema_version=20,
+            ast_producer="clang",
+            from_headers=True,
+            clang_vtable_facts_reliable=True,
+            types=[{"name": "Foo", "kind": "struct", "vtable": ["_ZN3FooD1Ev"]}],
+        )
+        restored = snapshot_from_dict(d)
+        r = restored.types[0]
+        assert r.vtable_fact is not None
+        assert r.vtable_fact.status is FactStatus.PRESENT
+        assert r.vtable_fact.value == ["_ZN3FooD1Ev"]
+
+    def test_legacy_snapshot_with_unreliable_flag_backfills_not_collected(self) -> None:
+        """The core backfill rule this phase exists for: an unreliable
+        legacy snapshot's vtable must NOT become Fact.present([]) — that
+        would misread "we don't trust this producer's vtable facts" as
+        "confirmed, this class has no vtable"."""
+        d = _minimal_dict(
+            schema_version=20,
+            ast_producer="clang",
+            from_headers=True,
+            clang_vtable_facts_reliable=False,
+            types=[{"name": "Foo", "kind": "struct", "vtable": []}],
+        )
+        restored = snapshot_from_dict(d)
+        r = restored.types[0]
+        assert r.vtable_fact is not None
+        assert r.vtable_fact.status is FactStatus.NOT_COLLECTED
+        assert r.vtable == []
+
+    def test_legacy_snapshot_unreliable_va_list_backfills_not_collected(self) -> None:
+        d = _minimal_dict(
+            schema_version=20,
+            ast_producer="clang",
+            from_headers=True,
+            clang_va_list_facts_reliable=False,
+            functions=[
+                {
+                    "name": "f",
+                    "mangled": "_Z1fz",
+                    "return_type": "void",
+                    "params": [
+                        {"name": "args", "type": "va_list", "is_va_list": False}
+                    ],
+                }
+            ],
+        )
+        restored = snapshot_from_dict(d)
+        p = restored.functions[0].params[0]
+        assert p.is_va_list_fact is not None
+        assert p.is_va_list_fact.status is FactStatus.NOT_COLLECTED
+        assert p.is_va_list is False
+
+    def test_legacy_snapshot_bases_always_backfills_present_unconditionally(
+        self,
+    ) -> None:
+        """bases/virtual_bases have no equivalent reliability flag to
+        condition on (AGENTS.md's type_base_changed entry) — a legacy
+        snapshot's raw bases list always backfills to Fact.present(raw),
+        the zero-behavior-change choice for a field whose status quo never
+        suppressed on capture-gap grounds."""
+        d = _minimal_dict(
+            schema_version=20,
+            types=[{"name": "Foo", "kind": "struct", "bases": ["Base"]}],
+        )
+        restored = snapshot_from_dict(d)
+        r = restored.types[0]
+        assert r.bases_fact is not None
+        assert r.bases_fact.status is FactStatus.PRESENT
+        assert r.bases_fact.value == ["Base"]
+
+    def test_snapshot_to_dict_encodes_status_as_plain_string(self) -> None:
+        rec = RecordType(name="Foo", kind="struct", vtable_fact=Fact.present(["m"]))
+        d = snapshot_to_dict(_make_snap(types=[rec]))
+        assert d["types"][0]["vtable_fact"]["status"] == "present"
+
+    def test_schema_version_is_26_or_higher(self) -> None:
+        assert SCHEMA_VERSION >= 26

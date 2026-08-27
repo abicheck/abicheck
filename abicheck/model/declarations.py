@@ -18,9 +18,20 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import cast
 
 from .elf_facts import SymbolBinding
+from .fact import Fact, _Omitted, bridge_legacy_and_fact
 from .vocabulary import AccessLevel, ElfVisibility, ParamKind, ScopeOrigin, Visibility
+
+# ADR-063 Phase 0: private omission sentinel for Param.is_va_list's Fact[T]
+# sibling — see model/fact.py's _Omitted/bridge_legacy_and_fact docstrings.
+# bool has only two instances, so a bare True/False cannot double as an
+# omission marker the way an empty list can for a list-typed field; this
+# sentinel is cast() to bool so the declared field type never widens to
+# bool | None (which would be a breaking change to this public dataclass's
+# type for every reader, not only the ones migrating to Fact[T]).
+_OMITTED_IS_VA_LIST: bool = cast(bool, _Omitted())
 
 
 @dataclass
@@ -31,7 +42,20 @@ class Param:
     default: str | None = None  # has default value (value not preserved)
     pointer_depth: int = 0  # nesting: T=0, T*=1, T**=2
     is_restrict: bool = False  # restrict-qualified pointer parameter
-    is_va_list: bool = False  # parameter is va_list (variadic argument list)
+    # ADR-063 Phase 0: defaults to a private omission sentinel, not False —
+    # see is_va_list_fact below and __post_init__.
+    is_va_list: bool = (
+        _OMITTED_IS_VA_LIST  # parameter is va_list (variadic argument list)
+    )
+    # Fact[bool] sibling — see RecordType's identical bases_fact/vtable_fact
+    # comment in model/entities.py for the full rationale. A detector reads
+    # this, never the plain is_va_list field above.
+    is_va_list_fact: Fact[bool] | None = None
+
+    def __post_init__(self) -> None:
+        self.is_va_list, self.is_va_list_fact = bridge_legacy_and_fact(
+            self.is_va_list, self.is_va_list_fact, _OMITTED_IS_VA_LIST, False
+        )
 
 
 @dataclass

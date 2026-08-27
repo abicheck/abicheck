@@ -51,6 +51,7 @@ from ..name_classification import (
     is_cxx_runtime_library as is_cxx_runtime_library,
     is_non_abi_surface_type as is_non_abi_surface_type,
 )
+from .availability import FactStatus as FactStatus
 from .declarations import Function as Function, Param as Param, Variable as Variable
 from .elf_facts import SymbolBinding as SymbolBinding
 from .entities import (
@@ -63,6 +64,7 @@ from .extraction_contract import (
     DependencyInfo as DependencyInfo,
     ExtractionContract as ExtractionContract,
 )
+from .fact import Fact as Fact
 from .snapshot import AbiSnapshot as AbiSnapshot
 from .stdlib_surface import stdlib_namespaces_excluded as stdlib_namespaces_excluded
 from .vocabulary import (

@@ -893,6 +893,33 @@ information, unconverted. Full test suite green; FP-rate/
 tier-accuracy gates unchanged (this phase changes representation, not
 detector logic).
 
+**Landed (first slice), not the whole phase — read this before assuming
+the Design section above is fully implemented.** `abicheck/model/
+availability.py` (relocated `FactStatus`/`Confidence`), `abicheck/model/
+fact.py` (`Fact[T]`, the `cast()`-sentinel omission mechanism for all
+three field shapes), `RecordType.bases_fact`/`virtual_bases_fact`/
+`vtable_fact`/`vptr_offset_bits_fact`, and `Param.is_va_list_fact` are
+real and tested (`tests/test_model_fact.py`,
+`tests/test_serialization_roundtrip.py::TestFactFieldRoundTrip`).
+`serialization.py` encodes/decodes the new fields and bumps
+`SCHEMA_VERSION` to 26, backfilling a legacy snapshot correctly from the
+existing `clang_vtable_facts_reliable`/`clang_va_list_facts_reliable`
+flags (split into `serialization_fact.py`/`serialization_enums.py` to
+stay under the 2000-line file-size cap). **Not landed in this slice**:
+no producer (`dumper_castxml.py`/`dumper_clang.py`/`dwarf_snapshot.py`)
+constructs a `Fact[...]` value directly yet — every fresh extraction
+still only populates the legacy field, so every `*_fact` sibling on a
+freshly-dumped snapshot is `Fact.present(raw)` regardless of true
+availability. No detector (`diff_layout.py`/`diff_types.py`/
+`diff_param_qualifiers.py`/the nine-reader table above) has been
+migrated to read `.status`, and the widened, non-glob AI-readiness check
+this Design section describes has not been written. Migrating a detector
+now would add real complexity for zero behavior change until producer-
+side `Fact` construction lands first — deferred deliberately, not
+silently, per this plan's own "vertical slice, not flag day" discipline:
+this slice is the primitive the rest of Phase 0 builds on, landed and
+tested on its own rather than held until every consumer migrates too.
+
 ---
 
 ### Phase 1 — finish the `dump`/`scan` typed-API convergence (closes AGENTS.md "PR C")
