@@ -666,7 +666,7 @@ third time in prose:**
 |---|---|---|---|
 | `contract_evidence_collect.py` | `build_type_graph()` | `bases`, `virtual_bases` | no |
 | `diff_time64.py` | `_fold_record_tokens()` | `bases`, `virtual_bases` | **yes** |
-| `diff_stdlib_impl.py` | `_public_by_value_records()` | `bases`, `virtual_bases` | **yes** |
+| `diff_stdlib_impl.py` | `_public_by_value_type_closure()` | `bases`, `virtual_bases` | **yes** |
 | `surface_graph.py` | `_build_type_refs()` | `bases`, `virtual_bases` (separate lines) | no |
 | `internal_leak.py` | `_enqueue_record_children()` | `bases`, `virtual_bases` (separate lines) | no |
 | `export_surface.py` | line 1167's unresolved-type scan | `bases`, `virtual_bases` | no |
