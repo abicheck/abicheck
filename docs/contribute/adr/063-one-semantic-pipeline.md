@@ -475,13 +475,37 @@ non-encoding fields:
 
 ```text
 RunOutcome(
-    compatibility: CompatibilityVerdict,
+    compatibility: CompatibilityVerdict | None,
     assurance: AnalysisAssurance,
     gate: PolicyGateDecision,
     operational: OperationalStatus,
     lifecycle: TargetLifecycle,
 )
 ```
+
+**`compatibility` is optional, not required, and a review round correctly
+found the first draft's bare `CompatibilityVerdict` couldn't represent
+every report this ADR itself names.** The implementation plan's Phase 7
+is explicit that `buildsource/check_report.py`'s `build_operational_
+error_report()`/`build_bootstrap_report()`/`build_new_target_report()`
+each build a report for exactly the non-`EXISTING` cases `operational`/
+`lifecycle` exist to represent — a pipeline failure before any comparison
+ran, a target with no baseline to compare against yet, a target new to
+this baseline-set — none of which ever computed a real compatibility
+verdict. A required field leaves an implementer with no honest value to
+put there: inventing a verdict (`COMPATIBLE` as a default, say) would
+silently claim a comparison happened when none did, exactly the kind of
+encoded-meaning collapse this decision exists to get away from. `None`
+means "no compatibility axis was computed for this report," distinct from
+any real `CompatibilityVerdict` member — not a sixth verdict value folded
+into the enum (which would force every existing compatibility-axis
+consumer to handle a case that isn't actually a verdict), but the absence
+of the axis itself, the same shape `Fact[T]`'s `NotApplicable` uses one
+layer down for a fact that doesn't apply to a given entity. Every ordinary
+single-pair `compare`, `scan --against`, and release/bundle comparison
+populates a real, non-`None` value; only the three synthetic report
+builders above, and any future report genuinely representing "no
+comparison ran," leave it `None`.
 
 **`TargetLifecycle` is attributed to ADR-053 in an earlier draft of this
 decision without checking — ADR-053 is TU-to-link-unit-to-DSO attribution

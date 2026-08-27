@@ -869,7 +869,8 @@ list and initial known-failures baseline — but none of them is a
 read after this phase ships with nothing catching it, recreating the
 exact unavailable-vs-empty confusion the migration exists to close.**
 The legacy-attribute-name widening (`rec.vtable`/`rec.bases`/
-`rec.vptr_offset_bits`/`param.is_va_list`, on a value whose declared type
+`rec.virtual_bases`/`rec.vptr_offset_bits`/`param.is_va_list`, on a value
+whose declared type
 resolves to `RecordType`/`Param`) therefore stays the *repository-wide*
 scan already specified above — covering every one of the nine-plus named
 semantic-reader modules, not only detector modules — with the
@@ -1755,6 +1756,59 @@ sibling:
   This phase is ordered after Phase 2 because the declaration/type half
   needs it — the same dependency Phase 6 (`SemanticIR`) has on Phase 2 —
   not because every node kind does.
+
+  **Defining `canonical_key(occurrence_id)` does not, by itself, make the
+  new public-surface builder's node ids agree with the existing L5
+  builder's — and a review round correctly found this phase's text never
+  actually closes that gap.** `canonical_key()` is specified above as
+  `compare/surface_graph.py`'s own new encoding; meanwhile
+  `buildsource/source_graph.py:1498,1533` and every sibling L5 module
+  (`header_graph.py`, `call_graph.py`, `type_graph.py`,
+  `override_graph.py`, `macro_graph.py`, `template_graph.py`,
+  `callback_graph.py`, `graph_backends.py` — twelve call sites across
+  eight files, by grep) still construct declaration/type node ids via
+  `graph_facts._decl_node_id(identity)`/`_type_node_id(identity)`, which
+  predate this phase and have their own independent `f"decl://
+  {_normalize_graph_identity(identity)}"`/`f"type://{...}"` format. Two
+  independently-written formats cannot be relied on to agree string-for-
+  string for the same declaration merely because both are "collision-
+  free" in isolation, and nothing in this phase's text migrates those
+  twelve call sites — so handing both builders one shared
+  `SourceGraphSummary` instance (the fix two bullets below) reconciles
+  nothing: the public-surface builder's node for a given declaration and
+  the L5 builder's node for the identical declaration land under two
+  different ids, `add_node()`'s id-collision merge never triggers, and the
+  two representations sit side by side in one container without ever
+  reconciling. **Migrating all twelve call sites to construct an
+  `OccurrenceId` and call `canonical_key()` directly is not this phase's
+  fix** — that is a real, cross-cutting rewrite of eight already-complex
+  L5 modules (the same class of scope this plan's "PR C" dump/scan
+  convergence saga in AGENTS.md shows is never a same-phase afterthought),
+  and every one of those call sites today receives a bare, already-
+  normalized identity *string* (`ent.identity()`, a clang qualified name,
+  a USR), not a structured `EntityId`/`OccurrenceId` — there is no
+  `ScopePath`/kind/disambiguator in hand at most of these call sites to
+  build one from without a materially larger, separate data-flow change
+  at each site. The fix instead makes the two encodings the same
+  encoding, not two encodings that must happen to agree: `_decl_node_id`/
+  `_type_node_id` move into `model/graph.py` alongside `GraphNode`/
+  `GraphEdge` (the same relocation Phase 3's own Files list already
+  performs for those two types, just extended to the two functions that
+  mint their ids), and `canonical_key(occurrence_id)` for a `declaration`/
+  `type`-kind `EntityId` is defined as exactly `_decl_node_id(identity)`/
+  `_type_node_id(identity)` — called with the `EntityId`'s own
+  identity-only string rendering — with the `OccurrenceId`'s disambiguator
+  appended as a suffix only when non-empty (reducing to bit-identical
+  output for the common, empty-disambiguator case). `buildsource/
+  graph_facts.py` keeps a thin re-export of both names, the same
+  compatibility-shim pattern this phase's Files list already uses for
+  `GraphNode`/`GraphEdge` — so all twelve existing L5 call sites are
+  **unchanged**, still passing a bare identity string, and now, without
+  any edit on their part, produce ids that are bit-for-bit identical to
+  what the new public-surface builder produces for the same declaration.
+  `add_node()`'s existing id-collision merge then does the reconciling
+  work this phase's design always intended, for real, on every node both
+  builders can see.
 - **Sharing node ids alone does not merge two graphs — this phase adds the
   actual assembly step, not only a shared identity.** `merge_graph_facts`
   only folds the `GraphFact` list already attached to *one* node; it is
@@ -3668,7 +3722,12 @@ field emission the other writers in this phase add — `build_operational_
 error_report()` emits `RunOutcome.operational = EXTRACTION_ERROR`;
 `build_bootstrap_report()`/`build_new_target_report()` emit
 `RunOutcome.lifecycle = BOOTSTRAP`/`NEW_TARGET` respectively — alongside
-their existing legacy sentinel fields, unchanged. `scan_engine.
+their existing legacy sentinel fields, unchanged. None of the three
+ever computed a real compatibility verdict, which is exactly why
+ADR-063 D6's `compatibility` field is `CompatibilityVerdict | None`
+rather than required: all three construct their `RunOutcome` with
+`compatibility=None`, the honest "no comparison ran" value, rather
+than inventing one. `scan_engine.
 ScanOutcome.to_dict()` (a separate, independent report writer a first
 draft of this phase's file list missed entirely — not a sibling of
 `reporter.py`'s compare-report writer, and `gate.py`'s `GateInfo.
@@ -4114,11 +4173,12 @@ not new design.
   that module is, for as long as ADR-062's v1-v25 import adapter promises
   to keep importing that version at all. **A second, separate row for the
   same phase**: the retained legacy compatibility-bridge attributes
-  themselves — `RecordType.vtable`/`bases`/`vptr_offset_bits`,
-  `Param.is_va_list` — are removed from the public dataclasses once the
-  widened, repository-wide legacy-attribute-read check Phase 0's own
-  Acceptance criteria adds reports zero remaining readers outside
-  `__post_init__`/serialization, closing the "kept for one release" window
+  themselves — `RecordType.vtable`/`bases`/`virtual_bases`/
+  `vptr_offset_bits`, `Param.is_va_list` — are removed from the public
+  dataclasses once the widened, repository-wide legacy-attribute-read
+  check Phase 0's own Acceptance criteria adds reports zero remaining
+  readers outside `__post_init__`/serialization, closing the "kept for
+  one release" window
   that section's own design states rather than leaving it open-ended; a
   first draft of this plan said this removal happened in Phase 5, which
   never touches these four fields at all (see Phase 0's own corrected
