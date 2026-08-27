@@ -2656,6 +2656,25 @@ this phase's scope, since it resolves a different question (build-output
 coverage, not evidence-requirement satisfiability) and has no `compare`/
 `dump` request to build a plan from at generation time.
 
+**The claim two paragraphs up — that `_run_compare_pair` "builds and
+resolves its own `CompareRequest`-shaped inputs without the pre-flight
+`PlanningError` check" — was stale the moment a later review round (see
+the Files section below) traced the real call chain and found the
+opposite: `_run_compare_pair` already calls `service.run_compare`, which
+calls `run_compare_request`, which calls `resolve_compare_request` — the
+exact function this phase wires to construct an `AnalysisPlan`. A
+release/bundle comparison therefore *does* get this phase's pre-flight
+guarantee, for free, through the shared chokepoint, the same way every
+other `service.run_compare()` caller does; it cannot "still hit the same
+silent-failure shape" this phase exists to close, because it runs through
+the identical resolver a single-pair `compare` does. Left uncorrected here,
+this paragraph and the Files section's own correction below instruct an
+implementer in opposite directions — build a second, independent plan for
+`_run_compare_pair` versus don't, it already gets one — so this paragraph
+is corrected rather than left standing: `_run_compare_pair` needs no
+change and constructs no `AnalysisPlan` of its own; see the Files section
+for the full reasoning.**
+
 **Files.** `abicheck/workflows/plan.py` (new); `service_compare_pipeline.
 resolve_compare_request`/`service_dump_pipeline.resolve_dump_request`
 (construct `AnalysisPlan` as part of resolution — the extraction-
