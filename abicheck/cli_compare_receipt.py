@@ -727,6 +727,26 @@ def record_release_resolved_config(result: Any, config: Any) -> None:
     mirrors ``record_resolved_config``'s own home: the single-pair
     equivalent of this exact operation already lives in this same flat,
     not-yet-migrated module, for the identical reason.
+
+    **Preserves the context's own ``suppressions`` when *config* has none**
+    (Codex review, fresh evidence): unlike single-pair `compare`'s
+    ``resolve_and_apply`` (which passes the real, already-loaded
+    ``SuppressionList`` as ``suppression=`` into ``resolve_cli_config``),
+    ``resolve_release_pack_application(_from_ctx)`` only ever passes
+    ``suppress_path=`` -- and ``_suppression_source`` returns ``None``
+    whenever no already-loaded object is given, path or not. So *config*'s
+    own ``suppressions`` is always ``None`` regardless of whether the
+    release actually has ``--suppress`` active, while *result*'s own
+    ``contract_context`` (built per library by ``service.run_compare``) DID
+    resolve the real one. A plain ``with_resolved_config`` merge -- which
+    replaces the observed ``resolved_config`` wholesale, preserving only the
+    two overlay fields it documents -- would silently drop that real
+    suppression digest/rule identities from the persisted receipt. Restoring
+    it here (rather than fixing the root cause in ``resolve_release_pack_
+    application``, which would mean threading an already-loaded
+    ``SuppressionList`` through the release CLI's own preflight, before this
+    function's caller even exists) keeps the fix local to the one place this
+    PR already owns.
     """
     if config is None:
         return
@@ -736,6 +756,22 @@ def record_release_resolved_config(result: Any, config: Any) -> None:
 
     ctx = getattr(result, "contract_context", None)
     if isinstance(ctx, PersistedContractContext):
+        from dataclasses import replace
+
+        from .compatibility_evaluation_frontend import SUPPRESSIONS_FIELD
         from .contract_context import with_resolved_config
 
+        observed_config = ctx.evaluation_context.resolved_config
+        if config.suppressions is None and observed_config.suppressions is not None:
+            provenance = dict(config.provenance)
+            observed_provenance = observed_config.provenance.get(SUPPRESSIONS_FIELD)
+            if observed_provenance is not None:
+                provenance[SUPPRESSIONS_FIELD] = observed_provenance
+            else:
+                provenance.pop(SUPPRESSIONS_FIELD, None)
+            config = replace(
+                config,
+                suppressions=observed_config.suppressions,
+                provenance=provenance,
+            )
         result.contract_context = with_resolved_config(ctx, config)

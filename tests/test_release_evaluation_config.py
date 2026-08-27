@@ -321,3 +321,110 @@ class TestReleaseFanOutMergesContractContext:
 
         assert diff.evaluation_config is None
         assert diff.contract_context is original_ctx
+
+
+class TestReleaseFanOutPreservesObservedSuppressions:
+    """Codex review, fresh evidence: unlike single-pair `compare`'s
+    ``resolve_and_apply`` (which passes the real, already-loaded
+    ``SuppressionList`` into the resolver), the release fan-out's own
+    ``resolve_release_pack_application(_from_ctx)`` only ever passes a raw
+    ``--suppress`` *path* -- and the resolver's own ``_suppression_source``
+    helper returns ``None`` whenever no already-loaded object is given, path
+    or not. So the release-wide ``config`` this module's
+    ``record_release_resolved_config`` merges in always has
+    ``suppressions=None``, regardless of whether ``--suppress`` is active --
+    while each library's own ``contract_context`` (built per library by
+    ``service.run_compare``) DID resolve the real one. A plain
+    ``with_resolved_config`` merge would silently drop that real suppression
+    digest/rule identities from the persisted receipt; this class covers the
+    fix that restores them."""
+
+    @staticmethod
+    def _persisted_context(resolved_config):
+        from abicheck.contract_evidence import (
+            ContractEvidenceBlock,
+            EvaluationContextBlock,
+            PersistedContractContext,
+        )
+
+        return PersistedContractContext(
+            contract_evidence=ContractEvidenceBlock(),
+            evaluation_context=EvaluationContextBlock(resolved_config=resolved_config),
+        )
+
+    def test_observed_suppressions_survive_the_merge(self) -> None:
+        from abicheck.cli_compare_receipt import record_release_resolved_config
+        from abicheck.compatibility_evaluation_config import SuppressionConfig
+
+        observed_suppressions = SuppressionConfig(
+            sha256="sha256:observed", rules=("cxx_standard_floor_raised",)
+        )
+        observed = _minimal_evaluation_config(suppressions=observed_suppressions)
+        # The release-wide config -- unconditionally suppressions=None, per
+        # this class's own docstring, regardless of whether --suppress is
+        # active for this release.
+        release_wide_config = _minimal_evaluation_config(
+            contract=ContractConfig(
+                mode=ContractMode.PUBLIC,
+                packs=(_identity("ignore_removals", version=1),),
+            )
+        )
+        assert release_wide_config.suppressions is None
+
+        diff = _result()
+        diff.contract_context = self._persisted_context(observed)
+
+        record_release_resolved_config(diff, release_wide_config)
+
+        merged_config = diff.contract_context.evaluation_context.resolved_config
+        assert merged_config.suppressions is observed_suppressions
+        # The pack identity from the release-wide config must still be
+        # present -- restoring suppressions must not undo the actual fix.
+        assert merged_config.contract.packs == release_wide_config.contract.packs
+
+    def test_configs_own_suppressions_win_when_it_has_one(self) -> None:
+        """If the release-wide config ever *does* carry real suppressions
+        (a future fix to resolve_release_pack_application, or a caller this
+        module doesn't control), that real value must not be silently
+        discarded in favor of the observed one."""
+        from abicheck.cli_compare_receipt import record_release_resolved_config
+        from abicheck.compatibility_evaluation_config import SuppressionConfig
+
+        observed_suppressions = SuppressionConfig(sha256="sha256:observed", rules=())
+        observed = _minimal_evaluation_config(suppressions=observed_suppressions)
+
+        release_suppressions = SuppressionConfig(sha256="sha256:release", rules=())
+        release_wide_config = _minimal_evaluation_config(
+            suppressions=release_suppressions
+        )
+
+        diff = _result()
+        diff.contract_context = self._persisted_context(observed)
+
+        record_release_resolved_config(diff, release_wide_config)
+
+        merged_config = diff.contract_context.evaluation_context.resolved_config
+        assert merged_config.suppressions is release_suppressions
+
+    def test_no_observed_suppressions_is_still_a_no_op(self) -> None:
+        """Neither side has suppressions -- nothing to restore, and the
+        merged config's suppressions must stay None rather than fabricating
+        an empty SuppressionConfig."""
+        from abicheck.cli_compare_receipt import record_release_resolved_config
+
+        observed = _minimal_evaluation_config()
+        assert observed.suppressions is None
+        release_wide_config = _minimal_evaluation_config(
+            contract=ContractConfig(
+                mode=ContractMode.PUBLIC,
+                packs=(_identity("ignore_removals", version=1),),
+            )
+        )
+
+        diff = _result()
+        diff.contract_context = self._persisted_context(observed)
+
+        record_release_resolved_config(diff, release_wide_config)
+
+        merged_config = diff.contract_context.evaluation_context.resolved_config
+        assert merged_config.suppressions is None
