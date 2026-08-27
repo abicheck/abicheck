@@ -78,21 +78,37 @@ becomes a re-export shim for one release so existing `storage.*` imports
 keep working. `FactAvailability` (the ledger record) stays in `storage/`,
 since *it* legitimately depends on `model`, not the other way around.
 
-Add `abicheck/model/fact.py`: a generic `Fact[T]` wrapping the relocated
-`FactStatus` plus an optional `T` payload. `FactStatus` has exactly six
-members (`PRESENT`, `PARTIAL`, `NOT_COLLECTED`, `UNSUPPORTED`, `FAILED`,
-`NOT_APPLICABLE` — see that module's own docstring) and deliberately has
-**no seventh "confirmed absent" member**: per `PRESENT`'s own documented
-meaning ("the producer ran, covered the requested scope, and established
-the facts — *including establishing that a collection is legitimately
-empty*"), a confirmed absence is `PRESENT` carrying an empty/`None`
-payload, not a distinct status. `Fact[T]`'s constructors are therefore
-`Fact.present(value)` (value may legitimately be `None`/`[]` — that *is*
-confirmed absence), `Fact.not_collected()`, `Fact.unsupported()`,
-`Fact.failed(reason)`, `Fact.not_applicable()`, and `Fact.partial(value)`.
-There is no `Fact.absent_confirmed()` — a draft of this plan proposed one
-and it was corrected during review for contradicting the vocabulary it
-claims to reuse unchanged; a caller wanting to assert absence calls
+Add `abicheck/model/fact.py`: a generic `Fact[T]` with **three** fields,
+not two — `status: FactStatus`, `value: T | None`, and `diagnostics:
+tuple[str, ...] = ()` — mirroring `storage.FactAvailability`'s own
+existing shape, which already separates its value-bearing fields from
+`diagnostics` for exactly this reason (see that record's own field
+comments). A first draft of this phase described `Fact[T]` as just
+`FactStatus` plus the `T` payload and let `Fact.failed(reason)` store its
+`reason` there — review correctly caught that this cannot typecheck
+(`reason` is a diagnostic string, not a value of type `T`) and would
+either violate the declared generic type or silently drop the diagnostic
+`FactAvailability`'s wire shape already preserves. With the third field:
+`Fact.failed(reason)` is `Fact(status=FAILED, value=None,
+diagnostics=(reason,))`; `Fact.unsupported()`/`Fact.not_applicable()`/
+`Fact.not_collected()` take an optional `*diagnostics` the same way, for a
+producer that wants to record *why* (e.g. which depth was requested)
+without it becoming a smuggled value.
+
+`FactStatus` has exactly six members (`PRESENT`, `PARTIAL`,
+`NOT_COLLECTED`, `UNSUPPORTED`, `FAILED`, `NOT_APPLICABLE` — see that
+module's own docstring) and deliberately has **no seventh "confirmed
+absent" member**: per `PRESENT`'s own documented meaning ("the producer
+ran, covered the requested scope, and established the facts — *including
+establishing that a collection is legitimately empty*"), a confirmed
+absence is `PRESENT` carrying an empty/`None` value, not a distinct
+status. `Fact[T]`'s constructors are therefore `Fact.present(value)`
+(value may legitimately be `None`/`[]` — that *is* confirmed absence),
+`Fact.not_collected()`, `Fact.unsupported()`, `Fact.failed(reason)`,
+`Fact.not_applicable()`, and `Fact.partial(value)`. There is no
+`Fact.absent_confirmed()` — a draft of this plan proposed one and it was
+corrected during review for contradicting the vocabulary it claims to
+reuse unchanged; a caller wanting to assert absence calls
 `Fact.present(None)` (or `Fact.present(())`/`Fact.present([])` for a
 collection) explicitly, so the payload contract's only rule is that this
 is the *one* legitimate way to spell "present, empty" — never a bare
@@ -153,6 +169,30 @@ value instead of a side boolean:
   load correctly) and are deleted in Phase 10 once no pre-conversion
   snapshot needs to be read anymore — not before.
 
+**Writing a freshly-extracted snapshot back out needs its own fix, not
+just a reader-side backfill.** `serialization.snapshot_to_dict()` calls
+`asdict(snap)` on the *whole* `AbiSnapshot` — `dataclasses.asdict()`
+recurses into every nested dataclass field, including a `Fact[...]`
+instance, which it flattens into `{"status": FactStatus.PRESENT, "value":
+..., "diagnostics": (...)}` with the `status` key holding the raw
+`FactStatus` **enum member**, not a JSON-safe value — `json.dump()` raises
+on an unrecognized type. This is not a new problem `Fact[...]` invents:
+`snapshot_to_dict()` already has to do exactly this conversion for
+`ElfMetadata`'s own enums today (its "Serialize ElfMetadata enums to
+strings for JSON compatibility" post-`asdict()` pass, right below the
+`asdict()` call itself) — this phase extends that same, already-
+established pattern to every `Fact[...]`-typed field's `status`, writing
+`status.value` (the plain string, e.g. `"present"`) instead of the enum
+member, with the reverse conversion added to `serialization.
+snapshot_from_dict()`'s per-field loaders. This is a genuine new key in
+the serialized document for every converted field, so it is a real schema
+change: `serialization.SCHEMA_VERSION` is bumped by one, following the
+identical precedent each of the `clang_*_facts_reliable` flags already
+used when it was introduced (schema v21 for vtable reliability, v23 for
+`is_va_list`, ...) — this is not a new kind of schema decision, it is the
+same kind this codebase already makes routinely for exactly this class of
+field addition.
+
 **Files.** `abicheck/model/availability.py` (new — the relocated
 `FactStatus`/`Confidence`/order-tuple vocabulary); `abicheck/storage/
 availability_status.py` (trimmed to a re-export shim); `abicheck/model/
@@ -163,9 +203,12 @@ ones, old field deprecated-but-present for one release to keep
 registry-driven sweep, not here); `dumper_castxml.py`/`dumper_clang.py`/
 `dumper_clang_vtable.py`/`dwarf_snapshot.py` (each producer constructs the
 `Fact[...]` value directly, per the design above); `serialization.py`
-(the legacy-schema backfill path, reading the existing reliability flags
-exactly once on load); `diff_layout.py`/`diff_types.py`'s vtable/base-list
-detectors (read `Fact[...]`, not raw `None`).
+(`snapshot_to_dict()`'s `Fact[...]`-status-to-string encoding, extending
+its existing ElfMetadata-enum-encoding pattern; `snapshot_from_dict()`'s
+matching decode; `SCHEMA_VERSION` bump; and the legacy-schema backfill
+path, reading the existing reliability flags exactly once on load);
+`diff_layout.py`/`diff_types.py`'s vtable/base-list detectors (read
+`Fact[...]`, not raw `None`).
 
 **Tests.** Port the existing `tests/test_vtable_evidence_guard.py`
 Hypothesis properties to assert over `Fact[...]` states directly, not only
@@ -181,7 +224,12 @@ reliability flag `True` loads as `Fact.present(...)`, one with the flag
 `Fact.present(False)` — since that exact confusion (a placeholder value
 read as a confirmed fact) is the bug this phase exists to make
 unrepresentable; a freshly-extracted snapshot round-trips through every
-backend's real parser and never consults the legacy flag at all.
+backend's real parser and never consults the legacy flag at all. Add a
+second, direct test asserting `snapshot_to_dict()` on a freshly-built
+snapshot never emits a raw `FactStatus` enum member anywhere in the
+resulting `dict` (walk the tree and assert every value is a JSON-primitive
+type) — confirmed to fail against the pre-fix `asdict()`-only path, which
+is exactly the failure mode a reviewer caught in this design.
 
 **Acceptance criteria.** The three converted fields cannot be read by any
 detector without explicit availability handling (enforced by a new
@@ -595,6 +643,19 @@ public dataclass in this repo already follows) and is not attempted here.
 Demonstrate the stated (five-item) reduction directly — the phase's own PR
 adds one new, real fact end-to-end as a worked example and states the
 old-vs-new touch-list diff in its description.
+
+**This five-item count holds only up to Phase 8; it gains one more item
+once storage v2 lands, and this plan does not hide that.** Phase 8's own
+design explicitly requires a distinct `to_dto()`/`from_dto()` mapping per
+persisted field (that is the whole point of D8 — no `asdict`-based
+mirror), and nothing in this registry generates that mapping either, for
+the identical reason it does not generate the model field. So for a fact
+added **after** Phase 8 ships, the real touch list is six items — model
+field + registry entry + DTO mapping + parser + detector + test — not
+five, and this plan states that explicitly rather than letting the
+five-item claim quietly go stale the moment Phase 8 lands. Registry-driven
+DTO-mapping generation is the same kind of out-of-scope follow-on as
+model-field generation above, not attempted in either phase.
 
 ---
 
