@@ -6,9 +6,12 @@
   `Param.is_va_list`).** ADR-063 Phase 0 (see the "One Semantic Pipeline"
   plan): `abicheck.model.fact.Fact` pairs a value with a `FactStatus`
   (`PRESENT`/`PARTIAL`/`NOT_COLLECTED`/`UNSUPPORTED`/`FAILED`/
-  `NOT_APPLICABLE`) so a detector can no longer observe a field's value
-  without first observing whether it was actually collected — `None`/`[]`
-  no longer has to double as both "confirmed absent" and "not collected".
+  `NOT_APPLICABLE`) so a reader of the new `*_fact` sibling fields can no
+  longer observe a value without also observing whether it was actually
+  collected — `None`/`[]` no longer has to double as both "confirmed
+  absent" and "not collected". No detector reads these siblings yet (see
+  "Not yet done" below); this introduces the representation, not
+  enforcement.
   Each of the five fields above gains a `*_fact` sibling
   (`bases_fact`, `virtual_bases_fact`, `vtable_fact`,
   `vptr_offset_bits_fact`, `is_va_list_fact`); the plain field stays for

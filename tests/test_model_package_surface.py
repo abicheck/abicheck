@@ -123,8 +123,11 @@ class TestFlatModelCompatibility:
         missing = {name for name in FLAT_MODEL_EXPORTS if not hasattr(model, name)}
         assert not missing
 
-    def test_all_matches_what_the_flat_module_exported(self) -> None:
-        assert set(model.__all__) == FLAT_MODEL_EXPORTS
+    def test_all_still_includes_everything_the_flat_module_exported(self) -> None:
+        """`__all__` may grow with genuinely new post-migration additions
+        (e.g. ADR-063's Fact[T]) — it must never *shrink* below the flat
+        module's own baseline, which would break a documented import path."""
+        assert FLAT_MODEL_EXPORTS <= set(model.__all__)
 
     def test_all_is_sorted_and_free_of_duplicates(self) -> None:
         assert model.__all__ == sorted(set(model.__all__))

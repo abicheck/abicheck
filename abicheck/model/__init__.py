@@ -85,6 +85,8 @@ __all__ = [
     "EnumMember",
     "EnumType",
     "ExtractionContract",
+    "Fact",
+    "FactStatus",
     "Function",
     "Param",
     "ParamKind",
@@ -101,5 +103,7 @@ __all__ = [
     "is_compiler_internal_type",
     "is_cxx_runtime_library",
     "is_non_abi_surface_type",
+    "replace_with_fact_sync",
+    "resolve_vptr_offset_bits",
     "stdlib_namespaces_excluded",
 ]
