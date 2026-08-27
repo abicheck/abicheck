@@ -664,7 +664,14 @@ construction-time state.
 **Acceptance criteria.** The three converted fields cannot be read by any
 detector without explicit availability handling — enforced by a new
 `check_ai_readiness.py` check flagging, inside `diff_*.py`/any detector
-module, either a bare attribute read of a `Fact[...]`-typed field *or* a
+module — **`idioms.py` named explicitly here, since a first draft of this
+criterion scoped itself to `diff_*.py` and missed it: it is semantic
+detector logic reached by `pattern_verdicts.py` (ADR-027 D2.2's single-
+snapshot anti-pattern recognition), reading `rec.vtable`/`rec.bases`
+directly to emit polymorphic-type anti-pattern findings, not a
+presentation or bridge module — the check's module-scope list is every
+module producing a `Change`/finding from model data, not only the ones
+named `diff_*.py`** — either a bare attribute read of a `Fact[...]`-typed field *or* a
 `.value_or(...)` call on one (both collapse the status space the same
 way); `.status`/pattern-match access is the only permitted form there.
 `.value_or(...)` itself is not banned repository-wide — it stays legal in
@@ -2709,9 +2716,9 @@ not a second channel `fold.py` additionally has to consult.** The fix:
 `gate.py`'s own readers — `GateInfo.from_report_data`/`from_scan_report` —
 fold `RunOutcome.operational` into the `GateInfo` they return, for a
 fresh report that carries the new structured fields: a blocking
-`OperationalStatus` value (budget overflow, not-comparable/evidence-
-contract-error, and any sibling operational failure this phase's
-`RunOutcome` construction populates) is combined with
+`OperationalStatus` value (`BUDGET_OVERFLOW`/`NOT_COMPARABLE`/
+`EXTRACTION_ERROR`, per ADR-063 D6's own grounded definition of the type)
+is combined with
 `PolicyGateDecision`'s own compatibility contribution by `max()` over the
 exit-code scheme both already share — the same orthogonal-axes shape
 ADR-049 Phase 7's contract-coverage axis already uses elsewhere in this

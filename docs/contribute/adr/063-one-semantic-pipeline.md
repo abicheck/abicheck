@@ -443,22 +443,43 @@ and defines no lifecycle vocabulary at all, and no `TargetLifecycle` type
 exists anywhere in the repository today.** Defined here instead, grounded
 in vocabulary this codebase's `aggregate` domain already distinguishes
 rather than invented from nothing: `workflows/aggregate/contracts.py`'s
-own `_BOOTSTRAP_VERDICT`/`_NEW_TARGET_VERDICT` sentinels and
-`TargetReport.unexpected` already separate exactly the cases a target's
-own lifecycle state needs to distinguish — `TargetLifecycle =
-EXISTING | BOOTSTRAP | NEW_TARGET | UNEXPECTED`, where `EXISTING` is the
-ordinary case (a target this baseline-set already knows, with a real prior
-baseline to compare against), `BOOTSTRAP` is `load.py`'s own "no baseline
-published yet" synthesis (`raw_verdict == _BOOTSTRAP_VERDICT`),
-`NEW_TARGET` is its "target new to this baseline-set" synthesis
-(`raw_verdict == _NEW_TARGET_VERDICT`), and `UNEXPECTED` is
-`TargetReport.unexpected` (a report whose target was not in the expected
-set). This axis is meaningful only where a "target" exists at all — a
-single-pair `compare` invocation, with no baseline-set or expected-target
-concept, always reports `EXISTING`, the same fixed default every
-non-`aggregate` `RunOutcome` construction uses; `aggregate`'s own
-`_load_report_file` is where the real derivation (reading the three
-existing signals above) happens, not a new mechanism this decision invents.
+own `_BOOTSTRAP_VERDICT`/`_NEW_TARGET_VERDICT` sentinels separate exactly
+the cases a target's own lifecycle state needs to distinguish —
+`TargetLifecycle = EXISTING | BOOTSTRAP | NEW_TARGET`, where `EXISTING` is
+the ordinary case (a target this baseline-set already knows, with a real
+prior baseline to compare against), `BOOTSTRAP` is `load.py`'s own "no
+baseline published yet" synthesis (`raw_verdict == _BOOTSTRAP_VERDICT`),
+and `NEW_TARGET` is its "target new to this baseline-set" synthesis
+(`raw_verdict == _NEW_TARGET_VERDICT`). This axis is meaningful only where
+a "target" exists at all — a single-pair `compare` invocation, with no
+baseline-set or expected-target concept, always reports `EXISTING`, the
+same fixed default every non-`aggregate` `RunOutcome` construction uses;
+`aggregate`'s own `_load_report_file` is where the real derivation
+(reading `raw_verdict` against the two sentinels above — both genuinely
+part of a report's *own* persisted content) happens, not a new mechanism
+this decision invents.
+
+**`TargetReport.unexpected` is deliberately *not* folded into this axis —
+an earlier draft of this section included it as a fourth member, and
+review correctly traced why that doesn't work.** Reading the real code
+(`workflows/aggregate/execute.py`), `unexpected` is not part of a report's
+own content the way `verdict` is — it is assigned by the *aggregator*,
+per invocation, from comparing the set of reports actually found against
+a specific expected-target manifest (`ExpectedTargets`) that invocation
+was given. The identical report file, aggregated against two different
+manifests, can be `unexpected` under one and not the other — so it cannot
+be a property `_load_report_file` derives once and bakes into a
+per-report `RunOutcome`, the way `EXISTING`/`BOOTSTRAP`/`NEW_TARGET`
+genuinely can be. It is also not mutually exclusive with the other three
+members the way a single enum requires: a target can be both `NEW_TARGET`
+(or mid-bootstrap) *and* absent from a given manifest's expected set at
+the same time, two orthogonal facts a four-way enum has no way to
+represent together. `unexpected` therefore stays exactly where it already
+correctly lives — a separate, aggregation-context-only field
+(`TargetReport.unexpected`, set by `execute.py` at aggregation time, after
+`RunOutcome.lifecycle` has already been read off the loaded report) — and
+this decision does not move it, fold it into `RunOutcome`, or ask any
+report writer to emit it.
 `PolicyGateDecision` is a **new, code-free type this decision defines** —
 not a reuse of `severity.GateDecision`, the existing type that already has
 this name's natural meaning in the codebase today. The existing
@@ -477,6 +498,32 @@ and `scan`'s own legacy exit
 codes (5 for budget overflow, 6 for not-comparable) are real, independent
 blocking conditions neither category covers.** `RunOutcome.operational`
 carries exactly this.
+
+**`OperationalStatus` itself is named throughout this decision with no
+defined members, ordering, or front-end mapping anywhere — an earlier
+draft used it as if it were already specified, and review correctly
+found nothing backing that.** Defined here, grounded in the real,
+already-distinct conditions this codebase's report writers/readers
+already encode rather than invented from nothing: `OperationalStatus =
+NONE | BUDGET_OVERFLOW | NOT_COMPARABLE | EXTRACTION_ERROR`, ordered
+`NONE < BUDGET_OVERFLOW = NOT_COMPARABLE = EXTRACTION_ERROR` for fold
+purposes — the three non-`NONE` members are equally blocking and mutually
+exclusive per report (a `scan` run that hit budget overflow didn't also
+fail extraction), so there is no further internal ordering among them to
+state, only "blocking vs. not." `BUDGET_OVERFLOW`/`NOT_COMPARABLE` are
+`scan`'s own legacy exit 5/6 (`gate.py::from_scan_report`'s existing
+raw-code branch, read the same way for a fresh, structured report);
+`EXTRACTION_ERROR` is `compare-release`'s own `verdict: "ERROR"` sentinel
+(`load.py`'s `_OPERATIONAL_ERROR_VERDICT` — "a library failed to
+dump/extract/compare," ranked above `BREAKING` and floored to exit 4
+today). Each front end maps its own real failure modes onto this set at
+the point it already computes them (`ScanOutcome`/`ScanResult`/
+`ScanSetResult`'s own to_dict() for `scan`'s two members, the release
+fan-out for the third) — this decision does not invent a fourth front-end
+computation for it, only the one shared vocabulary the existing three
+already need to agree on. A front end with no operational failure of its
+own to report (a plain single-pair `compare`, a `scan` invocation that
+completed cleanly) always reports `NONE`.
 
 **Which layer folds the two axes together — `gate.py`'s own per-target
 readers, or `fold.py`'s cross-target aggregation — is stated once here,
