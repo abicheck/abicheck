@@ -243,10 +243,22 @@ old field from the new `Fact[...]` value at the *same* construction call
 — `vtable=fact.value_or([])` right next to `vtable_fact=fact` — so
 there is exactly one write, not two independently-maintained ones that
 could drift; the old field is never independently assigned raw producer
-output again after this phase. (Removed in Phase 5's registry-driven
-sweep, not here.) `dumper_castxml.py`/`dumper_clang.py`/
-`dumper_clang_vtable.py`/`dwarf_snapshot.py` (each producer constructs the
-`Fact[...]` value directly, per the design above); `serialization.py`
+output again after this phase — with one named exception, below. (Removed
+in Phase 5's registry-driven sweep, not here.) `dumper_castxml.py`/
+`dumper_clang.py`/`dumper_clang_vtable.py`/`dwarf_snapshot.py` (each
+producer constructs the `Fact[...]` value directly, per the design above);
+`dumper_layout_backfill.py`'s `_backfilled_record()` — a *post-parse*
+path, not a producer construction call, that `dataclasses.replace()`s an
+already-built `RecordType` to overwrite `vtable`/`vptr_offset_bits` with
+corroborating DWARF evidence after either header parser has already run.
+The single-write rule above does not hold across this call: it must build
+a new `Fact[...]` from the DWARF value first and derive the replaced
+legacy fields from that `Fact`, the same order every producer uses, or the
+backfilled `RecordType` ends up with a legacy field holding the
+DWARF-corroborated value while its `Fact[...]` field still holds the
+header parser's pre-backfill one — exactly the split-source drift this
+phase exists to prevent, reached through a second call site rather than a
+second producer; `serialization.py`
 (`snapshot_to_dict()`'s `Fact[...]`-status-to-string encoding, extending
 its existing ElfMetadata-enum-encoding pattern; `snapshot_from_dict()`'s
 matching decode; `SCHEMA_VERSION` bump; and the legacy-schema backfill
@@ -744,7 +756,22 @@ object each builder was handed, not only by comparing their outputs after
 the fact, so a future regression that quietly goes back to constructing
 two independent `SourceGraphSummary()` instances fails this test
 immediately rather than only failing once two disagreeing facts happen to
-surface.
+surface. A second, separate regression locks down persistence: today's
+writer never round-trips a graph through plain `asdict()` at all — the
+existing `BuildSourcePack.to_embedded_dict()`/`SourceGraphSummary.
+from_dict()` pair is a deliberate special case precisely because the
+graph's canonical encoding isn't the dataclass default, reached today only
+through `build_source`'s old attachment path. Moving the graph onto
+`AbiSnapshot.surface_graph` directly needs the identical special-casing
+added to `serialization.py`'s `snapshot_to_dict()`/`snapshot_from_dict()`
+for the new field — without it, a saved-then-reloaded snapshot's
+`surface_graph` comes back as `None` or a bare `dict`, not a
+`SourceGraphSummary`, silently breaking `PublicSurfaceQuery.resolve()` on
+every persisted (as opposed to freshly-dumped) snapshot. A populated-graph
+save/load round-trip test (construct a snapshot with a real, non-empty
+`surface_graph`, write it, read it back, assert the reloaded object is a
+`SourceGraphSummary` with the same nodes/edges) is required by this phase,
+not deferred to Phase 10's cleanup.
 
 **Acceptance criteria.** `surface.py`'s own traversal implementation and
 `export_surface.py`'s independent closure walk are deleted, not kept
@@ -957,6 +984,30 @@ explicitly **not** touched by this phase — see ADR-063 D9's own
 extraction has no type spelling/scope/template-argument concern for this
 normalizer to canonicalize in the first place.
 
+Narrowing the parsers is not, by itself, a complete migration: `dumper.py`
+and `dumper_manifest.py` are the production call sites that invoke
+`parser.parse_functions()`/`parse_types()`/... today and assemble their
+return values directly into `AbiSnapshot`'s `functions`/`types`/...
+fields, and `checker.compare()` consumes that `AbiSnapshot` shape
+unchanged. Once a parser method returns only `RawXFacts`, neither call
+site has anywhere to route the normalizer through — `dumper.py`/
+`dumper_manifest.py` must be updated in this same phase to call
+`semantic_normalizer.normalize()` on each backend's raw facts and project
+the result back into the existing `AbiSnapshot` field shapes (via
+`SemanticIR.canonical_entities()`, so nothing downstream of `AbiSnapshot`
+changes shape in this phase), and a checker/workflow-level adapter making
+that `SemanticIR` itself available where `compare()`/future `SemanticIR`-
+aware detectors need it must be named explicitly. Without this wiring,
+landing the Files list above either breaks every `dump`/`compare`
+invocation (the parsers stop returning what `dumper.py` assembles from) or
+leaves `SemanticIR` fully built and fully inert beside an unchanged
+production pipeline — neither is an acceptable state to merge this phase
+in. An end-to-end parity test (`dump`/`compare` over a real fixture,
+before and after this phase, asserting identical `AbiSnapshot` output) is
+required alongside the per-backend unit tests below, to prove the
+normalizer-mediated assembly path is behavior-preserving for the existing
+pipeline rather than asserted.
+
 **Tests.** Every existing per-backend regression test that currently
 proves "backend X handles construct Y" is kept and re-targeted at the
 normalizer's output for that backend's raw facts — this is a large,
@@ -1127,7 +1178,16 @@ from_scan_report` is the matching separate *reader* already in this
 phase's file list, so leaving the writer unmigrated would mean every
 freshly-generated `scan` report still lacks the structured fields and
 keeps forcing `from_scan_report` onto the legacy-decode path D6 means to
-reserve for genuinely old reports, not new ones).
+reserve for genuinely old reports, not new ones). `scan` reports carry
+their own independent `SCAN_SCHEMA_VERSION` (`schemas.py`) — genuinely
+separate from `REPORT_SCHEMA_VERSION`/`AGGREGATE_SCHEMA_VERSION`, not
+another name for one of them, since `scan_engine.py`/`service_scan.py`
+stamp it on their own report shape. Emitting the new structured fields
+from this writer needs `SCAN_SCHEMA_VERSION` bumped too, for the identical
+reason the compare/aggregate counters are bumped above — a freshly
+regenerated `scan` report with the new fields but an unbumped
+`scan_schema_version` reads as the old schema to any version-aware
+consumer and defeats the whole point of versioning the additive change.
 
 **Tests.** A parity test asserting `junit_report.py`'s exit-relevant
 output (failure count, failure classification) is unchanged for the
@@ -1219,19 +1279,29 @@ is removed because the cycle it works around no longer exists.
 `checker_types`, `suppression.py`, `reclassify.py`, or `reporter`, per
 ADR-063 D10): the selector grammar (`symbol`/`symbol_pattern`/
 `type_pattern`/`member_name`/`namespace`/`entity_namespace`/
-`cause_namespace`/`source_location`/`change_kind`/`binding`/`expires`) —
-**`binding` is listed explicitly here because a first draft of this phase
-omitted it**, even though both `Suppression` and `ReclassifyRule` already
-expose it (ELF symbol-linkage matching, `Suppression._matches_binding`)
-and existing tests cover weak/global binding rules; dropping it from the
-shared grammar would either lose a supported selector outright or leave
-its matching logic as a second, un-consolidated implementation sitting
-next to the new leaf module — exactly what this phase exists to remove,
-not reintroduce. The corrected list above is every selector field either
-class currently supports, not a subset — extracted from
-`suppression.Suppression`'s existing `selector_matches()` — already the
-real, shared logic `reclassify.py` calls today, just reached through the
-import-cycle workaround rather than a dependency-free module. Once the
+`cause_namespace`/`source_location`/`change_kind`/`binding`/`finding_id`/
+`expires`) — **`binding` and `finding_id` are listed explicitly here
+because a first draft of this phase omitted both, in two different ways.**
+`binding` is shared by both `Suppression` and `ReclassifyRule` (ELF
+symbol-linkage matching, `Suppression._matches_binding`), and existing
+tests cover weak/global binding rules. `finding_id` is narrower —
+`Suppression.finding_id` only, not `ReclassifyRule`, matched via
+`_matches_finding_id()` against `finding_identity.
+report_canonical_finding_id(change)` — but it is a standalone-sufficient
+selector (an exact match on the producer-agnostic canonical finding
+identity needs no other field to narrow it), so it is still part of the
+shared grammar `suppression.py`'s matcher must keep evaluating even though
+`reclassify.py` never uses it; the shared module's leaf-matcher contract
+covers the union of both classes' fields, not their intersection, and a
+consumer that doesn't use a given field simply never sets it. Dropping
+either from the shared grammar would either lose a supported selector
+outright or leave its matching logic as a second, un-consolidated
+implementation sitting next to the new leaf module — exactly what this
+phase exists to remove, not reintroduce. The corrected list above is every
+selector field either class currently supports, not a subset — extracted
+from `suppression.Suppression`'s existing `selector_matches()` — already
+the real, shared logic `reclassify.py` calls today, just reached through
+the import-cycle workaround rather than a dependency-free module. Once the
 grammar itself lives in a leaf package with no edge back to `checker_types`
 or `policy_file`, `reclassify.py` can import it **statically** — the cycle
 `policy_file -> reclassify -> suppression -> checker_types -> policy_file`
@@ -1245,10 +1315,16 @@ different actions, which remain genuinely different decisions and are not
 an instance of the "one concept, two representations" problem this plan
 otherwise targets.
 
-**Files.** `abicheck/policy/selectors.py` (new); `suppression.py`
-(`Suppression.selector_matches()` becomes a thin wrapper calling the
-shared matcher, or is removed in favor of direct calls — whichever keeps
-`Suppression`'s own public method surface intact for existing callers);
+**Files.** `abicheck/policy/selectors.py` (new — includes the
+`finding_id` matcher, calling `finding_identity.report_canonical_
+finding_id` the same way `_matches_finding_id()` does today, so the
+backend-independent identity semantics move intact rather than being
+reimplemented against the leaf module's narrower dependency set);
+`suppression.py` (`Suppression.selector_matches()` becomes a thin wrapper
+calling the shared matcher, or is removed in favor of direct calls —
+whichever keeps `Suppression`'s own public method surface, including its
+existing `parse_finding_id`-based construction-time validation, intact for
+existing callers);
 `reclassify.py` (drops the `importlib.import_module` workaround and its
 own docstring's cycle justification, replaced by a static import of
 `policy/selectors.py`); `scripts/check_architecture.py`'s import-direction
