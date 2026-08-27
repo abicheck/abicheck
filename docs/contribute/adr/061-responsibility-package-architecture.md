@@ -1241,6 +1241,39 @@ than as a list of individually-discovered cases, and removes the
 entirely. Two new test cases cover the format-code gap and the
 None-with-format-spec gap.
 
+A sixth Codex review round on that same commit found the pure-execution
+approach from the fifth round was itself incomplete in one way, plus a
+separate, real freeze gap. (P2) Probing with a single representative
+string value cannot catch field *traversal* — `{symbol[0]}` succeeds
+against the probe value `"probe"` (it has a `[0]`) and only fails once
+`make_change()` is called with a real, empty `symbol`, which is a valid
+`str` some findings do pass; `{symbol.__class__}` similarly executes
+successfully against any string. Both are illegal — only the five bare
+`TEMPLATE_VOCAB` names are ever legal — but neither the field-name check
+before this round nor the execution-based check after it actually rejected
+them. Fixed by restoring a `string.Formatter().parse()`-based check
+alongside the execution-based one rather than instead of it: each field's
+name is checked for exact `TEMPLATE_VOCAB` membership (`Formatter().parse()`
+reports a field's full access expression as its name — `"symbol[0]"`,
+`"symbol.__class__"` — so an exact-membership check already rejects both
+without special-casing), while the execution-based check keeps catching
+everything a value-independent parse can't (format codes, conversions,
+None-handling). The two checks are complementary, not redundant: the
+field-name check is deterministic regardless of probe value; the
+execution check catches failures no static parse of the grammar can
+predict. (P2) Separately, `ChangeKindMeta.policy_overrides` is a
+`dict[str, Verdict]` field on a `frozen=True` dataclass — but `frozen`
+only stops reassigning the *attribute*, not mutating the dict object
+itself, and a caller could also keep a live reference to the dict it
+passed in. Either path could silently invalidate the reference/default
+checks already run at construction without re-running them, and could
+make `ChangeKindRegistry.policy_overrides_for()` disagree with sets
+already derived at import time. Fixed with a `__post_init__` that
+defensively copies into a `types.MappingProxyType`, closing both paths at
+once; the field's annotated type widened from `dict[str, Verdict]` to
+`Mapping[str, Verdict]` to reflect what callers actually receive. Three
+new test cases cover both fixes.
+
 The fourth, "complete metadata", is not enforced, and is a *content* gap
 rather than a missing check: `ChangeKindMeta.impact`/`.description_template`
 are both declared optional, and today 48 of 397 real entries have no

@@ -36,8 +36,11 @@ which imports the legacy shim, which imports this module) and
 
 from __future__ import annotations
 
+import string
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from enum import Enum
+from types import MappingProxyType
 
 
 class Verdict(str, Enum):
@@ -90,7 +93,7 @@ class ChangeKindMeta:
     default_verdict: Verdict
     impact: str = ""
     is_addition: bool = False
-    policy_overrides: dict[str, Verdict] = field(default_factory=dict)
+    policy_overrides: Mapping[str, Verdict] = field(default_factory=dict)
     # Optional ``str.format``-style template for a finding's per-change
     # ``description`` (C6). Detectors build their Change via
     # ``diff_helpers.make_change`` and pass structured fields rather than
@@ -101,6 +104,21 @@ class ChangeKindMeta:
     # when the text embeds computed offsets, demangled signatures, vtable slot
     # indices, counts, etc. that no fixed template can express.
     description_template: str | None = None
+
+    def __post_init__(self) -> None:
+        # ``frozen=True`` only stops reassigning the *attribute*
+        # (``entry.policy_overrides = {...}``) — it does not stop mutating
+        # the dict object itself (``entry.policy_overrides["x"] = y``), and
+        # a caller can hand in a dict it keeps its own live reference to.
+        # Either path can silently invalidate the "valid references"/
+        # "non-contradictory defaults" checks ``_validate_references_and_
+        # defaults`` already ran on construction, without re-running them,
+        # and can make ``ChangeKindRegistry.policy_overrides_for()`` disagree
+        # with sets already derived at import time (Codex review, PR #882).
+        # Defensively copy into an immutable view so neither is possible.
+        object.__setattr__(
+            self, "policy_overrides", MappingProxyType(dict(self.policy_overrides))
+        )
 
 
 #: Representative ``str.format(**...)`` kwarg sets used to *actually execute*
@@ -124,6 +142,50 @@ _TEMPLATE_PROBE_VALUE_SETS: tuple[dict[str, str | None], ...] = (
     },
     {"symbol": "probe", "name": None, "old": None, "new": None, "detail": None},
 )
+
+
+def _template_field_names(template: str) -> set[str]:
+    """Return every top-level replacement-field name referenced by template.
+
+    Recurses into a format spec that itself contains a nested replacement
+    field (``{name:{bogus}}``), so a bad reference hidden there is still
+    found. ``string.Formatter().parse()`` reports a field's *full* access
+    expression as its field name — ``{symbol[0]}`` reports the field name
+    ``"symbol[0]"``, not ``"symbol"``; ``{symbol.__class__}`` reports
+    ``"symbol.__class__"`` — so an exact-membership check against
+    ``TEMPLATE_VOCAB`` (five bare names, no indexing or attribute access)
+    already rejects both without needing to special-case them.
+    """
+    names: set[str] = set()
+    for _, field_name, format_spec, _conversion in string.Formatter().parse(template):
+        if field_name is not None:
+            names.add(field_name)
+        if format_spec and "{" in format_spec:
+            names |= _template_field_names(format_spec)
+    return names
+
+
+def _check_template_fields(template: str) -> None:
+    """Raise ``ValueError`` if ``template`` references a field outside TEMPLATE_VOCAB.
+
+    Catches field *traversal* (``{symbol[0]}``, ``{symbol.__class__}``) that
+    ``_check_template_formats`` below cannot reliably catch by probing:
+    indexing a string only raises for an out-of-range index, so
+    ``{symbol[0]}`` succeeds against the non-empty probe value ``"probe"``
+    and only fails once ``make_change()`` is called with a real, empty
+    ``symbol`` — which is a valid ``str`` some findings do pass (Codex
+    review, PR #882, fresh evidence beyond the format-code fix). This check
+    is independent of runtime values: it is unconditionally illegal for a
+    template to reference anything but the five declared plain names, so it
+    can reject deterministically at construction time rather than depending
+    on which probe values happen to trigger the failure.
+    """
+    bad = _template_field_names(template) - TEMPLATE_VOCAB
+    if bad:
+        raise ValueError(
+            f"description_template {template!r} references {sorted(bad)}, "
+            f"outside TEMPLATE_VOCAB {sorted(TEMPLATE_VOCAB)}"
+        )
 
 
 def _check_template_formats(template: str) -> None:
@@ -233,6 +295,7 @@ def _validate_references_and_defaults(e: ChangeKindMeta) -> None:
         # references" property for this field, the same shape as the
         # policy_overrides checks above (Codex review, PR #882).
         try:
+            _check_template_fields(e.description_template)
             _check_template_formats(e.description_template)
         except ValueError as exc:
             raise ValueError(f"{e.kind!r}: {exc}") from exc

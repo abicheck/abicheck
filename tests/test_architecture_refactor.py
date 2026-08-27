@@ -241,6 +241,29 @@ class TestChangeKindRegistry:
         registry = ChangeKindRegistry(entries)
         assert len(registry) == 2
 
+    def test_policy_overrides_is_immutable_after_construction(self):
+        """policy_overrides can't be mutated post-construction, dict or dataclass.
+
+        ``frozen=True`` only stops reassigning the attribute — it does not
+        stop mutating the dict object itself, and a caller can also keep a
+        live reference to the dict it passed in. Either path would silently
+        invalidate the reference/default checks already run at construction
+        without re-running them (Codex review, PR #882).
+        """
+        import pytest
+
+        source = {"plugin_abi": Verdict.COMPATIBLE}
+        entry = ChangeKindMeta("test_kind", Verdict.BREAKING, policy_overrides=source)
+
+        # The dataclass's own copy can't be mutated in place.
+        with pytest.raises(TypeError):
+            entry.policy_overrides["plugin_abi"] = Verdict.BREAKING
+
+        # Mutating the caller's original dict after construction doesn't
+        # reach through to the stored copy either.
+        source["plugin_abi"] = Verdict.BREAKING
+        assert entry.policy_overrides["plugin_abi"] == Verdict.COMPATIBLE
+
     def test_description_template_with_unknown_placeholder_raises(self):
         """A description_template referencing an out-of-vocabulary field is rejected.
 
@@ -291,6 +314,42 @@ class TestChangeKindRegistry:
         ]
         registry = ChangeKindRegistry(entries)
         assert len(registry) == 1
+
+    def test_description_template_with_indexed_field_raises(self):
+        """A field with subscript access is rejected, even though it probes fine.
+
+        ``{symbol[0]}`` succeeds against the non-empty probe value
+        ``"probe"`` (execution-based validation alone would miss this), and
+        only fails once ``make_change()`` is called with a real, empty
+        ``symbol`` — a valid ``str`` some findings do pass. Field-name
+        validation rejects it deterministically at construction time
+        instead, since only the five bare TEMPLATE_VOCAB names are ever
+        legal (Codex review, PR #882, fresh evidence beyond the format-code
+        fix).
+        """
+        import pytest
+
+        entries = [
+            ChangeKindMeta(
+                "test_kind", Verdict.BREAKING,
+                description_template="Changed: {symbol[0]}",
+            ),
+        ]
+        with pytest.raises(ValueError, match=r"symbol\[0\]"):
+            ChangeKindRegistry(entries)
+
+    def test_description_template_with_attribute_access_raises(self):
+        """A field with attribute traversal is rejected the same way."""
+        import pytest
+
+        entries = [
+            ChangeKindMeta(
+                "test_kind", Verdict.BREAKING,
+                description_template="Changed: {symbol.__class__}",
+            ),
+        ]
+        with pytest.raises(ValueError, match="__class__"):
+            ChangeKindRegistry(entries)
 
     def test_description_template_with_nested_bad_field_raises(self):
         """A field nested inside a format spec is caught too, not just the outer one.
