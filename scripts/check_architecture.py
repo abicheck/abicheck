@@ -356,6 +356,21 @@ def _imports(
                 target = node.module or ""
             if target:
                 result.append((node.lineno, target))
+                if not (node.module or "").strip():
+                    # `from . import x` / `from .. import x` -- with no
+                    # `node.module` at all, `target` above resolves to just the
+                    # enclosing package, silently dropping which submodule was
+                    # actually imported (`x` here can itself be a submodule,
+                    # not merely a symbol defined in the package's
+                    # `__init__.py`; this is the ordinary way to import one).
+                    # Also record `target.x` per imported name so a bare-dot
+                    # submodule import is not invisible to dependency-direction
+                    # (confirmed via a real repo-wide check before trusting
+                    # this: exactly the two real, pre-existing violations this
+                    # closes, zero new false positives from any other module's
+                    # `from . import <plain symbol>` usage).
+                    for alias in node.names:
+                        result.append((node.lineno, f"{target}.{alias.name}"))
     return result
 
 

@@ -1,16 +1,15 @@
 ### Changed
 
-- **ADR-061 continuation**: 21 more of `buildsource/`'s 73 flat modules (26
+- **ADR-061 continuation**: 19 more of `buildsource/`'s 73 flat modules (24
   total, plus its pre-existing 5) are now classified into the `extract`
   responsibility layer in `architecture/modules.yaml`, alongside 7 into
   `compare`, 2 into `storage`, 1 into `model` (plus its pre-existing 2), and
-  1 into `workflows` -- 39 of 73 `buildsource/` files classified overall.
-  Config-only change, verified via `scripts/check_architecture.py`
-  (0 errors) -- no source files touched, so behavior is unchanged.
+  1 into `workflows` -- 37 of 73 `buildsource/` files classified overall.
+  Verified via `scripts/check_architecture.py` (0 errors).
 
   - `extract`: raw fact-extraction/graph-building modules
-    (`header_graph.py`, `template_graph*.py`, `type_graph.py`,
-    `clang_ast_run.py`, `comdat_groups.py`, and 21 siblings) with no
+    (`header_graph.py`, `template_graph.py`, `type_graph.py`,
+    `clang_ast_run.py`, `comdat_groups.py`, and 19 siblings) with no
     cross-layer import violations.
   - `compare`: `source_diff.py`/`build_diff.py` (compare old/new surfaces,
     emit `Change` findings via `ChangeKind`); `crosscheck_base.py`/
@@ -45,7 +44,36 @@
   extraction and correctly stays `extract`. Left unclassified per Codex's
   own suggested fallback rather than forcing an incomplete fix.
 
-  The remaining 34 `buildsource/` files stay unclassified: 30 of them are
+  **`scripts/check_architecture.py` fix, found while investigating a third
+  round of Codex findings**: `template_graph.py`/`virtual_dispatch_graph.py`
+  both import the `compare`-owned `diff_cxx_rules.py` via
+  `from .. import diff_cxx_rules`, a real `extract -> compare` violation --
+  but the checker reported zero errors for either, because its import
+  resolver only ever read `node.module` for an `ImportFrom` node, which is
+  empty for this bare-dot form (`from . import x`/`from .. import x`); the
+  resolved target silently collapsed to the enclosing package, dropping
+  which submodule was actually imported. Fixed generally (not just for
+  these two files): the resolver now also records `<package>.<name>` for
+  each name in a bare-dot `from`-import, so a real submodule import via this
+  idiom can't be invisible to `dependency-direction` anywhere in the repo.
+  Verified narrowly scoped before trusting it -- a real repo-wide check with
+  the fix applied surfaced exactly these two known violations and zero new
+  false positives from any other module's ordinary `from . import <plain
+  symbol>` usage. Two new regression tests in `tests/test_architecture_
+  check.py` pin both directions (the violation is now caught; an ordinary
+  same-layer bare-dot import of a plain symbol still isn't flagged),
+  confirmed to fail/pass correctly against both the pre-fix and post-fix
+  checker.
+
+  With the checker now catching it, `template_graph.py`/
+  `virtual_dispatch_graph.py` themselves stay unclassified (reverted out of
+  `extract`) rather than resolving the cascade -- `diff_cxx_rules.py` is a
+  genuinely shared C++-mangling decoder both `compare` and these two
+  extraction modules need, so cleanly classifying either side needs its own
+  design (move the shared decoders to an inward layer, or accept the
+  duplication), not a same-PR reactive patch.
+
+  The remaining 35 `buildsource/` files stay unclassified: 30 of them are
   directly imported by `frontends`-layer `cli_*.py` modules (a pre-existing
   `frontends -> buildsource` direct-import pattern that bypasses the target
   `frontends -> workflows -> extract` routing -- ADR-061 D9's own worked
