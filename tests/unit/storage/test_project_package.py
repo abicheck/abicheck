@@ -12,6 +12,7 @@ Phase 0 modules use (root `AGENTS.md`'s "Primitive-level property tests").
 
 from __future__ import annotations
 
+import hashlib
 import unicodedata
 from collections.abc import Mapping
 from typing import Any
@@ -188,6 +189,34 @@ class TestPathLayout:
             assert object_relpath(digest) == (
                 f"objects/{algorithm}/{hexdigest[:2]}/{hexdigest}.json"
             )
+
+    @pytest.mark.parametrize(
+        "algorithm",
+        sorted(hashlib.algorithms_available - hashlib.algorithms_guaranteed),
+    )
+    def test_object_relpath_refuses_an_available_but_unguaranteed_algorithm(
+        self, algorithm: str
+    ) -> None:
+        """`hashlib.algorithms_available` is whatever this host's OpenSSL
+        happens to expose (`sm3`/`ripemd160`/`sha512_224`/`sha512_256` on a
+        typical Linux build) -- real, fixed-size algorithms that a naive
+        `hashlib.new(algorithm)` check would accept, but not guaranteed
+        present on every platform Python runs on. A package written where
+        one is available must not fail to even load on a platform where it
+        isn't (Codex review).
+        """
+        try:
+            digest = (
+                hashlib.new(algorithm).name
+                + ":"
+                + "ab" * hashlib.new(algorithm).digest_size
+            )
+        except ValueError:
+            pytest.skip(f"{algorithm} not constructible on this host")
+        if hashlib.new(algorithm).digest_size == 0:
+            pytest.skip(f"{algorithm} has no fixed digest size")
+        with pytest.raises(ValueError, match="algorithms_guaranteed"):
+            object_relpath(digest)
 
     def test_variant_and_artifact_relpaths(self) -> None:
         assert variant_ref_relpath("cpu-gcc") == "refs/variants/cpu-gcc.json"

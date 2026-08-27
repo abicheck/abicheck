@@ -264,23 +264,19 @@ def object_relpath(digest: str) -> str:
     `abicheck.storage.canonical.semantic_digest` returns. D6 fans objects out
     under a two-character prefix of the hex digest
     (`objects/sha256/<aa>/<digest>.json`), matching Git's own object layout,
-    so no single directory ends up holding as many entries as a project with
-    hundreds of thousands of stored sections would otherwise put in one
-    place.
+    so a project with hundreds of thousands of stored sections doesn't put
+    them all in one directory.
 
     This decides only the *logical* path a manifest reference and a physical
-    writer must agree on — never the bytes stored there. A real writer picks
-    its own physical suffix (`.json`, `.json.zst`, ...) on top of this path,
-    per ADR-059's envelope, which this function has no opinion on.
+    writer must agree on — never the bytes stored there; a real writer adds
+    its own physical suffix (`.json`, `.json.zst`, ...) per ADR-059's envelope.
 
     Validated against `hashlib`'s own algorithm/digest-size semantics, not a
     hand-rolled character class: an earlier `str.isalnum()` check rejected
     `semantic_digest`'s own canonical spelling for some algorithms (`"sha3_
-    256"` contains `_`, which is not alphanumeric) while still accepting an
-    impossible address like `"sha256:ab"` (two hex characters where sha256
-    always produces sixty-four) or an unknown algorithm name outright. The
-    two checks must agree on what `semantic_digest` can actually produce, or
-    a real digest could fail to address the very object it names.
+    256"` contains `_`) while still accepting an impossible address like
+    `"sha256:ab"` or an unknown algorithm outright. The two checks must
+    agree on what `semantic_digest` can actually produce.
     """
     if not isinstance(digest, str):
         raise TypeError(
@@ -298,23 +294,27 @@ def object_relpath(digest: str) -> str:
     if probe.name != algorithm:
         # `hashlib.new` accepts aliases (`SHA256`, `sha-256`) and resolves
         # them to one canonical spelling -- but `semantic_digest` always
-        # writes that canonical spelling (`digester.name`), never the
-        # caller's own. A reference built from an alias would compute a
-        # *different* path here than the one the object store actually put
-        # the content under, so `has()`/`get()` on it would never resolve --
-        # the same "accepted but unaddressable" failure this whole function
-        # exists to rule out, one level up.
+        # writes that spelling (`digester.name`), never the caller's own, so
+        # a reference built from an alias would compute a path the object
+        # store never actually put anything under.
         raise ValueError(
             f"{algorithm!r} is not the canonical spelling of a digest "
             f"algorithm ({probe.name!r} is); a reference must use the exact "
             f"spelling semantic_digest() writes, not an alias: {digest!r}"
         )
+    if algorithm not in hashlib.algorithms_guaranteed:
+        # Available-but-not-guaranteed (`sm3`/`ripemd160` on a typical Linux
+        # OpenSSL build) fails to load on a platform without it (Codex
+        # review).
+        raise ValueError(
+            f"{algorithm!r} is not in hashlib.algorithms_guaranteed, so it "
+            f"is not portable to every platform this package might be read "
+            f"on: {digest!r}"
+        )
     digest_size = probe.digest_size
     if digest_size == 0:
         # An extendable-output function (SHAKE and friends) has no fixed
-        # digest size, which `semantic_digest` itself already refuses for
-        # the identical reason -- a content address needs a length every
-        # reader agrees on.
+        # digest size -- `semantic_digest` itself refuses it too.
         raise ValueError(
             f"{algorithm!r} has no fixed digest size, so it cannot address a "
             f"stored object: {digest!r}"
