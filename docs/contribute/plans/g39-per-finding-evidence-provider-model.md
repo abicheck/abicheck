@@ -2633,17 +2633,38 @@ relying on per-finding tags in a fail-closed consumer (a declarative
 project's evidence-routing gate); the report-surface work in Phase 3 above
 does not depend on it and can ship independently.
 
-**Relationship to other plans:** `abicheck/buildsource/build_output.py`'s
-existing `evidence.attribution_path` field (already validated by
-`_inferred_evidence_projection_issues()` — see
-G43 ([`g43-inferred-evidence-attribution.md`](g43-inferred-evidence-attribution.md)),
-which wires the *consumption* of that already-implemented attribution data
-into `check-project.yml`/dump/compare) is a sibling concern (TU→target
-ownership) to this phase's producer/compatibility receipt (TU→compiler/
-context fidelity) — the two receipts live in the same pack manifest but
-answer different questions, and should be designed to compose (one pack
-manifest, two receipt sections) rather than merged into one
-undifferentiated blob. G34's `consumer_compile`/toolchain-binding work is
+**Relationship to other plans — corrected: these are not two sections of
+one manifest, they are two genuinely separate storage envelopes, confirmed
+by reading `build_output.py`/`inputs_pack.py` directly.** An earlier draft
+of this phase claimed G43's attribution data and this phase's producer
+receipt "live in the same pack manifest... two receipt sections" — false.
+Three distinct artifacts are in play, not one:
+
+1. **`build-output.json` itself** — carries its own top-level
+   `evidence_producer` (`BuildOutputEvidenceProducer`), which this phase
+   extends. This part of the design is unchanged.
+2. **The `abicheck_inputs/` pack's own `manifest.json`**
+   (`InputsManifest`, `inputs_pack.py`) — the actual Flow-2 source-facts
+   pack a per-target `evidence.path` in `build-output.json` points at.
+   This is the pack whose *own* schema is the natural home for a
+   producer receipt describing the facts it carries (Clang/plugin
+   version, compiler identity, source-tree digest, TU inventory) — not
+   `build-output.json`, which only points at this pack, doesn't embed it.
+3. **G43's `attribution_path`-referenced file** — a *third*, separate
+   artifact: `BuildOutputEvidence.attribution_path` is a per-target field
+   on `build-output.json` naming yet another file, one holding a raw
+   serialized `BuildEvidence` (parsed via `BuildEvidence.from_dict()`)
+   used only to re-derive TU→target attribution for validation — it is
+   neither part of `build-output.json` nor of the `abicheck_inputs/`
+   pack's own manifest.
+
+This phase's receipt therefore belongs in **artifact 2** (the
+`abicheck_inputs/manifest.json` schema, `InputsManifest`) for the facts it
+actually describes, plus the already-correct top-level `evidence_producer`
+extension in artifact 1 for coarse producer identity — not merged with
+G43's artifact 3. The three stay separate, cross-referenced by path
+(`evidence.path`/`evidence.attribution_path` in artifact 1), not folded
+into one schema. G34's `consumer_compile`/toolchain-binding work is still
 the source of the "compile-context fingerprint"/"compiler path and digest"
 fields this phase reuses rather than re-deriving.
 
@@ -2666,10 +2687,14 @@ not `abicheck/buildsource/build_output.py` directly:**
   ADR-061's "add an ABI entity/value shared across stages" routing.
 - **`abicheck/storage/`** — the receipt's schema/serialization and version
   bump, per ADR-061's "own their schemas/migrations" routing — the same
-  home G41 Phase 1 routes the baseline-manifest schema to; keep the two
-  receipts (this phase's producer/compatibility receipt, G43's
-  attribution receipt) as clearly separated sections of one manifest
-  schema rather than one undifferentiated blob, as already noted above.
+  home G41 Phase 1 routes the baseline-manifest schema to. This covers
+  both artifact 1 (`build-output.json`'s `evidence_producer` extension)
+  and, as a separate schema, artifact 2 (`InputsManifest`'s new receipt
+  fields) — see the corrected "Relationship to other plans" note above for
+  why these must stay two schemas, not one.
+- `abicheck/buildsource/inputs_pack.py` — the `InputsManifest` reader/
+  writer this phase's artifact-2 receipt fields actually extend (currently
+  missing from this file list; the receipt has nowhere to live without it).
 - **`abicheck/workflows/`** — the new validation entry point
   `check-project.yml`'s evidence-routing step consults, coordinating the
   fail-closed rejection.

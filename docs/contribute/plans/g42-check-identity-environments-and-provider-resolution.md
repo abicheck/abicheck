@@ -179,15 +179,37 @@ fingerprints and G34's `consumer_compile` projection already use, applied
 to a new axis.
 
 **Efficiency constraint, load-bearing**: environment evaluation must not
-trigger a new binary/header/source extraction per environment. The
-architecture is extract/diff once, then evaluate the *same* `DiffResult`
-against N declared environments — each environment only changes which
-runtime-floor/system-provider facts are checked against the findings
-already produced, never re-running `dump`/`compare`'s extraction stages.
-This mirrors G34 Phase D's existing per-profile finding-matrix
+trigger a new binary/header/source extraction per environment — extract/
+diff exactly once, then evaluate the *one* resulting `DiffResult` against
+N declared environments, never re-running `dump`/`compare`'s extraction
+stages. This mirrors G34 Phase D's existing per-profile finding-matrix
 reconciliation (`aggregate`'s `finding_matrix` block) — reuse that
 reconciliation shape for "same finding, N environments" rather than
 inventing a parallel one.
+
+**"Evaluate the same `DiffResult`" must not mean "call the same in-place
+mutator on the same `Change` objects N times" — confirmed a real bug in
+that shape by reading `diff_versioning.apply_runtime_floor_contract()`
+directly.** It mutates each `Change.effective_verdict` in place and
+explicitly skips any finding that already carries a modulation (`if
+change.effective_verdict is not None: continue` — the same "findings
+already carrying a modulation are left untouched" contract its own
+docstring documents, correctly, for its *existing*, single-environment
+callers). Calling it a second time for a second environment therefore
+does nothing for any finding the first environment already stamped — a
+finding evaluated as `BREAKING` under an old runtime floor stays
+permanently `BREAKING` once a newer floor is checked next, even if the
+newer floor would correctly reclassify it `COMPATIBLE`. The extract/diff-
+once requirement stands, but "evaluate against N environments" needs a
+pristine `Change` list (or an unmodified raw-result stage) per
+environment — e.g. deep-copying the kept `Change` list (or resetting
+`effective_verdict`/`modulation_reason`/`modulation_rule` to `None`)
+immediately before each environment's own
+`apply_runtime_floor_contract()`/provider-resolution pass, never sharing
+mutated objects across environments. This applies equally to whatever new
+system-provider classification function this plan adds in the next
+section, if it follows the same "mutate in place, skip if already
+modulated" ADR-025 pattern.
 
 ### Environment-aware system-provider resolution
 

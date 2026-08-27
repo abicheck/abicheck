@@ -159,11 +159,16 @@ abicheck project emit-build \
 
 The builder computes digests (reusing whatever digest primitives
 `build_output.py`'s existing validation already relies on — don't invent a
-second hashing convention), fills in tool identity (abicheck version,
-compiler identity where discoverable), normalizes every path relative to
-the manifest's own location, and — critically — runs the identical
-validation `project validate-build` runs before writing, so the emitted
-file can never itself fail the validator it's meant to satisfy.
+second hashing convention), normalizes every path relative to the
+manifest's own location, and — critically — runs the identical validation
+`project validate-build` runs before writing, so the emitted file can
+never itself fail the validator it's meant to satisfy. Tool/compiler
+identity (abicheck's own version; a discovered compiler's real
+version/identity) is *resolved separately*, by `extract/`-owned probing
+composed in by the `workflows/`-owned coordination step (see "Files &
+surfaces" for why this can't live in the same module as the writer), and
+handed to the builder as an already-resolved value rather than discovered
+inline.
 
 ## Files & surfaces
 
@@ -197,11 +202,30 @@ file can never itself fail the validator it's meant to satisfy.
   serialization/schema/write logic for this class of artifact —
   `build-output.json` is exactly a schema this tool writes and validates,
   the same category as the baseline manifest G41 Phase 1 routes there.
-  Keep any digest/tool-identity computation here too, alongside the
-  writer, rather than split across two modules.
+  **Content digests belong here** (pure hashing of already-known bytes),
+  **but tool/compiler-identity discovery does not** — confirmed by reading
+  `abicheck/storage/AGENTS.md` directly: `storage/` "may not import
+  extraction, comparison, policy, workflow, report, or frontend modules,"
+  and probing a compiler binary for its real version/identity is
+  extraction-layer work (running/interrogating a tool), not serialization.
+  That discovery belongs in `abicheck/extract/`, with the `workflows/`
+  coordination below composing its result into the document `storage/`
+  writes — putting it beside the writer instead would force `storage/` to
+  import extraction code (violating the boundary) or duplicate the probing
+  logic in two places.
+- **`abicheck/extract/`** — the compiler/tool-identity probe itself (given
+  a resolved compiler path, discover its real version/identity — the same
+  class of probing `dumper_ast_config.py`'s existing toolchain-version
+  helpers already do for other call sites, reused rather than
+  reimplemented if a suitable one already exists there).
+- **`abicheck/workflows/`** — the coordination that resolves inputs (a
+  binary/header root/evidence pack path, `extract/`'s tool-identity probe)
+  and composes them into the arguments the `storage/` writer takes — this
+  is what keeps `storage/` itself a pure schema/serialization layer with
+  no extraction-layer import.
 - **`abicheck/frontends/`** — the `project emit-build` CLI command adapter
   itself (parsing `--target`/`--binary`/`--public-header-root`/etc. and
-  calling the `storage/` builder), following ADR-061's `frontends/` role
+  calling the `workflows/` coordinator), following ADR-061's `frontends/` role
   ("CLI flag, Python adapter") — `abicheck/cli_project.py` is a
   `frozen_root_families["cli_"]` legacy module per `architecture/
   modules.yaml`, so it should gain only the thin `@project_group.command`

@@ -159,7 +159,8 @@ modules.yaml`'s own `storage` layer definition (`may_import: [model]`),
 `storage/` is the canonical owner of "serialize snapshots/baselines, own
 their schemas/migrations, or manage caches" — the new manifest fields,
 their schema-version bump, and the widened `(target, profile, channel,
-fingerprint)` selection key described below are exactly that. Add a new
+requested depth, evidence-producer identity, fingerprint)` selection key
+described below are exactly that. Add a new
 baseline-manifest schema/reader/writer module under `abicheck/storage/`
 (it only needs `model/`, matching the layer's own import constraint), and
 have `buildsource/baseline_publish.py`/`baseline_set.py` — which still own
@@ -186,10 +187,24 @@ entry:
   `profile_fingerprint`/`scope_fingerprint` machinery `comparability.py`
   already computes for live dumps — reuse it, don't invent a second one).
 
-A baseline entry selection key becomes at minimum
-`(target, profile, channel, extraction-context fingerprint)`, not `target`
-alone — two profiles pointed at the same target must not silently share one
-stored baseline whose extraction context matches only one of them.
+A baseline entry selection key becomes at minimum `(target, profile,
+channel, requested depth, evidence-producer identity, extraction-context
+fingerprint)`, not `target` alone, and not `(target, profile, channel,
+fingerprint)` either — a real gap in an earlier draft of this plan,
+confirmed by checking what `profile_fingerprint`/`scope_fingerprint`
+actually cover: compile context and headers/TUs, neither of which encodes
+*requested depth* or *which evidence producer* ran (replay vs. Clang
+plugin, say). Two checks on the same target/profile/channel that differ
+only in depth (a `headers`-depth check and a `source`-depth check) or only
+in evidence producer would otherwise collide on an identical key and one
+baseline would silently overwrite or be selected for the other — recreating
+exactly the mismatched-old-side problem this whole plan exists to close,
+just at the selection-key layer instead of the extraction layer. Depth and
+evidence-producer identity must be explicit key components (both are
+already-resolved, already-typed values by this point — G42's own
+`analysis.evidence` vocabulary is the natural source for the producer axis
+if G41 and G42 land in either order) rather than assumed to be implied by
+the fingerprint.
 
 **Historical-correctness constraint, stated explicitly because it is easy to
 get backwards**: an old baseline must contain facts extracted from the old
@@ -326,7 +341,8 @@ mistake (see `AGENTS.md`'s numbered findings on the L3→L2-fold entry).
   schema/serialization itself — manifest fields (producer/consumer compiler
   context, header frontend, header roots, evidence identity, depth,
   fingerprint), the schema-version bump, and the widened
-  `(target, profile, channel, fingerprint)` selection key — per ADR-061's
+  `(target, profile, channel, requested depth, evidence-producer identity,
+  fingerprint)` selection key — per ADR-061's
   routing (`storage/` owns schemas/migrations for snapshots/baselines).
 - `abicheck/buildsource/baseline_publish.py`, `baseline_set.py` — Phase 1:
   orchestration only (resolving the run plan, invoking the dump, calling
