@@ -210,6 +210,24 @@ currently-allowlisted legacy exceptions.
 unchanged; this decision is about what happens *behind* each existing
 entry point.
 
+**One dump shape is explicitly excluded from this convergence, by name,
+rather than silently implied as covered — an earlier draft of this
+decision left it unstated, and a repository-wide search of the
+implementation plan found no phase that ever migrates or retires it.**
+The binary-less `dump --sources`/`--build-info` path (no `SO_PATH`), which
+executes through `cli_buildsource.dump_source_only()`, stays a third,
+independent assembler after this plan's Phase 1 ships — that phase's own
+text names it as a tracked residual (the executor has no concept of a
+snapshot with no binary-derived L0-L2 facts at all, a real, separate
+design question), but tracking it inside one phase's own prose does not
+satisfy this decision's "all entry points" wording, and no later phase
+picks it back up. This decision's own scope is therefore: every dump
+execution path *that produces a binary-derived snapshot* converges on
+`resolve_dump_request`/`execute_dump_request`; the source-only path is a
+named, intentionally out-of-scope exception until a future, separately-
+justified phase gives the executor a real answer for a binary-less
+snapshot — not a gap this decision claims to close.
+
 ### D2 — `Fact[T]`: one representation of "do we know this, and how"
 
 Generalize ADR-062 Phase 0's `FactStatus`/`FactAvailability` (currently
@@ -505,22 +523,29 @@ draft used it as if it were already specified, and review correctly
 found nothing backing that.** Defined here, grounded in the real,
 already-distinct conditions this codebase's report writers/readers
 already encode rather than invented from nothing: `OperationalStatus =
-NONE | BUDGET_OVERFLOW | NOT_COMPARABLE | EXTRACTION_ERROR`, ordered
-`NONE < BUDGET_OVERFLOW = NOT_COMPARABLE = EXTRACTION_ERROR` for fold
-purposes — the three non-`NONE` members are equally blocking and mutually
+NONE | BUDGET_OVERFLOW | NOT_COMPARABLE | EVIDENCE_CONTRACT_ERROR |
+EXTRACTION_ERROR`, ordered `NONE < BUDGET_OVERFLOW = NOT_COMPARABLE =
+EVIDENCE_CONTRACT_ERROR = EXTRACTION_ERROR` for fold
+purposes — the four non-`NONE` members are equally blocking and mutually
 exclusive per report (a `scan` run that hit budget overflow didn't also
 fail extraction), so there is no further internal ordering among them to
 state, only "blocking vs. not." `BUDGET_OVERFLOW`/`NOT_COMPARABLE` are
 `scan`'s own legacy exit 5/6 (`gate.py::from_scan_report`'s existing
-raw-code branch, read the same way for a fresh, structured report);
+raw-code branch, read the same way for a fresh, structured report).
+**`EVIDENCE_CONTRACT_ERROR` is a fourth, genuinely distinct member, not a
+renaming of `EXTRACTION_ERROR` — an earlier draft of this definition
+conflated the two, and review correctly found `service_scan.py` returning
+a real, separate `ScanResult(verdict="EVIDENCE_CONTRACT_ERROR",
+exit_code=1)` at more than one call site (ADR-037 D5's evidence-contract
+check), never mapping to `EXTRACTION_ERROR`'s own exit 4.**
 `EXTRACTION_ERROR` is `compare-release`'s own `verdict: "ERROR"` sentinel
 (`load.py`'s `_OPERATIONAL_ERROR_VERDICT` — "a library failed to
 dump/extract/compare," ranked above `BREAKING` and floored to exit 4
 today). Each front end maps its own real failure modes onto this set at
 the point it already computes them (`ScanOutcome`/`ScanResult`/
-`ScanSetResult`'s own to_dict() for `scan`'s two members, the release
-fan-out for the third) — this decision does not invent a fourth front-end
-computation for it, only the one shared vocabulary the existing three
+`ScanSetResult`'s own to_dict() for `scan`'s three members, the release
+fan-out for the fourth) — this decision does not invent a new front-end
+computation for it, only the one shared vocabulary the existing writers
 already need to agree on. A front end with no operational failure of its
 own to report (a plain single-pair `compare`, a `scan` invocation that
 completed cleanly) always reports `NONE`.
@@ -733,8 +758,10 @@ their already-accepted decisions generalize and finish converging:
   unfinished.
 - **ADR-046/048** (canonical entity identity, source-graph identity v2):
   D3 generalizes their identity model from source-graph matching to every
-  identity-bearing subsystem (diff matching, suppression selectors,
-  persistence).
+  identity-bearing subsystem (diff matching, graph identity, persistence)
+  — **not** suppression selectors, which D3 itself now explicitly excludes
+  (a first draft of this summary still listed them, contradicting that
+  correction; fixed here to match).
 - **ADR-049** (contract relevance/compatibility configuration): D4's
   `AnalysisPlan` deliberately does not relocate its D7 precedence
   resolver's own call site — per D4's own corrected scope, policy/pack

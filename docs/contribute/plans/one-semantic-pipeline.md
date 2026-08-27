@@ -2717,8 +2717,8 @@ not a second channel `fold.py` additionally has to consult.** The fix:
 fold `RunOutcome.operational` into the `GateInfo` they return, for a
 fresh report that carries the new structured fields: a blocking
 `OperationalStatus` value (`BUDGET_OVERFLOW`/`NOT_COMPARABLE`/
-`EXTRACTION_ERROR`, per ADR-063 D6's own grounded definition of the type)
-is combined with
+`EVIDENCE_CONTRACT_ERROR`/`EXTRACTION_ERROR`, per ADR-063 D6's own
+grounded definition of the type) is combined with
 `PolicyGateDecision`'s own compatibility contribution by `max()` over the
 exit-code scheme both already share — the same orthogonal-axes shape
 ADR-049 Phase 7's contract-coverage axis already uses elsewhere in this
@@ -2765,8 +2765,26 @@ constant's own changelog comments; a first draft of this phase named the
 field addition without the version bump, schema-file edit, or
 regeneration that addition requires); `docs/reference/schemas/v1/
 compare_report.schema.json`/`aggregate_report.schema.json` (the new
-fields, regenerated via `scripts/publish_schemas.py`, not hand-edited);
-`scan_engine.
+fields, regenerated via `scripts/publish_schemas.py`, not hand-edited).
+
+**Three more writers are not report-reading fallback paths but
+*synthetic* report builders, each stamping `REPORT_SCHEMA_VERSION`
+directly and independently of `reporter.py`/`aggregate.py` — a gap a first
+draft of this phase's Files list didn't catch, since these aren't shaped
+like the other named writers.** `buildsource/check_report.py`'s
+`build_operational_error_report()`/`build_bootstrap_report()`/
+`build_new_target_report()` each hand-build a report `dict` from scratch
+for exactly the three non-`EXISTING` cases `RunOutcome.lifecycle`/
+`.operational` exist to represent (`EXTRACTION_ERROR`, `BOOTSTRAP`, and
+`NEW_TARGET` respectively) — once `REPORT_SCHEMA_VERSION` is bumped, these
+three would stamp the new version number on a document that still omits
+the very structured axes that version bump is *for*, for precisely the
+cases those axes were built to cover. Each gains the identical structured-
+field emission the other writers in this phase add — `build_operational_
+error_report()` emits `RunOutcome.operational = EXTRACTION_ERROR`;
+`build_bootstrap_report()`/`build_new_target_report()` emit
+`RunOutcome.lifecycle = BOOTSTRAP`/`NEW_TARGET` respectively — alongside
+their existing legacy sentinel fields, unchanged. `scan_engine.
 ScanOutcome.to_dict()` (a separate, independent report writer a first
 draft of this phase's file list missed entirely — not a sibling of
 `reporter.py`'s compare-report writer, and `gate.py`'s `GateInfo.
@@ -2878,7 +2896,16 @@ validates every regenerated fixture report against the regenerated
 `aggregate_report.schema.json` (the same validation
 `scripts/verify.py`'s `fair-metadata` step already runs for generated
 files), so the new fields are provably reflected in the published schema
-mirror, not only in the Python writer.
+mirror, not only in the Python writer. A fifth test covers the three
+synthetic builders directly: calling each of `build_operational_error_
+report()`/`build_bootstrap_report()`/`build_new_target_report()` and
+asserting the returned document carries the correct, non-`EXISTING`
+structured axis (`RunOutcome.operational`/`.lifecycle` respectively) —
+confirmed to fail against a version of each builder that stamps the
+bumped `REPORT_SCHEMA_VERSION` without adding the matching structured
+field, the exact "claims a schema version it doesn't carry the fields of"
+defect this phase's own `ScanOutcome`/`ScanResult`/`ScanSetResult`
+migration above is already written to avoid.
 
 **Acceptance criteria.** Zero remaining inline exit-code/severity
 computation outside the one designated encoder per front end — enforced
@@ -3088,7 +3115,12 @@ not new design.
   resolution logic; the legacy `-p`/`--compile-db` auto-match's standalone
   code path once the fold fully subsumes it (already partly done per
   AGENTS.md's "legacy-match overlap" record — this is closing the
-  remainder).
+  remainder). **Not in this accounting, and not silently assumed closed
+  by it**: `cli_buildsource.dump_source_only()`, the binary-less
+  `dump --sources`/`--build-info` path — per ADR-063 D1's own named
+  exception, it remains a third, independent dump assembler with no phase
+  in this plan scheduled to migrate or retire it; closing it is a real,
+  separately-justified future phase, not a residual of Phase 10's cleanup.
 - Phase 2: `diff_filtering.py`/`type_reachability.py`'s bespoke string-
   suffix ambiguity trackers.
 - Phase 3: `surface.py`'s pre-graph traversal implementation and
