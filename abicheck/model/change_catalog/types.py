@@ -504,9 +504,15 @@ TYPES_ENTRIES: list[ChangeKindMeta] = [
        description_template="Template parameter inner type changed: {name} param {detail} ({old} → {new})"),
     _E("template_return_type_changed", _B,
        impact="A template's own return type's inner type argument "
-              "changed; this changes what the template instantiation "
-              "returns and how, so a caller compiled against the old "
-              "return type reads the result incorrectly.",
+              "changed. The detector compares only the parsed argument "
+              "text under a matching outer template name, not whether the "
+              "two instantiations actually differ in layout or return "
+              "convention — two same-outer-name specializations that "
+              "differ only in a non-type argument (e.g. Tag<1> vs Tag<2>, "
+              "both empty) can share the same layout. Where the "
+              "instantiation's actual representation does differ, a "
+              "caller compiled against the old return type reads the "
+              "result incorrectly.",
        description_template="Template return type inner argument changed: {name} ({old} → {new})"),
     _E("trivially_copyable_lost", _B,
        impact="A type stopped being trivially copyable (e.g. a user-declared "

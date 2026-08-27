@@ -667,6 +667,27 @@ class ChangeKindRegistry:
             _validate_entry(e)
             self._entries[e.kind] = e
 
+    def __reduce__(self) -> tuple[type[ChangeKindRegistry], tuple[list[ChangeKindMeta]]]:
+        """Reconstruct through ``__init__`` on unpickling (Codex review, PR #882,
+        fresh evidence).
+
+        Without this, pickle's default protocol restores an instance by
+        calling ``cls.__new__(cls)`` and then setting ``__dict__`` directly
+        from the pickled state — ``__init__`` (and therefore
+        ``_validate_entry()``/the duplicate-key check) never runs. A pickle
+        produced by an older revision of this class — before a given
+        ``_validate_entry()`` rule existed, or simply written from a
+        registry someone assembled by hand — would load here as a fully
+        "real" ``ChangeKindRegistry`` despite carrying state this revision
+        would reject at construction time (e.g. the 48-entries-with-no-
+        ``impact`` state the "complete metadata" property closed off).
+        Returning ``(ChangeKindRegistry, (entries,))`` instead makes
+        unpickling call ``ChangeKindRegistry(entries)`` exactly like any
+        other construction path, so a restored registry is re-validated
+        every time, not just the first time it was built.
+        """
+        return (ChangeKindRegistry, (list(self._entries.values()),))
+
     def __len__(self) -> int:
         return len(self._entries)
 

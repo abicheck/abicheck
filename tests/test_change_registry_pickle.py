@@ -1,0 +1,62 @@
+# Copyright 2026 Nikolay Petrov
+# SPDX-License-Identifier: Apache-2.0
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+"""ChangeKindRegistry pickle round-trip re-validation.
+
+Split out of test_architecture_refactor.py once that file reached the
+architecture gate's 1200-line test-file cap (see its own module docstring
+for the split precedent this follows).
+"""
+
+from __future__ import annotations
+
+import pickle
+
+import pytest
+
+from abicheck.change_registry import ChangeKindMeta, ChangeKindRegistry, Verdict
+
+
+def test_registry_pickle_revalidates_on_load():
+    """Unpickling a registry re-runs ``__init__``'s own validation.
+
+    Codex review, PR #882, fresh evidence: pickle's default protocol
+    restores an instance via ``cls.__new__(cls)`` plus a raw ``__dict__``
+    update, bypassing ``__init__`` (and therefore ``_validate_entry()``/the
+    duplicate-key check) entirely. A pickle holding state today's
+    validation would reject — e.g. one produced by an older revision
+    before a given rule existed, or one built by directly poking
+    ``_entries`` — would load as a fully "real" ``ChangeKindRegistry``
+    without ever being checked. Fixed via ``ChangeKindRegistry.__reduce__``,
+    which makes unpickling reconstruct through ``ChangeKindRegistry(entries)``
+    exactly like any other construction path.
+    """
+    # A registry the constructor legitimately accepts round-trips.
+    ok_entry = ChangeKindMeta("ok_kind", Verdict.BREAKING, impact="i")
+    reg = ChangeKindRegistry([ok_entry])
+    rehydrated = pickle.loads(pickle.dumps(reg))
+    assert set(rehydrated.entries) == {"ok_kind"}
+    assert rehydrated.impact_text() == {"ok_kind": "i"}
+    assert rehydrated is not reg
+
+    # State the constructor would reject (empty impact) must be rejected
+    # on unpickle too, not silently restored via the default protocol's
+    # __init__-bypassing __new__ + __dict__ update.
+    bad_entry = ChangeKindMeta("bad_kind", Verdict.BREAKING)  # impact=""
+    bad_reg = object.__new__(ChangeKindRegistry)
+    bad_reg._entries = {"bad_kind": bad_entry}
+    payload = pickle.dumps(bad_reg)
+    with pytest.raises(ValueError, match="impact must be non-empty"):
+        pickle.loads(payload)
