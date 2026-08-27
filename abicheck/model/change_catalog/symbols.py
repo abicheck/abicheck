@@ -71,32 +71,41 @@ SYMBOLS_ENTRIES: list[ChangeKindMeta] = [
        impact="Function calling convention changed; registers/stack usage differs, call crashes.",
        policy_overrides={"plugin_abi": _C}),
     _E("constant_added", _C, is_addition=True,
-       impact="A new preprocessor constant appeared in the public "
-              "headers; an already-compiled binary is unaffected (macros "
-              "are purely a compile-time textual substitution, absent from "
-              "the ABI). Source is not unconditionally safe, though: this "
-              "detector checks only that the constant is new, not whether "
-              "its name collides with a consumer's own identifier — a "
-              "macro sharing the name of a consumer's variable, function, "
-              "or parameter (e.g. a new `#define min ...` ahead of a "
-              "consumer's own `min(...)`) gets textually substituted into "
-              "that consumer's source and can break a previously-valid "
-              "build.",
+       impact="A new public const/constexpr declaration appeared in the "
+              "public headers (`parse_constants()` extracts namespace-scope "
+              "`const`/`constexpr` variables with a compile-time "
+              "initializer, not preprocessor macros — a separate detector "
+              "family, `PUBLIC_MACRO_*`, covers those). Such a declaration "
+              "has internal linkage and no exported symbol, so an already-"
+              "compiled binary is unaffected. Source is not unconditionally "
+              "safe, though: this detector checks only that the constant is "
+              "new, not whether its name collides with an identifier a "
+              "consumer already declares at the same scope — an ordinary "
+              "redeclaration/ambiguity error, not a macro textual-"
+              "substitution hazard.",
        description_template="New preprocessor constant: {name}"),
     _E("constant_changed", _A,
-       impact="A preprocessor constant's value changed; any consumer that "
-              "was compiled against the old value has that value baked in "
-              "at compile time (macros are substituted before compilation, "
-              "not looked up at link/load time), so it keeps behaving as "
-              "if the constant were still the old value until it is "
-              "recompiled.",
+       impact="A public const/constexpr declaration's value changed "
+              "(`parse_constants()` extracts namespace-scope `const`/"
+              "`constexpr` variables with a compile-time initializer, not "
+              "preprocessor macros — a separate detector family, "
+              "`PUBLIC_MACRO_*`, covers those). Any consumer that was "
+              "compiled against the old value has that value baked in via "
+              "ordinary compile-time constant folding, not looked up at "
+              "link/load time (the declaration has internal linkage and no "
+              "exported symbol), so it keeps behaving as if the constant "
+              "were still the old value until it is recompiled.",
        description_template="Preprocessor constant value changed: {name} ({old} → {new})"),
     _E("constant_removed", _A,
-       impact="A preprocessor constant was removed from the public "
-              "headers; source code referencing it by name fails to "
-              "compile against the new headers, though an already-"
-              "compiled binary is unaffected (the old value was already "
-              "substituted in at its own compile time).",
+       impact="A public const/constexpr declaration was removed from the "
+              "public headers (`parse_constants()` extracts namespace-"
+              "scope `const`/`constexpr` variables with a compile-time "
+              "initializer, not preprocessor macros — a separate detector "
+              "family, `PUBLIC_MACRO_*`, covers those); source code "
+              "referencing it by name fails to compile against the new "
+              "headers, though an already-compiled binary is unaffected "
+              "(the old value was already folded in at its own compile "
+              "time, and the declaration never had an exported symbol).",
        description_template="Preprocessor constant removed: {name}"),
     _E("ctor_explicit_added", _A,
        impact="A constructor or conversion operator gained the `explicit` "
@@ -205,15 +214,28 @@ SYMBOLS_ENTRIES: list[ChangeKindMeta] = [
               "resolve at load time. This is a heuristic signal — verify the rename is intentional.",
        description_template="Function likely renamed: {old} → {new} (size={detail}B, confidence={name}%)"),
     _E("func_lost_inline", _C,
-       impact="A function lost its explicit inline attribute. A non-static "
-              "C++ function already has external linkage regardless of "
-              "inline — the attribute only permits the compiler to fold "
-              "identical out-of-line definitions emitted by multiple "
-              "translation units into one, so losing it doesn't itself "
-              "create or guarantee a new export (this detector doesn't "
-              "verify the new binary's export table). The function's own "
-              "signature and calling convention are unchanged either way, "
-              "so this is low-risk for already-linked consumers.",
+       impact="A function lost its explicit inline attribute. This "
+              "detector (`_check_inline_transitions()`) fires the same way "
+              "regardless of language, but the two languages' `inline` "
+              "semantics differ enough that the consequence does too. In "
+              "C++, a non-static function already has external linkage "
+              "regardless of inline — the attribute only permits the "
+              "compiler to fold identical out-of-line definitions emitted "
+              "by multiple translation units into one, so losing it "
+              "doesn't itself create or guarantee a new export (this "
+              "detector doesn't verify the new binary's export table). In "
+              "C (C99/GNU C `inline` rules), the opposite risk applies: an "
+              "`inline` function definition kept in a public header "
+              "normally produces no external definition on its own, but "
+              "removing `inline` from a definition every including "
+              "translation unit sees turns it into an ordinary external "
+              "definition — so multiple translation units that each "
+              "`#include` the header and get recompiled can each emit "
+              "their own external definition of the same name, producing "
+              "multiple-definition link errors that don't arise in the "
+              "C++ case. Either way, the function's own signature and "
+              "calling convention are unchanged, so this is low-risk for "
+              "already-linked consumers.",
        description_template="Function lost inline attribute: {name}"),
     _E("func_noexcept_added", _C,
        impact="In C++17 noexcept is part of the function type; old callers compiled against non-noexcept signature get a different mangled name."),
