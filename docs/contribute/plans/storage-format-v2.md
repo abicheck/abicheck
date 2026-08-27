@@ -108,6 +108,11 @@ and `BundleFacts` document is bit-for-bit unchanged.
 
 ### Phase 1 — unified project and multibuild storage
 
+**Status: A1.1 partially implemented** (this change) — the object model
+(`PackageManifest`/`VariantRef`/`ArtifactRef`/`ObjectRef`/`ObjectStore`) is
+landed; the directory-backed store that actually reads and writes it is not.
+See "Landed in Phase 1 (partial)" below.
+
 - **A1.1** `ProjectSnapshotStore` reads and writes the D6 layout over a
   directory abstraction, with a deterministic `.tar.zst` transport form.
 - **A1.2** A v1-v25 import adapter maps every existing snapshot into the v2
@@ -156,6 +161,8 @@ nothing in the existing pipeline changes behavior.
 ### Phase 1
 
 1. `storage/package.py` — manifest, refs, and the object-store abstraction.
+   **Object model landed** (this change); the directory-backed store
+   implementing `ObjectStore` against real files is still open.
 2. `storage/import_v1.py` — the v1-v25 adapter (A1.2), including the
    `*_facts_reliable` flags becoming `FactAvailability` records.
 3. Express a single-library dump as a one-artifact project (A1.3), behind
@@ -258,18 +265,57 @@ there, so the table is checked rather than maintained by hand.
 Tests live in `tests/unit/storage/`, stating each primitive's contract as
 invariants alongside the example cases (A0.6).
 
+## Landed in Phase 1 (partial): A1.1's object model
+
+The first Phase 1 slice — the object model half of "1. `storage/package.py`
+— manifest, refs, and the object-store abstraction" — is implemented.
+
+| Module | Contract |
+|---|---|
+| `abicheck/storage/package.py` | `MANIFEST_RELPATH`, `SECTION_KINDS`, `ObjectRef`, `VariantRef`, `ArtifactRef`, `PackageManifest`, `ObjectStore`, `InMemoryObjectStore`, `object_relpath`, `variant_ref_relpath`, `artifact_ref_relpath` (A1.1) |
+
+`ObjectRef`/`VariantRef`/`ArtifactRef`/`PackageManifest` are the in-memory
+document model of D6's `manifest.json` plus the ref documents it names.
+`ObjectStore` is D7's digest-addressed `put`/`get`/`has` abstraction, kept a
+`Protocol` rather than a filesystem client: this migrated layer may import
+only `model` (`storage/AGENTS.md`'s "Permitted imports"), so it cannot itself
+wrap ADR-059's `snapshot_io.py` envelope — a concrete, `.tar.zst`-transportable
+store is a separate implementation, outside this package, built over both
+this module and `snapshot_io`. `InMemoryObjectStore` is the one reference
+implementation this module ships, exercised by its own tests and usable
+on its own for a one-process comparison that never needs to persist a
+package.
+
+**Not yet implemented, and still open**: an actual directory-backed
+`ObjectStore`/`ProjectSnapshotStore` (A1.1's other half — "reads and writes
+the D6 layout over a directory abstraction, with a deterministic `.tar.zst`
+transport form"), the v1-v25 import adapter (A1.2), expressing a single-library
+dump as a one-artifact project (A1.3), and everything after it in the Phase 1
+list above. `PackageManifest.variant_refs`/`.artifact_refs` embed full
+records rather than pointers to on-disk `refs/*.json` files, because there is
+no writer yet to make that split meaningful — see the module's own docstring.
+
+Tests live in `tests/unit/storage/test_project_package.py`, following the same
+property-style-plus-example-cases convention as Phase 0 (A0.6/A1's
+"Validation corpus" identity-preservation cases, applied at the level this
+module actually operates at: a manifest's own `to_dict`/`from_dict` round
+trip, digest stability, and the D6 path-layout functions).
+
 ### Documentation ownership — deliberately not registered yet
 
 `docs/AGENTS.md` requires every **new public-facing feature or surface** to
 register a topic in `docs/_meta/topics.yaml` in the same PR, and a reviewer
-asked why storage v2 has none (Codex review). The answer is that Phase 0 adds
-no such surface: no CLI command or flag, no report field, no config
-namespace, no Action input, and nothing in the product produces, consumes or
-persists these primitives — `SCHEMA_VERSION` is unchanged and every existing
-document is byte-for-byte unchanged. They are also not part of the documented
-Python API: `abicheck/__init__.py` does not re-export them, and the
-`python-api` topic's `fact_sources` name the `service*` modules that page
-actually describes.
+asked why storage v2 has none (Codex review). The answer is that neither
+Phase 0 nor this A1.1 slice adds such a surface: no CLI command or flag, no
+report field, no config namespace, no Action input, and nothing in the
+product produces, consumes, or persists a byte through these primitives —
+`SCHEMA_VERSION` is unchanged and every existing document is byte-for-byte
+unchanged. `package.py` itself performs no filesystem or network I/O; its
+`ObjectStore` is a protocol plus one in-memory reference implementation, not
+a place any real package is written to or read from yet. They are also not
+part of the documented Python API: `abicheck/__init__.py` does not re-export
+them, and the `python-api` topic's `fact_sources` name the `service*` modules
+that page actually describes.
 
 The registry's `canonical_page` is required to be the one *published*
 narrative page a human reads, and every registered topic points at one under

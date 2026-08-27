@@ -1,0 +1,582 @@
+# Copyright 2026 Nikolay Petrov
+# SPDX-License-Identifier: Apache-2.0
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+"""The `ProjectSnapshot` package's manifest, refs, and object-store
+abstraction — ADR-062 D6/D7 (storage-format-v2 plan A1.1).
+
+D6 converges baseline sets, `BundleFacts`, and per-library snapshots onto
+one content-addressed layout::
+
+    project.abicheck/
+      manifest.json            # small; loads immediately
+      refs/variants/<variant-id>.json
+      refs/artifacts/<artifact-id>.json
+      objects/sha256/<aa>/<digest>.json.zst
+      indexes/index.sqlite     # optional, rebuildable, never canonical truth
+
+This module is the *logical* half of that layout: the manifest and ref
+records a reader assembles before it decides what section content to load,
+the path-layout functions that let every writer agree on where a given
+record or object lives, and :class:`ObjectStore` — the digest-addressed
+`put`/`get`/`has` abstraction D7's "stored once, referenced by digest"
+evidence is built on.
+
+It is deliberately **not** the physical half. ADR-059's envelope
+(compression detection, atomic writes, decompression-bomb limits) stays in
+`abicheck/snapshot_io.py` and is not reimplemented here — and per this
+package's own `AGENTS.md`, a migrated layer may import only `model`, so this
+module could not wrap `snapshot_io` even if that were the right layering.
+:class:`ObjectStore` is therefore a protocol, not a filesystem client: a
+real, `.tar.zst`-transportable store is a concrete implementation that lives
+outside this package, built over both this module and `snapshot_io`, the
+same way `InMemoryObjectStore` here is built over nothing but this module's
+own digest function. Nothing in this module reads or writes a byte of an
+actual file.
+
+`PackageManifest`, `VariantRef`, and `ArtifactRef` are the in-memory
+document model of `manifest.json`'s content plus the per-variant and
+per-artifact ref documents it names — one Python object graph, split across
+files only by whatever writer chooses to serialize it that way. Splitting
+the *object model* to match today would be premature: no writer exists yet
+to honor the split, and a single in-memory root that a future writer fans
+out to disk is strictly easier to get right than three independently-loaded
+models kept consistent by convention. `variant_ref_relpath`/
+`artifact_ref_relpath`/`object_relpath` already fix the path convention such
+a writer must follow, so this module and a future filesystem-backed
+implementation cannot independently invent two different layouts for the
+same D6 directory.
+"""
+
+from __future__ import annotations
+
+from collections.abc import Mapping
+from dataclasses import dataclass, field
+from types import MappingProxyType
+from typing import Any, Protocol, runtime_checkable
+
+from .canonical import canonical_form, semantic_digest
+from .guards import (
+    decision_key as _decision_key,
+    identity_text as _identity_text,
+    instance_of as _instance_of,
+    mapping as _mapping,
+    provenance_text as _provenance_text,
+    required_field as _required_field,
+    row_sequence as _row_sequence,
+)
+from .versioning import StorageVersions
+
+__all__ = [
+    "MANIFEST_RELPATH",
+    "SECTION_KINDS",
+    "ObjectRef",
+    "VariantRef",
+    "ArtifactRef",
+    "PackageManifest",
+    "ObjectStore",
+    "InMemoryObjectStore",
+    "object_relpath",
+    "variant_ref_relpath",
+    "artifact_ref_relpath",
+]
+
+#: The manifest's fixed, package-relative path — D6.
+MANIFEST_RELPATH = "manifest.json"
+
+_VARIANT_REF_DIR = "refs/variants"
+_ARTIFACT_REF_DIR = "refs/artifacts"
+_OBJECT_DIR = "objects"
+
+#: D8's section kinds. Membership in `ArtifactRef.sections` is deliberately
+#: not restricted to this set at the data-model level — a new section kind
+#: is a producer decision, not something this leaf should have to be
+#: re-released to allow — but it is the vocabulary D8 names, kept here for
+#: reference and for a caller that wants to validate against it explicitly.
+SECTION_KINDS = (
+    "binary",
+    "declarations",
+    "types",
+    "layout",
+    "debug",
+    "build",
+    "source_abi",
+    "graph",
+    "provenance",
+    "diagnostics",
+    "raw_refs",
+)
+
+
+def _safe_ref_id(value: str, field_name: str) -> str:
+    """A ref id, made safe to use as a bare filename component.
+
+    A variant or artifact id becomes a literal path segment
+    (`refs/variants/<variant-id>.json`), so a value containing a path
+    separator or a `..` component could let a written package escape its own
+    directory. Checked once here so every current and future path helper
+    inherits the rule rather than each re-deriving it.
+    """
+    _identity_text(value, field_name)
+    if (
+        not value
+        or "/" in value
+        or "\\" in value
+        or value in (".", "..")
+        or "\x00" in value
+    ):
+        raise ValueError(
+            f"{field_name} must be a non-empty, path-safe identifier, got {value!r}"
+        )
+    return value
+
+
+def variant_ref_relpath(variant_id: str) -> str:
+    """The package-relative path of one variant's ref document — D6."""
+    return f"{_VARIANT_REF_DIR}/{_safe_ref_id(variant_id, 'variant_id')}.json"
+
+
+def artifact_ref_relpath(artifact_id: str) -> str:
+    """The package-relative path of one artifact's ref document — D6."""
+    return f"{_ARTIFACT_REF_DIR}/{_safe_ref_id(artifact_id, 'artifact_id')}.json"
+
+
+def object_relpath(digest: str) -> str:
+    """The deterministic package-relative path a content digest addresses.
+
+    `digest` is the `"<algorithm>:<hex>"` form
+    `abicheck.storage.canonical.semantic_digest` returns. D6 fans objects out
+    under a two-character prefix of the hex digest
+    (`objects/sha256/<aa>/<digest>.json`), matching Git's own object layout,
+    so no single directory ends up holding as many entries as a project with
+    hundreds of thousands of stored sections would otherwise put in one
+    place.
+
+    This decides only the *logical* path a manifest reference and a physical
+    writer must agree on — never the bytes stored there. A real writer picks
+    its own physical suffix (`.json`, `.json.zst`, ...) on top of this path,
+    per ADR-059's envelope, which this function has no opinion on.
+    """
+    if not isinstance(digest, str):
+        raise TypeError(
+            f"digest must be a string, not {type(digest).__name__} ({digest!r})"
+        )
+    algorithm, separator, hexdigest = digest.partition(":")
+    if not separator or not algorithm or not hexdigest:
+        raise ValueError(f"digest must be in '<algorithm>:<hex>' form, got {digest!r}")
+    if not algorithm.isalnum() or not all(c in "0123456789abcdef" for c in hexdigest):
+        raise ValueError(f"digest is not a well-formed content address: {digest!r}")
+    if len(hexdigest) < 2:
+        raise ValueError(f"digest hex portion is too short to shard: {digest!r}")
+    return f"{_OBJECT_DIR}/{algorithm}/{hexdigest[:2]}/{hexdigest}.json"
+
+
+def _normalized_text_mapping(raw: Any, field_name: str) -> Mapping[str, str]:
+    """A `str -> str` coordinate mapping, guarded and canonically sorted.
+
+    Used for `VariantRef.declared`/`.captured` and `ArtifactRef.native_identity`
+    alike: each is a small set of named facts (`target`, `compiler_family`,
+    `build_id`, ...) that a decision compares to match or distinguish records,
+    so both the keys and the values go through the same guards
+    `AvailabilityLedger`'s family names and `ProducerIdentity`'s fields use —
+    a key is a `decision_key` (coercing it would let two distinct axes
+    collapse into one, with iteration order picking the survivor) and a
+    value is `provenance_text` (coercing it would make two genuinely
+    different facts compare equal).
+
+    Returned as a read-only, key-sorted `MappingProxyType` so the state
+    itself is canonical rather than only its serialized form — the same
+    "a canonical view over non-canonical state still leaks through `__eq__`"
+    rule `StorageVersions.section_schema_versions` already applies.
+    """
+    _mapping(raw, field_name)
+    normalized: dict[str, str] = {}
+    for key, value in raw.items():
+        normalized[_decision_key(key, f"{field_name} key")] = _provenance_text(
+            value, f"{field_name}[{key!r}]"
+        )
+    return MappingProxyType(dict(sorted(normalized.items())))
+
+
+@dataclass(frozen=True)
+class ObjectRef:
+    """A reference to one content-addressed object — ADR-062 D7.
+
+    `kind` names the section or evidence class this object holds
+    (`"declarations"`, `"graph"`, `"build_source_pack"`, ...) so a reader can
+    tell what it is being asked to load before fetching it. `digest` is the
+    object's content address (`semantic_digest` form) — two `ObjectRef`s with
+    equal digests name the same stored object regardless of what `kind` or
+    `size` either producer happened to record for it, since the object
+    store's own identity is the digest alone.
+
+    `size` is an informational, uncompressed byte count a reader may use to
+    decide whether to defer loading a section; it is never part of the
+    reference's identity, which is why it is not part of any equality this
+    module treats as meaningful — two `ObjectRef`s differing only in `size`
+    still point at one object.
+    """
+
+    kind: str
+    digest: str
+    size: int = 0
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "kind", _identity_text(self.kind, "kind"))
+        object.__setattr__(self, "digest", _identity_text(self.digest, "digest"))
+        if not self.kind:
+            raise ValueError("ObjectRef.kind must not be empty")
+        if not self.digest:
+            raise ValueError("ObjectRef.digest must not be empty")
+        size = self.size
+        if isinstance(size, bool) or not isinstance(size, int) or size < 0:
+            raise TypeError(f"ObjectRef.size must be a non-negative int, not {size!r}")
+
+    def to_dict(self) -> dict[str, Any]:
+        out: dict[str, Any] = {"kind": self.kind, "digest": self.digest}
+        if self.size:
+            out["size"] = self.size
+        return out
+
+    @classmethod
+    def from_dict(cls, data: Mapping[str, Any]) -> ObjectRef:
+        _mapping(data, "an object reference")
+        size = data.get("size", 0)
+        if isinstance(size, bool) or not isinstance(size, int) or size < 0:
+            # `size` is informational — no decision reads it (see the class
+            # docstring) — so a malformed value degrades to "unknown" rather
+            # than aborting the load of an otherwise well-formed reference.
+            size = 0
+        return cls(
+            kind=_required_field(data, "kind", "an object reference"),
+            digest=_required_field(data, "digest", "an object reference"),
+            size=size,
+        )
+
+
+@dataclass(frozen=True)
+class VariantRef:
+    """One matched build variant — ADR-062 D9.
+
+    Stable variant identity (target, compiler family, feature toggles) is
+    kept separate from state that may legitimately change between releases
+    *inside* the same variant (compiler version, standard, flags, artifact
+    membership): `declared` and `captured` are two independent coordinate
+    maps rather than one merged one, so a later comparison can tell a
+    genuine variant boundary apart from an ordinary version bump. Neither
+    map's shape is fixed here — the coordinate vocabulary is a capture-time
+    decision this leaf does not need to know.
+
+    `artifact_ids` is membership: which artifacts (by id) this variant's
+    captured evidence covers. It is stored as a stable-sorted tuple, not a
+    set, because — unlike `declared`/`captured`, whose *keys* are what a
+    decision compares — this field is itself the payload D5 says an
+    unordered collection needs an explicit sort key for.
+    """
+
+    variant_id: str
+    declared: Mapping[str, str] = field(default_factory=dict)
+    captured: Mapping[str, str] = field(default_factory=dict)
+    artifact_ids: tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        object.__setattr__(
+            self, "variant_id", _identity_text(self.variant_id, "variant_id")
+        )
+        if not self.variant_id:
+            raise ValueError("VariantRef.variant_id must not be empty")
+        object.__setattr__(
+            self, "declared", _normalized_text_mapping(self.declared, "declared")
+        )
+        object.__setattr__(
+            self, "captured", _normalized_text_mapping(self.captured, "captured")
+        )
+        ids = _row_sequence(self.artifact_ids, "artifact_ids")
+        for index, artifact_id in enumerate(ids):
+            _instance_of(artifact_id, str, f"artifact_ids[{index}]")
+        # Sorted and deduplicated: membership is a set of ids, and its
+        # serialized order must not depend on the order a caller happened to
+        # collect it in (D5's array-with-a-stable-sort-key rule, applied to a
+        # plain identifier list rather than a JSON document).
+        object.__setattr__(self, "artifact_ids", tuple(sorted(set(ids))))
+
+    def to_dict(self) -> dict[str, Any]:
+        out: dict[str, Any] = {"variant_id": self.variant_id}
+        if self.declared:
+            out["declared"] = dict(self.declared)
+        if self.captured:
+            out["captured"] = dict(self.captured)
+        if self.artifact_ids:
+            out["artifact_ids"] = list(self.artifact_ids)
+        return out
+
+    @classmethod
+    def from_dict(cls, data: Mapping[str, Any]) -> VariantRef:
+        _mapping(data, "a variant reference")
+        return cls(
+            variant_id=_required_field(data, "variant_id", "a variant reference"),
+            declared=data.get("declared", {}),
+            captured=data.get("captured", {}),
+            artifact_ids=data.get("artifact_ids", ()),
+        )
+
+
+@dataclass(frozen=True)
+class ArtifactRef:
+    """One artifact — a native binary, or a header-only/Python-visible
+    member with no binary at all — ADR-062 D6.
+
+    `kind` names what the artifact *is* (`"elf"`, `"pe"`, `"macho"`,
+    `"python"`, `"header_only"`, ...), never how it should be resolved: D6
+    requires every artifact kind to be representable, with bundle-level
+    *resolution* declared as an ELF-only capability by whatever consumes this
+    reference rather than by this leaf silently excluding non-ELF entries.
+
+    `native_identity` carries whatever content/build identity the artifact's
+    own kind actually has (`content_sha256`, ELF `build_id`, Mach-O `uuid`,
+    PE/PDB `pdb_guid_age`, ...) as a small `str -> str` fact map, the same
+    shape `VariantRef.declared`/`.captured` use — the top-level
+    `AbiSnapshot.build_id` field this replaces means an opaque CI identifier
+    and is deliberately not reused here (see the ADR's D6).
+
+    `sections` maps a D8 section kind to the object holding it. An artifact
+    need not carry every section — a header-only target has no `"binary"`
+    section at all — and D8 sections are independently addressable precisely
+    so that absence here is a real, representable fact rather than a default
+    standing in for one.
+    """
+
+    artifact_id: str
+    variant_id: str
+    kind: str
+    native_identity: Mapping[str, str] = field(default_factory=dict)
+    sections: Mapping[str, ObjectRef] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        object.__setattr__(
+            self, "artifact_id", _identity_text(self.artifact_id, "artifact_id")
+        )
+        if not self.artifact_id:
+            raise ValueError("ArtifactRef.artifact_id must not be empty")
+        object.__setattr__(
+            self, "variant_id", _identity_text(self.variant_id, "variant_id")
+        )
+        if not self.variant_id:
+            raise ValueError("ArtifactRef.variant_id must not be empty")
+        object.__setattr__(self, "kind", _identity_text(self.kind, "kind"))
+        if not self.kind:
+            raise ValueError("ArtifactRef.kind must not be empty")
+        object.__setattr__(
+            self,
+            "native_identity",
+            _normalized_text_mapping(self.native_identity, "native_identity"),
+        )
+        sections_raw = self.sections
+        _mapping(sections_raw, "sections")
+        sections: dict[str, ObjectRef] = {}
+        for key, value in sections_raw.items():
+            sections[_decision_key(key, "sections key")] = _instance_of(
+                value, ObjectRef, f"sections[{key!r}]"
+            )
+        object.__setattr__(
+            self, "sections", MappingProxyType(dict(sorted(sections.items())))
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        out: dict[str, Any] = {
+            "artifact_id": self.artifact_id,
+            "variant_id": self.variant_id,
+            "kind": self.kind,
+        }
+        if self.native_identity:
+            out["native_identity"] = dict(self.native_identity)
+        if self.sections:
+            out["sections"] = {k: v.to_dict() for k, v in self.sections.items()}
+        return out
+
+    @classmethod
+    def from_dict(cls, data: Mapping[str, Any]) -> ArtifactRef:
+        _mapping(data, "an artifact reference")
+        sections_raw = data.get("sections", {})
+        _mapping(sections_raw, "sections")
+        sections = {
+            key: ObjectRef.from_dict(value) for key, value in sections_raw.items()
+        }
+        return cls(
+            artifact_id=_required_field(data, "artifact_id", "an artifact reference"),
+            variant_id=_required_field(data, "variant_id", "an artifact reference"),
+            kind=_required_field(data, "kind", "an artifact reference"),
+            native_identity=data.get("native_identity", {}),
+            sections=sections,
+        )
+
+
+@dataclass(frozen=True)
+class PackageManifest:
+    """The small, always-loaded root document — ADR-062 D6.
+
+    Everything a reader needs before deciding what else to load: the version
+    axes (D2, via `StorageVersions`), which variants and artifacts exist, and
+    (once a writer assigns them) how to find each one's own ref document via
+    `variant_ref_relpath`/`artifact_ref_relpath`. It carries no section
+    *content* itself, which is exactly what keeps it small enough to load
+    unconditionally — D8's "a project comparison loads two manifests... all
+    small L0 binary sections, then one matched library pair at a time."
+
+    `variant_refs`/`artifact_refs` embed full records rather than pointers to
+    the on-disk `refs/*.json` files D6 describes, because this module owns
+    the in-memory model, not a filesystem layout — see the module docstring.
+    A future writer that fans this manifest's content out across the D6
+    directory tree does so from this one object, using the same
+    `variant_ref_relpath`/`artifact_ref_relpath` helpers a reader would use to
+    reassemble it.
+    """
+
+    versions: StorageVersions = field(default_factory=StorageVersions)
+    variant_refs: tuple[VariantRef, ...] = ()
+    artifact_refs: tuple[ArtifactRef, ...] = ()
+
+    def __post_init__(self) -> None:
+        _instance_of(self.versions, StorageVersions, "versions")
+
+        variants = _row_sequence(self.variant_refs, "variant_refs")
+        for index, variant in enumerate(variants):
+            _instance_of(variant, VariantRef, f"variant_refs[{index}]")
+        variant_ids = [variant.variant_id for variant in variants]
+        if len(variant_ids) != len(set(variant_ids)):
+            raise ValueError(
+                "PackageManifest.variant_refs contains a duplicate variant_id"
+            )
+        object.__setattr__(
+            self,
+            "variant_refs",
+            tuple(sorted(variants, key=lambda variant: variant.variant_id)),
+        )
+
+        artifacts = _row_sequence(self.artifact_refs, "artifact_refs")
+        for index, artifact in enumerate(artifacts):
+            _instance_of(artifact, ArtifactRef, f"artifact_refs[{index}]")
+        artifact_ids = [artifact.artifact_id for artifact in artifacts]
+        if len(artifact_ids) != len(set(artifact_ids)):
+            raise ValueError(
+                "PackageManifest.artifact_refs contains a duplicate artifact_id"
+            )
+        known_variant_ids = {variant.variant_id for variant in variants}
+        unknown = sorted(
+            {artifact.variant_id for artifact in artifacts} - known_variant_ids
+        )
+        if unknown:
+            raise ValueError(
+                "PackageManifest.artifact_refs references undeclared "
+                f"variant_id(s): {unknown}"
+            )
+        object.__setattr__(
+            self,
+            "artifact_refs",
+            tuple(sorted(artifacts, key=lambda artifact: artifact.artifact_id)),
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        out: dict[str, Any] = {"versions": self.versions.to_dict()}
+        if self.variant_refs:
+            out["variant_refs"] = [variant.to_dict() for variant in self.variant_refs]
+        if self.artifact_refs:
+            out["artifact_refs"] = [
+                artifact.to_dict() for artifact in self.artifact_refs
+            ]
+        return out
+
+    @classmethod
+    def from_dict(cls, data: Mapping[str, Any]) -> PackageManifest:
+        _mapping(data, "a package manifest")
+        raw_variants = _row_sequence(data.get("variant_refs", ()), "variant_refs")
+        raw_artifacts = _row_sequence(data.get("artifact_refs", ()), "artifact_refs")
+        return cls(
+            versions=StorageVersions.from_dict(data.get("versions", {})),
+            variant_refs=tuple(VariantRef.from_dict(row) for row in raw_variants),
+            artifact_refs=tuple(ArtifactRef.from_dict(row) for row in raw_artifacts),
+        )
+
+
+@runtime_checkable
+class ObjectStore(Protocol):
+    """The content-addressed object store abstraction — ADR-062 D7.
+
+    Deliberately narrow: three operations, no notion of compression, atomic
+    writes, or physical layout. Those belong to ADR-059's envelope
+    (`abicheck/snapshot_io.py`), which a concrete implementation of this
+    protocol wraps — this migrated layer may depend only on `model` (see
+    `storage/AGENTS.md`'s "Permitted imports"), so it cannot itself import
+    `snapshot_io`. A filesystem-backed store lives outside this package.
+
+    `put`/`get` operate on a value's *logical* content — whatever
+    `abicheck.storage.canonical.semantic_digest` accepts — so the digest a
+    caller computes to build an `ObjectRef` and the digest the store assigns
+    can never disagree, the way they would if the store hashed its own
+    serialization of the value instead of sharing this module's canonical
+    form.
+    """
+
+    def put(self, content: Any) -> str:
+        """Store `content`, returning its content digest.
+
+        Storing the same logical content twice must return the same digest
+        and must not create a second copy — the whole point of D7's shared,
+        digest-addressed evidence.
+        """
+        ...
+
+    def get(self, digest: str) -> Any:
+        """The canonical form of the object stored under `digest`.
+
+        Raises `KeyError` if nothing is stored under it.
+        """
+        ...
+
+    def has(self, digest: str) -> bool:
+        """Whether an object is already stored under `digest`."""
+        ...
+
+
+class InMemoryObjectStore:
+    """A process-local `ObjectStore`, addressed exactly the way a real one is.
+
+    Not a stub: `put`/`get`/`has` behave exactly as any conforming store
+    must, just without ever touching a filesystem or transport. Useful on
+    its own for a one-process comparison that never needs to persist a
+    package, and as the fixture every other implementation's contract can be
+    checked against.
+    """
+
+    def __init__(self) -> None:
+        self._objects: dict[str, Any] = {}
+
+    def put(self, content: Any) -> str:
+        digest = semantic_digest(content)
+        if digest not in self._objects:
+            # Canonicalized once, on the way in, so a second `get` never
+            # needs to re-derive the object's own canonical form from
+            # whatever shape the caller happened to pass.
+            self._objects[digest] = canonical_form(content)
+        return digest
+
+    def get(self, digest: str) -> Any:
+        digest = _identity_text(digest, "digest")
+        try:
+            return self._objects[digest]
+        except KeyError:
+            raise KeyError(f"no object stored under digest {digest!r}") from None
+
+    def has(self, digest: str) -> bool:
+        return _identity_text(digest, "digest") in self._objects
