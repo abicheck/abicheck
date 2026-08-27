@@ -12,4 +12,10 @@
   three sibling data files (kept under this repository's 800-line
   production file-size cap), with a generated mypy stub
   (`kinds.pyi`, `scripts/gen_changekind_stub.py`) preserving full static
-  type checking for every `ChangeKind.FOO` access.
+  type checking for every `ChangeKind.FOO` access; the stub's drift is now
+  enforced in the fast unit suite (`tests/test_changekind_stub.py`) rather
+  than only checked for its marker comment, and every member's `.value` is
+  verified an exact `str` (not a subclass instance -- an earlier revision's
+  `type=` mixin broke `yaml.safe_dump()` on any `ChangeKind` value, since
+  PyYAML dispatches representers on exact type) and correctly included in
+  a built wheel even under this project's oldest supported setuptools.

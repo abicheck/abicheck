@@ -54,12 +54,23 @@ three sibling files rather than deriving one from the other.
 The ``_missing_`` back-compat hook (accepting the pre-rename
 ``evidence_coverage_asymmetric`` serialized value) cannot be passed through
 the functional ``Enum()`` call directly -- that API only accepts member
-names/values -- so it is declared on ``_ChangeKindBase``, a plain ``str``
-mixin passed via ``type=``. Verified this preserves every property that
-matters (identical JSON serialization, `isinstance(x, str)`, pickling by
-qualified reference, `_missing_` lookup through the mixin's MRO) against a
-minimal reproduction before trusting it, rather than assumed from reading
-the ``enum`` module's docs alone.
+names/values -- so it is attached by plain attribute assignment on the class
+*after* construction, not via a custom mixin type passed through ``type=``.
+A first version used a ``str`` subclass (``_ChangeKindBase``) as the mixin
+instead, which is wrong: it changes every member's ``.value`` from an exact
+``str`` instance to a ``_ChangeKindBase`` one, and a serializer that
+dispatches on *exact* type rather than ``isinstance`` -- PyYAML's default
+representer lookup is exactly this -- then raises (``RepresenterError`` on
+``yaml.safe_dump(ChangeKind.FUNC_REMOVED.value)``), even though every
+``isinstance(x, str)`` check still passed (a Codex review finding on this
+PR, reproduced directly before trusting it: confirmed the exact
+``RepresenterError`` against the mixin version, confirmed it's gone with
+plain ``type=str``). Assigning ``_missing_`` after construction keeps
+``.value`` an exact ``str`` while still working -- enum special-method
+lookup doesn't care whether the method was defined in the class body or
+attached afterward, verified directly (`_missing_` fires correctly, JSON
+serialization/`isinstance`/pickling-by-qualified-reference are all still
+identical to the original class-based enum).
 
 ``checker_policy.py`` re-exports ``ChangeKind`` from here (``from
 .model.change_catalog.kinds import ChangeKind as ChangeKind``) rather than
@@ -91,30 +102,10 @@ _ALL_KIND_NAMES: tuple[tuple[str, str, str | None], ...] = (
 )
 
 
-class _ChangeKindBase(str):
-    """Plain ``str`` mixin carrying ``ChangeKind``'s one behavioral extra.
-
-    A method, not a member -- the functional ``Enum()`` call below only
-    accepts ``(name, value)`` pairs, so anything beyond that (here, just
-    this one classmethod) has to arrive through the mixin passed as
-    ``type=`` instead of the class body.
-    """
-
-    @classmethod
-    def _missing_(cls, value: object) -> ChangeKind | None:
-        # Back-compat: accept the pre-rename serialized value so reports and
-        # policy files written before the evidence→buildsource rename still
-        # deserialize. ``evidence_coverage_asymmetric`` was renamed to
-        # ``layer_coverage_asymmetric``; the meaning is unchanged.
-        if value == "evidence_coverage_asymmetric":
-            return ChangeKind.EVIDENCE_COVERAGE_ASYMMETRIC
-        return None
-
-
 ChangeKind = Enum(
     "ChangeKind",
     [(name, value) for name, value, _comment in _ALL_KIND_NAMES],
-    type=_ChangeKindBase,
+    type=str,
     module=__name__,
     qualname="ChangeKind",
 )
@@ -125,6 +116,23 @@ ChangeKind.__doc__ = (
     "here has exactly one corresponding entry in -- this enum carries only "
     "identity (name + serialized value), never classification."
 )
+
+
+def _changekind_missing(cls: type[ChangeKind], value: object) -> ChangeKind | None:
+    # Back-compat: accept the pre-rename serialized value so reports and
+    # policy files written before the evidence→buildsource rename still
+    # deserialize. ``evidence_coverage_asymmetric`` was renamed to
+    # ``layer_coverage_asymmetric``; the meaning is unchanged.
+    if value == "evidence_coverage_asymmetric":
+        return ChangeKind.EVIDENCE_COVERAGE_ASYMMETRIC
+    return None
+
+
+# Attached by assignment rather than through the functional Enum() call
+# (which only accepts member names/values) or a custom `type=` mixin (which
+# would change every member's `.value` from an exact `str` to a subclass
+# instance -- see this module's docstring for why that broke PyYAML).
+ChangeKind._missing_ = classmethod(_changekind_missing)  # type: ignore[method-assign]
 
 
 class HasKind(Protocol):
