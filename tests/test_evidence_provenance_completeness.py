@@ -382,3 +382,29 @@ class TestProvenanceTagsAreRegistered:
             f"{sorted(unregistered)} -- register the tag there before "
             "a detector call site stamps it."
         )
+
+    @pytest.mark.parametrize(
+        "kind_value", sorted(PROVENANCE_STATIC | PROVENANCE_PER_FINDING)
+    )
+    def test_every_stamped_tuple_is_normalized(self, kind_value: str) -> None:
+        """G39 Phase 0's own normalization rule: every non-``None``
+        ``evidence_provenance`` MUST be ``tuple(sorted(set(entries)))`` --
+        deduplicated and lexicographically sorted -- checked here rather
+        than only stated as a docstring rule, so a construction site or
+        roll-up that unions two tuples without normalizing (e.g. a
+        duplicate entry, or two entries out of order) fails this gate
+        instead of shipping unstable JSON/SARIF/JUnit output once Phase 3
+        projects this field (Codex review, PR #900)."""
+        emitted = TestClassificationTracksRealProducerBehavior._emitted_for_kind(
+            kind_value
+        )
+        for c in emitted:
+            if c.evidence_provenance is None:
+                continue
+            normalized = tuple(sorted(set(c.evidence_provenance)))
+            assert c.evidence_provenance == normalized, (
+                f"{kind_value}'s real producer emitted a non-normalized "
+                f"evidence_provenance {c.evidence_provenance!r} -- every "
+                "constructor must return tuple(sorted(set(entries))), "
+                f"expected {normalized!r}."
+            )
