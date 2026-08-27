@@ -726,12 +726,13 @@ class ObjectStore(Protocol):
     form.
     """
 
-    def put(self, content: Any) -> str:
+    def put(self, content: Any, *, algorithm: str = "sha256") -> str:
         """Store `content`, returning its content digest.
 
         Storing the same logical content twice must return the same digest
-        and must not create a second copy — the whole point of D7's shared,
-        digest-addressed evidence.
+        and must not create a second copy. `algorithm` is forwarded to
+        `semantic_digest` as-is, so an `ObjectRef` built with a non-default
+        algorithm round-trips through this same call (Codex review).
         """
         ...
 
@@ -766,16 +767,15 @@ class InMemoryObjectStore:
     def __init__(self) -> None:
         self._objects: dict[str, Any] = {}
 
-    def put(self, content: Any) -> str:
+    def put(self, content: Any, *, algorithm: str = "sha256") -> str:
         # Normalize `content` exactly once, then hash and store from that
         # same snapshot -- two separate calls would each re-traverse the
-        # caller's own `content` independently, which for a stateful custom
-        # `Mapping` (or one mutated between the calls) could make the
-        # returned digest identify different content than what gets stored
-        # (Codex review). `stripped` is a fresh, plain-typed structure, so
-        # re-hashing it traverses our own copy, not the caller's.
+        # caller's `content` independently, which for a stateful `Mapping`
+        # (or one mutated in between) could make the digest identify
+        # different content than what gets stored (Codex review).
+        algorithm = _identity_text(algorithm, "algorithm")
         stripped = strip_capture_metadata(content)
-        digest = semantic_digest(stripped)
+        digest = semantic_digest(stripped, algorithm=algorithm)
         if digest not in self._objects:
             self._objects[digest] = stripped
         return digest

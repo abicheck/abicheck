@@ -652,6 +652,22 @@ class TestObjectStoreContract:
         content = {"declarations": [1, 2, 3]}
         assert store.put(content) == semantic_digest(content)
 
+    def test_put_honors_a_non_default_algorithm(self) -> None:
+        """An `ObjectRef` built with a non-default algorithm (`object_relpath`
+        accepts any real, fixed-size hashlib algorithm) must be resolvable
+        through the store `put()`s the matching content into -- before the
+        fix, `put()` always hashed with the default sha256 regardless of
+        what algorithm the caller's own `ObjectRef` used, so such a
+        reference could never actually be `has()`/`get()`-resolved.
+        """
+        store = InMemoryObjectStore()
+        content = {"declarations": [1, 2, 3]}
+        digest = store.put(content, algorithm="sha3_256")
+        assert digest == semantic_digest(content, algorithm="sha3_256")
+        ref = ObjectRef(kind="declarations", digest=digest)
+        assert store.has(ref.digest)
+        assert store.get(ref.digest) == content
+
     def test_storing_identical_content_twice_returns_one_digest(self) -> None:
         store = InMemoryObjectStore()
         first = store.put({"a": 1, "b": 2})
