@@ -1065,7 +1065,16 @@ a thirteenth Codex review round caught it — `qualified_name_segments`
 (line 35) and `dumper_cache` (line 658). Both fixed in the same pass:
 verified with a corrected scanner, and cross-checked against the full
 classified-layer set to confirm no third instance of the same scanner bug
-survives in this list. `api_types` (also imported, line 36) is deliberately
+survives in this list. A fifteenth round caught a fourth kind of gap no AST
+scan, corrected or not, can ever see: `service_header_scoped` is loaded
+dynamically at line 87 via
+`_importlib.import_module(".service_header_scoped", __package__)` — a
+plain function call at runtime, not an `import`/`from` statement, exactly
+as that line's own surrounding comments explain. Confirmed unclassified in
+`modules.yaml` and confirmed no `abicheck/workflows/service_header_scoped.py`
+exists yet, so an otherwise-mechanical relocation of `service.py` would
+resolve this one to a nonexistent sibling rather than merely trip
+`unclassified-import` the way every AST-visible import here does. `api_types` (also imported, line 36) is deliberately
 *not* on this list, for the opposite reason `serialization` was added to it:
 `api_types` is one of `modules.yaml`'s two `public_root_surfaces`, the
 explicit exemption `check_architecture.py`'s `unclassified-import` check
@@ -1260,13 +1269,31 @@ imports applies here too, `TYPE_CHECKING`-only reference included.
 Codex review round caught this paragraph omitting** — `reclassify.py` is the
 module this note already recorded as *deliberately* unclassified, not
 merely not-yet-classified, so `checker_policy.py`'s own split resolves
-`ChangeKind` alone and does nothing for `ReclassifyRule`. So the protocol is
-the better mechanism to use *once* **both** `checker_policy.py`'s split
-*and* a real decision on `reclassify.py` (classify it, or accept the same
-kind of leaf-module treatment `policy_file.py` gets here) have happened —
-two co-prerequisites, not one — worth recording for whoever does that, but
-neither is a protocol in place of doing it, and `policy_file.py` staying
-unclassified for now is unchanged.
+`ChangeKind` alone and does nothing for `ReclassifyRule`. **A fourteenth
+Codex review round caught the fix this paragraph first proposed for that —
+"or accept the same kind of leaf-module treatment `policy_file.py` gets" —
+was itself wrong, and this pass reproduced why directly** rather than take
+the correction on faith: a probe file placed under `abicheck/model/`
+(`migrated_source=True`, matching where the protocol would actually live)
+with a `TYPE_CHECKING`-only import of `ReclassifyRule` from `reclassify.py`
+trips `unclassified-import` immediately —
+`python scripts/check_architecture.py` on it: `migrated layer 'model'
+imports unclassified first-party module 'abicheck.reclassify'`. Leaving
+`reclassify.py` unclassified only works for `policy_file.py`'s own case
+*because* `policy_file.py` isn't itself `migrated_source` (it's a flat,
+unmoved file, so `dependency-direction` is the only check that applies to
+its own imports, not `unclassified-import`) — a genuinely different
+situation from a *new* protocol module deliberately placed inside the
+already-migrated `abicheck/model/` package. So the protocol needs
+`ReclassifyRule` actually classified (or the protocol design changed to
+avoid the dependency) — there is no unclassified-and-unblocking option here
+the way there is for `policy_file.py` itself. So the protocol is the better
+mechanism to use *once* **both** `checker_policy.py`'s split (for
+`ChangeKind`) *and* a real classification of `reclassify.py` (for
+`ReclassifyRule`) have happened — two co-prerequisites, neither satisfied
+by deferral — worth recording for whoever does that, but neither is a
+protocol in place of doing it, and `policy_file.py` staying unclassified
+for now is unchanged.
 
 Reclassifying
 `policy_file.py`/`suppression.py` as `compare` instead was rejected too:
