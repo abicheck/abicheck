@@ -1790,36 +1790,57 @@ sibling:
   the L5 builder's node for the identical declaration land under two
   different ids, `add_node()`'s id-collision merge never triggers, and the
   two representations sit side by side in one container without ever
-  reconciling. **Migrating all twelve call sites to construct an
-  `OccurrenceId` and call `canonical_key()` directly is not this phase's
-  fix** — that is a real, cross-cutting rewrite of eight already-complex
-  L5 modules (the same class of scope this plan's "PR C" dump/scan
-  convergence saga in AGENTS.md shows is never a same-phase afterthought),
-  and every one of those call sites today receives a bare, already-
-  normalized identity *string* (`ent.identity()`, a clang qualified name,
-  a USR), not a structured `EntityId`/`OccurrenceId` — there is no
-  `ScopePath`/kind/disambiguator in hand at most of these call sites to
-  build one from without a materially larger, separate data-flow change
-  at each site. The fix instead makes the two encodings the same
-  encoding, not two encodings that must happen to agree: `_decl_node_id`/
-  `_type_node_id` move into `model/graph.py` alongside `GraphNode`/
-  `GraphEdge` (the same relocation Phase 3's own Files list already
-  performs for those two types, just extended to the two functions that
-  mint their ids), and `canonical_key(occurrence_id)` for a `declaration`/
-  `type`-kind `EntityId` is defined as exactly `_decl_node_id(identity)`/
-  `_type_node_id(identity)` — called with the `EntityId`'s own
-  identity-only string rendering — with the `OccurrenceId`'s disambiguator
-  appended as a suffix only when non-empty (reducing to bit-identical
-  output for the common, empty-disambiguator case). `buildsource/
-  graph_facts.py` keeps a thin re-export of both names, the same
-  compatibility-shim pattern this phase's Files list already uses for
-  `GraphNode`/`GraphEdge` — so all twelve existing L5 call sites are
-  **unchanged**, still passing a bare identity string, and now, without
-  any edit on their part, produce ids that are bit-for-bit identical to
-  what the new public-surface builder produces for the same declaration.
-  `add_node()`'s existing id-collision merge then does the reconciling
-  work this phase's design always intended, for real, on every node both
-  builders can see.
+  reconciling.
+
+  **A "move the function, have `canonical_key` delegate to it" fix was
+  tried here and is itself wrong, for a reason a further review round
+  caught precisely: relocating `_decl_node_id`/`_type_node_id` does not
+  make their *inputs* equal, and the inputs are where the real
+  incompatibility lives.** `canonical_key(entity_id)` exists specifically
+  because a flattened qualified-name string is *not* injective on
+  `EntityId` identity — two domain `EntityId`s whose `ScopePath`s differ
+  only in segment *kind* (a record nested in a record vs. the same names
+  nested in a namespace) can render to the identical flattened string,
+  which is exactly the collision this phase's own `surface_graph.py` fix
+  (two sections up) was built to avoid by keying on the segments'
+  `__eq__`/`__hash__` fields directly, not on a flattened rendering.
+  `_decl_node_id`/`_type_node_id`'s own normalization
+  (`_normalize_graph_identity`) only ever strips a checkout-dependent
+  absolute path out of an anonymous/lambda marker — confirmed by reading
+  it — it carries no segment-kind information at all, because its input,
+  `ent.identity()`, never had any: every one of the twelve L5 call sites
+  computes a bare, already-flattened string with no `ScopePath`/kind
+  breakdown behind it. So relocating the two functions and defining
+  `canonical_key()` to call them does not produce one shared, injective
+  encoding — it produces exactly one of two bad outcomes: either
+  `canonical_key()`'s rendering stays flattened (matching the L5
+  callers' ids, but reopening the segment-kind collision this same phase
+  already closed for the public-surface builder's own nodes), or it stays
+  segment-kind-aware (closing that collision, but then no longer matching
+  what the unchanged L5 callers compute, so `add_node()`'s id-collision
+  merge never triggers and nothing reconciles — the original finding's
+  own failure mode, unsolved by the relocation).
+
+  **Left as an explicit, scoped-out residual rather than attempted a
+  third time under review pressure, matching this plan's own established
+  discipline for a gap of this shape (the dump/scan typed-API convergence
+  in AGENTS.md's "PR C" note is the same class of problem: real,
+  cross-cutting, not a same-phase afterthought).** A correct fix needs
+  one of: (a) migrating the twelve L5 call sites to construct a real
+  `EntityId`/`OccurrenceId` from whatever scope/kind information their own
+  producers (`SourceEntity`, clang AST nodes, USR strings) actually carry
+  before flattening it away — a genuine, separate data-flow change to
+  eight already-complex modules, not a drive-by edit; or (b) a lossless
+  mapping recovering the lost segment-kind information from each
+  producer's own provenance, which would need its own audit of what each
+  of the twelve call sites' inputs actually preserve today. Until one of
+  those lands, the two builders sharing one `SourceGraphSummary` instance
+  (the assembly-step fix below) reconciles nodes only where the two
+  encodings happen to coincide — unparameterized, unambiguous declarations
+  with no real segment-kind collision, the common case — and a
+  declaration that does hit the segment-kind collision keeps two separate
+  nodes across the two builders, an accepted limitation for this phase
+  rather than a silently-assumed-closed gap.
 - **Sharing node ids alone does not merge two graphs — this phase adds the
   actual assembly step, not only a shared identity.** `merge_graph_facts`
   only folds the `GraphFact` list already attached to *one* node; it is
@@ -3280,17 +3301,31 @@ which backend's value won, per declaration, per fact — applied to
    on *both* sides must name exactly one occurrence per side (two
    occurrences on one side sharing a non-empty disambiguator is itself a
    genuine ambiguity for that value, not resolvable by this rule at all) —
-   pairing each such value 1:1; then, among whatever occurrences remain
-   unmatched after that (necessarily empty-disambiguator occurrences, since
-   every non-empty value was already paired or flagged), pair the two
-   leftovers only when *exactly one* remains unmatched on each side (the
-   "no TU-context signal from either side, but nothing else to confuse it
-   with" case this phase's own empty-disambiguator rule already covers for
-   the single-occurrence case). Any `EntityId` for which this process
+   pairing each such value 1:1.
+
+   **The leftovers after that pass are not necessarily empty-disambiguator
+   occurrences, and a further review round gave the exact counterexample:
+   CastXML `{empty, usr1}` against Clang `{usr1, usr2}` pairs `usr1`↔`usr1`
+   in the first pass, leaving CastXML's `empty` and Clang's `usr2` as the
+   leftovers — one empty, one genuinely non-empty, neither claimed by the
+   other side.** A one-sided non-empty disambiguator (present on one
+   occurrence, simply absent because the other backend never derived one
+   for its matching declaration) is not itself a disagreement — the same
+   "no additional signal from that backend" rule the single-occurrence
+   case already states — so treating every leftover as if it must be
+   empty, and refusing to look at what it actually holds, would wrongly
+   leave this pairing unmerged even though it is exactly as safe as the
+   empty-vs-empty case. The leftover pass therefore applies the identical
+   single-pair disambiguator-safety rule from above, not a
+   narrower empty-only rule: when exactly one occurrence remains unmatched
+   on each side, pair them unless *both* remaining disambiguators are
+   non-empty and unequal (a real, two-sided disagreement — the one case
+   this rule still refuses). Any `EntityId` for which this process
    leaves a non-empty disambiguator value claimed by more than one
-   occurrence on either side, or leaves more than one empty-disambiguator
-   occurrence unmatched on either side after every non-empty value is
-   resolved, has no unique matching — it is left entirely unmerged for that
+   occurrence on either side in the first pass, leaves more than one
+   leftover unmatched on either side after it, or leaves exactly one
+   leftover per side whose disambiguators are both non-empty and disagree,
+   has no unique matching — it is left entirely unmerged for that
    identity: every occurrence from both sides is unioned in verbatim as its
    own entry, under rule 3 below, rather than guessing at a pairing. This
    is the same fail-closed
@@ -3300,11 +3335,15 @@ which backend's value won, per declaration, per fact — applied to
    even meaningful, not a new principle invented for it. A dedicated
    property test pins the uniquely-matchable multi-occurrence case
    directly (two same-sized groups whose non-empty disambiguators are a
-   bijection, confirmed to merge both pairs correctly) alongside the
-   genuinely-ambiguous case (two occurrences sharing one non-empty
-   disambiguator on one side, confirmed to leave the whole group
-   unmerged) — the exact two shapes this finding's own counterexample and
-   the original ambiguity-detection requirement each name.
+   bijection, confirmed to merge both pairs correctly), the genuinely-
+   ambiguous case (two occurrences sharing one non-empty disambiguator on
+   one side, confirmed to leave the whole group unmerged), and the mixed
+   one-sided-leftover case above (CastXML `{empty, usr1}` against Clang
+   `{usr1, usr2}`, confirmed to merge both pairs — `usr1`↔`usr1` from the
+   first pass, `empty`↔`usr2` from the leftover pass — rather than leaving
+   the group unmerged) — the three shapes this finding's own two
+   counterexamples and the original ambiguity-detection requirement each
+   name.
 2. **CastXML's `CanonicalEntity` is the base for every matched pair**,
    mirroring every other reconciled field in this function: Clang's
    matching occurrence backfills only the specific facts CastXML's own
