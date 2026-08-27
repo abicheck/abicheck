@@ -2,8 +2,9 @@
 
 - **ADR-061 adoption ledger**: `architecture/debt.yaml` baselines are tightened
   again for 13 files whose recorded baseline had drifted from their actual
-  size since the last ratchet (`74cee4d`) — 96 lines of already-won ground
-  across `checker_types.py`, `cli_compare_helpers.py`, `cli_compare_release.py`,
+  size since the last ratchet (`74cee4d`) — 145 lines of already-won ground
+  (84 across the 12 production files, plus 61 on the one test file) across
+  `checker_types.py`, `cli_compare_helpers.py`, `cli_compare_release.py`,
   `cli_resolve.py`, `cli_scan_baseline.py`, `diff_filtering.py`,
   `diff_platform.py`, `diff_types.py`, `html_report.py`, `junit_report.py`,
   `reporter_markdown.py`, `serialization.py`, and
