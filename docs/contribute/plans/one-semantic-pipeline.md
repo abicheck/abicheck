@@ -216,8 +216,18 @@ availability_status.py` (trimmed to a re-export shim); `abicheck/model/
 fact.py` (new — `Fact[T]`); `abicheck/model/snapshot.py`'s `RecordType`/
 `Param` dataclasses (new `Fact[...]`-typed fields alongside the existing
 ones, old field deprecated-but-present for one release to keep
-`asdict`-based external consumers working — removed in Phase 5's
-registry-driven sweep, not here); `dumper_castxml.py`/`dumper_clang.py`/
+`asdict`-based external consumers working). **The old field is not a
+live `@property` deriving from the new one** — `dataclasses.asdict()`
+only serializes declared dataclass fields, never properties, so making
+the old field a property would silently *remove* it from every
+`asdict`-based consumer's output instead of keeping it populated, the
+opposite of this compatibility goal. Instead, every producer derives the
+old field from the new `Fact[...]` value at the *same* construction call
+— `vtable=fact.value_or([])` right next to `vtable_fact=fact` — so
+there is exactly one write, not two independently-maintained ones that
+could drift; the old field is never independently assigned raw producer
+output again after this phase. (Removed in Phase 5's registry-driven
+sweep, not here.) `dumper_castxml.py`/`dumper_clang.py`/
 `dumper_clang_vtable.py`/`dwarf_snapshot.py` (each producer constructs the
 `Fact[...]` value directly, per the design above); `serialization.py`
 (`snapshot_to_dict()`'s `Fact[...]`-status-to-string encoding, extending
@@ -531,10 +541,28 @@ sibling:
   `model`, `extract`, and `compare` alike) — each builder function receives
   the shared `SourceGraphSummary` as a parameter and only ever calls
   `.add_node`/`.add_edge` on it, never constructs or imports it itself.
-  `AbiSnapshot.build_source.source_graph` — the one field either builder's
-  output is ultimately attached to — is populated from this one shared
-  instance, never from two independently-constructed ones merged after the
-  fact by inspection. ADR-057/053's consumers still
+  **`AbiSnapshot.build_source.source_graph` cannot be where this
+  unconditional graph lives** — `build_source: BuildSourcePack | None` is
+  itself `None` for an ordinary L0-L2 snapshot with no `--sources`/
+  `--build-info`, which is the common case this phase's "available
+  unconditionally" claim is specifically about; attaching the graph only
+  under an optional evidence pack would mean fabricating a pack just to
+  hold it, silently widening what `build_source is not None` means
+  elsewhere in the codebase (it currently *means* "build/source evidence
+  was collected," which several existing checks rely on). Fixed by a new,
+  always-present field directly on `AbiSnapshot` — `surface_graph:
+  SourceGraphSummary | None = field(default=None, kw_only=True)` (`None`
+  only for a snapshot this phase hasn't touched yet, e.g. an old loaded
+  snapshot predating this field; always populated for a freshly-extracted
+  one, regardless of whether `build_source` is set). This is the one
+  shared instance both builders write into — when `build_source` evidence
+  also exists, the L5 builder writes into the *same* `AbiSnapshot.
+  surface_graph` instance rather than a separate graph attached under
+  `build_source`, so there is exactly one graph-shaped field per snapshot
+  after this phase, not a conditional one nested under an unrelated
+  optional pack. `compute_public_surface(snapshot)` and any other direct
+  caller read `snapshot.surface_graph` directly, with no fabricated
+  pack to thread through. ADR-057/053's consumers still
   read the L3-L5-gated graph only when it exists, and migrating them onto
   querying through `PublicSurfaceQuery`'s shared instance directly is
   still explicitly **not** part of this phase (each stays its own later,
@@ -574,13 +602,16 @@ traversal logic); `surface.py` (`compute_public_surface()` becomes a thin
 wrapper calling `PublicSurfaceQuery.resolve`); `dumper_scoping.py`/
 `export_surface.py`/`type_reachability.py` (each becomes a graph *builder*
 contributing nodes/edges in `compare/`, or a relevance *query* in
-`policy/`, not an independent reachability algorithm); the
+`policy/`, not an independent reachability algorithm); `abicheck/model/
+snapshot.py` (new `AbiSnapshot.surface_graph: SourceGraphSummary | None`
+field, unconditional — not nested under `build_source`); the
 `workflows/`-layer dump/compare orchestration code that already calls
 `buildsource.header_graph.build_header_only_graph()`/attaches
 `build_source.source_graph` (`service_header_graph_attach.py` and
-siblings) gains the one line constructing a single `SourceGraphSummary`
-and threading it into both the public-surface builder and the L5 builder,
-per the assembly-step design above. `abicheck/
+siblings) gains the one line constructing a single `SourceGraphSummary`,
+assigning it to `snapshot.surface_graph`, and threading that same
+instance into both the public-surface builder and the L5 builder, per the
+assembly-step design above. `abicheck/
 workflows/consumer_graph.py` (ADR-057's consumer graph) and ADR-053's
 TU→link-unit→DSO attribution are explicitly **not** migrated to query the
 graph in this phase — each stays a candidate for a later, separate phase,
@@ -622,8 +653,12 @@ implementations live past one release). No second node/edge dataclass
 hierarchy exists anywhere in the repository after this phase —
 `compare/surface_graph.py` constructs `model.graph.GraphNode`/`GraphEdge`
 instances with its own kind vocabulary, the same way `buildsource/
-source_graph.py` already does, never a parallel type. FP-rate gate shows
-no regression.
+source_graph.py` already does, never a parallel type. The new
+`AbiSnapshot.surface_graph` field bumps `serialization.SCHEMA_VERSION`
+the same way Phase 0's `Fact[...]` fields do (a third, independent bump
+by this plan, on top of Phase 0's and Phase 7's — all three are additive
+and bump the same pre-existing `AbiSnapshot`/report-schema counters, not
+ADR-062's `ProjectSnapshot` schema). FP-rate gate shows no regression.
 
 ---
 
@@ -870,18 +905,32 @@ whole point is to distinguish "evaluated" from "not evaluated," silently
 erasing that distinction from the existing JSON/SARIF output every
 external consumer already relies on. Instead, each `Change` gains a new,
 separate field — `gate_classification` (or similarly named; always
-resolved, never `None`, independent of whether contract evaluation ran) —
-carrying exactly the pass/fail/severity-category decision `_is_failure`
-needs, computed once during resolution (mirroring how `contract_context.py`
-already persists its own, separately-scoped per-finding decision, per
-ADR-049 D1 — a sibling field, not a reuse of that one). `junit_report.py`'s
-`_is_failure` reads *that* new field instead of re-deriving severity
-inline from raw `Change` data; `compatibility_decision` keeps its existing
-meaning and existing callers completely unchanged. `RunOutcome` is what
-the report's own top-level `compatibility_decision` summary still renders
-from, unchanged. "Stops computing inline" means `_is_failure` stops
-re-running severity/policy logic itself, not that it starts asking the
-aggregate report outcome a per-test-case question it cannot answer.
+resolved, never `None`, independent of whether contract evaluation ran).
+
+**Where it is stamped is not a new computation — it is `_is_failure`'s
+own existing logic, moved to run once instead of on every read.**
+`junit_report._is_failure` already calls the real, single canonical
+per-finding verdict — `DiffResult._effective_verdict_for_change(change)`
+— which already honours `PolicyFile` overrides, the A4 per-finding
+`effective_verdict` (ADR-027), frozen-namespace escalation guards, and
+(when given) the resolved `severity_config`'s category-to-level mapping;
+that one function is already correct for ordinary, contract-excluded, and
+scoped-finding runs alike, since that is exactly what it exists to be
+correct for today. The stamping point is therefore `checker.compare()`'s
+own result-assembly step — *after* `DiffResult` is fully built and the
+severity scheme is resolved (both already required inputs to
+`_effective_verdict_for_change` today), iterate `result.changes` once and
+set `change.gate_classification = _effective_verdict_for_change(change,
+result, kind_sets, severity_config)` for every finding. `junit_report.py`'s
+`_is_failure` then reads that stamped field instead of calling
+`_effective_verdict_for_change` itself on every `<failure>` check.
+`compatibility_decision` keeps its existing meaning and existing callers
+completely unchanged. `RunOutcome` is what the report's own top-level
+`compatibility_decision` summary still renders from, unchanged. "Stops
+computing inline" means `_is_failure` stops *calling* the resolution
+logic itself, not that the resolution logic is new or that it starts
+asking the aggregate report outcome a per-test-case question it cannot
+answer.
 
 **`junit_report.py` is not the only remaining inline exit-code consumer —
 a first draft of this phase missed the multi-target aggregate path
@@ -919,9 +968,13 @@ external encoder, mirroring the CLI's `_exit_with_severity_or_verdict` —
 that turns the aggregated `RunOutcome` back into the integer `aggregate`'s
 own JSON output and process exit code still need.
 
-**Files.** `abicheck/policy/outcome.py` (new); `junit_report.py` (the
-first remaining inline exit-code computation ADR-042 already named as
-unfinished); `html_report.py`'s CI Gate card (already `RunOutcome`-shaped
+**Files.** `abicheck/policy/outcome.py` (new); `checker_types.py` (new
+`Change.gate_classification` field, kw_only, appended last — `Change` is
+public API); `checker.py` (the stamping pass: once per `compare()` call,
+after `DiffResult`/severity resolution, over every `result.changes`
+entry — the one new population point the first draft of this phase
+omitted); `junit_report.py` (the first remaining inline exit-code
+computation ADR-042 already named as unfinished); `html_report.py`'s CI Gate card (already `RunOutcome`-shaped
 per ADR-042 — confirm it reads the new object directly rather than a
 precursor shape, closing ADR-036 Increment 3 as a side effect if it
 hasn't landed separately by then); `abicheck/workflows/aggregate/gate.py`
@@ -930,7 +983,16 @@ legacy `exit_code` decoding becomes the named fallback path, not the only
 path); `abicheck/workflows/aggregate/fold.py` (`exit_code()`'s aggregation
 reads `RunOutcome.gate` per target, `max()`-over-raw-integers deleted);
 the report-writing side of `reporter.py`/`aggregate.py` (emit the new
-structured fields alongside the unchanged `exit_code`); `scan_engine.
+structured fields alongside the unchanged `exit_code`, and bump
+`REPORT_SCHEMA_VERSION`/`AGGREGATE_SCHEMA_VERSION` — an additive schema
+change needs its version bumped the same way every prior
+`report_schema_version`-gated field addition already did, per that
+constant's own changelog comments; a first draft of this phase named the
+field addition without the version bump, schema-file edit, or
+regeneration that addition requires); `docs/reference/schemas/v1/
+compare_report.schema.json`/`aggregate_report.schema.json` (the new
+fields, regenerated via `scripts/publish_schemas.py`, not hand-edited);
+`scan_engine.
 ScanOutcome.to_dict()` (a separate, independent report writer a first
 draft of this phase's file list missed entirely — not a sibling of
 `reporter.py`'s compare-report writer, and `gate.py`'s `GateInfo.
@@ -958,7 +1020,13 @@ report (`ScanOutcome.to_dict()`) carries the new structured fields, and
 structured-field path, not the legacy-decode fallback — confirmed by
 asserting which path actually ran (not only that the output matches),
 since a test that only checks the output could pass with the writer
-changed and the reader still silently falling back.
+changed and the reader still silently falling back. A fourth test
+validates every regenerated fixture report against the regenerated
+`docs/reference/schemas/v1/compare_report.schema.json`/
+`aggregate_report.schema.json` (the same validation
+`scripts/verify.py`'s `fair-metadata` step already runs for generated
+files), so the new fields are provably reflected in the published schema
+mirror, not only in the Python writer.
 
 **Acceptance criteria.** Zero remaining inline exit-code/severity
 computation outside the one designated encoder per front end — enforced
