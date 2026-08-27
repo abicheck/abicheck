@@ -2354,7 +2354,43 @@ symbol spelling, per the correction above (`_root_seed_types`/
 `reachable_types`/`idioms.py`'s create/destroy regexes are all keyed on
 this plain name already) — preserving its existing `frozenset[str]`
 return type exactly — `surface_graph.py` itself still never imports
-`policy/public_surface.py`, per the note above); `pattern_verdicts.py`
+`policy/public_surface.py`, per the note above).
+
+  **Threading `public_entity_ids` into `compute_surface_metrics()`'s own
+  signature does not, by itself, make its *metrics* reflect the resolved
+  surface, and a review round correctly traced why: every one of its
+  direct counts is computed straight from `Visibility.PUBLIC`, with no
+  reference to the parameter at all.** Reading the real function:
+  `public_functions`/`public_variables`/`exported_symbols`/
+  `undocumented_export_ratio`/the per-header `declared_counts`/
+  `exported_counts` tallies each sum `fn.visibility ==
+  Visibility.PUBLIC`/`var.visibility == Visibility.PUBLIC` directly, and
+  `public_types`/`public_enums` come from `_public_type_counts()`, which
+  calls its *own*, entirely independent `compute_public_surface(snap)` —
+  never the `public_entity_ids` its caller already resolved. Adding the
+  parameter without touching any of these means `diff_surface_metrics()`'s
+  `PUBLIC_SURFACE_GREW`/`SHRANK` findings (via `_public_decl_count()`,
+  which sums exactly these fields) keep reflecting the legacy
+  `Visibility.PUBLIC` definition regardless of what `public_entity_ids`
+  says — a regression test proving the parameter was threaded through the
+  call signature would pass while the emitted findings stayed unchanged,
+  the exact gap this finding names. Fixed by having `compute_surface_
+  metrics()` use `public_entity_ids`, when non-`None`, for every one of
+  these tallies too: a function/variable counts as public when its own
+  resolved `EntityId` is a member of the set (matching `build_
+  surface_graph`'s own root-seeding rule, not a second definition), and
+  `_public_type_counts()` takes the same `public_entity_ids` argument and
+  counts record/enum membership directly from it instead of running its
+  own independent `compute_public_surface()` resolution — the caller
+  already resolved this once; a second, separate resolution inside
+  `_public_type_counts()` is exactly the redundant-recomputation this
+  phase's own design elsewhere avoids. When `public_entity_ids` is `None`
+  (every call site outside `compare()`'s own pipeline), every one of these
+  tallies keeps its exact current `Visibility.PUBLIC`-based behavior,
+  `_public_type_counts()` included — the same explicit, narrow residual
+  `public_roots()`'s own `Visibility.PUBLIC` fallback already states,
+  extended to the metrics this function computes directly rather than
+  through the graph. `pattern_verdicts.py`
 (`apply_pattern_verdicts()` gains the two-snapshot `old_public_entity_ids`/
 `new_public_entity_ids` pair, each threaded through as the single
 `public_entity_ids` argument to its matching `build_surface_graph()`
