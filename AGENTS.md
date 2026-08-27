@@ -587,7 +587,17 @@ cover the surrounding first-party trees this file doesn't detail.
 
 ## Adding a new ChangeKind
 
-1. Add to `ChangeKind` enum in `checker_policy.py`.
+1. Add a `("NAME", "value")` pair to whichever of
+   `abicheck/model/change_catalog/kind_names_{1,2,3}.py` is shortest at the
+   time (ADR-061 D9's model-vs-policy split moved `ChangeKind` itself out of
+   `checker_policy.py`; see `kinds.py`'s own docstring for why it's split
+   three ways instead of one class body). Then run
+   `python scripts/gen_changekind_stub.py` to regenerate the matching mypy
+   stub, `kinds.pyi` — required, since mypy type-checks against that stub
+   file instead of the real runtime module (`gen_changekind_stub.py --check`
+   catches a forgotten regeneration). `checker_policy.py` still re-exports
+   `ChangeKind`/`HasKind` unchanged, so every existing `from .checker_policy
+   import ChangeKind` call site is unaffected.
 2. Add ONE `ChangeKindMeta` entry (kind string, `default_verdict`, required
    `impact`, optional `description_template`) to the taxonomy module under
    `abicheck/model/change_catalog/` that matches which detector actually
