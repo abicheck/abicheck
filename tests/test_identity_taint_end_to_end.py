@@ -660,6 +660,7 @@ namespace lib { int touch() { return run_one() + run_two(); } }
         this documented boundary honestly rather than silently swallowing
         it as NO_CHANGE (Codex review, PR #898 -- confirmed empirically:
         asserting NO_CHANGE here fails against the real fix, as expected)."""
+        _require_toolchain()
         header_text = """
 #pragma once
 namespace lib {
