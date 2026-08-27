@@ -295,6 +295,18 @@ list above. `PackageManifest.variant_refs`/`.artifact_refs` embed full
 records rather than pointers to on-disk `refs/*.json` files, because there is
 no writer yet to make that split meaningful — see the module's own docstring.
 
+**A known, deliberately deferred gap** (flagged in review, Codex): `ArtifactRef.sections`
+has no accompanying D3 `FactAvailability`/`AvailabilityLedger` per section, so an
+absent section key cannot yet distinguish "not collected" from "unsupported"
+from "failed" the way a real producer will eventually need to report. Not
+closed here because no producer populates a section yet and D8's per-section
+content schemas don't exist yet either — wiring D3's vocabulary in now would
+mean guessing at a shape (per-artifact? per-section-kind?) with nothing real
+to validate the guess against, exactly the premature-design risk this file's
+own "Known gaps over risky reactive patches" convention warns about. Revisit
+once A1.4/A1.5 (folding sections/`BundleFacts`) or the first real section
+producer gives this a real caller to design against.
+
 Tests live in `tests/unit/storage/test_project_package.py`, following the same
 property-style-plus-example-cases convention as Phase 0 (A0.6/A1's
 "Validation corpus" identity-preservation cases, applied at the level this
