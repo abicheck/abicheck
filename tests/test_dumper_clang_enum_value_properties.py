@@ -52,17 +52,31 @@ pytestmark = pytest.mark.slow
 _WRAPPER_KINDS = sorted(_WRAPPER_EXPR_KINDS)
 
 
+def _int_value_encodings(value: int) -> list[str]:
+    """Every string encoding ``_evaluated_int_value`` must accept for
+    *value* -- it parses via ``int(str(val), 0)``, base-0, not decimal-only
+    (mirrors ``tests/test_ast_wrapper_chain_properties.py``'s identical
+    helper, Codex review, PR #888)."""
+    return [str(value), hex(value), oct(value), bin(value)]
+
+
+_int_with_encoding_strategy = st.integers(min_value=-1000, max_value=1000).flatmap(
+    lambda v: st.sampled_from(_int_value_encodings(v)).map(lambda s: (v, s))
+)
+
+
 @given(
     kinds=st.lists(st.sampled_from(_WRAPPER_KINDS), min_size=0, max_size=6),
-    value=st.integers(min_value=-1000, max_value=1000),
+    value_and_encoding=_int_with_encoding_strategy,
     data=st.data(),
 )
 @settings(max_examples=300)
 def test_finds_a_value_folded_at_any_position_along_the_chain(
-    kinds, value, data
+    kinds, value_and_encoding, data
 ) -> None:
+    value, encoding = value_and_encoding
     value_at = data.draw(st.integers(min_value=0, max_value=len(kinds)))
-    node, _leaf = build_wrapper_chain(kinds, value_at=value_at, value=str(value))
+    node, _leaf = build_wrapper_chain(kinds, value_at=value_at, value=encoding)
     assert _evaluated_int_value(node) == value
 
 

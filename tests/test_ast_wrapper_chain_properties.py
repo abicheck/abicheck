@@ -108,7 +108,26 @@ _EXPECTED_WRAPPER_KINDS = frozenset(
     }
 )
 _WRAPPER_KINDS = sorted(_EXPECTED_WRAPPER_KINDS)
-_LITERAL_LEAF_KIND = "IntegerLiteral"
+
+#: The six literal node kinds ``_initializer_value``/``_expr_value`` are
+#: each meant to recognize (see each module's own ``_LITERAL_NODE_KINDS``)
+#: -- pinned independently for the identical reason
+#: ``_EXPECTED_WRAPPER_KINDS`` above is: if either copy silently dropped one
+#: of these, an initializer of that kind would silently change from its
+#: readable value to a structural fingerprint, and a suite that only ever
+#: generated ``IntegerLiteral`` leaves would never notice (Codex review,
+#: PR #888).
+_EXPECTED_LITERAL_LEAF_KINDS = frozenset(
+    {
+        "IntegerLiteral",
+        "FloatingLiteral",
+        "CharacterLiteral",
+        "StringLiteral",
+        "CXXBoolLiteralExpr",
+        "FixedPointLiteral",
+    }
+)
+_LITERAL_LEAF_KINDS = sorted(_EXPECTED_LITERAL_LEAF_KINDS)
 
 _kinds_strategy = st.lists(st.sampled_from(_WRAPPER_KINDS), min_size=0, max_size=6)
 _nonempty_kinds_strategy = st.lists(
@@ -134,6 +153,19 @@ def test_wrapper_kind_vocabularies_agree_across_all_three_copies() -> None:
     assert dumper_clang._WRAPPER_EXPR_KINDS == _EXPECTED_WRAPPER_KINDS
     assert dumper_clang_expr._WRAPPER_EXPR_KINDS == _EXPECTED_WRAPPER_KINDS
     assert clang_nodes._WRAPPER_EXPR_KINDS == _EXPECTED_WRAPPER_KINDS
+
+
+def test_literal_kind_vocabularies_agree_across_both_copies() -> None:
+    """``_LITERAL_NODE_KINDS`` (the six literal kinds
+    ``_initializer_value``/``_expr_value`` recognize before falling back to
+    a structural fingerprint) is hand-maintained separately in
+    ``dumper_clang_expr.py`` and ``clang_nodes.py`` -- the same drift risk
+    ``_WRAPPER_EXPR_KINDS`` has, checked against ``_EXPECTED_LITERAL_LEAF_
+    KINDS`` above rather than against each other alone, for the identical
+    reason (Codex review, PR #888)."""
+    assert dumper_clang_expr._LITERAL_NODE_KINDS == clang_nodes._LITERAL_NODE_KINDS
+    assert dumper_clang_expr._LITERAL_NODE_KINDS == _EXPECTED_LITERAL_LEAF_KINDS
+    assert clang_nodes._LITERAL_NODE_KINDS == _EXPECTED_LITERAL_LEAF_KINDS
 
 
 # --------------------------------------------------------------------------
@@ -228,17 +260,34 @@ def test_evaluated_int_value_survives_the_same_malformed_shapes(
 # --------------------------------------------------------------------------
 
 
+def _int_value_encodings(value: int) -> list[str]:
+    """Every string encoding ``_evaluated_int_value`` must accept for
+    *value*, per its own ``int(str(val), 0)`` base-0 parsing -- not just
+    the decimal spelling. A regression narrowing that to decimal-only
+    parsing should fail here, not just against the one encoding every
+    other test in this module happens to use."""
+    return [str(value), hex(value), oct(value), bin(value)]
+
+
+#: Draws (value, one-of-its-valid-encodings) together, so a test can build
+#: the chain from the encoded string while asserting against the real int.
+_int_with_encoding_strategy = st.integers(min_value=-1000, max_value=1000).flatmap(
+    lambda v: st.sampled_from(_int_value_encodings(v)).map(lambda s: (v, s))
+)
+
+
 @given(
     kinds=_kinds_strategy,
-    value=st.integers(min_value=-1000, max_value=1000),
+    value_and_encoding=_int_with_encoding_strategy,
     data=st.data(),
 )
 @settings(max_examples=300)
 def test_evaluated_int_value_finds_a_value_folded_at_any_position(
-    kinds: list[str], value: int, data: Any
+    kinds: list[str], value_and_encoding: tuple[int, str], data: Any
 ) -> None:
+    value, encoding = value_and_encoding
     value_at = data.draw(st.integers(min_value=0, max_value=len(kinds)))
-    root, _leaf = build_wrapper_chain(kinds, value_at=value_at, value=str(value))
+    root, _leaf = build_wrapper_chain(kinds, value_at=value_at, value=encoding)
     assert dumper_clang._evaluated_int_value(root) == value
 
 
@@ -279,12 +328,15 @@ def test_evaluated_int_value_skips_unparseable_values_instead_of_raising(
         min_size=1,
         max_size=8,
     ).filter(lambda s: not _looks_intlike(s)),
-    good_value=st.integers(min_value=-1000, max_value=1000),
+    good_value_and_encoding=_int_with_encoding_strategy,
     data=st.data(),
 )
 @settings(max_examples=150)
 def test_evaluated_int_value_recovers_a_valid_value_past_an_unparseable_one(
-    kinds: list[str], bad_value: str, good_value: int, data: Any
+    kinds: list[str],
+    bad_value: str,
+    good_value_and_encoding: tuple[int, str],
+    data: Any,
 ) -> None:
     """The 'skip, don't raise' contract above only proves the walk doesn't
     crash when NOTHING further down is parseable either -- it doesn't by
@@ -293,9 +345,10 @@ def test_evaluated_int_value_recovers_a_valid_value_past_an_unparseable_one(
     on the first unparseable value, instead of continuing to descend,
     would still pass that test. Fold a real value onto a DEEPER node than
     the malformed one and assert it's still found."""
+    good_value, good_encoding = good_value_and_encoding
     bad_at = data.draw(st.integers(min_value=0, max_value=len(kinds) - 1))
     good_at = data.draw(st.integers(min_value=bad_at + 1, max_value=len(kinds)))
-    root, _leaf = build_wrapper_chain(kinds, value_at=good_at, value=str(good_value))
+    root, _leaf = build_wrapper_chain(kinds, value_at=good_at, value=good_encoding)
     ancestor = root
     for _ in range(bad_at):
         ancestor = ancestor["inner"][0]
@@ -337,22 +390,23 @@ def _pre_839_evaluated_int_value(node: dict[str, Any]) -> int | None:
 
 @given(
     kinds=_nonempty_kinds_strategy,
-    value=st.integers(min_value=-1000, max_value=1000),
+    value_and_encoding=_int_with_encoding_strategy,
     data=st.data(),
 )
 @settings(max_examples=300)
 def test_suite_kills_the_original_endpoints_only_mutant(
-    kinds: list[str], value: int, data: Any
+    kinds: list[str], value_and_encoding: tuple[int, str], data: Any
 ) -> None:
     """For a value folded strictly BETWEEN the outermost node and the fully
     -unwrapped leaf, the pre-#839 mutant must disagree with the fixed
     implementation -- demonstrating this generator actually reaches the
     input shape the historical bug needed, not merely inputs both
     implementations already handle alike."""
+    value, encoding = value_and_encoding
     if len(kinds) < 2:
         return
     value_at = data.draw(st.integers(min_value=1, max_value=len(kinds) - 1))
-    root, _leaf = build_wrapper_chain(kinds, value_at=value_at, value=str(value))
+    root, _leaf = build_wrapper_chain(kinds, value_at=value_at, value=encoding)
     assert dumper_clang._evaluated_int_value(root) == value
     assert _pre_839_evaluated_int_value(root) is None
     assert dumper_clang._evaluated_int_value(root) != _pre_839_evaluated_int_value(root)
@@ -376,13 +430,17 @@ def _decl_wrapping(init_expr: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-@given(kinds=_kinds_strategy, value=st.integers(min_value=-1000, max_value=1000))
+@given(
+    kinds=_kinds_strategy,
+    value=st.integers(min_value=-1000, max_value=1000),
+    leaf_kind=st.sampled_from(_LITERAL_LEAF_KINDS),
+)
 @settings(max_examples=200)
 def test_initializer_value_and_expr_value_agree_on_a_literal_at_any_depth(
-    kinds: list[str], value: int
+    kinds: list[str], value: int, leaf_kind: str
 ) -> None:
     root, _leaf = build_wrapper_chain(
-        kinds, value_at=len(kinds), value=str(value), leaf_kind=_LITERAL_LEAF_KIND
+        kinds, value_at=len(kinds), value=str(value), leaf_kind=leaf_kind
     )
     assert dumper_clang_expr._initializer_value(_decl_wrapping(root)) == str(value)
     assert clang_nodes._expr_value(root) == str(value)
