@@ -12,6 +12,7 @@ Phase 0 modules use (root `AGENTS.md`'s "Primitive-level property tests").
 
 from __future__ import annotations
 
+import unicodedata
 from typing import Any
 
 import pytest
@@ -238,6 +239,21 @@ class TestPathLayout:
         # "CON" and "CON.json" are refused for the identical reason.
         with pytest.raises(ValueError):
             variant_ref_relpath("CON.json")
+
+    @pytest.mark.parametrize("bad_id", ["COM¹", "com¹", "COM².json", "LPT³"])
+    def test_a_superscript_digit_device_name_is_refused(self, bad_id: str) -> None:
+        # A real, documented Windows bypass: "COM¹" (with the single-
+        # character Unicode superscript digit) renders identically to
+        # "COM1" and was blocked as a reserved name for the same reason.
+        with pytest.raises(ValueError):
+            variant_ref_relpath(bad_id)
+        with pytest.raises(ValueError):
+            artifact_ref_relpath(bad_id)
+
+    def test_an_ordinary_superscript_digit_id_is_not_refused(self) -> None:
+        # The restriction is specifically the reserved device-name stems --
+        # an id that merely contains a superscript digit elsewhere is fine.
+        assert variant_ref_relpath("x²") == "refs/variants/x².json"
 
     def test_an_id_at_the_component_limit_is_accepted(self) -> None:
         # 250 bytes + len(".json") == 255, the common filesystem limit --
@@ -508,6 +524,27 @@ class TestPackageManifest:
                         artifact_id=precomposed, variant_id="cpu-gcc", kind="pe"
                     ),
                 ),
+            )
+
+    def test_a_collision_only_visible_after_folding_is_still_refused(self) -> None:
+        # Two distinct, already-normalized ids can still fold to
+        # differently-normalized strings if the check only normalizes
+        # *before* casefold() -- casefold() is not guaranteed to preserve
+        # normalization. Both spellings here are already stable under a
+        # single NFC/NFD pass on their own, so this exact collision is
+        # invisible to a normalize-then-casefold check and only appears
+        # once the *casefolded* result is itself renormalized.
+        first = "\u0124\u0331"  # H WITH CIRCUMFLEX + COMBINING MACRON BELOW
+        second = "\u0125\u0331"  # h WITH CIRCUMFLEX (lowercase) + same combiner
+        naive = unicodedata.normalize("NFC", first).casefold()
+        other_naive = unicodedata.normalize("NFC", second).casefold()
+        assert naive != other_naive  # the premise: one normalize pass misses it
+        with pytest.raises(ValueError, match="normalization-insensitive"):
+            PackageManifest(
+                variant_refs=(
+                    VariantRef(variant_id=first),
+                    VariantRef(variant_id=second),
+                )
             )
 
     def test_an_artifact_naming_an_undeclared_variant_is_refused(self) -> None:

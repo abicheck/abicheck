@@ -126,10 +126,18 @@ SECTION_KINDS = (
 #: all refused the same way a real Windows filesystem refuses them), so a
 #: writer fanning this manifest out to `refs/variants/<id>.json` never hits
 #: a name the target filesystem cannot create.
+#: Superscript digits 0-9, index-aligned (`_SUPERSCRIPT_DIGITS[1]` is `"¹"`).
+#: Windows treats `COM¹`/`LPT¹` and friends as reserved device names too --
+#: a real, documented bypass of the plain-ASCII-digit restriction that a
+#: Windows filesystem update closed by rejecting these spellings as well.
+_SUPERSCRIPT_DIGITS = "⁰¹²³⁴⁵⁶⁷⁸⁹"
+
 _WINDOWS_RESERVED_NAMES = frozenset(
     {"CON", "PRN", "AUX", "NUL"}
     | {f"COM{i}" for i in range(1, 10)}
     | {f"LPT{i}" for i in range(1, 10)}
+    | {f"COM{_SUPERSCRIPT_DIGITS[i]}" for i in range(1, 4)}
+    | {f"LPT{_SUPERSCRIPT_DIGITS[i]}" for i in range(1, 4)}
 )
 
 #: Characters no Windows filesystem accepts in a path component, beyond the
@@ -211,15 +219,22 @@ def _reject_filesystem_collisions(ids: list[str], record_kind: str) -> None:
       path component for exactly the reason a case-insensitive one treats
       `Foo`/`foo` as the same one.
 
-    Both are folded together -- NFC normalization first, so the two
-    spellings above collapse to one string, then `casefold()` for case --
-    before comparing, so either kind of collision is caught here, at the
-    one place every id is collected, rather than only once a real writer
-    target reproduces it.
+    Folded via Unicode's own canonical-caseless-matching construction
+    (`NFD(casefold(NFD(x)))`, Unicode Standard D145/D146) rather than a single
+    normalize-then-casefold pass: `casefold()` is not guaranteed to preserve
+    normalization, so two ids that are themselves already NFC/NFD and
+    genuinely distinct can still fold to differently-normalized strings that
+    a normalization-insensitive filesystem would treat as one path
+    component. Renormalizing after casefolding is what closes that gap --
+    either kind of collision (case, or Unicode normalization, or both at
+    once) is caught here, at the one place every id is collected, rather
+    than only once a real writer target reproduces it.
     """
     seen: dict[str, str] = {}
     for ref_id in ids:
-        folded = unicodedata.normalize("NFC", ref_id).casefold()
+        folded = unicodedata.normalize(
+            "NFD", unicodedata.normalize("NFD", ref_id).casefold()
+        )
         collision = seen.get(folded)
         if collision is not None and collision != ref_id:
             raise ValueError(
