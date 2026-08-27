@@ -98,47 +98,66 @@ load regardless of whether any external consumer ever called `core_mul`
 directly, and `--scope-public-headers` never touches this detector's input at
 all.
 
-**Diff-derived detectors inherit scoping indirectly, through starvation.**
-`bundle_intra_dep_signature_changed`, `bundle_intra_type_changed`, and
-`bundle_provider_changed` are computed by scanning each library's own
-per-library `DiffResult.changes` for the specific kinds they promote
-(`func_params_changed`/`func_return_changed`/`var_type_changed` for the
-signature-change detector, `type_size_changed`/`type_field_removed`/etc. for
-the type-change detector, `func_removed`+`func_added` pairs for the
-provider-migration detector) — and that `DiffResult` is the *same*,
-already-scoped result the per-library report itself uses. If
-`--scope-public-headers` filtered the underlying provider-side change out of
-`diff.changes` because the changed symbol isn't part of `libcore.so`'s public
-surface, the bundle detector never sees it and never promotes it to a
-`bundle_*` finding either. So for these three kinds, `--scope-public-headers`
-*does* reach bundle-level findings — just indirectly, by removing the
-upstream signal they depend on, not by filtering the `bundle_*` finding
-itself.
+**Diff-derived detectors no longer inherit `--scope-public-headers` through
+starvation — G38 Phase 14 closed that gap.** `bundle_intra_dep_signature_
+changed`, `bundle_intra_type_changed`, and `bundle_provider_changed` are
+computed by scanning each library's own per-library `DiffResult` for the
+specific kinds they promote (`func_params_changed`/`func_return_changed`/
+`var_type_changed` for the signature-change detector, `type_size_changed`/
+`type_field_removed`/etc. for the type-change detector, `func_removed`+
+`func_added` pairs for the provider-migration detector) — but the source
+they scan is `diff.changes` **plus** `diff.out_of_surface_changes`, not
+`diff.changes` alone. `--scope-public-headers` (on by default) never
+*drops* a non-public-surface finding — `post_processing.
+FilterNonPublicSurface` moves it to `out_of_surface_changes` instead (ADR-024
+§D4/D5's "recorded, never silently dropped" ledger) — so an internal,
+headerless C export with no public header naming either side still reaches
+these three detectors, exactly as it should: the standalone per-library
+report correctly excludes it from that library's own *public* API, but the
+*bundle's* internal linkage contract between two siblings is a different
+question, and these three detectors exist specifically to answer it.
+Each detector keeps its own, already-shipped reachability rule unchanged —
+this phase did not unify them to one gate: the signature-change detector
+still requires a real resolved import edge
+(`resolution.consumers_of`/`_consumer_resolves_via_provider`), the
+type-change detector still requires only a name-embedding symbol-table
+match (never an import edge — see that detector's own docstring for why an
+import-edge requirement would be a strictly narrower, wrong gate here), and
+the provider-migration detector still requires no reachability at all (a
+provider move breaks an external consumer of the old DSO exactly as much as
+a bundle sibling).
 
 Contrast either case with an *ordinary* per-library finding that never gets
 promoted to a bundle finding at all (`func_removed` on something no sibling
-imports): that one **is** filtered by `--scope-public-headers`, same as any
-other per-library finding — but is unaffected by which `--policy` profile is
-selected, since policy never removes a finding, only reclassifies its
-verdict.
+imports): that one **is** filtered from the per-library report by
+`--scope-public-headers`, same as any other per-library finding — but is
+unaffected by which `--policy` profile is selected, since policy never
+removes a finding, only reclassifies its verdict.
 
-**No `bundle_*` kind can be suppressed *directly* — but suppression can still
-reach a diff-derived finding indirectly, the same way scoping does, on the
-CLI fan-out specifically.** `compare_bundle()` is never given a suppression
-ruleset itself, so no [suppression](suppressions.md) rule can target a
-`bundle_*` kind by name — that part holds for every `bundle_*` kind, with no
-exception, on every entry point. On the directory/package `compare` fan-out,
-`--suppress` is applied to each library's `DiffResult` *before* it reaches
-`compare_bundle()` (the same per-library compare pipeline that applies
-`--scope-public-headers`) — so, for the three **diff-derived** detectors
-(`bundle_intra_dep_signature_changed`, `bundle_intra_type_changed`,
-`bundle_provider_changed`), a suppression rule targeting the underlying
-per-library kind (`func_params_changed`, `type_size_changed`,
-`func_removed`/`func_added`) starves the bundle detector exactly like a
-scoping exclusion would, and the `bundle_*` finding never fires. This is a
-side effect of suppressing the per-library finding, not a way to suppress
-the bundle finding on its own terms — you can't write a rule that says
-"ignore `bundle_intra_dep_signature_changed` for symbol X" directly.
+**No `bundle_*` kind can be suppressed *directly* — and, unlike scoping,
+suppression still reaches a diff-derived finding indirectly through
+starvation, on the CLI fan-out specifically.** `compare_bundle()` is never
+given a suppression ruleset itself, so no [suppression](suppressions.md)
+rule can target a `bundle_*` kind by name — that part holds for every
+`bundle_*` kind, with no exception, on every entry point. On the
+directory/package `compare` fan-out, `--suppress` is applied to each
+library's `DiffResult.changes` *before* it reaches `compare_bundle()` (the
+same per-library compare pipeline that applies `--scope-public-headers`) —
+and `post_processing.py`'s own step ordering runs `FilterNonPublicSurface`
+*before* `ApplySuppression`, so a change already demoted to
+`out_of_surface_changes` never reaches `ApplySuppression` at all and can
+never be suppressed, while a change that stayed in-surface can still be
+suppressed out of `diff.changes` there. So, for the three **diff-derived**
+detectors, a suppression rule targeting the underlying per-library kind
+(`func_params_changed`, `type_size_changed`, `func_removed`/`func_added`)
+still starves the bundle detector for an *in-surface* finding exactly like
+before — this is a side effect of suppressing the per-library finding, not
+a way to suppress the bundle finding on its own terms — but has **no**
+effect on an out-of-surface finding these detectors now also see, since
+that finding was never checked against `--suppress` in the first place.
+Closing that narrower residual (re-running suppression against the
+out-of-surface ledger specifically) is tracked as a known gap, not
+attempted as part of this fix — see the G38 plan doc's own Phase 14 entry.
 
 **The whole-product baseline compare (`abicheck/product_baseline.py`'s
 `compare_product_directories`) has no suppression mechanism at all, for

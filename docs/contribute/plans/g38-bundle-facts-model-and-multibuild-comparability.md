@@ -1855,7 +1855,7 @@ own monkeypatch) and `test_per_library_overrides_win_over_the_uniform_fallback`
 doesn't leak onto a library absent from that same map, which still receives
 the uniform `headers`/`compile` default).
 
-### Phase 14 — Decouple diff-derived bundle detectors from public-surface scoping
+### Phase 14 — Decouple diff-derived bundle detectors from public-surface scoping (SHIPPED)
 
 **Origin:** external upstream-only review (base commit `327df7b5616bcf
 aea8c330aad418b796c17f3970`, PRs #860/#883 merged), items 7 and 8 of its
@@ -2044,6 +2044,90 @@ per-library compare cost, plus updating `docs/use/multi-binary.md`'s
 "Diff-derived detectors inherit scoping indirectly" section once this
 phase ships (it will no longer be an accurate description of the shipped
 behavior).
+
+**Shipped**, in a materially cheaper shape than this phase's own text
+above assumed, and with the ADR-061 routing explicitly *not* done --
+both discovered only once implementation started, not designed for up
+front.
+
+- **The "second, unscoped evidence view" already existed, at zero extra
+  extraction cost.** `DiffResult.out_of_surface_changes` (`checker_
+  types.py`) already carries every change `post_processing.
+  FilterNonPublicSurface` demoted for being outside the public-header
+  surface -- ADR-024 §D4/D5's "recorded, never silently dropped" ledger,
+  wired since long before this phase. The "second raw evidence view...
+  computed independently of `--scope-public-headers`" this phase's own
+  "Planned fix" section above sketched as needing new extraction plumbing
+  through `workflows/`/`frontends/` turns out to already be sitting on the
+  object every caller already has: `diff.changes + diff.out_of_surface_
+  changes`. No new compare pass, no doubled extraction cost, no new
+  workflow/frontend surface -- the fix is a one-line change to what each
+  detector iterates, at each of the three call sites.
+- **ADR-061 `compare/`-package routing is not reachable today, and was
+  not attempted, for the identical reason G38 Phase 16 already
+  documented for its own resolver.** `architecture/debt.yaml` names
+  `compare` as `bundle.py`'s own migration target -- but `compare/`'s
+  `may_import` (`architecture/modules.yaml`) is `["model"]` only, and
+  every type this logic operates over (`ChangeKind`, `BundleFinding`,
+  `ElfSymbol`) is an unclassified `legacy_root_module`, not part of
+  `model`. Verified rather than assumed: attempting a sibling flat module
+  (`abicheck/bundle_diff_derived_detectors.py`, following the
+  established `bundle_resolution_reachability.py` precedent for a
+  second bundle-level module `bundle.py` imports) was tried first and
+  rejected outright by `check_architecture.py`'s own
+  `frozen-root-family`/`root-module` checks -- unlike the no-growth
+  ledger (which gates *existing* file line counts), these two checks
+  reject *any* file not already named in `architecture/modules.yaml`'s
+  closed `frozen_root_families`/`legacy_root_modules` enumeration,
+  regardless of size. There is no flat-module escape valve at all for
+  new production code; only a real classified-package home or an
+  in-place edit to an already-listed file is accepted. Implemented as
+  the latter instead: the fix is entirely in-place inside `bundle.py`
+  itself (also pinned at an exact 2000-line no-growth baseline), each of
+  the three detector functions' own `for change in diff.changes:` line
+  changed to iterate `diff.changes + diff.out_of_surface_changes`
+  instead -- a content edit to an existing line, not a new one -- with
+  each function's docstring extended to document why, offset by
+  compacting a few genuinely collapsible pre-existing multi-line
+  conditionals elsewhere in the same file (no logic change) so the file
+  lands one line *under* its pinned baseline rather than over it.
+- **A narrower, previously-undocumented gap found while writing this
+  entry: suppression asymmetry between the two change sources now being
+  combined.** `post_processing.py`'s own step ordering runs
+  `FilterNonPublicSurface` before `ApplySuppression`, so a change already
+  demoted to `out_of_surface_changes` never reaches `ApplySuppression` at
+  all -- it was never checked against a `--suppress` rule, whereas a
+  change that stayed in `diff.changes` was. Combining the two sources
+  means a `--suppress` rule targeting an internal-only symbol has no
+  effect on the newly-visible out-of-surface half of the combined view,
+  even though it already suppressed the in-surface half before this
+  phase. Documented as a known, deliberately-undosed gap in
+  `bundle.py`'s own docstrings and in `docs/use/multi-binary.md`'s
+  updated suppression section, rather than solved here: re-running
+  suppression against the out-of-surface ledger specifically is a real,
+  separate behavior change to what `--suppress` reaches (needing its own
+  verification), not a silent side effect of this fix.
+- `docs/use/multi-binary.md`'s "Diff-derived detectors inherit scoping
+  indirectly, through starvation" section is rewritten to describe the
+  shipped behavior (scoping no longer starves these three detectors;
+  suppression still does, for the in-surface half only).
+
+Regression coverage: `tests/test_bundle_diff_derived_scoping.py` (a new
+file -- `tests/test_bundle.py` carries the identical no-growth pin
+`bundle.py` does, so a genuinely new test class needs a new file),
+reproducing this phase's own three acceptance scenarios directly against
+a `DiffResult` whose relevant `Change` lives *only* in
+`out_of_surface_changes`: (1) an internal signature break with a
+resolving sibling consumer promotes, the identical break with no
+resolving consumer does not (unchanged reachability rule); (2) an
+internal provider move between two libraries with no bundle sibling
+importing it at all still promotes (confirming no reachability
+requirement was added); (3) an internal type-layout change reachable
+only via a sibling's own exported (mangled) symbol name -- no DT_NEEDED
+edge at all -- still promotes (confirming the name-embedding rule was
+not replaced with an import-edge requirement). All three positive cases
+confirmed to fail against the pre-fix `bundle.py` (`git stash` on that
+one file); the negative-reachability control passes on both.
 
 ### Phase 15 — Declarative-pipeline wiring: `check-project.yml`/Action/CLI for `BundleFacts` and variants
 

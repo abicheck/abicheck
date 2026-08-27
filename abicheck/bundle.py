@@ -264,10 +264,7 @@ def build_bundle_snapshot_from_metadata(
     for name, meta in metadata.items():
         deadline.check()
         if meta is None or (
-            not meta.soname
-            and not meta.symbols
-            and not meta.imports
-            and not meta.needed
+            not meta.soname and not meta.symbols and not meta.imports and not meta.needed
         ):
             log.debug("bundle: skipping empty metadata for %s", name)
             continue
@@ -1173,7 +1170,10 @@ def _detect_intra_dep_signature_changed(
     against this provider* (:func:`_consumer_resolves_via_provider`),
     emitting one finding per (consumer, symbol) pair. *policy*: a
     named-policy demotion and a ``--policy-file`` override on the diff are
-    both honored, via :func:`_diff_change_is_breaking`.
+    both honored, via :func:`_diff_change_is_breaking`. Scanned including
+    ``diff.out_of_surface_changes`` (G38 Phase 14): a headerless break
+    demoted by ``--scope-public-headers`` still breaks the bundle's own
+    linkage contract (``docs/use/multi-binary.md``).
     """
     findings: list[BundleFinding] = []
     seen: set[tuple[str, str, str]] = set()
@@ -1185,7 +1185,7 @@ def _detect_intra_dep_signature_changed(
         return _cached_reachable_intra_libraries(new, reachable_cache, lib)
 
     for provider_lib, diff in diff_by_library.items():
-        for change in diff.changes:
+        for change in diff.changes + diff.out_of_surface_changes:
             if change.kind not in relevant_kinds:
                 continue
             if not _diff_change_is_breaking(diff, change, policy_sets):
@@ -1241,7 +1241,9 @@ def _detect_intra_type_changed(
     pattern where a type defined in core leaks into algo's mangled
     symbols. Misses extern-C function pointers that pass struct
     references (would require type-graph propagation from DWARF, future
-    work — out of scope for ADR-023 first cut).
+    work — out of scope for ADR-023 first cut). Scanned including
+    ``diff.out_of_surface_changes`` (G38 Phase 14, rationale in
+    ``_detect_intra_dep_signature_changed``'s own docstring).
 
     Reachability scope (ADR-027 A3 / D3.2 limitation). The public-vs-internal
     split below is computed from ``ElfMetadata.symbols``, which is parsed from
@@ -1275,7 +1277,7 @@ def _detect_intra_type_changed(
         ChangeKind.INTERNAL_TYPE_LEAKS_VIA_PUBLIC_API,
     }
     for provider_lib, diff in diff_by_library.items():
-        for change in diff.changes:
+        for change in diff.changes + diff.out_of_surface_changes:
             if change.kind not in type_kinds:
                 continue
             type_name = change.symbol
@@ -1359,23 +1361,20 @@ def _detect_provider_changed(
     A symbol that was removed from library A in this release and added
     (with the same mangled name) to library B in the same release is most
     likely a provider move, not an ABI change. Promote both per-library
-    findings into one ``BUNDLE_PROVIDER_CHANGED`` event.
+    findings into one ``BUNDLE_PROVIDER_CHANGED`` event. Scanned including
+    ``diff.out_of_surface_changes`` (G38 Phase 14) -- deliberately still
+    with no reachability requirement, unlike its two siblings: a provider
+    move breaks an external consumer exactly as much as a sibling (ADR-023).
     """
     findings: list[BundleFinding] = []
 
     removed_by: dict[str, str] = {}  # symbol -> library that removed it
     added_by: dict[str, str] = {}  # symbol -> library that added it
     for lib_name, diff in diff_by_library.items():
-        for change in diff.changes:
-            if change.kind in (
-                ChangeKind.FUNC_REMOVED,
-                ChangeKind.VAR_REMOVED,
-            ):
+        for change in diff.changes + diff.out_of_surface_changes:
+            if change.kind in (ChangeKind.FUNC_REMOVED, ChangeKind.VAR_REMOVED):
                 removed_by.setdefault(change.symbol, lib_name)
-            elif change.kind in (
-                ChangeKind.FUNC_ADDED,
-                ChangeKind.VAR_ADDED,
-            ):
+            elif change.kind in (ChangeKind.FUNC_ADDED, ChangeKind.VAR_ADDED):
                 added_by.setdefault(change.symbol, lib_name)
 
     for symbol, old_lib in removed_by.items():
