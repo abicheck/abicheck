@@ -1,7 +1,7 @@
 # ADR-061: Responsibility-Package Architecture and Flat-Namespace Migration
 
 **Date:** 2026-08-24
-**Status:** Accepted — partially implemented (Phases 0-1 implemented; Phases 2-4 in progress; Phase 5 begun — the `model` package and the `*_metadata.py` dataclass/parser split have landed; the change catalog now enforces 3 of D9's 4 registry-validation properties (unique identifiers, valid references, non-contradictory defaults), with complete metadata blocked on writing 48 missing `impact` strings and the D9 taxonomy repartition itself not started — and otherwise incremental).
+**Status:** Accepted — partially implemented (Phases 0-1 implemented; Phases 2-4 in progress; Phase 5 begun — the `model` package and the `*_metadata.py` dataclass/parser split have landed; the change catalog now enforces all 4 of D9's registry-validation properties (unique identifiers, valid references, non-contradictory defaults, complete metadata), with the D9 taxonomy repartition itself (moving the 397 entries into `model/change_catalog/{symbols,types,platform,build,source}.py`) not started — and otherwise incremental).
 **Decision maker:** abicheck maintainers
 
 ## Context
@@ -1305,15 +1305,53 @@ test exercises `asdict()`/`deepcopy()`/`pickle` round-trips together with
 re-checking immutability on both reconstructed copies, confirmed to fail
 against the `MappingProxyType` version.
 
-The fourth, "complete metadata", is not enforced, and is a *content* gap
-rather than a missing check: `ChangeKindMeta.impact`/`.description_template`
-are both declared optional, and today 48 of 397 real entries have no
-`impact` text at all. Adding that enforcement means writing 48 new,
-individually-accurate one-line impact descriptions first (real domain
-content, not a mechanical check) — a job of a different kind than the three
-properties above, and not attempted in this pass. "Enum-membership
-completeness" — every `ChangeKind` has exactly one registry entry, and no
-entry names a value outside the enum, pinned by that same test class's
+**The fourth, "complete metadata", is now also enforced** — closed in a
+later pass, on its own, separate from the taxonomy repartition item 3
+still names below. `ChangeKindMeta.description_template` stays genuinely
+optional (a kind can keep a bespoke, per-call-site description rather than
+a fixed template — see that field's own docstring), so only `impact` is
+required: writing the 48 missing, individually-accurate one-line impact
+descriptions was the actual blocker, and is real domain content, not a
+mechanical check — each string states concretely what breaks (or doesn't)
+and why, matching the style of the 349 entries that already had one (e.g.
+"A field gained volatile; its offset and size are unchanged, but the
+compiler now treats every access as observable and suppresses caching/
+reordering around it" for `field_became_volatile`, or "A parameter's
+pointer indirection depth changed... a caller compiled against the old
+signature passes the wrong kind of value — silent misinterpretation or a
+crash" for `param_pointer_level_changed`). `_validate_entry()` (renamed
+from `_validate_references_and_defaults` to reflect covering three of
+D9's four properties, not two) now rejects a `ChangeKindMeta` with empty
+`impact` the same way it rejects a bad `policy_overrides`/
+`description_template` — at construction time, with the offending kind
+named. Pinned by `test_empty_impact_raises` and
+`test_real_registry_has_no_missing_impact_text` (the latter a direct,
+explicit check of the specific gap this property closes, separate from
+the general `ChangeKindRegistry` reconstruction test).
+
+Writing 38 of those 48 entries hit `change_registry.py`'s 2000-line
+adoption-debt ceiling immediately — the file was exactly at it. Rather
+than trim unrelated content to make room, those 38 entries (spanning
+field/parameter qualifiers, pointer levels, template inner-type analysis,
+and assorted ABICC full-parity gaps — no single taxonomy name fits all of
+them, since this is a size-relief split, not D9's taxonomy) moved to a new
+sibling, `change_registry_parity.py`, following the exact pattern
+`change_registry_composition.py`/`_coverage.py`/etc. already establish
+("declaring an entry in any of them is equivalent" — this repo's own
+`AGENTS.md`). Registered in `architecture/modules.yaml`'s
+`frozen_root_families["change_registry_"]` and `legacy_root_modules`
+lists, the same two lists any new flat root module needs. The remaining
+10 (the `[[deprecated]]`-transition kinds) already lived in
+`change_registry_castxml.py`, which had headroom, so their `impact` text
+was added in place. `change_registry.py` itself shrank from exactly 2000
+lines to 1916 in the process — genuine headroom freed, not just moved
+elsewhere, since removing an entry frees more lines (the `_E(...)` call
+plus its `description_template` line) than adding one `impact=` line back
+costs on the ~10 entries that stayed.
+
+"Enum-membership completeness" — every `ChangeKind` has exactly one
+registry entry, and no entry names a value outside the enum, pinned by
+that same test class's
 `test_registry_has_all_changekind_members`/`test_registry_no_extra_entries`
 — is a distinct, already-enforced property and must not be read as
 satisfying "complete metadata": one is about which *kinds* have an entry,
@@ -1332,16 +1370,17 @@ The remaining Phase 5 work:
 1. split CastXML and Clang parsing by entity and shared parser context;
 2. separate source-graph values, construction, and comparison;
 3. repartition the change catalog into D9's `model/change_catalog/
-   {symbols,types,platform,build,source}.py` taxonomy, and write the 48
-   missing `impact` strings needed for "complete metadata" enforcement
-   (global uniqueness, valid references, and non-contradictory defaults are
-   done — see above). **A first slice landed**: `registry.py` itself — the
-   one file D9 says every taxonomy module should feed — now physically
-   exists at `abicheck/model/change_catalog/registry.py` and holds the real
-   `Verdict`/`ChangeKindMeta`/`ChangeKindRegistry`/validation
-   implementation, not just a stub; what remains is the taxonomy modules
-   themselves (`symbols.py`/`types.py`/`platform.py`/`build.py`/
-   `source.py`) and moving the 397 entries into them; and
+   {symbols,types,platform,build,source}.py` taxonomy (global uniqueness,
+   valid references, non-contradictory defaults, **and now complete
+   metadata** are all done — see above). **Two slices landed**: `registry.py`
+   itself — the one file D9 says every taxonomy module should feed — now
+   physically exists at `abicheck/model/change_catalog/registry.py` and
+   holds the real `Verdict`/`ChangeKindMeta`/`ChangeKindRegistry`/
+   validation implementation, not just a stub; and the 48 missing `impact`
+   strings are written, closing D9's fourth validation property entirely.
+   What remains is the taxonomy modules themselves (`symbols.py`/
+   `types.py`/`platform.py`/`build.py`/`source.py`) and moving the 397
+   entries into them; and
 4. remove superseded private re-exports, migration edges, and cycle
    exceptions. **A first, verified slice landed**: `architecture/
    modules.yaml`'s `frozen_root_families["cli_"]` and `legacy_root_modules`
@@ -1367,10 +1406,11 @@ The remaining Phase 5 work:
 
 **Acceptance:** parser fixtures demonstrate byte/fact parity where applicable;
 catalog validation proves all four of D9's properties — global uniqueness,
-valid references, and non-contradictory defaults are done; complete
-metadata needs the 48 missing `impact` strings written before it can be
-enforced; no parser imports policy/report/workflows/frontends;
-corresponding debt entries are removed.
+valid references, non-contradictory defaults, and complete metadata are
+all done; the taxonomy repartition itself (moving the 397 entries into
+`model/change_catalog/{symbols,types,platform,build,source}.py`) is the
+one piece of item 3 still open; no parser imports
+policy/report/workflows/frontends; corresponding debt entries are removed.
 
 ## Migration rules for every phase
 

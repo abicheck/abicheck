@@ -273,20 +273,41 @@ def _check_template_formats(template: str) -> None:
             ) from exc
 
 
-def _validate_references_and_defaults(e: ChangeKindMeta) -> None:
-    """Enforce D9's "valid references" and "non-contradictory defaults".
+def _validate_entry(e: ChangeKindMeta) -> None:
+    """Enforce three of D9's four catalog-validation properties.
 
-    Two of the four catalog-validation properties ADR-061 D9 assigns to the
-    assembled registry (global uniqueness and enum-membership completeness
-    are enforced elsewhere — the constructor's duplicate check and
-    ``tests/test_architecture_refactor.py``'s membership tests respectively;
-    "complete metadata" is not yet enforced, since ``impact``/
-    ``description_template`` are deliberately optional and a real content
-    gap — see the ADR's Phase 5 section). Raises ``ValueError`` with the
-    offending kind named, matching the constructor's existing duplicate-key
-    failure mode, so a bad entry fails at import time rather than silently
-    reaching a comparison.
+    ADR-061 D9 assigns the assembled registry four properties: global
+    uniqueness (enforced by the constructor's own duplicate-key check, not
+    here), complete metadata, valid references, and non-contradictory
+    defaults. This function enforces the latter three:
+
+    * **Complete metadata** — every entry must carry non-empty ``impact``
+      text. ``description_template`` stays genuinely optional (a kind can
+      keep a bespoke, per-call-site description — see ``ChangeKindMeta``'s
+      own docstring), so only ``impact`` is required. This was the fourth
+      property blocked on writing 48 real, individually-accurate one-line
+      descriptions for entries the catalog had never had one for — real
+      domain content, not a mechanical check, and now done (ADR-061 Phase 5).
+    * **Valid references** and **non-contradictory defaults** — see the
+      ``policy_overrides``/``description_template`` checks below.
+
+    Enum-membership completeness (every ``ChangeKind`` has exactly one
+    registry entry, and no entry names a value outside the enum) is a
+    distinct, already-enforced property, checked separately by
+    ``tests/test_architecture_refactor.py``'s membership tests rather than
+    here, since it requires comparing against the ``ChangeKind`` enum
+    itself, which this leaf module does not import.
+
+    Raises ``ValueError`` with the offending kind named, matching the
+    constructor's existing duplicate-key failure mode, so a bad entry fails
+    at import time rather than silently reaching a comparison.
     """
+    if not e.impact:
+        raise ValueError(
+            f"{e.kind!r}: impact must be non-empty — D9's \"complete "
+            f"metadata\" catalog-validation property requires every entry "
+            f"to carry human-readable impact text"
+        )
     for policy, override in e.policy_overrides.items():
         if policy not in VALID_BASE_POLICIES:
             raise ValueError(
@@ -372,7 +393,7 @@ class ChangeKindRegistry:
         for e in entries:
             if e.kind in self._entries:
                 raise ValueError(f"Duplicate registry entry for {e.kind!r}")
-            _validate_references_and_defaults(e)
+            _validate_entry(e)
             self._entries[e.kind] = e
 
     def __len__(self) -> int:

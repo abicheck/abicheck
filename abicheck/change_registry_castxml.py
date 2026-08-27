@@ -114,23 +114,48 @@ CASTXML_EXTENSION_ENTRIES: list[ChangeKindMeta] = [
     #    kind convention (is_final on types, is_explicit on functions, ...).
     #    All COMPATIBLE (quality): deprecation is advance notice, not a break.
     _E("func_deprecated_added", _C,
+       impact="Function gained [[deprecated]]; callers now get a compiler "
+              "warning when calling it, but its signature and ABI are "
+              "unchanged — informational advance notice, not a break.",
        description_template="Function marked deprecated: {name} ({detail})"),
     _E("func_deprecated_removed", _C,
+       impact="Function's [[deprecated]] marker was removed; the compiler "
+              "warning stops, with no effect on the function's ABI.",
        description_template="Function no longer marked deprecated: {name}"),
     _E("var_deprecated_added", _C,
+       impact="Variable gained [[deprecated]]; consumers get a compiler "
+              "warning when referencing it, but its type, size, and "
+              "address are unchanged.",
        description_template="Variable marked deprecated: {name} ({detail})"),
     _E("var_deprecated_removed", _C,
+       impact="Variable's [[deprecated]] marker was removed; the compiler "
+              "warning stops, with no effect on the variable's ABI.",
        description_template="Variable no longer marked deprecated: {name}"),
     _E("type_deprecated_added", _C,
+       impact="Type gained [[deprecated]]; consumers get a compiler "
+              "warning when naming it, but its layout and ABI are "
+              "unchanged.",
        description_template="Type marked deprecated: {name} ({detail})"),
     _E("type_deprecated_removed", _C,
+       impact="Type's [[deprecated]] marker was removed; the compiler "
+              "warning stops, with no effect on the type's ABI.",
        description_template="Type no longer marked deprecated: {name}"),
     _E("enum_deprecated_added", _C,
+       impact="Enum type gained [[deprecated]]; consumers get a compiler "
+              "warning when naming it, but its underlying type, size, and "
+              "enumerator values are unchanged.",
        description_template="Enum marked deprecated: {name} ({detail})"),
     _E("enum_deprecated_removed", _C,
+       impact="Enum type's [[deprecated]] marker was removed; the "
+              "compiler warning stops, with no effect on the enum's ABI.",
        description_template="Enum no longer marked deprecated: {name}"),
     _E("field_deprecated_added", _C,
+       impact="A field gained [[deprecated]]; consumers get a compiler "
+              "warning when accessing it, but its offset and type are "
+              "unchanged.",
        description_template="Field marked deprecated: {name}::{detail} ({new})"),
     _E("field_deprecated_removed", _C,
+       impact="A field's [[deprecated]] marker was removed; the compiler "
+              "warning stops, with no effect on the field's layout.",
        description_template="Field no longer marked deprecated: {name}::{detail}"),
 ]

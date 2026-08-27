@@ -35,5 +35,5 @@ from .model.change_catalog.registry import (
     ChangeKindMeta as ChangeKindMeta,
     ChangeKindRegistry as ChangeKindRegistry,
     Verdict as Verdict,
-    _validate_references_and_defaults as _validate_references_and_defaults,
+    _validate_entry as _validate_entry,
 )

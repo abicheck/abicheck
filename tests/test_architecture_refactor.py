@@ -106,8 +106,8 @@ class TestChangeKindRegistry:
         import pytest
 
         entries = [
-            ChangeKindMeta("test_kind", Verdict.BREAKING),
-            ChangeKindMeta("test_kind", Verdict.COMPATIBLE),
+            ChangeKindMeta("test_kind", Verdict.BREAKING, impact="x"),
+            ChangeKindMeta("test_kind", Verdict.COMPATIBLE, impact="x"),
         ]
         with pytest.raises(ValueError, match="Duplicate"):
             ChangeKindRegistry(entries)
@@ -121,7 +121,7 @@ class TestChangeKindRegistry:
 
         entries = [
             ChangeKindMeta(
-                "test_kind", Verdict.BREAKING,
+                "test_kind", Verdict.BREAKING, impact="x",
                 policy_overrides={"not_a_real_policy": Verdict.COMPATIBLE},
             ),
         ]
@@ -140,7 +140,7 @@ class TestChangeKindRegistry:
 
         entries = [
             ChangeKindMeta(
-                "test_kind", Verdict.BREAKING,
+                "test_kind", Verdict.BREAKING, impact="x",
                 policy_overrides={"strict_abi": Verdict.COMPATIBLE},
             ),
         ]
@@ -158,7 +158,7 @@ class TestChangeKindRegistry:
 
         entries = [
             ChangeKindMeta(
-                "test_kind", Verdict.BREAKING,
+                "test_kind", Verdict.BREAKING, impact="x",
                 policy_overrides={"plugin_abi": Verdict.BREAKING},
             ),
         ]
@@ -174,7 +174,7 @@ class TestChangeKindRegistry:
         import pytest
 
         entries = [
-            ChangeKindMeta("test_kind", Verdict.BREAKING, is_addition=True),
+            ChangeKindMeta("test_kind", Verdict.BREAKING, impact="x", is_addition=True),
         ]
         with pytest.raises(ValueError, match="is_addition=True"):
             ChangeKindRegistry(entries)
@@ -195,7 +195,7 @@ class TestChangeKindRegistry:
         for policy in ("sdk_vendor", "plugin_abi"):
             entries = [
                 ChangeKindMeta(
-                    "test_kind", Verdict.BREAKING,
+                    "test_kind", Verdict.BREAKING, impact="x",
                     policy_overrides={policy: Verdict.API_BREAK},
                 ),
             ]
@@ -233,10 +233,12 @@ class TestChangeKindRegistry:
         """A genuinely different, known-policy override passes construction."""
         entries = [
             ChangeKindMeta(
-                "test_kind", Verdict.BREAKING,
+                "test_kind", Verdict.BREAKING, impact="x",
                 policy_overrides={"plugin_abi": Verdict.COMPATIBLE},
             ),
-            ChangeKindMeta("compatible_addition", Verdict.COMPATIBLE, is_addition=True),
+            ChangeKindMeta(
+                "compatible_addition", Verdict.COMPATIBLE, impact="x", is_addition=True
+            ),
         ]
         registry = ChangeKindRegistry(entries)
         assert len(registry) == 2
@@ -319,7 +321,7 @@ class TestChangeKindRegistry:
 
         entries = [
             ChangeKindMeta(
-                "test_kind", Verdict.BREAKING,
+                "test_kind", Verdict.BREAKING, impact="x",
                 description_template="Changed: {bogus}",
             ),
         ]
@@ -337,7 +339,8 @@ class TestChangeKindRegistry:
 
         entries = [
             ChangeKindMeta(
-                "test_kind", Verdict.BREAKING, description_template="Changed: {}"
+                "test_kind", Verdict.BREAKING, impact="x",
+                description_template="Changed: {}",
             ),
         ]
         with pytest.raises(ValueError, match="description_template"):
@@ -347,7 +350,7 @@ class TestChangeKindRegistry:
         """A template using only TEMPLATE_VOCAB fields passes construction."""
         entries = [
             ChangeKindMeta(
-                "test_kind", Verdict.BREAKING,
+                "test_kind", Verdict.BREAKING, impact="x",
                 description_template="{symbol} changed from {old} to {new}",
             ),
         ]
@@ -370,7 +373,7 @@ class TestChangeKindRegistry:
 
         entries = [
             ChangeKindMeta(
-                "test_kind", Verdict.BREAKING,
+                "test_kind", Verdict.BREAKING, impact="x",
                 description_template="Changed: {symbol[0]}",
             ),
         ]
@@ -383,7 +386,7 @@ class TestChangeKindRegistry:
 
         entries = [
             ChangeKindMeta(
-                "test_kind", Verdict.BREAKING,
+                "test_kind", Verdict.BREAKING, impact="x",
                 description_template="Changed: {symbol.__class__}",
             ),
         ]
@@ -407,7 +410,7 @@ class TestChangeKindRegistry:
 
         entries = [
             ChangeKindMeta(
-                "test_kind", Verdict.BREAKING,
+                "test_kind", Verdict.BREAKING, impact="x",
                 description_template="Changed: {name:{bogus}}",
             ),
         ]
@@ -426,7 +429,7 @@ class TestChangeKindRegistry:
 
         entries = [
             ChangeKindMeta(
-                "test_kind", Verdict.BREAKING,
+                "test_kind", Verdict.BREAKING, impact="x",
                 description_template="Changed: {name!x}",
             ),
         ]
@@ -451,7 +454,7 @@ class TestChangeKindRegistry:
 
         entries = [
             ChangeKindMeta(
-                "test_kind", Verdict.BREAKING,
+                "test_kind", Verdict.BREAKING, impact="x",
                 description_template="Changed: {name:q}",
             ),
         ]
@@ -472,7 +475,7 @@ class TestChangeKindRegistry:
 
         entries = [
             ChangeKindMeta(
-                "test_kind", Verdict.BREAKING,
+                "test_kind", Verdict.BREAKING, impact="x",
                 description_template="Changed: {old:>10}",
             ),
         ]
@@ -480,15 +483,39 @@ class TestChangeKindRegistry:
             ChangeKindRegistry(entries)
 
     def test_real_registry_satisfies_reference_and_default_validation(self):
-        """The production REGISTRY was already valid before these checks existed.
+        """The production REGISTRY satisfies three of D9's four properties.
 
         Reconstructing it from its own entries must not raise — i.e. every
-        real ChangeKindMeta entry already satisfies D9's "valid references"
-        and "non-contradictory defaults" (verified empirically before this
-        validation was added; this pins that finding as a regression guard).
+        real ChangeKindMeta entry satisfies D9's "complete metadata"
+        (non-empty impact), "valid references", and "non-contradictory
+        defaults" catalog-validation properties (global uniqueness is
+        checked separately by the constructor's own duplicate-key check).
         """
         rebuilt = ChangeKindRegistry(list(REGISTRY.entries.values()))
         assert len(rebuilt) == len(REGISTRY)
+
+    def test_empty_impact_raises(self):
+        """A ChangeKindMeta entry with no impact text is rejected.
+
+        ADR-061 D9's "complete metadata" catalog-validation property — the
+        fourth of the four, closed by writing real, individually-accurate
+        impact text for the 48 entries that previously had none (Phase 5).
+        """
+        import pytest
+
+        entries = [ChangeKindMeta("test_kind", Verdict.BREAKING)]
+        with pytest.raises(ValueError, match="impact must be non-empty"):
+            ChangeKindRegistry(entries)
+
+    def test_real_registry_has_no_missing_impact_text(self):
+        """No production entry has an empty impact — D9's "complete metadata".
+
+        Direct, explicit pin of the specific gap this property closes (all
+        397 entries, including the 48 that previously had none), separate
+        from the general reconstruction test above.
+        """
+        missing = sorted(k for k, e in REGISTRY.entries.items() if not e.impact)
+        assert missing == []
 
     def test_adding_kind_is_one_entry(self):
         """Adding a new kind to the registry is a single ChangeKindMeta entry."""

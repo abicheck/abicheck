@@ -303,6 +303,7 @@
       "change_registry_composition.py",
       "change_registry_coverage.py",
       "change_registry_numpy.py",
+      "change_registry_parity.py",
       "change_registry_suppression.py",
       "change_registry_types.py",
       "change_registry_wheel.py"
@@ -368,6 +369,7 @@
     "change_registry_composition.py",
     "change_registry_coverage.py",
     "change_registry_numpy.py",
+    "change_registry_parity.py",
     "change_registry_suppression.py",
     "change_registry_types.py",
     "change_registry_wheel.py",

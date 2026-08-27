@@ -33,6 +33,7 @@ from .change_registry_castxml import CASTXML_EXTENSION_ENTRIES
 from .change_registry_composition import COMPOSITION_EXTENSION_ENTRIES
 from .change_registry_coverage import COVERAGE_EXTENSION_ENTRIES
 from .change_registry_numpy import NUMPY_EXTENSION_ENTRIES
+from .change_registry_parity import PARITY_EXTENSION_ENTRIES
 from .change_registry_suppression import SUPPRESSION_EXTENSION_ENTRIES
 from .change_registry_types import (  # noqa: F401
     ChangeKindMeta as ChangeKindMeta,
@@ -214,10 +215,6 @@ REGISTRY = ChangeKindRegistry([
        impact="New shared library dependency; may not be available on target systems."),
     _E("needed_removed", _C,
        impact="Dependency removed; should be transparent to consumers."),
-    _E("rpath_changed", _C,
-       description_template="RPATH changed: {old} → {new}"),
-    _E("runpath_changed", _C,
-       description_template="RUNPATH changed: {old} → {new}"),
 
     # ── Mach-O specific ───────────────────────────────────────────────────
     _E("compat_version_changed", _B,
@@ -296,8 +293,6 @@ REGISTRY = ChangeKindRegistry([
     _E("ifunc_removed", _C,
        impact="IFUNC removed; transparent to callers.",
        description_template="Symbol no longer GNU_IFUNC: {name}"),
-    _E("common_symbol_risk", _C,
-       description_template="Exported STT_COMMON symbol: {name} (resolution depends on linker/loader)"),
 
     # ── Symbol versioning ──────────────────────────────────────────────────
     _E("symbol_version_defined_removed", _B,
@@ -317,8 +312,6 @@ REGISTRY = ChangeKindRegistry([
        description_template="Symbol version requirement removed: {name} (from {detail})"),
 
     # ── DWARF layout (Sprint 3) ───────────────────────────────────────────
-    _E("dwarf_info_missing", _C,
-       description_template="New binary has no DWARF debug info — struct/enum layout comparison was skipped. Recompile with -g to enable."),
     _E("layer_coverage_asymmetric", _R,
        impact="The base snapshot was analyzed with evidence layers the target "
               "lacks (e.g. debug info, build context, or source ABI). The "
@@ -361,15 +354,10 @@ REGISTRY = ChangeKindRegistry([
     _E("calling_convention_changed", _B,
        impact="Function calling convention changed; registers/stack usage differs, call crashes.",
        policy_overrides={"plugin_abi": _C}),
-    _E("value_abi_trait_changed", _B,
-       policy_overrides={"plugin_abi": _C}),
     _E("struct_packing_changed", _B,
        impact="Packing attribute changed; field offsets differ from what old code expects."),
-    _E("type_visibility_changed", _B),
     _E("toolchain_flag_drift", _C,
        impact="Compiler flags differ between versions; may cause subtle ABI mismatches."),
-    _E("frame_register_changed", _B,
-       policy_overrides={"plugin_abi": _C}),
     _E("vector_abi_changed", _B,
        impact="Vector-function (SIMD clone) ABI selection changed (-mveclibabi/-fveclib/-vecabi); vectorized call variants resolve to a different ABI, so callers of the vector entry points pass/return data in the wrong registers.",
        policy_overrides={"plugin_abi": _C}),
@@ -396,48 +384,16 @@ REGISTRY = ChangeKindRegistry([
     _E("type_became_opaque", _B,
        impact="Type became forward-declaration only; old code using sizeof or accessing fields fails.",
        description_template="Type became opaque (forward-declaration only): {name} — stack allocation no longer possible"),
-    _E("base_class_position_changed", _B,
-       description_template="Base class order reordered: {name} — this-pointer adjustments changed"),
-    _E("base_class_virtual_changed", _B,
-       description_template="Base class virtual inheritance changed: {name} — {detail}"),
 
     # ── Sprint 7 — Source-level breaks ─────────────────────────────────────
     _E("enum_member_renamed", _A,
        impact="Enumerator name changed but value is the same; source code using old name won't compile.",
        policy_overrides={"sdk_vendor": _C},
        description_template="Enum member renamed: {name}::{old} → {new} (value={detail})"),
-    _E("param_default_value_changed", _C,
-       description_template="Parameter default changed: {name} param {detail}"),
-    _E("param_default_value_removed", _A,
-       policy_overrides={"sdk_vendor": _C},
-       description_template="Parameter default removed: {name} param {detail}"),
     _E("field_renamed", _A,
        impact="Field name changed but offset is the same; source code using old name won't compile.",
        policy_overrides={"sdk_vendor": _C},
        description_template="Field renamed: {name}::{old} → {new}"),
-    _E("param_renamed", _A,
-       policy_overrides={"sdk_vendor": _C},
-       description_template="Parameter renamed: {name} param {detail}: {old} → {new}"),
-
-    # ── Field qualifier changes ────────────────────────────────────────────
-    _E("field_became_const", _C,
-       description_template="Field became const: {name}::{detail}"),
-    _E("field_lost_const", _C,
-       description_template="Field lost const: {name}::{detail}"),
-    _E("field_became_volatile", _C,
-       description_template="Field became volatile: {name}::{detail}"),
-    _E("field_lost_volatile", _C,
-       description_template="Field lost volatile: {name}::{detail}"),
-    _E("field_became_mutable", _C,
-       description_template="Field became mutable: {name}::{detail}"),
-    _E("field_lost_mutable", _C,
-       description_template="Field lost mutable: {name}::{detail}"),
-
-    # ── Pointer level changes ──────────────────────────────────────────────
-    _E("param_pointer_level_changed", _B,
-       description_template="Parameter pointer level changed: {name} param {detail} (depth {old} → {new})"),
-    _E("return_pointer_level_changed", _B,
-       description_template="Return pointer level changed: {name} (depth {old} → {new})"),
 
     # ── Access level changes ───────────────────────────────────────────────
     _E("method_access_changed", _A,
@@ -449,54 +405,11 @@ REGISTRY = ChangeKindRegistry([
        policy_overrides={"sdk_vendor": _C},
        description_template="Field access level narrowed: {name}::{detail} ({old} → {new})"),
 
-    # ── Anonymous struct/union ─────────────────────────────────────────────
-    _E("anon_field_changed", _B),
-
     # ── ABICC full parity — remaining gaps ─────────────────────────────────
-    _E("var_value_changed", _C,
-       description_template="Global data value changed: {name} ({old} → {new})"),
-    _E("type_kind_changed", _B,
-       description_template="Aggregate kind changed: {name} ({old} → {new})"),
-    _E("source_level_kind_changed", _A,
-       policy_overrides={"sdk_vendor": _C},
-       description_template="Aggregate kind changed: {name} ({old} → {new})"),
-    _E("used_reserved_field", _C,
-       description_template="Reserved field put into use: {name}::{old} → {new}"),
     _E("removed_const_overload", _A,
        impact="Const overload removed; source code calling const version breaks.",
        policy_overrides={"sdk_vendor": _C},
        description_template="Const method overload removed: {name} (non-const version still exists)"),
-    _E("param_restrict_changed", _C,
-       description_template="Parameter restrict qualifier {detail}: {name} param {old}"),
-    _E("param_became_va_list", _C,
-       description_template="Parameter became va_list: {name} param {detail}"),
-    _E("param_lost_va_list", _C,
-       description_template="Parameter was va_list, now fixed: {name} param {detail}"),
-    _E("constant_changed", _A,
-       description_template="Preprocessor constant value changed: {name} ({old} → {new})"),
-    _E("constant_added", _C, is_addition=True,
-       description_template="New preprocessor constant: {name}"),
-    _E("constant_removed", _A,
-       description_template="Preprocessor constant removed: {name}"),
-    _E("var_access_changed", _A,
-       description_template="Variable access level narrowed: {name} ({old} → {new})"),
-    _E("var_access_widened", _C,
-       description_template="Variable access level widened: {name} ({old} → {new})"),
-
-    # ── Inline attribute changes ───────────────────────────────────────────
-    _E("func_became_inline", _A),
-    _E("func_lost_inline", _C,
-       description_template="Function lost inline attribute (now has external linkage): {name}"),
-
-    # ── PR #89: ELF fallback ──────────────────────────────────────────────
-    _E("func_deleted_elf_fallback", _B,
-       description_template="Symbol disappeared from ELF .dynsym without explicit deletion marker: {name} — was exported in old library, absent in new library's dynamic symbol table while header still declares it"),
-
-    # ── Template inner-type analysis ──────────────────────────────────────
-    _E("template_param_type_changed", _B,
-       description_template="Template parameter inner type changed: {name} param {detail} ({old} → {new})"),
-    _E("template_return_type_changed", _B,
-       description_template="Template return type inner argument changed: {name} ({old} → {new})"),
 
     # ── Version-stamped typedef sentinel ───────────────────────────────────
     _E("typedef_version_sentinel", _C,
@@ -1988,13 +1901,16 @@ REGISTRY = ChangeKindRegistry([
        description_template="Invalid Python API stub for extension module: {detail}"),
     # Coverage-extension, composition-compatibility, build-source (L3/L4/L5),
     # NumPy C-API (G26), wheel deployment-claim (G27), CastXML schema-
-    # completeness, and suppression reachability (ADR-044) kinds each live in
-    # their own change_registry_*.py file to keep this file under the cap.
+    # completeness, ABICC-parity/qualifier (moved for room to add impact
+    # text — D9 "complete metadata"), and suppression reachability (ADR-044)
+    # kinds each live in their own change_registry_*.py file to keep this
+    # file under the cap.
     *COVERAGE_EXTENSION_ENTRIES,
     *COMPOSITION_EXTENSION_ENTRIES,
     *BUILDSOURCE_EXTENSION_ENTRIES,
     *NUMPY_EXTENSION_ENTRIES,
     *WHEEL_DEPLOYMENT_EXTENSION_ENTRIES,
     *CASTXML_EXTENSION_ENTRIES,
+    *PARITY_EXTENSION_ENTRIES,
     *SUPPRESSION_EXTENSION_ENTRIES,
 ])
