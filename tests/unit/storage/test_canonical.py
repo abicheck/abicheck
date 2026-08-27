@@ -694,12 +694,6 @@ class TestRawDigest:
     """`raw_digest` -- D7's counterpart to `semantic_digest` for content
     `canonical_form` cannot represent at all (a binary buffer)."""
 
-    def test_hashes_the_payload_directly(self) -> None:
-        payload = b"raw extractor artifact bytes"
-        digest = raw_digest(payload)
-        expected = hashlib.sha256(payload).hexdigest()
-        assert digest == f"sha256:{expected}"
-
     def test_is_deterministic(self) -> None:
         payload = b"\x00\x01\xff some bytes \xfe"
         assert raw_digest(payload) == raw_digest(payload)
@@ -715,8 +709,10 @@ class TestRawDigest:
     def test_honors_a_non_default_algorithm(self) -> None:
         payload = b"raw bytes"
         digest = raw_digest(payload, algorithm="sha3_256")
-        expected = hashlib.sha3_256(payload).hexdigest()
-        assert digest == f"sha3_256:{expected}"
+        assert digest.startswith("sha3_256:")
+        assert (
+            len(digest.removeprefix("sha3_256:")) == hashlib.sha3_256().digest_size * 2
+        )
 
     def test_rejects_a_non_binary_value(self) -> None:
         with pytest.raises(TypeError):
@@ -741,8 +737,23 @@ class TestRawDigest:
 
     def test_never_strips_anything_shaped_like_capture_metadata(self) -> None:
         """A raw payload has no JSON structure at all, so a byte sequence
-        that happens to spell `{"capture": ...}` is hashed as opaque bytes,
-        unlike `semantic_digest`'s root-capture-stripping rule for JSON
-        content -- there is no document here to inspect a root key of."""
-        payload = b'{"capture": {"timestamp": "now"}, "x": 1}'
-        assert raw_digest(payload) == f"sha256:{hashlib.sha256(payload).hexdigest()}"
+        that happens to spell `{"capture": ...}` hashes differently from the
+        same bytes with that block actually removed -- unlike
+        `semantic_digest`'s root-capture-stripping rule for JSON content,
+        there is no document here to inspect a root key of."""
+        with_capture = b'{"capture": {"timestamp": "now"}, "x": 1}'
+        without_capture = b'{"x": 1}'
+        assert raw_digest(with_capture) != raw_digest(without_capture)
+
+    def test_never_collides_with_an_equivalent_json_value(self) -> None:
+        """The bug this fix closes: `b"{}"` and `{}` both encode to the
+        identical two bytes `b"{}"`, so without a domain separator the two
+        functions would compute the same digest for genuinely different
+        stored representations -- `InMemoryObjectStore.put()` would then
+        keep whichever was stored first and silently discard the other,
+        regardless of which one a later caller asked to store (Codex
+        review).
+        """
+        assert raw_digest(b"{}") != semantic_digest({})
+        assert raw_digest(b"null") != semantic_digest(None)
+        assert raw_digest(b"[]") != semantic_digest([])

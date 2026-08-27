@@ -361,11 +361,16 @@ def semantic_digest(value: Any, *, algorithm: str = "sha256") -> str:
     understand. A content-addressed store that other tools may re-derive
     digests for should not depend on the quirks of one runtime's encoder.
 
-    This changes the digest of any value containing non-ASCII content
-    relative to earlier revisions of this module. That is free precisely
-    because Phase 0 persists nothing: no stored package carries a digest
-    computed the old way. It would not be free later, which is why it is
-    settled now.
+    Every digest this function returns is domain-separated from
+    :func:`raw_digest`'s (a fixed tag is mixed in ahead of the payload --
+    see `_JSON_DOMAIN`), so a JSON value and an unrelated raw byte buffer
+    that happen to encode to the same bytes can never share an address.
+
+    This changes the digest of any value relative to earlier revisions of
+    this module (the non-ASCII fix above, and now the domain tag). That is
+    free precisely because Phase 0 persists nothing: no stored package
+    carries a digest computed the old way. It would not be free later,
+    which is why it is settled now.
     """
     stripped = strip_capture_metadata(value)
     _reject_surrogate_pairs(stripped)
@@ -375,17 +380,29 @@ def semantic_digest(value: Any, *, algorithm: str = "sha256") -> str:
         sort_keys=True,
         separators=(",", ":"),
     ).encode("ascii")
-    return _digest_from_payload(payload, algorithm=algorithm)
+    return _digest_from_payload(payload, algorithm=algorithm, domain=_JSON_DOMAIN)
 
 
-def _digest_from_payload(payload: bytes, *, algorithm: str) -> str:
+#: Domain separators mixed into the hashed bytes ahead of the actual payload
+#: (see `_digest_from_payload`) so a raw binary buffer and an unrelated
+#: JSON-shaped value that happen to encode to the same bytes -- `b"{}"` and
+#: `{}` both encode to the two bytes `b"{}"` -- can never collide on one
+#: address. Without this, `InMemoryObjectStore.put()` would keep whichever
+#: representation was stored first and `get()` would return it regardless of
+#: which one a later caller actually asked to store (Codex review).
+_JSON_DOMAIN = b"json:"
+_RAW_DOMAIN = b"raw:"
+
+
+def _digest_from_payload(payload: bytes, *, algorithm: str, domain: bytes) -> str:
     """Shared `<algorithm>:<hex>` formatting for an already-encoded payload.
 
     Used by both :func:`semantic_digest` (JSON-encoded content) and
     :func:`raw_digest` (raw binary content) so the two rules below can't
-    drift between two independent copies:
+    drift between two independent copies. `domain` is prepended to `payload`
+    before hashing -- see `_JSON_DOMAIN`/`_RAW_DOMAIN`.
     """
-    digester = hashlib.new(algorithm, payload)
+    digester = hashlib.new(algorithm, domain + payload)
     if digester.digest_size == 0:
         # SHAKE and friends are extendable-output functions: `hashlib.new`
         # accepts them, but `hexdigest()` requires a length, so a caller
@@ -440,4 +457,4 @@ def raw_digest(
             "hashes bytes-like payloads only -- use semantic_digest for "
             "JSON-shaped content"
         )
-    return _digest_from_payload(bytes(payload), algorithm=algorithm)
+    return _digest_from_payload(bytes(payload), algorithm=algorithm, domain=_RAW_DOMAIN)

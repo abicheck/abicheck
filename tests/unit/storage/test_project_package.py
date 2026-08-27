@@ -692,6 +692,22 @@ class TestObjectStoreContract:
         ref = ObjectRef(kind="raw_refs", digest=digest)
         assert store.get(ref.digest) == payload
 
+    def test_a_raw_payload_never_collides_with_an_equivalent_json_value(
+        self,
+    ) -> None:
+        """`b"{}"` and `{}` both encode to the identical bytes `b"{}"` --
+        before the domain-separation fix, storing both under one store gave
+        them the same digest, and `get()` returned whichever was `put()`
+        first regardless of which one a later caller asked for (Codex
+        review).
+        """
+        store = InMemoryObjectStore()
+        raw_digest_value = store.put(b"{}")
+        json_digest_value = store.put({})
+        assert raw_digest_value != json_digest_value
+        assert store.get(raw_digest_value) == b"{}"
+        assert store.get(json_digest_value) == {}
+
     def test_put_honors_a_non_default_algorithm(self) -> None:
         """An `ObjectRef` built with a non-default algorithm (`object_relpath`
         accepts any real, fixed-size hashlib algorithm) must be resolvable
