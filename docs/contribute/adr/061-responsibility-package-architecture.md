@@ -1235,19 +1235,32 @@ found two more real, direct accesses a protocol would also have to declare —
 Declaring the full five doesn't change the conclusion, only completes the
 premise it rests on: the protocol still has to *type* `overrides`/
 `reclassify` accurately to be worth using — `Mapping[ChangeKind, Verdict]`
-and `Sequence[ReclassifyRule]`, the identical two references named before
-this correction. A protocol module
+and, an eleventh Codex review round caught, **not** `Sequence[ReclassifyRule]`
+as an earlier revision had it: `reporter.py:1061`, `reporter_markdown.py:1818`,
+and `sarif.py:733` all pass `result.policy_file.reclassify` straight into
+`active_reclassify_rules(rules: list[ReclassifyRule], ...)`, and a `Sequence`
+doesn't satisfy a parameter typed `list` — reproduced directly with
+`mypy --strict` (`Argument 1 ... has incompatible type "Sequence[str]";
+expected "list[str]"`) before trusting it. The read-only property has to
+return `list[ReclassifyRule]` specifically. A protocol module
 placed where it would belong, physically under `abicheck/model/` (a real,
 already-migrated package, not a `legacy_paths` entry — unlike
 `checker_types.py`, which currently escapes this check only because it
 hasn't moved), referencing `ChangeKind` from the still-unclassified
 `checker_policy.py` trips `unclassified-import` immediately: the same
 `migrated_source` gate this note already measured for `service.py`'s parser
-imports applies here too, `TYPE_CHECKING`-only reference included. So the
-protocol is the better mechanism to use *once* `checker_policy.py`'s own
-split happens — worth recording for whoever does that — but the split
-itself is still the precondition, not a protocol in place of it, and
-`policy_file.py` staying unclassified for now is unchanged.
+imports applies here too, `TYPE_CHECKING`-only reference included.
+**`ReclassifyRule` has the identical problem independently, a twelfth
+Codex review round caught this paragraph omitting** — `reclassify.py` is the
+module this note already recorded as *deliberately* unclassified, not
+merely not-yet-classified, so `checker_policy.py`'s own split resolves
+`ChangeKind` alone and does nothing for `ReclassifyRule`. So the protocol is
+the better mechanism to use *once* **both** `checker_policy.py`'s split
+*and* a real decision on `reclassify.py` (classify it, or accept the same
+kind of leaf-module treatment `policy_file.py` gets here) have happened —
+two co-prerequisites, not one — worth recording for whoever does that, but
+neither is a protocol in place of doing it, and `policy_file.py` staying
+unclassified for now is unchanged.
 
 Reclassifying
 `policy_file.py`/`suppression.py` as `compare` instead was rejected too:
