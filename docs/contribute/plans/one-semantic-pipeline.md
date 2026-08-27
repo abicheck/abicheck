@@ -259,6 +259,41 @@ value instead of a side boolean:
   piece of this that is genuinely removable, not the wire-level decode
   logic that still has to run for a historical input.
 
+  **`RecordType.bases` has no equivalent flag to read, and "every sibling
+  this pattern applies to" above does not actually include it — a first
+  draft of this phase implied it did, by backfilling `bases` the identical
+  conditional way `vtable`/`is_va_list` backfill from their own reliability
+  flags, and review correctly caught that `bases` has no such flag to
+  condition on at all (confirmed by grep: no `*_bases_reliable`-shaped
+  field exists anywhere in this codebase).** This is not an omission this
+  phase introduces — AGENTS.md's own `type_base_changed` "Known gaps" entry
+  already documents, at length, that no independent evidence signal exists
+  for this field, and that the existing, live detector's accepted policy is
+  to *always* treat a captured `bases` list as real ("the alternative —
+  suppressing a real hierarchy change ... is strictly worse"). Backfilling
+  a legacy snapshot's raw `bases` to `Fact.not_collected()` — the `False`-
+  flag branch's behavior for `vtable`/`is_va_list` — would be a real,
+  new regression here specifically: it would silently suppress every
+  `type_base_changed` finding the existing, unconverted detector already
+  produces today against every pre-`Fact[...]` snapshot, for a field whose
+  status quo never suppressed on capture-gap grounds in the first place.
+  Backfilling unconditionally to `Fact.present(raw_bases)` is therefore the
+  *only* correct choice for this one field's legacy-loading path — not a
+  weaker substitute for the flag-conditioned mechanism, but the literal
+  zero-behavior-change preservation of what `bases` already does today,
+  known limitation included. This is deliberately asymmetric with
+  `vtable`/`is_va_list`'s own legacy-loading bullet above: those two
+  fields have a real signal to condition on and use it; `bases` does not,
+  and pretending otherwise by reusing the same conditional shape would
+  fabricate a confidence neither the flag nor the field's own history
+  supports. Closing the underlying gap — giving `bases` a real reliability
+  signal, the way `vtable` already has one — is exactly the kind of
+  cross-cutting data-model work AGENTS.md's own entry already named as a
+  needed, not-yet-attempted follow-up; this phase converts the
+  *representation*, which is what makes that follow-up additive instead of
+  another reinterpretation of a raw `None`/empty value, and does not
+  attempt the evidence-signal design itself.
+
 **Writing a freshly-extracted snapshot back out needs its own fix, not
 just a reader-side backfill.** `serialization.snapshot_to_dict()` calls
 `asdict(snap)` on the *whole* `AbiSnapshot` — `dataclasses.asdict()`
@@ -1574,13 +1609,44 @@ sibling:
   `PublicSurfaceQuery.resolve(graph, explicit_roots) -> frozenset[EntityId]`,
   a traversal from explicit public roots through `includes`/`declares`
   edges (closing the reachable-header surface) and `references`/
-  `instantiates` edges (closing the reachable-type surface), with
-  `exports` edges answering the `contract=exports` domain from the *same*
-  graph instead of `export_surface.py`'s separate walk. `policy -> compare`
+  `instantiates` edges (closing the reachable-type surface). `policy -> compare`
   is an already-allowed import edge under ADR-061, so `policy/` can consume
   the `compare/`-built graph directly; this is where `compute_public_
   surface()`'s actual decision logic — which declarations count as part of
   the public contract — lives after migration.
+
+  **The `contract=exports` domain does *not* collapse into this same
+  bare-`frozenset[EntityId]`-returning `resolve()`, and a first draft of
+  this phase claimed it did — review correctly found that claim
+  incompatible with what `export_surface.py`'s real consumers actually
+  need.** `ExportSurface` is not a membership set — it is a structured
+  result carrying `resolvable: bool` and the `exclusion_is_provable`
+  property, computed from several independent completeness conditions (no
+  observed export table, no resolved root, an untyped root, an unaccounted
+  export, an unresolved type edge — `export_surface.py`'s own documented
+  fail-closed gate), and `contract_evaluation.py`/`contract_evidence_
+  collect.py` consume exactly that structured state to decide whether a
+  `PROVEN_OUT_OF_CONTRACT` classification is actually *safe* to make, not
+  only whether a given `EntityId` is in some resolved set. Collapsing this
+  into "is this id in the frozenset `resolve()` returns" erases the
+  distinction between "not reached" and "reachability could not be
+  established" — exactly the distinction `exclusion_is_provable` exists to
+  keep, and losing it could let an incompletely-evidenced exclusion read as
+  proven, or silently drop a real contract-coverage failure. The fix:
+  `exports` queries the *same* shared graph this phase builds (the
+  evidence stays unified, per the Governing Invariant), but through a
+  second, differently-typed method — `PublicSurfaceQuery.
+  resolve_export_domain(graph, ...) -> ExportSurface` (or an equivalent
+  structured result preserving `resolvable`/`exclusion_is_provable`), not
+  the bare-set `resolve()` — since this domain's consumers need the
+  completeness state `resolve()`'s own return type has nowhere to carry.
+  `export_surface.py`'s own closure-walk algorithm migrates to build this
+  structured result from graph edges instead of its own independent scan;
+  its result *shape* does not migrate into `resolve()`'s, and Phase 10's
+  later deletion of `export_surface.py`'s independent closure walk (named
+  below) means the walk, not the structured `ExportSurface` type or its
+  consumers' own contract-evaluation logic, both of which stay exactly as
+  they are, fed by the new query instead of the old scan.
 
 `type_reachability.py`'s `directly_referenced_stdlib_types()` — itself a
 relevance decision (it un-filters a record for suppression purposes) —
