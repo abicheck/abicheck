@@ -554,17 +554,37 @@ matching decode; `SCHEMA_VERSION` bump; and the legacy-schema backfill
 path, reading the existing reliability flags exactly once on load);
 `diff_layout.py`/`diff_types.py`'s vtable/base-list detectors, **and every
 other semantic reader of the three converted fields, not only the two
-primary detectors** — `diff_param_qualifiers._diff_param_va_list`
+primary detectors, and not only the ones living under `diff_*.py`** —
+`diff_param_qualifiers._diff_param_va_list`
 (`p_old.is_va_list`/`p_new.is_va_list`), `diff_vtable_layout.
 _is_polymorphic` (`rec.vtable`/`rec.virtual_bases`), and `diff_cxx_rules`'s
 base-walk helpers (`start.bases`/`rec.bases`) all read the raw field
 directly today and were missing from a first draft of this file list —
 each retains the exact unavailable-vs-empty ambiguity this phase exists
-to close until it is migrated too. The AI-readiness gate this phase adds
-checks every module under `diff_*.py`, not only the two named here, so
-the full set is enforced mechanically once written, but the file list
-itself must name all of them as phase-0 work, not assume the gate alone
-will surface the rest as a later, unplanned fixup.
+to close until it is migrated too.
+
+**`internal_leak.py::_enqueue_record_children()` is a fourth such reader,
+and a first draft of this paragraph's own closing sentence — "the AI-
+readiness gate... checks every module under `diff_*.py`" — is exactly
+why it was missed: `internal_leak.py` is not a `diff_*.py` module at
+all, so a gate scoped to that glob would silently never see it.**
+`_enqueue_record_children()` walks `rec.bases` directly to decide whether
+an internal type is reachable from a public one through inheritance, for
+`INTERNAL_TYPE_LEAKS_VIA_PUBLIC_API`; reading the unconverted raw field
+here has the identical failure mode every other unmigrated reader has —
+if `bases_fact` is `Fact.not_collected()` but the legacy field was
+normalized to `[]` for backward compatibility, this walk sees no bases at
+all, can miss the one public-inheritance path that makes the leak real,
+and silently suppresses or demotes the finding. Fixed two ways, not one:
+`internal_leak.py` is added to this phase's migration file list alongside
+the `diff_*.py` modules above, and the AI-readiness gate's module scope
+widens from "every module under `diff_*.py`" to an explicit allowlist of
+every module this phase identifies as a semantic reader of the three
+converted fields (the four `diff_*.py` modules plus `internal_leak.py`) —
+a glob that happens to match today's known readers is not the same
+invariant as "every known reader is checked," and the next non-`diff_*.py`
+reader this plan's own drafting process misses should fail the gate, not
+silently bypass it the way this one did.
 
 **Tests.** A direct test on `Fact[T]`'s actual comparison contract, added
 before any detector migration depends on it: `if fact:` raises
