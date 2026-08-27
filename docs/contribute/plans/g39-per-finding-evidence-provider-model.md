@@ -2638,11 +2638,56 @@ the purpose of this phase for precisely the scenario G43 exists to wire
 up. The receipt's identity field must therefore be **projection-aware**:
 either a single target id (the ordinary, non-shared case — validated by
 equality exactly as before) *or* a build-wide/shared-scope marker paired
-with the attribution digest G43's `attribution_path` mechanism already
-computes (validated by checking that the *consumer's resolved projection*
-— this target, selected via attribution — is one the pack's own
-attribution digest actually covers, not by requiring the whole pack to
-name one target). A consumer validates whichever shape the receipt
+with an **attribution digest — which must be newly defined by this phase,
+not treated as something G43 or existing code already computes.** A fresh
+review round found this claim false: neither `link_attribution.py` nor
+`inputs_pack.py`/`build_output.py` computes or persists any such digest
+today — `attribute_sources_to_targets()` returns a plain
+`{normalized_source_path: frozenset[target_identity]}` mapping, and
+`_inferred_evidence_projection_issues()`/`_filter_tus_by_attribution()`
+only ever re-derive that mapping and test set intersection/membership
+against it; nothing hashes it. Without a real digest to validate against,
+this phase's own shared-pack receipt path has no value a producer can
+emit or a consumer can verify, and stays unimplementable for exactly the
+G43 scenario it was written to cover.
+
+This phase must therefore define, not merely reference, the attribution
+digest:
+
+- **Canonical normalization**: the digest is computed over
+  `attribute_sources_to_targets()`'s own return shape — sort the mapping's
+  keys (already-normalized source paths), and for each key sort its
+  `frozenset[target_identity]` members — so two structurally identical
+  mappings always serialize to the same canonical byte sequence regardless
+  of iteration/insertion order (the same "sort before hash" discipline
+  this codebase already applies to other content-addressed digests, e.g.
+  `BuildSourcePack.content_hash()`).
+- **Hashing algorithm**: reuse whatever primitive this codebase's other
+  content digests already use (confirm and reuse — don't introduce a
+  second hashing convention for one new field), applied to the canonical
+  serialization above.
+- **Persisted field**: the digest is computed once, at the point the
+  attribution mapping is produced/validated (natural point: alongside
+  `_inferred_evidence_projection_issues()`'s own re-derivation, or a new
+  sibling function next to it), and persisted as part of this phase's
+  receipt (artifact 2, `InputsManifest` — see "Relationship to other
+  plans" below) — not recomputed ad hoc by each consumer, which would
+  reintroduce the same "two independent statements of one fact can
+  disagree" risk this plan's own `comparability.py` precedent exists to
+  avoid.
+- **Producer/consumer wiring**: the producer (whatever emits the
+  `abicheck_inputs/` pack and its `attribution_path` file) computes and
+  stores the digest; the consumer (this phase's own fail-closed receipt
+  validator) recomputes it from the attribution mapping it independently
+  loaded and compares — a real equality check, not a reference to a value
+  that was merely asserted.
+
+Validated by checking that the *consumer's resolved projection* — this
+target, selected via attribution — is one the pack's own attribution
+digest actually covers (i.e. the target's canonical identity, from G43's
+own corrected identity-set resolution, appears among the values the
+digested mapping ties to at least one TU), not by requiring the whole
+pack to name one target. A consumer validates whichever shape the receipt
 declares; a shared pack is never forced through the single-target equality
 check that only applies to the non-shared case.
 
@@ -2741,8 +2786,14 @@ rather than letting the two blur into one field family that answers
 neither question cleanly. The projection-aware identity field (single
 target vs. shared/build-wide-plus-attribution-digest) adds one real design
 decision — a two-shape union rather than a bare string — but stays
-additive schema work, not new extraction logic; it does not change this
-phase's overall M estimate.
+additive schema work, not new extraction logic. **The attribution digest
+itself is a genuinely new piece of logic, not previously existing
+anywhere in this codebase** (confirmed by a fresh review round — no
+current code computes one) — canonical normalization, a hashing
+algorithm, a persisted field, and producer/consumer wiring, all defined
+above rather than assumed to already exist. This is real, if narrow, new
+work; it does not push the phase out of M, but it is not free the way the
+rest of this phase's additive schema fields are.
 
 ## Design
 

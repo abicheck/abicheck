@@ -89,8 +89,9 @@ it:
    `projection: inferred`, reads the validated `evidence.attribution_path`
    (already checked by `_inferred_evidence_projection_issues()` during
    `project validate-build`), loads the attribution mapping, and forwards
-   it — plus the target's own **canonical attribution identity, not its
-   bare id** — to whichever `dump`/`compare` entry point ultimately calls
+   it — plus the target's own **canonical attribution identity set, not a
+   bare id or a single resolved identity** (see the correction below) —
+   to whichever `dump`/`compare` entry point ultimately calls
    `ingest_inputs_pack()` for this check, instead of erroring out
    unconditionally.
 
@@ -108,13 +109,43 @@ it:
    membership check, silently dropping the *entire* pack's contribution to
    this target even though `project validate-build`'s own
    `_inferred_evidence_projection_issues()` accepted the identical mapping
-   using exactly these canonical, prefixed identities
-   (`expected_identities = {f"target://{t.id}"}`, plus the `output://`
-   fallback when `t.binary` is set). The fix: resolve and forward the same
-   canonical identity `_inferred_evidence_projection_issues()` already
-   computes — `f"target://{t.id}"`, falling back to the `output://`-based
-   identity the identical way that function does when the target has no
-   semantic id — not the target's bare `t.id`.
+   using exactly these canonical, prefixed identities.
+
+   **A single resolved identity is still not enough, and a second review
+   round found the real fix one layer deeper than the first correction
+   reached.** `_inferred_evidence_projection_issues()` validates against
+   `expected_identities = {f"target://{t.id}"}` **plus** the `output://`
+   fallback **as a set of two acceptable spellings**, because the
+   target-graph channel and the link-unit-graph fallback channel can each
+   cover a *different subset* of one target's own TUs (e.g. some TUs
+   discovered via a real target-graph adapter, others only reachable
+   through the link-unit fallback for a mixed-build-system project) — the
+   validator's own check is "does *any* TU's identity intersect this set,"
+   never "pick the one identity that matches." Forwarding a single resolved
+   string as `expected_target_id` (as the first correction above proposed)
+   reproduces the original bug in a narrower form: whichever TUs are
+   tagged with the *other* accepted spelling still fail
+   `_filter_tus_by_attribution()`'s exact-membership test and are silently
+   dropped — and, worse, the drop-reason accounting from this plan's own
+   `_filter_tus_by_attribution()` return-tuple widening (above) could
+   misclassify those dropped-but-legitimately-owned TUs as
+   `dropped_other_target` rather than `dropped_unresolved`, since they
+   *are* attributed, just under the identity spelling this call didn't
+   pass. The fix: `_filter_tus_by_attribution()`/`ingest_inputs_pack()`
+   must accept the **full accepted identity set** for this target —
+   `expected_target_ids: frozenset[str]` (or an equivalent plural
+   parameter), mirroring `_inferred_evidence_projection_issues()`'s own
+   `expected_identities` set exactly — and test `identities &
+   expected_target_ids` per TU, not `expected_target_id in identities`
+   against one resolved string. `check-project.yml`'s evidence-routing
+   step (and the CLI/typed-API surface below) therefore resolve and
+   forward the *same set* `_inferred_evidence_projection_issues()` already
+   computes (`{f"target://{t.id}"}`, plus the `output://` alternative when
+   `t.binary` is set) rather than picking one member of it. This is a
+   genuine, if narrow, signature widening on `ingest_inputs_pack()`'s
+   existing Python-API parameter (`expected_target_id: str | None` becomes
+   plural), not merely a resolution-logic change confined to the CLI/
+   workflow wiring.
 2. The real `dump`/`compare` CLI paths that consume a Flow-2
    `abicheck_inputs/` pack gain a way to receive an external
    `(attribution, expected_target_id)` pair — today `ingest_inputs_pack()`
@@ -174,14 +205,17 @@ would have no way to pass the value through). The design, corrected:
    defensively at consumption time — a validated `build-output.json` at
    publish time doesn't guarantee the exact file used at check time is the
    same one), load it, and forward `(attribution_path resolved,
-   canonical_attribution_identity)` — the `target://<id>`/`output://
-   <basename>`-shaped string described under "Goal & acceptance criteria"
-   above, **not** the target's bare id — as new outputs into its
+   canonical_attribution_identity_set)` — the **set** of `target://<id>`/
+   `output://<basename>`-shaped identities described under "Goal &
+   acceptance criteria" above, **not** a bare target id and **not** a
+   single resolved identity string — as new outputs into its
    `actions/check-target` step (mirroring how `evidence-pack`/
    `evidence-producer` are already forwarded as step outputs today).
 2. **`actions/check-target/action.yml`/`run.sh`**: gain new inputs
-   (e.g. `attribution-path`/`attribution-target-id`) accepting the values
-   `check-project.yml` forwards, and pass them onward to the repository-root
+   (e.g. `attribution-path`/`attribution-target-ids`, the latter a
+   comma-joined or JSON-encoded list, not a single id) accepting the
+   values `check-project.yml` forwards, and pass them onward to the
+   repository-root
    Action it invokes internally — the same forwarding shape its existing
    `candidate-build-output`/`evidence-pack-path` inputs already use (see
    `check-project.yml`'s own comment on those, quoted in this plan's
@@ -211,9 +245,12 @@ would have no way to pass the value through). The design, corrected:
    scoping convention already used for `--sources`/`--build-info`/
    `--header`/`--ast-frontend` (`cli_scan.py`/`cli_compare_helpers.py`) —
    e.g. `--attribution-path old=PATH new=PATH` (and a matching
-   `--attribution-target-id old=ID new=ID`) — rather than a bare,
-   unscoped flag pair. `ingest_inputs_pack(attribution=, expected_target_id=)`
-   is then called once per side with that side's own resolved values.
+   `--attribution-target-ids old=ID[,ID...] new=ID[,ID...]`, plural per
+   side — see the accepted-identity-set correction above: each side needs
+   the *set* of accepted identities, not one id) — rather than a bare,
+   unscoped flag pair. `ingest_inputs_pack(attribution=,
+   expected_target_ids=)` (plural parameter) is then called once per side
+   with that side's own resolved identity set.
    Steps 1-3's workflow/Action forwarding is unaffected in shape — a
    single-sided `check-project.yml` invocation supplies only the
    candidate-side (`new=`) half of this sided flag, never both — but the
@@ -426,7 +463,10 @@ remaining work is mostly CLI/workflow/Action plumbing connecting two
 already-tested pieces (`attribute_sources_to_targets()`'s output, already
 validated by `_inferred_evidence_projection_issues()`) to a third
 (`ingest_inputs_pack()`'s existing `attribution`/`expected_target_id`
-parameters), plus updating `check-project.yml`'s own rejection logic and
+parameters — **which this plan also widens to accept a set of accepted
+identities rather than one string, per the correction above; a small,
+narrow signature change to an existing function, not new extraction
+logic**), plus updating `check-project.yml`'s own rejection logic and
 messaging, plus mirroring that same wiring through `actions/baseline` and
 its two calling workflows, plus the one confirmed piece of new logic
 above. Low design risk; the main risk is scope creep back into

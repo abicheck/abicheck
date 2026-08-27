@@ -286,6 +286,47 @@ back to a config-only digest — that is exactly the same "fail closed into
 a distinct, named failure class" pattern G41 Phase 3 already establishes
 for assurance, applied here to environment-digest computation.
 
+**The content-bound digest above cannot live in `RunPlanCheck` as
+originally specified — a real job-ordering conflict confirmed by reading
+`check-project.yml` directly, correcting the design rather than only the
+definition.** `RunPlanCheck.environment_digest` is computed and persisted
+into `run-plan.json` by the `plan` job, which always runs on
+`ubuntu-latest` (fixed, confirmed in the workflow) — *before* any per-cell
+`check` job (which runs on `matrix.runs_on`, potentially Windows/macOS/a
+custom self-hosted runner entirely different from the planner) ever
+executes. A sysroot an environment's `providers:` names may exist *only*
+on that specific check-job runner — the planner has no access to probe it
+at all, on any runner, let alone the one where the actual comparison
+later executes. Requiring `RunPlanCheck` to already carry a digest that
+depends on a live probe is therefore not merely hard, it is structurally
+impossible for exactly the cross-platform-environment case this whole
+provider-resolution phase exists to serve. The design splits into two
+digests, not one:
+
+- **`RunPlanCheck.environment_digest`** (computed during planning, in the
+  `plan` job, before any check job runs) stays the narrower, config-only
+  digest — the resolved `environments:`/`providers:` YAML content
+  (sysroot path string, declared expectations), available with no live
+  probe. This is what the run plan, the effective-configuration receipt,
+  and the aggregate's profile/evaluation matrix already needed for
+  identity/grouping purposes, and it is genuinely computable at plan time.
+- **A new, separate post-probe field** — e.g. `probed_environment_digest`
+  — computed by the `check` job itself, *after* it actually probes the
+  live sysroot on its own runner, and stamped onto that job's own report
+  envelope (not `run-plan.json`, which has already been written and
+  uploaded by the time this value exists). This is the field that
+  incorporates the actually-probed provider-fact inventory described
+  above, and it is the one a consumer must read to know whether two runs'
+  *live* environments genuinely matched — `environment_digest` alone
+  never proves that, and this plan must not claim otherwise.
+- The report schema and the aggregate's profile/evaluation matrix both
+  gain this second field alongside the first, with the aggregate treating
+  a same-`environment_digest`-but-different-`probed_environment_digest`
+  pair as exactly what it is: same declared configuration, different live
+  environment content — not an error by itself, but a fact the aggregate
+  must be able to surface, since it is precisely the scenario the earlier
+  correction in this section identifies as a real risk.
+
 **Efficiency constraint, load-bearing**: environment evaluation must not
 trigger a new binary/header/source extraction per environment — extract/
 diff exactly once, then evaluate the *one* resulting `DiffResult` against
