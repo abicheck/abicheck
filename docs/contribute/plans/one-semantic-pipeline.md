@@ -150,7 +150,7 @@ value instead of a side boolean:
   absence, exactly the "real but WRONG data" distinction that flag's own
   docstring already draws). The reliability flags themselves become
   write-only after this phase (kept only so pre-Fact[...] snapshots still
-  load correctly) and are deleted in Phase 9 once no pre-conversion
+  load correctly) and are deleted in Phase 10 once no pre-conversion
   snapshot needs to be read anymore — not before.
 
 **Files.** `abicheck/model/availability.py` (new — the relocated
@@ -275,6 +275,33 @@ Generalizes ADR-046/048's source-graph identity (already real,
 snapshot and the source graph reference, rather than two graphs with their
 own identity schemes that happen to usually agree.
 
+**A function's `EntityId` carries a callable-signature discriminator —
+`ScopePath` plus a bare name is not enough.** `f(int)` and `f(double)` share
+the same `ScopePath` and the same `function` kind discriminator; without a
+third component, `EntityId` collapses two genuinely distinct overloads into
+one id, and since this phase directs diff matching and every other
+semantic consumer to key on `EntityId` rather than re-deriving their own
+fallback, `OccurrenceId`'s per-*record* disambiguator (built for the
+unrelated "same identity, duplicate declaration" case) does not repair
+this — it is not a per-overload discriminator. `EntityId` does not invent
+a new scheme for this: it carries the existing tiered resolution
+`finding_identity.resolve_function_identity`/`SymbolIdentityIndex` and
+ADR-048's normalized identity already establish — mangled name first when
+one exists (the common case, already globally unique per overload), and
+only for the genuinely mangling-free case (a non-`extern "C"` function on
+a DWARF-only snapshot) the same normalized-signature fallback tuple that
+code already computes: canonicalized parameter types plus `is_const`/
+`is_volatile`/ref-qualifier (an `extern "C"` function's parameter list is
+deliberately excluded from its own identity, per that function's own
+docstring, since C has no overload resolution — a changed parameter list
+there is a modification of the one function, not a different overload,
+and folding param types in would break the existing name-based extern-C
+match). `EntityId`'s function variant is therefore `(ScopePath, "function",
+mangled_name | normalized_signature_tuple)`, not a bare `(ScopePath,
+"function")` — generalizing the existing tiered primitive into the one
+identity every consumer reads, rather than proposing a simpler one that
+regresses what the codebase already gets right.
+
 This phase explicitly targets, and closes, the specific collision bugs
 AGENTS.md's "Known gaps" records as already-found-and-patched-locally:
 opaque-type suppression keyed by bare `RecordType.name`
@@ -286,7 +313,11 @@ replaced by one `ScopePath`-based identity computation instead of being
 kept as a parallel, narrower fix.
 
 **Files.** `abicheck/model/identity.py` (new, leaf — no dependency on
-`checker_types`/`diff_*`, per ADR-063 D10); `diff_filtering.py`'s
+`checker_types`/`diff_*`, per ADR-063 D10; its function-identity
+constructor calls into the existing `finding_identity.
+resolve_function_identity` logic rather than re-deriving it, so the two
+cannot drift independently of each other — this phase generalizes that
+function's caller, not its algorithm); `diff_filtering.py`'s
 `_find_opaque_types`/`_find_by_value_types`/`_root_type_name` (consume
 `EntityId` instead of bare `t.name`); `dumper_clang.py`/
 `dumper_castxml.py`'s `parse_types()` (produce `ScopePath`-derived
@@ -306,7 +337,12 @@ property tests" convention) states the contract directly: two distinct
 declarations in different namespaces never collide regardless of bare-name
 overlap; a using-declaration's `EntityId` always resolves to its target's,
 never a sibling; namespace-suffix stripping is symmetric and never merges
-two records whose full `ScopePath`s differ.
+two records whose full `ScopePath`s differ; **and two distinct overloads
+sharing one `ScopePath` (`f(int)` vs. `f(double)`, and separately `void
+f()` vs. `void f() const`) always produce distinct `EntityId`s**, pinned
+directly against the exact counterexample a reviewer raised for this
+design, with an `extern "C"` sibling case confirming the deliberate
+opposite rule (a changed parameter list there stays the same identity).
 
 **Acceptance criteria.** `diff_filtering.py`/`type_reachability.py`'s
 string-based ambiguity-tracking helpers are deleted, not kept alongside
@@ -322,69 +358,117 @@ by traversing one authoritative evidence graph, not by independently
 reconstructing include/reference/export relationships from the flat
 snapshot a second time.
 
-**Design.** This phase is deliberately split across two packages, because
+**Design.** Two things were wrong with this phase's first draft, both
+caught by review, and both point to the same corrected design. First,
 "is this declaration public" is a **relevance decision** — AGENTS.md's own
 task-routing table assigns exactly that class of question ("decide
 relevance, suppression, classification, severity, or gating") to
 `policy/`, not to `compare/` ("match old/new entities or identify a raw
-change"). Putting the decision itself in `compare/` would make that
-package own policy behavior, and ADR-061's fixed import direction
-(`policy -> model, compare`; nothing imports the reverse) means `compare/`
-can never import a relevance decision back out of `policy/` later without
-creating the cycle ADR-061 already forbids. So:
+change"); putting the decision itself in `compare/` would make that
+package own policy behavior. Second, and more fundamentally: this
+repository **already has** a general-purpose, producer-agnostic node/edge
+graph primitive with an evidence-preserving merge —
+`buildsource.graph_facts.GraphNode`/`GraphEdge`/`GraphFact`/
+`merge_graph_facts` (ADR-031 D2, ADR-046 D1/D2), currently used to build
+the optional L5 source/build-evidence graph (`buildsource.source_graph.
+SourceGraphSummary`, `NODE_KINDS`/`EDGE_KINDS`). A first draft of this
+phase defined a *second*, parallel node/edge dataclass hierarchy in a new
+`compare/surface_graph.py` for the public-surface graph — which is exactly
+the "one concept, two representations" defect the Governing Invariant
+forbids, and it would have left public-surface relevance and L5 impact
+analysis (ADR-057's consumer graph, ADR-053's TU→link-unit→DSO
+attribution) looking at the same declaration through two graphs that can
+still disagree, the opposite of this phase's own stated goal.
 
-- **The graph substrate** — `abicheck/compare/surface_graph.py` (new):
-  typed nodes (`Header`, `TranslationUnit`, `Declaration`, `Type`,
-  `Symbol`, `Target`) and typed edges (`Includes`, `Declares`,
-  `References`, `Instantiates`, `Exports`, `OwnedByTarget`), built once per
-  snapshot side from facts the existing extraction layer already produces
-  (the header origin/scoping data `dumper_scoping.py` reads, the
-  export-table data `export_surface.py` already computes for
-  `contract=exports`, the declaration/reference data `type_reachability.
-  py`/`surface.py` each independently reconstruct today). This is a
-  reconciliation of raw per-format facts into one structural shape —
-  identifying *what references what*, not deciding what is public — which
-  fits `compare/`'s charter and, critically, `policy -> compare` is an
-  already-allowed import edge, so `policy/` can consume this graph
-  directly. Nodes reference entities by the `EntityId` Phase 2 already
+The corrected design reuses the existing primitive rather than adding a
+sibling:
+
+- **Relocate the generic node/edge/merge primitive** (`GraphNode`,
+  `GraphEdge`, `GraphFact`, `FactConflict`, `merge_graph_facts`) from
+  `buildsource/graph_facts.py` into `abicheck/model/graph.py`. This is
+  exactly what ADR-061's own task-routing table says belongs in `model/`
+  ("add an ABI entity/value shared across stages") — the primitive itself
+  is already producer-agnostic and was never actually specific to L5
+  evidence; only its *vocabulary* (`NODE_KINDS`/`EDGE_KINDS`) and its
+  *construction* from source/build evidence are. `buildsource/
+  graph_facts.py`/`source_graph.py` import and re-export from the new
+  location (mirroring the re-export shim `source_graph.py` already uses
+  for its own split-out pieces), so every existing L5 caller is
+  unaffected.
+- **Build the public-surface graph as instances of that same primitive**,
+  not a new dataclass hierarchy — `abicheck/compare/surface_graph.py`
+  (new) registers its own node/edge *kind vocabulary* (`header`,
+  `translation_unit`, `declaration`, `type`, `symbol`, `target`; edge
+  kinds `includes`, `declares`, `references`, `instantiates`, `exports`,
+  `owned_by_target` — several of which already have an L5 analogue worth
+  reusing directly rather than renaming for its own sake: `declares`
+  *is* `SOURCE_DECLARES`, `exports` *is* `BINARY_EXPORTS_SYMBOL`,
+  `owned_by_target` *is* `TARGET_HAS_SOURCE`/`TARGET_HAS_PUBLIC_HEADER`),
+  built from facts the core L0-L2 extraction layer already produces (the
+  header origin/scoping data `dumper_scoping.py` reads, the export-table
+  data `export_surface.py` already computes for `contract=exports`, the
+  declaration/reference data `type_reachability.py`/`surface.py` each
+  independently reconstruct today) — available unconditionally, unlike
+  `source_graph.py`'s graph, which only exists when L3-L5 evidence was
+  collected. Nodes are keyed by the `EntityId` Phase 2 already
   established — this phase is ordered after Phase 2 for exactly that
-  reason, the same dependency Phase 5 (`SemanticIR`) has on Phase 2,
-  stated explicitly here so the plan's phase order is never read as
-  arbitrary.
+  reason, the same dependency Phase 5 (`SemanticIR`) has on Phase 2.
+- **This is what actually closes the "two graphs disagreeing" problem,
+  not a deferred aspiration.** When L3-L5 evidence *is* also collected,
+  `source_graph.py`'s builder and `compare/surface_graph.py`'s builder
+  register nodes for the *same* declaration under the *same* `EntityId`-
+  derived id — and `merge_graph_facts` (already designed, today, for
+  exactly this: "a node accumulates one `GraphFact` per producer that ever
+  registered it... genuine cross-producer disagreements recorded... instead
+  of silently dropped") merges them into one graph automatically, rather
+  than requiring ADR-057/053's consumers to be migrated in this same phase
+  before the disagreement is closed. Migrating those consumers onto
+  querying the merged graph directly is still explicitly **not** part of
+  this phase (each is its own later, separately-justified phase, per this
+  plan's "don't attempt a change with no real caller" discipline) — what
+  changes this time is that deferring the migration no longer leaves two
+  graphs free to silently disagree about the same declaration, since they
+  already share one node identity and one merge primitive underneath.
 - **The relevance query** — `abicheck/policy/public_surface.py` (new):
   `PublicSurfaceQuery.resolve(graph, explicit_roots) -> frozenset[EntityId]`,
-  a traversal from explicit public roots through `Includes`/`Declares`
-  edges (closing the reachable-header surface) and `References`/
-  `Instantiates` edges (closing the reachable-type surface), with
-  `Exports` edges answering the `contract=exports` domain from the *same*
-  graph instead of `export_surface.py`'s separate walk. This is where
-  `compute_public_surface()`'s actual decision logic — which declarations
-  count as part of the public contract — lives after migration, consuming
-  the `compare/`-built graph rather than rebuilding it.
+  a traversal from explicit public roots through `includes`/`declares`
+  edges (closing the reachable-header surface) and `references`/
+  `instantiates` edges (closing the reachable-type surface), with
+  `exports` edges answering the `contract=exports` domain from the *same*
+  graph instead of `export_surface.py`'s separate walk. `policy -> compare`
+  is an already-allowed import edge under ADR-061, so `policy/` can consume
+  the `compare/`-built graph directly; this is where `compute_public_
+  surface()`'s actual decision logic — which declarations count as part of
+  the public contract — lives after migration.
 
 `type_reachability.py`'s `directly_referenced_stdlib_types()` — itself a
 relevance decision (it un-filters a record for suppression purposes) —
 becomes a second, narrower query in `policy/public_surface.py` over the
-same graph (a one-hop `References` filter) rather than its own independent
+same graph (a one-hop `references` filter) rather than its own independent
 scan with its own ambiguity-tracking machinery — the machinery this phase
 removes is exactly what Phase 2 already started removing for the identity
 half of the same problem; this phase removes the *reachability* half.
 
-**Files.** `abicheck/compare/surface_graph.py` (new — graph builder only,
-no relevance logic); `abicheck/policy/public_surface.py` (new —
-`PublicSurfaceQuery`, migrated from `surface.py`'s existing traversal
-logic); `surface.py` (`compute_public_surface()` becomes a thin wrapper
-calling `PublicSurfaceQuery.resolve`); `dumper_scoping.py`/
-`export_surface.py`/`type_reachability.py` (each becomes a graph
-*builder* contributing nodes/edges in `compare/`, or a relevance *query* in
-`policy/`, not an independent reachability algorithm); `abicheck/
+**Files.** `abicheck/model/graph.py` (new — the relocated `GraphNode`/
+`GraphEdge`/`GraphFact`/`FactConflict`/`merge_graph_facts`); `buildsource/
+graph_facts.py`/`buildsource/source_graph.py` (trimmed to re-export from
+the new location, `NODE_KINDS`/`EDGE_KINDS` and L5-specific construction
+logic unchanged in place); `abicheck/compare/surface_graph.py` (new —
+public-surface node/edge *kind vocabulary* and builder, using `model/
+graph.py`'s primitive, not a new one); `abicheck/policy/public_surface.py`
+(new — `PublicSurfaceQuery`, migrated from `surface.py`'s existing
+traversal logic); `surface.py` (`compute_public_surface()` becomes a thin
+wrapper calling `PublicSurfaceQuery.resolve`); `dumper_scoping.py`/
+`export_surface.py`/`type_reachability.py` (each becomes a graph *builder*
+contributing nodes/edges in `compare/`, or a relevance *query* in
+`policy/`, not an independent reachability algorithm). `abicheck/
 workflows/consumer_graph.py` (ADR-057's consumer graph) and ADR-053's
-TU→link-unit→DSO attribution are explicitly **not** migrated in this
-phase — each is noted here as a candidate for a later, separate phase once
-this phase's graph has a real consumer to validate the generalization
-against, per this plan's own "don't attempt a change with no real caller"
-discipline (see AGENTS.md's "shape first, wiring later" gap and ADR-063
-D7's capability-lifecycle states).
+TU→link-unit→DSO attribution are explicitly **not** migrated to query the
+graph in this phase — each stays a candidate for a later, separate phase,
+per this plan's "don't attempt a change with no real caller" discipline
+(see AGENTS.md's "shape first, wiring later" gap and ADR-063 D7's
+capability-lifecycle states) — but they already share the merged graph's
+node identity the moment this phase ships, per the point above.
 
 **Tests.** Every existing `surface.py`/`type_reachability.py` regression
 test (including the namespace-collision property suite Phase 2 already
@@ -392,13 +476,29 @@ restated for identity) is kept and re-targeted at
 `PublicSurfaceQuery.resolve`'s output — this phase's acceptance bar is
 that none of those tests need a *behavior* change, only a different call
 path, and any test that does need a behavior change is a sign this phase
-introduced a real regression, not a refactor.
+introduced a real regression, not a refactor. The existing L5 source-graph
+test suite (`tests/test_source_graph*.py`/`tests/test_graph_facts.py` or
+their current equivalents) is re-run unchanged against the relocated
+`model/graph.py` primitive via `buildsource/graph_facts.py`'s re-export
+shim, proving the relocation is behavior-preserving rather than asserted.
+One new end-to-end regression is added specifically for the merge claim
+above: a project with both a public header (no L3-L5 evidence needed) and
+real `--sources`/`--build-info` evidence produces exactly one graph node
+for a declaration both builders see, not two — i.e. the same `EntityId`-
+derived node id is present in both builders' output and `merge_graph_facts`
+folds them, rather than the public-surface query and the L5 source graph
+silently describing the same declaration under two different node objects.
 
 **Acceptance criteria.** `surface.py`'s own traversal implementation and
 `export_surface.py`'s independent closure walk are deleted, not kept
-alongside the graph query (the actual removal happens in Phase 9's
+alongside the graph query (the actual removal happens in Phase 10's
 checklist, but this phase's own PR is incomplete if it leaves both
-implementations live past one release). FP-rate gate shows no regression.
+implementations live past one release). No second node/edge dataclass
+hierarchy exists anywhere in the repository after this phase —
+`compare/surface_graph.py` constructs `model.graph.GraphNode`/`GraphEdge`
+instances with its own kind vocabulary, the same way `buildsource/
+source_graph.py` already does, never a parallel type. FP-rate gate shows
+no regression.
 
 ---
 
@@ -651,7 +751,67 @@ earlier phases already establish as the pattern.
 
 ---
 
-### Phase 9 — delete the superseded representations
+### Phase 9 — selector/suppression/reclassification consolidation (D10)
+
+**Goal.** `suppression.py` and `reclassify.py` share one selector-matching
+primitive instead of two independent grammars kept in sync by hand, and
+`reclassify.py`'s `importlib.import_module` workaround for an import cycle
+is removed because the cycle it works around no longer exists.
+
+**Design.** `abicheck/policy/selectors.py` (new, leaf — zero dependency on
+`checker_types`, `suppression.py`, `reclassify.py`, or `reporter`, per
+ADR-063 D10): the selector grammar (`symbol`/`symbol_pattern`/
+`type_pattern`/`member_name`/`namespace`/`entity_namespace`/
+`cause_namespace`/`source_location`/`change_kind`/`expires`) extracted from
+`suppression.Suppression`'s existing `selector_matches()` — already the
+real, shared logic `reclassify.py` calls today, just reached through the
+import-cycle workaround rather than a dependency-free module. Once the
+grammar itself lives in a leaf package with no edge back to `checker_types`
+or `policy_file`, `reclassify.py` can import it **statically** — the cycle
+`policy_file -> reclassify -> suppression -> checker_types -> policy_file`
+that `reclassify.py`'s own docstring names as the reason for the
+`importlib.import_module` workaround no longer exists, because neither
+`reclassify.py` nor `suppression.py` needs to import the *other* anymore —
+both import the shared leaf instead. `Suppression`/`ReclassifyRule` keep
+their own, distinct *outcomes* (delete the finding vs. reclassify its
+verdict) — D10 consolidates the matching grammar, not the two rule types'
+different actions, which remain genuinely different decisions and are not
+an instance of the "one concept, two representations" problem this plan
+otherwise targets.
+
+**Files.** `abicheck/policy/selectors.py` (new); `suppression.py`
+(`Suppression.selector_matches()` becomes a thin wrapper calling the
+shared matcher, or is removed in favor of direct calls — whichever keeps
+`Suppression`'s own public method surface intact for existing callers);
+`reclassify.py` (drops the `importlib.import_module` workaround and its
+own docstring's cycle justification, replaced by a static import of
+`policy/selectors.py`); `scripts/check_architecture.py`'s import-direction
+gate (ADR-061) gains a check that `policy/selectors.py` itself imports
+nothing from `policy_file.py`/`checker_types.py`/`suppression.py`/
+`reclassify.py`, so a future change cannot silently reintroduce the same
+cycle through the new leaf module.
+
+**Tests.** Every existing `suppression.py`/`reclassify.py` selector test is
+kept and re-targeted at the shared matcher — this phase's acceptance bar
+is that no selector-matching *behavior* changes, only where the grammar
+lives. A new test asserts `reclassify.py` contains no
+`importlib.import_module` call at all (confirmed to fail against the
+pre-phase code, which has exactly one, per that module's own docstring),
+and `scripts/check_architecture.py`'s widened gate is exercised directly
+against a deliberately-reintroduced cyclic import in a throwaway fixture
+module to confirm it actually fails closed.
+
+**Acceptance criteria.** `reclassify.py`'s `importlib.import_module`
+workaround is deleted, not kept "for safety" alongside the static import —
+per the Governing Invariant, a workaround for a cycle that no longer
+exists is itself a stale second path. `suppression.py`'s selector grammar
+is the shared leaf module's, not a second copy. FP-rate/mutation-score
+gates show no regression (this phase moves matching logic, it does not
+change what matches).
+
+---
+
+### Phase 10 — delete the superseded representations
 
 **Goal.** Every phase above is only complete once its "before" state is
 removed, not left as a second path. This phase is the accounting pass,
@@ -671,7 +831,11 @@ not new design.
   suffix ambiguity trackers.
 - Phase 3: `surface.py`'s pre-graph traversal implementation and
   `export_surface.py`'s independent closure walk, once
-  `PublicSurfaceQuery.resolve` is the only path either one calls.
+  `PublicSurfaceQuery.resolve` is the only path either one calls; the
+  original, in-place copies of `GraphNode`/`GraphEdge`/`GraphFact`/
+  `FactConflict`/`merge_graph_facts` in `buildsource/graph_facts.py` once
+  every caller reads them from `model/graph.py` instead of the re-export
+  shim.
 - Phase 5: any hand-maintained capability-matrix doc section the
   generator now produces.
 - Phase 6: each backend parser's own copy of anonymous-marker/closure-
@@ -681,6 +845,8 @@ not new design.
 - Phase 8: any remaining legacy baseline-set/`BundleFacts`-only code path
   once the `ProjectSnapshot` import adapter covers it — per ADR-062's own
   phasing, not accelerated here.
+- Phase 9: `reclassify.py`'s `importlib.import_module` workaround and its
+  own now-stale cycle-justification docstring.
 
 **Acceptance criteria.** For each row: a `git grep` for the removed
 pattern/function name returns nothing outside test fixtures/changelog
@@ -717,10 +883,11 @@ history. This checklist is re-run, and re-verified, at the end of the
 | 0 | M | Converting the wrong three fields first (pick fields with an *active* fabricated-finding incident, not merely "many `None` checks") |
 | 1 | L | castxml unavailability blocking the parity-test half; mitigated by explicit clang-only first landing |
 | 2 | L | Identity collision regressions are exactly the bug class this phase targets — the property-test suite is the real acceptance bar, not code review alone |
-| 3 | L | Migrating `surface.py`/`export_surface.py`'s traversal into a shared graph without changing what counts as public — the kept-test-behavior acceptance bar exists specifically to catch a silent surface-scoping regression |
+| 3 | XL | Two distinct risks, not one: migrating `surface.py`/`export_surface.py`'s traversal without changing what counts as public (the kept-test-behavior acceptance bar), *and* relocating `buildsource/graph_facts.py`'s `GraphNode`/`GraphEdge`/`merge_graph_facts` into `model/` without disturbing the existing L5 source-graph suite — a wider blast radius than the phase's first draft assumed, which is exactly why review caught the parallel-graph-hierarchy defect in that draft before it shipped |
 | 4 | M | Planner rejecting a request current behavior silently accepted — must ship with a migration note in `CHANGELOG.md`/docs, not only a changelog fragment, since it is a user-visible behavior change (a previously-silent no-op becomes an error) |
 | 5 | L (mechanical, field-by-field) | Scope creep — cap each commit to one field |
 | 6 | XL | Largest blast radius in this plan (every backend parser); sequence last among the "hard" phases, after 0/2/3 give it primitives to build on |
 | 7 | S | JUnit output is consumed by external CI systems, and `_is_failure` stays per-finding rather than becoming an aggregate-outcome lookup — parity testing, not redesign |
 | 8 | XL | Shared with ADR-062's own Phase 1 risk profile; do not duplicate that ADR's own risk analysis here, defer to it |
-| 9 | S per row, continuous | The easiest phase to skip under time pressure — explicitly called out as required, not optional, per ADR-063's decision drivers |
+| 9 | S | Low technical risk (extracting already-shared logic into a leaf module), but skippable-looking — it has no dependency on any other phase, which makes it easy to defer indefinitely rather than land; don't let "independent" read as "optional" |
+| 10 | S per row, continuous | The easiest phase to skip under time pressure — explicitly called out as required, not optional, per ADR-063's decision drivers |

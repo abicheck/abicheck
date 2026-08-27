@@ -124,9 +124,10 @@ to be weighed against convenience:
   still reachable by any caller, that PR is incomplete, regardless of how
   much of the new representation it built. This is why every phase in the
   implementation plan carries its own explicit deletion step and
-  acceptance criterion, and why Phase 9 (delete the superseded
-  representations) is not optional cleanup — it is the point at which each
-  earlier phase's consolidation is actually true rather than merely begun.
+  acceptance criterion, and why the plan's final phase (delete the
+  superseded representations) is not optional cleanup — it is the point at
+  which each earlier phase's consolidation is actually true rather than
+  merely begun.
 - **"Generalize and finish," never "add a parallel design."** Every
   decision in this ADR explicitly names the existing, narrower primitive
   it generalizes (ADR-042/046/048/049/055/061/062's own work) rather than
@@ -300,25 +301,43 @@ one authoritative graph with typed nodes (`Header`, `TranslationUnit`,
 through this graph rather than a second, independently-maintained
 reconstruction of the same relationships from the flat snapshot — closing
 the class of bugs AGENTS.md documents under the namespace-collision and
-partial-qualification findings in `type_reachability.py`. Building the
-graph and deciding relevance from it are two different responsibilities
-under ADR-061's own task-routing table ("match... a raw change" vs.
-"decide relevance"): the graph substrate lands in `compare/` (a
-reconciliation of raw facts, not a policy decision), and the relevance
+partial-qualification findings in `type_reachability.py`.
+
+**This graph is not a new primitive.** `buildsource.graph_facts.
+GraphNode`/`GraphEdge`/`merge_graph_facts` (ADR-031 D2, ADR-046 D1/D2)
+already is exactly the producer-agnostic node/edge/evidence-merge
+primitive this decision needs — today used only to build the optional L5
+source/build-evidence graph. D5 relocates that primitive to `model/graph.py`
+(ADR-061's own task-routing table already names `model/` as owning "an ABI
+entity/value shared across stages") and builds the public-surface graph as
+a second set of node/edge *kinds* over the same primitive, available
+unconditionally rather than gated on L3-L5 evidence — not a second
+dataclass hierarchy. A first draft of this decision proposed exactly such
+a second hierarchy in `compare/`; that draft was rejected during review
+for violating this ADR's own Governing Invariant, and the corrected design
+is what's stated here.
+
+Building the graph and deciding relevance from it are two different
+responsibilities under ADR-061's own task-routing table ("match... a raw
+change" vs. "decide relevance"): the graph substrate lands in `compare/`
+(a reconciliation of raw facts, not a policy decision), and the relevance
 query itself — what `compute_public_surface()` actually decides — lands in
 `policy/`, which may import from `compare/` under ADR-061's fixed
 dependency direction. D5 does not move a relevance decision into
 `compare/`; see the implementation plan's Phase 3 for the exact package
-split. The same
-substrate is the natural target for later generalizing ADR-053's
-TU→link-unit→DSO attribution and ADR-057's consumer graph onto one graph
-instead of a third representation, but migrating either is explicitly
-**not** part of this decision's first implementation phase — see the
-implementation plan's Phase 3, which builds the graph for
-`compute_public_surface()`/`export_surface.py` only and records the
-ADR-053/057 migration as a later, separately-justified phase once this
-phase's graph has a real second consumer to validate the generalization
-against.
+split.
+
+Sharing one primitive and one node identity (Phase 2's `EntityId`) is what
+actually closes ADR-053's TU→link-unit→DSO attribution and ADR-057's
+consumer graph risk of permanently disagreeing with the public-surface
+graph about the same declaration — when L3-L5 evidence is present, both
+builders register the same node id and `merge_graph_facts` folds them
+automatically, without needing every consumer migrated in the same phase.
+Migrating ADR-053/057's own query logic onto this graph directly is still
+explicitly **not** part of this decision's first implementation phase —
+see the implementation plan's Phase 3 for exactly what is and is not
+migrated, and why sharing the primitive is sufficient to close the
+disagreement risk even before those consumers move.
 
 ### D6 — `RunOutcome` as independent axes; no `exit_code` inside the domain
 
@@ -423,7 +442,11 @@ the fix direction PR #733 already took for one local import cycle
 (`reclassify.py`'s `importlib.import_module` workaround to avoid importing
 `suppression.py`) into a standing rule enforced by `scripts/
 check_architecture.py`'s import-direction gate (ADR-061), not solved ad hoc
-per occurrence.
+per occurrence. See the implementation plan's Phase 9 for the selector
+half specifically: extracting the shared matching grammar into
+`policy/selectors.py` is what actually lets `reclassify.py` drop its
+`importlib.import_module` workaround, rather than this decision stating
+the generalization as an aspiration with no phase that closes it.
 
 ## Relationship to existing ADRs
 
