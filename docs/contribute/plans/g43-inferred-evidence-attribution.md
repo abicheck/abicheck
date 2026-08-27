@@ -164,11 +164,37 @@ would have no way to pass the value through). The design, corrected:
 3. **Repository-root `action.yml`/`run.sh`**: gain the matching inputs and
    have `run.sh`'s dispatch translate them into the new `dump`/`compare` CLI
    flag from step 4 below.
-4. **CLI/typed-API surface**: the actual `dump`/`compare` CLI gains a new
-   flag (or config field) accepting an attribution-manifest path and a
-   target id, which it loads and passes to `ingest_inputs_pack(attribution=,
-   expected_target_id=)` — this is the one genuinely new piece of *logic*
-   this plan adds; everything above it is forwarding.
+4. **CLI/typed-API surface — must be side-specific, not one global flag
+   pair, confirmed by a fresh review round covering a case steps 1-3 don't
+   reach.** Steps 1-3 above are single-sided by construction: a
+   `check-project.yml` check invocation only ever dumps the *candidate*
+   side directly (the baseline side is handled by the separate publication
+   path this plan's own baseline-attribution wiring, above, already
+   covers), so a single `attribution_path`/`target_id` pair reaching
+   `check-target` is correct for that flow. But the underlying `dump`/
+   `compare` CLI flag this step adds is a shared primitive, also reachable
+   directly for a real two-sided `compare old new`/`scan --against`
+   invocation where **both** `old=` and `new=` name pack-shaped build
+   information — and TU-to-target attribution is release-specific (the
+   set of TUs and which target owns them can genuinely differ between the
+   old and new revisions), so one global attribution path/id cannot
+   correctly scope both operands: applying it to only one side leaves the
+   other side's evidence unfiltered by attribution at all, and applying
+   one side's mapping to both risks incorrectly dropping or retaining TUs
+   on whichever side it doesn't actually describe. The flag must therefore
+   be **side-aware**, reusing this codebase's own established `old=`/`new=`
+   scoping convention already used for `--sources`/`--build-info`/
+   `--header`/`--ast-frontend` (`cli_scan.py`/`cli_compare_helpers.py`) —
+   e.g. `--attribution-path old=PATH new=PATH` (and a matching
+   `--attribution-target-id old=ID new=ID`) — rather than a bare,
+   unscoped flag pair. `ingest_inputs_pack(attribution=, expected_target_id=)`
+   is then called once per side with that side's own resolved values.
+   Steps 1-3's workflow/Action forwarding is unaffected in shape — a
+   single-sided `check-project.yml` invocation supplies only the
+   candidate-side (`new=`) half of this sided flag, never both — but the
+   CLI/typed-API surface itself must accept both. This side-aware flag
+   shape is the one genuinely new piece of *logic* this plan adds;
+   everything above it is forwarding.
 5. **Reject, don't silently widen, everything else**: a target declaring
    `projection: inferred` with no `attribution_path`, or one whose
    attribution file fails `_inferred_evidence_projection_issues()`'s
@@ -224,7 +250,11 @@ would have no way to pass the value through). The design, corrected:
 - Whichever CLI entry point(s) this chain ultimately shells out to for a
   build/source-depth check (see G41 Phase 2's per-target header/
   compile-context projection work, which touches the same call sites) —
-  new flag/config field for an attribution-manifest path + target id.
+  new, **side-aware** flag/config field for an attribution-manifest path
+  + target id (`old=`/`new=` scoped, mirroring `--sources`/`--build-info`'s
+  existing convention), not a single global pair — see the "Design"
+  section above for why a two-sided live `compare`/`scan --against`
+  invocation needs distinct old/new attribution.
 - **`abicheck/buildsource/inputs_pack.py` — one real, confirmed gap
   remains here, correcting an earlier draft of this plan's "no new logic
   expected" claim.** `_filter_tus_by_attribution()`'s two drop reasons —

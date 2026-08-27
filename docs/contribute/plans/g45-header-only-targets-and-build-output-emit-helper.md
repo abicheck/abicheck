@@ -36,10 +36,14 @@ separate numbered plan:
 
 A project can declare a target with no binary requirement whenever every
 check declared against it uses `depth: headers|build|source` — no ABI
-detection at `depth: binary`/`depth: symbols` is possible for a target with
-no compiled artifact, so those depths remain invalid for this target kind,
-same as they'd be meaningless today. Baseline publication for such a target
-stores header/source snapshots without fabricating a placeholder `.so`.
+detection at `depth: binary` is possible for a target with no compiled
+artifact, so that depth remains invalid for this target kind, same as it'd
+be meaningless today. (`symbols` is not itself a canonical project/CLI
+depth spelling — it is only a historical alias `parse_user_depth` resolves
+to `binary`, and the raw `--depth` CLI parameter explicitly rejects it
+outright; this plan does not reintroduce it as accepted vocabulary
+anywhere, including here.) Baseline publication for such a target stores
+header/source snapshots without fabricating a placeholder `.so`.
 
 **Acceptance test**: a pure header library supports detecting, all without
 requiring a binary:
@@ -88,15 +92,21 @@ more localized changes.
 
 Depth-gating for this target shape, stated as one unambiguous rule (an
 earlier draft of this plan phrased this two contradictory ways in
-adjacent sentences — corrected here): `_validate_library_target` (or its
-header-only-aware successor) must reject `depth: binary`/`depth: symbols`
-against a target with no `binary_pattern` — those two depths need a
-compiled artifact to extract from, and there is none. `depth: headers`/
-`depth: build`/`depth: source` all remain valid for a header-only target,
-since none of the three requires a binary — `depth: build` here means
-ordinary L3 build evidence (compile flags/macros/target facts from a
-compile database or build-system adapter), which a header-only target can
-supply exactly as any other target does.
+adjacent sentences, then briefly reintroduced a second, non-canonical
+depth spelling while correcting that — both fixed here): the canonical
+project/CLI depth ladder is exactly `binary|headers|build|source`
+(`USER_DEPTHS`); `symbols` is not a member of it — only a historical alias
+`parse_user_depth` resolves to `binary` for one specific caller, rejected
+outright by the raw `--depth` CLI parameter — and this plan does not treat
+it as valid vocabulary anywhere. `_validate_library_target` (or its
+header-only-aware successor) must reject `depth: binary` against a target
+with no `binary_pattern` — that depth needs a compiled artifact to extract
+from, and there is none. `depth: headers`/`depth: build`/`depth: source`
+all remain valid for a header-only target, since none of the three
+requires a binary — `depth: build` here means ordinary L3 build evidence
+(compile flags/macros/target facts from a compile database or
+build-system adapter), which a header-only target can supply exactly as
+any other target does.
 
 Baseline publication (this plan depends on nothing from G41, but shares
 its baseline-manifest shape): a header-only target's stored baseline omits

@@ -278,31 +278,56 @@ gap.
 Closing it needs a grouping stage *before* the matrix is built, not
 merely a safer mutator once inside one job:
 
-1. **Grouping key must be every non-environment analysis/identity field,
-   not just the four-tuple** — confirmed by a fresh review round: grouping
-   solely on (target, profile, channel, requested_depth) would also
-   collapse two checks that differ in `analysis_evidence`/
-   `analysis_policy`/`analysis_assurance_requirement`, or in an explicit
-   `id:`, since those are singular fields on today's `RunPlanCheck` and
-   nothing in the four-tuple distinguishes them. Concretely, this plan's
-   own acceptance-test pair from the "Explicit check identifiers" section
-   — one check requesting `evidence: replay`, a same-target/profile/
-   channel/depth sibling requesting `evidence: clang-plugin` — would
-   wrongly collapse into one job with only one `analysis_evidence` value,
-   silently dropping the other evidence method's check entirely. The
-   grouping key is therefore the full tuple (target, profile, channel,
-   requested_depth, `analysis_evidence`, `analysis_policy`,
-   `analysis_assurance_requirement`, explicit `id`) minus `environment_id`
-   — only checks identical in *every one* of those fields, differing
-   *exclusively* by environment, may share one extraction. Wherever
-   `RunPlanCheck`s are generated from the project's `checks:`/
+1. **Grouping key vs. per-environment evaluation descriptor — corrected
+   twice now, and the second correction changes the design's shape, not
+   just its key.** The first correction (grouping solely on (target,
+   profile, channel, requested_depth) would also collapse checks differing
+   in `analysis_evidence`/`analysis_policy`/`analysis_assurance_
+   requirement`/explicit `id`) is still right — these describe *what
+   extraction/comparison to run*, and two checks disagreeing on any of
+   them cannot share one extraction. A **second** review round found a
+   further gap in the same direction: `RunPlanCheck` also carries
+   `required: bool`, `gate_mode: str`, and `allow_new_target: bool`
+   (`abicheck/buildsource/run_plan.py`) — none are profile-derived
+   (unlike `compile_gcc_path`/`compile_ast_frontend`/`runs_on`/etc., which
+   already collapse safely for free once `profile_id` is part of the
+   group key, since a fixed profile always resolves to the same values for
+   those), but per-*check*-declaration fields that describe **how that
+   check's own report should be gated/consumed downstream**, independent
+   of the target/profile/channel/depth/evidence tuple. Two environments
+   sharing an otherwise-identical extraction key but declared with
+   different `gate_mode`/`required` (e.g. one environment meant as
+   advisory, a sibling meant as blocking) must not be forced to share a
+   single value for either — adding them to the grouping key would be
+   correct but defeats grouping precisely for the case a project author is
+   most likely to want (the same extraction, evaluated as blocking on one
+   environment and advisory on another).
+
+   **The right fix is therefore not a wider grouping key, but moving these
+   three fields out of `RunPlanCheck`'s own top-level singular fields and
+   into a per-environment evaluation descriptor** — the grouping key stays
+   exactly the tuple (target, profile, channel, requested_depth,
+   `analysis_evidence`, `analysis_policy`, `analysis_assurance_
+   requirement`, explicit `id`) established above (all fields that
+   genuinely determine *what to extract/compare*), while `required`/
+   `gate_mode`/`allow_new_target` — fields that determine *how to gate a
+   given environment's own result*, not what to run — move onto a new
+   `EnvironmentEvaluation` value (`environment_id`, `environment_digest`,
+   and that environment's own `required`/`gate_mode`/`allow_new_target`,
+   each defaulting to the check's declared values when a project author
+   doesn't differentiate them per environment). `RunPlanCheck` gains
+   `environment_evaluations: list[EnvironmentEvaluation]` (not the bare
+   `environment_ids: list[str]` the first correction proposed) while
+   keeping its own top-level `required`/`gate_mode`/`allow_new_target`
+   fields exactly as they are today for the ungrouped/single-environment
+   case — every existing invocation's shape is therefore unchanged.
+   Wherever `RunPlanCheck`s are generated from the project's `checks:`/
    `environments:` declarations (`abicheck project plan`, i.e. the
    run-plan-generation code `abicheck/buildsource/run_plan.py` and/or its
-   caller), checks matching on this full key collapse into *one*
-   `RunPlanCheck` carrying a **list** of environment ids/digests
-   (`environment_ids: list[str]`, not the singular `environment_id`/
-   `environment_digest` fields this plan's "Files & surfaces" section
-   currently proposes) — one grouped check, one matrix cell, one job.
+   caller), checks matching on the extraction-only key collapse into
+   *one* `RunPlanCheck` carrying this list — one grouped check, one matrix
+   cell, one job, but each environment's own gating intent travels with it
+   undiluted.
 2. **Fan-out inside the one job**: `actions/check-target` (or the CLI
    command it shells out to) gains a mode that performs the dump/compare
    exactly once, then evaluates the resulting `DiffResult` against each
@@ -400,36 +425,50 @@ from the report.
 ## Files & surfaces
 
 - **`abicheck/buildsource/run_plan.py` — `RunPlanCheck`: new `check_id`
-  (explicit, optional), `environment_ids`/`environment_digests` (**plural
-  lists, not singular `environment_id`/`environment_digest`** — see the
-  job-boundary grouping requirement below, without which the singular
-  shape would keep one job per environment), `analysis_evidence`/
-  `analysis_policy`/`analysis_assurance_requirement` fields, following the
-  exact structural precedent `consumer_compile_*` already set (see G34
-  Phase 0). Also: whatever generates `RunPlanCheck`s from a project's
+  (explicit, optional), `environment_evaluations: list[EnvironmentEvaluation]`
+  (**a list of a new small structured value, not a bare
+  `environment_ids: list[str]`** — see the job-boundary grouping
+  requirement below: a bare id list would lose each environment's own
+  `required`/`gate_mode`/`allow_new_target` the moment more than one
+  environment shares a group), `analysis_evidence`/`analysis_policy`/
+  `analysis_assurance_requirement` fields, following the exact structural
+  precedent `consumer_compile_*` already set (see G34 Phase 0). Each
+  `EnvironmentEvaluation` carries `environment_id`, `environment_digest`,
+  and that environment's own `required`/`gate_mode`/`allow_new_target`
+  (defaulting to the check's top-level values when undifferentiated).
+  `RunPlanCheck`'s own top-level `required`/`gate_mode`/`allow_new_target`
+  fields are unchanged, still governing the ungrouped/single-environment
+  case. Also: whatever generates `RunPlanCheck`s from a project's
   `checks:`/`environments:` declarations must group checks matching on
-  the *full* non-environment key (target, profile, channel,
-  requested_depth, `analysis_evidence`, `analysis_policy`,
-  `analysis_assurance_requirement`, explicit `id`) — not the narrower
-  four-tuple, which would wrongly collapse two checks differing only in
-  evidence method/policy/assurance/id — into one `RunPlanCheck` carrying
-  the full environment list. See "Efficiency constraint" above for why the
-  naive one-`RunPlanCheck`-per-environment shape silently reintroduces one
-  full extraction per environment at the job-orchestration layer, not just
-  inside one Python process.**
+  the *extraction-only* key (target, profile, channel, requested_depth,
+  `analysis_evidence`, `analysis_policy`, `analysis_assurance_requirement`,
+  explicit `id`) — not the narrower four-tuple, which would wrongly
+  collapse two checks differing only in evidence method/policy/assurance/
+  id, and not a wider key including `required`/`gate_mode`/
+  `allow_new_target`, which would defeat grouping for the common case of
+  one extraction evaluated as blocking on one environment and advisory on
+  another — into one `RunPlanCheck` carrying the full
+  `environment_evaluations` list. See "Efficiency constraint" above for
+  why the naive one-`RunPlanCheck`-per-environment shape silently
+  reintroduces one full extraction per environment at the
+  job-orchestration layer, not just inside one Python process.**
 - **`.github/workflows/check-project.yml`'s matrix-generation step and
   `actions/check-target`'s invocation** — the grouped `RunPlanCheck.
-  environment_ids` list must reach the single matrix cell/job unexpanded
-  (one cell per grouped check, not one per environment), and the job's
-  `dump`/`compare` invocation gains a mode that runs extraction/diff once
-  and then fans out the pristine-`Change`-list per-environment evaluation
-  from "Efficiency constraint" above, emitting one report artifact per
-  environment from that single job, each stamped with its own
-  `!<environment_id>` check-id qualifier (see "Efficiency constraint"
-  above — a unique *filename* alone does not make this transparent to the
-  aggregate, which keys on the in-report `target_id`). This is the real,
-  new workflow-orchestration logic this plan requires beyond schema/digest
-  plumbing — see "Efficiency constraint" above.
+  environment_evaluations` list must reach the single matrix cell/job
+  unexpanded (one cell per grouped check, not one per environment), and
+  the job's `dump`/`compare` invocation gains a mode that runs
+  extraction/diff once and then fans out the pristine-`Change`-list
+  per-environment evaluation from "Efficiency constraint" above, emitting
+  one report artifact per environment from that single job. Each report
+  is stamped with its own `!<environment_id>` check-id qualifier (see
+  "Efficiency constraint" above — a unique *filename* alone does not make
+  this transparent to the aggregate, which keys on the in-report
+  `target_id`) **and** gated according to *that specific environment's
+  own* `required`/`gate_mode`/`allow_new_target`, read from its
+  `EnvironmentEvaluation` entry rather than one shared value for the whole
+  group. This is the real, new workflow-orchestration logic this plan
+  requires beyond schema/digest plumbing — see "Efficiency constraint"
+  above.
 - **`abicheck/workflows/aggregate/contracts.py`/`execute.py`** — the
   second, environment-qualifier segment on `_CHECK_ID_RE`/`CheckIdParts`
   (composable with, and distinct from, the `~<explicit_id>` tail already
@@ -529,16 +568,20 @@ L, phased:
   existing precedent in this workflow to model it after (G34 Phase D's
   `finding_matrix` reconciliation covers *aggregating* already-emitted
   reports, not *avoiding generating* N redundant ones in the first place).
-  Two further, confirmed pieces belong to this same phase, not a later
-  one: the grouping key must match on every non-environment analysis/
-  identity field, not just (target, profile, channel, requested_depth)
-  — else two checks differing only in evidence method/policy/assurance/id
-  wrongly collapse; and each environment's emitted report needs its own
-  `!<environment_id>`-qualified `target_id`, with the aggregate's
-  `ExpectedTargets` projection expanded to one entry per environment per
-  grouped check, since a unique artifact filename alone does not stop
-  `collect_reports()`'s in-report-`target_id` duplicate check from
-  aborting the run.
+  Three further, confirmed pieces belong to this same phase, not a later
+  one: the grouping key must match on every extraction-relevant
+  analysis/identity field, not just (target, profile, channel,
+  requested_depth) — else two checks differing only in evidence
+  method/policy/assurance/id wrongly collapse; the grouping key must
+  **not** additionally include `required`/`gate_mode`/`allow_new_target`,
+  which instead move onto a per-environment `EnvironmentEvaluation` value
+  so two environments sharing one extraction can still be gated
+  differently (blocking vs. advisory); and each environment's emitted
+  report needs its own `!<environment_id>`-qualified `target_id`, with the
+  aggregate's `ExpectedTargets` projection expanded to one entry per
+  environment per grouped check, since a unique artifact filename alone
+  does not stop `collect_reports()`'s in-report-`target_id` duplicate
+  check from aborting the run.
 - Provider resolution (L): includes the confirmed `environment_matrix.py`
   schema extension (a real prerequisite, not a formality — see "Named
   environments" above) alongside the resolver itself, which is new logic
