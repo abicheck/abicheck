@@ -255,7 +255,64 @@ environment — e.g. deep-copying the kept `Change` list (or resetting
 `effective_verdict`/`modulation_reason`/`modulation_rule` to `None`)
 immediately before each environment's own
 `apply_runtime_floor_contract()`/provider-resolution pass, never sharing
-mutated objects across environments. This applies equally to whatever new
+mutated objects across environments. **That in-process mutation fix is necessary but not sufficient — the real
+extract-once boundary in this codebase is a GitHub Actions *job*, not a
+Python function call, and nothing in this plan as drafted groups
+environment-only-differing checks before the workflow decides how many
+jobs to run. Confirmed by reading `check-project.yml` directly, not
+assumed.** The `plan` job's own matrix-generation step does
+`checks = plan.get('checks', [])` then `matrix={'include': checks}` —
+i.e. one `RunPlanCheck` from `run-plan.json` becomes exactly one matrix
+cell, and `strategy: matrix` spawns one independent job per cell, each of
+which runs `actions/check-target` — its own full `dump`/`compare`
+invocation — from scratch. Two `RunPlanCheck`s sharing (target, profile,
+channel, requested_depth) but differing only in `environment_id` (exactly
+the schema this section's own example encourages a user to write:
+separate `checks:` entries per environment) therefore become two
+independent jobs performing two independent extractions today — the
+"extract/diff exactly once" constraint stated above describes what a
+single Python process must do, not what the actual workflow orchestration
+does across job boundaries, and as drafted this plan never closes that
+gap.
+
+Closing it needs a grouping stage *before* the matrix is built, not
+merely a safer mutator once inside one job:
+
+1. **Grouping**: wherever `RunPlanCheck`s are generated from the
+   project's `checks:`/`environments:` declarations (`abicheck project
+   plan`, i.e. the run-plan-generation code `abicheck/buildsource/
+   run_plan.py` and/or its caller own), checks that resolve to the same
+   (target, profile, channel, requested_depth) tuple but differing
+   `environment_id` values must collapse into *one* `RunPlanCheck`
+   carrying a **list** of environment ids/digests
+   (`environment_ids: list[str]`, not the singular `environment_id`/
+   `environment_digest` fields this plan's "Files & surfaces" section
+   currently proposes) — one grouped check, one matrix cell, one job.
+2. **Fan-out inside the one job**: `actions/check-target` (or the CLI
+   command it shells out to) gains a mode that performs the dump/compare
+   exactly once, then evaluates the resulting `DiffResult` against each
+   environment in the group's list in-process — using the pristine-
+   `Change`-list requirement established above, once per environment —
+   and emits one report artifact **per environment** from that single
+   job, each correctly stamped with its own `environment_id`/
+   `environment_digest` (and, where declared, its own `~<explicit_id>`
+   check-id suffix per the "Explicit check identifiers" section, so the N
+   reports remain individually addressable to the aggregate the same way
+   N separately-run jobs' reports would have been).
+3. **Aggregate consumption is unaffected in shape**: the aggregate step
+   already ingests report artifacts by discovery (see `check-project.yml`'s
+   `build-outputs`-directory glob pattern used elsewhere in this same
+   workflow for a precedent), so one job emitting N report artifacts
+   instead of N jobs each emitting one is invisible to that stage as long
+   as artifact names stay unique per (check, environment) pair — a naming
+   convention this plan must specify, not leave implicit.
+
+This is real, new workflow-orchestration logic — a grouping pass over
+`RunPlanCheck` generation and a multi-environment fan-out mode inside one
+job — not an extension of the in-process mutation-safety fix above; the
+"Effort & risk" section below is revised accordingly.
+
+This applies equally to whatever new
 system-provider classification function this plan adds in the next
 section, if it follows the same "mutate in place, skip if already
 modulated" ADR-025 pattern.
@@ -290,11 +347,30 @@ from the report.
 
 ## Files & surfaces
 
-- `abicheck/buildsource/run_plan.py` — `RunPlanCheck`: new `check_id`
-  (explicit, optional), `environment_id`, `environment_digest`,
-  `analysis_evidence`/`analysis_policy`/`analysis_assurance_requirement`
-  fields, following the exact structural precedent `consumer_compile_*`
-  already set (see G34 Phase 0).
+- **`abicheck/buildsource/run_plan.py` — `RunPlanCheck`: new `check_id`
+  (explicit, optional), `environment_ids`/`environment_digests` (**plural
+  lists, not singular `environment_id`/`environment_digest`** — see the
+  job-boundary grouping requirement below, without which the singular
+  shape would keep one job per environment), `analysis_evidence`/
+  `analysis_policy`/`analysis_assurance_requirement` fields, following the
+  exact structural precedent `consumer_compile_*` already set (see G34
+  Phase 0). Also: whatever generates `RunPlanCheck`s from a project's
+  `checks:`/`environments:` declarations must group checks sharing
+  (target, profile, channel, requested_depth) into one `RunPlanCheck`
+  carrying the full environment list — see "Efficiency constraint" above
+  for why the naive one-`RunPlanCheck`-per-environment shape silently
+  reintroduces one full extraction per environment at the job-orchestration
+  layer, not just inside one Python process.**
+- **`.github/workflows/check-project.yml`'s matrix-generation step and
+  `actions/check-target`'s invocation** — the grouped `RunPlanCheck.
+  environment_ids` list must reach the single matrix cell/job unexpanded
+  (one cell per grouped check, not one per environment), and the job's
+  `dump`/`compare` invocation gains a mode that runs extraction/diff once
+  and then fans out the pristine-`Change`-list per-environment evaluation
+  from "Efficiency constraint" above, emitting one uniquely-named report
+  artifact per environment from that single job. This is the real, new
+  workflow-orchestration logic this plan requires beyond schema/digest
+  plumbing — see "Efficiency constraint" above.
 - **`abicheck/workflows/aggregate/contracts.py`** — required, not optional:
   `_CHECK_ID_RE`'s extended `~<explicit_id>` suffix and `CheckIdParts`'
   matching `explicit_id` field (see "Explicit check identifiers" above) —
@@ -345,8 +421,6 @@ from the report.
   invoking this resolver from bundle/scan analysis. `bundle.py` gains only
   the minimal call site needed to consult the new resolver, not the
   resolution logic itself.
-- `.github/workflows/check-project.yml` — per-cell environment id/digest
-  forwarding into the report envelope.
 - **`abicheck/workflows/aggregate/`** — the environment axis in the
   profile/evaluation matrix, reusing G34 Phase D's `finding_matrix`
   reconciliation shape. This package (confirmed to already own
@@ -375,9 +449,19 @@ L, phased:
 
 - Check identity (M): schema + `RunPlanCheck` field + aggregate
   disambiguation; low architectural risk, mostly additive.
-- Named environments (M): schema + digest plumbing + the "evaluate once
-  against N environments" reconciliation; medium risk in ensuring the
-  extract-once invariant is actually enforced rather than merely intended.
+- Named environments (L, revised up from M): schema + digest plumbing +
+  the "evaluate once against N environments" reconciliation — **and,
+  confirmed by reading `check-project.yml` directly, a genuine
+  run-plan-generation grouping pass plus a multi-environment fan-out mode
+  inside `actions/check-target`'s single job**, since the naive
+  one-`RunPlanCheck`-per-environment shape reintroduces one full
+  extraction per environment at the job-orchestration layer regardless of
+  how safely the in-process mutation is handled. Medium-to-high risk: the
+  in-process extract-once invariant is straightforward to enforce once
+  named, but the job-boundary grouping is new orchestration logic with no
+  existing precedent in this workflow to model it after (G34 Phase D's
+  `finding_matrix` reconciliation covers *aggregating* already-emitted
+  reports, not *avoiding generating* N redundant ones in the first place).
 - Provider resolution (L): includes the confirmed `environment_matrix.py`
   schema extension (a real prerequisite, not a formality — see "Named
   environments" above) alongside the resolver itself, which is new logic

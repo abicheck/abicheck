@@ -258,6 +258,26 @@ inline.
   modules.yaml`, so it should gain only the thin `@project_group.command`
   registration shim, not the builder logic itself.
 - `docs/reference/cli-reference.md` (generated) — new subcommand entry.
+- **`.github/workflows/check-project.yml`'s "Resolve candidate binary/
+  binaries" step — required, not optional; the two Action-layer
+  relaxations below are unreachable for a header-only cell without it.**
+  Confirmed by reading the step directly: for a non-bundle cell it
+  unconditionally calls `resolve(cell.get('binary_pattern', ''), ...)`,
+  and `resolve()` returns `None` for an empty/absent pattern — which the
+  non-bundle branch treats as a hard failure
+  (`::error::target ...: no candidate binary matched binary_pattern ''
+  ...`, `sys.exit(1)`), before `new-library` is even emitted and long
+  before `actions/check-target` (or the root Action's `new-library`
+  relaxation) ever runs. A header-only cell reaching this step today
+  fails here unconditionally, regardless of what the two Action-layer
+  fixes below allow. This step needs its own header-only branch —
+  detecting the cell the same way `project_targets.py`'s schema marks
+  it, skipping the `binary_pattern` resolution and `new-library` output
+  entirely, and instead forwarding whatever header/build/source operands
+  (public-header-root, generated-header-root, evidence-pack path) the
+  target declares — mirroring the bundle branch's existing pattern of a
+  target-kind-specific code path in this same step, not a shared
+  fallthrough.
 - **`actions/check-target/action.yml`** — declares `new-library` as
   `required: true`; must be relaxed to optional so a header-only target's
   check invocation can omit it.

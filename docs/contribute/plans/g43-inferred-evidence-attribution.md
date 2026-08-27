@@ -188,6 +188,39 @@ would have no way to pass the value through). The design, corrected:
   relax `new-library` through for its own, unrelated header-only-target
   gap — these are two separate wiring tasks through the identical Action
   chain, not the same fix).
+- **Baseline publication — a wholly separate, previously-missing wiring
+  gap on the *other* side of the comparison, confirmed by reading the real
+  workflows/Action rather than assumed.** Everything above wires
+  attribution into the *candidate* side (`check-project.yml` →
+  `actions/check-target` → root Action). But when the *old* release was
+  also built from the same shared/inferred build-wide pack, the *baseline*
+  snapshot needs the identical attribution filtering, or the comparison is
+  asymmetric: the candidate side is scoped to this target's own TUs while
+  the stored baseline still carries every target's TUs from the shared
+  pack, producing false source-level differences or a spurious
+  comparability failure that has nothing to do with a real change.
+  `publish-baseline.yml`/`update-main-baseline.yml` both pass one
+  workflow-global `build-info` input straight through to `actions/
+  baseline`, which forwards it as a single, unconditional `--build-info
+  "$BUILD_INFO"` (`actions/baseline/run.sh`) to *every* library's `abicheck
+  dump` call — there is no per-library attribution path or target-id input
+  anywhere in this chain today. This plan must therefore also cover:
+  - `actions/baseline/action.yml`/`run.sh` — a new per-library
+    `attribution_path`/target-id input (or a per-entry field on the
+    existing `libraries` JSON array `run.sh` already parses), forwarded
+    into the same new CLI flag from step 4 above, mirroring the candidate
+    side's wiring rather than inventing a second shape.
+  - `abicheck/buildsource/baseline_publish.py`'s `derive_baseline_libraries()`
+    — must surface (or accept) the per-library attribution path/target id
+    so the two baseline-publishing workflows below can populate the new
+    Action input per library entry, not just per profile.
+  - `.github/workflows/publish-baseline.yml`/`update-main-baseline.yml` —
+    thread the per-library attribution path through to the new
+    `actions/baseline` input, the same way they already thread the
+    profile-level `build-info` input.
+  Without this half, wiring only the candidate chain leaves the baseline
+  unscoped and can turn a real fix into a new false positive/negative on
+  the very first inferred-projection target that publishes a baseline.
 - Whichever CLI entry point(s) this chain ultimately shells out to for a
   build/source-depth check (see G41 Phase 2's per-target header/
   compile-context projection work, which touches the same call sites) —
@@ -265,16 +298,21 @@ M (revised down from the original L estimate, since the attribution model
 and its validation are both already implemented; confirmed to still hold
 once the full three-layer Action chain — `check-project.yml` →
 `actions/check-target` → repository-root Action — was accounted for, since
-every added layer there is forwarding, not new logic; and confirmed once
-more against the one real exception, `inputs_pack.py`'s unresolved-vs-
-other-target drop-reason distinction, which is new but narrow) — the
+every added layer there is forwarding, not new logic; confirmed once more
+against the one real exception, `inputs_pack.py`'s unresolved-vs-
+other-target drop-reason distinction, which is new but narrow; and
+confirmed once more still after adding the baseline-publication wiring
+above, which doubles the Action-chain plumbing — candidate side and
+baseline side — but stays the same *kind* of work, forwarding a path/id
+through an already-established chain shape, not new logic) — the
 remaining work is mostly CLI/workflow/Action plumbing connecting two
 already-tested pieces (`attribute_sources_to_targets()`'s output, already
 validated by `_inferred_evidence_projection_issues()`) to a third
 (`ingest_inputs_pack()`'s existing `attribution`/`expected_target_id`
 parameters), plus updating `check-project.yml`'s own rejection logic and
-messaging, plus the one confirmed piece of new logic above. Low design
-risk; the main risk is scope creep back into
+messaging, plus mirroring that same wiring through `actions/baseline` and
+its two calling workflows, plus the one confirmed piece of new logic
+above. Low design risk; the main risk is scope creep back into
 re-deriving attribution logic that already exists — resist that, and keep
 this plan to the wiring task ADR-053 itself identifies as deferred.
 
