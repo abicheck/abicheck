@@ -2605,12 +2605,14 @@ abicheck version
 facts schema version
 Clang/plugin major
 compiler path and digest
-compile-context fingerprint
 source-tree digest
-projection identity (see below — not a bare singular target id)
-public-header-root digest
-translation-unit inventory
+per-projection: { identity, compile-context fingerprint, public-header-root digest, translation-unit inventory }
 ```
+
+(`compile-context fingerprint`/`public-header-root digest`/`translation-unit
+inventory` are keyed per canonical target projection, not singular pack-wide
+scalars — see the correction below for why a shared, multi-target pack
+cannot honestly carry one value for any of these three.)
 
 This receipt must be **validated and normalized, not merely informational**
 — a consumer (`check-project.yml`'s evidence-routing step, or a direct
@@ -2690,6 +2692,38 @@ digested mapping ties to at least one TU), not by requiring the whole
 pack to name one target. A consumer validates whichever shape the receipt
 declares; a shared pack is never forced through the single-target equality
 check that only applies to the non-shared case.
+
+**Two more receipt fields have the identical singular-value problem the
+identity field above was already fixed for, and a fresh review round found
+they were never fixed alongside it: `compile-context fingerprint` and
+`public-header-root digest`.** A build-wide shared pack is, by this
+phase's own design, consumed by multiple targets — and there is no reason
+those targets share one compiler context or one set of public-header
+roots; the whole point of a per-target attribution split is that
+different targets can be genuinely different components of one build.
+A singular compile-context fingerprint or public-header-root digest on
+the receipt therefore repeats exactly the mistake the identity field
+already had to be corrected for: fail-closed comparison against each
+target's own resolved context would either reject every projection except
+the one the singular value happens to describe, or — worse, silently —
+validate one target's context against a *different* target's actually-
+resolved facts, defeating the "fail closed with a named reason"
+discipline this whole receipt exists to provide. These two fields must
+therefore be defined **per canonical target projection**, not once for
+the whole pack: either (a) a mapping from each accepted projection
+identity (the same `target://<id>`/`output://<basename>`/shared-scope
+identity this phase's own identity field already resolves) to that
+projection's own compile-context fingerprint and public-header-root
+digest, each computed by restricting to the TUs G43's attribution
+mapping ties to that projection before fingerprinting; or (b) a single,
+projection-keyed subreceipt object bundling identity + fingerprint +
+header-root digest together per projection, rather than three
+independently-keyed parallel structures that could drift out of sync
+with each other. Either shape is acceptable; three separate singular
+scalars, as an earlier draft of this phase's field list had them, is not
+— it silently assumes every consumer of a shared pack shares one compile
+context, which is precisely the assumption G43's own attribution
+mechanism exists to *not* require.
 
 **Relationship to Phases 0-3 above:** the per-finding provenance tags this
 plan's earlier phases add (`l0:elf_symtab`, `l2:castxml`, `l4:source_
@@ -2793,7 +2827,15 @@ current code computes one) — canonical normalization, a hashing
 algorithm, a persisted field, and producer/consumer wiring, all defined
 above rather than assumed to already exist. This is real, if narrow, new
 work; it does not push the phase out of M, but it is not free the way the
-rest of this phase's additive schema fields are.
+rest of this phase's additive schema fields are. **The per-projection
+compile-context-fingerprint/public-header-root-digest/TU-inventory
+correction adds the identical class of real work**: restricting to a
+projection's own attributed TUs before fingerprinting is new logic
+alongside the schema shape change (a mapping or subreceipt, not three
+bare scalars) — confirmed by a fresh review round to be a second real
+gap in the same shared-pack scenario the identity field was already
+fixed for. Still additive schema/computation work overall, not a new
+extraction pipeline; the phase stays M.
 
 ## Design
 

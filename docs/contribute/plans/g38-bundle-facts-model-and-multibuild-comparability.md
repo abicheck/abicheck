@@ -2060,15 +2060,52 @@ matching variants" invariant and the fingerprint-verification check from
 the Phase 13 follow-up. **This is not still to design — it is shipped and
 tested, just not reachable from the CLI or a real `.abicheck.yml`.**
 
-What remains, restated against the review's own five-step sequence so nothing
-is lost: (1) run each member's ordinary target check once — already how
-`check-project.yml` works per target; (2) persist/retain each member's
-snapshot, assurance, and `DiffResult` — this is what `--bundle-facts-out`/
-`StoredBundleFactsInput` already do; (3) build/restore `BundleFacts` — done
-(Phase 2); (4) run bundle analysis over member topology/signature evidence/
-diff results/variant identity — done (`compare_bundle_sides`); (5) produce
-one bundle report referencing the member reports it consumed — the one
-piece that still needs a real dispatch site.
+What remains, restated against the review's own five-step sequence — **step
+(2) is real, missing work for the declarative-pipeline scenario, not
+already-done infrastructure; an earlier draft of this phase claimed
+otherwise and a fresh review round confirmed that claim was wrong by
+reading the actual mechanisms it pointed to.**
+
+(1) run each member's ordinary target check once — already how
+`check-project.yml` works per target, each running as its own matrix cell.
+
+(2) **persist/retain each member's snapshot and baseline `BundleFacts` —
+not already covered by `--bundle-facts-out`/`StoredBundleFactsInput` for
+this scenario.** `--bundle-facts-out` is a `compare-release`/
+`cli_compare_release.py` producer flag: it captures the *old*-side
+snapshots of one directory/package `compare-release` invocation, not
+something any of `check-project.yml`'s per-member matrix cells (each a
+separate, independent `actions/check-target` job for one target) emits
+today — there is no existing mechanism by which one member's job output
+reaches another member's job, or a later bundle-dispatch job, at all.
+Worse, even where `--bundle-facts-out` *is* reachable, `BundleFacts`
+itself (`bundle_facts.py`) stores `per_library_snapshots: dict[str,
+AbiSnapshot]`, `manifest`, `filesystem_aliases`, `library_filenames` —
+snapshot-level facts only, with **no `DiffResult` field and no assurance
+field at all**. A member's own `DiffResult`/assurance never had anywhere
+in `BundleFacts` to be stored even if a producer tried. A later bundle
+dispatch therefore has, today, no candidate snapshots assembled from
+separate matrix cells, no baseline `BundleFacts` to compare against, and
+no per-member comparison results to build the promised topology/
+signature-evidence/diff-result graphs from (step 4) — this is genuine,
+new workflow-owned publication/assembly work: each `check-project.yml`
+member cell must upload its own snapshot (and, where `BundleFacts` needs
+extending to actually carry per-member comparison outcomes, that
+schema-widening work too) as a real artifact, and a bundle-dispatch step
+must download and assemble them into one `BundleFacts` before step (4)
+can run against real data.
+
+(3) build/restore `BundleFacts` from an already-assembled input — done
+(Phase 2), *once step (2)'s assembly problem above is solved*.
+
+(4) run bundle analysis over member topology/signature evidence/diff
+results/variant identity — done (`compare_bundle_sides`), for whatever
+`BundleFacts`/per-member results step (2) actually manages to assemble.
+
+(5) produce one bundle report referencing the member reports it consumed
+— a real dispatch site is still needed, but it is not "the one piece that
+remains": it is downstream of, and depends on, step (2)'s assembly work
+existing first.
 
 **Blocked on the same, already-diagnosed constraint as Phase 13's "Known
 gap":** every file that would host a new `.abicheck.yml` `bundle_variants:`
@@ -2100,10 +2137,18 @@ yet demonstrable end to end: declaring all of the above from a real
 `.abicheck.yml`/`check-project.yml` invocation with no hand-written Python
 driver step. That is this phase's actual, remaining acceptance bar.
 
-**Effort:** M once the file-split prerequisite is done (S risk on the
-wiring itself, since the underlying logic is already tested); the file
-split itself is its own, separately-scoped refactor (see Phase 13's table)
-and should not be bundled into the same PR as the new surface it enables.
+**Effort:** L, revised up from M once the file-split prerequisite is done
+— **the step (2) correction above is real, new workflow/schema work, not
+already-tested logic waiting on a dispatch site.** The Python-API
+orchestration (`compare_bundle_sides`, `bundle_variants_config`) is
+genuinely already tested, keeping that part low-risk, but the
+per-member-snapshot/baseline-`BundleFacts` assembly across separate
+`check-project.yml` matrix cells has no existing mechanism to build on —
+confirmed by reading `BundleFacts`'s own field list (no `DiffResult`/
+assurance storage at all) and `--bundle-facts-out`'s actual scope
+(`compare-release`-only, not per-member-matrix-cell). The file split
+itself is its own, separately-scoped refactor (see Phase 13's table) and
+should not be bundled into the same PR as the new surface it enables.
 
 ### Phase 16 — Thread a resolved `PolicyFile` into the release fan-out's own bundle analysis
 
