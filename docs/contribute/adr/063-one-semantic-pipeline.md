@@ -370,13 +370,35 @@ from a backend-specific string at comparison time.
 
 Before a single collector or backend is invoked, an immutable `AnalysisPlan`
 states: the requested operation, per-side evidence requirements, and the
-resolved toolchain/compile context — each as a `requested`/`resolved`/
-`unsupported`/`ambiguous` tuple per requirement. A request that cannot be
-satisfied
+requested toolchain/compile-context inputs — each evidence requirement as a
+`requested`/`resolved`/`unsupported`/`ambiguous` tuple. A request that
+cannot be satisfied
 (AGENTS.md's recorded `--build-target` + pre-captured `aquery` silent
 no-op, or a `-H` flag accepted by a collect mode that cannot use it) is
 rejected by the planner, before execution, instead of discovered mid-run or
 not at all.
+
+**The toolchain/compile-context field is the *requested* inputs, never the
+resolved output of the P0.3 L3→L2 compile-context fold — an earlier draft
+of this decision said "resolved," and implementation-plan review correctly
+found that contradicts an already-landed design decision.**
+`service_dump_pipeline.py`'s own `ResolvedDumpRequest` (landed ahead of
+this ADR) is explicit that the fold cannot be determined without invoking
+it, and the fold can raise `HeaderCompileContextAmbiguousError` on
+genuinely ambiguous build evidence — which is exactly why that object
+deliberately excludes the fold's result and the fold stays inside
+`execute_dump_request`, never the side-effect-free resolve step: running it
+there would change `--dry-run`'s existing never-raises-but-a-usage-error
+contract, not merely extend it. `AnalysisPlan` is bound by the identical
+constraint, being built at the same resolve-time point. It therefore
+carries the same *requested* inputs `ResolvedDumpRequest` itself carries
+(explicit `--gcc-path`/`--ast-frontend`/language, whatever `--build-info`/
+`--sources` path was given) — not the fold's resolved compile context, and
+not a path for `HeaderCompileContextAmbiguousError` to surface as a
+`PlanningError`. This costs nothing this decision's own named scenarios
+need: both are about build-info/depth/collect-mode compatibility,
+resolvable from the request's own inputs before any compile-unit matching
+runs.
 
 **`AnalysisPlan` deliberately excludes resolved policy and the
 public-surface contract — an earlier draft of this decision included

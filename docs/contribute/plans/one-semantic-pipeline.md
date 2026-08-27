@@ -2278,20 +2278,27 @@ graph_facts.py`/`buildsource/source_graph.py` (trimmed to re-export from
 the new location, `NODE_KINDS`/`EDGE_KINDS` and L5-specific construction
 logic unchanged in place); `abicheck/compare/surface_graph.py` (new —
 public-surface node/edge *kind vocabulary* and builder, using `model/
-graph.py`'s primitive, not a new one); `abicheck/surface_graph.py`
-(`build_surface_graph()`/`compute_surface_metrics()` each gain **two**
-optional parameters, not one — `old_public_entity_ids`/
-`new_public_entity_ids: frozenset[EntityId] | None = None`, each reaching
-only the matching side's own `build_surface_graph(old)`/
-`build_surface_graph(new)` call, per the two-snapshot correction above —
-and `SurfaceGraph.public_roots()` maps a given set of ids back to their
+graph.py`'s primitive, not a new one); `abicheck/surface_graph.py` —
+**each of `build_surface_graph()`/`compute_surface_metrics()` operates on
+exactly one snapshot, and a review round correctly found an earlier draft
+of this bullet gave each of them the two-snapshot `old_public_entity_ids`/
+`new_public_entity_ids` pair, which neither function has any unambiguous
+way to route for a single-snapshot call.** Each gains exactly **one**
+optional parameter instead — `public_entity_ids: frozenset[EntityId] |
+None = None` — and the pair lives only at the two-snapshot callers below,
+each of which passes its own side's set to its own matching call:
+`build_surface_graph(old, public_entity_ids=old_ids)`/
+`build_surface_graph(new, public_entity_ids=new_ids)`. `SurfaceGraph.
+public_roots()` maps a given set of ids back to their
 mangled/symbol-name spelling, preserving its existing `frozenset[str]`
 return type exactly — `surface_graph.py` itself still never imports
 `policy/public_surface.py`, per the note above); `pattern_verdicts.py`
-(`apply_pattern_verdicts()` gains the identical pair, each threaded
-straight through to its matching `build_surface_graph()` call); `diff_surface_
+(`apply_pattern_verdicts()` gains the two-snapshot `old_public_entity_ids`/
+`new_public_entity_ids` pair, each threaded through as the single
+`public_entity_ids` argument to its matching `build_surface_graph()`
+call); `diff_surface_
 metrics.py` (`diff_surface_metrics()` gains the identical pair, each
-threaded straight through to its matching `compute_surface_metrics()`
+threaded through the same way to its matching `compute_surface_metrics()`
 call); `checker.py` (`_apply_pattern_verdicts_step`/`_apply_surface_metrics`
 both gain the identical pair, resolved from `compare()`'s own two
 independent, per-side `PublicSurfaceQuery.resolve()` calls). **Neither
