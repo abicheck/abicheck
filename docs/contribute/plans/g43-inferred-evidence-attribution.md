@@ -89,9 +89,32 @@ it:
    `projection: inferred`, reads the validated `evidence.attribution_path`
    (already checked by `_inferred_evidence_projection_issues()` during
    `project validate-build`), loads the attribution mapping, and forwards
-   it — plus the target's own id — to whichever `dump`/`compare` entry
-   point ultimately calls `ingest_inputs_pack()` for this check, instead of
-   erroring out unconditionally.
+   it — plus the target's own **canonical attribution identity, not its
+   bare id** — to whichever `dump`/`compare` entry point ultimately calls
+   `ingest_inputs_pack()` for this check, instead of erroring out
+   unconditionally.
+
+   **"The target's own id" is wrong here, confirmed by a fresh review
+   round reading `attribute_sources_to_targets()`/`_filter_tus_by_
+   attribution()` directly, not assumed.** `attribute_sources_to_targets()`
+   never records a bare target id as a TU's identity — it records
+   `f"target://{target.id_suffix}"` when the target-graph channel supplies
+   attribution, or `f"output://{basename}"` (the link-unit-graph channel's
+   fallback for e.g. a Make build with no semantic target concept to
+   attach an id to) when it doesn't. `_filter_tus_by_attribution()` then
+   does exact set membership, `expected_target_id in identities` — so
+   forwarding the plain project target id (e.g. `"core"` instead of
+   `"target://core"`) would make every TU's identity set fail that
+   membership check, silently dropping the *entire* pack's contribution to
+   this target even though `project validate-build`'s own
+   `_inferred_evidence_projection_issues()` accepted the identical mapping
+   using exactly these canonical, prefixed identities
+   (`expected_identities = {f"target://{t.id}"}`, plus the `output://`
+   fallback when `t.binary` is set). The fix: resolve and forward the same
+   canonical identity `_inferred_evidence_projection_issues()` already
+   computes — `f"target://{t.id}"`, falling back to the `output://`-based
+   identity the identical way that function does when the target has no
+   semantic id — not the target's bare `t.id`.
 2. The real `dump`/`compare` CLI paths that consume a Flow-2
    `abicheck_inputs/` pack gain a way to receive an external
    `(attribution, expected_target_id)` pair — today `ingest_inputs_pack()`
@@ -150,10 +173,12 @@ would have no way to pass the value through). The design, corrected:
    to be set (already enforced by `project validate-build`, but re-check
    defensively at consumption time — a validated `build-output.json` at
    publish time doesn't guarantee the exact file used at check time is the
-   same one), load it, and forward `(attribution_path resolved, target_id)`
-   as new outputs into its `actions/check-target` step (mirroring how
-   `evidence-pack`/`evidence-producer` are already forwarded as step
-   outputs today).
+   same one), load it, and forward `(attribution_path resolved,
+   canonical_attribution_identity)` — the `target://<id>`/`output://
+   <basename>`-shaped string described under "Goal & acceptance criteria"
+   above, **not** the target's bare id — as new outputs into its
+   `actions/check-target` step (mirroring how `evidence-pack`/
+   `evidence-producer` are already forwarded as step outputs today).
 2. **`actions/check-target/action.yml`/`run.sh`**: gain new inputs
    (e.g. `attribution-path`/`attribution-target-id`) accepting the values
    `check-project.yml` forwards, and pass them onward to the repository-root

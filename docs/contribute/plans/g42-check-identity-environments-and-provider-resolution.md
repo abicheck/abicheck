@@ -255,6 +255,37 @@ report envelope, and the aggregate's profile/evaluation matrix — the same
 fingerprints and G34's `consumer_compile` projection already use, applied
 to a new axis.
 
+**A digest of the resolved *matrix* content is not sufficient once
+`providers:` names a sysroot path rather than embedding inline facts — a
+real gap confirmed by a fresh review round, not a hypothetical one.** The
+provider-resolution phase below reads the *live libraries actually present*
+at the declared sysroot path (their real SONAMEs, exports, symbol
+versions) to decide presence/version-floor/incomplete-coverage — but a
+digest computed purely from the YAML's own resolved content (the sysroot
+*path string*, declared expected facts) says nothing about what was
+physically found there at probe time. Two different runners — or the same
+runner at two different points in time — can share byte-identical
+`environments:`/`providers:` YAML and therefore an identical digest under
+this narrower definition, while the sysroot path on each actually contains
+different library versions, producing different real provider-resolution
+verdicts under a digest that claims the two runs are equivalent. This
+defeats the entire point of persisting an environment digest: a consumer
+comparing two runs' digests to decide whether they represent "the same
+environment" would wrongly conclude they do. The digest must therefore
+also incorporate a **normalized, content-addressed inventory of the
+actually-probed provider facts** (per-provider: resolved SONAME, presence,
+exported-symbol set or its own digest, symbol-version set) — computed
+*after* the live sysroot probe runs, not merely from the declared YAML —
+folded into the same digest the matrix content already contributes to (or
+recorded as a separate, explicit field alongside it, whichever the
+provider-resolution phase's own return shape makes more natural; either
+way, the persisted digest must change when the physically probed contents
+change, config held constant). An environment whose sysroot cannot be
+probed at all (unreachable path, permission error) must not silently fall
+back to a config-only digest — that is exactly the same "fail closed into
+a distinct, named failure class" pattern G41 Phase 3 already establishes
+for assurance, applied here to environment-digest computation.
+
 **Efficiency constraint, load-bearing**: environment evaluation must not
 trigger a new binary/header/source extraction per environment — extract/
 diff exactly once, then evaluate the *one* resulting `DiffResult` against
@@ -356,6 +387,32 @@ merely a safer mutator once inside one job:
    *one* `RunPlanCheck` carrying this list — one grouped check, one matrix
    cell, one job, but each environment's own gating intent travels with it
    undiluted.
+
+   **The descriptor must also represent "no declared environment," not
+   only named environments — a real gap confirmed by checking this design
+   against this plan's own "Environments" acceptance test.** That test
+   requires *three* results from a single extraction/diff pass: the
+   unconfigured/no-environment evaluation (reported as risk), and two
+   named-environment evaluations (breaking against an old floor,
+   compatible against a new one) — but `EnvironmentEvaluation` as defined
+   above requires an `environment_id`/`environment_digest`, which the
+   no-environment case has neither of. Forcing that case through the same
+   shape would mean either running it as a separate, ungrouped matrix job
+   (violating the single-extraction-pass requirement this whole design
+   exists to satisfy) or inventing a synthetic environment id for "no
+   environment" (a fabricated identity that misrepresents what the report
+   actually means). Fixed by making `environment_id: str | None` on
+   `EnvironmentEvaluation` — `None` explicitly represents the
+   no-environment evaluation, with `environment_digest` also `None` for
+   that entry (there is no environment matrix content to fingerprint), and
+   its check-id behavior mirrors the plain, unqualified shape every
+   existing single-environment/no-environment check already produces
+   today — no `!<environment_id>` segment at all for the `None` entry,
+   the qualifier appearing only on entries with a real environment id.
+   A `RunPlanCheck` may therefore legitimately carry one `None` entry
+   alongside any number of named-environment entries in the same
+   `environment_evaluations` list, all evaluated from the one extraction
+   this phase's design already establishes.
 2. **Fan-out inside the one job**: `actions/check-target` (or the CLI
    command it shells out to) gains a mode that performs the dump/compare
    exactly once, then evaluates the resulting `DiffResult` against each
