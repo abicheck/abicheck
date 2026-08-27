@@ -2546,7 +2546,7 @@ with a named reason, not discovered as a silent no-op mid-run.
 
 **Design.** `abicheck/workflows/plan.py`: `AnalysisPlan` as a frozen
 dataclass (operation, per-side `SidePlan`, requested depth, required
-facts, resolved toolchain/compile context) built by a new
+facts, requested toolchain/compile-context inputs) built by a new
 `AnalysisPlanner.resolve(request) -> AnalysisPlan`, **raising
 `PlanningError` on failure, not returning it — a first draft of this
 signature wrote `-> AnalysisPlan | PlanningError`, a union return type
@@ -2567,6 +2567,40 @@ phase's acceptance test is exactly "these two scenarios now raise
 caller of `AnalysisPlanner.resolve()` can therefore treat a returned value
 as always a usable `AnalysisPlan`, with no `isinstance`/union-narrowing
 step of its own.
+
+**"Resolved toolchain/compile context" is not a field this phase can
+actually put in `AnalysisPlan`, and a review round correctly found this
+plan already states why, one phase over, without connecting the two.**
+`service_dump_pipeline.py`'s own `ResolvedDumpRequest` docstring (Phase 1,
+already landed in this codebase) is explicit that the P0.3 L3→L2
+compile-context fold cannot be determined without invoking it, and the
+fold can raise `HeaderCompileContextAmbiguousError` on genuinely ambiguous
+build evidence — which is exactly why that object deliberately excludes
+the fold's result and the fold itself stays inside `execute_dump_request`,
+never `resolve_dump_request`: running it during a side-effect-free resolve
+step would be a real behavior change to `--dry-run`'s existing contract
+(never raising on anything but a usage error), not an additive one. An
+`AnalysisPlan` built during `resolve_compare_request`/`resolve_dump_request`
+is bound by the identical constraint — it cannot carry the fold's actual
+resolved compile context without either running the fold during resolution
+(the same contract change `ResolvedDumpRequest`'s own design already
+rejected) or leaving the field permanently unresolved, which is worse than
+not stating it. Fixed by narrowing the field to what `AnalysisPlan` can
+honestly carry: the *requested* toolchain/compile-context inputs (explicit
+`--gcc-path`/`--ast-frontend`/language, and whatever `--build-info`/
+`--sources` path was given) — the same inputs `ResolvedDumpRequest` itself
+carries rather than the fold's output — not a resolved compile context.
+This phase's own two named acceptance scenarios (`--build-target` +
+pre-captured `aquery`; `-H` + unsupported collect mode) don't need the
+fold's result either: both are about build-info/depth/collect-mode
+compatibility, resolvable from the request's own inputs before any
+compile-unit matching runs, so narrowing this field costs this phase
+nothing it actually needed. `HeaderCompileContextAmbiguousError` itself
+stays exactly where it already lives — raised from `execute_dump_request`,
+not surfaced as a `PlanningError` — since catching it pre-flight would
+require running the fold at resolve time, the one thing this phase cannot
+do without reopening the behavior change `ResolvedDumpRequest`'s own
+design already closed.
 
 **`AnalysisPlan` deliberately does not carry resolved policy or the
 surface contract, and a first draft of this phase's field list included
