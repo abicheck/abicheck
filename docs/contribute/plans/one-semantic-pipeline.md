@@ -1,3 +1,9 @@
+---
+doc_type: contributor
+level: advanced
+lifecycle: active
+---
+
 # One Semantic Pipeline — unifying application, fact, identity, and outcome models
 
 **ADR:** [ADR-063](../adr/063-one-semantic-pipeline.md) · Proposed; nothing in
@@ -721,7 +727,7 @@ algorithm while Phase 6 is where real declarations actually get resolved
 identities. This is named explicitly as Phase 2's own open design
 question for its implementation PR to resolve, the same way this plan
 has already done for the `SourceGraphSummary`-relocation and
-`gate_classification`-stamping-layer questions elsewhere, rather than
+`compare()`'s-own-public-surface-parameter questions elsewhere, rather than
 asserting a fourth, unverified answer here.
 
 This phase explicitly targets, and closes, the specific collision bugs
@@ -1227,14 +1233,57 @@ threaded straight through to `build_surface_graph()`); `diff_surface_
 metrics.py` (`diff_surface_metrics()` gains the identical optional
 parameter, threaded straight through to `compute_surface_metrics()`);
 `checker.py` (`_apply_pattern_verdicts_step`/`_apply_surface_metrics` both
-gain the identical parameter, populated from the same `PublicSurfaceQuery.
-resolve()` result `compare()` already computes for `compute_public_surface()`,
-and thread it into the two functions above — this is what makes every
-call reachable from `compare()`'s own pipeline receive the real, resolved
-ids rather than the `None`-triggered legacy fallback); `abicheck/policy/public_surface.py`
+gain the identical parameter). **Neither `checker.py` nor `compare()`
+itself may call `PublicSurfaceQuery.resolve()` directly to populate it —
+a first draft of this phase's text said exactly that ("the same
+`PublicSurfaceQuery.resolve()` result `compare()` already computes"),
+which is the identical `policy -> compare` direction violation this
+phase's own `surface_graph.py` fix (above) already corrected once, just
+reappearing at a second call site `compare()` itself.** `checker.compare()`
+stays `compare/`-layer code with no import of `policy/public_surface.py`
+anywhere in it; the actual
+`PublicSurfaceQuery.resolve()` call moves to the workflow layer that
+already orchestrates `checker.compare()` for the typed pipeline —
+`service_compare_pipeline.py`'s `classify_compare_pair` (or wherever the
+Phase 4 `AnalysisPlan` resolution already runs, since both need the same
+graph) resolves the ids once, which is the `workflows -> model, storage,
+extract, compare, policy` edge ADR-061 already permits.
+
+**Whether `compare()`'s own new parameter is optional (with a fallback)
+or required is left as this phase's second open design question, not
+asserted a fifth time under continued correction** — it depends directly
+on an answer the note below (`surface.py`) gives for a different reason.
+If `compute_public_surface()` itself ends up with no fallback (because its
+own pre-existing traversal is genuinely deleted, per this phase's
+Acceptance criteria), then `compare()` cannot offer an optional, `None`-
+defaulting parameter either — there would be nothing for `compare()` to
+pass to `compute_public_surface()` in the `None` case, which makes
+*every* existing direct caller of `checker.compare()` (not only the ones
+this plan's Files list already names) a site this phase must also update
+to resolve ids first, a substantially larger migration footprint than "add
+an optional parameter to two internal helper functions." Resolving this
+needs to be done once real callers are enumerated, not guessed at here; it
+is named explicitly rather than left for a future reader to discover the
+two notes disagree. `abicheck/policy/public_surface.py`
 (new — `PublicSurfaceQuery`, migrated from `surface.py`'s existing
-traversal logic); `surface.py` (`compute_public_surface()` becomes a thin
-wrapper calling `PublicSurfaceQuery.resolve`); `dumper_scoping.py`/
+traversal logic); `surface.py` (`compute_public_surface(snapshot,
+public_entity_ids: frozenset[EntityId])` — **the parameter is required,
+not optional with a `None` fallback, unlike `surface_graph.py`'s
+functions above.** The two modules have genuinely different retirement
+plans, not an inconsistency: `SurfaceGraph`'s own traversal is explicitly
+*kept* (Phase 3's earlier note: "`SurfaceGraph` itself is not deleted...
+it answers a genuinely different question"), so its `None`-triggered
+`Visibility.PUBLIC` fallback is a real, permanent code path. `surface.py`'s
+own traversal is explicitly *deleted* by this phase's own Acceptance
+criteria (below) — there is nothing left for a `None` case to fall back
+to, so `compute_public_surface()` has no optional form; every caller
+reaches it only through the workflow-level resolution that computes the
+ids first. Existing direct callers (tests, any code outside the typed
+`compare()` pipeline) are updated to call a resolution helper first rather
+than relying on an argument default — `policy/public_surface.py` itself
+is the natural home for that convenience helper, since a test importing it
+directly is not the production package-level edge the architecture gate
+enforces); `dumper_scoping.py`/
 `export_surface.py`/`type_reachability.py` (each becomes a graph *builder*
 contributing nodes/edges in `compare/`, or a relevance *query* in
 `policy/`, not an independent reachability algorithm); `abicheck/model/
@@ -1858,9 +1907,14 @@ two assertions per fixture, not one assertion claiming full equality.
 
 ### Phase 7 — `RunOutcome` and the last inline exit-code computation
 
-**Goal.** `junit_report.py` stops computing an exit code inline; every
-front end encodes `RunOutcome`'s independent axes exactly once, at the
-boundary.
+**Goal.** The multi-target *aggregate* path (`gate.py`/`fold.py`) stops
+decoding and re-aggregating raw `exit_code` integers as semantic data;
+every front end encodes `RunOutcome`'s independent axes exactly once, at
+the boundary. `junit_report.py`'s own per-finding `_is_failure` is
+explicitly **not** in this phase's scope — see the Design section's own
+correction below for why a per-finding field on `Change` is the wrong
+shape for what `_is_failure` answers, regardless of which layer would
+stamp it.
 
 **Design.** `abicheck/policy/outcome.py`: `RunOutcome` (compatibility,
 assurance, gate, operational, lifecycle — each axis's *underlying concept*
@@ -1895,43 +1949,37 @@ for JUnit would either read every ordinary breaking change as an
 unclassified non-failure, or require universally populating a field whose
 whole point is to distinguish "evaluated" from "not evaluated," silently
 erasing that distinction from the existing JSON/SARIF output every
-external consumer already relies on. Instead, each `Change` gains a new,
-separate field — `gate_classification` (or similarly named; always
-resolved, never `None`, independent of whether contract evaluation ran).
+external consumer already relies on.
 
-**Where it is stamped is not a new computation — it is meant to be
-`_is_failure`'s own existing logic, moved to run once instead of on every
-read — but exactly which layer does the stamping is an open question this
-plan states honestly rather than asserting a third time.** `junit_report.
-_is_failure` already calls the real, single canonical per-finding verdict
-— `DiffResult._effective_verdict_for_change(change)` — which already
-honours `PolicyFile` overrides, the A4 per-finding `effective_verdict`
-(ADR-027), and frozen-namespace escalation guards; an earlier draft of
-this phase claimed `checker.compare()`'s own result-assembly step as the
-stamping point, which review correctly found incomplete twice over:
-`compare()` does not receive the renderer's `SeverityConfig` (a
-CLI/front-end-level concern today, resolved after `compare()` returns,
-not an input to it) or the `relevant_ids` scoping `--used-by`/
-`--required-symbol` produce, and `_effective_verdict_for_change` itself
-does not replicate `_is_failure`'s own preceding `is_evaluated`/
-scoped-id gate — so a value stamped purely inside `compare()` would not
-actually reproduce `_is_failure`'s current behavior for a demoted
-severity preset, a contract-excluded finding, or a scoped run. Closing
-this needs either moving the stamping call to wherever severity/scoping
-are already resolved (a later policy/workflow layer `compare()` itself
-does not reach, which may mean this field cannot be a plain `Change`
-attribute stamped once at all, but something resolved per-render-context
-instead) or threading those two missing inputs into `compare()`'s own
-signature — a real design decision with real tradeoffs on both sides,
-left to Phase 7's own implementation PR rather than guessed at a third
-time here. `compatibility_decision` keeps its existing meaning and
-existing callers completely unchanged either way. `RunOutcome` is what
-the report's own top-level `compatibility_decision` summary still renders
-from, unchanged. "Stops computing inline" means `_is_failure` stops
-*calling* the resolution logic itself once that logic has a real, settled
-stamping point — not that the resolution logic is new, or that it starts
-asking the aggregate report outcome a per-test-case question it cannot
-answer.
+**No stored `Change` field at all — this is the resolution to the
+stamping-layer question three prior rounds of this plan each tried to
+answer a different way, and it closes by removing the thing being argued
+over rather than picking a fourth layer to stamp it at.** Every prior
+attempt (`compatibility_decision` reuse, a `checker.compare()`-stamped
+field, an unspecified later-layer field) shared one assumption this round's
+review finally named directly: that `_is_failure`'s per-finding answer is
+a *property of the `Change`*, fixed once and read many times. It is not —
+the identical `DiffResult` can legitimately be rendered twice with two
+different `SeverityConfig`s and `relevant_ids` sets (an info-only render
+and a strict-severity render of the same comparison, say), and
+`_is_failure` is *supposed* to answer oppositely for the same `Change` in
+each case. A single always-resolved field baked onto the shared `Change`
+object can only ever be correct for the render context that stamped it;
+every other render context reads a stale answer, which is a worse defect
+than any of the three per-layer placements already rejected — it is wrong
+by *design*, not by picking the wrong layer. The fix: `_is_failure` stays
+exactly what it is today, a per-render function of `(change,
+SeverityConfig, relevant_ids)` — `junit_report.py` keeps computing it
+inline, unchanged, because "inline" was never the actual problem; the
+problem this phase's Goal statement should have named is the *aggregate*
+exit-code computation (`gate.py`/`fold.py`, covered below), not this
+function. `RunOutcome` stays exactly what it always was in this phase —
+a **report-level** aggregate, `compatibility_decision` keeps its existing
+meaning and existing callers completely unchanged, and this phase adds
+**zero** new fields to `Change`/`checker_types.py`. "Stops computing
+inline" is corrected to mean only what Phase 7 actually closes: the
+multi-target aggregate path below, not `junit_report.py`'s per-finding
+logic, which this phase now leaves alone entirely.
 
 **`junit_report.py` is not the only remaining inline exit-code consumer —
 a first draft of this phase missed the multi-target aggregate path
@@ -2001,16 +2049,12 @@ own JSON output and process exit code still need.
 **Files.** `abicheck/policy/outcome.py` (new — `RunOutcome` and the new,
 exit-code-free `PolicyGateDecision` ordered type, per the Design section
 above; `severity.GateDecision` itself is untouched, since it remains
-exactly what the boundary encoders convert *to*); `checker_types.py` (new
-`Change.gate_classification` field, kw_only, appended last — `Change` is
-public API); the actual stamping call site — `checker.py` if the
-`SeverityConfig`/`relevant_ids` gap above is closed by widening
-`compare()`'s own inputs, or the CLI/workflow layer that already holds
-both today if not; this phase's own implementation PR resolves which,
-per the open-question note above, rather than this plan naming one
-prematurely a third time; `junit_report.py` (the first remaining inline
-exit-code
-computation ADR-042 already named as unfinished); `html_report.py`'s CI Gate card (already `RunOutcome`-shaped
+exactly what the boundary encoders convert *to*). **`checker_types.py`/
+`Change` gain nothing in this phase** — the Design section's own
+correction above replaces the earlier `gate_classification`-field plan
+entirely; `junit_report.py` is correspondingly **not** touched either,
+since its `_is_failure` stays the unchanged, per-render function it
+already is. `html_report.py`'s CI Gate card (already `RunOutcome`-shaped
 per ADR-042 — confirm it reads the new object directly rather than a
 precursor shape, closing ADR-036 Increment 3 as a side effect if it
 hasn't landed separately by then); `abicheck/workflows/aggregate/gate.py`
@@ -2063,11 +2107,40 @@ regenerated `scan` report with the new fields but an unbumped
 `scan_schema_version` reads as the old schema to any version-aware
 consumer and defeats the whole point of versioning the additive change.
 
-**Tests.** A parity test asserting `junit_report.py`'s exit-relevant
-output (failure count, failure classification) is unchanged for the
-existing `tests/test_junit_report.py` fixtures before and after the
-rewrite — this is a refactor, not a behavior change, and needs to prove
-that explicitly given JUnit output is consumed by external CI systems. A
+**A fourth writer-adjacent call site needs this phase's attention, and it
+is not a new writer — it is an existing *neutralizer*, missed by the
+first draft because its own subject is mutating an already-written
+report, not producing one: `buildsource/check_report.py`'s
+`_neutralize_gate()`.** `check-project.yml`'s `gate-mode: advisory` path
+zeroes a report's legacy `severity`/`exit_code` contribution in place
+(that function's own docstring: "Only `advisory` reports are rewritten
+this way"), and its own accumulated review history already lists three
+prior rounds of exactly this shape of bug — zeroing only the top-level
+field left a nested `diff.severity` block, or the orthogonal
+contract-coverage contribution, still driving the trailing `aggregate`
+job to a nonzero exit, each caught and fixed in turn. `RunOutcome.gate`/
+`.operational` are a **fourth** axis this function does not know about
+yet, and `TargetGate.from_report`'s own new structured-field-first
+reading (this phase's own change, a few paragraphs above) is exactly what
+makes the omission land: once a fresh report's structured fields are
+preferred over the legacy ones this function *does* zero, an unchanged,
+still-blocking `RunOutcome.gate`/`.operational` value overrides the
+neutralization entirely, and an explicitly `advisory` check blocks the
+trailing aggregate anyway — the identical failure mode this function's
+own history keeps rediscovering, reached through the one axis this phase
+adds rather than one of the three it already covers. `_neutralize_gate()`
+gains the identical treatment: zero `RunOutcome.gate`'s own blocking
+contribution and `RunOutcome.operational`'s blocking set (per Phase 7's
+own operational-axis fold, above) the same way it already zeroes
+`severity`/`exit_code`/the nested scan-shaped block/the coverage
+contribution — one more axis added to a function whose whole job is
+"every axis that can block, zeroed for advisory," not a new mechanism.
+
+**Tests.** `tests/test_junit_report.py`'s existing suite needs no changes
+at all — `_is_failure` is untouched, so this is the test that proves the
+Design section's own correction is real: if any of these tests needed to
+change, this phase would have reintroduced a `Change`-level field by
+another name. A
 second parity test for the aggregate path: `fold.py`'s `exit_code()`/
 `blocking` output is unchanged for every existing `tests/test_aggregate.py`
 fixture, run twice — once against a report carrying only the legacy
@@ -2093,7 +2166,17 @@ of the three fresh reports takes the structured-field path, not the
 legacy-decode fallback — confirmed by
 asserting which path actually ran (not only that the output matches),
 since a test that only checks the output could pass with the writer
-changed and the reader still silently falling back. A fourth test
+changed and the reader still silently falling back. A parity test for
+`_neutralize_gate()` pins the new-axis gap directly: a fresh report
+carrying a blocking `RunOutcome.gate`/`.operational` value, run through
+`_neutralize_gate()` under `gate-mode: advisory`, then read back through
+the same `TargetGate.from_report`/`from_scan_report` this phase's reader
+changes use — asserting the aggregate sees a non-blocking result,
+confirmed to fail against a version of `_neutralize_gate()` that zeroes
+only the pre-existing legacy axes and leaves the new structured ones
+untouched, reproducing the exact "advisory check blocks the trailing
+aggregate anyway" failure mode this function's own prior review rounds
+already fixed three times for other axes. A fourth test
 validates every regenerated fixture report against the regenerated
 `docs/reference/schemas/v1/compare_report.schema.json`/
 `aggregate_report.schema.json` (the same validation

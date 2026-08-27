@@ -433,26 +433,31 @@ directly targets the PR #700 failure mode (a
 downstream consumer decoding semantic meaning from an exit-code integer)
 and finishes what ADR-042 started: `mcp_server.py`'s removal already
 deleted one of the remaining inline exit-code computations AGENTS.md
-flagged; `junit_report.py` and `workflows/aggregate/gate.py`/`fold.py`'s
-own `max()`-over-raw-integer aggregation are folded into this decision's
-scope too — the latter pair was missed by an earlier draft of this ADR's
+flagged; `workflows/aggregate/gate.py`/`fold.py`'s
+own `max()`-over-raw-integer aggregation is folded into this decision's
+scope too — it was missed by an earlier draft of this ADR's
 own implementation plan, caught in review, and is exactly the shape of
 gap D6 exists to close: decoding and aggregating exit-code semantics
 *inside* `aggregate`'s own workflow code, not only at its final encoder.
 
 `RunOutcome` is a **report-level** aggregate; it is not a substitute for
-a per-finding decision, and this decision does not ask it to be one —
-`junit_report.py`'s per-test-case pass/fail reads a per-finding field on
-`Change`. **That field is not `compatibility_decision`** — ADR-049 D1's
-existing field is deliberately `None`/`NOT_EVALUATED` on an ordinary,
-non-`--contract` run and for a contract-excluded finding, so reading it
-directly for pass/fail would misclassify exactly the common case. D6
-instead adds a second, always-resolved field (`gate_classification` in
-the implementation plan) carrying the real per-finding pass/fail decision
-`_is_failure` already computes today, leaving `compatibility_decision`'s
-existing meaning and every existing JSON/SARIF consumer of it untouched.
-See the implementation plan's Phase 7 for exactly what that rewrite does
-and does not change, and for why the two fields must stay separate.
+a per-finding decision, and this decision does not ask it to be one, nor
+does it touch `junit_report.py`'s own per-test-case pass/fail —
+`_is_failure` already decides that per-render, from `(Change,
+SeverityConfig, relevant_ids)`, and an earlier draft of this decision
+tried repeatedly to move that answer onto a stored `Change` field
+(first reusing `compatibility_decision`, deliberately `None`/
+`NOT_EVALUATED` by design and therefore the wrong signal; then a new,
+always-resolved field under several candidate stamping layers). Review
+correctly rejected the whole direction, not just each individual layer:
+the identical `DiffResult` can legitimately be rendered twice under two
+different `SeverityConfig`s/`relevant_ids`, requiring opposite `_is_failure`
+answers for the same `Change` — a single field stamped once on a shared
+object cannot represent that, regardless of which layer stamps it. D6
+therefore touches **no** per-finding field at all; `_is_failure` stays the
+unchanged per-render function it already is. See the implementation
+plan's Phase 7 for the full correction and for exactly what this decision
+does and does not change.
 
 ### D7 — A declarative fact/capability registry
 
