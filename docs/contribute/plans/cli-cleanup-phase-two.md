@@ -33,6 +33,32 @@ changes what a CI job's exit code means.
 > today's divergence between parallel paths into the removed-flag baseline. The
 > per-PR sections below carry the prerequisites each one gained.
 >
+> **Update (2026-08-27, fresh re-review, `main` at `327df7b`, after
+> [#883](https://github.com/abicheck/abicheck/pull/883)).** Re-checked every
+> claim in this plan against current `main` rather than trusting the prior
+> checkpoints' status cells. Confirmed unchanged: PR 1 (presentation) and PR 2
+> (aggregate policy) are done; pack parity now covers `compare`, the
+> release fan-out, *and* `scan --against` for both policy/contract
+> assignments and `gate.*` fields (PR B's scope is wider than the 2026-08-16
+> update above states — see that section for the current breakdown); the
+> PR 3B build-context-completeness gaps (forced pre-includes, matched-unit
+> include scoping) are closed. #883 itself fixed a real bundle-facts gap
+> this plan's PR B/bundle sections should account for: `PolicyFile` now
+> reaches both per-library *and* bundle-level verdicts (it previously
+> reached only per-library), the JSON resource budget is now applied
+> uniformly to archive and plain-JSON bundle-facts input, and
+> `DEFAULT_SYSTEM_PROVIDERS` grew several more vendor runtimes (oneTBB,
+> oneMKL, Intel runtime, Level Zero) — the latter is explicitly a tactical
+> fix, not the topology model PR B's bundle section still needs (see that
+> section for why a growing global allow-list isn't the end state).
+> **PR 0B/P0 is still the single outstanding item with no code-side gap
+> left** — see its status note below for the ready-to-apply Ruleset
+> artifact this pass added. PR C (typed dump/scan convergence) remains the
+> largest genuinely unfinished slice; its own section below has the fullest,
+> most current account (it has absorbed a long running series of
+> investigate/fix/revert rounds — read its own text, not this summary, for
+> what is actually closed today).
+>
 > **Update (2026-08-16, later the same day).** PR G1 (canonical `ExitDecision`
 > + report block) landed as [#789](https://github.com/abicheck/abicheck/pull/789)
 > — out of the reviewed "Ordering" sequence below, which lists it after PR B/C/D,
@@ -117,6 +143,22 @@ SHA), which is precisely what item 4 exists to make detectable.
 > GitHub MCP server's tool set nor any CLI available in this environment
 > exposes branch-protection/Ruleset administration). Once that toggle is
 > flipped, PR 0B is fully closed.
+>
+> **2026-08-27: the admin action now has a one-command runbook, not just a
+> classification rule to re-derive by hand.**
+> `.github/branch-protection-ruleset.json` is the exact Rulesets API payload
+> for the 14-name required-check list, and
+> `.github/branch-protection-ruleset.md` is the apply/verify runbook (the
+> `gh api` command, how to update rather than duplicate an existing ruleset,
+> and — the part that actually closes this item — a negative-test procedure
+> confirming a deliberately red required check blocks a merge, not just that
+> the rule was configured). `tests/test_required_checks_governance.py`'s
+> `TestBranchRulesetArtifact` keeps the JSON's context list mechanically in
+> sync with `AGENTS.md`'s prose and `verify-merge-checks.yml`'s
+> `REQUIRED_CHECKS` array, so this is a third checked copy of the list, not
+> a fourth hand-copied one. This closes every part of PR 0B/P0 that can be
+> closed from inside a PR; the ruleset still has to actually be applied and
+> the negative test actually run by an admin before this item is done.
 
 **The required-check list must match `.github/AGENTS.md`'s own required-vs-
 informational classification, not the set of workflow names visible in a run
