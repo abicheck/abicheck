@@ -226,8 +226,16 @@ BUG_CLASSES: tuple[BugClass, ...] = (
         invariant=(
             "For every key used in matching, grouping, or deduplication: "
             "totality (every producer-valid value yields a key), "
-            "determinism, injectivity (unequal values don't collide), and "
-            "order-invariance for unordered inputs."
+            "determinism, injectivity for semantically distinct findings "
+            "(two unequal inputs describing different logical events don't "
+            "collide — this is deliberately narrower than 'no two unequal "
+            "values ever collide': a batch/library-level finding samples "
+            "an arbitrary affected export as its 'spokesperson', so two "
+            "Change instances differing only in which export was sampled "
+            "describe the same logical event and must collide by design, "
+            "per test_finding_identity_properties.py's own "
+            "TestBatchShapedChangeIgnoresTheSample), and order-invariance "
+            "for unordered inputs."
         ),
         fixed_by=(753, 759, 879),
         seed_tests=(
