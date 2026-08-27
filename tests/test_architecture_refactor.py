@@ -280,7 +280,7 @@ class TestChangeKindRegistry:
         import pytest
 
         entry = ChangeKindMeta(
-            "test_kind", Verdict.BREAKING,
+            "test_kind", Verdict.BREAKING, impact="x",
             policy_overrides={"plugin_abi": Verdict.COMPATIBLE},
         )
         with pytest.raises(TypeError):
@@ -300,7 +300,7 @@ class TestChangeKindRegistry:
         import pytest
 
         entry = ChangeKindMeta(
-            "test_kind", Verdict.BREAKING,
+            "test_kind", Verdict.BREAKING, impact="x",
             policy_overrides={"plugin_abi": Verdict.COMPATIBLE},
         )
         with pytest.raises(TypeError):
@@ -326,7 +326,7 @@ class TestChangeKindRegistry:
         import pytest
 
         entry = ChangeKindMeta(
-            "test_kind", Verdict.BREAKING,
+            "test_kind", Verdict.BREAKING, impact="x",
             policy_overrides={"plugin_abi": Verdict.COMPATIBLE},
         )
         with pytest.raises(TypeError):
@@ -349,7 +349,7 @@ class TestChangeKindRegistry:
         import pytest
 
         entry = ChangeKindMeta(
-            "test_kind", Verdict.BREAKING,
+            "test_kind", Verdict.BREAKING, impact="x",
             policy_overrides={"plugin_abi": Verdict.COMPATIBLE},
         )
         with pytest.raises(TypeError):
@@ -399,7 +399,7 @@ class TestChangeKindRegistry:
         import pytest
 
         entry = ChangeKindMeta(
-            "test_kind", Verdict.BREAKING,
+            "test_kind", Verdict.BREAKING, impact="x",
             policy_overrides={"plugin_abi": Verdict.COMPATIBLE},
         )
 
@@ -456,7 +456,7 @@ class TestChangeKindRegistry:
         import pytest
 
         entry = ChangeKindMeta(
-            "test_kind", Verdict.BREAKING,
+            "test_kind", Verdict.BREAKING, impact="x",
             policy_overrides={"plugin_abi": Verdict.COMPATIBLE},
         )
         # Simulate a legacy pickle's restored state: a plain dict, not the
@@ -474,6 +474,66 @@ class TestChangeKindRegistry:
         assert dict(restored.policy_overrides) == {"plugin_abi": Verdict.COMPATIBLE}
         with pytest.raises(TypeError):
             restored.policy_overrides["unknown"] = Verdict.API_BREAK
+
+    def test_setstate_refuses_to_mutate_an_already_initialized_entry(self):
+        """``__setstate__`` is an ordinary method, not exclusive to pickle.
+
+        Nothing stops a caller from invoking ``entry.__setstate__(...)``
+        directly on an already-initialized, LIVE catalog entry (e.g. one
+        obtained via ``REGISTRY.entries``) — that call would silently
+        overwrite its ``__dict__`` in place, since it never goes through
+        ``frozen=True``'s ``__setattr__`` override. A crafted state could
+        install an unvalidated ``policy_overrides`` entry or blank the
+        required ``impact`` text directly onto a shared, already-trusted
+        catalog entry (Codex review, PR #882, fresh evidence). Fixed by
+        refusing outright unless ``self`` is still a genuinely blank
+        instance — the shape pickle's own restore protocol actually
+        produces.
+        """
+        import pytest
+
+        entry = ChangeKindMeta(
+            "test_kind", Verdict.BREAKING, impact="x",
+            policy_overrides={"plugin_abi": Verdict.COMPATIBLE},
+        )
+        with pytest.raises(TypeError, match="already-initialized"):
+            entry.__setstate__({"policy_overrides": {"unknown": Verdict.API_BREAK}})
+        # The live entry is completely unaffected by the rejected call.
+        assert dict(entry.policy_overrides) == {"plugin_abi": Verdict.COMPATIBLE}
+
+    def test_setstate_revalidates_a_restored_entry(self):
+        """A restored (unpickled) entry must pass the same checks a hand-built one does.
+
+        ``__setstate__`` never goes through ``__post_init__``/
+        ``ChangeKindRegistry.__init__``, so without its own validation call
+        a crafted or corrupted pickle state — an unknown ``policy_overrides``
+        key, or blank ``impact`` text — would install successfully on a
+        blank instance. Fixed by having ``__setstate__`` call the same
+        ``_validate_entry`` construction-time validation applies.
+        """
+        import pytest
+
+        bad_policy = object.__new__(ChangeKindMeta)
+        with pytest.raises(ValueError, match="unknown policy"):
+            bad_policy.__setstate__({
+                "kind": "y",
+                "default_verdict": Verdict.COMPATIBLE,
+                "impact": "i",
+                "is_addition": False,
+                "policy_overrides": {"unknown": Verdict.API_BREAK},
+                "description_template": None,
+            })
+
+        bad_impact = object.__new__(ChangeKindMeta)
+        with pytest.raises(ValueError, match="impact must be non-empty"):
+            bad_impact.__setstate__({
+                "kind": "z",
+                "default_verdict": Verdict.COMPATIBLE,
+                "impact": "",
+                "is_addition": False,
+                "policy_overrides": {},
+                "description_template": None,
+            })
 
     def test_description_template_with_unknown_placeholder_raises(self):
         """A description_template referencing an out-of-vocabulary field is rejected.

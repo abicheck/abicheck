@@ -327,11 +327,36 @@ class ChangeKindMeta:
         # review, PR #882, fresh evidence). Normalize on load instead, so
         # every restored instance's policy_overrides is provably an
         # _ImmutableDict regardless of which version produced the pickle.
+        #
+        # __setstate__ is an ordinary method, not exclusive to pickle's own
+        # restore path — nothing stops a caller from invoking it directly
+        # on an already-initialized, LIVE catalog entry (e.g. one obtained
+        # via ``REGISTRY.entries``), which would silently overwrite its
+        # __dict__ in place: this never goes through frozen=True's
+        # __setattr__ override, so a crafted state like
+        # ``{"policy_overrides": {"unknown": Verdict.API_BREAK}}`` would
+        # install an unvalidated override directly onto a shared catalog
+        # entry other code already trusts, or blank the required ``impact``
+        # text (Codex review, PR #882, fresh evidence). Refuse outright
+        # unless ``self`` is still a genuinely blank instance — the shape
+        # pickle's own restore protocol actually produces
+        # (``object.__new__(cls)`` with no ``__init__``/``__post_init__``
+        # call) — and re-run the same construction-time validation
+        # ``_validate_entry`` already applies to every hand-built entry,
+        # since a pickle is untrusted input the same way and this path
+        # never goes through ``__post_init__``/``ChangeKindRegistry.
+        # __init__`` to receive that validation otherwise.
+        if self.__dict__:
+            raise TypeError(
+                "ChangeKindMeta.__setstate__ refuses to overwrite an "
+                "already-initialized instance"
+            )
         overrides = state.get("policy_overrides")
         if not isinstance(overrides, _ImmutableDict):
             state = dict(state)
             state["policy_overrides"] = _ImmutableDict(overrides or {})
         self.__dict__.update(state)
+        _validate_entry(self)
 
 
 #: Representative ``str.format(**...)`` kwarg sets used to *actually execute*
