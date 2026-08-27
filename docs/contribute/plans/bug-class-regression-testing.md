@@ -80,9 +80,12 @@ still open.
    changed from "a test that fails on base and passes on head for the
    reported input" to "an executable, named bug-class invariant, tested
    with generated/adversarial inputs beyond the reported one, that fails
-   on base and passes on head." This is a documentation and PR-template
-   change (Phase 0), not a rewrite of the enforcement script's structural
-   half.
+   on base and passes on head." Phase 0 itself is a documentation and
+   PR-template change, deliberately not a rewrite of the enforcement
+   script's structural half — see the Phase 0 section below for one
+   correctness fix later folded into this same PR that *does* touch the
+   structural half, and why that is a different kind of change from
+   Phase 0's own scope.
 2. A durable **regression-class registry** exists (`tests/regressions/`)
    naming each bug class this audit found, its invariant, its test(s),
    and which axes/entry points/backends it is verified across — so a
@@ -242,13 +245,27 @@ expected defect-catching value is.
 * Add the corresponding normative statement to `AGENTS.md`'s
   "Decision-making principles" section, alongside the existing
   "Fix the cause, not the instance" bullet it already extends.
-* No enforcement-script behavior changes in this phase — the structural
-  half (code change ⇒ test change) is unaffected; only the declared
-  half's required *content* is redefined. A stricter, automatically
-  enforced version (does the named test actually generate more than one
-  input; does it name an oracle) is left for a later, optional
-  `check_regressions_manifest.py` CI gate once the registry has enough
-  entries to make false positives rare (see Phase 1 below) — deliberately
+* Phase 0's own design keeps the structural half (code change ⇒ test
+  change) untouched, redefining only the declared half's required
+  *content*. **One correctness fix landed in the same PR does change the
+  structural half, and is worth distinguishing from Phase 0's own
+  scope**: `tests/regressions/manifest.py` (Phase 1, below) is itself a
+  `.py` file under `tests/`, and `adds_or_modifies_a_test()`'s pre-
+  existing `is_test_path()` check credited *any* non-prose file there as
+  test evidence — so a PR that only added a `BugClass` entry, with no
+  `seed_tests` path actually touched, passed the structural gate with
+  zero executable test evidence (found by review on this PR itself, once
+  the registry file existed to expose it). Fixed by requiring a `.py`
+  path to look like a file pytest actually collects (`test_*.py`/
+  `*_test.py`), not just live under `tests/`. This is a bug fix to an
+  existing loophole, not part of Phase 0's declared-half redefinition —
+  it would have needed fixing whenever the first non-test `.py` support
+  module landed under `tests/`, regardless of this plan. A stricter,
+  automatically enforced version of the declared-half question (does the
+  named test actually generate more than one input; does it name an
+  oracle) is left for a later, optional `check_regressions_manifest.py`
+  CI gate once the registry has enough entries to make false positives
+  rare (see Phase 1 below) — deliberately
   not built yet, so this phase ships without new CI surface.
 
 ### Phase 1 — regression-class registry + manifest gate (implemented)
@@ -481,7 +498,13 @@ clean, silently-wrong result).
 
 * `AGENTS.md` — new "Decision-making principles" bullet (Phase 0).
 * `.github/PULL_REQUEST_TEMPLATE.md`, `scripts/check_bugfix_test_contract.py`
-  — reworded guidance text (Phase 0); no structural gate change.
+  — reworded declared-half guidance text (Phase 0); the latter also
+  gained one structural-gate correctness fix
+  (`_is_collected_python_test_module()`, see the Phase 0 section above)
+  once Phase 1's own `tests/regressions/manifest.py` file exposed a
+  pre-existing loophole — not part of Phase 0's own design, but folded
+  into this PR rather than deferred, since it's a small, self-contained
+  fix directly caused by this PR's own new file.
 * `tests/regressions/manifest.py`, `tests/test_regressions_manifest.py`
   (Phase 1, implemented). `scripts/check_regressions_manifest.py` — not
   built (see Phase 1's own note on why).
@@ -517,9 +540,13 @@ initiative.
 
 ## Out of scope
 
-* Rewriting `scripts/check_bugfix_test_contract.py`'s structural half
-  (code-change ⇒ test-change detection) — that mechanism is sound; this
-  plan changes what counts as satisfying the *declared* half.
+* A broader rewrite of `scripts/check_bugfix_test_contract.py`'s structural
+  half (code-change ⇒ test-change detection) — that mechanism is sound;
+  this plan changes what counts as satisfying the *declared* half. (One
+  narrow, self-contained correctness fix to the structural half's file-
+  recognition logic did land in this PR — see the Phase 0 section above
+  — but closing a loophole this PR's own new file exposed is different
+  from redesigning the mechanism, which stays out of scope.)
 * A trend-reporting database for property/mutation results over time —
   already listed as a deferred, separately-scoped item in AGENTS.md's
   "Known gaps" section; this plan does not change that.

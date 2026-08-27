@@ -34,8 +34,12 @@ answer should reference, and what the *next* PR should search before writing
 a fifth narrow reproducer for a mechanism a class already covers.
 
 ``tests/test_regressions_manifest.py`` enforces this registry's own
-integrity mechanically (every named path exists, every `known_gaps` entry
-names a real test), the same "a registry entry is checked, not just
+integrity mechanically — every named `seed_tests` path exists and is a
+real, pytest-collected `test_*.py` file, every `known_gaps` entry names a
+non-empty reference, and, when a `known_gaps` entry sets the optional
+`canary_test` (most current entries leave it `None` — a tracked-but-
+unmonitored residual is honest, not every gap has one), that path
+resolves the same way — the same "a registry entry is checked, not just
 written" discipline `scripts/check_ai_readiness.py`'s `changekind-*` checks
 already apply to `ChangeKind`.
 """
