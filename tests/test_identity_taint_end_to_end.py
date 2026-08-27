@@ -277,10 +277,21 @@ class TestRelocatingTheCheckoutRootIsANoOp:
 
 class TestSymlinkedCheckoutRootIsANoOp:
     """A checkout reached through a symlinked root must compare identically
-    to the same checkout reached directly -- the recorded absolute path
-    differs (a real symlink resolves to a different literal string than
-    its target unless the extractor canonicalizes it), but the ABI is the
-    exact same binary content."""
+    to the same checkout reached directly.
+
+    Confirmed empirically (Codex review, PR #898): the real direct-clang
+    backend resolves a symlinked header path to its REAL target before
+    recording ``source_location``/``source_header`` -- clang's own file-
+    open canonicalization, not anything abicheck does -- so both
+    invocations record the identical resolved path (verified below, not
+    assumed), and the closure-taint marker's own basename-only spelling
+    (see ``_assert_exercises_closure_taint``'s docstring) never carried a
+    directory component to vary in the first place. This test's real
+    invariant is therefore an end-to-end sanity check that a symlinked
+    entry point resolves and dumps identically to its real target, not a
+    test of abicheck-specific symlink-canonicalization logic -- there is
+    none to test here, since clang already does the canonicalizing
+    upstream of anything abicheck's own model sees."""
 
     def test_symlink_vs_direct_path_compare_identical(self, tmp_path: Path) -> None:
         _require_toolchain()
@@ -298,6 +309,18 @@ class TestSymlinkedCheckoutRootIsANoOp:
 
         _assert_exercises_closure_taint(snap_direct)
         _assert_exercises_closure_taint(snap_via_symlink)
+
+        # Prove the canonicalization claim above rather than merely assert
+        # it: both sides record the REAL (non-symlinked) path, confirming
+        # clang resolved the symlink before abicheck's model ever saw it.
+        add_direct = next(f for f in snap_direct.functions if f.name.endswith("add"))
+        add_via_symlink = next(
+            f for f in snap_via_symlink.functions if f.name.endswith("add")
+        )
+        assert add_direct.source_header == add_via_symlink.source_header
+        assert str(real_root) in (add_direct.source_header or "")
+        assert str(symlink_root) not in (add_direct.source_header or "")
+
         result = compare(snap_direct, snap_via_symlink)
         assert result.verdict is Verdict.NO_CHANGE
         assert result.changes == []
