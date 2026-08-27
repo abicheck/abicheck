@@ -148,8 +148,14 @@ int touch_lambda() { return uses_lambda(); }
 
 
 def _require_toolchain() -> None:
-    if not (_have("clang") and _have("g++")):
-        pytest.skip("clang and g++ are required for this end-to-end test")
+    # dump()'s default `compiler="c++"` resolves to `clang++`, not the bare
+    # `clang` driver (dumper_clang._resolve_clang_bin) -- checking only
+    # `clang` both proceeds-then-fails on a minimal toolchain that has
+    # `clang` but no `clang++`, and skips (losing real coverage) on a
+    # `clang++`-only install with no bare `clang` symlink (Codex review,
+    # PR #898).
+    if not (_have("clang++") and _have("g++")):
+        pytest.skip("clang++ and g++ are required for this end-to-end test")
 
 
 def _assert_exercises_closure_taint(snap: object) -> None:
@@ -159,11 +165,22 @@ def _assert_exercises_closure_taint(snap: object) -> None:
     exactly that identity shape (the historical taint mechanism) would go
     uncaught while the test stays green for an unrelated reason (ordinary
     named declarations don't embed source location in their identity at
-    all). Fails loudly, not silently, if the fixture stops producing one."""
-    names = {f.mangled for f in snap.functions}  # type: ignore[attr-defined]
-    assert any("invoke_with" in n for n in names), (
-        f"expected a lambda-parameterized invoke_with<...> instantiation "
-        f"in the snapshot, found: {names}"
+    all). Checks the actual ``(lambda:...)`` marker in a parameter/return
+    type spelling, not merely a mangled-name substring: the GENERIC,
+    uninstantiated template pattern itself (e.g. ``invoke_with``, no
+    lambda involved at all) also matches an ``"invoke_with" in f.mangled``
+    check, so that alone would stay green even if the actual
+    lambda-parameterized specialization vanished from the snapshot (Codex
+    review, PR #898). Fails loudly, not silently, if the fixture stops
+    producing one."""
+    spellings = {
+        t
+        for f in snap.functions  # type: ignore[attr-defined]
+        for t in ([f.return_type] + [p.type for p in f.params])
+    }
+    assert any("(lambda" in s for s in spellings if s), (
+        f"expected a lambda-parameterized type spelling ('(lambda...)') "
+        f"among the snapshot's function signatures, found: {spellings}"
     )
 
 
@@ -385,14 +402,34 @@ namespace lib { int touch() { return run_one() + run_two(); } }
         snap = _dump(so, header)
 
         # The two lambda-parameterized instantiations of call_with must be
-        # genuinely distinct types/functions within the SAME snapshot --
-        # not merely "not equal to each other by accident", but present as
-        # two separate entries.
-        lambda_functions = [f for f in snap.functions if "call_with" in f.mangled]
-        distinct_mangled = {f.mangled for f in lambda_functions}
-        assert len(distinct_mangled) >= 2, (
-            "expected two distinct call_with<lambda> instantiations, "
-            f"got: {distinct_mangled}"
+        # genuinely distinct CANONICAL closure identities within the SAME
+        # snapshot -- not merely "have different linker-mangled symbols",
+        # which is trivially true regardless of any identity bug here
+        # (run_one/run_two are themselves different enclosing functions, so
+        # real Itanium mangling already guarantees distinct symbols on its
+        # own), and not merely "the set has >= 2 entries", which the bare,
+        # uninstantiated generic template pattern (mangled == "call_with",
+        # no lambda at all) can also satisfy on its own. What must actually
+        # stay distinct is the RENUMBERED parameter-type spelling dump()
+        # already produces (production wiring: dumper.dump() calls
+        # renumber_anonymous_closure_identities before returning) -- a
+        # regression that rewrote BOTH specializations' parameter types to
+        # the SAME ordinal (e.g. both "(lambda:api.h#1)") would pass a
+        # bare mangled-symbol-count check while silently over-merging the
+        # two closures' identity (Codex review, PR #898).
+        def _lambda_param_spellings(functions: object) -> set[str]:
+            return {
+                p.type
+                for f in functions  # type: ignore[attr-defined]
+                if "call_with" in f.mangled
+                for p in f.params
+                if p.type and "(lambda" in p.type
+            }
+
+        lambda_spellings = _lambda_param_spellings(snap.functions)
+        assert len(lambda_spellings) >= 2, (
+            "expected two distinct call_with<lambda> canonical parameter "
+            f"identities, got: {lambda_spellings}"
         )
 
         # Now relocate the whole checkout and confirm the SAME two
@@ -404,10 +441,8 @@ namespace lib { int touch() { return run_one() + run_two(); } }
         so2, header2 = _build(relocated_root, header_text, source_text)
         snap2 = _dump(so2, header2)
 
-        relocated_mangled = {
-            f.mangled for f in snap2.functions if "call_with" in f.mangled
-        }
-        assert len(relocated_mangled) >= 2
+        relocated_lambda_spellings = _lambda_param_spellings(snap2.functions)
+        assert len(relocated_lambda_spellings) >= 2
 
         result = compare(snap, snap2)
         assert result.verdict is Verdict.NO_CHANGE
@@ -467,3 +502,72 @@ long touch_detail(detail::Outer::Inner x) { return x.c; }
         result = compare(snap, snap2)
         assert result.verdict is Verdict.NO_CHANGE
         assert result.changes == []
+
+
+class TestFindingIdentityIsCheckoutPathInvariant:
+    """Every positive case above compares semantically identical libraries
+    and asserts an EMPTY ``changes`` list -- the registry's own
+    ``report_canonical_finding_id`` invariant (used for cross-run/
+    cross-producer suppression matching) is otherwise never exercised at
+    all here: checkout-path taint could leak into a REAL finding's own
+    canonical identity while every other test in this module stayed green
+    (Codex review, PR #898). This introduces one genuine, controlled ABI
+    difference -- a second lambda-parameterized ``invoke_with<...>``
+    instantiation added on the "new" side -- and confirms the SAME
+    canonical finding id is produced whether the before/after pair is
+    built under one checkout root or a completely different one."""
+
+    def test_added_lambda_instantiation_gets_the_same_canonical_id_under_different_roots(
+        self, tmp_path: Path
+    ) -> None:
+        _require_toolchain()
+        new_header = _HEADER.replace(
+            "inline int uses_lambda() { return invoke_with([]() { return 7; }); }",
+            "inline int uses_lambda() { return invoke_with([]() { return 7; }); }\n"
+            "inline int uses_lambda2() { return invoke_with([]() { return 9; }); }",
+        )
+        new_source = _SOURCE.replace(
+            "int touch_lambda() { return uses_lambda(); }",
+            "int touch_lambda() { return uses_lambda(); }\n"
+            "int touch_lambda2() { return uses_lambda2(); }",
+        )
+        assert new_header != _HEADER and new_source != _SOURCE  # sanity
+
+        def _old_new_snapshots(root: Path) -> tuple[object, object]:
+            old_root = root / "old"
+            new_root = root / "new"
+            old_root.mkdir(parents=True)
+            new_root.mkdir(parents=True)
+            so_old, header_old = _build(old_root, _HEADER, _SOURCE)
+            so_new, header_new = _build(new_root, new_header, new_source)
+            return _dump(so_old, header_old), _dump(so_new, header_new)
+
+        old_a, new_a = _old_new_snapshots(tmp_path / "checkout_a")
+        old_b, new_b = _old_new_snapshots(tmp_path / "an/unrelated/deeper/checkout_b")
+
+        result_a = compare(old_a, new_a)
+        result_b = compare(old_b, new_b)
+
+        from abicheck.finding_identity import report_canonical_finding_id
+
+        def _added_lambda_canonical_ids(changes: object) -> set[str]:
+            candidates = [
+                c
+                for c in changes  # type: ignore[attr-defined]
+                if c.symbol and "uses_lambda2" in c.symbol
+            ]
+            assert candidates, (
+                "expected at least one finding naming the added "
+                f"uses_lambda2 symbol, got: "
+                f"{[c.symbol for c in changes]}"  # type: ignore[attr-defined]
+            )
+            return {report_canonical_finding_id(c) for c in candidates}
+
+        ids_a = _added_lambda_canonical_ids(result_a.changes)
+        ids_b = _added_lambda_canonical_ids(result_b.changes)
+
+        assert ids_a == ids_b, (
+            "the same controlled ABI addition produced different canonical "
+            f"finding ids purely from a different checkout root: {ids_a} "
+            f"vs {ids_b}"
+        )
