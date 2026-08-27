@@ -1958,19 +1958,33 @@ pipelines a fourth time.
   > `resolve_compare_request`) share one guard rather than risking a second,
   > independently-drifting copy. `dump_cmd` forwards its own
   > `--compile-db-filter` into the request it builds, so `--dry-run` now
-  > records the same filter the real run would apply. Landing this needed nine
-  > separate review-caught corrections to the scope-mismatch guard itself — a
-  > `--sources`-only tree with an auto-discoverable compile database, a nested
+  > records the same filter the real run would apply. Landing this drew eight
+  > separate Codex-caught corrections, six of them to the scope-mismatch guard
+  > itself (`header_conditionals.compile_db_for_filter_scope_check`/
+  > `compile_db_filter_scope_error`) — a `--sources`-only tree with an
+  > auto-discoverable compile database, a nested
   > `<dir>/build/compile_commands.json`, a pack or Bazel `aquery`/`cquery`
   > `--build-info`, a `--sources` pack with no `--build-info`, a false positive
-  > when an explicit `--build-info` resolves to nothing, `InputSpec.of()` not
-  > accepting the new keyword, and a Flow-2 `abicheck_inputs/` pack named by
-  > `--build-info` — each traced to a real, reachable combination rather than a
-  > hypothetical, and each pinned by its own regression test. See the root
-  > `AGENTS.md`'s `service_dump_pipeline.py`/PR C "Known gaps" entry for the
-  > full, numbered account (search "Item (1) closed") — not reproduced here in
-  > full, since it is the identical narrative this plan already defers to for
-  > every other slice in this subsection.
+  > when an explicit `--build-info` resolves to nothing, and a Flow-2
+  > `abicheck_inputs/` pack named by `--build-info` — plus two adjacent to it:
+  > `InputSpec.of()`, the public loose-value factory (not the guard's own
+  > logic), not accepting the new `compile_db_filter` keyword, and the guard
+  > being wired into `resolve_dump_request` only rather than also
+  > `CompareRequest`'s identical exposure. Each was traced to a real, reachable
+  > combination rather than a hypothetical, and each is pinned by its own
+  > regression test. **A ninth, related finding was investigated and
+  > deliberately left as a documented gap rather than "fixed": the keyword-only
+  > `build_compile_db` parameter `execute_dump_request`/
+  > `_resolve_side_snapshot_impl` already accept has the identical unguarded
+  > shape, but it is not a field of `DumpRequest`/`InputSpec` at all and has no
+  > real caller anywhere in the codebase today — it exists purely as
+  > scaffolding for the not-yet-landed real-run migration below, so there is no
+  > reachable path to validate a guard against, and closing it belongs with
+  > that migration rather than shipping unverifiable validation code now.** See
+  > the root `AGENTS.md`'s `service_dump_pipeline.py`/PR C "Known gaps" entry
+  > for the full, numbered account (search "Item (1) closed") — not reproduced
+  > here in full, since it is the identical narrative this plan already defers
+  > to for every other slice in this subsection.
   >
   > **Item 2 (castxml) is unchanged and is now the sole remaining blocker** on
   > routing `dump_cmd`'s real run through `execute_dump_request` — castxml is
