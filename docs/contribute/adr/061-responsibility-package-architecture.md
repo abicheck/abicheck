@@ -1307,15 +1307,33 @@ unmoved file, so `dependency-direction` is the only check that applies to
 its own imports, not `unclassified-import`) — a genuinely different
 situation from a *new* protocol module deliberately placed inside the
 already-migrated `abicheck/model/` package. So the protocol needs
-`ReclassifyRule` actually classified (or the protocol design changed to
-avoid the dependency) — there is no unclassified-and-unblocking option here
-the way there is for `policy_file.py` itself. So the protocol is the better
-mechanism to use *once* **both** `checker_policy.py`'s split (for
-`ChangeKind`) *and* a real classification of `reclassify.py` (for
-`ReclassifyRule`) have happened — two co-prerequisites, neither satisfied
-by deferral — worth recording for whoever does that, but neither is a
-protocol in place of doing it, and `policy_file.py` staying unclassified
-for now is unchanged.
+`ReclassifyRule` actually classified — but **a fifteenth Codex review round
+found that "classify `reclassify.py`" is itself not a valid fix, checked
+against the module's own imports rather than assumed**: `reclassify.py`
+imports `checker_policy`'s real policy sets and constants
+(`API_BREAK_KINDS`, `BREAKING_KINDS`, `COMPATIBLE_KINDS`, `RISK_KINDS`) at
+its top, and two of its own functions — `effective_verdict_for_change`,
+`reclassify_rule_for_change` — are policy resolution logic in the same
+sense `compute_verdict` is, not facts about a rule. So the *whole module*
+has no single valid classification: `model` would misplace that policy
+logic and reproduce the exact `model -> policy` edge this ADR exists to
+remove (and would itself need `checker_policy.py`'s own split done first,
+for the same `ChangeKind`/policy-set imports), while `policy` or `compare`
+would leave `ReclassifyRule` behind a layer a `model`-owned protocol still
+can't import. The actual third co-prerequisite is narrower than "classify
+`reclassify.py`": extract `ReclassifyRule` (the dataclass alone) into its
+own model-owned leaf, the same `*_metadata.py`-style split this document
+already rejected for `PolicyFile` as a whole but that applies cleanly here,
+since `ReclassifyRule` itself (unlike `PolicyFile`) carries no methods of
+its own — leaving `effective_verdict_for_change`/`reclassify_rule_for_change`
+behind in `reclassify.py`, still classified as `policy`/`compare` once
+`checker_policy.py`'s own split lands. So the protocol is the better
+mechanism to use *once* **three** co-prerequisites have happened, not two:
+`checker_policy.py`'s split (for `ChangeKind`), that same split reaching
+`reclassify.py`'s own `checker_policy` imports, and `ReclassifyRule`
+extracted into a model-owned leaf — none satisfied by deferral — worth
+recording for whoever does that, but none is a protocol in place of doing
+it, and `policy_file.py` staying unclassified for now is unchanged.
 
 Reclassifying
 `policy_file.py`/`suppression.py` as `compare` instead was rejected too:
@@ -1367,10 +1385,12 @@ or its own consumers, per the fourth Codex round above). **Decided, but not
 yet actionable**: the `Protocol`-based facade is the *selected* mechanism for
 whenever `policy_file.py`'s ownership is finally resolved — see the
 paragraph above ("the protocol is the better mechanism to use *once*..."),
-not a third rejected option; it is blocked today only by its two
-co-prerequisites (`ChangeKind` and `ReclassifyRule` each independently
-classified), not by any objection to the mechanism itself. **Not decided**:
-`policy_file.py`'s final layer ownership, and therefore *when* those two
+not a third rejected option; it is blocked today only by its three
+co-prerequisites (`checker_policy.py`'s split for `ChangeKind`, that split
+reaching `reclassify.py`'s own `checker_policy` imports, and `ReclassifyRule`
+extracted into its own model-owned leaf), not by any objection to the
+mechanism itself. **Not decided**:
+`policy_file.py`'s final layer ownership, and therefore *when* those three
 prerequisites get satisfied and the Protocol actually lands. "Deliberately
 unclassified" is this ADR's recorded
 *treatment* of the module for now, not its destination — the module stays
@@ -1380,9 +1400,8 @@ named here as a known open question (`checker_policy.py`'s own
 model-vs-policy split) rather than resolved. Since this ADR is the
 authoritative ownership contract, a reader relying on it for `policy_file.py`
 should read this as: no physical move is safe today, no `may_import` edge
-exists for it yet, and the two co-prerequisites above (`ChangeKind` and
-`ReclassifyRule` each independently classified) are what unblock deciding
-its owner — not a settled classification to build on.
+exists for it yet, and the three co-prerequisites above are what unblock
+deciding its owner — not a settled classification to build on.
 
 **A tenth Codex review round named the risk every number in this whole
 investigation shares, worth stating once rather than re-litigating per
