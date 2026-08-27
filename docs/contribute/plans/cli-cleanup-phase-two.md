@@ -2271,24 +2271,35 @@ pipelines a fourth time.
   > *default* castxml backend — "the migration itself," and it remains
   > exactly as blocked on castxml as this note already said.
   >
-  > **Item 2 (the L4 extractor default divergence) is now empirically
-  > confirmed, not merely reasoned about — but deliberately still not fixed
-  > (2026-08-27).** Every prior note on this item said the divergence was
-  > "unverifiable without castxml" because no environment this work had been
-  > done in had one. That changed this session: a genuine, policy-compliant
-  > castxml (0.7.0, conda-forge, within `castxml_policy.py`'s
-  > `>=0.6.11,<0.8.0` range, bundled Clang 20) was obtained and installed —
-  > `.conda` files are zip archives around zstd-compressed tarballs, not
-  > tarballs themselves, and the extracted binary needs its `share/castxml/`
-  > resource tree alongside it at a real install prefix, not just the bare
-  > executable on `PATH` — and verified via
-  > `castxml_policy.evaluate_castxml_version()` returning `supported=True`.
-  > With it, `tests/test_dump_scan_l3_comparability.py`'s two
-  > `_SCAN_KNOWN_DIVERGENT_FRONTENDS = frozenset({"castxml"})` xfail cases
+  > **Item 2 (the L4 extractor default divergence) is now locally
+  > reconfirmed under real castxml — but this is a reproduction of an
+  > already-established fact, not its first verification, and deliberately
+  > still not fixed (2026-08-27, corrected same day — Codex review caught an
+  > earlier revision of this note overclaiming both halves of that
+  > sentence).** The divergence was already the *fact owner*'s own recorded
+  > finding, not new: `tests/test_dump_scan_l3_comparability.py`'s own
+  > docstring (added in an earlier commit, `2f1accaa`) already states that
+  > running its `scan`-comparison tests under castxml surfaced this exact
+  > divergence and pinned its signature as
+  > `_SCAN_KNOWN_DIVERGENT_FRONTENDS = frozenset({"castxml"})` — and
+  > `.github/workflows/ci.yml`'s `integration` lane already installs a real,
+  > policy-compliant castxml (`./.github/actions/setup-castxml`) and already
+  > runs this exact module there. So this was neither "unverifiable" nor
+  > "first-time" in any absolute sense; what this session's environment
+  > specifically lacked, and what genuinely changed, was a local castxml
+  > install to reproduce that CI-side finding without waiting on a CI run.
+  > A genuine, policy-compliant castxml (0.7.0, conda-forge, within
+  > `castxml_policy.py`'s `>=0.6.11,<0.8.0` range, bundled Clang 20) was
+  > obtained and installed in *this* environment — `.conda` files are zip
+  > archives around zstd-compressed tarballs, not tarballs themselves, and
+  > the extracted binary needs its `share/castxml/` resource tree alongside
+  > it at a real install prefix, not just the bare executable on `PATH` —
+  > and verified via `castxml_policy.evaluate_castxml_version()` returning
+  > `supported=True`. With it, the two already-pinned xfail cases
   > (`test_scan_against_real_dump_baseline_is_comparable_on_unchanged_source`
   > and `test_scan_against_real_dump_baseline_matches_reported_cli_invocation`)
-  > were run for real for the first time and reproduce exactly the divergence
-  > their own long-standing module docstring already predicted: `scan`'s
+  > were reproduced locally, matching exactly the divergence their own
+  > long-standing module docstring already predicted: `scan`'s
   > candidate resolution uses `source_extractor="auto"` (`scan_engine.py`,
   > `_build_new_snapshot`), which `_make_source_extractor`
   > (`buildsource/inline.py`) resolves to clang, while `dump`/`compare` reach
@@ -2305,17 +2316,19 @@ pipelines a fourth time.
   > Deliberately **not** changed as part of confirming this: flipping
   > `scan_engine.py`'s `source_extractor="auto"` to
   > `effective_frontend(compile_context, header_backend)` (or an equivalent
-  > shared resolver — `buildsource/source_extractors.py` already has one,
-  > `resolve_source_extractor`, independent of `_make_source_extractor`,
-  > worth checking for reuse before hand-rolling a call site) would make
+  > shared resolver — `abicheck/buildsource/source_extractors/` already has
+  > one, `resolve_source_extractor` in its `resolver.py` (re-exported by the
+  > package's `__init__.py`), independent of `_make_source_extractor`, worth
+  > checking for reuse before hand-rolling a call site) would make
   > `scan --depth source` require castxml at its defaults for every user who
   > doesn't already have one installed — that line's own existing comment
   > already names this precisely: "a real behaviour change for real users...
   > unverifiable without a castxml-capable lane," calling for "its own
   > dedicated verification against real castxml/clang divergence in
   > production usage, not a side effect of hardening this module's test
-  > coverage." Having castxml available for the first time closes the
-  > *unverifiable* half of that sentence, not the *dedicated verification in
+  > coverage." Having a local castxml install closes the *unverifiable*
+  > half of that sentence for this environment (CI's own `integration` lane
+  > already had it, per above), not the *dedicated verification in
   > production usage* half — the two xfail tests exercise one project shape
   > each, not the breadth "production usage" implies, and a default-changing
   > fix here is exactly the class of decision this file's own established
