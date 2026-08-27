@@ -1,0 +1,495 @@
+# One Semantic Pipeline — unifying application, fact, identity, and outcome models
+
+**ADR:** [ADR-063](../adr/063-one-semantic-pipeline.md) · Proposed; nothing in
+this plan implemented yet. **Effort:** XL, multi-quarter, phased — do not
+attempt as one PR. **Depends on / sequences with:** ADR-055, ADR-061,
+ADR-062, ADR-042, ADR-046/048, ADR-049, ADR-050 (each partially implemented
+already; see "Sequencing against in-flight ADRs" below).
+
+## Problem
+
+AGENTS.md's own "Known gaps" section documents, over dozens of numbered
+findings, one recurring root cause: the same concept (an input, a config
+value, a fact's availability, an entity's identity, a semantic result) is
+represented more than once in the codebase, and the representations drift
+out of agreement. ADR-063 states the target architecture. This document is
+the phased, file-level plan to get there without a rewrite and without ever
+leaving two live implementations of the same concept standing side by side
+for longer than one phase.
+
+Three constraints shape every phase below, taken directly from this
+repository's own conventions (AGENTS.md, ADR-061's migration discipline):
+
+1. **Vertical slice, not flag day.** Each phase ships one consolidation,
+   behavior-preserving, independently mergeable, independently revertible.
+2. **Delete after consolidating.** A phase is not done when the new path
+   works; it is done when the old path it replaces is removed. A phase that
+   only adds is half a phase.
+3. **Verify at the size of the change.** A phase touching the compare/scan
+   hot path re-runs the FP-rate gate, the tier-accuracy gate, and the
+   mutation-score gate for any module it touches; a phase touching
+   persisted schema adds a v(N) migration test and a round-trip test at
+   production scale (per this repo's "third-party-boundary tests" and
+   "toolchain pins" conventions).
+
+## Sequencing against in-flight ADRs
+
+This plan does not start from zero. Four backing ADRs are already partially
+implemented, and their current state determines what each phase below can
+assume:
+
+| Backing ADR | Current state | What this plan's phases assume |
+|---|---|---|
+| ADR-055 (typed request/result) | D1 implemented for `compare` only | Phase 1 extends the existing `CompareRequest`/`service_compare_pipeline.py` shape to `dump`/`scan`, it does not invent a new shape |
+| ADR-061 (responsibility packages) | Phases 0-1 implemented; Phase 5 (`model` package) begun | Phase 0/2/3/6 of this plan land inside the `model`/`compare`/`policy` packages ADR-061 already created; this plan does not create new top-level packages beyond what ADR-061 names |
+| ADR-062 (storage v2) | Phase 0 primitives (`abicheck/storage/`: `FactStatus`/`FactAvailability`, occurrence-preserving identity, canonical encoding, version axes) implemented and **inert** — nothing wired to a producer/reader | Phase 0/4 of this plan is the *generalization* of these primitives into the domain layer; Phase 7 of this plan is the *wiring* ADR-062 Phase 1 still needs, done jointly rather than twice |
+| ADR-042 (compatibility/gate separation) | Implemented for JSON/SARIF/`compare-release`; `junit_report.py` still computes inline | Phase 6 of this plan closes exactly this one remaining gap, not a redesign |
+| AGENTS.md "PR C" (dump/scan typed convergence) | `resolve_dump_request`/`execute_dump_request` split landed; real `dump`/`scan` execution still on the legacy path, blocked on two named items (castxml availability for parity testing, `--compile-db-filter` typed surface — now closed) | Phase 1 of this plan is exactly "finish PR C," not a new design |
+
+## Phases
+
+### Phase 0 — `Fact[T]` in the domain layer (builds on ADR-062 Phase 0)
+
+**Goal.** A detector cannot observe a field's value without first observing
+its availability. `None`/`[]`/a boolean flag stop being overloaded to mean
+both "confirmed absent" and "not collected."
+
+**Design.** Add `abicheck/model/fact.py`: a generic `Fact[T]` wrapping
+`abicheck.storage.availability_status.FactStatus`/`FactAvailability`
+(imported, not reimplemented) plus an optional `T` payload, with exactly
+these constructors: `Fact.present(value)`, `Fact.absent_confirmed()`,
+`Fact.not_collected()`, `Fact.unsupported()`, `Fact.failed(reason)`,
+`Fact.not_applicable()`. `Fact.value_or(default)` and `Fact.is_present`
+are the only two ways to read one without a full `match`. No implicit
+truthiness — `Fact.__bool__` is intentionally not defined, so `if
+fact:` is a `TypeError`-at-lint-time smell a reviewer can grep for.
+
+**Scope for this phase (deliberately narrow).** Convert exactly the three
+fields AGENTS.md's "Known gaps" names as actively causing fabricated
+findings from absent evidence: `RecordType.vtable`/`vptr_offset_bits`
+(the `type_vtable_changed` guard), `RecordType.bases` (the accepted-gap
+`type_base_changed` entry — converting its *representation* first makes a
+future evidence-based guard additive instead of another reinterpretation
+of `None`), and `Param.is_va_list` (the reliability-flag entry). Every
+other model field stays as-is in this phase — a blanket conversion is
+Phase 4's job, after D7's registry exists to drive it mechanically.
+
+**Files.** `abicheck/model/fact.py` (new); `abicheck/model/snapshot.py`'s
+`RecordType`/`Param` dataclasses (new `Fact[...]`-typed fields alongside
+the existing ones, old field deprecated-but-present for one release to
+keep `asdict`-based external consumers working — removed in Phase 4's
+registry-driven sweep, not here); `diff_layout.py`/`diff_types.py`'s
+vtable/base-list detectors (read `Fact[...]`, not raw `None`).
+
+**Tests.** Port the existing `tests/test_vtable_evidence_guard.py`
+Hypothesis properties to assert over `Fact[...]` states directly, not only
+derived booleans; add a property asserting no detector in `diff_types.py`/
+`diff_layout.py` pattern-matches a `Fact[...]`-typed field without handling
+every `FactStatus` variant (a static AST check, mirroring
+`check_ai_readiness.py`'s own style, is preferable to a runtime check here
+since the failure mode is a missing `case`, not a bad value).
+
+**Acceptance criteria.** The three converted fields cannot be read by any
+detector without explicit availability handling (enforced by a new
+`check_ai_readiness.py` check: a `Fact[...]`-typed field accessed via
+direct attribute rather than `.value_or`/pattern-match outside
+`model/fact.py` itself is an ERROR). Full test suite green; FP-rate/
+tier-accuracy gates unchanged (this phase changes representation, not
+detector logic).
+
+---
+
+### Phase 1 — finish the `dump`/`scan` typed-API convergence (closes AGENTS.md "PR C")
+
+**Goal.** `dump`, `scan`, and `compare`'s implicit-dump operand execute
+through the same `resolve_dump_request`/`execute_dump_request` pair; no
+entry point hand-rolls its own L2 seed, ADR-039 collector call, or AST
+cache key.
+
+**Design.** This is not new design — AGENTS.md's "PR C" note already
+names the two blockers precisely and one is closed:
+
+1. *(Closed, carried over from main)* `InputSpec.compile_db_filter` exists
+   and is threaded through `resolve_dump_request`/`resolve_compare_request`.
+2. *(Open — the actual work of this phase)* The default header backend
+   (castxml) must be available in CI/dev environments capable of running
+   this migration's parity tests; every measurement backing "PR C" so far
+   is clang-only. Either (a) obtain a working castxml build for the
+   parity-test lane (this plan's own investigation found conda-forge
+   0.7.0 segfaulting inside `clang::ParseAST` in this environment — file
+   that as its own upstream-castxml investigation, tracked separately, not
+   blocking this phase's clang-only half), or (b) explicitly scope this
+   phase's first landing to the clang backend and track the castxml
+   parity gap as a named residual the same way AGENTS.md already does for
+   every other castxml-unavailable finding in this file.
+
+Once unblocked: route `perform_elf_dump`/`handle_non_elf_dump` through
+`execute_dump_request`, and `scan_engine._build_new_snapshot` through the
+already-landed `_resolve_side_snapshot_impl` call (this step is smaller
+than it looks — the candidate-resolver convergence already landed per
+AGENTS.md's own record; what remains is the `dump` CLI's real execution
+path). Fold the legacy `-p`/`--compile-db` auto-match into the L3→L2 fold
+as the *sole* source of compile-database-derived context when the fold
+applies (already decided and landed per AGENTS.md's "legacy-match
+overlap" entry) rather than re-deciding it here.
+
+**Files.** `abicheck/cli_dump_helpers.py` (`perform_elf_dump`/
+`handle_non_elf_dump` → call `execute_dump_request` instead of `dumper.
+dump()` directly, keeping every existing post-processing hook —
+ADR-039 collector, G31 header-graph attach, clang-layout-tool attach — as
+hooks the executor calls, not logic removed); `abicheck/
+service_dump_pipeline.py` (the executor gains the hook points);
+`abicheck/cli.py`'s `dump_cmd` (already builds a real `DumpRequest` per
+AGENTS.md's record — this phase is where it starts being what actually
+runs, not only what `--dry-run` renders).
+
+**Tests.** `tests/test_dump_cli_typed_api_parity.py`'s existing
+`_BUILD_SHAPES`/`xfail`-gated known-divergent-shape mechanism becomes the
+acceptance gate: every shape currently marked `xfail` for a *named,
+diagnosed* divergence must flip to passing, with no new shape added to the
+divergent list. A shape that cannot be closed this phase is demoted to a
+tracked AGENTS.md "Known gaps" entry with the same rigor the existing ones
+carry (a real repro, a named mechanism, not a guess).
+
+**Acceptance criteria.** `dump`'s CLI path and `execute_dump_request`
+produce bit-for-bit identical snapshots (modulo timestamps/provenance) for
+every build shape in the parity corpus; `cli_dump_helpers.render_dump_dry_
+run()` is deleted and `--dry-run` renders from the real
+`ResolvedDumpRequest` (closing the last item of AGENTS.md's own blocker
+list for this exact migration). PR 3C (removing `dump --build-query`/
+`--build-compile-db`, currently blocked on this per the plan's own
+ordering rule) unblocks as a follow-on, not part of this phase.
+
+---
+
+### Phase 2 — `EntityId`/`ScopePath` as the one identity primitive
+
+**Goal.** Every place that currently computes identity from a string
+(dict key, `name`, `qualified_name`, a synthetic ctor/dtor key) instead
+reads one `EntityId`, computed once, downstream of backend extraction.
+
+**Design.** `abicheck/model/identity.py`: `ScopePath` (an immutable tuple
+of typed segments — `Namespace(name)`, `Record(name, access)`,
+`InlineNamespace(name, version_tag)`, `Anonymous(kind, ordinal)`,
+`LocalToFunction(owner)`), `EntityId` (a `ScopePath` plus a kind
+discriminator — record/enum/typedef/function/variable/constant), and
+`OccurrenceId` (an `EntityId` plus a disambiguator for the
+already-documented "two declarations, one identity" case ADR-062 Phase 0
+already solves at the storage layer — reused here, not reinvented).
+Generalizes ADR-046/048's source-graph identity (already real,
+`USR`-based) by making `EntityId` the *single* identity both the flat
+snapshot and the source graph reference, rather than two graphs with their
+own identity schemes that happen to usually agree.
+
+This phase explicitly targets, and closes, the specific collision bugs
+AGENTS.md's "Known gaps" records as already-found-and-patched-locally:
+opaque-type suppression keyed by bare `RecordType.name`
+(`diff_filtering._find_opaque_types`), the `dumper_clang.py` tag-vs-
+ordinary-namespace typedef collision, and `type_reachability.py`'s
+multi-round namespace-suffix/bare-alias collision history (eleven-plus
+numbered findings in that one entry). Each of those local patches is
+replaced by one `ScopePath`-based identity computation instead of being
+kept as a parallel, narrower fix.
+
+**Files.** `abicheck/model/identity.py` (new, leaf — no dependency on
+`checker_types`/`diff_*`, per ADR-063 D10); `diff_filtering.py`'s
+`_find_opaque_types`/`_find_by_value_types`/`_root_type_name` (consume
+`EntityId` instead of bare `t.name`); `dumper_clang.py`/
+`dumper_castxml.py`'s `parse_types()` (produce `ScopePath`-derived
+identity, replacing the ad hoc `"::".join([*entry.scope, name])`);
+`type_reachability.py` (its multiple ambiguity-tracking helpers —
+`_spelling_index`, `_typedef_spelling_targets`, `_namespace_suffix_
+spellings` — collapse into one `ScopePath`-based resolver, deleting the
+bespoke string-suffix machinery once the new resolver's test coverage
+matches or exceeds the existing eleven-plus regression cases).
+
+**Tests.** Every existing regression test named in the "Known gaps"
+collision-history entries above is kept (they pin real, previously-found
+counterexamples) and re-pointed at the new `EntityId` resolver rather than
+deleted — a primitive-level property suite
+(`tests/test_entity_identity.py`, per AGENTS.md's "Primitive-level
+property tests" convention) states the contract directly: two distinct
+declarations in different namespaces never collide regardless of bare-name
+overlap; a using-declaration's `EntityId` always resolves to its target's,
+never a sibling; namespace-suffix stripping is symmetric and never merges
+two records whose full `ScopePath`s differ.
+
+**Acceptance criteria.** `diff_filtering.py`/`type_reachability.py`'s
+string-based ambiguity-tracking helpers are deleted, not kept alongside
+the new resolver. FP-rate gate shows no regression (a net-new suppressed
+finding from the identity change is a Phase 2 bug, not acceptable drift).
+
+---
+
+### Phase 3 — `AnalysisPlan`: pre-flight resolution, not mid-run discovery
+
+**Goal.** An unsatisfiable request (an evidence requirement no resolved
+collector/backend combination can produce) is rejected before extraction,
+with a named reason, not discovered as a silent no-op mid-run.
+
+**Design.** `abicheck/workflows/plan.py`: `AnalysisPlan` as a frozen
+dataclass (operation, per-side `SidePlan`, requested depth, required
+facts, resolved toolchain/compile context, resolved policy, surface
+contract) built by a new `AnalysisPlanner.resolve(request) ->
+AnalysisPlan | PlanningError`. `PlanningError` carries one entry per failed
+requirement (`requested`, `why_unsupported`), modeled directly on the
+`--build-target` + pre-captured `aquery` gap and the `-H` + unsupported-
+collect-mode gap AGENTS.md already documents as *silent* failures — this
+phase's acceptance test is exactly "these two scenarios now raise
+`PlanningError` instead of silently dropping the request."
+
+**Files.** `abicheck/workflows/plan.py` (new); `service_compare_pipeline.
+resolve_compare_request`/`service_dump_pipeline.resolve_dump_request`
+(construct `AnalysisPlan` as part of resolution, reusing — not
+duplicating — ADR-049's `compatibility_evaluation_resolver.resolve_field`
+for the policy half); `buildsource/adapters/bazel.py` (the `--build-
+target` scoping gap gets its first real pre-flight check site here, per
+its own AGENTS.md entry's recommended option 2 — reject, don't silently
+scope-miss).
+
+**Tests.** Two direct regression tests reproducing the exact named gaps
+from AGENTS.md (`--build-target` with pre-captured `--build-info`; `-H`
+with an incompatible collect mode) — each asserting `PlanningError`, not
+a warning or silent continuation.
+
+**Acceptance criteria.** Both named silent-failure gaps in AGENTS.md close
+as a side effect of this phase, not as separate fixes — if either needs a
+bespoke patch instead of falling out of the planner, the planner's design
+is incomplete and should not be landed yet.
+
+---
+
+### Phase 4 — the fact/capability registry (generalizes `change_registry.py`)
+
+**Goal.** A new model field requires one registry entry, not nine touched
+files.
+
+**Design.** `abicheck/model/fact_registry.py`: `FactDefinition` (id, value
+type, producing backends, persisted/identity-relevant/comparable/
+suppressible/reportable flags, lifecycle state per ADR-063 D7). A codegen/
+validation script (`scripts/gen_fact_capability_matrix.py`, mirroring
+`scripts/gen_cli_reference.py`'s existing pattern) emits the backend
+capability-matrix doc and a serialization-completeness check from this
+registry; `scripts/check_ai_readiness.py` gains a `fact-registry-
+completeness` check mirroring its existing `changekind-partition`/
+`changekind-detector` checks, one level up.
+
+**Scope.** This phase converts the *remaining* model fields Phase 0 left
+alone into `Fact[T]` + a registry entry, mechanically, field by field —
+each conversion is its own small commit (not one repository-wide diff),
+so a regression is attributable to one field's conversion.
+
+**Files.** `abicheck/model/fact_registry.py` (new); every `model/
+*_facts.py` module (each field gains a registry entry as it's converted);
+`scripts/check_ai_readiness.py` (new check); `scripts/gen_fact_capability_
+matrix.py` (new, generates what is today a hand-maintained capability doc).
+
+**Tests.** `tests/test_fact_registry_completeness.py`: every `Fact[T]`-
+typed model field has exactly one registry entry; every registry entry's
+declared producing backends match at least one real parser. Re-run the
+full FP-rate/mutation-score gates once after this phase's field-by-field
+conversion is complete (not per-field — the mechanical conversions don't
+individually risk detector-logic drift, but the cumulative change to every
+`Fact[T]`-typed field's representation is worth one full re-verification).
+
+**Acceptance criteria.** PR #734's exact touch list (model, ELF dumper,
+serialization, `Change`, diff, suppression, capability matrix, docs,
+fixtures) shrinks, for a comparably-scoped new fact added after this
+phase, to: registry entry + parser + detector + test. Demonstrate this
+directly — the phase's own PR adds one new, real fact end-to-end as a
+worked example and states the old-vs-new touch-list diff in its
+description.
+
+---
+
+### Phase 5 — canonical `SemanticIR` between backends and the checker
+
+**Goal.** Type-spelling, scope, template-argument, anonymous/lambda, and
+CV-qualification canonicalization happens once, not once per backend.
+
+**Design.** `abicheck/extract/semantic_normalizer.py`: one
+`normalize(raw: RawCastXmlFacts | RawClangFacts | RawDwarfFacts | ...) ->
+SemanticIR`. Each backend's existing parser (`dumper_castxml.py`,
+`dumper_clang.py`, `dwarf_snapshot.py`, `pdb_metadata.py`) is narrowed to
+produce only its own `RawXFacts` — today's `parse_types()`/`parse_
+typedefs()`-style functions stop doing their own ad hoc namespace-joining,
+anonymous-marker handling, and closure-identity stripping, and instead
+emit the backend's literal output for the normalizer to canonicalize via
+the `EntityId`/`ScopePath` primitives Phase 2 already built.
+
+**Why this phase is ordered after Phase 2, not before.** Every
+cross-backend disagreement AGENTS.md records in this area (the lambda-
+closure-identity entries, the MSVC-vs-Itanium mangling-scheme entries, the
+`Outer::Inner` partial-qualification entry) is a canonicalization
+disagreement *about identity specifically* — Phase 2's `EntityId`/
+`ScopePath` is the primitive this normalizer is built on, not a parallel
+concern.
+
+**Files.** `abicheck/extract/semantic_normalizer.py` (new);
+`dumper_castxml.py`/`dumper_clang.py`/`dwarf_snapshot.py` (narrowed to
+raw-fact production, each losing its own copy of anonymous-marker/
+closure-identity/namespace-join logic as that logic moves to the shared
+normalizer); `name_classification.py` (its `_ANONYMOUS_TYPE_MARKERS` and
+sibling helpers become the normalizer's, used once).
+
+**Tests.** Every existing per-backend regression test that currently
+proves "backend X handles construct Y" is kept and re-targeted at the
+normalizer's output for that backend's raw facts — this is a large,
+mechanical re-pointing, not new test design, and is the natural place to
+retire now-redundant backend-local duplicates of the same assertion (e.g.
+two nearly-identical closure-identity tests, one per backend, collapsing
+into one normalizer test parameterized over both backends' raw fixtures).
+
+**Acceptance criteria.** A single shared test fixture (one closure-
+parameterized template, one partially-qualified nested type, one using-
+re-exported constant) produces the *identical* `SemanticIR` regardless of
+source backend — stated as one parameterized test, not an assertion
+repeated per backend.
+
+---
+
+### Phase 6 — `RunOutcome` and the last inline exit-code computation
+
+**Goal.** `junit_report.py` stops computing an exit code inline; every
+front end encodes `RunOutcome`'s independent axes exactly once, at the
+boundary.
+
+**Design.** `abicheck/policy/outcome.py`: `RunOutcome` (compatibility,
+assurance, gate, operational, lifecycle — each already real today as
+`Verdict`/`AnalysisAssurance`/the ADR-042 gate decision/various ad hoc
+operational-status values/ADR-053's target lifecycle, just not yet one
+object). `junit_report.py` is rewritten to read `RunOutcome.gate`/
+`RunOutcome.compatibility` instead of re-deriving severity from raw
+`changes`, matching the pattern ADR-042 already established for JSON/
+SARIF/`compare-release`.
+
+**Files.** `abicheck/policy/outcome.py` (new); `junit_report.py` (the one
+remaining inline exit-code computation ADR-042 already named as
+unfinished); `html_report.py`'s CI Gate card (already `RunOutcome`-shaped
+per ADR-042 — confirm it reads the new object directly rather than a
+precursor shape, closing ADR-036 Increment 3 as a side effect if it
+hasn't landed separately by then).
+
+**Tests.** A parity test asserting `junit_report.py`'s exit-relevant
+output (failure count, failure classification) is unchanged for the
+existing `tests/test_junit_report.py` fixtures before and after the
+rewrite — this is a refactor, not a behavior change, and needs to prove
+that explicitly given JUnit output is consumed by external CI systems.
+
+**Acceptance criteria.** Zero remaining inline exit-code/severity
+computation outside the one designated encoder per front end — enforced
+by a new `check_ai_readiness.py` check (`no-inline-gate-computation`,
+WARN) flagging a severity/exit-code literal compared against `Change`
+data outside `policy/outcome.py` and the per-front-end encoders.
+
+---
+
+### Phase 7 — wire storage v2's writer/reader to the domain layer (closes ADR-062 Phase 1, jointly with D8)
+
+**Goal.** ADR-062 Phase 0's primitives stop being inert. A real
+`ProjectSnapshot` can be written and read, using `Fact[T]`/`EntityId` from
+Phases 0/2 as its domain representation rather than a second identity/
+availability scheme invented at the storage layer.
+
+**Design.** This phase is ADR-062 Phase 1 (the v1-v25 import adapter, the
+directory-backed `ObjectStore`, folding baseline sets/`BundleFacts` into
+sections) **executed with this plan's D8 constraint already in force**:
+every DTO is a distinct, versioned class from the domain `SemanticIR`/
+`Fact[T]`/`EntityId` objects, with an explicit `to_dto()`/`from_dto()`
+(never `asdict`/a 500-line mirror deserializer) and a migration adapter per
+DTO version. Doing this jointly with ADR-062 Phase 1 (rather than landing
+Phase 1 first, unconstrained, and retrofitting D8 after) avoids writing a
+throwaway first version of the writer/reader.
+
+**Files.** `abicheck/storage/package.py` (already has the object model —
+`PackageManifest`/`VariantRef`/`ArtifactRef`/`ObjectRef`/`ObjectStore`;
+this phase adds the directory-backed implementation and the writer);
+`abicheck/storage/dto.py` (new — the `SnapshotDTO`/`ProjectSnapshotDTO`
+classes D8 requires); `serialization.py` (the legacy `asdict`-adjacent
+`snapshot_from_dict` path is the one this phase's D8 constraint exists to
+prevent from growing a `ProjectSnapshot`-shaped sibling).
+
+**Tests.** Per ADR-062's own validation-corpus plan, plus a D8-specific
+test: renaming an internal domain field (a synthetic identity key, a
+reordered dataclass field) must not change any persisted DTO's bytes —
+stated as a property test generating domain-object mutations outside the
+DTO's own declared field set and asserting the serialized bytes are
+unchanged.
+
+**Acceptance criteria.** Matches ADR-062 Phase 1's own acceptance
+criteria (see that ADR and the `storage-format-v2.md` plan) plus: zero
+direct `asdict`/mirror-deserializer call sites for any `ProjectSnapshot`-
+related type, enforced by the same AI-readiness-style check this plan's
+earlier phases already establish as the pattern.
+
+---
+
+### Phase 8 — delete the superseded representations
+
+**Goal.** Every phase above is only complete once its "before" state is
+removed, not left as a second path. This phase is the accounting pass,
+not new design.
+
+**Checklist (one row per phase, each a real PR removing code):**
+
+- Phase 0: the raw `None`/`bool` reliability-flag fields Phase 0 added
+  `Fact[...]` siblings for are removed once every consumer reads the
+  `Fact[...]` field.
+- Phase 1: `cli_dump_helpers.render_dump_dry_run()`'s independent
+  resolution logic; the legacy `-p`/`--compile-db` auto-match's standalone
+  code path once the fold fully subsumes it (already partly done per
+  AGENTS.md's "legacy-match overlap" record — this is closing the
+  remainder).
+- Phase 2: `diff_filtering.py`/`type_reachability.py`'s bespoke string-
+  suffix ambiguity trackers.
+- Phase 4: any hand-maintained capability-matrix doc section the
+  generator now produces.
+- Phase 5: each backend parser's own copy of anonymous-marker/closure-
+  identity/namespace-join logic.
+- Phase 6: `junit_report.py`'s pre-rewrite inline computation (deleted,
+  not `# deprecated` and kept).
+- Phase 7: any remaining legacy baseline-set/`BundleFacts`-only code path
+  once the `ProjectSnapshot` import adapter covers it — per ADR-062's own
+  phasing, not accelerated here.
+
+**Acceptance criteria.** For each row: a `git grep` for the removed
+pattern/function name returns nothing outside test fixtures/changelog
+history. This checklist is re-run, and re-verified, at the end of the
+*last* phase landed in a given release cycle — not deferred to "eventually."
+
+## What this plan deliberately does not attempt
+
+- **No new root CLI command or public API surface.** Every new type in
+  this plan (`Fact[T]`, `EntityId`, `AnalysisPlan`, `RunOutcome`) is
+  internal until a specific phase's own PR explicitly promotes it, per
+  ADR-063's own "Explicitly not done by this ADR" section.
+- **No schema version bump beyond what ADR-062 already plans.** Phase 7
+  follows ADR-062's own phase boundaries; this plan does not add an
+  independent schema migration.
+- **No attempt to resolve every AGENTS.md "Known gaps" entry.** Several
+  entries there are accepted, permanent limitations (e.g. the reverted
+  linkage-blind-removal attempts, the `type_base_changed` evidence gap
+  with no independent signal) that this plan's primitives make *easier to
+  close later* (Phase 0's `Fact[T]` on `RecordType.bases`, specifically)
+  but does not itself close — closing them needs the evidence this plan
+  doesn't add (consumer-side evidence, a captured base-layout fact), which
+  is out of scope here and remains a tracked gap.
+- **No toolchain-identity-probe implementation.** AGENTS.md names this gap
+  independently (castxml/clang invoked without validating the resolved
+  compiler matches the real build); Phase 5's `SemanticNormalizer` makes a
+  future probe's result easier to thread through uniformly, but does not
+  implement the probe itself.
+
+## Effort and risk summary
+
+| Phase | Effort | Primary risk |
+|---|---|---|
+| 0 | M | Converting the wrong three fields first (pick fields with an *active* fabricated-finding incident, not merely "many `None` checks") |
+| 1 | L | castxml unavailability blocking the parity-test half; mitigated by explicit clang-only first landing |
+| 2 | L | Identity collision regressions are exactly the bug class this phase targets — the property-test suite is the real acceptance bar, not code review alone |
+| 3 | M | Planner rejecting a request current behavior silently accepted — must ship with a migration note in `CHANGELOG.md`/docs, not only a changelog fragment, since it is a user-visible behavior change (a previously-silent no-op becomes an error) |
+| 4 | L (mechanical, field-by-field) | Scope creep — cap each commit to one field |
+| 5 | XL | Largest blast radius in this plan (every backend parser); sequence last among the "hard" phases, after 0/2 give it primitives to build on |
+| 6 | S | JUnit output is consumed by external CI systems — parity testing, not redesign |
+| 7 | XL | Shared with ADR-062's own Phase 1 risk profile; do not duplicate that ADR's own risk analysis here, defer to it |
+| 8 | S per row, continuous | The easiest phase to skip under time pressure — explicitly called out as required, not optional, per ADR-063's decision drivers |
