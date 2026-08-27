@@ -48,25 +48,40 @@ AGENTS.md's own "Known gaps" section is the best evidence for this claim,
 not an assertion made here: dozens of numbered findings there are the same
 shape — a fact is folded into one of these representations but not a
 sibling, or two independently-maintained implementations of the same
-decision quietly diverge. Three examples, chosen because each is already a
-closed, documented incident:
+decision quietly diverge. One of those findings is cited below by name;
+the other two examples are independently verifiable in the repository's
+own merged-commit history (`git log --grep`) rather than in AGENTS.md —
+stated that way deliberately, so a reader checking a citation against the
+wrong source doesn't read it as unsupported. All three are real, not
+illustrative:
 
-- **ELF binding** (PR #734): adding one symbol-binding fact required
-  coordinated edits to the model, the ELF dumper, serialization, `Change`,
-  the diff layer, suppression, the backend capability matrix, docs, and
-  fixtures — for one field.
-- **L3→L2 compile-context fold** (the "Known gaps" entry by that name):
-  eighteen-plus numbered follow-on findings, each a *different* place the
-  same resolved compile context needed to be threaded but wasn't —
-  `perform_elf_dump`, `handle_non_elf_dump`, `scan_engine._build_new_
-  snapshot`, the header-graph second pass, three independent AST cache
-  keys, and the legacy `-p`/`--compile-db` auto-match overlapping the new
-  fold instead of composing with it.
-- **`scan` severity folding** (PR #700): teaching `scan --against` to
-  respect a configured severity scheme required widening the exit-code
-  space, which broke a downstream consumer's assumption that exit code `1`
-  meant only "coverage issue" — because the exit code was being used
-  *inside the system* as semantic data, not only as an external contract.
+- **ELF binding** (commit `e5fabd403` / PR #734, `feat(model): expose ELF
+  symbol binding as a Function/Variable field + suppression selector`):
+  adding one symbol-binding fact required coordinated edits to
+  `model.py`, `dumper_elf_symbols.py`, `serialization.py`, `Change` in
+  `checker_types.py`, `diff_symbols.py`, `suppression.py`,
+  `scripts/backend_capabilities.py` and its generated docs, a suppression
+  doc, and two regenerated example fixtures — nine files for one
+  additive field. (AGENTS.md separately documents a *different*, later
+  defect on this same field — `elf_binding`/`elf_visibility` collapsing
+  mixed bindings across symbol-versioned aliases — which is not this
+  example's point and is not the source of this citation.)
+- **L3→L2 compile-context fold** (the AGENTS.md "Known gaps" entry by that
+  name): eighteen-plus numbered follow-on findings, each a *different*
+  place the same resolved compile context needed to be threaded but
+  wasn't — `perform_elf_dump`, `handle_non_elf_dump`, `scan_engine.
+  _build_new_snapshot`, the header-graph second pass, three independent
+  AST cache keys, and the legacy `-p`/`--compile-db` auto-match
+  overlapping the new fold instead of composing with it.
+- **`scan` severity folding** (commit `73b5576c5` / PR #700, `feat: honor
+  severity/exit-code-scheme in \`scan --against\``): teaching `scan
+  --against` to respect a configured severity scheme required widening
+  the exit-code space, which broke `aggregate.py`'s own assumption that a
+  gated target reading non-blocking under the old scheme meant it was
+  safe to drop from `blocking_targets` — fixed in the same PR, but only
+  because the regression was caught before merge, not because the
+  dependency was made impossible. The exit code was being used *inside
+  the system* as semantic data, not only as an external contract.
 
 None of these are bugs in the PR that shipped the fix. They are evidence
 that **the integration surface for one new fact, one new config value, or
@@ -93,6 +108,47 @@ storage layer, source-graph matching) to the whole analysis model, and then
 **removing the legacy parallel paths** each of those ADRs left in place
 rather than letting a fourth, fifth, or sixth representation accumulate
 next to them.
+
+## Governing invariant
+
+> One concept, one representation, everywhere it is used. Never two.
+
+This is the one rule every decision and every phase below exists to
+enforce, and it is deliberately stated as absolute, not as a preference
+to be weighed against convenience:
+
+- **A second implementation of an already-consolidated concept is a
+  defect, full stop — not an acceptable transitional state, not a pragmatic
+  shortcut, and not something a later cleanup gets to find "eventually."**
+  If a phase's own PR leaves the representation it was meant to replace
+  still reachable by any caller, that PR is incomplete, regardless of how
+  much of the new representation it built. This is why every phase in the
+  implementation plan carries its own explicit deletion step and
+  acceptance criterion, and why Phase 9 (delete the superseded
+  representations) is not optional cleanup — it is the point at which each
+  earlier phase's consolidation is actually true rather than merely begun.
+- **"Generalize and finish," never "add a parallel design."** Every
+  decision in this ADR explicitly names the existing, narrower primitive
+  it generalizes (ADR-042/046/048/049/055/061/062's own work) rather than
+  proposing a new one from scratch. A future contributor extending this
+  architecture inherits the same rule: before introducing a new type or
+  module for a concept this ADR already names (availability, identity,
+  public surface, outcome, configuration, fact), check whether it already
+  has a representation here first. It does not get a second one.
+- **This is enforced mechanically, not by convention alone.** Each phase
+  that consolidates a representation adds (or extends) an AI-readiness or
+  architecture-gate check that makes the *old* representation's reappearance
+  a build failure, not a matter of code review catching it — the `Fact[...]`
+  truthiness/availability-handling check in Phase 0, the identity
+  ambiguity-tracker deletion in Phase 2, the `no-inline-gate-computation`
+  check in Phase 7, and so on. A rule that only holds "as long as reviewers
+  remember to enforce it" is not the rule this ADR commits to.
+- **Reviewers and future ADRs should read a proposal that adds a second way
+  to represent something this ADR already covers as a rejection trigger,**
+  not as a variation to reconcile later. The corrective action is to extend
+  the existing representation (or file a narrowly-scoped amendment to this
+  ADR explaining why it cannot be extended), not to let two stand side by
+  side.
 
 ## Decision drivers
 
@@ -207,10 +263,13 @@ documents repeatedly for opaque-type suppression, typedef dedup, and
 patched locally, each sharing the identical root cause.
 
 Backend-internal implementation keys (castxml's synthetic ctor/dtor key
-being the canonical example — see the `#761`/`#582` incident in AGENTS.md)
-are explicitly **not** persisted identity; `EntityId` is produced once,
-downstream of backend-specific extraction, not re-derived from a
-backend-specific string at comparison time.
+being the canonical example — PR #582 introduced the key format, and PR
+#761, `fix: reconcile castxml synthetic ctor/dtor key format drift (PR
+#582)`, is the real incident: the key-generation algorithm changed and a
+persisted snapshot's old-format key stopped matching its own unchanged
+constructor) are explicitly **not** persisted identity; `EntityId` is
+produced once, downstream of backend-specific extraction, not re-derived
+from a backend-specific string at comparison time.
 
 ### D4 — `AnalysisPlan` resolved before any extraction runs
 
@@ -284,7 +343,7 @@ each `Change`, and this decision does not ask it to be one —
 `junit_report.py`'s per-test-case pass/fail still reads a per-finding
 decision, the same one the report's own `changes` array already carries,
 not a question answered by the whole-run aggregate. See the implementation
-plan's Phase 6 for exactly what that rewrite does and does not change.
+plan's Phase 7 for exactly what that rewrite does and does not change.
 
 ### D7 — A declarative fact/capability registry
 
@@ -308,8 +367,7 @@ A fact also carries an explicit lifecycle state (`MODELLED → PRODUCED →
 NORMALIZED → PERSISTED → CONSUMED → REPORTED → PUBLIC`). A capability is
 documented or exposed as a CLI option only once it reaches `PUBLIC` —
 closing the repeated "shape shipped, wiring followed later" pattern
-AGENTS.md records for the snapshot cache (PR #580, zero call sites at
-merge) and the L3→L2 fold (`compare`'s implicit-dump path wired first,
+AGENTS.md records for the L3→L2 fold (`compare`'s implicit-dump path wired first,
 `dump`'s CLI path following later, `scan`'s candidate resolution later
 still).
 
@@ -320,9 +378,12 @@ addressed sections, explicit fact availability, occurrence-preserving
 identity, separated version axes, semantic-vs-operational payload
 separation. This ADR adds one explicit rule to that target: **no phase of
 storage v2 serializes a runtime/domain object directly** (no `asdict(
-AbiSnapshot)`, no single-function mirror deserializer the size of
-`snapshot_from_dict`, per the `#696` incident AGENTS.md records at ~530
-lines). Each layer is `Domain SemanticIR → DTO vN → canonical wire
+AbiSnapshot)`, no single large mirror deserializer the shape
+`serialization.py`'s `snapshot_from_dict` has today — PR #696, `refactor:
+cut CodeFactor complexity across the five reporting entry points`,
+already had to de-duplicate part of that same function's structure once,
+which is evidence the shape recurs rather than evidence it was fixed).
+Each layer is `Domain SemanticIR → DTO vN → canonical wire
 encoding`, and back, with a migration adapter per DTO version — so an
 internal refactor (a synthetic key rename, a reordered field) is never, by
 construction, a persisted-schema change. This decision does not change

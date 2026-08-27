@@ -12,19 +12,30 @@ AGENTS.md's own "Known gaps" section documents, over dozens of numbered
 findings, one recurring root cause: the same concept (an input, a config
 value, a fact's availability, an entity's identity, a semantic result) is
 represented more than once in the codebase, and the representations drift
-out of agreement. ADR-063 states the target architecture. This document is
-the phased, file-level plan to get there without a rewrite and without ever
-leaving two live implementations of the same concept standing side by side
-for longer than one phase.
+out of agreement. ADR-063 states the target architecture — and, in its own
+"Governing invariant" section, the one rule every phase here exists to
+enforce: **one concept, one representation, everywhere it is used, never
+two.** This document is the phased, file-level plan to get there without a
+rewrite and without ever leaving two live implementations of the same
+concept standing side by side for longer than one phase. That is not a
+style preference either document treats as negotiable: a phase whose own
+PR leaves the representation it was meant to replace still reachable by
+any caller is an incomplete phase, not a phase with follow-up work, no
+matter how much of the new representation it built.
 
 Three constraints shape every phase below, taken directly from this
-repository's own conventions (AGENTS.md, ADR-061's migration discipline):
+repository's own conventions (AGENTS.md, ADR-061's migration discipline)
+and from the governing invariant above:
 
 1. **Vertical slice, not flag day.** Each phase ships one consolidation,
    behavior-preserving, independently mergeable, independently revertible.
-2. **Delete after consolidating.** A phase is not done when the new path
-   works; it is done when the old path it replaces is removed. A phase that
-   only adds is half a phase.
+2. **Delete after consolidating — same PR or the very next one, never
+   "eventually."** A phase is not done when the new path works; it is done
+   when the old path it replaces is removed and nothing in the repository
+   can still reach it. A phase that only adds is half a phase, and "half a
+   phase, to be finished later" is exactly the accumulation pattern this
+   plan exists to stop — it does not get counted as progress toward
+   consolidation until the deletion half lands.
 3. **Verify at the size of the change.** A phase touching the compare/scan
    hot path re-runs the FP-rate gate, the tier-accuracy gate, and the
    mutation-score gate for any module it touches; a phase touching
