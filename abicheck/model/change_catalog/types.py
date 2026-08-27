@@ -120,9 +120,12 @@ TYPES_ENTRIES: list[ChangeKindMeta] = [
        description_template="Enum became scoped: {name} — unqualified enumerator lookup and implicit int conversion no longer compile"),
     _E("enum_deprecated_added", _C,
        impact="Enum type gained [[deprecated]]; consumers get a compiler "
-              "warning when naming it, but its underlying type, size, and "
-              "enumerator values are unchanged. A consumer building with "
-              "warnings as errors (e.g. -Werror=deprecated-declarations) "
+              "warning when naming it. This detector only checks the "
+              "deprecated flag itself — it doesn't verify the enum's "
+              "underlying type, size, or enumerator values also stayed the "
+              "same, so a companion finding for any of those is possible "
+              "if the revision changed both at once. A consumer building "
+              "with warnings as errors (e.g. -Werror=deprecated-declarations) "
               "has this turn a previously clean build into a failing one.",
        description_template="Enum marked deprecated: {name} ({detail})"),
     _E("enum_deprecated_removed", _C,
