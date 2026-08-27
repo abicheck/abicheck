@@ -71,7 +71,29 @@ from tests._wrapper_chain_gen import (
 
 pytestmark = pytest.mark.slow
 
-_WRAPPER_KINDS = sorted(dumper_clang._WRAPPER_EXPR_KINDS)
+#: The real clang wrapper-expression kinds this codebase's three
+#: ``_WRAPPER_EXPR_KINDS`` copies are meant to encode (see each module's own
+#: definition) -- pinned HERE independently of any of those copies, not
+#: derived from one of them. Deriving the generated vocabulary from the
+#: production set under test would mean a kind silently dropped from ALL
+#: THREE copies at once (a coordinated but wrong edit) still generates no
+#: chains containing it and the cross-module equality check below still
+#: agrees -- so the loss would go undetected (Codex review, PR #888).
+#: Pinning it independently means such a drop shows up as a mismatch
+#: against THIS set, not just as disagreement between the three copies.
+_EXPECTED_WRAPPER_KINDS = frozenset(
+    {
+        "ImplicitCastExpr",
+        "CStyleCastExpr",
+        "CXXStaticCastExpr",
+        "ConstantExpr",
+        "ExprWithCleanups",
+        "ParenExpr",
+        "CXXFunctionalCastExpr",
+        "MaterializeTemporaryExpr",
+    }
+)
+_WRAPPER_KINDS = sorted(_EXPECTED_WRAPPER_KINDS)
 _LITERAL_LEAF_KIND = "IntegerLiteral"
 
 _kinds_strategy = st.lists(st.sampled_from(_WRAPPER_KINDS), min_size=0, max_size=6)
@@ -87,9 +109,17 @@ def test_wrapper_kind_vocabularies_agree_across_all_three_copies() -> None:
     drift with nothing failing. A wrapper kind added to only one copy would
     make that module see a value collapsed onto that node where the other
     two stop early, silently.
+
+    Each copy is also checked against ``_EXPECTED_WRAPPER_KINDS`` above,
+    independently pinned rather than derived from any of the three -- so a
+    kind dropped from all three copies at once (which the copies-agree-
+    with-each-other checks alone cannot see) still fails here.
     """
     assert dumper_clang._WRAPPER_EXPR_KINDS == dumper_clang_expr._WRAPPER_EXPR_KINDS
     assert dumper_clang._WRAPPER_EXPR_KINDS == clang_nodes._WRAPPER_EXPR_KINDS
+    assert dumper_clang._WRAPPER_EXPR_KINDS == _EXPECTED_WRAPPER_KINDS
+    assert dumper_clang_expr._WRAPPER_EXPR_KINDS == _EXPECTED_WRAPPER_KINDS
+    assert clang_nodes._WRAPPER_EXPR_KINDS == _EXPECTED_WRAPPER_KINDS
 
 
 # --------------------------------------------------------------------------
