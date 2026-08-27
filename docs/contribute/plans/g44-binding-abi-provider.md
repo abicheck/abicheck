@@ -62,6 +62,19 @@ incompatibility. A negative control using `py::module_local` types (which
 pybind11 documents as deliberately *not* shared across the global registry)
 must remain non-breaking.
 
+**A second acceptance test for the cross-release axis, added per the
+`compare()` design correction above**: the same `_core.so`/`_geometry.so`
+internals mismatch from the first test exists **identically** in both an
+old and a new release (nothing changed about it between releases).
+Comparing the old release against the new release must **not** re-report
+it as a fresh incompatibility — the per-release module-pair graph shows
+the same disagreement on both sides, so `compare(old, new, policy)` finds
+no relationship-level delta. A third variant: the mismatch is present in
+the old release and genuinely fixed in the new one (both modules rebuilt
+against the same pybind11 internals version) — this *must* report a
+relationship-level change (the pair moved from disagreeing to agreeing),
+distinguishing "the break was fixed" from "nothing changed."
+
 ## Design
 
 ### Where the identity actually lives
@@ -169,13 +182,51 @@ this plan sketched:
   version, internals identity, registration scope, declared shared native
   types), from binary evidence first, an optional build-emitted manifest
   second.
-- **`compare(old, new, policy) -> Changes`** — the module-pair matching
-  logic: find declared shared native types between two modules (via
-  whatever registration-scope evidence is available — global-scope types
-  are candidates for every other global-scope module in the same process;
-  module-local types are never candidates) and flag an incompatibility when
-  two modules sharing a candidate type disagree on binding ABI/internals
-  version, C++ stdlib ABI, debug/release identity, or free-threaded mode.
+- **`compare(old, new, policy) -> Changes`** — **must stay a genuine
+  old-release-vs-new-release comparison of one module's own surface facts,
+  not a repurposed sibling-module comparison within one release — a real
+  design confusion caught by a fresh review round, not a hypothetical
+  one.** An earlier draft of this bullet defined `compare()` as "find
+  declared shared native types between two modules... flag an
+  incompatibility when two modules sharing a candidate type disagree,"
+  treating its `old`/`new` parameters as two sibling modules in one
+  release. That discards the temporal dimension the shared
+  `SurfaceProvider` contract exists to carry, and produces wrong results
+  either way: a pre-existing internals mismatch between two sibling
+  modules that is genuinely unchanged from one release to the next would
+  be re-emitted as a "new" incompatibility on *every* release comparison
+  (nothing tracks that it already existed last time), while a real fix —
+  resolving an old mismatch between two siblings — has no release-level
+  delta to report under this shape at all, since "old"/"new" were never
+  the release axis in the first place.
+
+  The cross-module (sibling) relationship question and the cross-release
+  (did-it-change) question are genuinely two different axes, and must
+  stay two stages, not one repurposed function:
+  1. **Per-release module-pair compatibility graph** (a new,
+     `compare/`-owned computation, run once per release): for one
+     release's full set of collected modules, find every candidate shared
+     native type across sibling pairs (the registration-scope logic
+     above) and record, per pair, whether they agree on binding ABI/
+     internals version/C++ stdlib ABI/debug-release identity/free-threaded
+     mode — the same shape G38's bundle-internal detectors already
+     establish for a *release's own* cross-DSO relationships, applied here
+     to Python binding modules instead of DSOs.
+  2. **`compare(old, new, policy) -> Changes`** then compares *that graph*
+     between the old release and the new release — i.e. `old`/`new` are
+     genuinely the old-release and new-release module-pair graphs (or,
+     per-module, the module's own `SurfaceFacts` across releases,
+     whichever the SciPy roadmap's own `SurfaceProvider` contract
+     specifies more precisely once read against this shape) — emitting a
+     `Change` only for a pair whose *relationship* changed (a previously
+     agreeing pair now disagrees, or vice versa), never for a
+     relationship merely re-observed as unchanged.
+  This may be implemented as `compare()` itself internally invoking stage
+  1 for both releases before diffing the two graphs, or as a separate
+  bundle-level reconciliation stage this plan's own coordination
+  (`workflows/`) invokes alongside `compare()` — either satisfies the
+  contract; repurposing `old`/`new` as two sibling modules within one
+  release does not.
 - **`coverage() -> CoverageRecord`** — this provider's own evidence-
   completeness signal (did extraction fully resolve both modules' internals
   identity, or degrade), following the same "explicit incomplete-coverage
@@ -284,7 +335,13 @@ recognition to build on, so its mangled-symbol-namespace/RTTI signal
 choice needs the same real-fixture validation before being trusted as a
 gate for whether this provider runs on a module at all — a false negative
 here means the whole provider silently never fires; a false positive means
-it misclassifies an unrelated Cython/hand-written extension.
+it misclassifies an unrelated Cython/hand-written extension. The
+two-stage `compare()` design (per-release module-pair graph, then a
+cross-release diff of that graph — see "Comparison semantics" above)
+adds real architectural surface beyond a single matching function, but is
+still additive to this estimate rather than a new risk category: it
+reuses G38's own established shape for a per-release relationship graph,
+applied to a different artifact kind.
 
 ## Out of scope
 
