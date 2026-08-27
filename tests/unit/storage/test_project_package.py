@@ -18,7 +18,7 @@ from typing import Any
 import pytest
 from hypothesis import given, strategies as st
 
-from abicheck.storage.canonical import semantic_digest
+from abicheck.storage.canonical import semantic_digest, strip_capture_metadata
 from abicheck.storage.package import (
     MANIFEST_RELPATH,
     ArtifactRef,
@@ -692,6 +692,35 @@ class TestObjectStoreContract:
             store.get(value)
         with pytest.raises(TypeError):
             store.has(value)
+
+    def test_get_never_depends_on_which_capture_variant_was_put_first(
+        self,
+    ) -> None:
+        """Two values differing only in the reserved `capture` block share a
+        digest (D3: capture metadata is provenance, not identity) -- so the
+        digest alone must determine what `get()` returns, regardless of
+        insertion order. Before the fix, whichever variant's `put()` ran
+        first silently won, and re-`put`ting the other variant did nothing
+        (its digest was already present) -- the address stopped uniquely
+        determining the observable stored object.
+        """
+        store = InMemoryObjectStore()
+        first = {"x": 1, "capture": {"timestamp": "A"}}
+        second = {"x": 1, "capture": {"timestamp": "B"}}
+        assert semantic_digest(first) == semantic_digest(second)
+
+        digest_first = store.put(first)
+        digest_second = store.put(second)
+        assert digest_first == digest_second
+        assert store.get(digest_first) == strip_capture_metadata(first)
+        assert store.get(digest_first) == strip_capture_metadata(second)
+        assert "capture" not in store.get(digest_first)
+
+        # Order reversed: same outcome either way.
+        other_store = InMemoryObjectStore()
+        other_store.put(second)
+        other_store.put(first)
+        assert other_store.get(digest_first) == strip_capture_metadata(first)
 
     def test_a_reference_built_from_a_stored_digest_resolves(self) -> None:
         """The whole point of D7: an `ObjectRef` and a store must agree."""

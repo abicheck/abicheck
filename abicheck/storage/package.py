@@ -68,7 +68,7 @@ from dataclasses import dataclass, field
 from types import MappingProxyType
 from typing import Any, Protocol, runtime_checkable
 
-from .canonical import canonical_form, semantic_digest
+from .canonical import canonical_form, semantic_digest, strip_capture_metadata
 from .guards import (
     decision_key as _decision_key,
     identity_text as _identity_text,
@@ -736,7 +736,13 @@ class ObjectStore(Protocol):
         ...
 
     def get(self, digest: str) -> Any:
-        """The canonical form of the object stored under `digest`.
+        """The stored object's hash-domain form -- what `digest` addresses.
+
+        This is `canonical_form(content)` with the reserved root `capture`
+        block removed (`strip_capture_metadata`), matching what
+        `semantic_digest` hashed: two values differing only in `capture`
+        share a digest by design (D3), so a store keeps at most one and must
+        not let which one survive depend on insertion order.
 
         Raises `KeyError` if nothing is stored under it.
         """
@@ -763,10 +769,11 @@ class InMemoryObjectStore:
     def put(self, content: Any) -> str:
         digest = semantic_digest(content)
         if digest not in self._objects:
-            # Canonicalized once, on the way in, so a second `get` never
-            # needs to re-derive the object's own canonical form from
-            # whatever shape the caller happened to pass.
-            self._objects[digest] = canonical_form(content)
+            # Store the *hash-domain* form (capture metadata stripped, same
+            # as what was hashed), not the full canonical form -- else two
+            # capture-only-differing values sharing a digest would make
+            # `get()` depend on which one's `put()` ran first (Codex review).
+            self._objects[digest] = strip_capture_metadata(content)
         return digest
 
     def get(self, digest: str) -> Any:
