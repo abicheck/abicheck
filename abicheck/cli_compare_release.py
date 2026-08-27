@@ -64,6 +64,7 @@ from .cli_compare_release_helpers import (  # noqa: F401
     _release_md_changed_libraries,
     _release_md_libraries_table,
     _release_md_matrix_findings,
+    _resolve_bundle_policy_file,
     _resolve_release_headers,
     _resolve_release_severity_config,
     _run_bundle_analysis,
@@ -1755,6 +1756,7 @@ def compare_release_cmd(
 
             bundle_result: BundleDiffResult | None = None
             if not no_bundle_analysis:
+                # G38 Phase 16: see _resolve_bundle_policy_file's docstring.
                 bundle_result, worst_verdict = _collect_bundle_result(
                     library_results,
                     old_map,
@@ -1764,6 +1766,9 @@ def compare_release_cmd(
                     bundle_system_providers=bundle_system_providers,
                     bundle_cohorts=bundle_cohorts,
                     policy=policy,
+                    policy_file=_resolve_bundle_policy_file(
+                        suppress, policy, policy_file_path, pack_application
+                    ),
                 )
 
             # Strip _diff_result from entries and bump verdict for removed libraries.

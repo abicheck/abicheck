@@ -2212,7 +2212,7 @@ assurance storage at all) and `--bundle-facts-out`'s actual scope
 itself is its own, separately-scoped refactor (see Phase 13's table) and
 should not be bundled into the same PR as the new surface it enables.
 
-### Phase 16 — Thread a resolved `PolicyFile` into the release fan-out's own bundle analysis
+### Phase 16 — Thread a resolved `PolicyFile` into the release fan-out's own bundle analysis (SHIPPED)
 
 **Origin:** Codex review on the PR that documented Phase 14/15 above,
 verified against current source, not assumed. `compare_bundle()`/
@@ -2255,6 +2255,25 @@ name's coarse three-way switch).
 this phase adds no new flag, only forwards an already-resolved local
 variable one call deeper, so it is not blocked by that constraint the way
 Phase 15 is.
+
+**Shipped.** `cli_compare_release_helpers._resolve_bundle_policy_file()` is
+the new one-shot resolver (`_load_suppression_and_policy()` then, when a
+`--pack` was resolved, `policy_file_with_packs()` — the identical pattern
+`_collect_matrix_result()` already used a few functions over), called from
+`cli_compare_release.compare_release_cmd()` immediately before
+`_collect_bundle_result()`. Landed as its own function rather than inlined
+at the call site because `cli_compare_release.py` was already at (1995 of)
+the 2000-line AI-readiness hard cap — an inlined 15-line resolve-then-fold
+block would have pushed it over; the resolver itself lives in
+`cli_compare_release_helpers.py`, which had headroom, keeping the call site
+to a single expression. `docs/use/multi-binary.md`'s "release fan-out
+doesn't forward policy files" section was updated to describe the shipped
+behavior. Regression coverage: `tests/test_cli_compare_release_bundle_
+signature_wiring.py::TestBundleAnalysisForwardsPolicyFile` (a
+`policy_file` override actually demoting `BundleDiffResult.bundle_verdict`
+through `_collect_bundle_result`, and a direct plumbing check pinning that
+`_run_bundle_analysis` forwards its `policy_file` argument to
+`analyze_bundle()` verbatim).
 
 ---
 

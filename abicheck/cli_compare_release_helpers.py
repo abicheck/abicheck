@@ -42,6 +42,7 @@ from .model import AbiSnapshot
 if TYPE_CHECKING:
     from .pack_application import PackApplication
     from .package import PackageExtractor
+    from .policy_file import PolicyFile
     from .workflows.gate import SeverityConfig
 
 
@@ -149,6 +150,39 @@ def _collect_release_warnings(
         )
 
 
+def _resolve_bundle_policy_file(
+    suppress: Path | None,
+    policy: str,
+    policy_file_path: Path | None,
+    pack_application: PackApplication | None,
+) -> PolicyFile | None:
+    """Resolve the ``PolicyFile`` bundle analysis should score against
+    (G38 Phase 16).
+
+    Mirrors ``_collect_matrix_result``'s identical resolve-then-fold-packs
+    pattern in ``cli_compare_release.py`` (``_load_suppression_and_policy``
+    then, when a ``--pack`` was resolved, ``policy_file_with_packs``) --
+    before this existed, ``_run_bundle_analysis``/``_collect_bundle_result``
+    only ever received the bare *policy* preset name, so a ``--policy
+    custom.yaml`` document's ``overrides:`` entry for a ``bundle_*``
+    ``ChangeKind`` had no effect on the release's aggregate
+    ``bundle_verdict``, even though ``analyze_bundle()``/``compare_bundle()``
+    have accepted a ``policy_file`` parameter since G38 Phase 4 and the
+    stored-``BundleFacts`` driver (``bundle_facts.
+    compare_bundle_from_facts``) already forwards one. Split out to a
+    one-line call site in ``cli_compare_release.py`` since that module sits
+    at the AI-readiness file-size hard cap.
+    """
+    from .cli_params import _load_suppression_and_policy
+
+    _, pf = _load_suppression_and_policy(suppress, policy, policy_file_path)
+    if pack_application is not None:
+        from .pack_application import policy_file_with_packs
+
+        pf = policy_file_with_packs(pf, pack_application, base_policy=policy)
+    return pf
+
+
 def _run_bundle_analysis(
     old_map: dict[str, Path],
     new_map: dict[str, Path],
@@ -158,6 +192,7 @@ def _run_bundle_analysis(
     bundle_system_providers: str,
     bundle_cohorts: tuple[str, ...] = (),
     policy: str = "strict_abi",
+    policy_file: PolicyFile | None = None,
     old_snapshots: dict[str, AbiSnapshot | BundleSignatureEvidence] | None = None,
     new_snapshots: dict[str, AbiSnapshot | BundleSignatureEvidence] | None = None,
 ) -> BundleDiffResult | None:
@@ -199,6 +234,17 @@ def _run_bundle_analysis(
     explicit ``--manifest``, and re-surfacing ``analyze_bundle``'s
     structured ``analysis_errors`` as the same ``click.echo(...,
     err=True)`` warnings this function has always emitted.
+
+    *policy_file* (G38 Phase 16) is the release fan-out's already-resolved
+    ``PolicyFile`` (the same one built for per-library scoring by
+    ``_load_suppression_and_policy``/``policy_file_with_packs`` a few
+    functions over), forwarded to :func:`analyze_bundle` unchanged. Before
+    this parameter existed, only the bare *policy* preset name reached
+    ``analyze_bundle``, so a ``--policy`` document's per-``ChangeKind``
+    override had no effect on the release's aggregate ``bundle_verdict`` --
+    the same capability the stored-``BundleFacts`` driver
+    (``bundle_facts.compare_bundle_from_facts``) already had. ``None`` (the
+    default) is a true no-op, matching every pre-existing caller.
     """
     from .bundle import build_bundle_snapshot, load_manifest
     from .bundle_analysis import analyze_bundle
@@ -240,6 +286,7 @@ def _run_bundle_analysis(
         system_providers=system_extra or None,
         cohorts=list(bundle_cohorts) or None,
         policy=policy,
+        policy_file=policy_file,
         old_signature_evidence=old_snapshots or None,
         new_signature_evidence=new_snapshots or None,
     )
@@ -543,6 +590,7 @@ def _collect_bundle_result(
     bundle_system_providers: str,
     bundle_cohorts: tuple[str, ...] = (),
     policy: str = "strict_abi",
+    policy_file: PolicyFile | None = None,
 ) -> tuple[BundleDiffResult | None, str]:
     """Extract stashed DiffResults, run bundle analysis, update worst verdict.
 
@@ -556,6 +604,9 @@ def _collect_bundle_result(
     :func:`~abicheck.bundle_signature_evidence.find_unverified_signature_
     findings` reads, so both are folded into the same ``old_snapshots``/
     ``new_snapshots`` mapping this function has always built.
+
+    *policy_file* (G38 Phase 16) is forwarded unchanged to
+    :func:`_run_bundle_analysis` -- see that function's own docstring.
     """
     stashed_diffs: list[DiffResult] = []
     old_snapshots: dict[str, AbiSnapshot | BundleSignatureEvidence] = {}
@@ -584,6 +635,7 @@ def _collect_bundle_result(
         bundle_system_providers=bundle_system_providers,
         bundle_cohorts=bundle_cohorts,
         policy=policy,
+        policy_file=policy_file,
         old_snapshots=old_snapshots,
         new_snapshots=new_snapshots,
     )
