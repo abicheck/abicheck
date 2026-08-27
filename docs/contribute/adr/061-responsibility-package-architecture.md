@@ -1106,15 +1106,17 @@ methods without changing what `BuildSourcePack(...)` constructs for callers
 this repository cannot see, which is its own slice.
 
 **Item 3 stays open — both its *taxonomy-partition* half and, contrary to
-two earlier drafts of this section, most of its *validation* half.** D9
+two earlier drafts of this section, part of its *validation* half.** D9
 specifies two separable things: the target file shape (declarative modules
 named by taxonomy — `symbols.py`, `types.py`, `platform.py`, `build.py`,
 `source.py` — under `model/change_catalog/`, feeding one `registry.py`) and
 what that `registry.py` validates — "globally unique identifiers, complete
-metadata, valid references, and non-contradictory defaults." Neither is done.
+metadata, valid references, and non-contradictory defaults." The taxonomy
+partition is not started; of the four validation properties, three are now
+enforced and one ("complete metadata") is not.
 
-The taxonomy shape isn't: what exists today — `change_registry.py` plus
-`change_registry_{buildsource,castxml,composition,coverage,numpy,
+The taxonomy shape isn't started: what exists today — `change_registry.py`
+plus `change_registry_{buildsource,castxml,composition,coverage,numpy,
 suppression,wheel,types}.py` — per this repository's own `AGENTS.md`
 ("Adding a new ChangeKind"), was "split out only to stay under the
 file-size cap," so `change_registry.py` still holds most entries across many
@@ -1123,24 +1125,35 @@ entries there purely for space, not because either is that entry's taxonomy
 home (a first Codex review round on this PR caught an earlier draft marking
 this done on the strength of the validation claim alone).
 
-Of D9's four registry-validation properties, three are now enforced,
-independent of file layout — global uniqueness of kind identifiers
-(`ChangeKindRegistry.__init__` raises `ValueError` on a duplicate `kind` at
-import time, pinned by `tests/test_architecture_refactor.py::
-TestChangeKindRegistry::test_duplicate_entry_raises`), "valid references",
-and "non-contradictory defaults" (both added in a follow-up pass: the
-constructor now also rejects a `policy_overrides` key naming an unknown
-policy or targeting `strict_abi` — whose verdict is `default_verdict`
-itself, so an override there would be a second, competing source of truth
-for the same policy — an override value equal to the entry's own
-`default_verdict` — restating the default is not an override — and an
-`is_addition=True` entry whose `default_verdict` isn't `Verdict.COMPATIBLE`,
-since `addition_kinds()` is documented as a subset of `COMPATIBLE_KINDS`;
-pinned by six new cases in the same test class, including
+Of D9's four registry-validation properties, three are now enforced by
+`ChangeKindRegistry` during construction (the production `REGISTRY` is built
+at import time, so this fires then in practice), independent of file
+layout — global uniqueness of kind identifiers
+(`ChangeKindRegistry.__init__` raises `ValueError` on a duplicate `kind`,
+pinned by `tests/test_architecture_refactor.py::TestChangeKindRegistry::
+test_duplicate_entry_raises`), "valid references", and "non-contradictory
+defaults" (both added in a follow-up pass: the constructor now also rejects
+a `policy_overrides` key naming an unknown policy; a key targeting
+`strict_abi` — whose verdict is `default_verdict` itself, so an override
+there would be a second, competing source of truth for the same policy; an
+override value equal to the entry's own `default_verdict` — restating the
+default is not an override; a non-`COMPATIBLE` override value for
+`sdk_vendor`/`plugin_abi` — `checker_policy.policy_kind_sets()`'s
+implementation for both policies discards the declared verdict and always
+downgrades an overridden kind to `COMPATIBLE`, so any other declared value
+would pass a naive "differs from default_verdict" check while silently
+disagreeing with actual runtime behavior, a real gap a Codex review round on
+this PR caught in the first cut of this validator; and an `is_addition=True`
+entry whose `default_verdict` isn't `Verdict.COMPATIBLE`, since
+`addition_kinds()` is documented as a subset of `COMPATIBLE_KINDS`; pinned
+by eight new cases in the same test class, including
 `test_real_registry_satisfies_reference_and_default_validation`, which
 reconstructs the real production `REGISTRY` from its own entries to prove
-every one of its 397 entries already satisfied both properties before the
-check existed). `VALID_BASE_POLICIES` — the canonical policy-name set the
+every one of its 397 entries already satisfied every property before the
+corresponding check existed, and `test_verdict_blind_policy_matches_runtime_
+behavior`, which exercises `policy_kind_sets()` directly to confirm the
+verdict-blind-policy list itself doesn't drift from what the runtime
+actually does). `VALID_BASE_POLICIES` — the canonical policy-name set the
 reference check validates against — moved from `checker_policy.py` to the
 leaf `change_registry_types.py` (re-exported unchanged from
 `checker_policy`, so no importer needed to change), since `checker_policy`

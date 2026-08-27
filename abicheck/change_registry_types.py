@@ -52,6 +52,18 @@ VALID_BASE_POLICIES: frozenset[str] = frozenset(
     {"strict_abi", "sdk_vendor", "plugin_abi"}
 )
 
+#: Policies whose ``checker_policy.policy_kind_sets()`` implementation
+#: classifies every kind carrying a ``policy_overrides`` entry for that
+#: policy as ``Verdict.COMPATIBLE`` unconditionally — the declared override
+#: *value* is never consulted, only its key's presence
+#: (``_policy_override_kinds()`` gathers ``policy_overrides_for(policy)``'s
+#: keys, not its values). ``ChangeKindRegistry`` below rejects a declared
+#: override for one of these policies that isn't ``Verdict.COMPATIBLE``,
+#: since anything else would silently disagree with actual runtime behavior.
+#: Keep this in sync with ``policy_kind_sets()`` — if a future policy's
+#: implementation genuinely consumes the declared verdict, remove it here.
+_VERDICT_BLIND_POLICIES: frozenset[str] = frozenset({"sdk_vendor", "plugin_abi"})
+
 
 @dataclass(frozen=True)
 class ChangeKindMeta:
@@ -110,6 +122,26 @@ def _validate_references_and_defaults(e: ChangeKindMeta) -> None:
                 f"{e.kind!r}: policy_overrides[{policy!r}] == default_verdict "
                 f"({override!r}); a redundant override contradicts the point "
                 f"of declaring one — remove it or pick a genuinely different verdict"
+            )
+        if policy in _VERDICT_BLIND_POLICIES and override != Verdict.COMPATIBLE:
+            # checker_policy.policy_kind_sets() classifies every kind with a
+            # 'sdk_vendor'/'plugin_abi' override as Verdict.COMPATIBLE
+            # unconditionally (via _policy_override_kinds(), which gathers
+            # only policy_overrides_for(policy)'s KEYS — the declared verdict
+            # is never consulted at runtime). A declared override value other
+            # than Verdict.COMPATIBLE would therefore pass the redundancy
+            # check above while silently behaving as COMPATIBLE anyway — a
+            # real metadata/runtime-behavior mismatch, not a redundant-override
+            # duplicate (Codex review, PR #882). If a future policy's
+            # implementation in policy_kind_sets() genuinely honors the
+            # declared verdict, remove it from _VERDICT_BLIND_POLICIES rather
+            # than special-casing around this check.
+            raise ValueError(
+                f"{e.kind!r}: policy_overrides[{policy!r}] declares {override!r}, "
+                f"but checker_policy.policy_kind_sets() classifies every "
+                f"{policy!r}-keyed kind as Verdict.COMPATIBLE unconditionally, "
+                f"discarding the declared verdict — only Verdict.COMPATIBLE "
+                f"matches this policy's actual runtime behavior today"
             )
     if e.is_addition and e.default_verdict != Verdict.COMPATIBLE:
         # addition_kinds() is documented as "a subset of COMPATIBLE" — an

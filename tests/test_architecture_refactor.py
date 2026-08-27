@@ -179,6 +179,56 @@ class TestChangeKindRegistry:
         with pytest.raises(ValueError, match="is_addition=True"):
             ChangeKindRegistry(entries)
 
+    def test_verdict_blind_policy_override_must_be_compatible(self):
+        """A non-COMPATIBLE override for sdk_vendor/plugin_abi is rejected.
+
+        checker_policy.policy_kind_sets() classifies every kind carrying a
+        'sdk_vendor'/'plugin_abi' override as Verdict.COMPATIBLE
+        unconditionally — the declared verdict is never consulted at
+        runtime, only the key's presence. A declared value other than
+        Verdict.COMPATIBLE would pass the redundant-override check (it
+        differs from default_verdict) while silently disagreeing with
+        actual runtime behavior, so it must be rejected on its own.
+        """
+        import pytest
+
+        for policy in ("sdk_vendor", "plugin_abi"):
+            entries = [
+                ChangeKindMeta(
+                    "test_kind", Verdict.BREAKING,
+                    policy_overrides={policy: Verdict.API_BREAK},
+                ),
+            ]
+            with pytest.raises(ValueError, match="unconditionally"):
+                ChangeKindRegistry(entries)
+
+    def test_verdict_blind_policy_matches_runtime_behavior(self):
+        """Regression guard: _VERDICT_BLIND_POLICIES must track policy_kind_sets().
+
+        Directly exercises checker_policy.policy_kind_sets() for every
+        non-strict_abi built-in policy and confirms the declared override
+        verdict genuinely has no effect on classification for each policy
+        this module treats as verdict-blind — the empirical fact the new
+        validator's rejection rests on, not just an assertion about it.
+        """
+        from abicheck.change_registry_types import (
+            _VERDICT_BLIND_POLICIES,
+            VALID_BASE_POLICIES,
+        )
+        from abicheck.checker_policy import policy_kind_sets
+
+        for policy in VALID_BASE_POLICIES - {"strict_abi"}:
+            if policy not in _VERDICT_BLIND_POLICIES:
+                continue
+            _breaking, _api, compat, _risk = policy_kind_sets(policy)
+            overridden = set(REGISTRY.policy_overrides_for(policy))
+            assert overridden, f"{policy!r} has no real overrides to check against"
+            assert overridden <= {k.value for k in compat}, (
+                f"{policy!r} is in _VERDICT_BLIND_POLICIES but "
+                f"policy_kind_sets() doesn't classify its overridden kinds "
+                f"as COMPATIBLE — the constant is stale"
+            )
+
     def test_valid_policy_override_is_accepted(self):
         """A genuinely different, known-policy override passes construction."""
         entries = [
