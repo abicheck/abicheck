@@ -1345,10 +1345,14 @@ what `cli_params.py`'s move still waits on.
 
 So Phase 4's `service.py` half is **blocked on real, unfinished work at both
 levels this note originally distinguished**: the two dozen imports named
-above still need classifying (or deliberately deferring, case by case) before
-a physical move is safe, and the ~1763 lines of implementation still need
-thinning into the destination that work would unblock. Neither is closed by
-this investigation. The `cli.py` half is complete.
+above still need classifying, exposing through an allowed canonical surface,
+or removing from the migrated code — not deferring, per the correction two
+paragraphs above (a Codex review round caught this summary sentence still
+saying "or deliberately deferring" after that correction, a second instance
+of the exact wording it had already fixed once) — before a physical move is
+safe, and the ~1763 lines of implementation still need thinning into the
+destination that work would unblock. Neither is closed by this
+investigation. The `cli.py` half is complete.
 
 Nor is the `PolicyFile` design question itself closed, and two Codex review
 rounds on this same document each caught a different overstatement in this
