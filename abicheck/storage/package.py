@@ -119,14 +119,39 @@ SECTION_KINDS = (
 )
 
 
+#: Windows' reserved device names -- forbidden as a path component's stem
+#: regardless of case or of what follows (`CON`, `con.json`, and `Con` are
+#: all refused the same way a real Windows filesystem refuses them), so a
+#: writer fanning this manifest out to `refs/variants/<id>.json` never hits
+#: a name the target filesystem cannot create.
+_WINDOWS_RESERVED_NAMES = frozenset(
+    {"CON", "PRN", "AUX", "NUL"}
+    | {f"COM{i}" for i in range(1, 10)}
+    | {f"LPT{i}" for i in range(1, 10)}
+)
+
+#: Characters no Windows filesystem accepts in a path component, beyond the
+#: separators `_safe_ref_id` already rejects on every platform.
+_WINDOWS_FORBIDDEN_CHARS = frozenset('<>:"|?*')
+
+
 def _safe_ref_id(value: str, field_name: str) -> str:
-    """A ref id, made safe to use as a bare filename component.
+    """A ref id, made safe to use as a bare, cross-platform filename component.
 
     A variant or artifact id becomes a literal path segment
     (`refs/variants/<variant-id>.json`), so a value containing a path
     separator or a `..` component could let a written package escape its own
     directory. Checked once here so every current and future path helper
     inherits the rule rather than each re-deriving it.
+
+    The check is Windows-shaped, not just POSIX-shaped, even though nothing
+    here runs on Windows yet: a package is meant to be written on one
+    platform and read on another, so an id only POSIX would accept (a
+    Windows reserved device name, a trailing dot or space, `:`/`*`/`?`/...)
+    would make a manifest that validates here fail once a real writer tries
+    to place it on a different filesystem. Refusing it at the one place
+    every id passes through means a future writer never has to guess which
+    ids are actually portable.
     """
     _identity_text(value, field_name)
     if (
@@ -134,12 +159,39 @@ def _safe_ref_id(value: str, field_name: str) -> str:
         or "/" in value
         or "\\" in value
         or value in (".", "..")
-        or "\x00" in value
+        or any(ord(char) < 0x20 for char in value)
+        or any(char in _WINDOWS_FORBIDDEN_CHARS for char in value)
+        or value[-1] in (".", " ")
+        or value.split(".", 1)[0].upper() in _WINDOWS_RESERVED_NAMES
     ):
         raise ValueError(
-            f"{field_name} must be a non-empty, path-safe identifier, got {value!r}"
+            f"{field_name} must be a non-empty, cross-platform-path-safe "
+            f"identifier, got {value!r}"
         )
     return value
+
+
+def _reject_case_insensitive_collisions(ids: list[str], record_kind: str) -> None:
+    """Two ids differing only by case, refused before they reach a manifest.
+
+    Distinct on a case-sensitive filesystem, `variant_ref_relpath`/
+    `artifact_ref_relpath` would still write `Foo.json` and `foo.json` into
+    the same directory as two files -- on a case-insensitive one (the
+    default on Windows and on macOS's usual filesystem), those are one file,
+    so the second write silently overwrites the first. Caught here, at the
+    one place every id is collected, rather than only once a case-insensitive
+    writer target reproduces it.
+    """
+    seen: dict[str, str] = {}
+    for ref_id in ids:
+        folded = ref_id.casefold()
+        collision = seen.get(folded)
+        if collision is not None and collision != ref_id:
+            raise ValueError(
+                f"{record_kind} {ref_id!r} and {collision!r} differ only by "
+                "case, and would collide on a case-insensitive filesystem"
+            )
+        seen[folded] = ref_id
 
 
 def variant_ref_relpath(variant_id: str) -> str:
@@ -476,6 +528,7 @@ class PackageManifest:
             raise ValueError(
                 "PackageManifest.variant_refs contains a duplicate variant_id"
             )
+        _reject_case_insensitive_collisions(variant_ids, "variant_id")
         object.__setattr__(
             self,
             "variant_refs",
@@ -490,6 +543,7 @@ class PackageManifest:
             raise ValueError(
                 "PackageManifest.artifact_refs contains a duplicate artifact_id"
             )
+        _reject_case_insensitive_collisions(artifact_ids, "artifact_id")
         known_variant_ids = {variant.variant_id for variant in variants}
         unknown = sorted(
             {artifact.variant_id for artifact in artifacts} - known_variant_ids

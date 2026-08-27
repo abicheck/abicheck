@@ -143,6 +143,48 @@ class TestPathLayout:
         with pytest.raises(ValueError):
             artifact_ref_relpath(bad_id)
 
+    @pytest.mark.parametrize(
+        "bad_id",
+        [
+            "CON",
+            "con",
+            "con.json",
+            "PRN",
+            "AUX",
+            "NUL",
+            "COM1",
+            "com9",
+            "LPT1",
+            "a:b",
+            "a?b",
+            "a*b",
+            'a"b',
+            "a<b",
+            "a>b",
+            "a|b",
+            "trailing.",
+            "trailing ",
+            "control\x01char",
+        ],
+    )
+    def test_a_ref_id_must_be_portable_to_windows(self, bad_id: str) -> None:
+        # Real IDs a Windows filesystem cannot create, or would silently
+        # reinterpret -- a manifest containing one would validate here and
+        # then be unwritable, or written wrong, once a real D6 writer tries
+        # to place it.
+        with pytest.raises(ValueError):
+            variant_ref_relpath(bad_id)
+        with pytest.raises(ValueError):
+            artifact_ref_relpath(bad_id)
+
+    def test_a_windows_reserved_name_is_refused_regardless_of_extension(
+        self,
+    ) -> None:
+        # The reserved-name check is on the stem, not the literal string --
+        # "CON" and "CON.json" are refused for the identical reason.
+        with pytest.raises(ValueError):
+            variant_ref_relpath("CON.json")
+
 
 class TestVariantRef:
     def test_round_trips(self) -> None:
@@ -333,6 +375,29 @@ class TestPackageManifest:
                 artifact_refs=(
                     self._A,
                     ArtifactRef(artifact_id="libfoo", variant_id="cpu-gcc", kind="pe"),
+                ),
+            )
+
+    def test_case_only_variant_id_collision_is_refused(self) -> None:
+        # Distinct strings, and distinct on a case-sensitive filesystem --
+        # but `refs/variants/Foo.json`/`refs/variants/foo.json` are one file
+        # on a case-insensitive one (Windows, default macOS), so the second
+        # write would silently overwrite the first.
+        with pytest.raises(ValueError, match="case-insensitive"):
+            PackageManifest(
+                variant_refs=(
+                    VariantRef(variant_id="Foo"),
+                    VariantRef(variant_id="foo"),
+                )
+            )
+
+    def test_case_only_artifact_id_collision_is_refused(self) -> None:
+        with pytest.raises(ValueError, match="case-insensitive"):
+            PackageManifest(
+                variant_refs=(self._V,),
+                artifact_refs=(
+                    self._A,
+                    ArtifactRef(artifact_id="LIBFOO", variant_id="cpu-gcc", kind="pe"),
                 ),
             )
 
