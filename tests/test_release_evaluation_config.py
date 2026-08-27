@@ -428,3 +428,38 @@ class TestReleaseFanOutPreservesObservedSuppressions:
 
         merged_config = diff.contract_context.evaluation_context.resolved_config
         assert merged_config.suppressions is None
+
+    def test_evaluation_config_attribute_matches_the_merged_context(self) -> None:
+        """Codex review, fresh evidence: an earlier revision stamped
+        ``result.evaluation_config`` from the *pre-restoration* config
+        (before the suppression-restore replace() below it ran), so a Python
+        API consumer reading ``DiffResult.evaluation_config`` directly saw
+        ``suppressions=None`` even on a release where suppressions genuinely
+        applied -- while the very same result's ``contract_context`` carried
+        the correctly-restored value. Two disagreeing "resolved" configs on
+        one result. Pins that ``evaluation_config`` is stamped from the same,
+        final (possibly suppression-restored) object as the merged context,
+        never the pre-restoration one."""
+        from abicheck.cli_compare_receipt import record_release_resolved_config
+        from abicheck.compatibility_evaluation_config import SuppressionConfig
+
+        observed_suppressions = SuppressionConfig(
+            sha256="sha256:observed", rules=("cxx_standard_floor_raised",)
+        )
+        observed = _minimal_evaluation_config(suppressions=observed_suppressions)
+        release_wide_config = _minimal_evaluation_config(
+            contract=ContractConfig(
+                mode=ContractMode.PUBLIC,
+                packs=(_identity("ignore_removals", version=1),),
+            )
+        )
+        assert release_wide_config.suppressions is None
+
+        diff = _result()
+        diff.contract_context = self._persisted_context(observed)
+
+        record_release_resolved_config(diff, release_wide_config)
+
+        merged_config = diff.contract_context.evaluation_context.resolved_config
+        assert diff.evaluation_config is merged_config
+        assert diff.evaluation_config.suppressions is observed_suppressions

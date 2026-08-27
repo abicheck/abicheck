@@ -750,7 +750,6 @@ def record_release_resolved_config(result: Any, config: Any) -> None:
     """
     if config is None:
         return
-    result.evaluation_config = config
 
     from .contract_evidence import PersistedContractContext
 
@@ -775,3 +774,11 @@ def record_release_resolved_config(result: Any, config: Any) -> None:
                 provenance=provenance,
             )
         result.contract_context = with_resolved_config(ctx, config)
+
+    # Stamped last, from the (possibly suppression-restored) *config* above --
+    # never the pre-restoration object -- so a Python API consumer reading
+    # DiffResult.evaluation_config directly sees the same resolved
+    # suppressions as the one merged into contract_context, rather than two
+    # disagreeing "resolved" configs on the same result (Codex review, fresh
+    # evidence).
+    result.evaluation_config = config
