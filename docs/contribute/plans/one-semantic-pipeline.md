@@ -908,10 +908,16 @@ flags (split into `storage/fact_codec.py`/`storage/enum_codec.py` — both
 ADR-061 `storage`-layer leaf modules, depending on nothing beyond `model` —
 to stay under the 2000-line file-size cap). **Not landed in this slice**:
 no producer (`dumper_castxml.py`/`dumper_clang.py`/`dwarf_snapshot.py`)
-constructs a `Fact[...]` value directly yet — every fresh extraction
-still only populates the legacy field, so every `*_fact` sibling on a
-freshly-dumped snapshot is `Fact.present(raw)` regardless of true
-availability. No detector (`diff_layout.py`/`diff_types.py`/
+constructs a `Fact[...]` value directly yet — every fresh extraction still
+only populates the legacy field, so the bridge derives each `*_fact`
+sibling purely from whether that legacy argument was supplied at all: a
+producer that omits it (CastXML's own `Param(...)` never passes
+`is_va_list=`, for instance) already yields `NOT_COLLECTED`, while one
+that passes a raw value yields `Fact.present(raw)` regardless of whether
+that value is actually trustworthy. Producers do not yet construct
+`Fact[...]` explicitly to state a real reliability signal (`PARTIAL`/
+`UNSUPPORTED`/`FAILED`) — that is what a producer migration still needs
+to add. No detector (`diff_layout.py`/`diff_types.py`/
 `diff_param_qualifiers.py`/the nine-reader table above) has been
 migrated to read `.status`, and the widened, non-glob AI-readiness check
 this Design section describes has not been written. Migrating a detector

@@ -27,10 +27,13 @@
 
 - **Not yet done in this pass, tracked explicitly**: no detector migrated
   to read the new `Fact[...]` fields yet (every producer still populates
-  only the legacy fields, so every `*_fact` sibling is `Fact.present(...)`
-  today regardless of true availability — migrating a detector now would
-  add complexity with no behavior change until producer-side `Fact`
-  construction lands), and no static AI-readiness check yet flags a
-  detector reading the legacy field directly. Both are named, scoped
-  follow-ups in the ADR-063 plan doc's own Phase 0 section, not silent
-  gaps.
+  only the legacy fields, so the bridge derives each `*_fact` sibling from
+  whether that legacy argument was supplied at all — an omitted field
+  already yields `NOT_COLLECTED`, a supplied one yields `Fact.present(...)`
+  regardless of whether the value itself is trustworthy; no producer
+  constructs `Fact[...]` explicitly yet to state a real `PARTIAL`/
+  `UNSUPPORTED`/`FAILED` signal, so migrating a detector now would add
+  complexity with no behavior change until that lands), and no static
+  AI-readiness check yet flags a detector reading the legacy field
+  directly. Both are named, scoped follow-ups in the ADR-063 plan doc's
+  own Phase 0 section, not silent gaps.
