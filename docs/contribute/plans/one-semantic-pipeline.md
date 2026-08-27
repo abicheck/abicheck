@@ -1963,12 +1963,35 @@ entities.py`), `Function.contract_attributes`/`Variable.alignment_bits`
 (`model/declarations.py`) are exactly the same "unavailable vs. genuinely
 absent" ambiguity Phase 0 exists to close, and none of them live in a
 `*_facts.py`-named file. The completeness check below must therefore scan
-every dataclass field under `model/` eligible for this conversion
-(bool/list/int-or-None fields documented as backend-dependent), not only
-fields already typed `Fact[T]` — a check that starts from "fields already
-converted" is structurally blind to a raw field nobody has touched yet,
-which is exactly how this phase could report complete while the ambiguity
-it exists to close still exists.
+every dataclass field under `model/` eligible for this conversion, not
+only fields already typed `Fact[T]` — a check that starts from "fields
+already converted" is structurally blind to a raw field nobody has
+touched yet, which is exactly how this phase could report complete while
+the ambiguity it exists to close still exists.
+
+**"Eligible" is not the same question as "which three annotation shapes
+Phase 0 happened to use," and a first draft of this phase's check scanned
+only `bool`/`list`/`int | None` fields — a review round correctly found
+real, currently-unconverted counterexamples that shape excludes:
+`Function.deprecated`/`TypeField.default` (`str | None`, each already
+guarded by their own snapshot-level reliability flag) and `Variable.access`
+(an enum, guarded by `castxml_var_access_facts_reliable`).** Both meet
+this phase's own stated scope — "every availability-ambiguous field ...
+documented as backend-dependent" — but neither is a bare `bool`/`list`/
+`int | None` annotation, so a check enumerating those three shapes would
+report Phase 5 complete while these (and any future field shaped like
+them) stay raw, overloaded values with no availability distinction. The
+check's actual scan key is not a field's annotation shape at all — it is
+"does this field have a sibling snapshot-level reliability flag" (the same
+`*_facts_reliable`-suffixed boolean pattern Phase 0's own bridge reads
+from, for every field already converted), since that flag's mere
+existence is this codebase's own, already-written admission that the
+field is availability-ambiguous, independent of whether the field itself
+happens to be a `bool`, a `list`, an `int | None`, a `str | None`, or an
+enum. A field with no such flag and no other documented backend-dependence
+is out of scope, the same way it was before this correction; the fix
+widens which fields the scan considers eligible, not how many fields
+outside that category it flags.
 
 **Files.** `abicheck/model/fact_registry.py` (new); every fact-bearing
 `model/` dataclass module with an eligible field — `model/*_facts.py`,

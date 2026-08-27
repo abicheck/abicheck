@@ -275,8 +275,40 @@ vocabulary, and the implementation plan states the exact relocation.
 Generalize ADR-062's occurrence-preserving identity model and ADR-046/048's
 canonical-entity/source-graph identity into the identity primitive used
 everywhere an entity needs to be referenced: diff matching (`diff_helpers.
-TypeMap`, `finding_identity.py`), suppression/policy selectors, the source
-graph (`graph_facts.py`), and persisted snapshots. A structural `ScopePath`
+TypeMap`, `finding_identity.py`), the source
+graph (`graph_facts.py`), and persisted snapshots.
+
+**Suppression/policy selectors are deliberately not on this list — an
+earlier draft of this decision included them, and implementation-plan
+review correctly found no phase actually migrates them (Phase 2 never
+touches `suppression.py`/`reclassify.py`, and Phase 9's own selector-
+consolidation is a string-grammar merge between those two modules, not an
+`EntityId` projection).** Unlike the other listed consumers, a selector's
+`symbol`/`namespace`/`entity_namespace`/`cause_namespace` fields are
+regex/glob **patterns a user writes into a public YAML policy file**, not
+an internal reference to one specific entity — there is no single
+`EntityId` a pattern like `namespace: "ns::.*"` could be rewritten to
+point at, and changing what these fields accept would be a breaking
+change to the public suppression-file schema, a different and much larger
+problem than the identity-consumer migration this decision is about.
+Collapsing a pattern-matching surface into a point-identity primitive is
+not the same kind of generalization as the other three consumers, so it
+is named here as explicitly out of scope rather than silently implied by
+"everywhere an entity needs to be referenced."
+
+**This does leave a narrower, real residual the suppression/reclassify
+grammar still carries, named rather than fixed here**: a `namespace`/
+`entity_namespace`/`cause_namespace` pattern matches against a *rendered*
+qualified-name string, the same flattening documented further below in
+this section as lossy — two entities whose typed `ScopePath`s differ
+only in segment kind can render to the identical string, so a namespace
+pattern could match (or fail to match) both identically even though a
+`ScopePath`-aware match would tell them apart. This is an accepted
+limitation of the string-pattern selector surface as it exists today, not
+introduced or worsened by this decision; closing it would mean designing
+a `ScopePath`-aware pattern-matching semantics for a public, user-authored
+config format, which is its own scoped follow-up, not a consequence of
+migrating internal identity consumers in Phases 2/9. A structural `ScopePath`
 (a sequence of typed segments — namespace, record, inline-namespace,
 anonymous/local markers) replaces string-concatenated qualified names
 wherever identity, not display, is being computed, which closes the family
@@ -405,6 +437,28 @@ RunOutcome(
 )
 ```
 
+**`TargetLifecycle` is attributed to ADR-053 in an earlier draft of this
+decision without checking — ADR-053 is TU-to-link-unit-to-DSO attribution
+and defines no lifecycle vocabulary at all, and no `TargetLifecycle` type
+exists anywhere in the repository today.** Defined here instead, grounded
+in vocabulary this codebase's `aggregate` domain already distinguishes
+rather than invented from nothing: `workflows/aggregate/contracts.py`'s
+own `_BOOTSTRAP_VERDICT`/`_NEW_TARGET_VERDICT` sentinels and
+`TargetReport.unexpected` already separate exactly the cases a target's
+own lifecycle state needs to distinguish — `TargetLifecycle =
+EXISTING | BOOTSTRAP | NEW_TARGET | UNEXPECTED`, where `EXISTING` is the
+ordinary case (a target this baseline-set already knows, with a real prior
+baseline to compare against), `BOOTSTRAP` is `load.py`'s own "no baseline
+published yet" synthesis (`raw_verdict == _BOOTSTRAP_VERDICT`),
+`NEW_TARGET` is its "target new to this baseline-set" synthesis
+(`raw_verdict == _NEW_TARGET_VERDICT`), and `UNEXPECTED` is
+`TargetReport.unexpected` (a report whose target was not in the expected
+set). This axis is meaningful only where a "target" exists at all — a
+single-pair `compare` invocation, with no baseline-set or expected-target
+concept, always reports `EXISTING`, the same fixed default every
+non-`aggregate` `RunOutcome` construction uses; `aggregate`'s own
+`_load_report_file` is where the real derivation (reading the three
+existing signals above) happens, not a new mechanism this decision invents.
 `PolicyGateDecision` is a **new, code-free type this decision defines** —
 not a reuse of `severity.GateDecision`, the existing type that already has
 this name's natural meaning in the codebase today. The existing
