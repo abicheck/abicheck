@@ -574,7 +574,31 @@ way); `.status`/pattern-match access is the only permitted form there.
 `.value_or(...)` itself is not banned repository-wide — it stays legal in
 presentation-only modules (`reporter.py`/`html_report.py`/`sarif.py` and
 siblings), which is a real, narrower allowlist, not "anywhere outside
-`model/fact.py`." Full test suite green; FP-rate/
+`model/fact.py`."
+
+**The check as stated above cannot actually close this gap by itself — it
+recognizes only reads of the *new*, `Fact[...]`-typed field names
+(`vtable_fact`/`bases_fact`/`vptr_offset_bits_fact`/`is_va_list_fact`),
+never a detector that keeps reading the *retained legacy* attribute
+(`rec.vtable`, `rec.bases`, `rec.vptr_offset_bits`, `param.is_va_list`)
+directly.** This phase's own compatibility bridge keeps those legacy
+fields populated and normalized specifically so existing, unmigrated
+callers keep working — but that same retention means a detector can
+continue reading `rec.vtable` (unchanged, still a plain `list[str]`, still
+passes every existing type check) and never touch the `Fact[...]` field or
+the new check at all, bypassing availability handling entirely while
+looking, to both a type checker and this AST check, exactly like a
+correctly-migrated detector. The check is therefore widened to flag the
+legacy attribute names too, but *only inside a detector module* — the same
+file-scope restriction already used for the `Fact[...]`/`value_or` rule —
+so a detector reading `rec.vtable`/`rec.bases`/`rec.vptr_offset_bits`/
+`param.is_va_list` is flagged identically to a bare `Fact[...]` read,
+while the compatibility bridge's own `__post_init__` (which legitimately
+reads and writes the legacy field to backfill/resync it) and every
+non-detector caller (serialization, `asdict()`-based external consumers)
+stay unflagged, since the point is never "no code may read the legacy
+field," only "a detector may not read it as a substitute for the
+availability-aware one." Full test suite green; FP-rate/
 tier-accuracy gates unchanged (this phase changes representation, not
 detector logic).
 
@@ -734,12 +758,49 @@ two sibling anonymous structs or two same-named locals in one function —
 an `ordinal`/`owner` that is dropped from identity would silently
 re-introduce exactly the sibling-collision class this phase's own
 `(ScopePath, kind, leaf_name, extra)` correction exists to close, one
-level down. `ordinal` is a stable, deterministic per-parent sequence
+level down. `ordinal` is a deterministic per-parent sequence
 number assigned at parse time (the same position-in-the-scope-stack
 counter `entry.scope`'s widening already has to track to build
 `Anonymous` segments at all, not a second counter invented for this), not
 a DWARF offset or other environment-sensitive value that could differ
-between an otherwise-identical old/new pair. `Namespace(name)`/
+between an otherwise-identical old/new pair — deterministic *within one
+parse*, which is what makes it a legitimate disambiguator for two
+anonymous siblings that coexist in the same snapshot.
+
+**This is not the same claim as "stable across revisions," and a first
+draft of this phase's wording did not distinguish the two — review
+correctly caught that an ordinal is a within-parse index, not an
+across-snapshot identity.** Inserting a new anonymous sibling before
+existing ones (an ordinary, unremarkable source edit — a new anonymous
+`union` added earlier in a header than existing ones) shifts every later
+sibling's ordinal, which changes their `ScopePath` and therefore their
+whole `EntityId` even though nothing about those later siblings' own
+declarations changed — the old/new matcher would read every one of them
+as "removed, then re-added at a new identity," exactly the false-positive
+shape this plan's own diff-matching discipline exists to eliminate, not
+introduce at a lower level. **No stable discriminator for this case is
+adopted here, and none is asserted as if one were** — the two candidates
+this codebase already has experience with are each independently
+documented, in AGENTS.md's own "Known gaps," as unreliable for this exact
+purpose: a source-location anchor (`file:line:col`, the same shape
+AGENTS.md's "lambda-closure churn" entry already names as "per-translation-
+unit and compiler-ordering dependent... a rebuilt consumer can fail to
+resolve the symbol," reproduced there as a real false-positive source,
+not merely a theoretical risk) and a structural/content fingerprint of the
+anonymous scope's own members (circular here specifically — those
+members' own identity is what `ScopePath` is being built to resolve, so
+fingerprinting them to identify their *parent* scope has nothing yet to
+fingerprint). Reconciliation semantics that treat an ordinal shift as a
+rename rather than a removal-and-addition (matching on the *shifted*
+sibling set's relative order, or deferring to a different signal when an
+insertion is detected) are a real, separate design this plan does not
+attempt to pick under continued review pressure for the third time in
+this same section. Until designed, this is an accepted, documented
+limitation of `Anonymous` identity specifically — the same "attempted
+twice, reverted twice... accept the... limitation" discipline this
+codebase's own AGENTS.md already establishes for comparably-shaped
+identity problems (anonymous-type-marker collisions, the ctor/dtor
+lambda-closure entries) — not a silent gap this plan is claiming away. `Namespace(name)`/
 `InlineNamespace(name, version_tag)` are identity on every field
 unconditionally — a namespace has no non-identity payload to exclude, and
 an inline namespace's `version_tag` is exactly the dimension ADR-025's own
@@ -1079,7 +1140,23 @@ fresh v2 encoding of the same logical entity.
 
 **Acceptance criteria.** `diff_filtering.py`/`type_reachability.py`'s
 string-based ambiguity-tracking helpers are deleted, not kept alongside
-the new resolver. Exactly one `EntityKind`/`ObservationKind` definition
+the new resolver — **conditional on option (a) being the one this phase's
+open design question resolves to, not unconditional.** A first draft of
+this criterion deleted them regardless of which option the implementation
+PR picks, which review correctly caught as unsatisfiable under option
+(b): that option's own premise (stated above) is that no post-parse
+consumer — `diff_filtering.py`/`type_reachability.py` included, named there
+by name — has a resolved `EntityId` until Phase 6's `SemanticIR` assembly
+runs. Deleting their only working implementation in *this* phase under
+option (b) would leave them with neither the old mechanism nor a usable
+replacement for the several phases in between — worse than the
+double-reporting/collision bugs this phase exists to close. So: under
+option (a), this criterion holds exactly as stated, in this phase. Under
+option (b), the deletion moves to land together with Phase 6's own
+migration of these same consumers (already named as deferred to that
+phase above), and this phase's acceptance bar for them is narrowed to "the
+new `model.identity` resolver exists and is correct," not "every
+consumer has migrated onto it yet." Exactly one `EntityKind`/`ObservationKind` definition
 exists in the repository after this phase, in `model/identity.py` —
 `storage/entity_ids.py` imports rather than redefines them. FP-rate gate
 shows no regression (a net-new suppressed finding from the identity
@@ -1908,6 +1985,32 @@ Demonstrate the stated (six-item) reduction directly — the phase's own PR
 adds one new, real fact end-to-end as a worked example, including its
 serialization round-trip, and states the
 old-vs-new touch-list diff in its description.
+
+**The six-item count is also an understatement for any fact flagged
+`suppressible`/`reportable` — not just the Phase-8 persisted-fact case
+below — and a first draft of this phase's worked example did not say so.**
+A registry entry's `suppressible`/`reportable` flags are *validated* by
+the completeness check (a flagged-suppressible fact whose `ChangeKind` has
+no matching suppression-selector path, or a flagged-reportable fact whose
+field is absent from the JSON schema, fails the check) — they are not
+*generated* from, for the identical reason the registry does not generate
+the model field, the serialization pair, or (post-Phase-8) the DTO
+mapping: `suppression.py`'s selector grammar and `reporter.py`'s
+schema/JSON emission are each their own real implementation, not a
+derivable function of a boolean flag. Concretely, for a fact shaped like
+AGENTS.md's own `elf_binding` entry (suppressible via a `binding: weak`
+rule, reportable in the JSON `changes` list) the real touch list is eight
+items, not six: model field + registry entry + serialization encode/
+decode + parser + **suppression selector/matcher entry** + **report/
+schema field** + detector + test — the two added items exist today
+(`suppression.py`'s existing per-`ChangeKind` matchers, `reporter.py`'s
+existing per-field JSON emission) and are unaffected by this phase; they
+are simply not shrunk by it, and this plan states that explicitly rather
+than letting a reader assume "suppressible"/"reportable" flags alone wire
+those consumers up. Designing codegen that derives a selector/schema entry
+from the registry's own flags is the identical kind of out-of-scope
+follow-on as model-field/serialization/DTO-mapping generation above, not
+attempted in any of the three phases.
 
 **This six-item count holds only up to Phase 8; it gains one more item
 once storage v2 lands, and this plan does not hide that.** Phase 8's own

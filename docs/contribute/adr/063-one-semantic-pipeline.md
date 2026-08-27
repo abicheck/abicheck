@@ -662,10 +662,19 @@ their already-accepted decisions generalize and finish converging:
   not only in the registry's own schema — this is the same vigilance
   AGENTS.md's "change the kind of tests that get written" section already
   asks for `ChangeKind` registration.
-- D6 removing inline exit-code computation from `junit_report.py` is a
-  behavior-risk-bearing change to a stable output format and needs its own
-  parity tests before and after, per the repository's "toolchain/wire
-  format changes need a round-trip test at production scale" convention.
+- D6 does **not** remove or change `junit_report.py`'s own inline
+  `_is_failure` computation — its answer is a per-render function of each
+  call's `SeverityConfig`/`relevant_ids`, not a property a finding carries,
+  so there is nothing to migrate away from it, and an earlier draft of
+  this section overstated D6's scope to include it. The behavior-risk-
+  bearing change D6 actually makes is the aggregate report reader/encoder
+  migration (`workflows/aggregate/gate.py`'s readers folding structured
+  `RunOutcome.gate`/`.operational` fields, `fold.py::exit_code()` staying
+  the unchanged external encoder) — that is what needs its own parity
+  tests before and after, per the repository's "toolchain/wire format
+  changes need a round-trip test at production scale" convention, run
+  against both a legacy-`exit_code`-only fixture and a freshly-regenerated
+  structured-field fixture.
 
 **Explicitly not done by this ADR**
 
