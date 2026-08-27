@@ -87,7 +87,24 @@ gh api /repos/abicheck/abicheck/rulesets/<id> > /tmp/existing-ruleset.json
   `branch-protection-ruleset.json`, keep its `conditions` and every other
   rule/`bypass_actors` entry untouched, save the merged result to a file,
   and `PUT` *that* file (same command as above, with `--input` pointed at
-  the merged file) — not `branch-protection-ruleset.json` verbatim.
+  the merged file) — not `branch-protection-ruleset.json` verbatim. **Strip
+  GET-only fields first**: `/tmp/existing-ruleset.json` is a raw `GET`
+  response and carries server-managed properties (`id`, `node_id`,
+  `source`, `source_type`, `created_at`, `updated_at`, `_links`, ...) that
+  the [update-ruleset request schema](https://docs.github.com/en/rest/repos/rules?apiVersion=2022-11-28#update-a-repository-ruleset)
+  doesn't accept — `PUT`ting them back can fail validation instead of
+  applying the update. Project the fetched object down to `name`, `target`,
+  `enforcement`, `bypass_actors`, `conditions`, and `rules` before editing,
+  e.g.:
+
+  ```bash
+  jq '{name, target, enforcement, bypass_actors, conditions, rules}' \
+    /tmp/existing-ruleset.json > /tmp/merged-ruleset.json
+  # edit /tmp/merged-ruleset.json by hand as described above, then:
+  gh api --method PUT -H "Accept: application/vnd.github+json" \
+    /repos/abicheck/abicheck/rulesets/<id> \
+    --input /tmp/merged-ruleset.json
+  ```
 - When merging feels risky or the existing ruleset's purpose is unclear,
   the safe fallback is a **separate, additionally-named** Ruleset (the
   `POST` command in "Apply" above, under a distinct `name`) rather than
