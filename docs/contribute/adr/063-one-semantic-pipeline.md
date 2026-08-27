@@ -489,6 +489,32 @@ the exact assembly mechanism, the full file list, and why sharing one
 instance is sufficient to close the disagreement risk even before those
 consumers' own query logic moves.
 
+**"One authoritative graph" is this decision's target state, not a claim
+this decision's own first implementation phase fully achieves — a review
+round correctly asked where that gap is, and the honest answer is
+narrower than "closed."** The public-surface builder and the pre-existing
+L5 builder sharing one `SourceGraphSummary` instance only reconciles a
+declaration/type node when both builders mint the *same* node id for it.
+Implementation-plan review found, and this decision's own first
+implementation phase does not close, a real case where they don't: the
+twelve pre-existing L5 producer call sites mint ids from a flattened,
+already-normalized identity *string* with no `ScopePath` segment-kind
+information behind it, while the collision-free id this decision requires
+(Phase 2's `EntityId`/`OccurrenceId` identity) is deliberately *not*
+injective on a flattened string — two `EntityId`s whose `ScopePath`s
+differ only in segment kind can render to the same string, which is
+exactly the collision this decision's own graph-key design avoids by
+keying on the segments' own identity fields instead. Migrating those
+twelve L5 call sites to carry real structured identity through is a
+genuine, cross-cutting rewrite of eight already-complex modules, not a
+same-phase fix — so for a snapshot with L3-L5 evidence where a real
+segment-kind collision occurs, the public-surface node and the L5 node
+for that one declaration remain two separate, unreconciled nodes even
+after this decision's first implementation phase ships, an accepted,
+named limitation rather than a silently-assumed-closed one. See the
+implementation plan's Phase 3 for the full accounting and what a real fix
+would require.
+
 ### D6 — `RunOutcome` as independent axes; no `exit_code` inside the domain
 
 Generalize ADR-042's `CompatibilityDecision`/gate-decision split and the

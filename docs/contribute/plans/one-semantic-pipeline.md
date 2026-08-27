@@ -3458,14 +3458,45 @@ which backend's value won, per declaration, per fact — applied to
    Fixed with a new, additive field instead of widening the existing
    one (which every pre-existing `fact_provenance` reader already depends
    on staying `dict[str, str]`) — `AbiSnapshot.semantic_ir_conflicts:
-   dict[str, str]`, keyed identically to `fact_provenance`'s own fact
-   keys, valued with a `repr()` of the losing backend's discarded value
+   dict[str, str]`, valued with a `repr()` of the losing backend's
+   discarded value
    (present only for a key where a real conflict occurred; absent
    otherwise, same "absence means no conflict" convention `fact_
-   provenance` itself already uses) — so `fact_provenance[key] ==
-   "castxml"` plus `key in semantic_ir_conflicts` together give a
-   consumer both which backend won and that a real disagreement, not mere
-   agreement, produced that outcome.
+   provenance` itself already uses).
+
+   **Keying `semantic_ir_conflicts` identically to `fact_provenance`'s own
+   fact keys is itself wrong for this specific field, and a further review
+   round caught exactly why: `fact_provenance`'s keys
+   (`func_fact_key(mangled, fact)`/`type_fact_key(name, fact)`/...,
+   reading the real functions) name a *declaration*, not an *occurrence* —
+   correct for every pre-existing legacy-field reconciliation, which never
+   has more than one matched pair per identity, but this phase's own
+   matching rule (two sections up) explicitly allows more than one matched
+   pair to share one `EntityId` (the ODR-duplicate/incomplete-declaration
+   case `SemanticIR.occurrences` exists to represent). Two different
+   matched occurrence pairs sharing one `EntityId`, each with its own real
+   conflict on the same fact name, would write the same declaration-keyed
+   string twice — the second write silently discards the first conflict
+   record, with no signal that two conflicts existed rather than one.**
+   Fixed by keying `semantic_ir_conflicts` on the *occurrence*, not the
+   declaration: each key is the matched pair's own `canonical_key
+   (occurrence_id)` (Phase 3's collision-free occurrence rendering, already
+   built for exactly this "more than one occurrence can share one
+   `EntityId`" case) joined with the fact name, rather than reusing
+   `fact_provenance`'s declaration-only key — so two conflicting pairs for
+   the same `EntityId` occupy two distinct keys and neither can silently
+   overwrite the other. `fact_provenance` itself is unchanged (its
+   existing declaration-only key stays correct for the *legacy* fields it
+   already reconciles, none of which has this multi-occurrence shape); a
+   dedicated property test covers two matched occurrence pairs sharing one
+   `EntityId`, each with its own independent conflicting fact, asserting
+   both conflict records survive in `semantic_ir_conflicts` — confirmed to
+   fail against a version keyed like `fact_provenance`, where the second
+   pair's conflict silently overwrites the first's. `fact_provenance[key]
+   == "castxml"` (declaration-keyed, for the legacy fields) plus the
+   occurrence-keyed `semantic_ir_conflicts` together give a consumer both
+   which backend won a given legacy field and, per occurrence, that a real
+   disagreement, not mere agreement, produced a `semantic_ir` outcome.
 3. **A Clang-only `EntityId` (no CastXML match at all) is unioned in
    verbatim**, exactly mirroring how a genuinely Clang-only function/type
    is appended rather than dropped in the existing legacy-field merge.
@@ -4501,12 +4532,28 @@ not new design.
   carries, so there is nothing for it to be superseded by and deleting it
   would remove real, still-needed behavior rather than a second path.
   `gate.py`'s
-  legacy-`exit_code`-only decode fallback is the one exception to "delete
-  in the same PR": it stays, the same way Phase 0's reliability-flag
-  backfill stays, only so a report predating this phase's schema addition
-  still reads correctly — removed once no such report needs to be read
-  anymore (every front end emits the structured fields from this phase
-  onward), not before, and not kept as a second *current* representation.
+  legacy-`exit_code`-only decode fallback is a second **permanent**
+  exception, not a temporary one to be deleted once every front end has
+  migrated — a review round correctly caught a first draft's "removed
+  once no such report needs to be read anymore (every front end emits the
+  structured fields from this phase onward)" for conflating two different
+  conditions: which *front ends* currently write is not the same fact as
+  whether any pre-Phase-7 report *still exists to be read*, and a
+  persisted report (a CI artifact, an archived aggregate result) can
+  outlive every writer that produced it by years. This exception is
+  therefore kept exactly the way Phase 0's `serialization.py`
+  legacy-schema backfill is kept ("not removed, ever... a permanent
+  reader, the same way every other schema-version branch in that module
+  is, for as long as ADR-062's v1-v25 import adapter promises to keep
+  importing that version at all") — the same reasoning applies here
+  verbatim, and matches ADR-063 D6's own stated promise that this
+  fallback "keeps every already-published report decodable rather than
+  orphaned by this decision," which is a permanent commitment, not one
+  scoped to "until every front end migrates." Not kept as a second
+  *current* representation — every front end emits the structured fields
+  from this phase onward, so the fallback is reached only for a report
+  that predates it — but never scheduled for removal on any writer-
+  migration timeline.
 - Phase 8: any remaining legacy baseline-set/`BundleFacts`-only code path
   once the `ProjectSnapshot` import adapter covers it — per ADR-062's own
   phasing, not accelerated here.
