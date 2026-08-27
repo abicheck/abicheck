@@ -230,8 +230,12 @@ field addition.
 **Files.** `abicheck/model/availability.py` (new — the relocated
 `FactStatus`/`Confidence`/order-tuple vocabulary); `abicheck/storage/
 availability_status.py` (trimmed to a re-export shim); `abicheck/model/
-fact.py` (new — `Fact[T]`); `abicheck/model/snapshot.py`'s `RecordType`/
-`Param` dataclasses (new `Fact[...]`-typed fields alongside the existing
+fact.py` (new — `Fact[T]`); `abicheck/model/entities.py`'s `RecordType`
+and `abicheck/model/declarations.py`'s `Param` dataclasses — **not
+`model/snapshot.py`, which only imports both from their real owning
+modules and defines neither; a first draft of this phase named the wrong
+file, the same way Phase 5's Files section already correctly names the
+two** (new `Fact[...]`-typed fields alongside the existing
 ones, old field deprecated-but-present for one release to keep
 `asdict`-based external consumers working). **The old field is not a
 live `@property` deriving from the new one** — `dataclasses.asdict()`
@@ -335,7 +339,19 @@ names the two blockers precisely and one is closed:
    blocking this phase's clang-only half), or (b) explicitly scope this
    phase's first landing to the clang backend and track the castxml
    parity gap as a named residual the same way AGENTS.md already does for
-   every other castxml-unavailable finding in this file.
+   every other castxml-unavailable finding in this file. **If (b) is
+   taken, this phase's own Acceptance criteria below must be scoped to
+   match, not left stating unqualified convergence** — `--ast-frontend`
+   defaults to castxml, so landing the typed execution path for clang
+   alone while the default production backend stays on the untouched
+   legacy path means `dump`'s actual default invocation has not
+   converged, and claiming "every build shape in the parity corpus" passes
+   would silently overstate that for any reader who doesn't separately
+   check which backend each shape ran under. Taking (b) makes this phase's
+   real deliverable "the clang backend converges, verified; the castxml
+   backend is a tracked, named incomplete prerequisite, not a residual
+   detail" — restated explicitly in the Acceptance criteria below, not
+   left implicit in this Design section alone.
 
 Once unblocked: route `perform_elf_dump`/`handle_non_elf_dump` through
 `execute_dump_request`, and `scan_engine._build_new_snapshot` through the
@@ -367,12 +383,20 @@ carry (a real repro, a named mechanism, not a guess).
 
 **Acceptance criteria.** `dump`'s CLI path and `execute_dump_request`
 produce bit-for-bit identical snapshots (modulo timestamps/provenance) for
-every build shape in the parity corpus; `cli_dump_helpers.render_dump_dry_
-run()` is deleted and `--dry-run` renders from the real
-`ResolvedDumpRequest` (closing the last item of AGENTS.md's own blocker
-list for this exact migration). PR 3C (removing `dump --build-query`/
-`--build-compile-db`, currently blocked on this per the plan's own
-ordering rule) unblocks as a follow-on, not part of this phase.
+every build shape in the parity corpus **under the clang backend** —
+this phase does not claim convergence for `--ast-frontend castxml`, the
+actual default, while option (b) above is in force; a reader checking this
+phase's own status must be able to see "clang: converged and verified;
+castxml: not yet verified, tracked as a named incomplete prerequisite"
+without inferring it from the Design section. `cli_dump_helpers.
+render_dump_dry_run()` is deleted and `--dry-run` renders from the real
+`ResolvedDumpRequest` for both backends (the dry-run path itself has no
+castxml-specific execution to be blocked on). PR 3C (removing `dump
+--build-query`/`--build-compile-db`, currently blocked on this per the
+plan's own ordering rule) unblocks as a follow-on, not part of this phase,
+and — per the same scoping — only once castxml parity closes too, not on
+the strength of clang-only convergence alone, since `--build-query`/
+`--build-compile-db` are reachable under either backend.
 
 ---
 
@@ -468,17 +492,42 @@ outcome. `EntityKind`/`ObservationKind` (genuinely domain vocabulary, not
 a storage wire concern) relocate from `storage/entity_ids.py` into `model/
 identity.py` alongside the new primitive, and `model.identity.EntityId`'s
 `kind` field is typed as the relocated `EntityKind` enum rather than a bare
-string literal, closing that mismatch too. `storage/entity_ids.py`'s
-`EntityId`/`OccurrenceId` keep their existing role as D8's *wire* DTOs
-(the packed `key`, the exact `to_dict()`/`from_dict()` shape ADR-062's
-on-disk format already commits to) but stop being independently
-constructed: `EntityId.qualified_name`/`discriminator` become derived, via
-a new `to_dto()` on the domain type (mirroring D8's `to_dto()`/`from_dto()`
-convention elsewhere in this plan), from the domain `EntityId`'s
-`ScopePath`/`leaf_name`/`extra` — `qualified_name` rendered from
-`ScopePath`+`leaf_name`, `discriminator` from `extra` — rather than a
-second place that independently decides what qualifies as a function's
-discriminator. This is the identical domain/DTO split D8 already
+string literal, closing that mismatch too.
+
+**Flattening `ScopePath`/`extra` into the existing bare
+`qualified_name`/`discriminator` strings is not a lossless bridge, and a
+first draft of this phase claimed it was without checking.** `ScopePath`
+is a typed tuple of segment *kinds* (`Namespace`, `Record`,
+`InlineNamespace`, `Anonymous`, `LocalToFunction`) — rendering it to one
+string, the way a display spelling does, discards which kind each segment
+was. Two domain `EntityId`s whose `ScopePath`s differ only in segment kind
+(a record nested in a record vs. the same names nested in a namespace; an
+inline-namespace segment vs. an ordinary one) can render to the identical
+`qualified_name` string, so `from_dict()` reconstructing a domain
+`EntityId` from that string cannot recover which one it was — a save/load
+round trip can silently collapse two distinct domain identities into one,
+or change which declarations a reloaded `EntityId` is considered equal to.
+A one-way render for *display* purposes is fine; claiming it as the wire
+DTO's reversible encoding is not. The actual fix: `storage/entity_ids.py`'s
+`EntityId`/`OccurrenceId` DTOs gain a new wire-schema version (D8's "a
+migration adapter per DTO version," applied here for the first time) whose
+`to_dict()` encodes the `ScopePath` as an explicit list of typed segment
+records — `{"kind": "namespace" | "record" | "inline_namespace" |
+"anonymous" | "local_to_function", "name": str, ...}`, one entry per
+segment, preserving exactly the structure `ScopePath` itself carries —
+plus `leaf_name` and `extra` each kept as their own typed fields rather
+than folded into one `discriminator` string. This is what makes
+`to_dto()`/`from_dto()` an actual round trip rather than a one-way
+projection: `from_dto()` reconstructs the identical `ScopePath`/`leaf_name`/
+`extra` tuple `to_dto()` started from, with no string to parse back apart.
+The old version-1 shape (`kind`/`qualified_name`/`discriminator`) stays
+readable — a migration adapter maps a v1 document's bare strings into the
+closest v2 domain `EntityId` it can (a single, untyped `Namespace` segment
+per `::`-separated component, since v1 never recorded which kind a segment
+was) — but a v1-loaded `EntityId` is documented as potentially not equal
+to the v2 `EntityId` the same declaration would produce today; this is an
+accepted, one-time migration-boundary gap, not a property the wire format
+promises going forward. This is the identical domain/DTO split D8 already
 establishes for Phase 8's storage writer, applied one phase earlier because
 the domain type it wraps already existed before this phase, not invented
 by it. `storage/identity.py`'s own re-export of both names is unaffected —
@@ -535,12 +584,18 @@ f()` vs. `void f() const`) always produce distinct `EntityId`s**, pinned
 directly against the exact counterexample a reviewer raised for this
 design, with an `extern "C"` sibling case confirming the deliberate
 opposite rule (a changed parameter list there stays the same identity).
-A separate test on the relocation covers `storage/entity_ids.py`'s
-existing `tests/test_entity_ids.py`-style suite re-pointed at the new
-`to_dto()`/`from_dto()` bridge — every existing DTO `to_dict()`/
-`from_dict()` round-trip case must still produce byte-identical output,
-proving the relocation changed where the vocabulary lives, not the wire
-shape ADR-062 already committed to.
+A separate test on the relocation covers `storage/entity_ids.py`'s new v2
+wire schema: a primitive-level round-trip property test constructing
+domain `EntityId`s across every `ScopePath` segment kind (including two
+deliberately chosen so their *rendered* `qualified_name` strings would
+collide under the old v1 flattening, pinning the exact counterexample this
+finding raised) and asserting `from_dto(to_dto(entity)) == entity` — not
+merely that some string comes back, but that the reconstructed domain
+object is equal to the original, segment kinds included. A second test
+covers the v1 migration adapter: every existing v1 fixture document still
+loads without error, and the result is documented (in the test, not only
+in prose) as a best-effort reconstruction rather than asserted equal to a
+fresh v2 encoding of the same logical entity.
 
 **Acceptance criteria.** `diff_filtering.py`/`type_reachability.py`'s
 string-based ambiguity-tracking helpers are deleted, not kept alongside
@@ -596,6 +651,36 @@ sibling:
   location (mirroring the re-export shim `source_graph.py` already uses
   for its own split-out pieces), so every existing L5 caller is
   unaffected.
+- **A third, pre-existing graph-shaped module already answers a
+  public-surface question independently, and a first draft of this phase
+  missed it entirely — `abicheck/surface_graph.py`'s `SurfaceGraph`/
+  `build_surface_graph()`, with real production consumers in `idioms.py`,
+  `pattern_verdicts.py`, and `diff_surface_metrics.py` (ADR-025's A1-A4
+  surface-intelligence features).** Naming the new module
+  `compare/surface_graph.py` below, without addressing this one, would
+  leave two same-named-in-spirit graph modules in the codebase — exactly
+  the outcome the Governing Invariant forbids. Worse than the name
+  collision: `SurfaceGraph.public_roots()` computes "what's public" by
+  filtering `Visibility.PUBLIC` directly off the flat snapshot, which is
+  *not* the same answer `surface.py`'s reachability closure (and this
+  phase's `PublicSurfaceQuery.resolve()`) computes — a declaration tagged
+  `Visibility.PUBLIC` but unreachable through real header inclusion, or
+  vice versa, is exactly the disagreement this phase exists to close for
+  `compute_public_surface()`, and `SurfaceGraph` has had its own,
+  independent version of that same risk the whole time. This phase closes
+  it: `SurfaceGraph.public_roots()`'s body is replaced with a call into
+  `PublicSurfaceQuery.resolve()` (the graph query this phase builds,
+  below) instead of its own `Visibility.PUBLIC` filter, so `idioms.py`/
+  `pattern_verdicts.py`/`diff_surface_metrics.py` inherit the corrected
+  answer without each needing their own migration. `SurfaceGraph` itself
+  is not deleted or folded into `model/graph.py` — it answers a genuinely
+  different question from the evidence graph (a snapshot-local
+  declaration-reference index for surface-intelligence metrics, not a
+  multi-evidence-source relevance graph), and conflating the two into one
+  module would be the opposite error: forcing a real distinction into one
+  representation. What must be one representation is *what counts as
+  public*, not the index structure built for a different purpose on top
+  of it.
 - **Build the public-surface graph as instances of that same primitive**,
   not a new dataclass hierarchy — `abicheck/compare/surface_graph.py`
   (new) registers its own node/edge *kind vocabulary* (`header`,
@@ -679,9 +764,31 @@ sibling:
   surface_graph` instance rather than a separate graph attached under
   `build_source`, so there is exactly one graph-shaped field per snapshot
   after this phase, not a conditional one nested under an unrelated
-  optional pack. `compute_public_surface(snapshot)` and any other direct
-  caller read `snapshot.surface_graph` directly, with no fabricated
-  pack to thread through. ADR-057/053's consumers still
+  optional pack.
+
+  A snapshot persisted before this field existed has `surface_graph is
+  None`, and `PublicSurfaceQuery.resolve()` must not treat that the same as
+  "nothing is public" -- a first draft of this phase left the backfill
+  unaddressed, which would have broken (or silently emptied) every existing
+  baseline's public/export-surface queries the moment `compute_public_surface`
+  stopped falling back to its own flat-snapshot traversal. The fix is a
+  lazy backfill inside `PublicSurfaceQuery.resolve()` itself, not a
+  migration step on load: when `snapshot.surface_graph is None`,
+  `resolve()` builds one on the fly, in memory, using the exact same
+  `compare/surface_graph.py` builder a fresh extraction already uses --
+  it needs only the flat `AbiSnapshot` fields that builder already reads
+  (header origin, declarations, export-table data), none of which are
+  themselves new or missing on an old snapshot; only the *pre-built graph*
+  is missing, not the evidence it would be built from. The backfilled
+  graph is not written back onto the loaded `snapshot` object (no silent,
+  surprising mutation of a caller's loaded snapshot) -- a query against
+  the same old snapshot pays the build cost each time, which is the
+  correct tradeoff for what should be a rare path once fresh snapshots
+  carry the field. `compute_public_surface(snapshot)` and any other direct
+  caller read `snapshot.surface_graph` when present, or get the
+  lazily-built equivalent transparently through `PublicSurfaceQuery.
+  resolve()`, with no fabricated pack to thread through either way.
+  ADR-057/053's consumers still
   read the L3-L5-gated graph only when it exists, and migrating them onto
   querying through `PublicSurfaceQuery`'s shared instance directly is
   still explicitly **not** part of this phase (each stays its own later,
@@ -754,7 +861,12 @@ graph_facts.py`/`buildsource/source_graph.py` (trimmed to re-export from
 the new location, `NODE_KINDS`/`EDGE_KINDS` and L5-specific construction
 logic unchanged in place); `abicheck/compare/surface_graph.py` (new —
 public-surface node/edge *kind vocabulary* and builder, using `model/
-graph.py`'s primitive, not a new one); `abicheck/policy/public_surface.py`
+graph.py`'s primitive, not a new one); `abicheck/surface_graph.py`
+(`SurfaceGraph.public_roots()` delegates to `PublicSurfaceQuery.resolve()`
+instead of its own `Visibility.PUBLIC` filter, per the note above — its
+three real consumers, `idioms.py`/`pattern_verdicts.py`/
+`diff_surface_metrics.py`, are unaffected beyond inheriting the corrected
+answer); `abicheck/policy/public_surface.py`
 (new — `PublicSurfaceQuery`, migrated from `surface.py`'s existing
 traversal logic); `surface.py` (`compute_public_surface()` becomes a thin
 wrapper calling `PublicSurfaceQuery.resolve`); `dumper_scoping.py`/
@@ -816,7 +928,24 @@ every persisted (as opposed to freshly-dumped) snapshot. A populated-graph
 save/load round-trip test (construct a snapshot with a real, non-empty
 `surface_graph`, write it, read it back, assert the reloaded object is a
 `SourceGraphSummary` with the same nodes/edges) is required by this phase,
-not deferred to Phase 10's cleanup.
+not deferred to Phase 10's cleanup. A third regression covers the legacy
+backfill: load an old-schema snapshot (`surface_graph=None`, constructed
+the way a pre-this-phase snapshot would be) alongside a fresh one with a
+real `surface_graph`, run `compute_public_surface`/`compare()` against
+both, and assert the old snapshot's query result matches what the lazy,
+in-memory backfill inside `PublicSurfaceQuery.resolve()` produces rather
+than crashing or returning an empty surface — and assert the loaded
+snapshot object's own `surface_graph` attribute is still `None` afterward,
+proving the backfill is genuinely not persisted back onto it. A fourth
+regression covers `abicheck/surface_graph.py`'s own migration: every
+existing `idioms.py`/`pattern_verdicts.py`/`diff_surface_metrics.py` test
+is re-run unchanged (behavior-preserving, same as the `surface.py`
+migration bar above), plus one new case constructing a snapshot where
+`Visibility.PUBLIC` and real reachability disagree (a declaration tagged
+public but unreachable through header inclusion), asserting
+`SurfaceGraph.public_roots()` now agrees with `PublicSurfaceQuery.resolve()`
+rather than the old `Visibility.PUBLIC`-only answer — confirmed to fail
+against the pre-migration `SurfaceGraph` for this exact input.
 
 **Acceptance criteria.** `surface.py`'s own traversal implementation and
 `export_surface.py`'s independent closure walk are deleted, not kept
