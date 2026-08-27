@@ -2,8 +2,8 @@
 
 - **ADR-061 continuation**: 19 more of `buildsource/`'s 73 flat modules (24
   total, plus its pre-existing 5) are now classified into the `extract`
-  responsibility layer in `architecture/modules.yaml`, alongside 7 into
-  `compare`, 1 into `storage`, 1 into `model` (plus its pre-existing 2), and
+  responsibility layer in `architecture/modules.yaml`, alongside 5 into
+  `compare`, 1 into `storage`, 3 into `model` (plus its pre-existing 2), and
   1 into `workflows` -- 36 of 73 `buildsource/` files classified overall.
   Verified via `scripts/check_architecture.py` (0 errors).
 
@@ -14,22 +14,39 @@
   - `compare`: `source_diff.py`/`build_diff.py` (compare old/new surfaces,
     emit `Change` findings via `ChangeKind`); `crosscheck_base.py`/
     `crosscheck_coherence.py` (raw-finding cross-check detectors, not fact
-    readers); `entity_identity.py`/`entity_resolver.py` (canonical
-    identity computation for old/new node matching, the same shape
-    `finding_identity.py` -- already `compare` -- already has for flat
-    findings); `graph_reconcile.py` (old/new node reconciliation --
-    rename/move/identity-reconciliation `Change` findings). Two review
-    rounds of Codex findings on this PR, all correct on reading the
-    flagged files directly.
+    readers); `graph_reconcile.py` (old/new node reconciliation --
+    rename/move/identity-reconciliation `Change` findings).
   - `storage`: `build_cache.py` -- content-addressed cache, on-disk
     reads/writes, `storage`'s explicit "manage caches" ownership, not
     extraction.
   - `model`: `graph_facts.py` -- defines the shared `GraphFact`/
     `FactConflict`/`GraphNode`/`GraphEdge` schema multiple layers consume,
-    not an extraction algorithm.
+    not an extraction algorithm -- and, moved here in a fifth review round
+    (see below), `entity_identity.py`/`entity_resolver.py`.
   - `workflows`: `baseline_publish.py` -- bridges an already-validated
     `BuildOutput` to a CI Action's payload shape, orchestration rather than
     fact-reading.
+
+  **`entity_identity.py`/`entity_resolver.py` moved `compare` -> `model`, a
+  fifth review round.** An earlier round classified both `compare` to
+  unblock `graph_reconcile.py`'s old/new-matching cascade -- reasoning by
+  analogy to `finding_identity.py` (already `compare`), which is
+  old/new-matching-only. Fresh evidence broke that analogy:
+  `source_graph.py` (a *single*-graph schema, no old/new pairing at all)
+  imports `EntityResolver` directly, stores it as `SourceGraphSummary.
+  entity_resolver`, and populates it from `resolve_entities()` walking the
+  graph's own node set -- confirmed by reading the code, not assumed.
+  `entity_identity.py`/`entity_resolver.py` are genuinely single-graph
+  identity/schema state consumed by both a single graph and cross-graph
+  reconciliation, the same shape `graph_facts.py` already established for
+  `model`, not exclusively compare-shaped matching machinery. Reclassifying
+  `compare` would have forced `source_graph.py`'s own eventual owner
+  (almost certainly `model`, per the schema/construction split
+  `source_graph_findings.py`'s docstring already establishes) to import
+  outward from `compare` once classified -- `model`'s own `may_import: []`
+  makes that impossible by construction. `graph_reconcile.py` (`compare`)
+  still imports both cleanly, since `compare`'s `may_import: [model]`
+  already allows it -- confirmed with `check_architecture.py`.
 
   `source_graph_findings.py` and `graph_impact.py` -- also flagged as
   compare-shaped, and they are (both emit/enrich findings rather than raw

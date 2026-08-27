@@ -11,6 +11,8 @@
       "path": "abicheck/model",
       "may_import": [],
       "legacy_paths": [
+        "abicheck/buildsource/entity_identity.py",
+        "abicheck/buildsource/entity_resolver.py",
         "abicheck/buildsource/graph_facts.py",
         "abicheck/buildsource/model.py",
         "abicheck/buildsource/pack.py",
@@ -80,8 +82,6 @@
         "abicheck/buildsource/build_diff.py",
         "abicheck/buildsource/crosscheck_base.py",
         "abicheck/buildsource/crosscheck_coherence.py",
-        "abicheck/buildsource/entity_identity.py",
-        "abicheck/buildsource/entity_resolver.py",
         "abicheck/buildsource/graph_reconcile.py",
         "abicheck/buildsource/source_diff.py",
         "abicheck/confidence.py",
