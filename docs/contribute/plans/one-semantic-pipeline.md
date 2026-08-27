@@ -2219,12 +2219,40 @@ sibling:
   object a second time. `snapshot_from_dict()` decodes the top-level
   `surface_graph` once and rebinds `build_source.source_graph` to that
   same decoded instance — restoring the alias on load, not just on
-  construction — and, for a legacy document written before this phase
-  (one carrying only the nested `source_graph`, no top-level
-  `surface_graph` key at all), decodes the nested field and aliases it
-  forward into `AbiSnapshot.surface_graph` instead, so an old document
-  gets the identical one-object guarantee a new one does rather than two
-  independently-decoded copies in either direction.
+  construction.
+
+  **Aliasing a legacy document's nested graph *forward* into
+  `AbiSnapshot.surface_graph` — the direction this paragraph originally
+  also specified, for a document written before this phase — is itself
+  wrong, and a review round correctly traced the consequence: it
+  silently defeats the approximate-backfill design two sections below.**
+  `resolve_public_surface()`'s whole reason for existing is that a
+  snapshot with `surface_graph is None` gets the lossy-but-designed-for-
+  this-case approximate graph built from its flat fields; a snapshot with
+  `surface_graph` already *non-`None`* skips that backfill and queries the
+  graph directly. A pre-Phase-3 document's nested `build_source.
+  source_graph` is an L3-L5 evidence graph that predates the public-
+  surface builder entirely — it was never populated with the `includes`/
+  `declares`/`references`/`exports` edges `PublicSurfaceQuery.resolve()`
+  actually traverses, so aliasing it forward makes `surface_graph`
+  non-`None` while still lacking exactly the edges the query needs,
+  silently skipping the intentional approximate-backfill path in favor of
+  querying a graph that resolves to a *smaller or empty* public surface
+  than either the backfill or the pre-migration flat-snapshot traversal
+  would have produced — worse than leaving it `None`, not equivalent to
+  it. Fixed by not aliasing in this direction at all: for a legacy document
+  (no top-level `surface_graph` key), `AbiSnapshot.surface_graph` stays
+  `None` exactly as it would for any other snapshot predating this field,
+  triggering `resolve_public_surface()`'s own designed fallback correctly;
+  `build_source.source_graph` is decoded from its own nested key exactly as
+  it always was, unaffected, so the five pre-existing L5 readers
+  (`internal_leak.py`/`crosscheck.py`/`evidence_report.py`/
+  `evidence_depth.py`/`cli_graph.py`) see the identical graph they always
+  did. The "one object, two attribute paths" guarantee is therefore scoped
+  to what this phase's own assembly step actually produces — a freshly
+  extracted or freshly re-saved snapshot, whose `surface_graph` has
+  genuinely been through the public-surface builder — not retroactively
+  forced onto a document this phase never touched.
 - **The relevance query** — `abicheck/policy/public_surface.py` (new):
   `PublicSurfaceQuery.resolve(graph, explicit_roots) -> frozenset[EntityId]`,
   a traversal from explicit public roots through `includes`/`declares`
@@ -4503,7 +4531,29 @@ not new design.
   original, in-place copies of `GraphNode`/`GraphEdge`/`GraphFact`/
   `FactConflict`/`merge_graph_facts` in `buildsource/graph_facts.py` once
   every caller reads them from `model/graph.py` instead of the re-export
-  shim.
+  shim. **A second, separate row for the same phase**: `BuildSourcePack.
+  source_graph`'s own live-alias mechanism is removed once the five named
+  readers (`internal_leak.py`, `buildsource/crosscheck.py`, `buildsource/
+  evidence_report.py`, `evidence_depth.py`, `cli_graph.py`) are migrated to
+  read `AbiSnapshot.surface_graph` directly — a review round correctly
+  found the alias's own Phase 3 text named this migration as "real, scoped,
+  follow-up work" with no phase ever actually scheduled to do it, and no
+  Phase 10 row removing the alias once it was; left as stated, the two
+  attribute paths for one mutable graph persist indefinitely, which is
+  exactly the kind of drift risk ("a later assignment to either path alone
+  could make old and new consumers diverge again") the alias's own
+  one-object guarantee was built to avoid, not accept permanently. This
+  row's migration is the same five-reader audit Phase 3's own text already
+  deferred, made concrete instead of left open-ended: migrate each reader
+  (verified against its own existing tests, per Phase 3's own reasoning for
+  why this wasn't attempted in that phase), then delete the alias
+  assignment in the L5 builder and the legacy-document aliasing fallback in
+  `snapshot_from_dict()` — a pre-Phase-3 document with no top-level
+  `surface_graph` at all is, by that point, old enough that its own
+  `build_source.source_graph` (if present) is read directly by
+  `BuildSourcePack.from_embedded_dict()` the way every pre-existing,
+  unmigrated consumer of that legacy field already does, rather than
+  through a forwarding alias.
 - Phase 4: **no row, by design, not by omission** — `AnalysisPlan`/
   `AnalysisPlanner.resolve()` is net-new pre-flight validation, not a
   second implementation of something this plan is consolidating onto one
