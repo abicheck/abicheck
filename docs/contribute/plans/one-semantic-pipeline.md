@@ -357,18 +357,25 @@ distinct `bool`-typed object a sentinel could be, so `self.is_va_list is
 _OMITTED_IS_VA_LIST` can never be true for *any* caller-supplied value —
 whichever of `True`/`False` the sentinel is defined to equal, that
 identity check collides with a caller legitimately passing the same
-value. For `RecordType.bases`/`vtable` (`list`-typed), the mechanism from
-before stands unchanged: the field's *actual* dataclass default becomes a
-private, identity-checkable empty-list singleton (`_OMITTED_BASES`/
-`_OMITTED_VTABLE`, never exported) rather than a literal `[]` —
-`__post_init__` checks `self.bases is _OMITTED_BASES` (identity, not
-equality — an explicitly passed *different*, even equal-valued, empty
-list is a distinct object) to tell omission from explicit confirmed-empty,
-backfills `Fact.not_collected()` only for the true-omission case and
-`Fact.present(self.bases)` for an explicit value (empty or not), then
-normalizes the field to an ordinary `[]` before `__post_init__` returns —
-a `list` is mutable and has real per-construction identity, so this works
-exactly as stated. For `Param.is_va_list` (`bool`-typed), the field's
+value. **For `RecordType.bases`/`vtable` (`list`-typed), the mechanism
+this section previously described cannot actually be implemented — a
+dataclass field may not take a mutable object (a `list`, `dict`, or `set`
+instance) as its own direct default at all; Python's `dataclasses` module
+raises `ValueError: mutable default <class 'list'> for field ... is not
+allowed` the moment the class body executes, before any instance is ever
+constructed.** A singleton list used as `bases`' own default is exactly
+such an object, so `bases: list[str] = _OMITTED_BASES` never reaches
+`__post_init__` at all — the class itself fails to define. Reaching for
+`field(default_factory=...)` instead does not repair the identity check
+either: a `default_factory` is called fresh on every omitted construction,
+so each omitted instance would get its *own*, distinct empty-list object —
+never the one singleton `self.bases is _OMITTED_BASES` needs to match. The
+actual fix drops the list-typed mechanism entirely and reuses the
+*bool*-typed mechanism instead, generalized: `bases`/`vtable` had no prior
+meaningful use for `None` any more than `is_va_list` did, so the same
+`None`-as-omission-marker shape already established below for
+`is_va_list` is the one mechanism, not a second, list-specific one that
+turned out to be unimplementable. For `Param.is_va_list` (`bool`-typed), the field's
 declared type widens to `bool | None`, default `None` — `None` is the
 omission marker (distinct from both `True` and `False`, not a third
 `bool`), `__post_init__` checks `self.is_va_list is None` the same way,
@@ -376,7 +383,25 @@ backfills identically, and then normalizes the field to a real `bool`
 (`False` if it was `None`) before returning — so after construction every
 reader still sees a plain `bool`, never `None`; only the *constructor's*
 accepted input type genuinely widens, which is what "an explicit union
-and normalization" means concretely here.
+and normalization" means concretely here. **`RecordType.bases`/`vtable`
+take the identical shape, not a variant of it**: declared type widens to
+`list[str] | None`, default `None`; `field(default_factory=list)` stays
+exactly as it is today for the *normal*, non-omission default a bare
+`RecordType()` would otherwise need — but a `None` default is what the
+omission check actually needs, so the field's default changes from
+`field(default_factory=list)` to a plain `None`, and `__post_init__`
+builds the *normal* empty list itself (`[]`, a fresh object, no shared
+mutable state) in the same branch that already constructs the `[]`
+fallback for the omission case — `self.bases is None` is the omission
+check (identity against the one object Python itself guarantees is a
+singleton, not a private sentinel this plan has to construct and that
+`dataclasses` then rejects), backfills `Fact.not_collected()` for that
+case and `Fact.present(self.bases)` for an explicit value (including an
+explicit `[]`, still distinguishable from omission since it is `not
+None`), then normalizes the field to `[]` before returning when it was
+`None` — so after construction every reader still sees a plain `list[str]`,
+never `None`, the identical "only the constructor's accepted input type
+widens" shape `is_va_list` already states above.
 
 **The field's own *static* declared type — what a type checker or
 `dataclasses.fields(Param)` reports — stays `bool | None` even though no
@@ -396,7 +421,10 @@ JSON key every `asdict`-based external consumer reads today — breaking
 exactly the compatibility this bridge exists to preserve, in exchange for
 a cleaner static type on a field whose runtime behavior is already fully
 pinned by the fifth test above. A `bool | None` annotation a consumer
-never actually observes `None` through is judged the smaller cost.
+never actually observes `None` through is judged the smaller cost. The
+identical trade-off applies to `bases`/`vtable`'s own `list[str] | None`
+declared type for the identical reason — not a second judgment call, the
+same one restated for the field shape this finding corrected.
 
 **A third field shape needs a third mechanism, and a later review round
 found it missing: `RecordType.vptr_offset_bits` is also converted by
@@ -1310,27 +1338,47 @@ sibling:
   optional pack.
 
   A snapshot persisted before this field existed has `surface_graph is
-  None`, and `PublicSurfaceQuery.resolve()` must not treat that the same as
-  "nothing is public" -- a first draft of this phase left the backfill
+  None`, and a query over the public surface must not treat that the same
+  as "nothing is public" -- a first draft of this phase left the backfill
   unaddressed, which would have broken (or silently emptied) every existing
   baseline's public/export-surface queries the moment `compute_public_surface`
-  stopped falling back to its own flat-snapshot traversal. The fix is a
-  lazy backfill inside `PublicSurfaceQuery.resolve()` itself, not a
-  migration step on load: when `snapshot.surface_graph is None`,
-  `resolve()` builds one on the fly, in memory, using the exact same
-  `compare/surface_graph.py` builder a fresh extraction already uses --
-  it needs only the flat `AbiSnapshot` fields that builder already reads
-  (header origin, declarations, export-table data), none of which are
-  themselves new or missing on an old snapshot; only the *pre-built graph*
-  is missing, not the evidence it would be built from. The backfilled
+  stopped falling back to its own flat-snapshot traversal.
+
+  **The fix is a lazy backfill, but it cannot live *inside*
+  `PublicSurfaceQuery.resolve()` itself — a first draft of this paragraph
+  placed it there without checking the resolver's own declared signature,
+  and review correctly caught the contradiction: `resolve(graph,
+  explicit_roots)` takes a pre-built `graph`, never the `AbiSnapshot` the
+  backfill would need to build one from when that graph is `None`. A
+  resolver that only ever receives `graph=None` for an old snapshot has
+  nothing to backfill from — there is no snapshot reference in scope to
+  read header origin/declaration/export-table data out of.** The backfill
+  therefore runs one layer up, in a single shared helper every caller of
+  `PublicSurfaceQuery.resolve()` routes through rather than each
+  reimplementing its own `None` check — `policy.public_surface.
+  resolve_public_surface(snapshot, explicit_roots)` (a thin wrapper, not a
+  second query implementation): it reads `snapshot.surface_graph`,
+  lazily builds one on the fly, in memory, using the exact same
+  `compare/surface_graph.py` builder a fresh extraction already uses when
+  that field is `None` — it needs only the flat `AbiSnapshot` fields that
+  builder already reads (header origin, declarations, export-table data),
+  none of which are themselves new or missing on an old snapshot; only the
+  *pre-built graph* is missing, not the evidence it would be built from —
+  and then calls `PublicSurfaceQuery.resolve()` with that graph, which
+  stays exactly the graph-only traversal its signature already states.
+  The backfilled
   graph is not written back onto the loaded `snapshot` object (no silent,
   surprising mutation of a caller's loaded snapshot) -- a query against
   the same old snapshot pays the build cost each time, which is the
   correct tradeoff for what should be a rare path once fresh snapshots
   carry the field. `compute_public_surface(snapshot)` and any other direct
-  caller read `snapshot.surface_graph` when present, or get the
-  lazily-built equivalent transparently through `PublicSurfaceQuery.
-  resolve()`, with no fabricated pack to thread through either way.
+  caller call `resolve_public_surface(snapshot, ...)`, never
+  `PublicSurfaceQuery.resolve()` directly, so the `None`-backfill and the
+  graph-only resolver stay two separably-testable pieces rather than one
+  function quietly doing both — and a workflow-layer caller that already
+  holds a resolved, non-`None` graph (the common, fresh-extraction case)
+  pays no extra indirection beyond the one wrapper call, with no fabricated
+  pack to thread through either way.
   ADR-057/053's consumers still
   read the L3-L5-gated graph only when it exists, and migrating them onto
   querying through `PublicSurfaceQuery`'s shared instance directly is
@@ -1425,7 +1473,9 @@ phase's own `surface_graph.py` fix (above) already corrected once, just
 reappearing at a second call site `compare()` itself.** `checker.compare()`
 stays `compare/`-layer code with no import of `policy/public_surface.py`
 anywhere in it; the actual
-`PublicSurfaceQuery.resolve()` call moves to the workflow layer that
+`resolve_public_surface()` call (the snapshot-aware wrapper around
+`PublicSurfaceQuery.resolve()`, per the backfill fix below) moves to the
+workflow layer that
 already orchestrates `checker.compare()` for the typed pipeline —
 `service_compare_pipeline.py`'s `classify_compare_pair` (or wherever the
 Phase 4 `AnalysisPlan` resolution already runs, since both need the same
@@ -1520,8 +1570,9 @@ through `build_source`'s old attachment path. Moving the graph onto
 added to `serialization.py`'s `snapshot_to_dict()`/`snapshot_from_dict()`
 for the new field — without it, a saved-then-reloaded snapshot's
 `surface_graph` comes back as `None` or a bare `dict`, not a
-`SourceGraphSummary`, silently breaking `PublicSurfaceQuery.resolve()` on
-every persisted (as opposed to freshly-dumped) snapshot. A populated-graph
+`SourceGraphSummary`, silently breaking `resolve_public_surface()`'s
+snapshot-reading backfill on every persisted (as opposed to freshly-dumped)
+snapshot. A populated-graph
 save/load round-trip test (construct a snapshot with a real, non-empty
 `surface_graph`, write it, read it back, assert the reloaded object is a
 `SourceGraphSummary` with the same nodes/edges) is required by this phase,
@@ -1529,8 +1580,9 @@ not deferred to Phase 10's cleanup. A third regression covers the legacy
 backfill: load an old-schema snapshot (`surface_graph=None`, constructed
 the way a pre-this-phase snapshot would be) alongside a fresh one with a
 real `surface_graph`, run `compute_public_surface`/`compare()` against
-both, and assert the old snapshot's query result matches what the lazy,
-in-memory backfill inside `PublicSurfaceQuery.resolve()` produces rather
+both, and assert the old snapshot's query result matches what
+`resolve_public_surface()`'s lazy,
+in-memory backfill produces rather
 than crashing or returning an empty surface — and assert the loaded
 snapshot object's own `surface_graph` attribute is still `None` afterward,
 proving the backfill is genuinely not persisted back onto it. A fourth
@@ -1593,14 +1645,42 @@ with a named reason, not discovered as a silent no-op mid-run.
 
 **Design.** `abicheck/workflows/plan.py`: `AnalysisPlan` as a frozen
 dataclass (operation, per-side `SidePlan`, requested depth, required
-facts, resolved toolchain/compile context, resolved policy, surface
-contract) built by a new `AnalysisPlanner.resolve(request) ->
-AnalysisPlan | PlanningError`. `PlanningError` carries one entry per failed
+facts, resolved toolchain/compile context) built by a new
+`AnalysisPlanner.resolve(request) -> AnalysisPlan | PlanningError`.
+`PlanningError` carries one entry per failed
 requirement (`requested`, `why_unsupported`), modeled directly on the
 `--build-target` + pre-captured `aquery` gap and the `-H` + unsupported-
 collect-mode gap AGENTS.md already documents as *silent* failures — this
 phase's acceptance test is exactly "these two scenarios now raise
 `PlanningError` instead of silently dropping the request."
+
+**`AnalysisPlan` deliberately does not carry resolved policy or the
+surface contract, and a first draft of this phase's field list included
+both — a reviewer correctly traced why neither belongs here.** This
+phase's own Goal is extraction-feasibility pre-flight: rejecting a request
+no resolved collector/backend combination can satisfy, *before* extraction
+runs. Policy/pack overrides, contract mode, and severity configuration
+answer a different question — how an already-extracted comparison's
+findings are classified and scored — and for the native `compare`/`scan`
+CLIs specifically, that question isn't even fully answered at the point
+`resolve_compare_request`/`resolve_dump_request` return: `cli_compare_
+receipt.resolve_and_apply()` (ADR-049 Phase 5) is a separate, Click-
+dependent step that runs strictly *after* snapshot resolution
+(`cli_compare_helpers.py`'s own `compare_cmd` calls `_resolve_compare_
+snapshots()` first, `_resolve_evaluation_config()`/`resolve_and_apply()`
+only afterward — confirmed by reading the real call order, not assumed),
+since it depends on CLI-specific inputs (`--policy`/`--pack`/`--exit-
+code-scheme`/a discovered `.abicheck.yml`) `AnalysisPlanner.resolve`'s own
+request shape has no seam for. An `AnalysisPlan` that tried to carry a
+"resolved policy" field populated at the earlier point would therefore be
+stale or incomplete for exactly the front end D1 names first — recording a
+policy the run does not actually score under, which is a worse defect than
+not recording one at all. `AnalysisPlan` stays scoped to what its Goal
+actually needs (evidence/extraction satisfiability, fully knowable before
+any front-end-specific configuration seam runs); policy/pack/contract
+resolution keeps its own existing timing, wherever a front end's own seam
+for it already sits, and is not something this phase moves earlier or
+threads through planning.
 
 **ADR-063 D1's own scope is wider than `compare`/`dump`'s resolution
 path alone, and a first draft of this phase didn't reach the rest of
@@ -1639,9 +1719,10 @@ coverage, not evidence-requirement satisfiability) and has no `compare`/
 
 **Files.** `abicheck/workflows/plan.py` (new); `service_compare_pipeline.
 resolve_compare_request`/`service_dump_pipeline.resolve_dump_request`
-(construct `AnalysisPlan` as part of resolution, reusing — not
-duplicating — ADR-049's `compatibility_evaluation_resolver.resolve_field`
-for the policy half). **`cli_compare_release.py`'s `_run_compare_pair`
+(construct `AnalysisPlan` as part of resolution — the extraction-
+feasibility check only, per the Design section's own correction above; no
+policy/pack resolution is constructed or reused here, since `AnalysisPlan`
+carries none). **`cli_compare_release.py`'s `_run_compare_pair`
 itself is *not* a Files entry, and a first draft of this phase's Files
 list had it independently constructing and checking a second
 `AnalysisPlan` before calling `service.run_compare` — a real mistake a

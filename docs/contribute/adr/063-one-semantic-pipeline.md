@@ -298,20 +298,40 @@ from a backend-specific string at comparison time.
 ### D4 — `AnalysisPlan` resolved before any extraction runs
 
 Before a single collector or backend is invoked, an immutable `AnalysisPlan`
-states: the requested operation, per-side evidence requirements, the
-resolved toolchain/compile context, the resolved policy, and the public-
-surface contract — each as a `requested`/`resolved`/`unsupported`/
-`ambiguous` tuple per requirement. A request that cannot be satisfied
+states: the requested operation, per-side evidence requirements, and the
+resolved toolchain/compile context — each as a `requested`/`resolved`/
+`unsupported`/`ambiguous` tuple per requirement. A request that cannot be
+satisfied
 (AGENTS.md's recorded `--build-target` + pre-captured `aquery` silent
 no-op, or a `-H` flag accepted by a collect mode that cannot use it) is
 rejected by the planner, before execution, instead of discovered mid-run or
 not at all.
 
+**`AnalysisPlan` deliberately excludes resolved policy and the
+public-surface contract — an earlier draft of this decision included
+both, and implementation-plan review found neither belongs here.** This
+decision's own scope is extraction-feasibility pre-flight; policy/pack
+resolution and contract-mode selection answer a later question (how an
+already-extracted comparison is classified and scored), and for the
+native `compare`/`scan` CLIs specifically that question is not yet
+answerable at the point a plan would be built — `cli_compare_receipt.
+resolve_and_apply()` (ADR-049 Phase 5) is a separate, Click-dependent step
+that runs strictly *after* snapshot resolution, not before it, since it
+depends on CLI-specific inputs (`--policy`/`--pack`/`--exit-code-scheme`/a
+discovered `.abicheck.yml`) a plan built from a bare request has no seam
+for. A plan that carried "resolved policy" as of its own construction
+would therefore be stale or incomplete for exactly that front end — worse
+than not recording the field at all. ADR-049's D7 precedence resolver
+keeps its own existing timing, wherever each front end's configuration
+seam for it already sits; this decision does not move that earlier or
+claim a canonical pre-extraction point for it that does not exist for
+every front end.
+
 This generalizes ADR-050's comparability contract (a `profile_fingerprint`/
 `scope_fingerprint` computed and checked, today, mostly *after* both sides
-are extracted) into a pre-flight step, and gives ADR-049's D7 precedence
-resolver (`compatibility_evaluation_resolver.py`) one canonical point to
-run before, rather than interleaved with, extraction.
+are extracted) into a pre-flight step for evidence/extraction
+satisfiability specifically — not for policy, which stays exactly where it
+already ran.
 
 ### D5 — Public surface as a query over one evidence graph
 
@@ -593,9 +613,12 @@ their already-accepted decisions generalize and finish converging:
   identity-bearing subsystem (diff matching, suppression selectors,
   persistence).
 - **ADR-049** (contract relevance/compatibility configuration): D4's
-  `AnalysisPlan` gives its D7 precedence resolver one pre-flight call site;
-  D6's `RunOutcome` is where its `compatibility_decision` axis already
-  lives and stays.
+  `AnalysisPlan` deliberately does not relocate its D7 precedence
+  resolver's own call site — per D4's own corrected scope, policy/pack
+  resolution stays exactly where each front end's configuration seam for
+  it already sits, since `AnalysisPlan` carries no policy field to give it
+  a second one. D6's `RunOutcome` is where its `compatibility_decision`
+  axis already lives and stays.
 - **ADR-050** (comparability contract): D4 promotes its fingerprint checks
   from a post-extraction gate to a pre-extraction planning input where
   possible; the fingerprint mechanism itself is unchanged.
