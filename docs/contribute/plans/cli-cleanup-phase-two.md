@@ -18,8 +18,8 @@ interface contract), [ADR-043](../adr/043-cli-pre-1.0-surface-reset.md) /
 [ADR-056](../adr/056-multi-artifact-library-set-scan.md) (`scan --artifact-set`).
 **Effort:** L (seven independent PRs, plus three convergence prerequisites
 added by the post-#780/#782 review) · **Risk:** mixed — PR 1 is
-presentation-only, PR 1b is gated on new persisted-report schema work, PR 4
-changes what a CI job's exit code means.
+presentation-only, PR 1b **landed** (annotations moved to the Action — see
+its own section below), PR 4 changes what a CI job's exit code means.
 
 > **Review checkpoint (2026-08-16, `main` at `410caf5`, after
 > [#779](https://github.com/abicheck/abicheck/pull/779),
@@ -2164,10 +2164,13 @@ pipelines a fourth time.
   > `-H` directory gap, below) are unchanged.
   >
   > **Investigated further (2026-08-27): the reordering is real work to
-  > *verify*, and it is now verified — real evidence, not further reasoning,
-  > that `_write_snapshot_output`'s current sequence already handles a
-  > resolve-time-embedded snapshot correctly, with no code change needed.**
-  > Traced through both functions' actual bodies rather than reasoned about
+  > *verify*, and its depth-gate/provenance/dependency-scope half is now
+  > verified — real evidence, not further reasoning, that
+  > `_write_snapshot_output`'s current sequence already handles a
+  > resolve-time-embedded snapshot correctly there, with no code change
+  > needed for that half.** (The Flow-2 `--inputs` half is separately
+  > addressed below and stays open.) Traced through both functions' actual
+  > bodies rather than reasoned about
   > abstractly: `execute_dump_request`'s own `enforce_requested_depth`
   > (`workflows/artifact/execute.py`) and `_write_snapshot_output`'s
   > `check_requested_depth_satisfied` (`cli_dump_helpers.py`) are not two
@@ -2189,12 +2192,25 @@ pipelines a fourth time.
   > is now answered end to end:
   > `tests/test_dump_write_after_resolve_time_embed.py` builds a real
   > library, runs it through the actual `resolve_dump_request`/
-  > `execute_dump_request` split (`--ast-frontend clang`, castxml still
-  > unavailable in this environment), and hands the result straight to
+  > `execute_dump_request` split (`--ast-frontend clang` — the header parse
+  > itself never invokes castxml; a policy-non-compliant castxml stub
+  > (`pip install castxml`, 0.4.5, below the 0.6.11 minimum
+  > `castxml_policy.py` enforces for an authoritative scan) had to be
+  > installed in this session purely to satisfy `tests/conftest.py`'s
+  > `integration`-marker gate, which checks only `shutil.which("castxml")`
+  > and cannot tell that this specific test never calls it — a CI lane that
+  > actually runs the `integration` marker has a real, policy-compliant
+  > castxml installed for its other tests, so this is a local-session
+  > workaround, not a statement that the test needs none), and hands the
+  > result straight to
   > `_write_snapshot_output` with an explicit `--depth source` — asserting
   > no second embed occurs, the depth gate does not raise, the provenance
   > fold correctly reports `effective_depth == "source"`/`degraded is
-  > False`, and the real L3/L4/L5 evidence survives into the written JSON.
+  > False`, and the written JSON's own `build_source.manifest.coverage`
+  > rows report L3/L4 `"present"` — checking the actual per-layer coverage
+  > this request's evidence produced, not merely that a `build_source` key
+  > exists (a headers-only run's own pack, per the discovery below, would
+  > pass a bare presence check vacuously).
   > A second case pins the depth gate's own negative direction (a
   > `depth="binary"` resolve-time result — no header parse at all, so
   > `build_source` stays genuinely `None` — still raises
@@ -2210,18 +2226,23 @@ pipelines a fourth time.
   > this class of test therefore needs the header parse itself to never
   > run (`depth="binary"`, no `-H`), not merely L3/L4 to be empty.
   >
-  > **What this narrows, precisely.** Item 1's "reordering" half is closed:
-  > no `_write_snapshot_output` code change is needed for the sequence
-  > itself. Not closed, and out of this investigation's scope: whether
-  > *`_write_snapshot_output`'s Flow-2 `--inputs` pack fold* behaves
-  > identically when layered on top of a resolve-time embed (untested here —
-  > constructing a real Flow-2 pack fixture was not attempted), and whether
-  > the *whole* migrated pipeline (a real `perform_elf_dump` calling
+  > **What this narrows, precisely — the reordering item is narrowed, not
+  > closed.** The depth-gate/provenance/dependency-scope half of the
+  > sequence is verified safe for a resolve-time embed, so no
+  > `_write_snapshot_output` code change is needed for *that* half. **Still
+  > open, and deliberately not folded into "closed" above (Codex review
+  > caught an earlier revision of this note doing exactly that): whether
+  > `_write_snapshot_output`'s Flow-2 `--inputs` pack fold** — the third
+  > name in "provenance/`--inputs`/depth-gate sequence" — **behaves
+  > identically when layered on top of a resolve-time embed.** Untested
+  > here; constructing a real Flow-2 pack fixture was not attempted. This
+  > prerequisite therefore stays open until that combined path has its own
+  > test, alongside the still-unstarted third step: whether the *whole*
+  > migrated pipeline (a real `perform_elf_dump` calling
   > `execute_dump_request` end to end, ADR-039 collector included) produces
   > output byte-identical to today's write-time-embed path under the
-  > *default* castxml backend — that is "the migration itself," item 1's
-  > still-unstarted third step, and it remains exactly as blocked on castxml
-  > as this note already said.
+  > *default* castxml backend — "the migration itself," and it remains
+  > exactly as blocked on castxml as this note already said.
 
 `dump --build-query` and `dump --build-compile-db` describe how the *project*
 is built, not what this snapshot is. They are already documented as CLI

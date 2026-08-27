@@ -34,7 +34,14 @@ end to end.
 
 This module answers that question directly, using ``--ast-frontend clang``
 (the same substitute this whole test suite already uses everywhere castxml
-is unavailable): build a ``DumpRequest``, run it through the real
+is unavailable) so the header parse itself never invokes castxml. This
+module is still ``integration``-marked, though, and
+``tests/conftest.py``'s ``_integration_skip_reason`` gates every
+``integration``-marked test on ``shutil.which("castxml")`` alone -- it
+cannot tell that a given test never calls it -- so *some* castxml binary
+must still be discoverable on ``PATH`` for this module to run at all, even
+though the test itself is castxml-free. Build a ``DumpRequest``, run it
+through the real
 ``resolve_dump_request``/``execute_dump_request`` split (exactly the shape
 a migrated ``perform_elf_dump`` would produce), and hand the resulting,
 already-embedded snapshot to ``_write_snapshot_output`` with an *explicit*
@@ -214,10 +221,21 @@ def test_write_snapshot_output_accepts_a_resolve_time_embedded_snapshot(
     assert provenance["effective_depth"] == "source"
     assert provenance["degraded"] is False
 
-    # The real L3/L4 evidence from the resolve-time embed survived into the
-    # written snapshot -- not silently dropped or replaced with an empty
-    # pack by anything downstream of the guard.
-    assert payload.get("build_source") is not None
+    # The real L3/L4/L5 evidence from the resolve-time embed survived into
+    # the written snapshot -- not silently dropped or replaced with an
+    # empty/no-op pack by anything downstream of the guard. Checking mere
+    # pack *presence* is not enough: this fixture's own docstring records
+    # that even a headers-only run (no sources/build_info at all) produces
+    # a non-null pack whose L3/L4 layers are NOT_COLLECTED -- so the real
+    # assertion is that every layer this specific request actually
+    # requested (L3 build, L4 source-ABI replay) reports "present", not
+    # merely that a `build_source` key exists.
+    coverage = {
+        row["layer"]: row["status"]
+        for row in payload["build_source"]["manifest"]["coverage"]
+    }
+    assert coverage["L3_build"] == "present"
+    assert coverage["L4_source_abi"] == "present"
 
 
 @pytest.mark.skipif(not (_HAVE_GXX and _HAVE_CLANG), reason=_SKIP_REASON)
