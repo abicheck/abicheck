@@ -112,6 +112,96 @@ class TestChangeKindRegistry:
         with pytest.raises(ValueError, match="Duplicate"):
             ChangeKindRegistry(entries)
 
+    def test_unknown_policy_override_raises(self):
+        """A policy_overrides key naming an unrecognized policy is rejected.
+
+        ADR-061 D9's "valid references" catalog-validation property.
+        """
+        import pytest
+
+        entries = [
+            ChangeKindMeta(
+                "test_kind", Verdict.BREAKING,
+                policy_overrides={"not_a_real_policy": Verdict.COMPATIBLE},
+            ),
+        ]
+        with pytest.raises(ValueError, match="unknown policy"):
+            ChangeKindRegistry(entries)
+
+    def test_strict_abi_policy_override_raises(self):
+        """A policy_overrides entry targeting 'strict_abi' is rejected.
+
+        strict_abi's verdict is already default_verdict itself — an
+        override under that key would be a second, competing source of
+        truth for the same policy (ADR-061 D9's "non-contradictory
+        defaults").
+        """
+        import pytest
+
+        entries = [
+            ChangeKindMeta(
+                "test_kind", Verdict.BREAKING,
+                policy_overrides={"strict_abi": Verdict.COMPATIBLE},
+            ),
+        ]
+        with pytest.raises(ValueError, match="strict_abi"):
+            ChangeKindRegistry(entries)
+
+    def test_redundant_policy_override_raises(self):
+        """A policy_overrides value equal to default_verdict is rejected.
+
+        Restating the default under a policy key is not an override — it's
+        either stale or was never needed (ADR-061 D9's "non-contradictory
+        defaults").
+        """
+        import pytest
+
+        entries = [
+            ChangeKindMeta(
+                "test_kind", Verdict.BREAKING,
+                policy_overrides={"plugin_abi": Verdict.BREAKING},
+            ),
+        ]
+        with pytest.raises(ValueError, match="== default_verdict"):
+            ChangeKindRegistry(entries)
+
+    def test_addition_kind_must_default_to_compatible(self):
+        """is_addition=True with a non-COMPATIBLE default_verdict is rejected.
+
+        addition_kinds() is documented as a subset of COMPATIBLE_KINDS
+        (ADR-061 D9's "non-contradictory defaults").
+        """
+        import pytest
+
+        entries = [
+            ChangeKindMeta("test_kind", Verdict.BREAKING, is_addition=True),
+        ]
+        with pytest.raises(ValueError, match="is_addition=True"):
+            ChangeKindRegistry(entries)
+
+    def test_valid_policy_override_is_accepted(self):
+        """A genuinely different, known-policy override passes construction."""
+        entries = [
+            ChangeKindMeta(
+                "test_kind", Verdict.BREAKING,
+                policy_overrides={"plugin_abi": Verdict.COMPATIBLE},
+            ),
+            ChangeKindMeta("compatible_addition", Verdict.COMPATIBLE, is_addition=True),
+        ]
+        registry = ChangeKindRegistry(entries)
+        assert len(registry) == 2
+
+    def test_real_registry_satisfies_reference_and_default_validation(self):
+        """The production REGISTRY was already valid before these checks existed.
+
+        Reconstructing it from its own entries must not raise — i.e. every
+        real ChangeKindMeta entry already satisfies D9's "valid references"
+        and "non-contradictory defaults" (verified empirically before this
+        validation was added; this pins that finding as a regression guard).
+        """
+        rebuilt = ChangeKindRegistry(list(REGISTRY.entries.values()))
+        assert len(rebuilt) == len(REGISTRY)
+
     def test_adding_kind_is_one_entry(self):
         """Adding a new kind to the registry is a single ChangeKindMeta entry."""
         entry = ChangeKindMeta(

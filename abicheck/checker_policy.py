@@ -44,6 +44,12 @@ from typing import Protocol
 
 from .change_registry import REGISTRY as _REGISTRY, Verdict as Verdict
 
+# Imported directly from the leaf module rather than via change_registry's
+# own re-export, so this doesn't grow change_registry.py past its 2000-line
+# adoption-debt ceiling (ADR-061) for a name nothing external currently
+# imports through that path.
+from .change_registry_types import VALID_BASE_POLICIES as VALID_BASE_POLICIES
+
 
 class ChangeKind(str, Enum):
     # Function / variable changes
@@ -1351,12 +1357,6 @@ def policy_registry_markdown() -> str:
             f"`{entry.severity}` | `{entry.doc_slug}` |"
         )
     return "\n".join(lines)
-
-
-VALID_BASE_POLICIES: frozenset[str] = frozenset(
-    {"strict_abi", "sdk_vendor", "plugin_abi"}
-)
-"""Canonical set of valid built-in policy names. Import from here — do not redefine."""
 
 
 def policy_kind_sets(

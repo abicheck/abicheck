@@ -1,7 +1,7 @@
 # ADR-061: Responsibility-Package Architecture and Flat-Namespace Migration
 
 **Date:** 2026-08-24
-**Status:** Accepted — partially implemented (Phases 0-1 implemented; Phases 2-4 in progress; Phase 5 begun — the `model` package and the `*_metadata.py` dataclass/parser split have landed; the change catalog has unique identifiers and enum-membership completeness today, but its D9 taxonomy repartition and the rest of D9's registry validation are not done — and otherwise incremental).
+**Status:** Accepted — partially implemented (Phases 0-1 implemented; Phases 2-4 in progress; Phase 5 begun — the `model` package and the `*_metadata.py` dataclass/parser split have landed; the change catalog now enforces 3 of D9's 4 registry-validation properties (unique identifiers, valid references, non-contradictory defaults), with complete metadata blocked on writing 48 missing `impact` strings and the D9 taxonomy repartition itself not started — and otherwise incremental).
 **Decision maker:** abicheck maintainers
 
 ## Context
@@ -1123,61 +1123,71 @@ entries there purely for space, not because either is that entry's taxonomy
 home (a first Codex review round on this PR caught an earlier draft marking
 this done on the strength of the validation claim alone).
 
-The validation is only partly done, and a second Codex review round caught
-this section overclaiming that too: `ChangeKindRegistry` genuinely enforces
-two of D9's four properties, independent of file layout — global uniqueness
-of kind identifiers (`ChangeKindRegistry.__init__` raises `ValueError` on a
-duplicate `kind` at import time, pinned by `tests/
-test_architecture_refactor.py::TestChangeKindRegistry::
-test_duplicate_entry_raises`) and enum-membership completeness in both
-directions — every `ChangeKind` member has exactly one registry entry, and
-no entry names a value outside the enum — pinned by that same class's
-`test_registry_has_all_changekind_members`/`test_registry_no_extra_entries`.
-But "enum-membership completeness" is not D9's "complete metadata":
-`ChangeKindMeta.impact` and `.description_template` are both declared
-optional (`impact: str = ""`, `description_template: str | None = None` in
-`change_registry_types.py`), so an entry with empty/absent metadata is
-accepted, not rejected — nothing requires those fields populated. Nor is
-either "valid references" or "non-contradictory defaults" validated
-anywhere: no check confirms a `policy_overrides` key names a real policy, or
-that an override doesn't trivially equal its own `default_verdict`, or any
-other cross-field consistency. `scripts/check_ai_readiness.py`'s
-`changekind-partition` check gates (as an ERROR) the same enum-membership
-completeness `ChangeKindRegistry` already enforces at import time — not new
-coverage. Its `changekind-detector`/`changekind-docs` siblings are WARN-only,
-not gates, and check for a bare textual reference (`ChangeKind.NAME`
-appearing anywhere outside `checker_policy.py`, or the kind's name/value
-appearing anywhere under `docs/`) rather than proving a detector actually
-produces the kind or that a page substantively documents it — real,
-current-state evidence toward "produced by some detector" and "documented",
-but advisory, not enforced, and not part of D9's four validation properties
-either way.
+Of D9's four registry-validation properties, three are now enforced,
+independent of file layout — global uniqueness of kind identifiers
+(`ChangeKindRegistry.__init__` raises `ValueError` on a duplicate `kind` at
+import time, pinned by `tests/test_architecture_refactor.py::
+TestChangeKindRegistry::test_duplicate_entry_raises`), "valid references",
+and "non-contradictory defaults" (both added in a follow-up pass: the
+constructor now also rejects a `policy_overrides` key naming an unknown
+policy or targeting `strict_abi` — whose verdict is `default_verdict`
+itself, so an override there would be a second, competing source of truth
+for the same policy — an override value equal to the entry's own
+`default_verdict` — restating the default is not an override — and an
+`is_addition=True` entry whose `default_verdict` isn't `Verdict.COMPATIBLE`,
+since `addition_kinds()` is documented as a subset of `COMPATIBLE_KINDS`;
+pinned by six new cases in the same test class, including
+`test_real_registry_satisfies_reference_and_default_validation`, which
+reconstructs the real production `REGISTRY` from its own entries to prove
+every one of its 397 entries already satisfied both properties before the
+check existed). `VALID_BASE_POLICIES` — the canonical policy-name set the
+reference check validates against — moved from `checker_policy.py` to the
+leaf `change_registry_types.py` (re-exported unchanged from
+`checker_policy`, so no importer needed to change), since `checker_policy`
+imports `REGISTRY` from `change_registry.py`, which in turn imports
+`change_registry_types` — a `checker_policy`-side definition would have
+been a cycle.
 
-So the only pieces of item 3 actually done are unique identifiers and
-enum-membership completeness — real, and worth not re-verifying when the
-repartition happens, but a small fraction of what D9 asks the assembled
-`registry.py` to validate. Complete-metadata enforcement, reference
-validation, and default-contradiction checking are all still open, alongside
-the taxonomy move itself.
+The fourth, "complete metadata", is not enforced, and is a *content* gap
+rather than a missing check: `ChangeKindMeta.impact`/`.description_template`
+are both declared optional, and today 48 of 397 real entries have no
+`impact` text at all. Adding that enforcement means writing 48 new,
+individually-accurate one-line impact descriptions first (real domain
+content, not a mechanical check) — a job of a different kind than the three
+properties above, and not attempted in this pass. "Enum-membership
+completeness" — every `ChangeKind` has exactly one registry entry, and no
+entry names a value outside the enum, pinned by that same test class's
+`test_registry_has_all_changekind_members`/`test_registry_no_extra_entries`
+— is a distinct, already-enforced property and must not be read as
+satisfying "complete metadata": one is about which *kinds* have an entry,
+the other about whether each entry's own fields are populated.
+`scripts/check_ai_readiness.py`'s `changekind-partition` check gates (as an
+ERROR) that same enum-membership completeness — not new coverage. Its
+`changekind-detector`/`changekind-docs` siblings are WARN-only, not gates,
+and check for a bare textual reference (`ChangeKind.NAME` appearing
+anywhere outside `checker_policy.py`, or the kind's name/value appearing
+anywhere under `docs/`) rather than proving a detector actually produces
+the kind or that a page substantively documents it — real, current-state
+evidence, but advisory, and not part of D9's four properties either way.
 
 The remaining Phase 5 work:
 
 1. split CastXML and Clang parsing by entity and shared parser context;
 2. separate source-graph values, construction, and comparison;
 3. repartition the change catalog into D9's `model/change_catalog/
-   {symbols,types,platform,build,source}.py` taxonomy and implement its full
-   validation (complete metadata, valid references, non-contradictory
-   defaults — only unique identifiers and enum-membership completeness are
-   done today, see above); and
+   {symbols,types,platform,build,source}.py` taxonomy, and write the 48
+   missing `impact` strings needed for "complete metadata" enforcement
+   (global uniqueness, valid references, and non-contradictory defaults are
+   done — see above); and
 4. remove superseded private re-exports, migration edges, and cycle
    exceptions.
 
 **Acceptance:** parser fixtures demonstrate byte/fact parity where applicable;
 catalog validation proves all four of D9's properties — global uniqueness,
-complete metadata, valid references, and non-contradictory defaults (only
-the first is fully done today; the rest, complete metadata included, remain
-open per the item-3 write-up above); no parser imports
-policy/report/workflows/frontends; corresponding debt entries are removed.
+valid references, and non-contradictory defaults are done; complete
+metadata needs the 48 missing `impact` strings written before it can be
+enforced; no parser imports policy/report/workflows/frontends;
+corresponding debt entries are removed.
 
 ## Migration rules for every phase
 
