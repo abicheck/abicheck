@@ -35,24 +35,26 @@ from tests.regressions.manifest import BUG_CLASSES, BugClass, all_ids, get
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
 
-def _pytest_and_mark_aliases(tree: ast.AST) -> tuple[set[str], set[str]]:
+def _pytest_import_aliases(tree: ast.AST) -> tuple[set[str], set[str], set[str]]:
     """Names this file's own imports bind to the `pytest` module itself
-    (`import pytest`, `import pytest as pt`) and to `pytest.mark` directly
-    (`from pytest import mark`, `from pytest import mark as m`) — so
-    `@pt.mark.xfail(...)` and `@m.xfail(...)` are recognized the same way
-    `@pytest.mark.xfail(...)` already is.
+    (`import pytest`, `import pytest as pt`), to `pytest.mark` directly
+    (`from pytest import mark`, `from pytest import mark as m`), and to
+    `pytest.param` directly (`from pytest import param [as p]`) — so
+    `@pt.mark.xfail(...)`, `@m.xfail(...)`, and `p(..., marks=...)` are all
+    recognized the same way their unaliased spellings already are.
 
-    An exact `pytest.mark.*` attribute chain is not the only legal spelling
-    (Codex review, PR #885, seventh round): a canary using either import
-    form was invisible to the previous exact-name check, so a non-strict
-    `@mark.xfail(...)`/`@pt.mark.xfail(...)` was silently accepted.
-    `"pytest"` is always included as a fallback even with no `import
-    pytest` found, matching every pre-existing test's assumption and
-    costing nothing — a real canary can't reference `pytest.mark.xfail`
-    without that name resolving somehow.
+    An exact `pytest.mark.*`/`pytest.param` spelling is not the only legal
+    one (Codex review, PR #885, seventh round): a canary using an import
+    alias for either was invisible to the previous exact-name check, so a
+    non-strict marker written that way was silently accepted. `"pytest"`
+    is always included as a fallback even with no `import pytest` found,
+    matching every pre-existing test's assumption and costing nothing — a
+    real canary can't reference `pytest.mark.xfail` without that name
+    resolving somehow.
     """
     pytest_names = {"pytest"}
     mark_names: set[str] = set()
+    param_names: set[str] = set()
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
             for alias in node.names:
@@ -62,7 +64,9 @@ def _pytest_and_mark_aliases(tree: ast.AST) -> tuple[set[str], set[str]]:
             for alias in node.names:
                 if alias.name == "mark":
                     mark_names.add(alias.asname or alias.name)
-    return pytest_names, mark_names
+                elif alias.name == "param":
+                    param_names.add(alias.asname or alias.name)
+    return pytest_names, mark_names, param_names
 
 
 def _is_pytest_mark_attr(
@@ -88,22 +92,49 @@ def _is_pytest_mark_attr(
     )
 
 
-def _iter_marker_expressions(tree: ast.AST) -> list[ast.expr]:
+def _is_pytest_param_call(
+    node: ast.AST, pytest_names: set[str], param_names: set[str]
+) -> bool:
+    """Is *node* a call to `<pytest_alias>.param(...)` or a directly
+    imported `param(...)` (`from pytest import param [as p]`)?"""
+    if not isinstance(node, ast.Call):
+        return False
+    func = node.func
+    if (
+        isinstance(func, ast.Attribute)
+        and func.attr == "param"
+        and isinstance(func.value, ast.Name)
+        and func.value.id in pytest_names
+    ):
+        return True
+    return isinstance(func, ast.Name) and func.id in param_names
+
+
+def _iter_marker_expressions(
+    tree: ast.AST, pytest_names: set[str], param_names: set[str]
+) -> list[ast.expr]:
     """Every raw marker expression this file could apply to a collected
-    test, by any of pytest's three application mechanisms: a function/
-    async-function decorator, a *class* decorator (`@pytest.mark.xfail`
-    on a `class Test...`, applying to every test method in it), or a
-    module-/class-level `pytestmark` assignment (a single marker, or a
-    `list`/`tuple` of several).
+    test, by any of pytest's application mechanisms: a function/async-
+    function decorator, a *class* decorator (`@pytest.mark.xfail` on a
+    `class Test...`, applying to every test method in it), a module-/
+    class-level `pytestmark` assignment (a single marker, or a `list`/
+    `tuple` of several), or a per-case `pytest.param(..., marks=...)`
+    inside a `parametrize(...)` list (a single marker, or a `list`/`tuple`
+    of several) — pytest's normal idiom for xfail-ing one parametrized
+    case rather than the whole test.
 
     Function decorators alone are not the whole surface (Codex review,
-    PR #885, fourth round): `_marker_decorator_calls`'s previous version
-    only walked `FunctionDef`/`AsyncFunctionDef.decorator_list`, so a
-    class-level `@pytest.mark.xfail` or a `pytestmark = pytest.mark.
-    xfail(...)` assignment — both real, pytest-documented ways to apply a
-    marker — were invisible to it, and a canary using either would have
-    been silently accepted as strict-compliant regardless of whether it
-    actually was.
+    PR #885, fourth and tenth rounds): the original version only walked
+    `FunctionDef`/`AsyncFunctionDef.decorator_list`, so a class-level
+    `@pytest.mark.xfail` or a `pytestmark = pytest.mark.xfail(...)`
+    assignment were invisible to it (fourth round); `pytest.param(...,
+    marks=pytest.mark.xfail(...))` nested inside a `@pytest.mark.
+    parametrize(...)` decorator's own argument list was invisible to
+    *that* fix in turn, since it only walked decorators/`pytestmark`
+    themselves, never into a decorator's own call arguments (tenth round)
+    — `ast.walk(tree)` finds a `pytest.param(...)` call anywhere in the
+    module regardless of nesting, so no special-casing of `parametrize`'s
+    own argument shape is needed to reach it.
     """
     exprs: list[ast.expr] = []
     for node in ast.walk(tree):
@@ -117,6 +148,15 @@ def _iter_marker_expressions(tree: ast.AST) -> list[ast.expr]:
             exprs.extend(
                 value.elts if isinstance(value, ast.List | ast.Tuple) else [value]
             )
+        elif _is_pytest_param_call(node, pytest_names, param_names):
+            for kw in node.keywords:
+                if kw.arg == "marks":
+                    value = kw.value
+                    exprs.extend(
+                        value.elts
+                        if isinstance(value, ast.List | ast.Tuple)
+                        else [value]
+                    )
     return exprs
 
 
@@ -139,9 +179,9 @@ def _marker_decorator_calls(tree: ast.AST, marker_name: str) -> list[ast.Call | 
     the earlier text-based version, which needed an explicit next-character
     guard for exactly this.
     """
-    pytest_names, mark_names = _pytest_and_mark_aliases(tree)
+    pytest_names, mark_names, param_names = _pytest_import_aliases(tree)
     results: list[ast.Call | None] = []
-    for expr in _iter_marker_expressions(tree):
+    for expr in _iter_marker_expressions(tree, pytest_names, param_names):
         target = expr.func if isinstance(expr, ast.Call) else expr
         if _is_pytest_mark_attr(target, marker_name, pytest_names, mark_names):
             results.append(expr if isinstance(expr, ast.Call) else None)
@@ -179,6 +219,26 @@ def _xfail_is_strict(call: ast.Call) -> bool:
     return strict_ok and run_ok
 
 
+def _skipif_condition_is_unconditionally_true(call: ast.Call) -> bool:
+    """Does *call* (a `pytest.mark.skipif(...)` application) pass a
+    literal `True` as its `condition` — positional or `condition=` keyword
+    — so it behaves exactly like a bare `@pytest.mark.skip` regardless of
+    environment (Codex review, PR #885, tenth round)?
+
+    A genuine, environment-dependent `skipif` (`sys.platform == "win32"`,
+    a version check, a variable) is deliberately left alone — only a
+    condition that is *provably* always `True` is rejected, the same
+    "provably safe/unsafe, not merely not-provably-otherwise" bar
+    `strict`/`run` are already held to.
+    """
+    if call.args and _is_literal_bool(call.args[0], True):
+        return True
+    return any(
+        kw.arg == "condition" and _is_literal_bool(kw.value, True)
+        for kw in call.keywords
+    )
+
+
 def _canary_strictness_violation(source: str) -> str | None:
     """`None` if *source* honors the "fails loudly" canary contract
     (`KnownGap.canary_test`'s own docstring); otherwise a one-sentence
@@ -187,9 +247,12 @@ def _canary_strictness_violation(source: str) -> str | None:
     on an unexpected pass, and a `@pytest.mark.skip`'d test never executes
     at all — neither can detect the tracked residual closing or widening).
 
-    Only rejects the two decorator patterns that are *unconditionally*
-    wrong regardless of the test body: a non-strict/bare `@pytest.mark.
-    xfail` and any `@pytest.mark.skip`. It does **not** accept — nor
+    Only rejects the decorator patterns that are *unconditionally* wrong
+    regardless of the test body: a non-strict/bare `@pytest.mark.xfail`,
+    any `@pytest.mark.skip`, and a `@pytest.mark.skipif(...)` whose
+    condition is a literal `True` (a genuinely conditional `skipif` is a
+    legitimate environment-dependent exclusion and is left alone). It
+    does **not** accept — nor
     specifically endorse — a conditional runtime `pytest.xfail(...)` call
     as an equivalent to `strict=True`: a second review round (fresh
     evidence) found that once the guarding condition stops being met, such
@@ -212,6 +275,12 @@ def _canary_strictness_violation(source: str) -> str | None:
         return f"could not be parsed as Python ({exc}); cannot verify it fails loudly"
     if _marker_decorator_calls(tree, "skip"):
         return "uses @pytest.mark.skip, which never executes and so cannot fail loudly"
+    for call in _marker_decorator_calls(tree, "skipif"):
+        if call is not None and _skipif_condition_is_unconditionally_true(call):
+            return (
+                "uses @pytest.mark.skipif(True, ...), which never executes "
+                "and so cannot fail loudly"
+            )
     for call in _marker_decorator_calls(tree, "xfail"):
         if call is None or not _xfail_is_strict(call):
             return (
@@ -629,6 +698,75 @@ class TestCanaryStrictnessViolation:
         than silently reading as compliant."""
         source = "def test_x(:\n    this is not python\n"
         assert _canary_strictness_violation(source) is not None
+
+    def test_a_non_strict_xfail_nested_in_a_param_mark_is_inspected(self) -> None:
+        """`pytest.param(..., marks=pytest.mark.xfail(...))` is pytest's
+        normal idiom for xfail-ing one parametrized case rather than the
+        whole test — invisible to a walk that only inspects decorators/
+        `pytestmark` directly, since the marker sits nested inside the
+        `parametrize(...)` decorator's own argument list (Codex review,
+        PR #885, tenth round)."""
+        source = (
+            "@pytest.mark.parametrize(\n"
+            "    'x',\n"
+            "    [1, pytest.param(2, marks=pytest.mark.xfail(reason='tracked gap'))],\n"
+            ")\n"
+            "def test_x(x): ...\n"
+        )
+        assert _canary_strictness_violation(source) is not None
+
+    def test_a_strict_xfail_nested_in_a_param_mark_is_accepted(self) -> None:
+        source = (
+            "@pytest.mark.parametrize(\n"
+            "    'x',\n"
+            "    [\n"
+            "        1,\n"
+            "        pytest.param(\n"
+            "            2, marks=pytest.mark.xfail(reason='tracked gap', strict=True)\n"
+            "        ),\n"
+            "    ],\n"
+            ")\n"
+            "def test_x(x): ...\n"
+        )
+        assert _canary_strictness_violation(source) is None
+
+    def test_a_param_marks_list_is_also_inspected(self) -> None:
+        """`marks=` may also be a list/tuple of several markers, not just
+        one bare marker call."""
+        source = (
+            "@pytest.mark.parametrize(\n"
+            "    'x',\n"
+            "    [pytest.param(2, marks=[pytest.mark.xfail(reason='tracked gap')])],\n"
+            ")\n"
+            "def test_x(x): ...\n"
+        )
+        assert _canary_strictness_violation(source) is not None
+
+    def test_an_unconditional_skipif_is_rejected(self) -> None:
+        """`@pytest.mark.skipif(True, ...)` behaves exactly like a bare
+        `@pytest.mark.skip` — it never executes and so cannot fail loudly
+        (Codex review, PR #885, tenth round)."""
+        source = (
+            "@pytest.mark.skipif(True, reason='not implemented yet')\n"
+            "def test_x(): ...\n"
+        )
+        assert _canary_strictness_violation(source) is not None
+
+    def test_an_unconditional_skipif_via_condition_keyword_is_rejected(self) -> None:
+        source = (
+            "@pytest.mark.skipif(condition=True, reason='not implemented yet')\n"
+            "def test_x(): ...\n"
+        )
+        assert _canary_strictness_violation(source) is not None
+
+    def test_a_genuinely_conditional_skipif_is_not_flagged(self) -> None:
+        """A real, environment-dependent `skipif` is a legitimate exclusion
+        and must not be rejected merely for existing."""
+        source = (
+            "@pytest.mark.skipif(sys.platform == 'win32', reason='posix only')\n"
+            "def test_x(): ...\n"
+        )
+        assert _canary_strictness_violation(source) is None
 
 
 class TestLookupHelpers:

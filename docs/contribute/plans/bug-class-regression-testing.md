@@ -272,8 +272,10 @@ expected defect-catching value is.
 ### Phase 1 — regression-class registry + manifest gate (implemented)
 
 * `tests/regressions/manifest.py` — the `BugClass`/`KnownGap` registry
-  described above, seeded with the nine classes this plan names, each
-  pointing at the real generalized/property test(s) that already exist
+  described above, seeded with the classes this plan names below (see
+  `BUG_CLASSES`/`all_ids()` for the current, authoritative count and
+  membership — not a number restated here), each pointing at the real
+  generalized/property test(s) that already exist
   for it (see the "Coverage gaps found" sections below for what each
   class's tests still need to grow into) and, where applicable, a
   `known_gaps` entry recording a residual this registry does not yet
@@ -288,9 +290,10 @@ expected defect-catching value is.
 * `scripts/check_regressions_manifest.py` (optional CI wiring, e.g. a
   soft nudge when a `fix:` PR's "Bug class" answer matches a registered
   id but that class's own test set didn't change) — **not built in this
-  phase**, deliberately: with nine entries the false-positive risk of an
-  automated nudge isn't worth it yet; revisit once the registry has grown
-  from later phases' work.
+  phase**, deliberately: with only a handful of entries (see
+  `BUG_CLASSES`/`all_ids()` for the current count) the false-positive
+  risk of an automated nudge isn't worth it yet; revisit once the
+  registry has grown from later phases' work.
 
 ### Phase 2 — AST wrapper-chain traversal invariant
 
@@ -561,7 +564,7 @@ initiative.
 * A trend-reporting database for property/mutation results over time —
   already listed as a deferred, separately-scoped item in AGENTS.md's
   "Known gaps" section; this plan does not change that.
-* Migrating any of the nine classes' existing narrow regression tests
+* Migrating any of this plan's classes' existing narrow regression tests
   out of the test files that already carry them — Phase 2–9 work
   extends and generalizes those files in place, per each phase's own
   "reuse... rather than building a second one" note, rather than
