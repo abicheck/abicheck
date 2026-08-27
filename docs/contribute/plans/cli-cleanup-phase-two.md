@@ -2162,6 +2162,66 @@ pipelines a fourth time.
   > the reordering, which has no such external blocker and could be done
   > independently. Items 2 (the L4 extractor default divergence) and 3 (the
   > `-H` directory gap, below) are unchanged.
+  >
+  > **Investigated further (2026-08-27): the reordering is real work to
+  > *verify*, and it is now verified — real evidence, not further reasoning,
+  > that `_write_snapshot_output`'s current sequence already handles a
+  > resolve-time-embedded snapshot correctly, with no code change needed.**
+  > Traced through both functions' actual bodies rather than reasoned about
+  > abstractly: `execute_dump_request`'s own `enforce_requested_depth`
+  > (`workflows/artifact/execute.py`) and `_write_snapshot_output`'s
+  > `check_requested_depth_satisfied` (`cli_dump_helpers.py`) are not two
+  > independent implementations that could disagree — the latter's
+  > `_DEPTH_RANK`/`_gated_source_label` are a documented `= DEPTH_RANK`
+  > constant and a documented compatibility alias for
+  > `evidence_depth.gated_source_label`, the exact same shared primitives
+  > the former uses — so calling both in sequence (once inside
+  > `execute_dump_request`, once inside `_write_snapshot_output`, if a
+  > migrated `perform_elf_dump` called both) is redundant, not risky.
+  > Likewise the provenance fold (`fold_dump_provenance_into_dict`) and the
+  > dependency-scope resolution (`resolve_dependency_scope`) both read
+  > `snap.build_source`/`snap` state directly, with no dependency on *when*
+  > that state was populated. The one real question this reading could not
+  > settle from the code alone — whether `build_source_already_satisfies`
+  > (PR 3A blocker 5 sub-issue 3) genuinely prevents a second embed against
+  > a *real*, non-stubbed pack the typed pipeline itself produced, and
+  > whether the rest of the sequence still completes correctly around it —
+  > is now answered end to end:
+  > `tests/test_dump_write_after_resolve_time_embed.py` builds a real
+  > library, runs it through the actual `resolve_dump_request`/
+  > `execute_dump_request` split (`--ast-frontend clang`, castxml still
+  > unavailable in this environment), and hands the result straight to
+  > `_write_snapshot_output` with an explicit `--depth source` — asserting
+  > no second embed occurs, the depth gate does not raise, the provenance
+  > fold correctly reports `effective_depth == "source"`/`degraded is
+  > False`, and the real L3/L4/L5 evidence survives into the written JSON.
+  > A second case pins the depth gate's own negative direction (a
+  > `depth="binary"` resolve-time result — no header parse at all, so
+  > `build_source` stays genuinely `None` — still raises
+  > `DumpDepthNotSatisfiedError` for an explicit `--depth source`), so the
+  > redundant check is proven to still be a real gate, not merely inert.
+  >
+  > One genuine, previously-undocumented discovery along the way, recorded
+  > in the test's own docstring so it is not rediscovered: a *headers-only*
+  > resolve-time result (no `--sources`/`--build-info` at all) already
+  > populates `snap.build_source` with a real, if L3/L4-empty, pack —
+  > the header-graph attach pass runs and records L5 coverage regardless of
+  > whether any build evidence was given. "No build/source evidence" for
+  > this class of test therefore needs the header parse itself to never
+  > run (`depth="binary"`, no `-H`), not merely L3/L4 to be empty.
+  >
+  > **What this narrows, precisely.** Item 1's "reordering" half is closed:
+  > no `_write_snapshot_output` code change is needed for the sequence
+  > itself. Not closed, and out of this investigation's scope: whether
+  > *`_write_snapshot_output`'s Flow-2 `--inputs` pack fold* behaves
+  > identically when layered on top of a resolve-time embed (untested here —
+  > constructing a real Flow-2 pack fixture was not attempted), and whether
+  > the *whole* migrated pipeline (a real `perform_elf_dump` calling
+  > `execute_dump_request` end to end, ADR-039 collector included) produces
+  > output byte-identical to today's write-time-embed path under the
+  > *default* castxml backend — that is "the migration itself," item 1's
+  > still-unstarted third step, and it remains exactly as blocked on castxml
+  > as this note already said.
 
 `dump --build-query` and `dump --build-compile-db` describe how the *project*
 is built, not what this snapshot is. They are already documented as CLI
