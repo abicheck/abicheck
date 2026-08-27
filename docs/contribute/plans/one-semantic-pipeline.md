@@ -251,8 +251,19 @@ sweep, not here.) `dumper_castxml.py`/`dumper_clang.py`/
 its existing ElfMetadata-enum-encoding pattern; `snapshot_from_dict()`'s
 matching decode; `SCHEMA_VERSION` bump; and the legacy-schema backfill
 path, reading the existing reliability flags exactly once on load);
-`diff_layout.py`/`diff_types.py`'s vtable/base-list detectors (read
-`Fact[...]`, not raw `None`).
+`diff_layout.py`/`diff_types.py`'s vtable/base-list detectors, **and every
+other semantic reader of the three converted fields, not only the two
+primary detectors** — `diff_param_qualifiers._diff_param_va_list`
+(`p_old.is_va_list`/`p_new.is_va_list`), `diff_vtable_layout.
+_is_polymorphic` (`rec.vtable`/`rec.virtual_bases`), and `diff_cxx_rules`'s
+base-walk helpers (`start.bases`/`rec.bases`) all read the raw field
+directly today and were missing from a first draft of this file list —
+each retains the exact unavailable-vs-empty ambiguity this phase exists
+to close until it is migrated too. The AI-readiness gate this phase adds
+checks every module under `diff_*.py`, not only the two named here, so
+the full set is enforced mechanically once written, but the file list
+itself must name all of them as phase-0 work, not assume the gate alone
+will surface the rest as a later, unplanned fixup.
 
 **Tests.** Port the existing `tests/test_vtable_evidence_guard.py`
 Hypothesis properties to assert over `Fact[...]` states directly, not only
@@ -621,6 +632,31 @@ sibling:
   no real caller" discipline) — but what changes this time is structural,
   not aspirational: there is one graph object per snapshot side after this
   phase, not two that merely happen to agree on node spelling.
+
+  **Two items this relocation still owes a real design, named here rather
+  than asserted as solved — this plan is stopping at naming them, not
+  attempting a fourth consecutive re-design of the same field in the same
+  review cycle.** First: `SourceGraphSummary` itself — the container class
+  with `add_node`/`add_edge`/`resolve_entities`, as opposed to the
+  `GraphNode`/`GraphEdge` primitives Phase 3's own `model/graph.py`
+  relocation already covers — still lives in `buildsource/source_graph.py`
+  today. Typing `AbiSnapshot.surface_graph: SourceGraphSummary | None` from
+  `model/snapshot.py` needs that container available to `model/` too, the
+  same direction question already answered once for the primitives
+  themselves; whether `SourceGraphSummary` relocates alongside them, or
+  `AbiSnapshot` instead holds a narrower model-layer protocol/interface
+  `SourceGraphSummary` satisfies, is a real design choice this document
+  does not resolve. Second: moving the L5 graph's attachment point off
+  `BuildSourcePack.source_graph` has real existing readers —
+  `internal_leak.py`, `buildsource/crosscheck.py`, `buildsource/
+  evidence_report.py`, `evidence_depth.py` among them — each would observe
+  no graph at all the moment the L5 builder stops writing to the old
+  location, silently regressing impact/cross-check/assurance behavior
+  that works today. Both are real, scoped, answerable questions — not
+  reasons to abandon the `surface_graph` design — but they are Phase 3's
+  own implementation PR's work to resolve with the actual code in front
+  of it (a real migration of every named reader, verified against its own
+  existing tests), not this planning document's.
 - **The relevance query** — `abicheck/policy/public_surface.py` (new):
   `PublicSurfaceQuery.resolve(graph, explicit_roots) -> frozenset[EntityId]`,
   a traversal from explicit public roots through `includes`/`declares`
@@ -986,28 +1022,37 @@ external consumer already relies on. Instead, each `Change` gains a new,
 separate field — `gate_classification` (or similarly named; always
 resolved, never `None`, independent of whether contract evaluation ran).
 
-**Where it is stamped is not a new computation — it is `_is_failure`'s
-own existing logic, moved to run once instead of on every read.**
-`junit_report._is_failure` already calls the real, single canonical
-per-finding verdict — `DiffResult._effective_verdict_for_change(change)`
-— which already honours `PolicyFile` overrides, the A4 per-finding
-`effective_verdict` (ADR-027), frozen-namespace escalation guards, and
-(when given) the resolved `severity_config`'s category-to-level mapping;
-that one function is already correct for ordinary, contract-excluded, and
-scoped-finding runs alike, since that is exactly what it exists to be
-correct for today. The stamping point is therefore `checker.compare()`'s
-own result-assembly step — *after* `DiffResult` is fully built and the
-severity scheme is resolved (both already required inputs to
-`_effective_verdict_for_change` today), iterate `result.changes` once and
-set `change.gate_classification = _effective_verdict_for_change(change,
-result, kind_sets, severity_config)` for every finding. `junit_report.py`'s
-`_is_failure` then reads that stamped field instead of calling
-`_effective_verdict_for_change` itself on every `<failure>` check.
-`compatibility_decision` keeps its existing meaning and existing callers
-completely unchanged. `RunOutcome` is what the report's own top-level
-`compatibility_decision` summary still renders from, unchanged. "Stops
-computing inline" means `_is_failure` stops *calling* the resolution
-logic itself, not that the resolution logic is new or that it starts
+**Where it is stamped is not a new computation — it is meant to be
+`_is_failure`'s own existing logic, moved to run once instead of on every
+read — but exactly which layer does the stamping is an open question this
+plan states honestly rather than asserting a third time.** `junit_report.
+_is_failure` already calls the real, single canonical per-finding verdict
+— `DiffResult._effective_verdict_for_change(change)` — which already
+honours `PolicyFile` overrides, the A4 per-finding `effective_verdict`
+(ADR-027), and frozen-namespace escalation guards; an earlier draft of
+this phase claimed `checker.compare()`'s own result-assembly step as the
+stamping point, which review correctly found incomplete twice over:
+`compare()` does not receive the renderer's `SeverityConfig` (a
+CLI/front-end-level concern today, resolved after `compare()` returns,
+not an input to it) or the `relevant_ids` scoping `--used-by`/
+`--required-symbol` produce, and `_effective_verdict_for_change` itself
+does not replicate `_is_failure`'s own preceding `is_evaluated`/
+scoped-id gate — so a value stamped purely inside `compare()` would not
+actually reproduce `_is_failure`'s current behavior for a demoted
+severity preset, a contract-excluded finding, or a scoped run. Closing
+this needs either moving the stamping call to wherever severity/scoping
+are already resolved (a later policy/workflow layer `compare()` itself
+does not reach, which may mean this field cannot be a plain `Change`
+attribute stamped once at all, but something resolved per-render-context
+instead) or threading those two missing inputs into `compare()`'s own
+signature — a real design decision with real tradeoffs on both sides,
+left to Phase 7's own implementation PR rather than guessed at a third
+time here. `compatibility_decision` keeps its existing meaning and
+existing callers completely unchanged either way. `RunOutcome` is what
+the report's own top-level `compatibility_decision` summary still renders
+from, unchanged. "Stops computing inline" means `_is_failure` stops
+*calling* the resolution logic itself once that logic has a real, settled
+stamping point — not that the resolution logic is new, or that it starts
 asking the aggregate report outcome a per-test-case question it cannot
 answer.
 
@@ -1049,10 +1094,13 @@ own JSON output and process exit code still need.
 
 **Files.** `abicheck/policy/outcome.py` (new); `checker_types.py` (new
 `Change.gate_classification` field, kw_only, appended last — `Change` is
-public API); `checker.py` (the stamping pass: once per `compare()` call,
-after `DiffResult`/severity resolution, over every `result.changes`
-entry — the one new population point the first draft of this phase
-omitted); `junit_report.py` (the first remaining inline exit-code
+public API); the actual stamping call site — `checker.py` if the
+`SeverityConfig`/`relevant_ids` gap above is closed by widening
+`compare()`'s own inputs, or the CLI/workflow layer that already holds
+both today if not; this phase's own implementation PR resolves which,
+per the open-question note above, rather than this plan naming one
+prematurely a third time; `junit_report.py` (the first remaining inline
+exit-code
 computation ADR-042 already named as unfinished); `html_report.py`'s CI Gate card (already `RunOutcome`-shaped
 per ADR-042 — confirm it reads the new object directly rather than a
 precursor shape, closing ADR-036 Increment 3 as a side effect if it
