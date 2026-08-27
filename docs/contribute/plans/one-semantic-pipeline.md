@@ -308,7 +308,38 @@ the latter was never supplied, never the other way around — so a caller
 combining both consistently sees the `Fact[...]` value it gave, and a
 caller giving only the legacy value sees it faithfully reconstructed
 rather than silently demoted to not-collected.
-second producer; `serialization.py`
+
+**This bridge as just described is still wrong for the common case, and a
+later review round caught it: `RecordType.bases`/`vtable` already default
+to `[]` and `Param.is_va_list` already defaults to `False` — identical to
+an explicitly-supplied confirmed-empty value.** `vtable_fact = Fact.
+present(self.vtable) if self.vtable_fact is None else self.vtable_fact`
+cannot tell "caller explicitly wrote `bases=[]`" apart from "caller wrote
+`RecordType(...)` and never touched `bases` at all" — both leave
+`self.bases == []` by the time `__post_init__` runs, and both would
+backfill to `Fact.present([])`, falsely claiming "collected, confirmed
+empty" for the ordinary case of a caller (most of this codebase's own
+existing test fixtures, for a start) that never asserted anything about
+the field at all. That is the identical unavailable-vs-empty collapse
+Phase 0 exists to eliminate, reintroduced through the one compatibility
+path meant to *preserve* callers, not create a new instance of the bug
+for them. The fix needs an omission sentinel, not a truthiness check: the
+legacy field's *actual* dataclass default becomes a private, identity-
+checkable sentinel object (`_OMITTED_BASES`/`_OMITTED_VTABLE`/
+`_OMITTED_IS_VA_LIST`, one `list`/`bool`-typed singleton per field, never
+exported) rather than a literal `[]`/`False` — `__post_init__` checks
+`self.bases is _OMITTED_BASES` (identity, not equality — an explicitly
+passed *different* empty list is a distinct object and compares
+unequal-by-identity even though it is equal-by-value) to tell omission
+from explicit confirmed-empty, backfills `Fact.not_collected()` only for
+the true-omission case and `Fact.present(self.bases)` for an explicit
+value (empty or not), and then normalizes the field to an ordinary `[]`/
+`False` before `__post_init__` returns, so every reader of `self.bases`
+after construction still sees the identical plain value it always has —
+the sentinel is an internal construction-time signal, never a value a
+consumer observes.
+
+Continuing the Files list: `serialization.py`
 (`snapshot_to_dict()`'s `Fact[...]`-status-to-string encoding, extending
 its existing ElfMetadata-enum-encoding pattern; `snapshot_from_dict()`'s
 matching decode; `SCHEMA_VERSION` bump; and the legacy-schema backfill
@@ -364,6 +395,17 @@ than the backfilled one, pinning the stated precedence directly; and a
 bare `Param(is_va_list=True)` with no `is_va_list_fact` given backfills
 the same way — each confirmed to fail against a version of the dataclass
 that defaults the new field to `Fact.not_collected()` instead of `None`.
+A fourth test pins the omission-sentinel fix directly, the exact
+counterexample that caught the gap in the first design: `RecordType()`
+(nothing touched — the common case, not the nonempty/`True` cases the
+third test above already covers) backfills `vtable_fact`/`bases_fact` to
+`Fact.not_collected()`, never `Fact.present([])`; `RecordType(bases=[])`
+(an explicit, confirmed-empty base list) backfills to `Fact.present([])`,
+distinct from the previous case despite both leaving `self.bases == []`;
+and a bare `Param()` backfills `is_va_list_fact` to `Fact.not_collected()`,
+never `Fact.present(False)` — each confirmed to fail against the
+truthiness-based (non-sentinel) version of the bridge, which cannot tell
+the two cases apart.
 
 **Acceptance criteria.** The three converted fields cannot be read by any
 detector without explicit availability handling — enforced by a new
@@ -541,29 +583,72 @@ phase left the question open rather than answering it, which review
 correctly read as "nowhere for the promised identity to live."** The
 resolver function (`model.identity.entity_id_for_record(rec)` and its
 siblings for enum/typedef/function/variable/constant) derives `ScopePath`
-from the same raw data the ad hoc `"::".join([*entry.scope, name])`/
-namespace-suffix machinery already parses today — `RecordType.
-qualified_name`/`name` (and the equivalent fields on every other kind) —
-so no new field is needed to *compute* it: every caller already has
-enough to call the resolver directly. A consumer like `_find_opaque_types`
-calls `entity_id_for_record(rec)` instead of reading `rec.name` directly,
-which is the actual fix this phase makes (one shared, tested algorithm
-instead of nine independently-invented ones) — it is not, and was never
-meant to be, a caching optimization. Caching belongs to whichever
-structure is built once per snapshot and handed to every consumer
-afterward, which is a genuinely separate design question this phase
-correctly defers rather than answers prematurely: Phase 6's `SemanticIR`
-is exactly that structure (`dict[OccurrenceId, CanonicalEntity]`, built
-once during snapshot assembly), and its `canonical_entities()` projection
-is where a future consumer reads a pre-resolved `EntityId` without
-recomputing it. Until Phase 6 lands, every `EntityId`-consuming call site
-this phase migrates calls the resolver function directly, on demand — a
-cheap, pure computation (tuple construction from already-available
-strings), not a serialization or round-trip concern, since nothing is
-persisted. Round-tripping `EntityId` through storage is Phase 2's own
-`storage/entity_ids.py` DTO work (above), which is unrelated to this
-question — that DTO exists for ADR-062's persisted `ProjectSnapshot`, not
-for `AbiSnapshot`'s in-memory `RecordType`/`Function` objects.
+from structural scope data the parsers already track internally during
+the AST walk — **not, as an earlier draft of this note claimed, from
+`RecordType.qualified_name`/`name` alone.** That claim does not survive
+checking the real parser code: `entry.scope` (`dumper_clang.py`'s/
+`dumper_castxml.py`'s own internal scope-tracking list, built up while
+walking the AST, collapsed into `qualified_name` via `"::".join([*entry.
+scope, name])` at the point a declaration is finalized) is a plain
+`list[str]` of bare names, with no per-segment kind tag at all — it cannot
+distinguish a record nested in a record from the same names nested in a
+namespace, or an inline-namespace segment from an ordinary one, because
+that distinction was never captured in the first place, not merely
+discarded during string-joining. A resolver operating on `qualified_name`
+alone is working from a representation that is *structurally* insufficient
+for `ScopePath`, not one the resolver fails to parse correctly — no
+amount of cleverness in `model/identity.py` recovers information the
+parser itself never recorded. **The real fix reaches one layer further
+back than the resolver: `entry.scope` itself is widened, in both
+`dumper_clang.py` and `dumper_castxml.py`, from `list[str]` to a list of
+typed segment records** — each push onto the scope stack (entering a
+namespace, a record, an inline namespace, an anonymous scope, a
+function-local scope during AST traversal) already has, *at that exact
+point*, the one piece of information `qualified_name` alone throws away:
+which AST node kind it is actually processing (a clang `NamespaceDecl`
+vs. `CXXRecordDecl` vs. an inline-namespace-tagged `NamespaceDecl`; a
+castxml `<Namespace>` vs. `<Struct>`/`<Class>` XML element), plus
+whatever kind-specific data that node already carries (a record's access
+specifier, an inline namespace's version tag). Recording that tag
+*when the scope is entered*, rather than trying to reconstruct it later
+from the flattened string, is what makes `ScopePath` constructible at
+all — `model.identity.entity_id_for_record(rec)` and its siblings take
+this typed scope list (not `qualified_name`) as their real input, with
+`qualified_name`/`name` kept exactly as they are today for every
+consumer that still wants the flat display spelling.
+
+**This still leaves one real question this phase cannot paper over with a
+third redesign: `_find_opaque_types`/`type_reachability.py`'s other
+consumers run *after* parsing, against an already-built `AbiSnapshot` —
+they have no access to the parser's local typed-scope list by the time
+they run, only to `RecordType`'s own fields.** "Call the resolver
+on demand" only works where the typed scope data the resolver needs is
+still in scope, which is true during parsing and false for every
+post-parse consumer this phase's own acceptance criteria require
+migrating (`diff_filtering.py`'s ambiguity-tracking helpers, explicitly
+named for deletion below). Two earlier framings of this section each
+answered a different half of the real question and missed the other:
+round 15's "no new carrier field, call the resolver on demand" is correct
+for *where the computation happens* (parse time, not a cached field) but
+silently assumed every consumer could reach that computation, which this
+round's finding shows is false for any consumer running after parsing.
+Resolving it for real needs one of two shapes, and this plan does not
+pick one under continued review pressure a third time: (a) `EntityId`
+actually is computed once, at parse time, and carried forward on the
+model objects after all — which means Phase 2 does introduce a field
+(`RecordType.entity_id`/equivalent per kind), contradicting this
+section's earlier "no carrier" framing, with its own schema bump and
+round-trip test; or (b) every post-parse consumer this phase lists for
+migration is deferred to land *with* Phase 6 instead of before it, since
+Phase 6's raw-fact capture is the one place in this plan's own sequencing
+that already has the typed scope data (SemanticIR's `CanonicalEntity`
+is built from it directly), making Phase 2 define the types and the
+algorithm while Phase 6 is where real declarations actually get resolved
+identities. This is named explicitly as Phase 2's own open design
+question for its implementation PR to resolve, the same way this plan
+has already done for the `SourceGraphSummary`-relocation and
+`gate_classification`-stamping-layer questions elsewhere, rather than
+asserting a fourth, unverified answer here.
 
 This phase explicitly targets, and closes, the specific collision bugs
 AGENTS.md's "Known gaps" records as already-found-and-patched-locally:
@@ -1212,20 +1297,36 @@ coverage, not evidence-requirement satisfiability) and has no `compare`/
 resolve_compare_request`/`service_dump_pipeline.resolve_dump_request`
 (construct `AnalysisPlan` as part of resolution, reusing — not
 duplicating — ADR-049's `compatibility_evaluation_resolver.resolve_field`
-for the policy half); `cli_compare_release.py`'s `_run_compare_pair` (also
-constructs and checks an `AnalysisPlan` for each library pair before
-calling `service.run_compare`, so a release/bundle comparison gets the
-identical pre-flight rejection a single-pair `compare` does, rather than
-discovering the same silent-failure shape mid-run just because it already
-shares the Tier-2 chokepoint); `buildsource/adapters/bazel.py` (the `--build-
+for the policy half). **`cli_compare_release.py`'s `_run_compare_pair`
+itself is *not* a Files entry, and a first draft of this phase's Files
+list had it independently constructing and checking a second
+`AnalysisPlan` before calling `service.run_compare` — a real mistake a
+later review round caught.** `_run_compare_pair` already calls `service.
+run_compare`, which itself calls `run_compare_request`, which calls
+`resolve_compare_request` — the one function this phase just wired to
+construct an `AnalysisPlan` as part of its own resolution. Every
+`service.run_compare()` caller, `_run_compare_pair` included, already
+reaches that check through the shared resolver; having the frontend build
+a second, independent plan performs the same preflight twice and leaves
+two copies of workflow orchestration that can silently drift apart the
+moment planning gains a new probe or normalization step only one of them
+gets. The release/bundle fan-out gets this phase's pre-flight guarantee
+for free, through the exact chokepoint it already shares with single-pair
+`compare` — no change to `cli_compare_release.py` itself is needed or
+correct here. (A genuinely new capability — say, inspecting the resolved
+plan *before* the comparison runs, which `_run_compare_pair` cannot do
+through `service.run_compare`'s current signature — would need the
+service API explicitly widened to return or accept a plan; that is a
+real, separate change this phase does not need and does not attempt.)
+`buildsource/adapters/bazel.py` (the `--build-
 target` scoping gap gets its first real pre-flight check site here, per
 its own AGENTS.md entry's recommended option 2 — reject, don't silently
 scope-miss); `scripts/check_architecture.py`'s `cli-contract`/
-`engine-cli-boundary` gates (widened to confirm `cli_compare_release.py`
-resolves an `AnalysisPlan` before its `service.run_compare` call, per
-ADR-063 D1's own statement that these gates are "widened to check this
-directly" — not left as a claim this plan's own Files list doesn't act
-on).
+`engine-cli-boundary` gates (widened to confirm every `service.
+run_compare`/`run_compare_request` caller — not `_run_compare_pair`
+independently — resolves an `AnalysisPlan` through the one shared path,
+per ADR-063 D1's own statement that these gates are "widened to check
+this directly").
 
 **Tests.** Two direct regression tests reproducing the exact named gaps
 from AGENTS.md (`--build-target` with pre-captured `--build-info`; `-H`
@@ -1233,8 +1334,10 @@ with an incompatible collect mode) — each asserting `PlanningError`, not
 a warning or silent continuation. A third test reproduces the identical
 `--build-target` gap through `compare-release`/bundle's own fan-out (not
 only single-pair `compare`), confirming `_run_compare_pair` now raises the
-same `PlanningError` for one library in a release rather than silently
-scope-missing that one library while the rest of the release proceeds.
+same `PlanningError` for one library in a release — through the shared
+`resolve_compare_request` path, not a second, frontend-local plan — rather
+than silently scope-missing that one library while the rest of the
+release proceeds.
 
 **Acceptance criteria.** Both named silent-failure gaps in AGENTS.md close
 as a side effect of this phase, not as separate fixes — if either needs a
