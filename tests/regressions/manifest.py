@@ -89,13 +89,28 @@ class BugClass:
     #: suite for this class. At least one is required — a class with no
     #: test is a "Known gaps" AGENTS.md paragraph, not a registry entry.
     seed_tests: tuple[str, ...]
-    #: Public surfaces this class's tests are verified through (CLI,
-    #: Python API, GitHub Action, ...). Free-form; not yet cross-checked
-    #: against a fixed vocabulary.
+    #: Documented, user-facing entry points this class's own seed_tests
+    #: actually invoke — "cli" only for a real Click/`CliRunner`
+    #: invocation, "python-api" only for a call through `abicheck.service`,
+    #: "github-action" only for a real execution of a workflow/composite-
+    #: action step. A seed test that imports an internal module directly
+    #: (`abicheck.checker`, `abicheck.surface`, `abicheck.dumper_clang`,
+    #: ...) — which is most of this registry today — exercises none of
+    #: these, and this field must stay `()` for it: a claimed surface a
+    #: seed test doesn't reach conceals exactly the missing cross-surface
+    #: coverage a contributor is supposed to discover here (Codex review,
+    #: PR #885). Free-form beyond that rule; not yet cross-checked against
+    #: a fixed vocabulary.
     public_surfaces: tuple[str, ...] = ()
-    #: Axis name -> the values verified for that axis, e.g.
-    #: {"frontend": ("castxml", "clang")}. Free-form; documents *coverage*
-    #: breadth, not a schema this module enforces.
+    #: Axis name -> the values *actually exercised*, e.g.
+    #: {"algorithm": ("zstd", "gzip")} when a seed test genuinely round-
+    #: trips through both. The same rule as `public_surfaces` applies to a
+    #: "frontend" axis specifically: {"frontend": ("castxml", "clang")}
+    #: requires a seed test that invokes the real castxml/clang backend —
+    #: not one that feeds a hand-built AST/XML fragment into an internal
+    #: parser class directly, which is frontend-agnostic and earns no
+    #: frontend axis entry at all. Free-form beyond that rule; documents
+    #: *coverage* breadth, not a schema this module enforces.
     axes: dict[str, tuple[str, ...]] = field(default_factory=dict)
     #: Residuals this class's current tests do not close (see `KnownGap`).
     known_gaps: tuple[KnownGap, ...] = ()
@@ -119,8 +134,19 @@ BUG_CLASSES: tuple[BugClass, ...] = (
         ),
         fixed_by=(839,),
         seed_tests=("tests/test_dumper_clang_enum_value_properties.py",),
-        public_surfaces=("python-api",),
-        axes={"frontend": ("clang",)},
+        known_gaps=(
+            KnownGap(
+                description=(
+                    "The seed test calls `dumper_clang._evaluated_int_value` "
+                    "directly on a hand-built AST-node dict — no real clang "
+                    "invocation, no public surface — so this is unit-level "
+                    "primitive coverage only; there is no cross-surface "
+                    "(CLI/python-api) or real-clang-backend test for this "
+                    "class yet."
+                ),
+                reference="docs/contribute/plans/bug-class-regression-testing.md#phase-2",
+            ),
+        ),
     ),
     BugClass(
         id="policy.public_surface_reachability",
@@ -135,15 +161,20 @@ BUG_CLASSES: tuple[BugClass, ...] = (
             "tests/test_surface_property.py",
             "tests/test_surface_seed_predicate_properties.py",
         ),
-        public_surfaces=("python-api", "cli"),
-        axes={"frontend": ("castxml", "clang")},
         known_gaps=(
             KnownGap(
                 description=(
-                    "The direct-clang path-normalization and nested/"
-                    "anonymous-namespace record gaps AGENTS.md's 'Known "
-                    "gaps' section documents from PR #843 are not yet "
-                    "encoded as canaries in the generalized suite."
+                    "Both seed tests run on synthetic snapshots built "
+                    "directly (no castxml/clang, no CLI) — the "
+                    "cross-surface (CLI) and cross-backend (castxml/clang) "
+                    "coverage this class's own invariant is stated over "
+                    "does not exist yet, and the direct-clang path-"
+                    "normalization and nested/anonymous-namespace record "
+                    "gaps AGENTS.md's 'Known gaps' section documents from "
+                    "PR #843 are unmonitored (Codex review, PR #885 — "
+                    "public_surfaces/axes here previously overclaimed "
+                    "'cli'/'castxml'/'clang' coverage neither seed test "
+                    "exercises)."
                 ),
                 reference="PR #843",
             ),
@@ -163,8 +194,6 @@ BUG_CLASSES: tuple[BugClass, ...] = (
             "tests/test_castxml_anonymous_type_location.py",
             "tests/test_anon_type_location_properties.py",
         ),
-        public_surfaces=("python-api",),
-        axes={"frontend": ("castxml", "clang"), "storage": ("live",)},
         known_gaps=(
             KnownGap(
                 description=(
@@ -173,6 +202,18 @@ BUG_CLASSES: tuple[BugClass, ...] = (
                     "markers (AGENTS.md, PR #868's own follow-up note)."
                 ),
                 reference="PR #868",
+            ),
+            KnownGap(
+                description=(
+                    "Both seed tests feed a hand-built AST-node/XML "
+                    "fragment into an internal parser class directly — no "
+                    "real castxml/clang subprocess, no CLI, no python-api "
+                    "call — so there is no cross-backend (castxml/clang) "
+                    "or cross-surface (CLI/python-api) test for this class "
+                    "yet, despite the invariant itself being backend-"
+                    "agnostic (Codex review, PR #885)."
+                ),
+                reference="docs/contribute/plans/bug-class-regression-testing.md#phase-4",
             ),
         ),
     ),
@@ -189,7 +230,19 @@ BUG_CLASSES: tuple[BugClass, ...] = (
             "tests/test_cross_tier_dedup_unhashable_value.py",
             "tests/test_finding_identity_properties.py",
         ),
-        public_surfaces=("python-api",),
+        known_gaps=(
+            KnownGap(
+                description=(
+                    "Both seed tests call internal matching/dedup "
+                    "primitives directly (`diff_filtering`/"
+                    "`finding_identity`) — no CLI, no python-api call — so "
+                    "there is no public-surface-level test that a real "
+                    "dedup-key collision actually reaches `compare()`'s "
+                    "output."
+                ),
+                reference="docs/contribute/plans/bug-class-regression-testing.md#phase-5",
+            ),
+        ),
     ),
     BugClass(
         id="config.propagation_completeness",
@@ -200,15 +253,16 @@ BUG_CLASSES: tuple[BugClass, ...] = (
         ),
         fixed_by=(860, 883),
         seed_tests=("tests/test_project_targets_consumer_compile.py",),
-        public_surfaces=("cli", "python-api"),
         known_gaps=(
             KnownGap(
                 description=(
                     "No generalized sentinel-propagation matrix exists yet "
                     "covering every public entry point named in "
                     "bug-class-regression-testing.md's Phase 6 — today's "
-                    "seed test covers one concrete config path, not the "
-                    "full matrix."
+                    "seed test calls "
+                    "`abicheck.buildsource.project_targets` directly "
+                    "(no CLI, no python-api) and covers one concrete "
+                    "config path, not the full matrix."
                 ),
                 reference="docs/contribute/plans/bug-class-regression-testing.md#phase-6",
             ),
@@ -224,8 +278,20 @@ BUG_CLASSES: tuple[BugClass, ...] = (
         ),
         fixed_by=(699, 721),
         seed_tests=("tests/test_snapshot_compression.py",),
-        public_surfaces=("python-api",),
         axes={"algorithm": ("zstd", "gzip")},
+        known_gaps=(
+            KnownGap(
+                description=(
+                    "The seed test calls `abicheck.serialization`/"
+                    "`abicheck.snapshot_io`'s real read/write chokepoints "
+                    "directly (real gzip/zstd, real scale) but never "
+                    "through `abicheck.service`/the CLI — no python-api "
+                    "or CLI-level round-trip test exists for this class "
+                    "yet."
+                ),
+                reference="docs/contribute/plans/bug-class-regression-testing.md#phase-7",
+            ),
+        ),
     ),
     BugClass(
         id="trust_boundary.shell_workflow_injection",
@@ -249,7 +315,6 @@ BUG_CLASSES: tuple[BugClass, ...] = (
         ),
         fixed_by=(753, 759),
         seed_tests=("tests/test_canonical_finding_id_completeness.py",),
-        public_surfaces=("python-api",),
         known_gaps=(
             KnownGap(
                 description=(
@@ -258,6 +323,15 @@ BUG_CLASSES: tuple[BugClass, ...] = (
                     "property is not yet generalized to every other "
                     "kind-keyed registry named in Phase 9 of the plan "
                     "(evidence kinds, providers, report renderers)."
+                ),
+                reference="docs/contribute/plans/bug-class-regression-testing.md#phase-9",
+            ),
+            KnownGap(
+                description=(
+                    "The seed test calls `finding_identity."
+                    "report_canonical_finding_id` directly — no CLI, no "
+                    "python-api — so nothing here proves a real registry "
+                    "omission reaches a `compare()` report."
                 ),
                 reference="docs/contribute/plans/bug-class-regression-testing.md#phase-9",
             ),
@@ -275,7 +349,6 @@ BUG_CLASSES: tuple[BugClass, ...] = (
         ),
         fixed_by=(834, 838, 860, 883),
         seed_tests=("tests/test_fact_conservation_properties.py",),
-        public_surfaces=("cli", "python-api"),
         known_gaps=(
             KnownGap(
                 description=(
@@ -283,6 +356,16 @@ BUG_CLASSES: tuple[BugClass, ...] = (
                     "detector-family subset today, not every ChangeKind "
                     "family and evidence-completeness failure mode named "
                     "in AGENTS.md's 'Known gaps' section."
+                ),
+                reference="docs/contribute/plans/bug-class-regression-testing.md#phase-9",
+            ),
+            KnownGap(
+                description=(
+                    "The seed test calls `abicheck.checker.compare` "
+                    "directly on hand-built snapshots — real detection "
+                    "logic, but no CLI/python-api/exit-code layer, so "
+                    "report/gate/exit-code agreement (the second half of "
+                    "this class's own invariant) is untested."
                 ),
                 reference="docs/contribute/plans/bug-class-regression-testing.md#phase-9",
             ),
