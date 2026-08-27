@@ -2583,6 +2583,260 @@ header-only" to "was *this finding* header-only, uncorroborated" — a
 strictly more precise version of the same signal, using data this plan
 produces rather than requiring new extraction.
 
+### Phase 5 — Pack-level producer receipt (prerequisite for declarative-project consumers)
+
+**Origin:** external upstream-only review (base commit `327df7b5616bcf
+aea8c330aad418b796c17f3970`, PRs #860/#883 merged), item 10. Distinct from
+Phases 0-3 above, which answer *per-finding* provenance ("which extractor
+and evidence tier produced or corroborated this one `Change`"). This phase
+answers a coarser, prerequisite question at the *evidence pack* level: does
+the pack a `check-project.yml` target consumes carry enough of a receipt to
+be validated and normalized before its facts ever reach a finding at all?
+
+`build-output.json` today carries a coarse top-level `evidence_producer`
+(`abicheck/buildsource/build_output.py`) — enough to answer "what kind of
+tool produced this," not enough to reject a pack that is subtly
+incompatible with the context consuming it. Extend the pack-level receipt
+to carry:
+
+```
+producer kind
+abicheck version
+facts schema version
+Clang/plugin major
+compiler path and digest
+source-tree digest
+per-projection: { identity, compile-context fingerprint, public-header-root digest, translation-unit inventory }
+```
+
+(`compile-context fingerprint`/`public-header-root digest`/`translation-unit
+inventory` are keyed per canonical target projection, not singular pack-wide
+scalars — see the correction below for why a shared, multi-target pack
+cannot honestly carry one value for any of these three.)
+
+This receipt must be **validated and normalized, not merely informational**
+— a consumer (`check-project.yml`'s evidence-routing step, or a direct
+Python API caller) rejects a pack whose receipt disagrees with the
+resolved consumption context, with a typed reason, rather than accepting it
+and letting a downstream mismatch surface as a confusing comparability
+error several steps later. This is the same "fail closed with a named
+reason" discipline `comparability.py`'s existing `ScopeMismatchError`
+already establishes for the scope-fingerprint axis — extend that pattern to
+the producer-receipt axis rather than inventing a second one.
+
+**A bare singular "target id" field is wrong here, confirmed by a fresh
+review round cross-checking this phase against G43's own scenario, not
+assumed.** G43's inferred-projection case is exactly one build-wide
+`abicheck_inputs/` pack intentionally consumed by *several* targets, with
+`attribute_sources_to_targets()`/`_filter_tus_by_attribution()` selecting
+each target's own TUs out of that one shared pack — the pack itself has no
+honest single target it "belongs to." A singular `target id` field
+combined with fail-closed equality matching would force one of two wrong
+outcomes: either the pack is stamped with one target's id and every other
+target's legitimate consumption of the identical pack is rejected as a
+receipt mismatch, or the field is left blank/absent for a shared pack and
+loses fail-closed validation for this class of pack entirely — both defeat
+the purpose of this phase for precisely the scenario G43 exists to wire
+up. The receipt's identity field must therefore be **projection-aware**:
+either a single target id (the ordinary, non-shared case — validated by
+equality exactly as before) *or* a build-wide/shared-scope marker paired
+with an **attribution digest — which must be newly defined by this phase,
+not treated as something G43 or existing code already computes.** A fresh
+review round found this claim false: neither `link_attribution.py` nor
+`inputs_pack.py`/`build_output.py` computes or persists any such digest
+today — `attribute_sources_to_targets()` returns a plain
+`{normalized_source_path: frozenset[target_identity]}` mapping, and
+`_inferred_evidence_projection_issues()`/`_filter_tus_by_attribution()`
+only ever re-derive that mapping and test set intersection/membership
+against it; nothing hashes it. Without a real digest to validate against,
+this phase's own shared-pack receipt path has no value a producer can
+emit or a consumer can verify, and stays unimplementable for exactly the
+G43 scenario it was written to cover.
+
+This phase must therefore define, not merely reference, the attribution
+digest:
+
+- **Canonical normalization**: the digest is computed over
+  `attribute_sources_to_targets()`'s own return shape — sort the mapping's
+  keys (already-normalized source paths), and for each key sort its
+  `frozenset[target_identity]` members — so two structurally identical
+  mappings always serialize to the same canonical byte sequence regardless
+  of iteration/insertion order (the same "sort before hash" discipline
+  this codebase already applies to other content-addressed digests, e.g.
+  `BuildSourcePack.content_hash()`).
+- **Hashing algorithm**: reuse whatever primitive this codebase's other
+  content digests already use (confirm and reuse — don't introduce a
+  second hashing convention for one new field), applied to the canonical
+  serialization above.
+- **Persisted field**: the digest is computed once, at the point the
+  attribution mapping is produced/validated (natural point: alongside
+  `_inferred_evidence_projection_issues()`'s own re-derivation, or a new
+  sibling function next to it), and persisted as part of this phase's
+  receipt (artifact 2, `InputsManifest` — see "Relationship to other
+  plans" below) — not recomputed ad hoc by each consumer, which would
+  reintroduce the same "two independent statements of one fact can
+  disagree" risk this plan's own `comparability.py` precedent exists to
+  avoid.
+- **Producer/consumer wiring**: the producer (whatever emits the
+  `abicheck_inputs/` pack and its `attribution_path` file) computes and
+  stores the digest; the consumer (this phase's own fail-closed receipt
+  validator) recomputes it from the attribution mapping it independently
+  loaded and compares — a real equality check, not a reference to a value
+  that was merely asserted.
+
+Validated by checking that the *consumer's resolved projection* — this
+target, selected via attribution — is one the pack's own attribution
+digest actually covers (i.e. the target's canonical identity, from G43's
+own corrected identity-set resolution, appears among the values the
+digested mapping ties to at least one TU), not by requiring the whole
+pack to name one target. A consumer validates whichever shape the receipt
+declares; a shared pack is never forced through the single-target equality
+check that only applies to the non-shared case.
+
+**Two more receipt fields have the identical singular-value problem the
+identity field above was already fixed for, and a fresh review round found
+they were never fixed alongside it: `compile-context fingerprint` and
+`public-header-root digest`.** A build-wide shared pack is, by this
+phase's own design, consumed by multiple targets — and there is no reason
+those targets share one compiler context or one set of public-header
+roots; the whole point of a per-target attribution split is that
+different targets can be genuinely different components of one build.
+A singular compile-context fingerprint or public-header-root digest on
+the receipt therefore repeats exactly the mistake the identity field
+already had to be corrected for: fail-closed comparison against each
+target's own resolved context would either reject every projection except
+the one the singular value happens to describe, or — worse, silently —
+validate one target's context against a *different* target's actually-
+resolved facts, defeating the "fail closed with a named reason"
+discipline this whole receipt exists to provide. These two fields must
+therefore be defined **per canonical target projection**, not once for
+the whole pack: either (a) a mapping from each accepted projection
+identity (the same `target://<id>`/`output://<basename>`/shared-scope
+identity this phase's own identity field already resolves) to that
+projection's own compile-context fingerprint and public-header-root
+digest, each computed by restricting to the TUs G43's attribution
+mapping ties to that projection before fingerprinting; or (b) a single,
+projection-keyed subreceipt object bundling identity + fingerprint +
+header-root digest together per projection, rather than three
+independently-keyed parallel structures that could drift out of sync
+with each other. Either shape is acceptable; three separate singular
+scalars, as an earlier draft of this phase's field list had them, is not
+— it silently assumes every consumer of a shared pack shares one compile
+context, which is precisely the assumption G43's own attribution
+mechanism exists to *not* require.
+
+**Relationship to Phases 0-3 above:** the per-finding provenance tags this
+plan's earlier phases add (`l0:elf_symtab`, `l2:castxml`, `l4:source_
+replay`, ...) name *which evidence tier* produced or corroborated a
+finding; this phase's pack-level receipt is what lets a consumer trust that
+tier's claim in the first place — a `l4:source_replay` tag is only as
+trustworthy as the receipt proving the L4 replay ran against the compiler
+version, source tree, and target it claims to. Sequence this phase before
+relying on per-finding tags in a fail-closed consumer (a declarative
+project's evidence-routing gate); the report-surface work in Phase 3 above
+does not depend on it and can ship independently.
+
+**Relationship to other plans — corrected: these are not two sections of
+one manifest, they are two genuinely separate storage envelopes, confirmed
+by reading `build_output.py`/`inputs_pack.py` directly.** An earlier draft
+of this phase claimed G43's attribution data and this phase's producer
+receipt "live in the same pack manifest... two receipt sections" — false.
+Three distinct artifacts are in play, not one:
+
+1. **`build-output.json` itself** — carries its own top-level
+   `evidence_producer` (`BuildOutputEvidenceProducer`), which this phase
+   extends. This part of the design is unchanged.
+2. **The `abicheck_inputs/` pack's own `manifest.json`**
+   (`InputsManifest`, `inputs_pack.py`) — the actual Flow-2 source-facts
+   pack a per-target `evidence.path` in `build-output.json` points at.
+   This is the pack whose *own* schema is the natural home for a
+   producer receipt describing the facts it carries (Clang/plugin
+   version, compiler identity, source-tree digest, TU inventory) — not
+   `build-output.json`, which only points at this pack, doesn't embed it.
+3. **G43's `attribution_path`-referenced file** — a *third*, separate
+   artifact: `BuildOutputEvidence.attribution_path` is a per-target field
+   on `build-output.json` naming yet another file, one holding a raw
+   serialized `BuildEvidence` (parsed via `BuildEvidence.from_dict()`)
+   used only to re-derive TU→target attribution for validation — it is
+   neither part of `build-output.json` nor of the `abicheck_inputs/`
+   pack's own manifest.
+
+This phase's receipt therefore belongs in **artifact 2** (the
+`abicheck_inputs/manifest.json` schema, `InputsManifest`) for the facts it
+actually describes, plus the already-correct top-level `evidence_producer`
+extension in artifact 1 for coarse producer identity — not merged with
+G43's artifact 3. The three stay separate, cross-referenced by path
+(`evidence.path`/`evidence.attribution_path` in artifact 1), not folded
+into one schema. G34's `consumer_compile`/toolchain-binding work is still
+the source of the "compile-context fingerprint"/"compiler path and digest"
+fields this phase reuses rather than re-deriving.
+
+**Acceptance test:** a Clang-18 plugin pack consumed by an incompatible
+producer context is rejected with a typed reason. A stale source-tree
+digest is rejected. A clean-job reuse of a valid pack (identical receipt,
+re-run in a fresh CI job) reproduces the same normalized L4 findings. Every
+reported finding can identify its producing and corroborating evidence
+without reconstructing that answer from the whole snapshot (this last
+clause is Phases 0-3's own acceptance bar, restated here to make explicit
+that this phase and Phases 0-3 together are what the review's item 10
+acceptance test actually requires).
+
+**Files & surfaces — routed through ADR-061's canonical owners, matching
+the same correction already applied to G41/G45's manifest-schema work,
+not `abicheck/buildsource/build_output.py` directly:**
+
+- **`abicheck/model/`** — the receipt's own field shapes (producer kind,
+  version identifiers, digests, TU inventory) as a shared value type, per
+  ADR-061's "add an ABI entity/value shared across stages" routing.
+- **`abicheck/storage/`** — the receipt's schema/serialization and version
+  bump, per ADR-061's "own their schemas/migrations" routing — the same
+  home G41 Phase 1 routes the baseline-manifest schema to. This covers
+  both artifact 1 (`build-output.json`'s `evidence_producer` extension)
+  and, as a separate schema, artifact 2 (`InputsManifest`'s new receipt
+  fields) — see the corrected "Relationship to other plans" note above for
+  why these must stay two schemas, not one.
+- `abicheck/buildsource/inputs_pack.py` — the `InputsManifest` reader/
+  writer this phase's artifact-2 receipt fields actually extend (currently
+  missing from this file list; the receipt has nowhere to live without it).
+- **`abicheck/workflows/`** — the new validation entry point
+  `check-project.yml`'s evidence-routing step consults, coordinating the
+  fail-closed rejection.
+- `abicheck/buildsource/build_output.py` — orchestration only (calling the
+  `storage/` reader/writer), not schema logic grown here directly.
+- `abicheck/comparability.py`'s existing fail-closed rejection pattern
+  (`ScopeMismatchError`) is the *pattern* to extend, not necessarily the
+  *module* — `comparability.py` is itself an unclassified `legacy_root_
+  modules` entry per `architecture/modules.yaml`, so whether this phase's
+  new rejection lives there or in a `policy/`-owned sibling is a decision
+  for whoever migrates `comparability.py` into the classified inventory,
+  not a blocking prerequisite for this phase (the same "don't relocate an
+  unrelated legacy module as a side effect" reasoning G41 Phase 2 already
+  states for `run_plan.py`).
+
+**Effort:** M — mostly additive schema fields plus one new validation
+entry point; the design risk is keeping this receipt's fields cleanly
+separated from the existing `attribution_path` fields in the same manifest
+rather than letting the two blur into one field family that answers
+neither question cleanly. The projection-aware identity field (single
+target vs. shared/build-wide-plus-attribution-digest) adds one real design
+decision — a two-shape union rather than a bare string — but stays
+additive schema work, not new extraction logic. **The attribution digest
+itself is a genuinely new piece of logic, not previously existing
+anywhere in this codebase** (confirmed by a fresh review round — no
+current code computes one) — canonical normalization, a hashing
+algorithm, a persisted field, and producer/consumer wiring, all defined
+above rather than assumed to already exist. This is real, if narrow, new
+work; it does not push the phase out of M, but it is not free the way the
+rest of this phase's additive schema fields are. **The per-projection
+compile-context-fingerprint/public-header-root-digest/TU-inventory
+correction adds the identical class of real work**: restricting to a
+projection's own attributed TUs before fingerprinting is new logic
+alongside the schema shape change (a mapping or subreceipt, not three
+bare scalars) — confirmed by a fresh review round to be a second real
+gap in the same shared-pack scenario the identity field was already
+fixed for. Still additive schema/computation work overall, not a new
+extraction pipeline; the phase stays M.
+
 ## Design
 
 Almost no new extraction. Every phase above threads a fact the producing
