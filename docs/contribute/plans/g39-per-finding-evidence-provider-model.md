@@ -1052,6 +1052,39 @@ structure already in place:
    Left as a documented, known limitation for whichever slice next
    touches `.symtab`-fallback provenance.
 
+   **Second sub-slice shipped: the remaining hardening kinds in the same
+   two detector functions.** `RELRO_WEAKENED`/`PIE_DISABLED`/
+   `WRITABLE_EXECUTABLE_SEGMENT`/`EXECUTABLE_STACK`/
+   `EXECUTABLE_STACK_REMOVED` were deliberately excluded from the first
+   sub-slice above pending a precise trace of their evidence sources
+   (`elf_metadata._parse_segments`/`_finalize_hardening`/
+   `_parse_dynamic`) — now done. Three are pure ELF program-header/
+   segment reads (`WRITABLE_EXECUTABLE_SEGMENT`: `PT_LOAD`;
+   `EXECUTABLE_STACK`/`EXECUTABLE_STACK_REMOVED`: `PT_GNU_STACK`) —
+   `both:l0:elf_program_headers`, a new tag (ELF program headers,
+   distinct from `l0:elf_dynamic`'s `.dynamic`-section reads). Two are
+   genuine composites: `RELRO_WEAKENED` combines a `PT_GNU_RELRO`
+   segment check with the `.dynamic` `bind_now` flag
+   (`both:l0:elf_dynamic`, `both:l0:elf_program_headers`, sorted per the
+   normalization rule above); `PIE_DISABLED` combines the `.dynamic`
+   `DF_1_PIE` flag with the ELF file header's own `e_type` (`ET_DYN`) —
+   `both:l0:elf_dynamic`, `both:l0:elf_header` (`l0:elf_header`, a
+   second new tag: the ELF file header itself, distinct from both the
+   `.dynamic` section and program headers). `l0:elf_dynamic` itself was
+   already named in Phase 0's table (`ElfMetadata.soname`/`DT_SONAME`)
+   but had no real producer wired until this slice. All five kinds are
+   single-producer (confirmed via `git grep`), added to `PROVENANCE_
+   STATIC`, and covered by five new `tests/_detector_mutations.py`
+   entries (`_m_relro_weakened`/`_m_pie_disabled`/`_m_writable_
+   executable_segment`, both weakening-direction-only and added to
+   `ASYMMETRIC`; `_m_executable_stack_introduced`/`_m_executable_stack_
+   removed`, NOT asymmetric since the two opposite-direction kinds share
+   one symbol — `"PT_GNU_STACK"` — so forward/backward symbol sets
+   still agree). `RPATH_CHANGED`/`RPATH_TYPE_CHANGED`/`RUNPATH_CHANGED`
+   remain excluded, for the same multi-provider reason the first
+   sub-slice's note already gives (a second, Mach-O-side producer with
+   no existing per-platform vocabulary entry).
+
    **`diff_symbols.py` does NOT belong in this
    mechanical sub-slice** despite being symbol-table-driven on its face
    (Codex review, verified against the code): `_public_functions()` falls

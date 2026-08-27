@@ -270,6 +270,66 @@ def _m_fortify_source_weakened(tag: int):
     )
 
 
+def _m_relro_weakened(tag: int):
+    """G39 Phase 1 second sub-slice — same binary-level shape, weakening-
+    direction-only (strengthening RELRO emits nothing)."""
+    del tag
+    return (
+        {"elf": ElfMetadata(relro="full", bind_now=True)},
+        {"elf": ElfMetadata(relro="none")},
+        ChangeKind.RELRO_WEAKENED,
+        False,
+    )
+
+
+def _m_pie_disabled(tag: int):
+    """Weakening-direction-only (enabling PIE emits nothing)."""
+    del tag
+    return (
+        {"elf": ElfMetadata(is_pie=True)},
+        {"elf": ElfMetadata(is_pie=False)},
+        ChangeKind.PIE_DISABLED,
+        False,
+    )
+
+
+def _m_writable_executable_segment(tag: int):
+    """Introduction-direction-only (removing W+X emits nothing)."""
+    del tag
+    return (
+        {"elf": ElfMetadata(has_writable_executable_segment=False)},
+        {"elf": ElfMetadata(has_writable_executable_segment=True)},
+        ChangeKind.WRITABLE_EXECUTABLE_SEGMENT,
+        False,
+    )
+
+
+def _m_executable_stack_introduced(tag: int):
+    """Not asymmetric, unlike its siblings above: the reverse edit emits a
+    *different* kind (EXECUTABLE_STACK_REMOVED, an improvement) on the
+    identical symbol ("PT_GNU_STACK"), so forward/backward symbol sets
+    still agree -- see diff_platform_elf_dynamic._diff_elf_dynamic_
+    section's own comment for why both directions are real findings."""
+    del tag
+    return (
+        {"elf": ElfMetadata(has_executable_stack=False)},
+        {"elf": ElfMetadata(has_executable_stack=True)},
+        ChangeKind.EXECUTABLE_STACK,
+        False,
+    )
+
+
+def _m_executable_stack_removed(tag: int):
+    """The improvement-direction sibling of ``_m_executable_stack_introduced``."""
+    del tag
+    return (
+        {"elf": ElfMetadata(has_executable_stack=True)},
+        {"elf": ElfMetadata(has_executable_stack=False)},
+        ChangeKind.EXECUTABLE_STACK_REMOVED,
+        False,
+    )
+
+
 # Mutations whose reverse is legitimately a non-change, so touched-symbol
 # direction-symmetry does NOT hold and must not be asserted: making a virtual
 # method pure is a break, but the reverse (providing a concrete implementation)
@@ -285,6 +345,13 @@ ASYMMETRIC = {
     # mutation's own docstring above).
     "_m_stack_canary_removed",
     "_m_fortify_source_weakened",
+    # Same reason -- weakening-only, strengthening emits nothing.
+    "_m_relro_weakened",
+    "_m_pie_disabled",
+    "_m_writable_executable_segment",
+    # NOT asymmetric: EXECUTABLE_STACK/EXECUTABLE_STACK_REMOVED are two
+    # distinct real kinds on the same symbol, so forward/backward symbol
+    # sets still agree (see each mutation's own docstring above).
 }
 
 
@@ -307,6 +374,11 @@ MUTATIONS: list[Mutation] = [
     _m_overload_added,
     _m_stack_canary_removed,
     _m_fortify_source_weakened,
+    _m_relro_weakened,
+    _m_pie_disabled,
+    _m_writable_executable_segment,
+    _m_executable_stack_introduced,
+    _m_executable_stack_removed,
 ]
 
 

@@ -92,5 +92,23 @@ EVIDENCE_PROVENANCE_TAGS: frozenset[str] = frozenset(
         # .dynsym import/symbol-name derived, read identically on both
         # sides.
         "both:l0:elf_symtab",
+        # G39 Phase 1, second sub-slice (the remaining hardening kinds
+        # in the same detector): ELF `.dynamic` section entries read
+        # directly (not via .dynsym) -- already named in the plan's own
+        # Phase 0 vocabulary table (ElfMetadata.soname/DT_SONAME, not
+        # yet wired to a detector at the time that table was written;
+        # PIE_DISABLED/RELRO_WEAKENED are the first real producers).
+        "both:l0:elf_dynamic",
+        # ELF program-header/segment flags (PT_GNU_RELRO, PT_GNU_STACK,
+        # PT_LOAD) -- distinct from l0:elf_dynamic's .dynamic-section
+        # reads. New in this sub-slice: RELRO_WEAKENED (combined with
+        # l0:elf_dynamic's bind_now flag), WRITABLE_EXECUTABLE_SEGMENT,
+        # EXECUTABLE_STACK/EXECUTABLE_STACK_REMOVED.
+        "both:l0:elf_program_headers",
+        # The ELF file header itself (e.g. e_type/ET_DYN) -- distinct
+        # from both the .dynamic section and program headers. New in
+        # this sub-slice: PIE_DISABLED (is_pie gates DF_1_PIE on
+        # ET_DYN).
+        "both:l0:elf_header",
     }
 )
