@@ -873,7 +873,9 @@ def snapshot_from_dict(d: dict[str, Any]) -> AbiSnapshot:
                     pointer_depth=p.get("pointer_depth", 0),
                     is_restrict=p.get("is_restrict", False),
                     is_va_list=p.get("is_va_list", False),
-                    is_va_list_fact=decode_fact(p.get("is_va_list_fact")),
+                    is_va_list_fact=decode_fact(
+                        p.get("is_va_list_fact"), _schema_version
+                    ),
                 )
                 for p in f.get("params", [])
             ],
@@ -1000,7 +1002,7 @@ def snapshot_from_dict(d: dict[str, Any]) -> AbiSnapshot:
             qualified_name=t.get("qualified_name"),
             is_abstract=t.get("is_abstract"),
             deprecated=t.get("deprecated"),
-            **decode_record_facts(t),
+            **decode_record_facts(t, _schema_version),
         )
         for t in d.get("types", [])
     ]

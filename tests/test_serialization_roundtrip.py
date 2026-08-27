@@ -1,8 +1,6 @@
 """Unit tests for AbiSnapshot JSON round-trip — elf_only_mode and constants.
 
-Covers serialisation fields added in PR #63:
-  - elf_only_mode
-  - constants
+Covers serialisation fields added in PR #63: elf_only_mode, constants.
 """
 
 from __future__ import annotations
@@ -46,6 +44,16 @@ def _minimal_dict(**overrides: object) -> dict:
     }
     base.update(overrides)
     return base
+
+
+def _va_list_func(is_va_list: bool) -> dict:
+    """One raw function dict with a single ``va_list`` param — shared by the is_va_list backfill tests, which only vary the flag/producer/reliability."""
+    return {
+        "name": "f",
+        "mangled": "_Z1fz",
+        "return_type": "void",
+        "params": [{"name": "a", "type": "va_list", "is_va_list": is_va_list}],
+    }
 
 
 def _make_snap(**kwargs: object) -> AbiSnapshot:
@@ -1079,13 +1087,7 @@ class TestExtractionContractRoundTrip:
 
 
 class TestFactFieldRoundTrip:
-    """A freshly-built snapshot's Fact[...] fields survive a real
-    snapshot_to_dict()/json.dumps()/snapshot_from_dict() round-trip, and a
-    pre-v26 (schema_version < 26) snapshot with no *_fact keys backfills
-    correctly from the existing reliability flags — never Fact.present([])/
-    Fact.present(False) for the unreliable/unsupported case, which is the
-    exact confusion (a placeholder read as a confirmed fact) this phase
-    exists to make unrepresentable."""
+    """A freshly-built snapshot's Fact[...] fields survive a real snapshot_to_dict()/json.dumps()/snapshot_from_dict() round-trip, and a pre-v26 (schema_version < 26) snapshot with no *_fact keys backfills correctly from the existing reliability flags — never Fact.present([])/Fact.present(False) for the unreliable/unsupported case, the exact confusion (a placeholder read as a confirmed fact) this phase exists to make unrepresentable."""
 
     def test_fresh_snapshot_round_trips_present_fact_and_is_json_serializable(self) -> None:
         rec = RecordType(
@@ -1152,14 +1154,7 @@ class TestFactFieldRoundTrip:
             ast_producer="clang",
             from_headers=True,
             clang_va_list_facts_reliable=False,
-            functions=[
-                {
-                    "name": "f",
-                    "mangled": "_Z1fz",
-                    "return_type": "void",
-                    "params": [{"name": "a", "type": "va_list", "is_va_list": False}],
-                }
-            ],
+            functions=[_va_list_func(False)],
         )
         p = snapshot_from_dict(d).functions[0].params[0]
         assert p.is_va_list_fact.status is FactStatus.NOT_COLLECTED
@@ -1172,14 +1167,7 @@ class TestFactFieldRoundTrip:
             schema_version=20,
             ast_producer="castxml",
             from_headers=True,
-            functions=[
-                {
-                    "name": "f",
-                    "mangled": "_Z1fz",
-                    "return_type": "void",
-                    "params": [{"name": "a", "type": "va_list", "is_va_list": False}],
-                }
-            ],
+            functions=[_va_list_func(False)],
         )
         p = snapshot_from_dict(d).functions[0].params[0]
         assert p.is_va_list_fact.status is FactStatus.NOT_COLLECTED
@@ -1191,6 +1179,18 @@ class TestFactFieldRoundTrip:
         r = snapshot_from_dict(d).types[0]
         assert r.bases_fact.status is FactStatus.PRESENT
         assert r.bases_fact.value == ["Base"]
+
+    def test_current_schema_missing_fact_key_is_not_collected_not_present(self) -> None:
+        # A truncated/hand-authored v26+ document omitting a *_fact key must not read as confirmed just because the legacy field defaults to one — v26+ already commits to serializing the sibling, so a missing key means the fact was never populated (Codex review).
+        d = _minimal_dict(
+            schema_version=26,
+            types=[{"name": "Foo", "kind": "struct", "bases": ["Base"]}],
+            functions=[_va_list_func(True)],
+        )
+        snap = snapshot_from_dict(d)
+        assert snap.types[0].bases_fact.status is FactStatus.NOT_COLLECTED
+        assert snap.types[0].bases == []
+        assert snap.functions[0].params[0].is_va_list_fact.status is FactStatus.NOT_COLLECTED
 
     def test_snapshot_to_dict_encodes_status_as_plain_string(self) -> None:
         rec = RecordType(name="Foo", kind="struct", vtable_fact=Fact.present(["m"]))
