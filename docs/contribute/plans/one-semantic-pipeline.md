@@ -1148,24 +1148,79 @@ collect-mode gap AGENTS.md already documents as *silent* failures — this
 phase's acceptance test is exactly "these two scenarios now raise
 `PlanningError` instead of silently dropping the request."
 
+**ADR-063 D1's own scope is wider than `compare`/`dump`'s resolution
+path alone, and a first draft of this phase didn't reach the rest of
+it — D1 names the Action, `cli_project.py`, and bundle/release fan-out
+explicitly as adapters that must stop orchestrating independently.**
+Checking each against the real code narrows what's actually missing,
+rather than treating all three as equally unconverged: `cli_compare_
+release.py`'s `_run_compare_pair` already routes through `service.
+run_compare` — ADR-037 D1's existing single Tier-2 chokepoint, confirmed
+by that function's own docstring — so the release fan-out is not a second
+*implementation* of compare orchestration; `bundle.py`'s `compare_bundle()`
+takes already-computed `per_library_results` as an input rather than
+calling `checker.compare`/`service.run_compare` itself, so it isn't an
+orchestrator at all, just an aggregator over results the release fan-out
+already produced; and the Action (`action/run.sh`) invokes the CLI as a
+subprocess rather than importing `checker.compare`/`dumper.dump` in
+Python, so once `cli.py` itself is the one pipeline (this plan's own
+point), the Action inherits that for free as a CLI consumer. **What
+*is* still missing, confirmed by reading the same code**: none of these
+call sites construct an `AnalysisPlan` — `_run_compare_pair` builds and
+resolves its own `CompareRequest`-shaped inputs without the pre-flight
+`PlanningError` check this phase adds to `resolve_compare_request`, so a
+release/bundle comparison can still hit the same silent-failure shape
+(`--build-target` + pre-captured `aquery`, `-H` + unsupported collect
+mode) this phase exists to close for a single-pair `compare` — the
+existing Tier-2 chokepoint narrows the gap to "no second implementation,"
+not "the same pre-flight guarantees." `cli_project.py`'s `project_plan_cmd`
+is a narrower case again: it only *generates* `run-plan.json` (a document
+`aggregate --run-plan` consumes later) and neither calls `compare`/`dump`
+nor constructs an `AnalysisPlan` itself — closing its own gap (the
+`--toolchain-bindings` identity-probe mismatch check it already performs
+is a different, narrower pre-flight than `AnalysisPlan`'s) is not part of
+this phase's scope, since it resolves a different question (build-output
+coverage, not evidence-requirement satisfiability) and has no `compare`/
+`dump` request to build a plan from at generation time.
+
 **Files.** `abicheck/workflows/plan.py` (new); `service_compare_pipeline.
 resolve_compare_request`/`service_dump_pipeline.resolve_dump_request`
 (construct `AnalysisPlan` as part of resolution, reusing — not
 duplicating — ADR-049's `compatibility_evaluation_resolver.resolve_field`
-for the policy half); `buildsource/adapters/bazel.py` (the `--build-
+for the policy half); `cli_compare_release.py`'s `_run_compare_pair` (also
+constructs and checks an `AnalysisPlan` for each library pair before
+calling `service.run_compare`, so a release/bundle comparison gets the
+identical pre-flight rejection a single-pair `compare` does, rather than
+discovering the same silent-failure shape mid-run just because it already
+shares the Tier-2 chokepoint); `buildsource/adapters/bazel.py` (the `--build-
 target` scoping gap gets its first real pre-flight check site here, per
 its own AGENTS.md entry's recommended option 2 — reject, don't silently
-scope-miss).
+scope-miss); `scripts/check_architecture.py`'s `cli-contract`/
+`engine-cli-boundary` gates (widened to confirm `cli_compare_release.py`
+resolves an `AnalysisPlan` before its `service.run_compare` call, per
+ADR-063 D1's own statement that these gates are "widened to check this
+directly" — not left as a claim this plan's own Files list doesn't act
+on).
 
 **Tests.** Two direct regression tests reproducing the exact named gaps
 from AGENTS.md (`--build-target` with pre-captured `--build-info`; `-H`
 with an incompatible collect mode) — each asserting `PlanningError`, not
-a warning or silent continuation.
+a warning or silent continuation. A third test reproduces the identical
+`--build-target` gap through `compare-release`/bundle's own fan-out (not
+only single-pair `compare`), confirming `_run_compare_pair` now raises the
+same `PlanningError` for one library in a release rather than silently
+scope-missing that one library while the rest of the release proceeds.
 
 **Acceptance criteria.** Both named silent-failure gaps in AGENTS.md close
 as a side effect of this phase, not as separate fixes — if either needs a
 bespoke patch instead of falling out of the planner, the planner's design
-is incomplete and should not be landed yet.
+is incomplete and should not be landed yet. The release/bundle fan-out
+gets the identical pre-flight guarantee a single-pair `compare` does, not
+only the pre-existing single-chokepoint property. `cli_project.py`'s own
+adapters and the Action remain out of this phase's direct scope for the
+reasons stated above — named explicitly rather than left for a future
+reader to rediscover by re-checking D1's adapter list against the Files
+section.
 
 ---
 
@@ -1211,7 +1266,23 @@ plus `model/entities.py` and `model/declarations.py` specifically (their
 any sibling field matching the same shape found during the audit this
 phase's first commit performs); `scripts/check_ai_readiness.py` (new
 check); `scripts/gen_fact_capability_matrix.py` (new, generates what is
-today a hand-maintained capability doc).
+today a hand-maintained capability doc). **`serialization.py` for every
+field converted, not only the registry and the model dataclass — a first
+draft of this phase's touch list omitted it.** Every snapshot still loads
+through `serialization.snapshot_from_dict()`'s explicit `Param`/
+`RecordType`/other constructors (unchanged by the registry, which the
+Design section above already states validates serialization
+completeness but does not generate mappings); each field this phase
+converts needs the identical encode/decode treatment Phase 0 already gave
+its three — a `SCHEMA_VERSION` bump, the status-to-string encoding on
+write, the matching decode on read, and a legacy-schema backfill path for
+a pre-conversion snapshot. Without it, a persisted snapshot reloads the
+newly-converted field as a plain dict (losing its `Fact[...]` type) or
+drops the key outright — exactly the silent-regression shape Phase 0's
+own round-trip tests were written to rule out, reintroduced here one
+phase later for every field this one converts. The per-field touch list
+a new fact needs (stated below) is a *fourth* item because of this, not
+only the three already named.
 
 **Tests.** `tests/test_fact_registry_completeness.py`: every `Fact[T]`-
 typed model field has exactly one registry entry; **every registry
@@ -1231,7 +1302,15 @@ matching `Fact[...]` sibling, documented as backend-dependent) and fails
 if any exists once this phase claims completion — not only auditing the
 fields the registry already knows about, so a field the conversion missed
 entirely (not just one the registry forgot to register) fails this check
-too. Re-run the
+too. A direct `serialization.py` round-trip test per converted field (the
+same shape Phase 0's own tests already pin for its three fields) is
+required for each field this phase converts — a freshly-extracted
+snapshot round-trips through `snapshot_to_dict()`/`snapshot_from_dict()`
+with the `Fact[...]` value and status intact, and the completeness check
+above is additionally confirmed to fail (not pass vacuously) against a
+converted field whose serialization pair was skipped, so the check
+actually exercises the gap this finding raised rather than only the
+registry-entry gap it was originally written for. Re-run the
 full FP-rate/mutation-score gates once after this phase's field-by-field
 conversion is complete (not per-field — the mechanical conversions don't
 individually risk detector-logic drift, but the cumulative change to every
@@ -1241,36 +1320,57 @@ individually risk detector-logic drift, but the cumulative change to every
 serialization, `Change`, diff, suppression, capability matrix, docs,
 fixtures — nine files) shrinks, for a comparably-scoped new fact added
 after this phase, to: the model dataclass field itself + one registry
-entry + parser + detector + test. **The registry does not generate the
+entry + serialization encode/decode + parser + detector + test — **six
+items, not five.** A first draft of this phase's acceptance criterion
+named five and omitted serialization entirely, the same per-field,
+hand-written `snapshot_to_dict()`/`snapshot_from_dict()` pair this
+section's own `serialization.py` Files entry above just established is
+still required per field (confirmed against the real code: the existing
+`ElfMetadata`-enum encoding is per-path, hand-written, not a generic
+tree walk a future field inherits for free) — leaving it out of the count
+is the same class of gap as the already-caught "registry doesn't generate
+the model field" omission below, just for a different file. **The
+registry does not generate the
 model field** — `FactDefinition` describes and validates an existing
 `Fact[...]`-typed field on a `model/*_facts.py` dataclass; it is not a
 schema from which that field is code-generated, so adding the field by
 hand is still required and is explicitly counted in this acceptance
 criterion rather than silently omitted from it, per this corrected draft
 (a reviewer caught an earlier version of this criterion listing only four
-items). Designing and validating real generation of the model field
+items). **Nor does it generate the serialization encode/decode pair** —
+the completeness check the Design section above adds only validates that
+encode/decode exists for every `Fact[...]`-typed field, the same way it
+validates registry entries, it does not write the per-field code itself.
+Designing and validating real generation of the model field
 itself from the registry — which would shrink the list further, to
 registry entry + parser + detector + test — is out of scope for this
 phase; it would need its own dataclass-field-codegen design (interacting
 with `from __future__ import annotations`, `dataclasses.field(kw_only=
 True)` placement, and the "new field appended last" convention every
 public dataclass in this repo already follows) and is not attempted here.
-Demonstrate the stated (five-item) reduction directly — the phase's own PR
-adds one new, real fact end-to-end as a worked example and states the
+The identical reasoning applies to generating the serialization pair
+itself from the registry — also out of scope, also a separate, real
+codegen design, not a follow-on to this phase's validator.
+Demonstrate the stated (six-item) reduction directly — the phase's own PR
+adds one new, real fact end-to-end as a worked example, including its
+serialization round-trip, and states the
 old-vs-new touch-list diff in its description.
 
-**This five-item count holds only up to Phase 8; it gains one more item
+**This six-item count holds only up to Phase 8; it gains one more item
 once storage v2 lands, and this plan does not hide that.** Phase 8's own
 design explicitly requires a distinct `to_dto()`/`from_dto()` mapping per
 persisted field (that is the whole point of D8 — no `asdict`-based
 mirror), and nothing in this registry generates that mapping either, for
-the identical reason it does not generate the model field. So for a fact
-added **after** Phase 8 ships, the real touch list is six items — model
-field + registry entry + DTO mapping + parser + detector + test — not
-five, and this plan states that explicitly rather than letting the
-five-item claim quietly go stale the moment Phase 8 lands. Registry-driven
+the identical reason it does not generate the model field or the
+serialization pair. So for a fact
+added **after** Phase 8 ships, the real touch list is seven items — model
+field + registry entry + serialization encode/decode + DTO mapping +
+parser + detector + test — not
+six, and this plan states that explicitly rather than letting the
+six-item claim quietly go stale the moment Phase 8 lands. Registry-driven
 DTO-mapping generation is the same kind of out-of-scope follow-on as
-model-field generation above, not attempted in either phase.
+model-field/serialization generation above, not attempted in any of the
+three phases.
 
 ---
 
@@ -1374,7 +1474,33 @@ existing `AbiSnapshot` field shapes, attaching `semantic_ir` identically
 production the same way `pdb_metadata.py` itself is, per the Design
 section's own parser-narrowing rule, since it's a second conversion layer
 for the identical backend, not a different one);
-`serialization.py` (`SCHEMA_VERSION` bump and the field's encode/decode).
+`serialization.py` (`SCHEMA_VERSION` bump, and a real encode/decode design
+for `semantic_ir` — **not the bare "field's encode/decode" a first draft
+of this phase left unspecified, which understates a genuine technical
+blocker.** `SemanticIR.occurrences: dict[OccurrenceId, CanonicalEntity]`
+is keyed by a dataclass, and `snapshot_to_dict()` calls whole-snapshot
+`asdict(snap)` — `dataclasses.asdict()` recurses into a dict's *keys* the
+same way it recurses into values, so an `OccurrenceId` key becomes a
+nested dict before `json.dump()` ever runs, and a dict is unhashable —
+`asdict()` itself raises constructing the converted mapping, for every
+snapshot once `semantic_ir` is populated, not only on the eventual JSON
+write. Flattening `OccurrenceId` into a string key (the same move Phase
+2's `storage/entity_ids.py` finding rejected for `EntityId`'s own
+`ScopePath`) would reintroduce the identical lossy-flattening defect for
+the identical structural reason — an `OccurrenceId` carries an `EntityId`
+carrying a `ScopePath`, so a string rendering can't be reversed any more
+than `ScopePath` alone could. The fix follows the same shape Phase 2's
+v2 DTO already established: `semantic_ir` is excluded from the plain
+`asdict()` walk (the same special-casing `surface_graph` already needs,
+per Phase 3's finding) and encoded by its own `SemanticIR.to_dict()` as a
+**list of entries**, not a dict — `{"occurrences": [{"occurrence":
+occurrence_id.to_dict(), "entity": entity.to_dict()} for occurrence_id,
+entity in self.occurrences.items()]}` — with `SemanticIR.from_dict()`
+rebuilding the `dict[OccurrenceId, CanonicalEntity]` from that list on
+load. `OccurrenceId`/`EntityId`'s own `to_dict()`/`from_dict()` reuse the
+identical structured-segment encoding Phase 2's `storage/entity_ids.py`
+v2 DTO already defines for `ScopePath`, rather than a third, independently
+invented structural encoding for the same type.)
 `elf_metadata.py`/`pe_metadata.py`/`macho_metadata.py` are
 explicitly **not** touched by this phase — see ADR-063 D9's own
 "deliberately excluded, not an oversight" note: binary-symbol-table
@@ -1447,7 +1573,17 @@ ODR-duplicate or incomplete/complete declaration pair sharing one
 `canonical_entities()` finding above: a fixture without that shape could
 pass this parity test even with the wrong (collapsing) projection, since
 the collapse is only observable when more than one occurrence exists for
-some identity.
+some identity. A separate, direct test covers `semantic_ir`'s own
+save/load round trip: construct a `SemanticIR` with multiple occurrences
+sharing one `EntityId` (the same ODR-duplicate shape above), attach it to
+an `AbiSnapshot`, write it via `snapshot_to_dict()`, read it back via
+`snapshot_from_dict()`, and assert the reloaded `SemanticIR.occurrences`
+has the same keys and values as the original — confirmed to fail against
+a version of `snapshot_to_dict()` that still relies on plain `asdict()`
+for this field (it raises before the assertion is even reached, per the
+unhashable-key defect above) and against a version using a string-keyed
+encoding (it loses the shared-`EntityId`, multiple-occurrence shape the
+test specifically constructs).
 
 **Tests.** Every existing per-backend regression test that currently
 proves "backend X handles construct Y" is kept and re-targeted at the
