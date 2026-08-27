@@ -8,7 +8,7 @@ lifecycle: active
 
 **Origin:** An audit of the merged-fix history through `327df7b` (post-#883),
 covering the issue-recorded bugs, the six real-world oneAPI defects in
-#833–#838, and the escape sequences the bug-fix test contract's own
+issues #833–#838, and the escape sequences the bug-fix test contract's own
 docstring already names (#699→#721, #753→#759, #705→#758). Asked one
 question: for a fix whose PR *did* answer the bug-fix test contract in
 good faith, why did a sibling defect in the same mechanism still escape?
@@ -89,11 +89,10 @@ still open.
    future contributor (or agent) can check "does a test already cover
    this class" before writing a fifth narrow reproducer for the same
    mechanism.
-3. Each of the nine bug classes identified below (AST-wrapper-chain
-   traversal, public-surface reachability, path/checkout identity
-   taint, deduplication-key soundness, configuration propagation,
-   storage/third-party contracts, shell/workflow injection, registry
-   completeness, silent-degradation-to-clean-verdict) has at least one
+3. Each bug class identified below and now registered in
+   `tests/regressions/manifest.py` (nine as of this writing —
+   `BUG_CLASSES`/`all_ids()` is the source of truth for the current
+   count and membership, not this sentence) has at least one
    generalized test — property-based, metamorphic, or exhaustive —
    that is shown to catch a deliberately reintroduced instance of the
    class's own already-fixed bug (not just the literal historical
@@ -198,7 +197,7 @@ under test, does not satisfy Phase 0's contract wording change.
 
 ### Killing known-bad mutants, not just running Hypothesis N times
 
-#879's own history (a property strategy that never generated tuples,
+Issue #879's own history (a property strategy that never generated tuples,
 mappings, or `NaN`, so a real collision escaped two review rounds) is the
 concrete argument for a rule already present in spirit in this
 repository's own "Primitive-level property tests" AGENTS.md section: for
@@ -221,15 +220,17 @@ expected defect-catching value is.
 
 ### Phase 0 — process change (implemented)
 
-* Reword the bug-fix test contract's "General invariant" / "Regression
-  test fails on base" rows (`.github/PULL_REQUEST_TEMPLATE.md`) and the
-  enforcement script's guidance text
-  (`scripts/check_bugfix_test_contract.py`) to require the invariant be
-  backed by a *generalized* test (generated/adversarial inputs beyond
-  the one reported, or an exhaustive enumeration for a small domain) —
-  not a single fixed-input assertion plus prose. Points at this plan
-  file and, now that Phase 1 has landed, at `tests/regressions/manifest.py`
-  for "does this class already have a home."
+* Reword the bug-fix test contract's "General invariant" row
+  (`.github/PULL_REQUEST_TEMPLATE.md`) and the enforcement script's
+  matching guidance text (`scripts/check_bugfix_test_contract.py`) to
+  require the invariant be backed by a *generalized* test (generated/
+  adversarial inputs beyond the one reported, or an exhaustive
+  enumeration for a small domain) — not a single fixed-input assertion
+  plus prose. Points at this plan file and, now that Phase 1 has landed,
+  at `tests/regressions/manifest.py` for "does this class already have a
+  home." (The "Regression test fails on base" row is left as-is — it
+  asks whether the *named* test failed pre-fix, a question orthogonal to
+  how many inputs that test covers, so it doesn't need this reword.)
 * Add the corresponding normative statement to `AGENTS.md`'s
   "Decision-making principles" section, alongside the existing
   "Fix the cause, not the instance" bullet it already extends.
@@ -390,7 +391,7 @@ not equivalent plain JSON).
   expected consumer set receives it, not merely that some mock was
   called.
 * **State distinctions:** omitted / explicit `None` / explicit empty /
-  default / explicit-equal-to-default must be tested as four distinct
+  default / explicit-equal-to-default must be tested as five distinct
   cases, since #860/#883's own root causes conflated some of these.
 * **Mutation check:** deliberately removing one forwarding edge in a
   copy of the matrix harness must make the suite fail and name the
@@ -441,9 +442,9 @@ word-splitting bug.
 
 ### Phase 9 — registry-completeness and silent-degradation invariants
 
-Generalizes #753→#759 (hand-maintained list omission) and #838/#834/#860/
-#883's shared shape (missing/rejected/partial evidence producing a clean,
-silently-wrong result).
+Generalizes #753→#759 (hand-maintained list omission) and the shared shape
+of #838/#834/#860/#883 (missing/rejected/partial evidence producing a
+clean, silently-wrong result).
 
 * **Registry completeness:** every declared `ChangeKind`/evidence-kind/
   provider is accounted for by every *total* downstream consumer
@@ -501,7 +502,7 @@ Risk is concentrated in Phase 6 (the configuration-propagation matrix,
 which needs a real sentinel threaded through every public entry point and
 so touches the most call sites) and Phase 3 (the reachability oracle,
 which needs a generated-include-DAG model expressive enough to reproduce
-#834/#835/#843's real counterexamples without becoming its own
+the real counterexamples #834/#835/#843 found without becoming its own
 maintenance burden) — both should get their own design review before
 implementation starts, per this repository's normal process for an XL
 initiative.

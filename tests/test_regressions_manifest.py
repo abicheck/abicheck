@@ -164,6 +164,9 @@ class TestRegisteredTestPathsExist:
     )
     def test_known_gap_canaries_exist(self, bug_class: BugClass) -> None:
         for gap in bug_class.known_gaps:
+            assert gap.description.strip(), (
+                f"{bug_class.id}: known_gaps entry must describe the residual gap"
+            )
             assert gap.reference.strip(), (
                 f"{bug_class.id}: known_gaps entry must name a reference "
                 f"(issue/PR/plan section): {gap.description}"
