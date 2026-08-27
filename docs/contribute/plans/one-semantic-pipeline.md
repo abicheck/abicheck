@@ -2359,12 +2359,12 @@ return type exactly — `surface_graph.py` itself still never imports
   **Threading `public_entity_ids` into `compute_surface_metrics()`'s own
   signature does not, by itself, make its *metrics* reflect the resolved
   surface, and a review round correctly traced why: every one of its
-  direct counts is computed straight from `Visibility.PUBLIC`, with no
-  reference to the parameter at all.** Reading the real function:
+  *public-only* counts is computed straight from `Visibility.PUBLIC`, with
+  no reference to the parameter at all.** Reading the real function:
   `public_functions`/`public_variables`/`exported_symbols`/
-  `undocumented_export_ratio`/the per-header `declared_counts`/
-  `exported_counts` tallies each sum `fn.visibility ==
-  Visibility.PUBLIC`/`var.visibility == Visibility.PUBLIC` directly, and
+  `undocumented_export_ratio`/the per-header `exported_counts` tallies
+  each sum `fn.visibility == Visibility.PUBLIC`/`var.visibility ==
+  Visibility.PUBLIC` directly, and
   `public_types`/`public_enums` come from `_public_type_counts()`, which
   calls its *own*, entirely independent `compute_public_surface(snap)` —
   never the `public_entity_ids` its caller already resolved. Adding the
@@ -2376,7 +2376,8 @@ return type exactly — `surface_graph.py` itself still never imports
   call signature would pass while the emitted findings stayed unchanged,
   the exact gap this finding names. Fixed by having `compute_surface_
   metrics()` use `public_entity_ids`, when non-`None`, for every one of
-  these tallies too: a function/variable counts as public when its own
+  these *public-only* tallies: a function/variable counts as public when
+  its own
   resolved `EntityId` is a member of the set (matching `build_
   surface_graph`'s own root-seeding rule, not a second definition), and
   `_public_type_counts()` takes the same `public_entity_ids` argument and
@@ -2384,13 +2385,26 @@ return type exactly — `surface_graph.py` itself still never imports
   own independent `compute_public_surface()` resolution — the caller
   already resolved this once; a second, separate resolution inside
   `_public_type_counts()` is exactly the redundant-recomputation this
-  phase's own design elsewhere avoids. When `public_entity_ids` is `None`
+  phase's own design elsewhere avoids.
+
+  **The per-header `declared_counts` tally is not one of these — a
+  further review round correctly caught this finding's own first draft
+  grouping it in with the visibility-filtered tallies.** `HeaderCoverage.
+  declared` is explicitly the count of declarations physically defined in
+  the header, incremented unconditionally for every function/variable/
+  type/enum regardless of visibility — the denominator `HeaderCoverage.
+  exported` (from `exported_counts`) is measured *against*. Filtering
+  `declared_counts` to the resolved public set too would change that
+  denominator and misreport header coverage, not fix it; only
+  `exported_counts` (a public-only tally, alongside the other fields named
+  above) is affected by `public_entity_ids`. When `public_entity_ids` is `None`
   (every call site outside `compare()`'s own pipeline), every one of these
   tallies keeps its exact current `Visibility.PUBLIC`-based behavior,
   `_public_type_counts()` included — the same explicit, narrow residual
   `public_roots()`'s own `Visibility.PUBLIC` fallback already states,
   extended to the metrics this function computes directly rather than
-  through the graph. `pattern_verdicts.py`
+  through the graph — and `declared_counts` stays unfiltered in every
+  case, `None` or not. `pattern_verdicts.py`
 (`apply_pattern_verdicts()` gains the two-snapshot `old_public_entity_ids`/
 `new_public_entity_ids` pair, each threaded through as the single
 `public_entity_ids` argument to its matching `build_surface_graph()`
@@ -2398,8 +2412,10 @@ call); `diff_surface_
 metrics.py` (`diff_surface_metrics()` gains the identical pair, each
 threaded through the same way to its matching `compute_surface_metrics()`
 call); `checker.py` (`_apply_pattern_verdicts_step`/`_apply_surface_metrics`
-both gain the identical pair, resolved from `compare()`'s own two
-independent, per-side `PublicSurfaceQuery.resolve()` calls). **Neither
+both gain the identical pair — received as an already-resolved parameter
+from `compare()`'s own caller (`classify_compare_pair()`/`service.
+compare_snapshots()`), never resolved by `compare()` itself; see
+immediately below for why). **Neither
 `checker.py` nor `compare()`
 itself may call `PublicSurfaceQuery.resolve()` directly to populate it —
 a first draft of this phase's text said exactly that ("the same
