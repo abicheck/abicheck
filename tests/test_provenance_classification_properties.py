@@ -140,16 +140,34 @@ def test_classification_is_invariant_to_checkout_relocation(
     """The #843 path-taint bug generalized one layer up: the SAME relative
     structure (a public directory, and a header somewhere under or outside
     it) must classify identically regardless of which absolute checkout
-    root it's rooted at."""
-    assume(root_a != root_b)
-    header_tail = (*pub_rel, *header_rel, f"{filename}.h")
+    root it's rooted at.
 
-    def classify_under(root: list[str]) -> ScopeOrigin:
+    Both an inside-public-dir and an OUTSIDE-public-dir header are checked,
+    each against its own expected ``ScopeOrigin`` (not just cross-root
+    equality) -- a header nested under ``pub_rel`` for every root classifies
+    trivially the same way regardless of relocation sensitivity, so that
+    case alone can't distinguish this property from a checkout-tainted
+    implementation (e.g. one keying off the raw absolute root string) that
+    happens to move both sides consistently. The outside-public-dir header
+    lives under a UUID-rooted sibling disjoint from ``root``/``pub_rel``/
+    ``header_rel``, so it can never accidentally land under the public
+    directory via `_contiguous_subsequence` containment."""
+    assume(root_a != root_b)
+    public_tail = (*pub_rel, *header_rel, f"{filename}.h")
+    private_sibling = (str(uuid.uuid4()), str(uuid.uuid4()))
+    private_tail = (*private_sibling, f"{filename}.h")
+
+    def classify_under(root: list[str], header_tail: tuple[str, ...]) -> ScopeOrigin:
         public_dir = _abspath((*root, *pub_rel))
         header = _abspath((*root, *header_tail))
         return _classify(header, [public_dir])
 
-    assert classify_under(root_a) == classify_under(root_b)
+    for root in (root_a, root_b):
+        assert classify_under(root, public_tail) is ScopeOrigin.PUBLIC_HEADER
+        assert classify_under(root, private_tail) is ScopeOrigin.PRIVATE_HEADER
+
+    assert classify_under(root_a, public_tail) == classify_under(root_b, public_tail)
+    assert classify_under(root_a, private_tail) == classify_under(root_b, private_tail)
 
 
 @given(

@@ -50,11 +50,18 @@ from abicheck.model import ScopeOrigin, Visibility
 # different mangling schemes and never match. The pure-parser unit suite
 # (``test_dumper_clang.py``) covers the backend logic on every platform.
 #
-# NB: deliberately *not* marked ``integration`` — that marker's Linux gate
-# requires castxml (tests/conftest.py ``_integration_skip_reason``), but the
-# whole point here is the **castxml-absent** host. Each test instead self-skips
-# on its own real tool requirement (clang + g++; the parity test additionally
-# needs castxml).
+# NB: this MODULE is deliberately *not* marked ``integration`` — that marker's
+# Linux gate requires castxml (tests/conftest.py ``_integration_skip_reason``),
+# but the whole point here is the **castxml-absent** host, so most tests below
+# self-skip on their own real tool requirement (clang + g++) without needing
+# the module-wide gate. The two tests that additionally need castxml (the
+# clang↔castxml parity oracle) DO carry an explicit per-test
+# ``@pytest.mark.integration`` on top of their own runtime self-skip: without
+# it, a host that happens to have castxml installed (e.g. a pixi environment,
+# which provisions castxml for the integration/libabigail/abicc lanes) would
+# have these two tests silently selected and executed by the fast/PR "not
+# integration" lane, spending real g++/clang/castxml subprocess time in a lane
+# meant to stay fast (Codex review, PR #894).
 pytestmark = pytest.mark.skipif(
     not sys.platform.startswith("linux"),
     reason="clang L2 backend integration test is ELF/Linux-scoped (see module docstring)",
@@ -239,6 +246,7 @@ def test_clang_backend_recovers_c_anonymous_typedef_enum(tmp_path: Path) -> None
     ] == "log_level_t"
 
 
+@pytest.mark.integration
 def test_clang_and_castxml_snapshots_agree_on_public_surface(
     built_lib: tuple[Path, Path],
 ) -> None:
@@ -268,6 +276,7 @@ def test_clang_and_castxml_snapshots_agree_on_public_surface(
     assert {e.name for e in clang_snap.enums} == {e.name for e in castxml_snap.enums}
 
 
+@pytest.mark.integration
 def test_clang_and_castxml_agree_on_public_vs_private_header_origin(
     tmp_path: Path,
 ) -> None:
@@ -290,7 +299,9 @@ def test_clang_and_castxml_agree_on_public_vs_private_header_origin(
     private_header = tmp_path / "detail.h"
     private_header.write_text("#pragma once\nint detail_helper(int x);\n")
     public_header = tmp_path / "api.h"
-    public_header.write_text('#pragma once\n#include "detail.h"\nint api_call(int x);\n')
+    public_header.write_text(
+        '#pragma once\n#include "detail.h"\nint api_call(int x);\n'
+    )
     src = tmp_path / "api.cpp"
     src.write_text(
         '#include "api.h"\n'
