@@ -1259,6 +1259,22 @@ shapes each recognizes. Verified empirically: still zero existing hits,
 baseline stays at 104. New test: a qualified class alias detected through
 a positional pattern.
 
+**A thirteenth Codex review round found one more real gap, applying to
+both alias resolvers at once -- fixed.** `RT = Alias = RecordType` (an
+ordinary chained assignment) then `case RT(_, _, _, _, _, []):`, and the
+identical shape for `_builtins_getattr_aliases()`: `read1 = read2 =
+getattr` then `read1(rec, "bases")` -- both resolvers' `ast.Assign`
+branches were still restricted to `len(node.targets) == 1`, so a chained
+assignment (every target receiving the identical RHS, unlike a
+tuple-unpacking target, which has no single value to attribute) was
+excluded the same way the fifth-Codex-round-in-`fact_detector_misuse.py`
+finding was for that module's own candidate collector. Fixed by looping
+over every target in `node.targets` and registering each plain-`Name`
+one, in both `_imported_class_aliases()` and `_builtins_getattr_
+aliases()`. Verified empirically: still zero existing hits, baseline
+stays at 104. New tests: a chained class alias detected through a
+positional pattern, and a chained `getattr` alias detected.
+
 **Still not landed**: no detector (`diff_layout.py`/`diff_types.py`/
 `diff_param_qualifiers.py`/the reader set the check above now tracks
 precisely) has actually been migrated to read `.status` — the check above

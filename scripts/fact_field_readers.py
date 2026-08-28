@@ -377,8 +377,10 @@ def _imported_class_aliases(tree: ast.Module) -> dict[str, str]:
     """Map every local name *tree* binds to one of `FACT_BRIDGED_CLASS_NAMES`
     -- either via an `import ... as` (`from abicheck.model import
     RecordType as RT` maps `"RT" -> "RecordType"`), a simple whole-tree
-    name assignment (`RT = RecordType` maps the same way; an annotated
-    assignment `RT: type = RecordType` maps identically; a further
+    name assignment (`RT = RecordType` maps the same way; a *chained*
+    assignment, `RT = Alias = RecordType`, maps every plain-name target
+    identically, since they all receive the same RHS; an annotated
+    assignment `RT: type = RecordType` maps identically too; a further
     `RT2 = RT` chains to `"RecordType"` too, resolved to a fixed point the
     same way `fact_detector_misuse._fact_aliases` chains local aliases),
     or a *qualified* class reference (`import abicheck.model as model; RT
@@ -389,15 +391,16 @@ def _imported_class_aliases(tree: ast.Module) -> dict[str, str]:
     evidence: a positional class pattern on such an alias, `case
     RT(_, _, _, _, _, []):`, is invisible to a bare-name check against the
     literal `RecordType`/`Param` spellings, whichever way the alias was
-    established -- the annotated-assignment and qualified-reference
-    shapes are the same gap the plain-`ast.Assign` fix already closed,
-    just reached through a differently-shaped RHS (or a differently-typed
-    AST node) that a check keyed on the original shape alone never
-    visits. An import/assignment with no local rename needs no entry --
-    the bare name already matches directly. Whole-tree, not
-    function-scoped: every mechanism here is almost always module level,
-    and scanning the whole tree is the same over-approximating-is-safe
-    stance this module already takes elsewhere.
+    established -- the chained-assignment, annotated-assignment, and
+    qualified-reference shapes are the same gap the plain-`ast.Assign` fix
+    already closed, just reached through a differently-shaped assignment
+    (or a differently-typed AST node) that a check keyed on the original
+    shape alone never visits. An import/assignment with no local rename
+    needs no entry -- the bare name already matches directly. Whole-tree,
+    not function-scoped: every mechanism here is almost always module
+    level, and scanning the whole tree is the same
+    over-approximating-is-safe stance this module already takes
+    elsewhere.
     """
     aliases: dict[str, str] = {}
     assign_candidates: list[tuple[str, str]] = []
@@ -419,12 +422,15 @@ def _imported_class_aliases(tree: ast.Module) -> dict[str, str]:
                 local = alias.asname or alias.name
                 if alias.name in FACT_BRIDGED_CLASS_NAMES and local != alias.name:
                     aliases[local] = alias.name
-        elif (
-            isinstance(node, ast.Assign)
-            and len(node.targets) == 1
-            and isinstance(node.targets[0], ast.Name)
-        ):
-            _register_assign(node.targets[0].id, node.value)
+        elif isinstance(node, ast.Assign):
+            # Every plain-`Name` target, not only a lone one -- a chained
+            # assignment (`RT = Alias = RecordType`) gives every target
+            # the identical RHS (Codex review, fresh evidence: the
+            # single-target restriction wrongly excluded this ordinary,
+            # unrelated shape too).
+            for target in node.targets:
+                if isinstance(target, ast.Name):
+                    _register_assign(target.id, node.value)
         elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
             _register_assign(node.target.id, node.value)
     changed = True
@@ -449,26 +455,29 @@ def _builtins_getattr_aliases(
     *tree* binds to the real `getattr` builtin (always includes the bare
     `"getattr"` itself, plus any `from builtins import getattr as X`, plus
     a plain assignment chain such as `read_attr = getattr` --
-    `read_attr2 = read_attr` chains too, resolved to a fixed point --
-    plus a *qualified* assignment such as `read_attr = builtins.getattr`,
-    plus an *annotated* assignment of either shape, e.g. `read_attr:
-    Callable[..., object] = getattr`), and every local name bound to the
-    `builtins` module itself (`import builtins`, `import builtins as b`)
-    -- used to recognize `builtins.getattr(...)`/`b.getattr(...)`
-    alongside a bare call. All are real (Codex review, fresh evidence,
-    three rounds: `import builtins; builtins.getattr(rec, "bases")`,
-    `from builtins import getattr as read_attr`, `read_attr = getattr;
-    read_attr(rec, "bases")`, combining the qualified-call recognition
-    with the plain-assignment chaining as `read_attr = builtins.getattr;
-    read_attr(rec, "bases")`, and -- the annotated-assignment spelling of
-    either -- `read_attr: Callable[..., object] = getattr` -- are all
-    invisible to a scan that only matches the literal bare callee
-    `getattr`). Whole-tree, matching `_imported_class_aliases`'s own scope
-    for the identical reason -- and the plain-assignment chaining mirrors
-    that function's own fixed-point resolution of `RT = RecordType`/
-    `RT2 = RT` exactly, just for the builtin callable instead of a class
-    name; the annotated-assignment branch mirrors that same function's own
-    `ast.AnnAssign` handling.
+    `read_attr2 = read_attr` chains too, resolved to a fixed point, and a
+    *chained* assignment (`read1 = read2 = getattr`) marks every plain-
+    name target the same way -- plus a *qualified* assignment such as
+    `read_attr = builtins.getattr`, plus an *annotated* assignment of
+    either shape, e.g. `read_attr: Callable[..., object] = getattr`), and
+    every local name bound to the `builtins` module itself (`import
+    builtins`, `import builtins as b`) -- used to recognize `builtins.
+    getattr(...)`/`b.getattr(...)` alongside a bare call. All are real
+    (Codex review, fresh evidence, four rounds: `import builtins;
+    builtins.getattr(rec, "bases")`, `from builtins import getattr as
+    read_attr`, `read_attr = getattr; read_attr(rec, "bases")`, combining
+    the qualified-call recognition with the plain-assignment chaining as
+    `read_attr = builtins.getattr; read_attr(rec, "bases")`, the
+    annotated-assignment spelling of either -- `read_attr: Callable[...,
+    object] = getattr` -- and a chained assignment, `read1 = read2 =
+    getattr` -- are all invisible to a scan that only matches the literal
+    bare callee `getattr`). Whole-tree, matching `_imported_class_
+    aliases`'s own scope for the identical reason -- and the plain-
+    assignment chaining mirrors that function's own fixed-point
+    resolution of `RT = RecordType`/`RT2 = RT` exactly, just for the
+    builtin callable instead of a class name; the annotated-assignment and
+    chained-assignment branches mirror that same function's own
+    `ast.AnnAssign`/multi-target `ast.Assign` handling.
     """
     getattr_names = {"getattr"}
     builtins_names: set[str] = set()
@@ -498,12 +507,16 @@ def _builtins_getattr_aliases(
             for alias in node.names:
                 if alias.name == "getattr":
                     getattr_names.add(alias.asname or alias.name)
-        elif (
-            isinstance(node, ast.Assign)
-            and len(node.targets) == 1
-            and isinstance(node.targets[0], ast.Name)
-        ):
-            _add_candidate(node.targets[0].id, node.value)
+        elif isinstance(node, ast.Assign):
+            # Every plain-`Name` target, not only a lone one -- a chained
+            # assignment (`read1 = read2 = getattr`) gives every target
+            # the identical RHS (Codex review, fresh evidence: the
+            # single-target restriction wrongly excluded this ordinary,
+            # unrelated shape too, the identical gap fixed in
+            # `_imported_class_aliases`'s own `ast.Assign` branch).
+            for target in node.targets:
+                if isinstance(target, ast.Name):
+                    _add_candidate(target.id, node.value)
         elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
             _add_candidate(node.target.id, node.value)
     for local, base in qualified_candidates:

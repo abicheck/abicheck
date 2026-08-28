@@ -452,6 +452,29 @@ class TestUnmigratedFactReaderSites:
             "x.py::f::<positional>::RT(_, _, _, _, _, [])::RT(_, _, _, _, _, [])::1"
         ]
 
+    def test_detects_a_positional_pattern_through_a_chained_class_alias(
+        self,
+    ) -> None:
+        """`RT = Alias = RecordType` then `case RT(_, _, _, _, _, []):` --
+        an ordinary chained assignment, not a single-target `ast.Assign`
+        (Codex review, fresh evidence: the single-target restriction
+        wrongly excluded this shape too)."""
+        src = (
+            "RT = Alias = RecordType\n"
+            "def f(rec):\n"
+            "    match rec:\n"
+            "        case RT(_, _, _, _, _, []):\n"
+            "            return True\n"
+            "    return False\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        keys = [
+            key for key, _l, _a, _q in unmigrated_fact_reader_sites(tree, "x.py", src)
+        ]
+        assert keys == [
+            "x.py::f::<positional>::RT(_, _, _, _, _, [])::RT(_, _, _, _, _, [])::1"
+        ]
+
     def test_detects_a_qualified_builtins_getattr_call(self) -> None:
         """`import builtins; builtins.getattr(rec, "bases")` is the
         identical read as bare `getattr(rec, "bases")` (Codex review:
@@ -523,6 +546,21 @@ class TestUnmigratedFactReaderSites:
         assert keys == [
             'x.py::f::vtable::read_attr2(rec, "vtable")::read_attr2(rec, "vtable")::1'
         ]
+
+    def test_detects_a_chained_assignment_to_the_getattr_builtin(self) -> None:
+        """`read1 = read2 = getattr` -- an ordinary chained assignment,
+        not a single-target `ast.Assign` (Codex review, fresh evidence:
+        the identical gap fixed for the class-alias resolver's own
+        `ast.Assign` branch, reached here through the getattr resolver
+        instead)."""
+        src = (
+            'def f(rec):\n    read1 = read2 = getattr\n    return read1(rec, "bases")\n'
+        )
+        tree = ast.parse(src, filename="x.py")
+        keys = [
+            key for key, _l, _a, _q in unmigrated_fact_reader_sites(tree, "x.py", src)
+        ]
+        assert keys == ['x.py::f::bases::read1(rec, "bases")::read1(rec, "bases")::1']
 
     def test_detects_a_qualified_assignment_to_the_getattr_builtin(self) -> None:
         """`read_attr = builtins.getattr; read_attr(rec, "bases")` --
