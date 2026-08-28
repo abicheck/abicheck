@@ -18,13 +18,8 @@
         "abicheck/change_registry_types.py",
         "abicheck/checker_types.py",
         "abicheck/compile_context.py",
-        "abicheck/config_paths.py",
-        "abicheck/contract_coverage_ledger.py",
         "abicheck/contract_evidence.py",
-        "abicheck/contract_gating.py",
         "abicheck/contract_relevance_types.py",
-        "abicheck/deadline.py",
-        "abicheck/demangle.py",
         "abicheck/detectors.py",
         "abicheck/evidence_depth.py",
         "abicheck/name_classification.py"
