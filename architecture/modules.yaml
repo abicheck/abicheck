@@ -162,9 +162,16 @@
       ],
       "legacy_paths": [
         "abicheck/analysis_assurance.py",
+        "abicheck/compatibility_evaluation_config.py",
         "abicheck/contract_coverage_exit.py",
+        "abicheck/contract_evaluation.py",
+        "abicheck/contract_evidence_collect.py",
+        "abicheck/contract_pipeline.py",
         "abicheck/exit_decision.py",
-        "abicheck/severity.py"
+        "abicheck/export_surface.py",
+        "abicheck/pattern_verdicts.py",
+        "abicheck/severity.py",
+        "abicheck/suppression_yaml.py"
       ]
     },
     "workflows": {
