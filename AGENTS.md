@@ -4334,9 +4334,18 @@ Once a root command genuinely clears the bar above, pick the right home:
   system-provider classification -- a tactical fix that has grown, not a
   designed feature (Codex review on #791, fresh evidence).**
   `bundle.compare_bundle()`'s unresolved-import check
-  (`ChangeKind.BUNDLE_INTRA_DEP_REMOVED`) ignores an import against any
-  soname in `set(DEFAULT_SYSTEM_PROVIDERS) | set(bundle_system_providers)`
-  -- correct for the ordinary libc/libstdc++/libpthread runtime set the
+  (`ChangeKind.BUNDLE_INTRA_DEP_REMOVED`, `_detect_intra_dep_removed()`)
+  does not exempt an import merely for being "against any" soname in this
+  union -- it suppresses a consumer's finding only when that consumer's
+  remaining non-intra `DT_NEEDED` edges are all non-empty AND every one of
+  them matches `set(DEFAULT_SYSTEM_PROVIDERS) | set(bundle_system_providers)`
+  (or the `_looks_system` heuristic), AND EITHER no in-bundle sibling ever
+  version-compatibly provided the symbol OR the user explicitly named one of
+  the remaining sonames via `explicit_providers` -- a consumer with a mixed
+  intra-bundle/external dependency set can still produce the finding, and
+  a match against the allow-list alone is not sufficient (Codex review,
+  PR #910, fresh evidence). Correct for the ordinary libc/libstdc++/libpthread
+  runtime set the
   constant started from, but each addition since (oneTBB's `libtbb.so.*`
   and its allocator-proxy libs, oneMKL/Intel-runtime and Level Zero
   entries, PR #883) was a real, reported false positive fixed by naming one

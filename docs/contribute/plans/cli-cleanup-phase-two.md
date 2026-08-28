@@ -3017,10 +3017,23 @@ only the *unification into one shared typed object* is deferred.
 > the old blanked-to-default one.
 
 > **PR B finalized (2026-08-28).** Both of PR B's own stated goals are fully
-> landed: pack parity across every front end (`compare`, the release
-> fan-out, `scan --against`, both `policy.overrides`/`surface.
-> internal_namespaces` *and* `gate.*` fields — slices 1-3) and the
-> effective-config digest recorded in every report (slice 4). The one
+> landed for every CLI command path: pack parity across `compare`, the
+> release fan-out, and `scan --against`, both `policy.overrides`/`surface.
+> internal_namespaces` *and* `gate.*` fields — slices 1-3 — plus the
+> effective-config digest recorded in every report (slice 4). **Narrower
+> than "every front end" once the typed Python API is included**: `--pack`
+> is a CLI selector today (ADR-049 D8), and neither `ScanRequest` nor
+> `CompareRequest` carries a pack field a typed caller can set — `ScanRequest`
+> has none at all (`service_scan._resolve_api_evaluation_config` explicitly
+> resolves `pack_paths=()`, documented at that call site as "a `ScanRequest`
+> has no pack field"), and `CompareRequest` accepts only pre-resolved
+> `pack_policy_overrides`/`pack_internal_namespaces` (the `policy.overrides`/
+> `surface.internal_namespaces` halves), with no `gate.*` equivalent — so a
+> typed-API caller cannot reproduce a CLI `gate`-pack's severity/exit-code
+> configuration today (Codex review, PR #910, fresh evidence). Landing that
+> is its own, separate slice — a `pack_paths`/gate-pack field on both typed
+> requests, threaded through `PackApplication` the way the CLI receipts
+> already are — not implied by anything closed here. The one
 > remaining loose end named above — a typed `GateOptions` object the
 > release fan-out's own severity/exit-code-scheme resolution is built from,
 > replacing its six-raw-string threading — is deliberately **not** PR B's
