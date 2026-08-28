@@ -659,9 +659,8 @@ def _resolve_artifact_set_paths(spec: tuple[str, ...]) -> tuple[list[Path], bool
     to every discoverable shared library in it (``explicit=False`` -- an
     unsupported file found this way is silently skipped, mirroring
     ``build_bundle_snapshot``'s directory-scan behavior); anything else is
-    an explicit path list, one member per occurrence (``explicit=True`` --
-    every member must resolve, enforced by :func:`bundle.discover_artifact_set`).
-    ``reject_incoherent_scan_operands`` has already rejected an empty member.
+    an explicit path list, one member per occurrence, every member of which
+    must resolve (``explicit=True``, per :func:`bundle.discover_artifact_set`).
     """
     from .workflows.extraction import discover_shared_libraries
 
@@ -1509,21 +1508,16 @@ def scan_cmd(
     # ARTIFACT, with --against (audit-only -- no old side for a set), and
     # --bundle-system-providers is meaningless without --artifact-set.
     #
-    # --artifact-set is a repeatable option (CLI cleanup phase two, PR 5),
-    # so `artifact_set` here is the tuple Click collects -- empty when the
-    # flag was never given. "Supplied" is exactly `bool(artifact_set)`, with
-    # no separate `is not None` reading to disagree with it: a bare
-    # ``--artifact-set ""`` still yields the one-element tuple `("",)`,
-    # which is truthy (correctly "supplied", rejected outright by the
-    # empty-member check inside `reject_incoherent_scan_operands`), not
-    # silently "not set". The comma-separated single-string form this
-    # replaced needed the truthiness/`is not None` distinction documented
-    # here because an empty *string* is falsy but not `None` -- that
-    # mismatch is what let ARTIFACT and an empty --artifact-set both pass
-    # the exclusivity check and silently resolve to `Path("") ==
-    # Path(".")`, auditing the whole CWD instead of erroring (CodeRabbit
-    # review, historical). A tuple has no equivalent falsy-but-present
-    # state, so that class of bug cannot recur here.
+    # --artifact-set is now a repeatable option (CLI cleanup phase two, PR
+    # 5): `artifact_set` is the tuple Click collects, empty when unset, so
+    # "supplied" is exactly `bool(artifact_set)` -- a bare `--artifact-set
+    # ""` is still the truthy `("",)`, correctly "supplied" and rejected by
+    # `reject_incoherent_scan_operands`'s own empty-member check. The old
+    # comma-string form needed a `bool()`/`is not None` distinction here
+    # because an empty *string* was falsy but not `None`, which is what let
+    # ARTIFACT and an empty --artifact-set both pass exclusivity and
+    # silently resolve to `Path("") == Path(".")` (CodeRabbit review,
+    # historical) -- a tuple has no such falsy-but-present state.
     _reject_incoherent_scan_operands(
         artifact=artifact, artifact_set=artifact_set, against=against,
         dry_run=dry_run, bundle_system_providers=bundle_system_providers,

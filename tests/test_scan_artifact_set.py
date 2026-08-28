@@ -155,8 +155,7 @@ class TestArtifactSetCliValidation:
         self, runner: CliRunner, snap_a: Path
     ) -> None:
         result = runner.invoke(
-            main,
-            ["scan", str(snap_a), "--artifact-set", "x", "--artifact-set", "y"],
+            main, ["scan", str(snap_a), "--artifact-set", "x", "--artifact-set", "y"]
         )
         assert result.exit_code != 0
         assert "exactly one of ARTIFACT or --artifact-set" in result.output
@@ -215,10 +214,7 @@ class TestArtifactSetCliValidation:
     ) -> None:
         result = runner.invoke(
             main,
-            [
-                "scan", "--artifact-set", "x", "--artifact-set", "y",
-                "--against", str(snap_a),
-            ],
+            ["scan", "--artifact-set", "x", "--artifact-set", "y", "--against", str(snap_a)],
         )
         assert result.exit_code != 0
         assert "--against is not supported with --artifact-set" in result.output
@@ -291,8 +287,7 @@ class TestArtifactSetCompileContextForwarding:
             main,
             [
                 "scan",
-                "--artifact-set", str(p1),
-                "--artifact-set", str(p2),
+                "--artifact-set", str(p1), "--artifact-set", str(p2),
                 "--compiler", "/usr/bin/my-cross-gcc",
                 "--sysroot", str(sysroot_dir),
                 "--nostdinc",
@@ -351,10 +346,7 @@ class TestArtifactSetSourceMethodSelection:
 
         result = runner.invoke(
             main,
-            [
-                "scan", "--artifact-set", str(p1), "--artifact-set", str(p2),
-                "--depth", "binary",
-            ],
+            ["scan", "--artifact-set", str(p1), "--artifact-set", str(p2), "--depth", "binary"],
         )
         assert result.exit_code == 0, result.output
         assert captured["req"].source_method is None
@@ -1236,12 +1228,8 @@ class TestArtifactSetComparisonOnlyFlagsRejected:
             main,
             [
                 "scan",
-                "--artifact-set",
-                str(p1),
-                "--artifact-set",
-                str(p2),
-                "--suppress",
-                str(suppress_file),
+                "--artifact-set", str(p1), "--artifact-set", str(p2),
+                "--suppress", str(suppress_file),
             ],
         )
         assert result.exit_code != 0
@@ -1261,12 +1249,8 @@ class TestArtifactSetComparisonOnlyFlagsRejected:
             main,
             [
                 "scan",
-                "--artifact-set",
-                str(p1),
-                "--artifact-set",
-                str(p2),
-                "--env-matrix",
-                str(matrix_file),
+                "--artifact-set", str(p1), "--artifact-set", str(p2),
+                "--env-matrix", str(matrix_file),
             ],
         )
         assert result.exit_code != 0
@@ -1294,10 +1278,7 @@ class TestArtifactSetMalformedRiskRules:
 
         result = runner.invoke(
             main,
-            [
-                "scan", "--artifact-set", str(p1), "--artifact-set", str(p2),
-                "--risk-rules", str(bad),
-            ],
+            ["scan", "--artifact-set", str(p1), "--artifact-set", str(p2), "--risk-rules", str(bad)],
         )
         assert result.exit_code != 0
         assert result.exception is None or isinstance(result.exception, SystemExit)
