@@ -2011,6 +2011,68 @@ separate, pre-existing, unrelated gap this module doesn't track at all
 (confirmed unaffected by this fix, before and after, by direct
 comparison against the pre-fix code).
 
+**A further Codex review round found a real regression in the comprehension
+fix above, plus one more real gap, both fixed.**
+
+**(1) The comprehension fix's own "harmless, same span" reasoning was
+correct for `_enclosing_qualnames`, but wrong for its two siblings.** The
+first version of that fix dispatched the outermost iterable once, under
+the old scope, then still finished with a blanket `visit(child, ...)`
+over the *whole* comprehension -- reasoned as harmless, since the blanket
+walk reaches the identical iterable a second time with the identical
+span, and `_qualname_at`'s strict `size < best_size` tie-break never lets
+a same-size later entry replace an earlier one. That reasoning holds for
+`_enclosing_qualnames`'s own `spans` list, but `_lexical_function_
+parents`/`_def_containing_qualnames` don't build a spans list at all --
+they write straight into a plain `dict` (`parents[qualname] = ...`,
+`containing[pos] = ...`), where a second write to the same key
+*unconditionally overwrites* the first, no tie-break involved. `[x for
+fact in (lambda y=fact: (y == other,))() for x in fact]` -- the lambda's
+own default `y=fact` is correctly dispatched once, under `f`'s own scope,
+by the fix's first half; the blanket re-walk then reaches the *same*
+lambda a second time and overwrites its correct `containing[]`/`parents[]`
+entry with the comprehension's own (wrong) scope, silently missing the
+misuse. Fixed uniformly across all three functions by never re-walking
+the outermost iterable at all: the comprehension's own body is now walked
+explicitly, field by field (`elt`/`key`+`value` for a `DictComp`, each
+generator's `target`/`ifs`, and every *non-first* generator's own `iter`),
+instead of through a blanket walk that would reach the already-handled
+iterable again. `_enclosing_qualnames` itself needed a genuine `dispatch`/
+`visit` split for this (it never had one before, unlike its two siblings
+-- see the def-time-subtree fix earlier in this section), since dispatching
+a specific field like `elt` as its own candidate (it might itself be a bare
+`Lambda`, as in `[lambda: x for x in y]`) needs a function that matches a
+*given* node, not `visit`'s existing "match every child of a container"
+shape. New tests: the reported lambda-in-outermost-iterable case, and a
+`DictComp`-specific case confirming its `key`/`value` split is covered by
+the same explicit-field dispatch.
+
+**(2) `_fact_aliases()`'s candidate collection deliberately excluded every
+tuple/list-unpacking assignment target**, reasoned as "has no single value
+to attribute" -- true for the *general* case (`a, b = pair`, one opaque
+value with no per-element sub-expression), but not for `old_fact, new_fact
+= old.bases_fact, new.bases_fact`, where the RHS is *itself* a literal
+tuple display of the identical length: each target element genuinely does
+have its own value, the same way a chained assignment's every target
+already does. Fixed with `_paired_unpacking_candidates()`, a recursive
+helper matching a `Tuple`/`List` target against a structurally identical
+`Tuple`/`List` value element-by-element (nesting through a further tuple
+target the same way `_bound_names()` already does), returning *no*
+candidates at all -- rather than a partial, best-effort pairing -- the
+moment either side isn't a literal display, the lengths disagree, or
+either side contains a `Starred` element (which captures an
+arbitrary-length slice with no single corresponding RHS sub-expression to
+pair it against). New tests: paired tuple unpacking, paired list
+unpacking, nested paired unpacking, and two negative controls (the
+pre-existing opaque-single-value case, still correctly excluded, and a
+starred-target case confirming no candidate is derived for it without
+spuriously flagging an unrelated comparison in the same function).
+
+Both fixes' new tests went into `tests/test_fact_detector_misuse_def_
+time_scope.py` (room remained under the architecture gate's 1200-line
+cap). Verified empirically: still zero existing hits in the real
+repository, and `mypy`/`ruff` both stayed clean.
+
 ---
 
 ### Phase 1 — finish the `dump`/`scan` typed-API convergence (closes AGENTS.md "PR C")

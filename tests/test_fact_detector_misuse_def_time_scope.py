@@ -319,3 +319,107 @@ class TestDefContainingQualnamesDefTimeSubtrees:
         )
         tree = ast.parse(src, filename="x.py")
         assert fact_equality_misuse_sites(tree, "x.py") == []
+
+
+class TestComprehensionOutermostIterableIsDispatchedExactlyOnce:
+    """`_enclosing_qualnames`/`_lexical_function_parents`/`_def_containing_
+    qualnames` each dispatch a comprehension's outermost generator's
+    iterable exactly once, under the enclosing scope -- a first version of
+    this fix still finished with a blanket re-walk of the whole
+    comprehension, which silently re-registered any closure found in the
+    outermost iterable a second time, under the comprehension's own
+    (wrong) scope (Codex review, fresh evidence)."""
+
+    def test_detects_a_lambda_default_in_the_outermost_iterable(self) -> None:
+        """`[x for fact in (lambda y=fact: (y == other,))() for x in
+        fact]` -- the lambda's own default `y=fact` evaluates in `f`'s
+        own scope, before the comprehension's `fact` target exists to
+        shadow it, but a blanket re-walk after the correct dispatch used
+        to re-register the lambda under the comprehension's own scope
+        instead, silently missing the misuse."""
+        src = (
+            "def f(rec, other):\n"
+            "    fact = rec.bases_fact\n"
+            "    return [x for fact in (lambda y=fact: (y == other,))() "
+            "for x in fact]\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert fact_equality_misuse_sites(tree, "x.py") == [(3, 43)]
+
+    def test_ignores_a_comparison_in_a_dict_comprehensions_value_shadowed_by_key(
+        self,
+    ) -> None:
+        """A `DictComp`'s own `key`/`value` split is covered by the same
+        explicit-field dispatch as `elt` -- a genuine shadow inside the
+        `value` expression (not the outermost iterable) is still
+        correctly excluded."""
+        src = (
+            "def f(rec, other):\n"
+            "    fact = rec.bases_fact\n"
+            "    return {fact: (fact == other) for fact in range(3)}\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert fact_equality_misuse_sites(tree, "x.py") == []
+
+
+class TestElementwiseTupleUnpackingAliases:
+    """A simple tuple/list-unpacking assignment whose RHS is itself a
+    literal `Tuple`/`List` display of the identical length has a real,
+    identifiable per-element value -- `old_fact, new_fact = old.
+    bases_fact, new.bases_fact` is an ordinary detector refactor of two
+    independent Fact-typed values, ordinary code the check must still
+    catch (Codex review, fresh evidence)."""
+
+    def test_detects_a_comparison_through_paired_tuple_unpacking(self) -> None:
+        src = (
+            "def f(old, new):\n"
+            "    old_fact, new_fact = old.bases_fact, new.bases_fact\n"
+            "    return old_fact == new_fact\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert fact_equality_misuse_sites(tree, "x.py") == [(3, 11)]
+
+    def test_detects_a_comparison_through_paired_list_unpacking(self) -> None:
+        """The identical pairing for a `List` display on both sides, not
+        just `Tuple`."""
+        src = (
+            "def f(old, new):\n"
+            "    [old_fact, new_fact] = [old.bases_fact, new.bases_fact]\n"
+            "    return old_fact == new_fact\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert fact_equality_misuse_sites(tree, "x.py") == [(3, 11)]
+
+    def test_detects_a_comparison_through_nested_paired_unpacking(self) -> None:
+        """Pairing recurses through a further nested tuple target, the
+        same way `_bound_names()` already does."""
+        src = (
+            "def f(old, new):\n"
+            "    (old_fact, (new_fact, x)) = (old.bases_fact, (new.bases_fact, 1))\n"
+            "    return old_fact == new_fact\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert fact_equality_misuse_sites(tree, "x.py") == [(3, 11)]
+
+    def test_ignores_an_opaque_single_valued_tuple_unpacking(self) -> None:
+        """Negative control: `a, b = pair` has no per-element RHS sub-
+        expression to pair against -- `pair` is one opaque value, so `a`
+        must not be attributed a Fact-typed value it was never shown to
+        hold, the same distinction the module's own pre-existing
+        docstring already draws."""
+        src = "def f(pair, other):\n    a, b = pair\n    return a == other\n"
+        tree = ast.parse(src, filename="x.py")
+        assert fact_equality_misuse_sites(tree, "x.py") == []
+
+    def test_ignores_a_starred_target_pairing(self) -> None:
+        """Negative control: a starred target captures an arbitrary-length
+        slice with no single corresponding RHS sub-expression, so no
+        candidate is derived for it -- and this must not spuriously flag
+        the *other*, ordinary comparison in the same function either."""
+        src = (
+            "def f(old, new, extra):\n"
+            "    old_fact, *rest = old.bases_fact, new.bases_fact, extra\n"
+            "    return old_fact == rest\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert fact_equality_misuse_sites(tree, "x.py") == []

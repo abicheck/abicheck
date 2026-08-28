@@ -368,53 +368,95 @@ def _enclosing_qualnames(tree: ast.Module) -> _QualnameSpans:
         )
         return start, end
 
+    def dispatch(node: ast.AST, prefix: str, qualname: str) -> None:
+        """Match *node* against every scope-introducing shape this
+        function recognizes, exactly the way `visit()`'s own loop used to
+        match each of `node`'s *children* inline -- factored out so a
+        *specific* node (not "every child of a container") can be treated
+        as a candidate in its own right (Codex review, fresh evidence: the
+        comprehension branch below needs to dispatch its own `elt`/
+        `generators[0].iter`/etc. individually, and `visit(node, ...)`
+        only ever tests `node`'s children, so calling it on a bare
+        expression that might itself be a `Lambda`/comprehension --
+        `[lambda: x for x in y]`'s own `elt`, for instance -- would
+        silently skip matching that expression itself).
+        """
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            child_qualname = f"{prefix}{node.name}#{node.lineno}"
+            start, end = _span(node)
+            spans.append((start, end, child_qualname))
+            visit(node, child_qualname + ".", child_qualname)
+        elif isinstance(node, ast.Lambda):
+            child_qualname = f"{prefix}<lambda>#{node.lineno}:{node.col_offset}"
+            start, end = _span(node)
+            spans.append((start, end, child_qualname))
+            visit(node, child_qualname + ".", child_qualname)
+        elif isinstance(
+            node, (ast.ListComp, ast.SetComp, ast.DictComp, ast.GeneratorExp)
+        ):
+            child_qualname = f"{prefix}<comp>#{node.lineno}:{node.col_offset}"
+            start, end = _span(node)
+            spans.append((start, end, child_qualname))
+            # The OUTERMOST generator's own iterable evaluates in the
+            # ENCLOSING scope -- before the comprehension's implicit
+            # function is even called -- not inside the comprehension's
+            # own new scope (Codex review, fresh evidence for the exact
+            # case this function's own docstring above already named as
+            # "vanishingly rare, and not the shape any review round has
+            # found": `fact = rec.bases_fact; [x for fact in (fact ==
+            # other,)]` -- the comparison inside the first iterable
+            # reads the *outer* `fact`, not the comprehension's own
+            # shadowing target).
+            #
+            # **A first version of this fix dispatched the outermost
+            # iterable once under the old scope, then still re-walked the
+            # *whole* comprehension afterward -- a further round found
+            # this reaches the same iterable a second time, silently
+            # re-registering any closure inside it under the wrong scope
+            # (Codex review, fresh evidence): `[x for fact in (lambda
+            # y=fact: (y == other,))()]` -- the lambda's own default is
+            # correctly dispatched once, under the outer scope, but the
+            # blanket re-walk then reached the identical lambda again and
+            # re-registered it under the comprehension's own scope
+            # instead. Harmless for *this* function's own `spans` list
+            # (both entries share the identical span, and `_qualname_at`'s
+            # smallest-span-first tie-break never lets a same-size later
+            # entry replace an earlier one) -- but the identical
+            # duplicate-walk shape in `_lexical_function_parents`/
+            # `_def_containing_qualnames` below uses a plain `dict`, where
+            # a same-key second write unconditionally *overwrites* the
+            # first.** Fixed uniformly across all three functions: the
+            # outermost iterable is dispatched exactly once, under the old
+            # scope, and everything else in the comprehension is now
+            # dispatched explicitly, field by field, rather than through a
+            # blanket walk that would reach the same iterable again.
+            if node.generators:
+                first_iter = node.generators[0].iter
+                i_start, i_end = _span(first_iter)
+                spans.append((i_start, i_end, qualname))
+                dispatch(first_iter, prefix, qualname)
+            if isinstance(node, ast.DictComp):
+                dispatch(node.key, child_qualname + ".", child_qualname)
+                dispatch(node.value, child_qualname + ".", child_qualname)
+            else:
+                dispatch(node.elt, child_qualname + ".", child_qualname)
+            for index, generator in enumerate(node.generators):
+                dispatch(generator.target, child_qualname + ".", child_qualname)
+                if index > 0:
+                    dispatch(generator.iter, child_qualname + ".", child_qualname)
+                for cond in generator.ifs:
+                    dispatch(cond, child_qualname + ".", child_qualname)
+        elif isinstance(node, ast.ClassDef):
+            class_qualname = f"{prefix}{node.name}#{node.lineno}<class-body>"
+            start, end = _span(node)
+            spans.append((start, end, class_qualname))
+            visit(node, f"{prefix}{node.name}.", class_qualname)
+        else:
+            visit(node, prefix, qualname)
+
     def visit(node: ast.AST, prefix: str, qualname: str) -> None:
         for child in ast.iter_child_nodes(node):
-            if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                child_qualname = f"{prefix}{child.name}#{child.lineno}"
-                start, end = _span(child)
-                spans.append((start, end, child_qualname))
-                visit(child, child_qualname + ".", child_qualname)
-            elif isinstance(child, ast.Lambda):
-                child_qualname = f"{prefix}<lambda>#{child.lineno}:{child.col_offset}"
-                start, end = _span(child)
-                spans.append((start, end, child_qualname))
-                visit(child, child_qualname + ".", child_qualname)
-            elif isinstance(
-                child, (ast.ListComp, ast.SetComp, ast.DictComp, ast.GeneratorExp)
-            ):
-                child_qualname = f"{prefix}<comp>#{child.lineno}:{child.col_offset}"
-                start, end = _span(child)
-                spans.append((start, end, child_qualname))
-                # The OUTERMOST generator's own iterable evaluates in the
-                # ENCLOSING scope -- before the comprehension's implicit
-                # function is even called -- not inside the comprehension's
-                # own new scope (Codex review, fresh evidence for the exact
-                # case this function's own docstring above already named as
-                # "vanishingly rare, and not the shape any review round has
-                # found": `fact = rec.bases_fact; [x for fact in (fact ==
-                # other,)]` -- the comparison inside the first iterable
-                # reads the *outer* `fact`, not the comprehension's own
-                # shadowing target). A narrower override span for just that
-                # iterable, registered *before* the whole-node walk below,
-                # wins `_qualname_at`'s smallest-span-first tie-break for
-                # any position inside it; the whole-node walk still reaches
-                # the same nodes afterward (harmless -- same span, so the
-                # strict `<` comparison in `_qualname_at` never lets the
-                # later, wrong entry replace this one).
-                if child.generators:
-                    first_iter = child.generators[0].iter
-                    i_start, i_end = _span(first_iter)
-                    spans.append((i_start, i_end, qualname))
-                    visit(first_iter, prefix, qualname)
-                visit(child, child_qualname + ".", child_qualname)
-            elif isinstance(child, ast.ClassDef):
-                class_qualname = f"{prefix}{child.name}#{child.lineno}<class-body>"
-                start, end = _span(child)
-                spans.append((start, end, class_qualname))
-                visit(child, f"{prefix}{child.name}.", class_qualname)
-            else:
-                visit(child, prefix, qualname)
+            dispatch(child, prefix, qualname)
 
     visit(tree, "", "<module>")
     return spans
@@ -570,11 +612,37 @@ def _lexical_function_parents(tree: ast.Module) -> dict[str, str]:
             # `nearest_func` so a closure found there (not merely a bare
             # read, which `_enclosing_qualnames`'s own span override
             # already handles) still resolves against the outer scope.
+            #
+            # **Dispatched exactly once, not also reachable through a
+            # later blanket walk (Codex review, fresh evidence, mirroring
+            # `_enclosing_qualnames`'s own identical follow-up fix and
+            # docstring for the full reasoning).** A first version of this
+            # fix still finished with a blanket `visit(child, qualname +
+            # ".", qualname)`, which reaches the same outermost iterable a
+            # *second* time and re-registers any closure inside it under
+            # the wrong (comprehension's own) scope -- and since `parents`
+            # is a plain `dict`, that second, wrong write unconditionally
+            # overwrites the first, correct one (no smallest-span
+            # tie-break to protect it the way `_enclosing_qualnames`'s own
+            # `spans` list has). Fixed by never re-walking the outermost
+            # iterable at all: every other part of the comprehension is
+            # now dispatched explicitly, field by field, instead of
+            # through a blanket walk.
             qualname = f"{prefix}<comp>#{child.lineno}:{child.col_offset}"
             parents[qualname] = nearest_func
             if child.generators:
                 dispatch(child.generators[0].iter, prefix, nearest_func)
-            visit(child, qualname + ".", qualname)
+            if isinstance(child, ast.DictComp):
+                dispatch(child.key, qualname + ".", qualname)
+                dispatch(child.value, qualname + ".", qualname)
+            else:
+                dispatch(child.elt, qualname + ".", qualname)
+            for index, generator in enumerate(child.generators):
+                dispatch(generator.target, qualname + ".", qualname)
+                if index > 0:
+                    dispatch(generator.iter, qualname + ".", qualname)
+                for cond in generator.ifs:
+                    dispatch(cond, qualname + ".", qualname)
         elif isinstance(child, ast.ClassDef):
             # The class body's *own* scope inherits from whatever
             # encloses the `class` statement (ordinary Python LEGB
@@ -724,9 +792,30 @@ def _def_containing_qualnames(tree: ast.Module) -> dict[tuple[int, int], str]:
             # qualnames`'s own identical fix): a `def`/`lambda`/`class`
             # found there is still contained by *this* scope
             # (`scope_qualname`), not the comprehension's own.
+            #
+            # Dispatched exactly once, not also reachable through a later
+            # blanket walk (Codex review, fresh evidence, mirroring
+            # `_lexical_function_parents`'s own identical follow-up fix
+            # and docstring for the full reasoning): a blanket `visit(
+            # child, qualname + ".", qualname)` here would reach the same
+            # outermost iterable a second time and overwrite its correct
+            # `containing[]` entry (and any closure found inside it) with
+            # the comprehension's own, wrong scope -- `containing` is a
+            # plain `dict`, so a second write always wins. Every other
+            # part of the comprehension is dispatched explicitly instead.
             if child.generators:
                 dispatch(child.generators[0].iter, prefix, scope_qualname)
-            visit(child, qualname + ".", qualname)
+            if isinstance(child, ast.DictComp):
+                dispatch(child.key, qualname + ".", qualname)
+                dispatch(child.value, qualname + ".", qualname)
+            else:
+                dispatch(child.elt, qualname + ".", qualname)
+            for index, generator in enumerate(child.generators):
+                dispatch(generator.target, qualname + ".", qualname)
+                if index > 0:
+                    dispatch(generator.iter, qualname + ".", qualname)
+                for cond in generator.ifs:
+                    dispatch(cond, qualname + ".", qualname)
         elif isinstance(child, ast.ClassDef):
             class_qualname = f"{prefix}{child.name}#{child.lineno}<class-body>"
             containing[child.lineno, child.col_offset] = scope_qualname
@@ -779,6 +868,48 @@ def _bound_names(target: ast.expr) -> list[str]:
         for elt in target.elts:
             names.extend(_bound_names(elt))
     return names
+
+
+def _paired_unpacking_candidates(
+    target: ast.expr, value: ast.expr
+) -> list[tuple[str, ast.expr]]:
+    """Recursively pair a tuple/list-unpacking *target* against a
+    structurally matching *value*, returning a `(name, expr)` candidate
+    for each plain-`Name` element that lines up with its own identifiable
+    RHS sub-expression (Codex review, fresh evidence): `old_fact, new_fact
+    = old.bases_fact, new.bases_fact` is an ordinary detector refactor of
+    two independent Fact-typed values -- each target element genuinely has
+    its own single value, exactly the way a chained assignment's every
+    target does, but the *general* tuple-unpacking case (`a, b = pair`,
+    where `pair` is one opaque value with no per-element sub-expression at
+    all) has no such value to attribute, which is why the ordinary
+    candidate-collection loop above deliberately skips every tuple/list
+    target. This handles only the *provably* elementwise case: both sides
+    are literal `Tuple`/`List` displays of the identical length, with no
+    `Starred` element on either side (a starred target captures an
+    arbitrary-length slice, which has no single corresponding RHS
+    sub-expression to pair it with; a starred *value* is symmetric evidence
+    the RHS was never actually laid out element-by-element to begin with).
+    Nests through a further tuple/list target (`(a, (b, c)) = (x, (y, z))`)
+    the identical way `_bound_names` already does. Returns no candidates
+    at all -- rather than a partial, best-effort pairing -- the moment
+    either side fails to match this shape, since a partial pairing risks
+    attributing the wrong sub-expression to the wrong name.
+    """
+    if isinstance(target, ast.Name):
+        return [(target.id, value)]
+    if not isinstance(target, (ast.Tuple, ast.List)) or not isinstance(
+        value, (ast.Tuple, ast.List)
+    ):
+        return []
+    if len(target.elts) != len(value.elts):
+        return []
+    if any(isinstance(elt, ast.Starred) for elt in (*target.elts, *value.elts)):
+        return []
+    candidates: list[tuple[str, ast.expr]] = []
+    for target_elt, value_elt in zip(target.elts, value.elts):
+        candidates.extend(_paired_unpacking_candidates(target_elt, value_elt))
+    return candidates
 
 
 def _match_pattern_names(pattern: ast.pattern) -> list[str]:
@@ -1015,10 +1146,23 @@ def _fact_aliases(tree: ast.Module, qualnames: _QualnameSpans) -> dict[str, set[
             # other` both bypass the gate). A tuple/list target among
             # `node.targets` still contributes nothing here -- only
             # `locally_bound`, via `_bound_names` above -- since it has no
-            # single value of its own either.
+            # single value of its own either -- *unless* the RHS is
+            # itself a literal `Tuple`/`List` display of the identical
+            # length, in which case each element genuinely does have its
+            # own value (Codex review, fresh evidence: `old_fact, new_fact
+            # = old.bases_fact, new.bases_fact` then `old_fact ==
+            # new_fact` is an ordinary detector refactor of two
+            # independent Fact-typed values, bypassing the gate entirely
+            # under the plain-`Name`-only restriction) -- see
+            # `_paired_unpacking_candidates()`'s own docstring for exactly
+            # which shapes this covers.
             for target in node.targets:
                 if isinstance(target, ast.Name):
                     candidates.setdefault(qualname, []).append((target.id, node.value))
+                elif isinstance(target, (ast.Tuple, ast.List)):
+                    candidates.setdefault(qualname, []).extend(
+                        _paired_unpacking_candidates(target, node.value)
+                    )
         elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
             qualname = _qualname_at((node.lineno, node.col_offset), qualnames)
             locally_bound.setdefault(qualname, set()).add(node.target.id)
