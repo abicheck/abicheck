@@ -230,6 +230,35 @@ def test_link_source_abi_rescues_a_synthetic_ctor_key_with_a_real_export() -> No
     assert synthetic_ctor.id in {d.id for d in surface_matched.reachable_declarations}
 
 
+def test_link_source_abi_rescues_a_synthetic_ctor_key_for_an_abi_tagged_owner() -> (
+    None
+):
+    """Codex review, PR #930: `itanium_scope_components` renders an ABI-tagged
+    owner (`__attribute__((abi_tag("v1")))`) as `"Widget[abi:v1]"`, but
+    castxml's own synthetic ctor key encodes only the plain source-level
+    class name (`"Widget"`), never the tag. The owner-index rescue must
+    strip the tag before matching, or an ODR-used implicit constructor of
+    an ABI-tagged public class is wrongly dropped even though its real
+    weak C1/C2 exports exist."""
+    from abicheck.dumper_castxml import SYNTHETIC_CTOR_KEY_PREFIX
+
+    synthetic_ctor = entity_from_function(
+        Function(
+            name="Widget",
+            mangled=f"{SYNTHETIC_CTOR_KEY_PREFIX}Widget(Widget const&)",
+            return_type="",
+            source_header="include/widget.h",
+            origin=ScopeOrigin.PUBLIC_HEADER,
+            is_compiler_generated=True,
+        )
+    )
+    tu = SourceAbiTu(tu_id="cu://widget.cpp#cfg", functions=[synthetic_ctor])
+
+    # A real, ABI-tagged export of this same class's constructor.
+    surface = link_source_abi([tu], exported_symbols=["_ZN6WidgetB2v1C1ERKS_"])
+    assert synthetic_ctor.id in {d.id for d in surface.reachable_declarations}
+
+
 @pytest.mark.integration
 def test_castxml_l4_extract_excludes_implicit_special_members_from_reachable_surface(
     tmp_path: Path,

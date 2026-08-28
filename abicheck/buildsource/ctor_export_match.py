@@ -64,6 +64,7 @@ declaration" rule.
 
 from __future__ import annotations
 
+import re
 from collections.abc import Callable
 from typing import TYPE_CHECKING
 
@@ -79,11 +80,20 @@ if TYPE_CHECKING:
 
 _CTOR_MARKER = "{ctor}"
 _DTOR_MARKER = "{dtor}"
+#: `itanium_scope_components` renders an ABI-tagged component (a real GCC/Clang
+#: `__attribute__((abi_tag("v1")))`) as `"Widget[abi:v1]"`, but castxml's own
+#: synthetic ctor/dtor key encodes only the plain source-level class name it
+#: parsed -- it never carries an ABI-tag suffix. Stripped before indexing/
+#: lookup so an ABI-tagged public class's real ctor/dtor exports still match
+#: (Codex review, PR #930): the tag versions one logical class's ABI, it does
+#: not name a different class castxml would have spelled differently.
+_ABI_TAG_RE = re.compile(r"\[abi:[^\]]*\]")
 
 
 def build_ctor_dtor_owner_index(exported: set[str]) -> dict[str, str]:
-    """Owner scope (Itanium-demangled, ``"::"``-joined) -> ``"ctor"``/
-    ``"dtor"``/``"both"``, for every export a ctor/dtor marker was found in.
+    """Owner scope (Itanium-demangled, ``"::"``-joined, ABI tags stripped) ->
+    ``"ctor"``/``"dtor"``/``"both"``, for every export a ctor/dtor marker
+    was found in.
 
     Built once per link, mirroring how :func:`~.source_link._build_export_index`
     already indexes ``exported`` up front rather than re-scanning it per entity.
@@ -100,7 +110,7 @@ def build_ctor_dtor_owner_index(exported: set[str]) -> dict[str, str]:
             kind = "dtor"
         else:
             continue
-        owner = "::".join(comps[:-1])
+        owner = _ABI_TAG_RE.sub("", "::".join(comps[:-1]))
         existing = index.get(owner)
         index[owner] = "both" if existing and existing != kind else kind
     return index
@@ -139,6 +149,19 @@ def should_drop_generated_candidate(
     relink, once the export table becomes known) so the two apply the
     identical rule rather than the relink path silently keeping a candidate
     the first link would have dropped (Codex review, PR #930).
+
+    Known, accepted residual (Codex review): ``bool(exported)`` is the only
+    signal available here for "has the export table actually been
+    resolved" -- ``link_source_abi``/``relink_surface_exports`` accept a
+    bare ``Iterable[str]`` with no separate resolved/unresolved flag, so a
+    *genuinely* zero-export dynamic library (an unusual but real shape --
+    e.g. an executable with no public symbols, or a `.so` whose every
+    export was stripped/LTO-eliminated) is indistinguishable from "the
+    binary side hasn't been linked yet" and is treated the same way: every
+    generated candidate is kept rather than dropped. Closing this needs a
+    real tri-state export-resolution signal threaded through both
+    functions' public signatures and every one of their callers -- a
+    genuine API-shape change, not a follow-up to this predicate.
     """
     return (
         not primary

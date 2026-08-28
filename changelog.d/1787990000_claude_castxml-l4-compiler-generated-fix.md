@@ -63,3 +63,25 @@
   (capped at the input's own length), mirroring the identical guard
   `buildsource/source_link.py`'s own ctor/dtor folder already used, instead
   of `int(s[i:j])`.
+- **The ctor/dtor rescue's owner-index now strips Itanium `[abi:tag]`
+  annotations before matching.** `itanium_scope_components` renders an
+  ABI-tagged owner (a real `__attribute__((abi_tag("v1")))`) as
+  `"Widget[abi:v1]"`, but castxml's own synthetic ctor/dtor key encodes
+  only the plain source-level class name it parsed, never the tag — so an
+  ODR-used implicit constructor/destructor of an ABI-tagged public class
+  previously failed the owner-index lookup and was wrongly dropped even
+  though its real weak `C1`/`C2`/`D1`/`D2` exports genuinely existed
+  (Codex review).
+- **Known, accepted residual on the empty-export-set "unresolved, not
+  confirmed-miss" rule**: `bool(exported)` is the only signal
+  `should_drop_generated_candidate` has for "has the export table
+  actually been resolved" — `link_source_abi`/`relink_surface_exports`
+  accept a bare `Iterable[str]` with no separate resolved/unresolved
+  flag, so a genuinely zero-export dynamic library (unusual but real —
+  e.g. an executable with no public symbols, or a fully
+  LTO/dead-code-eliminated `.so`) is indistinguishable from "the binary
+  side hasn't been linked yet", and every generated candidate is kept
+  rather than dropped in that case too (Codex review). Closing this needs
+  a real tri-state export-resolution signal threaded through both
+  functions' public signatures and every one of their callers — a
+  genuine API-shape change, not a follow-up to this predicate.
