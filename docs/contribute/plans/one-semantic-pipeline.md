@@ -1561,6 +1561,49 @@ repro and its negative control (an ordinary, undeclared local assignment
 must not leak into the module's own alias set), and the identical
 write-side routing test for `nonlocal`.
 
+**A further Codex review round found two more real gaps, both fixed.**
+(1) **The write-side routing fix's own candidate-move approach broke on a
+same-writer-scope RHS indirection.** `global fact; local = rec.bases_fact;
+fact = local` -- `fact`'s own candidate value is the bare `ast.Name`
+`local`, which is only ever a real local of the *writer's own* scope
+(`seed`), never of `<module>`. The previous round's fix moved the raw
+`(name, value)` candidate tuple straight into the target scope's own
+candidate list, where the inner fixed point then checked `local` against
+the *target*'s own alias set -- `local` was never going to appear there,
+silently breaking the exact RHS indirection this whole write-side fix
+exists to close. Fixed by no longer moving candidates at all: a declared
+assignment's candidate stays in its writer's own scope, resolving
+normally there (so `local` resolves against `seed`'s own alias set, same
+as any other same-function alias). A new step, run each outer-fixed-point
+iteration right after a scope's own inner candidate resolution, then
+checks whether a `global`/`nonlocal`-declared name has become confirmed
+Fact-typed *within its writer's own scope this iteration* and, only then,
+propagates it into the scope the assignment actually writes to -- so
+`fact` (confirmed via `local`, within `seed`) propagates to `<module>`
+the same outer iteration, with no separate resolution context to drift
+out of sync with the writer's own. (2) **A comparison inside a
+parameter's own default or annotation resolved against the function's
+own body scope, not the enclosing scope it actually evaluates in.** `fact
+= rec.bases_fact; def inner(fact=(fact == other)): ...` -- Python
+evaluates a default at `def`-time in the *enclosing* scope (the same
+binding-timing rule the earlier default-embedded-walrus fix already
+relies on), but `fact_equality_misuse_sites()`'s own site-to-qualname
+resolution is purely position-based, and the comparison's own position is
+textually inside `inner`'s span -- so it was checked against `inner`'s
+own alias set, where `inner`'s own parameter `fact` has already removed
+the inherited alias (the shadowing fix, several rounds above), missing a
+comparison that at the point it actually runs still reads the outer
+alias. Fixed with a new `_default_and_annotation_scope_overrides()`,
+walking every parameter default and annotation expression's own subtree
+and mapping each descendant node's `id()` to the function's lexical
+parent -- consulted by `fact_equality_misuse_sites()`'s own `ast.Compare`
+handling before falling back to the ordinary position-based lookup.
+Verified empirically: still zero existing hits in the real repository,
+and `mypy`/`ruff` both stayed clean. Four new tests: the same-scope-RHS-
+indirection repro for both `global` and `nonlocal`, the default-
+comparison repro, and a negative control (a default comparison against
+an unrelated, non-Fact value must not be flagged).
+
 ---
 
 ### Phase 1 — finish the `dump`/`scan` typed-API convergence (closes AGENTS.md "PR C")

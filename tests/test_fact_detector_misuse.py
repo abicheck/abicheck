@@ -1052,6 +1052,73 @@ class TestFactEqualityMisuseSites:
         tree = ast.parse(src, filename="x.py")
         assert fact_equality_misuse_sites(tree, "x.py") == [(7, 15)]
 
+    def test_a_global_write_through_a_same_scope_local_is_visible_to_a_sibling(
+        self,
+    ) -> None:
+        """A `global fact; local = rec.bases_fact; fact = local` write
+        genuinely writes module-scope `fact` -- but the candidate's own
+        value (`local`) is only ever meaningful within the *writer's own*
+        scope, not the target scope it moves to (Codex review: a first
+        revision of the write-side routing fix moved the raw `(name,
+        value)` candidate straight into the target scope's own candidate
+        list, where `local` could never resolve, since it's local only to
+        `seed`). Fixed by resolving each declared assignment against the
+        writer's own scope first, then propagating only the *confirmed*
+        alias to the target scope."""
+        src = (
+            "def seed(rec):\n"
+            "    global fact\n"
+            "    local = rec.bases_fact\n"
+            "    fact = local\n"
+            "def use(other):\n"
+            "    return fact == other\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert fact_equality_misuse_sites(tree, "x.py") == [(6, 11)]
+
+    def test_a_nonlocal_write_through_a_same_scope_local_is_visible_to_a_sibling(
+        self,
+    ) -> None:
+        """The identical RHS-indirection fix for `nonlocal`."""
+        src = (
+            "def outer():\n"
+            "    fact = None\n"
+            "    def setter(rec):\n"
+            "        nonlocal fact\n"
+            "        local = rec.bases_fact\n"
+            "        fact = local\n"
+            "    def reader(other):\n"
+            "        return fact == other\n"
+            "    return setter, reader\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert fact_equality_misuse_sites(tree, "x.py") == [(8, 15)]
+
+    def test_detects_a_comparison_inside_a_parameter_default_against_the_enclosing_alias(
+        self,
+    ) -> None:
+        """`fact = rec.bases_fact; def inner(fact=(fact == other)): ...` --
+        Python evaluates a default at `def`-time, in the *enclosing*
+        scope, but this function's own site-to-qualname resolution is
+        purely position-based, and the comparison's own position is
+        textually inside `inner`'s span -- so it was wrongly resolved
+        against `inner`'s own alias set, where `inner`'s own parameter
+        `fact` has already removed the inherited alias (Codex review)."""
+        src = (
+            "fact = rec.bases_fact\ndef inner(fact=(fact == other)):\n    return fact\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert fact_equality_misuse_sites(tree, "x.py") == [(2, 16)]
+
+    def test_ignores_a_default_comparison_against_an_unrelated_non_fact_value(
+        self,
+    ) -> None:
+        """Negative control: a default comparison that has nothing to do
+        with a Fact alias must not be flagged."""
+        src = "x = 5\ndef inner(y=(x == 1)):\n    return y\n"
+        tree = ast.parse(src, filename="x.py")
+        assert fact_equality_misuse_sites(tree, "x.py") == []
+
 
 def test_check_reports_a_new_violation(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch

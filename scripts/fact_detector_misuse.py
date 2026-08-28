@@ -1016,38 +1016,6 @@ def _fact_aliases(tree: ast.Module, qualnames: _QualnameSpans) -> dict[str, set[
             return lexical_parents.get(qualname, "<module>")
         return qualname
 
-    # Redirect every candidate/direct-alias this walk recorded under a
-    # `global`/`nonlocal`-declaring function's own qualname to the scope
-    # the assignment actually writes to (see `_declared_target_scope`'s
-    # own docstring). Done once, after the whole walk (and the shadowing
-    # subtraction above) has finished -- a `global`/`nonlocal` statement
-    # can appear anywhere in its function's body, even textually after
-    # the assignment it governs, so this can't be decided candidate-by-
-    # candidate during the single forward walk that collected them.
-    for qualname in list(candidates):
-        declared_names = nonlocal_or_global.get(qualname)
-        if not declared_names:
-            continue
-        kept: list[tuple[str, ast.expr]] = []
-        for name, value in candidates[qualname]:
-            target_scope = _declared_target_scope(qualname, name)
-            if target_scope == qualname:
-                kept.append((name, value))
-            else:
-                candidates.setdefault(target_scope, []).append((name, value))
-        candidates[qualname] = kept
-    for qualname in list(aliases):
-        declared_names = nonlocal_or_global.get(qualname)
-        if not declared_names:
-            continue
-        moved: set[str] = set()
-        for name in list(aliases[qualname]):
-            target_scope = _declared_target_scope(qualname, name)
-            if target_scope != qualname:
-                aliases.setdefault(target_scope, set()).add(name)
-                moved.add(name)
-        aliases[qualname] -= moved
-
     def _scope_depth(qualname: str) -> int:
         depth = 0
         current = qualname
@@ -1147,6 +1115,39 @@ def _fact_aliases(tree: ast.Module, qualnames: _QualnameSpans) -> dict[str, set[
                         known.add(name)
                         changed = True
                         outer_changed = True
+            # Propagate a `global`/`nonlocal`-declared name, confirmed
+            # Fact-typed *within this writer's own scope* (via `known`
+            # just above -- direct annotation, or the inner fixed point
+            # resolving it through a same-scope local like `local = rec.
+            # bases_fact; fact = local`), into the scope it actually
+            # writes to (Codex review, fresh evidence, second round on
+            # this same write-side routing fix). The first revision
+            # instead *moved* each declared assignment's raw `(name,
+            # value)` candidate straight into the target scope's own
+            # candidate list -- but `value` can itself be a bare `Name`
+            # referencing a *third*, same-writer-scope local (`local` in
+            # the example above), and once moved, the inner fixed point
+            # for the *target* scope checks that name against the
+            # *target*'s own `known` set, where a name local only to the
+            # writer was never going to appear -- silently breaking
+            # exactly the RHS indirection this whole write-side fix exists
+            # to close. Checked here instead, each outer iteration, only
+            # after `known` reflects everything resolvable within the
+            # writer's own scope for *this* iteration -- so `local`
+            # resolves in `seed`'s own scope first, then `fact` (now
+            # confirmed via `local`) propagates to `<module>` the same
+            # iteration, with no separate resolution context to get out of
+            # sync with the writer's own.
+            for declared_name in nonlocal_or_global.get(qualname, ()):
+                if declared_name not in known:
+                    continue
+                target_scope = _declared_target_scope(qualname, declared_name)
+                if target_scope == qualname:
+                    continue
+                target_known = aliases.setdefault(target_scope, set())
+                if declared_name not in target_known:
+                    target_known.add(declared_name)
+                    outer_changed = True
 
         # Resolve every pending parameter default against each scope's
         # own alias set as it stands *this* iteration -- a default
@@ -1169,6 +1170,55 @@ def _fact_aliases(tree: ast.Module, qualnames: _QualnameSpans) -> dict[str, set[
     return aliases
 
 
+def _default_and_annotation_scope_overrides(
+    tree: ast.Module, qualnames: _QualnameSpans, lexical_parents: dict[str, str]
+) -> dict[int, str]:
+    """Map `id()` of every node found inside a parameter's own default
+    value or annotation expression to the qualname it actually *evaluates*
+    in -- the function's lexical parent, not the function's own body scope
+    (Codex review, fresh evidence): `fact = rec.bases_fact; def inner(fact=
+    (fact == other)): ...` -- Python evaluates a default (and, absent
+    `from __future__ import annotations`, an annotation too) at `def`-time,
+    in the *enclosing* scope, the identical binding-timing rule `_fact_
+    aliases()`'s own default-embedded-walrus handling already relies on.
+    But `fact_equality_misuse_sites()`'s own site-to-qualname resolution is
+    purely position-based (`_qualname_at`), and a default/annotation
+    expression is textually *inside* the `def`'s own span -- so the
+    comparison above was resolved against `inner`'s own alias set, where
+    `inner`'s own parameter `fact` has already removed the inherited
+    alias (a real local, shadowing it for the whole function body) --
+    silently missing a comparison that, at the point it actually runs,
+    still reads the outer alias.
+
+    Consulted by `fact_equality_misuse_sites()` only -- `_fact_aliases()`
+    itself already resolves a *binding* found inside a default/annotation
+    correctly (the walrus case), this is the sibling fix for a *read* (an
+    `==`/`!=` comparison) found there instead.
+    """
+    overrides: dict[int, str] = {}
+    for node in ast.walk(tree):
+        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)):
+            continue
+        func_qualname = _qualname_at((node.lineno, node.col_offset), qualnames)
+        enclosing = lexical_parents.get(func_qualname, "<module>")
+        subtrees = [*node.args.defaults, *node.args.kw_defaults]
+        for arg in (
+            *node.args.posonlyargs,
+            *node.args.args,
+            *node.args.kwonlyargs,
+            *((node.args.vararg,) if node.args.vararg else ()),
+            *((node.args.kwarg,) if node.args.kwarg else ()),
+        ):
+            if arg.annotation is not None:
+                subtrees.append(arg.annotation)
+        for subtree in subtrees:
+            if subtree is None:
+                continue
+            for descendant in ast.walk(subtree):
+                overrides[id(descendant)] = enclosing
+    return overrides
+
+
 def fact_equality_misuse_sites(tree: ast.Module, rel: str) -> list[tuple[int, int]]:
     """Return one ``(lineno, col_offset)`` per `==`/`!=` comparison in *tree*
     where at least one side is recognizably `Fact[T]`-typed (see
@@ -1179,9 +1229,21 @@ def fact_equality_misuse_sites(tree: ast.Module, rel: str) -> list[tuple[int, in
     stores `left`, `ops`, and `comparators` separately, not as a flat list
     of operands, so each adjacent pair is checked independently and a
     single chain can report more than one site.
+
+    **A comparison found inside a parameter's own default or annotation
+    resolves against the function's lexical *parent*, not its own body
+    (Codex review, fresh evidence).** See `_default_and_annotation_scope_
+    overrides()`'s own docstring for why: a default/annotation expression
+    is textually inside the `def`'s own span but evaluates in the
+    enclosing scope, and this function's own site-to-qualname resolution
+    is otherwise purely position-based.
     """
     qualnames = _enclosing_qualnames(tree)
     aliases = _fact_aliases(tree, qualnames)
+    lexical_parents = _lexical_function_parents(tree)
+    scope_overrides = _default_and_annotation_scope_overrides(
+        tree, qualnames, lexical_parents
+    )
     fact_names = _imported_fact_aliases(tree)
 
     def is_fact_typed(node: ast.expr, qualname: str) -> bool:
@@ -1193,7 +1255,9 @@ def fact_equality_misuse_sites(tree: ast.Module, rel: str) -> list[tuple[int, in
     for node in ast.walk(tree):
         if not isinstance(node, ast.Compare):
             continue
-        qualname = _qualname_at((node.lineno, node.col_offset), qualnames)
+        qualname = scope_overrides.get(
+            id(node), _qualname_at((node.lineno, node.col_offset), qualnames)
+        )
         operands = [node.left, *node.comparators]
         for op, left, right in zip(node.ops, operands, operands[1:]):
             if not isinstance(op, (ast.Eq, ast.NotEq)):
