@@ -967,6 +967,44 @@ per this plan's own "vertical slice, not flag day" discipline: each slice
 is a primitive the rest of Phase 0 builds on, landed and tested on its own
 rather than held until every consumer migrates too.
 
+**A second static gate, closing a gap this plan's own generated code left
+open — landed.** `abicheck/model/fact.py`'s own `Fact` class docstring
+states, in the present tense: "A detector reads a `Fact[...]`-typed field
+only by inspecting `.status` ... The guard against comparing two
+`Fact[...]` values directly inside detector logic (rather than unwrapping
+first) is a static check, not a runtime one — see
+`scripts/check_ai_readiness.py`'s `fact-detector-misuse` check." No such
+check existed when that sentence was written in the first slice — a
+docstring describing a gate the codebase doesn't have yet is exactly the
+kind of drift AGENTS.md's `adr-status-sync`/`generated-file-ownership`
+checks exist to catch for other artifact kinds, just not one either of
+them scans for here. `scripts/fact_detector_misuse.py` (registered as
+`fact-detector-misuse`, mirroring `fact_field_readers.py`'s own
+extraction) is that check: an AST scan for an `==`/`!=` comparison where
+either side is a `<attr>_fact` field access or a
+`Fact(...)`/`Fact.<classmethod>(...)` constructor call — `Fact[T]`
+deliberately doesn't override `__eq__` (poisoning the *containing*
+dataclass's own generated equality would be worse), so this comparison
+doesn't raise; it silently falls back to structural dataclass equality
+over `status`/`value`/`diagnostics` together, which can answer True or
+False without ever checking whether either side is `PRESENT` — exactly
+the ambiguity `Fact[T]` exists to make unrepresentable, reintroduced by a
+different spelling. Verified empirically (by running the real scan
+against the whole package) to have zero existing hits under `abicheck/`
+today — the only real matches for this pattern anywhere in the repo are
+in `tests/`, asserting a constructed `Fact` equals an expected one, which
+is legitimate assertion code outside this check's `abicheck/`-only scope
+— so this check ships with **no baseline at all**, unlike
+`fact-field-readers`'s allowlist-and-shrink `KNOWN_UNMIGRATED_READERS`:
+any match is an unconditional error. Tests: `tests/
+test_fact_detector_misuse.py` (the real repository has zero violations;
+the AST primitive's own contract — both attribute-pair and
+constructor-call shapes detected for `==` and `!=`, a chained comparison's
+each adjacent pair caught independently, `is`/`is not` and an unrelated
+attribute/method name ignored; and end-to-end cases confirming the check
+function fires on a new violation and stays silent on `.status`-based
+unwrapping).
+
 ---
 
 ### Phase 1 — finish the `dump`/`scan` typed-API convergence (closes AGENTS.md "PR C")
