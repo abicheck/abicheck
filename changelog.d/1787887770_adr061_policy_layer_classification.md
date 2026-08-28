@@ -1,14 +1,30 @@
 ### Changed
 
-- ADR-061 continuation: classified 7 more root-level modules into the
+- ADR-061 continuation: classified 3 more root-level modules into the
   `policy` responsibility layer in `architecture/modules.yaml`
-  (`compatibility_evaluation_config.py`, `contract_evaluation.py`,
-  `contract_evidence_collect.py`, `contract_pipeline.py`,
-  `export_surface.py`, `pattern_verdicts.py`, `suppression_yaml.py`) —
+  (`export_surface.py`, `pattern_verdicts.py`, `suppression_yaml.py`) —
   pure data-only ledger change, `check_architecture.py` reports 0 errors
   both before and after. Each classified file's own imports resolve only
   to `model`/`compare` (already-classified) or to a currently-unclassified
   sibling — the exact set `policy`'s `may_import: [model, compare]` allows.
+
+  This branch originally proposed 7 additions
+  (`compatibility_evaluation_config.py`, `contract_evaluation.py`,
+  `contract_evidence_collect.py`, `contract_pipeline.py`,
+  `export_surface.py`, `pattern_verdicts.py`, `suppression_yaml.py`), but by
+  the time it merged `main` back in, three of them
+  (`compatibility_evaluation_config.py`, `contract_evaluation.py`,
+  `contract_evidence_collect.py`) had already been independently classified
+  into `policy` by other, separately-merged sibling PRs, and a fourth
+  (`contract_pipeline.py`) had been classified `workflows` instead (see
+  `docs/contribute/adr/061-responsibility-package-architecture.md` and that
+  PR's own reasoning) — so only the 3 named above are this PR's own net new
+  contribution. `architecture/modules.yaml`'s `policy.legacy_paths` now
+  holds 8 entries total: those 3, plus `analysis_assurance.py` (pre-existing
+  before this PR) and `compatibility_evaluation_config.py`/
+  `compatibility_evaluation_packs.py`/`contract_evaluation.py`/
+  `contract_evidence_collect.py` (added by the sibling PRs merged in ahead
+  of this one).
 
   A much larger candidate set was investigated
   (`policy_file.py`, `suppression.py`, `contract_relevance_types.py`,
@@ -74,10 +90,11 @@
   module reachable from both sides — real, scoped follow-up work, not a
   ledger edit.
 
-  Verification: `python scripts/check_architecture.py` -> 0 errors (11
-  files newly classified — the 4 pre-existing `policy` entries plus the 7
-  from this change); `python scripts/check_ai_readiness.py` -> 0 errors,
-  warning count unaffected (no `.py` file touched); `python
-  scripts/adr_status_sync.py` -> clean; `mypy abicheck/` -> clean, no
-  drift (no `.py` file touched); `pytest tests/test_architecture_check.py`
-  -> 40 passed; full fast unit suite green.
+  Verification: `python scripts/check_architecture.py` -> 0 errors (8 total
+  `policy.legacy_paths` entries — 5 already present via other, separately
+  merged sibling PRs plus 3 newly added by this PR's own diff); `python
+  scripts/check_ai_readiness.py` -> 0 errors, warning count unaffected (no
+  `.py` file touched); `python scripts/adr_status_sync.py` -> clean; `mypy
+  abicheck/` -> clean, no drift (no `.py` file touched); `pytest
+  tests/test_architecture_check.py` -> 40 passed; full fast unit suite
+  green.
