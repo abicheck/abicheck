@@ -2733,6 +2733,76 @@ lines (well under the 2000-line hard cap). New tests:
 test_fact_detector_misuse_alias_edge_cases.py` (493 lines, well under its
 own 1200-line cap).
 
+**Three more findings from the next review round, all bounded extensions
+of already-established mechanisms, plus one declined as a re-raise of an
+already-decided, documented tradeoff.** (1) The tuple-*unpacking* loop/
+comprehension branches (the destructured-target sibling of the set/dict-
+display fix above) still gated on a hand-rolled `isinstance(node.iter,
+(ast.Tuple, ast.List))`/`isinstance(generator.iter, (ast.Tuple, ast.List))`
+of their own rather than reusing `_static_display_elements()` -- the
+identical drift risk the simple-target case was already fixed for one
+round earlier. `for fact, tag in {(rec.bases_fact, "old")}: fact == other`
+(a set of tuples) was invisible, as was the identical dict-keys and
+comprehension form. Fixed by reusing the already-computed `display_elts`/
+`gen_display_elts` local (computed once per branch, shared by both the
+simple-target and tuple-unpacking cases) instead of a second, independent
+shape check. (2) None of the four loop/comprehension collection branches'
+own element-admission gate (`_is_fact_typed_expr(elt, fact_names) or
+isinstance(elt, ast.Name)`) recognized a composed expression
+(`NamedExpr`/`IfExp`/`BoolOp`) as a candidate worth deferring to
+fixed-point time, even though `_candidate_resolves_to_fact()` -- the
+function that actually resolves a deferred candidate once `known`/
+`aliases` are populated -- already has its own recursive branch for every
+one of those three shapes. `old = rec1.bases_fact; new = rec2.
+vtable_fact; for fact in (old if cond else new,): fact == other` was
+rejected outright at collection time, since `old if cond else new` is
+neither already Fact-typed (its own leaves aren't resolved as aliases
+yet) nor a bare name. Fixed with one shared `_admissible_loop_element()`
+gate (`_is_fact_typed_expr(...)` or one of `_DEFERRED_CANDIDATE_NODE_
+TYPES` -- `Name`/`NamedExpr`/`IfExp`/`BoolOp`), replacing all four
+independent copies of the old two-clause check at once, so a future
+composed shape added to `_candidate_resolves_to_fact()` only needs
+updating in this one admission set to reach every collection site. (3)
+`Fact[int](...)`/`Fact[int].present(...)` -- a generic specialization of
+`Fact`, which subscripting produces as a `_GenericAlias` whose own
+`__call__`/attribute access delegates straight through to the real class
+-- is still exactly `Fact` at runtime, but the callable is an
+`ast.Subscript` (or an `ast.Attribute` whose `.value` is one), invisible
+to the constructor-call recognition in `_is_fact_typed_expr()`, which
+only ever unwrapped a bare `ast.Name`. Fixed with a single unwrap of an
+`ast.Subscript` callee (and, separately, of an `ast.Attribute`'s own
+`.value`) before the existing `Name`-in-`fact_names` checks, composing
+for free with both existing shapes rather than needing a duplicate check.
+
+(4) **Declined, citing an already-documented rationale rather than
+re-implementing.** A module-qualified `Fact` *annotation* (`value: model.
+Fact[int]`/`value: fact_module.Fact`) is the identical "no type
+inference, match by import spelling" residual `_imported_fact_aliases()`'s
+own docstring already documents and accepts for the module-qualified
+*constructor-call* form (`fact_model.Fact.present(...)`) -- both trace to
+the same root cause (`_is_fact_typed_annotation`'s/`_is_fact_typed_expr`'s
+constructor-call branch each assuming a bare `ast.Name` rather than an
+arbitrary `ast.Attribute` chain) and the same accepted-gap paragraph in
+that docstring ("This module's own module docstring already accepts as
+inherent to a pure-AST heuristic, not a specific miss worth chasing
+indefinitely"). Documented as covering the annotation spelling too rather
+than re-litigated as a fresh finding.
+
+Verified against all three reported repros for findings (1)-(3) (the
+destructured set/dict-keys forms and their comprehension duplicates; the
+composed-`IfExp` loop element and its comprehension duplicate; both
+generic-specialized constructor spellings), plus negative controls for
+each (a destructured set with one non-Fact element; an `IfExp` with one
+non-Fact branch) and a regression guard confirming the unspecialized
+`Fact(...)` form still works, all via direct AST reproduction before
+writing tests. Still zero existing hits, `mypy`/`ruff` both stayed clean,
+`fact_detector_misuse.py` at 1780 lines (well under the 2000-line hard
+cap). New tests: `TestDestructuredLoopsRecognizeSetAndDictKeyDisplays`,
+`TestComposedLoopElementsDeferToTheAliasFixedPoint`, and
+`TestGenericSpecializedFactConstructorsAreRecognized`, all appended to
+`tests/test_fact_detector_misuse_alias_edge_cases.py` (608 lines, well
+under its own 1200-line cap).
+
 ---
 
 ### Phase 1 — finish the `dump`/`scan` typed-API convergence (closes AGENTS.md "PR C")

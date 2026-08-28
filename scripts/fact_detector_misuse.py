@@ -208,11 +208,28 @@ def _is_fact_typed_expr(node: ast.expr, fact_names: frozenset[str]) -> bool:
     if isinstance(node, ast.Attribute) and node.attr in FACT_FIELD_NAMES:
         return True
     if isinstance(node, ast.Call):
+        # `Fact[int](...)`/`Fact[int].present(...)` -- a generic
+        # specialization of `Fact` is still exactly `Fact` at runtime
+        # (Codex review, fresh evidence): subscripting a class produces a
+        # `_GenericAlias` whose own `__call__`/attribute access delegates
+        # straight through to the real class, so both spellings construct
+        # a real `Fact` value identically to the unspecialized form -- but
+        # the callable is an `ast.Subscript` (or an `ast.Attribute` whose
+        # `.value` is one), invisible to a check that only ever unwrapped
+        # a bare `ast.Name`. A single unwrap composes for free with both
+        # existing shapes below, rather than needing its own duplicate
+        # check.
         func = node.func
+        if isinstance(func, ast.Subscript):
+            func = func.value
         if isinstance(func, ast.Name) and func.id in fact_names:
             return True
-        if isinstance(func, ast.Attribute) and isinstance(func.value, ast.Name):
-            return func.value.id in fact_names
+        if isinstance(func, ast.Attribute):
+            value = func.value
+            if isinstance(value, ast.Subscript):
+                value = value.value
+            if isinstance(value, ast.Name):
+                return value.id in fact_names
     if isinstance(node, ast.NamedExpr):
         return _is_fact_typed_expr(node.value, fact_names)
     if isinstance(node, ast.IfExp):
@@ -263,6 +280,46 @@ def _static_display_elements(node: ast.expr) -> list[ast.expr] | None:
             return None
         return list(node.keys)  # type: ignore[arg-type]
     return None
+
+
+#: Every shape :func:`_candidate_resolves_to_fact` knows how to walk on its
+#: own, once the fixed point's `known`/`aliases` state is available -- a
+#: bare name (looked up in `known`/`aliases` directly) plus every composed
+#: expression form it recurses into (`NamedExpr`/`IfExp`/`BoolOp`, mirroring
+#: `_is_fact_typed_expr`'s own identical set of recursive cases).
+_DEFERRED_CANDIDATE_NODE_TYPES = (ast.Name, ast.NamedExpr, ast.IfExp, ast.BoolOp)
+
+
+def _admissible_loop_element(elt: ast.expr, fact_names: frozenset[str]) -> bool:
+    """True if *elt* -- one element of a statically known loop/
+    comprehension display -- is either already, unconditionally Fact-typed
+    (:func:`_is_fact_typed_expr`), or a shape whose Fact-typedness can only
+    be settled later, at fixed-point time (:func:`_candidate_resolves_to_fact`,
+    once `known`/`aliases` actually hold something to resolve a bare name
+    or a composed expression's own leaves against).
+
+    Used by every single-target and tuple-unpacking loop/comprehension
+    collection branch in this module as the admission gate for a
+    candidate element -- an element satisfying neither check disqualifies
+    the *whole* display outright (the identical conservative "no partial
+    admission" behavior this module's loop-collection branches already
+    document), so widening this gate only ever *admits* a genuinely
+    resolvable element, never accepts a real non-Fact one.
+
+    **Originally just `_is_fact_typed_expr(elt, fact_names) or
+    isinstance(elt, ast.Name)` at each of four call sites, missing every
+    composed shape `_candidate_resolves_to_fact` already knows how to
+    resolve (Codex review, fresh evidence).** `old = rec1.bases_fact; new
+    = rec2.vtable_fact; for fact in (old if cond else new,): fact ==
+    other` -- the tuple element `old if cond else new` is neither directly
+    Fact-typed (`old`/`new` aren't resolved as aliases yet at collection
+    time) nor a bare `ast.Name`, so the whole display was rejected outright
+    even though `_candidate_resolves_to_fact` already has its own `IfExp`
+    branch built for exactly this shape once `known` is populated.
+    """
+    return _is_fact_typed_expr(elt, fact_names) or isinstance(
+        elt, _DEFERRED_CANDIDATE_NODE_TYPES
+    )
 
 
 def _candidate_resolves_to_fact(
@@ -769,8 +826,7 @@ def _fact_aliases(tree: ast.Module, qualnames: _QualnameSpans) -> dict[str, set[
                 isinstance(node.target, ast.Name)
                 and display_elts
                 and all(
-                    _is_fact_typed_expr(elt, fact_names) or isinstance(elt, ast.Name)
-                    for elt in display_elts
+                    _admissible_loop_element(elt, fact_names) for elt in display_elts
                 )
             ):
                 tuple_loop_candidates.setdefault(qualname, []).append(
@@ -779,11 +835,18 @@ def _fact_aliases(tree: ast.Module, qualnames: _QualnameSpans) -> dict[str, set[
             # `for fact, tag in ((old.bases_fact, "old"), (new.bases_fact,
             # "new")): return fact == other` -- the tuple-*unpacking*
             # sibling of the case just above: the loop target is itself a
-            # `Tuple`/`List` display, destructured one iteration at a
-            # time against each element of the iterable, which must
-            # *also* be a literal `Tuple`/`List` display for any single
-            # sub-value to be identifiable at all (Codex review, fresh
-            # evidence). Reuses `_paired_unpacking_candidates()` -- the
+            # `Tuple`/`List` display, destructured one iteration at a time
+            # against each element of the *iterable*, which -- reusing
+            # `display_elts` from the branch above, so this and the
+            # simple-target case can't independently drift on which
+            # display shapes they each recognize (Codex review, fresh
+            # evidence: originally gated on a hand-rolled `isinstance(
+            # node.iter, (ast.Tuple, ast.List))`, missing the identical
+            # set/dict-keys displays the simple-target case was already
+            # fixed for) -- must also be one of `_static_display_elements`'s
+            # own recognized shapes for any single sub-value to be
+            # identifiable at all. Reuses `_paired_unpacking_candidates()`
+            # -- the
             # identical elementwise pairing `ast.Assign`'s own unpacking
             # handling already relies on -- once per iteration element,
             # since each is exactly the "one assignment's worth" of value
@@ -802,12 +865,13 @@ def _fact_aliases(tree: ast.Module, qualnames: _QualnameSpans) -> dict[str, set[
             # registered together, subject to the identical
             # every-element-Fact-typed-or-deferred-name conjunctive
             # requirement the simple-target case above already applies.
-            elif isinstance(node.target, (ast.Tuple, ast.List)) and isinstance(
-                node.iter, (ast.Tuple, ast.List)
+            elif (
+                isinstance(node.target, (ast.Tuple, ast.List))
+                and display_elts is not None
             ):
                 per_name_elements: dict[str, list[ast.expr]] = {}
-                all_iterations_paired = bool(node.iter.elts)
-                for iteration_elt in node.iter.elts:
+                all_iterations_paired = bool(display_elts)
+                for iteration_elt in display_elts:
                     pairs = _paired_unpacking_candidates(node.target, iteration_elt)
                     if not pairs:
                         all_iterations_paired = False
@@ -817,8 +881,7 @@ def _fact_aliases(tree: ast.Module, qualnames: _QualnameSpans) -> dict[str, set[
                 if all_iterations_paired:
                     for name, raw_elts in per_name_elements.items():
                         if all(
-                            _is_fact_typed_expr(elt, fact_names)
-                            or isinstance(elt, ast.Name)
+                            _admissible_loop_element(elt, fact_names)
                             for elt in raw_elts
                         ):
                             tuple_loop_candidates.setdefault(qualname, []).append(
@@ -1168,8 +1231,7 @@ def _fact_aliases(tree: ast.Module, qualnames: _QualnameSpans) -> dict[str, set[
                     isinstance(generator.target, ast.Name)
                     and gen_display_elts
                     and all(
-                        _is_fact_typed_expr(elt, fact_names)
-                        or isinstance(elt, ast.Name)
+                        _admissible_loop_element(elt, fact_names)
                         for elt in gen_display_elts
                     )
                 ):
@@ -1186,12 +1248,17 @@ def _fact_aliases(tree: ast.Module, qualnames: _QualnameSpans) -> dict[str, set[
                 # evidence): `[fact == other for fact, tag in
                 # ((old.bases_fact, "old"),)]` was invisible, since this
                 # branch only ever matched a bare `ast.Name` target.
-                elif isinstance(generator.target, (ast.Tuple, ast.List)) and isinstance(
-                    generator.iter, (ast.Tuple, ast.List)
+                # Reuses `gen_display_elts` (Codex review, fresh evidence:
+                # originally gated on a hand-rolled `isinstance(generator.
+                # iter, (ast.Tuple, ast.List))`, the identical drift risk
+                # the `for`/`AsyncFor` branch's own sibling was fixed for).
+                elif (
+                    isinstance(generator.target, (ast.Tuple, ast.List))
+                    and gen_display_elts is not None
                 ):
                     comp_per_name_elements: dict[str, list[ast.expr]] = {}
-                    all_iterations_paired = bool(generator.iter.elts)
-                    for iteration_elt in generator.iter.elts:
+                    all_iterations_paired = bool(gen_display_elts)
+                    for iteration_elt in gen_display_elts:
                         pairs = _paired_unpacking_candidates(
                             generator.target, iteration_elt
                         )
@@ -1203,8 +1270,7 @@ def _fact_aliases(tree: ast.Module, qualnames: _QualnameSpans) -> dict[str, set[
                     if all_iterations_paired:
                         for pname, pelts in comp_per_name_elements.items():
                             if all(
-                                _is_fact_typed_expr(pelt, fact_names)
-                                or isinstance(pelt, ast.Name)
+                                _admissible_loop_element(pelt, fact_names)
                                 for pelt in pelts
                             ):
                                 tuple_loop_candidates.setdefault(qualname, []).append(

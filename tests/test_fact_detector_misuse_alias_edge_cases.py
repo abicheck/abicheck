@@ -491,3 +491,118 @@ class TestStaticDisplayLoopTargetsRecognizeSetAndDictKeys:
         src = "def f(rec1, other):\n    for fact in {}:\n        return fact == other\n"
         tree = ast.parse(src, filename="x.py")
         assert fact_equality_misuse_sites(tree, "x.py") == []
+
+
+class TestDestructuredLoopsRecognizeSetAndDictKeyDisplays:
+    """The tuple-*unpacking* loop/comprehension branches share
+    `_static_display_elements()` (via a reused `display_elts`/
+    `gen_display_elts` local) with their simple-target siblings, rather
+    than a hand-rolled `isinstance(..., (ast.Tuple, ast.List))` check of
+    their own (Codex review, fresh evidence): `for fact, tag in
+    {(rec.bases_fact, "old")}: fact == other` -- a set of tuples -- was
+    invisible, as was the identical dict-keys and comprehension form."""
+
+    def test_detects_a_destructured_set_display_for_loop(self) -> None:
+        src = (
+            'def f(rec, other):\n    for fact, tag in {(rec.bases_fact, "old")}:\n'
+            "        return fact == other\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert fact_equality_misuse_sites(tree, "x.py") == [(3, 15)]
+
+    def test_detects_a_destructured_set_display_comprehension(self) -> None:
+        src = (
+            "def f(rec, other):\n    return [fact == other for fact, tag in "
+            '{(rec.bases_fact, "old")}]\n'
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert fact_equality_misuse_sites(tree, "x.py") == [(2, 12)]
+
+    def test_detects_a_destructured_dict_keys_for_loop(self) -> None:
+        src = (
+            'def f(rec, other):\n    for fact, tag in {(rec.bases_fact, "old"): 1}:\n'
+            "        return fact == other\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert fact_equality_misuse_sites(tree, "x.py") == [(3, 15)]
+
+    def test_ignores_a_destructured_set_with_a_non_fact_element(self) -> None:
+        """Negative control: only *some* tuples' first element is
+        Fact-typed, so the target is only sometimes a Fact."""
+        src = (
+            "def f(rec, other, unrelated):\n"
+            '    for fact, tag in {(rec.bases_fact, "old"), (unrelated(), "x")}:\n'
+            "        return fact == other\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert fact_equality_misuse_sites(tree, "x.py") == []
+
+
+class TestComposedLoopElementsDeferToTheAliasFixedPoint:
+    """`_admissible_loop_element()` widens a loop/comprehension display
+    element's admission gate beyond "already Fact-typed, or a bare name"
+    to include every composed shape `_candidate_resolves_to_fact()`
+    already knows how to resolve (`NamedExpr`/`IfExp`/`BoolOp`) -- deferred
+    to fixed-point time exactly like a bare name already was (Codex
+    review, fresh evidence): `old = rec1.bases_fact; new = rec2.
+    vtable_fact; for fact in (old if cond else new,): fact == other` was
+    rejected outright, even though `_candidate_resolves_to_fact()` already
+    has its own `IfExp` branch built for exactly this shape."""
+
+    def test_detects_an_ifexp_loop_element_resolved_through_aliases(self) -> None:
+        src = (
+            "def f(rec1, rec2, cond, other):\n"
+            "    old = rec1.bases_fact\n"
+            "    new = rec2.vtable_fact\n"
+            "    for fact in (old if cond else new,):\n"
+            "        return fact == other\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert fact_equality_misuse_sites(tree, "x.py") == [(5, 15)]
+
+    def test_detects_an_ifexp_loop_element_in_a_comprehension(self) -> None:
+        src = (
+            "def f(rec1, rec2, cond, other):\n"
+            "    old = rec1.bases_fact\n"
+            "    new = rec2.vtable_fact\n"
+            "    return [fact == other for fact in (old if cond else new,)]\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert fact_equality_misuse_sites(tree, "x.py") == [(4, 12)]
+
+    def test_ignores_an_ifexp_loop_element_with_one_non_fact_branch(self) -> None:
+        """Negative control: only one branch resolves as Fact-typed, so
+        the element isn't reliably a Fact -- must stay unflagged."""
+        src = (
+            "def f(rec1, cond, other, unrelated):\n"
+            "    old = rec1.bases_fact\n"
+            "    for fact in (old if cond else unrelated(),):\n"
+            "        return fact == other\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert fact_equality_misuse_sites(tree, "x.py") == []
+
+
+class TestGenericSpecializedFactConstructorsAreRecognized:
+    """`Fact[int](...)`/`Fact[int].present(...)` -- a generic
+    specialization of `Fact` is still exactly `Fact` at runtime, but the
+    callable is an `ast.Subscript` (or an `ast.Attribute` whose `.value`
+    is one), invisible to a check that only ever unwrapped a bare
+    `ast.Name` (Codex review, fresh evidence)."""
+
+    def test_detects_a_subscripted_bare_constructor_comparison(self) -> None:
+        src = "def f(a, b):\n    return Fact[int](a) == Fact[int](b)\n"
+        tree = ast.parse(src, filename="x.py")
+        assert fact_equality_misuse_sites(tree, "x.py") == [(2, 11)]
+
+    def test_detects_a_subscripted_classmethod_constructor_comparison(self) -> None:
+        src = "def f(a, b):\n    return Fact[int].present(a) == Fact[int].present(b)\n"
+        tree = ast.parse(src, filename="x.py")
+        assert fact_equality_misuse_sites(tree, "x.py") == [(2, 11)]
+
+    def test_still_detects_the_unspecialized_constructor_form(self) -> None:
+        """Regression guard: the fix must not disturb the plain,
+        unspecialized `Fact(...)` form."""
+        src = "def f(a, b):\n    return Fact(a) == Fact(b)\n"
+        tree = ast.parse(src, filename="x.py")
+        assert fact_equality_misuse_sites(tree, "x.py") == [(2, 11)]
