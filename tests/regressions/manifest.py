@@ -648,6 +648,49 @@ BUG_CLASSES: tuple[BugClass, ...] = (
             ),
         ),
     ),
+    BugClass(
+        id="extraction.implicit_declaration_leaks_into_surface",
+        invariant=(
+            "A header-AST backend's own compiler-synthesized declaration "
+            "(an implicit default/copy/move constructor, destructor, or "
+            "copy/move `operator=` the user never wrote) is treated as "
+            "reachable public/exported API by a downstream consumer only "
+            "when it matches a genuine, ODR-used export in the real export "
+            "table — never merely because the source declares it, "
+            "regardless of the declaration's origin or access. An "
+            "unresolved export table (not yet known, as opposed to "
+            "genuinely empty) keeps every such candidate, deferring the "
+            "drop until authoritative matching can actually run."
+        ),
+        fixed_by=(920,),
+        seed_tests=(
+            "tests/test_castxml_compiler_generated.py",
+            "tests/test_dumper_clang_compiler_generated.py",
+            "tests/test_serialization_function_compiler_generated.py",
+            "tests/test_castxml_l4_phantom_members.py",
+        ),
+        public_surfaces=(),
+        axes={"frontend": ("castxml",)},
+        known_gaps=(
+            KnownGap(
+                description=(
+                    "Only castxml's own `artificial=\"1\"` marker is read "
+                    "(`Function.is_compiler_generated`); the direct-clang "
+                    "L2 backend never emits an implicit declaration as a "
+                    "`Function` at all (its AST walk skips `isImplicit` "
+                    "nodes outright), so it needs no equivalent per-node "
+                    "signal and is covered structurally rather than by a "
+                    "real clang-invoking seed test for this axis. If a "
+                    "future clang change ever started emitting an "
+                    "implicit node, this class's clang-side seed test "
+                    "(a hand-built AST dict, not a real clang subprocess) "
+                    "would not by itself catch it."
+                ),
+                reference="tests/test_dumper_clang_compiler_generated.py::"
+                "test_parse_functions_skips_implicit_declarations_entirely",
+            ),
+        ),
+    ),
 )
 
 

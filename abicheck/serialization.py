@@ -290,6 +290,18 @@ from .storage.fact_codec import (
 #   26 — ADR-063 Phase 0: `Fact[T]` siblings for `RecordType.bases_fact`/
 #     `virtual_bases_fact`/`vtable_fact`/`vptr_offset_bits_fact` and
 #     `Param.is_va_list_fact` — see `storage/fact_codec.py`.
+#   27 — `Function.is_compiler_generated`: closes the castxml L4 extractor
+#     bug documented in AGENTS.md's "PR C" known-gaps entry, where a
+#     compiler-synthesized implicit special member (or a synthesized
+#     `operator=`, which castxml gives a real-looking Itanium mangled name)
+#     leaked into the L4 source-ABI extractor's reachable declaration
+#     surface as if it were genuine public API. Needs no reliability flag,
+#     unlike v19-v23: `None` (a pre-v27 snapshot's default) is exactly
+#     "not captured", never a real-but-wrong scalar — `entity_from_
+#     function`'s own `api_relevant` exclusion only fires on a confirmed
+#     `True`, so an older snapshot degrades cleanly to today's (buggy)
+#     inclusive behavior rather than being misread as "confirmed
+#     user-written".
 #
 # Reading an OLDER snapshot (the direction every CI baseline actually hits —
 # a baseline is committed once and outlives however many abicheck pin bumps
@@ -302,7 +314,7 @@ from .storage.fact_codec import (
 # doesn't hit any producer-specific threshold above stays silent, since every
 # CI baseline is *always* some number of versions behind and warning
 # regardless of relevance would just be noise.
-SCHEMA_VERSION: int = 26
+SCHEMA_VERSION: int = 27
 
 # Schema version at which CastXML field CV facts became reliable (see v9 above).
 _MIN_SCHEMA_VERSION_FOR_CV_FACTS = 9
@@ -931,6 +943,8 @@ def snapshot_from_dict(d: dict[str, Any]) -> AbiSnapshot:
             exception_spec=f.get("exception_spec"),
             deprecated=f.get("deprecated"),
             is_override=f.get("is_override"),
+            # Tri-state (v27) — missing on a pre-v27 snapshot loads as None.
+            is_compiler_generated=f.get("is_compiler_generated"),
         )
         for f in d.get("functions", [])
     ]

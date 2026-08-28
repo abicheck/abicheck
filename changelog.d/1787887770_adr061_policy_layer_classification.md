@@ -49,12 +49,24 @@
 
   So this PR's own genuine net-new contribution is **one** module,
   `export_surface.py`. `architecture/modules.yaml`'s `policy.legacy_paths`
-  holds **9 entries** total on the merged tree: `export_surface.py` (this
-  PR), `analysis_assurance.py` (pre-existing before this PR), and
+  holds **13 entries** total on the merged tree: `export_surface.py` (this
+  PR), `analysis_assurance.py` (pre-existing before this PR),
   `compatibility_evaluation_config.py`/`compatibility_evaluation_packs.py`/
   `contract_evaluation.py`/`contract_evidence_collect.py`/`semver.py`/
   `suppression_yaml.py`/`surface.py` (added by sibling PRs merged in ahead
-  of or alongside this one).
+  of or alongside this one), and `idioms.py`/`post_processing.py`/
+  `post_processing_context.py`/`post_processing_reachability.py` (added by
+  a later sibling PR, `#927`/"classify batch 4", merged into `main` after
+  this PR's own `pattern_verdicts.py` exclusion above — that same sibling
+  PR's diff also re-added `pattern_verdicts.py` to `policy.legacy_paths`
+  via a purely mechanical, import-edge-only check (its own commit message:
+  "verified with `check_architecture.py`... including a scratch add-then-
+  revert probe for each skipped module"), with no awareness of this PR's
+  Codex-reviewed *role*-mismatch finding above — merging `main` back in
+  produced a real conflict on this exact entry, resolved by dropping
+  `pattern_verdicts.py` again (keeping its four now-classified siblings),
+  per the same reasoning already established two paragraphs up rather than
+  a fresh one.
 
   A much larger candidate set was investigated
   (`policy_file.py`, `suppression.py`, `contract_relevance_types.py`,
@@ -145,9 +157,12 @@
   specifically, splitting its raw-change detectors into `compare/` first)
   — real, scoped follow-up work, not a ledger edit.
 
-  Verification: `python scripts/check_architecture.py` -> 0 errors (9
-  total `policy.legacy_paths` entries — 8 already present via other,
-  separately merged sibling PRs plus 1 newly added by this PR's own diff);
+  Verification: `python scripts/check_architecture.py` -> 0 errors (13
+  total `policy.legacy_paths` entries on the fully-merged tree — 8 already
+  present via other, separately merged sibling PRs, 4 more added by a later
+  sibling PR merged in during this PR's own merge-conflict resolution
+  rounds, plus 1 newly added by this PR's own diff; `pattern_verdicts.py`
+  stays excluded);
   `python scripts/check_ai_readiness.py` -> 0 errors, warning count
   unaffected (no `.py` file touched); `python scripts/adr_status_sync.py`
   -> clean; `mypy abicheck/` -> clean, no drift (no `.py` file touched);

@@ -79,6 +79,7 @@ from adr_status_sync import (  # noqa: E402
     check_adr_status_sync,
 )
 from engine_cli_boundary import check_engine_cli_boundary  # noqa: E402
+from fact_detector_misuse import check_fact_detector_misuse  # noqa: E402
 from fact_field_readers import check_fact_field_readers  # noqa: E402
 from findings_report import Findings as _SharedFindings  # noqa: E402
 
@@ -2840,6 +2841,20 @@ def check_cli_contract(f: Findings) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Check: Fact[T] equality misuse (ADR-063 Phase 0,
+# docs/contribute/plans/one-semantic-pipeline.md)
+# ---------------------------------------------------------------------------
+#
+# Implementation lives in the sibling leaf module `fact_detector_misuse.py`,
+# same reason as `engine_cli_boundary.py` above -- this is the static check
+# `abicheck/model/fact.py`'s own `Fact` docstring already claims exists
+# ("see scripts/check_ai_readiness.py's fact-detector-misuse check"), which
+# this module is what makes true: no baseline, since it has zero existing
+# hits under `abicheck/` today -- any `==`/`!=` comparison of a `Fact[T]`
+# value is a hard error, not an allowlisted one.
+
+
+# ---------------------------------------------------------------------------
 # Check: unmigrated Fact[T]-bridged legacy field readers (ADR-063 Phase 0,
 # docs/contribute/plans/one-semantic-pipeline.md)
 # ---------------------------------------------------------------------------
@@ -3017,6 +3032,7 @@ CHECKS: dict[str, Callable[[Findings], None]] = {
     "banned-imports": check_banned_imports,
     "cli-contract": check_cli_contract,
     "engine-cli-boundary": check_engine_cli_boundary,
+    "fact-detector-misuse": check_fact_detector_misuse,
     "fact-field-readers": check_fact_field_readers,
     "license-header": check_license_header,
     "test-assertion-density": check_test_assertion_density,

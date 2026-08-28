@@ -30,6 +30,10 @@ from xml.etree.ElementTree import (
 )
 
 from . import dumper_castxml_typedefs as _typedefs_helpers
+from .dumper_castxml_typedefs import (
+    _deprecation_marker as _deprecation_marker,
+    _extract_contract_attributes as _extract_contract_attributes,
+)
 from .model import (
     AccessLevel,
     EnumMember,
@@ -45,77 +49,6 @@ from .model import (
 )
 from .name_classification import strip_anonymous_type_location
 from .provenance import build_public_set, classify_origin, header_from_location
-
-#: Base names of semantic contract / calling-convention attributes worth
-#: diffing. castxml passes GNU attributes through its compound ``attributes``
-#: string, optionally prefixed (``gnu:nonnull(1)``); arguments are kept as
-#: part of the normalized token so ``nonnull(1)`` → ``nonnull(2)`` is a change.
-_CONTRACT_ATTRIBUTE_BASES = frozenset(
-    {
-        "noreturn",
-        "nonnull",
-        "returns_nonnull",
-        "malloc",
-        "format",
-        "format_arg",
-        "alloc_size",
-        "alloc_align",
-        "warn_unused_result",
-        "sentinel",
-        # calling-convention selections — a flip is an ABI change on the
-        # affected targets, reported via the contract-attribute kinds.
-        "cdecl",
-        "stdcall",
-        "fastcall",
-        "thiscall",
-        "regparm",
-        "ms_abi",
-        "sysv_abi",
-        "vectorcall",
-    }
-)
-
-
-def _extract_contract_attributes(attributes: str) -> list[str]:
-    """Filter a castxml ``attributes`` string down to contract attributes.
-
-    Returns normalized, sorted tokens with any ``gnu:``/``gnu::`` namespace
-    prefix stripped and argument lists preserved (``nonnull(1)``). Tokens not
-    in the known contract set (``noexcept``, ``final``, …) are ignored.
-    """
-    tokens: set[str] = set()
-    for raw in attributes.split():
-        token = raw
-        for prefix in ("gnu::", "gnu:", "__"):
-            if token.startswith(prefix):
-                token = token[len(prefix) :]
-        token = token.strip("_")
-        base = token.split("(", 1)[0]
-        if base in _CONTRACT_ATTRIBUTE_BASES:
-            tokens.add(token)
-    return sorted(tokens)
-
-
-def _deprecation_marker(el: Element) -> str | None:
-    """Deprecation message for *el*, or ``None`` if not deprecated.
-
-    castxml's ``GetDeclAttributes`` (``Output.cxx``) always adds a bare
-    ``"deprecated"`` token to the compound ``attributes`` string when
-    ``DeprecatedAttr`` is present, but only emits the dedicated
-    ``deprecation="..."`` XML attribute when the attribute carries a
-    non-empty message. A BARE ``[[deprecated]]``/
-    ``__attribute__((deprecated))`` (no message) therefore has NO
-    ``deprecation`` attribute at all — reading only ``el.get("deprecation")``
-    missed every messageless deprecation (Codex review, PR #582, confirmed
-    against castxml's own source). Falls back to ``""`` (deprecated, no
-    message) when the bare token is present in ``attributes`` instead.
-    """
-    msg = el.get("deprecation")
-    if msg is not None:
-        return msg
-    if re.search(r"\bdeprecated\b", el.get("attributes", "")):
-        return ""
-    return None
 
 
 def _parse_vtable_index(vi_str: str | None) -> int | None:
@@ -1240,6 +1173,7 @@ class _CastxmlParser:
                 if el.tag in ("Method", "Destructor", "Converter", "OperatorMethod")
                 else None
             ),
+            is_compiler_generated=el.get("artificial") == "1",
         )
 
     def parse_variables(self) -> list[Variable]:
