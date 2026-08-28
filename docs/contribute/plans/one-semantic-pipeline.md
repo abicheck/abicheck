@@ -3129,6 +3129,109 @@ positions.py` (7 tests, four classes:
 than appended to `test_fact_detector_misuse_alias_edge_cases.py`, which
 had only ~60 lines of headroom left under its own 1200-line cap.
 
+**Three more findings on the same commit (a further Codex review round),
+all bounded extensions -- one self-inflicted regression caught and fixed
+before landing.**
+
+(1) **`case (fact,) as whole:` -- a structural pattern *wrapped* by a
+top-level `as`-pattern -- recorded only `whole`, never recursing into
+its own wrapped `MatchSequence`.** The whole-`case.pattern` dispatch in
+`fact_equality_misuse_sites()` treated `MatchAs` exclusively as a
+whole-subject capture (an inline reimplementation of a *subset* of the
+rules `_paired_sub_pattern_candidates()`'s own per-position handling
+already states in full, including this exact wrapped-structural-pattern
+case). Fixed by deleting the whole-`case.pattern` dispatch's own five
+`if`/`elif` branches entirely and delegating the whole thing to
+`_paired_sub_pattern_candidates(case.pattern, node.subject)` -- the same
+shared primitive, reused whole rather than kept as two independently-
+maintained subsets of the same rules that could (and, per this finding,
+already had) silently diverge again. Verified every existing whole-
+subject shape unaffected (bare capture, `SomeClass() as fact`, a chained
+`MatchAs`, the whole-subject `MatchOr`, a structural sequence/mapping
+sub-part, a bare wildcard contributing no candidate) plus the new
+wrapped-structural shape at both a sequence and a mapping position, all
+via direct AST reproduction before writing tests.
+
+(2) **A literal display indexed at a statically known position/key
+(`(rec.bases_fact,)[0]`, `{"x": rec.bases_fact}["x"]`) fell through
+`_is_fact_typed_expr()` entirely -- `ast.Subscript` had no branch at
+all.** Fixed with a new `Subscript` branch: a literal `ast.Tuple`/
+`ast.List` indexed by a literal integer resolves to that element (a
+`Starred` element anywhere disqualifies the whole display, the identical
+rule `_paired_unpacking_candidates()` already applies to a starred value
+display); a literal `ast.Dict` indexed by a literal key resolves to the
+matching value (a `**expansion` entry disqualifies the whole display,
+the identical rule). **A negative literal index (`[-1]`) needed its own
+unwrap**: Python parses it as `ast.UnaryOp(op=ast.USub(), operand=
+ast.Constant(...))`, not a bare `ast.Constant` -- caught by this fix's
+own first round of empirical verification (the negative-index repro
+failed against the initial implementation, before any test was written
+for it) rather than shipping the gap silently. Composes for free with
+every other recursive shape (`IfExp`/`BoolOp`/`NamedExpr`/a nested
+resolved element), verified unaffected. **One residual, documented in
+the function's own docstring rather than chased further**: this does
+*not* recurse into the display itself when it is a further, resolvable
+`Subscript` (`((rec.bases_fact,), 1)[0][0]`, two levels of indexing
+before ever reaching a literal display) -- doubly-indirect subscript
+chaining over a literal display has no real precedent in this codebase,
+unlike the single-level form the reported finding actually named.
+
+(3) **`def f(Fact, other): return Fact(1) == other` -- an ordinary
+parameter reusing the constructor's own name -- was still treated as the
+real constructor.** `_is_fact_typed_expr()`'s constructor-call
+recognition is a pure, scope-blind lookup against a single whole-tree
+`fact_names` set, with no shadow-awareness at all, unlike the shadowing
+this module already applies to *alias* names via `_fact_aliases()`.
+**The first fix attempt was wrong, caught before landing by direct
+reproduction against a genuine import (this file's own "verify every
+sibling form" discipline catching a self-inflicted bug, not just the
+reported one):** reusing `_fact_aliases()`'s own broader internal
+`locally_bound` set (returned as a new second value from that function)
+seemed like the natural, already-computed answer -- but that set also
+records every `ast.ImportFrom` binding, and a genuine `from abicheck.
+model.fact import Fact` (the *correct*, ordinary way to bring the real
+constructor into scope at all) is itself exactly such a binding.
+Subtracting that broader set silently treated the legitimate import that
+establishes `Fact` as though it *shadowed* `Fact`, disabling constructor
+recognition module-wide the moment any file imported it normally --
+confirmed by direct reproduction (`from abicheck.model.fact import
+Fact; def f(other): return Fact(1) == other` stopped being detected at
+all) before a single test was written, and reverted in full. Fixed
+instead with a new, deliberately narrower `_locally_bound_parameter_
+names()`, collecting *only* function/lambda parameter names (never
+imports or assignment targets) per function's own qualname -- a
+parameter is never a legitimate way to bind the real `Fact` class,
+unlike an import, so this collector carries no equivalent risk. Also
+needed closure-scope inheritance the parameter-only collector doesn't
+give for free: `def outer(Fact): def inner(other): return Fact(1) ==
+other` -- `inner`'s own parameter set is empty, since `Fact` is
+`outer`'s parameter, but `inner` still genuinely closes over it -- so a
+new `_shadowed_constructor_names()` walks the real lexical-function-
+parent chain (`_lexical_function_parents()`, the identical closure-scope
+chain `_fact_aliases()`'s own alias inheritance already walks), unioning
+every ancestor's own bound-parameter set. Verified against the reported
+repro, a genuine unshadowed import (both bare `Fact` and an aliased
+`Fact as F`, both classmethod and plain-constructor spellings -- the
+exact regression class the reverted first attempt introduced), a
+sibling function with no shadowing parameter still detecting the real
+constructor, single/double/class-nested closure inheritance of the
+shadow, an unrelated attribute-field-access recognition path staying
+unaffected by the shadow, and a shadowed imported-alias name too, all
+via direct AST reproduction before writing tests.
+
+Still zero existing hits across all three, `mypy`/`ruff` both stayed
+clean, `fact_detector_misuse.py` at 1896 lines and `fact_detector_
+misuse_scope.py` at 1109 lines (both well under the 2000-line hard cap).
+New tests split into three dedicated sibling files (none of the
+existing files had enough headroom left under their own 1200-line caps
+to safely absorb this many new cases): `tests/test_fact_detector_
+misuse_as_pattern_wraps_structural.py` (10 tests),
+`tests/test_fact_detector_misuse_static_subscript.py` (20 tests), and
+`tests/test_fact_detector_misuse_constructor_shadow.py` (11 tests, the
+`TestGenuineImportStillRecognizedAfterTheFix` class specifically pinning
+the self-inflicted regression the first attempt introduced, not just
+the originally reported finding).
+
 ---
 
 ### Phase 1 — finish the `dump`/`scan` typed-API convergence (closes AGENTS.md "PR C")

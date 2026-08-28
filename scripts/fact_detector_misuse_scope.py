@@ -1055,3 +1055,55 @@ def _match_pattern_names(pattern: ast.pattern) -> list[str]:
         for sub in pattern.patterns:
             names.extend(_match_pattern_names(sub))
     return names
+
+
+def _locally_bound_parameter_names(
+    tree: ast.Module, qualnames: _QualnameSpans
+) -> dict[str, set[str]]:
+    """Map each function's own qualname to *only* the parameter names it
+    binds -- `def f(Fact, other): ...` records `{"Fact", "other"}` under
+    `f`'s own qualname (Codex review, fresh evidence): `def f(Fact,
+    other): return Fact(1) == other` -- an ordinary parameter reusing
+    the model `Fact` constructor's own name -- shadows it for the whole
+    function, the identical shadowing rule this module's own alias
+    tracking (`_fact_aliases()`) already applies to an *alias* name, but
+    nothing applied it to the constructor's own name resolution, which is
+    a pure, scope-blind lookup against a single whole-tree name set.
+
+    **Deliberately narrower than `_fact_aliases()`'s own internal
+    `locally_bound` set, which this module could otherwise have reused
+    directly instead of adding a second collector.** That set also
+    records every `ast.Import`/`ast.ImportFrom`/assignment-target
+    binding, not just parameters -- and a `from abicheck.model.fact
+    import Fact` (the ordinary, correct way to bring the real constructor
+    into scope at all) is *itself* one such binding. Subtracting that
+    broader set from the constructor-name set would have treated the
+    legitimate import that establishes `Fact` as though it *shadowed*
+    `Fact` -- self-defeating, and confirmed by direct reproduction before
+    this narrower collector was written. A function parameter, by
+    contrast, is never a legitimate way to bind the real `Fact` class (a
+    parameter is always a runtime value the function receives, never an
+    import), so collecting parameters alone carries no equivalent risk.
+    An ordinary assignment-based shadow (`Fact = SomethingElse` inside a
+    function body) is a real, if narrower, sibling case left uncollected
+    here -- correctly distinguishing "assigned to the real constructor"
+    from "assigned to something else" needs the same resolution machinery
+    `_fact_aliases()`'s own alias tracking already builds for a
+    *value*, and reusing it for the *constructor name* question is a
+    genuinely separate, larger change than this fix's own scope.
+    """
+    params: dict[str, set[str]] = {}
+    for node in ast.walk(tree):
+        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)):
+            continue
+        qualname = _qualname_at((node.lineno, node.col_offset), qualnames)
+        all_args = (
+            *node.args.posonlyargs,
+            *node.args.args,
+            *node.args.kwonlyargs,
+            *((node.args.vararg,) if node.args.vararg else ()),
+            *((node.args.kwarg,) if node.args.kwarg else ()),
+        )
+        for arg in all_args:
+            params.setdefault(qualname, set()).add(arg.arg)
+    return params

@@ -72,14 +72,12 @@ from fact_detector_misuse_scope import (  # noqa: E402
     _def_containing_qualnames,
     _enclosing_qualnames,
     _lexical_function_parents,
+    _locally_bound_parameter_names,
     _match_pattern_names,
-    _matchas_chain_names,
-    _paired_match_mapping_candidates,
-    _paired_match_sequence_candidates,
+    _paired_sub_pattern_candidates,
     _paired_unpacking_candidates,
     _qualname_at,
     _QualnameSpans,
-    _trusted_matchor_chain_names,
 )
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -208,6 +206,36 @@ def _is_fact_typed_expr(node: ast.expr, fact_names: frozenset[str]) -> bool:
     isn't reliably a Fact), the identical every-branch-must-agree
     principle the loop-target literal-collection fix elsewhere in this
     module already applies to a tuple's elements.
+
+    A literal display indexed at a statically known position (`(rec.
+    bases_fact,)[0]`/`[rec.bases_fact][0]`, an `ast.Subscript` over an
+    `ast.Tuple`/`ast.List`) or by a statically known literal key (`{"x":
+    rec.bases_fact}["x"]`, over an `ast.Dict`) resolves to that one
+    element/value and is recognized exactly when *it* is (Codex review,
+    fresh evidence): both are real, ordinary indexing operations whose
+    result is definitively known from the display alone -- an unrelated
+    element/key elsewhere in the same display doesn't matter, unlike the
+    `IfExp`/`BoolOp` "every branch must agree" cases above, since
+    indexing at a fixed position/key always selects the identical one
+    element regardless of what else the display holds. Requires a
+    literal `ast.Constant` index for both -- a non-literal index (a
+    variable, an expression) can't be resolved without runtime
+    evaluation, the same "no type inference" stance this module already
+    takes everywhere else, and a `Tuple`/`List` display containing a
+    `Starred` element is rejected outright (its own fixed positions are
+    no longer statically known once one is), the identical rule
+    `_paired_unpacking_candidates()` already applies to a starred value
+    display. Recurses into a resolved *element/value* (`(a, b, (rec.
+    bases_fact,)[0])[2]`), the same as every other composed shape above
+    -- but **not** into the *display* itself when it is a further,
+    resolvable `Subscript` (`((rec.bases_fact,), 1)[0][0]`, chaining two
+    levels of indexing before ever reaching a literal display): the
+    outer `Subscript`'s own `.value` is checked only for being literally
+    an `ast.Tuple`/`ast.List`/`ast.Dict`, not for being itself something
+    this function could resolve down to one. Left as an accepted,
+    narrower residual -- doubly-indirect subscript chaining over a
+    literal display has no real precedent in this codebase, unlike the
+    single-level form the reported finding actually named.
     """
     if isinstance(node, ast.Attribute) and node.attr in FACT_FIELD_NAMES:
         return True
@@ -252,6 +280,44 @@ def _is_fact_typed_expr(node: ast.expr, fact_names: frozenset[str]) -> bool:
         # operand count (`a or b or c` chains to one `BoolOp` node with
         # three values, not two nested ones).
         return all(_is_fact_typed_expr(value, fact_names) for value in node.values)
+    if isinstance(node, ast.Subscript):
+        # `(rec.bases_fact,)[-1]` -- a negative literal index parses as
+        # `ast.UnaryOp(op=ast.USub(), operand=ast.Constant(value=1))`,
+        # not a bare `ast.Constant` (Python's own grammar for a unary
+        # minus applied to any literal, not just an index) -- unwrapped
+        # here so a negative index resolves the same as a positive one,
+        # rather than falling through as an unrecognized non-literal
+        # index.
+        slice_node = node.slice
+        index: object | None = None
+        if isinstance(slice_node, ast.Constant):
+            index = slice_node.value
+        elif (
+            isinstance(slice_node, ast.UnaryOp)
+            and isinstance(slice_node.op, ast.USub)
+            and isinstance(slice_node.operand, ast.Constant)
+            and isinstance(slice_node.operand.value, int)
+        ):
+            index = -slice_node.operand.value
+        display = node.value
+        if (
+            index is not None
+            and isinstance(display, (ast.Tuple, ast.List))
+            and isinstance(index, int)
+            and not any(isinstance(elt, ast.Starred) for elt in display.elts)
+        ):
+            elts = display.elts
+            if -len(elts) <= index < len(elts):
+                return _is_fact_typed_expr(elts[index], fact_names)
+            return False
+        if (
+            index is not None
+            and isinstance(display, ast.Dict)
+            and not any(key is None for key in display.keys)
+        ):
+            for key_expr, value_expr in zip(display.keys, display.values):
+                if isinstance(key_expr, ast.Constant) and key_expr.value == index:
+                    return _is_fact_typed_expr(value_expr, fact_names)
     return False
 
 
@@ -916,87 +982,37 @@ def _fact_aliases(tree: ast.Module, qualnames: _QualnameSpans) -> dict[str, set[
                 for name in _match_pattern_names(case.pattern):
                     locally_bound.setdefault(qualname, set()).add(name)
                 # `case fact:` (a bare capture, matching -- and binding --
-                # the *entire* subject unconditionally) and `case
-                # SomeClass() as fact:` (an `as`-pattern, binding the
-                # entire subject whenever its own sub-pattern matches)
-                # both make `fact` a real alias of `node.subject` itself,
-                # not merely an arbitrary local shadow (Codex review,
-                # fresh evidence): `match rec.bases_fact: case fact:
-                # return fact == other` is a real misuse. Both shapes are
-                # exactly `case.pattern` itself being an `ast.MatchAs`
-                # with a real `name` -- Python's own grammar for a
-                # top-level capture/`as`-pattern -- as opposed to a
-                # *nested* capture inside a larger structural pattern
-                # (`case [x, y as fact]:`), which only captures a
-                # *sub*-part of the subject, not the whole thing, and is
-                # deliberately not treated as an alias of `node.subject`
-                # here.
-                #
-                # **A `MatchAs` can itself nest a *further* `MatchAs`,
-                # not just a structural sub-pattern -- `case fact as
-                # alias:` binds *both* names to the whole subject, not
-                # only the outer one (Codex review, fresh evidence).**
-                # `_matchas_chain_names()` walks the whole chain of
-                # nested `MatchAs` nodes; for the ordinary, non-chained
-                # case it still returns exactly the single outer name.
-                if (
-                    isinstance(case.pattern, ast.MatchAs)
-                    and case.pattern.name is not None
+                # the *entire* subject unconditionally), `case SomeClass()
+                # as fact:` (an `as`-pattern, binding the entire subject
+                # whenever its own sub-pattern matches), `case fact as
+                # alias:` (a *chained* `MatchAs`, binding *both* names to
+                # the whole subject -- Codex review, fresh evidence), `case
+                # (C() as fact) | (D() as fact):` (an OR pattern trusted
+                # per `_trusted_matchor_chain_names()`'s own rule), `case
+                # (fact, _):`/`case {"fact": fact}:` (a structural
+                # sequence/mapping pattern capturing a *sub*-part of the
+                # subject positionally/by literal key), and `case (fact,)
+                # as whole:` (a structural pattern *wrapped* by an outer
+                # `as`-pattern, binding `whole` to the entire subject *and*
+                # `fact` to its own sub-part -- Codex review, fresh
+                # evidence: the previous top-level dispatch treated
+                # `MatchAs` exclusively as a whole-subject capture and
+                # never recursed into its wrapped sub-pattern, unlike
+                # `_paired_sub_pattern_candidates()`'s own identical
+                # per-position handling of the same shape) all delegate to
+                # `_paired_sub_pattern_candidates()`, the single shared
+                # primitive that already states every one of these rules
+                # for the per-*position* case -- reused whole here rather
+                # than reimplemented, so the top-level whole-subject
+                # dispatch and the per-position dispatch cannot silently
+                # diverge on the same pattern shapes again. A bare
+                # wildcard `_`/a literal `MatchValue`/a `MatchClass` with
+                # no `as` contributes no candidate, matching the
+                # pre-existing behavior for those shapes.
+                for name, value in _paired_sub_pattern_candidates(
+                    case.pattern, node.subject
                 ):
-                    for chain_name in _matchas_chain_names(case.pattern):
-                        candidates.setdefault(qualname, []).append(
-                            (chain_name, node.subject)
-                        )
-                elif isinstance(case.pattern, ast.MatchOr) and case.pattern.patterns:
-                    # `case (C() as fact) | (D() as fact): fact == other`
-                    # -- an OR pattern where *every* alternative is itself
-                    # a top-level `MatchAs` capturing the whole subject
-                    # under the identical name (Codex review, fresh
-                    # evidence). `_trusted_matchor_chain_names()` states
-                    # the full trust rule (own docstring): only when every
-                    # single alternative is exactly `MatchAs` with the
-                    # identical full nested chain of names is every one of
-                    # those names guaranteed to be the raw subject
-                    # regardless of which alternative matched -- shared
-                    # with `_paired_sub_pattern_candidates()`'s identical
-                    # per-position handling of the same OR-pattern shape.
-                    for chain_name in _trusted_matchor_chain_names(case.pattern):
-                        candidates.setdefault(qualname, []).append(
-                            (chain_name, node.subject)
-                        )
-                elif isinstance(case.pattern, ast.MatchSequence):
-                    # `case (fact, _):` -- a structural sequence pattern
-                    # capturing only a *sub*-part of the subject, not the
-                    # whole thing (Codex review, fresh evidence): `match
-                    # (rec.bases_fact, tag): case (fact, _): return fact ==
-                    # other` -- `fact` is definitively the subject tuple's
-                    # first element, but neither branch above applies
-                    # (`case.pattern` is a `MatchSequence`, not a bare
-                    # `MatchAs`/`MatchOr`-of-`MatchAs`). Paired positionally
-                    # against a statically-known `Tuple`/`List` subject via
-                    # `_paired_match_sequence_candidates()`, the `match`
-                    # sibling of `_paired_unpacking_candidates()`.
-                    for name, value in _paired_match_sequence_candidates(
-                        case.pattern, node.subject
-                    ):
-                        candidates.setdefault(qualname, []).append((name, value))
-                elif isinstance(case.pattern, ast.MatchMapping):
-                    # `case {"fact": fact}:` -- the identical gap as the
-                    # `MatchSequence` branch above, for a structural
-                    # mapping pattern instead (Codex review, fresh
-                    # evidence): `match {"fact": rec.bases_fact}: case
-                    # {"fact": fact}: return fact == other` -- `fact` is
-                    # definitively the subject dict's own `"fact"` entry,
-                    # but a `MatchMapping` pattern was left to the
-                    # whole-subject-capture handling too, which never
-                    # applies to a structural, sub-part-capturing pattern.
-                    # Paired by literal key against a statically-known
-                    # `Dict` subject via `_paired_match_mapping_
-                    # candidates()`.
-                    for name, value in _paired_match_mapping_candidates(
-                        case.pattern, node.subject
-                    ):
-                        candidates.setdefault(qualname, []).append((name, value))
+                    candidates.setdefault(qualname, []).append((name, value))
         elif isinstance(node, (ast.Import, ast.ImportFrom)):
             # `import json as fact` / `from pkg import item as fact` --
             # a real local binding too, the identical shadowing shape as
@@ -1788,9 +1804,47 @@ def fact_equality_misuse_sites(tree: ast.Module, rel: str) -> list[tuple[int, in
     def_containing = _def_containing_qualnames(tree)
     scope_overrides = _default_and_annotation_scope_overrides(tree, def_containing)
     fact_names = _imported_fact_aliases(tree)
+    locally_bound_params = _locally_bound_parameter_names(tree, qualnames)
+    lexical_parents = _lexical_function_parents(tree)
+
+    def _shadowed_constructor_names(qualname: str) -> set[str]:
+        # A parameter shadows an outer `Fact` (or an imported alias of
+        # it) not just for that function's own body, but for every
+        # *nested* function closing over it too, the ordinary Python
+        # closure rule (Codex review, fresh evidence: `def outer(Fact):
+        # def inner(other): return Fact(1) == other` -- `inner`'s own
+        # `locally_bound_params` entry is empty, since `Fact` is
+        # `outer`'s parameter, not `inner`'s own -- but `inner` still
+        # genuinely sees `outer`'s `Fact`, not the module-level one).
+        # Walks the real lexical-function-parent chain (skipping class
+        # layers, the identical closure-scope chain `_fact_aliases()`'s
+        # own alias inheritance already walks), unioning every
+        # ancestor's own bound-parameter set rather than stopping at the
+        # first one.
+        shadowed: set[str] = set()
+        seen: set[str] = set()
+        current: str | None = qualname
+        while current is not None and current not in seen:
+            seen.add(current)
+            shadowed |= locally_bound_params.get(current, set())
+            current = lexical_parents.get(current)
+        return shadowed
 
     def is_fact_typed(node: ast.expr, qualname: str) -> bool:
-        if _is_fact_typed_expr(node, fact_names):
+        # `def f(Fact, other): return Fact(1) == other` -- an ordinary
+        # parameter reusing the constructor's own name shadows it for
+        # the whole function (Codex review, fresh evidence):
+        # `_is_fact_typed_expr()`'s constructor-call recognition is a
+        # pure, scope-blind lookup against the single, whole-tree
+        # `fact_names` set, so a locally-shadowed `Fact` was still
+        # treated as the real constructor. Filtered per-qualname via
+        # `_shadowed_constructor_names()` -- see
+        # `_locally_bound_parameter_names()`'s own docstring for why
+        # this is scoped to parameters specifically, not every kind of
+        # local binding `_fact_aliases()`'s own shadowing already
+        # accounts for.
+        effective_fact_names = fact_names - _shadowed_constructor_names(qualname)
+        if _is_fact_typed_expr(node, effective_fact_names):
             return True
         if isinstance(node, ast.Name):
             return node.id in aliases.get(qualname, ())
