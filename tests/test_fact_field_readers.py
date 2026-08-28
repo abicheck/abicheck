@@ -148,6 +148,26 @@ class TestUnmigratedFactReaderSites:
             'x.py::f::vtable::getattr(rec, "vtable", None)::1'
         ]
 
+    def test_detects_a_structural_pattern_match_naming_a_bridged_attr(
+        self,
+    ) -> None:
+        """`case RecordType(bases=[]):` reads `bases` via `ast.MatchClass.
+        kwd_attrs`, not an `ast.Attribute` or a `getattr()` call -- invisible
+        to both other branches (Codex review: this exact shape was found
+        undetected)."""
+        src = (
+            "def f(rec):\n"
+            "    match rec:\n"
+            "        case RecordType(bases=[]):\n"
+            "            return True\n"
+            "    return False\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        sites = unmigrated_fact_reader_sites(tree, "x.py", src)
+        assert [key for key, _l, _a, _q in sites] == [
+            "x.py::f::bases::RecordType(bases=[])::1"
+        ]
+
     def test_ignores_a_getattr_call_with_a_non_matching_or_dynamic_name(self) -> None:
         src = (
             "def f(rec, attr):\n"

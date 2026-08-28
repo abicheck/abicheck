@@ -1062,6 +1062,25 @@ primitive, fires on a new violation, stays silent on a baselined one, and
 respects a function-scoped exemption without leaking to a sibling function
 in the same file).
 
+**A fifth Codex review round found two more real gaps, both fixed.** (1)
+The scan matched an `ast.Attribute` read and a `getattr()` call, but not a
+structural-pattern-matching read: `case RecordType(bases=[]):` reads
+`bases` via `ast.MatchClass.kwd_attrs` (a `list[str]`, paired positionally
+with `kwd_patterns`), a node shape neither branch recognized — invisible
+to the check even though it collapses unavailable and confirmed-empty the
+same way a direct attribute read does. Fixed by matching a `MatchClass`
+node's `kwd_attrs` against `FACT_BRIDGED_ATTRS` too, keyed by the matched
+keyword pattern's own location and the whole class pattern's source text
+(`RecordType(bases=[])`) as `expr-text`, since a `MatchClass` node carries
+no location for a single keyword on its own. Verified empirically to have
+zero existing hits — no `match`/`case` statement in the repository
+currently patterns on any of these five fields, so the baseline stays at
+104. (2) The root `AGENTS.md`'s AI-readiness gate table (the canonical
+verification contract every other check is listed in) had no row for
+`fact-field-readers`, leaving it undiscoverable from that table — added
+alongside `engine-cli-boundary`'s own row. New test:
+`test_detects_a_structural_pattern_match_naming_a_bridged_attr`.
+
 **Still not landed**: no detector (`diff_layout.py`/`diff_types.py`/
 `diff_param_qualifiers.py`/the reader set the check above now tracks
 precisely) has actually been migrated to read `.status` — the check above

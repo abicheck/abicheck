@@ -27,7 +27,7 @@ three more the plan's own table doesn't name yet
 and `idioms.py`'s factory/non-virtual-destructor idiom detectors) --
 confirming the plan's own conclusion: a hand-maintained allowlist is the
 wrong invariant. This check is the real one: a plain, repo-wide AST scan
-for a direct attribute read of one of the four names below, with every
+for a direct attribute read of one of the five names below, with every
 *currently known* reader recorded in `KNOWN_UNMIGRATED_READERS` (an
 allowlist-and-shrink baseline, exactly `IMPORT_CYCLE_ALLOWLIST`'s own
 convention -- it may only shrink, and a genuinely new entry needs the same
@@ -70,7 +70,7 @@ same rank in the same function.
 **No type inference.** "On a value whose declared type resolves to
 `RecordType`/`Param`" (the Design section's own phrasing) would need a real
 type checker; this script runs before `pip install` and must stay pure
-stdlib. Instead it matches the four attribute *names* anywhere in
+stdlib. Instead it matches the five attribute *names* anywhere in
 `abicheck/` — verified empirically (by running exactly this scan against
 the whole package before writing the baseline below) to have zero
 cross-class collisions today: every single hit is genuinely a `RecordType`/
@@ -349,6 +349,21 @@ def unmigrated_fact_reader_sites(
     is out of scope, the same "no type inference" limit this module's own
     docstring already states for the attribute case.
 
+    A structural-pattern-matching read (`case RecordType(bases=[]):`) is
+    detected too (Codex review, fresh evidence): Python represents a class
+    pattern's keyword attributes as `ast.MatchClass.kwd_attrs` (a
+    `list[str]`, paired positionally with `kwd_patterns`) rather than as
+    an `ast.Attribute` or a `getattr()` call, so it is invisible to both
+    branches above -- `case RecordType(bases=[]):` reads `bases` exactly
+    as much as `rec.bases` does, and would have collapsed unavailable and
+    confirmed-empty the same way. Each matched keyword's own pattern node
+    supplies the location; the whole class pattern's source text
+    (`RecordType(bases=[])`, not just the one keyword) is the key's
+    `expr-text`, since a `MatchClass` node has no location of its own for
+    a single keyword. Verified empirically to have zero existing hits in
+    `abicheck/` today -- no match/case statement currently patterns on any
+    of these five fields.
+
     **The key includes the read's own source text, not just a positional
     ordinal (Codex review, fresh evidence).** `diff_param_qualifiers.py`'s
     `if not p_old.is_va_list and p_new.is_va_list:` has two DIFFERENT
@@ -365,6 +380,29 @@ def unmigrated_fact_reader_sites(
     qualnames = _enclosing_qualnames(tree)
     matches: list[tuple[int, int, str, str, str]] = []
     for node in ast.walk(tree):
+        if isinstance(node, ast.MatchClass):
+            # `case RecordType(bases=[]):` -- structural pattern matching
+            # reads a keyword attribute (`kwd_attrs`, a list[str], paired
+            # positionally with `kwd_patterns`) without ever producing an
+            # `ast.Attribute` or a `getattr()` call (Codex review, fresh
+            # evidence): invisible to both branches below.
+            class_text = (
+                ast.get_source_segment(source, node) if source else None
+            ) or "<unavailable>"
+            qualname = qualnames.get(node.lineno, "<module>")
+            for kwd_attr, kwd_pattern in zip(node.kwd_attrs, node.kwd_patterns):
+                if kwd_attr not in FACT_BRIDGED_ATTRS:
+                    continue
+                matches.append(
+                    (
+                        kwd_pattern.lineno,
+                        kwd_pattern.col_offset,
+                        kwd_attr,
+                        qualname,
+                        class_text,
+                    )
+                )
+            continue
         if (
             isinstance(node, ast.Attribute)
             and node.attr in FACT_BRIDGED_ATTRS
