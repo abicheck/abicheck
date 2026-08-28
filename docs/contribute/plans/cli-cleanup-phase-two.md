@@ -2776,24 +2776,13 @@ immutable effective configuration (one `CompatibilityEvaluationConfig`, one
 and the Action, with the same effective-config digest recorded in every
 report.
 
-**Scope correction (2026-08-28, recorded here rather than left only in PR
-B's own "finalized" note below, per Codex review, PR #910 — the two must
-agree): the `GateOptions` half of "land first" above was reassigned to PR
-G2, not landed as part of PR B.** PR B's own two stated goals — pack parity
-across every CLI command path, and the effective-config digest in every
-report — are both landed (see PR B's "finalized" note below; the typed
-Python API's own pack-parity gap — `ScanRequest` has no pack field,
-`CompareRequest` carries no `gate.*` equivalent — is separate, outstanding
-work, not part of what PR B closed). The single shared
-`GateOptions` object this paragraph originally asked for is not: it needs a
-genuine rewrite of the release fan-out's own severity/exit-code-scheme
-representation, immediately ahead of PR G2's own not-yet-designed rewrite of
-the identical logic, so it is reassigned there rather than attempted
-reactively inside PR B. The `PolicyFile`/pack-parity slices below still
-close the fields a `GateOptions` object would otherwise have carried
-(`policy.overrides`, `surface.internal_namespaces`, `gate.exit_code_scheme`,
-`gate.severity.*`) via each front end's own existing configuration shape —
-only the *unification into one shared typed object* is deferred.
+**Scope correction (2026-08-28): the `GateOptions` half of "land first"
+above was reassigned to PR G2, not landed as part of PR B — see PR B's own
+"finalized" note below for the complete, canonical status (what landed,
+the typed-API pack-parity exception, and why `GateOptions` was
+reassigned). Consolidated here to one pointer rather than three
+independently-drifting restatements (Codex review, PR #910, `docs/AGENTS.md`'s
+"one fact, one canonical page" rule).**
 
 > **Slice 1 landed (2026-08-16):** the directory/package release fan-out no
 > longer rejects `--pack` outright. `CompareRequest` gained `pack_policy_
