@@ -912,6 +912,53 @@ def _matchas_chain_names(pattern: ast.pattern) -> list[str]:
     return [pattern.name, *inner] if pattern.name is not None else inner
 
 
+def _trusted_matchor_chain_names(pattern: ast.MatchOr) -> list[str]:
+    """Return the names an OR pattern's *every* alternative is guaranteed
+    to bind to the identical value regardless of which alternative
+    matched, or `[]` if that can't be established (Codex review, fresh
+    evidence): `case (C() as fact) | (D() as fact):` -- every alternative
+    is itself a top-level `MatchAs` capturing the *whole* value it's
+    matched against under the identical name. Python requires every
+    alternative of an OR pattern to bind the same set of names (a
+    `SyntaxError` otherwise), but not the same *shape* of binding --
+    `case (C(x=fact)) | (D() as fact):` legally binds the name `fact` in
+    both branches, but only the second branch binds it to the *whole*
+    matched value, so a bare per-alternative name check is not safe to
+    trust as an alias. Only when every single alternative is itself
+    exactly `MatchAs` with the *identical full nested chain* of names (via
+    `_matchas_chain_names()`, so a chained `case (fact as alias) | (other
+    as alias):` is correctly rejected -- only `alias` is guaranteed
+    identical, not `fact`/`other`) is every one of those names guaranteed
+    safe.
+
+    Shared by two callers matching this identical OR-pattern shape at two
+    different levels: `fact_detector_misuse.py`'s whole-`case.pattern`
+    capture collection (`case (C() as fact) | (D() as fact): fact ==
+    other`), and `_paired_sub_pattern_candidates()`'s per-position
+    structural pairing (`case ((C() as fact) | (D() as fact),):` -- the
+    identical OR-pattern shape nested one level inside a sequence/mapping
+    position, previously unrecognized there since this function's own
+    predecessor logic was inlined only at the whole-subject level).
+    """
+    alternatives = pattern.patterns
+    if not alternatives:
+        return []
+    first_alt = alternatives[0]
+    first_chain = (
+        _matchas_chain_names(first_alt)
+        if isinstance(first_alt, ast.MatchAs) and first_alt.name is not None
+        else []
+    )
+    if first_chain and all(
+        isinstance(alt, ast.MatchAs)
+        and alt.name is not None
+        and _matchas_chain_names(alt) == first_chain
+        for alt in alternatives
+    ):
+        return first_chain
+    return []
+
+
 def _paired_sub_pattern_candidates(
     sub_pattern: ast.pattern, sub_subject: ast.expr
 ) -> list[tuple[str, ast.expr]]:
@@ -920,7 +967,7 @@ def _paired_sub_pattern_candidates(
     `_paired_match_sequence_candidates()`/`_paired_match_mapping_
     candidates()` both delegate to (Codex review, fresh evidence): the
     previous inline handling recognized only a bare `MatchAs(name=...)`
-    at a position, missing two real shapes. (1) A *chained* `MatchAs`
+    at a position, missing three real shapes. (1) A *chained* `MatchAs`
     (`case (fact as alias,):`, parsing as `MatchAs(pattern=MatchAs(
     name="fact"), name="alias")`) recorded only the outer `alias`,
     leaving `fact` -- an equally real whole-subject alias, per
@@ -929,6 +976,11 @@ def _paired_sub_pattern_candidates(
     alias,):`) fell through every branch untouched, since the position's
     own top-level node is `MatchAs`, not `MatchSequence`/`MatchMapping`
     directly, even though its wrapped pattern is exactly one of those.
+    (3) A `MatchOr` at a position (`case ((C() as fact) | (D() as
+    fact),):`) fell through untouched too -- the identical OR-pattern
+    shape `_trusted_matchor_chain_names()` already recognizes at the
+    whole-`case.pattern` level, just unreached at the per-position level
+    (Codex review, fresh evidence).
 
     Unwinds the full nested-`MatchAs` chain via `_matchas_chain_names()`
     first (recording every name along it against the identical
@@ -937,10 +989,15 @@ def _paired_sub_pattern_candidates(
     the chain's innermost non-`MatchAs` wrapped pattern -- skipping past
     every already-recorded `MatchAs` layer, so a name is never registered
     twice -- and recurses into it structurally when it is itself a
-    `MatchSequence`/`MatchMapping`. A non-`MatchAs`, non-structural
-    *sub_pattern* (a wildcard `_`, a literal `MatchValue`, a `MatchClass`)
-    contributes no candidate, matching the pre-existing behavior for
-    those shapes.
+    `MatchSequence`/`MatchMapping`. A `MatchOr` position delegates to
+    `_trusted_matchor_chain_names()`, the identical "every alternative is
+    exactly `MatchAs` with the same full nested chain" trust rule the
+    whole-subject level already applies -- deliberately not recursed into
+    further (an alternative's own wrapped structural sub-pattern is left
+    unpaired, matching the whole-subject branch's identical restriction).
+    A non-`MatchAs`, non-structural, non-`MatchOr` *sub_pattern* (a
+    wildcard `_`, a literal `MatchValue`, a bare `MatchClass`) contributes
+    no candidate, matching the pre-existing behavior for those shapes.
     """
     if isinstance(sub_pattern, ast.MatchAs):
         candidates = [(name, sub_subject) for name in _matchas_chain_names(sub_pattern)]
@@ -954,6 +1011,10 @@ def _paired_sub_pattern_candidates(
         return _paired_match_sequence_candidates(sub_pattern, sub_subject)
     if isinstance(sub_pattern, ast.MatchMapping):
         return _paired_match_mapping_candidates(sub_pattern, sub_subject)
+    if isinstance(sub_pattern, ast.MatchOr):
+        return [
+            (name, sub_subject) for name in _trusted_matchor_chain_names(sub_pattern)
+        ]
     return []
 
 

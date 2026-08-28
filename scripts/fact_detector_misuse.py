@@ -79,6 +79,7 @@ from fact_detector_misuse_scope import (  # noqa: E402
     _paired_unpacking_candidates,
     _qualname_at,
     _QualnameSpans,
+    _trusted_matchor_chain_names,
 )
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -951,39 +952,18 @@ def _fact_aliases(tree: ast.Module, qualnames: _QualnameSpans) -> dict[str, set[
                     # -- an OR pattern where *every* alternative is itself
                     # a top-level `MatchAs` capturing the whole subject
                     # under the identical name (Codex review, fresh
-                    # evidence). Python requires every alternative of an
-                    # OR pattern to bind the same set of names (a
-                    # SyntaxError otherwise), but not the same *shape* of
-                    # binding -- `case (C(x=fact)) | (D() as fact):`
-                    # legally binds the name `fact` in both branches, but
-                    # only the second branch binds it to the *whole*
-                    # subject, so this alone is not safe to trust as an
-                    # alias. Only when every single alternative is itself
-                    # exactly `MatchAs` with the *identical full nested
-                    # chain* of names (Codex review, fresh evidence: a
-                    # bare per-alternative name check missed a nested
-                    # `MatchAs` chain the identical way the top-level
-                    # branch above originally did) is every one of those
-                    # names guaranteed to be the raw subject regardless of
-                    # which alternative matched.
-                    alternatives = case.pattern.patterns
-                    first_alt = alternatives[0]
-                    first_chain = (
-                        _matchas_chain_names(first_alt)
-                        if isinstance(first_alt, ast.MatchAs)
-                        and first_alt.name is not None
-                        else []
-                    )
-                    if first_chain and all(
-                        isinstance(alt, ast.MatchAs)
-                        and alt.name is not None
-                        and _matchas_chain_names(alt) == first_chain
-                        for alt in alternatives
-                    ):
-                        for chain_name in first_chain:
-                            candidates.setdefault(qualname, []).append(
-                                (chain_name, node.subject)
-                            )
+                    # evidence). `_trusted_matchor_chain_names()` states
+                    # the full trust rule (own docstring): only when every
+                    # single alternative is exactly `MatchAs` with the
+                    # identical full nested chain of names is every one of
+                    # those names guaranteed to be the raw subject
+                    # regardless of which alternative matched -- shared
+                    # with `_paired_sub_pattern_candidates()`'s identical
+                    # per-position handling of the same OR-pattern shape.
+                    for chain_name in _trusted_matchor_chain_names(case.pattern):
+                        candidates.setdefault(qualname, []).append(
+                            (chain_name, node.subject)
+                        )
                 elif isinstance(case.pattern, ast.MatchSequence):
                     # `case (fact, _):` -- a structural sequence pattern
                     # capturing only a *sub*-part of the subject, not the

@@ -3086,6 +3086,49 @@ was sufficient -- no independent architecture fix was needed on this
 branch. Verified with `python scripts/check_architecture.py` reporting
 `0 error(s)` on the merge commit.
 
+**A further Codex review round found `_paired_sub_pattern_candidates()`
+had no `MatchOr` branch, the identical OR-pattern shape the whole-`case.
+pattern` level already recognizes, just unreached at the per-position
+level.** `case ((C() as fact) | (D() as fact),):` deterministically
+binds `fact` to the sequence position's own Fact-valued element
+regardless of which alternative matched -- every alternative is a
+top-level `MatchAs` capturing that one position's whole value under the
+identical name -- but `_paired_sub_pattern_candidates()`'s `MatchAs`/
+`MatchSequence`/`MatchMapping` branches don't match a `MatchOr` node at
+all, so `unmigrated_fact_reader_sites()`'s `match_detector_misuse`
+sibling (`fact_equality_misuse_sites()`) returned no site. Fixed by
+extracting the existing whole-`case.pattern` OR-pattern trust rule
+("every alternative is exactly `MatchAs` with the identical full nested
+chain of names, via `_matchas_chain_names()`") into a new shared
+`_trusted_matchor_chain_names()`, used by both the pre-existing
+whole-subject branch (refactored to call it, not reimplement it, so the
+already-correct case couldn't silently diverge from the newly-added
+one) and a new `MatchOr` branch in `_paired_sub_pattern_candidates()`
+itself -- deliberately not recursed into an alternative's own wrapped
+structural sub-pattern, matching the whole-subject branch's identical
+restriction, rather than widening the trust rule at the same time as
+relocating it.
+
+Verified against the reported repro, the identical shape reproduced at a
+mapping position, three negative controls (mismatched alternative names,
+one alternative binding a field rather than the whole value, a chained
+`MatchAs` with mismatched inner names), and the whole-subject `MatchOr`
+branch re-verified unaffected by the refactor (both its positive and
+negative case), plus every other `_paired_sub_pattern_candidates()`
+sibling form (plain `MatchAs` at a position, a chained `MatchAs`, a
+structural sub-pattern wrapped by `MatchAs`, the starred-subject guard),
+all via direct AST reproduction before writing tests. Still zero
+existing hits, `mypy`/`ruff` both stayed clean, `fact_detector_misuse.py`
+at 1842 lines and `fact_detector_misuse_scope.py` at 1057 lines (both
+well under the 2000-line hard cap). New tests split into a dedicated
+sibling file, `tests/test_fact_detector_misuse_matchor_structural_
+positions.py` (7 tests, four classes:
+`TestMatchOrAtAStructuralSequencePosition`/
+`TestMatchOrAtAStructuralMappingPosition`/
+`TestWholeSubjectMatchOrStillWorksAfterTheSharedHelperRefactor`), rather
+than appended to `test_fact_detector_misuse_alias_edge_cases.py`, which
+had only ~60 lines of headroom left under its own 1200-line cap.
+
 ---
 
 ### Phase 1 — finish the `dump`/`scan` typed-API convergence (closes AGENTS.md "PR C")
