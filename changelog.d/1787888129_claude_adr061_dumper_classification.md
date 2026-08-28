@@ -1,0 +1,71 @@
+### Changed
+
+- **ADR-061 continuation**: 20 of the 23 `dumper*.py` header-AST/DWARF
+  parsing-engine modules are now classified into the `extract`
+  responsibility layer in `architecture/modules.yaml`:
+  `dumper_ast_config.py`, `dumper_ast_config_cpp20.py`,
+  `dumper_ast_config_cpp20_chains.py`, `dumper_cache.py`,
+  `dumper_castxml_probe.py`, `dumper_castxml_typedefs.py`,
+  `dumper_clang_attributes.py`, `dumper_clang_errors.py`,
+  `dumper_clang_qualifiers.py`, `dumper_clang_streaming.py`,
+  `dumper_clang_vtable.py`, `dumper_contract.py`, `dumper_debug.py`,
+  `dumper_elf_fallback.py`, `dumper_elf_symbols.py`,
+  `dumper_layout_backfill.py`, `dumper_manifest.py`, `dumper_sysinc.py`,
+  `dumper_toolchain.py` (`dumper_clang.py`/`dumper_scoping.py` were
+  already classified by an earlier PR). Every one of these is genuine
+  fact-extraction/config-resolution code (parses castxml XML or clang AST
+  JSON, resolves compiler flags, decodes DWARF, streams/prunes AST output)
+  with no `compare`-shaped construction of `Change`/`ChangeKind` objects.
+
+  **Closed the `frontends -> extract` direct-import gap this classification
+  opened**, the same way PR #907 did for `buildsource/`: three CLI/compat
+  modules (`cli_dump_helpers.py`, `cli_dump_non_elf.py`, `compat/cli.py`,
+  classified `frontends`) imported `dumper_cache.ast_memoize_scope`,
+  `dumper_clang_streaming.suppress_streaming_prune`, and
+  `dumper_contract._manifest_declared_includes` directly (one module-scope,
+  one lazy, one function-local). `abicheck/workflows/extraction.py`
+  (already the documented sole CLI-to-extract-engine facade) gained
+  re-exports for all three names, and each call site now imports through
+  it instead of the origin module.
+
+  **Three files deliberately left unclassified, each for a real,
+  structural reason rather than an oversight:**
+
+  - `dumper.py` itself — the module the whole cluster builds toward
+    (`dump()`), imported directly (not through the facade) by
+    `cli_dump_helpers.py`/`compat/cli.py` (both `frontends`) and, at
+    function scope, by `probe_harness.py` (classified `compare`). The
+    first two are routable through `workflows/extraction.py` the same way
+    the three names above were, but `probe_harness.py`'s edge is not:
+    `compare`'s `may_import` is `[model]` only, so a `compare`-classified
+    module cannot reach `extract` through *any* facade under ADR-061's
+    allowed-import table — closing it needs `probe_harness.py`'s own
+    classification revisited first (it already reads as workflow-shaped —
+    it drives a compile-and-snapshot pipeline — not `compare`-shaped), a
+    separate, out-of-scope decision. Left unclassified with this reasoning
+    recorded, per this ADR's established "leave it, document why" pattern
+    (`template_graph.py`, PR #903).
+  - `dumper_hybrid.py` — imports `diff_cxx_rules`/`diff_helpers` directly,
+    both already classified `compare`. `extract`'s `may_import` is
+    `[model, storage]`; `compare` is not reachable from `extract` at all,
+    facade or not, so this is a structural block, not a missing
+    re-export.
+  - `dumper_castxml.py` — the castxml XML parser itself. Three
+    `compare`-classified modules (`diff_symbols.py`,
+    `diff_symbols_renames.py`, `diff_templates.py`) import its
+    `is_synthetic_ctor_key`/`is_synthetic_dtor_key`/
+    `SYNTHETIC_CTOR_KEY_PREFIX` constants directly, at both module and
+    function scope — the identical `compare -> extract` structural
+    block as above. A correct fix would move that shared vocabulary
+    somewhere `compare` may import from (`model`), which is a real,
+    separate data-model change to `dumper_castxml.py`'s own public
+    surface, not a facade-routing fix.
+
+  Verified via `scripts/check_architecture.py` (0 errors, repo-wide),
+  `scripts/check_ai_readiness.py` (0 errors, 146 warnings — unchanged
+  from baseline; one `CLI_CONTRACT_ALLOWLIST` line-pin was updated for a
+  shifted line number after the import edits, no allowlist entry added or
+  removed), `mypy abicheck/` (clean, no new errors), `scripts/adr_status_sync.py`
+  (clean), a targeted run across every `dumper*`-named test module plus
+  `cli_dump_helpers`/`cli_scan`/`architecture` coverage, and the full fast
+  unit suite.

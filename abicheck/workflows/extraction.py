@@ -113,7 +113,10 @@ from ..buildsource.toolchain_bindings import (
 from ..buildsource.toolchain_probe import check_profile_toolchain_identity
 from ..debug_resolver import DebugArtifact, resolve_debug_info
 from ..dump_manifest import DumpManifest, load_manifest
+from ..dumper_cache import ast_memoize_scope
 from ..dumper_clang import resolve_source_frontend_clang_bin
+from ..dumper_clang_streaming import suppress_streaming_prune
+from ..dumper_contract import _manifest_declared_includes
 from ..dumper_scoping import dump_manifest_header_roots, resolve_dependency_scope
 from ..elf_metadata import parse_elf_metadata
 from ..header_conditionals import attach_build_context_for_parsed_headers
@@ -146,6 +149,8 @@ __all__ = [
     "_canonical_library_key",
     "_compile_db_at",
     "_load_build_evidence",
+    "_manifest_declared_includes",
+    "ast_memoize_scope",
     "attach_build_context_for_parsed_headers",
     "build_inline_coverage",
     "build_points_of_interest",
@@ -209,5 +214,6 @@ __all__ = [
     "sniff_build_info_format",
     "split_public_header_inputs",
     "strip_vendor_hash",
+    "suppress_streaming_prune",
     "validate_inputs_pack",
 ]
