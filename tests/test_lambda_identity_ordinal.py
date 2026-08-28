@@ -825,7 +825,7 @@ class TestServiceRunDumpHybridAlsoDefersRenumbering:
                 return clang_snap
             return castxml_snap
 
-        with patch("abicheck.service._dump_elf", side_effect=_fake_dump_elf):
+        with patch("abicheck.service_dump_native._dump_elf", side_effect=_fake_dump_elf):
             merged = run_dump(p, "elf", header_backend="hybrid")
 
         matched = [t for t in merged.types if t.name.startswith("Foo<")]
