@@ -2183,6 +2183,54 @@ well under their respective caps. New tests:
 `TestExplicitMappingItemReaders` and `TestDynamicReaderAliasesResolvePer
 LexicalScope`, both now in `tests/test_fact_field_readers_later_fixes.py`.
 
+**One more finding from the next review round, on the same `operator.
+getitem` shape just landed.** The new `getitem` call-matching branch
+required an `ast.Attribute` callee (`operator.getitem(...)` through a
+resolved `operator` module alias) -- `_operator_attrgetter_aliases()`
+resolves `getitem`'s *own* bare-name import alias family nowhere at all,
+unlike `attrgetter`, which already gets the identical import-seeded/
+chained/qualified resolution via `attrgetter_names`. `from operator
+import getitem as gi; gi(vars(rec), "bases")` was invisible. Fixed by
+widening `_operator_attrgetter_aliases()` to also return a third set,
+`getitem_names`, resolved by literally duplicating `attrgetter_names`'s
+own three-stage mechanism (import-seeded from `from operator import
+getitem [as X]`, a plain-assignment chain, and a qualified `X.getitem`
+assignment once `operator_names` is known) against a separate `getitem`-
+tagged qualified-candidate list, sharing this same function's
+`operator_names`/`assign_candidates` collection so the two families can't
+independently drift on what counts as a resolved `operator` alias. A new
+sibling call-matching branch (bare `ast.Name` callee, `node.func.id in
+getitem_names`) was added alongside the existing qualified-form branch.
+
+**A second, self-found gap surfaced while first verifying this fix
+empirically, before any external review flagged it: `_locally_bound_
+names()`'s recognized-import carve-out had no entry for `from operator
+import getitem`, unlike its sibling `attrgetter`.** Without that entry,
+the new alias import was recorded as an *ordinary* local binding rather
+than a recognized alias source -- making `_shadowed()` see the import
+itself as shadowing its own later use, the exact inversion that carve-out
+exists to prevent (the same class of bug the `vars` alias round earlier
+in this file's own history already hit and fixed for an identical
+reason). Caught before this even reached review, since the very first
+empirical check of the direct, unaliased import form returned no site at
+all -- confirming the value of reproducing every case via `python3 -c`
+*before* writing tests, not just the one the review comment names. Fixed
+by adding `"getitem"` alongside `"attrgetter"` in that carve-out's
+recognized-name set.
+
+Verified against the reported repro, an unaliased variant, a chained-
+alias variant, and the qualified-assignment form (`gi = operator.
+getitem`), plus negative controls (an unrelated local function with no
+import; a shadowing parameter) -- all via direct AST reproduction before
+writing tests, and re-verified after the carve-out fix confirmed both the
+previously-broken direct-import forms and the previously-working chained/
+qualified forms all resolve correctly together. Still zero existing hits,
+`mypy`/`ruff` both stayed clean, `fact_field_readers.py` at 1720 lines
+(well under the 2000-line hard cap). New tests:
+`TestGetitemImportAliasesResolveTheBareCallableForm` in `tests/
+test_fact_field_readers_later_fixes.py` (403 lines, well under its own
+1200-line cap).
+
 **Still not landed**: no detector (`diff_layout.py`/`diff_types.py`/
 `diff_param_qualifiers.py`/the reader set the check above now tracks
 precisely) has actually been migrated to read `.status` — the check above

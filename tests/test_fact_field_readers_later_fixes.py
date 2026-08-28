@@ -313,3 +313,91 @@ class TestDynamicReaderAliasesResolvePerLexicalScope:
         assert keys == [
             'x.py::outer.inner::bases::getattr(rec, "bases")::getattr(rec, "bases")::1'
         ]
+
+
+class TestGetitemImportAliasesResolveTheBareCallableForm:
+    """`_operator_attrgetter_aliases()` also resolves `operator.getitem`'s
+    own bare-name import alias (`getitem_names`), the identical
+    import-seeded/chained/qualified resolution `attrgetter_names` already
+    gets -- not only the qualified `operator.getitem(...)` spelling."""
+
+    def test_detects_an_aliased_bare_getitem_import(self) -> None:
+        src = (
+            "from operator import getitem as gi\n"
+            "def f(rec):\n"
+            '    return gi(vars(rec), "bases")\n'
+        )
+        tree = ast.parse(src, filename="x.py")
+        keys = [
+            key for key, _l, _a, _q in unmigrated_fact_reader_sites(tree, "x.py", src)
+        ]
+        assert keys == [
+            'x.py::f::bases::gi(vars(rec), "bases")::gi(vars(rec), "bases")::1'
+        ]
+
+    def test_detects_an_unaliased_bare_getitem_import(self) -> None:
+        src = (
+            "from operator import getitem\n"
+            "def f(rec):\n"
+            '    return getitem(vars(rec), "bases")\n'
+        )
+        tree = ast.parse(src, filename="x.py")
+        keys = [
+            key for key, _l, _a, _q in unmigrated_fact_reader_sites(tree, "x.py", src)
+        ]
+        assert keys == [
+            'x.py::f::bases::getitem(vars(rec), "bases")::'
+            'getitem(vars(rec), "bases")::1'
+        ]
+
+    def test_detects_a_chained_getitem_alias(self) -> None:
+        src = (
+            "from operator import getitem as gi\n"
+            "def f(rec):\n"
+            "    gi2 = gi\n"
+            '    return gi2(vars(rec), "bases")\n'
+        )
+        tree = ast.parse(src, filename="x.py")
+        keys = [
+            key for key, _l, _a, _q in unmigrated_fact_reader_sites(tree, "x.py", src)
+        ]
+        assert keys == [
+            'x.py::f::bases::gi2(vars(rec), "bases")::gi2(vars(rec), "bases")::1'
+        ]
+
+    def test_detects_a_qualified_getitem_assignment(self) -> None:
+        src = (
+            "import operator\n"
+            "def f(rec):\n"
+            "    gi = operator.getitem\n"
+            '    return gi(vars(rec), "bases")\n'
+        )
+        tree = ast.parse(src, filename="x.py")
+        keys = [
+            key for key, _l, _a, _q in unmigrated_fact_reader_sites(tree, "x.py", src)
+        ]
+        assert keys == [
+            'x.py::f::bases::gi(vars(rec), "bases")::gi(vars(rec), "bases")::1'
+        ]
+
+    def test_ignores_an_unrelated_local_getitem_with_no_import(self) -> None:
+        """Negative control: an ordinary, locally defined function
+        sharing the name `getitem`, with no `from operator import
+        getitem` anywhere in the file, must not be recognized."""
+        src = (
+            "def getitem(a, b):\n"
+            "    return a\n"
+            "def f(rec):\n"
+            '    return getitem(vars(rec), "bases")\n'
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert unmigrated_fact_reader_sites(tree, "x.py", src) == []
+
+    def test_ignores_a_getitem_import_shadowed_by_a_parameter(self) -> None:
+        src = (
+            "from operator import getitem\n"
+            "def f(getitem, rec):\n"
+            '    return getitem(vars(rec), "bases")\n'
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert unmigrated_fact_reader_sites(tree, "x.py", src) == []

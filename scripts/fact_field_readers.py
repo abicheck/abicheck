@@ -756,15 +756,30 @@ def _mapping_receiver_aliases(
 
 def _operator_attrgetter_aliases(
     tree: ast.Module,
-) -> tuple[frozenset[str], frozenset[str]]:
-    """Return `(attrgetter_names, operator_module_names)`: every local name
-    *tree* binds to the real `operator.attrgetter` callable (the bare
-    `"attrgetter"` itself only once a real `from operator import
-    attrgetter` is found -- see this docstring's own "Seeded only from a
-    verified import" paragraph below for why -- plus any `... as X`
-    alias), and every local name bound to the `operator` module itself
-    (the bare `"operator"` only once a real `import operator` is found,
-    plus any `import operator as X`).
+) -> tuple[frozenset[str], frozenset[str], frozenset[str]]:
+    """Return `(attrgetter_names, operator_module_names, getitem_names)`:
+    every local name *tree* binds to the real `operator.attrgetter`
+    callable (the bare `"attrgetter"` itself only once a real `from
+    operator import attrgetter` is found -- see this docstring's own
+    "Seeded only from a verified import" paragraph below for why -- plus
+    any `... as X` alias), every local name bound to the `operator`
+    module itself (the bare `"operator"` only once a real `import
+    operator` is found, plus any `import operator as X`), and every
+    local name bound to the real `operator.getitem` callable (the
+    identical `attrgetter`-shaped resolution -- import-seeded, chained,
+    qualified -- applied to `getitem` instead).
+
+    **`getitem_names` closes the identical import-alias gap this
+    function's own `attrgetter_names` already covers, for `operator.
+    getitem` instead (Codex review, fresh evidence).** `from operator
+    import getitem as gi; gi(vars(rec), "bases")` reads the exact same
+    normalized legacy value the unaliased `operator.getitem(...)` form
+    already catches -- but the call-matching branch there requires an
+    `ast.Attribute` callee (`X.getitem(...)`), and `getitem` was never
+    tracked as its own alias family at all. Resolved identically to
+    `attrgetter_names`, sharing this same function's `operator_names`/
+    `assign_candidates` collection so the two families can't
+    independently drift on what counts as a resolved `operator` alias.
 
     An ordinary `import operator as op` or `from operator import attrgetter
     as ag` reads the identical legacy field as the unaliased spellings
@@ -838,6 +853,7 @@ def _operator_attrgetter_aliases(
     """
     attrgetter_names: set[str] = set()
     operator_names: set[str] = set()
+    getitem_names: set[str] = set()
     assign_candidates: list[tuple[str, str]] = []
     # `local = <module-name>.attrgetter` -- resolved once, after the walk
     # below has finished collecting every `import operator` occurrence,
@@ -846,22 +862,28 @@ def _operator_attrgetter_aliases(
     # (mirroring `_builtins_getattr_aliases()`'s own identical two-phase
     # resolution for `read_attr = builtins.getattr`).
     qualified_candidates: list[tuple[str, str]] = []
+    # `local = <module-name>.getitem` -- the identical two-phase
+    # resolution as `qualified_candidates` above, kept as a separate list
+    # since it seeds a different name family (`getitem_names`, not
+    # `attrgetter_names`).
+    qualified_getitem_candidates: list[tuple[str, str]] = []
 
     def _add_candidate(target: str, value: ast.expr | None) -> None:
         if isinstance(value, ast.Name):
             assign_candidates.append((target, value.id))
-        elif (
-            isinstance(value, ast.Attribute)
-            and value.attr == "attrgetter"
-            and isinstance(value.value, ast.Name)
-        ):
-            qualified_candidates.append((target, value.value.id))
+        elif isinstance(value, ast.Attribute) and isinstance(value.value, ast.Name):
+            if value.attr == "attrgetter":
+                qualified_candidates.append((target, value.value.id))
+            elif value.attr == "getitem":
+                qualified_getitem_candidates.append((target, value.value.id))
 
     for node in ast.walk(tree):
         if isinstance(node, ast.ImportFrom) and node.module == "operator":
             for alias in node.names:
                 if alias.name == "attrgetter":
                     attrgetter_names.add(alias.asname or alias.name)
+                elif alias.name == "getitem":
+                    getitem_names.add(alias.asname or alias.name)
         elif isinstance(node, ast.Import):
             for alias in node.names:
                 if alias.name == "operator":
@@ -893,7 +915,23 @@ def _operator_attrgetter_aliases(
             if ref in attrgetter_names:
                 attrgetter_names.add(local)
                 changed = True
-    return frozenset(attrgetter_names), frozenset(operator_names)
+    for local, base in qualified_getitem_candidates:
+        if base in operator_names:
+            getitem_names.add(local)
+    changed = True
+    while changed:
+        changed = False
+        for local, ref in assign_candidates:
+            if local in getitem_names:
+                continue
+            if ref in getitem_names:
+                getitem_names.add(local)
+                changed = True
+    return (
+        frozenset(attrgetter_names),
+        frozenset(operator_names),
+        frozenset(getitem_names),
+    )
 
 
 def _is_attrgetter_constructor_call(
@@ -1143,7 +1181,7 @@ def unmigrated_fact_reader_sites(
     unbound_getattribute_names = _unbound_getattribute_method_aliases(
         tree, object_type_names
     )
-    attrgetter_names, operator_names = _operator_attrgetter_aliases(tree)
+    attrgetter_names, operator_names, getitem_names = _operator_attrgetter_aliases(tree)
     locally_bound, recognized_alias_scopes = _locally_bound_names(tree)
     lexical_parents = _lexical_function_parents(tree)
 
@@ -1592,6 +1630,26 @@ def unmigrated_fact_reader_sites(
             # via a real `operator` module alias (`operator_names`, the
             # same resolved set `attrgetter`'s own module-qualified form
             # already uses) (Codex review, fresh evidence).
+            attr = node.args[1].value
+            record_node = node
+        elif (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Name)
+            and node.func.id in getitem_names
+            and not _shadowed(node, node.func.id)
+            and len(node.args) == 2
+            and _is_mapping_receiver(node.args[0])
+            and isinstance(node.args[1], ast.Constant)
+            and isinstance(node.args[1].value, str)
+            and node.args[1].value in FACT_BRIDGED_ATTRS
+        ):
+            # `from operator import getitem as gi; gi(vars(rec),
+            # "bases")` -- the bare-name spelling of the identical
+            # standard-library callable read, via a real `getitem` import
+            # alias (`getitem_names`, resolved the same way `attrgetter_
+            # names` already is) rather than the qualified `operator.
+            # getitem(...)` form the branch above matches (Codex review,
+            # fresh evidence).
             attr = node.args[1].value
             record_node = node
         else:
