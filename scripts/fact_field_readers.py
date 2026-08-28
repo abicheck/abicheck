@@ -421,6 +421,45 @@ def _locally_bound_names(tree: ast.Module) -> dict[str, set[str]]:
     Extend this the same incremental way if one is ever found, matching
     this module's own established practice of only building the
     generality an actual review finding demonstrates.
+
+    **Known gap, confirmed with a concrete repro rather than left purely
+    theoretical (Codex review, fresh evidence): a shadowing parameter that
+    is later *rebound* to a genuine alias source is still treated as
+    shadowed for the call.** `def f(getattr, rec): getattr =
+    builtins.getattr; return getattr(rec, "bases")` -- a real, unremarkable
+    read of a bridged field through a locally-rebound name -- currently
+    reports no site at all (the sibling `attrgetter`/`operator` shape has
+    the identical gap: `def f(operator, rec): import operator; return
+    operator.attrgetter("bases")(rec)`). This is exactly the follow-up the
+    paragraph above already named as not attempted, now with a real
+    example rather than a hypothetical one: correctly distinguishing it
+    from a genuine shadow (`getattr = some_unrelated_value`) needs
+    *order-aware* per-function tracing -- which assignment to the name is
+    the one actually in effect at the call's own position, not merely
+    whether *some* recognized-alias assignment exists anywhere in the
+    scope. The latter, simpler check is unsound in the other direction:
+    `def f(getattr, rec): result = getattr(rec, "bases"); getattr =
+    builtins.getattr` calls `getattr` *before* the rebind, while still
+    holding the arbitrary parameter value, so an order-blind "was this
+    name ever reassigned to a recognized alias" check would wrongly
+    exclude a real shadow the same way `_builtins_getattr_aliases()`'s own
+    docstring already warns a naive treatment could. Building genuine
+    per-position dataflow into this module -- rather than its current
+    presence/absence-only model -- is a materially larger change than the
+    guard conditions this module has added incrementally so far (it took
+    `fact_detector_misuse.py`'s own alias-resolution machinery upwards of
+    twenty review rounds to reach exactly this kind of order-sensitivity
+    for its own, structurally similar problem), so it is recorded here as
+    an accepted, deliberately unfixed gap rather than attempted under
+    review pressure. This is a false *negative* (a real dynamic read
+    silently passes the gate), the direction this module's own established
+    "a false positive is far cheaper than the false negative it closes"
+    trade-off argues hardest against accepting -- but an incorrect,
+    order-blind attempt at closing it risks trading this false negative
+    for a new false positive on a genuine shadow, which is not obviously
+    an improvement. Revisit with real per-position tracing if this shape
+    is found in practice, not with a heuristic that cannot tell the two
+    cases apart.
     """
     bound: dict[str, set[str]] = {}
 

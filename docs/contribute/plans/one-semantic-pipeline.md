@@ -1521,6 +1521,39 @@ the aliased-unbound-`__getattribute__` positive case and its
 unrelated-name negative control, and the enclosing-parameter-shadow
 exclusion and its sibling-function negative control.
 
+**A further Codex review round confirmed, with a concrete repro, a gap
+`_locally_bound_names()`'s own docstring had already predicted but left
+unattempted -- recorded here as an accepted known gap rather than a bug
+fix, since a correct fix needs real per-position dataflow this module
+does not have.** `def f(getattr, rec): getattr = builtins.getattr; return
+getattr(rec, "bases")` -- a shadowing parameter later *rebound* to a
+genuine alias source -- currently reports no site at all, even though the
+call genuinely reads a bridged field through that rebound name (the
+sibling `attrgetter`/`operator` shape has the identical gap). Correctly
+distinguishing this from a genuine, still-shadowing parameter (`getattr =
+some_unrelated_value`) needs order-aware tracing of which assignment is
+actually in effect at the call's own position -- an order-*blind* "was
+this name ever reassigned to a recognized alias anywhere in the scope"
+check is unsound in the other direction, since `def f(getattr, rec):
+result = getattr(rec, "bases"); getattr = builtins.getattr` calls
+`getattr` *before* the rebind, while it still holds the arbitrary
+parameter value, and would be wrongly excluded by that simpler check.
+This module's presence/absence-only shadowing model has no notion of
+"which binding is in effect here" at all; building one is a materially
+larger change than every guard condition landed incrementally so far --
+it took `fact_detector_misuse.py`'s own alias machinery upwards of twenty
+review rounds to reach exactly this kind of order-sensitivity for a
+structurally similar problem. Recorded directly in `_locally_bound_
+names()`'s own docstring (extending the paragraph that already predicted
+this shape) rather than fixed under review pressure: this is a false
+*negative*, the direction this module's own "a false positive is far
+cheaper than the false negative it closes" trade-off argues hardest
+against silently accepting, but an incorrect, order-blind attempt risks
+trading it for a new false positive on a genuine shadow -- not obviously
+an improvement, and not the kind of bounded, single-condition extension
+every other round in this section landed. Revisit with real per-position
+tracing if this shape is found in practice.
+
 **Still not landed**: no detector (`diff_layout.py`/`diff_types.py`/
 `diff_param_qualifiers.py`/the reader set the check above now tracks
 precisely) has actually been migrated to read `.status` — the check above
