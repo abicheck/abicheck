@@ -764,9 +764,8 @@ def render_dump_dry_run(
 
     Cheap, read-only resolution only: classifies the inputs, discovers config,
     shows the resolved depth/collect-mode and available data layers, and
-    checks tool availability on PATH. Never runs castxml/clang, a build query,
-    or any I/O beyond stat()/PATH lookups. ADR-063 Phase 1: renders from a
-    real ``ResolvedDumpRequest``; the remaining params are presentation.
+    checks tool availability on PATH. Never runs castxml/clang, a build
+    query, or I/O beyond stat()/PATH lookups.
 
     ``has_compile_db`` (Codex review): whether ``-p``/``--compile-db`` was
     given at all -- a bare presence flag, kept for the "nothing was given at
@@ -843,7 +842,7 @@ def render_dump_dry_run(
     headers = resolved.headers
     depth = resolved.requested_depth
     collect_mode = resolved.collect_mode
-    dump_manifest = resolved.evidence.dump_manifest
+    dump_manifest = side.dump_manifest  # raw; evidence's clears at --depth binary
 
     result = DryRunResult(command="dump")
     result.add(
