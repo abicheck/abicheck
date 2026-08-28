@@ -517,24 +517,32 @@ BUG_CLASSES: tuple[BugClass, ...] = (
             "existing kind."
         ),
         fixed_by=(753, 759),
-        seed_tests=("tests/test_canonical_finding_id_completeness.py",),
+        seed_tests=(
+            "tests/test_canonical_finding_id_completeness.py",
+            "tests/test_report_classifications_unit.py",
+        ),
         known_gaps=(
             KnownGap(
                 description=(
-                    "Only canonical_finding_id's classification is "
-                    "exhaustiveness-checked today; the same totality "
-                    "property is not yet generalized to every other "
-                    "kind-keyed registry named in Phase 9 of the plan "
-                    "(evidence kinds, providers, report renderers)."
+                    "canonical_finding_id's classification and "
+                    "report_classifications.py's seven hand-maintained "
+                    "kind-keyed frozensets are now reverse-completeness "
+                    "checked (every member names a live ChangeKind, with a "
+                    "mutation check proving the assertion actually fails on "
+                    "a corrupted set) — but the same totality property is "
+                    "not yet generalized to every other kind-keyed registry "
+                    "named in Phase 9 of the plan (evidence kinds, "
+                    "providers, other report renderers)."
                 ),
                 reference="docs/contribute/plans/bug-class-regression-testing.md#phase-9",
             ),
             KnownGap(
                 description=(
-                    "The seed test calls `finding_identity."
-                    "report_canonical_finding_id` directly — no CLI, no "
-                    "python-api — so nothing here proves a real registry "
-                    "omission reaches a `compare()` report."
+                    "The seed tests call `finding_identity."
+                    "report_canonical_finding_id`/`report_classifications` "
+                    "helpers directly — no CLI, no python-api — so nothing "
+                    "here proves a real registry omission reaches a "
+                    "`compare()` report."
                 ),
                 reference="docs/contribute/plans/bug-class-regression-testing.md#phase-9",
             ),
@@ -551,14 +559,17 @@ BUG_CLASSES: tuple[BugClass, ...] = (
             "from one production helper."
         ),
         fixed_by=(834, 838, 860, 883),
-        seed_tests=("tests/test_fact_conservation_properties.py",),
+        seed_tests=(
+            "tests/test_fact_conservation_properties.py",
+            "tests/test_bundle_side_input.py",
+        ),
         known_gaps=(
             KnownGap(
                 description=(
                     "The fact-conservation suite covers a selected "
                     "detector-family subset today, not every ChangeKind "
                     "family and evidence-completeness failure mode named "
-                    "in AGENTS.md's 'Known gaps' section."
+                    "in `docs/contribute/known-gaps.md`."
                 ),
                 reference="docs/contribute/plans/bug-class-regression-testing.md#phase-9",
             ),
@@ -568,7 +579,16 @@ BUG_CLASSES: tuple[BugClass, ...] = (
                     "directly on hand-built snapshots — real detection "
                     "logic, but no CLI/python-api/exit-code layer, so "
                     "report/gate/exit-code agreement (the second half of "
-                    "this class's own invariant) is untested."
+                    "this class's own invariant) is untested. Incident "
+                    "#883's own gap — a dropped `policy_file` reaching "
+                    "silently unverified through a mocked "
+                    "`compare_snapshots` — is now closed independently by "
+                    "`test_bundle_side_input.py`'s "
+                    "`test_policy_file_override_genuinely_demotes_a_real_"
+                    "verdict`, which runs the real, unmocked "
+                    "`compare_snapshots` and asserts the returned verdict "
+                    "is actually demoted (a mutation check: reverting the "
+                    "production fix fails this test)."
                 ),
                 reference="docs/contribute/plans/bug-class-regression-testing.md#phase-9",
             ),
