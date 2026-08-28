@@ -54,6 +54,14 @@
   after `_demangled_rematch` in both `link_source_abi` and
   `relink_surface_exports`, instead of inline during routing (Codex
   review).
+- **`relink_surface_exports` now refreshes `coverage["reachable_declarations"]`
+  after its deferred generated-candidate drop, instead of leaving it at the
+  empty-export first link's unfiltered stamp.** `crosscheck.
+  _surface_boundary_counters` prefers that coverage value over the live
+  `reachable_declarations` list length whenever it's nonzero, so a stale
+  count kept reporting the removed phantom declarations as still present
+  on the surface even after the relink correctly dropped them (Codex
+  review).
 - **Known, accepted residual on the ctor/dtor rescue above**: the rescue is
   class-level, not per-overload — it asks "does this class have *any*
   matching ctor/dtor export at all", not "does *this specific* candidate

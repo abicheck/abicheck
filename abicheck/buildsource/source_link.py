@@ -1268,17 +1268,16 @@ def link_source_abi(
             _route_entity(entity, surface, state, exported)
     surface.source_edges = source_edges
     surface.roots["public_header_declarations"] = sorted(set(state.public_decl_ids))
-    # Second-tier: rescue decls whose mangled name differs textually from the
-    # export (ABI-tag / substitution drift) via demangled identity.
+    # Second tier: rescue decls whose mangled name differs textually from the export
+    # (ABI-tag / substitution drift) via demangled identity; third: drop a still-
+    # unmatched compiler_generated candidate only now that it has had that same
+    # chance an ordinary declaration gets (Codex review, PR #930).
     _demangled_rematch(
         surface.reachable_declarations,
         state.decl_to_symbol,
         state.matched_symbols,
         exported,
     )
-    # Third tier for a compiler_generated candidate: dropped only now, after
-    # the demangled-identity rescue above has had the same chance an ordinary
-    # declaration gets (Codex review, PR #930 -- see _route_declaration).
     surface.reachable_declarations = ctor_export_match.drop_unmatched_generated_declarations(
         surface.reachable_declarations, state.decl_to_symbol, exported, state.ctor_dtor_owner_index
     )
@@ -1412,10 +1411,10 @@ def relink_surface_exports(
         surface.reachable_declarations, exported, export_index, exact_index, ctor_dtor_owner_index, _match_export
     )
     surface.reachable_declarations = kept
-    # Second-tier demangled-identity rematch (ABI-tag / substitution drift).
+    # Second-tier demangled-identity rematch (ABI-tag / substitution drift), then a
+    # third: drop a still-unmatched compiler_generated candidate now that it has had
+    # its chance at both prior tiers (Codex review, PR #930).
     _demangled_rematch(surface.reachable_declarations, mapping, matched, exported)
-    # Third tier: drop a still-unmatched compiler_generated candidate only now,
-    # after the demangled rescue above has had its chance (Codex review, PR #930).
     surface.reachable_declarations = ctor_export_match.drop_unmatched_generated_declarations(
         surface.reachable_declarations, mapping, exported, ctor_dtor_owner_index
     )
@@ -1481,6 +1480,8 @@ def relink_surface_exports(
         identity_to_qname.get(key, key) for key, sym in mapping.items() if not sym
     )
     if isinstance(surface.coverage, dict):
+        # Refresh from the empty-export first link's unfiltered count, or crosscheck's counters keep the removed phantoms (Codex review, PR #930).
+        surface.coverage["reachable_declarations"] = len(surface.reachable_declarations)
         surface.coverage["exported_symbols"] = len(exported)
         surface.coverage["matched_symbols"] = len(matched)
         surface.coverage["synthesized_symbols_matched"] = len(synthesized)
@@ -1598,9 +1599,7 @@ def _route_type(
         )
     else:
         state.type_by_name[key] = entity.type_hash
-    surface.mappings["source_type_to_debug_type"][entity.qualified_name] = (
-        entity.type_hash
-    )
+    surface.mappings["source_type_to_debug_type"][entity.qualified_name] = entity.type_hash
 
 
 def _route_declaration(

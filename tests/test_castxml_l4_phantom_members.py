@@ -181,7 +181,12 @@ def test_relink_surface_exports_drops_a_generated_candidate_confirmed_unmatched(
     "unresolved, not confirmed-miss" rule) must be dropped from
     `reachable_declarations`/`decls_without_symbol` once relinked against a
     real export set that genuinely never mentions it -- the same outcome
-    linking directly against that binary would have produced."""
+    linking directly against that binary would have produced. Also asserts
+    `coverage["reachable_declarations"]` is refreshed to the post-drop
+    count, not left at the empty-export first link's unfiltered stamp --
+    `crosscheck._surface_boundary_counters` prefers that coverage value
+    over the live list length whenever it's nonzero, so a stale count would
+    keep counting the removed phantom past this relink (Codex review)."""
     common = dict(
         name="Widget",
         mangled="_ZN6WidgetaSERKS_",
@@ -194,6 +199,7 @@ def test_relink_surface_exports_drops_a_generated_candidate_confirmed_unmatched(
 
     surface = link_source_abi([tu], exported_symbols=[])
     assert phantom.id in {d.id for d in surface.reachable_declarations}
+    assert surface.coverage["reachable_declarations"] == 1
 
     from abicheck.buildsource.source_link import relink_surface_exports
 
@@ -201,6 +207,7 @@ def test_relink_surface_exports_drops_a_generated_candidate_confirmed_unmatched(
     relinked = relink_surface_exports(surface, ["_ZN5UnrelatedC1Ev"])
     assert phantom.id not in {d.id for d in relinked.reachable_declarations}
     assert phantom.identity() not in relinked.mappings["source_decl_to_binary_symbol"]
+    assert relinked.coverage["reachable_declarations"] == 0
     assert phantom.qualified_name not in relinked.unmatched["decls_without_symbol"]
 
 
