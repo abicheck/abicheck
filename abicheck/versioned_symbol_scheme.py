@@ -34,8 +34,8 @@ from __future__ import annotations
 import re
 from typing import TYPE_CHECKING
 
-from .checker_policy import ChangeKind
 from .demangle import demangle, demangle_batch
+from .model.change_catalog.kinds import ChangeKind
 
 if TYPE_CHECKING:
     from .checker_types import Change

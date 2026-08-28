@@ -1053,12 +1053,12 @@
     },
     {
       "path": "abicheck/service.py",
-      "baseline_lines": 1763,
+      "baseline_lines": 873,
       "target": "workflows-or-frontends",
       "rule": "no_growth",
       "category": "legacy_workflow_or_frontend_monolith",
       "owner": "abicheck maintainers",
-      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice.",
+      "rationale": "Existing implementation predates ADR-061. The dump-orchestration block (run_dump/_dump_elf/_dump_pe/_dump_macho and siblings) was split out to service_dump_native.py/service_dump_native_pe.py, shrinking this file from 1763 to 873 lines; the remaining input-resolution/compare-wrapper/policy-loading content and the many re-export blocks still predate ADR-061 and cannot move safely without a further behavior-preserving vertical slice.",
       "review_by": "2026-11-30"
     },
     {
