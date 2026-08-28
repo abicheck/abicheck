@@ -401,3 +401,158 @@ class TestGetitemImportAliasesResolveTheBareCallableForm:
         )
         tree = ast.parse(src, filename="x.py")
         assert unmigrated_fact_reader_sites(tree, "x.py", src) == []
+
+
+class TestNamedExprAliasesAndInlineCallsAreRecognized:
+    """A named expression (walrus) is a real assignment target too --
+    `(read := getattr)(rec, "bases")` both introduces a real alias `read`
+    (tracked the identical way a plain `read = getattr` already is) and,
+    when the walrus is itself used as the call's own callee/mapping
+    receiver, reads the field right there in the very expression that
+    introduces the alias (Codex review, fresh evidence: the alias
+    collectors only ever recognized `ast.Assign`/`ast.AnnAssign`, so
+    neither shape produced a reader site)."""
+
+    def test_detects_a_walrus_bound_getattr_called_inline(self) -> None:
+        src = 'def f(rec):\n    return (read := getattr)(rec, "bases")\n'
+        tree = ast.parse(src, filename="x.py")
+        sites = unmigrated_fact_reader_sites(tree, "x.py", src)
+        assert len(sites) == 1
+        assert sites[0][2] == "bases"
+
+    def test_detects_a_walrus_bound_vars_mapping_used_inline(self) -> None:
+        src = 'def f(rec):\n    return (fields := vars(rec))["bases"]\n'
+        tree = ast.parse(src, filename="x.py")
+        sites = unmigrated_fact_reader_sites(tree, "x.py", src)
+        assert len(sites) == 1
+        assert sites[0][2] == "bases"
+
+    def test_detects_a_walrus_bound_getattr_alias_used_later(self) -> None:
+        """The alias itself, not just the inline call, is tracked --
+        `read` resolves as a real `getattr` alias for a later, ordinary
+        call too."""
+        src = (
+            "def f(rec):\n"
+            "    if (read := getattr) is not None:\n"
+            '        return read(rec, "bases")\n'
+            "    return None\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        sites = unmigrated_fact_reader_sites(tree, "x.py", src)
+        assert len(sites) == 1
+        assert sites[0][2] == "bases"
+
+    def test_ignores_a_walrus_bound_getattr_shadowed_by_a_parameter(self) -> None:
+        """Negative control: a parameter named `getattr` shadows the real
+        builtin, so the walrus's own RHS is not the real `getattr` either
+        -- must not fire."""
+        src = 'def f(rec, getattr):\n    return (read := getattr)(rec, "bases")\n'
+        tree = ast.parse(src, filename="x.py")
+        assert unmigrated_fact_reader_sites(tree, "x.py", src) == []
+
+    def test_ignores_a_walrus_of_an_unrelated_builtin(self) -> None:
+        """Negative control: `len` is not `getattr`/`vars` -- the walrus
+        machinery must not treat every callable-valued walrus as a
+        bridged-field read."""
+        src = "def f(rec):\n    return (x := len)(rec)\n"
+        tree = ast.parse(src, filename="x.py")
+        assert unmigrated_fact_reader_sites(tree, "x.py", src) == []
+
+
+class TestLexicalBindingFormsAreTreatedAsShadows:
+    """`_locally_bound_names()` now recognizes a `for` target, a
+    `with ... as` target, an `except ... as` name, a comprehension's own
+    `for` target, and a `match` capture as real local bindings -- not just
+    a parameter, a `def`/`class` name, or an import (Codex review, fresh
+    evidence): `for getattr in funcs: return getattr(rec, "bases")`
+    reused the builtin-looking name for an ordinary, unrelated loop
+    variable, but was still unconditionally treated as the real builtin
+    and flagged, a false positive on genuinely valid code."""
+
+    def test_ignores_a_for_target_shadow(self) -> None:
+        src = (
+            "def f(rec, funcs):\n"
+            "    for getattr in funcs:\n"
+            '        return getattr(rec, "bases")\n'
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert unmigrated_fact_reader_sites(tree, "x.py", src) == []
+
+    def test_ignores_a_for_target_shadow_through_tuple_unpacking(self) -> None:
+        src = (
+            "def f(rec, funcs):\n"
+            "    for getattr, other in funcs:\n"
+            '        return getattr(rec, "bases")\n'
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert unmigrated_fact_reader_sites(tree, "x.py", src) == []
+
+    def test_ignores_a_with_as_shadow(self) -> None:
+        src = (
+            "def f(rec, cm):\n"
+            "    with cm() as getattr:\n"
+            '        return getattr(rec, "bases")\n'
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert unmigrated_fact_reader_sites(tree, "x.py", src) == []
+
+    def test_ignores_an_except_as_shadow(self) -> None:
+        src = (
+            "def f(rec):\n"
+            "    try:\n"
+            "        pass\n"
+            "    except Exception as getattr:\n"
+            '        return getattr(rec, "bases")\n'
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert unmigrated_fact_reader_sites(tree, "x.py", src) == []
+
+    def test_ignores_a_comprehension_target_shadow(self) -> None:
+        src = 'def f(rec, funcs):\n    return [getattr(rec, "bases") for getattr in funcs]\n'
+        tree = ast.parse(src, filename="x.py")
+        assert unmigrated_fact_reader_sites(tree, "x.py", src) == []
+
+    def test_ignores_a_bare_match_capture_shadow(self) -> None:
+        src = (
+            "def f(rec, val):\n"
+            "    match val:\n"
+            "        case getattr:\n"
+            '            return getattr(rec, "bases")\n'
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert unmigrated_fact_reader_sites(tree, "x.py", src) == []
+
+    def test_ignores_a_match_as_pattern_capture_shadow(self) -> None:
+        src = (
+            "def f(rec, val):\n"
+            "    match val:\n"
+            "        case object() as getattr:\n"
+            '            return getattr(rec, "bases")\n'
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert unmigrated_fact_reader_sites(tree, "x.py", src) == []
+
+    def test_ignores_a_match_capture_nested_in_a_class_pattern(self) -> None:
+        src = (
+            "def f(rec, val):\n"
+            "    match val:\n"
+            "        case SomeCls(getattr):\n"
+            '            return getattr(rec, "bases")\n'
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert unmigrated_fact_reader_sites(tree, "x.py", src) == []
+
+    def test_still_detects_a_real_getattr_read_inside_an_unrelated_for_loop(
+        self,
+    ) -> None:
+        """Positive control: a `for` loop binding an unrelated name must
+        not suppress a real read elsewhere in the same function."""
+        src = (
+            "def f(rec, items):\n"
+            "    for x in items:\n"
+            '        return getattr(rec, "bases")\n'
+        )
+        tree = ast.parse(src, filename="x.py")
+        sites = unmigrated_fact_reader_sites(tree, "x.py", src)
+        assert len(sites) == 1
+        assert sites[0][2] == "bases"

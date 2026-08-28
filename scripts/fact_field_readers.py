@@ -381,6 +381,8 @@ def _imported_class_aliases(tree: ast.Module) -> dict[str, str]:
                     _register_assign(target.id, node.value)
         elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
             _register_assign(node.target.id, node.value)
+        elif isinstance(node, ast.NamedExpr) and isinstance(node.target, ast.Name):
+            _register_assign(node.target.id, node.value)
     changed = True
     while changed:
         changed = False
@@ -471,6 +473,8 @@ def _builtins_getattr_aliases(
                     _add_candidate(target.id, node.value)
         elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
             _add_candidate(node.target.id, node.value)
+        elif isinstance(node, ast.NamedExpr) and isinstance(node.target, ast.Name):
+            _add_candidate(node.target.id, node.value)
     # `b = builtins` -- a plain assignment alias of the `builtins` module
     # itself, resolved to a fixed point the same way a `getattr` alias
     # chain already is, reusing the identical `assign_candidates` list
@@ -556,6 +560,8 @@ def _builtins_symbol_aliases(
                     _add_candidate(target.id, node.value)
         elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
             _add_candidate(node.target.id, node.value)
+        elif isinstance(node, ast.NamedExpr) and isinstance(node.target, ast.Name):
+            _add_candidate(node.target.id, node.value)
     for local, base in qualified_candidates:
         if base in builtins_names:
             symbol_names.add(local)
@@ -604,6 +610,8 @@ def _unbound_getattribute_receiver_aliases(tree: ast.Module) -> frozenset[str]:
                 if isinstance(target, ast.Name):
                     _add_candidate(target.id, node.value)
         elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
+            _add_candidate(node.target.id, node.value)
+        elif isinstance(node, ast.NamedExpr) and isinstance(node.target, ast.Name):
             _add_candidate(node.target.id, node.value)
     changed = True
     while changed:
@@ -658,6 +666,8 @@ def _unbound_getattribute_method_aliases(
                 if isinstance(target, ast.Name):
                     _add_candidate(target.id, node.value)
         elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
+            _add_candidate(node.target.id, node.value)
+        elif isinstance(node, ast.NamedExpr) and isinstance(node.target, ast.Name):
             _add_candidate(node.target.id, node.value)
     for local, base in qualified_candidates:
         if base in object_type_names:
@@ -741,6 +751,8 @@ def _mapping_receiver_aliases(
                 if isinstance(target, ast.Name):
                     _add_candidate(target.id, node.value)
         elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
+            _add_candidate(node.target.id, node.value)
+        elif isinstance(node, ast.NamedExpr) and isinstance(node.target, ast.Name):
             _add_candidate(node.target.id, node.value)
     changed = True
     while changed:
@@ -893,6 +905,8 @@ def _operator_attrgetter_aliases(
                 if isinstance(target, ast.Name):
                     _add_candidate(target.id, node.value)
         elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
+            _add_candidate(node.target.id, node.value)
+        elif isinstance(node, ast.NamedExpr) and isinstance(node.target, ast.Name):
             _add_candidate(node.target.id, node.value)
     changed = True
     while changed:
@@ -1265,7 +1279,21 @@ def unmigrated_fact_reader_sites(
         evidence): `fields = vars(rec); fields["bases"]` / `fields = rec.
         __dict__; fields.get("bases")` were both invisible before, since
         neither is directly `vars(rec)`-shaped or `X.__dict__`-shaped at
-        the point this function actually inspects it."""
+        the point this function actually inspects it.
+
+        A walrus used directly as the mapping expression itself --
+        `(fields := vars(rec))["bases"]` -- unwraps to its own `.value`
+        before any of the checks below run (Codex review, fresh evidence):
+        the alias `fields` is a real, useful binding for a *later* read,
+        but this specific expression reads the field right here, in the
+        very statement that introduces the alias, and none of the checks
+        below recognize an `ast.NamedExpr` node directly. Unwrapping once,
+        at the top, composes for free with every existing shape (`vars(
+        rec)`, `builtins.vars(rec)`, `X.__dict__`, an already-resolved
+        alias name) rather than needing a duplicate NamedExpr-aware copy of
+        each."""
+        if isinstance(value, ast.NamedExpr):
+            value = value.value
         if isinstance(value, ast.Call) and len(value.args) == 1:
             if (
                 isinstance(value.func, ast.Name)
@@ -1459,6 +1487,23 @@ def unmigrated_fact_reader_sites(
                     and node.func.attr == "getattr"
                     and isinstance(node.func.value, ast.Name)
                     and node.func.value.id in builtins_names
+                    and not _shadowed(node, node.func.value.id)
+                )
+                or (
+                    # `(read := getattr)(rec, "bases")` -- a walrus used
+                    # directly as the call's own callee (Codex review,
+                    # fresh evidence): `read` is a real, useful alias for
+                    # a *later* call too (already tracked by
+                    # `_builtins_getattr_aliases()`'s own `ast.NamedExpr`
+                    # branch), but this specific call reads the field
+                    # right here, in the very expression that introduces
+                    # the alias -- checked against the walrus's own
+                    # `.value` (what is actually being called), not its
+                    # `.target` (the alias name being bound, irrelevant to
+                    # whether *this* call is a getattr read).
+                    isinstance(node.func, ast.NamedExpr)
+                    and isinstance(node.func.value, ast.Name)
+                    and node.func.value.id in getattr_names
                     and not _shadowed(node, node.func.value.id)
                 )
             )

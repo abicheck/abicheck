@@ -350,13 +350,108 @@ def _locally_bound_names(
     `from builtins import getattr as g` recognized under the alias `g`,
     which is excluded the identical way -- still binds and shadows
     normally.
+
+    **A `for` target, a `with ... as` target, an `except ... as` name, a
+    comprehension's own `for` target, and a `match` capture are all real
+    lexical bindings too -- the identical class of gap as the `def`/
+    `class`/import bindings above, just for five more binding *forms*
+    rather than a sixth binding *site* (Codex review, fresh evidence).**
+    `for getattr in funcs: return getattr(rec, "bases")` -- an ordinary,
+    unrelated loop variable reusing the builtin-looking name -- was still
+    unconditionally treated as the real builtin, since none of `ast.For`/
+    `ast.AsyncFor`/`ast.With`/`ast.AsyncWith`/`ast.ExceptHandler`/a
+    comprehension's own `generators`/`ast.Match` was ever specially
+    recognized here; the fallback walk only ever recurses into each of
+    these, it never records what they themselves bind. The identical
+    false-positive shape reproduces for `with cm() as getattr:`, `except
+    Exception as getattr:`, `[getattr(rec, "bases") for getattr in
+    funcs]`, and `case getattr: return getattr(rec, "bases")`.
+
+    Modeled as one generalized shadowing class rather than five
+    independently-hand-rolled ones, per the review finding's own
+    suggestion: `_target_bound_names()` extracts every plain name a `for`/
+    `with` target binds (recursing through `Tuple`/`List`/`Starred`
+    nesting -- `for getattr, _ in pairs:` binds `getattr` exactly like a
+    bare `for getattr in ...:` does), and `_match_pattern_captures()`
+    extracts every capture a `match` pattern binds (`ast.walk` over the
+    pattern subtree, since a capture can nest arbitrarily deep inside a
+    class/sequence/mapping/OR pattern, and Python already requires every
+    alternative of an OR pattern to bind the identical name set, so
+    walking the whole pattern once is sound regardless of which
+    alternative a real match would take). None of these five forms
+    introduces its own new *scope* the way a `def`/comprehension does for
+    its *body* (a `for`/`with`/`except`/`match` binds directly into
+    whatever function scope already contains it, and this module's own
+    line-based `_enclosing_qualnames` already resolves a comprehension's
+    `elt` to its enclosing *function*, not a comprehension-specific scope,
+    matching this module's own established coarser granularity) -- so
+    every one of these bindings is recorded against the current
+    `binding_scope` directly, the same target every parameter already
+    uses, never a new one.
     """
     bound: dict[str, set[str]] = {}
     recognized_aliases: dict[str, set[str]] = {}
 
+    def _target_bound_names(target: ast.expr) -> list[str]:
+        if isinstance(target, ast.Name):
+            return [target.id]
+        if isinstance(target, ast.Starred):
+            return _target_bound_names(target.value)
+        if isinstance(target, (ast.Tuple, ast.List)):
+            names: list[str] = []
+            for elt in target.elts:
+                names.extend(_target_bound_names(elt))
+            return names
+        return []
+
+    def _match_pattern_captures(pattern: ast.pattern) -> list[str]:
+        names: list[str] = []
+        for node in ast.walk(pattern):
+            if isinstance(node, ast.MatchAs) and node.name is not None:
+                names.append(node.name)
+            elif isinstance(node, ast.MatchStar) and node.name is not None:
+                names.append(node.name)
+            elif isinstance(node, ast.MatchMapping) and node.rest is not None:
+                names.append(node.rest)
+        return names
+
     def visit(node: ast.AST, prefix: str, binding_scope: str | None) -> None:
         for child in ast.iter_child_nodes(node):
-            if isinstance(child, (ast.Import, ast.ImportFrom)):
+            if isinstance(child, (ast.For, ast.AsyncFor)):
+                if binding_scope is not None:
+                    bound.setdefault(binding_scope, set()).update(
+                        _target_bound_names(child.target)
+                    )
+                visit(child, prefix, binding_scope)
+            elif isinstance(child, (ast.With, ast.AsyncWith)):
+                if binding_scope is not None:
+                    for item in child.items:
+                        if item.optional_vars is not None:
+                            bound.setdefault(binding_scope, set()).update(
+                                _target_bound_names(item.optional_vars)
+                            )
+                visit(child, prefix, binding_scope)
+            elif isinstance(child, ast.ExceptHandler):
+                if binding_scope is not None and child.name is not None:
+                    bound.setdefault(binding_scope, set()).add(child.name)
+                visit(child, prefix, binding_scope)
+            elif isinstance(
+                child, (ast.ListComp, ast.SetComp, ast.DictComp, ast.GeneratorExp)
+            ):
+                if binding_scope is not None:
+                    for generator in child.generators:
+                        bound.setdefault(binding_scope, set()).update(
+                            _target_bound_names(generator.target)
+                        )
+                visit(child, prefix, binding_scope)
+            elif isinstance(child, ast.Match):
+                if binding_scope is not None:
+                    for case in child.cases:
+                        bound.setdefault(binding_scope, set()).update(
+                            _match_pattern_captures(case.pattern)
+                        )
+                visit(child, prefix, binding_scope)
+            elif isinstance(child, (ast.Import, ast.ImportFrom)):
                 for alias in child.names:
                     if isinstance(child, ast.Import):
                         bound_name = alias.asname or alias.name.split(".", 1)[0]

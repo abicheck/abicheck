@@ -2231,6 +2231,66 @@ qualified forms all resolve correctly together. Still zero existing hits,
 test_fact_field_readers_later_fixes.py` (403 lines, well under its own
 1200-line cap).
 
+**Two more findings from the next review round.** (1) None of the alias
+collectors ever recognized `ast.NamedExpr` -- only `ast.Assign`/
+`ast.AnnAssign` -- so `(read := getattr)(rec, "bases")` and `(fields :=
+vars(rec))["bases"]` were both invisible. Fixing this needed two separate
+changes, not one, since the walrus repro packs two distinct gaps into one
+expression: the *alias* itself (`read`, `fields`, real bindings a later,
+ordinary reference should resolve through) needed a `NamedExpr` branch in
+every alias-collecting function's own `ast.Assign`/`ast.AnnAssign` walk
+(`_imported_class_aliases`, `_builtins_getattr_aliases`,
+`_builtins_symbol_aliases`, `_unbound_getattribute_receiver_aliases`,
+`_unbound_getattribute_method_aliases`, `_mapping_receiver_aliases`,
+`_operator_attrgetter_aliases` -- all seven, applied mechanically since
+every one of them shares the identical structural gap, not just the two
+functions the finding itself named) -- and, separately, the walrus used
+*directly* as the call's own callee or mapping receiver (as both reported
+repros actually are) reads the field right there, in the very expression
+that introduces the alias, which no amount of alias-table lookup can
+catch since there is no later reference to look up. Fixed with a small,
+targeted unwrap at the two sites the finding actually named: `_is_mapping_
+receiver()` now unwraps a `NamedExpr` to its own `.value` before any of
+its existing checks run (composing for free with every shape it already
+recognizes), and the `getattr`-call-matching branch gained a third
+alternative recognizing `node.func` as a `NamedExpr` whose own `.value` is
+a known `getattr` name. (2) `_locally_bound_names()` modeled only a
+parameter, a `def`/`class` name, and an import as a real local binding --
+a `for` target, a `with ... as` target, an `except ... as` name, a
+comprehension's own `for` target, and a `match` capture were all invisible
+to it, so `for getattr in funcs: return getattr(rec, "bases")` (an
+ordinary, unrelated loop variable reusing the builtin-looking name) was
+still unconditionally flagged as a real read -- a false positive on
+genuinely valid code, not a missed misuse. Fixed as one generalized
+shadowing class, per the finding's own suggestion, rather than five
+hand-rolled special cases: `_target_bound_names()` extracts every plain
+name a `for`/`with` target binds (recursing through `Tuple`/`List`/
+`Starred` nesting), and `_match_pattern_captures()` walks a `match`
+pattern's own subtree for every `MatchAs`/`MatchStar`/`MatchMapping`
+capture regardless of nesting depth. None of these five forms introduces
+its own new scope (a `for`/`with`/`except`/`match` binds directly into
+whatever function already contains it, and this module's own line-based
+scope model already resolves a comprehension's `elt` to its enclosing
+*function*, matching its established coarser granularity) -- so every
+binding is recorded against the current `binding_scope` directly, the
+same target a parameter already uses.
+
+Verified against both reported repros for finding (1) plus a later-use
+(non-inline) variant, a shadowed-parameter negative control, and an
+unrelated-builtin negative control; and all five reported binding shapes
+for finding (2) (`for`, tuple-unpacking `for`, `with ... as`,
+`except ... as`, a comprehension target, a bare match capture, an
+as-pattern match capture, and a capture nested inside a class pattern),
+plus a positive control confirming an unrelated `for` loop doesn't
+suppress a real read elsewhere in the same function -- all via direct AST
+reproduction before writing tests. Still zero existing hits, `mypy`/
+`ruff` both stayed clean, `fact_field_readers.py` at 1765 lines and
+`fact_field_readers_scope.py` at 538 lines (both well under the 2000-line
+hard cap). New tests: `TestNamedExprAliasesAndInlineCallsAreRecognized`
+and `TestLexicalBindingFormsAreTreatedAsShadows`, both appended to `tests/
+test_fact_field_readers_later_fixes.py` (558 lines, well under its own
+1200-line cap).
+
 **Still not landed**: no detector (`diff_layout.py`/`diff_types.py`/
 `diff_param_qualifiers.py`/the reader set the check above now tracks
 precisely) has actually been migrated to read `.status` — the check above
