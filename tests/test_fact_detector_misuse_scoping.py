@@ -1081,3 +1081,36 @@ class TestFactEqualityMisuseSitesScoping:
         )
         tree = ast.parse(src, filename="x.py")
         assert fact_equality_misuse_sites(tree, "x.py") == []
+
+    def test_ignores_a_walrus_inside_a_nested_default_lambda(self) -> None:
+        """`fact = 1; def configure(cb=lambda: (fact := rec.bases_fact)):
+        ...` -- the lambda is only *created* at def-time in the enclosing
+        scope; the walrus inside its body binds `fact` in the *lambda's
+        own* scope when it is later called, never the enclosing one. An
+        unrestricted walk of the default expression wrongly published the
+        lambda-local walrus target as an alias of the enclosing (here,
+        module) scope, making a later, genuinely unrelated `fact ==
+        other` read as a misuse (Codex review, fresh evidence)."""
+        src = (
+            "fact = 1\n"
+            "def configure(cb=lambda: (fact := rec.bases_fact)):\n"
+            "    return cb\n"
+            "print(fact == other)\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert fact_equality_misuse_sites(tree, "x.py") == []
+
+    def test_detects_a_walrus_directly_in_a_default_with_no_nested_scope(
+        self,
+    ) -> None:
+        """Negative control: a walrus directly inside a default (no
+        nested lambda/comprehension in the way) must still be published
+        to the enclosing scope exactly as before."""
+        src = (
+            "fact = 1\n"
+            "def inner(x=(fact := rec.bases_fact)):\n"
+            "    return x\n"
+            "print(fact == other)\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert fact_equality_misuse_sites(tree, "x.py") == [(4, 6)]

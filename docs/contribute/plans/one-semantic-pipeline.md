@@ -1734,6 +1734,30 @@ default exclusion plus its no-lambda negative control, the return-
 annotation case, and the class-body-default case plus its
 method-parameter-still-shadows negative control.
 
+**A further Codex review round found the identical nested-scope-boundary
+gap in a sibling collector, one function over.** `_default_and_
+annotation_scope_overrides()`'s own `Compare`-attribution walk had just
+been fixed (previous round) to stop at a nested lambda/comprehension
+boundary via `_iter_default_subtree()`, but the *walrus-inside-a-default*
+collector -- a separate loop, a few lines above in `_fact_aliases()`,
+that publishes a default-embedded walrus target as an alias of the
+enclosing scope -- still used a plain, unrestricted `ast.walk(default_
+expr)`. `fact = 1; def configure(cb=lambda: (fact := rec.bases_fact)):
+...` -- the lambda is only *created* at def-time in the enclosing scope;
+the walrus inside its body binds `fact` in the *lambda's own* scope only
+when the lambda is later called, never the enclosing one -- but the
+unrestricted walk crossed that boundary anyway, wrongly publishing the
+lambda-local walrus target as a real alias of the enclosing (here,
+module) scope, so a later, genuinely unrelated `fact == other` read past
+that point was rejected. Fixed by switching this collector to the same
+`_iter_default_subtree()` walker the sibling fix already introduced --
+one shared boundary-aware primitive for both consumers, rather than a
+second copy of the same fix. Verified empirically: still zero existing
+hits in the real repository, and `mypy`/`ruff` both stayed clean. Two new
+tests: the nested-lambda-walrus exclusion and a negative control (a
+walrus directly inside a default, no nested scope in the way, must still
+be published to the enclosing scope exactly as before).
+
 ---
 
 ### Phase 1 — finish the `dump`/`scan` typed-API convergence (closes AGENTS.md "PR C")

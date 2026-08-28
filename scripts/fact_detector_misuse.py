@@ -1022,11 +1022,24 @@ def _fact_aliases(tree: ast.Module, qualnames: _QualnameSpans) -> dict[str, set[
             # exactly this kind of use) as an ordinary local binding, and
             # excluded from the generic branch via `default_walrus_ids` so
             # it isn't also (mis)processed there.
+            #
+            # **Stops at a nested scope boundary, via `_iter_default_
+            # subtree()` (Codex review, fresh evidence).** A default
+            # containing its own lambda/comprehension -- `def configure(cb
+            # =lambda: (fact := rec.bases_fact)): ...` -- only *creates*
+            # the lambda object at def-time in the enclosing scope; the
+            # walrus inside its body binds `fact` in the *lambda's own*
+            # scope when the lambda is later called, never the enclosing
+            # one, the identical distinction `_default_and_annotation_
+            # scope_overrides()` already draws for a `Compare` found the
+            # same way. An unrestricted `ast.walk(default_expr)` crossed
+            # that boundary too, wrongly publishing the lambda-local walrus
+            # target as an alias of the *enclosing* (here, module) scope.
             enclosing = lexical_parents.get(qualname, "<module>")
             for default_expr in (*node.args.defaults, *node.args.kw_defaults):
                 if default_expr is None:
                     continue
-                for walrus in ast.walk(default_expr):
+                for walrus in _iter_default_subtree(default_expr):
                     if isinstance(walrus, ast.NamedExpr) and isinstance(
                         walrus.target, ast.Name
                     ):
