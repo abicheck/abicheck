@@ -414,11 +414,16 @@ class TestUnmigratedFactReaderSites:
 
     def test_ignores_attrgetter_shadowed_by_an_operator_parameter(self) -> None:
         """`def f(operator, rec): return operator.attrgetter("bases")(rec)`
-        -- an ordinary, unrelated parameter reusing the name `operator`
-        must not be treated as the real module (Codex review: the
-        `attrgetter` branch never consulted the shadowing check at all,
-        unlike the neighboring `getattr` branch)."""
-        src = 'def f(operator, rec):\n    return operator.attrgetter("bases")(rec)\n'
+        -- an unrelated parameter reusing the name `operator` must not be
+        treated as the real module. A real `import operator` is present
+        at module scope, so this pins the shadowing check itself, not the
+        separate import-requirement rule in
+        `test_fact_field_readers_wrapper_scoping.py`."""
+        src = (
+            "import operator\n"
+            "def f(operator, rec):\n"
+            '    return operator.attrgetter("bases")(rec)\n'
+        )
         tree = ast.parse(src, filename="x.py")
         assert unmigrated_fact_reader_sites(tree, "x.py", src) == []
 
@@ -426,8 +431,12 @@ class TestUnmigratedFactReaderSites:
         self,
     ) -> None:
         """The identical shadowing for the bare `attrgetter(...)`
-        spelling."""
-        src = 'def f(attrgetter, rec):\n    return attrgetter("bases")(rec)\n'
+        spelling, with a real `from operator import attrgetter`."""
+        src = (
+            "from operator import attrgetter\n"
+            "def f(attrgetter, rec):\n"
+            '    return attrgetter("bases")(rec)\n'
+        )
         tree = ast.parse(src, filename="x.py")
         assert unmigrated_fact_reader_sites(tree, "x.py", src) == []
 
@@ -463,6 +472,7 @@ class TestUnmigratedFactReaderSites:
         the identical key -- migrating one while adding an unrelated new
         read at the same rank would silently reuse the vacated key)."""
         src = (
+            "from operator import attrgetter\n"
             "def f(rec):\n"
             '    old_decision(attrgetter("bases")(rec))\n'
             '    keep(attrgetter("bases")(rec))\n'

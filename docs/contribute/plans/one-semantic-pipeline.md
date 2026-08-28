@@ -1581,6 +1581,76 @@ an improvement, and not the kind of bounded, single-condition extension
 every other round in this section landed. Revisit with real per-position
 tracing if this shape is found in practice.
 
+**Two further Codex review rounds found two more real gaps, both fixed,
+in the same area the previous several rounds had already been hardening.**
+(1) **`_operator_attrgetter_aliases()` seeded `"attrgetter"`/`"operator"`
+into their own alias sets unconditionally**, mirroring how
+`_builtins_getattr_aliases()` correctly seeds the real builtin
+`"getattr"` -- but `attrgetter`/`operator` are not builtins; nothing makes
+either name mean the stdlib module/function without a real `import
+operator`/`from operator import attrgetter` somewhere in the file. An
+ordinary, unrelated local function or variable sharing either name --
+`def attrgetter(rec, name): ...` with no import anywhere -- was therefore
+wrongly recognized as the real constructor. Fixed by seeding both sets
+empty and relying entirely on the module's own existing real-import scan
+(the same one every `getattr`/`builtins` qualified-alias branch already
+required) -- an asymmetry the fix's own docstring now states explicitly,
+since a future reader could otherwise "fix" the asymmetry the wrong way
+by re-adding the unconditional seed. New tests: an unrelated local
+`attrgetter` function with no import, and its dotted-access sibling (an
+unrelated `operator`-named local variable with its own `attrgetter`
+method), both in `tests/test_fact_field_readers_wrapper_scoping.py`. Two
+of this area's own pre-existing shadowing tests
+(`test_ignores_attrgetter_shadowed_by_an_operator_parameter`/
+`test_ignores_attrgetter_shadowed_by_a_bare_attrgetter_parameter`) had no
+real import in their fixtures either, so under this fix they would have
+passed for the wrong reason (no import at all, rather than the shadowing
+guard) -- both were corrected to include a real module-level import, so
+they keep testing the shadowing check specifically rather than silently
+degrading into a second copy of the new import-requirement test.
+
+(2) **`_outermost_containing_expr()` stopped climbing one level too early
+at a keyword-argument value or a comprehension's own `for ... in ...`
+clause**, since neither `ast.keyword` nor `ast.comprehension` is itself an
+`ast.expr` -- the climb's own guard condition (`isinstance(parent,
+ast.expr)`) correctly stops at any *ordinary* non-expression boundary
+(a statement), but these two wrapper node types are not statements
+either; they are transparent syntactic scaffolding a real containing
+expression still continues through. Two real examples surfaced by
+regenerating the baseline against the fix: `make_change(...,
+old_value=str(t_old.bases), ...)` (a keyword argument) and
+`{_topmost_scope_suffix(b) for b in header.bases + header.virtual_bases}`
+(a comprehension's own iterable clause) both had their previously-recorded
+`outer-expr-text` narrower than the real surrounding expression, silently
+under-recording how much context a reader site's own key actually
+carries. Fixed with a new `_TRANSPARENT_EXPR_WRAPPER_TYPES = (ast.keyword,
+ast.comprehension)` tuple, checked alongside `ast.expr` in the climb's own
+condition. This legitimately reshaped 19 pre-existing, already-reviewed
+`KNOWN_UNMIGRATED_READERS` entries (same underlying sites, wider
+`outer-expr-text`) -- the baseline was regenerated from a fresh real-repo
+scan rather than hand-edited, with the count confirmed unchanged (104
+before and after) and every reshaped key confirmed a 1:1 rename of an
+existing site, not a new or missing violation. New tests, in
+`tests/test_fact_field_readers_wrapper_scoping.py`: a keyword-argument
+read climbing to its enclosing call, a comprehension read climbing to its
+enclosing display, and two reads sharing identical attribute/expression
+text but wrapped in different keyword arguments of different calls,
+pinning that each climbs to its own enclosing call rather than the two
+collapsing onto a shared inner boundary.
+
+Both fixes' new tests were split into a new sibling file,
+`tests/test_fact_field_readers_wrapper_scoping.py`, rather than appended
+to `test_fact_field_readers.py` -- which was already within a few lines of
+the architecture gate's 1200-line test-file cap once the two `test_
+ignores_an_unrelated_*_with_no_import` and three climbing tests were
+added -- mirroring how `tests/test_fact_detector_misuse_def_time_scope.py`
+was split out of `test_fact_detector_misuse.py` for the identical reason.
+Verified empirically: still zero existing `attrgetter`/`operator` false
+positives introduced against the real repository (the baseline
+regeneration's own 104-in/104-out count is the check), `mypy`/`ruff` both
+stayed clean, and `python scripts/check_architecture.py` reports 0 errors
+with both test files under the cap.
+
 **Still not landed**: no detector (`diff_layout.py`/`diff_types.py`/
 `diff_param_qualifiers.py`/the reader set the check above now tracks
 precisely) has actually been migrated to read `.status` — the check above
