@@ -209,7 +209,6 @@
         "abicheck/compatibility_evaluation_frontend.py",
         "abicheck/l0_export_delta.py",
         "abicheck/post_manifest.py",
-        "abicheck/product_baseline.py",
         "abicheck/resolver.py",
         "abicheck/service.py",
         "abicheck/service_compare_evidence.py",
