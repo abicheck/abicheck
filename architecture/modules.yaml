@@ -33,7 +33,8 @@
         "model"
       ],
       "legacy_paths": [
-        "abicheck/buildsource/build_cache.py"
+        "abicheck/buildsource/build_cache.py",
+        "abicheck/dumper_cache.py"
       ]
     },
     "extract": {
@@ -96,8 +97,23 @@
         "abicheck/ctf_metadata.py",
         "abicheck/debug_resolver.py",
         "abicheck/dump_manifest.py",
+        "abicheck/dumper_ast_config.py",
+        "abicheck/dumper_ast_config_cpp20.py",
+        "abicheck/dumper_ast_config_cpp20_chains.py",
+        "abicheck/dumper_castxml_probe.py",
+        "abicheck/dumper_castxml_typedefs.py",
         "abicheck/dumper_clang.py",
+        "abicheck/dumper_clang_attributes.py",
+        "abicheck/dumper_clang_errors.py",
+        "abicheck/dumper_clang_qualifiers.py",
+        "abicheck/dumper_clang_streaming.py",
+        "abicheck/dumper_debug.py",
+        "abicheck/dumper_elf_fallback.py",
+        "abicheck/dumper_elf_symbols.py",
+        "abicheck/dumper_layout_backfill.py",
         "abicheck/dumper_scoping.py",
+        "abicheck/dumper_sysinc.py",
+        "abicheck/dumper_toolchain.py",
         "abicheck/dwarf_advanced.py",
         "abicheck/dwarf_metadata.py",
         "abicheck/dwarf_presence.py",
@@ -314,6 +330,7 @@
     "abicheck.checker_policy",
     "abicheck.contract_coverage_ledger",
     "abicheck.contract_gating",
+    "abicheck.dumper_contract",
     "abicheck.errors",
     "abicheck.reclassify"
   ],

@@ -41,10 +41,9 @@ from .cli_dump_protocols import (
     StampProvenance as _StampProvenance,
     WriteSnapshotOutput as _WriteSnapshotOutput,
 )
-from .dumper_clang_streaming import suppress_streaming_prune
 from .errors import AbicheckError
 from .workflows.artifact import ResolvedArtifactPlan
-from .workflows.extraction import include_operand_dirs
+from .workflows.extraction import include_operand_dirs, suppress_streaming_prune
 
 if TYPE_CHECKING:
     from .model import AbiSnapshot
