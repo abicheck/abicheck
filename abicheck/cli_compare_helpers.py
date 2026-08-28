@@ -139,8 +139,8 @@ def _resolve_compare_config(
     ADR-049 receipt can prove *which revision* of the file supplied a value
     rather than only naming its path (Codex review, fresh evidence).
     """
-    from .buildsource.build_config_io import load_build_config_with_digest
     from .cli_helpers_compare import discover_project_config, resolve_compare_config
+    from .workflows.extraction import load_build_config_with_digest
 
     cfg_path = config if config is not None else discover_project_config()
     cfg_sha: str | None = None

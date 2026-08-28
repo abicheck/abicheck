@@ -48,7 +48,24 @@ from ..binary_utils import (
     resolve_linker_script_chain,
     strip_vendor_hash,
 )
+from ..buildsource.build_config_io import load_build_config_with_digest
+from ..buildsource.build_query import (
+    PRUNED_HEADER_DIR_SEGMENTS,
+    drain_build_dir_cleanups,
+)
+from ..buildsource.compiler_record import extract_compiler_record
 from ..buildsource.embed import embed_build_source
+from ..buildsource.extractor import CollectionAction, CollectionContext, CollectionMode
+from ..buildsource.extractor_manifest import (
+    ManifestError,
+    load_extractor_manifest,
+    run_external_extractor,
+)
+from ..buildsource.graph_backends import (
+    ingest_codeql_call_results,
+    ingest_codeql_extends_results,
+    ingest_kythe_entries,
+)
 from ..buildsource.inline import (
     BuildConfig,
     _autodiscover_compile_db,
@@ -59,6 +76,17 @@ from ..buildsource.inline import (
     load_build_config,
     sniff_build_info_format,
 )
+from ..buildsource.inline_graph_fold import (
+    fold_archive_graph,
+    fold_call_graph,
+    fold_callback_graph,
+    fold_include_graph,
+    fold_macro_graph,
+    fold_override_graph,
+    fold_template_graph,
+    fold_type_graph,
+    fold_virtual_dispatch_graph,
+)
 from ..buildsource.inputs_pack import (
     _load_build_evidence,
     ingest_inputs_pack,
@@ -66,7 +94,23 @@ from ..buildsource.inputs_pack import (
     is_inputs_pack_dir,
     load_inputs_manifest,
 )
+from ..buildsource.inputs_validate import validate_inputs_pack
 from ..buildsource.l2_seed import seed_includes_and_fold_compile_context
+from ..buildsource.pack_load import load_inputs_pack_or_raise, load_pack_or_raise
+from ..buildsource.pattern_scan import scan_files
+from ..buildsource.poi import build_points_of_interest, resolve_symbol_tus
+from ..buildsource.preprocessor_scan import run_preprocessor_scan
+from ..buildsource.redaction import DEFAULT_REDACTION
+from ..buildsource.snapshot_exports import exported_symbols_from_snapshot
+from ..buildsource.source_link import relink_surface_exports
+from ..buildsource.source_replay import collection_for_ci_mode
+from ..buildsource.toolchain_bindings import (
+    BindingsFile,
+    BindingsFileError,
+    check_profile_bindings_resolve,
+    load_bindings_file,
+)
+from ..buildsource.toolchain_probe import check_profile_toolchain_identity
 from ..debug_resolver import DebugArtifact, resolve_debug_info
 from ..dump_manifest import DumpManifest, load_manifest
 from ..dumper_clang import resolve_source_frontend_clang_bin
@@ -87,45 +131,83 @@ from ..python_ext import detect_python_extension
 from ..symvers_metadata import looks_like_symvers
 
 __all__ = [
+    "BindingsFile",
+    "BindingsFileError",
     "BuildConfig",
+    "CollectionAction",
+    "CollectionContext",
+    "CollectionMode",
+    "DEFAULT_REDACTION",
     "DebugArtifact",
     "DumpManifest",
+    "ManifestError",
+    "PRUNED_HEADER_DIR_SEGMENTS",
     "_autodiscover_compile_db",
     "_canonical_library_key",
     "_compile_db_at",
     "_load_build_evidence",
     "attach_build_context_for_parsed_headers",
     "build_inline_coverage",
+    "build_points_of_interest",
+    "check_profile_bindings_resolve",
+    "check_profile_toolchain_identity",
+    "collection_for_ci_mode",
     "dedup_paths_preserve_order",
     "deferred_token_dirs",
     "detect_binary_format",
     "detect_python_api",
     "detect_python_extension",
     "discover_build_config",
+    "drain_build_dir_cleanups",
     "dump_manifest_header_roots",
     "embed_build_source",
+    "exported_symbols_from_snapshot",
+    "extract_compiler_record",
     "extract_numpy_capi_surface",
+    "fold_archive_graph",
+    "fold_call_graph",
+    "fold_callback_graph",
+    "fold_include_graph",
+    "fold_macro_graph",
+    "fold_override_graph",
+    "fold_template_graph",
+    "fold_type_graph",
+    "fold_virtual_dispatch_graph",
     "has_explicit_std",
     "include_operand_dirs",
+    "ingest_codeql_call_results",
+    "ingest_codeql_extends_results",
     "ingest_inputs_pack",
+    "ingest_kythe_entries",
     "is_inputs_pack",
     "is_inputs_pack_dir",
     "is_pack_dir",
     "iter_directory_headers",
+    "load_bindings_file",
     "load_build_config",
+    "load_build_config_with_digest",
+    "load_extractor_manifest",
     "load_inputs_manifest",
+    "load_inputs_pack_or_raise",
     "load_manifest",
+    "load_pack_or_raise",
     "looks_like_symvers",
     "normalize_binary_input",
     "parse_elf_metadata",
+    "relink_surface_exports",
     "resolve_debug_info",
     "resolve_dependency_scope",
     "resolve_inferred_header_roots",
     "resolve_linker_script",
     "resolve_linker_script_chain",
     "resolve_source_frontend_clang_bin",
+    "resolve_symbol_tus",
+    "run_external_extractor",
+    "run_preprocessor_scan",
+    "scan_files",
     "seed_includes_and_fold_compile_context",
     "sniff_build_info_format",
     "split_public_header_inputs",
     "strip_vendor_hash",
+    "validate_inputs_pack",
 ]

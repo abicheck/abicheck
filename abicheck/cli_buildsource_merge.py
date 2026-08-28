@@ -46,7 +46,7 @@ if TYPE_CHECKING:
 def _exported_symbols_from_snapshot(snap: AbiSnapshot) -> tuple[str, ...]:
     """Alias for ``buildsource.snapshot_exports.exported_symbols_from_snapshot``,
     which has owned this since ADR-061 Phase 3."""
-    from .buildsource.snapshot_exports import exported_symbols_from_snapshot
+    from .workflows.extraction import exported_symbols_from_snapshot
 
     return exported_symbols_from_snapshot(snap)
 
@@ -185,8 +185,7 @@ def _relink_combined_against_exports(
             build_source_graph,
             mark_source_edges_extractor_coverage,
         )
-        from .buildsource.source_link import relink_surface_exports
-        from .workflows.extraction import build_inline_coverage
+        from .workflows.extraction import build_inline_coverage, relink_surface_exports
 
         relink_surface_exports(combined.source_abi, base_exports)
         # L5: rebuild source graph so L5 mapping/localization is not inert.
