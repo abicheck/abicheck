@@ -84,15 +84,19 @@ from typing import Protocol
 ROOT = Path(__file__).resolve().parent.parent
 PKG = ROOT / "abicheck"
 
-#: The four `Fact[T]`-bridged legacy field names this phase converted
+#: The five `Fact[T]`-bridged legacy field names this phase converted
 #: (ADR-063 Phase 0's Scope section: `RecordType.bases`/`virtual_bases`/
-#: `vtable`, `Param.is_va_list`). `RecordType.vptr_offset_bits` is
-#: deliberately not included -- it is `int | None`, already meaningfully
-#: `None` before this phase, so "read the raw field" was never itself
-#: ambiguous the way these four (whose legacy value collapses "no
-#: evidence" onto an otherwise-ordinary confirmed value) are.
+#: `vtable`/`vptr_offset_bits`, `Param.is_va_list`). `vptr_offset_bits` was
+#: first left out of this set on the theory that it was "already
+#: meaningfully `None`... never itself ambiguous" -- wrong (Codex review,
+#: fresh evidence): `model/entities.py` gives it the identical
+#: `_OMITTED_VPTR_OFFSET_BITS` sentinel-based omission bridge the other
+#: four fields use (`RecordType()` backfills `Fact.not_collected()`;
+#: `RecordType(vptr_offset_bits=None)` backfills `Fact.present(None)` --
+#: two different Facts for the identical `None` legacy value), so a direct
+#: read has exactly the same unavailable-vs-confirmed ambiguity.
 FACT_BRIDGED_ATTRS: frozenset[str] = frozenset(
-    {"bases", "virtual_bases", "vtable", "is_va_list"}
+    {"bases", "virtual_bases", "vtable", "is_va_list", "vptr_offset_bits"}
 )
 
 #: Permanently exempt, keyed `"<rel>::<qualname>"` (qualname is the
@@ -153,14 +157,19 @@ KNOWN_UNMIGRATED_READERS: frozenset[str] = frozenset(
         "abicheck/buildsource/source_extractors/base.py::entity_from_record::vtable::1",
         "abicheck/contract_evidence_collect.py::build_type_graph::bases::1",
         "abicheck/contract_evidence_collect.py::build_type_graph::virtual_bases::1",
+        "abicheck/diff_cpp_patterns.py::_is_empty_record::vtable::1",
         "abicheck/diff_cxx_rules.py::_transitive_bases::bases::1",
         "abicheck/diff_cxx_rules.py::_transitive_bases::bases::2",
         "abicheck/diff_cxx_rules.py::_transitive_bases::virtual_bases::1",
         "abicheck/diff_cxx_rules.py::_transitive_bases::virtual_bases::2",
         "abicheck/diff_cxx_rules.py::virtual_method_addition::vtable::1",
         "abicheck/diff_cxx_rules.py::virtual_method_addition::vtable::2",
+        "abicheck/diff_layout.py::_check_vptr_introduced::vptr_offset_bits::1",
+        "abicheck/diff_layout.py::_check_vptr_introduced::vptr_offset_bits::2",
+        "abicheck/diff_layout.py::_check_vptr_introduced::vptr_offset_bits::3",
         "abicheck/diff_layout.py::_check_vptr_introduced::vtable::1",
         "abicheck/diff_layout.py::_check_vptr_introduced::vtable::2",
+        "abicheck/diff_layout.py::_has_layout_descriptor::vptr_offset_bits::1",
         "abicheck/diff_param_qualifiers.py::param_va_list_changes::is_va_list::1",
         "abicheck/diff_param_qualifiers.py::param_va_list_changes::is_va_list::2",
         "abicheck/diff_param_qualifiers.py::param_va_list_changes::is_va_list::3",
@@ -322,6 +331,15 @@ def unmigrated_fact_reader_sites(
     `storage/fact_codec.py`'s legacy-schema backfill `record.vtable = []`)
     is writing the field, not reading it as if it were unambiguous, and is
     not the failure mode this check exists to catch.
+
+    A `getattr(obj, "vtable", ...)` call with the attribute name as a
+    literal string constant is a dynamic equivalent of `obj.vtable` and is
+    detected too (Codex review, fresh evidence: `diff_cpp_patterns.
+    _is_empty_record` reads `vtable` exactly this way, invisible to a scan
+    that only matches `ast.Attribute` nodes). A non-literal second
+    argument (`getattr(obj, name, ...)`) can't be resolved statically and
+    is out of scope, the same "no type inference" limit this module's own
+    docstring already states for the attribute case.
     """
     qualnames = _enclosing_qualnames(tree)
     matches: list[tuple[int, str, str]] = []
@@ -334,6 +352,17 @@ def unmigrated_fact_reader_sites(
             matches.append(
                 (node.lineno, node.attr, qualnames.get(node.lineno, "<module>"))
             )
+        elif (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Name)
+            and node.func.id == "getattr"
+            and len(node.args) >= 2
+            and isinstance(node.args[1], ast.Constant)
+            and isinstance(node.args[1].value, str)
+            and node.args[1].value in FACT_BRIDGED_ATTRS
+        ):
+            attr = node.args[1].value
+            matches.append((node.lineno, attr, qualnames.get(node.lineno, "<module>")))
     matches.sort(key=lambda m: m[0])
     occurrence: dict[tuple[str, str], int] = {}
     sites: list[tuple[str, int, str, str]] = []

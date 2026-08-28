@@ -122,12 +122,32 @@ class TestUnmigratedFactReaderSites:
             "    b = rec.virtual_bases\n"
             "    c = rec.vtable\n"
             "    d = p.is_va_list\n"
+            "    e = rec.vptr_offset_bits\n"
         )
         tree = ast.parse(src, filename="x.py")
         sites = unmigrated_fact_reader_sites(tree, "x.py")
         attrs = {attr for _key, _lineno, attr, _qualname in sites}
         assert attrs == FACT_BRIDGED_ATTRS
         assert all(qualname == "f" for _k, _l, _a, qualname in sites)
+
+    def test_detects_a_getattr_call_naming_a_bridged_attr(self) -> None:
+        """A dynamic `getattr(obj, "vtable", ...)` read is a real
+        equivalent of `obj.vtable` -- `ast.Attribute`-only matching misses
+        it entirely (Codex review: `diff_cpp_patterns._is_empty_record`
+        reads `vtable` exactly this way)."""
+        src = 'def f(rec):\n    return getattr(rec, "vtable", None) or []\n'
+        tree = ast.parse(src, filename="x.py")
+        sites = unmigrated_fact_reader_sites(tree, "x.py")
+        assert [key for key, _l, _a, _q in sites] == ["x.py::f::vtable::1"]
+
+    def test_ignores_a_getattr_call_with_a_non_matching_or_dynamic_name(self) -> None:
+        src = (
+            "def f(rec, attr):\n"
+            '    a = getattr(rec, "size_bits", None)\n'
+            "    b = getattr(rec, attr, None)\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert unmigrated_fact_reader_sites(tree, "x.py") == []
 
     def test_ignores_an_assignment_target(self) -> None:
         """A `Store` context (`rec.vtable = []`, the legacy-schema backfill

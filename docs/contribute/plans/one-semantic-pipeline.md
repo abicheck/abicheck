@@ -1015,25 +1015,45 @@ whether two records structurally match across the header/DWARF backfill.
 A whole-module exemption hid both from the scan entirely; narrowing to
 function scope surfaced them as two more genuine, previously-invisible
 readers, now real `KNOWN_UNMIGRATED_READERS` entries themselves (bringing
-the total from the originally-reported 91 to 99). No type inference is
-attempted — verified empirically, by running the scan against the whole
-package before writing the baseline, that all 99 hits are genuinely
-`RecordType`/`Param` accesses with zero cross-class collisions. Tests:
+the total from the originally-reported 91 to 99).
+
+**Two more real gaps found in the same review round, both fixed.** (1)
+`RecordType.vptr_offset_bits` was originally left out of
+`FACT_BRIDGED_ATTRS` on the theory that it was "already meaningfully
+`None`... never itself ambiguous" before this phase — false: it carries
+the identical `_OMITTED_VPTR_OFFSET_BITS` sentinel-based omission bridge
+the other four fields use (`RecordType()` backfills `Fact.not_collected()`;
+`RecordType(vptr_offset_bits=None)` backfills `Fact.present(None)` — two
+different Facts for the same `None` legacy value), so a direct read has
+the identical ambiguity. Adding it surfaced four more real reader sites
+(`diff_layout.py`'s `_check_vptr_introduced`/`_has_layout_descriptor`).
+(2) The scan matched only `ast.Attribute` nodes, missing a dynamic
+`getattr(obj, "vtable", ...)` read with the attribute name as a literal
+string constant — `diff_cpp_patterns._is_empty_record` reads `vtable`
+exactly this way, invisible to the original scan. Fixed by also matching
+a `getattr()` call whose second argument is a string-literal `ast.Constant`
+naming one of the bridged attributes (a non-literal name stays out of
+scope, the same no-type-inference limit already stated for the attribute
+case). Total baseline: 104. No type inference is attempted — verified
+empirically, by running the scan against the whole package before writing
+the baseline, that all 104 hits are genuinely `RecordType`/`Param`
+accesses (attribute or `getattr`) with zero cross-class collisions. Tests:
 `tests/test_fact_field_readers.py` (the real repository has zero unlisted
 violations; every baseline/exempt entry still names something real; the
-AST primitive's own contract — attrs detected, `Store` ignored,
-per-function occurrence numbering, module/class qualname derivation —
-pinned directly; and end-to-end cases against a throwaway `abicheck/`-
-shaped tree confirming the check function itself, not only the primitive,
-fires on a new violation, stays silent on a baselined one, and respects a
-function-scoped exemption without leaking to a sibling function in the
-same file).
+AST primitive's own contract — attrs detected including `vptr_offset_bits`,
+`getattr` calls detected and a non-matching/dynamic name ignored, `Store`
+ignored, per-function occurrence numbering, module/class qualname
+derivation — pinned directly; and end-to-end cases against a throwaway
+`abicheck/`-shaped tree confirming the check function itself, not only the
+primitive, fires on a new violation, stays silent on a baselined one, and
+respects a function-scoped exemption without leaking to a sibling function
+in the same file).
 
 **Still not landed**: no detector (`diff_layout.py`/`diff_types.py`/
-`diff_param_qualifiers.py`/the fourteen-plus-five-reader set the check
-above now tracks precisely) has actually been migrated to read `.status`
-— the check above only *guards* the 99 existing sites against a new,
-unreviewed one joining them; it does not change what any of them do.
+`diff_param_qualifiers.py`/the reader set the check above now tracks
+precisely) has actually been migrated to read `.status` — the check above
+only *guards* the 104 existing sites against a new, unreviewed one
+joining them; it does not change what any of them do.
 Migrating a detector now would add real complexity for zero behavior
 change until every producer's own construction is at least this explicit
 — landed as of the second slice for the five fields this phase scoped —
