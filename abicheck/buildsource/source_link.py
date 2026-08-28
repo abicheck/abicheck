@@ -1398,8 +1398,9 @@ def relink_surface_exports(
     as :func:`link_source_abi` (``mangled_name or qualified_name`` matched against
     the export set), so the result is identical to what ``dump <binary> --sources``
     would have produced and introduces no new behaviour. Mutates and returns
-    *surface*.
-    """
+    *surface*. At most once per surface (Codex review, PR #930): the drop below
+    is permanent, so a second call vs. a different export set can't recover a
+    dropped candidate -- the one caller only ever relinks an empty-exports one."""
     exported = set(exported_symbols)
     surface.roots["exported_symbols"] = sorted(exported)
     export_index, exact_index = _build_export_index(exported), _build_exact_index(exported)
