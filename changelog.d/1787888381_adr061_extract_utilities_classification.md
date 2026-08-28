@@ -1,17 +1,21 @@
 ### Changed
 
-- **ADR-061 continuation**: 21 more root-level `abicheck/*.py` files are now
+- **ADR-061 continuation**: 19 more root-level `abicheck/*.py` files are now
   classified into the `extract` responsibility layer in
-  `architecture/modules.yaml` (up from 61 to 82 entries overall for that
-  layer): `binder.py`, `btf_metadata.py`, `castxml_policy.py`,
+  `architecture/modules.yaml` (up from 61 to 80 entries overall for that
+  layer): `btf_metadata.py`, `castxml_policy.py`,
   `clang_layout_tool.py`, `classify.py`, `ctf_metadata.py`,
   `dwarf_presence.py`, `dwarf_snapshot.py`, `dwarf_unified.py`,
   `dwarf_utils.py`, `package.py`, `pdb_metadata.py`, `pdb_model.py`,
-  `pdb_parser.py`, `pdb_utils.py`, `provenance.py`, `resolver.py`,
+  `pdb_parser.py`, `pdb_utils.py`, `provenance.py`,
   `source_smoke.py`, `sycl_context.py`, `tu_fragment.py`, `type_metadata.py`.
   All are raw fact-extraction/toolchain-probe/format-parsing modules with no
   `compare`/`policy`/`report`-shaped concerns and no cross-layer imports
   outside `model`/`storage`/already-`extract`-classified siblings.
+  (`binder.py`/`resolver.py` were originally classified `extract` in this
+  same commit too — see the "Post-merge cross-PR collision found and fixed"
+  paragraph below for why they were moved to `workflows` instead, which is
+  why they're absent from both this list and the 80-entry count.)
   `type_metadata.py` was not on the original candidate list but was added
   alongside `btf_metadata.py`/`ctf_metadata.py` since it is their shared
   "unified `TypeMetadataSource` protocol for all debug format readers" leaf
