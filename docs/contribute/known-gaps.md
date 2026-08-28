@@ -4461,6 +4461,125 @@ looked like the obvious fix and wasn't.
   emptying that test's own `headers` list, since its actual subject is
   `public_headers`/`public_header_dirs`'s own expansion, not `headers`'s.
 
+  **ADR-063 Phase 1 (`docs/contribute/plans/one-semantic-pipeline.md`,
+  "finish the `dump`/`scan` typed-API convergence") re-investigated this
+  entry's still-open blocker 2 with castxml genuinely available in the
+  investigating environment (a solver-resolved conda-forge install, not the
+  hand-assembled 0.7.0 build the plan's Design section found segfaulting) —
+  so the environmental precondition for full option (a) convergence no
+  longer blocks. **One real, safely-landable slice of blocker 1 closed for
+  real** (`cli_dump_helpers.render_dump_dry_run` now takes the real
+  `ResolvedDumpRequest` `resolve_dump_request_for_cli` already produces —
+  `so_path`/`headers`/`sources`/`build_info`/`depth`/`collect_mode`/
+  `header_backend`/`dump_manifest` are all read off it, not re-passed as
+  fifteen independently-threaded primitives — verified against
+  `test_dump_cli_typed_api_parity.py -m integration`, 16/16 green. **That
+  acceptance-gate file itself is clang-only, not evidence of castxml
+  coverage**: every one of its subprocess invocations hard-codes
+  `--ast-frontend clang`, not parametrized by backend at all (confirmed —
+  `pytest tests/test_dump_cli_typed_api_parity.py -m integration -k
+  castxml` selects zero tests). What castxml's newfound availability
+  separately confirmed is broader but different: the wider integration
+  suite's own castxml-specific cases (`pytest tests/ -m "integration and
+  not slow" -k castxml`) are 38/38 green with only the two pre-existing,
+  unrelated `xfail`s — real evidence `abicheck dump --ast-frontend castxml`
+  itself works end to end in this environment, not evidence this
+  particular parity file exercises it. Field-level parity between the two
+  paths was already closed
+  before this phase started -- `_CONTRACT_KNOWN_DIVERGENT_FIELDS` and
+  `_SCAN_KNOWN_DIVERGENT_SHAPES` in that test module were both already
+  empty -- so there was no xfail-gated shape left for this phase to flip;
+  confirmed empty both before and after this phase's change.
+
+  **Blocker 2 (the post-processing hooks) does NOT close, and the reason is
+  independent of which AST backend is available, so obtaining castxml did
+  not remove it.** Re-read `perform_elf_dump` end to end (not skimmed)
+  looking specifically for whether its first try block (the primary
+  `seed_includes_and_fold_compile_context` + `dump()` call) could be
+  replaced by a call to `execute_dump_request()`, keeping the second try
+  block's post-processing hooks (the ADR-039 collector's own explicit
+  second call, the header-graph attach, the clang-layout-tool attach)
+  unchanged as hooks applied to the returned snapshot. Two sub-findings,
+  each confirmed against the real code, not assumed:
+
+  1. *(Not actually a blocker — investigated and ruled out.)* The ADR-039
+     collector (`attach_build_context_for_parsed_headers`) already runs a
+     second time, unconditionally, inside `_resolve_side_snapshot_impl`
+     itself (PR C's own shared-gate work wired it in there too). Calling it
+     a *third* time from `perform_elf_dump`'s own existing second block —
+     which is what "keep the hook, route the primary parse" would produce
+     — is safe: `attach_build_context` *assigns*
+     `snap.build_context_defines`/`conditional_fields`, it never
+     accumulates, so a second identically-scoped call is idempotent, and
+     `parsed_with_build_context` is only ever set `True`, never reset to
+     `False`, so a redundant second stamp cannot regress it. Similarly,
+     `scope_header_dirs` (a parameter `perform_elf_dump`'s own `dump()`
+     call passes that `_dump_elf`, reached via `execute_dump_request`,
+     does not) turns out to be provably redundant with `resolve_dump_
+     request`'s own `public_header_dirs` (both are derived from the
+     identical `split_public_header_inputs(headers)` call, and `dump()`
+     unions them for the extraction contract) — so this is not a real
+     divergence either, just a vestigial second computation of the same
+     set of directories.
+  2. *(A real, structural blocker, confirmed by reading the code, distinct
+     from anything the Design section named.)* `dump_cmd`'s legacy
+     `-p`/`--compile-db` auto-match (`cli_helpers_compare.
+     _resolve_build_context_flags`, using `build_context_for_header`/
+     `build_context_union_fallback` — a completely different code path from
+     the P0.3 L3->L2 fold's `seed_includes_and_fold_compile_context`) is
+     computed in `dump_cmd` *after* `resolve_dump_request_for_cli` already
+     built the `ResolvedDumpRequest` (`_resolved`), on the real-execution
+     branch only, never on the typed-request-building path at all. Its
+     result (`effective_gcc_options`/`effective_compile_db`/
+     `compile_db_context_matched`) is what `perform_elf_dump`'s own
+     `effective_gcc_options` parameter already carries into its primary
+     `dump()` call -- and per this same entry's earlier "legacy-match
+     overlap" fix, that legacy match's derived flags are the *sole* source
+     of compile-database-derived context whenever the P0.3 fold does *not*
+     independently match the same header (the fold's result wins and
+     supersedes it whenever the fold *does* match — already the case
+     `effective_gcc_options`/`l3_context_applied`'s reassignment in
+     `perform_elf_dump` handles). `resolve_dump_request`/
+     `_resolve_side_snapshot_impl` has no equivalent call to
+     `_resolve_build_context_flags` anywhere -- `DumpRequest.input.compile`
+     only ever carries the CLI's own explicit `--gcc-options`, never the
+     legacy match's derived flags. So routing `perform_elf_dump`'s primary
+     parse through `execute_dump_request()` as-is would silently drop real,
+     still-live, still-documented (`dump --build-query`/
+     `--build-compile-db`/`-p`/`--compile-db` are explicitly not yet
+     removed — PR 3C is gated on this same convergence closing first)
+     compile-database-derived flags for exactly the headers the P0.3 fold
+     itself does not match — a real regression, not a refactor, for any
+     project relying on that fallback. Closing this for real needs the
+     legacy match's computation moved earlier (before `resolve_dump_
+     request_for_cli` runs) and threaded into the `DumpRequest`/
+     `CompileContext` the resolved object carries, so the typed pipeline
+     sees it too — a genuine, separate design change to the request-
+     building sequence (which field absorbs the legacy match's *derived*,
+     not user-typed, flags, and whether that blurs `DumpRequest`'s
+     documented "records the run, not a second opinion about it"
+     contract), not a same-session drive-by fix. **Not attempted here** —
+     recorded so a future attempt starts from this precise mechanism
+     instead of re-deriving it, per this file's own "known gaps over risky
+     reactive patches" convention.
+
+  **Net effect on this phase's own scoping**: full "route `perform_elf_dump`
+  through `execute_dump_request`" (Design section item, this entry's
+  original blocker 2) remains unattempted for the reason above -- this was
+  never actually gated on castxml availability the way the Design section's
+  own item 2 implied; that item's "(b) scope to clang, castxml tracked as
+  residual" framing turned out to describe the wrong axis. What castxml's
+  availability *did* let this phase newly verify -- run against the wider
+  integration suite, not the clang-only acceptance corpus itself (see
+  above) -- is that `abicheck dump --ast-frontend castxml` genuinely works
+  end to end in this environment today, closing the environmental
+  uncertainty the Design section's segfault finding had left open. The
+  acceptance corpus's own field-level parity (`_CONTRACT_KNOWN_DIVERGENT_
+  FIELDS`/`_SCAN_KNOWN_DIVERGENT_SHAPES` empty) remains verified for clang
+  only, exactly as it was before this phase -- extending that specific
+  corpus to also parametrize over castxml is real, still-open follow-on
+  work this phase did not attempt.
+
 - **Lambda-closure churn survives at the *function* level after the type-level
   fix — investigated, deliberately not patched (oneTBB flow-graph report,
   fresh evidence).** `name_classification._ANONYMOUS_TYPE_MARKERS` did not

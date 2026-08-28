@@ -47,10 +47,15 @@ are large".
 
 **Scope, stated plainly**: the real ELF/PE/Mach-O run still executes through
 ``perform_elf_dump``/``handle_non_elf_dump``, not through
-``service_dump_pipeline.execute_dump_request``. Three separate obstacles block
-that half (post-processing passes driven by CLI-only inputs, the write-time
-vs. resolve-time embed, and the source-only branch's own pipeline); see the
-plan's PR 3A section. This module is the prerequisite that migration needs,
+``service_dump_pipeline.execute_dump_request``. ADR-063 Phase 1 re-investigated
+this and found the ADR-039 collector's own post-processing passes are NOT
+actually a blocker (they already run inside ``_resolve_side_snapshot_impl``
+too, and a second, redundant call from ``perform_elf_dump`` is a safe no-op).
+The real, still-open blocker is the legacy ``-p``/``--compile-db`` auto-match
+(``cli_helpers_compare._resolve_build_context_flags``) having no equivalent
+inside ``resolve_dump_request``/``execute_dump_request`` at all — see
+``docs/contribute/known-gaps.md``'s "PR C" entry for the precise mechanism.
+This module is the prerequisite that migration needs,
 consumed today by ``--dry-run``.
 """
 

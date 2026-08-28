@@ -85,6 +85,7 @@ from .workflows.extraction import (
 if TYPE_CHECKING:
     from .buildsource.pack import BuildSourcePack
     from .model import AbiSnapshot
+    from .service_dump_pipeline import ResolvedDumpRequest
     from .service_scan import CompileContext
 
 
@@ -750,21 +751,14 @@ def _add_dump_depth_feasibility(
 
 
 def render_dump_dry_run(
+    resolved: ResolvedDumpRequest,
     *,
-    so_path: Path | None,
-    headers: tuple[Path, ...],
-    sources: Path | None,
-    build_info: Path | None,
-    build_config: Path | None,
-    depth: str | None,
-    collect_mode: str,
-    header_backend: str,
     output: Path | None,
+    build_config: Path | None = None,
     snapshot_compression: str = "auto",
     has_compile_db: bool = False,
     compile_db_matched: bool | None = None,
     build_info_is_pack: bool = False,
-    dump_manifest: Any | None = None,
 ) -> Any:
     """Build the ``dump --dry-run`` report (ADR-043 D4): resolve, never execute.
 
@@ -772,6 +766,29 @@ def render_dump_dry_run(
     shows the resolved depth/collect-mode and available data layers, and
     checks tool availability on PATH. Never runs castxml/clang, a build query,
     or any I/O beyond stat()/PATH lookups.
+
+    ADR-063 Phase 1 (``docs/contribute/plans/one-semantic-pipeline.md``): this
+    now renders from a real :class:`~abicheck.service_dump_pipeline.
+    ResolvedDumpRequest` (``so_path``/``headers``/``sources``/``build_info``/
+    ``depth``/``collect_mode``/``header_backend``/``dump_manifest`` all read
+    off *resolved*, the identical object ``resolve_dump_request_for_cli``
+    produces for the real run) instead of fifteen independently-passed
+    primitives ``dump_cmd`` used to re-derive by hand -- closing the second
+    half of ADR-061/AGENTS.md's "PR C" note (the first half, ``resolve_dump_request``
+    itself existing, landed earlier). ``output``/``snapshot_compression``
+    (CLI presentation, not resolution) and ``has_compile_db``/
+    ``compile_db_matched``/``build_info_is_pack`` (cheap, deterministic
+    compile-database classification with no field on the typed request --
+    see each parameter's own docstring below) remain separate parameters:
+    they describe how the CLI reports the run, not what the run resolved to.
+    ``build_config`` stays a separate parameter too, for the identical
+    reason -- ``DumpRequest``/``InputSpec`` carry no ``build_config`` field
+    of their own (an explicit ``--config`` is a CLI-only ``.abicheck.yml``
+    *discovery* override; its effect on the actually-resolved compile
+    context already reached *resolved* upstream, before this function ever
+    sees it). ``None`` (the default) falls back to
+    ``discover_project_config(sources)`` below, unchanged from before this
+    migration.
 
     ``has_compile_db`` (Codex review): whether ``-p``/``--compile-db`` was
     given at all -- a bare presence flag, kept for the "nothing was given at
@@ -842,6 +859,15 @@ def render_dump_dry_run(
     """
     from .cli_helpers_compare import discover_project_config
     from .dry_run import DryRunResult, tool_status
+
+    so_path = resolved.request.input.path
+    headers = resolved.headers
+    sources = resolved.request.input.sources
+    build_info = resolved.request.input.build_info
+    depth = resolved.requested_depth
+    collect_mode = resolved.collect_mode
+    header_backend = resolved.header_backend
+    dump_manifest = resolved.evidence.dump_manifest
 
     result = DryRunResult(command="dump")
     result.add(

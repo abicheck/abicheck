@@ -527,13 +527,18 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
     # because nothing fails when they drift.
     #
     # The real ELF/PE/Mach-O run still *executes* through `perform_elf_dump`/
-    # `handle_non_elf_dump` rather than `execute_dump_request` (that migration
-    # needs the ADR-039 collector's CLI-only inputs represented in the typed
-    # API, and `_write_snapshot_output`'s provenance/`--inputs`/depth-gate
-    # sequence reordered around a resolve-time embed). What changed is which
-    # object supplies its *resolved inputs*: they now come from
-    # `ResolvedDumpRequest`, not from a parallel set of locals that merely
-    # happened to agree.
+    # `handle_non_elf_dump` rather than `execute_dump_request` -- ADR-063
+    # Phase 1 re-investigated this migration and found the ADR-039
+    # collector itself is NOT actually a blocker (it already runs a second
+    # time inside `_resolve_side_snapshot_impl`, and a third, redundant call
+    # is a safe no-op, not a double-count). The real blocker is the legacy
+    # `-p`/`--compile-db` auto-match (`_resolve_build_context_flags`,
+    # computed below, strictly after `_resolved` here) having no equivalent
+    # inside `resolve_dump_request`/`execute_dump_request` at all -- see
+    # `docs/contribute/known-gaps.md`'s "PR C" entry for the precise
+    # mechanism. What changed so far is which object supplies the *resolved
+    # inputs* `--dry-run` renders: they now come from `ResolvedDumpRequest`,
+    # not from a parallel set of locals that merely happened to agree.
     _dump_request = build_dump_request(
         so_path=so_path, headers=headers, includes=includes,
         version=version, lang=lang, lang_explicit=lang_explicit,
@@ -571,11 +576,9 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
             compile_db_path, None, headers, compile_db_filter,
         )
         _dry_result = render_dump_dry_run(
-            so_path=so_path, headers=_resolved.headers, sources=sources,
-            build_info=build_info, build_config=build_config,
-            depth=_resolved.requested_depth,
-            collect_mode=_resolved.collect_mode,
-            header_backend=_resolved.header_backend, output=output,
+            _resolved,
+            output=output,
+            build_config=build_config,
             snapshot_compression=snapshot_compression,
             has_compile_db=compile_db_path is not None,
             # External review: dry-run previously only checked bare -p/
@@ -591,7 +594,6 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
             build_info_is_pack=(
                 is_pack_dir(build_info) or _is_inputs_pack_dir(build_info)
             ),
-            dump_manifest=parsed_dump_manifest,
         )
         # CLI cleanup phase two, PR 3C prerequisite 3: show whether/why
         # build.query would execute, without ever running it.
