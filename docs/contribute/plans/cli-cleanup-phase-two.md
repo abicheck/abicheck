@@ -2122,11 +2122,22 @@ pipelines a fourth time.
   >    `effective_compile_db`), and reordering
   >    `_write_snapshot_output`'s provenance/`--inputs`/depth-gate sequence
   >    around a resolve-time embed.
-  > 2. **The L4 extractor default still diverges** between `scan` (clang, via
-  >    `embed_build_source`'s `"auto"`) and `dump`/`compare` (castxml, via
-  >    `effective_frontend`). Removing the flags does not cause this, but it
-  >    is a live "two interpreters of one config" instance. **No longer
-  >    "unverifiable without castxml"** — see the 2026-08-27 note below this
+  > 2. **The L4 extractor default still diverges, in more than one pairing.**
+  >    `scan`'s candidate resolution hardcodes `source_extractor="auto"`
+  >    (`embed_build_source`, ignoring whatever `--ast-frontend` scan itself
+  >    received), which resolves to clang; `compare`'s implicit-dump operand
+  >    and the typed `execute_dump_request` pipeline reach
+  >    `effective_frontend`, which resolves an unflagged `"auto"` to castxml
+  >    unconditionally. **The native `dump` CLI is neither of those — it
+  >    resolves its own `header_backend` from the explicit `--ast-frontend`
+  >    flag or a `compile.frontend` config value only, never through
+  >    `effective_frontend`, and defaults an unflagged invocation to clang
+  >    too (Codex review, fresh evidence, correcting this item's own prior
+  >    grouping of `dump` with `compare` here — see the dated note two
+  >    sections below for the full investigation).** Removing the flags
+  >    does not cause any of this, but it is a live "two interpreters of one
+  >    config" instance. **No longer "unverifiable without castxml"** — see
+  >    the 2026-08-27 note below this
   >    block, which obtained a real one and reproduced the divergence
   >    directly; the fix itself is still not attempted, deliberately.
   > 3. **Prerequisite 3's own remaining `-H`-directory gap**, below, is
@@ -2317,12 +2328,21 @@ pipelines a fourth time.
   > and `test_scan_against_real_dump_baseline_matches_reported_cli_invocation`)
   > were reproduced locally, matching exactly the divergence their own
   > long-standing module docstring already predicted: `scan`'s
-  > candidate resolution uses `source_extractor="auto"` (`scan_engine.py`,
-  > `_build_new_snapshot`), which `_make_source_extractor`
-  > (`buildsource/inline.py`) resolves to clang, while `dump`/`compare` reach
-  > `effective_frontend(...)` (`service_compare_evidence.py`), which resolves
-  > `"auto"` through `dumper._resolve_header_backend` to castxml
-  > unconditionally (no clang fallback). The rest of the `integration`-marked
+  > candidate resolution *hardcodes* `source_extractor="auto"`
+  > (`scan_engine.py`, `_build_new_snapshot`) regardless of whatever
+  > `--ast-frontend` value scan itself received, which `_make_source_
+  > extractor` (`buildsource/inline.py`) resolves to clang -- while these
+  > two tests give `dump` an *explicit* `--ast-frontend castxml`, which the
+  > native `dump` CLI honors directly (`resolve_dump_compile_context()`,
+  > never through `effective_frontend`). **The two land on the same
+  > castxml-vs-clang outcome these tests observe, but not through the
+  > mechanism this paragraph originally described (Codex review, fresh
+  > evidence, correcting this exact paragraph's own prior "dump/compare
+  > reach `effective_frontend(...)`" claim) — `dump`'s own CLI path never
+  > calls `effective_frontend` at all; only `compare`'s implicit-dump
+  > operand and the typed `execute_dump_request` pipeline do, and only for
+  > an *unflagged* `"auto"` request, which is not the shape these two tests
+  > exercise.** The rest of the `integration`-marked
   > suite for this area — `test_dump_cli_typed_api_parity.py`,
   > `test_dump_scan_l3_comparability.py`'s non-xfailed cases,
   > `test_dump_write_after_resolve_time_embed.py`,
