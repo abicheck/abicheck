@@ -765,30 +765,8 @@ def render_dump_dry_run(
     Cheap, read-only resolution only: classifies the inputs, discovers config,
     shows the resolved depth/collect-mode and available data layers, and
     checks tool availability on PATH. Never runs castxml/clang, a build query,
-    or any I/O beyond stat()/PATH lookups.
-
-    ADR-063 Phase 1 (``docs/contribute/plans/one-semantic-pipeline.md``): this
-    now renders from a real :class:`~abicheck.service_dump_pipeline.
-    ResolvedDumpRequest` (``so_path``/``headers``/``sources``/``build_info``/
-    ``depth``/``collect_mode``/``header_backend``/``dump_manifest`` all read
-    off *resolved*, the identical object ``resolve_dump_request_for_cli``
-    produces for the real run) instead of fifteen independently-passed
-    primitives ``dump_cmd`` used to re-derive by hand -- closing the second
-    half of ADR-061/AGENTS.md's "PR C" note (the first half, ``resolve_dump_request``
-    itself existing, landed earlier). ``output``/``snapshot_compression``
-    (CLI presentation, not resolution) and ``has_compile_db``/
-    ``compile_db_matched``/``build_info_is_pack`` (cheap, deterministic
-    compile-database classification with no field on the typed request --
-    see each parameter's own docstring below) remain separate parameters:
-    they describe how the CLI reports the run, not what the run resolved to.
-    ``build_config`` stays a separate parameter too, for the identical
-    reason -- ``DumpRequest``/``InputSpec`` carry no ``build_config`` field
-    of their own (an explicit ``--config`` is a CLI-only ``.abicheck.yml``
-    *discovery* override; its effect on the actually-resolved compile
-    context already reached *resolved* upstream, before this function ever
-    sees it). ``None`` (the default) falls back to
-    ``discover_project_config(sources)`` below, unchanged from before this
-    migration.
+    or any I/O beyond stat()/PATH lookups. ADR-063 Phase 1: renders from a
+    real ``ResolvedDumpRequest``; the remaining params are presentation.
 
     ``has_compile_db`` (Codex review): whether ``-p``/``--compile-db`` was
     given at all -- a bare presence flag, kept for the "nothing was given at
@@ -860,13 +838,11 @@ def render_dump_dry_run(
     from .cli_helpers_compare import discover_project_config
     from .dry_run import DryRunResult, tool_status
 
-    so_path = resolved.request.input.path
+    side = resolved.request.input
+    so_path, sources, build_info = side.path, side.sources, side.build_info
     headers = resolved.headers
-    sources = resolved.request.input.sources
-    build_info = resolved.request.input.build_info
     depth = resolved.requested_depth
     collect_mode = resolved.collect_mode
-    header_backend = resolved.header_backend
     dump_manifest = resolved.evidence.dump_manifest
 
     result = DryRunResult(command="dump")
@@ -887,7 +863,7 @@ def render_dump_dry_run(
     )
     result.add(
         "Headers and compile context",
-        f"ast-frontend: {header_backend}",
+        f"ast-frontend: {resolved.effective_header_backend}",
     )
     result.add(
         "Build/source inputs",
