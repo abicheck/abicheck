@@ -33,11 +33,11 @@ import click
 
 from ..checker import compare
 from ..dumper import dump
-from ..dumper_clang_streaming import suppress_streaming_prune
 from ..errors import ProfileMismatchError, ScopeMismatchError, SnapshotError
 from ..html_report import write_html_report
 from ..reporter import to_json, to_markdown
 from ..serialization import load_snapshot, save_snapshot
+from ..workflows.extraction import suppress_streaming_prune
 from ._errors import (
     _classify_compat_error_exit_code,
     _classify_fs_error,
