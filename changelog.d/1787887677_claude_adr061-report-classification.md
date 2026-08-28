@@ -1,34 +1,22 @@
 ### Changed
 
-- **Four root-level report-formatting modules are now classified `report`
-  by this PR's own diff** (ADR-061): `html_template.py`,
-  `junit_coverage_warnings.py`, `report_classifications.py`,
-  `report_correlation.py`. (Fourteen candidates were reviewed in total; six
-  were classified `report` and then reverted after Codex review found they
-  compute policy/gate decisions rather than only rendering an
-  already-computed result — see below, and see further below for why the
-  merged state on `main` carries all six of them anyway, via a sibling
-  PR. `appcompat_html.py`, `sarif.py`, `stack_html.py`, `stack_report.py`
-  were already `report`-classified on `main` by other, already-merged
-  ADR-061 PRs by the time this one was first rebased, so they are not new
-  entries from this diff even though they were part of the original
-  fourteen-candidate review pass.) Pure data-only ledger change to
-  `architecture/modules.yaml`
-  — 0 architecture errors both before and after; none of these four import
-  anything outside `report`'s allowed targets (`model`, `compare`, `policy`,
-  `workflows`) once their own unclassified-but-harmless dependencies
-  (`checker.py`, `checker_policy.py`, `demangle.py`, `contract_gating.py`,
-  `semver.py`, `impact/`, `binder.py`, `resolver.py`, `stack_checker.py`) —
-  all still unclassified themselves, so `_layer_for` returns `None` for
-  them and the architecture gate's `dependency-direction` check does not
-  apply — are skipped by that check.
+- **This PR's net diff against `main` removes six modules from
+  `report.legacy_paths`** (`architecture/modules.yaml`): `html_report.py`,
+  `junit_report.py`, `report_model.py`, `report_summary.py`,
+  `reporter_contract_blocks.py`, `reporter_markdown.py`. Pure data-only
+  ledger change — 0 architecture errors both before and after.
 
-  **Six candidates were reverted after Codex review, each for the same
-  reason: the module computes a policy/severity/gate decision itself rather
-  than only formatting an already-computed one, which the routing table in
-  `AGENTS.md` ("Decide relevance, suppression, classification, severity, or
-  gating" → `policy/`) puts outside `report`'s remit.** Confirmed by reading
-  each named function directly, not taken on the review's word alone:
+  **History, since the diff this PR now carries is not the one its own
+  commits originally set out to make.** This PR began by classifying
+  fourteen root-level report-formatting modules as `report`
+  (`architecture/modules.yaml`'s `report.legacy_paths`). Codex review on
+  this same PR then found, and this PR's own commits confirmed by reading
+  each named function directly, that six of those fourteen — the same six
+  named above — each compute a live policy/severity/gate decision
+  themselves rather than only rendering an already-resolved one, which the
+  routing table in `AGENTS.md` ("Decide relevance, suppression,
+  classification, severity, or gating" → `policy/`) puts outside `report`'s
+  remit:
   - `html_report.py`: `_gate_card_html()` calls
     `severity.compute_gate_decision()` directly and derives the CI gate's
     pass/fail state and exit code from it.
@@ -49,97 +37,95 @@
     verdict for filtering.
   - `report_model.py`: `ReportModel.classify()` and `verdict_of()` both
     call `result._effective_verdict_for_change(c)`
-    (`checker_types.DiffResult`'s own method), which is a thin wrapper —
-    `from .reclassify import effective_verdict_for_change; return
-    effective_verdict_for_change(change, policy=self.policy,
-    kind_sets=self._effective_kind_sets(), policy_file=self.policy_file)`
-    — around the exact same `reclassify.effective_verdict_for_change`
-    policy resolver `severity.effective_verdict_for_change` re-exports and
-    `reporter_markdown.py`'s already-reverted `ShowOnlyFilter._check_
-    severity()` calls directly. Reaching the decision through `DiffResult`'s
-    own bound method rather than importing `severity`/`reclassify` directly
-    is a different code path to the same live, policy-file-aware
-    recomputation, not a read of an already-resolved, cached value — it is
-    re-invoked, unmemoized, on every call.
+    (`checker_types.DiffResult`'s own method), a thin wrapper around the
+    exact same live, policy-file-aware `reclassify.effective_verdict_for_
+    change` resolver `severity.effective_verdict_for_change` re-exports —
+    reached one hop removed via a bound method rather than a direct
+    `severity`/`reclassify` import, but re-invoked, unmemoized, on every
+    call, not a read of an already-resolved value.
   - `report_summary.py`: `compatibility_metrics()` directly imports and
     calls `severity.effective_verdict_for_change()` per change when
-    `policy`/`kind_sets`/`policy_file` is given (its own docstring: "Passing
-    *kind_sets*... and/or *policy_file* makes this metric agree with the
-    verdict by counting each change's effective verdict instead of its raw
-    kind"), and `build_summary()` always calls it this way, via
-    `result._effective_kind_sets()`/`result.policy`/`result.policy_file` —
-    the identical decision function `report_model.py` above reaches one hop
-    removed.
+    `policy`/`kind_sets`/`policy_file` is given, and `build_summary()`
+    always calls it this way via `result._effective_kind_sets()`/
+    `result.policy`/`result.policy_file` — the identical decision function
+    `report_model.py` reaches one hop removed.
 
-  This PR itself left these six unclassified rather than force-classifying
-  them either way — a correct fix would split the gate/severity computation
-  out into `policy`/`workflows` and have the renderer consume the resolved
-  decision, which is a real code change, not a ledger edit, and out of scope
-  for this PR. **They are classified `report` in the merged state anyway**:
-  a sibling ADR-061 PR (`764ebe4a2`, "classify 22 more flat modules") landed
-  on `main` first and swept all fourteen of the original candidates into
-  `report` — including these same six, plus `pr_comment.py`/
-  `pr_comment_base.py`/`pr_comment_scan.py`/`root_cause_evidence.py` — using
-  only `check_architecture.py`'s import-direction check as its verification,
-  which cannot see this role-mismatch concern (`report`'s `may_import`
-  already includes `policy`, so a report module calling straight into
-  `severity.py`/`reclassify.py`/`exit_decision.py` produces no forbidden
-  edge either way). Rebasing this PR onto that state via a plain merge
-  therefore carries all six back in through `architecture/modules.yaml`'s
-  `report.legacy_paths`, unioned with this PR's own four — resolved that
-  way per this session's own instructions (union on conflict, remove only
-  on a genuine new `check_architecture.py` error, which this merge does not
-  produce). The role-mismatch finding above stands as documented reasoning
-  either way; closing it for real still needs the same policy/workflows
-  split this paragraph already describes, not a ledger reshuffle in either
-  direction. `sarif.py` (already `report`-classified on `main` before this
-  PR, not touched by this diff) has the identical shape
-  (`classify_effective_change`, `gate_contribution_for_change`,
-  `compute_gate_decision` all called directly) and is likely a further
-  pre-existing instance of the same issue — flagged here for visibility,
-  not reclassified, since it isn't part of this PR's own diff.
+  This PR reverted all six from `report.legacy_paths` for that reason,
+  leaving four other, genuinely display-only candidates classified
+  (`html_template.py`, `junit_coverage_warnings.py`,
+  `report_classifications.py`, `report_correlation.py` — static
+  presentation tables and formatting helpers with no live policy-file-aware
+  decision of their own, confirmed the same way).
 
-  `report_classifications.py` was *also* named in the same Codex finding
-  that flagged `report_model.py`/`report_summary.py` above, but reading it
-  directly does not support the same conclusion: `is_breaking()`,
-  `category()`, `severity()`, and their backing frozensets
-  (`BREAKING_KINDS`, `HIGH_SEVERITY_KINDS`, `MEDIUM_SEVERITY_KINDS`,
-  `CATEGORY_PREFIXES`, ...) are all static, module-level lookup tables —
-  none consult a `PolicyFile`/`policy_file` override, none call
-  `severity.py`/`reclassify.py`/`exit_decision.py`, and none feed the
-  compatibility verdict or process exit code (confirmed by tracing every
-  import site: `html_report.py`'s section grouping, `reporter_markdown.
-  py`'s `ENVIRONMENT_DRIFT_KINDS` bucketing, and `compat/xml_report.py`'s
-  ABICC-style High/Medium/Low severity column are all display-only). This
-  is the same shape as the `VERDICT_PRESENTATION` table `report_model.py`
-  itself keeps for verdict-axis labels — a fixed, non-policy-file-aware
-  presentation mapping, not a live per-run decision — so it stays
-  classified `report`.
+  **A sibling ADR-061 PR (`764ebe4a2`, "classify 22 more flat modules")
+  then merged to `main` first**, sweeping all fourteen of this PR's
+  original candidates into `report.legacy_paths` — including the six
+  role-mismatched ones this PR had just reverted, plus `pr_comment.py`/
+  `pr_comment_base.py`/`pr_comment_scan.py`/`root_cause_evidence.py` (not
+  part of this PR's own review scope; checked separately here and found to
+  be genuinely display-only — none imports or calls `severity`/
+  `reclassify`/`exit_decision` at all, only a few docstring/comment
+  mentions of `severity.*` describing behavior they consume as an
+  already-computed value, so they're left classified as-is). Merging
+  `main` into this branch therefore adopted `main`'s version of
+  `architecture/modules.yaml` wholesale: since `main`'s `report.legacy_
+  paths` already carried both this PR's own four genuine additions *and*
+  the six reverted ones, the merge produced **no net diff** against `main`
+  at all for a time — this PR's own commits after the merge (visible in
+  its history as the "revert report_model.py/report_summary.py" and
+  "revert 4 mixed policy/gate modules" commits) were re-deriving content
+  `main` already had, which is why a later Codex review round correctly
+  flagged this fragment as describing a no-op: at that point in the PR's
+  history, `architecture/modules.yaml` had genuinely stopped differing
+  from `main` in any way this fragment claimed.
+
+  **This entry's own text is therefore no longer a report of what this
+  PR's commit history did — it's a description of this PR's actual,
+  current net diff**, restored by explicitly re-removing the same six
+  modules one more time from the post-merge state (which had regained
+  them from the sibling PR), specifically to preserve the reasoning above
+  now that it would otherwise be silently lost. The four genuine additions
+  (`html_template.py`, `junit_coverage_warnings.py`,
+  `report_classifications.py`, `report_correlation.py`) are **not** part
+  of this PR's net diff either way, since `main` already carries them via
+  the sibling PR before this PR's base — nothing to add or remove for
+  those four. Closing the role-mismatch finding for real still needs the
+  same `policy`/`workflows` split the original finding already describes
+  (splitting the gate/severity computation out of each of the six modules
+  and having the renderer consume the resolved decision), not a ledger
+  reshuffle in either direction — this PR does not attempt that split.
+
+  **Important limitation of this PR's fix: it affects only this branch,
+  not `main`.** Since the sibling PR (`764ebe4a2`) is already merged, `main`
+  itself carries the six role-mismatched modules in `report.legacy_paths`
+  permanently, independent of anything this PR does — a plain re-merge of
+  `main` into this branch after this PR merges would silently reintroduce
+  them again. A separate follow-up PR against `main` is needed to apply the
+  same six-module revert there. Flagged on this PR for a human's attention
+  (see PR comment) rather than attempted here, since this PR's own scope is
+  this branch.
+
+  `sarif.py` (already `report`-classified on `main` before this PR, not
+  touched by this diff) has the identical shape (`classify_effective_
+  change`, `gate_contribution_for_change`, `compute_gate_decision` all
+  called directly) and is likely a further pre-existing instance of the
+  same issue — flagged here for visibility, not reclassified, since it
+  isn't part of this PR's own diff either.
 
   Two further candidates were deliberately left unclassified from the
   original review pass, both for a role mismatch rather than an import
   violation: `stack_binding_diff.py` computes a real cross-environment
   symbol-binding diff (`diff_runtime_bindings()` builds `Change` objects
-  from two resolved `DependencyGraph`s/`SymbolBinding` lists — matching
-  bindings across environments, detecting a provider swap or a weak/strong
-  resolution flip) rather than rendering an already-computed result — that
-  is a detector, the same shape as `stack_report.py`'s own sibling
-  `diff_*.py` modules under `compare`, not a report formatter; its
-  immediate, format-only neighbor `stack_report.py` (which only ever
-  renders `StackCheckResult`/`Change` objects someone else computed) was
-  classified `report`, but `stack_binding_diff.py` itself was not.
-  `appcompat.py` computes its own compatibility verdict for an application
-  (`compute_verdict`/`impact.engine.assess_change` over the app's
-  required-symbol intersection with a library `DiffResult`, per ADR-005)
-  rather than only formatting an existing report — the module map's own "7.
-  Application compatibility" section already lists it as a distinct
-  pipeline stage from "6. Reporting". Its format-only sibling,
-  `appcompat_html.py` (renders an already-computed `appcompat` result to
-  HTML, no decision logic of its own, no import of `appcompat.py`), *was*
-  classified `report` (by an already-merged sibling PR, not this one).
+  from two resolved `DependencyGraph`s/`SymbolBinding` lists) rather than
+  rendering an already-computed result — a detector, not a report
+  formatter; its format-only sibling `stack_report.py` was classified
+  `report`. `appcompat.py` computes its own compatibility verdict for an
+  application (`compute_verdict`/`impact.engine.assess_change`, per
+  ADR-005) rather than only formatting an existing report; its format-only
+  sibling `appcompat_html.py` (already `report`-classified on `main`
+  before this PR) was left as-is.
 
   Verified: `python scripts/check_architecture.py` → 0 errors (before and
-  after); `python scripts/check_ai_readiness.py` → 0 errors; `python
-  scripts/adr_status_sync.py` → clean; `mypy abicheck/` → clean (no `.py`
-  file touched); `pytest tests/test_architecture_check.py` → 40 passed;
-  full fast unit suite green.
+  after); `python scripts/check_ai_readiness.py` → 0 errors; `mypy
+  abicheck/` → clean (no `.py` file touched); `pytest tests/test_
+  architecture_check.py` → 40 passed; full fast unit suite green.
