@@ -470,6 +470,15 @@ pytest_add_cli_args = [
     "--ignore=tests/test_skill_eval_pack.py",
     "--ignore=tests/test_skill_eval_scenarios.py",
     "--ignore=tests/test_verify_profiles.py",
+    # Same "reads the real repository" class as the entries above: its
+    # `_repo_reader_scan` fixture does one full `abicheck/**/*.py` AST walk
+    # rooted at `Path(__file__).resolve().parent.parent`, asserting the real
+    # repository has no unlisted `fact-field-readers` violation — not
+    # something a `mutants/` copy can answer for itself. No mutation-kill
+    # cost: it imports no `only_mutate` module (confirmed by grep), only
+    # `scripts.check_ai_readiness`/`scripts.fact_field_readers`, matching
+    # this file's own "costs no measurement" rule for every entry above.
+    "--ignore=tests/test_fact_field_readers.py",
 ]
 
 # ---------------------------------------------------------------------------

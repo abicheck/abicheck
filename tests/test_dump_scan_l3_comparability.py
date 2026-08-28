@@ -141,10 +141,23 @@ _SCAN_KNOWN_DIVERGENT_FRONTENDS: frozenset[str] = frozenset({"castxml"})
 # still xfail past an unrelated additional risk finding riding alongside
 # the known two) and not a bare set either (Codex review, round 2: a set
 # collapses a *second* occurrence of either known kind -- e.g. one more
-# `source_binary_provenance_mismatch` reported per side -- into "no
-# change", silently hiding that regression too).
+# `source_fact_coverage_incomplete` reported per side -- into "no change",
+# silently hiding that regression too).
+#
+# Narrowed from two kinds to one (2026-08-28, AGENTS.md "PR C" known-gaps
+# entry): this shape used to also include `source_binary_provenance_
+# mismatch`, from castxml's compiler-synthesized implicit special members
+# (constructors, destructor, synthesized `operator=`) leaking into the L4
+# reachable-declaration surface and dragging the match ratio down. That
+# extractor bug is fixed (`Function.is_compiler_generated`,
+# `entity_from_function`'s `api_relevant` exclusion) -- the remaining
+# `source_fact_coverage_incomplete` is the separate, still-open item 2
+# divergence this module's own docstring already names (`scan`'s candidate
+# always replays L4 via clang; `dump`'s baseline via castxml's own default),
+# now visible in its own smaller, cleaner shape instead of being swamped by
+# the fixed bug's noise.
 _KNOWN_L4_EXTRACTOR_DIVERGENCE_COUNTS = Counter(
-    {"source_fact_coverage_incomplete": 1, "source_binary_provenance_mismatch": 1}
+    {"source_fact_coverage_incomplete": 1}
 )
 _RISK_LINE_RE = re.compile(r"^\s*\[risk\]\s+(\S+):", re.MULTILINE)
 #: ``cli_scan_helpers.render_baseline_lines``'s exact counts-line format:
@@ -162,7 +175,7 @@ _COUNTS_LINE_RE = re.compile(
 _KNOWN_L4_EXTRACTOR_DIVERGENCE_TOTALS = (
     0,
     0,
-    2,
+    1,
     0,
 )  # breaking, api_break, risk, compatible
 
@@ -201,13 +214,12 @@ _ADVISORY_HEADINGS = _CROSSCHECK_HEADINGS + (
 
 def _is_known_l4_extractor_divergence_text(output: str) -> bool:
     """Text-output variant: the verdict must be ``COMPATIBLE_WITH_RISK``,
-    the counts line must read exactly ``breaking=0 api_break=0 risk=2
+    the counts line must read exactly ``breaking=0 api_break=0 risk=1
     compatible=0``, the multiset of ``[risk] <kind>:`` lines must equal
-    exactly the known two-kind, one-each multiset, and none of the three
-    advisory blocks (cross-check, pattern, preprocessor) may have
-    anything to report -- no more, no fewer, no duplicates, and no
-    unrelated finding hiding in a bucket this module doesn't otherwise
-    inspect.
+    exactly the known one-kind multiset, and none of the three advisory
+    blocks (cross-check, pattern, preprocessor) may have anything to
+    report -- no more, no fewer, no duplicates, and no unrelated finding
+    hiding in a bucket this module doesn't otherwise inspect.
 
     Structurally cannot go further than kind-multiset granularity (Codex
     review, round 5, raised the same concern the JSON variant below
@@ -238,12 +250,12 @@ def _is_known_l4_extractor_divergence_text(output: str) -> bool:
 def _is_known_l4_extractor_divergence_report(report: dict) -> bool:
     """JSON-report variant: the verdict must be ``COMPATIBLE_WITH_RISK``,
     the diff summary's ``breaking``/``api_break``/``risk``/``compatible``
-    counts must read exactly ``0``/``0``/``2``/``0``, the multiset of
-    finding kinds must equal exactly the known two-kind, one-each
-    multiset, and none of the three advisory blocks (cross-check,
-    pattern, preprocessor) may have anything to report -- no more, no
-    fewer, no duplicates, and no unrelated finding hiding in a bucket this
-    module doesn't otherwise inspect.
+    counts must read exactly ``0``/``0``/``1``/``0``, the multiset of
+    finding kinds must equal exactly the known one-kind multiset, and
+    none of the three advisory blocks (cross-check, pattern, preprocessor)
+    may have anything to report -- no more, no fewer, no duplicates, and
+    no unrelated finding hiding in a bucket this module doesn't otherwise
+    inspect.
 
     Several buckets live entirely outside ``report["diff"]`` and must be
     checked separately: an unrelated *compatible*-category finding
@@ -296,18 +308,29 @@ def _is_known_l4_extractor_divergence_report(report: dict) -> bool:
     # distinct underlying incompleteness reasons joined into one
     # description, and a real regression could reproduce the identical
     # kind pair/verdict/totals for a genuinely different cause (a
-    # different incomplete fact family, a different side). Each
+    # different incomplete fact family, a different side). The
     # description is the one place that cause is actually recorded, so
-    # match the fixed, distinctive substrings each producer emits.
+    # match the fixed, distinctive substring the producer emits.
+    #
+    # 2026-08-28: this used to also require a paired
+    # SOURCE_BINARY_PROVENANCE_MISMATCH finding's own distinctive
+    # substrings ("do not map to any exported binary symbol"/"wrong
+    # tag/commit") -- that finding no longer occurs for this scenario
+    # once the castxml L4 phantom-implicit-member fix (this repo's own
+    # AGENTS.md "Known gaps" entry) stopped counting a compiler-
+    # synthesized special member as a reachable declaration needing a
+    # binary-symbol match, so `provenance_desc` is now always "" and
+    # those two `in ""` checks could never pass again -- caught by this
+    # very function silently returning False forever, not by a review
+    # comment. `_KNOWN_L4_EXTRACTOR_DIVERGENCE_COUNTS`/`_TOTALS` above
+    # were narrowed to the single remaining kind at the same time; this
+    # substring check is narrowed to match.
     descriptions = {f.get("kind"): f.get("description") or "" for f in findings}
     coverage_desc = descriptions.get("source_fact_coverage_incomplete", "")
-    provenance_desc = descriptions.get("source_binary_provenance_mismatch", "")
     return (
         "treat this pair's other source-replay findings as unreliable "
         "until re-collected"
         in coverage_desc
-        and "do not map to any exported binary symbol" in provenance_desc
-        and "wrong tag/commit" in provenance_desc
     )
 
 
@@ -518,8 +541,7 @@ def test_scan_against_real_dump_baseline_is_comparable_on_unchanged_source(
             f"{ast_frontend} is listed in _SCAN_KNOWN_DIVERGENT_FRONTENDS, "
             "but the previously-diagnosed failure signature "
             "(COMPATIBLE_WITH_RISK naming exactly "
-            "source_fact_coverage_incomplete and "
-            "source_binary_provenance_mismatch, no other risk finding) did "
+            "source_fact_coverage_incomplete, no other risk finding) did "
             "not reproduce. Either the underlying gap has closed -- remove "
             "this frontend from _SCAN_KNOWN_DIVERGENT_FRONTENDS and update "
             "this module's docstring -- or a different failure occurred "
@@ -621,8 +643,7 @@ def test_scan_against_real_dump_baseline_matches_reported_cli_invocation(
             f"{ast_frontend} is listed in _SCAN_KNOWN_DIVERGENT_FRONTENDS, "
             "but the previously-diagnosed failure signature "
             "(COMPATIBLE_WITH_RISK naming exactly "
-            "source_fact_coverage_incomplete and "
-            "source_binary_provenance_mismatch, no other change) did not "
+            "source_fact_coverage_incomplete, no other change) did not "
             "reproduce. Either the underlying gap has closed -- remove "
             "this frontend from _SCAN_KNOWN_DIVERGENT_FRONTENDS and update "
             f"this module's docstring -- or a different failure occurred. "

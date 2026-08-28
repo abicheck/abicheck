@@ -37,6 +37,7 @@ __all__ = [
     "decode_fact",
     "decode_record_facts",
     "encode_fact_fields",
+    "legacy_dwarf_evidence_state",
 ]
 
 _TYPE_FACT_KEYS = (
@@ -70,6 +71,22 @@ def _encode_one(fact_dict: dict[str, Any] | None) -> None:
     status = fact_dict.get("status")
     if isinstance(status, FactStatus):
         fact_dict["status"] = status.value
+
+
+def legacy_dwarf_evidence_state(d: dict[str, Any]) -> str:
+    """Default a legacy (pre-v28) DWARF block's ``evidence_state``.
+
+    Such a block carries no debug-evidence provenance at all, so this
+    fails closed rather than claiming a real parse: a ``has_dwarf`` block
+    degrades to ``"presence_only"`` (schema v28's own cheapest tier, not
+    ``"parsed"``), and no block at all degrades to ``"not_available"``.
+    Shared by :func:`serialization._dwarf_from_dict` and
+    :func:`serialization._dwarf_advanced_from_dict`.
+    """
+    return d.get(
+        "evidence_state",
+        "presence_only" if d.get("has_dwarf", False) else "not_available",
+    )
 
 
 # The schema_version this phase bumped SCHEMA_VERSION to when it started

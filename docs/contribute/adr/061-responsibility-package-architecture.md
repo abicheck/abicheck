@@ -734,6 +734,45 @@ already documented as a leaf by construction, and `checker_types.py`'s
 `_evaluated_changes`/`not_evaluated` depend on it exactly as `severity.py`'s
 gate functions do.
 
+A third module joined this treatment later, once `compatibility_evaluation_
+config.py` was separately classified `policy`: `contract_evidence.py` (ADR-049
+Phase 4's persisted contract-relevance evidence/decision shape) had been
+classified `model`, but it imports `CompatibilityEvaluationConfig` from that
+now-`policy` module as a real dataclass field type on `EvaluationContextBlock`
+— not a type-only reference — which `model`'s `may_import: []` can never
+satisfy. `model` was always the wrong classification for it, not a fixable
+import direction: it genuinely depends on the resolved policy configuration
+it records. Reclassifying it into `policy` instead was considered and
+rejected — several `frontends`-layer files (`cli_compare_receipt.py`,
+`cli_scan_receipt.py`) import it directly, and `frontends.may_import`
+excludes `policy`, so `policy` would just relocate the identical class of
+violation. `contract_evidence.py` stays **unclassified** until that
+`frontends -> contract_evidence.py` coupling is routed through the
+`workflows` facade (or the shared logic moved to a leaf module) — the same
+"not yet actionable, treatment not destination" status this section already
+records for `policy_file.py` below.
+
+A fourth, pre-existing tension (not new to this ADR, only now made explicit):
+`buildsource/ctor_export_match.py` imports `diff_cxx_rules.itanium_scope_
+components` — a `compare`-classified module — from `buildsource/`, the same
+family `source_link.py` (`extract`) lives in. Classifying it `extract` would
+make that import a real `extract -> compare` violation; classifying it
+`compare` would just relocate the same violation to `source_link.py`'s own
+call into it. This is not new debt this module introduces: `dumper_hybrid.py`
+and `dumper_clang_expr.py` already depend on the identical
+`itanium_scope_components` parser and are themselves still unclassified
+(`frozen_root_families`'s `dumper_` family), and `export_accounting.py`
+(`extract`) sidesteps the same constraint by keeping its own narrower,
+purpose-built `_msvc_scope_components` rather than importing the shared one.
+`itanium_scope_components`/`msvc_scope_components` are validated Itanium/MSVC
+mangled-name parsers depended on by a dozen-plus modules across `compare`,
+still-frozen `dumper_*` files, and now `buildsource/`; relocating them into a
+shared inward-facing leaf module both `extract` and `compare` may import is
+the real fix, but it is a codebase-wide move affecting every one of those
+call sites, not something to attempt reactively from one `buildsource/`
+addition. `ctor_export_match.py` stays **unclassified** until that move
+happens.
+
 What this does **not** resolve: `DiffResult` still exposes policy-resolved
 verdict buckets from a `compare`-classified type, which is the underlying
 design tension rather than the import edge. Moving those properties off

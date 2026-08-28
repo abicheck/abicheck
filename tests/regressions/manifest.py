@@ -489,20 +489,43 @@ BUG_CLASSES: tuple[BugClass, ...] = (
             "bytes, and untrusted data cannot create additional commands, "
             "$GITHUB_OUTPUT records, paths, or side effects."
         ),
-        fixed_by=(705, 758),
-        seed_tests=("tests/test_reusable_workflow_execution.py",),
+        fixed_by=(705, 758, 836, 919),
+        seed_tests=(
+            "tests/test_reusable_workflow_execution.py",
+            "tests/test_check_project_workflow_execution.py",
+            "tests/test_action_run_sh_helpers.py",
+        ),
         public_surfaces=("github-action",),
+        axes={
+            "adversarial-shape": (
+                "path-traversal",
+                "shell-metacharacters",
+                "command-substitution",
+                "spaces",
+                "tab",
+                "leading-dash-flag-shaped",
+                "multiple-flags-shaped",
+                "quotes",
+                "redirects",
+                "newline-record-injection",
+                "non-ascii",
+                "empty-string",
+            )
+        },
         known_gaps=(
             KnownGap(
                 description=(
-                    "The seed test's own hostile-input corpus is scoped "
-                    "to `check-single.yml`'s shell steps only "
-                    '(`CHECK_SINGLE = "check-single.yml"`) — not every '
-                    "scalar input across the repository's other shell "
-                    "scripts and composite-action steps, which "
-                    "bug-class-regression-testing.md's Phase 8 names as "
-                    "the full target-script inventory this class's "
-                    "invariant is stated over (Codex review, PR #885)."
+                    "The hostile-input execution corpus (shared via "
+                    "`_workflow_exec.HOSTILE_SCALAR_CORPUS`, Phase 8) now "
+                    "covers two independently-maintained real sanitizer "
+                    "copies (`check-single.yml`/`check-project.yml`) plus "
+                    "`action/run.sh`'s word-splitting-sensitive `add_flag`/"
+                    "`add_sided_flag` helpers — not every scalar input "
+                    "across the repository's other shell scripts and "
+                    "composite-action steps (e.g. the other workflows' "
+                    "`run:` steps enumerated in the plan's own target-"
+                    "script inventory), which is still the full scope "
+                    "Phase 8's invariant is stated over."
                 ),
                 reference="docs/contribute/plans/bug-class-regression-testing.md#phase-8",
             ),
@@ -516,25 +539,33 @@ BUG_CLASSES: tuple[BugClass, ...] = (
             "every kind has a mapping, and every mapping key names an "
             "existing kind."
         ),
-        fixed_by=(753, 759),
-        seed_tests=("tests/test_canonical_finding_id_completeness.py",),
+        fixed_by=(753, 759, 932),
+        seed_tests=(
+            "tests/test_canonical_finding_id_completeness.py",
+            "tests/test_report_classifications_unit.py",
+        ),
         known_gaps=(
             KnownGap(
                 description=(
-                    "Only canonical_finding_id's classification is "
-                    "exhaustiveness-checked today; the same totality "
-                    "property is not yet generalized to every other "
-                    "kind-keyed registry named in Phase 9 of the plan "
-                    "(evidence kinds, providers, report renderers)."
+                    "canonical_finding_id's classification and "
+                    "report_classifications.py's seven hand-maintained "
+                    "kind-keyed frozensets are now reverse-completeness "
+                    "checked (every member names a live ChangeKind, with a "
+                    "mutation check proving the assertion actually fails on "
+                    "a corrupted set) — but the same totality property is "
+                    "not yet generalized to every other kind-keyed registry "
+                    "named in Phase 9 of the plan (evidence kinds, "
+                    "providers, other report renderers)."
                 ),
                 reference="docs/contribute/plans/bug-class-regression-testing.md#phase-9",
             ),
             KnownGap(
                 description=(
-                    "The seed test calls `finding_identity."
-                    "report_canonical_finding_id` directly — no CLI, no "
-                    "python-api — so nothing here proves a real registry "
-                    "omission reaches a `compare()` report."
+                    "The seed tests call `finding_identity."
+                    "report_canonical_finding_id`/`report_classifications` "
+                    "helpers directly — no CLI, no python-api — so nothing "
+                    "here proves a real registry omission reaches a "
+                    "`compare()` report."
                 ),
                 reference="docs/contribute/plans/bug-class-regression-testing.md#phase-9",
             ),
@@ -550,15 +581,18 @@ BUG_CLASSES: tuple[BugClass, ...] = (
             "result must agree, checked independently, not all derived "
             "from one production helper."
         ),
-        fixed_by=(834, 838, 860, 883),
-        seed_tests=("tests/test_fact_conservation_properties.py",),
+        fixed_by=(834, 838, 860, 883, 932),
+        seed_tests=(
+            "tests/test_fact_conservation_properties.py",
+            "tests/test_bundle_side_input.py",
+        ),
         known_gaps=(
             KnownGap(
                 description=(
                     "The fact-conservation suite covers a selected "
                     "detector-family subset today, not every ChangeKind "
                     "family and evidence-completeness failure mode named "
-                    "in AGENTS.md's 'Known gaps' section."
+                    "in `docs/contribute/known-gaps.md`."
                 ),
                 reference="docs/contribute/plans/bug-class-regression-testing.md#phase-9",
             ),
@@ -568,7 +602,16 @@ BUG_CLASSES: tuple[BugClass, ...] = (
                     "directly on hand-built snapshots — real detection "
                     "logic, but no CLI/python-api/exit-code layer, so "
                     "report/gate/exit-code agreement (the second half of "
-                    "this class's own invariant) is untested."
+                    "this class's own invariant) is untested. Incident "
+                    "#883's own gap — a dropped `policy_file` reaching "
+                    "silently unverified through a mocked "
+                    "`compare_snapshots` — is now closed independently by "
+                    "`test_bundle_side_input.py`'s "
+                    "`test_policy_file_override_genuinely_demotes_a_real_"
+                    "verdict`, which runs the real, unmocked "
+                    "`compare_snapshots` and asserts the returned verdict "
+                    "is actually demoted (a mutation check: reverting the "
+                    "production fix fails this test)."
                 ),
                 reference="docs/contribute/plans/bug-class-regression-testing.md#phase-9",
             ),
@@ -602,6 +645,49 @@ BUG_CLASSES: tuple[BugClass, ...] = (
                     "(`docs/use/multi-binary.md`, G38 Phase 14 notes)."
                 ),
                 reference="docs/contribute/plans/g38-bundle-facts-model-and-multibuild-comparability.md#phase-14",
+            ),
+        ),
+    ),
+    BugClass(
+        id="extraction.implicit_declaration_leaks_into_surface",
+        invariant=(
+            "A header-AST backend's own compiler-synthesized declaration "
+            "(an implicit default/copy/move constructor, destructor, or "
+            "copy/move `operator=` the user never wrote) is treated as "
+            "reachable public/exported API by a downstream consumer only "
+            "when it matches a genuine, ODR-used export in the real export "
+            "table — never merely because the source declares it, "
+            "regardless of the declaration's origin or access. An "
+            "unresolved export table (not yet known, as opposed to "
+            "genuinely empty) keeps every such candidate, deferring the "
+            "drop until authoritative matching can actually run."
+        ),
+        fixed_by=(920,),
+        seed_tests=(
+            "tests/test_castxml_compiler_generated.py",
+            "tests/test_dumper_clang_compiler_generated.py",
+            "tests/test_serialization_function_compiler_generated.py",
+            "tests/test_castxml_l4_phantom_members.py",
+        ),
+        public_surfaces=(),
+        axes={"frontend": ("castxml",)},
+        known_gaps=(
+            KnownGap(
+                description=(
+                    "Only castxml's own `artificial=\"1\"` marker is read "
+                    "(`Function.is_compiler_generated`); the direct-clang "
+                    "L2 backend never emits an implicit declaration as a "
+                    "`Function` at all (its AST walk skips `isImplicit` "
+                    "nodes outright), so it needs no equivalent per-node "
+                    "signal and is covered structurally rather than by a "
+                    "real clang-invoking seed test for this axis. If a "
+                    "future clang change ever started emitting an "
+                    "implicit node, this class's clang-side seed test "
+                    "(a hand-built AST dict, not a real clang subprocess) "
+                    "would not by itself catch it."
+                ),
+                reference="tests/test_dumper_clang_compiler_generated.py::"
+                "test_parse_functions_skips_implicit_declarations_entirely",
             ),
         ),
     ),

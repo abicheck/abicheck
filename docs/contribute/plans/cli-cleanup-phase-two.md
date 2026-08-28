@@ -48,15 +48,28 @@ its own section below), PR 4 changes what a CI job's exit code means.
 > assignments and `gate.*` fields (PR B's scope is wider than the 2026-08-16
 > update above states — see that section for the current breakdown); the
 > PR 3B build-context-completeness gaps (forced pre-includes, matched-unit
-> include scoping) are closed. #883 itself fixed a real bundle-facts gap
-> this plan's PR B/bundle sections should account for: `PolicyFile` now
-> reaches both per-library *and* bundle-level verdicts (it previously
-> reached only per-library), the JSON resource budget is now applied
-> uniformly to archive and plain-JSON bundle-facts input, and
+> include scoping) are closed. #883 itself fixed a real bundle-facts gap:
+> `PolicyFile` now reaches both per-library *and* bundle-level verdicts (it
+> previously reached only per-library), the JSON resource budget is now
+> applied uniformly to archive and plain-JSON bundle-facts input, and
 > `DEFAULT_SYSTEM_PROVIDERS` grew several more vendor runtimes (oneTBB,
 > oneMKL, Intel runtime, Level Zero) — the latter is explicitly a tactical
-> fix, not the topology model PR B's bundle section still needs (see that
-> section for why a growing global allow-list isn't the end state).
+> fix, not a real topology model for bundle-level system-provider
+> classification. **Correction (2026-08-28): this was never actually PR B's
+> own scope** — PR B's two stated goals (pack parity, effective-config
+> digest) are about *configuration* reaching every relevant CLI command
+> path (typed-API pack parity is separate, outstanding work — see PR B's
+> own "finalized" note below), not about bundle *verdict topology*; the
+> growing-allow-list gap is recorded in the
+> root `AGENTS.md`'s "Known gaps" section, pointing at `g42-check-identity-
+> environments-and-provider-resolution.md`'s own "Environment-aware
+> system-provider resolution" design rather than sketching a competing fix
+> (Codex review, PR #910, fresh evidence: an earlier revision of this note
+> also pointed at a since-removed AGENTS.md entry for a *second*, "sibling"
+> policy-override gap that #883 -- named two sentences above -- had already
+> fixed; that stale entry is gone, this note no longer claims it) — see PR
+> B's own "finalized" note below for why the remaining topology gap doesn't
+> block PR B closing.
 > **PR 0B/P0 is still the single outstanding item with no code-side gap
 > left** — see its status note below for the ready-to-apply Ruleset
 > artifact this pass added. PR C (typed dump/scan convergence) remains the
@@ -2122,11 +2135,28 @@ pipelines a fourth time.
   >    `effective_compile_db`), and reordering
   >    `_write_snapshot_output`'s provenance/`--inputs`/depth-gate sequence
   >    around a resolve-time embed.
-  > 2. **The L4 extractor default still diverges** between `scan` (clang, via
-  >    `embed_build_source`'s `"auto"`) and `dump`/`compare` (castxml, via
-  >    `effective_frontend`). Removing the flags does not cause this, but it
-  >    is a live "two interpreters of one config" instance. **No longer
-  >    "unverifiable without castxml"** — see the 2026-08-27 note below this
+  > 2. **The L4 extractor default still diverges, in more than one pairing.**
+  >    `scan`'s candidate resolution hardcodes `source_extractor="auto"`
+  >    (`embed_build_source`, ignoring whatever `--ast-frontend` scan itself
+  >    received), which resolves to clang; `compare`'s implicit-dump operand
+  >    and the typed `execute_dump_request` pipeline reach
+  >    `effective_frontend`, which resolves an unflagged `"auto"` to castxml
+  >    by default -- **not unconditionally: an `ABICHECK_AST_FRONTEND`
+  >    override changes this (`clang` resolves clang instead; `hybrid`
+  >    resolves `"hybrid"`, which rejects a raw-source `depth="source"`
+  >    request outright rather than resolving to any extractor at all --
+  >    see the dated note's own environment-resolution matrix below for the
+  >    full per-value account, Codex review, fresh evidence).** The native
+  >    `dump` CLI is neither of those — it
+  >    resolves its own `header_backend` from the explicit `--ast-frontend`
+  >    flag or a `compile.frontend` config value only, never through
+  >    `effective_frontend`, and defaults an unflagged invocation to clang
+  >    too (Codex review, fresh evidence, correcting this item's own prior
+  >    grouping of `dump` with `compare` here — see the dated note two
+  >    sections below for the full investigation).** Removing the flags
+  >    does not cause any of this, but it is a live "two interpreters of one
+  >    config" instance. **No longer "unverifiable without castxml"** — see
+  >    the 2026-08-27 note below this
   >    block, which obtained a real one and reproduced the divergence
   >    directly; the fix itself is still not attempted, deliberately.
   > 3. **Prerequisite 3's own remaining `-H`-directory gap**, below, is
@@ -2288,6 +2318,49 @@ pipelines a fourth time.
   > already-scoped test run. This step stays open until someone actually
   > runs it.
   >
+  > **Update (2026-08-28): the Flow-2 half is closed.** A real Flow-2 pack
+  > fixture (`write_inputs_pack`) was built and run through
+  > `_write_snapshot_output(snap, ..., inputs_pack=...)` with `snap` produced
+  > by the real `resolve_dump_request`/`execute_dump_request` split, not a
+  > hand-stubbed pack. The fold does the identical combination
+  > `_combine_packs`'s own documented per-layer priority already predicts,
+  > regardless of how `snap.build_source` was populated: it is not a
+  > per-fact merge — `bi_pack` (the resolve-time-embedded snapshot passed as
+  > `embed_inputs_pack`'s first argument) wins L3 (`build_evidence`) first,
+  > while `src_pack` (the ingested Flow-2 pack, second argument) wins
+  > L4/L5 (`source_abi`/`source_graph`) first when it supplies real facts —
+  > wholesale per layer, not unioned. Verified both directions with a
+  > fixture where the Flow-2 pack supplies a declaration (`helper`, declared
+  > in no header the resolve-time embed ever parsed) the resolve-time L4
+  > surface has no way to see: the written snapshot links `helper` (the
+  > Flow-2 replacement took effect) while the resolve-time embed's own L3
+  > compile-unit facts — the one layer Flow-2 did not supply here — survive
+  > the combination untouched, and the resolve-time embed's own L4 fact for
+  > `sum()` does *not* survive (pinning the wholesale-replacement,
+  > not-a-merge semantics itself, not just the positive case). **Correction
+  > (Codex review, PR #917): L5 is not independently preserved in this
+  > scenario** — `ingest_inputs_pack` builds `source_abi`/`source_graph`
+  > together from the same `tus` list whenever any TU is supplied, so a
+  > Flow-2 pack that replaces L4 always supplies a real, non-empty L5 graph
+  > too, and `_combine_packs` prefers `src_pack` for L5 exactly as it does
+  > for L4 — the resolve-time embed's own graph (17 nodes, including a
+  > `sum()` declaration node) is replaced wholesale by Flow-2's own graph
+  > (8 nodes, containing only `helper`), confirmed directly by asserting the
+  > `sum()` node is absent and the `helper` node present in the final graph
+  > rather than only that the graph is non-empty (an earlier revision of
+  > this test asserted only non-emptiness, which passed regardless of which
+  > pack's graph won). This is not new behavior introduced by a
+  > resolve-time embed — `_combine_packs`'s per-layer priority is
+  > unconditional on how either pack was produced — but it was genuinely
+  > unverified for this specific base-pack shape until now. Test:
+  > `tests/test_dump_write_after_resolve_time_embed.py::
+  > test_write_snapshot_output_folds_a_flow2_inputs_pack_onto_a_resolve_time_embedded_snapshot`.
+  > This closes the Flow-2 half of the reordering prerequisite in full; the
+  > still-unstarted third step above (the whole migrated pipeline's
+  > byte-identical-output verification, blocked only on castxml before this
+  > update, no longer blocked on it either) remains the sole open item in
+  > this prerequisite.
+  >
   > **Item 2 (the L4 extractor default divergence) is now locally
   > reconfirmed under real castxml — but this is a reproduction of an
   > already-established fact, not its first verification, and deliberately
@@ -2317,12 +2390,21 @@ pipelines a fourth time.
   > and `test_scan_against_real_dump_baseline_matches_reported_cli_invocation`)
   > were reproduced locally, matching exactly the divergence their own
   > long-standing module docstring already predicted: `scan`'s
-  > candidate resolution uses `source_extractor="auto"` (`scan_engine.py`,
-  > `_build_new_snapshot`), which `_make_source_extractor`
-  > (`buildsource/inline.py`) resolves to clang, while `dump`/`compare` reach
-  > `effective_frontend(...)` (`service_compare_evidence.py`), which resolves
-  > `"auto"` through `dumper._resolve_header_backend` to castxml
-  > unconditionally (no clang fallback). The rest of the `integration`-marked
+  > candidate resolution *hardcodes* `source_extractor="auto"`
+  > (`scan_engine.py`, `_build_new_snapshot`) regardless of whatever
+  > `--ast-frontend` value scan itself received, which `_make_source_
+  > extractor` (`buildsource/inline.py`) resolves to clang -- while these
+  > two tests give `dump` an *explicit* `--ast-frontend castxml`, which the
+  > native `dump` CLI honors directly (`resolve_dump_compile_context()`,
+  > never through `effective_frontend`). **The two land on the same
+  > castxml-vs-clang outcome these tests observe, but not through the
+  > mechanism this paragraph originally described (Codex review, fresh
+  > evidence, correcting this exact paragraph's own prior "dump/compare
+  > reach `effective_frontend(...)`" claim) — `dump`'s own CLI path never
+  > calls `effective_frontend` at all; only `compare`'s implicit-dump
+  > operand and the typed `execute_dump_request` pipeline do, and only for
+  > an *unflagged* `"auto"` request, which is not the shape these two tests
+  > exercise.** The rest of the `integration`-marked
   > suite for this area — `test_dump_cli_typed_api_parity.py`,
   > `test_dump_scan_l3_comparability.py`'s non-xfailed cases,
   > `test_dump_write_after_resolve_time_embed.py`,
@@ -2461,6 +2543,457 @@ pipelines a fourth time.
   > pressure. Item 2 therefore stays open, with its blocker now precisely
   > characterized instead of merely "unverifiable" or "needs its own
   > dedicated pass" in the abstract.
+
+  > **A new, previously-undocumented divergence found while investigating
+  > item 2's migration risk directly (2026-08-28): `dump`'s own CLI L4
+  > extractor default disagrees with `compare`'s implicit-dump operand and
+  > the typed `execute_dump_request` pipeline — a real bug, unrelated to
+  > whether the migration happens, and it changes the migration's risk
+  > profile rather than only its verification burden.** Traced end to end,
+  > not guessed: `perform_elf_dump` (`cli_dump_helpers.py`) receives
+  > `header_backend` from the CLI's own resolved value and forwards it
+  > **unresolved** — `extractor=header_backend`, still the literal string
+  > `"auto"` when `--ast-frontend` is not given — all the way down through
+  > `_write_snapshot_output` → `embed_build_source` → `collect_inline_pack`
+  > to `buildsource.inline._make_source_extractor`, which (per its own,
+  > already-documented behavior) treats anything but the literal string
+  > `"castxml"` as clang -- **unconditionally**, with no `ABICHECK_AST_
+  > FRONTEND` consultation of its own. So a plain `dump --depth source`
+  > with no explicit `--ast-frontend` resolves its L4 source-ABI replay to
+  > **clang**. Confirmed with a debug spy on the real CLI invocation
+  > (`header_backend` captured as the literal `"auto"` at the
+  > `perform_elf_dump` call site).
+  >
+  > **Third qualification (Codex review, fresh evidence, two rounds --
+  > the first draft of this qualification was itself wrong and is
+  > corrected here rather than left standing).** A first attempt at this
+  > qualification claimed the divergence additionally requires
+  > `ABICHECK_AST_FRONTEND` to be unset, alongside no config-selected
+  > frontend. That is false for the env var half: `ABICHECK_AST_FRONTEND`
+  > is consulted by `dumper._resolve_header_backend` (the L2 header-AST
+  > backend picker) and by `compare`/`execute_dump_request`'s own
+  > `effective_frontend`, but **never** by the native `dump` CLI's L4
+  > extractor selection — `resolve_dump_compile_context()`
+  > (`cli_dump_helpers.py`/`cli_options.resolve_compile_context`) only
+  > ever resolves `header_backend` from the explicit CLI flag or the
+  > discovered `.abicheck.yml`'s `compile.frontend`, never from the
+  > environment. So `ABICHECK_AST_FRONTEND=castxml` does **not** prevent
+  > this reproduction: the `dump` CLI's `header_backend` still resolves to
+  > the un-given default `"auto"` (env-var-blind) and `_make_source_
+  > extractor` still treats that as clang, while `compare`'s/`execute_
+  > dump_request`'s `effective_frontend` honors the env var and resolves
+  > castxml — the two sides still disagree. `ABICHECK_AST_FRONTEND=clang`
+  > closes this specific gap by coincidence: `_make_source_extractor` was
+  > already going to pick clang by default, and the env var pushes
+  > `effective_frontend` to the identical choice. **`ABICHECK_AST_
+  > FRONTEND=hybrid` does NOT close it for the raw-source `--depth source`
+  > reproduction -- it turns the discrepancy into native success vs.
+  > typed/compare rejection, not agreement (Codex review, fresh evidence,
+  > correcting this exact paragraph's own prior claim that hybrid closes
+  > the gap "too, for the same coincidental reason").** Both
+  > `resolve_dump_request()` and `resolve_compare_request()` call
+  > `workflows.artifact.resolve.reject_hybrid_source_frontend()` before
+  > embedding, which resolves the environment-selected frontend via the
+  > *same* `effective_frontend()` this paragraph already relies on -- so
+  > with `ABICHECK_AST_FRONTEND=hybrid` set, that guard sees
+  > `effective_frontend(...) == "hybrid"` for a raw (non-pack) `sources`
+  > tree under `depth="source"` and raises `ValidationError` outright,
+  > before `_make_source_extractor("hybrid", ...)` is ever reached. The
+  > native `dump` CLI carries the identical guard
+  > (`_dump_will_attempt_hybrid_l4_extraction`,
+  > `frontends/cli/commands/dump.py`) but only fires it when the CLI's own
+  > *resolved* `header_backend` is literally `"hybrid"` -- which, per this
+  > note's own earlier finding, only happens from an explicit
+  > `--ast-frontend hybrid` flag or a `compile.frontend: hybrid` config,
+  > never from the (env-var-blind) `"auto"` default. So with only
+  > `ABICHECK_AST_FRONTEND=hybrid` set and no explicit flag/config, the
+  > native `dump` CLI's guard never fires, `header_backend` stays `"auto"`,
+  > and `_make_source_extractor("auto", ...)` proceeds to clang and
+  > succeeds -- while the typed/compare path raises `ValidationError` for
+  > the identical input. `ABICHECK_AST_FRONTEND=clang` is therefore the
+  > *only* `ABICHECK_AST_FRONTEND` value that closes this gap by genuine
+  > agreement (both sides succeed and resolve clang); `hybrid` closes
+  > nothing and `castxml` leaves the original clang-vs-castxml disagreement
+  > standing.
+  >
+  > The config half of the original qualification does hold, but only for
+  > the **CLI-vs-CLI** pairing, not the CLI-vs-typed-API one: a project
+  > `.abicheck.yml` pinning `compile.frontend` (to either `castxml` or
+  > `clang`) is discovered by `resolve_dump_compile_context()` and reaches
+  > `header_backend` as that explicit string, and `compare`'s own CLI path
+  > discovers and honors the identical config value — so the native `dump`
+  > and `compare` CLIs agree whenever a config pins the frontend, closing
+  > the divergence for that pairing. It does **not**, by itself, close the
+  > divergence against a *directly constructed* typed `DumpRequest`/
+  > `execute_dump_request` call: `resolve_dump_request()` never discovers
+  > `.abicheck.yml` at all — it derives its evidence solely from
+  > `DumpRequest.input.compile` and the request-level `frontend` field the
+  > caller supplied, so a config's `compile.frontend` has no effect on a
+  > typed request unless the caller separately replicates it.
+  >
+  > **Qualification (Codex review, fresh evidence): this does not mean
+  > every config pin leaves a bare typed request diverging equally in both
+  > directions.** `resolve_dump_request()`
+  > (`service_dump_pipeline.py`) resolves `header_backend` from the
+  > request-level `DumpRequest.frontend` field *before* calling
+  > `effective_frontend()` — `header_backend = frontend_lower if
+  > frontend_lower in HEADER_AST_FRONTENDS else "auto"`, then
+  > `effective_frontend(evidence.compile, header_backend)` — so a typed
+  > caller can align with a `compile.frontend: clang` config by setting
+  > only the request-level `DumpRequest(frontend="clang", ...)`, with no
+  > need to touch `input.compile.frontend` at all: `effective_frontend`
+  > honors an already-non-`"auto"` `header_backend` over its own castxml
+  > default. A `compile.frontend: castxml` config needs no typed-side
+  > action to align either, for a simpler reason — `effective_frontend`'s
+  > bare default (an un-set `DumpRequest.frontend`, still `"auto"`) is
+  > already castxml, so that direction was never divergent from a config
+  > pin in the first place -- **when no `ABICHECK_AST_FRONTEND` override
+  > is set (Codex review, fresh evidence, correcting this exact claim).**
+  > `dumper._resolve_header_backend`'s own precedence honors an *explicit*
+  > `castxml`/`clang`/`hybrid` verbatim, consulting `ABICHECK_AST_FRONTEND`
+  > only for the `"auto"` case -- so the native CLI's config-forwarded
+  > explicit `"castxml"` string is env-var-blind, but a bare typed
+  > request's un-set `"auto"` default is not: with `ABICHECK_AST_
+  > FRONTEND=clang` set, the CLI stays castxml (explicit, ignores the env
+  > var) while the typed request resolves clang (auto, honors it) -- the
+  > two diverge again, contrary to the "needs no typed-side action" claim
+  > this paragraph made without that qualification. The claim above holds
+  > precisely for a typed request that leaves *both* `DumpRequest.frontend`
+  > and `input.compile.frontend` at their defaults (`"auto"`/unset) *and*
+  > no `ABICHECK_AST_FRONTEND` override selects a frontend — that is the
+  > shape that survives a config-pinned frontend unclosed, not every typed
+  > request unconditionally.
+  >
+  > `compare`'s implicit-dump operand and `execute_dump_request` both reach
+  > L4 replay through the *same* shared primitive,
+  > `workflows.artifact.execute.embed_side_build_source`, whose
+  > `source_extractor: str | None = None` parameter's own docstring already
+  > states the contract: `None` keeps that function's own
+  > `service_compare_evidence.effective_frontend` resolution -- the
+  > identical native-`dump`-CLI-vs-typed/`compare` pairing, `ABICHECK_AST_
+  > FRONTEND`-vs-config precedence, and per-value outcome (unset/`castxml`
+  > disagree; `clang` converges on clang by coincidence; `hybrid` does
+  > *not* converge -- it turns the divergence into native success vs.
+  > typed/compare `ValidationError` rejection) the "Third qualification"
+  > note above already establishes in full **(consolidated here rather
+  > than restated a second time, per this file's own single-owner
+  > documentation contract; Codex review, fresh evidence)** -- see that
+  > note for the complete per-value matrix and reasoning.
+  >
+  > Confirmed directly, with the environment variable unset: a
+  > `dump`-CLI-written baseline's
+  > `build_source.source_abi.coverage.fact_set.producer` reads
+  > `"abicheck-cc-clang-extractor"`; the identical input run through
+  > `resolve_dump_request`/`execute_dump_request` reads `"castxml-source"`.
+  > Every other field of the two runs' *flat* (L0-L2) snapshot payload was
+  > confirmed byte-identical (modulo `created_at`/`dependency_scope`, both
+  > already-documented, expected differences) — this is specifically an L4
+  > extractor-selection divergence, not a wider parity gap.
+  >
+  > This is a **third** instance of the "L4 extractor default" divergence
+  > this plan already tracks for `scan` (item 2, two notes above) — but on
+  > the opposite side of the pairing this whole area cares about most:
+  > `scan`'s own candidate resolution *also* defaults to clang (documented),
+  > so a `scan --against` a `dump`-CLI-written baseline happens to have both
+  > sides agree by accident (verified: `scan --against` a plain `dump`
+  > baseline for the fixture above reports `NO_CHANGE`, not
+  > `NOT_COMPARABLE`) — but `dump`'s own CLI baseline compared against
+  > `compare`'s implicit-dump resolution of the identical live binary pairs
+  > a clang-derived old side against a castxml-derived new side. **This is
+  > not reproducible through the native `compare` CLI's own `--old/new-
+  > sources`/`--build-info` flags at all (Codex review, fresh evidence,
+  > correcting this exact paragraph's own prior `compare oldbaseline.json
+  > new.so --sources new=<tree>` reproduction command) -- a raw, non-pack
+  > `sources`/`build_info` value on either side makes `_needs_inline_embed()`
+  > true, which routes through `_embed_inline_source_sides()` /
+  > `_embed_inline_source_side()`'s own nested `ctx.invoke(dump_cmd, ...)` --
+  > the exact same native `dump` CLI path the baseline itself took, unflagged
+  > `"auto"` and all, so a `--sources new=<tree>` new side resolves clang,
+  > not castxml, pairing clang with clang instead of demonstrating the
+  > divergence. **`sources` and `build_info` are not equivalent here, though
+  > (Codex review, fresh evidence): a `--build-info`-only new side (no
+  > `--sources`) still enters this same nested `dump_cmd` invocation, but
+  > `_run_inline_source_abi(sources, ...)` (`buildsource/inline.py`) returns
+  > `(None, [])` immediately when `sources is None` -- before
+  > `_make_source_extractor()` is ever called -- since a raw `--build-info`
+  > supplies only L3 compile-unit evidence, never an L4 source tree to
+  > extract from. So `--build-info`-only resolves no extractor at all
+  > (clang or castxml), and only a raw `--sources` value actually reaches
+  > and exercises this resolution.** "`compare`'s implicit-dump operand" instead names the
+  > *typed* pipeline `resolve_compare_request`/`resolve_side_snapshot`
+  > share with `execute_dump_request` (`header_conditionals.py`'s own
+  > module-header comment) -- reached only when `compare` resolves a side
+  > with no CLI-level raw `--sources`/`--build-info` flag at all (a direct
+  > typed `CompareRequest` call). **A project-level `.abicheck.yml`'s
+  > `sources:`/`build:` blocks are NOT an alternative route to this here
+  > (Codex review, fresh evidence, correcting this exact paragraph's own
+  > prior claim to the contrary): `_resolve_side_snapshot_impl()`
+  > (`workflows/artifact/execute.py`) only embeds L3-L5 evidence when `if
+  > side.sources or side.build_info:` -- a per-side `InputSpec` field the
+  > typed pipeline never populates from a discovered config file (the typed
+  > pipeline doesn't discover `.abicheck.yml` at all, established earlier in
+  > this same note); those config keys are collection settings the *CLI*
+  > resolvers consult, not an `InputSpec` source.** A bare `compare
+  > oldbaseline.json new.so` with no
+  > `sources`/`build_info` input anywhere (CLI flag or a typed `InputSpec`
+  > field) has nothing
+  > for `embed_build_source` to call `collect_inline_pack()` against, so it
+  > produces no new-side L4 evidence to diverge on at all -- the actual
+  > reproduction needs a typed `CompareRequest(old=..., new=InputSpec(path=
+  > new_so, sources=<the same tree the baseline was dumped from>, ...),
+  > depth="source")` call -- `depth` lives on `CompareRequest` itself, not
+  > `InputSpec` (Codex review, fresh evidence, correcting this exact
+  > paragraph's own prior misplacement, which would raise `TypeError:
+  > InputSpec.__init__() got an unexpected keyword argument 'depth'` before
+  > ever reaching the resolver) -- with a real, raw (non-pack) `sources` value
+  > on the `InputSpec` itself, so `resolve_side_snapshot` reaches
+  > `effective_frontend`
+  > directly, pairing a clang-derived old side against a castxml-derived new
+  > side as originally intended -- and the `profile_fingerprint`/
+  > `scope_fingerprint`
+  > comparability gate does not consult the extractor choice, so this does
+  > **not** surface as `NOT_COMPARABLE`. **Correction (Codex review, fresh
+  > evidence): the extractor choice is not *unrecorded* -- it already reads
+  > straight off `build_source.source_abi.coverage.fact_set.producer`, as
+  > this same paragraph's own confirmation above demonstrates
+  > (`"abicheck-cc-clang-extractor"` vs. `"castxml-source"`).** The actual
+  > gap is narrower than "nowhere a consumer can see": that already-recorded
+  > identity is simply never folded into the comparability fingerprints, so
+  > the existing `NOT_COMPARABLE` gate -- which exists precisely to catch a
+  > disagreement between two sides' extraction facts -- has no way to act on
+  > a signal it already has sitting right next to it.
+  >
+  > **Second correction (Codex review, fresh evidence): folding `producer`
+  > into `profile_fingerprint`/`scope_fingerprint` is NOT the right fix
+  > direction, and this note should not have named that gate as "where the
+  > fix belongs."** `buildsource.source_diff.diff_source_abi()` already
+  > passes both sides' `fact_set`s through `fact_set.check_fact_
+  > compatibility()`, which explicitly handles a `producer`/`producer_
+  > version`/`compiler_version` mismatch as one of its own named
+  > invalidating conditions (see that function's own docstring) -- it
+  > selectively suppresses only the specific evidence categories a producer
+  > mismatch actually invalidates (structured-content, opaque-hash,
+  > source-edge comparisons) while retaining compiler-neutral structured
+  > facts, and emits `SOURCE_FACT_COVERAGE_INCOMPLETE` to record why. This
+  > is a deliberate, already-built, category-specific degradation
+  > mechanism -- folding `producer` into the coarse, all-or-nothing
+  > `profile_fingerprint`/`scope_fingerprint` gate would hard-fail the
+  > *entire* comparison as `NOT_COMPARABLE` the moment two sides picked
+  > different (but individually valid) default extractors, discarding every
+  > compiler-neutral fact `check_fact_compatibility` would have correctly
+  > kept comparable. Whatever the real fix for this divergence turns out to
+  > be (see the "Deliberately not fixed here" note below), it needs to
+  > reconcile with this existing mechanism first, not bypass it with a
+  > blunter one. It silently produces
+  > two different sets of L4-derived facts for the
+  > "same" comparison, real only when the two extractors actually disagree
+  > about a declaration (item 3's own castxml phantom-implicit-member bug
+  > is exactly such a disagreement: clang does not have it, so a clang-L4
+  > `dump` baseline compared against a castxml-L4 live resolution of a class
+  > with implicit special members is a live vector for a spurious
+  > `source_binary_provenance_mismatch`-shaped finding, though this was not
+  > separately reproduced with a repro that isolates it from item 3's own
+  > repro).
+  >
+  > **Deliberately not fixed here, in either direction, and here is why
+  > both "obvious" fixes are each their own real behavior change:** (a)
+  > making `dump`'s CLI resolve `header_backend` through
+  > `effective_frontend` before forwarding it as `extractor=` would align it
+  > with `compare`/the typed pipeline — but at the time this was written it
+  > would also have meant every plain `dump --depth source` newly
+  > inheriting item 3's then-still-open castxml phantom-implicit-member
+  > bug, which `dump`'s current (accidental) clang default did not have.
+  > **Correction (Codex review, fresh evidence): item 3's fix had NOT
+  > landed on this tree at the time this note was written, and an earlier
+  > revision overstated it as already fixed.** Item 3's own fix
+  > (`Function.is_compiler_generated`, `entity_from_function` gating
+  > `api_relevant` on it, the ctor/dtor owner-index rescue and its several
+  > follow-on findings) is real and verified, and has since landed in this
+  > same tree (see this plan's own item-3 status note below, "The castxml
+  > L4 extractor bug is fixed") — so the specific regression risk this
+  > paragraph names (a naive migration of `dump`'s CLI onto
+  > `effective_frontend`/`execute_dump_request` newly inheriting the castxml
+  > phantom-implicit-member bug on every plain `dump --depth source`) is
+  > now closed. The CLI-vs-typed-pipeline extractor divergence documented
+  > in this note is independently still open regardless of item 3's landing
+  > status, and still needs its own dedicated, verified pass rather than a
+  > byproduct of this one. (b)
+  > making `compare`/the typed pipeline default to clang to match `dump`'s
+  > CLI would contradict `dumper._resolve_header_backend`'s established,
+  > intentional castxml-first default for **L2** header-AST parsing, which
+  > the typed dump/compare pipeline deliberately couples its own L4 choice
+  > to via `effective_frontend` (this plan's item 2 elsewhere). **Correction
+  > (Codex review, fresh evidence): this is not a repository-wide "castxml
+  > is the canonical L2/L4 default" architecture, and the original wording
+  > overstated it.** A separate, dedicated L4-only resolver exists
+  > (`buildsource.source_extractors.resolver.resolve_source_extractor`,
+  > `AUTO_PREFERENCE = (CLANG, CASTXML)` — clang preferred first, on
+  > capability grounds, "most capable first") with the *opposite* default
+  > direction. **Second correction (Codex review, fresh evidence): this
+  > resolver does have a real production caller, contrary to the "no
+  > production caller anywhere" claim this note originally made.**
+  > `select_source_backend()` calls `resolve_source_extractor()`, and
+  > `cc_wrapper.emit_facts_for_command()` — reached from the published
+  > `abicheck-cc` console entry (`pyproject.toml`'s `[project.scripts]`,
+  > ADR-035 D5/G19.4's Flow-2 compiler wrapper) — calls
+  > `select_source_backend()`. So the capability-ordered, clang-first
+  > `AUTO_PREFERENCE` policy is already user-facing, through a different
+  > front end (`abicheck-cc`'s per-TU fact capture at compile time) than
+  > the `dump`/`compare`/`scan` pipeline this note is about. This still
+  > does not contradict `dump`'s CLI default: the two resolvers serve
+  > genuinely different callers (a compiler-wrapper's own per-compile
+  > extractor choice, vs. this pipeline's post-hoc choice of which
+  > extractor a whole comparison routes through), so `AUTO_PREFERENCE`
+  > being real and shipped doesn't itself argue for or against either of
+  > the two "obvious fixes" this note already rejects — only the "no
+  > production caller" framing was wrong, not the conclusion drawn from
+  > it. What actually constrains direction (b) is narrower and real: the *typed*
+  > `dump`/`compare` pipeline's specific, deliberate choice to couple L4 to
+  > L2 through one shared resolution (`effective_frontend`), for reasons
+  > that have nothing to do with this one CLI code path — not a
+  > codebase-wide L4 convention. Either direction is a real, user-facing
+  > behavior change needing its own dedicated, verified pass — not a
+  > byproduct of characterizing item 2's migration risk. What this finding
+  > *does* change is item 2's own risk calculus: a naive migration of
+  > `dump`'s CLI onto `execute_dump_request` would, as a side effect,
+  > silently flip this default from clang to castxml -- so "byte-identical
+  > to today's output" is not actually the right acceptance bar for L4
+  > facts specifically; today's output is itself one side of a pre-existing,
+  > real disagreement, not a stable target to match. (Item 3's fix was not
+  > merged on this tree at the time this note was originally written, but
+  > has since landed in this same tree -- see this plan's own item-3 status
+  > note below, "The castxml L4 extractor bug is fixed" -- closing this
+  > specific regression risk. It is still a real, user-facing default
+  > change that needs to be a deliberate decision, not a side effect
+  > discovered mid-migration -- Codex/CodeRabbit review: an earlier
+  > revision of this wording said "now that item 3 is fixed", contradicting
+  > this same section's own earlier correction at the time it was written.)
+  > A correct migration plan needs
+  > to decide this divergence's resolution *before* attempting
+  > byte-identical verification, not discover it via a failing diff
+  > mid-migration.
+  > **The castxml L4 extractor bug is fixed (2026-08-28).** A new field,
+  > `Function.is_compiler_generated` (schema v27), records castxml's own
+  > `artificial="1"` XML attribute — read for ANY function-like element,
+  > not just `Constructor`/`Destructor` where it was already read for
+  > `_ctor_or_dtor_visibility` — closing the exact gap this entry
+  > identified as the only reliable, general signal (the two pre-existing
+  > synthetic-mangled-name markers, `is_synthetic_ctor_key`/
+  > `is_synthetic_dtor_key`, could not catch a synthesized `operator=`,
+  > which castxml gives a real-looking Itanium mangled name). The
+  > direct-clang L2 backend stamps `is_compiler_generated=False`
+  > unconditionally, not per-node: its own `_walk` already skips
+  > `_categorize` entirely whenever a node is `isImplicit`, so a node
+  > reaching `parse_functions()`'s output is structurally guaranteed to
+  > have been written by the user — confirmed by reading `dumper_clang.py`
+  > directly, not assumed. Every existing consumer of `Function.visibility`
+  > was checked and needed no change — this fix is additive (a new field)
+  > rather than a change to `visibility`'s own HIDDEN/PUBLIC split, so
+  > nothing that already reads `visibility` observes different behavior.
+  >
+  > **Correction (Codex review, same day): the first cut of this fix
+  > unconditionally excluded every confirmed compiler-generated declaration
+  > from `api_relevant` — wrong, because an ODR-used implicit special member
+  > CAN have a real exported symbol** (e.g. a public function returning a
+  > type by value calls its implicit copy/move constructor, which the
+  > compiler still emits as a real weak export). `entity_from_function` is a
+  > per-declaration, export-table-blind mapping stage — it has no way to
+  > know whether a given implicit member is ODR-used, so excluding
+  > unconditionally there would silently drop that genuine symbol's only
+  > source declaration. Fixed by moving the decision downstream to
+  > `link_source_abi`'s `_route_declaration`, which already has the
+  > exported-symbol table: `entity_from_function` now stays additive (stamps
+  > `SourceEntity.ownership["compiler_generated"] = "true"`, `api_relevant`
+  > unchanged), and `_route_declaration` gives such an entity one export-
+  > match attempt before recording it at all — matched, it is linked like
+  > any ordinary declaration; unmatched, it is dropped outright (not counted
+  > reachable-but-unmatched), closing the identical false-positive
+  > `source_binary_provenance_mismatch` this entry's own repro produced,
+  > without losing a genuinely-exported implicit member in the process.
+  >
+  > **Two further findings on this same correction, both real, both fixed
+  > (Codex review, same PR).** (1) The export-match attempt only ever
+  > compares `entity.mangled_name` directly against the export set —
+  > correct for `operator=` (castxml always gives it a real Itanium mangled
+  > name) but not for a constructor/destructor, whose real mangled name
+  > castxml frequently omits, leaving a *synthetic* internal key
+  > (`dumper_castxml.SYNTHETIC_CTOR_KEY_PREFIX`-prefixed, or `~`-prefixed
+  > for a destructor) that can never equal a real export by direct
+  > comparison — so an ODR-used implicit constructor/destructor with a real
+  > weak export (`_ZN...C1.../_ZN...C2...`) was still silently dropped, the
+  > identical class of loss the correction above was written to close, just
+  > for a different declaration kind. Fixed with a new, narrowly-scoped
+  > module, `buildsource/ctor_export_match.py`: `itanium_scope_components`
+  > already parses a ctor/dtor mangled symbol's owning scope correctly
+  > (confirmed empirically: `_ZN6WidgetC1ERKS_` → `["Widget", "{ctor}"]`),
+  > so a class-level index (owner scope → "ctor"/"dtor"/"both") built once
+  > per link gives a synthetic key one rescue check: does its owning class
+  > have *any* matching ctor/dtor export at all. Deliberately conservative
+  > in one direction, documented rather than attempted: a templated owner
+  > (castxml's own spelling embeds `"<...>"`) is never matched, since
+  > `itanium_scope_components`'s mangled-argument spelling (`"BoxIiE"` for
+  > `Box<int>`) does not textually agree with castxml's spelled form, and
+  > this codebase's own history (this file's "linkage-blind-removal"/type-
+  > identity entries) shows that reconciling two independently-spelled
+  > identities via a partial match is exactly the class of bug that has
+  > taken multiple review rounds to find and revert elsewhere — a templated
+  > class's synthetic-keyed ctor/dtor still falls back to the original
+  > "no export visibility, drop it" behavior. (2) `_route_declaration`
+  > dropped a `compiler_generated` candidate outright whenever `exported`
+  > was empty — correct for "checked a real export table, found nothing",
+  > wrong for "the export table isn't known yet", which is exactly the
+  > Flow-2/parallel-baseline `merge` flow's own documented shape
+  > (`relink_surface_exports`'s own docstring: "the parallel-baseline
+  > `merge` flow links the source surface with no binary present"). That
+  > flow's later `relink_surface_exports()` pass only re-matches entities
+  > already in `reachable_declarations` — it never adds one back that the
+  > first link already dropped — so every compiler-generated candidate in
+  > that flow was permanently lost before the real export table was ever
+  > consulted. Fixed by never dropping when `exported` is itself empty
+  > (unresolved, not confirmed absent).
+  >
+  > A third, independent finding surfaced while testing the ctor/dtor
+  > rescue against a real fuzzed/adversarial export string (an existing
+  > regression test, `test_ctor_dtor_fold_tolerates_malformed_huge_length_
+  > fields`, which this new code path made reachable for the first time):
+  > `diff_cxx_rules._read_length_prefixed_name` computed a mangled symbol's
+  > declared length via a bare `int(s[i:j])`, which raises on a fuzzed
+  > symbol with thousands of digits (Python's integer-conversion digit
+  > limit) — a pre-existing latent bug in a shared, widely-used parser,
+  > newly reachable because this is the first caller to feed it strings
+  > read from a binary's own untrusted export table. `buildsource/
+  > source_link.py`'s own, unrelated ctor/dtor folder already carries the
+  > identical guard (`_consume_source_name`, digit-by-digit accumulation
+  > capped at the input length) for the same reason; `_read_length_
+  > prefixed_name` now does too.
+  >
+  > Verified against real castxml 0.7.0 and real clang 20, not only against
+  > hand-built fixtures: `tests/test_castxml_l4_phantom_members.py::
+  > test_castxml_l4_extract_excludes_implicit_special_members_from_reachable_surface`
+  > reproduces this entry's own exact repro end to end through the real
+  > `CastxmlSourceExtractor.extract` → `link_source_abi` pipeline (not a
+  > synthetic fixture) — confirmed to fail against the pre-fix code with
+  > the identical `7` exportable-declarations / `1` matched shape this
+  > entry's own investigation found, and to pass after it with a clean
+  > `1/1`. Further coverage: `tests/test_castxml_compiler_generated.py`
+  > (the castxml parser level, hand-built XML mirroring real castxml
+  > output element-for-element), `tests/
+  > test_dumper_clang_compiler_generated.py` (the direct-clang parser
+  > level, plus a direct pin that an `isImplicit` node never reaches
+  > `parse_functions()`'s output at all), and `tests/
+  > test_serialization_function_compiler_generated.py` (schema-v27
+  > round-trip, including a pre-v27 snapshot dict loading the field as
+  > `None`).
+  >
+  > **Deliberately not done in this same pass, per this entry's own
+  > established caution and the plan's item 2 section above**: flipping
+  > `scan_engine.py`'s `source_extractor="auto"` to follow
+  > `effective_frontend` (closing the scan-vs-dump/compare L4 extractor
+  > default divergence item 2 documents) — that remains a separate,
+  > deliberately deferred decision needing its own dedicated verification
+  > in production usage, not a byproduct of fixing the bug that blocked it.
+  > This fix removes that decision's main objection (castxml's L4 surface
+  > was unsafe to trust), but does not itself change any default.
 
 `dump --build-query` and `dump --build-compile-db` describe how the *project*
 is built, not what this snapshot is. They are already documented as CLI
@@ -2765,6 +3298,14 @@ immutable effective configuration (one `CompatibilityEvaluationConfig`, one
 and the Action, with the same effective-config digest recorded in every
 report.
 
+**Scope correction (2026-08-28): the `GateOptions` half of "land first"
+above was reassigned to PR G2, not landed as part of PR B — see PR B's own
+"finalized" note below for the complete, canonical status (what landed,
+the typed-API pack-parity exception, and why `GateOptions` was
+reassigned). Consolidated here to one pointer rather than three
+independently-drifting restatements (Codex review, PR #910, `docs/AGENTS.md`'s
+"one fact, one canonical page" rule).**
+
 > **Slice 1 landed (2026-08-16):** the directory/package release fan-out no
 > longer rejects `--pack` outright. `CompareRequest` gained `pack_policy_
 > overrides`/`pack_internal_namespaces` (additive, `None` by default — see the
@@ -2901,21 +3442,54 @@ report.
 > resolves regardless (`DiffResult.policy`/`policy_file`, the resolved
 > `SeverityConfig`/`exit_code_scheme` pair). One function,
 > `effective_config_fields`, picks the tier; `compare` (via
-> `reporter_contract_blocks.add_contract_context`), the directory/package
-> release fan-out (the same call -- release reports funnel through the
-> identical function, so no separate release-side computation exists to
-> drift), and `scan --against` (`cli_scan_baseline._run_baseline_compare`,
+> `reporter_contract_blocks.add_contract_context`), `reporter.py`'s
+> `--stat` JSON summary builder, and `scan --against`
+> (`cli_scan_baseline._run_baseline_compare`,
 > reusing the exact `sev_config`/`exit_scheme` pair its own `exit` block was
 > just resolved from) all call it through one shared helper,
-> `reporter_contract_blocks.add_effective_config_digest` -- so "the same
-> effective-config digest recorded in every report" is now literally one
-> function, not three approximations of one shape. `report_schema_version`
-> 2.45 / `scan_schema_version` 1.19 (additive keys:
-> `effective_config_digest`/`effective_config_fields`). Tests:
-> `tests/test_effective_config_digest.py` (both tiers directly, plus
-> cross-report parity: two reports resolving the identical configuration
-> produce the identical digest regardless of findings/library name, and a
-> policy override changes it).
+> `reporter_contract_blocks.add_effective_config_digest` -- so across
+> those call sites this digest reaches, it's now literally one
+> function, not several approximations of one shape. `report_schema_version`
+> 2.45 / `scan_schema_version` 1.19 (additive keys: `effective_config_digest`/
+> `effective_config_fields`). **Scope correction (Codex review, fresh
+> evidence, three rounds — the first draft of this correction undercounted
+> the call sites, the second overcounted them, this is the corrected
+> version): "in every report" overstates this -- the digest reaches only
+> the native JSON report path, and even there it's not one uniform digest
+> everywhere.** `add_effective_config_digest` is called from exactly
+> three places: `reporter_contract_blocks.py`'s own `add_contract_context`
+> (a per-library/single-comparison `compare` JSON report, gated on
+> `include_exit_decision`), `reporter.py`'s separate `--stat` JSON summary
+> builder, and `cli_scan_baseline.py`'s `scan --against` JSON path. **The
+> directory/package release fan-out does NOT go through this function at
+> all** -- its own release-level *summary* JSON (both the primary release
+> report, `cli_compare_release_helpers._format_release_json`, and the
+> `--output-dir` sibling, `cli_compare_release._write_release_summary_
+> file`) instead calls a separate, narrower helper,
+> `_release_summary_effective_config_block`, which computes its digest
+> from `SeverityConfig` alone -- no `CompatibilityEvaluationConfig`/
+> `PolicyFile`/suppression object exists at release-summary scope at all
+> (documented as a known, accepted gap in that helper's own docstring).
+> So two releases differing only by a policy pack or internal-namespace
+> override can share an identical release-summary digest even though
+> their *per-library* sidecar reports (which DO reach
+> `add_effective_config_digest` via `add_contract_context`) correctly
+> differ -- a real, narrower parity gap this note previously elided by
+> claiming the release fan-out reuses the identical call. The Markdown,
+> review, SARIF, JUnit, and HTML renderers (`html_report.py`, `sarif.py`,
+> `junit_report.py`, and `reporter.py`'s own non-JSON renderers) never call
+> it, so a user selecting one of those output formats gets no
+> effective-configuration fingerprint at all. `compat check
+> --report-format json` also intentionally omits it: `compat/cli.py`
+> reuses `reporter.to_json` with `include_exit_decision=False` (its real
+> process exit follows the ABICC-style 0/1/2 scheme, not the native
+> gate/severity axes this digest describes), which
+> `TestCompatReportOmitsTheDigest` in `tests/test_effective_config_
+> digest.py` pins directly. Tests: `tests/test_effective_config_digest.py`
+> (both tiers directly, plus cross-report parity: two reports resolving
+> the identical configuration produce the identical digest regardless of
+> findings/library name, a policy override changes it, and the compat
+> exception above).
 >
 > **What remains open, deliberately not attempted in this slice, and why:**
 > the *first* still-open goal from the note above -- one shared
@@ -2989,10 +3563,65 @@ report.
 > from `TestGateBlanking` to assert the new, accurate provenance instead of
 > the old blanked-to-default one.
 
+> **PR B finalized (2026-08-28).** Both of PR B's own stated goals are fully
+> landed for every CLI command path: pack parity across `compare`, the
+> release fan-out, and `scan --against`, both `policy.overrides`/`surface.
+> internal_namespaces` *and* `gate.*` fields — slices 1-3 — plus the
+> effective-config digest reaching every native JSON report path in some
+> form (slice 4; **narrower than "every report", and narrower still than
+> "one uniform digest"**, Codex review, fresh evidence — see slice 4's own
+> section above for the exact scope: only the JSON report path calls
+> `add_effective_config_digest` at all — the Markdown/review/SARIF/
+> JUnit/HTML renderers don't, and `compat check --report-format json`
+> deliberately omits the field too — and even within JSON, the
+> directory/package release-summary report does not go through
+> `add_effective_config_digest`: its own `_release_summary_effective_
+> config_block` hashes `SeverityConfig` alone, so two releases differing
+> only by a policy pack or internal-namespace override can share an
+> identical release-summary digest even though their per-library sidecar
+> reports correctly differ — a real, open parity gap this status note does
+> not claim closed, kept open alongside the `GateOptions` item below).
+> **Narrower again once the typed
+> Python API is included**: `--pack`
+> is a CLI selector today (ADR-049 D8), and neither `ScanRequest` nor
+> `CompareRequest` carries a pack field a typed caller can set — `ScanRequest`
+> has none at all (`service_scan._resolve_api_evaluation_config` explicitly
+> resolves `pack_paths=()`, documented at that call site as "a `ScanRequest`
+> has no pack field"), and `CompareRequest` accepts only pre-resolved
+> `pack_policy_overrides`/`pack_internal_namespaces` (the `policy.overrides`/
+> `surface.internal_namespaces` halves), with no `gate.*` equivalent — so a
+> typed-API caller cannot reproduce a CLI `gate`-pack's severity/exit-code
+> configuration today (Codex review, PR #910, fresh evidence). Landing that
+> is its own, separate slice — a `pack_paths`/gate-pack field on both typed
+> requests, threaded through `PackApplication` the way the CLI receipts
+> already are — not implied by anything closed here. The one
+> remaining loose end named above — a typed `GateOptions` object the
+> release fan-out's own severity/exit-code-scheme resolution is built from,
+> replacing its six-raw-string threading — is deliberately **not** PR B's
+> to close. It was investigated in slice 4's own pass and found to need a
+> genuine rewrite of the release fan-out's internal representation, in the
+> single most reviewed area of this plan, immediately ahead of PR G2's own
+> not-yet-designed rewrite of the identical logic (the ADR-gated one-gate-
+> algorithm unification `--exit-code-scheme` removal needs) — building it
+> now risks colliding with a design that doesn't exist yet, rather than
+> simplifying ahead of it. Reassigned explicitly to PR G2 as one of *its*
+> prerequisites (see that section's own "(1) Pack parity" and "(2) One
+> canonical `ExitDecision`" pair below — the `GateOptions` unification
+> belongs with (2), since it's the same rewrite), not tracked as
+> outstanding PR B work. See the "Ordering" table at the bottom, which now
+> marks PR B **(DONE)** on this basis.
+
 This is also PR 1b/E's prerequisite, which is why it sits early in the
 reviewed ordering rather than inside PR 4.
 
-**(2) One canonical `ExitDecision` — the review's PR G proper.** Since #780
+**(2) One canonical `ExitDecision` — the review's PR G proper.** This
+prerequisite also inherits PR B's one deliberately-deferred item (see PR B's
+"finalized" note above): the release fan-out's own severity/exit-code-scheme
+resolution still threads six raw strings through four functions instead of
+one typed `GateOptions` object the way `compare`/`scan` already share via
+`ResolvedCompareConfig`. That rewrite belongs here, not as separate PR B
+follow-up, since it touches the identical exit-code-computation logic this
+`ExitDecision` unification is already rewriting. Since #780
 this is no longer two axes but a set of them, and a flat `max()` is not the
 whole rule: scan budget overflow (`5`) is scan-only, and so is a pinned depth
 whose evidence can't be collected (`_EvidenceContractError`, exit `1`); usage
@@ -3213,11 +3842,18 @@ slice that made it safe.
 ```text
 PR A  repository governance          = PR 0B — required checks / Ruleset,
                                        exact-merge-SHA verification
-PR B  effective configuration parity — packs resolved once into one
-                                       CompatibilityEvaluationConfig +
-                                       GateOptions, shared by compare /
-                                       release / scan / Action, digest in
-                                       every report
+PR B  effective configuration parity  — packs resolved once into one
+      (DONE)                           CompatibilityEvaluationConfig, pack
+                                       parity across every CLI command
+                                       path (typed-API parity is separate,
+                                       outstanding work), and an
+                                       effective-config digest in every
+                                       native JSON report (see PR B's own
+                                       section for the non-JSON/compat
+                                       exception); the release fan-out's own
+                                       typed GateOptions object is
+                                       deliberately reassigned to PR G2,
+                                       see PR B's own section for why
 PR C  typed dump+scan convergence     = PR 3A — DumpRequest →
                                        ResolvedDumpRequest → DumpResult, one
                                        resolver for dump CLI/Python/Action

@@ -956,16 +956,4762 @@ confirmed to fail against the pre-change code (`git stash`); the
 representational-only assertions pass either way, since they pin
 already-correct, now-explicit behavior rather than a regression.
 
+**The widened, non-glob AI-readiness check — landed (third slice).**
+`scripts/fact_field_readers.py` (registered by `check_ai_readiness.py` as
+`fact-field-readers`) is the real, repo-wide static scan this Design
+section names: an AST walk for a direct attribute *read* (`ast.Load`) of
+`bases`/`virtual_bases`/`vtable`/`vptr_offset_bits`/`is_va_list` anywhere
+under `abicheck/`, not a `diff_*.py` glob — because a glob is exactly what let this section's
+own hand-enumeration repeatedly miss a real reader across several review
+rounds (the fifth, then the tenth call site each surfaced only in a later
+pass). Auditing the real tree while building this check (rather than
+trusting that hand list) found **three more genuine semantic readers the
+plan's own nine-reader table doesn't name**:
+`buildsource/header_graph.py`'s inheritance-edge emitter (walks `rt.bases`
+to build the L5 source graph's `INHERITS` edges), `buildsource/
+source_extractors/base.py`'s `entity_from_record()` (folds `rec.bases`/
+`rec.vtable` into the L4/L5 source-ABI-replay entity-identity fingerprint),
+and `idioms.py`'s factory/non-virtual-destructor anti-pattern detectors
+(`_recognise_factory`/`_is_virtual_dtor_present`/`_collect_base_targets`/
+`_detect_non_virtual_dtor`, all reading `rec.vtable`/`rec.bases` directly)
+— confirming this Design section's own conclusion in the most direct way
+possible: a hand-maintained list is not the same invariant as "every known
+reader is checked," and it takes exactly this kind of real scan to find
+the readers a hand audit keeps missing.
+
+The check's baseline (`KNOWN_UNMIGRATED_READERS`, allowlist-and-shrink,
+`IMPORT_CYCLE_ALLOWLIST`'s own convention) currently records every known
+reader site across the modules named above and throughout this Design
+section (including `vptr_offset_bits` and every dynamic-read form later
+review rounds added -- `getattr`/its aliases, `operator.attrgetter`,
+`__getattribute__`, `MatchClass` keyword and positional patterns -- each
+described in its own round below) — the exact count is deliberately not
+restated here as a number (Codex review, fresh evidence: an earlier
+revision of this paragraph copied the count by hand and went stale the
+moment a later round changed it, the same drift risk every "stays at N"
+review-note copy below carried too -- those now read "the baseline count
+is unchanged" instead of a literal figure, for the identical reason).
+`len(KNOWN_UNMIGRATED_READERS)` in the source is this baseline's own fact
+owner, and the count is explicitly expected to shrink as readers migrate.
+Each site is keyed `"<rel>::<qualname>::<attr>::
+<outer-expr-text>::<expr-text>::<occurrence>"` -- `qualname` the enclosing
+function (`<module>` for module-level code, `Class.method` for a method),
+`outer-expr-text` the read's own outermost containing expression
+(`_outermost_containing_expr`, climbing every enclosing `ast.expr` up to
+the first statement boundary), `expr-text` the read's own exact bare
+source text (`ast.get_source_segment`), `occurrence` a rank among reads
+sharing all four of those. This is the *final* key shape, landed by the
+"fingerprint the containing expression" round further below -- the count
+and key shape in this paragraph previously described only the check's
+*first* landed slice, silently contradicting the append-only review notes
+below it once those notes moved past it (Codex review, fresh evidence);
+readers auditing the gate should treat the review notes' own final state
+as authoritative, and this paragraph is now kept in sync with it rather
+than left as a stale first draft. That first draft keyed only
+`"<rel>::<attr>::<occurrence>"`; a
+Codex review round caught the real gap in that: an existing read migrated
+or deleted and a different, unrelated read of the same attribute later
+added to the same file would silently inherit the vacated occurrence
+number and read as an already-reviewed site — scoping the counter to
+`(qualname, attr)` needs the new read to land in the exact same function at
+the exact same rank to collide, a real coincidence rather than a routine
+edit's side effect.
+
+**A second Codex round found the function-scoped key still collides.**
+`diff_param_qualifiers.py`'s `if not p_old.is_va_list and p_new.is_va_list:`
+has two DIFFERENT reads (`p_old.is_va_list`, `p_new.is_va_list`) on one
+line, in the same function — a purely positional rank can't tell them
+apart, or protect a future, unrelated third read from inheriting one's
+rank once it's migrated away. Fixed by folding the read's own source text
+into the key (`ast.get_source_segment`, scoping the occurrence counter to
+`(qualname, attr, text)`) — a collision now needs the new read to be the
+*textually identical* expression, not merely occupy the same rank in the
+same function. Every key in the baseline below carries this shape.
+
+`EXEMPT_FUNCTIONS` is the separate, non-shrinking set of specific
+functions this check never flags: `RecordType.__post_init__`/
+`Param.__post_init__` (the fields' own `__post_init__` omission-bridge
+implementation) and two specific DWARF functions,
+`dwarf_snapshot._DwarfSnapshotBuilder._finalize_vptr_offsets` and
+`dumper_layout_backfill._backfilled_record`, which compute or combine the
+raw legacy value itself rather than making a compatibility decision from
+it. **Function-scoped, not module-scoped — a first draft exempted the
+whole `dwarf_snapshot.py`/`dumper_layout_backfill.py` modules, and a
+Codex review round found that was wrong**: both files hold a second kind
+of function that genuinely *decides* something from these fields rather
+than merely computing them --
+`_DwarfSnapshotBuilder._filter_types_by_reachability` reads `bases`/
+`virtual_bases` to decide which types survive into the exported snapshot
+(dropping one on a false "no bases" reading is a real, silent
+correctness loss, not a cosmetic one), and `dumper_layout_backfill.
+_fields_corroborate` reads `bases`/`virtual_bases`/`vtable` to decide
+whether two records structurally match across the header/DWARF backfill.
+A whole-module exemption hid both from the scan entirely; narrowing to
+function scope surfaced them as two more genuine, previously-invisible
+readers, now real `KNOWN_UNMIGRATED_READERS` entries themselves (bringing
+the total from the originally-reported 91 to 99).
+
+**Two more real gaps found in the same review round, both fixed.** (1)
+`RecordType.vptr_offset_bits` was originally left out of
+`FACT_BRIDGED_ATTRS` on the theory that it was "already meaningfully
+`None`... never itself ambiguous" before this phase — false: it carries
+the identical `_OMITTED_VPTR_OFFSET_BITS` sentinel-based omission bridge
+the other four fields use (`RecordType()` backfills `Fact.not_collected()`;
+`RecordType(vptr_offset_bits=None)` backfills `Fact.present(None)` — two
+different Facts for the same `None` legacy value), so a direct read has
+the identical ambiguity. Adding it surfaced four more real reader sites
+(`diff_layout.py`'s `_check_vptr_introduced`/`_has_layout_descriptor`).
+(2) The scan matched only `ast.Attribute` nodes, missing a dynamic
+`getattr(obj, "vtable", ...)` read with the attribute name as a literal
+string constant — `diff_cpp_patterns._is_empty_record` reads `vtable`
+exactly this way, invisible to the original scan. Fixed by also matching
+a `getattr()` call whose second argument is a string-literal `ast.Constant`
+naming one of the bridged attributes (a non-literal name stays out of
+scope, the same no-type-inference limit already stated for the attribute
+case). No type inference is attempted — verified empirically, by running
+the scan against the whole package before writing the baseline, that
+every hit recorded there is genuinely a `RecordType`/`Param` access
+(attribute or `getattr`) with zero cross-class collisions. Tests:
+`tests/test_fact_field_readers.py` (the real repository has zero unlisted
+violations; every baseline/exempt entry still names something real; the
+AST primitive's own contract — attrs detected including `vptr_offset_bits`,
+`getattr` calls detected and a non-matching/dynamic name ignored, `Store`
+ignored, per-function occurrence numbering, module/class qualname
+derivation — pinned directly; and end-to-end cases against a throwaway
+`abicheck/`-shaped tree confirming the check function itself, not only the
+primitive, fires on a new violation, stays silent on a baselined one, and
+respects a function-scoped exemption without leaking to a sibling function
+in the same file).
+
+**A fifth Codex review round found two more real gaps, both fixed.** (1)
+The scan matched an `ast.Attribute` read and a `getattr()` call, but not a
+structural-pattern-matching read: `case RecordType(bases=[]):` reads
+`bases` via `ast.MatchClass.kwd_attrs` (a `list[str]`, paired positionally
+with `kwd_patterns`), a node shape neither branch recognized — invisible
+to the check even though it collapses unavailable and confirmed-empty the
+same way a direct attribute read does. Fixed by matching a `MatchClass`
+node's `kwd_attrs` against `FACT_BRIDGED_ATTRS` too, keyed by the matched
+keyword pattern's own location and the whole class pattern's source text
+(`RecordType(bases=[])`) as `expr-text`, since a `MatchClass` node carries
+no location for a single keyword on its own. Verified empirically to have
+zero existing hits — no `match`/`case` statement in the repository
+currently patterns on any of these five fields, so the baseline count is unchanged. (2) The root `AGENTS.md`'s AI-readiness gate table (the canonical
+verification contract every other check is listed in) had no row for
+`fact-field-readers`, leaving it undiscoverable from that table — added
+alongside `engine-cli-boundary`'s own row. New test:
+`test_detects_a_structural_pattern_match_naming_a_bridged_attr`.
+
+**A sixth Codex review round found two more real gaps in the same area,
+both fixed.** (1) *Positional* class patterns: `case RecordType(_, _, _,
+_, _, []):` reads a field via `cls.__match_args__` positionally, which
+`MatchClass.kwd_attrs` (the previous fix's whole mechanism) doesn't cover
+at all — an empty `kwd_attrs` list for a purely positional pattern, so
+the loop finds nothing. Resolving *which* position maps to which field
+would need real `__match_args__` introspection (the dataclass's own
+declared field order) this pure-AST scan can't do — instead of leaving
+this silently invisible, ANY non-empty positional pattern on a
+`MatchClass` whose `cls` resolves by bare name to `RecordType`/`Param`
+(`FACT_BRIDGED_CLASS_NAMES`, a new two-name constant) is reported with a
+synthetic `<positional>` attr, on this module's own established
+false-positive-over-false-negative principle. (2) A deeper, third-round
+collision in the baseline key itself: two DIFFERENT call sites sharing
+identical bare attribute text — `old_decision(rec.bases)` and, elsewhere
+in the same function, `keep(rec.bases)` — still differed only by
+occurrence ordinal even after the previous two rounds' fixes (function
+scope, then bare-expression text), because the key never looked past the
+attribute node itself to the *expression containing it*. Migrating
+`old_decision` away and adding an unrelated third read anywhere in the
+same function re-numbers the survivors in encounter order — `keep`
+silently drops to rank 1 (harmless, it was already reviewed), but the new
+read then lands on rank 2, silently inheriting `keep`'s own baseline
+approval. Fixed with `_outermost_containing_expr()`: a one-pass parent
+map, then climbing every enclosing `ast.expr` up to (but never past) the
+first statement boundary. Deliberately the containing *expression*, not
+the containing *statement* — a first attempt at this same fix climbed to
+the nearest `ast.stmt` instead, which for `if not p_old.is_va_list and
+p_new.is_va_list: changes.append(make_change(...))` pulled the *entire
+if-body* into the key (a ~970-character entry that would silently break
+on any unrelated edit inside that body) — caught before landing by
+checking the actual generated key lengths, not just that the fix
+compiled. Stopping at the expression boundary gives the whole boolean
+test (`not p_old.is_va_list and p_new.is_va_list`, shared correctly by
+both reads, still disambiguated between them by the existing bare-text
+component) without the body. Key format is now `"<rel>::<qualname>::
+<attr>::<outer-expr>::<expr-text>::<occurrence>"` — five components before
+the ordinal, not three. Baseline regenerated directly from the real scan
+(still the same number of entries, only the key shape changed) and re-verified at zero
+unlisted violations. New tests: two different call sites with identical
+bare text now getting distinct keys with no ordinal needed, a compound
+statement's body confirmed excluded from the key, a positional pattern on
+a bridged class detected, and one on an unrelated class ignored.
+
+**A seventh Codex review round found the positional-pattern fix itself
+was defeated by an import alias, fixed in the same PR.** `from
+abicheck.model import RecordType as RT` then `case RT(_, _, _, _, _,
+[]):` names the identical class, but a bare `node.cls.id in
+FACT_BRIDGED_CLASS_NAMES` check rejects `"RT"` outright — invisible to
+the positional-pattern fix despite being exactly the shape it exists to
+catch. Fixed with `_imported_class_aliases()`: maps every local name an
+`import`/`from ... import` statement binds one of `FACT_BRIDGED_CLASS_
+NAMES` under (via `as`) back to its real name, whole-tree rather than
+function-scoped (an import is visible for its entire enclosing scope
+regardless of where a later pattern uses it) — the positional-pattern
+check resolves through this map before testing membership. Verified
+empirically: still zero existing hits, baseline count is unchanged. New tests:
+a positional pattern through an import alias detected, one on an alias
+of an unrelated class ignored.
+
+**An eighth Codex review round found two more real gaps, both fixed in
+the same PR -- the same two mechanisms, probed one alias mechanism
+further each.** (1) `RT = RecordType` (a plain module-level assignment,
+not an `import ... as`) then `case RT(_, _, _, _, _, []):` -- the
+import-alias fix from the previous round only visited `Import`/
+`ImportFrom` nodes, so a simple name assignment was invisible to it.
+Fixed by extending `_imported_class_aliases()` to also collect a
+single-target `name = OtherName` assignment as a candidate, resolved to
+`FACT_BRIDGED_CLASS_NAMES` (directly, or transitively through an
+already-resolved alias -- `RT2 = RT` chains too) the same fixed-point
+way `fact_detector_misuse._fact_aliases` already chains local aliases.
+(2) `import builtins; builtins.getattr(rec, "bases")` and `from builtins
+import getattr as read_attr` are both the identical read as a bare
+`getattr(rec, "bases")` call, but the existing check only matched an
+`ast.Call` whose `func` was literally the bare `ast.Name` `"getattr"`.
+Fixed with `_builtins_getattr_aliases()`: collects every local name bound
+to the real `getattr` builtin (the bare name itself, plus any `from
+builtins import getattr as X`) and every local name bound to the
+`builtins` module itself (`import builtins`, `import builtins as b`),
+and the `getattr`-detection branch now also matches a qualified call
+(`<name>.getattr(...)`) whose base resolves to one of those module
+names. Verified empirically: still zero existing hits, baseline count is unchanged. New tests: a local class-name alias detected and a negative control
+for an unrelated class, a qualified `builtins.getattr` call detected, an
+aliased `getattr` import detected, and a negative control for a call
+qualified through an unrelated module.
+
+**A ninth Codex review round found two more real gaps, both fixed in the
+same PR -- the same two mechanisms probed one further indirection layer
+each, matching the eighth round's own framing.** (1) `read_attr = getattr`
+then `read_attr(rec, "bases")` is the identical dynamic read as a bare
+`getattr(rec, "bases")` call, but `_builtins_getattr_aliases()` only ever
+collected the bare name and a `from builtins import getattr as X` import
+-- a plain assignment chain to the builtin callable was invisible, the
+identical gap the eighth round's fix (1) already closed for a *class*
+alias but left open for `getattr` itself. Fixed by extending
+`_builtins_getattr_aliases()` with the same fixed-point assignment-chaining
+`_imported_class_aliases` already does (`RT = RecordType`, `RT2 = RT`),
+just for the builtin callable instead of a class name. (2) `rec.bases +=
+inherited` updates a bridged field, but Python marks the target Attribute
+node `ast.Store` even though the operation reads the field's existing
+value first, to combine it with the right-hand side, before writing the
+result back -- an ordinary `Store`/`Del` (a plain overwrite) genuinely
+never reads, but an `AugAssign` target always does, and the existing
+Load-only restriction missed this distinction entirely: the target
+Attribute node is still visited independently by `ast.walk` (it's a child
+of the `AugAssign`), but its `Store` context skipped the ordinary
+attribute branch too. Fixed with a dedicated `ast.AugAssign` branch
+matching the target's own attribute name, keyed on the target Attribute
+node itself (not the whole `AugAssign` statement) so its site/text line up
+with an ordinary attribute read at the same position. Verified
+empirically: still zero existing hits, baseline count is unchanged. New tests: a
+local `getattr` alias detected, a chained `getattr` alias detected, an
+augmented assignment detected, and a negative control confirming an
+ordinary `Store` overwrite is still not flagged.
+
+**A tenth Codex review round found two more real gaps, both small,
+bounded extensions of already-built mechanisms -- fixed, matching the
+review-convergence status already posted on this PR (further exotic
+indirection is documented as a known gap; a bounded combination of two
+already-supported mechanisms is not).** (1) `RT: type = RecordType` then
+`case RT(_, _, _, _, _, []):` -- an ordinary annotated assignment
+(`ast.AnnAssign`), not the `ast.Assign` the class-alias collector already
+matched. The same gap the eighth round's fix (1) closed for a plain
+`RT = RecordType`, reached through a differently-typed AST node the
+collector never visited. Fixed by adding an `ast.AnnAssign` branch to
+`_imported_class_aliases()` alongside the existing `ast.Assign` one,
+feeding the identical fixed-point chain. (2) `read_attr = builtins.
+getattr` then `read_attr(rec, "bases")` -- combining two mechanisms this
+file already supports independently (the qualified-call recognition from
+round eight and the plain-assignment chaining from round nine) in a way
+neither alone catches: the assignment's own value is `builtins.getattr`
+(an `ast.Attribute`), not a bare `ast.Name`, so the existing candidate
+collector -- which only ever matched an `ast.Name` value -- never added
+it. Fixed with a second candidate list resolved once, after the walk
+finishes collecting every `import builtins` occurrence (needed since,
+unlike the plain-name candidates, this resolution needs the *complete*
+`builtins_names` set before it can tell whether the qualifying name is
+really the `builtins` module). Verified empirically: still zero existing
+hits, baseline count is unchanged. New tests: an annotated class alias detected
+through a positional pattern, and a qualified assignment to the
+`getattr` builtin detected.
+
+**An eleventh Codex review round found one more real gap, the same
+small, bounded shape as round ten's fix (1) -- fixed.** `read_attr:
+Callable[..., object] = getattr` then `read_attr(rec, "bases")` -- the
+annotated-assignment spelling of the `getattr`-alias assignment, an
+`ast.AnnAssign` the candidate collector never matched (it only ever
+walked `ast.Assign`). The same gap round ten's fix (1) already closed
+for `_imported_class_aliases()`, now closed for `_builtins_getattr_
+aliases()` too, for both the plain-name and qualified-attribute value
+shapes -- factored into one shared `_add_candidate()` helper so the
+`ast.Assign` and `ast.AnnAssign` branches can't independently drift on
+which value shapes each recognizes. Verified empirically: still zero
+existing hits, baseline count is unchanged. New tests: an annotated `getattr`
+alias detected, and the annotated form of the qualified spelling
+(`read_attr: object = builtins.getattr`) detected too.
+
+**A twelfth Codex review round found one more real gap, the class-alias
+mirror of round eleven's `getattr` fix -- fixed.** `import abicheck.model
+as model; RT = model.RecordType` then `case RT(_, _, _, _, _, []):` --
+combining two already-supported forms (a qualified class reference,
+already recognized when used directly as `model.RecordType(...)`-shaped
+construction elsewhere in this file's own reasoning, and an assignment
+alias) in a way neither alone catches: the assignment's own value is
+`model.RecordType`, an `ast.Attribute`, not a bare `ast.Name`, so
+`_imported_class_aliases()`'s candidate collector never resolved it.
+Fixed by resolving a qualified-attribute RHS immediately whenever its own
+`.attr` is one of `FACT_BRIDGED_CLASS_NAMES` -- matching the identical
+name-only stance the `import ... as` branch already takes for its own
+qualifying source module (never checked either way) -- factored into one
+shared `_register_assign()` helper (mirroring round eleven's
+`_add_candidate()` for `_builtins_getattr_aliases()`) so the `ast.Assign`
+and `ast.AnnAssign` branches can't independently drift on which RHS
+shapes each recognizes. Verified empirically: still zero existing hits,
+baseline count is unchanged. New test: a qualified class alias detected through
+a positional pattern.
+
+**A thirteenth Codex review round found one more real gap, applying to
+both alias resolvers at once -- fixed.** `RT = Alias = RecordType` (an
+ordinary chained assignment) then `case RT(_, _, _, _, _, []):`, and the
+identical shape for `_builtins_getattr_aliases()`: `read1 = read2 =
+getattr` then `read1(rec, "bases")` -- both resolvers' `ast.Assign`
+branches were still restricted to `len(node.targets) == 1`, so a chained
+assignment (every target receiving the identical RHS, unlike a
+tuple-unpacking target, which has no single value to attribute) was
+excluded the same way the fifth-Codex-round-in-`fact_detector_misuse.py`
+finding was for that module's own candidate collector. Fixed by looping
+over every target in `node.targets` and registering each plain-`Name`
+one, in both `_imported_class_aliases()` and `_builtins_getattr_
+aliases()`. Verified empirically: still zero existing hits, baseline
+count is unchanged. New tests: a chained class alias detected through a
+positional pattern, and a chained `getattr` alias detected.
+
+**A fourteenth Codex review round found one more real gap -- fixed.**
+`import builtins; b = builtins` then `b.getattr(rec, "bases")` --
+`builtins_names` was only ever populated from a real `import` statement
+(`import builtins`/`import builtins as b`), never from a plain assignment
+alias of an already-known one. Fixed by resolving `builtins_names` to a
+fixed point too, reusing the identical `assign_candidates` list the
+`getattr` alias chain already builds (it already captures every simple
+Name-valued assignment, not just getattr-related ones) -- resolved
+*before* the existing `qualified_candidates` step, so `b.getattr(...)`
+is recognized through the now-expanded `builtins_names` as well.
+Verified empirically: still zero existing hits, baseline count is unchanged.
+New test: a call through an assigned alias of the `builtins` module.
+
+**A fifteenth Codex review round found the scan still missed two more
+standard dynamic-attribute-reading forms, distinct from `getattr`'s own
+alias family the previous several rounds closed -- both fixed.**
+`operator.attrgetter("bases")(rec)` and `object.__getattribute__(rec,
+"bases")`/`rec.__getattribute__("bases")` read the identical legacy value
+through different standard-library entry points -- `getattr()` is itself
+defined in terms of `__getattribute__`, and `attrgetter` is the
+callable-returning equivalent -- so unavailable evidence could again read
+as confirmed-empty while the required gate passed. Fixed with a new
+`_is_attrgetter_constructor_call()` helper (recognizing both the
+qualified `operator.attrgetter(...)` spelling and the bare one reached
+via `from operator import attrgetter`) plus two new branches matching a
+`__getattribute__` call in both its bound (`rec.__getattribute__
+("bases")`) and unbound (`object.__getattribute__(rec, "bases")`/`type.
+__getattribute__(rec, "bases")`) forms. Both stay scoped to the same "no
+type inference" limit as every other branch here: only a single,
+literal-string field name is recognized -- `attrgetter("a.b")`'s dotted
+chain, and a two-step `getter = attrgetter(...); getter(rec)` indirection
+through an intermediate variable, are both out of scope, the identical
+limit a non-literal `getattr()` default already accepts. Deliberately no
+local-alias resolution for `attrgetter` itself, unlike `getattr`'s own
+now-elaborate alias-chain tracking -- `attrgetter` returns a *callable*
+assigned once and invoked later, which is exactly the two-step
+indirection this scan already excludes for every other form, so building
+the same machinery for it would recognize a shape this scan otherwise
+deliberately doesn't. Verified empirically: still zero existing hits in
+the real repository, baseline count is unchanged. Eight new tests: the
+qualified and bare `attrgetter` forms, a dotted-name negative control, the
+variable-indirection negative control, the bound and unbound
+`__getattribute__` forms, and a non-matching-name negative control for
+the latter.
+
+**A sixteenth Codex review round found two more real gaps in the new
+`attrgetter` recognition itself, both fixed.** (1) **An ordinary import
+alias of either `operator` or `attrgetter` bypassed the gate.** `import
+operator as op; op.attrgetter("bases")(rec)` and `from operator import
+attrgetter as ag; ag("bases")(rec)` both read the identical legacy field
+as the unaliased spellings, but the fifteenth round's matching checked
+only the exact literal names `"operator"`/`"attrgetter"`. Fixed with a
+new `_operator_attrgetter_aliases()` -- the identical import-alias
+mechanism `_builtins_getattr_aliases()` already provides for `getattr`/
+`builtins`, applied to this pair -- resolving `import operator as X` and
+`from operator import attrgetter as X` into the two name sets `_is_
+attrgetter_constructor_call()` now checks against, instead of two hard-
+coded literals. Deliberately narrower than `_builtins_getattr_aliases()`'s
+own multi-round evolution: no assignment-chain resolution (`op2 = op`,
+`ag2 = ag`) was added, since neither finding asked for it and this stays
+consistent with `attrgetter`'s own existing "no local-alias resolution"
+stance for a *constructed getter value* -- only the two `import`-form
+aliases this finding named are covered. (2) **Only the first argument to
+`attrgetter` was inspected.** `attrgetter` accepts any number of
+positional field names and reads every one of them --
+`attrgetter("size_bits", "bases")(rec)` reads `bases` too, but the
+fifteenth round's own code checked only `node.func.args[0]`, so a bridged
+field named anywhere but first was invisible. Fixed by moving the whole
+`attrgetter` case out of the single-attribute `elif` chain into its own
+top-level handler (mirroring how `MatchClass` is already handled
+separately, since it too can produce more than one match per node),
+inspecting every literal, string-constant positional argument
+independently and reporting each bridged one as its own site. Verified
+empirically: still zero existing hits in the real repository, baseline
+count is unchanged. Five new tests: the `import ... as`/`from ... import ... as`
+alias forms, a multi-argument call with the bridged field in the second
+position, a multi-argument call with two independently-bridged fields
+(both reported), and a multi-argument negative control naming no bridged
+field at all. A sixth, separate finding from the same round (a stale
+"landed" paragraph in this Design section still describing the check's
+*first* slice -- 99 sites, the pre-fingerprint key shape -- contradicting
+the append-only review notes once they moved past it) is fixed directly
+in that paragraph itself, not narrated as its own round here.
+
+**A seventeenth Codex review round found two more real gaps, one in the
+new `attrgetter` alias resolution and one a genuine false positive in the
+existing `getattr` recognition -- both fixed, the second with a real
+mid-fix correction.** (1) **A plain-assignment alias of `operator`/
+`attrgetter` was still out of scope.** `import operator as op; op2 = op;
+op2.attrgetter("bases")(rec)` and `from operator import attrgetter as ag;
+ag2 = ag; ag2("bases")(rec)` read the identical legacy field as the
+unaliased/singly-import-aliased spellings, but the previous round's own
+docstring claimed "a `Call`-typed value has no simple assignment shape to
+chain through" -- true, but irrelevant: `op`/`ag` are ordinary references
+(a module, a builtin callable) *before* being called, chaining through a
+plain assignment exactly the way `_builtins_getattr_aliases()`'s own
+`getattr`/`builtins` resolution already does. Fixed by giving
+`_operator_attrgetter_aliases()` the identical fixed-point assignment-
+chaining pattern that function already uses. (2) **A local binding that
+shadows the bare `getattr`/`builtins` names was never excluded from the
+builtin match at all.** `def f(getattr, rec): return getattr(rec,
+"bases")` -- an ordinary, unrelated function parameter reusing the name
+`getattr` -- was unconditionally treated as the real builtin, blocking a
+valid, unrelated change. Fixed with a new `_locally_bound_names()`,
+consulted at each `getattr`/`builtins` match site. **The first revision of
+that helper also covered ordinary `ast.Assign`/`ast.AnnAssign` targets,
+not just parameters, and immediately broke six existing tests** --
+`read_attr = getattr; read_attr(rec, "bases")` IS a genuine local
+assignment target of the identical shape, but treating that assignment as
+"shadowing" is backwards: it's *how* the existing alias-resolution
+mechanism makes `read_attr` trustworthy in the first place, not a reason
+to distrust it. Telling a real shadow (`getattr = some_unrelated_value`)
+apart from a real alias assignment (`read_attr = getattr`) needs
+per-assignment tracing of what each target's own value resolves to --
+information `_builtins_getattr_aliases()`'s own internal `assign_
+candidates` already computes but doesn't expose, and doing so scoped
+per-function is a real, separate follow-up, not attempted here. Since a
+parameter can never be an alias source in that same sense (nothing in a
+function signature assigns FROM `getattr`), `_locally_bound_names()` was
+narrowed to parameters only, closing the reported false positive with no
+risk of this conflict -- and `def f(rec): getattr = some_other_thing;
+getattr(rec, "bases")` (an ordinary reassignment shadow, not reported by
+this round) is left as a documented, accepted residual false positive
+rather than a silently reintroduced one, pinned by its own test. Verified
+empirically: still zero existing hits in the real repository, baseline
+count is unchanged, and `mypy`/`ruff` both stayed clean. Five new tests: the
+two chained-alias `attrgetter`/`operator` forms, the shadowed-parameter
+negative control, its sibling-function negative control (shadowing in one
+function must not leak into another), and the residual-gap documentation
+test.
+
+**An eighteenth review round found one more real gap and one real test-
+suite performance problem, both fixed.** (1) **The `attrgetter`
+recognition never consulted the shadowing check the `getattr` branch
+already got.** `def f(operator, rec): return operator.attrgetter("bases")
+(rec)` -- an ordinary, unrelated parameter reusing the name `operator` --
+was unconditionally treated as the real module, the identical false
+positive the `getattr`-shadowing round fixed for that branch specifically,
+left open here since this branch was added afterward and never wired to
+`_locally_bound_names()`/`_shadowed()` at all. Fixed with a new
+`_attrgetter_matched_name()` helper (re-deriving which of `_is_attrgetter_
+constructor_call()`'s two recognized shapes actually matched, narrowly
+typed so the call site doesn't need its own unchecked `ast.Attribute`/
+`ast.Name` assumption -- mypy can't narrow `node.func.func`'s type through
+a boolean `and`-chain the way an explicit `isinstance` inside a dedicated
+function can) and a `not _shadowed(...)` guard on the same branch. (2)
+**Three of this file's own tests each independently re-parsed and
+re-scanned every `abicheck/**/*.py` file from scratch.** `test_no_
+unlisted_violation_in_real_repo`/`test_baseline_entries_are_real_sites`/
+`test_exempt_functions_are_real_sites` each ran their own full
+`PKG.rglob("*.py")` walk -- ~14s apiece on a real measurement, ~42s total,
+consuming close to this whole file's share of the documented 43-second
+fast-suite budget by itself. Fixed with a new module-scoped `_repo_
+reader_scan` pytest fixture running the walk exactly once; all three
+assertions are pure derivations of the identical underlying scan data.
+`test_no_unlisted_violation_in_real_repo`'s own derivation no longer
+calls `check_fact_field_readers()` directly, but is provably equivalent
+to it -- that function's own filtering is exactly the same two-step check
+(`EXEMPT_FUNCTIONS`, then `KNOWN_UNMIGRATED_READERS` membership) applied
+to the identical scan, confirmed by reading its source rather than
+assumed; `check_fact_field_readers()`'s own Findings/message-building glue
+stays independently, directly tested by this file's existing synthetic-
+fixture tests (`test_check_reports_a_new_violation`/`test_check_is_
+silent_for_clean_code`), so nothing lost real coverage. Verified
+empirically: still zero existing hits, baseline count is unchanged, `mypy`/
+`ruff` both stayed clean, and this file's own runtime dropped from ~26s
+to ~9s for its (now 60, previously 57) tests. Three new tests: the
+shadowed-`operator`-parameter and shadowed-bare-`attrgetter`-parameter
+negative controls, and a sibling-function negative control (shadowing in
+one function must not leak into another's genuine `attrgetter()` call).
+
+**A nineteenth review round found the identical shadowing gap in the
+unbound `__getattribute__` branch's sibling** -- the bound form
+(`rec.__getattribute__("bases")`) has no builtin name to shadow (its
+receiver is an arbitrary object, exactly like `rec.bases_fact` itself), but
+the unbound form (`object.__getattribute__(rec, "bases")`) names the
+builtin `object`/`type` the same way the `getattr`/`attrgetter` branches
+name theirs, and it was the one branch of the four dynamic-reader forms
+never wired to `_shadowed()`: `def f(object, rec): return object.
+__getattribute__(rec, "bases")` -- an ordinary, unrelated parameter reusing
+the name `object` -- was unconditionally treated as the builtin, the
+identical false positive already fixed for `getattr` and (eighteenth round)
+`attrgetter`. Fixed with a `not _shadowed(node, node.func.value.id)` guard
+on the same condition, mirroring the other three branches exactly -- no new
+helper needed here, since `node.func.value.id` is already narrowed to
+`ast.Name` by the existing `isinstance` checks in the same `and`-chain, one
+level shallower than the attrgetter branch's `node.func.func` access that
+needed its own dedicated helper in the eighteenth round. Verified
+empirically: still zero existing hits in the real repository, baseline
+count is unchanged, `mypy`/`ruff` both stayed clean. Three new tests: the
+shadowed-`object`-parameter and shadowed-`type`-parameter negative
+controls, and a sibling-function negative control (shadowing in one
+function must not leak into another's genuine unbound
+`object.__getattribute__()` call).
+
+**A twentieth review round found two more real gaps, both fixed.** (1)
+**The unbound `__getattribute__` receiver check matched only the two
+literal spellings `"object"`/`"type"`, missing an ordinary import
+alias.** `from builtins import object as O; O.__getattribute__(rec,
+"bases")` is the identical dynamic read as the unaliased spelling, but
+was invisible to the scan entirely. Fixed with a new
+`_unbound_getattribute_receiver_aliases()` helper (always includes the
+bare `"object"`/`"type"`, plus any `from builtins import object as O`/
+`from builtins import type as T`, plus a plain-assignment alias chain,
+mirroring `_builtins_getattr_aliases()`'s own `getattr`-alias chaining
+exactly), consulted in place of the literal two-element tuple; the
+existing `_shadowed()` guard from the nineteenth round applies unchanged,
+since it already checks whatever name was actually matched. (2)
+**`_shadowed()` consulted only a call's own innermost qualname, never an
+enclosing function's binding.** `def outer(getattr): def inner(rec):
+return getattr(rec, "bases")` -- `inner` binds no parameter of its own
+named `getattr`, but Python's ordinary closure rule still captures the
+arbitrary callable `outer`'s own parameter holds, so this was
+unconditionally treated as the real builtin despite being shadowed one
+scope up. Fixed with a new `_lexical_function_parents()` helper -- a
+standalone copy of `fact_detector_misuse.py`'s identical-purpose helper,
+simplified to this module's own coarser, dot-joined qualname scheme (no
+`#lineno` disambiguator, an existing, accepted characteristic of this
+module's qualnames already) -- and widened `_shadowed()` to walk the
+call's entire lexical scope chain, testing membership in each ancestor's
+own `locally_bound` set in turn rather than only the innermost one.
+Verified empirically: still zero existing hits in the real repository,
+baseline count is unchanged, `mypy`/`ruff` both stayed clean. Four new tests:
+the aliased-unbound-`__getattribute__` positive case and its
+unrelated-name negative control, and the enclosing-parameter-shadow
+exclusion and its sibling-function negative control.
+
+**A further Codex review round found the `attrgetter` branch's own
+baseline key never actually fingerprinted the read's containing
+expression, unlike every other reader form.** `outer_text = ast.
+get_source_segment(source, node) ...` used the attrgetter *call's own*
+bare text for both the outer-expression and expr-text key slots, instead
+of climbing to the read's real outermost containing expression via
+`_expr_text()` the way the plain-attribute/`getattr`/`__getattribute__`
+branches already do. `old_decision(attrgetter("bases")(rec))` and
+`keep(attrgetter("bases")(rec))` -- two attrgetter reads with an
+identical bare call but different containing expressions -- collapsed to
+the exact same key, ending in occurrence `1` for both once sorted by
+position; migrating the first reader while adding an unrelated new one
+at the same rank would silently reuse the vacated key, the exact
+collision `_outermost_containing_expr()` exists to close for every other
+form (the very finding that motivated that helper's own creation
+several rounds above -- this branch was simply never wired to it). Fixed
+by computing `outer_text = _expr_text(node)` (the containing expression)
+separately from `text` (the call's own bare source), matching the
+six-part key's established `(qualname, attr, outer_text, text,
+occurrence)` shape exactly. Verified empirically: still zero existing
+hits in the real repository (no `attrgetter` read exists anywhere in
+`abicheck/` today, so the baseline itself is unaffected by the key-shape
+fix), baseline count is unchanged, `mypy`/`ruff` both stayed clean. New
+test: two attrgetter reads sharing identical bare-call text inside
+different containing expressions, pinning that they now get distinct
+keys.
+
+**A further Codex review round confirmed, with a concrete repro, a gap
+`_locally_bound_names()`'s own docstring had already predicted but left
+unattempted -- recorded here as an accepted known gap rather than a bug
+fix, since a correct fix needs real per-position dataflow this module
+does not have.** `def f(getattr, rec): getattr = builtins.getattr; return
+getattr(rec, "bases")` -- a shadowing parameter later *rebound* to a
+genuine alias source -- currently reports no site at all, even though the
+call genuinely reads a bridged field through that rebound name (the
+sibling `attrgetter`/`operator` shape has the identical gap). Correctly
+distinguishing this from a genuine, still-shadowing parameter (`getattr =
+some_unrelated_value`) needs order-aware tracing of which assignment is
+actually in effect at the call's own position -- an order-*blind* "was
+this name ever reassigned to a recognized alias anywhere in the scope"
+check is unsound in the other direction, since `def f(getattr, rec):
+result = getattr(rec, "bases"); getattr = builtins.getattr` calls
+`getattr` *before* the rebind, while it still holds the arbitrary
+parameter value, and would be wrongly excluded by that simpler check.
+This module's presence/absence-only shadowing model has no notion of
+"which binding is in effect here" at all; building one is a materially
+larger change than every guard condition landed incrementally so far --
+it took `fact_detector_misuse.py`'s own alias machinery upwards of twenty
+review rounds to reach exactly this kind of order-sensitivity for a
+structurally similar problem. Recorded directly in `_locally_bound_
+names()`'s own docstring (extending the paragraph that already predicted
+this shape) rather than fixed under review pressure: this is a false
+*negative*, the direction this module's own "a false positive is far
+cheaper than the false negative it closes" trade-off argues hardest
+against silently accepting, but an incorrect, order-blind attempt risks
+trading it for a new false positive on a genuine shadow -- not obviously
+an improvement, and not the kind of bounded, single-condition extension
+every other round in this section landed. Revisit with real per-position
+tracing if this shape is found in practice.
+
+**Two further Codex review rounds found two more real gaps, both fixed,
+in the same area the previous several rounds had already been hardening.**
+(1) **`_operator_attrgetter_aliases()` seeded `"attrgetter"`/`"operator"`
+into their own alias sets unconditionally**, mirroring how
+`_builtins_getattr_aliases()` correctly seeds the real builtin
+`"getattr"` -- but `attrgetter`/`operator` are not builtins; nothing makes
+either name mean the stdlib module/function without a real `import
+operator`/`from operator import attrgetter` somewhere in the file. An
+ordinary, unrelated local function or variable sharing either name --
+`def attrgetter(rec, name): ...` with no import anywhere -- was therefore
+wrongly recognized as the real constructor. Fixed by seeding both sets
+empty and relying entirely on the module's own existing real-import scan
+(the same one every `getattr`/`builtins` qualified-alias branch already
+required) -- an asymmetry the fix's own docstring now states explicitly,
+since a future reader could otherwise "fix" the asymmetry the wrong way
+by re-adding the unconditional seed. New tests: an unrelated local
+`attrgetter` function with no import, and its dotted-access sibling (an
+unrelated `operator`-named local variable with its own `attrgetter`
+method), both in `tests/test_fact_field_readers_wrapper_scoping.py`. Two
+of this area's own pre-existing shadowing tests
+(`test_ignores_attrgetter_shadowed_by_an_operator_parameter`/
+`test_ignores_attrgetter_shadowed_by_a_bare_attrgetter_parameter`) had no
+real import in their fixtures either, so under this fix they would have
+passed for the wrong reason (no import at all, rather than the shadowing
+guard) -- both were corrected to include a real module-level import, so
+they keep testing the shadowing check specifically rather than silently
+degrading into a second copy of the new import-requirement test.
+
+(2) **`_outermost_containing_expr()` stopped climbing one level too early
+at a keyword-argument value or a comprehension's own `for ... in ...`
+clause**, since neither `ast.keyword` nor `ast.comprehension` is itself an
+`ast.expr` -- the climb's own guard condition (`isinstance(parent,
+ast.expr)`) correctly stops at any *ordinary* non-expression boundary
+(a statement), but these two wrapper node types are not statements
+either; they are transparent syntactic scaffolding a real containing
+expression still continues through. Two real examples surfaced by
+regenerating the baseline against the fix: `make_change(...,
+old_value=str(t_old.bases), ...)` (a keyword argument) and
+`{_topmost_scope_suffix(b) for b in header.bases + header.virtual_bases}`
+(a comprehension's own iterable clause) both had their previously-recorded
+`outer-expr-text` narrower than the real surrounding expression, silently
+under-recording how much context a reader site's own key actually
+carries. Fixed with a new `_TRANSPARENT_EXPR_WRAPPER_TYPES = (ast.keyword,
+ast.comprehension)` tuple, checked alongside `ast.expr` in the climb's own
+condition. This legitimately reshaped 19 pre-existing, already-reviewed
+`KNOWN_UNMIGRATED_READERS` entries (same underlying sites, wider
+`outer-expr-text`) -- the baseline was regenerated from a fresh real-repo
+scan rather than hand-edited, with the count confirmed unchanged (104
+before and after) and every reshaped key confirmed a 1:1 rename of an
+existing site, not a new or missing violation. New tests, in
+`tests/test_fact_field_readers_wrapper_scoping.py`: a keyword-argument
+read climbing to its enclosing call, a comprehension read climbing to its
+enclosing display, and two reads sharing identical attribute/expression
+text but wrapped in different keyword arguments of different calls,
+pinning that each climbs to its own enclosing call rather than the two
+collapsing onto a shared inner boundary.
+
+Both fixes' new tests were split into a new sibling file,
+`tests/test_fact_field_readers_wrapper_scoping.py`, rather than appended
+to `test_fact_field_readers.py` -- which was already within a few lines of
+the architecture gate's 1200-line test-file cap once the two `test_
+ignores_an_unrelated_*_with_no_import` and three climbing tests were
+added -- mirroring how `tests/test_fact_detector_misuse_def_time_scope.py`
+was split out of `test_fact_detector_misuse.py` for the identical reason.
+Verified empirically: still zero existing `attrgetter`/`operator` false
+positives introduced against the real repository (the baseline
+regeneration's own 104-in/104-out count is the check), `mypy`/`ruff` both
+stayed clean, and `python scripts/check_architecture.py` reports 0 errors
+with both test files under the cap.
+
+**A further Codex review round found a fresh repro for a residual this
+module's own docstring had already named, explicitly, as an accepted,
+narrow gap -- attempted a fix, and reverted it after the fix's own blast
+radius and residual coverage didn't justify it.** `unmigrated_fact_reader_
+sites`'s docstring already states: "A genuinely duplicated expression (the
+identical containing expression appearing twice, with identical bare-read
+text, in one function) still falls back to the ordinal, an accepted,
+narrow residual." Codex's repro sharpens *why* that's a real risk, not
+just a curiosity: `decide(rec.bases)` under `if cond:` and, separately,
+under `else:` gets two baseline entries differing only by occurrence rank
+(`...::1`, `...::2`); deleting the `if` branch's call and adding a
+*different*, genuinely new `decide(rec.bases)` call somewhere else in the
+function re-numbers the survivors from scratch, so the new call can land
+on the vacated rank and silently inherit an unrelated site's approval.
+
+Attempted a fix: `_branch_path()`, walking a read's ancestors up to its
+enclosing function and recording which alternative of each `if`/`try`/
+`match`/loop-`else` it sits in, added as a new key segment. A first cut
+used a bare structural label (`"if"`/`"else"`) -- verified against the
+exact repro and found **insufficient**: two separate, sibling `if`
+statements in the same function both mark as plain `"if"` regardless of
+which one, so Codex's own repro (the read moving from a deleted `else:`
+to a *different* `if` statement elsewhere) still collided. Revised to
+carry the branch's own *governing* text (`f"if:{test text}"`,
+`f"except:{i}:{type text}"`, `f"case:{i}:{pattern text}"`) rather than a
+bare label -- deliberately still not the *body* text
+`_outermost_containing_expr`'s own docstring already rejected including
+(a change anywhere inside the branch's own body would then reshape the
+key for no reason); only the governing condition/type/pattern, which
+changes only when the branch's own identity does. This version correctly
+closed Codex's exact repro and a hand-built adversarial variant reusing
+the identical condition-variable name across separate `if` statements,
+verified empirically both ways.
+
+**Reverted anyway, after actually running the full existing suite --
+not because the mechanism was wrong, but because its true cost wasn't
+visible until measured.** The new key segment is a real structural
+change to the key *shape* for every entry, not just branching ones: a
+non-branching read's `branch_marker` is `""`, but the key is still built
+by `"::"`-joining a fixed number of components, so every one of the 40+
+existing hand-written key-literal tests in this file failed --  not
+because their logic was wrong, but because every expected key string now
+needs an inserted empty `"::"` segment before the occurrence rank, and
+the 104-entry `KNOWN_UNMIGRATED_READERS` baseline needs a full
+regeneration for the same reason. That is a large, mechanical, but
+genuinely invasive change for a gap this module's own docstring had
+*already* scoped and accepted as narrow -- and even after paying that
+cost, a residual remains (two sibling branches with byte-identical
+governing text, e.g. two separately-written `if cond:` blocks with the
+identical condition spelling and an identical duplicated call inside
+each) still falls back to the ordinal, unchanged from before the
+attempt. Weighed against this module's own established discipline
+(documented elsewhere in this same file and in AGENTS.md's "attempted
+twice, reverted twice" pattern): a fix that trades a large, invasive
+change and a full baseline regeneration for a *narrower*, not
+*eliminated*, version of an already-accepted, already-documented residual
+is not a clear improvement, so it was reverted rather than shipped.
+`git diff` after the revert is clean (`scripts/fact_field_readers.py`
+byte-identical to before the attempt); the full existing test suite
+(73 tests across this file and its wrapper-scoping sibling) passes
+unchanged. The residual stays exactly as this module's own docstring
+already described it before this round: an accepted, narrow gap, now
+with a concretely verified (not merely hypothetical) repro on record here
+and in the PR's own review thread.
+
+**A further Codex review round found two more real gaps, both fixed.**
+(1) **The attrgetter branch required the constructor call to be
+*immediately* invoked** (`attrgetter("bases")(rec)`, matched via
+`isinstance(node, ast.Call) and isinstance(node.func, ast.Call) and
+_is_attrgetter_constructor_call(node.func, ...)`), missing the equally
+common callback spelling entirely: `sorted(records,
+key=operator.attrgetter("bases"))` and `map(attrgetter("bases"),
+records)` both construct the identical getter, just hand it to another
+function instead of calling it themselves -- the read still happens, on
+whatever `sorted`/`map` eventually calls it with. Fixed by matching the
+constructor call directly (`_is_attrgetter_constructor_call(node, ...)`,
+no outer-call requirement at all) -- the same conservative-by-design
+principle every other branch here already follows: a false positive
+(a constructed-but-never-called getter) costs a reviewed baseline entry,
+a false negative would be silent. This also closes, as a side effect
+rather than a targeted fix, the previously-documented two-step
+local-variable-indirection gap (`getter = attrgetter("bases");
+getter(rec)`) -- `_is_attrgetter_constructor_call()`'s own docstring
+previously stated this was deliberately out of scope, "the same
+`x = attrgetter` equivalent of `_builtins_getattr_aliases()`" that
+`attrgetter` doesn't get; both that docstring and `unmigrated_fact_
+reader_sites()`'s own attrgetter-branch comment were corrected to
+describe the new, broader match instead of the narrower one they no
+longer describe. One consequence worth naming: `text` (the read's own
+bare source, previously the *whole* double-call `attrgetter("bases")
+(rec)`) is now just the constructor call's own text (`attrgetter(
+"bases")`), since that call is what's actually matched -- `outer_text`
+is unaffected (`_outermost_containing_expr()` still climbs through the
+immediate outer call when there is one, since `ast.Call` is itself an
+`ast.expr`). Every existing attrgetter test asserting an exact key
+literal for the immediate-double-call shape needed updating to the
+narrower `text` value; the real repository baseline is unaffected (still
+zero existing attrgetter reads anywhere in `abicheck/`).
+
+(2) **`_locally_bound_names()` only ever tracked a *parameter* as a
+locally-bound name, never a nested `def`/`class` statement's own
+*name*.** `def getattr(obj, name): return None` followed by `getattr(rec,
+"bases")` -- an ordinary, unrelated function definition sharing the
+builtin-looking name `getattr`, at module scope or nested inside the
+calling function itself -- was still unconditionally treated as the real
+builtin, since a def/class statement's own binding target (Python's
+ordinary `STORE_NAME`/`STORE_FAST` rule, the identical rule
+`fact_detector_misuse.py`'s own `_def_containing_qualnames` already
+models for the sibling module) was invisible to this module's shadowing
+check. Fixed by threading a `nearest_func` parameter through `_locally_
+bound_names()`'s walk (mirroring `_lexical_function_parents`'s identical
+concept -- class bodies stay transparent, the same simplified model this
+whole module already uses) and recording each `def`/`class`'s own `name`
+against whichever scope directly contains it, alongside its existing
+parameter tracking.
+
+Both fixes' new tests, plus the attrgetter-indirection test repurposed
+from a negative to a positive control (its old premise -- "no local-alias
+resolution for attrgetter" -- no longer holds), went into `tests/
+test_fact_field_readers_wrapper_scoping.py` (room remained under the
+architecture gate's 1200-line cap; one existing test was moved there from
+`test_fact_field_readers.py` to keep the main file under the cap after
+its own docstring updates grew it past 1200). Verified empirically: still
+zero existing hits in the real repository, `mypy`/`ruff` both stayed
+clean, and `python scripts/check_architecture.py` reports 0 errors with
+both test files under the cap.
+
+**A further Codex review round found a real regression in finding 4's own
+fix, plus one more real gap in the module's line-based qualname model,
+both fixed.**
+
+**(1) The class-body-transparency fix used the wrong scope concept.**
+Finding 4's fix threaded a `nearest_func` parameter, skipping class
+layers the same way `_lexical_function_parents` deliberately does for
+*closure* purposes -- but a method's own *name* does not bind into its
+enclosing function/module namespace at all; it becomes a class attribute
+(`C.getattr`), invisible to an ordinary bare-name lookup anywhere outside
+the class body. Recording it against the skip-class `nearest_func` meant
+`class C: def getattr(self, name): ...` made an *unrelated* function
+elsewhere in the same module -- with no textual relationship to `C` at
+all -- read as if it had a local `getattr` binding, silently excluding
+its own genuine `getattr(rec, "bases")` call. Fixed by replacing
+`nearest_func` with `binding_scope: str | None` -- the scope a bare name
+actually *binds into*, as opposed to "the scope a closure looks up
+through" -- `None` while directly inside a class body (nothing recorded
+there at all, matching how `_shadowed()` never queries a class-body scope
+either, since none of this module's qualname machinery models one), and
+the function's own qualname once recursed into a function body (an
+ordinary nested function's own name genuinely does bind into its
+immediately enclosing function, unlike a method's into its class). New
+tests: the reported case, and the identical class-body-transparency rule
+for a nested `class` (not just a nested `def`) shadowing `attrgetter`.
+
+**(2) A parameter default value/annotation was attributed to the
+function's own body scope, not the enclosing scope it actually evaluates
+in.** `def f(getattr, x=getattr(rec, "bases")): ...` -- Python evaluates
+the default *before* `f`'s own parameters exist, so this call genuinely
+reads the real builtin, but `_enclosing_qualnames()`'s `[child.lineno,
+end]` range covers the function's own signature line too, so `_shadowed()`
+saw `f`'s own (not-yet-bound) parameter `getattr` and wrongly excluded a
+real read. A decorator needs no equivalent fix -- it sits on a line
+strictly *before* `child.lineno`, already outside the function's own
+range by construction. Fixed by registering each default/annotation's own
+`[lineno, end_lineno]` range under the *current* (enclosing, pre-function)
+qualname -- narrower than the function's own range in the ordinary case,
+so the existing smallest-range-wins tie-break lets it correctly override
+the function's own broader range for just those lines. A default/
+annotation sharing a line with genuine function-*body* code (a one-liner
+`def f(x=getattr(rec, "bases")): return x`) is a real, accepted residual
+this line-based model can't distinguish further -- the same granularity
+limit this function's own docstring already accepts throughout. New
+tests: the reported case, a negative control confirming an ordinary body
+call is still correctly shadowed, and a negative control confirming a
+default nested inside a function that genuinely declares the shadowing
+parameter is still correctly excluded (this fix only corrects the
+function's own signature line being wrongly attributed to itself, not
+shadowing in general).
+
+Both fixes' new tests went into `tests/test_fact_field_readers_wrapper_
+scoping.py` (room remained under the architecture gate's 1200-line cap).
+Verified empirically: still zero existing hits in the real repository,
+`mypy`/`ruff` both stayed clean.
+
+**A further Codex review round found two more real gaps, both fixed.**
+
+**(3) No branch recognized a mapping-based field read at all.**
+`vars(rec)["bases"]`/`rec.__dict__["bases"]` both read the exact same
+normalized legacy value `rec.bases` does, through the instance's own
+`__dict__` mapping rather than attribute-lookup machinery -- invisible
+to every existing branch (`ast.Attribute`, `getattr()`, `attrgetter()`,
+`__getattribute__()`), none of which is an `ast.Subscript`. Added as a
+new branch matching a `Subscript` in `ast.Load` context with a literal
+string key in `FACT_BRIDGED_ATTRS`, whose `.value` is either a `vars(...)`
+call (gated on `_shadowed()` for the `vars` spelling, an ordinary
+bare-name call the same shadowing guard every other dynamic form already
+gets) or a `.__dict__` attribute access (matched unconditionally -- an
+attribute access, unlike a bare name, has nothing for a local binding to
+shadow). A non-literal key (`vars(rec)[name]`) stays out of scope, the
+same "no type inference" limit every other dynamic-read form here
+already accepts. New tests: both positive forms, a shadowed-`vars`-
+parameter negative control, a non-literal-key negative control, and an
+unrelated-key negative control.
+
+**(4) `_locally_bound_names()` never visited `ast.Import`/`ast.
+ImportFrom` at all.** `from helper import getattr` then `getattr(rec,
+"bases")` -- an ordinary import of an unrelated module's own `getattr`
+symbol, reusing the builtin-looking bare name -- was still treated as
+the real builtin, since an import statement's own binding was invisible
+the same way a bare parameter/`def`/`class` name once was (findings 4-5
+above, before those were fixed). Fixed by recording each imported name
+(`alias.asname` if given, else the plain name, with the identical
+first-`.`-segment split `fact_detector_misuse.py`'s own import branch
+already applies for an unaliased dotted `import a.b.c`) against
+whichever scope directly contains the import statement -- with a
+deliberate carve-out for the specific imports this module already
+recognizes elsewhere as a genuine alias *source* for a real builtin/
+`operator` symbol: `from builtins import getattr`/`object`/`type`, `from
+operator import attrgetter`, and a bare `import builtins`/`operator`.
+Recording one of *those* as a local binding here too would have made
+`_shadowed()` see it as shadowing itself, silently breaking the very
+recognition it exists to enable -- e.g. `from operator import
+attrgetter; attrgetter("bases")(rec)` would have stopped being
+recognized at all, a real regression rather than an incomplete fix. Every
+*other* import, including an aliased `from builtins import getattr as g`
+(recognized under the alias `g`, excluded the identical way), still binds
+and shadows normally. New tests: an unrelated module-scope import shadow,
+its aliased-import variant, the identical shadow established inside a
+function body instead of at module scope, a sibling-function negative
+control (the shadow in one function must not suppress detection in an
+unrelated one), and four positive controls confirming every one of the
+five recognized-import carve-outs (`from builtins import getattr`, its
+aliased spelling, `from operator import attrgetter`, and a bare `import
+operator`) still resolves correctly.
+
+Both fixes verified empirically: still zero existing hits in the real
+repository, `mypy`/`ruff` both stayed clean. New tests in
+`TestMappingBasedFieldReads` and `TestImportedNamesShadowBuiltinRecognition`
+(`tests/test_fact_field_readers_wrapper_scoping.py`).
+
+**A further Codex review round found one more real gap in the mapping-
+subscript fix above.** `vars(rec).get("bases")`/`rec.__dict__.get(
+"bases")` -- the `dict.get()` spelling of the identical mapping read --
+were both still invisible, since neither is an `ast.Subscript`, the only
+shape the previous fix's branch matched. Fixed by factoring the shared
+"is this a mapping over the instance's own `__dict__`" check (`vars(
+...)`/`.__dict__`) out into a new `_is_mapping_receiver()` helper, reused
+by both the existing subscript branch and a new `.get()`-call branch --
+so the two forms can't independently drift on what counts as a
+recognized mapping receiver, the same lesson this file's own earlier
+entries (the attrgetter-vs-`__getattribute__` alias sets, the vars/
+`__dict__` shadowing rules) keep re-learning about duplicated conditions.
+An optional second `.get()` argument (the default) is accepted but not
+inspected, matching how `getattr()`'s own third argument is treated
+elsewhere in this module. New tests: both mapping-receiver forms with
+`.get()`, a call carrying an explicit default, a shadowed-`vars`-
+parameter negative control, an unrelated-key negative control, and a
+negative control confirming an ordinary `.get()` call on some unrelated
+object (not `vars(...)`/`.__dict__`) is never flagged merely because its
+argument happens to spell a bridged field name.
+
+Verified empirically: still zero existing hits in the real repository,
+`mypy`/`ruff` both stayed clean. New tests in `TestMappingGetFieldReads`
+(`tests/test_fact_field_readers_wrapper_scoping.py`).
+
+**A further Codex review round found one more real gap: `_is_mapping_
+receiver()` only ever matched the bare literal spelling `vars`, not a
+real alias of it.** `import builtins; builtins.vars(rec)["bases"]` (a
+qualified call through a real `builtins` alias) and `read_map = vars;
+read_map(rec).get("bases")` (a plain assignment alias) were both
+invisible -- the identical gap `_builtins_getattr_aliases()` already
+closed for `getattr` specifically, never extended to `vars`. Fixed with
+a new, generalized `_builtins_symbol_aliases(tree, symbol,
+builtins_names)`: the *symbol*-specific half of that same alias-
+resolution mechanism (import-from, a plain-assignment chain resolved to
+a fixed point, a qualified `X.symbol` chain), taking the caller's
+already-resolved `builtins_names` as a parameter rather than re-deriving
+it, so `vars` doesn't need a third hand-duplicated copy of the shared
+`import builtins`/module-alias collection `_builtins_getattr_aliases()`
+itself already owns. `_builtins_getattr_aliases()` itself was left
+unchanged rather than refactored to share this helper -- it is already
+hardened across five prior review rounds (see its own docstring), and
+generalizing it risks reopening one of them for no benefit, since it
+already returns exactly the `builtins_names` this function needs.
+
+**A real regression caught before the tests even ran, by the tests
+themselves rather than a fresh review round: an aliased import of `vars`
+(`from builtins import vars as V`) was still wrongly excluded, for a
+different reason than the one this fix targets.** `_locally_bound_names`'s
+own recognized-import carve-out (added two rounds earlier for `getattr`/
+`object`/`type`/`attrgetter`) had no entry for `vars` at all, so `from
+builtins import vars as V` was itself recorded as an ordinary local
+binding of `V` at module scope — making `_shadowed()` see `V` as shadowed
+by its *own* import statement, the exact inversion the carve-out exists
+to prevent. Fixed by adding `"vars"` to that carve-out's recognized-name
+set, alongside the new alias-resolution fix above (not a separate,
+unrelated bug — the same "this import is a recognized alias *source*,
+not a shadow" principle, just missing one more entry).
+
+Verified against the reported qualified-call and assigned-alias repros,
+an imported-alias positive control, and three negative controls (a
+`builtins`-shadowing parameter, an aliased-import self-shadow, and an
+unrelated object's own `.vars()` method). Zero existing hits, `mypy`/
+`ruff` both stayed clean. New tests in `TestVarsAliasesInMappingReads`
+(`tests/test_fact_field_readers_wrapper_scoping.py`).
+
+**A further Codex review round found one more real gap: `_operator_
+attrgetter_aliases()`'s own assignment-chain resolution never recognized
+a *qualified* RHS.** `import operator as op; ag = op.attrgetter;
+ag("bases")(rec)` was invisible, since `_add_candidate()` only ever
+matched a plain `ast.Name` value -- the identical gap `_builtins_getattr_
+aliases()`'s own `qualified_candidates` mechanism already closes for
+`read_attr = builtins.getattr`. Fixed the same way: a qualified
+`X.attrgetter` assignment is collected into a new `qualified_candidates`
+list during the same walk, resolved once the walk (and therefore
+`operator_names`) is complete -- since, unlike the plain-name chain, this
+needs the *complete* set to know whether `X` really is a resolved
+`operator` alias. The resolution order matters: `operator_names`'s own
+fixed point runs first, then the qualified resolution folds into
+`attrgetter_names`, then `attrgetter_names`'s own plain-name fixed point
+runs last -- so a name assigned from a qualified alias can itself be
+chained further (`ag = op.attrgetter; ag2 = ag`).
+
+Verified against the reported repro, a further-chained variant
+(confirming the qualified resolution feeds back into the existing
+plain-name chain), and a negative control for an unrelated object's own
+`.attrgetter` attribute. Zero existing hits, `mypy`/`ruff` both stayed
+clean, `fact_field_readers.py` at 1741 lines (well under the 2000-line
+hard cap). New tests in `TestQualifiedAttrgetterAssignmentAliases`
+(`tests/test_fact_field_readers_wrapper_scoping.py`).
+
+**One more finding, from the next review round: the unbound-method
+`object.__getattribute__(rec, "bases")` call branch only ever matched a
+call made directly off `object`/`type`/an alias of either receiver -- it
+had no notion of the *method itself* being lifted out to a plain name
+first.** `read_attr = object.__getattribute__; read_attr(rec, "bases")`
+performs the identical unbound-method read, but the call-matching branch
+requires `node.func` to still be an `ast.Attribute` (`X.__getattribute__
+(...)`) -- once the method is assigned to `read_attr`, `node.func` is an
+`ast.Name`, and neither this branch nor `_unbound_getattribute_receiver_
+aliases()` (which tracks aliases of the *receiver* `object`/`type`, not of
+the method) had anything to recognize it. Fixed with a new
+`_unbound_getattribute_method_aliases(tree, object_type_names)`, mirroring
+`_builtins_symbol_aliases()`'s own qualified-candidate mechanism: a plain
+assignment whose RHS is `X.__getattribute__` for some `X` already in the
+caller's resolved `object_type_names` seeds the set, then an ordinary
+plain-name chain resolves further aliases of that alias to a fixed point
+-- so a receiver alias (`from builtins import object as O`) and a method
+alias (`read_attr = O.__getattribute__`) compose correctly together. A new
+call-matching branch was added alongside the existing unbound-receiver
+branch, requiring the same `not _shadowed(...)`/two-args/literal-string-
+argument/`FACT_BRIDGED_ATTRS` shape the existing branches already enforce.
+
+Verified against the reported repro, a chained-alias variant, a
+receiver-alias-composed-with-method-alias variant, the `type.
+__getattribute__` sibling spelling, and two negative controls (a
+shadowing parameter; a non-bridged attribute argument) via direct AST
+reproduction before writing tests. Zero existing hits, `mypy`/`ruff` both
+stayed clean, `fact_field_readers.py` at 1821 lines (well under the
+2000-line hard cap, though headroom is narrowing -- the next finding in
+this area should reassess whether a sibling module split is due before
+adding more). New tests in `TestUnboundGetattributeMethodAliases`
+(`tests/test_fact_field_readers_wrapper_scoping.py`).
+
+**One more finding, from the next review round: the mapping-subscript
+branch's `ast.Load`-only restriction missed the augmented-assignment
+shape entirely, the identical gap the dedicated `ast.Attribute`-target
+`AugAssign` branch already exists to close for the plain-attribute
+form.** `rec.__dict__["bases"] += values` / `vars(rec)["bases"] += values`
+both read the field's existing value before combining it with the
+right-hand side, but Python marks an `AugAssign` target `ast.Store`
+regardless of its shape -- the target `Subscript` node is still visited
+independently by `ast.walk` (it's a child of the `AugAssign`), but its
+`Store` context skips the ordinary, `Load`-only Subscript branch too, so
+nothing caught it. Fixed with a new `ast.AugAssign` branch matching a
+`Subscript` target with a literal string key naming a bridged attribute,
+gated on `_is_mapping_receiver(node.target.value)` -- mirroring the
+existing attribute-target `AugAssign` branch exactly, including keying
+the finding on the target `Subscript` node itself (not the whole
+`AugAssign` statement) so its site/text line up with an ordinary
+subscript read at the same position.
+
+Verified against both mapping spellings (`rec.__dict__[...]`/
+`vars(rec)[...]`) and three negative controls (a non-bridged key; a
+plain, non-augmented overwrite, which genuinely never reads and correctly
+stays unflagged; a non-mapping receiver) via direct AST reproduction
+before writing tests. Zero existing hits, `mypy`/`ruff` both stayed clean,
+`fact_field_readers.py` at 1845 lines -- still under the 2000-line hard
+cap, but headroom has narrowed enough (155 lines) that the next finding
+in this area should split a sibling module before adding more, per the
+prior round's own note. New tests in
+`TestAugmentedAssignmentThroughMappingReceivers` (`tests/
+test_fact_field_readers_wrapper_scoping.py`).
+
+**Two more findings from the next review round, plus the sibling-module
+split the prior round's own note said was due.** (1) `_locally_bound_
+names()`/`_enclosing_qualnames()` deliberately don't model an `ast.Lambda`
+as its own scope at all (see either function's own docstring on why this
+module's design stays coarser than `fact_detector_misuse.py`'s) -- a
+lambda's body shares its *enclosing* function's qualname, so a lambda's
+own parameter was never recorded as bound anywhere `_shadowed()`'s
+qualname-based check could see. `lambda getattr, rec: getattr(rec,
+"bases")` -- an ordinary, unrelated lambda parameter reusing the
+builtin-looking name -- was still treated as the real builtin. Rather
+than widening the qualname/scope machinery itself (a materially larger
+change touching three functions' worth of established, narrower-by-design
+modeling), `_shadowed()` now also walks the call's own true AST ancestry
+(via the already-available `parents` map) checking every enclosing
+`ast.Lambda`'s own parameters directly -- exact by construction, so it
+can never misattribute a shadow to a call genuinely outside the lambda,
+even one sharing the same line/qualname the coarser qualname model would
+conflate them under (verified with a dedicated negative control: a
+genuine `getattr` call textually outside the lambda, in the same
+function, still gets caught). `_shadowed()`'s own parameter type widened
+from `ast.Call` to `ast.expr`, since it only ever consults `.lineno` and
+walks `parents` -- neither Call-specific -- and the new bare-`ast.Name`
+use site from finding (2) needs the wider type too. (2)
+`_is_mapping_receiver()` only ever matched `vars(rec)`/`X.__dict__`
+directly at the point it inspects an expression -- `fields = vars(rec);
+fields["bases"]` / `fields = rec.__dict__; fields.get("bases")` were both
+invisible once the mapping was stored in an intermediate variable first,
+the same "no alias tracking" gap this module's other alias helpers
+already close for `getattr`/`vars`/`attrgetter` themselves, unclosed here
+for their own *result*. Fixed with a new `_mapping_receiver_aliases()`
+(the identical name-only, fixed-point assignment-chain pattern every
+other alias helper in this module already uses), consulted by
+`_is_mapping_receiver()`'s new final branch, gated on `_shadowed()` the
+same way the direct `vars(rec)` form already is.
+
+**The sibling-module split (Codex/CodeRabbit finding notwithstanding --
+this one was self-imposed, per the prior round's own note, once the two
+fixes above pushed the file to 1975 of 2000 lines, only 25 short of the
+hard cap).** `scripts/fact_field_readers_scope.py` now holds
+`_enclosing_qualnames`, `_parent_map`, `_TRANSPARENT_EXPR_WRAPPER_TYPES`,
+`_outermost_containing_expr`, `_locally_bound_names`, and `_lexical_
+function_parents` -- a mechanical extraction, not a redesign, mirroring
+`fact_detector_misuse_scope.py`'s own identical split from the sibling
+gate: every function moved unchanged, as one contiguous block, with a
+matching sys.path guard (`fact_field_readers.py` importing the sibling
+module whether run directly or loaded as `scripts.fact_field_readers` by
+a test that never imports `check_ai_readiness.py` first) verified by
+running `tests/test_fact_field_readers_wrapper_scoping.py` in isolation,
+not just as part of the full suite -- the exact scenario a missing guard
+would silently pass in a full run and fail only in isolation. Registered
+in `scripts/CLAUDE.md`'s Inventory table.
+
+Verified against both reported repros, a positive control for each (a
+genuinely unrelated lambda/an unrelated dict alias must still be
+caught/stay unflagged), a chained-mapping-alias variant, and negative
+controls for shadowing and a non-bridged key, via direct AST reproduction
+before writing tests -- including confirming the closure-shadow case
+(`def outer(getattr): return (lambda rec: getattr(rec, "bases"))(None)`)
+and a nested-lambda shadow both still resolve correctly with the new
+ancestor-walk check running ahead of the pre-existing qualname-based one.
+Zero existing hits, `mypy`/`ruff` both stayed clean,
+`fact_field_readers.py` back down to 1615 lines after the split (well
+under the 2000-line hard cap, real headroom restored) plus the new 410-line
+`fact_field_readers_scope.py`. New tests:
+`TestLambdaParametersShadowDynamicReaders` and
+`TestMappingReceiverAliasesResolveThroughLocalNames` in `tests/
+test_fact_field_readers_wrapper_scoping.py`.
+
+**Two more findings from the next review round, plus a second test-file
+split once the second push crossed the 1200-line cap outright.** (1)
+Neither the mapping-`.get()` branch nor the subscript branch matches
+`vars(rec).__getitem__("bases")` (the explicit dunder-method spelling of
+the identical subscript read) or `operator.getitem(vars(rec), "bases")`
+(the standard-library callable spelling) -- both read the exact same
+normalized legacy value already caught elsewhere. Fixed with two new
+sibling branches: a `__getitem__` call on a mapping receiver, and a
+`getitem` call through a real `operator` module alias (`operator_names`,
+already resolved by `_operator_attrgetter_aliases()` for `attrgetter`'s
+own qualified form -- reused as-is, not re-derived), gated on `_shadowed()`
+the same way every other module-qualified call in this file already is.
+(2) Every alias-collection helper in this module (`_builtins_getattr_
+aliases`, `_operator_attrgetter_aliases`, `_unbound_getattribute_receiver_
+aliases`, `_builtins_symbol_aliases`, `_mapping_receiver_aliases`) is
+deliberately name-only and whole-tree, with no notion of *which* scope a
+given alias was actually recognized in -- and `_locally_bound_names()`'s
+own recognized-import carve-out (the mechanism that keeps a genuine alias
+import like `from operator import attrgetter as ag` from being wrongly
+treated as a shadow of itself) simply *omits* such an import from its
+`bound` dict entirely, rather than recording anywhere that it was
+recognized. `_shadowed()`'s outward closure walk had nothing to stop it
+at the scope the alias was actually resolved in, so it kept walking past
+that scope to search an *enclosing* one -- and if that enclosing scope
+happened to bind the same bare name to something completely unrelated
+(`from helper import ag` at module scope, an ordinary, unrecognized
+import), the walk wrongly treated that unrelated binding as a shadow of
+the genuinely-resolved inner alias. `from helper import ag` at module
+scope, `from operator import attrgetter as ag` inside `f`, `ag("bases")
+(rec)` inside `f` -- a real field read -- was invisible. Rather than
+threading real per-scope alias resolution through all five of those
+name-collection helpers (the kind of redesign `fact_detector_misuse.py`'s
+own `_imported_fact_aliases()` docstring already declined for an
+analogous reason -- see its "known gap" entry earlier in this doc),
+`_locally_bound_names()` now returns a *second* dict alongside its
+existing one: which names were recognized as a genuine alias source, per
+scope, rather than discarding that information. `_shadowed()`'s walk now
+checks this second dict at each scope it passes through and returns
+`False` (unshadowed) the moment it finds the name recognized there,
+before ever reaching an enclosing scope's own (potentially unrelated)
+binding. This is a real, bounded fix rather than the declined redesign,
+because it reuses the exact closure-walk mechanism `_shadowed()` already
+has -- the only change is giving it one more signal to stop on, not
+teaching every alias helper to understand scope.
+
+Verified against both reported repros, an aliased-import variant of the
+`operator.getitem` fix, and negative controls for each (a non-mapping
+`__getitem__` receiver; a shadowed `operator` parameter; an unrelated
+outer import with no inner recognized re-import, confirming the fix
+doesn't widen recognition, only stops the walk early once a real alias is
+found; a genuine parameter shadow, confirming ordinary shadowing is
+unaffected; a closure through a real recognized alias from an *enclosing*
+scope with no re-import of its own, confirming the pre-existing
+closure-walk behavior survives) via direct AST reproduction before
+writing tests. Adding these tests pushed `tests/
+test_fact_field_readers_wrapper_scoping.py` to 1219 of its own 1200-line
+cap -- over it outright -- so its tail (the five most recent test
+classes: augmented assignment through mapping receivers, lambda parameter
+shadowing, mapping-receiver aliases, explicit mapping-item readers,
+per-scope dynamic-reader alias resolution) was split into a new sibling
+file, `tests/test_fact_field_readers_later_fixes.py`, mirroring the
+`test_fact_detector_misuse_alias_edge_cases.py` precedent on the sibling
+gate -- mechanical extraction, every class moved unchanged, verified both
+in combination and in isolation. Zero existing hits, `mypy`/`ruff` both
+stayed clean, `fact_field_readers.py` at 1662 lines,
+`fact_field_readers_scope.py` at 439 lines, the wrapper-scoping test file
+back down to 936 lines, the new later-fixes test file at 315 lines -- all
+well under their respective caps. New tests:
+`TestExplicitMappingItemReaders` and `TestDynamicReaderAliasesResolvePer
+LexicalScope`, both now in `tests/test_fact_field_readers_later_fixes.py`.
+
+**One more finding from the next review round, on the same `operator.
+getitem` shape just landed.** The new `getitem` call-matching branch
+required an `ast.Attribute` callee (`operator.getitem(...)` through a
+resolved `operator` module alias) -- `_operator_attrgetter_aliases()`
+resolves `getitem`'s *own* bare-name import alias family nowhere at all,
+unlike `attrgetter`, which already gets the identical import-seeded/
+chained/qualified resolution via `attrgetter_names`. `from operator
+import getitem as gi; gi(vars(rec), "bases")` was invisible. Fixed by
+widening `_operator_attrgetter_aliases()` to also return a third set,
+`getitem_names`, resolved by literally duplicating `attrgetter_names`'s
+own three-stage mechanism (import-seeded from `from operator import
+getitem [as X]`, a plain-assignment chain, and a qualified `X.getitem`
+assignment once `operator_names` is known) against a separate `getitem`-
+tagged qualified-candidate list, sharing this same function's
+`operator_names`/`assign_candidates` collection so the two families can't
+independently drift on what counts as a resolved `operator` alias. A new
+sibling call-matching branch (bare `ast.Name` callee, `node.func.id in
+getitem_names`) was added alongside the existing qualified-form branch.
+
+**A second, self-found gap surfaced while first verifying this fix
+empirically, before any external review flagged it: `_locally_bound_
+names()`'s recognized-import carve-out had no entry for `from operator
+import getitem`, unlike its sibling `attrgetter`.** Without that entry,
+the new alias import was recorded as an *ordinary* local binding rather
+than a recognized alias source -- making `_shadowed()` see the import
+itself as shadowing its own later use, the exact inversion that carve-out
+exists to prevent (the same class of bug the `vars` alias round earlier
+in this file's own history already hit and fixed for an identical
+reason). Caught before this even reached review, since the very first
+empirical check of the direct, unaliased import form returned no site at
+all -- confirming the value of reproducing every case via `python3 -c`
+*before* writing tests, not just the one the review comment names. Fixed
+by adding `"getitem"` alongside `"attrgetter"` in that carve-out's
+recognized-name set.
+
+Verified against the reported repro, an unaliased variant, a chained-
+alias variant, and the qualified-assignment form (`gi = operator.
+getitem`), plus negative controls (an unrelated local function with no
+import; a shadowing parameter) -- all via direct AST reproduction before
+writing tests, and re-verified after the carve-out fix confirmed both the
+previously-broken direct-import forms and the previously-working chained/
+qualified forms all resolve correctly together. Still zero existing hits,
+`mypy`/`ruff` both stayed clean, `fact_field_readers.py` at 1720 lines
+(well under the 2000-line hard cap). New tests:
+`TestGetitemImportAliasesResolveTheBareCallableForm` in `tests/
+test_fact_field_readers_later_fixes.py` (403 lines, well under its own
+1200-line cap).
+
+**Two more findings from the next review round.** (1) None of the alias
+collectors ever recognized `ast.NamedExpr` -- only `ast.Assign`/
+`ast.AnnAssign` -- so `(read := getattr)(rec, "bases")` and `(fields :=
+vars(rec))["bases"]` were both invisible. Fixing this needed two separate
+changes, not one, since the walrus repro packs two distinct gaps into one
+expression: the *alias* itself (`read`, `fields`, real bindings a later,
+ordinary reference should resolve through) needed a `NamedExpr` branch in
+every alias-collecting function's own `ast.Assign`/`ast.AnnAssign` walk
+(`_imported_class_aliases`, `_builtins_getattr_aliases`,
+`_builtins_symbol_aliases`, `_unbound_getattribute_receiver_aliases`,
+`_unbound_getattribute_method_aliases`, `_mapping_receiver_aliases`,
+`_operator_attrgetter_aliases` -- all seven, applied mechanically since
+every one of them shares the identical structural gap, not just the two
+functions the finding itself named) -- and, separately, the walrus used
+*directly* as the call's own callee or mapping receiver (as both reported
+repros actually are) reads the field right there, in the very expression
+that introduces the alias, which no amount of alias-table lookup can
+catch since there is no later reference to look up. Fixed with a small,
+targeted unwrap at the two sites the finding actually named: `_is_mapping_
+receiver()` now unwraps a `NamedExpr` to its own `.value` before any of
+its existing checks run (composing for free with every shape it already
+recognizes), and the `getattr`-call-matching branch gained a third
+alternative recognizing `node.func` as a `NamedExpr` whose own `.value` is
+a known `getattr` name. (2) `_locally_bound_names()` modeled only a
+parameter, a `def`/`class` name, and an import as a real local binding --
+a `for` target, a `with ... as` target, an `except ... as` name, a
+comprehension's own `for` target, and a `match` capture were all invisible
+to it, so `for getattr in funcs: return getattr(rec, "bases")` (an
+ordinary, unrelated loop variable reusing the builtin-looking name) was
+still unconditionally flagged as a real read -- a false positive on
+genuinely valid code, not a missed misuse. Fixed as one generalized
+shadowing class, per the finding's own suggestion, rather than five
+hand-rolled special cases: `_target_bound_names()` extracts every plain
+name a `for`/`with` target binds (recursing through `Tuple`/`List`/
+`Starred` nesting), and `_match_pattern_captures()` walks a `match`
+pattern's own subtree for every `MatchAs`/`MatchStar`/`MatchMapping`
+capture regardless of nesting depth. None of these five forms introduces
+its own new scope (a `for`/`with`/`except`/`match` binds directly into
+whatever function already contains it, and this module's own line-based
+scope model already resolves a comprehension's `elt` to its enclosing
+*function*, matching its established coarser granularity) -- so every
+binding is recorded against the current `binding_scope` directly, the
+same target a parameter already uses.
+
+Verified against both reported repros for finding (1) plus a later-use
+(non-inline) variant, a shadowed-parameter negative control, and an
+unrelated-builtin negative control; and all five reported binding shapes
+for finding (2) (`for`, tuple-unpacking `for`, `with ... as`,
+`except ... as`, a comprehension target, a bare match capture, an
+as-pattern match capture, and a capture nested inside a class pattern),
+plus a positive control confirming an unrelated `for` loop doesn't
+suppress a real read elsewhere in the same function -- all via direct AST
+reproduction before writing tests. Still zero existing hits, `mypy`/
+`ruff` both stayed clean, `fact_field_readers.py` at 1765 lines and
+`fact_field_readers_scope.py` at 538 lines (both well under the 2000-line
+hard cap). New tests: `TestNamedExprAliasesAndInlineCallsAreRecognized`
+and `TestLexicalBindingFormsAreTreatedAsShadows`, both appended to `tests/
+test_fact_field_readers_later_fixes.py` (558 lines, well under its own
+1200-line cap).
+
+**Two more findings from the next review round, plus one declined as a
+re-raise of an already-decided, documented tradeoff.** (1) The lexical-
+binding-forms fix's own comprehension-target handling (previous round)
+was a real regression, caught by review: it recorded a comprehension's
+`for` target against `_locally_bound_names()`'s coarser, function-only
+qualname model -- correct for `for`/`with`/`except`/`match` (none of
+which are block-scoped in Python), but a comprehension genuinely *does*
+introduce its own new scope, so that recording shadowed every call
+anywhere later in the *whole enclosing function*, not just calls
+genuinely inside the comprehension. `[x for getattr in funcs]` followed
+by an unrelated, later `getattr(rec, "bases")` in the same function was
+wrongly suppressed. Fixed by reverting that one binding form out of
+`_locally_bound_names()` entirely and handling it instead in
+`_shadowed()`'s own real AST-ancestor walk -- the identical mechanism
+already used for a `lambda` parameter's identical "not a scope this
+module's coarser qualname model tracks" shape -- so a comprehension
+target shadows exactly the calls nested inside it (`elt`, filters, later
+generators), never anything outside it. The *outermost* generator's own
+iterable is the one exception (mirroring `fact_detector_misuse_scope.py`'s
+identical carve-out for the same construct): it evaluates in the scope
+enclosing the comprehension, before the comprehension's own target
+exists, so `[x for getattr in getattr(rec, "bases")]` must still be
+flagged. Implementing this exactly needed one more structural fact about
+the AST than the analogous fix in the sibling module: a comprehension's
+`generators[0]` holds the `ast.comprehension` *clause* object, not its
+`.iter` directly, so the ancestor walk tracks which clause object it just
+ascended through (`outermost_iter_clause`) across the next hop, rather
+than comparing the immediate child against `.iter` at the point the
+`ListComp`/etc. itself is reached -- a first attempt compared against
+`generators[0].iter` directly and silently never matched, since the
+ancestor walk's immediate child at that point is always the clause
+object. (2) A lambda's own default value expression evaluates at lambda-
+*creation* time, in the enclosing scope, before the lambda's own
+parameters exist at all -- the identical def-time-vs-body-time
+distinction `_enclosing_qualnames`'s own default/annotation handling
+already draws for a named `def` -- but `_shadowed()`'s lambda-ancestor
+check unconditionally treated any call reached through a `Lambda`
+ancestor as shadowed by its parameters, regardless of whether the call
+came from the lambda's `body` or its `args` (default values). `lambda
+getattr=getattr(rec, "bases"): getattr` read the real builtin in its
+default, but was wrongly treated as shadowed. Fixed by checking `child is
+node.body` at the point the walk reaches the `Lambda` ancestor -- exact
+by construction (true only on the hop ascending directly out of the body
+subtree, however deeply nested; false for every hop coming from `args`
+instead) -- and only checking the lambda's own parameters when that holds.
+
+(3) **Declined, citing an already-documented rationale rather than
+re-implementing.** `_builtins_getattr_aliases()`'s own plain-assignment
+alias resolution (`read = getattr`) is deliberately whole-tree/module-
+wide, not per-function -- its own docstring already states this
+explicitly ("Whole-tree, matching `_imported_class_aliases`'s own scope
+for the identical reason"), and `_imported_class_aliases()`'s own
+docstring gives the reason: "every mechanism here is almost always module
+level, and scanning the whole tree is the same over-approximating-is-safe
+stance this module already takes elsewhere." The finding reproduces
+exactly the false-positive shape that stance already, deliberately
+accepts: two unrelated functions each assigning the identical local name
+`read` to two different values (`read = getattr` in one, `read = helper`
+in another) both have their own `read(rec, "bases")` call flagged, since
+the alias name is resolved once, globally. This is the identical class of
+question already decided (and declined, twice, with the identical
+citation) earlier in this same PR's review history for
+`_imported_fact_aliases`'s own module-wide import-alias resolution (see
+that thread's own "convergence note") -- a correct fix needs the same
+kind of per-scope threading through the fixed-point alias resolution that
+was already judged "a real, if narrow, redesign... not a follow-up to the
+last one" there, not a bounded extension of an established mechanism.
+Documented as a known, pre-existing, deliberately-accepted tradeoff
+rather than re-litigated.
+
+Verified against both reported repros for findings (1)/(2), a positive
+control confirming each fix's *intended* shadowing case still works
+(comprehension elt/filter/non-outermost-generator shadowing; a lambda
+body genuinely shadowed by its own parameter), and the outermost-
+generator-iterable exception itself for both a list comprehension and a
+set comprehension, all via direct AST reproduction before writing tests.
+Still zero existing hits, `mypy`/`ruff` both stayed clean,
+`fact_field_readers.py` at 1829 lines and `fact_field_readers_scope.py`
+at 556 lines (both well under the 2000-line hard cap). New tests:
+`TestComprehensionTargetShadowsOnlyWithinTheComprehension` and
+`TestLambdaDefaultsEvaluateBeforeParameterShadows`, both appended to
+`tests/test_fact_field_readers_later_fixes.py` (660 lines, well under its
+own 1200-line cap).
+
+**Two more findings from the next review round: one fixed, a bounded
+extension of an established mechanism; one declined as needing a real
+redesign rather than a bounded fix.** (1) `dict.__getitem__(vars(rec),
+"bases")` -- the *unbound*-method spelling of the bound
+`vars(rec).__getitem__("bases")` form already recognized, the identical
+relationship `object.__getattribute__(rec, "bases")` already has to
+`rec.__getattribute__("bases")` elsewhere in this module -- was invisible.
+Fixed by resolving `dict`'s own alias family through `_builtins_symbol_
+aliases()`'s already-generic mechanism (the same one `vars` itself already
+uses -- `dict_names = _builtins_symbol_aliases(tree, "dict",
+builtins_names)`, no new collector needed, since `dict` is a real,
+always-in-scope builtin in the identical "no import required" category
+`getattr` itself is in) and adding one new call-matching branch mirroring
+the bound form's own shape, with the receiver check against `dict_names`
+instead of `_is_mapping_receiver()`. **Proactively verified every sibling
+alias form before writing tests, per this file's own established
+discipline (a prior round's own self-found regression) rather than only
+the one reported repro** -- the aliased-import form (`from builtins import
+dict as D; D.__getitem__(...)`) initially produced no site at all, traced
+to the identical class of bug caught earlier in this same file's history:
+`_locally_bound_names()`'s recognized-import carve-out had no entry for
+`"dict"` alongside its existing `"getattr"`/`"object"`/`"type"`/`"vars"`
+tuple, so the import itself was recorded as an ordinary local binding
+rather than a recognized alias source, making `_shadowed()` see the
+import as shadowing its own later use. Fixed by adding `"dict"` to that
+tuple, then re-verified every alias shape together (bare import, aliased
+import, plain-assignment chain, qualified `builtins.dict`) rather than
+re-testing only the one that had been broken.
+
+(2) **Declined, documented as a known gap needing real redesign rather
+than attempted under review pressure.** `class C: def getattr(self,
+name): ...; value = getattr(rec, "bases")` -- a class-body-level call
+(not inside a method) genuinely does see an earlier same-class-body
+binding via ordinary sequential class-body execution, but
+`_locally_bound_names()` passes `binding_scope=None` when descending into
+a `ClassDef`, discarding every binding made anywhere in the class body,
+not just a method's own name -- so this reads as an unshadowed real
+`getattr` call and is wrongly flagged. Investigated a same-round fix and
+found it structurally unsound, not merely inconvenient: this module's
+`_enclosing_qualnames()` gives class-body-level code no distinct qualname
+of its own at all (it inherits whichever qualname encloses the `class`
+statement, confirmed directly -- the reported repro's own call resolved
+to qualname `"<module>"`), which is exactly why `binding_scope=None` was
+chosen for class bodies in the first place (a documented, deliberate
+fix, see `_locally_bound_names()`'s own "That 'directly, syntactically
+contains it' scope is NOT simply the nearest enclosing function" section):
+recording a class-body binding (in particular a method's own name)
+against the *same* qualname that also covers code genuinely *outside* and
+*after* the class statement would leak it there too -- `class C: def
+getattr(self, name): ...` followed by a real, unrelated
+`getattr(rec, "bases")` **after** the class definition, at the same outer
+scope, would then be wrongly excluded, reintroducing a worse version of
+the exact bug that `None` was chosen to prevent. A correct fix needs a
+genuinely distinct, *position-based* class-body scope (mirroring how a
+comprehension's own scope was just handled above via `_shadowed()`'s
+AST-ancestor walk rather than the qualname model) -- and, unlike the
+comprehension case, get it *order-sensitive* too, since class-body
+execution is sequential top-to-bottom, ordinary code (a call before the
+shadowing `def` must still see the real builtin) -- exactly the
+"materially larger change than the guard conditions this module has
+added incrementally so far" `_locally_bound_names()`'s own docstring
+already names as a known, deliberately-unattempted gap for a
+structurally identical reordering problem. Recorded here rather than
+attempted as a reactive same-round patch.
+
+Verified against the reported repro, the aliased/bare-import/plain-
+assignment/qualified alias forms, and negative controls (a `dict`
+parameter shadow; an unrelated mapping-receiver argument) for finding
+(1), via direct AST reproduction before writing tests. Still zero
+existing hits, `mypy`/`ruff` both stayed clean, `fact_field_readers.py`
+at 1859 lines and `fact_field_readers_scope.py` at 558 lines (both well
+under the 2000-line hard cap). New tests:
+`TestUnboundDictGetitemMappingReaders`, appended to `tests/
+test_fact_field_readers_later_fixes.py` (728 lines, well under its own
+1200-line cap).
+
 **Still not landed**: no detector (`diff_layout.py`/`diff_types.py`/
-`diff_param_qualifiers.py`/the nine-reader table above) has been migrated
-to read `.status`, and the widened, non-glob AI-readiness check this
-Design section describes has not been written. Migrating a detector now
-would add real complexity for zero behavior change until every producer's
-own construction is at least this explicit — landed as of this slice for
-the five fields this phase scoped — deferred deliberately, not silently,
-per this plan's own "vertical slice, not flag day" discipline: each slice
-is a primitive the rest of Phase 0 builds on, landed and tested on its own
-rather than held until every consumer migrates too.
+`diff_param_qualifiers.py`/the reader set the check above now tracks
+precisely) has actually been migrated to read `.status` — the check above
+only *guards* the existing sites against a new, unreviewed one
+joining them; it does not change what any of them do.
+Migrating a detector now would add real complexity for zero behavior
+change until every producer's own construction is at least this explicit
+— landed as of the second slice for the five fields this phase scoped —
+deferred deliberately, not silently, per this plan's own "vertical slice,
+not flag day" discipline: each slice is a primitive the rest of Phase 0
+builds on, landed and tested on its own rather than held until every
+consumer migrates too.
+
+**Three more `fact-field-readers` findings (same review round), all
+bounded extensions of already-shipped alias/constructor-recognition
+mechanisms — fixed, one after chasing a real self-inflicted regression
+this same class of bug had already produced twice.** (1) `dict.get(vars
+(rec), "bases")` — the unbound-method spelling of the already-recognized
+bound `vars(rec).get("bases")` form, the identical relationship the
+already-shipped unbound `dict.__getitem__` branch has to its own bound
+sibling. A straightforward mirror of that branch, reusing `dict_names`
+unchanged. (2) `operator.attrgetter("bases.foo")` — a dotted attrgetter
+path. The existing docstring's blanket "no type inference" framing for a
+dotted argument was overbroad: the *first* dotted component is read
+directly off the literal string (`field.partition(".")`), no inference
+needed, while a *later* component genuinely would need to know the
+runtime type of what the first component reads — so only the first
+component is matched, keeping the "no type inference" limit exactly
+where it actually applies. Verified a multi-argument call
+(`attrgetter("size_bits", "bases.foo")`) still reports only the real
+`FACT_BRIDGED_ATTRS` hit, and that a bridged name appearing in a
+*non-first* component (`attrgetter("foo.bases")`) stays correctly out of
+scope. (3) `operator.itemgetter("bases")(vars(rec))` — the `attrgetter`-
+shaped constructor spelling of a subscript read, previously entirely
+untracked (no `itemgetter_names` alias family existed at all). Added by
+widening `_operator_attrgetter_aliases()`'s return to a 4-tuple
+(`itemgetter_names` resolved the identical import-seeded/chained/
+qualified way `attrgetter_names`/`getitem_names` already are) and a new
+`_is_itemgetter_constructor_call()`/`_itemgetter_matched_name()` pair
+mirroring the attrgetter versions — but with one deliberate difference:
+unlike `attrgetter`'s "match wherever constructed, regardless of how the
+getter is later used" stance, `itemgetter` is matched only at the
+*outer*, immediate call, gated on `_is_mapping_receiver()` the same way
+every other subscript-reading form here already is. The reason the two
+forms can't share one stance: `attrgetter("bases")(x)` reads `x.bases`
+for *any* `x`, so there's no narrower receiver shape to require, while
+`itemgetter("bases")(x)` reads `x["bases"]`, exactly as legitimate for an
+arbitrary unrelated mapping as for an instance's own `vars()`/
+`__dict__` — an ungated constructor-wide match would have been far
+noisier than its `dict.get`/`operator.getitem` siblings.
+
+**A real self-inflicted regression, caught by proactively verifying every
+sibling alias form before writing tests rather than only the one repro —
+the third instance of this exact bug class this session (a new alias
+family missing its own entry in `_locally_bound_names()`'s recognized-
+import carve-out tuple, `fact_field_readers_scope.py`).** The bare-name
+forms (`from operator import itemgetter`, and its own `as` alias) both
+returned `[]` — a genuine false negative, not merely an incomplete
+positive check — because the carve-out tuple gating which imports are
+treated as a real alias *source* rather than an ordinary shadowable local
+binding still only listed `("attrgetter", "getitem")` for the `operator`
+module; `itemgetter` was never added alongside them. Without the
+carve-out entry, `_locally_bound_names()` recorded the bare `itemgetter`
+import as an ordinary local binding, and `_shadowed()` then read it back
+as shadowing itself — every bare-name itemgetter call was wrongly
+excluded. Root-caused (not guessed) by adding temporary trace prints at
+each condition in the new matching branch, isolating the exact point
+where `_shadowed(...)` returned `True` for an unshadowed name, rather
+than assuming which of the several new conditions was at fault. Fixed by
+adding `itemgetter` to the tuple (now `("attrgetter", "getitem",
+"itemgetter")`) and updating the docstring paragraph that enumerates the
+carved-out spellings to match. Re-verified every sibling form afterward
+(bare, aliased, `operator`-qualified, an aliased `operator` module, a
+plain-assignment alias of the `operator` module, a qualified-assignment
+alias) rather than stopping at the one repro that first surfaced the gap.
+
+**A file-size consequence, handled the established way rather than
+reactively.** Adding the itemgetter machinery pushed `fact_field_
+readers.py` to 2019 lines — over the AI-readiness gate's 2000-line hard
+cap. Rather than trim content, the `_operator_attrgetter_aliases()`/
+`_is_attrgetter_constructor_call()`/`_attrgetter_matched_name()`/
+`_is_itemgetter_constructor_call()`/`_itemgetter_matched_name()` block
+(self-contained — no dependency on anything else in the module besides
+bare `ast`) was moved to `fact_field_readers_scope.py` as a second,
+later block, exactly mirroring how that sibling module's *first* block
+was split out originally; the module's own docstring was extended to
+record the second move. `fact_field_readers.py` dropped to 1701 lines,
+`fact_field_readers_scope.py` grew to 896 — both comfortably under the
+cap. Verified with the full existing 176-test suite plus 33 new
+positive/negative-control tests (three new classes —
+`TestUnboundDictGetMappingReaders`, `TestAttrgetterDottedPaths`,
+`TestItemgetterMappingReaders` — appended to `tests/test_fact_field_
+readers_later_fixes.py`, 974 lines, well under its own 1200-line cap),
+`mypy`/`ruff format`/`ruff check` all clean on both touched scripts,
+`check_architecture.py` and `check_ai_readiness.py` both at 0 errors, and
+`check_docs_contract.py` unchanged at its two pre-existing warnings.
+
+**One more finding on the same round's itemgetter fix: only a single
+constructor argument was ever inspected.** `operator.itemgetter("foo",
+"bases")(vars(rec))` returns a getter that reads *both* requested keys as
+a tuple — real, documented `itemgetter` behavior, and the identical
+multi-key shape `attrgetter`'s own recognition already handles — but the
+new itemgetter branch's own `len(node.func.args) == 1` guard (and
+`_is_itemgetter_constructor_call()`'s matching `len(node.args) == 1`)
+silently missed a bridged key riding alongside an unrelated one. Fixed by
+widening `_is_itemgetter_constructor_call()` to `len(node.args) >= 1`
+(mirroring `_is_attrgetter_constructor_call()`'s identical bound) and
+restructuring the itemgetter branch from the single-attribute elif chain
+into its own top-level case — the same reason the `attrgetter` branch
+itself is a top-level case rather than folded into that chain: it now
+iterates every constructor argument and reports each bridged, literal
+string-constant key independently, rather than fitting into a chain
+shaped for exactly one `attr` per matched node.
+
+Verified against the reported multi-key repro, both keys bridged
+(reporting both independently), the bare (non-qualified) spelling,
+a no-bridged-keys negative control, a non-mapping-receiver negative
+control, and a shadowed-`operator`-parameter negative control, via direct
+AST reproduction before writing tests. The full existing single-key
+suite (dict.get, dotted attrgetter, single-key itemgetter, and every
+other already-shipped reader form) re-verified unaffected. Still zero
+existing hits, `mypy`/`ruff` both stayed clean, `fact_field_readers.py`
+at 1733 lines and `fact_field_readers_scope.py` at 901 lines (both well
+under the 2000-line hard cap). New tests:
+`test_inspects_every_key_in_a_multi_key_getter`,
+`test_reports_each_bridged_key_independently`,
+`test_multi_key_bare_spelling_still_recognized`,
+`test_ignores_a_multi_key_getter_with_no_bridged_keys`, appended to
+`TestItemgetterMappingReaders` in `tests/test_fact_field_readers_later_
+fixes.py` (1014 lines, well under its own 1200-line cap).
+
+**Two more `fact-field-readers` findings (next review round), both real,
+both bounded extensions of already-shipped mechanisms.** (1) `_shadowed()`'s
+comprehension-generator handling blanket-checked *every* generator's own
+target against a call reached through any generator's iterable -- correct
+for the outermost generator (already excluded entirely, since it evaluates
+before any target exists) but wrong for a *non*-outermost one: `[x for x in
+xs for getattr in getattr(rec, "bases")]` -- the second generator's own
+iterable evaluates *before that same generator's own target* is bound, the
+identical binding-order rule the outermost generator's iterable already
+gets, just one level less special-cased. Fixed by generalizing the single
+`outermost_iter_clause` tracked during the ascent into
+`comprehension_gen_clause`/`comprehension_via_iter`, identifying *which*
+generator (by index, via `node.generators.index(...)`) and *which part* of
+it (`.iter`, evaluating before that generator's own target; `.ifs`,
+evaluating after) the call was reached through, then shadowing only
+against the generators that are actually already bound at that point: none
+for the outermost iterable, generators strictly before the current one for
+a non-outermost iterable, the current generator inclusive for a filter, and
+every generator for the comprehension's own final `elt`/`key`/`value`
+(reached with no intervening generator clause at all). (2) `operator.
+itemgetter("bases")(vars(rec))` was recognized only at the point of
+immediate construction-and-call -- `get = operator.itemgetter("bases");
+get(vars(rec))`, storing the constructed getter in a variable first before
+calling it, is ordinary, common Python that was silently missed. Fixed
+with a new `_itemgetter_alias_keys()`, tracking every local name bound via
+a plain `ast.Assign` to the *result* of an itemgetter-constructor call,
+mapped to that call's own literal keys -- deliberately not chased through
+a *further* plain-name alias (`get2 = get`, the same "no type inference
+beyond one hop" limit already accepted elsewhere in this module) and
+dropped entirely for a name assigned more than once anywhere in the file
+(ambiguous by the second assignment, so guessing which one a later call
+used would risk fabricating a false positive rather than merely missing a
+true one).
+
+Both pre-existing tests that pinned the exact gaps these fixes close were
+corrected rather than left pinning a now-fixed bug -- the fourth and fifth
+instances of this exact pattern this plan has now recorded.
+`test_still_shadows_within_a_non_outermost_generators_iterable` used a
+repro where the shadowing target was the call's *own* generator's target
+(self-shadowing, the bug), not an *earlier* generator's target (the
+positive control its own docstring actually claimed to be testing) --
+corrected to the earlier-target repro, with a new sibling test class,
+`TestComprehensionGeneratorBindingOrder`, exhaustively covering all four
+binding-order cases (a generator's own iterable, its own filter, the final
+element expression, and a third generator confirming the rule generalizes
+past two). `test_does_not_match_a_getter_constructed_but_not_immediately_
+called` asserted `== []` for exactly the aliased-itemgetter repro this
+round's second fix now correctly detects -- renamed and rewritten to
+assert the real, single hit, with a new sibling test pinning the
+one-hop-only chased-no-further limit explicitly rather than leaving it
+implicit.
+
+Verified against both reported repros, every binding-order permutation
+listed above, the reassigned-variable and chained-second-name negative
+controls for the itemgetter alias case, and every existing sibling form
+(dict.get, dotted attrgetter, direct-call itemgetter, multi-key itemgetter)
+re-verified unaffected, all via direct AST reproduction before writing
+tests. Still zero existing hits, `mypy`/`ruff` both stayed clean,
+`fact_field_readers.py` at 1809 lines and `fact_field_readers_scope.py` at
+966 lines (both well under the 2000-line hard cap). New tests:
+`TestComprehensionGeneratorBindingOrder` (4 tests) and
+`test_detects_a_getter_assigned_to_a_variable_before_being_called`/
+`test_does_not_chase_an_aliased_getter_through_a_second_name`/
+`test_ignores_a_reassigned_getter_variable` in
+`TestItemgetterMappingReaders`, all in `tests/test_fact_field_readers_
+later_fixes.py` (1113 lines, still under its own 1200-line cap).
+
+A follow-up Codex review on the same commit found `_itemgetter_alias_keys()`
+walked only `ast.Assign` -- `get: object = operator.itemgetter("bases")`
+(an annotated assignment) and `(get := operator.itemgetter("bases"))`
+(a named expression/walrus, bound and referenced later, not the immediate-
+self-call shape) construct and bind the identical getter through a
+different Python binding statement, and both were silently missed:
+`unmigrated_fact_reader_sites()` returned no site for either form, so the
+ERROR-level gate could be bypassed by simply spelling the same alias
+through `AnnAssign`/`NamedExpr` instead of `Assign`. Fixed by generalizing
+`_itemgetter_alias_keys()`'s walk to the identical three-branch shape
+`_mapping_receiver_aliases()` (`fact_field_readers.py`) already uses for
+this exact purpose -- a shared `_record(target, value)` helper called from
+`ast.Assign`, `ast.AnnAssign`, and `ast.NamedExpr` branches, preserving the
+existing ambiguity rule (a name assigned more than once anywhere in the
+tree is dropped entirely, regardless of which binding forms produced the
+multiple assignments).
+
+Verified against both reported repros (AnnAssign, NamedExpr-then-later-call),
+a multi-key variant of each, the bare (non-qualified) `itemgetter` spelling
+combined with each, the original plain-`ast.Assign` case as a regression
+check, and the reassigned-variable and non-mapping-receiver negative
+controls for both new forms -- all via direct AST reproduction before
+writing tests. One further shape was checked and found out of scope for
+this finding: `(get := operator.itemgetter("bases"))(vars(rec))`, an
+immediate self-call on the walrus expression itself (no later reference to
+`get` at all), stays undetected -- distinct from the reported "store then
+call later" pattern the review actually named, and from the already-handled
+`operator.itemgetter("bases")(vars(rec))` immediate-construction-and-call
+form (whose `func` is the `Call` node itself, not a `NamedExpr` wrapping
+one); left as an unreported, narrower residual rather than folded into this
+fix's scope. Still zero existing hits, `mypy`/`ruff` both stayed clean,
+`fact_field_readers_scope.py` at 989 lines (well under the 2000-line hard
+cap). New tests split into a dedicated sibling file,
+`tests/test_fact_field_readers_itemgetter_binding_forms.py` (9 tests, two
+classes: `TestItemgetterConstructorAliasedThroughAnnAssign`/
+`TestItemgetterConstructorAliasedThroughNamedExpr`), rather than appended to
+`test_fact_field_readers_later_fixes.py`, which had only ~87 lines of
+headroom left under its own 1200-line cap.
+
+**The "left as an unreported, narrower residual" shape above turned out not
+to stay a residual: a follow-up Codex review round named it directly and it
+turned out to be a bounded, mechanical extension of an already-established
+sibling mechanism, not exotic indirection worth declining.**
+`(get := operator.itemgetter("bases"))(vars(rec))` -- the outer call's own
+`func` is the `ast.NamedExpr` itself, not a `Call`, so neither the
+immediate-construction-and-call branch (which requires `node.func` to
+literally be the constructor `Call`) nor the plain-Name alias branch (which
+requires `node.func` to be a bare `Name`) ever matched, and
+`unmigrated_fact_reader_sites()` returned no site -- letting a bridged-field
+read bypass the ERROR-level gate. The review pointed at the exact right
+precedent to mirror: this module already handles the identical shape for
+`getattr` (`(read := getattr)(rec, "bases")`, checked against the walrus's
+own `.value` -- what is actually being called -- not its `.target`). Fixed
+with a new branch matching `isinstance(node.func, ast.NamedExpr) and
+isinstance(node.func.value, ast.Call) and _is_itemgetter_constructor_call
+(node.func.value, ...)`, inspecting every constructor argument the same
+multi-key way the immediate-construction-and-call branch already does, and
+gated by `_shadowed()` against `_itemgetter_matched_name(node.func.value)`
+-- the same "is the `itemgetter`/`operator` name itself locally shadowed at
+this point" check the immediate-call branch already applies, just against
+the walrus's wrapped call rather than `node.func` directly.
+
+Verified against the reported repro, a multi-key variant, the bare
+(non-qualified) `itemgetter` spelling, a no-bridged-keys negative control, a
+non-mapping-receiver negative control, a shadowed-`operator`-parameter
+negative control, and every existing sibling form re-verified unaffected
+(the walrus-then-later-call form, the plain-`ast.Assign`/`AnnAssign` forms,
+the immediate-construction-and-call form with no assignment at all, the
+sibling `getattr` walrus-callee mechanism, and the still-undetected
+two-hop-alias-chain residual staying correctly out of scope), all via direct
+AST reproduction before writing tests. Still zero existing hits, `mypy`/
+`ruff` both stayed clean, `fact_field_readers.py` at 1858 lines (well under
+the 2000-line hard cap). New tests: `TestItemgetterConstructedAndCalledThrough
+AWalrusCallee` (6 tests), appended to
+`tests/test_fact_field_readers_itemgetter_binding_forms.py` (235 lines,
+plenty of headroom under its own 1200-line cap -- the natural home for this
+fix, unlike the two files already tight on headroom).
+
+**Separately, this same round brought PR #921's branch up to date with
+`main`, closing a CI `architecture` step failure (`abicheck/contract_
+evidence.py:86: model -> policy is forbidden`, a `compare -> model ->
+policy -> compare` dependency cycle) that was never this PR's own doing.**
+The branch was 53 commits behind `main`; `main` had already merged a fix
+for the identical cycle (PR #931,
+`fix/contract-evidence-model-policy-cycle`) before this round started, so
+merging `main` in (a clean merge, no conflicts) was sufficient -- no
+independent architecture fix was needed on this branch. Verified with
+`python scripts/check_architecture.py` reporting `0 error(s)` both on the
+merge commit and, separately, on `main` itself before merging.
+
+**A further Codex review round read the gate's own error message as
+promising a recognition mechanism that does not exist, and was declined
+as a detection-logic change while accepted as a wording fix.** The
+finding: "when migrated code first checks `rec.bases_fact.status` and
+then reads `rec.bases`, `unmigrated_fact_reader_sites()` still returns
+the legacy read... the gate needs to recognize an applicable
+sibling-status guard before reporting the legacy read (or change the
+contract and diagnostic to require reading the Fact value instead)."
+Investigated both halves of that either/or separately. Recognizing "a
+preceding, applicable sibling-status guard" correctly needs genuine
+control-flow analysis this scan deliberately doesn't have (a plain,
+position-blind AST walk, per this module's own docstring) --
+what counts as "preceding" (same branch? any earlier line in the same
+function? does it need to dominate every path to the read?), what
+counts as an "applicable" check (equality against a specific
+`FactStatus` member? a truthiness test? membership?), and whether the
+guard's branch is even the one containing the read, are all genuine
+design questions with no existing precedent to model after -- and
+`grep -rn "_fact\.status\b" abicheck/` confirms zero real call sites in
+the codebase exercise this pattern today, matching the plan doc's own
+already-recorded "Still not landed: no detector... has actually been
+migrated to read `.status`" note two entries above. Building real
+control-flow recognition for a pattern nothing in the tree uses yet,
+under review pressure, risks exactly the "attractive nuisance" this
+plan's own established discipline warns against -- a heuristic that
+could produce false negatives (masking a genuinely unguarded read that
+merely happens to share a function with an unrelated status check
+elsewhere) for a benefit no real caller currently needs.
+
+The second half -- "change the contract and diagnostic" -- was the real,
+actionable gap: the message's previous wording ("either migrate this
+reader to check .status first, or add its stable key to
+KNOWN_UNMIGRATED_READERS") is genuinely ambiguous between "replace the
+legacy-field read with a `Fact[...]`-sibling read" (the actual intended
+migration path, which naturally stops matching this scan's own
+attribute-read pattern once done, needing no new recognition logic at
+all) and "add a status check immediately before the still-present
+legacy read" (the reading Codex's finding took, which this scan can
+never honor without the unbuilt control-flow analysis above). Tightened
+the message to state the "no control-flow analysis, a preceding check
+does not exempt the read" contract explicitly, so a developer reading
+it cannot come away expecting a recognition mechanism the scan doesn't
+have. Verified the new wording against a real preceding-`.status`-check
+repro (confirming it still, correctly, fires) and against the existing
+end-to-end violation-reporting test, and confirmed no existing test
+pinned the old wording (`grep`-checked across every `test_fact_field_
+readers*.py` file) before changing it. Still zero existing hits,
+`mypy`/`ruff` both stayed clean, `fact_field_readers.py` at 1863 lines
+(well under the 2000-line hard cap). New tests split into a dedicated
+small sibling file, `tests/test_fact_field_readers_status_check_
+diagnostic.py` (2 tests), rather than appended to
+`test_fact_field_readers.py`, which had only ~24 lines of headroom left
+under its own 1200-line cap.
+
+**A second static gate, closing a gap this plan's own generated code left
+open — landed.** `abicheck/model/fact.py`'s own `Fact` class docstring
+states, in the present tense: "A detector reads a `Fact[...]`-typed field
+only by inspecting `.status` ... The guard against comparing two
+`Fact[...]` values directly inside detector logic (rather than unwrapping
+first) is a static check, not a runtime one — see
+`scripts/check_ai_readiness.py`'s `fact-detector-misuse` check." No such
+check existed when that sentence was written in the first slice — a
+docstring describing a gate the codebase doesn't have yet is exactly the
+kind of drift AGENTS.md's `adr-status-sync`/`generated-file-ownership`
+checks exist to catch for other artifact kinds, just not one either of
+them scans for here. `scripts/fact_detector_misuse.py` (registered as
+`fact-detector-misuse`, mirroring `fact_field_readers.py`'s own
+extraction) is that check: an AST scan for an `==`/`!=` comparison where
+either side is a `<attr>_fact` field access or a
+`Fact(...)`/`Fact.<classmethod>(...)` constructor call — `Fact[T]`
+deliberately doesn't override `__eq__` (poisoning the *containing*
+dataclass's own generated equality would be worse), so this comparison
+doesn't raise; it silently falls back to structural dataclass equality
+over `status`/`value`/`diagnostics` together, which can answer True or
+False without ever checking whether either side is `PRESENT` — exactly
+the ambiguity `Fact[T]` exists to make unrepresentable, reintroduced by a
+different spelling. Verified empirically (by running the real scan
+against the whole package) to have zero existing hits under `abicheck/`
+today — the only real matches for this pattern anywhere in the repo are
+in `tests/`, asserting a constructed `Fact` equals an expected one, which
+is legitimate assertion code outside this check's `abicheck/`-only scope
+— so this check ships with **no baseline at all**, unlike
+`fact-field-readers`'s allowlist-and-shrink `KNOWN_UNMIGRATED_READERS`:
+any match is an unconditional error. Tests: `tests/
+test_fact_detector_misuse.py` (the real repository has zero violations;
+the AST primitive's own contract — both attribute-pair and
+constructor-call shapes detected for `==` and `!=`, a chained comparison's
+each adjacent pair caught independently, `is`/`is not` and an unrelated
+attribute/method name ignored; and end-to-end cases confirming the check
+function fires on a new violation and stays silent on `.status`-based
+unwrapping).
+
+**A Codex review round found a real gap in the name-only matching, fixed
+in the same PR.** The scan recognized `x.bases_fact == y.bases_fact`
+directly but not the same misuse laundered through an ordinary local
+variable: `old_fact = old.bases_fact` followed by `old_fact == new_fact`
+has two bare `ast.Name` operands, and a single node can't answer whether
+a name is Fact-typed without knowing which function it belongs to — the
+identical scope question `fact_field_readers.py`'s own `qualname`-keyed
+baseline already had to solve. Fixed with `_fact_aliases()`: a
+per-function `dict[qualname, set[name]]` built from two name-only
+sources, a simple single-target assignment from a recognized Fact-typed
+expression, and a function parameter whose own annotation is `Fact[...]`
+(or bare `Fact`) — both scoped to their own enclosing function so an
+alias in one function can't leak into an unrelated same-named local in a
+sibling. Deliberately conservative in the *over*-approximating direction
+(an aliased name is trusted for the whole function, not narrowed to the
+lines after its assignment) — a false positive here is far cheaper than
+the false negative it closes, and this check has no control-flow
+analysis to narrow it correctly anyway. Verified empirically to have zero
+existing hits, so the check still has no baseline. New tests: aliasing
+through a local assignment, two `Fact[...]`-annotated parameters compared
+directly, an alias not leaking across sibling functions, and an ordinary
+non-Fact local left alone.
+
+**A second Codex round found the alias tracking itself stopped one hop
+too early, fixed in the same PR.** `first = rec.bases_fact; second =
+first; second == other` launders the misuse through a *second* ordinary
+assignment: `second`'s own RHS is the bare `ast.Name` `first`, which
+`_is_fact_typed_expr` doesn't recognize (only an attribute access or a
+constructor call), so a single pass over assignments stopped at `first`
+and never learned `second` was an alias too. Fixed by resolving the
+per-function alias set to a fixed point: collect every simple
+single-target assignment as a `(name, value)` candidate first, then
+repeatedly add any candidate whose value is either directly Fact-typed
+*or* is itself a `Name` already known as an alias in that same function,
+until a pass adds nothing new — bounded by construction (finitely many
+candidates, each pass adds at least one or the loop stops). New test:
+`test_detects_a_comparison_through_a_chained_alias`.
+
+**A third Codex round found two more real gaps, both fixed in the same
+PR.** (1) `old_fact: Fact[list[str]] = old.bases_fact` is an
+`ast.AnnAssign`, a distinct node type the candidate collection (`ast.
+Assign`-only) never matched at all — the ordinary annotated-assignment
+spelling bypassed the gate entirely. Fixed by collecting `AnnAssign` too:
+its own annotation is an unconditional signal on its own (mirroring the
+function-parameter case — a bare `old_fact: Fact[...]` with no value is
+still Fact-typed), and when it isn't Fact-typed but a value is present,
+the assignment still joins the ordinary fixed-point candidate pool. (2)
+`fact = rec.bases_fact` in an outer function, then `def inner(): return
+fact == other` — `inner`'s own qualname has no assignment establishing
+`fact`, but it's a real, visible closure variable there; a lookup scoped
+strictly to the exact qualname missed it. Fixed by processing qualnames
+in shallowest-first order (by dot-count — a real approximation of "outer
+scopes before inner ones", not exact Python scoping since a class body
+isn't actually a closure scope for its methods, but the same
+over-approximating-is-safe direction this whole module already takes)
+and seeding each qualname's known-alias set with its lexical parent's
+already-resolved set before running the fixed point over its own
+candidates. A real bug surfaced while implementing this: a qualname with
+no candidates or annotations of its own (like `inner` in that example)
+was never added to the `dict`, so its own lookup silently saw nothing
+rather than its parent's set — fixed by unioning in every qualname
+`_enclosing_qualnames` actually produced, not just ones with a candidate.
+Re-verified the existing sibling-non-leakage guarantee still holds (an
+alias in one function must not leak into an unrelated, non-nested sibling
+sharing a parameter name) with a dedicated test alongside the two new
+ones. Verified empirically: still zero existing hits under `abicheck/`
+today. New tests: an annotated local assignment, a bare annotated local
+with no value, a closure over an outer alias, and the sibling-leakage
+negative control restated for this fix.
+
+**A fourth Codex round found the closure-inheritance fix itself was
+wrong for one real shape, fixed in the same PR.** That fix derived a
+qualname's "lexical parent" by string-splitting the dotted qualname
+(`rsplit(".", 1)`) — correct for a plain nested function, but wrong for a
+class *nested inside* a function: `fact = rec.bases_fact` in an outer
+function, then `class C: def method(self): return fact == other` still
+closes `method` over `fact` in real Python (a class body isn't a closure
+scope, but the function wrapping it still is), yet the dotted qualname
+`"f.C.method"` splits to `"f.C"` — a synthetic scope no real function
+owns, so it was never itself processed or seeded, silently breaking the
+chain there. Fixed with `_lexical_function_parents()`: walks the tree
+directly, tracking each function's nearest *enclosing function*
+separately from the dotted-name prefix (skipping over any intervening
+class layer), giving the real Python closure-scope chain instead of one
+reconstructed from a string that conflates class and function nesting.
+Qualnames are now processed in order of true scope-nesting depth (walking
+this parent map) rather than dot-count, so a parent is still always
+resolved before a child consults it. Verified empirically: still zero
+existing hits. New test:
+`test_detects_a_comparison_through_a_closure_over_a_class_nested_method`.
+
+**A CodeRabbit finding on the same round: an import alias of `Fact`
+itself, not just the fields on `RecordType`/`Param`, was invisible too --
+fixed in the same PR.** `from abicheck.model.fact import Fact as F` then
+`F.present(a) == F.present(b)` is the identical misuse as `Fact.
+present(a) == Fact.present(b)`, but `_is_fact_typed_expr`/`_is_fact_
+typed_annotation` both hard-coded the literal bare name `"Fact"`. Fixed
+with `_imported_fact_aliases()` -- collects every local name bound to
+`Fact` via `from ... import Fact as F` (matched by imported name alone,
+not by source module, the same name-only stance `fact_field_readers.
+py`'s own import-alias helpers already take) -- threaded as a new
+`fact_names` parameter through both functions and every call site.
+Verified empirically: still zero existing hits. New tests: an aliased
+constructor-call comparison, an aliased annotation comparison, and a
+negative control for an unrelated import merely sharing the alias name.
+
+**A fifth Codex round found the closure-inheritance fix itself produces a
+real false *positive*, not a missed detection -- fixed in the same PR.**
+Every prior round in this section closed a *false-negative* gap (misuse
+that should have been flagged but wasn't); this one is the opposite
+direction, which this module's usual "a false positive here is cheaper
+than a false negative" stance does not cover -- a false positive means
+rejecting valid code as a hard CI error. `fact = rec.bases_fact` in an
+outer function, then `def inner(fact, other): return fact == other` --
+`inner`'s own `fact` parameter is an ordinary, unrelated local that merely
+reuses the name; Python's scoping makes it local to the whole inner
+function (shadowing the outer alias throughout, not just after some
+reassignment point), but the closure-inheritance fix's `known |=
+aliases.get(parent, set())` unconditionally unioned the parent's alias set
+into every child scope, with no way to exclude a name the child rebinds
+itself. Fixed by tracking `locally_bound`: every name a function binds on
+its own -- every parameter (Fact-typed or not) and every simple assignment
+target, collected in the same walk that already builds `aliases` and
+`candidates` -- and subtracting it from the inherited set before seeding:
+`known |= aliases.get(parent, set()) - locally_bound.get(qualname,
+set())`. Verified empirically: the shadowed-parameter case now correctly
+reports no misuse, the real (non-shadowed) closure case from the fourth
+round is unaffected, and the real repository still reports zero
+violations. New tests:
+`test_ignores_a_parameter_that_shadows_an_outer_fact_alias` and
+`test_ignores_a_reassigned_local_that_shadows_an_outer_fact_alias` (the
+latter pinning that the shadowing rule applies to a plain reassignment,
+not just a parameter, and that it covers the whole function body, not
+only the lines after the reassignment).
+
+**Review convergence reached on this PR; two further findings documented
+as known gaps rather than fixed (Codex review, both after the above
+fix).** Posted as a PR comment: six review rounds on this file have each
+closed a real, bounded gap in the same "name-only, no type inference"
+alias/closure-resolution machinery; going forward, a further round
+finding yet another indirection on the same "is this expression
+Fact-typed" question is the same inherent no-type-inference residual
+`fact_field_readers.py`'s own docstring already accepts, not a specific
+miss worth chasing indefinitely -- documented in the module rather than
+fixed, per this repo's own review-convergence guidance. Two findings
+landed exactly in that category and are recorded in
+`_imported_fact_aliases`'s own docstring rather than fixed here: (1) the
+import-alias set this function builds is module-wide rather than scoped
+to the function the `ImportFrom` sits inside, so a (highly unusual)
+per-function `from ... import Fact as F` could leak its alias name into
+an unrelated sibling binding of the same short name; (2) only a bare `from
+... import Fact as F` is recognized -- a module-qualified constructor call
+(`fact_model.Fact.present(...)`) is invisible, since the constructor-call
+match assumes `func.value` is a bare `ast.Name`, not an arbitrary
+`ast.Attribute` chain. Both would need real per-scope import tracking or
+arbitrary-attribute-chain resolution respectively -- their own scoped
+redesigns, not follow-ups to the fixes already in this file.
+
+**A further Codex review round found two more real false *positives* on
+the shadowing fix's own machinery -- both fixed, since a false positive
+here (rejecting valid code) is never treated as a convergence-eligible
+finding regardless of how many rounds precede it.** (1) `locally_bound`
+only ever recorded a bare `ast.Name` assignment target and a function's
+own parameters, so `fact, other = pair` (ordinary tuple-unpacking) inside
+a nested function shadowing an outer `fact = rec.bases_fact` alias was
+never recorded as a local binding -- the nested function's own `fact`
+still read as the *outer* alias, flagging a valid `fact == other`. Fixed
+with `_bound_names()`, a small recursive helper unpacking `ast.Tuple`/
+`ast.List`/`ast.Starred` targets, wired into `locally_bound` for
+`ast.Assign` (all targets, not just the single-`Name` case `candidates`
+stays restricted to), plus the other real Python local-binding forms the
+same review comment named: a `for`/`async for` loop target, a `with`/
+`async with` `as` target, and an `except ... as name:` handler name.
+(2) `_enclosing_qualnames`/`_lexical_function_parents` both keyed a
+function purely by its dotted name, so two functions sharing one bare
+name -- the shape a `@typing.overload`-decorated stub and its real
+implementation share -- collapsed onto the same qualname key, and
+`_fact_aliases` merged their alias/candidate data: a stub's `x:
+Fact[int]` parameter leaked into a same-named real implementation's own,
+unrelated `x` local, flagging a valid `x == other`. Fixed by folding each
+`def`'s own line number into its qualname (`f"{prefix}{child.name}#
+{child.lineno}"`) in both helpers identically -- safe here in a way it
+would not be in `fact_field_readers.py`'s identical-*looking* helper: this
+module's qualname is purely internal (`fact_equality_misuse_sites` returns
+only `(lineno, col_offset)`, never a qualname-derived key), so there is no
+external format to keep stable. Verified empirically: still zero existing
+hits in the real repository, and a positive control confirms two
+independent same-named functions are still each checked for real misuse
+on their own (neither silently swallows the other's genuine violation).
+Six new tests: tuple-unpacking, `for`, `with`, and `except-as` shadowing,
+plus a two-independent-same-name-functions-both-flagged positive control
+and the `@overload`-shaped negative control itself.
+
+**A further Codex review round found two more real false positives, both
+fixed -- neither a lambda nor a comprehension, nor a class body,
+introduced a scope of its own before this fix, so each leaked whatever
+alias happened to be in scope around it straight through.** (1) A
+class-body-level assignment (`fact = rec.bases_fact` written directly in
+a class body, not inside a method) was attributed to whatever *function*
+enclosed the class, since only a nested `FunctionDef` contributed a scope
+range of its own -- a `ClassDef` contributed none. A class body is
+actually its own namespace (an ordinary name assigned there is a class
+attribute, visible only as `self.x`/`Class.x`, never as a bare name to
+the enclosing function), so this let a class-body assignment masquerade
+as a real local of the enclosing function, and an unrelated, later
+`fact == 1` elsewhere in that function (a genuine module-global `fact`)
+was flagged as misuse. Fixed by giving each `ClassDef` its own scope
+range in `_enclosing_qualnames` (`f"{prefix}{child.name}#{child.lineno}
+<class-body>"`), the identical mechanism a `FunctionDef` already gets --
+a nested method's own, narrower range still overrides it for the
+method's own lines. Nothing ever looks this qualname up as a lexical
+*parent* (`_lexical_function_parents` only ever produces function-def-
+derived keys), so it correctly has no effect on anything outside the
+class body -- while a genuine misuse *within* the class body itself is
+still caught, since the class body is now a real scope of its own rather
+than a black hole. (2) A lambda parameter and a comprehension's own
+`for` target were likewise never recorded as local bindings, since
+neither introduced a scope of its own either -- `fact = rec.bases_fact`
+outer, then `(lambda fact: fact == other)(1)` or `[fact == other for
+fact in values]`, each shadow the outer alias with an unrelated local
+exactly the way a nested `def`'s parameter or a `for`-loop's own target
+already does, but the shadow went unrecognized. Fixed the identical way
+a `def` already is: both `ast.Lambda` and each comprehension kind
+(`ListComp`/`SetComp`/`DictComp`/`GeneratorExp`) now get their own scope
+range in `_enclosing_qualnames` (disambiguated by line *and* column,
+since several could share one line) and their own entry in
+`_lexical_function_parents` -- a lambda/comprehension is a real Python
+closure over its enclosing scope, exactly like a nested `def`, so it
+becomes the new `nearest_func` for anything nested inside it too, not
+just a leaf scope. `_fact_aliases`'s own binding-collection walk now
+records a lambda's parameters (reusing the identical `FunctionDef`/
+`AsyncFunctionDef` branch, since `ast.Lambda.args` shares the same
+`ast.arguments` shape -- a lambda parameter can never carry an
+annotation, so the Fact-typed-annotation check on it is always a
+harmless no-op) and a comprehension's own `for` target(s) (via the
+already-existing `_bound_names()` recursive-unpacking helper). Verified
+empirically: still zero existing hits in the real repository, and three
+positive controls confirm a genuine misuse inside a lambda, inside a
+comprehension, and directly inside a class body are each still caught.
+Six new tests: the class-body leak and its positive-control counterpart,
+the lambda shadow and its positive control, the comprehension shadow and
+its positive control.
+
+**A further Codex review round found three more real gaps -- one a
+structural correctness bug in the lambda/comprehension fix itself (a
+false *negative*, not the false positives every round so far had been),
+the other two small, bounded extensions -- all fixed.** (1) **Resolving a
+scope by *line* alone, not by exact position, could hide a genuine
+misuse, not merely flag a spurious one.** `fact = rec.bases_fact` outer,
+then `(lambda fact: fact == other)(1); return fact == other` on one
+line: the SECOND `fact == other` (the real outer alias, textually
+sharing the lambda's line but not part of it at all) was silently
+misattributed to the lambda's own shadowing scope, since the previous
+fix's scope map was still keyed `dict[int, str]` -- one qualname per
+physical *line* -- so whichever scope happened to be inserted last for
+that line (the lambda) won for the *entire* line, including code that
+was never part of the lambda's body. This is more serious than the
+false positives every prior round in this section fixed: those rejected
+valid code (a review cost); this one let a real `Fact[T]` misuse pass
+silently, the exact failure this whole check exists to prevent. Fixed by
+switching `_enclosing_qualnames` from a line-keyed `dict[int, str]` to a
+list of exact `((start_line, start_col), (end_line, end_col), qualname)`
+spans, resolved by a new `_qualname_at()` -- the smallest span whose
+`(start, end)` lexicographically brackets a query `(lineno, col_offset)`
+position, not merely the smallest span sharing its line (correct because
+every span this module produces nests strictly inside its lexical
+parent's own span, a laminar family, so comparing by `(end_line -
+start_line, end_col - start_col)` -- line span first, column span only
+as a same-line tiebreaker -- always picks the correctly-nested one).
+Every one of the eight call sites that previously did `qualnames.get(node.
+lineno, "<module>")` now does `_qualname_at((node.lineno, node.
+col_offset), qualnames)`. Verified against the review's own exact repro:
+the shadowed `fact == other` inside the lambda is correctly NOT flagged,
+while the real outer `fact == other` on the same line now IS. (2) `first
+= second = rec.bases_fact` -- a chained assignment gives every plain-name
+target the identical RHS value, unlike a tuple-unpacking target, but the
+candidate collector was restricted to exactly one target. Fixed by
+looping over every target and registering a candidate for each
+plain-`Name` one, all sharing the same RHS -- a tuple/list target among
+the same chain still contributes nothing here (only `locally_bound`, via
+the pre-existing `_bound_names()` path), since it still has no single
+value of its own. (3) `(fact := rec.bases_fact) == other` -- an inline
+assignment expression (`ast.NamedExpr`), invisible to `_is_fact_typed_
+expr` (which never unwrapped it) and to the alias tracking (which only
+ever walked plain assignment statements, never an expression embedded
+inside a larger one). Fixed with two changes: `_is_fact_typed_expr` now
+unwraps a `NamedExpr` to its own `.value`, exactly as Fact-typed as its
+RHS; and `_fact_aliases`'s binding-collection walk registers the
+walrus's target as an ordinary alias candidate too, so a later reuse of
+the bound name (`if (fact := rec.bases_fact) is not None: return fact ==
+other`) is also caught, not just an inline use at the assignment
+expression's own site. Deliberately not chasing PEP 572's own
+scope-hopping rule for a walrus used *inside* a comprehension (which
+binds into the comprehension's *enclosing* scope, not its own) -- an
+accepted, narrow residual, since `qualnames` has no notion of that rule
+and the walrus alias is registered under whatever scope its own position
+resolves to. Verified empirically: still zero existing hits in the real
+repository. Four new tests: the exact same-line lambda/outer-alias repro
+(with an explicit column check pinning which of the two identical-text
+`fact == other` occurrences was reported), a chained assignment, an
+inline walrus comparison, and a walrus alias reused on a later line.
+
+**A further Codex review round found two more real gaps, both in the
+walrus/parameter machinery this section had just built -- both fixed.**
+(1) **The walrus fix's own "deliberately not chasing PEP 572's
+scope-hopping rule" residual was, on inspection, backwards -- a real
+false positive, not merely an accepted narrow gap.** The previous round
+exempted *every* walrus target from `locally_bound` on the theory that
+its scope-hopping rule always applies; that rule is real, but only fires
+when the walrus sits *directly inside a comprehension* -- everywhere
+else, a walrus binds to its immediately enclosing scope exactly like an
+ordinary assignment. Unconditionally exempting it meant an entirely
+ordinary, comprehension-free rebinding (`fact = rec.bases_fact` outer,
+then `def inner(other): (fact := 1); return fact == other`) failed to
+shadow the outer alias, flagging valid code. Fixed by hopping only the
+genuine comprehension case out to its real PEP 572 binding scope (the
+nearest enclosing *non*-comprehension scope, walking `lexical_parents` --
+moved earlier in the function so this same walk can use it -- through
+every nested comprehension layer, not just the innermost one) and
+treating every other case as an ordinary local binding, added to
+`locally_bound` the same as any other assignment target. (2) **A
+parameter's own default value can be Fact-typed, and nothing examined
+it.** `fact = rec.bases_fact; def inner(fact=fact): return fact ==
+other` -- calling `inner()` with no override genuinely runs the
+comparison against the outer Fact value (a default is evaluated once, in
+the *enclosing* scope, at `def`/lambda time), but the parameter was
+already unconditionally excluded from the inherited alias set regardless
+of what its own default was. Fixed by pairing `args.defaults`/
+`kw_defaults` with their parameters (positional defaults right-align
+against `posonlyargs + args`; `kw_defaults` pairs positionally with
+`kwonlyargs`, `None` for one with no default) and resolving each pending
+default in a dedicated pass *after* the fixed point has already
+stabilized every scope's own alias set -- a default expression must be
+checked against its *enclosing* scope's final alias set, not the
+function's own (which excludes this exact name by construction), so this
+can't be folded into the same single fixed-point pass every other alias
+source already uses. Verified empirically: still zero existing hits in
+the real repository, and positive/negative controls confirm a walrus
+alias used without shadowing, a walrus hopping out of a comprehension,
+and an ordinary (non-Fact) parameter default all still behave correctly.
+Five new tests: the walrus-shadow false positive and its walrus-hops-out
+positive control, a default referencing an outer alias, a directly
+Fact-typed default, and an ordinary-default negative control.
+
+**A further Codex review round found two more real gaps -- one a false
+positive in the same shadowing family as the class-body/lambda/
+comprehension fixes above, the other a false negative in the same
+"attributed to the wrong scope" family as the default-value fix just
+above -- both fixed.** (1) **Structural pattern matching's own capture
+forms were never recorded as local bindings.** `case fact:` (a bare
+`ast.MatchAs` capture), `case [*fact]:` (`ast.MatchStar`), and `case
+{**fact}:` (`ast.MatchMapping`'s own `rest`) are all real local bindings,
+exactly like a `for` loop target or an `except ... as name:` handler, but
+nothing collected any of them -- a nested function's own `case fact:`
+failed to shadow an outer `fact = rec.bases_fact` alias, flagging a valid
+`fact == other` comparison against the captured (arbitrary) matched
+value. Fixed with a new `_match_pattern_names()`, recursively collecting
+every bound name from a `pattern` (also descending into `MatchSequence`/
+`MatchMapping`/`MatchClass`/`MatchOr`, since a capture can nest inside
+any of them), wired into a new `ast.Match` branch in the binding-
+collection walk -- `match`/`case` introduces no scope of its own in
+Python, so every case's captures are attributed to the `match`
+statement's own position. (2) **A walrus inside a parameter's own
+default expression was attributed to the wrong scope.** `def inner(x=
+(fact := rec.bases_fact)):` -- Python evaluates a default expression in
+the *enclosing* scope (the same rule the previous round's default-value
+fix already relies on), but the generic, position-based `NamedExpr`
+handling resolves a query position to the *smallest* span containing it
+-- and a default expression is textually part of the `def`/lambda's own
+span, so the walrus was misattributed to `inner`'s own body scope, not
+the scope its value is actually usable in. A later, genuinely outer
+`fact == other` therefore saw no alias for `fact` at all. Fixed by
+explicitly walking each default expression (`args.defaults`/
+`kw_defaults`) inside the `FunctionDef`/`AsyncFunctionDef`/`Lambda`
+branch that already handles defaults, registering any embedded
+`NamedExpr` directly in the *enclosing* scope (`lexical_parents[
+qualname]`) as an ordinary local binding -- and recording each one's
+`id()` in a new `default_walrus_ids` set so the generic, position-based
+`NamedExpr` branch skips it rather than also (mis)processing it a second
+time. Verified empirically: still zero existing hits in the real
+repository, and positive controls confirm a genuine misuse reached
+through a match capture (no shadowing) is still caught. Five new tests:
+`MatchAs`/`MatchStar`/`MatchMapping` shadowing, a positive control for a
+real match-capture misuse, and the default-expression-walrus repro.
+
+**A further Codex review round found three more real gaps, all in this
+same shadowing/scope-attribution family, all fixed.** (1) **`nonlocal`/
+`global` were treated identically to an ordinary local rebinding for
+shadowing purposes -- wrong, since neither introduces a new local at
+all.** `def outer(rec): fact = rec.bases_fact; def inner(): nonlocal
+fact; hit = fact == other; fact = 1` -- the `fact = 1` reassignment inside
+`inner` correctly makes `fact` a target the existing shadowing machinery
+records in `locally_bound[inner]`, but `nonlocal fact` means this is the
+*same* variable as the outer alias, not a fresh local one -- so the read
+on the line before the reassignment should still see the outer alias and
+be flagged, and it wasn't. The identical gap applies to `global`. Fixed
+with a new `ast.Global`/`ast.Nonlocal` branch recording each declared
+name against its own qualname, followed by a post-walk pass subtracting
+every declared name from that same qualname's `locally_bound` set --
+after every ordinary binding source has already been collected, so a
+genuinely *different* local reassignment in the same function (not
+declared nonlocal/global) is unaffected. (2) **A parameter default's own
+alias never propagated to a function nested inside the one declaring the
+default.** `def inner(rec, fact=rec.bases_fact): def nested(): return
+fact == other` -- the previous round's default-value fix resolves
+`pending_defaults` in one pass *after* the depth-ordered inheritance/
+candidate fixed point has already run to completion, so `nested`'s own
+inheritance from `inner` was computed before `inner`'s own default-derived
+alias for `fact` existed at all, and `nested` never saw it. Fixed by
+wrapping both the depth-ordered inheritance/candidate pass and the
+pending-defaults resolution together in one outer fixed-point loop (`while
+outer_changed: ...`), so a second iteration through inheritance sees
+`inner`'s now-resolved `fact` and propagates it to `nested` exactly the
+way an ordinary parent alias already would -- guaranteed to terminate,
+since every alias set only ever grows over a finite universe of
+`(qualname, name)` pairs. (3) **A class body's own top-level code did not
+inherit from its lexically enclosing scope at all.** `def outer(rec):
+fact = rec.bases_fact; class C: result = fact == other` -- a class body
+is ordinary code that inherits from its enclosing scope like any other
+(it's only invisible to a *method* defined inside it, since Python's LEGB
+rule skips the class layer specifically for a nested function's own
+closure), but `_lexical_function_parents()` had no entry for a class-body
+qualname at all, so it inherited nothing and the read was missed. Fixed
+by adding a `class_qualname -> nearest_func` entry to the same parents
+dict the class-body walk already builds, without disturbing the existing,
+correct method-skips-its-class-body behavior (a method gets its own,
+independent qualname entry via the unchanged `FunctionDef` branch).
+Verified empirically: still zero existing hits in the real repository,
+and `mypy`/`ruff` both stayed clean (one incidental fix along the way --
+the new pending-defaults loop variable had to be renamed off `target`,
+since that name was already inferred as `ast.expr` from an unrelated
+`for target in node.targets:` loop earlier in the same function, and
+Python's lack of block scoping meant reusing it produced a real mypy type
+error, not just a style nit). Nine new tests: the nonlocal/global
+exemption and its negative control (an *undeclared* local reassignment
+must still shadow), the nested-function default-propagation repro, the
+class-body-inherits repro and its negative control (a class body with no
+enclosing Fact alias), and a test pinning that a method still does not
+see its own class body's local reassignment of the same name -- it sees
+straight through to the enclosing function's real alias instead.
+
+**A further Codex review round found three more real gaps in this same
+family, all fixed.** (1) **A class body's own `LOAD_NAME` lookup is
+statement-order-aware, unlike every other scope's `LOAD_FAST`, and the
+previous round's shadowing fix didn't account for it.** `fact = rec.
+bases_fact` outer, then `class C: hit = fact == other; fact = 1` --
+Python resolves `fact` dynamically at each class-body statement against
+whatever the class namespace holds *so far*, not statically pre-determined
+by "is this name assigned anywhere in this class body" the way a
+function's `LOAD_FAST` is -- so `hit`'s read, occurring *before* the
+later `fact = 1` reassignment, genuinely sees the outer alias in real
+Python, but the existing shadowing subtraction (whole-scope, position-
+blind, correct for every other scope) excluded it entirely, missing a
+real misuse. This module has no statement-order-aware lookup of its own
+(building one would mean turning `_fact_aliases`'s per-scope answer into
+a per-position one, a materially larger change), so the fix takes the
+same over-approximating-is-safe direction the module already argues for
+the opposite case (nonlocal/global): a class body's own local rebinding
+now never shadows what it inherits at all, gated on the `<class-body>`
+qualname suffix `_enclosing_qualnames` already produces. The accepted
+cost is symmetric to the finding this closes: a class body that
+reassigns `fact` to something ordinary *before* using it now reads as a
+false positive -- the same "false positive is far cheaper than the false
+negative it closes" trade-off this module states throughout, just landing
+on the opposite scope this time. (2) **A nested `def`/`class` statement's
+own *name* was never recorded as a local binding in the scope that
+contains it.** `def fact(): ...` then `fact == other` in the same
+containing scope -- Python's `LOAD_FAST`/`LOAD_NAME` resolves `fact` to
+the function object just defined, an ordinary local, but the existing
+branch only ever recorded the *nested* scope's own parameters, never the
+definition's name in its *container* -- so an outer Fact alias of the
+identical bare name was never shadowed, flagging valid code. Fixing this
+correctly needed a new, dedicated helper rather than reusing the
+position-based `_qualname_at` lookup every other binding site already
+uses: a scope-introducing node's own span always starts at its own
+`(lineno, col_offset)`, so querying that exact position resolves to the
+node's *own* smallest containing span, not its parent's -- the wrong
+answer for "what scope contains this definition." `_def_containing_
+qualnames()` is a small, standalone recursive walk (mirroring `_lexical_
+function_parents`'s own shape, deliberately *not* skipping a class
+layer the way that function does, since a def/class statement's binding
+target is a different question from the closure-scope chain), keyed by
+position rather than qualname string, consulted only by this one new
+`FunctionDef`/`AsyncFunctionDef`/`ClassDef` branch. (3) **`global fact`
+was still routed through ordinary `lexical_parents` inheritance, which is
+wrong for `global` specifically even though it's exactly right for
+`nonlocal`.** `nonlocal fact` genuinely means "the nearest enclosing
+*function's* own `fact`" -- precisely what `lexical_parents[qualname]`
+already gives every other inherited name, so the previous round's fix was
+correct for that half. `global fact` means "*module*-scope `fact`, full
+stop" -- it must bypass every intervening function layer's own
+inheritance entirely, even one with its own unrelated, non-Fact-typed
+local of the identical bare name. Routing it through ordinary inheritance
+was wrong in both directions at once: an intervening function's own
+unrelated local could shadow (hide) a genuinely Fact-typed module-level
+name, and, symmetrically, an intervening function's own genuinely
+Fact-typed local of the same bare name could be wrongly attributed to an
+unrelated module-level one. Fixed by tracking `global`-declared names in
+a separate `global_declared` dict (alongside the existing, still-shared
+`nonlocal_or_global` shadowing-exemption set) and adding a dedicated step
+to the outer fixed-point loop: a `global`-declared name is excluded from
+the ordinary parent-inheritance step entirely and instead resolved
+directly against `aliases["<module>"]`. Verified empirically: still zero
+existing hits in the real repository, and `mypy`/`ruff` both stayed clean.
+Seven new tests: the class-body read-before-reassignment repro, the
+nested-def and nested-class shadowing repros and their shared negative
+control (a real misuse still caught with no nested definition present),
+and the global-through-an-intervening-local repro with its reversed-
+values negative control.
+
+**A further Codex review round found two more real gaps, both fixed.**
+(1) **A comprehension walrus was never actually marked as a local binding
+in the scope PEP 572 hops it out to.** The scope-hop fix (several rounds
+above) computes `binding_qualname` -- the walrus's real PEP 572 target
+scope, hopping out of every enclosing comprehension layer -- correctly,
+but the `locally_bound` mark itself was gated on `binding_qualname ==
+walrus_qualname`, i.e. only when NO hop occurred. That's backwards
+relative to that same fix's own stated intent ("every other case" gets
+the identical `locally_bound` treatment): `[(fact := x) for x in values]`
+sitting directly inside `inner`, with an outer `fact = rec.bases_fact`
+alias, hops `fact`'s real binding out to `inner` itself under PEP 572 --
+a genuine local of `inner` -- but with the mark skipped whenever a hop
+happens, `inner`'s own inheritance step never learned this, and a later,
+real `fact == other` in `inner` (reading the comprehension's own ordinary
+int, not the outer Fact alias) was wrongly flagged. Fixed by marking
+`locally_bound[binding_qualname]` unconditionally, regardless of whether
+a hop occurred -- `binding_qualname` is already the correct target scope
+either way, so the conditional never needed to exist. (2) **A `global`/
+`nonlocal`-declared name's own *write* side was still attached to the
+declaring function's own qualname, even though the read side (two rounds
+above) was already correctly routed.** `def seed(rec): global fact; fact
+= rec.bases_fact` genuinely writes *module*-scope `fact` -- but the
+candidate this assignment produces was recorded under `seed`'s own
+qualname regardless, so a sibling function reading the identical
+module-level `fact` through ordinary inheritance (not its own `global`
+declaration) never saw it as Fact-typed at all, missing a real misuse.
+The identical gap applies to `nonlocal`. Fixed with a new
+`_declared_target_scope()` helper and a dedicated post-walk pass
+(alongside the existing shadowing-subtraction pass, for the identical
+reason: a `global`/`nonlocal` statement can appear anywhere in its
+function's body, even after the assignment it governs, so this can't be
+decided candidate-by-candidate during the single forward walk) that
+redirects every candidate *and* every direct alias recorded under a
+declaring qualname to the scope the assignment actually writes to --
+`<module>` for `global`, the nearest enclosing function for `nonlocal`.
+Verified empirically: still zero existing hits in the real repository,
+and `mypy`/`ruff` both stayed clean (the same "variable name already
+inferred as a different type elsewhere in this function" mypy trap this
+file's history has hit twice before required renaming two local variables
+away from `target`/`declared`). Six new tests: the comprehension-walrus
+shadowing repro and its negative control (a real misuse still caught with
+no comprehension walrus present), the global-write-visible-to-a-sibling
+repro and its negative control (an ordinary, undeclared local assignment
+must not leak into the module's own alias set), and the identical
+write-side routing test for `nonlocal`.
+
+**A further Codex review round found two more real gaps, both fixed.**
+(1) **The write-side routing fix's own candidate-move approach broke on a
+same-writer-scope RHS indirection.** `global fact; local = rec.bases_fact;
+fact = local` -- `fact`'s own candidate value is the bare `ast.Name`
+`local`, which is only ever a real local of the *writer's own* scope
+(`seed`), never of `<module>`. The previous round's fix moved the raw
+`(name, value)` candidate tuple straight into the target scope's own
+candidate list, where the inner fixed point then checked `local` against
+the *target*'s own alias set -- `local` was never going to appear there,
+silently breaking the exact RHS indirection this whole write-side fix
+exists to close. Fixed by no longer moving candidates at all: a declared
+assignment's candidate stays in its writer's own scope, resolving
+normally there (so `local` resolves against `seed`'s own alias set, same
+as any other same-function alias). A new step, run each outer-fixed-point
+iteration right after a scope's own inner candidate resolution, then
+checks whether a `global`/`nonlocal`-declared name has become confirmed
+Fact-typed *within its writer's own scope this iteration* and, only then,
+propagates it into the scope the assignment actually writes to -- so
+`fact` (confirmed via `local`, within `seed`) propagates to `<module>`
+the same outer iteration, with no separate resolution context to drift
+out of sync with the writer's own. (2) **A comparison inside a
+parameter's own default or annotation resolved against the function's
+own body scope, not the enclosing scope it actually evaluates in.** `fact
+= rec.bases_fact; def inner(fact=(fact == other)): ...` -- Python
+evaluates a default at `def`-time in the *enclosing* scope (the same
+binding-timing rule the earlier default-embedded-walrus fix already
+relies on), but `fact_equality_misuse_sites()`'s own site-to-qualname
+resolution is purely position-based, and the comparison's own position is
+textually inside `inner`'s span -- so it was checked against `inner`'s
+own alias set, where `inner`'s own parameter `fact` has already removed
+the inherited alias (the shadowing fix, several rounds above), missing a
+comparison that at the point it actually runs still reads the outer
+alias. Fixed with a new `_default_and_annotation_scope_overrides()`,
+walking every parameter default and annotation expression's own subtree
+and mapping each descendant node's `id()` to the function's lexical
+parent -- consulted by `fact_equality_misuse_sites()`'s own `ast.Compare`
+handling before falling back to the ordinary position-based lookup.
+Verified empirically: still zero existing hits in the real repository,
+and `mypy`/`ruff` both stayed clean. Four new tests: the same-scope-RHS-
+indirection repro for both `global` and `nonlocal`, the default-
+comparison repro, and a negative control (a default comparison against
+an unrelated, non-Fact value must not be flagged).
+
+**A further Codex review round found two more real gaps, both fixed --
+plus a file-size split this round's own new tests triggered.** (1) **The
+`nonlocal` write-side routing fix always targeted the immediate lexical
+parent, but `nonlocal` can skip *multiple* enclosing functions.** Python
+resolves `nonlocal fact` to the nearest enclosing function scope that
+actually binds the name itself, not merely the one right above -- `outer`
+binds `fact`, `middle` (nested in `outer`) never touches it at all,
+`setter` (nested in `middle`) does `nonlocal fact; fact = rec.bases_fact`
+-- this genuinely writes `outer`'s `fact`, skipping `middle` entirely,
+but the previous, immediate-parent-only routing published the write to
+`middle` instead, where nothing reads it (a sibling of `middle`,
+`reader`, never saw it). Fixed by walking outward from the immediate
+parent, at each step checking whether that ancestor's own `locally_
+bound` set actually contains the declared name -- `locally_bound` is
+already exactly the right test, since it already excludes a name an
+ancestor only holds via its *own* `nonlocal`/`global` declaration (the
+shadowing-exemption subtraction from several rounds above), so the walk
+naturally continues past an ancestor whose own binding is itself
+borrowed from further out, the identical case Python's own resolution
+skips. (2) **An import statement was never recorded as a local
+binding at all.** `import json as fact` or `from pkg import item as fact`
+inside a nested function shadows an inherited Fact alias exactly like any
+other assignment form, but the binding collector had no `ast.Import`/
+`ast.ImportFrom` branch, so a nested function's own import-bound `fact`
+never shadowed an outer alias. Fixed with a new branch mirroring every
+other binding-form branch's own shape, splitting an unaliased dotted
+import (`import a.b.c`) on its first `.` to match Python's own
+import-binding rule (only the top-level package name binds in the
+importing scope without an explicit `as`). Verified empirically: still
+zero existing hits in the real repository, and `mypy`/`ruff` both stayed
+clean. Four new tests: the multi-level `nonlocal`-skip repro, both import
+forms' shadowing repros, and a negative control (a real misuse still
+caught with no import shadowing present).
+
+**The four new tests above pushed `tests/test_fact_detector_misuse.py`
+past the architecture gate's 1200-line test-file cap (1224 lines) --
+split the same way `test_mutation_run_scoping.py` already did for an
+identical reason (see `tests/CLAUDE.md`'s own note on that split).** The
+whole `TestFactEqualityMisuseSites` class had grown into two genuinely
+distinct halves: the core misuse-detection contract (direct attribute
+reads, `getattr`/constructor-call recognition, alias chains, annotated
+assignments) and, by far the larger half after fourteen-plus rounds of
+scope-attribution findings, every shadowing/scope-resolution test
+(parameter/local/comprehension/lambda/walrus/match-capture shadowing,
+closure inheritance through nested functions and class bodies,
+`nonlocal`/`global` read- and write-side routing, parameter-default/
+annotation scope resolution, import-based shadowing). Split the second
+half out into a new sibling file, `tests/test_fact_detector_misuse_
+scoping.py` (`TestFactEqualityMisuseSitesScoping`), leaving the original
+file at 273 lines and the new one at 997 -- both comfortably under the
+cap, with zero test behavior change (all 82 tests, the same set as
+before the split, still pass).
+
+**A further Codex review round found four more real gaps, all fixed --
+one in annotation recognition, three in scope resolution.** (1)
+**`_is_fact_typed_annotation` only ever recognized a bare `Fact` or a
+subscript whose own value was `Fact` -- an `Optional[Fact[T]]`/
+`Union[Fact[T], None]`/PEP 604 `Fact[T] | None` wrapper hid the misuse
+underneath it entirely.** `def f(value: Fact[int] | None, other): return
+value == other` produced no finding at all. Fixed by making the function
+genuinely recursive over the three wrapper shapes: an `ast.BinOp` with
+`ast.BitOr` unwraps both operands (`X | None`), an `Optional[...]`
+subscript unwraps its slice, and a `Union[...]` subscript unwraps every
+element of its slice tuple (or the bare slice, for a single-argument
+`Union[X]`) -- each via the same `fact_names`-keyed leaf check a bare
+`Fact` already used, so `Fact[int]` nested arbitrarily deep inside any
+combination of these still resolves. A new `_annotation_head_name()`
+helper recognizes the wrapper's own name whether spelled bare
+(`Optional[...]`) or module-qualified (`typing.Optional[...]`). (2)
+**A default expression containing its own nested lambda/comprehension
+scope had every one of its descendants force-attributed to the enclosing
+scope, including nodes that actually evaluate *inside* that nested
+scope.** With an outer `fact = rec.bases_fact`, `def f(cb=lambda fact:
+fact == other): ...` was rejected even though the lambda's own parameter
+`fact` genuinely shadows the outer alias for the comparison inside the
+lambda's own body -- the blanket `ast.walk(subtree)` walked straight
+through the lambda's own boundary, overriding the inner `Compare` node's
+scope to the *outer* function's, discarding the shadowing the lambda's
+own already-correct position-based resolution would have given it. Fixed
+with a new `_iter_default_subtree()` walker: it still yields every
+descendant (so the override map is unaffected for the common,
+no-nested-scope case), but stops expanding past any node that itself
+introduces a scope (`FunctionDef`/`AsyncFunctionDef`/`Lambda`/any
+comprehension) -- that boundary node is still yielded (harmless, since
+only an `ast.Compare` id is ever looked up), just never descended into,
+leaving its own body to ordinary position-based resolution, which already
+has a real span and qualname for it. (3) **`node.returns` -- a return
+annotation -- was omitted from the scope-override traversal entirely,**
+even though Python evaluates it in the defining (enclosing) scope exactly
+like a parameter default or a parameter annotation: `fact = rec.
+bases_fact; def inner(fact) -> (fact == other): ...` was missed, since
+`inner`'s own parameter `fact` shadows the outer alias for the function
+body, but the return annotation evaluates *before* that parameter even
+exists. Fixed by appending `node.returns` (when present -- `ast.Lambda`
+has no such attribute) to the same `subtrees` list defaults/parameter
+annotations already populate. (4) **A method's own parameter default is
+evaluated while its *containing class body* executes -- ordinary
+`LOAD_NAME` class-body code, not a closure lookup -- but the
+`pending_defaults` resolution pass looked up the default's evaluation
+scope via `lexical_parents`, which intentionally skips the class layer
+for the different question of a method *body*'s own free-variable
+lookup.** `class C: fact = rec.bases_fact; def m(self, value=fact):
+return value == other` produced no finding, since `value` was never
+marked as a Fact alias -- `lexical_parents.get("C.m", ...)` skips straight
+past `C`'s own class-body scope to whatever encloses the class, which
+carries no `fact` alias in this shape at all. Fixed by resolving the
+default's own evaluation scope through `_def_containing_qualnames`
+instead (already computed once per call inside `_fact_aliases`, unlike
+`_default_and_annotation_scope_overrides`'s own separate copy, since
+`_fact_aliases` needed it first for the walrus-target-hop case several
+rounds above) -- the syntactic containing scope, class layers included --
+while the method *body*'s own `fact` parameter (with no default at all)
+still correctly shadows in its body, verified by a dedicated negative
+control, since `_fact_aliases`'s shadowing-subtraction mechanism the
+class-skipping `lexical_parents` chain still governs is untouched by this
+fix. `pending_defaults` grew a fourth tuple element (the `def`'s own
+`(lineno, col_offset)`, needed since `_def_containing_qualnames` is
+position-keyed, not qualname-keyed) to carry this through; `_default_and_
+annotation_scope_overrides` itself was also switched from
+`_lexical_function_parents` to `_def_containing_qualnames` for the
+identical reason -- a comparison found *directly inside* a method's own
+default (not just an aliased parameter later read in the body) needs the
+same containing-class-scope answer. Verified empirically: still zero
+existing hits in the real repository, and `mypy`/`ruff` both stayed
+clean. Nine new tests: three annotation-wrapper positive cases plus a
+negative control (an ordinary `int | None` parameter), the nested-lambda-
+default exclusion plus its no-lambda negative control, the return-
+annotation case, and the class-body-default case plus its
+method-parameter-still-shadows negative control.
+
+**A further Codex review round found the identical nested-scope-boundary
+gap in a sibling collector, one function over.** `_default_and_
+annotation_scope_overrides()`'s own `Compare`-attribution walk had just
+been fixed (previous round) to stop at a nested lambda/comprehension
+boundary via `_iter_default_subtree()`, but the *walrus-inside-a-default*
+collector -- a separate loop, a few lines above in `_fact_aliases()`,
+that publishes a default-embedded walrus target as an alias of the
+enclosing scope -- still used a plain, unrestricted `ast.walk(default_
+expr)`. `fact = 1; def configure(cb=lambda: (fact := rec.bases_fact)):
+...` -- the lambda is only *created* at def-time in the enclosing scope;
+the walrus inside its body binds `fact` in the *lambda's own* scope only
+when the lambda is later called, never the enclosing one -- but the
+unrestricted walk crossed that boundary anyway, wrongly publishing the
+lambda-local walrus target as a real alias of the enclosing (here,
+module) scope, so a later, genuinely unrelated `fact == other` read past
+that point was rejected. Fixed by switching this collector to the same
+`_iter_default_subtree()` walker the sibling fix already introduced --
+one shared boundary-aware primitive for both consumers, rather than a
+second copy of the same fix. Verified empirically: still zero existing
+hits in the real repository, and `mypy`/`ruff` both stayed clean. Two new
+tests: the nested-lambda-walrus exclusion and a negative control (a
+walrus directly inside a default, no nested scope in the way, must still
+be published to the enclosing scope exactly as before).
+
+**A further Codex review round found three more real gaps in the same
+containing-scope machinery, all fixed.** (1) **`_def_containing_
+qualnames()` recorded a containing scope for a `def`/`class` statement
+but never for a `Lambda`.** A lambda has no *name* to bind (unlike a
+`def`/`class` statement, its introduction is an expression, not a
+statement) -- but its own default values still evaluate at
+lambda-creation time in whatever scope directly contains it, the
+identical rule a method's own default already relies on this function
+for. `fact = rec.bases_fact; cb = lambda x=fact: x == other` inside a
+function had no entry to resolve against, so both the pending-default
+alias resolution and the comparison-scope override silently fell back to
+`"<module>"` regardless of the lambda's real containing scope. Fixed by
+recording `containing[lambda.lineno, lambda.col_offset] = scope_qualname`
+in the `Lambda` branch, mirroring the `FunctionDef`/`ClassDef` branches
+exactly. (2) **A nested class's own base/keyword expressions were
+attributed to the *inner* class's own body scope instead of the scope
+that actually contains the `class` statement.** `class Outer: fact =
+rec.bases_fact; class Inner(make_base(fact == other)): ...` -- a base
+class or metaclass keyword executes while the `class Inner` statement
+itself runs, in `Outer`'s own scope, never inside `Inner`'s own (not yet
+even created) body -- but `_enclosing_qualnames` assigns the *entire*
+`ClassDef` span, bases and keywords included, to the inner class-body
+scope (correct for the body's own statements, wrong for the header that
+precedes them), and `_default_and_annotation_scope_overrides()` had no
+`ClassDef` branch at all to correct it. Fixed by extending that function
+with a `ClassDef` branch: walk `node.bases`/`(kw.value for kw in
+node.keywords)` through the same `_iter_default_subtree()` boundary-aware
+walker the `FunctionDef`/`Lambda` branch already uses, overriding each to
+the `ClassDef`'s own containing scope (from `def_containing`) rather than
+its class-body scope. (3) **The walrus-inside-a-default collector's own
+`enclosing` computation still used `lexical_parents`, not
+`def_containing`, even after the sibling `pending_defaults` resolution
+and `_default_and_annotation_scope_overrides()` were both already fixed
+to use the latter (two rounds above).** A *method's* own default-embedded
+walrus is evaluated while its containing *class body* executes -- ordinary
+class-body code, not a closure lookup -- but `lexical_parents`
+intentionally skips that class layer for the different question of a
+method *body*'s own free-variable lookup: `fact = 1; class C: def
+f(self, x=(fact := rec.bases_fact)): ...` wrongly bound the walrus target
+to the *module's* `fact` (skipping straight past `C`'s own class-body
+scope), so a later, genuinely unrelated module-level `fact == other`
+read past that point was rejected, and the actual class-body-scoped
+`fact` the walrus meant to bind was invisible to a use elsewhere in that
+same class body. Fixed by switching this one remaining call site to
+`def_containing.get((node.lineno, node.col_offset), "<module>")`,
+matching its two siblings. Verified empirically: still zero existing
+hits in the real repository, and `mypy`/`ruff` both stayed clean. Five
+new tests: the lambda-default-inherits-containing-scope case, the
+nested-class-header case, the method-default-walrus-binds-in-class-
+namespace case and its positive control (the same walrus target visible
+elsewhere in that class body).
+
+**A further Codex review round found a structural bug in `_lexical_
+function_parents()` itself, distinct from every containing-scope fix
+above.** All of those rounds fixed *which primitive* (`lexical_parents`
+vs. `def_containing`) a caller consults; this one is a bug in `lexical_
+parents`'s own construction. `_lexical_function_parents()`'s recursive
+descent switched to a `def`/`lambda`'s *new* qualname before visiting
+*any* of its own children -- including its default values, parameter
+annotations, return annotation, and decorators, all of which evaluate at
+def/lambda-*creation* time, in whatever scope was active *before* that
+new qualname takes over (the identical binding-timing rule `_fact_
+aliases()`'s/`_default_and_annotation_scope_overrides()`'s own default/
+annotation handling already relies on). `fact = rec.bases_fact` in `f`,
+then `def g(fact, cb=[fact == other for _ in xs]): ...` -- the
+comprehension executes while `g` is being *defined* (in `f`'s own scope,
+before `g`'s own parameter `fact` even exists to shadow anything) and
+genuinely closes over `f`'s alias, but was wrongly parented under `g`
+itself, where `g`'s own same-named parameter incorrectly shadowed it.
+
+Fixed by splitting the single recursive `visit()` into two cooperating
+functions: `dispatch()` does the actual scope-introducing-node matching
+(the original `visit()`'s `if isinstance(...)` chain, unchanged in
+substance), while a new, thinner `visit()` just applies `dispatch()` to
+every direct child of a node. This split matters because a `def`'s own
+default/annotation/decorator expressions now need to be *re-dispatched*
+(via a new `def_time_subtrees()` helper, mirroring `_default_and_
+annotation_scope_overrides()`'s own `subtrees` construction almost
+exactly) with the *old* `nearest_func`, while only the real function body
+executes with the new one -- and a subtree re-dispatch needs the full
+`dispatch()` match logic (in case the subtree is itself a bare `Lambda`/
+comprehension), not a plain `visit()` that would skip straight into its
+children. Generalized to `Lambda`'s own defaults too, not just `def`
+(the identical Codex-reported repro reproduces for `g = lambda fact,
+cb=[fact == other for _ in xs]: cb`), and to decorators (a decorator's
+own arguments evaluate at def-time in the enclosing scope by the
+identical rule, even though the reported finding didn't name that
+shape) -- matching this repo's own "fix the cause, not the instance"
+convention rather than patching only the literal reported repro.
+
+**A real regression was caught and fixed while implementing this, not by
+a separate review round: the first version of the split reused `visit()`
+(not `dispatch()`) for a function's own body statements and a lambda's
+own body expression, silently breaking the plain-closure case with no
+default at all.** `visit(stmt, qualname + ".", qualname)` for each body
+statement treats `stmt` as the node whose *children* get dispatched, not
+as a dispatch candidate itself -- so a nested `def`/`class`/`Lambda`/
+comprehension directly in the body (the ordinary, common shape every
+closure-inheritance test in this whole file already exercises) was never
+matched by `dispatch()` at all, and its own `parents[]` entry was never
+recorded. Caught immediately by re-running the existing test suite before
+adding new tests for this fix (`test_a_plain_closure_with_no_default_is_
+still_caught` pins this exact regression), not by a fresh review round --
+worth recording as the same "verify against the existing suite before
+trusting a refactor, not just the new repro it was written for" discipline
+this plan's own earlier rounds have needed more than once. Fixed by
+calling `dispatch()`, not `visit()`, for both the `FunctionDef`/
+`AsyncFunctionDef` body-statement loop and the `Lambda` body expression.
+A second, smaller version of the same class of bug (`kw_defaults`
+carrying a `None` element -- an ordinary "this keyword-only parameter has
+no default" marker, not a bug -- reaching `dispatch()` unfiltered and
+crashing on `ast.iter_child_nodes(None)`) was caught the same way, before
+it ever reached CI, and fixed by filtering `None` out of `def_time_
+subtrees()`'s own `kw_defaults` half, matching `_default_and_annotation_
+scope_overrides()`'s own pre-existing `if subtree is None: continue`
+guard for the identical list.
+
+Verified empirically: still zero existing hits in the real repository,
+and `mypy`/`ruff` both stayed clean. Six new tests, in a new sibling file
+(`tests/test_fact_detector_misuse_def_time_scope.py` -- `test_fact_
+detector_misuse_scoping.py` was already at the architecture gate's
+1200-line cap, the same reason that file was split out of `test_fact_
+detector_misuse.py` in the first place): the reported comprehension-
+default-on-a-`def` case, the identical case on a `lambda`, a negative
+control (a comprehension shadow genuinely inside the body, not a
+default, must still be caught by the parameter), the plain-closure
+regression guard, a keyword-only-default-after-a-no-default-keyword-arg
+case (pinning the `kw_defaults`-filtering fix), and the decorator
+generalization.
+
+**A further Codex review round found `_def_containing_qualnames()` had
+the identical unconditional-`visit(child, qualname + ".", qualname)` bug
+`_lexical_function_parents()` above was just fixed for, in its own
+separate walk over the same tree.** `_def_containing_qualnames()` answers
+a related but distinct question (which scope a `def`/`class` *statement*
+directly, syntactically binds into, and -- since a later slice -- which
+scope a `Lambda` is directly, syntactically created in), used by the
+pending-default alias resolution and the comparison-scope override
+elsewhere in this file, but it had its own, separate recursive walk that
+never received the `def_time_subtrees()`/`dispatch()`/`visit()` split
+above. `fact = rec.bases_fact` in `f`, then `def g(fact, cb=lambda x=
+fact: x == other): ...` -- the *inner* lambda's own `x=fact` default
+evaluates while `g` is being defined, in `f`'s own scope, before `g`'s own
+parameter `fact` even exists -- but the unconditional recursion recorded
+the lambda's containing scope as `g` instead of `f`, so `g`'s own
+same-named parameter `fact` incorrectly appeared to shadow the lambda's
+`x=fact` default and the misuse went undetected. Fixed with the identical
+split: a second `def_time_subtrees()` (duplicated rather than shared --
+this module deliberately keeps each scoping helper local to the function
+that uses it, matching this file's own existing convention of two
+independent, structurally identical copies rather than a premature shared
+abstraction) plus a `dispatch()`/`visit()` split for `_def_containing_
+qualnames()`, re-visiting a def-time subtree under the *old*
+`scope_qualname` while only the real body executes under the new one.
+Verified empirically: still zero existing hits in the real repository,
+and `mypy`/`ruff` both stayed clean. Two new tests, appended to the
+existing `tests/test_fact_detector_misuse_def_time_scope.py` (room
+remained under the architecture gate's 1200-line cap): the reported
+nested-lambda-default-inside-another-`def`'s-default case, and a negative
+control confirming a lambda genuinely created inside `g`'s own body (not
+one of `g`'s own def-time subtrees) is still correctly parented under
+`g`, so `g`'s own parameter still shadows the outer alias there.
+
+**Two further Codex review rounds found two more real gaps in the same
+area, both real Python scoping exceptions this scoping machinery had
+never modeled, both fixed.**
+
+**(1) A comprehension's own *outermost* generator's iterable evaluates in
+the enclosing scope, not the comprehension's own.** This is a genuine
+CPython semantic: a comprehension compiles to an implicit generator
+function, and only the *first* `for`'s iterable is evaluated *before*
+that function is even called (passed to it as an argument) -- the
+element expression, every `if` filter, and every non-first `for`'s
+iterable all run *inside* the comprehension's own new scope, after its
+own target(s) have already bound. `fact = rec.bases_fact; [x for fact in
+(fact == other,) for x in fact]` -- the comparison sits inside the first
+generator's own iterable, which runs before `fact` (the comprehension's
+own target) exists to shadow anything, so it still reads the *outer*
+alias. All three scoping functions (`_enclosing_qualnames`,
+`_lexical_function_parents`, `_def_containing_qualnames`) previously
+attributed the *whole* comprehension -- outermost iterable included -- to
+its own new scope uniformly, missing this. Notably, `_enclosing_
+qualnames`'s own docstring had already predicted and explicitly accepted
+this exact gap as "vanishingly rare, and not the shape any review round
+has found" -- a review round then found it.
+
+Fixed with the identical technique in all three functions, each adapted
+to its own return shape: `_enclosing_qualnames` (which threads a
+`qualname` string through its walk, not just a `prefix`, so it can name
+what "the enclosing scope" actually *is*) registers a narrower,
+independent span for the outermost iterable's own source range, tagged
+with the *incoming* qualname rather than the comprehension's own new
+one -- `_qualname_at`'s existing smallest-span-first resolution then
+picks this override for any position inside that one iterable, while the
+comprehension's own broader span still covers everything else. The
+whole-node walk still revisits the same iterable afterward (a real,
+accepted small waste, not a bug -- since it's the *identical* span, the
+strict `<` comparison `_qualname_at` already uses never lets a
+same-size, later-registered entry displace the correct, earlier one).
+`_lexical_function_parents`/`_def_containing_qualnames` (which don't
+build spans at all, only qualname-keyed maps) instead re-dispatch the
+outermost iterable directly under the *old* `nearest_func`/
+`scope_qualname`, mirroring exactly how each already re-dispatches a
+`def`/`lambda`'s own def-time subtrees under the old scope. Verified
+empirically: still zero existing hits in the real repository, and
+`mypy`/`ruff` both stayed clean. New tests, in `tests/test_fact_detector_
+misuse_def_time_scope.py`: the reported case, a negative control
+confirming only the *first* generator is special (a genuine shadow in a
+*second* generator's own iterable is still correctly excluded), and a
+case confirming a real *closure* (not just a bare comparison) found in
+the outermost iterable resolves correctly too.
+
+**(2) A class's own base classes, keyword arguments, and decorators all
+evaluate while the `class` statement itself executes, in whatever scope
+directly contains it -- never inside the new class's own body -- and
+`_def_containing_qualnames`'s `ClassDef` branch dispatched all of them
+(bases, keywords, decorators, *and* body) uniformly under the new
+class-body qualname.** An earlier round had already fixed the *direct*-
+read case for `_default_and_annotation_scope_overrides`'s own separate
+override map (`class Inner(make_base(fact == other)): ...`), but that fix
+only widens which *qualname* a bare read resolves to when the read sits
+*directly* in the header text -- it says nothing about a *nested closure*
+(a `def`/`lambda`/comprehension/another `class`) found there, whose own
+containing-scope entry is a completely different lookup, owned by
+`_def_containing_qualnames` itself. `class Inner((lambda x=fact:
+make_base(x == other))()): ...` -- the lambda's own default `x=fact`
+evaluates in `Outer`'s namespace (wherever the `class Inner(...):`
+statement itself lives), not `Inner`'s, but the unconditional dispatch
+recorded the lambda's containing scope as `Inner<class-body>` instead,
+so `x` was never recognized as the outer alias. Fixed by splitting the
+`ClassDef` branch's dispatch the same way the `FunctionDef`/`Lambda`
+branches already are: every base expression and keyword value (plus,
+generalizing to a shape the reported repro didn't name but the identical
+timing rule covers, every decorator) is re-dispatched under the
+*incoming* `scope_qualname`, while only the class's own body statements
+dispatch under the new `class_qualname`. This closes the gap for both a
+direct read *and* a nested closure automatically, since a nested `def`/
+`lambda` dispatched under `scope_qualname` now correctly records its own
+`containing[]` entry against that same outer scope -- no separate change
+to `_default_and_annotation_scope_overrides` was needed, since that
+function already reads `def_containing` (this fix's own output) for every
+`def`/`lambda`'s own position, whether inside a class header or not.
+Verified empirically: still zero existing hits, `mypy`/`ruff` both stayed
+clean. New tests: the reported base-expression case, a metaclass-keyword
+case (generalizing beyond the one reported shape), and a negative control
+confirming a comparison genuinely inside the class *body* is still
+correctly attributed there -- shadowed via a nested method's own
+parameter (a mechanism already known to work) rather than a class-body
+*reassignment*, since class-body-level reassignment shadowing is a
+separate, pre-existing, unrelated gap this module doesn't track at all
+(confirmed unaffected by this fix, before and after, by direct
+comparison against the pre-fix code).
+
+**A further Codex review round found a real regression in the comprehension
+fix above, plus one more real gap, both fixed.**
+
+**(1) The comprehension fix's own "harmless, same span" reasoning was
+correct for `_enclosing_qualnames`, but wrong for its two siblings.** The
+first version of that fix dispatched the outermost iterable once, under
+the old scope, then still finished with a blanket `visit(child, ...)`
+over the *whole* comprehension -- reasoned as harmless, since the blanket
+walk reaches the identical iterable a second time with the identical
+span, and `_qualname_at`'s strict `size < best_size` tie-break never lets
+a same-size later entry replace an earlier one. That reasoning holds for
+`_enclosing_qualnames`'s own `spans` list, but `_lexical_function_
+parents`/`_def_containing_qualnames` don't build a spans list at all --
+they write straight into a plain `dict` (`parents[qualname] = ...`,
+`containing[pos] = ...`), where a second write to the same key
+*unconditionally overwrites* the first, no tie-break involved. `[x for
+fact in (lambda y=fact: (y == other,))() for x in fact]` -- the lambda's
+own default `y=fact` is correctly dispatched once, under `f`'s own scope,
+by the fix's first half; the blanket re-walk then reaches the *same*
+lambda a second time and overwrites its correct `containing[]`/`parents[]`
+entry with the comprehension's own (wrong) scope, silently missing the
+misuse. Fixed uniformly across all three functions by never re-walking
+the outermost iterable at all: the comprehension's own body is now walked
+explicitly, field by field (`elt`/`key`+`value` for a `DictComp`, each
+generator's `target`/`ifs`, and every *non-first* generator's own `iter`),
+instead of through a blanket walk that would reach the already-handled
+iterable again. `_enclosing_qualnames` itself needed a genuine `dispatch`/
+`visit` split for this (it never had one before, unlike its two siblings
+-- see the def-time-subtree fix earlier in this section), since dispatching
+a specific field like `elt` as its own candidate (it might itself be a bare
+`Lambda`, as in `[lambda: x for x in y]`) needs a function that matches a
+*given* node, not `visit`'s existing "match every child of a container"
+shape. New tests: the reported lambda-in-outermost-iterable case, and a
+`DictComp`-specific case confirming its `key`/`value` split is covered by
+the same explicit-field dispatch.
+
+**(2) `_fact_aliases()`'s candidate collection deliberately excluded every
+tuple/list-unpacking assignment target**, reasoned as "has no single value
+to attribute" -- true for the *general* case (`a, b = pair`, one opaque
+value with no per-element sub-expression), but not for `old_fact, new_fact
+= old.bases_fact, new.bases_fact`, where the RHS is *itself* a literal
+tuple display of the identical length: each target element genuinely does
+have its own value, the same way a chained assignment's every target
+already does. Fixed with `_paired_unpacking_candidates()`, a recursive
+helper matching a `Tuple`/`List` target against a structurally identical
+`Tuple`/`List` value element-by-element (nesting through a further tuple
+target the same way `_bound_names()` already does), returning *no*
+candidates at all -- rather than a partial, best-effort pairing -- the
+moment either side isn't a literal display, the lengths disagree, or
+either side contains a `Starred` element (which captures an
+arbitrary-length slice with no single corresponding RHS sub-expression to
+pair it against). New tests: paired tuple unpacking, paired list
+unpacking, nested paired unpacking, and two negative controls (the
+pre-existing opaque-single-value case, still correctly excluded, and a
+starred-target case confirming no candidate is derived for it without
+spuriously flagging an unrelated comparison in the same function).
+
+Both fixes' new tests went into `tests/test_fact_detector_misuse_def_
+time_scope.py` (room remained under the architecture gate's 1200-line
+cap). Verified empirically: still zero existing hits in the real
+repository, and `mypy`/`ruff` both stayed clean.
+
+**A further Codex review round found two more real gaps, both direct
+siblings of already-fixed shapes above, both fixed.**
+
+**(1) A walrus inside a class base or metaclass keyword expression had no
+binding-side counterpart to the read-side fix already covering that same
+header text.** `_default_and_annotation_scope_overrides()`'s `ClassDef`
+branch already routes a bare `==`/`!=` comparison found directly in a
+base/keyword expression to the scope containing the `class` statement --
+but `_fact_aliases()`'s own walrus-binding handling (the branch that lets
+`(fact := rec.bases_fact)` be *usable* later, not just recognized
+inline) only ever special-cased a `FunctionDef`/`AsyncFunctionDef`/
+`Lambda`'s own default/annotation subtrees, with no equivalent branch for
+`ast.ClassDef` at all. `class C(make_base(fact := rec.vtable_fact)): ...`
+therefore bound `fact` in the not-yet-created class-body scope (the
+generic, position-based `NamedExpr` branch's default attribution), not
+the scope actually executing the class header -- silently losing an
+alias a later, genuinely outer `fact == other` needs. Fixed with the
+identical mechanism the `FunctionDef`/`Lambda` branch already uses,
+mirrored into a new `ast.ClassDef` branch: walk every base and keyword
+value through `_iter_default_subtree()`, register any walrus found there
+against `def_containing`'s own entry for the class statement, and mark
+it via `default_walrus_ids` so the generic branch doesn't also
+(mis)process it. One subtlety worth recording: `ast.ClassDef` already
+matches an *earlier*, unrelated `elif` branch in the same walk (the
+def/class own-name binding fix from an earlier round) -- placing the new
+branch there would have made it unreachable dead code, since Python's
+`elif` chain stops at the first match per node per loop iteration. The
+new branch instead joins the *second*, independent `if`/`elif` chain the
+`FunctionDef`/`Lambda` default-handling branch already starts (Python
+allows a fresh `if` after an `elif` chain ends; the two chains run
+sequentially, not exclusively, for a single node), confirmed correct by
+tracing a `ClassDef` node's own execution path through both chains
+directly rather than assuming placement.
+
+**(2) A single `for`/comprehension loop target bound, one iteration at a
+time, to every element of a literal `Tuple`/`List` display of
+Fact-typed values had no propagation at all -- the loop-target
+counterpart of `_paired_unpacking_candidates()`'s already-fixed
+assignment-side handling.** `for fact in (old.bases_fact, new.bases_
+fact): return fact == other` only ever recorded `fact` as an ordinary
+local binding (shadowing an *outer* alias correctly), never as a
+candidate in its own right, so the misuse this loop actually performs
+went undetected. Unlike the paired-unpacking case -- where *distinct*
+targets each pair with a *distinct* RHS element -- a loop target reuses
+the *same* name across every iteration, so the alias only holds if
+*every* element is definitively Fact-typed, not merely one of them
+(`for x in (rec.bases_fact, some_other_call()):` must stay unflagged,
+since `x` is only sometimes a Fact). Fixed by checking, for both `ast.
+For`/`ast.AsyncFor` and a comprehension's own each-generator loop, that
+the target is a bare `Name`, the iterable is a literal `Tuple`/`List`
+display, and every element satisfies `_is_fact_typed_expr()` before
+registering one representative element as a candidate (the fixed-point
+resolver only needs one Fact-typed candidate value per name to mark it
+known). Verified against the exact reported repro plus its comprehension
+form (`[fact == other for fact in (old.bases_fact, new.bases_fact)]`),
+a negative control with a mixed Fact/non-Fact tuple, a negative control
+with a bare (non-literal) iterable, and a negative control confirming
+the alias stays scoped to the function that actually established it
+(an unrelated sibling function's own same-named parameter is unaffected).
+
+Both fixes verified empirically: still zero existing hits in the real
+repository, and `mypy`/`ruff` both stayed clean. New tests in `tests/
+test_fact_detector_misuse_def_time_scope.py` (room remained under the
+architecture gate's 1200-line cap): `TestClassHeaderWalrusContainingScope`
+and `TestForLoopLiteralCollectionAliases`.
+
+**A further Codex review round found one more real gap in the loop-target
+fix above.** `_is_fact_typed_expr()` deliberately never resolves a bare
+`ast.Name` -- answering "is this name a Fact" needs the whole-tree alias
+fixed point, which doesn't exist yet during the single collection pass
+that builds candidates -- so the "every element satisfies
+`_is_fact_typed_expr()`" gate from the previous fix silently rejected an
+otherwise-ordinary alias refactor: `old_fact = old.bases_fact` outer,
+then `for fact in (old_fact,): fact == other`, is a real misuse (`fact`
+genuinely holds `old_fact`'s value, which is genuinely Fact-typed), but
+`old_fact` is a bare name, not a structural attribute/constructor
+expression, so it never satisfied the gate at collection time.
+
+The loop-target case needed something the existing `candidates`
+mechanism can't express: `candidates` is *disjunctive* (a name becomes
+known the moment ANY ONE of its recorded values resolves -- the right
+model for "this name was assigned this value, or this other value, at
+different points"), but a loop target bound to every element of one
+tuple needs *every* element to resolve before the target itself does --
+a *conjunctive* requirement. Fixed with a new, parallel structure,
+`tuple_loop_candidates: dict[str, list[tuple[str, list[ast.expr]]]]`,
+populated by the same collection-time gate as before except an element
+is now accepted either because it's structurally Fact-typed (unchanged)
+or because it's simply a bare `ast.Name` (deferred, not yet confirmed) --
+an element that is neither still disqualifies the whole loop outright,
+preserving the original conservative guarantee. Consulted inside the
+same `while changed:` per-qualname fixed point `candidates` itself
+already participates in: at each pass, a `tuple_loop_candidates` entry's
+target becomes known once every one of its elements is either
+structurally Fact-typed or a `Name` already present in `known` -- the
+identical `isinstance(value, ast.Name) and value.id in known` resolution
+`candidates`' own loop already performs for a single value, just
+conjoined across a whole tuple instead of checked for one. Since `known`
+persists across outer fixed-point passes and only ever grows, this
+naturally converges the same way every other alias resolution in this
+module does.
+
+Verified against the exact reported repro, its comprehension form, a
+mixed alias-and-direct-read tuple (both element kinds must each resolve
+independently), a negative control where the bare-name element never
+resolves to anything (must stay unflagged, confirming the deferred
+element is only *eligible*, not automatically accepted), and a negative
+control mixing a resolved alias with an unrelated non-Fact call
+(confirming the conjunctive requirement holds regardless of which
+specific element fails it) -- plus the full existing suite, confirming
+the original tuple-of-direct-reads shape from the previous round is
+unaffected. `mypy`/`ruff` both stayed clean, still zero existing hits in
+the real repository. New tests:
+`TestForLoopLiteralCollectionResolvesThroughExistingAliases` in `tests/
+test_fact_detector_misuse_def_time_scope.py`.
+
+**A CodeRabbit review round found one more real gap: `_fact_aliases()`'s
+walrus-collection loop only ever walked `node.args.defaults`/
+`kw_defaults`, never a parameter's own annotation or the `->` return
+annotation.** `def inner(x: (fact := rec.bases_fact)): ...` -- absent
+`from __future__ import annotations`, Python evaluates a parameter
+annotation at the identical def-time, in the identical containing scope,
+a default value does -- but this loop's own construction (mirroring only
+half of `_default_and_annotation_scope_overrides()`'s already-wider
+`subtrees` list, this module's read-side sibling function) never
+included either, so a walrus there fell through to the generic,
+position-based `NamedExpr` branch and was misattributed to the
+function's own body scope, the identical failure mode every earlier
+round in this section already fixed for defaults specifically. Fixed by
+widening the loop's own subtree collection to mirror `_default_and_
+annotation_scope_overrides()`'s exactly (every parameter's own
+annotation, plus `returns` when present) -- unconditionally, regardless
+of whether the module actually has `from __future__ import annotations`
+in effect, matching that sibling function's own already-established,
+deliberately conservative choice: a walrus that in fact never executes
+under postponed evaluation registering a spurious alias is a false
+positive, the safe direction this module accepts throughout, rather than
+adding a second, narrower postponed-annotation-detection rule that would
+only complicate this loop without closing a real gap in the safe
+direction. Verified against the reported parameter-annotation repro, its
+return-annotation sibling, and a negative control confirming the
+existing nested-scope-boundary rule (`_iter_default_subtree()`, already
+relied on for defaults) applies identically to a lambda nested inside an
+annotation. Full existing suite unaffected. `mypy`/`ruff` both stayed
+clean, still zero existing hits in the real repository. New tests:
+`TestWalrusInAnnotationsContainingScope` in `tests/
+test_fact_detector_misuse_def_time_scope.py`.
+
+**A further Codex review round found two more real gaps in
+`_is_fact_typed_expr()`'s and the loop-target machinery's own coverage,
+both fixed.**
+
+**(1) `_is_fact_typed_expr()` never unwrapped a conditional expression.**
+`(old.bases_fact if condition else new.bases_fact) == other` -- and the
+equivalent `fact = old.bases_fact if condition else new.bases_fact;
+fact == other` -- both genuinely produce a Fact-typed result regardless
+of which branch actually runs, but `ast.IfExp` had no branch in this
+function at all, unlike the already-handled `ast.NamedExpr` unwrap.
+Fixed with a new `ast.IfExp` branch requiring *both* `node.body` and
+`node.orelse` to independently resolve as Fact-typed -- deliberately
+narrower than `NamedExpr`'s unconditional unwrap, since an `IfExp`
+genuinely produces one of two *different* values depending on
+`condition`, so only the case where both are guaranteed Fact-typed
+regardless of outcome is a real, unconditional Fact-typed result;
+`old.bases_fact if condition else some_other_call()` must stay
+unflagged, the identical every-branch-must-agree principle the
+loop-target literal-collection fix earlier in this section already
+applies to a tuple's own elements. Verified against both the inline and
+assigned-then-compared repros, plus a negative control with one
+non-Fact branch.
+
+**(2) The loop-target literal-collection fix only ever handled a bare
+`ast.Name` target -- a tuple-*unpacking* target was silently excluded
+entirely.** `for fact, tag in ((old.bases_fact, "old"), (new.bases_fact,
+"new")): fact == other` -- each target position genuinely has its own
+per-iteration value, but neither the single-target `elif` branch nor
+anything else in this loop matched a `Tuple`/`List` target at all. Fixed
+with a new `elif` branch reusing `_paired_unpacking_candidates()` --
+the identical elementwise pairing `ast.Assign`'s own unpacking handling
+already relies on -- once per iteration element (each iteration element
+is exactly the "one assignment's worth" of value that function already
+knows how to pair against the loop's own, unchanging target shape). Any
+single iteration element that isn't itself a literal display of matching
+length (or that trips the starred-element exclusion
+`_paired_unpacking_candidates()` already applies) disqualifies the
+*whole* loop via an `all_iterations_paired` flag, rather than silently
+pairing only some iterations -- the identical "no candidates at all over
+a partial pairing" principle that function's own docstring already
+states, extended across iterations instead of within one. Once every
+iteration pairs successfully, each target name's own per-iteration
+values are collected and registered together, subject to the identical
+every-element-Fact-typed-or-deferred-name conjunctive requirement the
+simple-target case already applies via `tuple_loop_candidates`. Verified
+against the reported repro, a negative control confirming the sibling
+unpacked position (`tag`, never Fact-typed) stays unflagged even though
+`fact` in the same loop is, a negative control where one iteration
+element fails to pair (disqualifying the whole loop, not just that
+iteration), and a negative control for a starred unpacking target.
+
+Both fixes verified empirically: still zero existing hits in the real
+repository, `mypy`/`ruff` both stayed clean. New tests:
+`TestConditionalExpressionsRecognizedWhenBothBranchesAreFactTyped` and
+`TestForLoopUnpackingTargetsResolveElementwise` in `tests/
+test_fact_detector_misuse_def_time_scope.py`.
+
+**Split into a sibling module once these fixes pushed the file past the
+AI-readiness `file-size` gate's own 2000-line hard cap.** Every review
+round in this section added real, dense docstring explaining *why* --
+the file-size check does not distinguish code from documentation, and
+the growth was entirely legitimate (each finding needed its reasoning
+recorded, per this file's own "known gaps over risky reactive patches"
+and "fix the cause, not the instance" conventions), so the fix is a
+mechanical extraction, not a diet. The eight lexical-scope-resolution
+building blocks every alias-resolution function in this module builds on
+(`_enclosing_qualnames`/`_qualname_at`/`_QualnameSpans`,
+`_lexical_function_parents`, `_def_containing_qualnames`,
+`_bound_names`, `_paired_unpacking_candidates`, `_match_pattern_names`)
+moved, unchanged, into a new sibling leaf module,
+`scripts/fact_detector_misuse_scope.py`, imported by
+`fact_detector_misuse.py` via a sys.path guard mirroring
+`check_ai_readiness.py`'s own identical one -- needed because a bare,
+non-dotted `from fact_detector_misuse_scope import ...` only resolves
+when `scripts/` itself is on `sys.path`, which is guaranteed when this
+module is run directly (Python adds its own directory automatically) or
+when `check_ai_readiness.py` was imported first in the same process (it
+already inserts its own directory before importing `fact_detector_
+misuse` the identical bare way) -- but not guaranteed for a test file
+that imports `scripts.fact_detector_misuse` on its own, as two of this
+module's own test files already do. Verified by running each of those
+two test files in isolation (not just as part of the full suite), which
+is exactly the scenario a missing guard would silently pass in a
+full-suite run and fail only in isolation. `fact_detector_misuse.py`
+dropped from 2058 to 1369 lines; the new module is 739. No behavior
+change -- every moved function is bit-for-bit identical to its original,
+confirmed by the full existing test suite passing unchanged (142 tests
+across all three test files) and a fresh `mypy`/`ruff` pass on both
+files. Registered in `scripts/CLAUDE.md`'s inventory table (the
+`script-inventory` AI-readiness check's own requirement).
+
+**A further Codex review round found four more real gaps, all fixed.**
+
+**(1) `_is_fact_typed_expr()`'s own `IfExp` branch can't resolve a
+bare-`Name` alias, since it has no access to a scope's `known` set.**
+`old_fact = old.bases_fact; new_fact = new.bases_fact; fact = old_fact if
+cond else new_fact; fact == other` is a real misuse -- both branches are
+aliases the surrounding fixed point already confirmed Fact-typed -- but
+the structural, scope-independent `_is_fact_typed_expr()` deliberately
+never resolves a bare name at all. Fixed with a new
+`_candidate_resolves_to_fact(value, fact_names, known)`: the
+fixed-point-aware sibling every ordinary `candidates` entry already got
+via its own inline `isinstance(value, ast.Name) and value.id in known`
+check, generalized to recurse through an `IfExp`'s own two branches too
+(each independently required to resolve -- structurally, as an
+already-known alias, or itself another nested `IfExp` -- before the
+conditional as a whole is trusted). Both the ordinary `candidates` loop
+and `tuple_loop_candidates`' own per-element check now go through this
+one function instead of duplicating the same inline check twice.
+
+**(2) A comprehension's tuple-loop-target candidate always registered
+every element against the comprehension's own scope, even the first
+generator's own iterable, which actually evaluates in the *parent*
+scope.** `fact = rec.bases_fact; [fact == other for fact in (fact,)]` --
+the tuple element `fact` names the *outer* alias, but the comprehension's
+own target is *also* `fact`, shadowing it in the comprehension's own
+scope; checking the element there checks the shadowed name against
+itself and never resolves. This needed a genuine data-model change, not
+just a smarter check: `tuple_loop_candidates` now pairs each element with
+its *own* resolution qualname (`list[tuple[ast.expr, str]]`, not a flat
+`list[ast.expr]`) -- the resolved target name still becomes known in the
+comprehension's own scope (where the actual read happens), but each
+element is checked against `aliases.get(elt_qualname, set())`, which for
+the first generator is the position `_qualname_at()` resolves via the
+narrower override span `_enclosing_qualnames()` already registers for
+that exact iterable, tagged with the comprehension's own incoming
+(parent) qualname. A plain `for` loop and every generator after the
+first pair every element with their own (unchanged) qualname, so this is
+a strict widening, not a behavior change for the already-fixed cases.
+
+**(3) The comprehension's own tuple-loop-target branch only ever matched
+a bare `ast.Name` generator target -- the comprehension counterpart of
+finding (2) two Codex rounds ago, applied to a plain `for` loop, was
+never extended to a comprehension's own generator.** `[fact == other for
+fact, tag in ((old.bases_fact, "old"),)]` was invisible. Fixed with the
+identical `_paired_unpacking_candidates()`-per-iteration-element
+machinery the `for`/`AsyncFor` branch already uses, applied per
+generator -- paired with each element's own resolution qualname from
+finding (2), and registered under the comprehension's own scope the
+same way finding (2)'s fix already does.
+
+**(4) A whole-subject `match` capture was recorded only as an ordinary
+local binding, never as an alias of the match subject.** `match
+rec.bases_fact: case fact: return fact == other` -- `case fact:` (a bare
+capture) and `case SomeClass() as fact:` (an `as`-pattern) both bind the
+*entire* subject unconditionally whenever that case matches, making the
+captured name a real alias of `node.subject`, not merely an arbitrary
+shadow the way a *nested* capture inside a larger structural pattern
+(`case [x, y as fact]:`, capturing only a sub-part) correctly still is.
+Both shapes are exactly `case.pattern` itself being an `ast.MatchAs` with
+a real `name` -- Python's own grammar for a top-level capture/`as`-
+pattern. Fixed by registering `(case.pattern.name, node.subject)` as an
+ordinary candidate whenever `isinstance(case.pattern, ast.MatchAs) and
+case.pattern.name is not None`, reusing the existing `candidates`
+fixed point rather than adding a new mechanism.
+
+Verified against each finding's own reported repro plus negative
+controls (an unresolved conditional branch; an unrelated first-iterable
+name; the sibling unpacked position staying unflagged; a nested
+structural capture; a non-Fact match subject) and the full existing
+suite, confirming every previously-fixed shape in this section is
+unaffected. `mypy` caught two real variable-redefinition/type-narrowing
+issues in the same pass (a same-named local reused with a different type
+across the `for`-loop and comprehension branches) -- fixed by renaming,
+not by suppressing. `ruff`/`mypy` both stayed clean, still zero existing
+hits in the real repository, `fact_detector_misuse.py` at 1523 lines
+(well under the 2000-line hard cap). New tests:
+`TestConditionalExpressionResolvesThroughAliasBranches`,
+`TestComprehensionFirstIterableResolvesAgainstTheParentScope`,
+`TestComprehensionUnpackingTargetsResolveElementwise`, and
+`TestWholeSubjectMatchCapturesAreAliases` in `tests/
+test_fact_detector_misuse_def_time_scope.py`.
+
+**A fifth finding, from the next review round: a direct conditional
+comparison operand -- never assigned to an intermediate variable at all --
+still bypassed alias resolution, even after finding (1) above fixed the
+*assignment-candidate* half of the identical `IfExp` shape.**
+`old_fact = rec.bases_fact; new_fact = rec.bases_fact; (old_fact if cond
+else new_fact) == other` returned no misuse site. The two `IfExp` checks
+already in the module are not the same check: `_is_fact_typed_expr()`'s own
+`IfExp` branch (used by `_fact_aliases()`'s fixed point when *registering* a
+candidate) requires both branches to be *structurally* Fact-typed on their
+own -- it never resolves an alias `Name` in either branch, since alias
+resolution is the fixed point's job, not this structural predicate's.
+`fact_equality_misuse_sites()`'s own *terminal* `is_fact_typed()` closure --
+the one that actually decides whether a raw `==`/`!=` operand counts,
+applied after the whole fixed point has already converged -- had no `IfExp`
+branch of its own at all: it fell through to `isinstance(node, ast.Name)`,
+which a conditional expression never satisfies, so a direct conditional
+operand could not be recognized regardless of what either branch resolved
+to. Fixed by giving `is_fact_typed()` its own recursive `IfExp` branch,
+mirroring `_candidate_resolves_to_fact()`'s reasoning but adapted to this
+call site's available state: it checks each branch via `is_fact_typed()`
+itself (so a nested conditional operand resolves too) against the
+comparison's own `qualname`, reading the *final*, already-converged
+`aliases` mapping rather than an in-progress fixed-point `known` set, since
+by the time this terminal check runs `_fact_aliases()` has already finished.
+Kept the same AND semantics every other `IfExp` handling in this module
+already uses (`_is_fact_typed_expr`, `_candidate_resolves_to_fact`): both
+branches must resolve, since a single-branch match cannot be told apart
+from an ordinary conditional expression that merely happens to read one
+Fact attribute among other unrelated locals -- a real, if narrow, accepted
+false-negative direction, not new to this fix.
+
+Verified against the reported repro, a nested-conditional variant, and two
+negative controls (neither branch resolves; only one branch resolves) via
+direct `python3 -c` reproduction before writing tests, plus the full
+existing suite confirming every previously-fixed shape stays unaffected.
+`ruff`/`mypy` both clean, still zero existing hits in the real repository,
+`fact_detector_misuse.py` at 1529 lines (well under the 2000-line hard cap).
+New tests:
+`TestDirectConditionalOperandsResolveThroughAliasBranches` in `tests/
+test_fact_detector_misuse_def_time_scope.py`.
+
+**A CodeRabbit review round re-raised the postponed-annotations question
+this module's own walrus-in-annotation collection loop already reasoned
+through and deliberately declined to special-case -- investigated afresh,
+the standing decision stands, not re-implemented.** The finding: `_fact_
+aliases()` registers a walrus target found inside a parameter's own
+annotation or the `->` return annotation as bound at def-time
+unconditionally, even when the module carries `from __future__ import
+annotations` (PEP 563), under which an annotation expression is never
+evaluated at all -- it is stored as an unparsed string, so the walrus
+inside it never actually executes and the name it would have bound is
+never really available. This is not a new observation: the exact same
+walrus-collection loop's own inline comment already states this trade-off
+explicitly ("absent `from __future__ import annotations` ... unconditionally
+walking here too matches that established, deliberately conservative
+choice rather than adding a second, narrower rule: a walrus that in fact
+never executes under postponed evaluation registering a spurious alias is
+a false positive, the safe direction this whole module already accepts
+throughout"). Re-verified the reasoning still holds rather than accepting
+it on faith: (1) this repository's own `AGENTS.md` convention mandates
+`from __future__ import annotations` in every scanned production file
+(`abicheck/**/*.py`), so a correct implementation would need to gate on a
+per-*module* fact (does the scanned file itself carry the future import)
+threaded specifically into the annotation-embedded half of the walrus
+walk -- default-expression walruses are unaffected by PEP 563 and must
+keep binding eagerly regardless, so the two subtrees this loop currently
+treats identically (`walrus_subtrees = [*node.args.defaults, *node.args.
+kw_defaults]`, with annotations appended after) would need to split back
+apart, undoing the very unification that closed the earlier annotation-
+vs-default gap this class of finding exists to prevent reopening; (2) the
+scenario itself -- a walrus operator inside a type annotation, assigning a
+`Fact[...]`-typed value as a side effect of annotating a parameter -- is
+adversarial, not a pattern any real detector code in this repository
+would plausibly write, unlike every other alias shape this module has
+special-cased so far (each traced to an ordinary, unremarkable refactor a
+real contributor could genuinely perform); (3) the failure direction is
+already the accepted one throughout this module -- an over-approximated
+alias only ever risks flagging a comparison that, if the annotation truly
+never executes, would itself raise `NameError` before reaching the
+comparison, so the practical cost of not fixing it is a spurious ERROR on
+code that cannot run as written, not a missed real misuse. Given the
+fix's real complexity (a second, narrower rule threaded through one
+specific subtree of an already-hardened, many-times-reviewed collection
+loop) against a scenario with no plausible real-world occurrence, this is
+documented as a known, deliberate, already-reasoned-through accepted
+false-positive direction rather than implemented -- consistent with this
+module's own established "the safe direction this whole module already
+accepts throughout" principle, not a gap distinct from what the code
+already states. No code change; replied to the review thread pointing at
+the existing docstring's own reasoning.
+
+**Two more findings from the same review round, both real, both bounded
+extensions of the same recursive-resolver mechanism the direct-
+conditional-operand fix just established.** (1) `_is_fact_typed_expr()`'s
+own `NamedExpr` branch unwraps a walrus to its `.value` and checks it
+structurally, but it deliberately never resolves a bare `Name` there (the
+same limit every structural check in this module accepts -- alias
+resolution needs scope, which a single node can't supply). Neither of the
+two places that *can* supply scope had a matching `NamedExpr` branch of
+their own: `_candidate_resolves_to_fact()` (the fixed-point-aware
+resolver a candidate's own value is checked against) and `is_fact_typed()`
+(`fact_equality_misuse_sites()`'s own terminal comparison-operand
+predicate). `old_fact = rec.bases_fact; (copy := old_fact) == other` (a
+direct comparison operand) and `old_fact = rec.bases_fact; fact = (copy
+:= old_fact); fact == other` (assigned through an intermediate name
+first) were both missed -- `_is_fact_typed_expr` correctly declined to
+resolve the wrapped bare `old_fact`, and neither caller had anywhere else
+to turn. Fixed by giving both functions the identical recursive
+`NamedExpr` branch already established for `IfExp` one round earlier:
+`_candidate_resolves_to_fact(value.value, fact_names, known)` and
+`is_fact_typed(node.value, qualname)` respectively -- each simply
+recurses into the walrus's own value through the same resolver, so a
+nested walrus (`(a := (b := old_fact)) == other`) resolves too, and a
+walrus wrapping a genuinely non-Fact name stays correctly unflagged. (2)
+The parameter-default resolution loop's own inline check --
+`_is_fact_typed_expr(default, fact_names) or (isinstance(default,
+ast.Name) and default.id in aliases.get(parent, ()))` -- was a narrower,
+duplicated re-implementation of exactly what `_candidate_resolves_to_fact()`
+already generalizes: it had no `IfExp` (or now `NamedExpr`) branch of its
+own, so a default composing two already-known aliases through a
+conditional expression (`old = rec.bases_fact; new = rec.vtable_fact; def
+inner(value=old if cond else new): return value == other`) was rejected
+outright, even though both branches were already confirmed Fact-typed
+aliases in the parent scope. Fixed by replacing the inline check with a
+direct call to `_candidate_resolves_to_fact(default, fact_names,
+aliases.get(parent, set()))` -- the identical resolver every other
+candidate site already uses, so this loop can no longer independently
+drift from what the rest of the module considers Fact-typed, and it
+inherits the `NamedExpr` fix above for free.
+
+Verified against all three reported repros (direct `NamedExpr` operand,
+assigned-through `NamedExpr` alias, composed `IfExp` default), a nested-
+`NamedExpr` variant, and two negative controls (a `NamedExpr` wrapping a
+non-Fact name; a composed default with only one Fact-typed branch,
+pinning the same AND semantics established for the direct-conditional-
+operand fix) via direct `python3 -c` reproduction before writing tests.
+`ruff`/`mypy` both stayed clean, still zero existing hits in the real
+repository, `fact_detector_misuse.py` at 1533 lines (well under the
+2000-line hard cap). New tests:
+`TestNamedExpressionsResolveThroughAliasBranches` in `tests/
+test_fact_detector_misuse_def_time_scope.py`.
+
+**Two more findings from the next review round, plus a test-file split
+the second push over the 1200-line cap.** (1) `_is_fact_typed_annotation()`'s
+generic fallback branch (`return _is_fact_typed_annotation(annotation.value,
+fact_names)`) is correct for a plain `Fact[int]` subscript -- `annotation.
+value` is the `Fact` head name itself -- but wrong for `Annotated[Fact[int],
+metadata]` (PEP 593): there, `annotation.value` is `Annotated`, not `Fact`,
+and the real type lives in the subscript's own *slice* (its first element;
+everything after is arbitrary metadata, never itself a type to check).
+`def f(value: Annotated[Fact[int], "meta"], other): return value == other`
+was invisible. Fixed with a dedicated `head == "Annotated"` branch,
+mirroring the existing `Optional`/`Union` branches' own tuple-vs-bare-slice
+handling: recurses into the slice's first element only (`elts[0]` when the
+slice is a `Tuple`, else the bare slice), leaving every later metadata
+element untouched. Composes correctly with the existing `Optional`
+handling (`Annotated[Optional[Fact[int]], "meta"]`), since each branch
+only ever recurses through the same function. (2) The `ast.Match` branch's
+existing whole-subject-capture recognition (`case fact:`/`case SomeClass()
+as fact:`) had no counterpart for an OR pattern where *every* alternative
+independently captures the whole subject under the same name -- `case
+(list() as fact) | (tuple() as fact): fact == other` was invisible, since
+`case.pattern` there is `ast.MatchOr`, never itself an `ast.MatchAs`.
+Python requires every alternative of an OR pattern to bind the identical
+*set* of names (a `SyntaxError` otherwise), but not the identical binding
+*shape* -- `case C(x=fact) | (D() as fact):` legally binds `fact` in both
+branches, but only the second branch binds it to the whole subject, so
+consistency of the bound *name* alone is not sufficient evidence. Fixed
+by requiring every single alternative to itself be exactly `ast.MatchAs`
+with the identical `.name` before treating it as an alias of `node.
+subject` -- verified this correctly rejects the mixed-shape case above
+while still accepting a bare-capture-mixed-with-an-as-pattern OR
+(`case fact | (tuple() as fact):`) and a three-way OR, since each
+alternative there is independently a whole-subject `MatchAs`.
+
+Verified against both reported repros, a multi-metadata-item variant and
+an `Annotated`+`Optional` composition for finding (1), a three-way OR and
+a bare-capture-mixed-with-`MatchAs` OR for finding (2), and negative
+controls for each (a non-Fact `Annotated` type; a non-Fact match subject;
+the mixed-binding-shape OR pattern) via direct AST reproduction before
+writing tests. Adding these tests pushed `tests/test_fact_detector_misuse_
+def_time_scope.py` to 1198 of its own 1200-line test-file cap -- two lines
+of headroom, effectively none -- so its tail (the four most recent
+alias-resolution-edge-case test classes: direct conditional operands,
+`NamedExpr`, `Annotated`, `MatchOr`) was split into a new sibling file,
+`tests/test_fact_detector_misuse_alias_edge_cases.py`, mirroring how that
+file was itself split out of `test_fact_detector_misuse_scoping.py` --
+mechanical extraction, every class moved unchanged, verified both in
+combination and in isolation. `ruff`/`mypy` both stayed clean, still zero
+existing hits in the real repository, `fact_detector_misuse.py` at 1572
+lines (well under the 2000-line hard cap), the def-time-scope test file
+back down to 940 lines, the new edge-case test file at 299 lines. New
+tests: `TestAnnotatedWrapperUnwrapsToItsFirstSliceElement` and
+`TestMatchOrPropagatesWholeSubjectCaptures`, both now in `tests/
+test_fact_detector_misuse_alias_edge_cases.py`.
+
+**Two more findings from the next review round, both bounded extensions
+of already-established mechanisms.** (1) None of `_is_fact_typed_expr()`,
+`_candidate_resolves_to_fact()`, or `fact_equality_misuse_sites()`'s own
+terminal `is_fact_typed()` predicate had a `BoolOp` branch, so `(old.
+bases_fact or new.bases_fact) == other` was missed entirely, as was the
+assignment-through-alias form. Python's `and`/`or` always return one of
+their own operands verbatim -- never a synthesized `True`/`False`, only
+ever short-circuiting to whichever operand its own truthiness picks -- so
+if *every* operand of a `BoolOp` is guaranteed Fact-typed, the result is
+too, regardless of which one runtime truthiness actually selects: the
+identical every-operand-must-agree principle the `IfExp` branches already
+established, generalized from two branches to `BoolOp.values`'s arbitrary
+operand count (an `a or b or c` chain is one `BoolOp` node with three
+values, not two nested ones). Fixed by giving all three functions the
+identical recursive `BoolOp` branch, mirroring each one's own existing
+`IfExp` branch exactly. (2) The comprehension-scope-hopping walrus
+collection branch (an earlier round's own fix) registers a hopped
+target's candidate under `binding_qualname` (the enclosing scope PEP 572
+hops it out to), but paired it with `node.value` unconditionally checked
+against that *same* scope's converged aliases at fixed-point time -- even
+though the walrus's RHS is still textually written, and can only ever
+resolve, in the comprehension's *own* scope. `[(captured := fact) for
+fact in (rec.bases_fact,)]; captured == other` was missed: `fact` (the
+comprehension's own `for`-bound target) is never a known alias of
+`binding_qualname` (the enclosing function), only of the comprehension's
+own scope. This is the identical "one shared qualname per entry can't
+express both a binding scope and a resolution scope" problem `tuple_loop_
+candidates`'s own per-element `(elt, elt_qualname)` pairing already
+solves for a tuple's elements -- applied here to a single scalar walrus
+value instead. Fixed with a new `cross_scope_candidates` dict, keyed by
+the binding qualname exactly like `candidates`, but each entry additionally
+carrying the value's own resolution qualname (`walrus_qualname`, only
+populated when a real hop occurred -- the no-hop case still uses the
+ordinary `candidates` dict unchanged); the fixed-point loop resolves each
+entry's value against `aliases.get(value_qualname, set())` rather than
+the current pass's `known` set, mirroring `tuple_loop_candidates`'s own
+per-element resolution exactly. A walrus hopping out of *nested*
+comprehensions (PEP 572 hops out of all of them, not just the innermost)
+resolves correctly too, since `walrus_qualname` still names the
+comprehension it was textually written in.
+
+Verified against both reported repros, a three-way `BoolOp` chain, a
+`BoolOp`-via-alias variant, alias-resolved `BoolOp` operands, a negative
+control pinning the AND semantics (one non-Fact operand disqualifies the
+whole expression) for finding (1); and a non-Fact-RHS negative control, a
+double-hopped nested-comprehension variant, and a no-hop regression guard
+for finding (2) -- all via direct AST reproduction before writing tests.
+Zero existing hits, `mypy`/`ruff` both stayed clean,
+`fact_detector_misuse.py` at 1642 lines (well under the 2000-line hard
+cap). New tests: `TestBoolOpResolvesWhenEveryOperandIsFactTyped` and
+`TestComprehensionWalrusResolvesItsRhsInItsOwnScope`, both in `tests/
+test_fact_detector_misuse_alias_edge_cases.py` (410 lines, well under its
+own 1200-line cap).
+
+**Two more findings from the next review round, both bounded extensions of
+already-established mechanisms.** (1) `_iter_default_subtree()` -- the
+helper `_default_and_annotation_scope_overrides()` uses to attribute
+everything inside a `def`/`lambda`'s own default value or annotation to
+its def-time (enclosing) scope -- stops descending the moment it reaches
+any scope-introducing node, comprehensions included, since a comprehension
+genuinely creates its own new scope for its `elt`/later generators. But a
+comprehension's own *outermost* generator's iterable is the one
+established exception to that rule (the identical carve-out
+`_enclosing_qualnames`'s and `_lexical_function_parents`'s own
+comprehension handling already give the same construct, documented in
+their own docstrings): it evaluates in the scope enclosing the
+comprehension, before the comprehension's own implicit function is even
+called. `_iter_default_subtree()` never carried the same exception, so
+`fact = rec.bases_fact; def g(fact, cb=[x for x in (fact == other,)]):
+...` was silently missed -- the comparison sits inside exactly that
+exempt iterable, but the walk stopped at the `ListComp` boundary before
+ever reaching it. Fixed by giving `_iter_default_subtree()` the identical
+one-generator carve-out: on reaching a comprehension, its outermost
+iterable is pushed back onto the walk (still under the def-time scope this
+whole function exists to attribute), and everything else in the
+comprehension is left correctly opaque. The exception recurses through the
+walk's own stack the same way it already does in the two sibling
+functions, so a doubly-nested comprehension's own outermost iterable
+(itself nested two hops from the `def`) resolves correctly too, with no
+extra logic needed. (2) `_is_fact_typed_annotation()` had no case for a
+*stringized* (quoted) annotation -- `def f(old_fact: "Fact[list[str]]",
+other): return old_fact == other` -- a real, common spelling (required
+under `from __future__ import annotations` for anything evaluated lazily,
+and used ad hoc even without it to break an import cycle or reference a
+not-yet-defined name), invisible to every existing shape check since it
+parses as a bare `ast.Constant` string rather than any of the `Name`/
+`Subscript`/`BinOp` shapes the function already recognized. Fixed by
+parsing the string as an expression (`ast.parse(..., mode="eval")`) and
+recursing into the parsed body through the same function -- so the fix
+composes for free with every wrapper the function already handles
+(`Optional[...]`, `Union[...]`, the `X | None` PEP 604 spelling,
+`Annotated[...]`), rather than needing its own copy of that logic. A
+string that isn't valid Python at all (unrelated malformed input, not a
+forward-reference annotation) degrades to `False` rather than propagating
+a `SyntaxError`, matching every other best-effort parse in this module.
+
+Verified against both reported repros -- a doubly-nested comprehension
+variant and a lambda-default-body negative control (a genuine, ordinary
+scope boundary, unlike a comprehension's outermost iterable) for finding
+(1); a stringized annotation wrapped in `Optional[...]`, one using the
+PEP 604 `X | None` spelling, a malformed-string negative control, and an
+unrelated non-Fact stringized-annotation negative control for finding
+(2) -- all via direct AST reproduction before writing tests. Zero existing
+hits, `mypy`/`ruff` both stayed clean, `fact_detector_misuse.py` at 1683
+lines (well under the 2000-line hard cap). New tests:
+`TestDefaultComprehensionOutermostIterableStaysDefTimeScoped` and
+`TestStringizedFactAnnotationsAreRecognized`, both appended to `tests/
+test_fact_detector_misuse_def_time_scope.py` (1062 lines, well under its
+own 1200-line cap -- the natural home for both, since each is a def-time/
+annotation-scope fix, not a plain alias-resolution one).
+
+**One more finding from the next review round, a bounded extension of an
+already-established mechanism.** The single-target `for`/comprehension
+loop-binding branches (`tuple_loop_candidates`'s own collection: "one loop
+target bound, one iteration at a time, to every element of a statically
+known display") recognized only `ast.Tuple`/`ast.List`, so `for fact in
+{old.bases_fact, new.bases_fact}: fact == other` (a set display) and `for
+fact in {old.bases_fact: 1, new.bases_fact: 2}: fact == other` (a dict
+display, iterated as its keys) were both invisible, as was the identical
+gap in the duplicated comprehension-generator branch -- an ordinary choice
+of container literal, not a different question from the `Tuple`/`List`
+case already handled. Fixed with one shared `_static_display_elements()`
+helper (`Tuple`/`List`/`Set` → `.elts`, `Dict` → `.keys`, `None` for
+anything else or for a dict containing a `**expansion` -- a `None` entry
+in `ast.Dict.keys`, whose own value could be anything, so the whole
+display can't be treated as statically enumerable), used at both the
+`for`-loop and comprehension single-target sites instead of duplicating
+the three-way shape check at each.
+
+Verified against both reported repros (set-display `for`, dict-keys
+`for`), the identical pair for the comprehension form, a mixed-element
+set negative control (only some elements Fact-typed -- must stay
+unflagged, mirroring the existing tuple negative control), a `**expansion`
+dict negative control, and an empty-display negative control (`{}`,
+Python's only empty-display literal -- there is no bare empty-set syntax,
+and `set()` is a call, correctly not recognized as a display at all), all
+via direct AST reproduction before writing tests. Still zero existing
+hits, `mypy`/`ruff` both stayed clean, `fact_detector_misuse.py` at 1714
+lines (well under the 2000-line hard cap). New tests:
+`TestStaticDisplayLoopTargetsRecognizeSetAndDictKeys` in `tests/
+test_fact_detector_misuse_alias_edge_cases.py` (493 lines, well under its
+own 1200-line cap).
+
+**Three more findings from the next review round, all bounded extensions
+of already-established mechanisms, plus one declined as a re-raise of an
+already-decided, documented tradeoff.** (1) The tuple-*unpacking* loop/
+comprehension branches (the destructured-target sibling of the set/dict-
+display fix above) still gated on a hand-rolled `isinstance(node.iter,
+(ast.Tuple, ast.List))`/`isinstance(generator.iter, (ast.Tuple, ast.List))`
+of their own rather than reusing `_static_display_elements()` -- the
+identical drift risk the simple-target case was already fixed for one
+round earlier. `for fact, tag in {(rec.bases_fact, "old")}: fact == other`
+(a set of tuples) was invisible, as was the identical dict-keys and
+comprehension form. Fixed by reusing the already-computed `display_elts`/
+`gen_display_elts` local (computed once per branch, shared by both the
+simple-target and tuple-unpacking cases) instead of a second, independent
+shape check. (2) None of the four loop/comprehension collection branches'
+own element-admission gate (`_is_fact_typed_expr(elt, fact_names) or
+isinstance(elt, ast.Name)`) recognized a composed expression
+(`NamedExpr`/`IfExp`/`BoolOp`) as a candidate worth deferring to
+fixed-point time, even though `_candidate_resolves_to_fact()` -- the
+function that actually resolves a deferred candidate once `known`/
+`aliases` are populated -- already has its own recursive branch for every
+one of those three shapes. `old = rec1.bases_fact; new = rec2.
+vtable_fact; for fact in (old if cond else new,): fact == other` was
+rejected outright at collection time, since `old if cond else new` is
+neither already Fact-typed (its own leaves aren't resolved as aliases
+yet) nor a bare name. Fixed with one shared `_admissible_loop_element()`
+gate (`_is_fact_typed_expr(...)` or one of `_DEFERRED_CANDIDATE_NODE_
+TYPES` -- `Name`/`NamedExpr`/`IfExp`/`BoolOp`), replacing all four
+independent copies of the old two-clause check at once, so a future
+composed shape added to `_candidate_resolves_to_fact()` only needs
+updating in this one admission set to reach every collection site. (3)
+`Fact[int](...)`/`Fact[int].present(...)` -- a generic specialization of
+`Fact`, which subscripting produces as a `_GenericAlias` whose own
+`__call__`/attribute access delegates straight through to the real class
+-- is still exactly `Fact` at runtime, but the callable is an
+`ast.Subscript` (or an `ast.Attribute` whose `.value` is one), invisible
+to the constructor-call recognition in `_is_fact_typed_expr()`, which
+only ever unwrapped a bare `ast.Name`. Fixed with a single unwrap of an
+`ast.Subscript` callee (and, separately, of an `ast.Attribute`'s own
+`.value`) before the existing `Name`-in-`fact_names` checks, composing
+for free with both existing shapes rather than needing a duplicate check.
+
+(4) **Declined, citing an already-documented rationale rather than
+re-implementing.** A module-qualified `Fact` *annotation* (`value: model.
+Fact[int]`/`value: fact_module.Fact`) is the identical "no type
+inference, match by import spelling" residual `_imported_fact_aliases()`'s
+own docstring already documents and accepts for the module-qualified
+*constructor-call* form (`fact_model.Fact.present(...)`) -- both trace to
+the same root cause (`_is_fact_typed_annotation`'s/`_is_fact_typed_expr`'s
+constructor-call branch each assuming a bare `ast.Name` rather than an
+arbitrary `ast.Attribute` chain) and the same accepted-gap paragraph in
+that docstring ("This module's own module docstring already accepts as
+inherent to a pure-AST heuristic, not a specific miss worth chasing
+indefinitely"). Documented as covering the annotation spelling too rather
+than re-litigated as a fresh finding.
+
+Verified against all three reported repros for findings (1)-(3) (the
+destructured set/dict-keys forms and their comprehension duplicates; the
+composed-`IfExp` loop element and its comprehension duplicate; both
+generic-specialized constructor spellings), plus negative controls for
+each (a destructured set with one non-Fact element; an `IfExp` with one
+non-Fact branch) and a regression guard confirming the unspecialized
+`Fact(...)` form still works, all via direct AST reproduction before
+writing tests. Still zero existing hits, `mypy`/`ruff` both stayed clean,
+`fact_detector_misuse.py` at 1780 lines (well under the 2000-line hard
+cap). New tests: `TestDestructuredLoopsRecognizeSetAndDictKeyDisplays`,
+`TestComposedLoopElementsDeferToTheAliasFixedPoint`, and
+`TestGenericSpecializedFactConstructorsAreRecognized`, all appended to
+`tests/test_fact_detector_misuse_alias_edge_cases.py` (608 lines, well
+under its own 1200-line cap).
+
+**One more finding from the next review round, a bounded extension of an
+established mechanism.** The `match` statement's whole-subject-capture
+handling (a bare `case fact:`/`case SomeClass() as fact:`, or a
+whole-subject `MatchOr`) only ever recognized `case.pattern` itself being
+a top-level `MatchAs` -- a structural sequence pattern capturing a
+*sub*-part of the subject, not the whole thing, was invisible: `match
+(rec.bases_fact, tag): case (fact, _): return fact == other` -- `fact` is
+definitively the subject tuple's first, Fact-typed element, but neither
+existing branch applies (`case.pattern` is an `ast.MatchSequence`, not a
+bare `MatchAs`/`MatchOr`-of-`MatchAs`). Fixed with a new
+`_paired_match_sequence_candidates()` -- the `match`/`case` sibling of
+`_paired_unpacking_candidates()` this module already uses for ordinary
+tuple-unpacking assignment -- pairing a structural sequence pattern's own
+captures against a statically-known `Tuple`/`List` subject's elements,
+positionally, recursing through a nested sequence pattern matched against
+a nested `Tuple`/`List` subject element the identical way its assignment-
+unpacking sibling already nests. Deliberately **not** all-or-nothing the
+way `_paired_unpacking_candidates()` is, though: a non-capturing
+sub-pattern at one position (a wildcard `_`, a literal, a class pattern)
+does not disqualify a real capture found at another position, since a
+structural pattern routinely mixes captures with non-capturing
+sub-patterns as completely ordinary code -- only a genuine shape mismatch
+(a pattern/subject length disagreement, more than one `MatchStar`) makes
+the whole pairing untrustworthy, since then no position can be
+confidently attributed to the right subject element at all. A
+`MatchStar`'s own captured name (`case (fact, *rest):`) binds a runtime
+list, not a single value, and is deliberately not treated as a Fact-typed
+candidate here (`_match_pattern_names()` still records it as an ordinary
+local bound name, a real shadow, just not an alias source).
+
+**Fixing this correctly required updating one existing test, not just
+adding new ones.** `test_ignores_a_nested_capture_inside_a_structural_
+pattern` (a pre-existing negative control, added for the whole-subject-
+capture fix earlier in this module's history) used `match [rec.bases_fact,
+1]: case [x, y]: return x == other` as its repro -- which its own
+docstring correctly names as "must not be treated as an alias of the
+[whole] subject," but its assertion (`== []`, no finding at all) also
+happened to encode the *narrower*, not-yet-fixed gap this same round
+closes: once elementwise pairing exists, `x` genuinely *is* `rec.
+bases_fact` (the subject's first element), so `x == other` now correctly
+IS a real misuse, and asserting `== []` there would pin the bug rather
+than guard the fix. Reproducing the pre-fix suite confirmed this test
+failed immediately, for exactly that reason, once the new branch landed.
+Fixed by changing the test's own subject to a dynamic (non-statically-
+known) one, `pair` rather than a literal display, which the elementwise
+pairing correctly still returns no candidates for (subject isn't a
+recognized static display) -- preserving the test's original, narrower
+purpose (guard against the whole-subject-alias mechanism over-eagerly
+matching a partial capture) without it silently drifting into pinning a
+now-fixed gap.
+
+Verified against the reported repro, a nested-sequence-pattern variant, a
+leading-star and a trailing-star variant (confirming a captured position
+binds to the correct, Python-semantics-accurate subject element on either
+side of a `*rest`), a wildcard-position positive control (a non-capturing
+sub-pattern elsewhere must not block a real capture), and negative
+controls (a captured but genuinely non-Fact element; a dynamic subject; a
+pattern/subject length mismatch), all via direct AST reproduction before
+writing tests. Still zero existing hits, `mypy`/`ruff` both stayed clean,
+`fact_detector_misuse.py` at 1797 lines and `fact_detector_misuse_scope.py`
+at 803 lines (both well under the 2000-line hard cap). New tests:
+`TestStructuralSequencePatternCapturesPairWithTheSubject`, appended to
+`tests/test_fact_detector_misuse_alias_edge_cases.py` (710 lines, well
+under its own 1200-line cap).
+
+**Two more findings on the same pairing machinery (7th review round),
+both real, both bounded extensions of the mechanism already built for
+the sequence-pattern fix above.** (1) `_paired_unpacking_candidates()`'s
+own blanket "any `Starred` element anywhere disqualifies the whole
+pairing" rule was one rule too many: a starred *target* element (`fact,
+*rest = old.bases_fact, new.bases_fact, extra`) captures a runtime-length
+slice with no single corresponding value, but the *fixed*-position
+elements before and after it still line up unambiguously against the
+value display's own (starless, so fixed-length) elements — the identical
+before/after-the-star split `_paired_match_sequence_candidates()` already
+uses for a `MatchStar`. A starred *value* element (`x = (*a, b)`) stays a
+genuine disqualifier throughout, since a dynamic expansion's own length
+isn't statically known. Fixed by splitting the target's own `Starred`
+position (at most one, matching Python's own grammar) into before/after
+slices and pairing each against the value's own front/back elements by
+position, mirroring the sequence-pattern helper's shape exactly; the star
+element itself never produces a candidate, matching that helper's
+identical treatment of `MatchStar`'s own captured name. This reaches both
+a plain assignment and a `for` loop's own unpacking target, since the
+latter already reuses this same helper per iteration element. (2) The
+sequence-pattern fix's own docstring explicitly scoped itself to
+`MatchSequence` and left every `MatchMapping` pattern to the
+whole-subject-capture handling, which never applies to a structural,
+sub-part-capturing pattern — so `case {"fact": fact}:` against a literal
+`{"fact": rec.bases_fact}` subject stayed an unrecognized capture. Fixed
+with a new `_paired_match_mapping_candidates()`, the `MatchMapping`
+sibling of `_paired_match_sequence_candidates()`: pairs a pattern's own
+literal keys against a literal `Dict` subject's own literal keys
+independently per key (unlike sequence pairing's positional,
+whole-pairing-disqualifying shape, one key missing or unresolvable in the
+subject contributes no candidate for *that* key without disqualifying
+the others), requires every subject key to be a literal `ast.Constant`
+with no `**expansion` entry, and recurses into a further sequence or
+mapping sub-pattern the identical way the sequence helper already
+recurses into a further sequence. `**rest` is deliberately not treated
+as a candidate here either, mirroring `MatchStar`'s identical treatment.
+
+**Two pre-existing tests pinned the exact gap fix (1) closes, and were
+corrected rather than left pinning a now-fixed bug** (the same discipline
+the sequence-pattern round's own `test_ignores_a_nested_capture_inside_a_
+structural_pattern` correction already established): both
+`TestElementwiseTupleUnpackingAliases::test_ignores_a_starred_target_
+pairing` and `TestForLoopUnpackingTargetsResolveElementwise::test_ignores_
+a_starred_unpacking_target` asserted `== []` for a starred-target
+unpacking whose *fixed* position is now correctly Fact-typed — reproducing
+the pre-fix suite confirmed both failed immediately once the new
+before/after-the-star pairing landed, for exactly that reason. Each was
+rewritten to isolate its own original, narrower purpose (confirming the
+starred capture itself is never treated as a Fact alias — now checked via
+a comparison involving the *starred* name specifically) from the new,
+correctly-detected fixed-position finding, rather than asserting `== []`
+against a case that is now a genuine, non-spurious hit.
+
+Verified against the reported starred-target repro (leading and trailing
+star, plain assignment and `for`-loop unpacking), a starred-*value*
+regression control (still correctly excluded), and the mapping-pattern
+repro plus its own negative controls (`**rest` not blocking a sibling
+capture, a key absent from the subject, a dynamic non-`Dict` subject, a
+non-literal subject key, a nested sequence pattern inside a mapping
+pattern), all via direct AST reproduction before writing tests. Still
+zero existing hits, `mypy`/`ruff` both stayed clean,
+`fact_detector_misuse.py` at 1815 lines and `fact_detector_misuse_scope.py`
+at 917 lines (both well under the 2000-line hard cap). New tests:
+`TestStarredUnpackingTargetsStillPairFixedPositions` and
+`TestStructuralMappingPatternCapturesPairWithTheSubject`, appended to
+`tests/test_fact_detector_misuse_alias_edge_cases.py` (851 lines, well
+under its own 1200-line cap).
+
+**One more finding on the def-time scope-resolution machinery (8th review
+round): decorator expressions were never given the def-time treatment
+their siblings already have.** `_default_and_annotation_scope_overrides()`
+already resolves a parameter default/annotation and a `ClassDef`'s own
+base/keyword expression against the scope that directly, syntactically
+contains the `def`/`class` statement, since Python evaluates each of
+those *before* the function/class exists — but a decorator
+(`@deco(fact == other)`) is evaluated the identical way, at the identical
+time, and this function's own subtree collection had no `decorator_list`
+entry for either shape at all. `fact = rec.bases_fact; @deco([x for x in
+(fact == other,)]) def f(fact): ...` was silently missed:
+`_enclosing_qualnames` assigns the whole `FunctionDef`'s decorator-
+adjacent lines to `f`'s own body scope, where the parameter `fact` has
+already shadowed the alias. Confirmed as a genuine asymmetry, not a fresh
+question: `_lexical_function_parents`'s and `_def_containing_qualnames`'s
+own `def_time_subtrees()`/`dispatch()` helpers *already* dispatch a
+`def`'s or `class`'s `decorator_list` under the incoming (enclosing)
+qualname — this function alone had never been extended to match. Fixed
+by adding `decorator_list` to both the function/lambda branch's
+`subtrees` (via `getattr`, since `ast.Lambda` carries none) and the
+`ClassDef` branch's own base/keyword loop — the identical fix, applied to
+the one remaining site that needed it.
+
+Verified against the reported repro, its class-decorator sibling, a
+regression control confirming the fix doesn't leak the decorator's own
+resolution into the function's real body scope (a genuine parameter
+still correctly shadows there), a non-Fact decorator negative control,
+and both a nested-function and a method decorator (resolving against
+their own real enclosing function/class-body scope respectively,
+mirroring the identical class-body-vs-function distinction the existing
+method-default handling already draws), all via direct AST reproduction
+before writing tests. Still zero existing hits, `mypy`/`ruff` both stayed
+clean, `fact_detector_misuse.py` at 1843 lines (well under the 2000-line
+hard cap). New tests:
+`TestDecoratorExpressionsResolveAgainstTheContainingScope`, appended to
+`tests/test_fact_detector_misuse_alias_edge_cases.py` (946 lines, well
+under its own 1200-line cap) rather than the more thematically obvious
+`test_fact_detector_misuse_def_time_scope.py`, which had only ~105 lines
+of headroom left under its own cap.
+
+**One more finding on the whole-subject `match`-capture machinery (9th
+review round): a `MatchAs` node can itself nest a *further* `MatchAs`,
+not just a structural sub-pattern.** `case fact as alias:` parses as
+`MatchAs(pattern=MatchAs(name="fact"), name="alias")` — a genuinely
+*nested* `MatchAs`, distinct from `case SomeClass() as fact:`'s own
+wrapped `MatchClass` (a real structural sub-pattern, correctly left
+alone) — but the existing top-level-capture branch only ever registered
+`case.pattern.name` (the outer `alias`), leaving the inner `fact` to
+`_match_pattern_names()`'s ordinary local-shadow treatment even though
+it is equally a real alias of the whole subject. Fixed with a new
+`_matchas_chain_names()`, walking the chain of nested `MatchAs` nodes and
+collecting every name along it — for the ordinary, non-chained case it
+still returns exactly the single outer name, so this is a strict
+generalization, not a behavior change for either existing shape. The
+sibling `MatchOr` branch (added in an earlier round for `case (C() as
+fact) | (D() as fact):`) had the identical gap one level up: its own
+per-alternative check only compared the *outer* name across
+alternatives, not the full nested chain, so a mismatched inner name
+(`case (fact as alias) | (other_fact as alias):`, where only the
+outer name `alias` is actually guaranteed identical by Python's own
+same-name-set-across-alternatives grammar rule) could have been
+trusted as safe when it isn't. Fixed by requiring every alternative's
+*full* `_matchas_chain_names()` result to match the first alternative's,
+term for term — the identical "only trust when every alternative is
+structured identically" principle that branch's own docstring already
+states, now applied at the right granularity.
+
+Verified against the reported repro, the inner-name-alone and outer-
+name-alone cases independently, both together in one comparison, the
+existing single-level `as`-pattern regression control, an OR pattern
+with identical nested chains (still trusted) and one with mismatched
+inner names (correctly not trusted), and a negative control confirming
+a nested capture inside a genuine structural sub-pattern (`case [x, y as
+fact]:`) stays a sub-part capture, not a whole-subject one, via direct
+AST reproduction before writing tests. Still zero existing hits,
+`mypy`/`ruff` both stayed clean, `fact_detector_misuse.py` at 1862 lines
+and `fact_detector_misuse_scope.py` at 945 lines (both well under the
+2000-line hard cap). New tests:
+`TestNestedMatchAsChainsPropagateWholeSubjectCaptures` (7 tests),
+appended to `tests/test_fact_detector_misuse_alias_edge_cases.py` (1035
+lines, still under its own 1200-line cap).
+
+**Two more findings on the same commit (10th review round), both in the
+structural-pairing per-position handling
+(`_paired_match_sequence_candidates()`/`_paired_match_mapping_
+candidates()`), not the whole-subject `MatchAs`/`MatchOr` branch the
+previous round fixed.** (1) The per-position handling still only ever
+extracted `sub_pattern.name` from a bare `MatchAs`, so a *chained*
+`MatchAs` at a structural position (`case (fact as alias,): return fact
+== other`) recorded only the outer `alias`, missing the inner `fact` --
+the identical nested-`MatchAs` shape the previous round's fix already
+closed at the whole-subject level, just unreached at the per-position
+level. A structural sub-pattern *wrapped* by `MatchAs` at a position
+(`case ((fact, _) as alias,):`) fell through every branch untouched
+too, since the position's own top-level node is `MatchAs`, not
+`MatchSequence`/`MatchMapping` directly. (2) The sequence-pairing
+function accepted a *starred* subject (`match (*extras, rec.
+bases_fact): case (_, fact):`) with no guard at all -- a dynamic
+expansion of unknown length means no pattern position can be
+confidently attributed to a known subject element, the identical rule
+`_paired_unpacking_candidates()` already applies to a starred *value*
+display, just missing on this structural-`match` sibling.
+
+Fixed both per-position gaps with one new shared helper, `_paired_sub_
+pattern_candidates()`, which both `_paired_match_sequence_candidates()`
+and `_paired_match_mapping_candidates()` now delegate their per-position
+step to instead of their own ad hoc `MatchAs`/`MatchSequence`/
+`MatchMapping` branching: it unwinds a chained `MatchAs` via the
+existing `_matchas_chain_names()` (recording every name along the chain
+against the identical sub-subject), then finds the chain's innermost
+non-`MatchAs` wrapped pattern -- skipping past every already-recorded
+`MatchAs` layer so a name is never registered twice -- and recurses into
+it structurally when it is itself a `MatchSequence`/`MatchMapping`.
+Fixed the starred-subject gap with the same `any(isinstance(elt,
+ast.Starred) ...)` guard `_paired_unpacking_candidates()`'s own value
+display already uses, applied to `_paired_match_sequence_candidates()`'s
+subject elements before any positional pairing is attempted (mapping
+pairing is unaffected -- it pairs by literal key, not position, so a
+starred *sequence* element has no analogue there).
+
+Verified against both reported repros (chained `MatchAs` at a sequence
+position, starred subject), the chained-`MatchAs` shape reproduced at a
+mapping position too, a structural sub-pattern wrapped by `MatchAs`
+(both the inner structural capture and the outer wrapping alias,
+independently), and every existing sibling case re-verified unaffected
+(a plain single-level `case fact:`, a sequence wildcard position, a
+`MatchStar`'s own captured name staying an ordinary shadow rather than
+an alias, a non-tuple/list subject, an unstarred subject, and a
+length-mismatch subject), all via direct AST reproduction before
+writing tests. Still zero existing hits, `mypy`/`ruff` both stayed
+clean, `fact_detector_misuse_scope.py` at 996 lines (well under the
+2000-line hard cap). New tests:
+`TestNestedMatchAsChainsInsideStructuralPositions` (3 tests),
+`TestStructuralSubPatternWrappedByMatchAsAtAPosition` (2 tests), and
+`TestStarredSubjectDisqualifiesStructuralSequencePairing` (2 tests),
+appended to `tests/test_fact_detector_misuse_alias_edge_cases.py` (1140
+lines, still under its own 1200-line cap).
+
+**Separately, this same round brought PR #929's branch up to date with
+`main`, closing a CI `architecture` step failure (`abicheck/contract_
+evidence.py:86: model -> policy is forbidden`, a `compare -> model ->
+policy -> compare` dependency cycle) that this PR had already documented
+as a pre-existing, unrelated base-branch regression (PR comments
+5453660592/5453762855).** `main` had since merged a fix for the identical
+cycle (PR #931, `fix/contract-evidence-model-policy-cycle`); the branch
+was 48 commits behind, so merging `main` in (a clean merge, no conflicts)
+was sufficient -- no independent architecture fix was needed on this
+branch. Verified with `python scripts/check_architecture.py` reporting
+`0 error(s)` on the merge commit.
+
+**A further Codex review round found `_paired_sub_pattern_candidates()`
+had no `MatchOr` branch, the identical OR-pattern shape the whole-`case.
+pattern` level already recognizes, just unreached at the per-position
+level.** `case ((C() as fact) | (D() as fact),):` deterministically
+binds `fact` to the sequence position's own Fact-valued element
+regardless of which alternative matched -- every alternative is a
+top-level `MatchAs` capturing that one position's whole value under the
+identical name -- but `_paired_sub_pattern_candidates()`'s `MatchAs`/
+`MatchSequence`/`MatchMapping` branches don't match a `MatchOr` node at
+all, so `unmigrated_fact_reader_sites()`'s `match_detector_misuse`
+sibling (`fact_equality_misuse_sites()`) returned no site. Fixed by
+extracting the existing whole-`case.pattern` OR-pattern trust rule
+("every alternative is exactly `MatchAs` with the identical full nested
+chain of names, via `_matchas_chain_names()`") into a new shared
+`_trusted_matchor_chain_names()`, used by both the pre-existing
+whole-subject branch (refactored to call it, not reimplement it, so the
+already-correct case couldn't silently diverge from the newly-added
+one) and a new `MatchOr` branch in `_paired_sub_pattern_candidates()`
+itself -- deliberately not recursed into an alternative's own wrapped
+structural sub-pattern, matching the whole-subject branch's identical
+restriction, rather than widening the trust rule at the same time as
+relocating it.
+
+Verified against the reported repro, the identical shape reproduced at a
+mapping position, three negative controls (mismatched alternative names,
+one alternative binding a field rather than the whole value, a chained
+`MatchAs` with mismatched inner names), and the whole-subject `MatchOr`
+branch re-verified unaffected by the refactor (both its positive and
+negative case), plus every other `_paired_sub_pattern_candidates()`
+sibling form (plain `MatchAs` at a position, a chained `MatchAs`, a
+structural sub-pattern wrapped by `MatchAs`, the starred-subject guard),
+all via direct AST reproduction before writing tests. Still zero
+existing hits, `mypy`/`ruff` both stayed clean, `fact_detector_misuse.py`
+at 1842 lines and `fact_detector_misuse_scope.py` at 1057 lines (both
+well under the 2000-line hard cap). New tests split into a dedicated
+sibling file, `tests/test_fact_detector_misuse_matchor_structural_
+positions.py` (7 tests, four classes:
+`TestMatchOrAtAStructuralSequencePosition`/
+`TestMatchOrAtAStructuralMappingPosition`/
+`TestWholeSubjectMatchOrStillWorksAfterTheSharedHelperRefactor`), rather
+than appended to `test_fact_detector_misuse_alias_edge_cases.py`, which
+had only ~60 lines of headroom left under its own 1200-line cap.
+
+**Three more findings on the same commit (a further Codex review round),
+all bounded extensions -- one self-inflicted regression caught and fixed
+before landing.**
+
+(1) **`case (fact,) as whole:` -- a structural pattern *wrapped* by a
+top-level `as`-pattern -- recorded only `whole`, never recursing into
+its own wrapped `MatchSequence`.** The whole-`case.pattern` dispatch in
+`fact_equality_misuse_sites()` treated `MatchAs` exclusively as a
+whole-subject capture (an inline reimplementation of a *subset* of the
+rules `_paired_sub_pattern_candidates()`'s own per-position handling
+already states in full, including this exact wrapped-structural-pattern
+case). Fixed by deleting the whole-`case.pattern` dispatch's own five
+`if`/`elif` branches entirely and delegating the whole thing to
+`_paired_sub_pattern_candidates(case.pattern, node.subject)` -- the same
+shared primitive, reused whole rather than kept as two independently-
+maintained subsets of the same rules that could (and, per this finding,
+already had) silently diverge again. Verified every existing whole-
+subject shape unaffected (bare capture, `SomeClass() as fact`, a chained
+`MatchAs`, the whole-subject `MatchOr`, a structural sequence/mapping
+sub-part, a bare wildcard contributing no candidate) plus the new
+wrapped-structural shape at both a sequence and a mapping position, all
+via direct AST reproduction before writing tests.
+
+(2) **A literal display indexed at a statically known position/key
+(`(rec.bases_fact,)[0]`, `{"x": rec.bases_fact}["x"]`) fell through
+`_is_fact_typed_expr()` entirely -- `ast.Subscript` had no branch at
+all.** Fixed with a new `Subscript` branch: a literal `ast.Tuple`/
+`ast.List` indexed by a literal integer resolves to that element (a
+`Starred` element anywhere disqualifies the whole display, the identical
+rule `_paired_unpacking_candidates()` already applies to a starred value
+display); a literal `ast.Dict` indexed by a literal key resolves to the
+matching value (a `**expansion` entry disqualifies the whole display,
+the identical rule). **A negative literal index (`[-1]`) needed its own
+unwrap**: Python parses it as `ast.UnaryOp(op=ast.USub(), operand=
+ast.Constant(...))`, not a bare `ast.Constant` -- caught by this fix's
+own first round of empirical verification (the negative-index repro
+failed against the initial implementation, before any test was written
+for it) rather than shipping the gap silently. Composes for free with
+every other recursive shape (`IfExp`/`BoolOp`/`NamedExpr`/a nested
+resolved element), verified unaffected. **One residual, documented in
+the function's own docstring rather than chased further**: this does
+*not* recurse into the display itself when it is a further, resolvable
+`Subscript` (`((rec.bases_fact,), 1)[0][0]`, two levels of indexing
+before ever reaching a literal display) -- doubly-indirect subscript
+chaining over a literal display has no real precedent in this codebase,
+unlike the single-level form the reported finding actually named.
+
+(3) **`def f(Fact, other): return Fact(1) == other` -- an ordinary
+parameter reusing the constructor's own name -- was still treated as the
+real constructor.** `_is_fact_typed_expr()`'s constructor-call
+recognition is a pure, scope-blind lookup against a single whole-tree
+`fact_names` set, with no shadow-awareness at all, unlike the shadowing
+this module already applies to *alias* names via `_fact_aliases()`.
+**The first fix attempt was wrong, caught before landing by direct
+reproduction against a genuine import (this file's own "verify every
+sibling form" discipline catching a self-inflicted bug, not just the
+reported one):** reusing `_fact_aliases()`'s own broader internal
+`locally_bound` set (returned as a new second value from that function)
+seemed like the natural, already-computed answer -- but that set also
+records every `ast.ImportFrom` binding, and a genuine `from abicheck.
+model.fact import Fact` (the *correct*, ordinary way to bring the real
+constructor into scope at all) is itself exactly such a binding.
+Subtracting that broader set silently treated the legitimate import that
+establishes `Fact` as though it *shadowed* `Fact`, disabling constructor
+recognition module-wide the moment any file imported it normally --
+confirmed by direct reproduction (`from abicheck.model.fact import
+Fact; def f(other): return Fact(1) == other` stopped being detected at
+all) before a single test was written, and reverted in full. Fixed
+instead with a new, deliberately narrower `_locally_bound_parameter_
+names()`, collecting *only* function/lambda parameter names (never
+imports or assignment targets) per function's own qualname -- a
+parameter is never a legitimate way to bind the real `Fact` class,
+unlike an import, so this collector carries no equivalent risk. Also
+needed closure-scope inheritance the parameter-only collector doesn't
+give for free: `def outer(Fact): def inner(other): return Fact(1) ==
+other` -- `inner`'s own parameter set is empty, since `Fact` is
+`outer`'s parameter, but `inner` still genuinely closes over it -- so a
+new `_shadowed_constructor_names()` walks the real lexical-function-
+parent chain (`_lexical_function_parents()`, the identical closure-scope
+chain `_fact_aliases()`'s own alias inheritance already walks), unioning
+every ancestor's own bound-parameter set. Verified against the reported
+repro, a genuine unshadowed import (both bare `Fact` and an aliased
+`Fact as F`, both classmethod and plain-constructor spellings -- the
+exact regression class the reverted first attempt introduced), a
+sibling function with no shadowing parameter still detecting the real
+constructor, single/double/class-nested closure inheritance of the
+shadow, an unrelated attribute-field-access recognition path staying
+unaffected by the shadow, and a shadowed imported-alias name too, all
+via direct AST reproduction before writing tests.
+
+Still zero existing hits across all three, `mypy`/`ruff` both stayed
+clean, `fact_detector_misuse.py` at 1896 lines and `fact_detector_
+misuse_scope.py` at 1109 lines (both well under the 2000-line hard cap).
+New tests split into three dedicated sibling files (none of the
+existing files had enough headroom left under their own 1200-line caps
+to safely absorb this many new cases): `tests/test_fact_detector_
+misuse_as_pattern_wraps_structural.py` (10 tests),
+`tests/test_fact_detector_misuse_static_subscript.py` (20 tests), and
+`tests/test_fact_detector_misuse_constructor_shadow.py` (11 tests, the
+`TestGenuineImportStillRecognizedAfterTheFix` class specifically pinning
+the self-inflicted regression the first attempt introduced, not just
+the originally reported finding).
+
+**A further Codex review round found two more real gaps in the same two
+fixes, both closed -- and this round's own instruction was explicit
+about not repeating the previous round's self-inflicted mistake: verify
+against a realistic sibling case, not just a synthetic one, before
+calling either fix done.**
+
+(1) **`_locally_bound_parameter_names()` covered only parameters, so
+every *other* local-binding form still shadowed nothing**: `Fact =
+lambda x: x`, `for Fact in factories:`, and a comprehension target named
+`Fact` were all still read as the real constructor and called, even
+though Python resolves each to the local value, not `model.fact.Fact`.
+Renamed and widened to `_locally_bound_constructor_shadow_names()`,
+covering parameters, plain/annotated-assignment/walrus/`for`-loop/
+comprehension targets (via `_bound_names()`, so nested tuple-unpacking
+targets are covered too), and imports -- with the identical carve-out
+the reverted first attempt's mistake already established, now applied
+correctly instead of blanket-excluded: an `ast.ImportFrom` only counts
+as a shadow when its own `alias.name` is *not* literally `"Fact"` -- the
+exact structural test `_imported_fact_aliases()` itself uses to decide a
+name belongs in `fact_names`, so the two functions cannot disagree.
+`from x import Fact`/`from x import Fact as F` (any source module --
+this module's own established "match by name alone" stance) are
+correctly *not* shadows regardless of `x`; `from x import SomethingElse
+as Fact` (renaming an unrelated import to the exact spelling `Fact`) *is*
+one, since `_imported_fact_aliases()` never adds a name to `fact_names`
+for that shape (it requires the *original* imported name to be `"Fact"`,
+not the local alias) -- without the exclusion, a bare `ast.Import` is
+never exempt at all, since `_imported_fact_aliases()` only ever
+recognizes `ImportFrom`. Deliberately still narrower than `_fact_
+aliases()`'s own general-binding walk in one respect, documented as an
+accepted residual rather than reused outright: `match`/`case` pattern
+captures and `with`/`except ... as` targets aren't collected, since each
+would need the identical multi-round hardening `_fact_aliases()`'s own
+history already applied to its *general* collection before it could be
+trusted for this independent purpose too -- reusing that machinery
+directly is exactly the coupling the first, reverted attempt already
+showed is dangerous.
+
+Verified against all three reported shapes, five more sibling forms
+(annotated assignment, walrus, a renaming import, a bare `import ...
+as Fact`, a nested tuple-unpacking target), and -- this time -- the
+exact realistic sibling case the previous round's instruction named
+explicitly: a genuine, unrenamed `from abicheck.model.fact import Fact`
+(and its aliased `as F` form) confirmed still detected, a classmethod
+constructor confirmed still detected, a sibling function with no local
+shadow confirmed unaffected, and a shadow correctly *not* leaking past
+its own function into an unrelated one -- all via direct AST
+reproduction before writing a single test, closing the exact gap the
+first attempt's own skipped step left open. No self-inflicted regression
+this round.
+
+(2) **The static-subscript fix's own selected element was still passed
+through the purely structural `_is_fact_typed_expr()` alone**: `fact =
+rec.bases_fact; (fact,)[0] == other` -- a bare alias inside an otherwise
+statically resolvable display -- went unrecognized, since `_is_fact_
+typed_expr()` deliberately never resolves a bare `ast.Name` (that needs
+`known`/`aliases`, which a structural predicate alone doesn't have).
+Fixed by extracting the resolution step itself into a new
+`_static_subscript_element()` (mirroring `_static_display_elements()`'s
+own "one extraction, several alias-aware/structural callers" shape,
+carrying forward the identical negative-index/`Starred`/`**expansion`
+rules the original fix already stated), then routing it through *both*
+of this module's alias-aware resolvers -- a new `Subscript` branch in
+`_candidate_resolves_to_fact()` (the fixed-point resolver, recursing
+through itself with `known` in scope) and a new `Subscript` branch in
+`fact_equality_misuse_sites()`'s own `is_fact_typed()` (the top-level
+comparison-operand resolver, recursing through itself with `qualname` in
+scope) -- instead of only ever landing back in the purely structural
+`_is_fact_typed_expr()`, whose own Subscript branch was simplified to
+call the shared extraction helper too.
+
+Verified against both reported repros (tuple and dict displays), the
+identical shape with the selected element further assigned to a new
+local before comparison (exercising the fixed-point resolver
+specifically, not just the top-level one), a chained alias inside a
+subscript (`fact2 = fact`, composing the new Subscript recursion with
+the fixed point's own existing alias-chain resolution), a negative-index
+alias, a wrong-position alias staying correctly unrecognized, and every
+pre-existing literal-display/non-literal-index/starred-display/non-alias
+regression re-verified unaffected, all via direct AST reproduction
+before writing tests.
+
+Still zero existing hits across both, `mypy`/`ruff` both stayed clean,
+`fact_detector_misuse.py` at 1959 lines (only ~41 lines of headroom left
+under the 2000-line hard cap -- the very next finding in this area will
+likely need a split into a sibling module) and `fact_detector_misuse_
+scope.py` at 1170 lines (well under its own cap). New tests appended to
+the two dedicated sibling files these two mechanisms already own (both
+had ample headroom, unlike the script file itself):
+`TestNonParameterShadowsSuppressRecognition` (9 tests) in
+`tests/test_fact_detector_misuse_constructor_shadow.py`, and
+`TestAliasResolutionInsideAStaticSubscript` (8 tests) in
+`tests/test_fact_detector_misuse_static_subscript.py`.
+
+**A further round tracked assignment aliases of the `Fact` constructor
+itself** (Codex review, fresh evidence): `F = Fact` or `make_fact =
+Fact.present`, followed by `F(1) == other`/`make_fact(1) == other`,
+went unrecognized -- `F`/`make_fact` is a genuine, if local, name for
+the identical constructor, not merely a shadow of it, but neither
+`_is_fact_typed_expr()`'s scope-blind lookup nor the shadow-tracking
+fix above had any notion of a local rebinding *extending* the
+constructor set. Reproduced both sub-cases directly (0 hits, expected
+1 each) before designing a fix.
+
+Given `fact_detector_misuse.py`'s tight headroom (1959/2000 lines),
+both new collectors -- `_constructor_alias_names()` (`F = Fact`: a
+bound name behaves exactly like `Fact` itself, in both call and
+further-attribute-access position, so it's *added* into the effective
+`fact_names` set the same way a shadow is subtracted) and
+`_constructor_method_alias_names()` (`make_fact = Fact.present`: an
+*unbound classmethod reference*, tracked as its own, separate set,
+recognized only against a direct `ast.Call` whose `func` is a bare
+`ast.Name`, never composed into the general substitution set -- a
+further attribute access off it, `make_fact.foo`, would be nonsensical)
+-- went into `fact_detector_misuse_scope.py`, which had ample room. The
+existing hand-rolled closure-scope-chain walk in `fact_detector_misuse.
+py` (`_shadowed_constructor_names()`) was also generalized into a new
+shared `_scope_chain_union()` helper (in the scope module) and reused
+for both the shadow set and the two new alias sets, netting a small
+reduction in the primary file's own line count that offset most of the
+new wiring code -- both fixed-cap files stayed within budget without a
+module split this round. Both `F = Fact` and `make_fact = Fact.present`
+are recognized only via a plain single-target `ast.Assign` (no type
+inference, "one hop only" -- a further transitive rename `G = F` is a
+documented, accepted residual, the identical limit already accepted
+elsewhere in this module's alias tracking).
+
+**Proactive sibling verification for this round found a real false
+positive of its own, before it shipped, not a reported finding**:
+`def f(Fact, other): F = Fact; return F(1) == other` has a parameter
+named `Fact` shadowing the real constructor for the whole function, so
+`F = Fact` binds `F` to that *parameter's* runtime value, not to the
+real constructor -- registering `F` as a constructor alias
+unconditionally would have fabricated a misuse site out of an unrelated
+local rebinding, and the identical hazard applies to the classmethod-
+alias form. Fixed by threading `locally_bound_shadows`/`lexical_parents`
+into both new collectors and skipping registration whenever the RHS
+name is itself shadowed anywhere in its own closure-scope chain (via
+the same `_scope_chain_union()` walk), including through a nested
+closure over the shadowing outer scope.
+
+Verified via direct AST reproduction against 20 cases before writing
+any test: both reported sub-cases, a classmethod alias of a different
+method, aliasing through an already-import-aliased name (both bare and
+classmethod forms), nested-closure inheritance of both alias kinds, a
+sibling function unaffected, a bare alias composing with a further
+attribute call, the transitive (two-hop) alias correctly *not* chased,
+both alias kinds correctly *not* recognized via tuple-unpack (not a
+single target), two negative controls (aliasing an unrelated name,
+aliasing a non-`Fact` attribute access), both pre-existing regressions
+(bare import, classmethod constructor) still recognized, the
+shadow-guard false positive fixed in both forms, and the shadow-guard
+holding through a nested closure. `mypy`/`ruff` both stayed clean;
+`fact_detector_misuse.py` at 1966 lines and `fact_detector_misuse_
+scope.py` at 1300 lines, both still under their respective caps. New
+tests: `TestConstructorAssignmentAliasesAreRecognized` (13 tests) and
+`TestShadowedConstructorSuppressesItsOwnAlias` (3 tests), both appended
+to `tests/test_fact_detector_misuse_constructor_shadow.py`.
+
+**A further round found the enclosing-shadow walk itself was too blunt**
+(Codex review, fresh evidence): `def outer(Fact): def inner(other):
+global Fact; return Fact.present(1) == other` -- `inner`'s own `global
+Fact` statement is Python's ordinary override of the closure rule for
+that name: it routes *every* reference to `Fact` inside `inner` straight
+to module scope, completely bypassing `outer`'s own shadowing parameter.
+`_scope_chain_union()`'s unconditional walk had no notion of `global`
+statements at all and still unioned `outer`'s shadow in, suppressing a
+genuine misuse site of the real, unshadowed constructor. Reproduced
+directly (0 hits, expected 1) before designing a fix.
+
+Fixed with a new `_global_declared_names()` collector in
+`fact_detector_misuse_scope.py` (maps each function's own qualname to
+the names it declares via a direct `global` statement in its own body)
+and an optional `global_names` parameter on `_scope_chain_union()`
+itself: a name the *starting* qualname declares `global` is excluded
+from every non-module ancestor's own contribution to the walk, while
+still receiving whatever `"<module>"`'s own entry says, since the walk
+reaches the module scope as its terminal node regardless. Threaded
+through all three call sites that need it -- `is_fact_typed()`'s own
+shadow-subtraction, and both `_constructor_alias_names()`'s and
+`_constructor_method_alias_names()`'s own internal shadow checks (the
+identical hazard applies to an alias sourced from a `global`-declared
+name: `global Fact; F = Fact` must still register `F` as a real alias).
+The alias-*addition* half of `is_fact_typed()`'s own union (constructor
+aliases bound in an ancestor scope, reached via ordinary closure) is
+correctly left unaffected -- `global` changes what a *name* resolves to
+within the declaring scope, not whether a *different* scope's own local
+binding remains visible to its own nested closures the normal way.
+
+Verified via direct AST reproduction against 10 cases before writing
+tests: the reported case, the bare-call form, both new alias
+collectors' own shadow checks correctly bypassed too, a doubly-nested
+case where only the innermost scope declares `global` (bypassing two
+levels of shadowing parameter at once), a regression guard confirming
+the shadow still suppresses recognition with the `global` statement
+removed, a `global` declaration with no shadowing parameter left
+completely unaffected, sibling-function isolation, `global` of an
+*unrelated* name correctly not bypassing a genuine `Fact` shadow (the
+bypass is keyed by name, not merely "a global statement exists in this
+scope"), and the subtle case where the module-level `Fact` itself is
+shadowed by an ordinary module-level assignment (`global` only means
+"look at module scope" -- it doesn't mean the module-level binding is
+the real constructor, so recognition correctly stays suppressed there
+too). `mypy`/`ruff` both stayed clean; `fact_detector_misuse.py` at 1974
+lines (headroom now tight -- ~26 lines left under the 2000-line hard
+cap; the next finding in this area will very likely need a further
+split) and `fact_detector_misuse_scope.py` at 1356 lines (still ample).
+New tests: `TestGlobalDeclarationBypassesEnclosingShadow` (10 tests),
+appended to `tests/test_fact_detector_misuse_constructor_shadow.py`.
+
+**A further round found the shadow collector recorded only a `def`'s
+own parameters, never a nested `def`/`class` statement's own name**
+(Codex review, fresh evidence): `def outer(other): def Fact(x): return
+x; return Fact(1) == other` was still read as the real constructor,
+since nothing recorded the nested function's own name as a binding in
+its containing scope -- the identical `STORE_NAME`/`STORE_FAST` rule an
+ordinary assignment already gets. Reproduced directly for both the
+`def Fact` and `class Fact` forms (0 hits each, expected 0 -- i.e. both
+were false positives: the constructor was wrongly recognized) before
+designing a fix.
+
+Fixed entirely inside `fact_detector_misuse_scope.py`'s existing
+`_locally_bound_constructor_shadow_names()`: resolves each `FunctionDef`/
+`AsyncFunctionDef`/`ClassDef` node's own containing qualname via the
+already-existing `_def_containing_qualnames()` helper (already used
+elsewhere in this module for the identical "a def/class statement's own
+name binds into whatever namespace textually contains it" question --
+distinct from the closure-scope chain `_lexical_function_parents`
+answers, since a def/class statement's binding target is never about
+free-variable lookup) and records the definition's own `.name` there.
+No change to `fact_detector_misuse.py` itself was needed at all --
+deliberate, given that file's own tight remaining headroom (1974/2000
+lines) after the previous two rounds.
+
+Verified via direct AST reproduction against 10 cases before writing
+tests: both reported forms, each correctly scoped to its own containing
+function only (a sibling function unaffected), a further-nested closure
+correctly inheriting the def-shadowed name, a module-level `def Fact`
+also shadowing, both pre-existing regressions (bare import, classmethod
+constructor) still recognized, an unrelated nested `def helper(...)`
+correctly not affecting recognition, and the trickiest composition --
+a sibling nested `def Fact` in the same enclosing function that would
+otherwise shadow it, with an inner `global Fact` still correctly
+bypassing straight to module scope, confirming the two mechanisms
+(this round's def/class shadow and the previous round's global bypass)
+don't interfere with each other. `mypy`/`ruff` both stayed clean;
+`fact_detector_misuse.py` unchanged at 1974 lines and
+`fact_detector_misuse_scope.py` at 1369 lines (still ample headroom).
+New tests: `TestNestedDefinitionsShadowTheConstructorName` (10 tests),
+appended to `tests/test_fact_detector_misuse_constructor_shadow.py`.
+
+**A further round found `_fact_aliases()`'s own annotation recognition
+had no shadow awareness at all** (Codex review, fresh evidence): `from
+other_model import Value as Fact; def f(value: Fact, other): return
+value == other` -- the identical renaming import the constructor-*call*
+path already recognizes as a shadow -- still marked `value` as
+Fact-typed, since `_is_fact_typed_annotation()` (used for both a
+parameter's own annotation and an `AnnAssign`'s annotation) was called
+with the raw, whole-tree `fact_names` set directly, with no per-scope
+subtraction at all. Reproduced directly (1 hit, expected 0) before
+designing a fix.
+
+Fixed by reusing the exact same shadow machinery the constructor-call
+path already built (`_locally_bound_constructor_shadow_names()`,
+`_global_declared_names()`, `_scope_chain_union()`) rather than
+building a second, parallel mechanism: computed once inside
+`_fact_aliases()` itself (a small `_effective_fact_names(qualname)`
+closure) and applied at both annotation call sites. Deliberately reused
+rather than duplicated -- the two paths (constructor-call recognition
+in `fact_equality_misuse_sites()`, and annotation recognition in
+`_fact_aliases()`) answer the identical underlying question ("does the
+bare identifier `Fact` at this scope refer to the real constructor, or
+something else"), so a second independent implementation would risk the
+two silently disagreeing the way the very first self-inflicted
+regression in this saga already showed is dangerous.
+
+Verified via direct AST reproduction against 11 cases before writing
+tests: the reported parameter-annotation case, the equivalent
+`AnnAssign` form, a parameter literally named `Fact` correctly
+suppressing a *sibling* parameter's own annotation in the same function,
+nested-closure inheritance of an annotation shadow, sibling-function
+isolation (an unrelated function's own local shadow not leaking into a
+different function's real annotation), the `global` bypass composing
+correctly with annotation resolution too, four pre-existing regressions
+(bare, subscripted, `Optional`-wrapped, and stringized annotations all
+still recognized), and a negative control (an annotation naming an
+unrelated type, unaffected either way). `mypy`/`ruff` both stayed
+clean; `fact_detector_misuse.py` at **1993/2000 lines -- only ~7 lines
+of headroom left**, confirming the previous round's own prediction that
+this file would need a further split very soon; `fact_detector_misuse_
+scope.py` unchanged (this fix needed no new scope-module code, only
+reuse of what already existed there). New tests:
+`TestAnnotationsResolveThroughTheSameShadowMachinery` (11 tests),
+appended to `tests/test_fact_detector_misuse_constructor_shadow.py`.
+
+**A further round found `_static_subscript_element()`'s own dict-key
+resolution used a forward scan, returning the *first* matching key
+rather than the last** (Codex review, fresh evidence): a real Python
+dict literal keeps the *last* value for a repeated (or merely
+`==`-equal, e.g. `1`/`True`) key -- ordinary dict-construction overwrite
+semantics -- but `{"x": Fact.present(1), "x": 0}["x"]` was still
+reported as a misuse site even though the value actually selected at
+runtime is `0`, not the `Fact` value. Reproduced directly (1 hit,
+expected 0) before designing a fix. Fixed by scanning the full
+`zip(display.keys, display.values)` sequence and keeping the *last*
+match (via a `match` accumulator) rather than returning on the first
+one -- the identical `==`-based key comparison the loop already used is
+what makes the `1`/`True` collision resolve correctly too, with no
+separate logic needed for it. Verified against 8 cases via direct AST
+reproduction before writing tests: the reported case, the reversed
+case (Fact value as the *last*, correctly flagged), both directions of
+the `True`/`1` equality collision, a triple-duplicate key, and
+regression guards (single non-duplicate key, wrong key, tuple/list
+subscript resolution all unaffected). New tests:
+`TestLastMatchingKeyWins` (6 tests), appended to
+`tests/test_fact_detector_misuse_static_subscript.py`.
+
+**This fix pushed `fact_detector_misuse.py` to 1999/2000 lines --
+genuinely out of headroom** (the previous two rounds had already
+flagged this as imminent). Rather than waiting for a *third* finding to
+force an emergency split mid-fix, this round performed the split
+proactively, per the standing instruction: `fact_detector_misuse.py`'s
+entire "does this expression/annotation/name resolve to a `Fact[T]`
+value" machinery -- `FACT_FIELD_NAMES`, `_imported_fact_aliases`,
+`_is_fact_typed_expr`, `_static_display_elements`,
+`_static_subscript_element`, `_admissible_loop_element`,
+`_candidate_resolves_to_fact`, `_annotation_head_name`, `_is_fact_typed_
+annotation`, `_fact_aliases` -- moved to a new sibling module,
+`fact_detector_misuse_aliases.py`, mirroring the exact precedent
+`fact_detector_misuse_scope.py`'s own split already established
+(mechanical extraction, unchanged function bodies, not a redesign).
+`fact_detector_misuse.py` itself now holds only the top-level scan entry
+point (`fact_equality_misuse_sites`/`check_fact_detector_misuse`) and
+the def-time default/annotation scope-override machinery
+(`_default_and_annotation_scope_overrides`/`_iter_default_subtree`'s own
+caller). One further wrinkle the split surfaced: `_iter_default_
+subtree()` (and the `_SCOPE_INTRODUCING_NODE_TYPES` constant it uses)
+turned out to be needed by *both* remaining files -- the def-time
+scope-override machinery that stayed in `fact_detector_misuse.py`, and
+`_fact_aliases()`'s own pending-default resolution that moved to the
+new module -- so it relocated a second level up, into
+`fact_detector_misuse_scope.py` (the module both siblings already
+import from), rather than either duplicating it or creating a new
+import cycle. `FACT_FIELD_NAMES`/`_imported_fact_aliases`/`_is_fact_
+typed_expr`/`_static_subscript_element`/`_fact_aliases` are re-exported
+by `fact_detector_misuse.py` via the explicit `X as X` spelling
+`checker_policy.py` already uses for `ChangeKind`, so every existing
+`from .fact_detector_misuse import FACT_FIELD_NAMES` call site
+(including this check's own test suite) is unaffected -- confirmed by
+re-running the full test suite unchanged and reloading the module
+directly. Resulting line counts: `fact_detector_misuse.py` 381 lines
+(from 1999), `fact_detector_misuse_aliases.py` 1614 lines (new),
+`fact_detector_misuse_scope.py` 1434 lines (up from 1369, absorbing
+`_iter_default_subtree`) -- all three now with ample headroom under the
+2000-line hard cap for the foreseeable next several rounds.
+`scripts/CLAUDE.md`'s inventory table updated with a new row for the
+split-out module and revised text for the two existing rows it now
+shares responsibilities with.
+
+**A further round raised two findings against the same commit; one was
+fixed, one was recorded as an accepted known gap rather than chased.**
+
+(1) **Fixed: constructor-call/alias recognition treated *any*
+`Fact.<attr>(...)` call as a constructor, regardless of which attribute**
+(Codex review, fresh evidence): `Fact.value_or(fact, 0) == expected` is
+an ordinary, correct unwrap-then-compare -- `value_or` is an *instance*
+method returning the bare `T`, never a `Fact` -- but was flagged as a
+misuse, and `_constructor_method_alias_names()`'s own `get =
+Fact.value_or` alias tracking repeated the identical mistake.
+Reproduced directly (1 hit, expected 0) before designing a fix. Fixed
+by adding `_FACT_CONSTRUCTOR_METHOD_NAMES` (`fact_detector_misuse_
+scope.py`) -- the real `Fact` class's own six `@classmethod`s that
+literally return `cls(...)` (`present`, `partial`, `not_collected`,
+`unsupported`, `failed`, `not_applicable`), explicitly excluding
+`value_or` and `is_present` (a `@property` returning `bool`) -- and
+checking the called/aliased attribute's own name against it at both
+call sites (`_is_fact_typed_expr()`'s Attribute branch,
+`_constructor_method_alias_names()`'s own check), the identical "no
+type inference, match by name alone" stance `FACT_FIELD_NAMES` already
+takes. Placed in the scope module (not the aliases module) because
+`_constructor_method_alias_names()` -- which also needs it -- already
+lives there and importing it from the aliases module would have
+created a new import cycle (aliases already imports *from* scope, never
+the reverse); `_locally_bound_constructor_shadow_names()`'s own existing
+`alias.name == "Fact"` literal-string check already established that
+this "generic lexical-scope module" isn't actually Fact-name-agnostic
+at the code level, so this is consistent with that existing precedent,
+not a new exception. Verified via direct AST reproduction against 10
+cases before writing tests: the reported case, the aliased form, all
+six real constructors still recognized (individually, by name, not just
+as a count), a real constructor alias still recognized, `is_present`
+(a non-call attribute access) correctly unaffected either way, an
+unrecognized *future* method name correctly not a false positive
+either, and both the constructor and non-constructor forms composing
+correctly with the existing `Fact[int]` generic-specialization
+resolution. New tests: `TestOnlyRealConstructorMethodsAreRecognized` (8
+tests), appended to `tests/test_fact_detector_misuse_constructor_
+shadow.py`.
+
+(2) **Recorded as a known gap, not fixed: a class body's own execution
+order is not modeled.** `class C: hit = Fact.present(1) == other; Fact
+= factory` -- Python populates a class namespace statement by
+statement, so `hit`'s own `Fact.present(1)` genuinely resolves to the
+real, imported constructor (the `Fact = factory` rebinding hasn't
+executed yet at that point) -- but the whole-class-body shadow
+subtraction this module already applies (matching ordinary function
+scoping, where a name bound *anywhere* in the function is local to the
+*whole* function regardless of line order) treats the entire class body
+as shadowed the moment *any* rebinding appears in it anywhere,
+including textually *after* a genuine early use. Reproduced directly
+(confirmed: no hit, though a real misuse is present) before deciding
+not to chase this. **Deliberately left unfixed**, for three compounding
+reasons: (a) it requires genuine statement-order/execution-order
+tracking scoped specifically to class bodies (which execute top-to-
+bottom like a script, unlike a function body's real order-independent
+static scoping) -- a new analytical capability this module has nowhere
+else; (b) it directly contradicts the "no control-flow analysis" design
+stance this module's own docstrings state repeatedly and explicitly
+(e.g. `_fact_aliases()`'s own "this check has no control-flow analysis,
+and a false positive here is far cheaper than the false negative it
+prevents"); (c) the failure direction is a false *negative* only (a
+missed detection, never a blocked legitimate PR) -- the strictly safer
+of the two failure modes per this module's own stated philosophy, and
+the described pattern itself (a class reassigning the literal name
+`Fact` mid-body to an unrelated factory function) is sufficiently
+exotic that the risk of a rushed, under-tested order-sensitive
+implementation introducing a *new* false positive elsewhere outweighs
+closing this one narrow miss. If a genuine instance of this pattern is
+ever found in the real codebase (this scan still has zero baseline
+hits), revisit then with a concrete case in hand rather than a
+synthetic one.
+
+**A further round found two Codex findings against the same commit that
+both traced back to one root cause**: the constructor-alias-addition
+step (`F = Fact`) was folded into the effective `fact_names` set via an
+*independent* `_scope_chain_union()` walk from the shadow-subtraction
+step, rather than one combined, nearest-scope-wins resolution.
+
+(A) **Annotation recognition never consulted constructor aliases at
+all** (Codex review, fresh evidence): `F = Fact; def f(value: F,
+other): return value == other` -- `value`'s annotation names `F`, a
+genuine constructor alias, but `_fact_aliases()`'s own `_effective_
+fact_names()` closure only ever subtracted shadows from the raw,
+whole-tree `fact_names` set; it never added constructor aliases the
+constructor-*call* path already folds in. Reproduced directly (0 hits,
+expected 1) before designing a fix.
+
+(B) **An unconditional alias union re-added an alias a nearer scope
+shadows** (Codex review, fresh evidence): `F = Fact; def f(F, other):
+return F(1) == other` -- `f`'s own parameter `F` is an ordinary,
+unrelated local reusing the outer alias's name, but the old
+`_scope_chain_union(qualname, constructor_aliases, lexical_parents)`
+walk unioned in *every* ancestor's own aliases unconditionally,
+re-adding `outer`'s `F` alias regardless of `f`'s own nearer shadow --
+a real false positive. Reproduced directly (1 hit, expected 0) before
+designing a fix. **Proactive sibling verification (per this repo's
+established discipline) found an identical, unreported bug in
+`_constructor_method_alias_names()`**: `make_fact = Fact.present; def
+f(make_fact, other): return make_fact(1) == other` had the exact same
+symptom, since that check was also a separate, unconditional
+`_scope_chain_union()` walk with no shadow awareness.
+
+Both findings share the identical fix: a new shared primitive,
+`_resolve_effective_fact_names()` (`fact_detector_misuse_scope.py`,
+right after `_scope_chain_union()`), that folds shadow-subtraction and
+alias-addition into ONE combined walk from a starting qualname up
+through `lexical_parents` -- the *first* (nearest) scope that mentions
+a given name, either as a shadow or as a constructor alias, decides
+what that name means for every scope between it and the starting
+qualname; a farther ancestor's mention of the same name is never
+consulted (`dict.setdefault`-based, so the first write per name wins).
+Within one scope, a constructor-alias mention is checked *before* a
+shadow mention -- necessary because the shadow collector records every
+assignment target unconditionally (including `F` in `F = Fact` itself),
+so without this ordering the alias's own defining scope would
+incorrectly read as "shadowed" rather than "aliased." The identical
+`global_names` bypass `_scope_chain_union()` already established
+composes unchanged: a globally-declared name still routes straight to
+module scope, skipping every intervening scope's shadow *and* alias
+mentions alike.
+
+Wired into three call sites: `is_fact_typed()`'s own `effective_fact_
+names` (replacing the two independent `_scope_chain_union()` calls),
+the classmethod-alias direct-call check (previously its own separate
+`_scope_chain_union()` membership test -- now `_resolve_effective_fact_
+names()` called with an empty `fact_names` base, since that check needs
+no base set, only "is this exact name a live classmethod alias here"),
+and `_fact_aliases()`'s own `_effective_fact_names()` closure (which now
+also computes `_constructor_alias_names()` internally, since annotation
+resolution has its own independent `qualnames`/`lexical_parents` and
+needed the same alias data the constructor-call path already had).
+`_scope_chain_union()` itself is now unused in `fact_detector_misuse.py`
+and `fact_detector_misuse_aliases.py` (both imports removed) but remains
+in active use elsewhere in the scope module.
+
+Verified via direct AST reproduction against 15 cases before writing
+tests: both reported findings, the classmethod-alias sibling, both
+alias forms still recognized without a shadow present, the alias still
+recognized at its *own* defining scope (the same-scope tie-break),
+an alias-annotation shadowed by a sibling nested parameter, a nested
+closure inheriting an alias into its own annotation, the `AnnAssign`
+annotation form, generic-specialized (`F[int]`) annotations, and five
+pre-existing regressions (real `Fact` annotation, renaming-import
+shadow in annotation, global bypass composing with annotations, bare
+constructor, parameter-shadow-of-`Fact`-itself). `mypy`/`ruff` both
+stayed clean; `fact_detector_misuse.py` at 401 lines,
+`fact_detector_misuse_aliases.py` at 1645 lines,
+`fact_detector_misuse_scope.py` at 1520 lines (newly past the 1500-line
+*soft* limit -- a WARN, not an ERROR, with ample headroom left under
+the 2000-line hard cap). New tests: a new dedicated file,
+`tests/test_fact_detector_misuse_nearest_scope_alias.py` (15 tests,
+`TestAnnotationRecognitionConsultsConstructorAliases` +
+`TestNearestScopeWinsForConstructorAliases`) -- a new file rather than
+appending to `test_fact_detector_misuse_constructor_shadow.py`, which
+had grown to 1049/1200 lines and was getting tight.
+
+**A further round found the alias collectors missed two more binding
+shapes, both against the same commit.**
+
+(C) **`ast.AnnAssign` bindings were invisible to both collectors**
+(Codex review, fresh evidence): `make_fact: Callable[..., Fact[int]] =
+Fact.present` (or `F: type[Fact[int]] = Fact`) is an `ast.AnnAssign`,
+but `_constructor_alias_names()`/`_constructor_method_alias_names()`
+only ever matched `ast.Assign`. Reproduced directly (both bare and
+classmethod forms, 0 hits each, expected 1) before designing a fix.
+
+(D) **A generic-specialized receiver was resolved by the direct-call
+path but not the alias-collection path** (Codex review, fresh
+evidence): `make_fact = Fact[int].present` -- the direct call
+`Fact[int].present(...)` was already recognized (`_is_fact_typed_expr()`
+already unwraps a single `Subscript` receiver), but the *alias*
+collector required a bare `ast.Name` receiver, so binding it to a name
+first and calling through that name bypassed the gate. Reproduced
+directly (both bare and classmethod forms, 0 hits each, expected 1)
+before designing a fix.
+
+Both findings share the identical fix: two small shared helpers in
+`fact_detector_misuse_scope.py`, right before `_constructor_alias_
+names()` -- `_single_target_binding()` (returns `(target, value)` for a
+single-target `ast.Assign` **or** a valued `ast.AnnAssign`, `None`
+otherwise) and `_unwrap_generic_receiver()` (unwraps a single
+`ast.Subscript` receiver, the identical rule `_is_fact_typed_expr()`'s
+own constructor-call recognition already applies). Both collectors' own
+walks now check `isinstance(node, (ast.Assign, ast.AnnAssign))` before
+calling `_single_target_binding()` (needed for mypy's own type
+narrowing on `node.lineno`/`node.col_offset`, since `ast.walk()` yields
+the un-narrowed `ast.AST` base type) and unwrap the RHS receiver before
+the existing `fact_names` membership check.
+
+Verified via direct AST reproduction against 12 cases before writing
+tests: both new findings in both bare and classmethod-alias forms, the
+two combined (`AnnAssign` + `Subscript` together), a bare annotation
+with no value correctly registering nothing, both new forms correctly
+still suppressed by a parameter shadow, and three pre-existing
+regressions (plain `Assign` bare and classmethod aliases, tuple-unpack
+still not recognized). `mypy`/`ruff` both stayed clean;
+`fact_detector_misuse_scope.py` at 1574 lines (still comfortably under
+the 2000-line hard cap, though now further past the 1500-line soft
+WARN threshold). New tests: `TestAlternateBindingShapesAreRecognized`
+(10 tests), appended to `tests/test_fact_detector_misuse_nearest_scope_
+alias.py` (still well under its own 1200-line cap).
+
+**A further round found a comparison embedded inside a *deferred*
+annotation was still flagged as a real misuse site** (Codex review,
+fresh evidence): `def f(x: Annotated[int, Fact.present(1) ==
+sentinel]): ...` under `from __future__ import annotations` (PEP 563)
+-- the repository-mandated convention `AGENTS.md` requires throughout
+`abicheck/`, this check's own real scan target -- stores every
+annotation as source text, never evaluating it at runtime, so that
+embedded comparison never actually executes. The unconditional
+`ast.Compare` walk in `fact_equality_misuse_sites()` had no notion of
+this and flagged that dead code as if it were live. Reproduced directly
+(1 hit, expected 0) before designing a fix.
+
+Fixed with two small, module-local helpers in `fact_detector_misuse.py`
+itself (not the scope or aliases module -- this is neither a lexical-
+scope-resolution concern nor a Fact-typedness-resolution concern, just
+"which `Compare` nodes are dead code here"): `_module_has_deferred_
+annotations()` (checks for a module-level `from __future__ import
+annotations`) and `_deferred_annotation_compare_ids()` (collects the
+`id()` of every `ast.Compare` found inside a parameter, return, or
+variable annotation's own subtree, gated on the future import actually
+being present -- empty otherwise, so a module *without* PEP 563
+deferral keeps every embedded comparison as a genuine site, since it
+really does execute at def-time there). Deliberately independent of
+`_default_and_annotation_scope_overrides()`'s own similarly-shaped
+subtree walk just above it in the file, even though both visit the
+identical parameter-annotation/`returns` shape: that function's own
+`overrides` dict conflates default-value, decorator, and class-base/
+keyword subtrees together with annotation subtrees into one id set, and
+only annotations are ever deferred by PEP 563 -- a default value,
+decorator, or class base always evaluates eagerly regardless of the
+future import, so reusing that dict's keys would have wrongly excluded
+a genuine comparison inside one of those other subtrees too.
+
+Verified via direct AST reproduction against 8 cases before writing
+tests: the reported case, the equivalent return-annotation and
+variable-annotation (`AnnAssign`) forms, a nested function's own
+annotation, the negative control confirming the identical comparison
+stays flagged *without* the future import, a real body-level comparison
+still flagged, a default-value comparison (never deferred, regardless
+of the future import) still flagged, ordinary `Fact`-typed annotation
+*type* recognition (a separate mechanism entirely) left unaffected, and
+an `AnnAssign`'s own *value* (as opposed to its annotation) confirmed
+never deferred either. `mypy`/`ruff` both stayed clean;
+`fact_detector_misuse.py` at 469 lines (still ample headroom). New
+tests: a new dedicated file, `tests/test_fact_detector_misuse_
+deferred_annotations.py` (9 tests,
+`TestDeferredAnnotationsExcludeEmbeddedComparisons`).
+
+**A further round found two more findings against the same commit: one
+a real bug, one a documentation-completeness gap.**
+
+(E) **A literal `None` dictionary key was conflated with "the index
+couldn't be resolved at all"** (Codex review, fresh evidence):
+`_static_subscript_element()`'s own slice-resolution used a single
+`index: object | None` sentinel for both "resolved to the constant
+value `None`" and "nothing resolved" -- so `{None: Fact.present(1)}
+[None]`, a perfectly ordinary `None`-keyed dict lookup that genuinely
+selects the `Fact` value, silently declined to resolve at all,
+bypassing the gate. Reproduced directly (0 hits, expected 1) before
+designing a fix. Fixed by tracking whether the index was actually
+resolved in a separate `resolved: bool`, rather than overloading
+`index is None` for both meanings -- `if not resolved: return None`
+replaces the old `if index is None: return None`. Verified via direct
+AST reproduction against 10 cases before writing tests: the reported
+case, the identical lookup via an intermediate alias, a `None` key
+present but a *different* key selected (still correctly ignored), a
+`None` key winning a duplicate-key tie as the last entry (composing
+correctly with the earlier "last matching key wins" fix), and five
+regressions -- `**expansion` still disqualifying the whole display even
+with a `None` key present, a non-literal index still unresolvable, a
+tuple/list indexed by `None` correctly staying unresolvable (a real
+`TypeError` at runtime, unlike the dict case this fix addresses), and a
+falsy-but-genuinely-resolved index (`0`) not mistaken for "unresolved"
+either (the `resolved` flag's own regression guard). New tests:
+`TestNoneIsAValidDictionaryKey` (7 tests), appended to
+`tests/test_fact_detector_misuse_static_subscript.py`.
+
+(F) **The `fact-detector-misuse` gate was registered in `scripts/
+CLAUDE.md`'s inventory table but never added to the root `AGENTS.md`'s
+own canonical AI-readiness gate table** (Codex review, fresh evidence)
+-- the two tables serve different audiences (`scripts/CLAUDE.md`
+documents *what the script does and who imports it*; `AGENTS.md`'s
+table is the canonical, single-page enumeration of every enforced
+AI-readiness check), and this PR's original commit updated only the
+former. Fixed by adding a `fact-detector-misuse` row to `AGENTS.md`'s
+table, alphabetically ordered immediately before the existing
+`fact-field-readers` row (matching `CHECKS` dict's own ordering in
+`scripts/check_ai_readiness.py`), summarizing the check's rule, its
+three-file implementation, and its no-baseline/unconditional-error
+posture. `python scripts/check_docs_contract.py` and `python scripts/
+check_ai_readiness.py` both re-run clean at their existing baselines
+(0 errors, 2/148 warnings respectively) after the addition.
 
 ---
 

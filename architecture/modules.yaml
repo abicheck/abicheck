@@ -22,8 +22,11 @@
         "abicheck/compile_context.py",
         "abicheck/contract_relevance_types.py",
         "abicheck/detectors.py",
+        "abicheck/elf_symbol_filter.py",
         "abicheck/evidence_depth.py",
-        "abicheck/name_classification.py"
+        "abicheck/fact_provenance.py",
+        "abicheck/name_classification.py",
+        "abicheck/stable_abi_data.py"
       ]
     },
     "storage": {
@@ -32,7 +35,8 @@
         "model"
       ],
       "legacy_paths": [
-        "abicheck/buildsource/build_cache.py"
+        "abicheck/buildsource/build_cache.py",
+        "abicheck/dumper_cache.py"
       ]
     },
     "extract": {
@@ -95,8 +99,24 @@
         "abicheck/ctf_metadata.py",
         "abicheck/debug_resolver.py",
         "abicheck/dump_manifest.py",
+        "abicheck/dumper_ast_config.py",
+        "abicheck/dumper_ast_config_cpp20.py",
+        "abicheck/dumper_ast_config_cpp20_chains.py",
+        "abicheck/dumper_castxml_probe.py",
+        "abicheck/dumper_castxml_typedefs.py",
         "abicheck/dumper_clang.py",
+        "abicheck/dumper_clang_attributes.py",
+        "abicheck/dumper_clang_errors.py",
+        "abicheck/dumper_clang_qualifiers.py",
+        "abicheck/dumper_clang_streaming.py",
+        "abicheck/dumper_clang_vtable.py",
+        "abicheck/dumper_debug.py",
+        "abicheck/dumper_elf_fallback.py",
+        "abicheck/dumper_elf_symbols.py",
+        "abicheck/dumper_layout_backfill.py",
         "abicheck/dumper_scoping.py",
+        "abicheck/dumper_sysinc.py",
+        "abicheck/dumper_toolchain.py",
         "abicheck/dwarf_advanced.py",
         "abicheck/dwarf_metadata.py",
         "abicheck/dwarf_presence.py",
@@ -109,14 +129,17 @@
         "abicheck/macho_metadata.py",
         "abicheck/numpy_capi.py",
         "abicheck/package.py",
+        "abicheck/parallel_probe.py",
         "abicheck/pdb_metadata.py",
         "abicheck/pdb_model.py",
         "abicheck/pdb_parser.py",
         "abicheck/pdb_utils.py",
         "abicheck/pe_metadata.py",
+        "abicheck/process_resources.py",
         "abicheck/provenance.py",
         "abicheck/python_api.py",
         "abicheck/python_ext.py",
+        "abicheck/service_metadata_attach.py",
         "abicheck/source_smoke.py",
         "abicheck/sycl_context.py",
         "abicheck/sycl_metadata.py",
@@ -178,7 +201,10 @@
         "abicheck/diff_vtable_layout.py",
         "abicheck/finding_identity.py",
         "abicheck/finding_identity_atomic.py",
+        "abicheck/finding_identity_ctor_dtor.py",
         "abicheck/probe_harness.py",
+        "abicheck/qualified_name_segments.py",
+        "abicheck/type_reachability_spelling.py",
         "abicheck/versioned_symbol_scheme.py"
       ]
     },
@@ -192,11 +218,17 @@
         "abicheck/analysis_assurance.py",
         "abicheck/compatibility_evaluation_config.py",
         "abicheck/compatibility_evaluation_packs.py",
-        "abicheck/contract_coverage_exit.py",
         "abicheck/contract_evaluation.py",
         "abicheck/contract_evidence_collect.py",
-        "abicheck/exit_decision.py",
-        "abicheck/severity.py"
+        "abicheck/export_surface.py",
+        "abicheck/idioms.py",
+        "abicheck/pattern_verdicts.py",
+        "abicheck/post_processing.py",
+        "abicheck/post_processing_context.py",
+        "abicheck/post_processing_reachability.py",
+        "abicheck/semver.py",
+        "abicheck/suppression_yaml.py",
+        "abicheck/surface.py"
       ]
     },
     "workflows": {
@@ -231,6 +263,11 @@
         "abicheck/contract_scoped_promotion.py",
         "abicheck/debian_symbols.py",
         "abicheck/dependency_info.py",
+        "abicheck/dumper_hybrid.py",
+        "abicheck/effective_config_digest.py",
+        "abicheck/environment_matrix.py",
+        "abicheck/l0_export_delta.py",
+        "abicheck/post_manifest.py",
         "abicheck/resolver.py",
         "abicheck/service.py",
         "abicheck/service_compare_evidence.py",
@@ -238,8 +275,10 @@
         "abicheck/service_dump_native.py",
         "abicheck/service_dump_native_pe.py",
         "abicheck/service_dump_pipeline.py",
+        "abicheck/service_header_scoped.py",
         "abicheck/service_input_resolution.py",
-        "abicheck/service_scan.py"
+        "abicheck/service_scan.py",
+        "abicheck/stack_checker.py"
       ]
     },
     "report": {
@@ -254,7 +293,24 @@
         "abicheck/annotations.py",
         "abicheck/annotations_step_summary.py",
         "abicheck/appcompat_html.py",
-        "abicheck/reporter.py"
+        "abicheck/html_report.py",
+        "abicheck/html_template.py",
+        "abicheck/junit_coverage_warnings.py",
+        "abicheck/junit_report.py",
+        "abicheck/pr_comment.py",
+        "abicheck/pr_comment_base.py",
+        "abicheck/pr_comment_scan.py",
+        "abicheck/report_classifications.py",
+        "abicheck/report_correlation.py",
+        "abicheck/report_model.py",
+        "abicheck/report_summary.py",
+        "abicheck/reporter.py",
+        "abicheck/reporter_contract_blocks.py",
+        "abicheck/reporter_markdown.py",
+        "abicheck/root_cause_evidence.py",
+        "abicheck/sarif.py",
+        "abicheck/stack_html.py",
+        "abicheck/stack_report.py"
       ]
     },
     "frontends": {
@@ -303,7 +359,12 @@
   },
   "public_root_surfaces": [
     "abicheck.api_types",
-    "abicheck.errors"
+    "abicheck.checker_policy",
+    "abicheck.contract_coverage_ledger",
+    "abicheck.contract_gating",
+    "abicheck.dumper_contract",
+    "abicheck.errors",
+    "abicheck.reclassify"
   ],
   "facades": [
     "abicheck.aggregate",

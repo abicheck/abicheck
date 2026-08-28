@@ -52,6 +52,7 @@ from .storage.fact_codec import (
     decode_fact,
     decode_record_facts,
     encode_fact_fields,
+    legacy_dwarf_evidence_state,
 )
 
 # Current schema version for snapshot serialization.
@@ -290,6 +291,18 @@ from .storage.fact_codec import (
 #   26 — ADR-063 Phase 0: `Fact[T]` siblings for `RecordType.bases_fact`/
 #     `virtual_bases_fact`/`vtable_fact`/`vptr_offset_bits_fact` and
 #     `Param.is_va_list_fact` — see `storage/fact_codec.py`.
+#   27 — `Function.is_compiler_generated`: closes the castxml L4 extractor
+#     bug documented in AGENTS.md's "PR C" known-gaps entry, where a
+#     compiler-synthesized implicit special member (or a synthesized
+#     `operator=`, which castxml gives a real-looking Itanium mangled name)
+#     leaked into the L4 source-ABI extractor's reachable declaration
+#     surface as if it were genuine public API. Needs no reliability flag,
+#     unlike v19-v23: `None` (a pre-v27 snapshot's default) is exactly
+#     "not captured", never a real-but-wrong scalar — `entity_from_
+#     function`'s own `api_relevant` exclusion only fires on a confirmed
+#     `True`, so an older snapshot degrades cleanly to today's (buggy)
+#     inclusive behavior rather than being misread as "confirmed
+#     user-written".
 #
 # Reading an OLDER snapshot (the direction every CI baseline actually hits —
 # a baseline is committed once and outlives however many abicheck pin bumps
@@ -302,8 +315,9 @@ from .storage.fact_codec import (
 # doesn't hit any producer-specific threshold above stays silent, since every
 # CI baseline is *always* some number of versions behind and warning
 # regardless of relevance would just be noise.
-# v26 persists debug-evidence provenance; older readers must not discard it.
-SCHEMA_VERSION: int = 26
+# v28 adds debug-evidence provenance (source/state, CU accounting) for
+# `analysis_assurance` — see model/dwarf_facts.py; older readers must reject.
+SCHEMA_VERSION: int = 28
 
 # Schema version at which CastXML field CV facts became reliable (see v9 above).
 _MIN_SCHEMA_VERSION_FOR_CV_FACTS = 9
@@ -632,12 +646,8 @@ def _dwarf_from_dict(d: dict[str, Any]) -> Any:
         enums=enums,
         base_types={k: int(v) for k, v in d.get("base_types", {}).items()},
         has_dwarf=d.get("has_dwarf", False),
-        # Legacy DWARF blocks lack provenance; fail closed in assurance receipts.
         evidence_source=d.get("evidence_source", "unknown"),
-        evidence_state=d.get(
-            "evidence_state",
-            "presence_only" if d.get("has_dwarf", False) else "not_available",
-        ),
+        evidence_state=legacy_dwarf_evidence_state(d),
         cu_total=d.get("cu_total", 0),
         cu_failed=d.get("cu_failed", 0),
     )
@@ -656,10 +666,7 @@ def _dwarf_advanced_from_dict(d: dict[str, Any]) -> Any:
     )
     return AdvancedDwarfMetadata(
         has_dwarf=d.get("has_dwarf", False),
-        evidence_state=d.get(
-            "evidence_state",
-            "presence_only" if d.get("has_dwarf", False) else "not_available",
-        ),
+        evidence_state=legacy_dwarf_evidence_state(d),
         cu_total=d.get("cu_total", 0),
         cu_failed=d.get("cu_failed", 0),
         target_arch=d.get("target_arch", ""),
@@ -946,6 +953,8 @@ def snapshot_from_dict(d: dict[str, Any]) -> AbiSnapshot:
             exception_spec=f.get("exception_spec"),
             deprecated=f.get("deprecated"),
             is_override=f.get("is_override"),
+            # Tri-state (v27) — missing on a pre-v27 snapshot loads as None.
+            is_compiler_generated=f.get("is_compiler_generated"),
         )
         for f in d.get("functions", [])
     ]

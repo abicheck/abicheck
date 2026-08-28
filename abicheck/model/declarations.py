@@ -180,6 +180,29 @@ class Function:
     # elf.symbol_map's last-write-wins dict happens to keep — see AGENTS.md's
     # dedicated entry for this field.
     elf_binding: SymbolBinding | None = None
+    # True when this declaration was never written by the user — a
+    # compiler-synthesized implicit special member (default/copy/move
+    # constructor, copy/move assignment operator, destructor) the language
+    # generates automatically rather than a real declaration in the public
+    # header. Tri-state like is_explicit/is_override:
+    # - True  → confirmed compiler-generated (castxml's own `artificial="1"`
+    #           XML attribute, present on every function-like element it
+    #           emits, not just Constructor/Destructor).
+    # - False → confirmed user-written (clang's AST walk skips a node
+    #           entirely whenever it is `isImplicit`, before it ever
+    #           becomes a Function at all — so every Function this backend
+    #           produces is structurally guaranteed non-implicit).
+    # - None  → dumper/loader does not know (older snapshots, DWARF-only
+    #           path — DWARF has no equivalent marker for this).
+    # Exists to close a real bug: castxml's compiler-synthesized implicit
+    # special members (and a synthesized `operator=`, which castxml gives a
+    # real-looking Itanium mangled name) were leaking into the L4
+    # source-ABI extractor's "reachable declaration surface" as if they
+    # were genuine public API — see
+    # `buildsource.source_extractors.base.entity_from_function`'s own
+    # `api_relevant` computation, and AGENTS.md's "PR C" known-gaps entry
+    # for the full empirical account.
+    is_compiler_generated: bool | None = None
 
 
 @dataclass
