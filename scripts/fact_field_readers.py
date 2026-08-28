@@ -486,13 +486,34 @@ def _locally_bound_names(tree: ast.Module) -> dict[str, set[str]]:
     an improvement. Revisit with real per-position tracing if this shape
     is found in practice, not with a heuristic that cannot tell the two
     cases apart.
+
+    **A `def`/`class` statement's own *name* is a locally-bound name too,
+    not just a parameter (Codex review, fresh evidence).** `def
+    getattr(obj, name): return None` followed by `getattr(rec, "bases")`
+    -- an ordinary, unrelated function definition that happens to share
+    the builtin-looking name `getattr` -- was still unconditionally
+    treated as the real builtin, since only parameters were ever recorded
+    as locally bound; a `def`/`class` statement's own binding target
+    (Python's ordinary `STORE_NAME`/`STORE_FAST` rule for a def/class
+    statement, the identical rule `fact_detector_misuse.py`'s own
+    `_def_containing_qualnames` already models) was invisible here. Fixed
+    by also recording each `def`/`class`'s own `name` against whichever
+    scope directly, syntactically contains it -- tracked as a
+    `nearest_func` parameter through the walk (mirroring `_lexical_
+    function_parents`'s identical concept: class bodies stay transparent,
+    the same simplified model this whole module already uses -- a
+    class-nested `def getattr(...):` binds against the nearest enclosing
+    *function* qualname, not a separate class-body scope, since this
+    module's `_enclosing_qualnames`/`_lexical_function_parents` never
+    model one either).
     """
     bound: dict[str, set[str]] = {}
 
-    def visit(node: ast.AST, prefix: str) -> None:
+    def visit(node: ast.AST, prefix: str, nearest_func: str) -> None:
         for child in ast.iter_child_nodes(node):
             if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef)):
                 child_qualname = f"{prefix}{child.name}"
+                bound.setdefault(nearest_func, set()).add(child.name)
                 all_args = (
                     *child.args.posonlyargs,
                     *child.args.args,
@@ -502,13 +523,14 @@ def _locally_bound_names(tree: ast.Module) -> dict[str, set[str]]:
                 )
                 for arg in all_args:
                     bound.setdefault(child_qualname, set()).add(arg.arg)
-                visit(child, child_qualname + ".")
+                visit(child, child_qualname + ".", child_qualname)
             elif isinstance(child, ast.ClassDef):
-                visit(child, f"{prefix}{child.name}.")
+                bound.setdefault(nearest_func, set()).add(child.name)
+                visit(child, f"{prefix}{child.name}.", nearest_func)
             else:
-                visit(child, prefix)
+                visit(child, prefix, nearest_func)
 
-    visit(tree, "")
+    visit(tree, "", "<module>")
     return bound
 
 
@@ -901,12 +923,22 @@ def _is_attrgetter_constructor_call(
     argument (the attribute name(s) to read). The caller is responsible for
     checking that the requested arguments are literal, single-name strings
     matching a recognized field -- this helper only recognizes the
-    *constructor*, not the field(s) it will read. Deliberately no alias
-    tracking for a *value* assigned from a constructed getter (no `x =
-    attrgetter` equivalent of `_builtins_getattr_aliases()` above) -- a
-    two-step `getter = attrgetter(...); getter(rec)` indirection through an
-    intermediate variable is out of scope, the same "no type inference"
-    limit this whole scan already accepts elsewhere.
+    *constructor*, not the field(s) it will read. Matched wherever the
+    constructor call itself occurs -- immediately invoked
+    (`attrgetter("bases")(rec)`), assigned to an intermediate variable
+    before being called (`getter = attrgetter("bases"); getter(rec)`), or
+    handed to another function as a callback (`sorted(records,
+    key=attrgetter("bases"))`) -- since the field will be read on whatever
+    the constructed getter is eventually called with, regardless of how
+    that call happens (Codex review, fresh evidence: matching only an
+    immediate outer call missed the equally common callback spelling
+    entirely; see `unmigrated_fact_reader_sites()`'s own attrgetter branch
+    for the full reasoning). This is a genuine improvement over needing
+    dedicated alias tracking for the constructed *getter object* itself
+    (no `x = attrgetter(...)` equivalent of `_builtins_getattr_aliases()`'s
+    own alias-chain tracking is needed here, since the constructor call is
+    matched directly rather than needing to be traced through to wherever
+    it's eventually called).
     """
     return (
         isinstance(node, ast.Call)
@@ -1095,9 +1127,12 @@ def unmigrated_fact_reader_sites(
     limit as the rest of this scan: only a literal-string field name is
     recognized per argument (`attrgetter("a.b")`, which chains a *second*
     attribute access, is out of scope, same as a non-literal `getattr()`
-    default) -- see `_is_attrgetter_constructor_call()`'s own docstring for
-    why a *value* assigned from a constructed getter, unlike `getattr`
-    itself, gets no local-alias resolution.
+    default). Matched at the point of *construction*, not only an
+    immediate call -- see `_is_attrgetter_constructor_call()`'s own
+    docstring for why this also catches a getter assigned to an
+    intermediate variable or handed to another function as a callback,
+    without needing dedicated alias tracking the way `getattr` itself
+    does.
 
     **A local binding that shadows `getattr`/`builtins` is excluded from
     the bare-name builtin match (Codex review, fresh evidence).** `def
@@ -1198,44 +1233,60 @@ def unmigrated_fact_reader_sites(
             continue
         if (
             isinstance(node, ast.Call)
-            and isinstance(node.func, ast.Call)
-            and _is_attrgetter_constructor_call(
-                node.func, attrgetter_names, operator_names
-            )
-            and not _shadowed(node, _attrgetter_matched_name(node.func))
+            and _is_attrgetter_constructor_call(node, attrgetter_names, operator_names)
+            and not _shadowed(node, _attrgetter_matched_name(node))
         ):
-            # `operator.attrgetter("bases")(rec)` (or a resolved alias of
-            # either name) is a dynamic equivalent of `rec.bases` built in
-            # two calls: the inner one constructs the getter, the outer
-            # one applies it. Handled as its own top-level case (like
-            # `MatchClass` above), not folded into the single-attribute
-            # chain below, since `attrgetter` accepts *any number* of
-            # positional field names and reads every one of them (Codex
-            # review, fresh evidence: `attrgetter("size_bits", "bases")
-            # (rec)` reads `bases` too, not only the first argument) --
-            # each literal, string-constant argument matching a bridged
-            # name is its own real read, reported independently. A
-            # non-literal or dotted-name argument (`attrgetter("a.b")`,
-            # chaining a *second* attribute access) stays out of scope,
-            # the same "no type inference" limit the plain `getattr` case
-            # already accepts for a non-literal default.
+            # `operator.attrgetter("bases")` (or a resolved alias of either
+            # name) *constructs* a getter that will read `bases` off
+            # whatever it's later called with -- reported at the point of
+            # construction, not only when it's called *immediately*
+            # (`operator.attrgetter("bases")(rec)`). Matching only the
+            # doubly-called shape missed the equally common callback
+            # spelling entirely (Codex review, fresh evidence):
+            # `sorted(records, key=operator.attrgetter("bases"))` and
+            # `map(attrgetter("bases"), records)` both construct the
+            # identical getter, just hand it to another function instead
+            # of calling it themselves -- the read still happens, on
+            # whatever `sorted`/`map` eventually calls it with. Matching
+            # the constructor call directly, regardless of how its result
+            # is used, closes this the same conservative-by-design way
+            # every other branch here does: a false positive here (a
+            # constructed-but-never-called getter) costs a reviewed
+            # baseline entry; a false negative would be silent. Handled as
+            # its own top-level case (like `MatchClass` above), not folded
+            # into the single-attribute chain below, since `attrgetter`
+            # accepts *any number* of positional field names and reads
+            # every one of them (Codex review, fresh evidence:
+            # `attrgetter("size_bits", "bases")(rec)` reads `bases` too,
+            # not only the first argument) -- each literal, string-constant
+            # argument matching a bridged name is its own real read,
+            # reported independently. A non-literal or dotted-name argument
+            # (`attrgetter("a.b")`, chaining a *second* attribute access)
+            # stays out of scope, the same "no type inference" limit the
+            # plain `getattr` case already accepts for a non-literal
+            # default.
             # Fingerprinted the same way every other reader form is
             # (Codex review, fresh evidence): `outer_text` climbs to the
             # read's own *outermost containing expression* via
-            # `_expr_text()`, distinct from `text`, the call's own bare
-            # source -- an earlier revision used the call's own bare text
-            # for both slots, so `old_decision(attrgetter("bases")(rec))`
-            # and `keep(attrgetter("bases")(rec))` produced the identical
-            # key. Migrating the first reader while adding an unrelated
-            # new one at the same rank would then have silently reused
-            # the vacated key, the exact collision `_outermost_containing_
-            # expr()` exists to close for every other form.
+            # `_expr_text()`, distinct from `text`, the constructor call's
+            # own bare source -- an earlier revision used the call's own
+            # bare text for both slots, so `old_decision(attrgetter(
+            # "bases")(rec))` and `keep(attrgetter("bases")(rec))` produced
+            # the identical key. Migrating the first reader while adding an
+            # unrelated new one at the same rank would then have silently
+            # reused the vacated key, the exact collision
+            # `_outermost_containing_expr()` exists to close for every
+            # other form. `_outermost_containing_expr()` still climbs
+            # through an immediate outer call (`ast.Call` is itself an
+            # `ast.expr`), so the doubly-called shape's `outer_text` is
+            # unaffected by matching the inner constructor call instead of
+            # the outer one.
             text = (
                 ast.get_source_segment(source, node) if source else None
             ) or "<unavailable>"
             outer_text = _expr_text(node)
             qualname = qualnames.get(node.lineno, "<module>")
-            for call_arg in node.func.args:
+            for call_arg in node.args:
                 if (
                     isinstance(call_arg, ast.Constant)
                     and isinstance(call_arg.value, str)

@@ -13,7 +13,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Two narrower, more structural fixes for the ``fact-field-readers``
+"""Narrower, more structural fixes for the ``fact-field-readers``
 AI-readiness check (``scripts/fact_field_readers.py``, registered by
 ``scripts/check_ai_readiness.py``) -- ADR-063 Phase 0
 (``docs/contribute/plans/one-semantic-pipeline.md``).
@@ -24,8 +24,7 @@ Split out as its own file (rather than appended to
 ``tests/test_fact_detector_misuse_def_time_scope.py`` was split out of
 ``test_fact_detector_misuse.py`` -- see that file's own docstring.
 
-Covers two independent Codex-review findings against a single earlier
-revision:
+Covers four independent Codex-review findings across two review rounds:
 
 1. **``_operator_attrgetter_aliases()`` seeded ``"attrgetter"``/``"operator"``
    unconditionally**, the same way ``_builtins_getattr_aliases()`` correctly
@@ -46,6 +45,23 @@ revision:
    that fingerprint accurate for a read sitting inside a keyword argument
    or a comprehension clause, the same way it already was for a read
    sitting inside any ordinary nested expression.
+
+3. **The attrgetter branch required the constructor call to be
+   *immediately* invoked** (``attrgetter("bases")(rec)``), missing the
+   equally common callback spelling (``sorted(records,
+   key=attrgetter("bases"))``, ``map(attrgetter("bases"), records)``) --
+   the constructor is now matched wherever it's *constructed*, regardless
+   of how (or whether, at the same expression) its result is called. This
+   also closes, as a side effect, the previously-documented
+   two-step-local-variable-indirection gap
+   (``getter = attrgetter("bases"); getter(rec)``).
+
+4. **``_locally_bound_names()`` only ever tracked a *parameter* as a
+   locally-bound name, never a nested ``def``/``class`` statement's own
+   *name*** -- so ``def getattr(obj, name): ...`` followed by an ordinary
+   call to it was still treated as the real builtin, since only the
+   builtin's own unconditional seed and the parameter-only shadow map were
+   ever consulted.
 """
 
 from __future__ import annotations
@@ -156,4 +172,140 @@ class TestOutermostContainingExprClimbsThroughTransparentWrappers:
         assert keys == [
             "x.py::f::bases::old_call(value=t_old.bases)::t_old.bases::1",
             "x.py::f::bases::new_call(value=t_new.bases)::t_new.bases::1",
+        ]
+
+
+class TestAttrgetterMatchedAtConstruction:
+    """`operator.attrgetter(...)`/`attrgetter(...)` is matched at the point
+    of *construction*, not only when the constructed getter is called
+    immediately -- the field will be read on whatever the getter is
+    eventually called with, regardless of how that call happens (Codex
+    review, fresh evidence: matching only an immediate outer call missed
+    the equally common callback spelling)."""
+
+    def test_detects_an_attrgetter_used_as_a_sort_key_callback(self) -> None:
+        """`sorted(records, key=operator.attrgetter("bases"))` -- the
+        getter is handed to `sorted` as a callback, never itself
+        immediately called at the same expression."""
+        src = (
+            "import operator\n"
+            "def f(records):\n"
+            '    return sorted(records, key=operator.attrgetter("bases"))\n'
+        )
+        tree = ast.parse(src, filename="x.py")
+        keys = [
+            key for key, _l, _a, _q in unmigrated_fact_reader_sites(tree, "x.py", src)
+        ]
+        assert keys == [
+            'x.py::f::bases::sorted(records, key=operator.attrgetter("bases"))::'
+            'operator.attrgetter("bases")::1'
+        ]
+
+    def test_detects_an_attrgetter_used_as_a_map_callback(self) -> None:
+        """The bare `attrgetter(...)` spelling as a positional callback
+        argument: `map(attrgetter("bases"), records)`."""
+        src = (
+            "from operator import attrgetter\n"
+            "def f(records):\n"
+            '    return map(attrgetter("bases"), records)\n'
+        )
+        tree = ast.parse(src, filename="x.py")
+        keys = [
+            key for key, _l, _a, _q in unmigrated_fact_reader_sites(tree, "x.py", src)
+        ]
+        assert keys == [
+            'x.py::f::bases::map(attrgetter("bases"), records)::attrgetter("bases")::1'
+        ]
+
+    def test_detects_an_attrgetter_indirected_through_a_local_variable(
+        self,
+    ) -> None:
+        """`getter = operator.attrgetter("bases"); getter(rec)` splits the
+        constructor call and the application call across two statements --
+        the construction alone is now sufficient, so this two-step
+        indirection is caught as a side effect without needing dedicated
+        local-alias resolution for `attrgetter` itself (unlike `getattr`,
+        which still needs one, since a bare `getattr` reference alone
+        reads nothing until it's actually called)."""
+        src = (
+            "import operator\n"
+            "def f(rec):\n"
+            '    getter = operator.attrgetter("bases")\n'
+            "    return getter(rec)\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        keys = [
+            key for key, _l, _a, _q in unmigrated_fact_reader_sites(tree, "x.py", src)
+        ]
+        assert keys == [
+            'x.py::f::bases::operator.attrgetter("bases")::'
+            'operator.attrgetter("bases")::1'
+        ]
+
+
+class TestLocallyBoundNamesCoversNestedDefAndClassNames:
+    """`_locally_bound_names()` must recognize a `def`/`class` statement's
+    own *name* as a locally-bound name, not just a parameter -- an
+    ordinary, unrelated function definition sharing a builtin-looking name
+    must not be treated as the real builtin (Codex review, fresh
+    evidence)."""
+
+    def test_ignores_a_module_level_function_shadowing_getattr(self) -> None:
+        """`def getattr(obj, name): ...` at module scope, followed by an
+        ordinary call to it, must not be treated as the real `getattr`
+        builtin."""
+        src = (
+            "def getattr(obj, name):\n"
+            "    return None\n"
+            "def f(rec):\n"
+            '    return getattr(rec, "bases")\n'
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert unmigrated_fact_reader_sites(tree, "x.py", src) == []
+
+    def test_ignores_a_nested_function_shadowing_getattr(self) -> None:
+        """The identical shadowing for a `def getattr(...):` nested
+        *inside* the calling function itself, not just at module scope."""
+        src = (
+            "def f(rec):\n"
+            "    def getattr(obj, name):\n"
+            "        return None\n"
+            '    return getattr(rec, "bases")\n'
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert unmigrated_fact_reader_sites(tree, "x.py", src) == []
+
+    def test_ignores_a_class_shadowing_attrgetter(self) -> None:
+        """The identical shadowing rule applies to a `class attrgetter:
+        ...` definition, not just a `def`."""
+        src = (
+            "class attrgetter:\n"
+            "    def __call__(self, name):\n"
+            "        return name\n"
+            "def f(rec):\n"
+            '    return attrgetter("bases")(rec)\n'
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert unmigrated_fact_reader_sites(tree, "x.py", src) == []
+
+    def test_detects_a_real_getattr_call_despite_a_shadowing_def_in_a_sibling(
+        self,
+    ) -> None:
+        """Negative control: a shadowing `def getattr(...):` at module
+        scope must not leak into an unrelated sibling function's own
+        genuine `getattr()` call."""
+        src = (
+            "def getattr(obj, name):\n"
+            "    return None\n"
+            "def g(rec):\n"
+            "    import builtins\n"
+            '    return builtins.getattr(rec, "bases")\n'
+        )
+        tree = ast.parse(src, filename="x.py")
+        keys = [
+            key for key, _l, _a, _q in unmigrated_fact_reader_sites(tree, "x.py", src)
+        ]
+        assert keys == [
+            'x.py::g::bases::builtins.getattr(rec, "bases")::'
+            'builtins.getattr(rec, "bases")::1'
         ]

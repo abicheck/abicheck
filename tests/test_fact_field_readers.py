@@ -216,7 +216,7 @@ class TestUnmigratedFactReaderSites:
         sites = unmigrated_fact_reader_sites(tree, "x.py", src)
         assert [key for key, _l, _a, _q in sites] == [
             'x.py::f::bases::operator.attrgetter("bases")(rec)::'
-            'operator.attrgetter("bases")(rec)::1'
+            'operator.attrgetter("bases")::1'
         ]
 
     def test_detects_a_bare_attrgetter_call_via_a_from_import(self) -> None:
@@ -226,7 +226,7 @@ class TestUnmigratedFactReaderSites:
         tree = ast.parse(src, filename="x.py")
         sites = unmigrated_fact_reader_sites(tree, "x.py", src)
         assert [key for key, _l, _a, _q in sites] == [
-            'x.py::f::bases::attrgetter("bases")(rec)::attrgetter("bases")(rec)::1'
+            'x.py::f::bases::attrgetter("bases")(rec)::attrgetter("bases")::1'
         ]
 
     def test_ignores_an_attrgetter_call_with_a_dotted_name(self) -> None:
@@ -241,23 +241,6 @@ class TestUnmigratedFactReaderSites:
         tree = ast.parse(src, filename="x.py")
         assert unmigrated_fact_reader_sites(tree, "x.py", src) == []
 
-    def test_ignores_an_attrgetter_indirected_through_a_local_variable(
-        self,
-    ) -> None:
-        """`getter = operator.attrgetter("bases"); getter(rec)` splits the
-        constructor call and the application call across two statements --
-        out of scope, the same "no type inference" limit `attrgetter`
-        deliberately gets no local-alias resolution for (unlike `getattr`
-        itself, which does)."""
-        src = (
-            "import operator\n"
-            "def f(rec):\n"
-            '    getter = operator.attrgetter("bases")\n'
-            "    return getter(rec)\n"
-        )
-        tree = ast.parse(src, filename="x.py")
-        assert unmigrated_fact_reader_sites(tree, "x.py", src) == []
-
     def test_detects_an_attrgetter_call_through_an_operator_import_alias(
         self,
     ) -> None:
@@ -268,8 +251,7 @@ class TestUnmigratedFactReaderSites:
         tree = ast.parse(src, filename="x.py")
         sites = unmigrated_fact_reader_sites(tree, "x.py", src)
         assert [key for key, _l, _a, _q in sites] == [
-            'x.py::f::bases::op.attrgetter("bases")(rec)::'
-            'op.attrgetter("bases")(rec)::1'
+            'x.py::f::bases::op.attrgetter("bases")(rec)::op.attrgetter("bases")::1'
         ]
 
     def test_detects_an_attrgetter_call_through_a_from_import_alias(
@@ -281,7 +263,7 @@ class TestUnmigratedFactReaderSites:
         tree = ast.parse(src, filename="x.py")
         sites = unmigrated_fact_reader_sites(tree, "x.py", src)
         assert [key for key, _l, _a, _q in sites] == [
-            'x.py::f::bases::ag("bases")(rec)::ag("bases")(rec)::1'
+            'x.py::f::bases::ag("bases")(rec)::ag("bases")::1'
         ]
 
     def test_detects_every_bridged_attr_requested_from_a_multi_arg_attrgetter(
@@ -340,8 +322,7 @@ class TestUnmigratedFactReaderSites:
         tree = ast.parse(src, filename="x.py")
         sites = unmigrated_fact_reader_sites(tree, "x.py", src)
         assert [key for key, _l, _a, _q in sites] == [
-            'x.py::f::bases::op2.attrgetter("bases")(rec)::'
-            'op2.attrgetter("bases")(rec)::1'
+            'x.py::f::bases::op2.attrgetter("bases")(rec)::op2.attrgetter("bases")::1'
         ]
 
     def test_detects_an_attrgetter_call_through_a_chained_bare_alias(
@@ -359,7 +340,7 @@ class TestUnmigratedFactReaderSites:
         tree = ast.parse(src, filename="x.py")
         sites = unmigrated_fact_reader_sites(tree, "x.py", src)
         assert [key for key, _l, _a, _q in sites] == [
-            'x.py::f::bases::ag2("bases")(rec)::ag2("bases")(rec)::1'
+            'x.py::f::bases::ag2("bases")(rec)::ag2("bases")::1'
         ]
 
     def test_ignores_getattr_shadowed_by_a_function_parameter(self) -> None:
@@ -456,7 +437,7 @@ class TestUnmigratedFactReaderSites:
         sites = unmigrated_fact_reader_sites(tree, "x.py", src)
         assert [key for key, _l, _a, _q in sites] == [
             'x.py::g::bases::operator.attrgetter("bases")(rec)::'
-            'operator.attrgetter("bases")(rec)::1'
+            'operator.attrgetter("bases")::1'
         ]
 
     def test_keys_two_attrgetter_reads_by_their_own_containing_expression(
@@ -481,9 +462,8 @@ class TestUnmigratedFactReaderSites:
         sites = unmigrated_fact_reader_sites(tree, "x.py", src)
         assert [key for key, _l, _a, _q in sites] == [
             'x.py::f::bases::old_decision(attrgetter("bases")(rec))::'
-            'attrgetter("bases")(rec)::1',
-            'x.py::f::bases::keep(attrgetter("bases")(rec))::'
-            'attrgetter("bases")(rec)::1',
+            'attrgetter("bases")::1',
+            'x.py::f::bases::keep(attrgetter("bases")(rec))::attrgetter("bases")::1',
         ]
 
     def test_detects_a_bound_getattribute_call_naming_a_bridged_attr(

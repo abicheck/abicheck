@@ -1716,6 +1716,68 @@ already described it before this round: an accepted, narrow gap, now
 with a concretely verified (not merely hypothetical) repro on record here
 and in the PR's own review thread.
 
+**A further Codex review round found two more real gaps, both fixed.**
+(1) **The attrgetter branch required the constructor call to be
+*immediately* invoked** (`attrgetter("bases")(rec)`, matched via
+`isinstance(node, ast.Call) and isinstance(node.func, ast.Call) and
+_is_attrgetter_constructor_call(node.func, ...)`), missing the equally
+common callback spelling entirely: `sorted(records,
+key=operator.attrgetter("bases"))` and `map(attrgetter("bases"),
+records)` both construct the identical getter, just hand it to another
+function instead of calling it themselves -- the read still happens, on
+whatever `sorted`/`map` eventually calls it with. Fixed by matching the
+constructor call directly (`_is_attrgetter_constructor_call(node, ...)`,
+no outer-call requirement at all) -- the same conservative-by-design
+principle every other branch here already follows: a false positive
+(a constructed-but-never-called getter) costs a reviewed baseline entry,
+a false negative would be silent. This also closes, as a side effect
+rather than a targeted fix, the previously-documented two-step
+local-variable-indirection gap (`getter = attrgetter("bases");
+getter(rec)`) -- `_is_attrgetter_constructor_call()`'s own docstring
+previously stated this was deliberately out of scope, "the same
+`x = attrgetter` equivalent of `_builtins_getattr_aliases()`" that
+`attrgetter` doesn't get; both that docstring and `unmigrated_fact_
+reader_sites()`'s own attrgetter-branch comment were corrected to
+describe the new, broader match instead of the narrower one they no
+longer describe. One consequence worth naming: `text` (the read's own
+bare source, previously the *whole* double-call `attrgetter("bases")
+(rec)`) is now just the constructor call's own text (`attrgetter(
+"bases")`), since that call is what's actually matched -- `outer_text`
+is unaffected (`_outermost_containing_expr()` still climbs through the
+immediate outer call when there is one, since `ast.Call` is itself an
+`ast.expr`). Every existing attrgetter test asserting an exact key
+literal for the immediate-double-call shape needed updating to the
+narrower `text` value; the real repository baseline is unaffected (still
+zero existing attrgetter reads anywhere in `abicheck/`).
+
+(2) **`_locally_bound_names()` only ever tracked a *parameter* as a
+locally-bound name, never a nested `def`/`class` statement's own
+*name*.** `def getattr(obj, name): return None` followed by `getattr(rec,
+"bases")` -- an ordinary, unrelated function definition sharing the
+builtin-looking name `getattr`, at module scope or nested inside the
+calling function itself -- was still unconditionally treated as the real
+builtin, since a def/class statement's own binding target (Python's
+ordinary `STORE_NAME`/`STORE_FAST` rule, the identical rule
+`fact_detector_misuse.py`'s own `_def_containing_qualnames` already
+models for the sibling module) was invisible to this module's shadowing
+check. Fixed by threading a `nearest_func` parameter through `_locally_
+bound_names()`'s walk (mirroring `_lexical_function_parents`'s identical
+concept -- class bodies stay transparent, the same simplified model this
+whole module already uses) and recording each `def`/`class`'s own `name`
+against whichever scope directly contains it, alongside its existing
+parameter tracking.
+
+Both fixes' new tests, plus the attrgetter-indirection test repurposed
+from a negative to a positive control (its old premise -- "no local-alias
+resolution for attrgetter" -- no longer holds), went into `tests/
+test_fact_field_readers_wrapper_scoping.py` (room remained under the
+architecture gate's 1200-line cap; one existing test was moved there from
+`test_fact_field_readers.py` to keep the main file under the cap after
+its own docstring updates grew it past 1200). Verified empirically: still
+zero existing hits in the real repository, `mypy`/`ruff` both stayed
+clean, and `python scripts/check_architecture.py` reports 0 errors with
+both test files under the cap.
+
 **Still not landed**: no detector (`diff_layout.py`/`diff_types.py`/
 `diff_param_qualifiers.py`/the reader set the check above now tracks
 precisely) has actually been migrated to read `.status` — the check above
