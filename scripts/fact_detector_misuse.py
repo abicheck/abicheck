@@ -1058,6 +1058,19 @@ def _fact_aliases(tree: ast.Module, qualnames: _QualnameSpans) -> dict[str, set[
     def_containing = _def_containing_qualnames(tree)
     aliases: dict[str, set[str]] = {}
     candidates: dict[str, list[tuple[str, ast.expr]]] = {}
+    # A `for`/comprehension loop target bound to every element of a
+    # literal `Tuple`/`List` display needs a *conjunctive* fixed point --
+    # the target is only reliably Fact-typed if EVERY element is, unlike
+    # `candidates` above's ordinary *disjunctive* resolution (a name is
+    # known the moment ANY one of its recorded values resolves). A bare
+    # `ast.Name` element referencing an already-known alias (`old_fact =
+    # old.bases_fact` outer, then `for fact in (old_fact,): ...`) can't be
+    # confirmed Fact-typed at collection time -- `_is_fact_typed_expr()`
+    # deliberately never resolves a bare name, since answering that needs
+    # the very `known` set this fixed point builds (Codex review, fresh
+    # evidence) -- so each such loop is recorded here, elements and all,
+    # and re-checked every fixed-point pass alongside `candidates` below.
+    tuple_loop_candidates: dict[str, list[tuple[str, list[ast.expr]]]] = {}
     # Every name *this* function binds on its own -- every parameter
     # (Fact-typed or not) and every simple assignment target -- used below
     # to stop an inherited alias from shadowing a genuine local rebinding
@@ -1244,17 +1257,34 @@ def _fact_aliases(tree: ast.Module, qualnames: _QualnameSpans) -> dict[str, set[
             # *same* target name -- so the alias only holds if *every*
             # element is definitively Fact-typed, not merely one of them
             # (`for x in (rec.bases_fact, some_other_call()):` must stay
-            # unflagged, since `x` is only sometimes a Fact). One
-            # representative element is enough for the fixed point below,
-            # which only asks whether *a* candidate value is Fact-typed.
+            # unflagged, since `x` is only sometimes a Fact).
+            #
+            # **A bare-`Name` element referencing an already-known alias
+            # is a real Fact-typed element too, resolved through the
+            # fixed point below rather than at collection time (Codex
+            # review, fresh evidence).** `old_fact = old.bases_fact`
+            # outer, then `for fact in (old_fact,): fact == other` --
+            # `_is_fact_typed_expr()` deliberately never resolves a bare
+            # name (that needs `known`, which doesn't exist yet during
+            # this single collection pass), so an all-elements check
+            # gated on it alone rejected this ordinary alias refactor.
+            # Every element satisfying either check (structurally
+            # Fact-typed, or a bare name at all -- whether it actually
+            # resolves is `tuple_loop_candidates`' own job at fixed-point
+            # time, below) is enough to register the whole loop; an
+            # element that is neither still disqualifies it outright, the
+            # identical conservative behavior as before.
             if (
                 isinstance(node.target, ast.Name)
                 and isinstance(node.iter, (ast.Tuple, ast.List))
                 and node.iter.elts
-                and all(_is_fact_typed_expr(elt, fact_names) for elt in node.iter.elts)
+                and all(
+                    _is_fact_typed_expr(elt, fact_names) or isinstance(elt, ast.Name)
+                    for elt in node.iter.elts
+                )
             ):
-                candidates.setdefault(qualname, []).append(
-                    (node.target.id, node.iter.elts[0])
+                tuple_loop_candidates.setdefault(qualname, []).append(
+                    (node.target.id, list(node.iter.elts))
                 )
         elif isinstance(node, (ast.With, ast.AsyncWith)):
             # `with ctx() as fact:` -- likewise a real local binding.
@@ -1472,7 +1502,9 @@ def _fact_aliases(tree: ast.Module, qualnames: _QualnameSpans) -> dict[str, set[
                 # The comprehension equivalent of the `for`-loop literal-
                 # collection case above -- `[fact == other for fact in
                 # (old.bases_fact, new.bases_fact)]` -- the identical
-                # every-element-Fact-typed requirement, attributed to the
+                # every-element-Fact-typed-or-a-deferred-alias requirement
+                # (see the `for`/`AsyncFor` branch's own docstring for the
+                # bare-`Name`-element reasoning), attributed to the
                 # comprehension's own scope (`qualname`, already resolved
                 # above), which is where the target itself is bound
                 # regardless of which scope the iterable expression's own
@@ -1484,11 +1516,12 @@ def _fact_aliases(tree: ast.Module, qualnames: _QualnameSpans) -> dict[str, set[
                     and generator.iter.elts
                     and all(
                         _is_fact_typed_expr(elt, fact_names)
+                        or isinstance(elt, ast.Name)
                         for elt in generator.iter.elts
                     )
                 ):
-                    candidates.setdefault(qualname, []).append(
-                        (generator.target.id, generator.iter.elts[0])
+                    tuple_loop_candidates.setdefault(qualname, []).append(
+                        (generator.target.id, list(generator.iter.elts))
                     )
 
     # A `global`/`nonlocal`-declared name is never a real local rebinding
@@ -1640,6 +1673,29 @@ def _fact_aliases(tree: ast.Module, qualnames: _QualnameSpans) -> dict[str, set[
                         continue
                     if _is_fact_typed_expr(value, fact_names) or (
                         isinstance(value, ast.Name) and value.id in known
+                    ):
+                        known.add(name)
+                        changed = True
+                        outer_changed = True
+                # `tuple_loop_candidates`' own conjunctive resolution --
+                # unlike `candidates` above (known the moment ANY one
+                # recorded value resolves), a loop-target entry here needs
+                # EVERY element to resolve before the target itself does
+                # (Codex review, fresh evidence -- see the `for`/`AsyncFor`
+                # collection branch's own docstring). A bare `ast.Name`
+                # element resolves through this same `known` set, exactly
+                # like `candidates`' own `isinstance(value, ast.Name) and
+                # value.id in known` check -- so this loop naturally
+                # participates in the surrounding `while changed:` fixed
+                # point, converging once every element (structural or
+                # alias) is confirmed.
+                for name, elts in tuple_loop_candidates.get(qualname, []):
+                    if name in known:
+                        continue
+                    if all(
+                        _is_fact_typed_expr(elt, fact_names)
+                        or (isinstance(elt, ast.Name) and elt.id in known)
+                        for elt in elts
                     ):
                         known.add(name)
                         changed = True

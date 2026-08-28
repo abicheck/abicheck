@@ -561,3 +561,73 @@ class TestForLoopLiteralCollectionAliases:
         )
         tree = ast.parse(src, filename="x.py")
         assert fact_equality_misuse_sites(tree, "x.py") == []
+
+
+class TestForLoopLiteralCollectionResolvesThroughExistingAliases:
+    """A literal `Tuple`/`List` element that is itself a bare `Name`
+    already known to be a Fact alias is a real Fact-typed element too --
+    `_is_fact_typed_expr()` deliberately never resolves a bare name (that
+    needs the whole-tree alias fixed point, which doesn't exist yet
+    during collection), so this resolves through the same fixed point
+    `tuple_loop_candidates` participates in, not at collection time."""
+
+    def test_detects_a_for_loop_over_a_tuple_of_an_existing_alias(self) -> None:
+        src = (
+            "def f(old, other):\n"
+            "    old_fact = old.bases_fact\n"
+            "    for fact in (old_fact,):\n"
+            "        return fact == other\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert fact_equality_misuse_sites(tree, "x.py") == [(4, 15)]
+
+    def test_detects_a_comprehension_over_a_tuple_of_an_existing_alias(self) -> None:
+        src = (
+            "def f(old, other):\n"
+            "    old_fact = old.bases_fact\n"
+            "    return [fact == other for fact in (old_fact,)]\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert fact_equality_misuse_sites(tree, "x.py") == [(3, 12)]
+
+    def test_detects_a_for_loop_mixing_an_alias_and_a_direct_fact_read(self) -> None:
+        """A tuple mixing a resolved alias element with an ordinary
+        directly Fact-typed element -- both must individually satisfy
+        the conjunctive check."""
+        src = (
+            "def f(old, new, other):\n"
+            "    old_fact = old.bases_fact\n"
+            "    for fact in (old_fact, new.bases_fact):\n"
+            "        return fact == other\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert fact_equality_misuse_sites(tree, "x.py") == [(4, 15)]
+
+    def test_ignores_a_for_loop_over_a_name_that_never_resolves(self) -> None:
+        """Negative control: a bare-`Name` element is only *eligible*
+        for deferred resolution -- if it never actually resolves to a
+        known Fact alias, the loop target must stay unflagged, the same
+        as before this fix."""
+        src = (
+            "def f(other, unrelated):\n"
+            "    for x in (unrelated,):\n"
+            "        return x == other\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert fact_equality_misuse_sites(tree, "x.py") == []
+
+    def test_ignores_a_for_loop_mixing_an_alias_and_an_unresolved_call(self) -> None:
+        """Negative control: even with one element resolving to a known
+        alias, a *different* element that is neither Fact-typed nor a
+        name at all still disqualifies the whole loop -- the conjunctive
+        requirement holds regardless of which element fails it."""
+        src = (
+            "def f(old, other):\n"
+            "    old_fact = old.bases_fact\n"
+            "    def some_call():\n"
+            "        return 1\n"
+            "    for x in (old_fact, some_call()):\n"
+            "        return x == other\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert fact_equality_misuse_sites(tree, "x.py") == []

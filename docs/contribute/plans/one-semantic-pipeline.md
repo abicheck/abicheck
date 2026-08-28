@@ -2139,6 +2139,56 @@ test_fact_detector_misuse_def_time_scope.py` (room remained under the
 architecture gate's 1200-line cap): `TestClassHeaderWalrusContainingScope`
 and `TestForLoopLiteralCollectionAliases`.
 
+**A further Codex review round found one more real gap in the loop-target
+fix above.** `_is_fact_typed_expr()` deliberately never resolves a bare
+`ast.Name` -- answering "is this name a Fact" needs the whole-tree alias
+fixed point, which doesn't exist yet during the single collection pass
+that builds candidates -- so the "every element satisfies
+`_is_fact_typed_expr()`" gate from the previous fix silently rejected an
+otherwise-ordinary alias refactor: `old_fact = old.bases_fact` outer,
+then `for fact in (old_fact,): fact == other`, is a real misuse (`fact`
+genuinely holds `old_fact`'s value, which is genuinely Fact-typed), but
+`old_fact` is a bare name, not a structural attribute/constructor
+expression, so it never satisfied the gate at collection time.
+
+The loop-target case needed something the existing `candidates`
+mechanism can't express: `candidates` is *disjunctive* (a name becomes
+known the moment ANY ONE of its recorded values resolves -- the right
+model for "this name was assigned this value, or this other value, at
+different points"), but a loop target bound to every element of one
+tuple needs *every* element to resolve before the target itself does --
+a *conjunctive* requirement. Fixed with a new, parallel structure,
+`tuple_loop_candidates: dict[str, list[tuple[str, list[ast.expr]]]]`,
+populated by the same collection-time gate as before except an element
+is now accepted either because it's structurally Fact-typed (unchanged)
+or because it's simply a bare `ast.Name` (deferred, not yet confirmed) --
+an element that is neither still disqualifies the whole loop outright,
+preserving the original conservative guarantee. Consulted inside the
+same `while changed:` per-qualname fixed point `candidates` itself
+already participates in: at each pass, a `tuple_loop_candidates` entry's
+target becomes known once every one of its elements is either
+structurally Fact-typed or a `Name` already present in `known` -- the
+identical `isinstance(value, ast.Name) and value.id in known` resolution
+`candidates`' own loop already performs for a single value, just
+conjoined across a whole tuple instead of checked for one. Since `known`
+persists across outer fixed-point passes and only ever grows, this
+naturally converges the same way every other alias resolution in this
+module does.
+
+Verified against the exact reported repro, its comprehension form, a
+mixed alias-and-direct-read tuple (both element kinds must each resolve
+independently), a negative control where the bare-name element never
+resolves to anything (must stay unflagged, confirming the deferred
+element is only *eligible*, not automatically accepted), and a negative
+control mixing a resolved alias with an unrelated non-Fact call
+(confirming the conjunctive requirement holds regardless of which
+specific element fails it) -- plus the full existing suite, confirming
+the original tuple-of-direct-reads shape from the previous round is
+unaffected. `mypy`/`ruff` both stayed clean, still zero existing hits in
+the real repository. New tests:
+`TestForLoopLiteralCollectionResolvesThroughExistingAliases` in `tests/
+test_fact_detector_misuse_def_time_scope.py`.
+
 ---
 
 ### Phase 1 — finish the `dump`/`scan` typed-API convergence (closes AGENTS.md "PR C")
