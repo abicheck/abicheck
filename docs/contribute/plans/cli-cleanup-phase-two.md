@@ -2515,15 +2515,32 @@ pipelines a fourth time.
   > the divergence for that pairing. It does **not**, by itself, close the
   > divergence against a *directly constructed* typed `DumpRequest`/
   > `execute_dump_request` call: `resolve_dump_request()` never discovers
-  > `.abicheck.yml` at all (Codex review, fresh evidence) — it derives its
-  > evidence solely from `DumpRequest.input.compile` and the request-level
-  > `frontend` field the caller supplied. A typed caller that does not
-  > itself set `DumpRequest.input.compile.frontend` to match the project's
-  > config still resolves through `effective_frontend`'s bare default
-  > (castxml), regardless of what `.abicheck.yml` says — so the CLI-vs-
-  > typed-API divergence this plan's headline names survives a
-  > config-pinned frontend and is closed only by the caller explicitly
-  > replicating the config's value on the request object itself.
+  > `.abicheck.yml` at all — it derives its evidence solely from
+  > `DumpRequest.input.compile` and the request-level `frontend` field the
+  > caller supplied, so a config's `compile.frontend` has no effect on a
+  > typed request unless the caller separately replicates it.
+  >
+  > **Qualification (Codex review, fresh evidence): this does not mean
+  > every config pin leaves a bare typed request diverging equally in both
+  > directions.** `resolve_dump_request()`
+  > (`service_dump_pipeline.py`) resolves `header_backend` from the
+  > request-level `DumpRequest.frontend` field *before* calling
+  > `effective_frontend()` — `header_backend = frontend_lower if
+  > frontend_lower in HEADER_AST_FRONTENDS else "auto"`, then
+  > `effective_frontend(evidence.compile, header_backend)` — so a typed
+  > caller can align with a `compile.frontend: clang` config by setting
+  > only the request-level `DumpRequest(frontend="clang", ...)`, with no
+  > need to touch `input.compile.frontend` at all: `effective_frontend`
+  > honors an already-non-`"auto"` `header_backend` over its own castxml
+  > default. A `compile.frontend: castxml` config needs no typed-side
+  > action to align either, for a simpler reason — `effective_frontend`'s
+  > bare default (an un-set `DumpRequest.frontend`, still `"auto"`) is
+  > already castxml, so that direction was never divergent from a config
+  > pin in the first place. The claim above holds precisely for a typed
+  > request that leaves *both* `DumpRequest.frontend` and
+  > `input.compile.frontend` at their defaults (`"auto"`/unset) — that is
+  > the shape that survives a config-pinned frontend unclosed, not every
+  > typed request unconditionally.
   >
   > `compare`'s implicit-dump operand and `execute_dump_request` both reach
   > L4 replay through the *same* shared primitive,
@@ -2634,10 +2651,25 @@ pipelines a fourth time.
   > (`buildsource.source_extractors.resolver.resolve_source_extractor`,
   > `AUTO_PREFERENCE = (CLANG, CASTXML)` — clang preferred first, on
   > capability grounds, "most capable first") with the *opposite* default
-  > direction — though it has no production caller anywhere in the
-  > codebase today (confirmed by grep: only its own test module calls it),
-  > so it does not itself contradict `dump`'s CLI default either. What
-  > actually constrains direction (b) is narrower and real: the *typed*
+  > direction. **Second correction (Codex review, fresh evidence): this
+  > resolver does have a real production caller, contrary to the "no
+  > production caller anywhere" claim this note originally made.**
+  > `select_source_backend()` calls `resolve_source_extractor()`, and
+  > `cc_wrapper.emit_facts_for_command()` — reached from the published
+  > `abicheck-cc` console entry (`pyproject.toml`'s `[project.scripts]`,
+  > ADR-035 D5/G19.4's Flow-2 compiler wrapper) — calls
+  > `select_source_backend()`. So the capability-ordered, clang-first
+  > `AUTO_PREFERENCE` policy is already user-facing, through a different
+  > front end (`abicheck-cc`'s per-TU fact capture at compile time) than
+  > the `dump`/`compare`/`scan` pipeline this note is about. This still
+  > does not contradict `dump`'s CLI default: the two resolvers serve
+  > genuinely different callers (a compiler-wrapper's own per-compile
+  > extractor choice, vs. this pipeline's post-hoc choice of which
+  > extractor a whole comparison routes through), so `AUTO_PREFERENCE`
+  > being real and shipped doesn't itself argue for or against either of
+  > the two "obvious fixes" this note already rejects — only the "no
+  > production caller" framing was wrong, not the conclusion drawn from
+  > it. What actually constrains direction (b) is narrower and real: the *typed*
   > `dump`/`compare` pipeline's specific, deliberate choice to couple L4 to
   > L2 through one shared resolution (`effective_frontend`), for reasons
   > that have nothing to do with this one CLI code path — not a
