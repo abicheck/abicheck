@@ -477,6 +477,101 @@ class TestCompareReleaseAgainstBundleFactsResolutionUnit:
         result = compare_release_against_bundle_facts(facts_path, new_dir, policy_file=pf)
         assert result.policy_file is pf
 
+    def test_policy_file_override_genuinely_demotes_a_real_verdict(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Bug-class regression (plan Phase 9, incident #883): the two
+        tests above only prove *forwarding* -- both mock
+        ``service.compare_snapshots`` itself, the very function whose real
+        behavior a ``policy_file`` override is supposed to change -- so
+        neither would catch a regression where the override reaches the
+        call but is silently ignored by it, or is threaded to the wrong
+        keyword and has no effect. This lets the real, production
+        ``compare_snapshots`` run end to end (only ``service.resolve_input``
+        is mocked, since the NEW side has no real compiled binary here) and
+        asserts the actual, returned verdict is genuinely demoted -- closing
+        #883's own registered gap of "checked independently, not all
+        derived from one production helper" for at least this one detector
+        family."""
+        import abicheck.package as package_mod
+        import abicheck.service as service_mod
+        from abicheck.policy_file import PolicyFile
+
+        old_fn = Function(
+            name="core_fn",
+            mangled="core_fn",
+            return_type="int",
+            visibility=Visibility.PUBLIC,
+        )
+        old_snapshot = AbiSnapshot(
+            library="libcore.so",
+            version="old",
+            elf=_meta(soname="libcore.so", exports=["core_fn"]),
+            functions=[old_fn],
+        )
+        facts = capture_bundle_facts({"libcore.so": old_snapshot})
+        facts_path = tmp_path / "old.bundlefacts.json"
+        save_bundle_facts(facts, facts_path)
+
+        new_dir = tmp_path / "new"
+        new_dir.mkdir()
+        new_so = new_dir / "libcore.so"
+        new_so.write_bytes(b"")
+
+        monkeypatch.setattr(
+            package_mod,
+            "discover_shared_libraries",
+            lambda d, include_private=False: [new_so],
+        )
+
+        new_fn = Function(
+            name="core_fn",
+            mangled="core_fn",
+            return_type="int",
+            visibility=Visibility.HIDDEN,
+        )
+
+        def _fake_resolve_input(path, **kwargs):
+            return AbiSnapshot(
+                library="libcore.so",
+                version="new",
+                elf=_meta(soname="libcore.so", exports=[]),
+                functions=[new_fn],
+            )
+
+        monkeypatch.setattr(service_mod, "resolve_input", _fake_resolve_input)
+
+        # Baseline: no override -- the real compare_snapshots reports this
+        # kind's built-in default verdict, BREAKING.
+        baseline = compare_release_against_bundle_facts(facts_path, new_dir)
+        baseline_diffs = [d for d in baseline.per_library if d.library == "libcore.so"]
+        assert len(baseline_diffs) == 1
+        assert any(
+            c.kind == ChangeKind.FUNC_VISIBILITY_CHANGED
+            for c in baseline_diffs[0].changes
+        )
+        assert baseline_diffs[0].verdict == Verdict.BREAKING
+        assert baseline.verdict == Verdict.BREAKING
+
+        # Given: a real PolicyFile override demoting that one kind must
+        # actually change the per-library verdict AND the aggregate
+        # BundleDiffResult.verdict this driver returns -- not merely be
+        # accepted and discarded.
+        pf = PolicyFile(
+            overrides={ChangeKind.FUNC_VISIBILITY_CHANGED: Verdict.COMPATIBLE}
+        )
+        demoted = compare_release_against_bundle_facts(
+            facts_path, new_dir, policy_file=pf
+        )
+        demoted_diffs = [d for d in demoted.per_library if d.library == "libcore.so"]
+        assert len(demoted_diffs) == 1
+        assert any(
+            c.kind == ChangeKind.FUNC_VISIBILITY_CHANGED
+            for c in demoted_diffs[0].changes
+        )
+        assert demoted_diffs[0].verdict == Verdict.COMPATIBLE
+        assert demoted.verdict == Verdict.COMPATIBLE
+
     def test_duplicate_new_side_versions_use_version_aware_selection(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
