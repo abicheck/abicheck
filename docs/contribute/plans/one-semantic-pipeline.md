@@ -57,11 +57,11 @@ assume:
 
 | Backing ADR | Current state | What this plan's phases assume |
 |---|---|---|
-| ADR-055 (typed request/result) | D1 implemented for `compare` only | Phase 1 extends the existing `CompareRequest`/`service_compare_pipeline.py` shape to `dump`/`scan`, it does not invent a new shape |
+| ADR-055 (typed request/result) | D1 implemented for `compare` only | Phase 1 extends the existing `CompareRequest`/`service_compare_pipeline.py` shape to `dump` (a real `DumpRequest`/`resolve_dump_request`/`execute_dump_request` pair, already built) and finishes routing `dump`'s own real execution onto it — `scan`'s `ScanRequest` already exists separately and its candidate resolution already converges on the shared execution primitive, so Phase 1 does not extend this shape to `scan`, only to `dump` |
 | ADR-061 (responsibility packages) | Phases 0-1 implemented; Phase 5 (`model` package) begun | Phase 0/2/4/7 of this plan land inside the `model`/`compare`/`policy` packages ADR-061 already created; this plan does not create new top-level packages beyond what ADR-061 names |
 | ADR-062 (storage v2) | Phase 0 primitives (`abicheck/storage/`: `FactStatus`/`FactAvailability`, occurrence-preserving identity, canonical encoding, version axes) implemented and **inert** — nothing wired to a producer/reader | Phase 0/5 of this plan is the *generalization* of these primitives into the domain layer; Phase 8 of this plan is the *wiring* ADR-062 Phase 1 still needs, done jointly rather than twice |
 | ADR-042 (compatibility/gate separation) | Implemented for JSON/SARIF/`compare-release`; `workflows/aggregate/gate.py`/`fold.py` still decode exit codes inline | Phase 7 of this plan closes the `gate.py`/`fold.py` gap — not a redesign of ADR-042 itself. `junit_report.py`'s own inline `_is_failure` computation is **not** one of the gaps Phase 7 closes: that phase's own corrected design leaves it exactly as it is, since it is a legitimate per-render function of each call's own `SeverityConfig`/`relevant_ids`, not a property a finding carries — there is no `RunOutcome` field for it to read instead, so it stays inline by design, not as an unclosed gap |
-| AGENTS.md "PR C" (dump/scan typed convergence) | `resolve_dump_request`/`execute_dump_request` split landed; real `dump`/`scan` execution still on the legacy path, blocked on two named items (castxml availability for parity testing, `--compile-db-filter` typed surface — now closed) | Phase 1 of this plan is exactly "finish PR C," not a new design |
+| AGENTS.md "PR C" (dump/scan typed convergence) | `resolve_dump_request`/`execute_dump_request` split landed; `scan`'s candidate resolution already converges on the shared `workflows.artifact.execute._resolve_side_snapshot_impl` primitive that `execute_dump_request` itself calls internally (`resolve_dump_request` only validates evidence and builds a `ResolvedDumpRequest` — it never calls the primitive; `service_input_resolution` is only a delegating facade re-exporting this module's owner), but `dump`'s own real ELF/PE/Mach-O execution still runs the legacy path, blocked on two named items (castxml availability for parity testing, `--compile-db-filter` typed surface — now closed) | Phase 1 of this plan is exactly "finish PR C" for the `dump` half, not a new design |
 
 ## Phases
 
@@ -666,7 +666,7 @@ third time in prose:**
 |---|---|---|---|
 | `contract_evidence_collect.py` | `build_type_graph()` | `bases`, `virtual_bases` | no |
 | `diff_time64.py` | `_fold_record_tokens()` | `bases`, `virtual_bases` | **yes** |
-| `diff_stdlib_impl.py` | `_public_by_value_records()` | `bases`, `virtual_bases` | **yes** |
+| `diff_stdlib_impl.py` | `_public_by_value_type_closure()` | `bases`, `virtual_bases` | **yes** |
 | `surface_graph.py` | `_build_type_refs()` | `bases`, `virtual_bases` (separate lines) | no |
 | `internal_leak.py` | `_enqueue_record_children()` | `bases`, `virtual_bases` (separate lines) | no |
 | `export_surface.py` | line 1167's unresolved-type scan | `bases`, `virtual_bases` | no |
@@ -893,12 +893,53 @@ information, unconverted. Full test suite green; FP-rate/
 tier-accuracy gates unchanged (this phase changes representation, not
 detector logic).
 
+**Landed (first slice), not the whole phase — read this before assuming
+the Design section above is fully implemented.** `abicheck/model/
+availability.py` (relocated `FactStatus`/`Confidence`), `abicheck/model/
+fact.py` (`Fact[T]`, the `cast()`-sentinel omission mechanism for all
+three field shapes), `RecordType.bases_fact`/`virtual_bases_fact`/
+`vtable_fact`/`vptr_offset_bits_fact`, and `Param.is_va_list_fact` are
+real and tested (`tests/test_model_fact.py`,
+`tests/test_serialization_roundtrip.py::TestFactFieldRoundTrip`).
+`serialization.py` encodes/decodes the new fields and bumps
+`SCHEMA_VERSION` to 26, backfilling a legacy snapshot correctly from the
+existing `clang_vtable_facts_reliable`/`clang_va_list_facts_reliable`
+flags (split into `storage/fact_codec.py`/`storage/enum_codec.py` — both
+ADR-061 `storage`-layer leaf modules, depending on nothing beyond `model` —
+to stay under the 2000-line file-size cap). **Not landed in this slice**:
+no producer (`dumper_castxml.py`/`dumper_clang.py`/`dwarf_snapshot.py`)
+constructs a `Fact[...]` value directly yet — every fresh extraction still
+only populates the legacy field, so the bridge derives each `*_fact`
+sibling purely from whether that legacy argument was supplied at all: a
+producer that omits it (CastXML's own `Param(...)` never passes
+`is_va_list=`, for instance) already yields `NOT_COLLECTED`, while one
+that passes a raw value yields `Fact.present(raw)` regardless of whether
+that value is actually trustworthy. Producers do not yet construct
+`Fact[...]` explicitly to state a real reliability signal (`PARTIAL`/
+`UNSUPPORTED`/`FAILED`) — that is what a producer migration still needs
+to add. No detector (`diff_layout.py`/`diff_types.py`/
+`diff_param_qualifiers.py`/the nine-reader table above) has been
+migrated to read `.status`, and the widened, non-glob AI-readiness check
+this Design section describes has not been written. Migrating a detector
+now would add real complexity for zero behavior change until producer-
+side `Fact` construction lands first — deferred deliberately, not
+silently, per this plan's own "vertical slice, not flag day" discipline:
+this slice is the primitive the rest of Phase 0 builds on, landed and
+tested on its own rather than held until every consumer migrates too.
+
 ---
 
 ### Phase 1 — finish the `dump`/`scan` typed-API convergence (closes AGENTS.md "PR C")
 
-**Goal.** `dump`, `scan`, and `compare`'s implicit-dump operand execute
-through the same `resolve_dump_request`/`execute_dump_request` pair; no
+**Goal.** `dump` and `compare`'s implicit-dump operand execute through the
+same `resolve_dump_request`/`execute_dump_request` pair; `scan`'s candidate
+resolution executes through the shared `workflows.artifact.execute.
+_resolve_side_snapshot_impl` primitive that pair itself calls internally
+(already landed, per AGENTS.md's own record — `scan` has no `DumpRequest`-
+shaped input for `resolve_dump_request`/`execute_dump_request`'s own
+signature to accept, so it converges one layer lower, not on that pair
+verbatim; `service_input_resolution` is only a delegating facade
+re-exporting this module's owner, per that facade's own docstring). No
 entry point hand-rolls its own L2 seed, ADR-039 collector call, or AST
 cache key.
 
@@ -932,13 +973,13 @@ names the two blockers precisely and one is closed:
    left implicit in this Design section alone.
 
 Once unblocked: route `perform_elf_dump`/`handle_non_elf_dump` through
-`execute_dump_request`, and `scan_engine._build_new_snapshot` through the
-already-landed `_resolve_side_snapshot_impl` call (this step is smaller
-than it looks — the candidate-resolver convergence already landed per
-AGENTS.md's own record; what remains is the `dump` CLI's real execution
-path). Fold the legacy `-p`/`--compile-db` auto-match into the L3→L2 fold
-as the *sole* source of compile-database-derived context when the fold
-applies (already decided and landed per AGENTS.md's "legacy-match
+`execute_dump_request` — the one remaining routing step (this phase's
+worklist is smaller than the Goal above might suggest: `scan_engine.
+_build_new_snapshot` needs no further work here, since its own routing
+onto `_resolve_side_snapshot_impl` already landed per AGENTS.md's own
+record). Fold the legacy `-p`/`--compile-db` auto-match into the L3→L2
+fold as the *sole* source of compile-database-derived context when the
+fold applies (already decided and landed per AGENTS.md's "legacy-match
 overlap" entry) rather than re-deciding it here.
 
 **A third dump execution path exists, untouched by either of the two
@@ -1522,7 +1563,7 @@ sibling:
   `SurfaceGraph.public_roots()` calling `PublicSurfaceQuery.resolve()`
   directly would make `surface_graph.py` — a comparison/index-layer
   module (ADR-025's A1-A4 surface-intelligence substrate, the same role
-  `idiom.py`/`pattern_verdicts.py`/`diff_surface_metrics.py` already play)
+  `idioms.py`/`pattern_verdicts.py`/`diff_surface_metrics.py` already play)
   — import `policy/public_surface.py`, reversing ADR-061's required
   `policy -> compare` direction (`policy/` is allowed to depend on
   `compare/`, never the reverse). Second, `PublicSurfaceQuery.resolve()`
@@ -2672,7 +2713,7 @@ consumable by `re.Pattern.match()` with no caller change — agrees with
 pre-migration `SurfaceGraph` for this exact input; and a second case
 asserting `surface_graph.py` imports nothing from `policy/`, enforced by
 the same architecture-gate mechanism this plan already uses elsewhere for
-a leaf module's import direction. A sixth regression pins the kind-filter
+a leaf module's import direction. A seventh regression pins the kind-filter
 fix directly: a fixture where `PublicSurfaceQuery.resolve()`'s resolved
 set genuinely includes a record/enum/typedef `EntityId` (a public
 function's return type, reachable via a `declares`/type-reference edge)
@@ -2806,11 +2847,12 @@ is not a second *implementation* of compare orchestration.
 two more branches in the same file that it doesn't cover — `cli_compare_
 release.py` is not uniformly converged, just its main path.**
 `_collect_matrix_result()` (the `--probe-matrix-*` release-global
-build-configuration feature) calls `checker.compare()` directly over a
-pair of empty snapshots with `extra_changes`, by that function's own
-docstring's own admission — not through `service.run_compare`/
-`resolve_compare_request` at all, so it never constructs an `AnalysisPlan`
-either and has no pre-flight check for its own inputs.
+build-configuration feature) calls `service.compare_snapshots()` directly
+over a pair of empty snapshots with `extra_changes` — the sanctioned Tier-2
+chokepoint, not the disallowed Tier-1 `checker.compare()` core, so this
+doesn't itself trip the `cli-contract` gate — but it's still not through
+`service.run_compare`/`resolve_compare_request`, so it never constructs an
+`AnalysisPlan` either and has no pre-flight check for its own inputs.
 `_resolve_stranded_library()` (the `--bundle-facts-out` path's own
 fallback for a library missing from the normal per-pair comparison) calls
 `cli_resolve._resolve_input()` directly — the same Tier-2 resolution

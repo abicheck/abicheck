@@ -383,6 +383,19 @@ class TestApplyRecordFacts:
         assert updated.alignment_bits == 64
         assert updated.data_size_bits == 192
 
+    def test_backfilled_vptr_fact_matches_backfilled_scalar(self):
+        # Codex review: raw dataclasses.replace() carries t's stale
+        # vptr_offset_bits_fact=Fact.not_collected() into this update,
+        # which (bridge_legacy_and_fact's "explicit Fact wins" rule) would
+        # silently revert the just-backfilled scalar back to None.
+        from abicheck.model.fact import FactStatus
+
+        t = RecordType(name="Foo", kind="struct", vptr_offset_bits=None)
+        updated = _apply_record_facts(t, {"vptr_offset_bits": 0})
+        assert updated.vptr_offset_bits == 0
+        assert updated.vptr_offset_bits_fact.status is FactStatus.PRESENT
+        assert updated.vptr_offset_bits_fact.value == 0
+
     def test_backfills_base_offsets_only_when_empty(self):
         t = RecordType(name="Derived", kind="class", bases=["Base"], base_offsets={})
         facts = {"bases": [{"name": "Base", "offset_bits": 0, "is_virtual": False}]}

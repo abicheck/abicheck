@@ -30,7 +30,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING
 
-from .model import RecordType, TypeField
+from .model import RecordType, TypeField, replace_with_fact_sync
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -181,11 +181,10 @@ def _unique_dwarf_match(
     candidates = dwarf_candidates.get(name, [])
     return candidates[0] if len(candidates) == 1 else None
 
+
 def _fields_corroborate(header: RecordType, dwarf: RecordType) -> bool:
     if header.fields and dwarf.fields:
-        return bool(
-            {f.name for f in header.fields} & {f.name for f in dwarf.fields}
-        )
+        return bool({f.name for f in header.fields} & {f.name for f in dwarf.fields})
     if not header.fields and dwarf.fields:
         # An empty header type (tag type) can't corroborate against a
         # DWARF candidate that DOES have fields — that's exactly the
@@ -211,9 +210,7 @@ def _fields_corroborate(header: RecordType, dwarf: RecordType) -> bool:
     header_bases = {
         _topmost_scope_suffix(b) for b in header.bases + header.virtual_bases
     }
-    dwarf_bases = {
-        _topmost_scope_suffix(b) for b in dwarf.bases + dwarf.virtual_bases
-    }
+    dwarf_bases = {_topmost_scope_suffix(b) for b in dwarf.bases + dwarf.virtual_bases}
     if header_bases or dwarf_bases:
         return bool(header_bases & dwarf_bases)
     if header.name == dwarf.name:
@@ -318,8 +315,19 @@ def _backfilled_record(header: RecordType, dwarf: RecordType) -> RecordType:
     Purely additive: an attribute the header backend already computed always
     wins, so this is a no-op for a layout-aware backend (castxml) and a fill-in
     for a layout-blind one (clang).
+
+    ADR-063 Phase 0: `replace()` re-invokes `RecordType.__post_init__` with
+    EVERY field of `header`, not just the ones this function overrides —
+    including `header`'s own (pre-backfill) `vtable_fact`/
+    `vptr_offset_bits_fact` when `vtable`/`vptr_offset_bits` themselves ARE
+    being replaced with dwarf's value below. `__post_init__`'s "explicit
+    Fact wins" rule would then silently revert the just-backfilled scalar
+    back to `header`'s own (pre-backfill) value (Codex review, confirmed
+    against a real repro) — `replace_with_fact_sync` derives and passes the
+    matching `Fact.present(...)` sibling alongside each, so the two cannot
+    disagree.
     """
-    return replace(
+    return replace_with_fact_sync(
         header,
         size_bits=dwarf.size_bits,
         alignment_bits=dwarf.alignment_bits,

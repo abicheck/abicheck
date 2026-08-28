@@ -6,14 +6,19 @@ are already partially satisfied by work this ADR consolidates rather than
 replaces (see "Relationship to existing ADRs" below); none of its new
 primitives exist yet.
 **Decision maker:** abicheck maintainers
-**Relates to / builds on:** [ADR-036](036-report-view-model.md),
+**Relates to / builds on:** [ADR-024](024-public-abi-surface-resolution.md),
+[ADR-031](031-source-implementation-graph-augmentation.md),
+[ADR-036](036-report-view-model.md),
 [ADR-037](037-cli-interface-contract.md),
 [ADR-042](042-compatibility-and-gate-decision-separation.md),
+[ADR-043](043-cli-pre-1.0-surface-reset.md),
+[ADR-044](044-reachability-aware-suppression.md),
 [ADR-045](045-identity-based-old-new-entity-matching.md),
 [ADR-046](046-source-graph-identity-v2-and-evidence-merge.md),
 [ADR-048](048-canonical-entity-identity-and-graph-reconciliation.md),
 [ADR-049](049-contract-relevance-and-compatibility-configuration.md),
 [ADR-050](050-comparability-contract-and-multi-tu-manifest.md),
+[ADR-053](053-tu-link-unit-dso-attribution.md),
 [ADR-054](054-cli-project-integration-surface-consolidation.md),
 [ADR-055](055-typed-request-result-completeness-and-schema-registry.md),
 [ADR-057](057-consumer-graph-and-impact-join.md),
@@ -196,15 +201,27 @@ classify → outcome` — instead of each independently orchestrating
 This generalizes ADR-055's D1 (CLI and the typed API already share one
 input-resolution path for `compare`) and ADR-061's `workflows` ring to
 *every* operation, not only `compare`. Concretely: `dump`'s ELF/PE/Mach-O
-execution paths (`perform_elf_dump`/`handle_non_elf_dump`) and `scan`'s
-candidate resolution (`scan_engine._build_new_snapshot`) converge on the
-same `resolve_dump_request`/`execute_dump_request` split already added to
-`service_dump_pipeline.py` (see AGENTS.md's "PR C" note for the concrete,
-already-identified blockers to finishing this for `dump`/`scan`), and the
-Action/`cli_project.py`/bundle fan-out stop doing their own policy
-interpretation or compare setup. The `cli-contract`/`engine-cli-boundary`
-AI-readiness gates are widened to check this directly rather than only the
-currently-allowlisted legacy exceptions.
+execution paths (`perform_elf_dump`/`handle_non_elf_dump`) are meant to
+converge on the `resolve_dump_request`/`execute_dump_request` split already
+added to `service_dump_pipeline.py`, but still run their own legacy route
+today. `scan`'s candidate resolution (`scan_engine._build_new_snapshot`)
+already converges on the shared `workflows.artifact.execute.
+_resolve_side_snapshot_impl` primitive (`service_input_resolution` is only
+a delegating facade over this same module; import the real owner in new
+code, per that facade's own docstring) — the same one `execute_dump_request`
+itself calls internally (`resolve_dump_request` does not; it only validates
+evidence and builds a `ResolvedDumpRequest`) — not on
+`resolve_dump_request`/`execute_dump_request` verbatim, since `scan` has no
+`DumpRequest`-shaped input for that pair's own signature to accept (per
+AGENTS.md's own record, this half is already landed; only `dump`'s real
+execution path remains on the legacy route, still needing to be migrated
+onto `execute_dump_request` itself, not merely onto the shared primitive it
+wraps). See AGENTS.md's "PR C" note for the concrete, already-identified
+blockers to finishing the `dump` half, and the Action/`cli_project.py`/
+bundle fan-out stop doing their own policy interpretation or compare setup.
+The `cli-contract`/`engine-cli-boundary` AI-readiness gates are widened to
+check this directly rather than only the currently-allowlisted legacy
+exceptions.
 
 **No new root entry point is introduced.** ADR-043/054's CLI surface is
 unchanged; this decision is about what happens *behind* each existing
@@ -232,9 +249,12 @@ snapshot — not a gap this decision claims to close.
 code, not assumed covered by "bundle/release fan-out" above): two branches
 inside `cli_compare_release.py` bypass the pipeline and are not migrated by
 this plan either.** `_collect_matrix_result()` (the `--probe-matrix-*`
-release-global build-configuration feature) calls `checker.compare()`
-directly over a pair of empty snapshots with `extra_changes`, never
-constructing a request or a plan. `_resolve_stranded_library()` (the
+release-global build-configuration feature) calls `service.
+compare_snapshots()` directly over a pair of empty snapshots with
+`extra_changes` — the sanctioned Tier-2 chokepoint, not the disallowed
+Tier-1 `checker.compare()` core, so this does not itself trip the
+`cli-contract` gate — but it still never constructs a request or a plan,
+which is what this decision's own convergence is about. `_resolve_stranded_library()` (the
 `--bundle-facts-out` path's fallback for a library missing from the normal
 per-pair comparison) calls `cli_resolve._resolve_input()` directly — the
 same Tier-2 resolution `resolve_compare_request` itself calls, but reached

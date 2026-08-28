@@ -46,6 +46,13 @@ from .model import (
     Variable,
     Visibility,
 )
+from .storage.enum_codec import encode_platform_enums
+from .storage.fact_codec import (
+    apply_legacy_fact_backfill,
+    decode_fact,
+    decode_record_facts,
+    encode_fact_fields,
+)
 
 # Current schema version for snapshot serialization.
 # Increment this whenever the snapshot format changes in a backward-incompatible way.
@@ -280,6 +287,9 @@ from .model import (
 #     unqualified `typedefs` dict as the fallback source of truth, so
 #     "empty" degrades cleanly to "no extra qualified-identity data
 #     available" rather than being misread as a real fact.
+#   26 — ADR-063 Phase 0: `Fact[T]` siblings for `RecordType.bases_fact`/
+#     `virtual_bases_fact`/`vtable_fact`/`vptr_offset_bits_fact` and
+#     `Param.is_va_list_fact` — see `storage/fact_codec.py`.
 #
 # Reading an OLDER snapshot (the direction every CI baseline actually hits —
 # a baseline is committed once and outlives however many abicheck pin bumps
@@ -292,7 +302,7 @@ from .model import (
 # doesn't hit any producer-specific threshold above stays silent, since every
 # CI baseline is *always* some number of versions behind and warning
 # regardless of relevance would just be noise.
-SCHEMA_VERSION: int = 25
+SCHEMA_VERSION: int = 26
 
 # Schema version at which CastXML field CV facts became reliable (see v9 above).
 _MIN_SCHEMA_VERSION_FOR_CV_FACTS = 9
@@ -381,51 +391,11 @@ def snapshot_to_dict(snap: AbiSnapshot) -> dict[str, Any]:
     if snap.from_headers_inferred:
         d.pop("from_headers", None)
 
-    # Serialize ElfMetadata enums to strings for JSON compatibility
-    if d.get("elf"):
-        elf = d["elf"]
-        for sym in elf.get("symbols", []):
-            sym["binding"] = (
-                sym["binding"]
-                if isinstance(sym["binding"], str)
-                else sym["binding"].value
-            )
-            sym["sym_type"] = (
-                sym["sym_type"]
-                if isinstance(sym["sym_type"], str)
-                else sym["sym_type"].value
-            )
-        for imp in elf.get("imports", []):
-            imp["binding"] = (
-                imp["binding"]
-                if isinstance(imp["binding"], str)
-                else imp["binding"].value
-            )
-            imp["sym_type"] = (
-                imp["sym_type"]
-                if isinstance(imp["sym_type"], str)
-                else imp["sym_type"].value
-            )
+    # ElfMetadata/PeMetadata/MachoMetadata enums -> strings (storage/enum_codec.py).
+    encode_platform_enums(d)
 
-    # Serialize PeMetadata enums to strings
-    if d.get("pe"):
-        pe = d["pe"]
-        for exp in pe.get("exports", []):
-            exp["sym_type"] = (
-                exp["sym_type"]
-                if isinstance(exp["sym_type"], str)
-                else exp["sym_type"].value
-            )
-
-    # Serialize MachoMetadata enums to strings
-    if d.get("macho"):
-        macho = d["macho"]
-        for exp in macho.get("exports", []):
-            exp["sym_type"] = (
-                exp["sym_type"]
-                if isinstance(exp["sym_type"], str)
-                else exp["sym_type"].value
-            )
+    # ADR-063 Phase 0 (schema v26): see storage/fact_codec.py.
+    encode_fact_fields(d)
 
     # Convert all sets → sorted lists (needed for AdvancedDwarfMetadata.packed_structs
     # and ToolchainInfo.abi_flags; json.dumps raises TypeError on set objects)
@@ -903,6 +873,9 @@ def snapshot_from_dict(d: dict[str, Any]) -> AbiSnapshot:
                     pointer_depth=p.get("pointer_depth", 0),
                     is_restrict=p.get("is_restrict", False),
                     is_va_list=p.get("is_va_list", False),
+                    is_va_list_fact=decode_fact(
+                        p.get("is_va_list_fact"), _schema_version
+                    ),
                 )
                 for p in f.get("params", [])
             ],
@@ -1029,6 +1002,7 @@ def snapshot_from_dict(d: dict[str, Any]) -> AbiSnapshot:
             qualified_name=t.get("qualified_name"),
             is_abstract=t.get("is_abstract"),
             deprecated=t.get("deprecated"),
+            **decode_record_facts(t, _schema_version),
         )
         for t in d.get("types", [])
     ]
@@ -1322,6 +1296,17 @@ def snapshot_from_dict(d: dict[str, Any]) -> AbiSnapshot:
             or ast_producer_value == "castxml"
             or _schema_version >= _MIN_SCHEMA_VERSION_FOR_CLANG_VA_LIST_FACTS
         )
+
+    # ADR-063 Phase 0 (schema v26): see storage/fact_codec.py.
+    apply_legacy_fact_backfill(
+        d,
+        types,
+        funcs,
+        _schema_version,
+        clang_vtable_facts_reliable_value,
+        clang_va_list_facts_reliable_value,
+        ast_producer_value,
+    )
 
     if "castxml_var_access_facts_reliable" in d:
         # Same explicit-marker-wins reasoning as the flags above.

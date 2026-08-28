@@ -77,7 +77,7 @@ from .dumper_clang_errors import (
 from .dumper_sysinc import _resolve_clang_system_includes
 from .errors import SnapshotError, ValidationError
 from .header_utils import iter_directory_headers, resolve_inferred_header_roots
-from .model import AbiSnapshot, RecordType
+from .model import AbiSnapshot, RecordType, replace_with_fact_sync
 
 log = logging.getLogger(__name__)
 
@@ -386,7 +386,7 @@ def _apply_record_facts(t: RecordType, facts: dict[str, Any]) -> RecordType:
         if fields_changed:
             updates["fields"] = new_fields
 
-    return replace(t, **updates) if updates else t
+    return replace_with_fact_sync(t, **updates) if updates else t
 
 
 def apply_layout_facts(

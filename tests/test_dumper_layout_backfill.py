@@ -20,11 +20,13 @@ import pytest
 
 from abicheck.dumper_layout_backfill import (
     DwarfLayoutCoherence,
+    _backfilled_record,
     _topmost_scope_suffix,
     backfill_dwarf_layout,
     dwarf_layout_types_or_empty,
 )
 from abicheck.model import RecordType, TypeField
+from abicheck.model.availability import FactStatus
 
 
 def _dwarf_meta(has_dwarf: bool):
@@ -773,3 +775,53 @@ class TestDwarfLayoutCoherence:
         )
         assert out == [already_has_layout]
         assert coherence == DwarfLayoutCoherence(status="matched")
+
+
+class TestBackfilledRecordFactSync:
+    """ADR-063 Phase 0 (Codex review): dataclasses.replace() re-invokes
+    RecordType.__post_init__ with EVERY field of the header-side record,
+    including its own (pre-backfill) vtable_fact/vptr_offset_bits_fact —
+    which, without this fix, silently reverted the just-backfilled DWARF
+    scalar back to the header's own pre-backfill value."""
+
+    def test_vptr_offset_bits_fact_matches_backfilled_scalar(self) -> None:
+        header = RecordType(name="Widget", kind="class", vptr_offset_bits=None)
+        dwarf = RecordType(name="Widget", kind="class", vptr_offset_bits=0)
+        merged = _backfilled_record(header, dwarf)
+        assert merged.vptr_offset_bits == 0
+        assert merged.vptr_offset_bits_fact is not None
+        assert merged.vptr_offset_bits_fact.status is FactStatus.PRESENT
+        assert merged.vptr_offset_bits_fact.value == 0
+
+    def test_vtable_fact_matches_backfilled_scalar(self) -> None:
+        header = RecordType(name="Widget", kind="class", vtable=[])
+        dwarf = RecordType(name="Widget", kind="class", vtable=["_ZN6WidgetD1Ev"])
+        merged = _backfilled_record(header, dwarf)
+        assert merged.vtable == ["_ZN6WidgetD1Ev"]
+        assert merged.vtable_fact is not None
+        assert merged.vtable_fact.status is FactStatus.PRESENT
+        assert merged.vtable_fact.value == ["_ZN6WidgetD1Ev"]
+
+    def test_header_own_vptr_offset_bits_still_wins_and_fact_agrees(self) -> None:
+        header = RecordType(name="Widget", kind="class", vptr_offset_bits=64)
+        dwarf = RecordType(name="Widget", kind="class", vptr_offset_bits=0)
+        merged = _backfilled_record(header, dwarf)
+        assert merged.vptr_offset_bits == 64
+        assert merged.vptr_offset_bits_fact is not None
+        assert merged.vptr_offset_bits_fact.value == 64
+
+    def test_hybrid_merge_snapshots_keeps_vptr_fact_in_sync_too(self) -> None:
+        # Same bug, reached via dumper_hybrid.merge_snapshots's castxml+clang
+        # RecordType.replace() path rather than this module's DWARF backfill.
+        from abicheck.dumper_hybrid import merge_snapshots
+        from abicheck.model import AbiSnapshot
+
+        old = RecordType(name="Widget", kind="class", size_bits=64, vptr_offset_bits=None)
+        new = RecordType(name="Widget", kind="class", size_bits=64, vptr_offset_bits=0)
+        merged_t = merge_snapshots(
+            AbiSnapshot(library="l", version="1", types=[old], from_headers=True, ast_producer="castxml"),
+            AbiSnapshot(library="l", version="1", types=[new], from_headers=True, ast_producer="clang"),
+        ).type_by_name("Widget")
+        assert merged_t.vptr_offset_bits == 0
+        assert merged_t.vptr_offset_bits_fact.status is FactStatus.PRESENT
+        assert merged_t.vptr_offset_bits_fact.value == 0
