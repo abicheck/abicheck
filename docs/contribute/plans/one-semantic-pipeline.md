@@ -980,12 +980,20 @@ reader is checked," and it takes exactly this kind of real scan to find
 the readers a hand audit keeps missing.
 
 The check's baseline (`KNOWN_UNMIGRATED_READERS`, allowlist-and-shrink,
-`IMPORT_CYCLE_ALLOWLIST`'s own convention) currently records 104 known
-reader sites across the modules named above and throughout this Design
+`IMPORT_CYCLE_ALLOWLIST`'s own convention) currently records every known
+reader site across the modules named above and throughout this Design
 section (including `vptr_offset_bits` and every dynamic-read form later
 review rounds added -- `getattr`/its aliases, `operator.attrgetter`,
 `__getattribute__`, `MatchClass` keyword and positional patterns -- each
-described in its own round below), keyed `"<rel>::<qualname>::<attr>::
+described in its own round below) — the exact count is deliberately not
+restated here as a number (Codex review, fresh evidence: an earlier
+revision of this paragraph copied the count by hand and went stale the
+moment a later round changed it, the same drift risk every "stays at N"
+review-note copy below carried too -- those now read "the baseline count
+is unchanged" instead of a literal figure, for the identical reason).
+`len(KNOWN_UNMIGRATED_READERS)` in the source is this baseline's own fact
+owner, and the count is explicitly expected to shrink as readers migrate.
+Each site is keyed `"<rel>::<qualname>::<attr>::
 <outer-expr-text>::<expr-text>::<occurrence>"` -- `qualname` the enclosing
 function (`<module>` for module-level code, `Class.method` for a method),
 `outer-expr-text` the read's own outermost containing expression
@@ -1060,10 +1068,10 @@ exactly this way, invisible to the original scan. Fixed by also matching
 a `getattr()` call whose second argument is a string-literal `ast.Constant`
 naming one of the bridged attributes (a non-literal name stays out of
 scope, the same no-type-inference limit already stated for the attribute
-case). Total baseline: 104. No type inference is attempted — verified
-empirically, by running the scan against the whole package before writing
-the baseline, that all 104 hits are genuinely `RecordType`/`Param`
-accesses (attribute or `getattr`) with zero cross-class collisions. Tests:
+case). No type inference is attempted — verified empirically, by running
+the scan against the whole package before writing the baseline, that
+every hit recorded there is genuinely a `RecordType`/`Param` access
+(attribute or `getattr`) with zero cross-class collisions. Tests:
 `tests/test_fact_field_readers.py` (the real repository has zero unlisted
 violations; every baseline/exempt entry still names something real; the
 AST primitive's own contract — attrs detected including `vptr_offset_bits`,
@@ -1087,8 +1095,7 @@ keyword pattern's own location and the whole class pattern's source text
 (`RecordType(bases=[])`) as `expr-text`, since a `MatchClass` node carries
 no location for a single keyword on its own. Verified empirically to have
 zero existing hits — no `match`/`case` statement in the repository
-currently patterns on any of these five fields, so the baseline stays at
-104. (2) The root `AGENTS.md`'s AI-readiness gate table (the canonical
+currently patterns on any of these five fields, so the baseline count is unchanged. (2) The root `AGENTS.md`'s AI-readiness gate table (the canonical
 verification contract every other check is listed in) had no row for
 `fact-field-readers`, leaving it undiscoverable from that table — added
 alongside `engine-cli-boundary`'s own row. New test:
@@ -1132,7 +1139,7 @@ both reads, still disambiguated between them by the existing bare-text
 component) without the body. Key format is now `"<rel>::<qualname>::
 <attr>::<outer-expr>::<expr-text>::<occurrence>"` — five components before
 the ordinal, not three. Baseline regenerated directly from the real scan
-(still 104 entries, only the key shape changed) and re-verified at zero
+(still the same number of entries, only the key shape changed) and re-verified at zero
 unlisted violations. New tests: two different call sites with identical
 bare text now getting distinct keys with no ordinal needed, a compound
 statement's body confirmed excluded from the key, a positional pattern on
@@ -1150,7 +1157,7 @@ NAMES` under (via `as`) back to its real name, whole-tree rather than
 function-scoped (an import is visible for its entire enclosing scope
 regardless of where a later pattern uses it) — the positional-pattern
 check resolves through this map before testing membership. Verified
-empirically: still zero existing hits, baseline stays at 104. New tests:
+empirically: still zero existing hits, baseline count is unchanged. New tests:
 a positional pattern through an import alias detected, one on an alias
 of an unrelated class ignored.
 
@@ -1175,8 +1182,7 @@ builtins import getattr as X`) and every local name bound to the
 `builtins` module itself (`import builtins`, `import builtins as b`),
 and the `getattr`-detection branch now also matches a qualified call
 (`<name>.getattr(...)`) whose base resolves to one of those module
-names. Verified empirically: still zero existing hits, baseline stays at
-104. New tests: a local class-name alias detected and a negative control
+names. Verified empirically: still zero existing hits, baseline count is unchanged. New tests: a local class-name alias detected and a negative control
 for an unrelated class, a qualified `builtins.getattr` call detected, an
 aliased `getattr` import detected, and a negative control for a call
 qualified through an unrelated module.
@@ -1205,7 +1211,7 @@ attribute branch too. Fixed with a dedicated `ast.AugAssign` branch
 matching the target's own attribute name, keyed on the target Attribute
 node itself (not the whole `AugAssign` statement) so its site/text line up
 with an ordinary attribute read at the same position. Verified
-empirically: still zero existing hits, baseline stays at 104. New tests: a
+empirically: still zero existing hits, baseline count is unchanged. New tests: a
 local `getattr` alias detected, a chained `getattr` alias detected, an
 augmented assignment detected, and a negative control confirming an
 ordinary `Store` overwrite is still not flagged.
@@ -1233,7 +1239,7 @@ finishes collecting every `import builtins` occurrence (needed since,
 unlike the plain-name candidates, this resolution needs the *complete*
 `builtins_names` set before it can tell whether the qualifying name is
 really the `builtins` module). Verified empirically: still zero existing
-hits, baseline stays at 104. New tests: an annotated class alias detected
+hits, baseline count is unchanged. New tests: an annotated class alias detected
 through a positional pattern, and a qualified assignment to the
 `getattr` builtin detected.
 
@@ -1248,7 +1254,7 @@ aliases()` too, for both the plain-name and qualified-attribute value
 shapes -- factored into one shared `_add_candidate()` helper so the
 `ast.Assign` and `ast.AnnAssign` branches can't independently drift on
 which value shapes each recognizes. Verified empirically: still zero
-existing hits, baseline stays at 104. New tests: an annotated `getattr`
+existing hits, baseline count is unchanged. New tests: an annotated `getattr`
 alias detected, and the annotated form of the qualified spelling
 (`read_attr: object = builtins.getattr`) detected too.
 
@@ -1269,7 +1275,7 @@ shared `_register_assign()` helper (mirroring round eleven's
 `_add_candidate()` for `_builtins_getattr_aliases()`) so the `ast.Assign`
 and `ast.AnnAssign` branches can't independently drift on which RHS
 shapes each recognizes. Verified empirically: still zero existing hits,
-baseline stays at 104. New test: a qualified class alias detected through
+baseline count is unchanged. New test: a qualified class alias detected through
 a positional pattern.
 
 **A thirteenth Codex review round found one more real gap, applying to
@@ -1285,7 +1291,7 @@ finding was for that module's own candidate collector. Fixed by looping
 over every target in `node.targets` and registering each plain-`Name`
 one, in both `_imported_class_aliases()` and `_builtins_getattr_
 aliases()`. Verified empirically: still zero existing hits, baseline
-stays at 104. New tests: a chained class alias detected through a
+count is unchanged. New tests: a chained class alias detected through a
 positional pattern, and a chained `getattr` alias detected.
 
 **A fourteenth Codex review round found one more real gap -- fixed.**
@@ -1298,7 +1304,7 @@ fixed point too, reusing the identical `assign_candidates` list the
 Name-valued assignment, not just getattr-related ones) -- resolved
 *before* the existing `qualified_candidates` step, so `b.getattr(...)`
 is recognized through the now-expanded `builtins_names` as well.
-Verified empirically: still zero existing hits, baseline stays at 104.
+Verified empirically: still zero existing hits, baseline count is unchanged.
 New test: a call through an assigned alias of the `builtins` module.
 
 **A fifteenth Codex review round found the scan still missed two more
@@ -1327,7 +1333,7 @@ assigned once and invoked later, which is exactly the two-step
 indirection this scan already excludes for every other form, so building
 the same machinery for it would recognize a shape this scan otherwise
 deliberately doesn't. Verified empirically: still zero existing hits in
-the real repository, baseline stays at 104. Eight new tests: the
+the real repository, baseline count is unchanged. Eight new tests: the
 qualified and bare `attrgetter` forms, a dotted-name negative control, the
 variable-indirection negative control, the bound and unbound
 `__getattribute__` forms, and a non-matching-name negative control for
@@ -1362,7 +1368,7 @@ separately, since it too can produce more than one match per node),
 inspecting every literal, string-constant positional argument
 independently and reporting each bridged one as its own site. Verified
 empirically: still zero existing hits in the real repository, baseline
-stays at 104. Five new tests: the `import ... as`/`from ... import ... as`
+count is unchanged. Five new tests: the `import ... as`/`from ... import ... as`
 alias forms, a multi-argument call with the bridged field in the second
 position, a multi-argument call with two independently-bridged fields
 (both reported), and a multi-argument negative control naming no bridged
@@ -1413,7 +1419,7 @@ getattr(rec, "bases")` (an ordinary reassignment shadow, not reported by
 this round) is left as a documented, accepted residual false positive
 rather than a silently reintroduced one, pinned by its own test. Verified
 empirically: still zero existing hits in the real repository, baseline
-stays at 104, and `mypy`/`ruff` both stayed clean. Five new tests: the
+count is unchanged, and `mypy`/`ruff` both stayed clean. Five new tests: the
 two chained-alias `attrgetter`/`operator` forms, the shadowed-parameter
 negative control, its sibling-function negative control (shadowing in one
 function must not leak into another), and the residual-gap documentation
@@ -1452,7 +1458,7 @@ assumed; `check_fact_field_readers()`'s own Findings/message-building glue
 stays independently, directly tested by this file's existing synthetic-
 fixture tests (`test_check_reports_a_new_violation`/`test_check_is_
 silent_for_clean_code`), so nothing lost real coverage. Verified
-empirically: still zero existing hits, baseline stays at 104, `mypy`/
+empirically: still zero existing hits, baseline count is unchanged, `mypy`/
 `ruff` both stayed clean, and this file's own runtime dropped from ~26s
 to ~9s for its (now 60, previously 57) tests. Three new tests: the
 shadowed-`operator`-parameter and shadowed-bare-`attrgetter`-parameter
@@ -1477,7 +1483,7 @@ helper needed here, since `node.func.value.id` is already narrowed to
 level shallower than the attrgetter branch's `node.func.func` access that
 needed its own dedicated helper in the eighteenth round. Verified
 empirically: still zero existing hits in the real repository, baseline
-stays at 104, `mypy`/`ruff` both stayed clean. Three new tests: the
+count is unchanged, `mypy`/`ruff` both stayed clean. Three new tests: the
 shadowed-`object`-parameter and shadowed-`type`-parameter negative
 controls, and a sibling-function negative control (shadowing in one
 function must not leak into another's genuine unbound
@@ -1510,7 +1516,7 @@ module's qualnames already) -- and widened `_shadowed()` to walk the
 call's entire lexical scope chain, testing membership in each ancestor's
 own `locally_bound` set in turn rather than only the innermost one.
 Verified empirically: still zero existing hits in the real repository,
-baseline stays at 104, `mypy`/`ruff` both stayed clean. Four new tests:
+baseline count is unchanged, `mypy`/`ruff` both stayed clean. Four new tests:
 the aliased-unbound-`__getattribute__` positive case and its
 unrelated-name negative control, and the enclosing-parameter-shadow
 exclusion and its sibling-function negative control.
@@ -1518,7 +1524,7 @@ exclusion and its sibling-function negative control.
 **Still not landed**: no detector (`diff_layout.py`/`diff_types.py`/
 `diff_param_qualifiers.py`/the reader set the check above now tracks
 precisely) has actually been migrated to read `.status` — the check above
-only *guards* the 104 existing sites against a new, unreviewed one
+only *guards* the existing sites against a new, unreviewed one
 joining them; it does not change what any of them do.
 Migrating a detector now would add real complexity for zero behavior
 change until every producer's own construction is at least this explicit
