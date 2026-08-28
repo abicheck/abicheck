@@ -1047,3 +1047,78 @@ def test_mutating_the_real_hop2_gate_leaks_the_workflow_global_path() -> None:
         "would NOT actually have caught this class of regression, "
         "contradicting the mutation-check claim this test exists to prove"
     )
+
+
+def test_collect_facts_failure_independently_disables_the_consumer_step() -> None:
+    """Codex review (PR #906): every `steps_context` used elsewhere in this
+    file sets `collect_verify.outcome` and `collect_replay.outcome` to the
+    identical value ("success") -- but `actions/check-target/action.yml`'s
+    own "Collect source facts (verify)"/"(replay)" steps have mutually
+    exclusive `if:` conditions (gated on `evidence-producer` being
+    wrapper/clang-plugin vs. replay), so in a real run at most one of them
+    ever actually executes; the other reads "skipped". Because every
+    scenario elsewhere in this file supplies the same value for both keys,
+    a mutation collapsing `steps.collect_replay.outcome != 'failure'` into
+    a second check of `steps.collect_verify.outcome` would have left every
+    other test in this file green, while a real replay-collection failure
+    alongside a skipped verify step would incorrectly still let the
+    consumer dump run.
+
+    Proves each `!= 'failure'` clause is independently load-bearing: a
+    genuine failure on either collection step disables the guard even
+    when the OTHER, mutually-exclusive step was merely skipped (never a
+    forged "success") -- and that a realistic skipped/succeeded pairing
+    still activates it, so the failing cases aren't just an always-false
+    guard."""
+    consumer_step = _consumer_context_step()
+    hop3_inputs = _hop3_inputs_from(
+        kind="target",
+        baseline_channel="none",
+        consumer_compile_active="true",
+        consumer_ast_frontend=_SENTINEL_CONSUMER_AST_FRONTEND,
+        consumer_gcc_path=_SENTINEL_CONSUMER_GCC_PATH,
+        consumer_gcc_options="",
+    )
+
+    # A real "evidence-producer: replay" run: verify never ran (skipped),
+    # replay genuinely failed. The guard must still refuse to run.
+    assert not eval_gha_expression(
+        consumer_step["if"],
+        inputs=hop3_inputs,
+        steps={
+            "collect_verify.outcome": "skipped",
+            "collect_replay.outcome": "failure",
+        },
+    ), (
+        "a failed replay collection must disable the consumer step even "
+        "when verify was merely skipped, not run as a forged success"
+    )
+
+    # A real "evidence-producer: wrapper" run: replay never ran (skipped),
+    # verify genuinely failed. The guard must still refuse to run.
+    assert not eval_gha_expression(
+        consumer_step["if"],
+        inputs=hop3_inputs,
+        steps={
+            "collect_verify.outcome": "failure",
+            "collect_replay.outcome": "skipped",
+        },
+    ), (
+        "a failed verify collection must disable the consumer step even "
+        "when replay was merely skipped, not run as a forged success"
+    )
+
+    # Sanity: the realistic, mutually-exclusive success pairing (one
+    # skipped, one succeeded) still activates it -- confirming the two
+    # failing cases above aren't just an always-false guard.
+    assert eval_gha_expression(
+        consumer_step["if"],
+        inputs=hop3_inputs,
+        steps={
+            "collect_verify.outcome": "skipped",
+            "collect_replay.outcome": "success",
+        },
+    ), (
+        "a realistic skipped-verify/succeeded-replay pairing must still "
+        "activate the consumer step"
+    )
