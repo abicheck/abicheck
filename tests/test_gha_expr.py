@@ -36,11 +36,23 @@ def test_string_literal() -> None:
     assert eval_gha_expression("${{ '' }}", inputs={}) == ""
 
 
-def test_missing_property_is_none_not_an_error() -> None:
+def test_missing_property_is_empty_string_not_an_error() -> None:
     """A genuinely-omitted matrix key (RunPlanCheck.to_dict()'s own
-    falsy-field-omission convention) must evaluate to None, matching real
-    GHA runtime behavior for an undefined context property."""
-    assert eval_gha_expression("${{ matrix.absent }}", matrix={}) is None
+    falsy-field-omission convention) must evaluate to "" (CodeRabbit
+    review, PR #906: GitHub's own contexts reference documents that
+    dereferencing a nonexistent context property evaluates to an empty
+    string, not `null` -- an earlier revision returned `None`, which is
+    falsy the same way "" is under short-circuit `||`/`&&`, but made
+    `matrix.absent == ''` wrongly evaluate `False` instead of the `True` a
+    real GHA runtime produces)."""
+    assert eval_gha_expression("${{ matrix.absent }}", matrix={}) == ""
+
+
+def test_missing_property_equals_empty_string() -> None:
+    """The real-world case the `None` bug above actually broke: comparing
+    an unset property against the empty-string literal, exactly as several
+    real workflow expressions in this repo do."""
+    assert eval_gha_expression("${{ matrix.absent == '' }}", matrix={}) is True
 
 
 def test_unsupplied_context_name_is_a_caller_error() -> None:

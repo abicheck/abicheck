@@ -168,13 +168,20 @@ class _Ref(_Node):
 
     A genuinely-unset property (e.g. a JSON matrix cell that omits a key
     entirely -- ``RunPlanCheck.to_dict()``'s own convention for a falsy
-    field) evaluates to ``None``, matching real GHA runtime behavior for
-    referencing an undefined context property, not an error: that is a
-    legitimate, common shape this grammar must evaluate correctly, since
-    several of this repo's own expressions rely on exactly that
-    omission-means-falsy behavior (``matrix.consumer_compile_gcc_path ||
-    ...``). Only a context *name* the caller never supplied at all
-    (``matrix``/``inputs`` themselves) is treated as a caller error.
+    field) evaluates to ``""``, matching real GHA runtime behavior for
+    referencing an undefined context property (per GitHub's own contexts
+    reference: dereferencing a nonexistent context property evaluates to
+    an empty string, not `null` -- CodeRabbit review, PR #906, fresh
+    evidence: an earlier revision returned `None` here, which is falsy the
+    same way `""` is under `_truthy()`/`||`/`&&`, but made
+    `matrix.absent == ''` -- itself a legitimate, real expression shape --
+    incorrectly evaluate `False` instead of the `True` a real GHA runtime
+    would produce). This is a legitimate, common shape this grammar must
+    evaluate correctly, since several of this repo's own expressions rely
+    on exactly that omission-means-falsy behavior
+    (``matrix.consumer_compile_gcc_path || ...``). Only a context *name*
+    the caller never supplied at all (``matrix``/``inputs`` themselves) is
+    treated as a caller error.
     """
 
     def __init__(self, path: str) -> None:
@@ -192,7 +199,7 @@ class _Ref(_Node):
             raise GhaExpressionError(
                 f"context {head!r} must be a dict, got {type(node).__name__}"
             )
-        return node.get(rest)
+        return node.get(rest, "")
 
 
 class _Eq(_Node):
