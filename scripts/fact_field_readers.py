@@ -83,8 +83,26 @@ codebase already accepts elsewhere for a structural, non-type-checking scan
 from __future__ import annotations
 
 import ast
+import sys
 from pathlib import Path
 from typing import Protocol
+
+# This script's own directory, so the sibling `fact_field_readers_scope`
+# module below imports whether this file is run directly (Python adds its
+# own directory automatically) or loaded as `scripts.fact_field_readers`
+# by a test that never imported `check_ai_readiness.py` first (the only
+# other thing in this tree that already inserts this same directory) --
+# mirroring `fact_detector_misuse.py`'s own identical sys.path guard for
+# the identical reason (that file's own split-out sibling module).
+if str(Path(__file__).resolve().parent) not in sys.path:
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+from fact_field_readers_scope import (  # noqa: E402
+    _enclosing_qualnames,
+    _lexical_function_parents,
+    _locally_bound_names,
+    _outermost_containing_expr,
+    _parent_map,
+)
 
 ROOT = Path(__file__).resolve().parent.parent
 PKG = ROOT / "abicheck"
@@ -301,384 +319,6 @@ def _read(p: Path) -> str:
         return p.read_text(encoding="utf-8")
     except OSError:
         return ""
-
-
-def _enclosing_qualnames(tree: ast.Module) -> dict[int, str]:
-    """Map every line number in *tree* to its innermost enclosing
-    function's qualified name (``Class.method`` for a method, tracked
-    through nested ``def``s the way `__qualname__` is), or ``"<module>"``
-    for a line outside any function.
-
-    A plain line-range lookup rather than tracking a live scope stack
-    during the attribute walk: `ast.walk` doesn't expose parent/ancestor
-    context, and re-deriving it with a hand-rolled visitor for every call
-    site would duplicate this same walk. One pass building this map,
-    consulted by line number, is simpler and gives the identical answer.
-
-    **A parameter default value/annotation is textually part of the
-    function's own signature, but evaluates at *def-time*, in whatever
-    scope directly, syntactically contains the `def` statement -- not the
-    function's own body scope this map would otherwise attribute its
-    whole line range to (Codex review, fresh evidence).** `def f(getattr,
-    x=getattr(rec, "bases")): ...` -- the default `x=getattr(rec,
-    "bases")` evaluates *before* `f`'s own parameters exist, so this call
-    genuinely reads the real builtin, but the function's own `[child.
-    lineno, end]` range covers its own signature line too, so `_shadowed()`
-    saw `f`'s own (not-yet-bound) parameter `getattr` and wrongly excluded
-    a real read. A decorator does *not* need this treatment: it sits on a
-    line strictly *before* `child.lineno`, already outside the function's
-    own range by construction. Fixed by registering each default/
-    annotation's own `[lineno, end_lineno]` range under the *current*
-    (enclosing, pre-function) qualname -- narrower than the function's own
-    range in the ordinary case, so the existing smallest-range-wins
-    tie-break below lets it correctly override the function's own broader
-    range for just those lines. A default/annotation sharing a line with
-    genuine function-*body* code (a one-liner `def f(x=getattr(rec,
-    "bases")): return x`) is a real, accepted residual this line-based
-    model can't distinguish further -- the same granularity limit this
-    function's own docstring already accepts throughout.
-    """
-    ranges: list[tuple[int, int, str]] = []
-
-    def visit(node: ast.AST, prefix: str, qualname: str) -> None:
-        for child in ast.iter_child_nodes(node):
-            if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                child_qualname = f"{prefix}{child.name}"
-                end = getattr(child, "end_lineno", child.lineno)
-                ranges.append((child.lineno, end, child_qualname))
-                all_args = (
-                    *child.args.posonlyargs,
-                    *child.args.args,
-                    *child.args.kwonlyargs,
-                    *((child.args.vararg,) if child.args.vararg else ()),
-                    *((child.args.kwarg,) if child.args.kwarg else ()),
-                )
-                def_time_subtrees = [
-                    *child.args.defaults,
-                    *(d for d in child.args.kw_defaults if d is not None),
-                    *(a.annotation for a in all_args if a.annotation is not None),
-                ]
-                returns = getattr(child, "returns", None)
-                if returns is not None:
-                    def_time_subtrees.append(returns)
-                for subtree in def_time_subtrees:
-                    sub_end = getattr(subtree, "end_lineno", subtree.lineno)
-                    ranges.append((subtree.lineno, sub_end, qualname))
-                visit(child, child_qualname + ".", child_qualname)
-            elif isinstance(child, ast.ClassDef):
-                visit(child, f"{prefix}{child.name}.", qualname)
-            else:
-                visit(child, prefix, qualname)
-
-    visit(tree, "", "<module>")
-    # Innermost enclosing range wins: sort by ascending span size so a
-    # later, narrower match overwrites the wider one already recorded.
-    ranges.sort(key=lambda r: r[1] - r[0], reverse=True)
-    by_line: dict[int, str] = {}
-    for start, end, qualname in ranges:
-        for lineno in range(start, end + 1):
-            by_line[lineno] = qualname
-    return by_line
-
-
-def _parent_map(tree: ast.Module) -> dict[int, ast.AST]:
-    """Map ``id(child)`` to its immediate AST parent, for every node in
-    *tree*. `ast.walk`/`ast.iter_child_nodes` expose no ancestor link on
-    their own, so this is one pass building the reverse edge, consulted by
-    :func:`_outermost_containing_expr`.
-    """
-    parents: dict[int, ast.AST] = {}
-    for parent in ast.walk(tree):
-        for child in ast.iter_child_nodes(parent):
-            parents[id(child)] = parent
-    return parents
-
-
-#: Non-`ast.expr` AST node kinds this module still climbs *through* when
-#: finding a read's outermost containing expression -- each always sits
-#: directly between an expression and its own real expression parent, so
-#: stopping at one of these (as the original `isinstance(..., ast.expr)`
-#: check alone did) understates the containing expression instead of
-#: reaching it (Codex review, fresh evidence): a `keyword`-argument value
-#: (`old(value=rec.bases)`) and a comprehension's own `for`/`if` clause
-#: (`[x for x in rec.bases]`'s `iter`, or an `if` filter) are both
-#: genuinely part of a real enclosing expression (a `Call`, a
-#: `ListComp`/`SetComp`/`DictComp`/`GeneratorExp`) one hop further up --
-#: `old(value=rec.bases)`/`keep(value=rec.bases)` collapsed to the
-#: identical `outer_text = "rec.bases"` (differing only by occurrence
-#: rank) before this fix, the exact same-key collision this whole
-#: mechanism exists to prevent.
-_TRANSPARENT_EXPR_WRAPPER_TYPES = (ast.keyword, ast.comprehension)
-
-
-def _outermost_containing_expr(node: ast.AST, parents: dict[int, ast.AST]) -> ast.AST:
-    """Walk *node*'s ancestors (via *parents*, from :func:`_parent_map`) up
-    through every enclosing `ast.expr` -- and every transparent wrapper in
-    `_TRANSPARENT_EXPR_WRAPPER_TYPES` above, climbed straight through
-    rather than counted as the boundary -- stopping at the outermost real
-    expression: the whole `old_decision(rec.bases)` call, or the whole
-    `not p_old.is_va_list and p_new.is_va_list` boolean test, but never
-    further: the next ancestor up is always a *statement*
-    (`Expr`/`If`/`Return`/...), whose own body/orelse this must not pull
-    in.
-
-    Deliberately narrower than the *enclosing statement* an earlier
-    revision of this function used -- see :func:`unmigrated_fact_reader_
-    sites`'s own docstring for why that was wrong (a compound statement's
-    body dwarfs and destabilizes the key for no benefit the expression
-    boundary doesn't already give).
-    """
-    current = node
-    while id(current) in parents:
-        parent = parents[id(current)]
-        if isinstance(parent, ast.expr) or isinstance(
-            parent, _TRANSPARENT_EXPR_WRAPPER_TYPES
-        ):
-            current = parent
-        else:
-            break
-    return current
-
-
-def _locally_bound_names(tree: ast.Module) -> dict[str, set[str]]:
-    """Map each function's qualname (the identical key `_enclosing_
-    qualnames` uses) to every *parameter* name it declares -- not an
-    ordinary assignment target, and not a name bound inside a *nested*
-    function's own body.
-
-    **Used to exclude a shadowed name from builtin recognition (Codex
-    review, fresh evidence).** `def f(getattr, rec): return getattr(rec,
-    "bases")` shadows the real `getattr` builtin with an ordinary,
-    unrelated local parameter of the identical name -- but the
-    builtin-recognition branch in `unmigrated_fact_reader_sites()` had no
-    notion of local shadowing at all, unconditionally treating the bare
-    name `getattr` as the real builtin regardless of what the enclosing
-    function actually bound it to. Reported call sites in an unrelated,
-    valid change would then either falsely fail the ERROR-level gate or
-    force a misleading baseline entry for a read that was never really a
-    builtin call.
-
-    **Deliberately parameters only, not an ordinary assignment target
-    (Codex review, fresh evidence: a first revision of this helper also
-    covered `ast.Assign`/`ast.AnnAssign` targets, and immediately broke six
-    existing tests).** `read_attr = getattr; read_attr(rec, "bases")` is
-    exactly `_builtins_getattr_aliases()`'s own alias-resolution mechanism
-    -- `read_attr` IS a genuine local assignment target, but treating that
-    as "shadowing" is backwards: it's *how* an alias becomes trustworthy,
-    not a reason to distrust it. Telling a real shadow (`getattr =
-    some_unrelated_value`) apart from a real alias assignment (`read_attr =
-    getattr`) needs per-assignment tracing of what each target's own value
-    resolves to (exactly what `_builtins_getattr_aliases()`'s internal
-    `assign_candidates` already does, but scoped per-function and exposed,
-    neither of which it currently is) -- a real, if narrow, follow-up this
-    revision does not attempt. A parameter can never be an alias source in
-    that same sense (nothing in a function signature assigns FROM
-    `getattr`), so restricting to parameters closes the reported false
-    positive with no risk of this same conflict.
-
-    Deliberately narrower than the exhaustive binding-form coverage
-    `fact_detector_misuse.py`'s own `locally_bound` machinery has grown
-    into over many review rounds (comprehension/lambda/match/walrus
-    scoping, closures into a *nested* function, global/nonlocal routing) --
-    only for the immediate enclosing function of the call site being
-    checked, since no evidence has reported any of those more exotic
-    shapes shadowing `getattr`/`builtins` specifically (or the identical
-    risk for `attrgetter`/`operator`, which shares this same unhandled gap
-    -- deliberately not extended there either without reported evidence).
-    Extend this the same incremental way if one is ever found, matching
-    this module's own established practice of only building the
-    generality an actual review finding demonstrates.
-
-    **Known gap, confirmed with a concrete repro rather than left purely
-    theoretical (Codex review, fresh evidence): a shadowing parameter that
-    is later *rebound* to a genuine alias source is still treated as
-    shadowed for the call.** `def f(getattr, rec): getattr =
-    builtins.getattr; return getattr(rec, "bases")` -- a real, unremarkable
-    read of a bridged field through a locally-rebound name -- currently
-    reports no site at all (the sibling `attrgetter`/`operator` shape has
-    the identical gap: `def f(operator, rec): import operator; return
-    operator.attrgetter("bases")(rec)`). This is exactly the follow-up the
-    paragraph above already named as not attempted, now with a real
-    example rather than a hypothetical one: correctly distinguishing it
-    from a genuine shadow (`getattr = some_unrelated_value`) needs
-    *order-aware* per-function tracing -- which assignment to the name is
-    the one actually in effect at the call's own position, not merely
-    whether *some* recognized-alias assignment exists anywhere in the
-    scope. The latter, simpler check is unsound in the other direction:
-    `def f(getattr, rec): result = getattr(rec, "bases"); getattr =
-    builtins.getattr` calls `getattr` *before* the rebind, while still
-    holding the arbitrary parameter value, so an order-blind "was this
-    name ever reassigned to a recognized alias" check would wrongly
-    exclude a real shadow the same way `_builtins_getattr_aliases()`'s own
-    docstring already warns a naive treatment could. Building genuine
-    per-position dataflow into this module -- rather than its current
-    presence/absence-only model -- is a materially larger change than the
-    guard conditions this module has added incrementally so far (it took
-    `fact_detector_misuse.py`'s own alias-resolution machinery upwards of
-    twenty review rounds to reach exactly this kind of order-sensitivity
-    for its own, structurally similar problem), so it is recorded here as
-    an accepted, deliberately unfixed gap rather than attempted under
-    review pressure. This is a false *negative* (a real dynamic read
-    silently passes the gate), the direction this module's own established
-    "a false positive is far cheaper than the false negative it closes"
-    trade-off argues hardest against accepting -- but an incorrect,
-    order-blind attempt at closing it risks trading this false negative
-    for a new false positive on a genuine shadow, which is not obviously
-    an improvement. Revisit with real per-position tracing if this shape
-    is found in practice, not with a heuristic that cannot tell the two
-    cases apart.
-
-    **A `def`/`class` statement's own *name* is a locally-bound name too,
-    not just a parameter (Codex review, fresh evidence).** `def
-    getattr(obj, name): return None` followed by `getattr(rec, "bases")`
-    -- an ordinary, unrelated function definition that happens to share
-    the builtin-looking name `getattr` -- was still unconditionally
-    treated as the real builtin, since only parameters were ever recorded
-    as locally bound; a `def`/`class` statement's own binding target
-    (Python's ordinary `STORE_NAME`/`STORE_FAST` rule for a def/class
-    statement, the identical rule `fact_detector_misuse.py`'s own
-    `_def_containing_qualnames` already models) was invisible here. Fixed
-    by also recording each `def`/`class`'s own `name` against whichever
-    scope directly, syntactically contains it.
-
-    **That "directly, syntactically contains it" scope is NOT simply the
-    nearest enclosing *function*, unlike the closure-parent concept
-    `_lexical_function_parents` tracks (Codex review, fresh evidence, a
-    real regression in the first version of this same fix).** A first
-    version tracked a `nearest_func` parameter, skipping class layers the
-    same way `_lexical_function_parents` deliberately does for closure
-    purposes -- but a method's own *name* does not bind into its
-    enclosing function/module namespace at all; it becomes a class
-    attribute (`C.getattr`), invisible to an ordinary bare-name lookup
-    anywhere outside the class body. Recording it against the skip-class
-    `nearest_func` anyway meant `class C: def getattr(self, name): ...`
-    made an *unrelated* function elsewhere in the same module -- one with
-    no textual relationship to `C` at all -- read as if it had a local
-    `getattr` binding, silently excluding its own, genuine
-    `getattr(rec, "bases")` call. Fixed by tracking a separate `binding_
-    scope: str | None` -- the scope a *bare name binds into*, as opposed
-    to `nearest_func`'s "scope a closure looks up through" -- `None`
-    while directly inside a class body (nothing recorded there at all,
-    matching how `_shadowed()` never queries a class-body scope either,
-    since none of this module's qualname machinery models one), and the
-    function's own qualname once recursed into a function body (an
-    ordinary nested function's own name genuinely does bind into its
-    immediately enclosing function, unlike a method's into its class).
-
-    **An import statement binds its target name too, exactly like a
-    parameter or a `def`/`class` statement's own name (Codex review,
-    fresh evidence).** `from helper import getattr` then `getattr(rec,
-    "bases")` -- an ordinary import of an unrelated module's own
-    `getattr` symbol, reusing the builtin-looking bare name -- was
-    unconditionally treated as the real builtin, since neither `ast.
-    Import` nor `ast.ImportFrom` was ever visited here at all. Fixed by
-    recording each imported name (`alias.asname` if given, else the
-    plain name -- an unaliased dotted `import a.b.c` binds only the
-    top-level package `a`, Python's own import-binding rule, the
-    identical split `fact_detector_misuse.py`'s own import branch
-    already applies) against whichever scope directly contains the
-    import statement.
-
-    **Carved out: an import this module already recognizes as a genuine
-    alias *source* for a builtin/`operator` symbol must NOT be treated as
-    a shadow of itself.** `from builtins import getattr` (bare, no
-    `as`), `from builtins import object`/`type`/`vars`, `from operator
-    import attrgetter`, and a bare `import builtins`/`import operator`
-    are all already resolved elsewhere in this module (`_builtins_
-    getattr_aliases()`, `_unbound_getattribute_receiver_aliases()`,
-    `_builtins_symbol_aliases()`, `_operator_attrgetter_aliases()`) as
-    evidence that the bound name genuinely *is* the real builtin/operator
-    symbol -- recording that same binding here too would make
-    `_shadowed()` see it as a local shadow and wrongly exclude the very
-    call it was imported to enable
-    (e.g. `from operator import attrgetter; attrgetter("bases")(rec)`
-    would stop being recognized at all, a real regression, not merely an
-    incomplete fix). Every *other* import -- including an aliased
-    `from builtins import getattr as g` recognized under the alias `g`,
-    which is excluded the identical way -- still binds and shadows
-    normally.
-    """
-    bound: dict[str, set[str]] = {}
-
-    def visit(node: ast.AST, prefix: str, binding_scope: str | None) -> None:
-        for child in ast.iter_child_nodes(node):
-            if isinstance(child, (ast.Import, ast.ImportFrom)):
-                for alias in child.names:
-                    if isinstance(child, ast.Import):
-                        bound_name = alias.asname or alias.name.split(".", 1)[0]
-                        recognized = alias.name in ("builtins", "operator")
-                    else:
-                        bound_name = alias.asname or alias.name
-                        recognized = (
-                            child.module == "builtins"
-                            and alias.name in ("getattr", "object", "type", "vars")
-                        ) or (child.module == "operator" and alias.name == "attrgetter")
-                    if recognized or binding_scope is None:
-                        continue
-                    bound.setdefault(binding_scope, set()).add(bound_name)
-            elif isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                child_qualname = f"{prefix}{child.name}"
-                if binding_scope is not None:
-                    bound.setdefault(binding_scope, set()).add(child.name)
-                all_args = (
-                    *child.args.posonlyargs,
-                    *child.args.args,
-                    *child.args.kwonlyargs,
-                    *((child.args.vararg,) if child.args.vararg else ()),
-                    *((child.args.kwarg,) if child.args.kwarg else ()),
-                )
-                for arg in all_args:
-                    bound.setdefault(child_qualname, set()).add(arg.arg)
-                visit(child, child_qualname + ".", child_qualname)
-            elif isinstance(child, ast.ClassDef):
-                if binding_scope is not None:
-                    bound.setdefault(binding_scope, set()).add(child.name)
-                visit(child, f"{prefix}{child.name}.", None)
-            else:
-                visit(child, prefix, binding_scope)
-
-    visit(tree, "", "<module>")
-    return bound
-
-
-def _lexical_function_parents(tree: ast.Module) -> dict[str, str]:
-    """Map each function's qualname (the identical key `_enclosing_
-    qualnames`/`_locally_bound_names` use) to its nearest *enclosing
-    function's* qualname -- skipping any intervening class scope -- or
-    `"<module>"` if it has none.
-
-    Used to widen `_shadowed()`'s shadowing check to a call's *entire*
-    lexical scope chain, not just its own innermost function (Codex
-    review, fresh evidence): `def outer(getattr): def inner(rec): return
-    getattr(rec, "bases")` -- `getattr` is an arbitrary callable captured
-    from `outer`'s own parameter via Python's ordinary closure rule, but
-    `inner` binds no parameter of that name itself, so a check restricted
-    to `inner`'s own `locally_bound` entry never saw it, falsely treating
-    the closed-over parameter as the real `getattr` builtin.
-
-    A standalone copy of `fact_detector_misuse.py`'s identical-purpose
-    helper (see `FACT_FIELD_NAMES`'s own docstring for why these two leaf
-    modules stay decoupled), simplified to this module's own coarser,
-    dot-joined qualname scheme (no `#lineno` disambiguator -- an
-    `@overload` stub colliding with its real implementation is an
-    existing, accepted characteristic of this module's qualnames already,
-    not a new risk this helper introduces).
-    """
-    parents: dict[str, str] = {}
-
-    def visit(node: ast.AST, prefix: str, nearest_func: str) -> None:
-        for child in ast.iter_child_nodes(node):
-            if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                qualname = f"{prefix}{child.name}"
-                parents[qualname] = nearest_func
-                visit(child, qualname + ".", qualname)
-            elif isinstance(child, ast.ClassDef):
-                visit(child, f"{prefix}{child.name}.", nearest_func)
-            else:
-                visit(child, prefix, nearest_func)
-
-    visit(tree, "", "<module>")
-    return parents
 
 
 def _imported_class_aliases(tree: ast.Module) -> dict[str, str]:
@@ -1022,6 +662,86 @@ def _unbound_getattribute_method_aliases(
     for local, base in qualified_candidates:
         if base in object_type_names:
             names.add(local)
+    changed = True
+    while changed:
+        changed = False
+        for local, ref in assign_candidates:
+            if local in names:
+                continue
+            if ref in names:
+                names.add(local)
+                changed = True
+    return frozenset(names)
+
+
+def _mapping_receiver_aliases(
+    tree: ast.Module, vars_names: frozenset[str], builtins_names: frozenset[str]
+) -> frozenset[str]:
+    """Return every local name *tree* binds to an instance's own mapping
+    receiver -- `vars(rec)` (any spelling *vars_names* already resolves),
+    `builtins.vars(rec)` (a qualified call through a real `builtins`
+    alias, given the caller's already-resolved *builtins_names*), or
+    `X.__dict__` -- plus any further plain-name assignment chain from
+    there, resolved to a fixed point (mirroring every other alias helper
+    in this module).
+
+    Used to close a real gap (Codex review, fresh evidence): `fields =
+    vars(rec); return fields["bases"]` / `fields = rec.__dict__; return
+    fields.get("bases")` both read the identical normalized legacy value
+    `_is_mapping_receiver()`'s direct forms already recognize, but neither
+    is visible to it once the mapping is stored in an intermediate
+    variable first -- the same "no alias tracking" gap this module's other
+    alias-resolution helpers already close for `getattr`/`vars`/
+    `attrgetter` themselves, applied here to the *result* of calling one
+    of them instead.
+
+    Deliberately name-only, like every alias source this module tracks:
+    `fields = vars(rec)` binds `fields` to *some* instance's `__dict__`
+    without this module ever knowing which instance -- but that's already
+    all `_is_mapping_receiver()`'s direct forms need, since the question
+    is only "is this expression structurally a read through an instance's
+    own mapping," never "which instance." Not gated on `_shadowed()`
+    during collection (a shadowed `vars`/`builtins` at the *assignment's*
+    own point would make this over-collect) -- matching the identical,
+    established stance `_builtins_getattr_aliases()`/`_operator_
+    attrgetter_aliases()` already take for their own alias collection:
+    shadowing is checked only where a resolved name is actually
+    *consumed*, not during collection.
+    """
+    names: set[str] = set()
+    assign_candidates: list[tuple[str, str]] = []
+
+    def _add_candidate(target: str, value: ast.expr | None) -> None:
+        if value is None:
+            return
+        if isinstance(value, ast.Name):
+            assign_candidates.append((target, value.id))
+            return
+        if (
+            isinstance(value, ast.Call)
+            and len(value.args) == 1
+            and (
+                (isinstance(value.func, ast.Name) and value.func.id in vars_names)
+                or (
+                    isinstance(value.func, ast.Attribute)
+                    and value.func.attr == "vars"
+                    and isinstance(value.func.value, ast.Name)
+                    and value.func.value.id in builtins_names
+                )
+            )
+        ):
+            names.add(target)
+            return
+        if isinstance(value, ast.Attribute) and value.attr == "__dict__":
+            names.add(target)
+
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Assign):
+            for target in node.targets:
+                if isinstance(target, ast.Name):
+                    _add_candidate(target.id, node.value)
+        elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
+            _add_candidate(node.target.id, node.value)
     changed = True
     while changed:
         changed = False
@@ -1418,6 +1138,7 @@ def unmigrated_fact_reader_sites(
     class_aliases = _imported_class_aliases(tree)
     getattr_names, builtins_names = _builtins_getattr_aliases(tree)
     vars_names = _builtins_symbol_aliases(tree, "vars", builtins_names)
+    mapping_receiver_names = _mapping_receiver_aliases(tree, vars_names, builtins_names)
     object_type_names = _unbound_getattribute_receiver_aliases(tree)
     unbound_getattribute_names = _unbound_getattribute_method_aliases(
         tree, object_type_names
@@ -1426,7 +1147,45 @@ def unmigrated_fact_reader_sites(
     locally_bound = _locally_bound_names(tree)
     lexical_parents = _lexical_function_parents(tree)
 
-    def _shadowed(call_node: ast.Call, name: str) -> bool:
+    def _shadowed(call_node: ast.expr, name: str) -> bool:
+        # A lambda parameter shadows innermost of all, checked directly
+        # against the call's real AST ancestry rather than through the
+        # qualname system (Codex review, fresh evidence): `lambda getattr,
+        # rec: getattr(rec, "bases")` -- an unrelated, ordinary lambda
+        # parameter reusing the builtin-looking name -- was still treated
+        # as the real builtin, since `_enclosing_qualnames()`/`_locally_
+        # bound_names()` deliberately don't model a lambda as its own
+        # scope at all (see their own docstrings) -- a lambda's body
+        # shares its *enclosing* function's qualname, so `getattr` was
+        # never recorded as bound anywhere the qualname-based check below
+        # could see. Rather than widening the qualname/scope machinery
+        # itself (a materially larger change touching three functions'
+        # worth of established, narrower-by-design modeling), this walks
+        # the call's own true ancestor chain via `parents` -- exact by
+        # construction, so it can never misattribute a shadow to a call
+        # genuinely outside the lambda, even one sharing the same line/
+        # qualname the coarser model below would conflate them under.
+        #
+        # Typed `ast.expr` rather than `ast.Call` (Codex review, fresh
+        # evidence): every existing call site here happens to pass a real
+        # `ast.Call`, but a bare-name mapping-receiver alias
+        # (`_mapping_receiver_aliases()` below) needs to shadow-check an
+        # `ast.Name` node instead -- and this function only ever consults
+        # `.lineno` and walks `parents`, both common to any expression, so
+        # the narrower `ast.Call` annotation was never load-bearing.
+        node: ast.AST = call_node
+        while id(node) in parents:
+            node = parents[id(node)]
+            if isinstance(node, ast.Lambda):
+                lambda_args = (
+                    *node.args.posonlyargs,
+                    *node.args.args,
+                    *node.args.kwonlyargs,
+                    *((node.args.vararg,) if node.args.vararg else ()),
+                    *((node.args.kwarg,) if node.args.kwarg else ()),
+                )
+                if any(arg.arg == name for arg in lambda_args):
+                    return True
         qualname = qualnames.get(call_node.lineno, "<module>")
         # Walk the call's entire lexical scope chain, not just its own
         # innermost function (Codex review, fresh evidence): a nested
@@ -1454,7 +1213,12 @@ def unmigrated_fact_reader_sites(
         (`vars(rec)["bases"]`) and `.get()` (`vars(rec).get("bases")`,
         Codex review, fresh evidence) mapping-read forms, so the two
         can't independently drift on what counts as "an instance's own
-        mapping"."""
+        mapping". Also true for a bare name already resolved to one of
+        those forms via `_mapping_receiver_aliases()` (Codex review, fresh
+        evidence): `fields = vars(rec); fields["bases"]` / `fields = rec.
+        __dict__; fields.get("bases")` were both invisible before, since
+        neither is directly `vars(rec)`-shaped or `X.__dict__`-shaped at
+        the point this function actually inspects it."""
         if isinstance(value, ast.Call) and len(value.args) == 1:
             if (
                 isinstance(value.func, ast.Name)
@@ -1470,7 +1234,13 @@ def unmigrated_fact_reader_sites(
                 and not _shadowed(value, value.func.value.id)
             ):
                 return True
-        return isinstance(value, ast.Attribute) and value.attr == "__dict__"
+        if isinstance(value, ast.Attribute) and value.attr == "__dict__":
+            return True
+        return (
+            isinstance(value, ast.Name)
+            and value.id in mapping_receiver_names
+            and not _shadowed(value, value.id)
+        )
 
     def _expr_text(node: ast.AST) -> str:
         outer = _outermost_containing_expr(node, parents)

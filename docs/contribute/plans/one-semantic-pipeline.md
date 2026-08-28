@@ -2044,6 +2044,74 @@ prior round's own note. New tests in
 `TestAugmentedAssignmentThroughMappingReceivers` (`tests/
 test_fact_field_readers_wrapper_scoping.py`).
 
+**Two more findings from the next review round, plus the sibling-module
+split the prior round's own note said was due.** (1) `_locally_bound_
+names()`/`_enclosing_qualnames()` deliberately don't model an `ast.Lambda`
+as its own scope at all (see either function's own docstring on why this
+module's design stays coarser than `fact_detector_misuse.py`'s) -- a
+lambda's body shares its *enclosing* function's qualname, so a lambda's
+own parameter was never recorded as bound anywhere `_shadowed()`'s
+qualname-based check could see. `lambda getattr, rec: getattr(rec,
+"bases")` -- an ordinary, unrelated lambda parameter reusing the
+builtin-looking name -- was still treated as the real builtin. Rather
+than widening the qualname/scope machinery itself (a materially larger
+change touching three functions' worth of established, narrower-by-design
+modeling), `_shadowed()` now also walks the call's own true AST ancestry
+(via the already-available `parents` map) checking every enclosing
+`ast.Lambda`'s own parameters directly -- exact by construction, so it
+can never misattribute a shadow to a call genuinely outside the lambda,
+even one sharing the same line/qualname the coarser qualname model would
+conflate them under (verified with a dedicated negative control: a
+genuine `getattr` call textually outside the lambda, in the same
+function, still gets caught). `_shadowed()`'s own parameter type widened
+from `ast.Call` to `ast.expr`, since it only ever consults `.lineno` and
+walks `parents` -- neither Call-specific -- and the new bare-`ast.Name`
+use site from finding (2) needs the wider type too. (2)
+`_is_mapping_receiver()` only ever matched `vars(rec)`/`X.__dict__`
+directly at the point it inspects an expression -- `fields = vars(rec);
+fields["bases"]` / `fields = rec.__dict__; fields.get("bases")` were both
+invisible once the mapping was stored in an intermediate variable first,
+the same "no alias tracking" gap this module's other alias helpers
+already close for `getattr`/`vars`/`attrgetter` themselves, unclosed here
+for their own *result*. Fixed with a new `_mapping_receiver_aliases()`
+(the identical name-only, fixed-point assignment-chain pattern every
+other alias helper in this module already uses), consulted by
+`_is_mapping_receiver()`'s new final branch, gated on `_shadowed()` the
+same way the direct `vars(rec)` form already is.
+
+**The sibling-module split (Codex/CodeRabbit finding notwithstanding --
+this one was self-imposed, per the prior round's own note, once the two
+fixes above pushed the file to 1975 of 2000 lines, only 25 short of the
+hard cap).** `scripts/fact_field_readers_scope.py` now holds
+`_enclosing_qualnames`, `_parent_map`, `_TRANSPARENT_EXPR_WRAPPER_TYPES`,
+`_outermost_containing_expr`, `_locally_bound_names`, and `_lexical_
+function_parents` -- a mechanical extraction, not a redesign, mirroring
+`fact_detector_misuse_scope.py`'s own identical split from the sibling
+gate: every function moved unchanged, as one contiguous block, with a
+matching sys.path guard (`fact_field_readers.py` importing the sibling
+module whether run directly or loaded as `scripts.fact_field_readers` by
+a test that never imports `check_ai_readiness.py` first) verified by
+running `tests/test_fact_field_readers_wrapper_scoping.py` in isolation,
+not just as part of the full suite -- the exact scenario a missing guard
+would silently pass in a full run and fail only in isolation. Registered
+in `scripts/CLAUDE.md`'s Inventory table.
+
+Verified against both reported repros, a positive control for each (a
+genuinely unrelated lambda/an unrelated dict alias must still be
+caught/stay unflagged), a chained-mapping-alias variant, and negative
+controls for shadowing and a non-bridged key, via direct AST reproduction
+before writing tests -- including confirming the closure-shadow case
+(`def outer(getattr): return (lambda rec: getattr(rec, "bases"))(None)`)
+and a nested-lambda shadow both still resolve correctly with the new
+ancestor-walk check running ahead of the pre-existing qualname-based one.
+Zero existing hits, `mypy`/`ruff` both stayed clean,
+`fact_field_readers.py` back down to 1615 lines after the split (well
+under the 2000-line hard cap, real headroom restored) plus the new 410-line
+`fact_field_readers_scope.py`. New tests:
+`TestLambdaParametersShadowDynamicReaders` and
+`TestMappingReceiverAliasesResolveThroughLocalNames` in `tests/
+test_fact_field_readers_wrapper_scoping.py`.
+
 **Still not landed**: no detector (`diff_layout.py`/`diff_types.py`/
 `diff_param_qualifiers.py`/the reader set the check above now tracks
 precisely) has actually been migrated to read `.status` — the check above

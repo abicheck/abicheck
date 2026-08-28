@@ -985,3 +985,114 @@ class TestAugmentedAssignmentThroughMappingReceivers:
         src = 'def f(d, values):\n    d["bases"] += values\n'
         tree = ast.parse(src, filename="x.py")
         assert unmigrated_fact_reader_sites(tree, "x.py", src) == []
+
+
+class TestLambdaParametersShadowDynamicReaders:
+    """`_shadowed()` checks a call's real AST ancestry for an enclosing
+    `ast.Lambda` whose own parameters include the matched name, since
+    `_enclosing_qualnames()`/`_locally_bound_names()` deliberately don't
+    model a lambda as its own scope at all."""
+
+    def test_ignores_a_getattr_call_shadowed_by_a_lambda_parameter(self) -> None:
+        src = 'def f(rec):\n    g = lambda getattr, rec: getattr(rec, "bases")\n    return g\n'
+        tree = ast.parse(src, filename="x.py")
+        assert unmigrated_fact_reader_sites(tree, "x.py", src) == []
+
+    def test_detects_a_genuine_builtin_call_inside_an_unrelated_lambda(self) -> None:
+        """Positive control: a lambda with no shadowing parameter of its
+        own must not suppress a real builtin call inside its body."""
+        src = 'def f(rec):\n    g = lambda x: getattr(x, "bases")\n    return g\n'
+        tree = ast.parse(src, filename="x.py")
+        keys = [
+            key for key, _l, _a, _q in unmigrated_fact_reader_sites(tree, "x.py", src)
+        ]
+        assert keys == [
+            'x.py::f::bases::lambda x: getattr(x, "bases")::getattr(x, "bases")::1'
+        ]
+
+    def test_detects_an_unrelated_call_outside_the_lambda_in_the_same_function(
+        self,
+    ) -> None:
+        """Negative-of-the-negative: a genuine `getattr` call textually
+        outside the lambda, in the same enclosing function, must still be
+        caught -- the lambda-parameter shadow must not leak past the
+        lambda's own body."""
+        src = (
+            "def f(rec, other):\n"
+            '    lam = lambda getattr: getattr(rec, "bases")\n'
+            '    return getattr(other, "bases")\n'
+        )
+        tree = ast.parse(src, filename="x.py")
+        keys = [
+            key for key, _l, _a, _q in unmigrated_fact_reader_sites(tree, "x.py", src)
+        ]
+        assert keys == [
+            'x.py::f::bases::getattr(other, "bases")::getattr(other, "bases")::1'
+        ]
+
+    def test_ignores_a_closure_shadow_reaching_through_a_lambda(self) -> None:
+        """A lambda with no parameter of its own still inherits a real
+        shadow from its enclosing function's own parameter, via the
+        pre-existing qualname-based closure walk -- unaffected by the new
+        lambda-ancestor check running first."""
+        src = 'def outer(getattr):\n    return (lambda rec: getattr(rec, "bases"))(None)\n'
+        tree = ast.parse(src, filename="x.py")
+        assert unmigrated_fact_reader_sites(tree, "x.py", src) == []
+
+    def test_ignores_a_shadow_in_a_nested_lambda(self) -> None:
+        src = (
+            "def f(rec):\n"
+            '    return (lambda getattr: (lambda: getattr(rec, "bases"))())(None)\n'
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert unmigrated_fact_reader_sites(tree, "x.py", src) == []
+
+
+class TestMappingReceiverAliasesResolveThroughLocalNames:
+    """`_mapping_receiver_aliases()` resolves a name assigned from a
+    mapping-receiver-shaped RHS (`vars(rec)`/`X.__dict__`), so
+    `_is_mapping_receiver()` recognizes it later even when the mapping
+    itself was stored in an intermediate variable first."""
+
+    def test_detects_a_subscript_read_through_a_vars_alias(self) -> None:
+        src = 'def f(rec):\n    fields = vars(rec)\n    return fields["bases"]\n'
+        tree = ast.parse(src, filename="x.py")
+        keys = [
+            key for key, _l, _a, _q in unmigrated_fact_reader_sites(tree, "x.py", src)
+        ]
+        assert keys == ['x.py::f::bases::fields["bases"]::fields["bases"]::1']
+
+    def test_detects_a_get_call_through_a_dunder_dict_alias(self) -> None:
+        src = 'def f(rec):\n    fields = rec.__dict__\n    return fields.get("bases")\n'
+        tree = ast.parse(src, filename="x.py")
+        keys = [
+            key for key, _l, _a, _q in unmigrated_fact_reader_sites(tree, "x.py", src)
+        ]
+        assert keys == ['x.py::f::bases::fields.get("bases")::fields.get("bases")::1']
+
+    def test_detects_a_chained_mapping_alias(self) -> None:
+        src = 'def f(rec):\n    a = vars(rec)\n    b = a\n    return b.get("bases")\n'
+        tree = ast.parse(src, filename="x.py")
+        keys = [
+            key for key, _l, _a, _q in unmigrated_fact_reader_sites(tree, "x.py", src)
+        ]
+        assert keys == ['x.py::f::bases::b.get("bases")::b.get("bases")::1']
+
+    def test_ignores_an_unrelated_dict_alias(self) -> None:
+        """Negative control: an ordinary parameter assigned to another
+        name is not a mapping receiver."""
+        src = 'def f(d):\n    fields = d\n    return fields["bases"]\n'
+        tree = ast.parse(src, filename="x.py")
+        assert unmigrated_fact_reader_sites(tree, "x.py", src) == []
+
+    def test_ignores_a_mapping_alias_shadowed_by_a_parameter(self) -> None:
+        """Negative control: a parameter reusing the alias name must not
+        be treated as the resolved mapping-receiver alias."""
+        src = 'def f(fields, rec):\n    return fields["bases"]\n'
+        tree = ast.parse(src, filename="x.py")
+        assert unmigrated_fact_reader_sites(tree, "x.py", src) == []
+
+    def test_ignores_a_mapping_alias_read_with_a_non_bridged_key(self) -> None:
+        src = 'def f(rec):\n    fields = vars(rec)\n    return fields["unrelated"]\n'
+        tree = ast.parse(src, filename="x.py")
+        assert unmigrated_fact_reader_sites(tree, "x.py", src) == []
