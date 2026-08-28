@@ -255,6 +255,8 @@ def _candidate_resolves_to_fact(
         return _candidate_resolves_to_fact(
             value.body, fact_names, known
         ) and _candidate_resolves_to_fact(value.orelse, fact_names, known)
+    if isinstance(value, ast.NamedExpr):
+        return _candidate_resolves_to_fact(value.value, fact_names, known)
     return False
 
 
@@ -1318,8 +1320,8 @@ def _fact_aliases(tree: ast.Module, qualnames: _QualnameSpans) -> dict[str, set[
             default_target_aliases = aliases.setdefault(qualname, set())
             if arg_name in default_target_aliases:
                 continue
-            if _is_fact_typed_expr(default, fact_names) or (
-                isinstance(default, ast.Name) and default.id in aliases.get(parent, ())
+            if _candidate_resolves_to_fact(
+                default, fact_names, aliases.get(parent, set())
             ):
                 default_target_aliases.add(arg_name)
                 outer_changed = True
@@ -1489,6 +1491,8 @@ def fact_equality_misuse_sites(tree: ast.Module, rel: str) -> list[tuple[int, in
             return is_fact_typed(node.body, qualname) and is_fact_typed(
                 node.orelse, qualname
             )
+        if isinstance(node, ast.NamedExpr):
+            return is_fact_typed(node.value, qualname)
         return False
 
     sites: list[tuple[int, int]] = []

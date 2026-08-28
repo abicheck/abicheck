@@ -2485,6 +2485,57 @@ accepts throughout" principle, not a gap distinct from what the code
 already states. No code change; replied to the review thread pointing at
 the existing docstring's own reasoning.
 
+**Two more findings from the same review round, both real, both bounded
+extensions of the same recursive-resolver mechanism the direct-
+conditional-operand fix just established.** (1) `_is_fact_typed_expr()`'s
+own `NamedExpr` branch unwraps a walrus to its `.value` and checks it
+structurally, but it deliberately never resolves a bare `Name` there (the
+same limit every structural check in this module accepts -- alias
+resolution needs scope, which a single node can't supply). Neither of the
+two places that *can* supply scope had a matching `NamedExpr` branch of
+their own: `_candidate_resolves_to_fact()` (the fixed-point-aware
+resolver a candidate's own value is checked against) and `is_fact_typed()`
+(`fact_equality_misuse_sites()`'s own terminal comparison-operand
+predicate). `old_fact = rec.bases_fact; (copy := old_fact) == other` (a
+direct comparison operand) and `old_fact = rec.bases_fact; fact = (copy
+:= old_fact); fact == other` (assigned through an intermediate name
+first) were both missed -- `_is_fact_typed_expr` correctly declined to
+resolve the wrapped bare `old_fact`, and neither caller had anywhere else
+to turn. Fixed by giving both functions the identical recursive
+`NamedExpr` branch already established for `IfExp` one round earlier:
+`_candidate_resolves_to_fact(value.value, fact_names, known)` and
+`is_fact_typed(node.value, qualname)` respectively -- each simply
+recurses into the walrus's own value through the same resolver, so a
+nested walrus (`(a := (b := old_fact)) == other`) resolves too, and a
+walrus wrapping a genuinely non-Fact name stays correctly unflagged. (2)
+The parameter-default resolution loop's own inline check --
+`_is_fact_typed_expr(default, fact_names) or (isinstance(default,
+ast.Name) and default.id in aliases.get(parent, ()))` -- was a narrower,
+duplicated re-implementation of exactly what `_candidate_resolves_to_fact()`
+already generalizes: it had no `IfExp` (or now `NamedExpr`) branch of its
+own, so a default composing two already-known aliases through a
+conditional expression (`old = rec.bases_fact; new = rec.vtable_fact; def
+inner(value=old if cond else new): return value == other`) was rejected
+outright, even though both branches were already confirmed Fact-typed
+aliases in the parent scope. Fixed by replacing the inline check with a
+direct call to `_candidate_resolves_to_fact(default, fact_names,
+aliases.get(parent, set()))` -- the identical resolver every other
+candidate site already uses, so this loop can no longer independently
+drift from what the rest of the module considers Fact-typed, and it
+inherits the `NamedExpr` fix above for free.
+
+Verified against all three reported repros (direct `NamedExpr` operand,
+assigned-through `NamedExpr` alias, composed `IfExp` default), a nested-
+`NamedExpr` variant, and two negative controls (a `NamedExpr` wrapping a
+non-Fact name; a composed default with only one Fact-typed branch,
+pinning the same AND semantics established for the direct-conditional-
+operand fix) via direct `python3 -c` reproduction before writing tests.
+`ruff`/`mypy` both stayed clean, still zero existing hits in the real
+repository, `fact_detector_misuse.py` at 1533 lines (well under the
+2000-line hard cap). New tests:
+`TestNamedExpressionsResolveThroughAliasBranches` in `tests/
+test_fact_detector_misuse_def_time_scope.py`.
+
 ---
 
 ### Phase 1 — finish the `dump`/`scan` typed-API convergence (closes AGENTS.md "PR C")

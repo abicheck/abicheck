@@ -1008,3 +1008,81 @@ class TestDirectConditionalOperandsResolveThroughAliasBranches:
         )
         tree = ast.parse(src, filename="x.py")
         assert fact_equality_misuse_sites(tree, "x.py") == []
+
+
+class TestNamedExpressionsResolveThroughAliasBranches:
+    """`_is_fact_typed_expr()`'s own `NamedExpr` branch unwraps to the
+    walrus's `.value`, but it can't resolve a bare `Name` there itself --
+    that needs alias resolution, which is `_candidate_resolves_to_fact()`
+    (for a candidate/default) and `is_fact_typed()` (for a direct
+    comparison operand) to supply, each now with its own recursive
+    `NamedExpr` branch mirroring the `IfExp` one already added for the
+    identical reason."""
+
+    def test_detects_a_direct_named_expression_wrapping_an_alias(self) -> None:
+        src = (
+            "def f(rec, other):\n"
+            "    old_fact = rec.bases_fact\n"
+            "    return (copy := old_fact) == other\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert fact_equality_misuse_sites(tree, "x.py") == [(3, 11)]
+
+    def test_detects_an_assignment_through_a_named_expression_alias(self) -> None:
+        """A named expression's own result, assigned to a further name,
+        must resolve through the ordinary candidate fixed point too --
+        not only when used inline as the comparison operand itself."""
+        src = (
+            "def f(rec, other):\n"
+            "    old_fact = rec.bases_fact\n"
+            "    fact = (copy := old_fact)\n"
+            "    return fact == other\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert fact_equality_misuse_sites(tree, "x.py") == [(4, 11)]
+
+    def test_detects_a_nested_named_expression(self) -> None:
+        src = (
+            "def f(rec, other):\n"
+            "    old_fact = rec.bases_fact\n"
+            "    return (a := (b := old_fact)) == other\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert fact_equality_misuse_sites(tree, "x.py") == [(3, 11)]
+
+    def test_ignores_a_named_expression_wrapping_a_non_fact_alias(self) -> None:
+        """Negative control: the wrapped name must itself resolve to a
+        Fact alias."""
+        src = "def f(rec, other):\n    x = rec.plain\n    return (copy := x) == other\n"
+        tree = ast.parse(src, filename="x.py")
+        assert fact_equality_misuse_sites(tree, "x.py") == []
+
+    def test_detects_a_composed_default_via_conditional_expression(self) -> None:
+        """A parameter default that is itself a conditional expression
+        composing two already-known aliases must resolve through
+        `_candidate_resolves_to_fact()`, not only a bare-name default."""
+        src = (
+            "def f(rec, other, cond):\n"
+            "    old = rec.bases_fact\n"
+            "    new = rec.vtable_fact\n"
+            "    def inner(value=old if cond else new):\n"
+            "        return value == other\n"
+            "    return inner()\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert fact_equality_misuse_sites(tree, "x.py") == [(5, 15)]
+
+    def test_ignores_a_composed_default_with_only_one_fact_branch(self) -> None:
+        """Negative control pinning the established AND semantics: a
+        default's own conditional expression is trusted only when both
+        branches resolve."""
+        src = (
+            "def f(rec, other, cond):\n"
+            "    old = rec.bases_fact\n"
+            "    new = rec.plain\n"
+            "    def inner(value=old if cond else new):\n"
+            "        return value == other\n"
+            "    return inner()\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert fact_equality_misuse_sites(tree, "x.py") == []
