@@ -2922,13 +2922,14 @@ independently-drifting restatements (Codex review, PR #910, `docs/AGENTS.md`'s
 > resolves regardless (`DiffResult.policy`/`policy_file`, the resolved
 > `SeverityConfig`/`exit_code_scheme` pair). One function,
 > `effective_config_fields`, picks the tier; `compare` (via
-> `reporter_contract_blocks.add_contract_context`) and `scan --against`
+> `reporter_contract_blocks.add_contract_context`), `reporter.py`'s
+> `--stat` JSON summary builder, and `scan --against`
 > (`cli_scan_baseline._run_baseline_compare`,
 > reusing the exact `sev_config`/`exit_scheme` pair its own `exit` block was
 > just resolved from) all call it through one shared helper,
 > `reporter_contract_blocks.add_effective_config_digest` -- so across
-> those two call sites this digest reaches, it's now literally one
-> function, not two approximations of one shape. `report_schema_version`
+> those call sites this digest reaches, it's now literally one
+> function, not several approximations of one shape. `report_schema_version`
 > 2.45 / `scan_schema_version` 1.19 (additive keys: `effective_config_digest`/
 > `effective_config_fields`). **Scope correction (Codex review, fresh
 > evidence, three rounds — the first draft of this correction undercounted
