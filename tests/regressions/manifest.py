@@ -570,7 +570,29 @@ BUG_CLASSES: tuple[BugClass, ...] = (
                     "to a different action would have left this test "
                     "evaluating stale files nothing in production actually "
                     "invokes anymore. Both helpers now assert their step's "
-                    "real `uses:` value before returning it."
+                    "real `uses:` value before returning it. A seventh "
+                    "review round found two more real gaps in the same "
+                    "helpers: (A) the `uses:` check for 'Run check-target' "
+                    'was a suffix match (`.endswith("actions/check-'
+                    'target")`), which would also accept a repointed '
+                    "`./some-other/actions/check-target` naming a "
+                    "completely different checked-out tree while still "
+                    "ending in the same two path segments. Fixed by "
+                    "asserting the exact real value "
+                    "(`./.check-project-src/actions/check-target`) instead "
+                    "of a suffix. (B) the harness never evaluated the "
+                    "parent workflow's OWN scheduling guard on the 'Run "
+                    "check-target' step itself (`if: steps.candidate."
+                    "outcome == 'success'`, in check-project.yml) before "
+                    "treating hop 2 as traversed — an inverted or renamed "
+                    "guard there would skip the whole step in production "
+                    "while this test still manually forwarded every "
+                    "sentinel into `with:` and passed regardless. Fixed by "
+                    "evaluating it against a realistic successful-"
+                    "candidate `steps.*` context "
+                    "(`_assert_run_check_target_step_guard_fires`), "
+                    "mirroring the consumer-context step's own guard check "
+                    "already in place."
                 ),
                 reference="docs/contribute/plans/bug-class-regression-testing.md#phase-6",
             ),

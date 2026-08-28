@@ -149,13 +149,36 @@ def _run_check_step(name: str) -> dict[str, Any]:
     )
     if name == "Run check-target":
         uses = step.get("uses", "")
-        assert uses.endswith("actions/check-target"), (
+        # The exact real value, not a mere suffix check (Codex review,
+        # PR #906) -- a suffix match would also accept a repointed
+        # `./some-other/actions/check-target`, which names a completely
+        # different checked-out tree while still ending in the same two
+        # path segments.
+        assert uses == "./.check-project-src/actions/check-target", (
             f"the {name!r} step's own `uses:` ({uses!r}) no longer targets "
-            f"actions/check-target -- this test loads that file directly "
-            f"(CHECK_TARGET) and would silently keep evaluating it even if "
-            f"production repointed this edge elsewhere"
+            f"./.check-project-src/actions/check-target -- this test loads "
+            f"that file directly (CHECK_TARGET) and would silently keep "
+            f"evaluating it even if production repointed this edge "
+            f"elsewhere"
         )
     return step
+
+
+def _assert_run_check_target_step_guard_fires(run_step: dict[str, Any]) -> None:
+    """The parent workflow's own scheduling guard on the "Run check-target"
+    step itself (`if: steps.candidate.outcome == 'success'`), evaluated
+    against a realistic successful-candidate `steps.*` context -- mirrors
+    the consumer-context step's own guard check below (Codex review,
+    PR #906): an inverted or renamed guard here would skip the whole step
+    in production while this test still manually forwards every sentinel
+    into its `with:` values and passes regardless."""
+    guard = eval_gha_expression(run_step["if"], steps={"candidate.outcome": "success"})
+    assert guard is True, (
+        "the 'Run check-target' step's own scheduling guard (`if:`) does "
+        "not evaluate truthy for a successful candidate -- the step would "
+        "never run in a real workflow, silently skipping this whole "
+        "propagation chain regardless of what its `with:` values resolve to"
+    )
 
 
 def _consumer_context_step() -> dict[str, Any]:
@@ -242,6 +265,7 @@ def test_sentinel_consumer_gcc_path_survives_config_to_check_target_input() -> N
     assert matrix["consumer_compile_ast_frontend"] == _SENTINEL_CONSUMER_AST_FRONTEND
 
     run_step = _run_check_step("Run check-target")
+    _assert_run_check_target_step_guard_fires(run_step)
     # Workflow-global inputs deliberately set to a THIRD, distinct
     # sentinel: if the real expression's own `matrix.consumer_compile_
     # active` gate were dropped, this would leak through instead of the
@@ -358,6 +382,7 @@ def test_marker_only_overlay_activates_the_consumer_step_without_any_field() -> 
     assert "consumer_compile_ast_frontend" not in matrix
 
     run_step = _run_check_step("Run check-target")
+    _assert_run_check_target_step_guard_fires(run_step)
     workflow_inputs = {"gcc-path": "", "gcc-options": "", "ast-frontend": ""}
     consumer_gcc_path = eval_gha_expression(
         run_step["with"]["consumer-gcc-path"], matrix=matrix, inputs=workflow_inputs
