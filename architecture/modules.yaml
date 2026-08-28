@@ -28,7 +28,8 @@
         "model"
       ],
       "legacy_paths": [
-        "abicheck/buildsource/build_cache.py"
+        "abicheck/buildsource/build_cache.py",
+        "abicheck/dumper_cache.py"
       ]
     },
     "extract": {
@@ -88,7 +89,6 @@
         "abicheck/dumper_ast_config.py",
         "abicheck/dumper_ast_config_cpp20.py",
         "abicheck/dumper_ast_config_cpp20_chains.py",
-        "abicheck/dumper_cache.py",
         "abicheck/dumper_castxml_probe.py",
         "abicheck/dumper_castxml_typedefs.py",
         "abicheck/dumper_clang.py",

@@ -1,10 +1,10 @@
 ### Changed
 
-- **ADR-061 continuation**: 19 of the 23 `dumper*.py` header-AST/DWARF
+- **ADR-061 continuation**: 18 of the 23 `dumper*.py` header-AST/DWARF
   parsing-engine modules are now classified into the `extract`
   responsibility layer in `architecture/modules.yaml`:
   `dumper_ast_config.py`, `dumper_ast_config_cpp20.py`,
-  `dumper_ast_config_cpp20_chains.py`, `dumper_cache.py`,
+  `dumper_ast_config_cpp20_chains.py`,
   `dumper_castxml_probe.py`, `dumper_castxml_typedefs.py`,
   `dumper_clang_attributes.py`, `dumper_clang_errors.py`,
   `dumper_clang_qualifiers.py`, `dumper_clang_streaming.py`,
@@ -16,6 +16,21 @@
   fact-extraction/config-resolution code (parses castxml XML or clang AST
   JSON, resolves compiler flags, decodes DWARF, streams/prunes AST output)
   with no `compare`-shaped construction of `Change`/`ChangeKind` objects.
+
+  A 19th module, `dumper_cache.py`, was originally classified `extract`
+  in this same commit and was moved to `storage` instead after a Codex
+  review finding: it owns on-disk AST cache path management, atomic
+  cache writes, and memoized-entry lifecycle (`store_cached_ast`/
+  `load_cached_ast`/`_atomic_write`/`_cache_path`) — this repo's own
+  task-routing table (`AGENTS.md`) is explicit that "serialize
+  snapshots/baselines, own their schemas/migrations, or manage caches"
+  is `storage`'s domain, not `extract`'s. Safe for its own imports
+  (`storage`'s `may_import` is `[model]`, and `dumper_cache.py`'s only
+  local import is the unclassified `deadline`) and safe for every
+  existing consumer (`extract`-classified `dumper_clang_errors.py` and
+  `workflows`-classified `workflows/extraction.py` both already permit
+  `storage` in their own `may_import` lists, so reclassifying the
+  callee only widens what's reachable, never narrows it).
 
   **Closed the `frontends -> extract` direct-import gap this classification
   opened**, the same way PR #907 did for `buildsource/`: three CLI/compat
