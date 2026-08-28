@@ -633,10 +633,14 @@ BUG_CLASSES: tuple[BugClass, ...] = (
         invariant=(
             "A header-AST backend's own compiler-synthesized declaration "
             "(an implicit default/copy/move constructor, destructor, or "
-            "copy/move `operator=` the user never wrote) is never treated "
-            "as reachable public/exported API by a downstream consumer, "
-            "regardless of the declaration's origin or access — only a "
-            "declaration the source actually spells is real API surface."
+            "copy/move `operator=` the user never wrote) is treated as "
+            "reachable public/exported API by a downstream consumer only "
+            "when it matches a genuine, ODR-used export in the real export "
+            "table — never merely because the source declares it, "
+            "regardless of the declaration's origin or access. An "
+            "unresolved export table (not yet known, as opposed to "
+            "genuinely empty) keeps every such candidate, deferring the "
+            "drop until authoritative matching can actually run."
         ),
         fixed_by=(920,),
         seed_tests=(
