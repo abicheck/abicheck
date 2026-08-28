@@ -15,4 +15,8 @@
   (see `AGENTS.md`'s and recent ADR-061 PRs' own "deliberately left
   unclassified" sections). `python scripts/check_architecture.py` returns to
   0 errors; this was blocking every other in-flight ADR-061 classification PR
-  whose merge with `main` surfaced the same pre-existing violation.
+  whose merge with `main` surfaced the same pre-existing violation. The
+  identical one-line change was also ported directly onto two other
+  in-flight PRs (#784, #922) that hit this same failure before this fix
+  merged, so neither had to wait on merge order; both ports become no-ops
+  once this PR merges and those branches re-merge `main`.
