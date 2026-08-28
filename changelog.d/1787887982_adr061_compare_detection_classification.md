@@ -1,14 +1,12 @@
 ### Changed
 
-- **ADR-061 continuation**: 4 more root-level `abicheck/*.py` modules are
+- **ADR-061 continuation**: 3 more root-level `abicheck/*.py` modules are
   now classified into the `compare` responsibility layer in
-  `architecture/modules.yaml` (49 of the layer's `legacy_paths` total, up
+  `architecture/modules.yaml` (48 of the layer's `legacy_paths` total, up
   from the pre-existing 45): `finding_identity_atomic.py`,
   `finding_identity_ctor_dtor.py` (both split-out siblings of the
   already-classified `finding_identity.py` -- old/new symbol-identity
-  canonicalization, importing only `model`), `type_metadata.py` (the
-  `TypeMetadataSource` protocol detectors consume to read debug-format
-  type info generically, importing only `model.dwarf_facts`), and
+  canonicalization, importing only `model`), and
   `versioned_symbol_scheme.py` (the ICU-style versioned-symbol-name
   matcher that folds `foo_75`/`foo_78` into one identity across old/new --
   no local imports at all). Verified via `scripts/check_architecture.py`
@@ -16,6 +14,24 @@
   errors), `mypy abicheck/` (17 errors, unchanged from the documented
   yaml-stub-only baseline), `scripts/adr_status_sync.py` (clean), and the
   full fast unit suite.
+
+  **`type_metadata.py` was initially classified `compare` in this same
+  batch and reverted after a Codex review finding, real and confirmed by
+  reading the file directly.** Its own docstring states its purpose
+  plainly: "Unified `TypeMetadataSource` protocol for all debug format
+  readers... so the checker's detectors can consume type information
+  without knowing the source format" -- an extraction-layer protocol/
+  schema, not an old/new matcher. Concretely, `btf_metadata.py` and
+  `ctf_metadata.py` -- both classified `extract` by the parallel
+  `extract`-utilities PR in this same ADR-061 batch -- import `FuncProto`/
+  `read_null_terminated_string` from it directly. Landing both PRs would
+  have created a real `extract -> compare` violation the moment they
+  merged, invisible to either PR's own `check_architecture.py` run in
+  isolation since each ran against its own pre-merge base and had no
+  visibility into the other's sibling PR's classification choice.
+  Reverted to unclassified; `FuncProto`/the `TypeMetadataSource` protocol
+  belongs with `extract` (or `model`, if split, per the Codex finding's own
+  suggestion) in a follow-up, not force-classified here on a second guess.
 
   **Most of the assigned candidate set was investigated and left
   unclassified, each for a documented reason** -- this batch was
