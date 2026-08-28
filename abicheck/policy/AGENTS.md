@@ -1,0 +1,63 @@
+# AGENTS.md — `abicheck/policy/`
+
+## Purpose
+
+This package owns deciding relevance, suppression, classification,
+severity, and gate (exit-code) effect for an already-identified change. It
+answers "does this change matter, and how much" — never "are these two
+declarations the same entity" (that is `compare/`) and never "how is it
+reported" (that is `report/`).
+
+Most of that behavior still lives in flat root modules that
+`architecture/modules.yaml` lists as this layer's `legacy_paths`. Those stay
+where they are until a behavior-preserving vertical slice moves them;
+`architecture/debt.yaml` holds an oversized one (`analysis_assurance.py`) at
+`no_growth` with an explicit rationale — its own debt entry states it
+"cannot move safely without a behavior-preserving vertical slice", and
+`scripts/check_architecture.py`'s `debt-exemption` gate mechanically
+enforces that a debt-tracked file's path cannot change within the same PR
+that would also need to renew its baseline, so it stays flat until a PR
+whose only job is that move does so deliberately.
+
+Three further legacy-path modules are classified nowhere by design, not by
+oversight: `checker_policy.py`, `contract_gating.py`, and `reclassify.py`
+are each documented, in their own module docstrings, as leaf modules that
+both `compare` (`checker_types.DiffResult`, `checker.py`) and `policy`
+(`severity.py`, this package) depend on — the "pull the shared logic out to
+a leaf both sides can depend on" pattern ADR-061 names for exactly this
+class of cross-layer dependency. Giving one of them a single layer would be
+wrong, not merely premature, so `modules.yaml`'s `public_root_surfaces`
+list — the ADR's own named escape hatch for behavior with no single clean
+owner (see `docs/contribute/adr/061-responsibility-package-architecture.md`
+D3) — carries them instead of a `legacy_paths` entry.
+
+## Permitted imports
+
+Per ADR-061, `policy/` may depend only on `model` and `compare`, plus the
+public root surfaces. It may not import extraction, workflow, report, or
+frontend modules — a policy module that touches a binary, a build system,
+or a CLI flag directly is in the wrong layer.
+`scripts/check_architecture.py` enforces this.
+
+## Modules
+
+- `severity.py` — severity/gate configuration and the change-gate exit-code
+  computation (`compute_exit_code`, `compute_gate_decision`,
+  `SeverityConfig`, `SeverityLevel`, ...). Moved here from
+  `abicheck/severity.py` (ADR-061 physical migration); the flat path is now
+  a thin, lazily-resolving back-compat shim — see its own module docstring.
+- `exit_decision.py` — `ExitDecision`/`ExitReason`, the orthogonal-axis
+  exit-code fold shared by `compare`/`scan`. Moved from
+  `abicheck/exit_decision.py`; same shim treatment.
+- `contract_coverage_exit.py` — ADR-049 Phase 7's contract-coverage exit
+  contribution. Moved from `abicheck/contract_coverage_exit.py`; same shim
+  treatment.
+
+## Conventions
+
+- Every module starts with `from __future__ import annotations`.
+- The 800-line production cap applies (`scripts/check_architecture.py`).
+- A back-compat shim left at a module's old flat path re-exports the
+  moved module's full public surface explicitly (not `import *`), so
+  `abicheck.<name>.<attr>` attribute access keeps working identically to
+  before the move, not only `from abicheck.<name> import <attr>`.

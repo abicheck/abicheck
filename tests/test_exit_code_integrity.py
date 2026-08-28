@@ -29,7 +29,8 @@ import pytest
 from abicheck.checker import compare
 from abicheck.checker_policy import Verdict
 from abicheck.model import AbiSnapshot, Function, Visibility
-from abicheck.severity import _LEGACY_VERDICT_EXIT_CODE, legacy_exit_code
+from abicheck.policy.severity import _LEGACY_VERDICT_EXIT_CODE
+from abicheck.severity import legacy_exit_code
 
 
 def _fn(name: str) -> Function:
