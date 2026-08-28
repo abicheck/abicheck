@@ -47,6 +47,7 @@ drifting copy.
 from __future__ import annotations
 
 import os
+import re
 import subprocess
 import tempfile
 from pathlib import Path
@@ -91,7 +92,7 @@ def _bash_executable() -> str:
 
 
 def _run_harness(harness: str, *, cwd: Path | None = None) -> str:
-    """Source the real helper functions + *harness*, return CMD joined by '\\x1f'.
+    """Source the real helper functions + *harness*, return CMD joined by NUL.
 
     Writes the assembled script to a real file (UTF-8, explicit ``\\n`` line
     endings) and runs ``bash <path>`` rather than ``bash -c <string>``: passing
@@ -104,6 +105,25 @@ def _run_harness(harness: str, *, cwd: Path | None = None) -> str:
     — needed to prove a value like ``"*"`` stays literal regardless of what
     files happen to exist there, rather than relying on whatever the pytest
     process's own cwd contains.
+
+    Two byte-fidelity fixes over an earlier revision of this helper (Codex
+    review, PR #919, fresh evidence -- found by actually deriving an
+    independent expected-argv oracle for the hostile corpus and discovering
+    two cases where the *harness itself*, not add_flag()/add_sided_flag(),
+    silently altered what the test observed):
+
+    - The item separator was ``\\x1f`` (unit separator), which collides with
+      ``HOSTILE_SCALAR_CORPUS``'s own ``"unit-separator"`` entry -- a CMD
+      item genuinely containing that byte was indistinguishable from a
+      record boundary, truncating the observed item at the embedded byte.
+      NUL (``\\0``) cannot appear in a bash string at all (the C string ABI
+      bash variables are built on has no representation for it), so it is
+      the only byte no corpus value could ever collide with.
+    - ``subprocess.run(..., text=True)`` decodes stdout via a universal-
+      newlines text wrapper, which silently rewrites a lone ``\\r`` (the
+      corpus's own ``"carriage-return"`` entry) to ``\\n`` before the test
+      ever sees it. Capturing raw bytes and decoding them directly (no
+      ``text=True``) preserves every byte exactly.
     """
     script = (
         _helpers_region()
@@ -113,7 +133,7 @@ def _run_harness(harness: str, *, cwd: Path | None = None) -> str:
         # stock 3.2 included — treats an empty array subscripted with [@]
         # under `set -u` as an unbound-variable error and aborts the script
         # (the same bug run.sh itself works around at its PR-comment loop).
-        + "\nprintf '%s\\x1f' ${CMD[@]+\"${CMD[@]}\"}\n"
+        + "\nprintf '%s\\0' ${CMD[@]+\"${CMD[@]}\"}\n"
     )
     with tempfile.NamedTemporaryFile(
         "w",
@@ -128,8 +148,6 @@ def _run_harness(harness: str, *, cwd: Path | None = None) -> str:
         result = subprocess.run(
             [_bash_executable(), script_path],
             capture_output=True,
-            text=True,
-            encoding="utf-8",
             cwd=str(cwd) if cwd is not None else None,
         )
     finally:
@@ -137,14 +155,36 @@ def _run_harness(harness: str, *, cwd: Path | None = None) -> str:
     if result.returncode != 0:
         raise AssertionError(
             f"harness script failed (exit {result.returncode})\n"
-            f"--- stdout ---\n{result.stdout}\n"
-            f"--- stderr ---\n{result.stderr}"
+            f"--- stdout ---\n{result.stdout!r}\n"
+            f"--- stderr ---\n{result.stderr!r}"
         )
-    return result.stdout
+    return result.stdout.decode("utf-8")
 
 
 def _cmd_items(stdout: str) -> list[str]:
-    return [item for item in stdout.split("\x1f") if item]
+    return [item for item in stdout.split("\0") if item]
+
+
+def _expected_legacy_split_items(value: str) -> list[str]:
+    """Independently derive what add_flag()'s/add_sided_flag()'s legacy
+    single-line path SHOULD produce for *value*, without calling into
+    real.sh at all -- so a test comparing the real output against this
+    can't pass merely because both sides share the same (possibly buggy)
+    formula (Codex review, PR #919, fresh evidence: an earlier revision of
+    this test only checked that a decoy filename was absent, which would
+    still pass if add_flag() dropped, mutated, or reordered a value).
+
+    Reproduces bash's *default-IFS* (``<space><tab><newline>``) word-
+    splitting exactly -- not Python's ``str.split()``, which also treats
+    ``\\r`` and other whitespace bash's default IFS does not as a
+    separator (verified against real bash: a lone ``\\r`` with no
+    space/tab/newline present does NOT split). A value containing an
+    embedded newline never reaches this path at all -- add_flag() routes
+    it through the newline-preserving branch instead, one line per item.
+    """
+    if "\n" in value:
+        return [line for line in value.split("\n") if line != ""]
+    return re.findall(r"[^ \t\n]+", value)
 
 
 def _bash_ansi_c_quote(value: str) -> str:
@@ -244,16 +284,23 @@ class TestAddFlagHostileScalarCorpus:
         assert _cmd_items(out) == ["-H", "*"]
 
     @pytest.mark.parametrize("value", HOSTILE_SCALAR_CORPUS)
-    def test_no_corpus_value_glob_expands_to_a_decoy_file(
+    def test_argv_exactly_matches_the_independent_oracle(
         self, tmp_path, value: str
     ) -> None:
+        """Compares the *complete* captured CMD against an independently
+        derived expectation (Codex review, PR #919, fresh evidence: an
+        earlier revision only checked that a planted decoy filename was
+        absent, which would still pass if add_flag() dropped, mutated,
+        reordered, or added extra items for a non-glob value)."""
         (tmp_path / "decoy_one.txt").write_text("x")
         (tmp_path / "decoy_two.txt").write_text("x")
         literal = _bash_ansi_c_quote(value)
         out = _run_harness(f'add_flag "-H" {literal}', cwd=tmp_path)
         items = _cmd_items(out)
-        assert "decoy_one.txt" not in items
-        assert "decoy_two.txt" not in items
+        expected: list[str] = []
+        for word in _expected_legacy_split_items(value):
+            expected += ["-H", word]
+        assert items == expected
 
 
 @pytest.mark.skipif(not RUN_SH.is_file(), reason="action/run.sh not found")
@@ -291,7 +338,7 @@ class TestAddSidedFlagHostileScalarCorpus:
         assert _cmd_items(out) == ["--header", "old=*"]
 
     @pytest.mark.parametrize("value", HOSTILE_SCALAR_CORPUS)
-    def test_no_corpus_value_glob_expands_to_a_decoy_file(
+    def test_argv_exactly_matches_the_independent_oracle(
         self, tmp_path, value: str
     ) -> None:
         (tmp_path / "decoy_one.txt").write_text("x")
@@ -299,8 +346,10 @@ class TestAddSidedFlagHostileScalarCorpus:
         literal = _bash_ansi_c_quote(value)
         out = _run_harness(f'add_sided_flag "--header" "old" {literal}', cwd=tmp_path)
         items = _cmd_items(out)
-        assert "old=decoy_one.txt" not in items
-        assert "old=decoy_two.txt" not in items
+        expected: list[str] = []
+        for word in _expected_legacy_split_items(value):
+            expected += ["--header", f"old={word}"]
+        assert items == expected
 
 
 @pytest.mark.skipif(not RUN_SH.is_file(), reason="action/run.sh not found")
