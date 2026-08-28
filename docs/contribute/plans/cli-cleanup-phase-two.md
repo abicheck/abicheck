@@ -58,11 +58,16 @@ its own section below), PR 4 changes what a CI job's exit code means.
 > classification. **Correction (2026-08-28): this was never actually PR B's
 > own scope** — PR B's two stated goals (pack parity, effective-config
 > digest) are about *configuration* reaching every front end, not about
-> bundle *verdict topology*; the growing-allow-list gap and the sibling
-> "bundle-level findings never respect any policy override" gap this same
-> review round found are recorded as their own, separate, undesigned
-> feature in the root `AGENTS.md`'s "Known gaps" section instead — see PR
-> B's own "finalized" note below for why they don't block PR B closing.
+> bundle *verdict topology*; the growing-allow-list gap is recorded in the
+> root `AGENTS.md`'s "Known gaps" section, pointing at `g42-check-identity-
+> environments-and-provider-resolution.md`'s own "Environment-aware
+> system-provider resolution" design rather than sketching a competing fix
+> (Codex review, PR #910, fresh evidence: an earlier revision of this note
+> also pointed at a since-removed AGENTS.md entry for a *second*, "sibling"
+> policy-override gap that #883 -- named two sentences above -- had already
+> fixed; that stale entry is gone, this note no longer claims it) — see PR
+> B's own "finalized" note below for why the remaining topology gap doesn't
+> block PR B closing.
 > **PR 0B/P0 is still the single outstanding item with no code-side gap
 > left** — see its status note below for the ready-to-apply Ruleset
 > artifact this pass added. PR C (typed dump/scan convergence) remains the
@@ -2770,6 +2775,22 @@ immutable effective configuration (one `CompatibilityEvaluationConfig`, one
 `GateOptions`), the same object used by `compare`, the release fan-out, `scan`
 and the Action, with the same effective-config digest recorded in every
 report.
+
+**Scope correction (2026-08-28, recorded here rather than left only in PR
+B's own "finalized" note below, per Codex review, PR #910 — the two must
+agree): the `GateOptions` half of "land first" above was reassigned to PR
+G2, not landed as part of PR B.** PR B's own two stated goals — pack parity
+across every front end, and the effective-config digest in every report —
+are both landed (see PR B's "finalized" note below). The single shared
+`GateOptions` object this paragraph originally asked for is not: it needs a
+genuine rewrite of the release fan-out's own severity/exit-code-scheme
+representation, immediately ahead of PR G2's own not-yet-designed rewrite of
+the identical logic, so it is reassigned there rather than attempted
+reactively inside PR B. The `PolicyFile`/pack-parity slices below still
+close the fields a `GateOptions` object would otherwise have carried
+(`policy.overrides`, `surface.internal_namespaces`, `gate.exit_code_scheme`,
+`gate.severity.*`) via each front end's own existing configuration shape —
+only the *unification into one shared typed object* is deferred.
 
 > **Slice 1 landed (2026-08-16):** the directory/package release fan-out no
 > longer rejects `--pack` outright. `CompareRequest` gained `pack_policy_
