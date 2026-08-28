@@ -274,6 +274,192 @@ def test_write_snapshot_output_accepts_a_resolve_time_embedded_snapshot(
     assert len(build_source["source_graph"]["nodes"]) > 0
 
 
+def _build_library_with_flow2_symbol(tmp_path: Path) -> tuple[Path, Path, Path]:
+    """Like :func:`_build_library`, plus one more exported symbol
+    (``extern "C" int helper()``) that is defined only in the ``.cpp`` TU and
+    declared in no header the resolve-time embed ever parses -- so the
+    resolve-time L4 surface (seeded from ``widget.h`` alone) has no way to
+    see it. A Flow-2 pack is the only thing that can supply source-level
+    facts for it, which is what makes this fixture prove the *combination*
+    rather than merely that the resolve-time facts survived unchanged.
+    """
+    header = tmp_path / "widget.h"
+    header.write_text(
+        "#pragma once\nstruct Widget { int x; int y; int sum() const; };\n",
+        encoding="utf-8",
+    )
+    src = tmp_path / "widget.cpp"
+    src.write_text(
+        '#include "widget.h"\n'
+        "int Widget::sum() const { return x + y; }\n"
+        'extern "C" int helper() { return 42; }\n',
+        encoding="utf-8",
+    )
+    so_path = tmp_path / "libwidget.so"
+    subprocess.run(
+        ["g++", "-std=c++17", "-shared", "-fPIC", "-o", str(so_path), str(src)],
+        check=True,
+        capture_output=True,
+    )
+    compile_db = tmp_path / "compile_commands.json"
+    compile_db.write_text(
+        json.dumps(
+            [
+                {
+                    "directory": str(tmp_path),
+                    "arguments": [
+                        "g++",
+                        "-std=c++17",
+                        "-fPIC",
+                        "-c",
+                        str(src),
+                        "-o",
+                        "widget.o",
+                    ],
+                    "file": str(src),
+                }
+            ]
+        ),
+        encoding="utf-8",
+    )
+    return so_path, header, compile_db
+
+
+@pytest.mark.skipif(not (_HAVE_GXX and _HAVE_CLANG), reason=_SKIP_REASON)
+def test_write_snapshot_output_folds_a_flow2_inputs_pack_onto_a_resolve_time_embedded_snapshot(
+    tmp_path: Path,
+) -> None:
+    """The other still-open half of PR 3A's reordering prerequisite (the
+    plan doc's own words): does ``_write_snapshot_output``'s Flow-2
+    ``--inputs`` fold (``embed_inputs_pack``) behave correctly when the
+    snapshot it receives already carries a *resolve-time*-embedded
+    ``build_source`` (produced by ``execute_dump_request``), rather than one
+    ``_write_snapshot_output`` embedded itself?
+
+    ``embed_inputs_pack`` calls ``_combine_packs(snap.build_source,
+    ingested.build_source)`` -- i.e. the resolve-time-embedded pack is
+    always ``_combine_packs``'s *first* argument (``bi_pack``), the ingested
+    Flow-2 pack its *second* (``src_pack``). Per ``_combine_packs``'s own
+    documented per-layer priority, that is NOT a per-fact merge: L3
+    (``build_evidence``) prefers ``bi_pack`` first, so the resolve-time
+    embed's own L3 facts win; L4/L5 (``source_abi``/``source_graph``)
+    prefer ``src_pack`` first, so a Flow-2 pack supplying real L4 facts
+    *replaces* the resolve-time embed's own L4 surface wholesale rather
+    than merging with it -- consistent with a Flow-2 pack's whole design
+    (a build's own wrapper-emitted, per-TU-authoritative facts, meant to
+    supersede a redundant inline replay, not be unioned with it).
+
+    This is not new behaviour to verify -- ``_combine_packs``'s per-layer
+    priority is already covered directly (``test_merge_support.py`` and
+    friends). What is specifically untested, and what this test closes, is
+    whether *this exact combination* still holds when ``bi_pack`` is a
+    snapshot produced by the *typed* pipeline
+    (``execute_dump_request``) rather than one ``_write_snapshot_output``
+    embedded itself -- the one shape this whole module exists to exercise.
+    Proven with a Flow-2 pack supplying a declaration for a real exported
+    symbol (``helper``) the resolve-time embed's own header-seeded L4
+    surface has no way to see (it is declared in no header at all): the
+    written snapshot must link ``helper`` (the Flow-2 replacement took
+    effect) while still carrying the resolve-time embed's own real L3
+    compile-unit facts and L5 graph (the layers Flow-2 did not supply, so
+    ``bi_pack`` -- the resolve-time embed -- must still win them).
+    """
+    from abicheck.api_types import DumpRequest, InputSpec
+    from abicheck.buildsource import SourceAbiTu, SourceEntity, SourceLocation
+    from abicheck.buildsource.inputs_emit import write_inputs_pack
+    from abicheck.cli_buildsource import _write_snapshot_output
+    from abicheck.compile_context import CompileContext
+    from abicheck.service_dump_pipeline import (
+        execute_dump_request,
+        resolve_dump_request,
+    )
+
+    so_path, header, compile_db = _build_library_with_flow2_symbol(tmp_path)
+
+    request = DumpRequest(
+        input=InputSpec(
+            path=so_path,
+            headers=(header,),
+            sources=tmp_path,
+            build_info=compile_db,
+            compile=CompileContext(frontend="clang"),
+        ),
+        depth="source",
+    )
+    resolved = resolve_dump_request(request)
+    result = execute_dump_request(resolved)
+    snap = result.snapshot
+    assert snap.build_source is not None
+
+    # Ground truth: the resolve-time embed's own L4 surface, seeded only
+    # from widget.h, has no way to have linked `helper` -- it is declared
+    # in no header this run ever parsed. Anything below linking `helper`
+    # is therefore genuinely attributable to the Flow-2 fold.
+    assert snap.build_source.source_abi is not None
+    pre_mapping = snap.build_source.source_abi.mappings.get(
+        "source_decl_to_binary_symbol", {}
+    )
+    assert "helper" not in pre_mapping
+
+    flow2_root = tmp_path / "abicheck_inputs"
+    tu = SourceAbiTu(
+        tu_id="cu://widget.cpp#cfg:flow2",
+        target_id="target://libwidget",
+        source="widget.cpp",
+        public_header_roots=["widget.cpp"],
+        functions=[
+            SourceEntity(
+                id="decl://helper",
+                kind="function",
+                qualified_name="helper",
+                mangled_name="helper",
+                signature_hash="sig-helper",
+                source_location=SourceLocation(
+                    path="widget.cpp", line=3, origin="PUBLIC_HEADER"
+                ),
+                visibility="public_header",
+            )
+        ],
+    )
+    write_inputs_pack(flow2_root, library="libwidget", tus=[tu])
+
+    out_path = tmp_path / "out.json"
+    _write_snapshot_output(
+        snap,
+        out_path,
+        build_info=compile_db,
+        sources=tmp_path,
+        collect_mode="source-target",
+        depth="source",
+        header_roots=(header,),
+        inputs_pack=flow2_root,
+    )
+
+    payload = json.loads(out_path.read_text(encoding="utf-8"))
+    build_source = payload["build_source"]
+
+    # L4: the Flow-2 pack's own facts won this layer wholesale (by design --
+    # see the docstring above), so `helper` -- invisible to the resolve-time
+    # embed -- is now linked.
+    mapping = build_source["source_abi"]["mappings"]["source_decl_to_binary_symbol"]
+    assert mapping.get("helper") == "helper"
+    # And genuinely wholesale, not a merge: the resolve-time embed's own L4
+    # fact for `sum()` did NOT survive the combination -- pinning the
+    # documented per-layer priority itself, not just the positive case.
+    assert "_ZNK6Widget3sumEv" not in mapping
+
+    # L3: Flow-2 supplied no compile_db in this fixture, so `bi_pack` (the
+    # resolve-time embed) must still win this layer -- its real compile
+    # unit survives the combination untouched.
+    compile_units = build_source["build_evidence"]["compile_units"]
+    assert len(compile_units) == 1
+    assert compile_units[0]["standard"] == "c++17"
+
+    # L5: Flow-2 supplied no graph either, so the resolve-time embed's own
+    # real source graph must also survive.
+    assert len(build_source["source_graph"]["nodes"]) > 0
+
+
 @pytest.mark.skipif(not (_HAVE_GXX and _HAVE_CLANG), reason=_SKIP_REASON)
 def test_write_snapshot_output_still_raises_for_a_genuinely_unreached_depth(
     tmp_path: Path,
