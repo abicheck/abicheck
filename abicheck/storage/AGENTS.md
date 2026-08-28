@@ -8,13 +8,16 @@ management, per ADR-061 D1. It answers "how is a fact stored, identified,
 versioned, and read back" — never "what that fact means" or "whether a
 comparison is valid".
 
-Two bodies of work live here and are deliberately independent:
+Three bodies of work live here and are deliberately independent:
 
 - **G40's bundle archive** — a content-addressed zip container for
   already-computed `BundleFacts`.
 - **[ADR-062](../../docs/contribute/adr/062-project-snapshot-storage-v2.md)'s
   Phase 0 primitives** — the availability, identity, canonical-encoding and
   versioning vocabulary a project-scale format is built on.
+- **ADR-063 Phase 0's `Fact[T]` snapshot codec** — `fact_codec.py`/
+  `enum_codec.py`, `serialization.py`'s codec helpers; excluded from the
+  ADR-062 sweeps (`adr062_scope.py`'s `NON_ADR062_MODULES`), not re-exported.
 
 [ADR-059](../../docs/contribute/adr/059-compressed-snapshot-storage.md)'s
 physical envelope (compression detection, atomic writes, decompression-bomb
@@ -90,24 +93,22 @@ own module — no service locator; `__init__.py` is a re-export surface only.
    compatibility question gets its own axis in `StorageVersions`.
 
 6. **Never coerce a value a decision reads.** `str()` on a field that
-   identifies something is silently lossy in the one way that matters: `1` and
-   `"1"` become the same value, so two things a package distinguished stop
-   being distinguishable, and where the field is a mapping key, iteration
-   order decides which record survives. Reject instead. This applies to
-   identity fields, mapping keys, ledger family names, override key halves,
-   and provenance (`producer`/`recipe` decide whether two `PRESENT` records
-   are interchangeable). Informational version axes are the deliberate
-   exception — no decision reads them, and this repo's convention is that a
-   hand-edited package must not abort a load.
+   identifies something is silently lossy in the one way that matters: `1`
+   and `"1"` become the same value, so two things a package distinguished
+   stop being distinguishable, and where the field is a mapping key,
+   iteration order decides which record survives. Reject instead. This
+   applies to identity fields, mapping keys, ledger family names, override
+   key halves, and provenance (`producer`/`recipe` decide whether two
+   `PRESENT` records are interchangeable). Informational version axes are
+   the deliberate exception — no decision reads them, and this repo's
+   convention is that a hand-edited package must not abort a load.
 
    **The guards live in `guards.py`** — `identity_text`, `decision_key`,
    `provenance_text`, `diagnostics_from`, `mapping`. They were one copy per
-   module until review found *seven* separate sites where the rule had not
-   been applied, one at a time, always as a site missing a check its siblings
-   already had. That is what three copies of a rule do, so the copies are
-   gone; the module is internal (the package does not re-export it) but its
-   surface is pinned by the same landed-surface table as the four public
-   ones. Add a new guard there, not at a call site.
+   module until review found *seven* separate sites missing a check its
+   siblings already had, one at a time. The module is internal (not
+   re-exported) but its surface is pinned by the same landed-surface table
+   as the four public ones. Add a new guard there, not at a call site.
 
    `canonical_form` keeps its own mapping-key rejection: it is the *format*
    refusing to encode a key it cannot round-trip, decided by the value's
@@ -119,16 +120,15 @@ own module — no service locator; `__init__.py` is a re-export surface only.
    a string all iterate into values that pass every key guard, so
    `AvailabilityLedger(families=["layout"])` constructed and only failed at
    the first real lookup. A **record slot** must be checked where it is
-   assigned, not where it is read, or a non-record surfaces from inside
-   whichever decision happens to consult it. And a `from_dict` must refuse a
-   non-mapping *cleanly* — a caller separating "malformed package" from
-   "broken reader" catches `TypeError`/`ValueError`, so an `AttributeError`
-   escaping `.get` reads as the second when it is the first. Where a
-   `from_dict` degrades instead of refusing (the informational axes), it
-   must degrade to what an empty document parses to, never to the
-   dataclass defaults: those are the current *writer's* versions, so a
-   malformed versions block would have read as "written by this exact
-   build" and passed `check_reader_compatibility`.
+   assigned, not read, or a non-record surfaces from inside whichever
+   decision consults it. And a `from_dict` must refuse a non-mapping
+   *cleanly* — a caller separating "malformed package" from "broken reader"
+   catches `TypeError`/`ValueError`, so an `AttributeError` escaping `.get`
+   reads as the second when it is the first. Where a `from_dict` degrades
+   instead of refusing (the informational axes), it must degrade to what an
+   empty document parses to, never to the dataclass defaults: those are the
+   current *writer's* versions, so a malformed versions block would have
+   read as "written by this exact build" and passed `check_reader_compatibility`.
 
 ## Tests
 

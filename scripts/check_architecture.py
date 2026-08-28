@@ -356,6 +356,29 @@ def _imports(
                 target = node.module or ""
             if target:
                 result.append((node.lineno, target))
+                # Every `from <target> import <name>` -- relative
+                # (`from . import x`/`from .. import x`, `node.module` empty)
+                # or absolute (`from abicheck import x`,
+                # `from abicheck.buildsource import x`, `node.module` set) --
+                # is ambiguous from the AST alone: `<name>` may be a plain
+                # symbol defined in `<target>`'s own `__init__.py`, or it may
+                # itself be a submodule of `<target>`. An earlier revision of
+                # this fix only handled the relative, empty-`node.module`
+                # case, so an absolute `from abicheck import legacy_compare`
+                # (a `legacy_paths`-classified importer, no `unclassified-
+                # import` fallback to catch it) stayed silently invisible to
+                # `dependency-direction` the identical way (Codex review,
+                # fresh evidence). Handling both shapes uniformly -- record
+                # `target.<name>` alongside `target` for every `ImportFrom`,
+                # not only the bare-dot one -- closes both. Confirmed via a
+                # real repo-wide check before trusting this: the identical
+                # two known violations the narrower fix found, still zero new
+                # false positives from any module's ordinary `from X import
+                # <plain symbol>` usage (a symbol name essentially never
+                # collides with an unrelated, differently-classified
+                # submodule's own name).
+                for alias in node.names:
+                    result.append((node.lineno, f"{target}.{alias.name}"))
     return result
 
 

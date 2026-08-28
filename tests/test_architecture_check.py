@@ -437,6 +437,87 @@ def test_legacy_source_import_direction_is_enforced(tmp_path: Path) -> None:
     assert "dependency-direction" in _rules(root)
 
 
+def test_bare_dot_import_of_forbidden_submodule_is_enforced(tmp_path: Path) -> None:
+    """`from . import x` / `from .. import x` must not blind the checker to
+    a real cross-layer import (Codex review finding, abicheck/abicheck#903:
+    ``buildsource/template_graph.py``/``virtual_dispatch_graph.py`` both
+    imported the compare-owned ``diff_cxx_rules`` via
+    ``from .. import diff_cxx_rules`` while classified `extract` via
+    `legacy_paths` (not physically migrated under `abicheck/extract/`), and
+    ``check_architecture.py`` reported zero errors -- its import resolver
+    only ever looked at ``node.module``, which is empty for this bare-dot
+    form, so the target collapsed to the enclosing package and the actual
+    imported name (``diff_cxx_rules`` here, potentially itself a submodule,
+    not merely a symbol in the package's own ``__init__.py``) was silently
+    dropped. Mirrors `test_legacy_source_import_direction_is_enforced`'s
+    legacy-path shape exactly -- a `migrated_source` importer trips a
+    different rule (`unclassified-import`) pre-fix, since that rule alone
+    already catches an import resolving to no layer; a `legacy_paths`
+    importer has no such fallback, which is what made this manifest as
+    silence in the real PR rather than a differently-worded finding.
+    """
+    root = _tree(tmp_path)
+    config = json.loads((root / "architecture/modules.yaml").read_text())
+    config["layers"]["extract"]["legacy_paths"] = ["abicheck/legacy_extract.py"]
+    config["layers"]["compare"]["legacy_paths"] = ["abicheck/legacy_compare.py"]
+    config["legacy_root_modules"].extend(["legacy_extract.py", "legacy_compare.py"])
+    _write(root / "architecture/modules.yaml", json.dumps(config))
+    _write(root / "abicheck/legacy_compare.py", "VALUE = 1\n")
+    _write(root / "abicheck/legacy_extract.py", "from . import legacy_compare\n")
+
+    assert "dependency-direction" in _rules(root)
+
+
+def test_absolute_import_of_forbidden_submodule_is_enforced(tmp_path: Path) -> None:
+    """The identical bug, in the absolute-import form (Codex review finding,
+    abicheck/abicheck#903, on the bare-dot fix itself): `from abicheck import
+    legacy_compare` has a nonempty `node.module` (`"abicheck"`), so the
+    narrower fix above -- gated on `node.module` being empty -- never applied
+    the `target.<name>` expansion here, leaving this shape exactly as
+    invisible to `dependency-direction` as the relative form was pre-fix.
+    Same `legacy_paths` shape as the bare-dot test, only the import spelling
+    differs.
+    """
+    root = _tree(tmp_path)
+    config = json.loads((root / "architecture/modules.yaml").read_text())
+    config["layers"]["extract"]["legacy_paths"] = ["abicheck/legacy_extract.py"]
+    config["layers"]["compare"]["legacy_paths"] = ["abicheck/legacy_compare.py"]
+    config["legacy_root_modules"].extend(["legacy_extract.py", "legacy_compare.py"])
+    _write(root / "architecture/modules.yaml", json.dumps(config))
+    _write(root / "abicheck/legacy_compare.py", "VALUE = 1\n")
+    _write(root / "abicheck/legacy_extract.py", "from abicheck import legacy_compare\n")
+
+    assert "dependency-direction" in _rules(root)
+
+
+def test_bare_dot_import_of_own_symbol_is_not_a_false_violation(
+    tmp_path: Path,
+) -> None:
+    """The fix above must not turn every ordinary `from . import x` into a
+    spurious finding merely because `x` happens to share a name with some
+    submodule elsewhere -- a same-layer bare-dot import (a package's own
+    `__init__.py` re-export, or a genuine same-package submodule) stays
+    silent, matching what a real repo-wide check found before trusting this
+    fix (zero new false positives across the whole codebase).
+
+    Covers both shapes CodeRabbit review flagged as needing separate
+    coverage: a symbol defined directly in `__init__.py` (`SOME_CONSTANT`)
+    and a genuine same-layer submodule (`helper.py`) -- the fix's own
+    `target.<name>` path resolves the latter to a real module in the same
+    layer as the importer, which must stay silent exactly like the former.
+    """
+    root = _tree(tmp_path)
+    _add_package(root, "extract", "SOME_CONSTANT = 1\n")
+    _write(root / "abicheck/extract/helper.py")
+    _write(root / "abicheck/extract/reader.py", "from . import SOME_CONSTANT\n")
+    _write(
+        root / "abicheck/extract/submodule_reader.py",
+        "from . import helper\n",
+    )
+
+    assert check_repository(root) == []
+
+
 def test_invalid_debt_path_and_review_date_fail_schema(tmp_path: Path) -> None:
     root = _tree(tmp_path)
     debt = {

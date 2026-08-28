@@ -193,6 +193,11 @@
           "default": null,
           "is_restrict": false,
           "is_va_list": false,
+          "is_va_list_fact": {
+            "diagnostics": [],
+            "status": "not_collected",
+            "value": null
+          },
           "kind": "value",
           "name": "s",
           "pointer_depth": 0,
@@ -221,7 +226,7 @@
   "platform": null,
   "python_api": null,
   "python_ext": null,
-  "schema_version": 25,
+  "schema_version": 26,
   "scope_fallback": null,
   "source_mtime": null,
   "source_mtime_epoch": false,
@@ -235,6 +240,11 @@
       "alignment_bits": null,
       "base_offsets": {},
       "bases": [],
+      "bases_fact": {
+        "diagnostics": [],
+        "status": "not_collected",
+        "value": null
+      },
       "data_size_bits": null,
       "deprecated": null,
       "fields": [],
@@ -254,8 +264,23 @@
       "source_header": null,
       "source_location": null,
       "virtual_bases": [],
+      "virtual_bases_fact": {
+        "diagnostics": [],
+        "status": "not_collected",
+        "value": null
+      },
       "vptr_offset_bits": null,
-      "vtable": []
+      "vptr_offset_bits_fact": {
+        "diagnostics": [],
+        "status": "not_collected",
+        "value": null
+      },
+      "vtable": [],
+      "vtable_fact": {
+        "diagnostics": [],
+        "status": "not_collected",
+        "value": null
+      }
     }
   ],
   "variables": [],

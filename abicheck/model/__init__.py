@@ -51,6 +51,7 @@ from ..name_classification import (
     is_cxx_runtime_library as is_cxx_runtime_library,
     is_non_abi_surface_type as is_non_abi_surface_type,
 )
+from .availability import FactStatus as FactStatus
 from .declarations import Function as Function, Param as Param, Variable as Variable
 from .elf_facts import SymbolBinding as SymbolBinding
 from .entities import (
@@ -58,11 +59,13 @@ from .entities import (
     EnumType as EnumType,
     RecordType as RecordType,
     TypeField as TypeField,
+    resolve_vptr_offset_bits as resolve_vptr_offset_bits,
 )
 from .extraction_contract import (
     DependencyInfo as DependencyInfo,
     ExtractionContract as ExtractionContract,
 )
+from .fact import Fact as Fact, replace_with_fact_sync as replace_with_fact_sync
 from .snapshot import AbiSnapshot as AbiSnapshot
 from .stdlib_surface import stdlib_namespaces_excluded as stdlib_namespaces_excluded
 from .vocabulary import (
@@ -82,6 +85,8 @@ __all__ = [
     "EnumMember",
     "EnumType",
     "ExtractionContract",
+    "Fact",
+    "FactStatus",
     "Function",
     "Param",
     "ParamKind",
@@ -98,5 +103,7 @@ __all__ = [
     "is_compiler_internal_type",
     "is_cxx_runtime_library",
     "is_non_abi_surface_type",
+    "replace_with_fact_sync",
+    "resolve_vptr_offset_bits",
     "stdlib_namespaces_excluded",
 ]

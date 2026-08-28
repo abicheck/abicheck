@@ -651,11 +651,11 @@ def _merge_record_type(
         # fact above, these two are plain `bool = False` -- not an Optional
         # tri-state -- so there is no null "castxml doesn't know" state to key
         # a _backfill_fact()-style None-check off. castxml's own `False` is
-        # ALWAYS structurally correct by construction rather than a
-        # placeholder (castxml never emits an uninstantiated template
-        # pattern as a declaration at all, and it always computes real
-        # per-field offsets for an anonymous-aggregate flatten it can see),
-        # so this is a plain OR-merge, not a None-guarded backfill.
+        # ALWAYS structurally correct by construction rather than a placeholder
+        # (castxml never emits an uninstantiated template pattern as a
+        # declaration at all, and it always computes real per-field offsets
+        # for an anonymous-aggregate flatten it can see), so this is a plain
+        # OR-merge, not a None-guarded backfill.
         #
         # is_template_pattern is empirically INERT here, verified with a real
         # class-template dump: a clang-recognized template PATTERN never
@@ -668,24 +668,21 @@ def _merge_record_type(
         # clang-only-append path below. Kept here anyway (not asserted
         # unreachable) both for defense in depth against a future clang
         # AST-shape change and because it is honest about the invariant this
-        # merge is supposed to preserve, matching this module's own
-        # documented precedent for RecordType.is_abstract (a backfill kept
-        # even though the current producer pair makes it a no-op).
+        # merge is supposed to preserve, matching this module's own documented
+        # precedent for RecordType.is_abstract (a backfill kept even though
+        # the current producer pair makes it a no-op).
         #
-        # has_anonymous_aggregate_fields is NOT provably inert the same way:
-        # a castxml record with real, populated fields already carries
+        # has_anonymous_aggregate_fields is NOT provably inert the same way: a
+        # castxml record with real, populated fields already carries
         # corroborating field-name-overlap evidence dumper_layout_backfill.py
-        # prefers over this flag's own fallback path, but an opaque/
-        # incomplete castxml record (or a future producer shape) could
-        # legitimately reach this merge with an EMPTY `fields` list for a
-        # genuinely anonymous-aggregate-only record, where clang's `True`
-        # is the only signal available.
+        # prefers over this flag's own fallback path, but an opaque/incomplete
+        # castxml record (or a future producer shape) could legitimately reach
+        # this merge with an EMPTY `fields` list for a genuinely
+        # anonymous-aggregate-only record, where clang's `True` is the only
+        # signal available.
         if clang_t.is_template_pattern and not t.is_template_pattern:
             updates["is_template_pattern"] = True
-        if (
-            clang_t.has_anonymous_aggregate_fields
-            and not t.has_anonymous_aggregate_fields
-        ):
+        if clang_t.has_anonymous_aggregate_fields and not t.has_anonymous_aggregate_fields:
             updates["has_anonymous_aggregate_fields"] = True
 
     clang_fields_by_name = {cf.name: cf for cf in clang_t.fields} if clang_t else {}
@@ -696,7 +693,9 @@ def _merge_record_type(
     if merged_fields != t.fields:
         updates["fields"] = merged_fields
 
-    return replace(t, **updates) if updates else t
+    from .model import replace_with_fact_sync
+
+    return replace_with_fact_sync(t, **updates) if updates else t
 
 
 def _merge_enum_type(

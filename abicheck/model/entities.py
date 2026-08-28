@@ -18,8 +18,21 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import cast
 
+from .fact import Fact, _Omitted, bridge_legacy_and_fact
 from .vocabulary import AccessLevel, ScopeOrigin
+
+# ADR-063 Phase 0: private omission sentinels for RecordType's Fact[T]-backed
+# fields — see model/fact.py's _Omitted/bridge_legacy_and_fact docstrings.
+# cast() to the field's own real type so the declared type never widens;
+# the list-typed sentinels are routed through a default_factory returning
+# this same singleton (a *direct* mutable-typed dataclass default is
+# rejected outright by `dataclasses`), never a fresh object per instance.
+_OMITTED_BASES: list[str] = cast("list[str]", _Omitted())
+_OMITTED_VIRTUAL_BASES: list[str] = cast("list[str]", _Omitted())
+_OMITTED_VTABLE: list[str] = cast("list[str]", _Omitted())
+_OMITTED_VPTR_OFFSET_BITS: int | None = cast("int | None", _Omitted())
 
 
 @dataclass
@@ -55,9 +68,16 @@ class RecordType:
     size_bits: int | None = None
     alignment_bits: int | None = None
     fields: list[TypeField] = field(default_factory=list)
-    bases: list[str] = field(default_factory=list)  # base class names
-    virtual_bases: list[str] = field(default_factory=list)
-    vtable: list[str] = field(default_factory=list)  # ordered vtable entries (mangled)
+    # ADR-063 Phase 0: bases/virtual_bases/vtable default to a private
+    # omission sentinel (identity-compared in __post_init__), not a plain
+    # empty list — an omitted field and an explicitly-confirmed-empty one
+    # must backfill their *_fact sibling differently (not_collected() vs.
+    # present([])). See bases_fact/virtual_bases_fact/vtable_fact below.
+    bases: list[str] = field(default_factory=lambda: _OMITTED_BASES)  # base class names
+    virtual_bases: list[str] = field(default_factory=lambda: _OMITTED_VIRTUAL_BASES)
+    vtable: list[str] = field(
+        default_factory=lambda: _OMITTED_VTABLE
+    )  # ordered vtable entries (mangled)
     source_location: str | None = None
     is_union: bool = False
     is_opaque: bool = (
@@ -121,7 +141,12 @@ class RecordType:
     # polymorphic class; nonzero with virtual bases). None when the type is
     # non-polymorphic or the dumper could not determine it. Introducing the
     # first virtual function makes this go from None → 0 and shifts every field.
-    vptr_offset_bits: int | None = None
+    # ADR-063 Phase 0: defaults to a private omission sentinel, not the
+    # literal `None` — `None` is already a real, meaningful value here
+    # ("no vptr observed"), so `RecordType()` (omitted) and
+    # `RecordType(vptr_offset_bits=None)` (explicit: confirmed no vptr)
+    # must backfill vptr_offset_bits_fact differently. See __post_init__.
+    vptr_offset_bits: int | None = _OMITTED_VPTR_OFFSET_BITS
     # Base-class subobject offsets: base name → bit offset within this object.
     # Distinct from ``bases`` (declaration order only): a base can *move* (e.g.
     # an empty-base-optimization is lost, or a member is inserted ahead of it)
@@ -145,6 +170,40 @@ class RecordType:
     is_abstract: bool | None = None
     # See Function.deprecated for the message-string convention.
     deprecated: str | None = None
+
+    # ── ADR-063 Phase 0: Fact[T] siblings for the fields AGENTS.md's
+    # "Known gaps" names as actively causing fabricated findings from
+    # absent evidence (type_vtable_changed, the accepted type_base_changed
+    # gap). Default None means "caller supplied neither form" — distinct
+    # from Fact.not_collected(), which is an explicit claim; __post_init__
+    # backfills from whichever of the legacy field / Fact sibling the
+    # caller actually supplied (see model/fact.py's bridge_legacy_and_fact).
+    # A detector reads these, never the plain bases/virtual_bases/vtable/
+    # vptr_offset_bits fields above, which stay for one release only for
+    # asdict()-based external-consumer compatibility (kept in sync with
+    # the Fact sibling at every construction site, never independently
+    # assigned again after this phase).
+    bases_fact: Fact[list[str]] | None = field(default=None, kw_only=True)
+    virtual_bases_fact: Fact[list[str]] | None = field(default=None, kw_only=True)
+    vtable_fact: Fact[list[str]] | None = field(default=None, kw_only=True)
+    vptr_offset_bits_fact: Fact[int | None] | None = field(default=None, kw_only=True)
+
+    def __post_init__(self) -> None:
+        self.bases, self.bases_fact = bridge_legacy_and_fact(
+            self.bases, self.bases_fact, _OMITTED_BASES, []
+        )
+        self.virtual_bases, self.virtual_bases_fact = bridge_legacy_and_fact(
+            self.virtual_bases, self.virtual_bases_fact, _OMITTED_VIRTUAL_BASES, []
+        )
+        self.vtable, self.vtable_fact = bridge_legacy_and_fact(
+            self.vtable, self.vtable_fact, _OMITTED_VTABLE, []
+        )
+        self.vptr_offset_bits, self.vptr_offset_bits_fact = bridge_legacy_and_fact(
+            self.vptr_offset_bits,
+            self.vptr_offset_bits_fact,
+            _OMITTED_VPTR_OFFSET_BITS,
+            None,
+        )
 
 
 @dataclass
@@ -176,3 +235,19 @@ class EnumType:
     # type-map-key reasons documented on ``RecordType.qualified_name``. None
     # when the enum is at global scope or the dumper couldn't determine it.
     qualified_name: str | None = None
+
+
+def resolve_vptr_offset_bits(rec: RecordType, value: int) -> None:
+    """Set ``vptr_offset_bits`` AND its ``Fact[T]`` sibling together.
+
+    ADR-063 Phase 0: a caller resolving a class's vptr offset *after* the
+    ``RecordType`` was already constructed (a post-construction fixed-point
+    pass, a DWARF-corroboration backfill) must update both representations
+    together — ``__post_init__`` already backfilled ``vptr_offset_bits_fact``
+    from the pre-resolution state (typically ``Fact.not_collected()``, since
+    ``None`` is what put the record on such a pass's worklist in the first
+    place), and leaving it stale while only the legacy scalar moves silently
+    loses exactly the fact this bridge exists to make visible.
+    """
+    rec.vptr_offset_bits = value
+    rec.vptr_offset_bits_fact = Fact.present(value)

@@ -974,7 +974,118 @@ structure already in place:
    is Phase 1 budget, not an afterthought discovered mid-implementation —
    the "close to mechanical" framing above describes the *common* case in
    this file, not a blanket exemption from the audit every other slice
-   already requires. **`diff_symbols.py` does NOT belong in this
+   already requires.
+
+   **First real sub-slice shipped:** `diff_platform_elf_dynamic.
+   _diff_security_hardening`'s `STACK_CANARY_REMOVED`/
+   `FORTIFY_SOURCE_WEAKENED` (deliberately the narrowest defensible cut of
+   this item's own "genuinely static... keeps its one-constant-tuple
+   treatment" case — the two hardening kinds this function *also* emits,
+   `RELRO_WEAKENED`/`PIE_DISABLED`/`WRITABLE_EXECUTABLE_SEGMENT`/
+   `EXECUTABLE_STACK`/`EXECUTABLE_STACK_REMOVED`, were checked against
+   `elf_metadata._finalize_hardening` and found to rest on a genuine
+   *composite* of ELF program-header/segment flags and `.dynamic`-section
+   reads — `relro` alone combines a `PT_GNU_RELRO` segment presence check
+   with the `.dynamic` `bind_now` flag — for which the existing vocabulary
+   has no clean single tag, and inventing one without the same review
+   scrutiny this document's own history shows that needs was left for its
+   own dedicated slice rather than guessed at here). `has_stack_canary`/
+   `has_fortify_source` are traced precisely to a pure `.dynsym` import/
+   symbol-name scan (`_finalize_hardening`'s `names = [s.name for s in
+   meta.imports] + [s.name for s in meta.symbols]`), read identically on
+   both sides — `("both:l0:elf_symtab",)`, no new vocabulary needed, single
+   producer confirmed via `git grep`. `RPATH_CHANGED`/`RPATH_TYPE_CHANGED`/
+   `RUNPATH_CHANGED` (the neighboring `_diff_elf_dynamic_section` function)
+   were also excluded from this slice: `RPATH_CHANGED` has a *second*,
+   Mach-O-side producer (`diff_platform._diff_macho_loader_facts`,
+   `LC_RPATH`) with no existing vocabulary entry for that platform's rpath
+   evidence — the same "Multi-provider `evidence_provenance`" shape the
+   existing `l0:pe_export_table`/`l0:macho_exports` split already
+   documents for exports, needing the identical treatment here before
+   this kind can be safely reclassified.
+
+   Also extended `tests/_detector_mutations.py`'s shared mutation
+   catalogue (previously function/type/enum/variable-only) with an `elf=`
+   fragment key and two new binary-level mutations
+   (`_m_stack_canary_removed`/`_m_fortify_source_weakened`, both in
+   `ASYMMETRIC` — hardening-weakening detectors report only the regression
+   direction, per `_diff_security_hardening`'s own docstring) — the first
+   `MUTATIONS` entries that mutate `AbiSnapshot.elf` rather than a
+   function/type/enum/variable list, satisfying Phase 2's
+   `test_every_verified_kind_has_a_mutation_catalogue_entry` gate for both
+   kinds. Verified end-to-end: `tests/test_evidence_provenance_completeness.py`
+   fails on the pre-fix code (`stack_canary_removed`/
+   `fortify_source_weakened`'s real emitted findings carry
+   `evidence_provenance=None` despite the PROVENANCE_STATIC
+   classification) and passes post-fix.
+
+   **The single code-level provider-ID registry this section's own
+   Phase 0 text called for did not exist yet when this slice first
+   landed — closed in the same PR (Codex review, PR #900).**
+   `model.vocabulary.EVIDENCE_PROVENANCE_TAGS` (a `frozenset[str]`, the
+   registry's home per ADR-061's "closed vocabularies" package) is now
+   the single source of truth, seeded with the one tag this slice
+   introduces (`"both:l0:elf_symtab"`). `tests/test_evidence_provenance_
+   completeness.py::TestProvenanceTagsAreRegistered` checks every tag any
+   `PROVENANCE_STATIC`/`PROVENANCE_PER_FINDING` kind's real producer
+   emits is registered — confirmed to fail when the registry is emptied
+   (a real, checked gate, not a decorative frozenset).
+
+   **A second finding on the same review round, verified real and
+   deliberately NOT fixed here:** `l0:elf_symtab`'s own vocabulary
+   definition (Phase 0's table, above) names `.dynsym`/the export table
+   specifically — but `elf_metadata._parse_all_sections()` has a
+   documented `.symtab` fallback for relocatable objects (`ET_REL` `.o`
+   files, no `.dynsym` at all — a real, reachable path via
+   `probe_harness.py`'s "pass a `.o` file through the existing dumper"),
+   reusing `_parse_dynsym` to populate `imports`/`symbols` from `.symtab`
+   instead. A stack-canary/FORTIFY regression detected between two such
+   snapshots would still be stamped `both:l0:elf_symtab`, overclaiming
+   `.dynsym`/export-table evidence for what was actually a `.symtab`
+   read. Not fixed here: `ElfMetadata` has no field today recording
+   which section supplied `imports`/`symbols` — distinguishing the two
+   correctly needs a new tracked field (and the serialization/schema
+   considerations that come with widening `ElfMetadata`), a real model
+   change out of proportion to this slice's own narrow scope, not a
+   same-PR reactive patch under review pressure (per this repo's own
+   "known gaps over risky reactive patches" convention, `AGENTS.md`).
+   Left as a documented, known limitation for whichever slice next
+   touches `.symtab`-fallback provenance.
+
+   **Second sub-slice shipped: the remaining hardening kinds in the same
+   two detector functions.** `RELRO_WEAKENED`/`PIE_DISABLED`/
+   `WRITABLE_EXECUTABLE_SEGMENT`/`EXECUTABLE_STACK`/
+   `EXECUTABLE_STACK_REMOVED` were deliberately excluded from the first
+   sub-slice above pending a precise trace of their evidence sources
+   (`elf_metadata._parse_segments`/`_finalize_hardening`/
+   `_parse_dynamic`) — now done. Three are pure ELF program-header/
+   segment reads (`WRITABLE_EXECUTABLE_SEGMENT`: `PT_LOAD`;
+   `EXECUTABLE_STACK`/`EXECUTABLE_STACK_REMOVED`: `PT_GNU_STACK`) —
+   `both:l0:elf_program_headers`, a new tag (ELF program headers,
+   distinct from `l0:elf_dynamic`'s `.dynamic`-section reads). Two are
+   genuine composites: `RELRO_WEAKENED` combines a `PT_GNU_RELRO`
+   segment check with the `.dynamic` `bind_now` flag
+   (`both:l0:elf_dynamic`, `both:l0:elf_program_headers`, sorted per the
+   normalization rule above); `PIE_DISABLED` combines the `.dynamic`
+   `DF_1_PIE` flag with the ELF file header's own `e_type` (`ET_DYN`) —
+   `both:l0:elf_dynamic`, `both:l0:elf_header` (`l0:elf_header`, a
+   second new tag: the ELF file header itself, distinct from both the
+   `.dynamic` section and program headers). `l0:elf_dynamic` itself was
+   already named in Phase 0's table (`ElfMetadata.soname`/`DT_SONAME`)
+   but had no real producer wired until this slice. All five kinds are
+   single-producer (confirmed via `git grep`), added to `PROVENANCE_
+   STATIC`, and covered by five new `tests/_detector_mutations.py`
+   entries (`_m_relro_weakened`/`_m_pie_disabled`/`_m_writable_
+   executable_segment`, both weakening-direction-only and added to
+   `ASYMMETRIC`; `_m_executable_stack_introduced`/`_m_executable_stack_
+   removed`, NOT asymmetric since the two opposite-direction kinds share
+   one symbol — `"PT_GNU_STACK"` — so forward/backward symbol sets
+   still agree). `RPATH_CHANGED`/`RPATH_TYPE_CHANGED`/`RUNPATH_CHANGED`
+   remain excluded, for the same multi-provider reason the first
+   sub-slice's note already gives (a second, Mach-O-side producer with
+   no existing per-platform vocabulary entry).
+
+   **`diff_symbols.py` does NOT belong in this
    mechanical sub-slice** despite being symbol-table-driven on its face
    (Codex review, verified against the code): `_public_functions()` falls
    back to the complete header/DWARF function set when live ELF evidence is
