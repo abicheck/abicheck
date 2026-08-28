@@ -15,6 +15,17 @@ lifecycle: active
 > (`scan --artifact-set`) and GitHub Action surfaces this plan describes
 > are unaffected and remain current.
 
+> **Superseded (2026-08-28, CLI cleanup phase two, PR 5).** Every
+> comma-separated `--artifact-set a.so,b.so,c.so`-style example below is
+> historical: the flag is now a repeatable option
+> (`--artifact-set a.so --artifact-set b.so --artifact-set c.so`), with no
+> comma-separated alias — see
+> `docs/contribute/plans/cli-cleanup-phase-two.md`'s PR 5 section and
+> `docs/contribute/adr/056-multi-artifact-library-set-scan.md`'s own
+> matching note. This plan's design decisions (the explicit-list-vs-directory
+> distinction, per-member rejection, colliding-identity handling) are
+> unaffected — only the value syntax multiple explicit paths use changed.
+
 # G35 — Multi-Artifact / Library-Set `scan`
 
 **Origin:** User request to properly scan cases where one logical

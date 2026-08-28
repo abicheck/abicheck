@@ -154,6 +154,21 @@ class TestScanArtifactSetForwarding:
         j = cmd.index("--artifact-set", i + 1)
         assert cmd[j + 1] == "b.so"
 
+    def test_new_library_set_handles_embedded_newlines(self) -> None:
+        # P2 regression (Codex review): a YAML block-scalar new-library-set
+        # value can carry an embedded newline (e.g. "a.so,\nb.so"); a naive
+        # `read -ra ... <<<` reads only the first line and silently drops
+        # every member after it. The old Python parser split the whole
+        # string on comma with no such line limit.
+        cmd = _run_cmd(
+            {"INPUT_MODE": "scan", "INPUT_NEW_LIBRARY_SET": "a.so,\nb.so"}
+        )
+        assert cmd.count("--artifact-set") == 2
+        i = cmd.index("--artifact-set")
+        assert cmd[i + 1] == "a.so"
+        j = cmd.index("--artifact-set", i + 1)
+        assert cmd[j + 1] == "b.so"
+
     def test_new_library_set_forwards_bundle_system_providers(self) -> None:
         cmd = _run_cmd(
             {

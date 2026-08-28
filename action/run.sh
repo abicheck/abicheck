@@ -1426,7 +1426,19 @@ elif [[ "$MODE" == "scan" ]]; then
     # the old CLI parser's own `if p.strip()` filter rather than forwarding
     # them to a per-member CLI empty-string rejection.
     if [[ "$SCAN_ARTIFACT_SET" == *,* ]]; then
-      IFS=',' read -ra _scan_artifact_set_members <<< "$SCAN_ARTIFACT_SET"
+      # `read -ra ... <<<` reads only the first line, silently dropping every
+      # member after an embedded newline (e.g. a YAML block-scalar
+      # new-library-set value like "a.so,\nb.so") -- a real regression from
+      # the old Python parser, which split the *entire* string on comma with
+      # no such truncation (Codex review). IFS word-splitting on the whole
+      # value has no line-based limit: setting IFS to comma alone (no
+      # whitespace) makes unquoted expansion split only on commas, embedded
+      # newlines included, matching str.split(",") exactly.
+      _old_ifs="$IFS"
+      IFS=','
+      # shellcheck disable=SC2206  # intentional word-splitting on IFS=','
+      _scan_artifact_set_members=($SCAN_ARTIFACT_SET)
+      IFS="$_old_ifs"
       for _scan_artifact_set_member in "${_scan_artifact_set_members[@]}"; do
         # Trim surrounding whitespace (xargs-free, no subshell/echo pitfalls).
         _scan_artifact_set_member="${_scan_artifact_set_member#"${_scan_artifact_set_member%%[![:space:]]*}"}"
