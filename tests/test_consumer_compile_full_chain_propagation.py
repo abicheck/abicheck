@@ -789,12 +789,17 @@ def _assert_run_abicheck_step_invokes_run_sh() -> None:
         step for step in _steps(action["runs"]) if step.get("name") == "Run abicheck"
     )
     run_cmd = step.get("run", "")
-    assert "action/run.sh" in run_cmd, (
-        f"root action.yml's 'Run abicheck' step no longer invokes "
-        f"action/run.sh ({run_cmd!r}) -- hop 4 below executes that file "
-        f"directly via test_action_compile_context_parity.py's RUN_SH "
-        f"constant and would silently keep testing a script production no "
-        f"longer runs"
+    # The exact real invocation, not a substring check (Codex review,
+    # PR #906) -- a substring match would also accept e.g.
+    # `bash .../action/run.sh.backup` or a comment merely mentioning
+    # `action/run.sh`, either of which means production no longer invokes
+    # the file this test executes directly via `RUN_SH`.
+    assert run_cmd == 'bash "${{ github.action_path }}/action/run.sh"', (
+        f"root action.yml's 'Run abicheck' step's `run:` command no "
+        f"longer exactly matches the expected invocation of action/run.sh "
+        f"(got {run_cmd!r}) -- hop 4 below executes that file directly via "
+        f"test_action_compile_context_parity.py's RUN_SH constant and "
+        f"would silently keep testing a script production no longer runs"
     )
 
 
