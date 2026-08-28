@@ -47,11 +47,13 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
-from .artifact_plan import ResolvedArtifactPlan
 from .errors import AstContextMissingError, ValidationError
-from .service_input_resolution import (
+from .workflows.artifact import ResolvedArtifactPlan
+from .workflows.artifact.execute import (
     _resolve_side_snapshot_impl,
     enforce_requested_depth,
+)
+from .workflows.artifact.resolve import (
     is_raw_source_tree,
     reject_hybrid_source_frontend,
 )
@@ -110,12 +112,13 @@ class ResolvedDumpRequest:
 
     ``artifact_plan`` (dedup-and-convergence plan, Phase 1 item 1
     "Milestone B"): the same facts this object already carries, also
-    attached to a :class:`~abicheck.artifact_plan.ResolvedArtifactPlan` --
-    the general, cross-consumer shape the plan's target architecture names.
-    Built with an empty ``pending_cleanups`` (this function allocates no
-    resource -- see :mod:`abicheck.artifact_plan`'s own module docstring for
-    why the two fields that *would* require one, effective include search
-    and effective compile context, stay excluded here too), so it is
+    attached to a :class:`~abicheck.workflows.artifact.ResolvedArtifactPlan`
+    -- the general, cross-consumer shape the plan's target architecture
+    names. Built with an empty ``pending_cleanups`` (this function allocates
+    no resource -- see :mod:`abicheck.workflows.artifact.contracts`'s own
+    module docstring for why the two fields that *would* require one,
+    effective include search and effective compile context, stay excluded
+    here too), so it is
     additive, inert data today: nothing yet reads it. It exists so a future
     consumer of the general shape (e.g. a migrated ``render_dump_dry_run``)
     has one object to build from instead of this dump-specific one, without
@@ -468,8 +471,8 @@ def execute_dump_request(
             :func:`~abicheck.cli_buildsource.dump_source_only`).
         SnapshotError: If the input cannot be loaded.
     """
-    from .cli_dump_helpers import _gated_source_label
     from .dependency_info import populate_side_dependency_info
+    from .evidence_depth import gated_source_label
 
     request = resolved.request
     side = request.input
@@ -545,7 +548,7 @@ def execute_dump_request(
         # raising, so _gated_source_label still falls through to its own
         # L3/build-context checks (Codex review, two rounds); this except
         # is a defensive backstop only, matching that same fallback label.
-        effective_depth = _gated_source_label(snap.build_source, snap)
+        effective_depth = gated_source_label(snap.build_source, snap)
     except (TypeError, ValueError, OverflowError):
         effective_depth = "headers" if snap.from_headers else "binary"
     return DumpResult(

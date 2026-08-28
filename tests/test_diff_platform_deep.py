@@ -234,6 +234,8 @@ class TestExecutableStack:
         new_elf = ElfMetadata(has_executable_stack=True)
         r = compare(_snap(elf=old_elf), _snap(elf=new_elf))
         assert ChangeKind.EXECUTABLE_STACK in _kinds(r)
+        stack = [c for c in r.changes if c.kind == ChangeKind.EXECUTABLE_STACK]
+        assert stack[0].evidence_provenance == ("both:l0:elf_program_headers",)
 
     def test_executable_stack_removal_uses_distinct_kind(self):
         """Removing an executable stack is a hardening *improvement*: it emits
@@ -247,6 +249,8 @@ class TestExecutableStack:
         assert ChangeKind.EXECUTABLE_STACK_REMOVED in kinds
         assert ChangeKind.EXECUTABLE_STACK not in kinds
         assert r.verdict == Verdict.COMPATIBLE
+        removed = [c for c in r.changes if c.kind == ChangeKind.EXECUTABLE_STACK_REMOVED]
+        assert removed[0].evidence_provenance == ("both:l0:elf_program_headers",)
 
 
 class TestSecurityHardeningDrift:
@@ -262,6 +266,12 @@ class TestSecurityHardeningDrift:
         r = compare(_snap(elf=old_elf), _snap(elf=new_elf))
         assert ChangeKind.RELRO_WEAKENED in _kinds(r)
         assert r.verdict == Verdict.COMPATIBLE_WITH_RISK
+        # G39 Phase 1: relro combines a PT_GNU_RELRO segment (program-header)
+        # check with the .dynamic bind_now flag.
+        relro = [c for c in r.changes if c.kind == ChangeKind.RELRO_WEAKENED]
+        assert relro[0].evidence_provenance == (
+            "both:l0:elf_dynamic", "both:l0:elf_program_headers",
+        )
 
     def test_relro_weakened_partial_to_none(self):
         r = compare(_snap(elf=ElfMetadata(relro="partial")),
@@ -277,6 +287,9 @@ class TestSecurityHardeningDrift:
         r = compare(_snap(elf=ElfMetadata(is_pie=True)),
                     _snap(elf=ElfMetadata(is_pie=False)))
         assert ChangeKind.PIE_DISABLED in _kinds(r)
+        # G39 Phase 1: is_pie = DF_1_PIE (.dynamic) gated on ET_DYN (ELF header).
+        pie = [c for c in r.changes if c.kind == ChangeKind.PIE_DISABLED]
+        assert pie[0].evidence_provenance == ("both:l0:elf_dynamic", "both:l0:elf_header")
 
     def test_pie_enabled_is_not_a_finding(self):
         r = compare(_snap(elf=ElfMetadata(is_pie=False)),
@@ -287,16 +300,24 @@ class TestSecurityHardeningDrift:
         r = compare(_snap(elf=ElfMetadata(has_stack_canary=True)),
                     _snap(elf=ElfMetadata(has_stack_canary=False)))
         assert ChangeKind.STACK_CANARY_REMOVED in _kinds(r)
+        # G39 Phase 1: has_stack_canary is .dynsym-derived (imported/defined
+        # symbol names), not a .dynamic-section read.
+        canary = [c for c in r.changes if c.kind == ChangeKind.STACK_CANARY_REMOVED]
+        assert canary[0].evidence_provenance == ("both:l0:elf_symtab",)
 
     def test_fortify_source_weakened(self):
         r = compare(_snap(elf=ElfMetadata(has_fortify_source=True)),
                     _snap(elf=ElfMetadata(has_fortify_source=False)))
         assert ChangeKind.FORTIFY_SOURCE_WEAKENED in _kinds(r)
+        fortify = [c for c in r.changes if c.kind == ChangeKind.FORTIFY_SOURCE_WEAKENED]
+        assert fortify[0].evidence_provenance == ("both:l0:elf_symtab",)
 
     def test_writable_executable_segment_introduced(self):
         r = compare(_snap(elf=ElfMetadata(has_writable_executable_segment=False)),
                     _snap(elf=ElfMetadata(has_writable_executable_segment=True)))
         assert ChangeKind.WRITABLE_EXECUTABLE_SEGMENT in _kinds(r)
+        wx = [c for c in r.changes if c.kind == ChangeKind.WRITABLE_EXECUTABLE_SEGMENT]
+        assert wx[0].evidence_provenance == ("both:l0:elf_program_headers",)
 
     def test_unchanged_hardening_is_silent(self):
         elf = ElfMetadata(relro="full", bind_now=True, is_pie=True,

@@ -155,3 +155,97 @@ def test_option_row_hides_click_internal_unset_sentinel():
     row = gen._option_row(_FakeParam())
     assert "Sentinel" not in row
     assert "| `--manifest` | no | — | Some help text. |" == row
+
+
+def test_option_row_resolves_a_bool_flags_unset_default_to_false():
+    # Click >= 8.5 stores a boolean flag's *implicit* default as its UNSET
+    # sentinel where earlier versions stored a literal False. Both mean the
+    # same thing to a user -- the flag is off unless passed -- so the
+    # rendered reference must not differ by which Click generated it, or the
+    # committed file goes stale the moment CI resolves a newer Click.
+    gen = _load_gen()
+
+    class _FakeSentinel:
+        pass
+
+    _FakeSentinel.__name__ = "Sentinel"
+
+    class _FakeParam:
+        opts = ("--show-impact",)
+        secondary_opts = ()
+        default = _FakeSentinel()
+        is_bool_flag = True
+        required = False
+        help = "Show impact analysis."
+        type = None
+
+    row = gen._option_row(_FakeParam())
+    assert "| `--show-impact` | no | `False` | Show impact analysis. |" == row
+
+
+def test_option_row_keeps_a_non_boolean_flags_unset_default_blank():
+    # The sibling of the test above, and the reason `is_bool_flag` rather
+    # than `is_flag` is the discriminator: Click sets `is_flag` for a
+    # `flag_value=` option too, but that one really does resolve to None,
+    # so rendering `False` for it would state a default the command never
+    # sees.
+    gen = _load_gen()
+
+    class _FakeSentinel:
+        pass
+
+    _FakeSentinel.__name__ = "Sentinel"
+
+    class _FakeParam:
+        opts = ("--mode",)
+        secondary_opts = ()
+        default = _FakeSentinel()
+        is_flag = True
+        is_bool_flag = False
+        required = False
+        help = "Pick a mode."
+        type = None
+
+    row = gen._option_row(_FakeParam())
+    assert "| `--mode` | no | — | Pick a mode. |" == row
+
+
+def test_real_click_bool_flags_render_false_under_the_installed_click():
+    # The two tests above pin the rule against a hand-built parameter; this
+    # one asks the *installed* Click for its own representation, so the
+    # invariant is checked against whatever version CI resolves rather than
+    # against this file's idea of what Click stores.
+    import click
+
+    gen = _load_gen()
+
+    @click.command()
+    @click.option("--solo", is_flag=True, help="Solo flag.")
+    @click.option("--pair/--no-pair", help="Flag pair.")
+    @click.option("--valued", flag_value="x", help="Valued flag.")
+    def _cmd() -> None:  # pragma: no cover - never invoked
+        """Doc."""
+
+    rows = {p.name: gen._option_row(p) for p in _cmd.params}
+    assert rows["solo"].endswith("| no | `False` | Solo flag. |")
+    assert rows["pair"].endswith("| no | `False` | Flag pair. |")
+    assert rows["valued"].endswith("| no | — | Valued flag. |")
+
+
+def test_a_repeatable_boolean_flag_keeps_its_empty_default():
+    # Click 8.5 accepts `multiple=True` on a boolean flag and marks it
+    # `is_bool_flag`, but it resolves to `()` rather than `False` -- so the
+    # rule above has to exclude it, or the reference states a default the
+    # command never receives. `()` is already rendered "—", the same as
+    # `--many`'s (CodeRabbit review).
+    import click
+
+    gen = _load_gen()
+
+    @click.command()
+    @click.option("--rep", is_flag=True, multiple=True, help="Repeatable flag.")
+    def _cmd() -> None:  # pragma: no cover - never invoked
+        """Doc."""
+
+    (param,) = _cmd.params
+    assert gen._option_row(param).endswith("| no | — | Repeatable flag. |")

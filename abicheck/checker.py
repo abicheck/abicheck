@@ -536,6 +536,7 @@ def _apply_soname_policy(
     into the gate through a derived finding (Codex review, confirmed with a
     proven-out-of-contract layout change against an unchanged SONAME).
     """
+    from .diff_templates import demote_lambda_closure_unexported_findings
     from .diff_versioning import demote_internal_version_node_findings
     from .elf_metadata import ElfMetadata as _ElfMetadata
 
@@ -546,6 +547,11 @@ def _apply_soname_policy(
     # demoted internal change neither drives a BREAKING verdict nor triggers a
     # spurious bump recommendation (validation parity class A — nettle 3.6→3.7).
     demote_internal_version_node_findings(kept + verdict_redundant, _old_elf, _new_elf)
+
+    # Same reasoning, same ordering requirement, for a lambda-closure
+    # function-level finding confirmed absent from both binaries' real
+    # export tables — see the function's own docstring.
+    demote_lambda_closure_unexported_findings(kept + verdict_redundant, old, new)
 
     # Classify before deriving, not after: everything appended to `kept` up to
     # this point (the declared-floor, wheel and numpy checks above included) is

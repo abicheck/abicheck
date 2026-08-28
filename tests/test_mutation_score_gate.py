@@ -67,6 +67,15 @@ def test_parse_survivors_returns_none_when_unmeasurable(text: str) -> None:
     assert gate.parse_survivors(text) is None
 
 
+def test_mutmut_subprocess_timeout_matches_the_workflow_ceiling() -> None:
+    """The Python cap must not pre-empt the GitHub Actions job deadline."""
+    workflow = (
+        Path(__file__).resolve().parent.parent / ".github" / "workflows" / "mutation.yml"
+    ).read_text(encoding="utf-8")
+    assert "timeout-minutes: 240" in workflow
+    assert gate.MUTMUT_RUN_TIMEOUT_SECONDS == 240 * 60
+
+
 def test_stats_without_a_survivor_count_are_not_a_completion_witness(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -431,6 +440,31 @@ def test_diff_scoped_fails_on_a_survivor_in_a_changed_function(
     )
     assert rc == 1
     assert "abicheck/diff_types.py::alpha" in capsys.readouterr().out
+
+
+def test_diff_scoped_allows_recorded_legacy_survivors_but_rejects_delta(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A baseline makes a legacy function a delta gate, not a permanent ban."""
+    diff, baseline = _diff_scoped_env(tmp_path, monkeypatch)
+    Path(baseline).write_text(
+        json.dumps(
+            {"modules": {"abicheck/diff_types.py": {
+                "survivors": 10, "keys": [], "functions": {"alpha": 1}
+            }}},
+        ),
+        encoding="utf-8",
+    )
+    one = _write(tmp_path, "one.txt", "    abicheck.diff_types.x_alpha__mutmut_1: survived\n")
+    two = _write(
+        tmp_path, "two.txt",
+        "    abicheck.diff_types.x_alpha__mutmut_1: survived\n"
+        "    abicheck.diff_types.x_alpha__mutmut_2: survived\n",
+    )
+    common = ["--baseline-file", baseline, "--diff-scoped", "--diff-file", diff]
+    assert gate.main(["--results-file", one, *common]) == 0
+    assert gate.main(["--results-file", two, *common]) == 1
+    assert "alpha: 1 -> 2" in capsys.readouterr().out
 
 
 #: A diff that touches only a test file — the shape a PR takes when it weakens
@@ -1503,12 +1537,14 @@ def test_an_unresolvable_base_ref_fails_the_diff_scoped_gate(
     assert "diff-scoped OK" not in out
 
 
-def test_a_module_scope_change_gates_every_survivor_in_that_module(
+def test_a_module_scope_change_uses_per_module_drift_not_absolute_debt(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """A top-level policy table can change what any function in the module
-    does, so a module-scope edit gates the module's survivors rather than
-    matching none of them."""
+    """Module scope has no precise mutant attribution, so baseline drift gates it.
+
+    Historical survivors must not permanently prohibit a constant/table edit;
+    a raised module total is still rejected by the ordinary baseline gate.
+    """
     (tmp_path / "abicheck").mkdir()
     (tmp_path / "abicheck" / "diff_types.py").write_text(
         "_KINDS = frozenset({'a'})\n\n\ndef untouched():\n    return _KINDS\n",
@@ -1534,5 +1570,5 @@ def test_a_module_scope_change_gates_every_survivor_in_that_module(
             diff,
         ]
     )
-    assert rc == 1
-    assert "module-scope change" in capsys.readouterr().out
+    assert rc == 0
+    assert "per-module baseline OK" in capsys.readouterr().out

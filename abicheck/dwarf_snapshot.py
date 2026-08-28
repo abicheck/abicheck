@@ -54,6 +54,7 @@ from .model import (
     AccessLevel,
     EnumMember,
     EnumType,
+    Fact,
     Function,
     Param,
     ParamKind,
@@ -63,6 +64,8 @@ from .model import (
     Visibility,
     is_compiler_internal_type as _is_compiler_internal,
     is_cxx_runtime_library,
+    record_layout_facts,
+    resolve_vptr_offset_bits,
 )
 
 if TYPE_CHECKING:
@@ -743,8 +746,9 @@ class _DwarfSnapshotBuilder:
     def _process_param(self, die: Any, CU: Any) -> Param | None:
         """Extract a parameter from DW_TAG_formal_parameter."""
         name = _attr_str(die, "DW_AT_name")
+        # DWARF carries no va_list-ness signal for either branch below -- same UNSUPPORTED stance as dumper_castxml.py's Param.
         if "DW_AT_type" not in die.attributes:
-            return Param(name=name, type="?")
+            return Param(name=name, type="?", is_va_list_fact=Fact.unsupported())
 
         type_name, _ = self._resolve_type(die, CU)
         self._referenced_type_names.add(type_name)
@@ -767,6 +771,7 @@ class _DwarfSnapshotBuilder:
             type=type_name,
             kind=kind,
             pointer_depth=ptr_depth,
+            is_va_list_fact=Fact.unsupported(),
         )
 
     # -------------------------------------------------------------------
@@ -890,17 +895,7 @@ class _DwarfSnapshotBuilder:
         is_opaque = byte_size == 0 and not fields
         source_loc = self._resolve_decl_file(die, CU)
 
-        # Real vptr offset, read from the compiler's own artificial vptr
-        # member when this class introduces one. A class that only extends
-        # or overrides an already-inherited vtable (no local vptr member,
-        # even when every one of its own declared methods is virtual) is
-        # left None here and resolved in a later pass, once every record
-        # type in this binary is known — see _finalize_vptr_offsets's
-        # docstring for why that can't be done eagerly, here, per-type.
-        # Tri-state by design: None also covers genuinely non-polymorphic
-        # and "only reachable through a virtual base" (whose offset is
-        # dynamic, never a fixed one this model can express), so the diff
-        # can tell "gained a vptr" (None → a real offset) from "vptr stayed".
+        # Real vptr offset, read from the compiler's own artificial vptr member when this class introduces one. A class that only extends or overrides an already-inherited vtable (no local vptr member, even when every one of its own declared methods is virtual) is left None here and resolved in a later pass, once every record type in this binary is known — see _finalize_vptr_offsets's docstring for why that can't be done eagerly, here, per-type. Tri-state by design: None also covers genuinely non-polymorphic and "only reachable through a virtual base" (whose offset is dynamic, never a fixed one this model can express), so the diff can tell "gained a vptr" (None → a real offset) from "vptr stayed".
         vptr_offset_bits = own_vptr_offset_bits
         # is_standard_layout / is_trivially_copyable / data_size_bits are
         # deliberately *not* derived here. "not polymorphic and no virtual bases"
@@ -927,6 +922,8 @@ class _DwarfSnapshotBuilder:
             source_location=source_loc,
             vptr_offset_bits=vptr_offset_bits,
             base_offsets=base_offsets,
+            # Stated explicitly, matching the other producers -- vptr_offset_bits may still be None pending _finalize_vptr_offsets's own later pass, which already resyncs both via resolve_vptr_offset_bits() if it resolves a real value.
+            **record_layout_facts(bases, virtual_bases, vtable, vptr_offset_bits),
         )
         self.types.append(rec)
         self._record_by_qualified_name[qualified] = rec
@@ -1273,7 +1270,7 @@ class _DwarfSnapshotBuilder:
                         resolved = base_rec.vptr_offset_bits
                         break
                 if resolved is not None:
-                    rec.vptr_offset_bits = resolved
+                    resolve_vptr_offset_bits(rec, resolved)
                     progressed = True
                 else:
                     still_unresolved.append(rec)
@@ -1288,25 +1285,24 @@ class _DwarfSnapshotBuilder:
         # SHARE one vptr slot at offset 0 with no local `_vptr.E` member of
         # E's own — GCC emits no such member here, unlike every other
         # virtual-base case this fix already handles (`struct D : virtual A
-        # { virtual void d(); int di; };`, which DOES get its own
-        # `_vptr.D`, confirmed by DIE dump, since D has a real data member
-        # forcing a non-degenerate layout). Because E's only base is
-        # virtual, it's entirely absent from `bases`/`base_edges` (mirroring
-        # `base_offsets`'s own long-standing exclusion of virtual bases —
-        # their offset is dynamic, not a fixed one this resolution walks),
-        # so the loop above never even considers it. Every class this
-        # applies to has `own_vptr_offset_bits is None` (no local member)
-        # AND is unreachable via the primary-base walk (no resolvable
-        # non-virtual base, or none at all) — exactly the shape the
-        # original heuristic covered by assuming 0 for any type with a
-        # non-empty `vtable`, so restoring it here for the specific
-        # remaining unresolved set is a pure regression fix, not a
-        # reintroduction of the original guess for cases this pass already
-        # resolves more precisely (those are excluded here since their
-        # `vptr_offset_bits` is already set).
+        # { virtual void d(); int di; };`, which DOES get its own `_vptr.D`,
+        # confirmed by DIE dump, since D has a real data member forcing a
+        # non-degenerate layout). Because E's only base is virtual, it's
+        # entirely absent from `bases`/`base_edges` (mirroring `base_offsets`'s
+        # own long-standing exclusion of virtual bases — their offset is
+        # dynamic, not a fixed one this resolution walks), so the loop above
+        # never even considers it. Every class this applies to has
+        # `own_vptr_offset_bits is None` (no local member) AND is unreachable
+        # via the primary-base walk (no resolvable non-virtual base, or none
+        # at all) — exactly the shape the original heuristic covered by
+        # assuming 0 for any type with a non-empty `vtable`, so restoring it
+        # here for the specific remaining unresolved set is a pure regression
+        # fix, not a reintroduction of the original guess for cases this pass
+        # already resolves more precisely (those are excluded here since
+        # their `vptr_offset_bits` is already set).
         for rec in self.types:
             if rec.vptr_offset_bits is None and rec.vtable:
-                rec.vptr_offset_bits = 0
+                resolve_vptr_offset_bits(rec, 0)
 
         # Second final-fallback tier: a class that is polymorphic ONLY
         # through a "nearly empty" virtual base, adding or overriding no
@@ -1365,7 +1361,7 @@ class _DwarfSnapshotBuilder:
                     and vbase.vptr_offset_bits is not None
                     for vbase_name, vbase_key in virtual_edges
                 ):
-                    rec.vptr_offset_bits = 0
+                    resolve_vptr_offset_bits(rec, 0)
                     progressed = True
                 else:
                     still_unresolved.append(rec)

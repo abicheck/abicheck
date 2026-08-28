@@ -44,6 +44,12 @@ from pathlib import Path
 from typing import Any
 
 from .errors import SnapshotError
+from .storage.zstd_frame_guard import (
+    read_past_leading_skippable_frames,
+    skip_leading_skippable_frames,
+    starts_with_skippable_frame_magic,
+    validate_zstd_frame_completeness,
+)
 
 # ── Compression selector ────────────────────────────────────────────────────
 
@@ -208,7 +214,15 @@ def _zstd_module() -> Any:
 
 
 def detect_compression_from_bytes(prefix: bytes) -> SnapshotCompression:
-    """Classify a byte prefix by magic bytes. Never trusts a filename."""
+    """Classify a byte prefix by magic bytes. Never trusts a filename.
+
+    Skips past any leading zstd skippable frame(s) first (Codex review,
+    fresh evidence: an externally produced zstd stream can legitimately
+    start with one, e.g. a metadata frame ahead of the real data frame) --
+    a no-op when *prefix* is too short to contain a full skippable-frame
+    header/body, or when it doesn't start with one at all, so a caller
+    passing only a bare 4-byte prefix keeps its existing behavior exactly."""
+    prefix = skip_leading_skippable_frames(prefix)
     if prefix.startswith(GZIP_MAGIC):
         return SnapshotCompression.GZIP
     if prefix.startswith(ZSTD_MAGIC):
@@ -216,19 +230,48 @@ def detect_compression_from_bytes(prefix: bytes) -> SnapshotCompression:
     return SnapshotCompression.NONE
 
 
+def _read_past_leading_skippable_frames(f: Any, prefix: bytes) -> bytes:
+    """This module's own step/cap bound to the shared primitive in
+    `storage.zstd_frame_guard` -- see that function's docstring; kept as
+    a thin wrapper so every call site here reads `_SNIFF_BYTES`/
+    `_BOUNDED_PREFIX_MAX_RAW_BYTES` (this module's own, pre-existing
+    bounded-prefix-sniffing constants) rather than the shared default."""
+    return read_past_leading_skippable_frames(
+        f, prefix, step=_SNIFF_BYTES, cap=_BOUNDED_PREFIX_MAX_RAW_BYTES
+    )
+
+
+def _classify_with_skippable_fallback(prefix: bytes, saw_skippable_magic: bool) -> SnapshotCompression:
+    """`detect_compression_from_bytes(prefix)`, except a leading skippable-
+    frame magic that outlasts the bounded escalation (`_BOUNDED_PREFIX_
+    MAX_RAW_BYTES`) still classifies as `ZSTD` -- the magic alone already
+    proves the zstd family (Codex review, sixth-order follow-up), shared
+    by every skippable-frame-aware probe in this module."""
+    compression = detect_compression_from_bytes(prefix)
+    if compression is SnapshotCompression.NONE and saw_skippable_magic:
+        return SnapshotCompression.ZSTD
+    return compression
+
+
 def detect_snapshot_compression(path: str | Path) -> SnapshotCompression:
     """Detect a stored snapshot's compression from its magic bytes.
 
     Reads a small bounded prefix — never a full decompression just to sniff
-    the format.
+    the format. Escalates that read (up to `_BOUNDED_PREFIX_MAX_RAW_BYTES`)
+    only when the prefix itself starts with a zstd skippable-frame magic
+    (Codex review, fresh evidence: a leading skippable frame otherwise
+    read as an uncompressed file, since 4 bytes can't see past it).
     """
     p = Path(path)
     try:
         with open(p, "rb") as f:
             prefix = f.read(4)
+            saw_skippable_magic = starts_with_skippable_frame_magic(prefix)
+            if saw_skippable_magic:
+                prefix = _read_past_leading_skippable_frames(f, prefix)
     except OSError as exc:
         raise SnapshotError(f"Cannot read {p}: {exc}") from exc
-    return detect_compression_from_bytes(prefix)
+    return _classify_with_skippable_fallback(prefix, saw_skippable_magic)
 
 
 def suffix_compression(path: str | Path) -> SnapshotCompression | None:
@@ -314,7 +357,13 @@ def read_snapshot_storage_info(path: str | Path) -> SnapshotStorageInfo:
         with open(p, "rb") as f:
             stored_size = os.fstat(f.fileno()).st_size
             prefix = f.read(4)
-            compression = detect_compression_from_bytes(prefix)
+            # Escalate only when ambiguous (a leading skippable-frame
+            # magic) -- forward-only, so it stays compatible with the
+            # sequential hash loop below (Codex review, fresh evidence).
+            saw_skippable_magic = starts_with_skippable_frame_magic(prefix)
+            if saw_skippable_magic:
+                prefix = _read_past_leading_skippable_frames(f, prefix)
+            compression = _classify_with_skippable_fallback(prefix, saw_skippable_magic)
             digest = hashlib.sha256()
             digest.update(prefix)
             for chunk in iter(lambda: f.read(1024 * 1024), b""):
@@ -393,85 +442,11 @@ def _decompress_zstd(data: bytes, *, max_decoded_bytes: int, source: str) -> byt
     # A frame truncated early enough (e.g. mid-header) can decompress with no
     # error at all, silently yielding fewer bytes than the frame's own
     # declared content size instead of raising -- confirmed against a real
-    # truncated frame. Cross-check against declared frame sizes (present on
-    # every frame this module writes, via write_content_size=True) rather
-    # than trusting the clean decompression loop above alone.
-    #
-    # Codex review, two rounds: ``get_frame_parameters(data)`` only ever
-    # inspects the *first* frame of a stream. A valid zstd stream may
-    # legitimately be multiple concatenated frames (this module's own
-    # writer never produces one, but a foreign/external snapshot may), and
-    # ``stream_reader`` above correctly decompresses all of them -- the
-    # first round's fix (comparing only against the first frame's declared
-    # size, flagging only under-decoding) stopped false-flagging a
-    # legitimate multi-frame stream, but a second round found it still
-    # couldn't catch a truncated *later* frame: if frame 1 (declares 100,
-    # yields 100) is intact and frame 2 (declares 100) is truncated to
-    # yield only 50, the aggregate 150 still exceeds frame 1's own 100,
-    # passing the "< declared" check with no visibility into frame 2 at
-    # all. Walk every frame's own declared size against its own actual
-    # output instead, using ``decompressobj()``'s per-frame boundary
-    # tracking (``.eof``/``.unused_data`` -- confirmed empirically: `.eof`
-    # is `False` exactly when a frame's decompression didn't reach its own
-    # end, `.unused_data` holds the remaining, not-yet-processed bytes).
-    #
-    # A third round found the second round's fix still stopped short: a
-    # frame with no declared size (CONTENTSIZE_UNKNOWN) used to abandon
-    # validation for *that* frame and every subsequent one, so a truncated
-    # frame anywhere after an unknown-size frame could hit the exact silent
-    # short-read this whole pass exists to catch, unchecked. `.eof` is
-    # checked unconditionally now (see the loop body below); only the
-    # declared-length comparison is skipped when there's genuinely nothing
-    # to compare against.
-    #
-    # Memory safety of this second pass (Codex review would flag this too,
-    # unprompted, if left unexplained): ``decompressobj().decompress()`` has
-    # no output-size cap the way ``stream_reader``'s bounded chunked reads
-    # above do -- feeding it even a tiny sliver of a highly-compressible
-    # frame's compressed bytes can still fully materialize that frame's
-    # entire decoded output in one call (confirmed empirically), which
-    # would reintroduce a real decompression-bomb risk if this ran
-    # *instead of* the bounded primary loop above. It doesn't: this pass
-    # only ever runs after that bounded loop already completed
-    # successfully, so the *total* decoded content across every frame is
-    # already known to fit within max_decoded_bytes (that's exactly what
-    # "completed without raising" means) -- redecompressing the same,
-    # already-proven-bounded data a second time for validation cannot
-    # exceed that same total, whatever this loop's own call granularity is.
-    remaining = data
-    try:
-        while remaining:
-            frame_declared = zstandard.get_frame_parameters(remaining).content_size
-            dobj = dctx.decompressobj()
-            frame_out = dobj.decompress(remaining)
-            # Codex review, third round: a frame with no declared size
-            # (CONTENTSIZE_UNKNOWN -- only possible for a foreign encoder
-            # that didn't set zstd's content-size flag; this module's own
-            # writer always does) used to abandon validation for that frame
-            # *and every subsequent frame* entirely -- a truncated *later*
-            # frame could then hit the exact same silent-short-read
-            # behavior this whole pass exists to catch, with nothing left
-            # checking it. `.eof` (frame completeness) is independent of
-            # whether a declared size exists at all, so it's still checked
-            # unconditionally; only the length-equality cross-check is
-            # skipped when there's no declared length to compare against.
-            if not dobj.eof or (
-                frame_declared != zstandard.CONTENTSIZE_UNKNOWN
-                and len(frame_out) != frame_declared
-            ):
-                raise SnapshotError(
-                    f"{source}: corrupt or truncated zstd stream (a frame "
-                    f"declares {frame_declared} bytes but only "
-                    f"{len(frame_out)} decoded)"
-                )
-            remaining = dobj.unused_data
-    except SnapshotError:
-        raise
-    except Exception:
-        pass  # frame-header parsing itself failing adds no new information
-        # -- the primary bounded loop above already proved the stream
-        # decodes cleanly end to end; this pass is an additional, stricter
-        # cross-check on top of that, not the only line of defense.
+    # truncated frame. `validate_zstd_frame_completeness` is a shared,
+    # three-Codex-round-corrected cross-check now also used by
+    # `storage/bundle_archive.py`'s `read_blob()` -- see its own docstring
+    # for the full multi-frame/CONTENTSIZE_UNKNOWN/memory-safety reasoning.
+    validate_zstd_frame_completeness(zstandard, dctx, data, source=source)
     return out.getvalue()
 
 
@@ -524,7 +499,17 @@ def read_snapshot_bytes(
     with open(p, "rb") as f:
         stored_size = os.fstat(f.fileno()).st_size
         prefix = f.read(4)
-        compression_hint = detect_compression_from_bytes(prefix)
+        # Codex review, fresh evidence: escalate past a leading zstd
+        # skippable frame before selecting the cap below, the same way
+        # this module's other three prefix probes do -- see `_classify_
+        # with_skippable_fallback`'s docstring for why `NONE` can't be
+        # trusted here. `prefix` never grows past `stored_size` (read
+        # forward from this same file), so `stored_size > cap` below
+        # still catches an oversized file regardless.
+        saw_skippable_magic = starts_with_skippable_frame_magic(prefix)
+        if saw_skippable_magic:
+            prefix = _read_past_leading_skippable_frames(f, prefix)
+        compression_hint = _classify_with_skippable_fallback(prefix, saw_skippable_magic)
         # Codex review: `max(limit, _max_stored_bytes())` let a raised
         # `max_decoded_bytes` (a caller's tolerance for large *decoded*
         # content) silently expand the *stored*-size ceiling too -- an
@@ -556,7 +541,12 @@ def read_snapshot_bytes(
     if len(raw) > cap:
         raise SnapshotError(f"{p}: stored file exceeds the {cap} byte safety limit.")
 
-    compression = detect_compression_from_bytes(raw[:4])
+    # The whole buffered `raw` (not just its first 4 bytes) is handed in
+    # here -- unlike the earlier `compression_hint` probe above, `raw` is
+    # already fully read at this point, so this is the one call site that
+    # can actually see past a leading skippable frame of any size up to
+    # `cap` (Codex review, fresh evidence).
+    compression = detect_compression_from_bytes(raw)
     suffix_hint = suffix_compression(p)
     if (
         suffix_hint is not None
@@ -648,10 +638,20 @@ def bounded_decoded_prefix(path: str | Path, n: int = _SNIFF_BYTES) -> bytes | N
     try:
         with open(p, "rb") as f:
             probe = f.read(4)
-            compression = detect_compression_from_bytes(probe)
+            # Escalate only when ambiguous (a leading skippable-frame
+            # magic) -- a plain/gzip/real-zstd-frame probe never has more
+            # to find past it, so the common case pays nothing extra
+            # (Codex review, fresh evidence).
+            saw_skippable_magic = starts_with_skippable_frame_magic(probe)
+            if saw_skippable_magic:
+                probe = _read_past_leading_skippable_frames(f, probe)
+            compression = _classify_with_skippable_fallback(probe, saw_skippable_magic)
             if compression is SnapshotCompression.NONE:
-                return (probe + f.read(max(n, 4) - len(probe)))[:n]
-            raw_size = max(n, 4)
+                more_needed = max(n, 4) - len(probe)
+                if more_needed > 0:
+                    probe += f.read(more_needed)
+                return probe[:n]
+            raw_size = max(n, len(probe))
             while True:
                 f.seek(0)
                 head = f.read(raw_size)

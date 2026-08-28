@@ -885,7 +885,7 @@ class TestResolveChangeIdentity:
         assert identity.tier == IDENTITY_TIER_NORMALIZED
 
     def test_batch_rename_synthetic_id_is_not_canonical(self) -> None:
-        # diff_symbols.py's _emit_batch_rename stores a synthetic
+        # diff_symbols_renames.py's emit_prefix_batch_rename stores a synthetic
         # "batch_rename:<prefix>*" identifier, never a real symbol.
         change = Change(
             kind=ChangeKind.SYMBOL_RENAMED_BATCH,

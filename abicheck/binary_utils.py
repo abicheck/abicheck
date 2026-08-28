@@ -120,6 +120,30 @@ def resolve_linker_script(path: Path) -> tuple[Path | None, bool]:
     return None, True
 
 
+def resolve_linker_script_chain(path: Path, max_hops: int = 32) -> Path:
+    """Follow a chain of GNU ld linker scripts to the final real artifact.
+
+    ``resolve_linker_script`` only ever resolves one hop; a linker script
+    can legitimately point at another linker script (e.g. a dev symlink
+    ``libfoo.so`` -> ``libfoo.so.1``, itself a script pointing at the
+    versioned ``libfoo.so.1.2.3``), which ``service.resolve_input`` already
+    follows correctly via its own recursive self-call. A caller that only
+    needs the final resolved path (not a full snapshot) -- e.g. hashing an
+    operand for the same-binary coverage warning -- needs the identical
+    multi-hop behavior rather than a single-hop copy of it (Codex review,
+    fresh evidence). ``max_hops`` guards against a pathological cyclic
+    chain; returns *path* itself once no further hop resolves (including
+    immediately, for an ordinary non-script input).
+    """
+    current = path
+    for _ in range(max_hops):
+        target, is_ld = resolve_linker_script(current)
+        if not is_ld or target is None:
+            return current
+        current = target
+    return current
+
+
 def normalize_binary_input(path: Path) -> tuple[Path, str | None]:
     """Detect binary format, following resolvable GNU ld linker scripts."""
     fmt = detect_binary_format(path)

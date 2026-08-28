@@ -105,84 +105,45 @@ import re
 from collections.abc import Iterable, Mapping
 from pathlib import Path
 
-from .bundle_models import BundleFinding, BundleSnapshot, ConsumerEntry, ProviderEntry
+from .bundle_models import (
+    CONFIRMED_C_BOUNDARY_SIGNATURE_BREAK_KINDS,
+    BundleFinding,
+    BundleSignatureEvidence,
+    BundleSnapshot,
+    ConsumerEntry,
+    ProviderEntry,
+    basename_to_bundle_key,
+)
 from .bundle_resolution_reachability import reachable_intra_libraries
 from .checker_policy import ChangeKind
 from .checker_types import DiffResult
 from .model import AbiSnapshot, Visibility
 
-#: Every per-symbol diff kind this module's own evidence-sufficiency check
-#: (`_symbol_evidence_sufficient`) can itself detect the *positive* side
-#: of. The first three (`FUNC_PARAMS_CHANGED`/`FUNC_RETURN_CHANGED`/
-#: `VAR_TYPE_CHANGED`) are the same three `bundle._detect_intra_dep_
-#: signature_changed` promotes to `BUNDLE_INTRA_DEP_SIGNATURE_CHANGED`;
-#: duplicated here (rather than imported from `bundle.py`) since that
-#: module must not import this leaf-module's own detector (see this
-#: module's own docstring on why it stays leaf-only) and a shared
-#: constant would need a home neither module owns. `FUNC_VARIADIC_ADDED`/
-#: `FUNC_VARIADIC_REMOVED`/`CALLING_CONVENTION_CHANGED` were added
-#: alongside this module's own `is_variadic`/`contract_attributes`
-#: sufficiency checks (Codex review, fresh evidence): without them, a
-#: symbol that diff_symbols already confirmed changed on one of *those*
-#: two axes, but which also happens to carry an unrelated unresolved
-#: field (an unresolved parameter type, say), would still produce a
-#: redundant, contradictory "cannot be confirmed or denied" finding
-#: alongside the already-proven break. A confirmed change for a symbol
-#: always takes precedence over the unverified kind this module emits --
-#: real evidence of a break is strictly more informative than "couldn't
-#: tell either way". `bundle._detect_intra_dep_signature_changed`'s own
-#: `relevant_kinds` set does not (yet) include these two -- a
-#: pre-existing, narrower gap in that sibling function, not something
-#: this module's own precedence check needs to wait on.
-#:
-#: The next six kinds (Codex review, fresh evidence, filed after the three
-#: above already went in) close the same coexistence gap for every *other*
-#: `Function`-level fact `diff_symbols.py` can independently confirm or deny
-#: with certainty, none of which `_symbol_evidence_sufficient` itself
-#: inspects (it only ever reads `return_type`/`params`/`is_variadic`/
-#: `contract_attributes`): `is_noexcept`/`is_virtual`/`ref_qualifier` are
-#: plain (non-tri-state) `Function` fields, always confidently comparable
-#: regardless of any other field's resolution state; `exception_spec` is a
-#: tri-state field whose own `diff_symbols._check_exception_spec_change`
-#: already skips on `None` the identical way `_check_variadic_change`/
-#: `_check_contract_attributes_change` do. Any one of these being genuinely
-#: confirmed for a symbol is exactly as informative as a confirmed
-#: params/return/variadic/calling-convention change -- "we know something
-#: concrete changed (or didn't) here," not "we couldn't tell" -- so it must
-#: suppress this module's own risk finding the same way.
-#:
-#: Deliberately excluded: `FUNC_LANGUAGE_LINKAGE_CHANGED` (an `extern "C"`
-#: transition changes the mangled name itself, so old/new can't share the
-#: `symbol` key this module matches on in the first place); the
-#: vtable-slot/inline-transition kinds (about virtual-dispatch layout and
-#: definition placement, not the calling-signature-agreement question this
-#: module exists to answer); and `CTOR_EXPLICIT_ADDED`/`CTOR_EXPLICIT_
-#: REMOVED` (Codex review, fresh evidence -- tried once, reverted). Unlike
-#: every kind actually included above, an `explicit` specifier transition
-#: is a purely source-level fact: `checker_policy.py`'s own `ChangeKind`
-#: comment for these two kinds states plainly "neither change alters the
-#: mangled name," meaning it proves nothing about whether the *binary*
-#: calling signature this module exists to verify (params/return/
-#: variadic/calling-convention/...) actually still agrees. Including it in
-#: this set let a confirmed, unrelated source-level fact silently suppress
-#: a real, still-unresolved binary-signature-agreement question for the
-#: same symbol.
-_CONFIRMED_SIGNATURE_CHANGE_KINDS = frozenset(
-    {
-        ChangeKind.FUNC_PARAMS_CHANGED,
-        ChangeKind.FUNC_RETURN_CHANGED,
-        ChangeKind.VAR_TYPE_CHANGED,
-        ChangeKind.FUNC_VARIADIC_ADDED,
-        ChangeKind.FUNC_VARIADIC_REMOVED,
-        ChangeKind.CALLING_CONVENTION_CHANGED,
-        ChangeKind.FUNC_NOEXCEPT_ADDED,
-        ChangeKind.FUNC_NOEXCEPT_REMOVED,
-        ChangeKind.FUNC_EXCEPTION_SPEC_CHANGED,
-        ChangeKind.FUNC_REF_QUAL_CHANGED,
-        ChangeKind.FUNC_VIRTUAL_ADDED,
-        ChangeKind.FUNC_VIRTUAL_REMOVED,
-    }
-)
+#: G38 stabilization: this used to be a locally-duplicated frozenset
+#: (comment preserved below for the history of why each kind is or isn't
+#: included), independently maintained from `bundle._detect_intra_dep_
+#: signature_changed`'s own `relevant_kinds` set -- and the two drifted:
+#: `bundle.py` promoted only three kinds
+#: (`FUNC_PARAMS_CHANGED`/`FUNC_RETURN_CHANGED`/`VAR_TYPE_CHANGED`) to a
+#: consumer-attributed `BUNDLE_INTRA_DEP_SIGNATURE_CHANGED` finding while
+#: this module already suppressed its own "unverified" finding on nine
+#: more. A confirmed `CALLING_CONVENTION_CHANGED` (say) correctly
+#: suppressed this module's uncertainty finding but was silently never
+#: promoted to a cross-library break -- losing exactly the causality the
+#: bundle report exists to surface. Both consumers now import the same
+#: :data:`abicheck.bundle_models.CONFIRMED_C_BOUNDARY_SIGNATURE_BREAK_KINDS`
+#: rather than keeping two lists that can disagree again; see that
+#: constant's own docstring for the per-kind inclusion/exclusion reasoning
+#: (`FUNC_VARIADIC_ADDED`/`FUNC_VARIADIC_REMOVED`/`CALLING_CONVENTION_
+#: CHANGED`, then `is_noexcept`/`is_virtual`/`ref_qualifier`/
+#: `exception_spec`, all added across several Codex review rounds for the
+#: identical "a confirmed change on one axis must not coexist with a
+#: contradictory 'couldn't tell' finding on the whole symbol" reason;
+#: `CTOR_EXPLICIT_ADDED`/`CTOR_EXPLICIT_REMOVED` deliberately excluded,
+#: tried once and reverted, since an `explicit` transition never changes
+#: the mangled name and proves nothing about the binary calling signature
+#: this module verifies).
+_CONFIRMED_SIGNATURE_CHANGE_KINDS = CONFIRMED_C_BOUNDARY_SIGNATURE_BREAK_KINDS
 
 #: The sentinel `dumper_elf_fallback.py` (and any other L0-only extraction
 #: path) writes into `Function.return_type`/`Param.type`/`Variable.type`
@@ -286,7 +247,9 @@ def _type_spelling_is_unresolved(spelling: str) -> bool:
     )
 
 
-def _symbol_evidence_sufficient(symbol: str, snapshot: AbiSnapshot) -> bool:
+def _symbol_evidence_sufficient(
+    symbol: str, snapshot: AbiSnapshot | BundleSignatureEvidence
+) -> bool:
     """Does *snapshot* carry real DWARF/header-derived type evidence for
     *symbol*, as opposed to only a bare ELF export with no corroborating
     declaration?
@@ -368,7 +331,9 @@ def _symbol_evidence_sufficient(symbol: str, snapshot: AbiSnapshot) -> bool:
     return False
 
 
-def _symbol_was_exported(symbol: str, snapshot: AbiSnapshot) -> bool:
+def _symbol_was_exported(
+    symbol: str, snapshot: AbiSnapshot | BundleSignatureEvidence
+) -> bool:
     """Did *snapshot*'s own `Function`/`Variable` entry for *symbol* actually
     reach the binary's *dynamic* export table (`.dynsym`) -- as opposed to
     merely being *some* declaration, public or private, that `AbiSnapshot`
@@ -408,26 +373,13 @@ def _symbol_was_exported(symbol: str, snapshot: AbiSnapshot) -> bool:
     return False
 
 
-def _basename_to_bundle_key(old: BundleSnapshot) -> dict[str, str]:
-    """Map each library's real on-disk file basename to its bundle-canonical
-    key (``old.libraries``' own keys -- the same version-stripped key
-    :func:`~abicheck.binary_utils._canonical_library_key` produces, e.g.
-    ``libfoo.so`` for a real ``libfoo.so.1.2.3``).
-
-    :class:`~abicheck.checker_types.DiffResult.library` is always set from
-    ``path.name`` (`abicheck/service.py`/`abicheck/dumper.py`, every ELF/PE/
-    Mach-O dump site) -- the literal on-disk filename, not the bundle's
-    canonical key -- so for any normally-versioned SONAME the two differ
-    (Codex review, fresh evidence: `_confirmed_provider_symbols` previously
-    compared a `DiffResult`'s raw basename directly against
-    `BundleSnapshot.resolution`'s canonical keys, which never match for a
-    realistically-versioned library, silently defeating the "a confirmed
-    change outranks unverified" precedence for the overwhelmingly common
-    case). A basename with no matching bundle entry is left unmapped --
-    the caller degrades to comparing the raw basename, same as before this
-    fix, rather than raising.
-    """
-    return {path.name: key for key, path in old.libraries.items()}
+#: G38 stabilization: this used to be a locally-duplicated function
+#: (`_basename_to_bundle_key`, original docstring's own history preserved
+#: in `bundle_models.basename_to_bundle_key` now) -- `bundle.py`'s own
+#: `diff_by_library` construction had the identical bug independently
+#: (Codex/CodeRabbit review on PR #845), so the fix moved to the one
+#: shared leaf module both already import from.
+_basename_to_bundle_key = basename_to_bundle_key
 
 
 def _confirmed_provider_symbols(
@@ -600,8 +552,8 @@ def find_unverified_signature_findings(
     old: BundleSnapshot,
     new: BundleSnapshot,
     per_library_results: Iterable[DiffResult],
-    old_snapshots: Mapping[str, AbiSnapshot],
-    new_snapshots: Mapping[str, AbiSnapshot],
+    old_snapshots: Mapping[str, AbiSnapshot | BundleSignatureEvidence],
+    new_snapshots: Mapping[str, AbiSnapshot | BundleSignatureEvidence],
 ) -> list[BundleFinding]:
     """`BUNDLE_INTRA_DEP_SIGNATURE_UNVERIFIED` findings: a sibling library's
     undefined import resolves by name to a provider's export in *new* (the
@@ -625,8 +577,12 @@ def find_unverified_signature_findings(
 
     *old_snapshots*/*new_snapshots* map bundle-relative library name (the
     same canonical key `BundleSnapshot.libraries` uses) to that library's
-    own `AbiSnapshot` -- the one input `compare_bundle` itself never
-    receives. A provider absent from either mapping, or whose symbol was
+    own `AbiSnapshot` -- or, since G38 stabilization Phase 9, the
+    cheaper `BundleSignatureEvidence` projection of one (see that type's
+    own docstring); both are accepted since this function reads only the
+    three fields the projection carries. Either way this is the one input
+    `compare_bundle` itself never receives. A provider absent from either
+    mapping, or whose symbol was
     not actually part of the *old* side's export surface (`_symbol_was_
     exported`), is skipped for that symbol -- this covers both a genuine
     addition (no declaration on the old side at all) and a symbol that

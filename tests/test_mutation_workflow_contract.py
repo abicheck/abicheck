@@ -553,6 +553,25 @@ _ACCEPTED_KILL_LOSS = {
             "abicheck.snapshot_io",
         }
     ),
+    # The same subprocess re-entry once more, and the first instance reached
+    # through a *workflow* step rather than through `action/`: this file runs
+    # check-project.yml's "Resolve candidate binary/binaries" body from a
+    # scratch `cwd`, and that step's own child imports `abicheck`, resolved to
+    # the mutant tree through the inherited PYTHONPATH. Reproduce without
+    # mutmut in one line:
+    #   PYTHONPATH=<mutants dir> python -m pytest \\
+    #     tests/test_reusable_workflows_project_evidence.py -k resolver_selects
+    "tests/test_reusable_workflows_project_evidence.py": frozenset(
+        {
+            "abicheck.checker_policy",
+            "abicheck.diff_symbols",
+            "abicheck.finding_identity",
+            "abicheck.name_classification",
+            "abicheck.serialization",
+            "abicheck.snapshot_io",
+            "abicheck.suppression",
+        }
+    ),
 }
 
 

@@ -20,13 +20,13 @@ import json
 from collections.abc import Callable
 from dataclasses import asdict
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, TypeVar
+from typing import TYPE_CHECKING, Any, TypeVar, cast
 
 if TYPE_CHECKING:
     from .build_mode import BuildMode
     from .bundle_facts import BundleFacts
     from .snapshot_io import SnapshotWriteResult
-
+from . import qualified_name_segments
 from .errors import IncompatibleSnapshotSchemaError, SnapshotError
 from .model import (
     AbiSnapshot,
@@ -45,6 +45,13 @@ from .model import (
     TypeField,
     Variable,
     Visibility,
+)
+from .storage.enum_codec import encode_platform_enums
+from .storage.fact_codec import (
+    apply_legacy_fact_backfill,
+    decode_fact,
+    decode_record_facts,
+    encode_fact_fields,
 )
 
 # Current schema version for snapshot serialization.
@@ -280,6 +287,9 @@ from .model import (
 #     unqualified `typedefs` dict as the fallback source of truth, so
 #     "empty" degrades cleanly to "no extra qualified-identity data
 #     available" rather than being misread as a real fact.
+#   26 — ADR-063 Phase 0: `Fact[T]` siblings for `RecordType.bases_fact`/
+#     `virtual_bases_fact`/`vtable_fact`/`vptr_offset_bits_fact` and
+#     `Param.is_va_list_fact` — see `storage/fact_codec.py`.
 #
 # Reading an OLDER snapshot (the direction every CI baseline actually hits —
 # a baseline is committed once and outlives however many abicheck pin bumps
@@ -294,6 +304,7 @@ from .model import (
 # regardless of relevance would just be noise.
 # v26 persists debug-evidence provenance; older readers must not discard it.
 SCHEMA_VERSION: int = 26
+
 # Schema version at which CastXML field CV facts became reliable (see v9 above).
 _MIN_SCHEMA_VERSION_FOR_CV_FACTS = 9
 
@@ -381,51 +392,11 @@ def snapshot_to_dict(snap: AbiSnapshot) -> dict[str, Any]:
     if snap.from_headers_inferred:
         d.pop("from_headers", None)
 
-    # Serialize ElfMetadata enums to strings for JSON compatibility
-    if d.get("elf"):
-        elf = d["elf"]
-        for sym in elf.get("symbols", []):
-            sym["binding"] = (
-                sym["binding"]
-                if isinstance(sym["binding"], str)
-                else sym["binding"].value
-            )
-            sym["sym_type"] = (
-                sym["sym_type"]
-                if isinstance(sym["sym_type"], str)
-                else sym["sym_type"].value
-            )
-        for imp in elf.get("imports", []):
-            imp["binding"] = (
-                imp["binding"]
-                if isinstance(imp["binding"], str)
-                else imp["binding"].value
-            )
-            imp["sym_type"] = (
-                imp["sym_type"]
-                if isinstance(imp["sym_type"], str)
-                else imp["sym_type"].value
-            )
+    # ElfMetadata/PeMetadata/MachoMetadata enums -> strings (storage/enum_codec.py).
+    encode_platform_enums(d)
 
-    # Serialize PeMetadata enums to strings
-    if d.get("pe"):
-        pe = d["pe"]
-        for exp in pe.get("exports", []):
-            exp["sym_type"] = (
-                exp["sym_type"]
-                if isinstance(exp["sym_type"], str)
-                else exp["sym_type"].value
-            )
-
-    # Serialize MachoMetadata enums to strings
-    if d.get("macho"):
-        macho = d["macho"]
-        for exp in macho.get("exports", []):
-            exp["sym_type"] = (
-                exp["sym_type"]
-                if isinstance(exp["sym_type"], str)
-                else exp["sym_type"].value
-            )
+    # ADR-063 Phase 0 (schema v26): see storage/fact_codec.py.
+    encode_fact_fields(d)
 
     # Convert all sets → sorted lists (needed for AdvancedDwarfMetadata.packed_structs
     # and ToolchainInfo.abi_flags; json.dumps raises TypeError on set objects)
@@ -917,6 +888,9 @@ def snapshot_from_dict(d: dict[str, Any]) -> AbiSnapshot:
                     pointer_depth=p.get("pointer_depth", 0),
                     is_restrict=p.get("is_restrict", False),
                     is_va_list=p.get("is_va_list", False),
+                    is_va_list_fact=decode_fact(
+                        p.get("is_va_list_fact"), _schema_version
+                    ),
                 )
                 for p in f.get("params", [])
             ],
@@ -1043,6 +1017,7 @@ def snapshot_from_dict(d: dict[str, Any]) -> AbiSnapshot:
             qualified_name=t.get("qualified_name"),
             is_abstract=t.get("is_abstract"),
             deprecated=t.get("deprecated"),
+            **decode_record_facts(t, _schema_version),
         )
         for t in d.get("types", [])
     ]
@@ -1336,6 +1311,17 @@ def snapshot_from_dict(d: dict[str, Any]) -> AbiSnapshot:
             or ast_producer_value == "castxml"
             or _schema_version >= _MIN_SCHEMA_VERSION_FOR_CLANG_VA_LIST_FACTS
         )
+
+    # ADR-063 Phase 0 (schema v26): see storage/fact_codec.py.
+    apply_legacy_fact_backfill(
+        d,
+        types,
+        funcs,
+        _schema_version,
+        clang_vtable_facts_reliable_value,
+        clang_va_list_facts_reliable_value,
+        ast_producer_value,
+    )
 
     if "castxml_var_access_facts_reliable" in d:
         # Same explicit-marker-wins reasoning as the flags above.
@@ -1658,7 +1644,7 @@ def snapshot_from_dict(d: dict[str, Any]) -> AbiSnapshot:
         )
 
     _backfill_missing_elf_binding(snap)
-    return snap
+    return qualified_name_segments.renumber_anonymous_closure_identities(snap)
 
 
 def _extraction_contract_from_dict(raw: Any) -> ExtractionContract | None:
@@ -1961,38 +1947,37 @@ def _validated_filename_map(raw: object) -> dict[str, str]:
     return filenames
 
 
-def load_bundle_facts(path: str | Path) -> BundleFacts:
-    """Load a :class:`~abicheck.bundle_facts.BundleFacts` from *path*,
-    transparently handling plain, gzip, and zstd storage (ADR-059,
-    detected from magic bytes) — the G38 Phase 2 counterpart to
-    :func:`load_snapshot`."""
+def load_bundle_facts(path: str | Path, *, format: str = "auto", max_json_object_nodes: int | None = None) -> BundleFacts:
+    """Load a BundleFacts; see ``storage.bundle_facts_validation.load_bundle_facts_dispatch`` for the ``format="auto"``/G40-archive dispatch and the ``max_json_object_nodes`` budget override."""
+    from . import bundle_facts as _bundle_facts
     from .snapshot_io import read_snapshot_text
+    from .storage.bundle_facts_validation import load_bundle_facts_dispatch
 
-    return bundle_facts_from_dict(json.loads(read_snapshot_text(path)))
+    budget = _bundle_facts.DEFAULT_MAX_JSON_OBJECT_NODES if max_json_object_nodes is None else max_json_object_nodes
+    return cast("BundleFacts", load_bundle_facts_dispatch(path, format, read_snapshot_text=read_snapshot_text, maybe_read_bundle_facts_archive=_bundle_facts.maybe_read_bundle_facts_archive, bundle_facts_from_dict=bundle_facts_from_dict, snapshot_from_dict=snapshot_from_dict, max_json_object_nodes=budget))
 
 
 def save_bundle_facts(
     facts: BundleFacts,
     path: str | Path,
     *,
+    format: str = "json",
     compression: str = "auto",
 ) -> SnapshotWriteResult:
-    """Save *facts* to *path* — the G38 Phase 2 counterpart to
-    :func:`write_snapshot`. Same *compression* contract (``"auto"``
-    inferred from *path*'s suffix, ``"none"``, ``"gzip"``, ``"zstd"``)."""
+    """Save *facts*; ``format="archive"`` writes G40's zip container, see
+    ``bundle_facts.maybe_write_bundle_facts_archive`` (``compression`` is JSON-only; ``"auto"``/``"none"`` no-op for it, only ``"gzip"``/``"zstd"`` reject -- Codex)."""
+    from .bundle_facts import maybe_write_bundle_facts_archive
     from .snapshot_io import SnapshotCompression, write_snapshot_text
 
-    # sort_keys=True (matching no other writer in this module -- see
-    # snapshot_to_json's own plain json.dumps) would recursively re-sort
-    # every dict's keys, including each manifest ManifestEntry's own
-    # instantiations dict -- whose iteration order IS the C++ template
-    # argument order (_expand_instantiations()'s own contract). Sorting it
-    # alphabetically corrupts a valid "T, U" contract into "T, U" reloading
-    # as "T, U" only by coincidence -- a real reorder (e.g. "Method,
-    # Precision" -> alphabetically "Method, Precision" already matches, but
-    # "Precision, Method" would sort back to "Method, Precision") produces
-    # a manifest entry that no longer matches any real symbol, a false
-    # bundle_manifest_instantiation_removed (Codex review, fresh evidence).
+    if format == "archive" and SnapshotCompression(compression) not in (SnapshotCompression.AUTO, SnapshotCompression.NONE):
+        raise ValueError('compression= is JSON-only; format="archive" is always zstd')
+    archived = maybe_write_bundle_facts_archive(facts, path, format, snapshot_to_dict=snapshot_to_dict)
+    if archived is not None:
+        return archived
+
+    # sort_keys=True (unlike other writers here) would re-sort a manifest
+    # entry's own instantiations dict, whose order IS the C++ template
+    # argument order -- corrupting a "T, U" contract (Codex review).
     return write_snapshot_text(
         json.dumps(bundle_facts_to_dict(facts), indent=2),
         path,

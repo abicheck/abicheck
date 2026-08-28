@@ -811,8 +811,10 @@ _SYMBOL_LEVEL_KIND_SLUGS = frozenset(
 #: entity-bearing" -- their ``Change.symbol`` is a version-node/requirement
 #: label (``diff_versioning.py``/``diff_platform_elf_symbols.py``: e.g.
 #: ``symbol=node`` where ``node`` is a string like ``"GLIBC_2.17"``) or a
-#: synthetic batch identifier (``diff_symbols.py``'s ``_emit_batch_rename``:
-#: ``symbol=f"batch_rename:{prefix}*"``), never a real exported function or
+#: synthetic batch identifier (``diff_symbols_renames.py``'s
+#: ``emit_prefix_batch_rename``/``emit_namespace_move_batches``:
+#: ``symbol=f"batch_rename:{prefix}*"`` and
+#: ``symbol=f"batch_rename:{old_segment}->{new_segment}"``), never a real exported function or
 #: variable name (Codex review: a version label or batch id that happens to
 #: resemble a mangling must not be promoted to CANONICAL and aliased
 #: alongside an actual function's mangled name). Verified per-kind against
@@ -1029,6 +1031,14 @@ _EQUIVALENT_CHANGE_CATEGORIES = {
     "enum_member_value_changed": "enum_member_value_changed",
     "enum_member_removed": "enum_member_removed",
     "enum_last_member_value_changed": "enum_last_member_value_changed",
+    # diff_types._diff_enums (L2 header tier, bare EnumType.name) and
+    # diff_platform._diff_enum_layouts (L1 DWARF tier, fully-qualified DWARF
+    # dict key) both emit this same kind for the same enum's underlying-type
+    # size change — self-mapped so its discriminator collapses across
+    # producers the same way the three sibling enum-member kinds above
+    # already do; see diff_filtering._deduplicate_cross_detector's own
+    # docstring for the qualified-name bridge this also depends on.
+    "enum_underlying_size_changed": "enum_underlying_size_changed",
     # diff_symbols._detect_newly_deleted_functions emits FUNC_DELETED
     # (castxml is_deleted attribute) or FUNC_DELETED_DWARF (DWARF
     # DW_AT_deleted) for the same symbol/callable->deleted transition --

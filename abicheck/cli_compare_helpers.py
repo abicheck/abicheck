@@ -35,22 +35,7 @@ from typing import TYPE_CHECKING, Any
 
 import click
 
-from . import cli
-from .cli import (
-    _EXIT_NOT_COMPARABLE,
-    _announce_exit_scheme,
-    _embed_inline_source_side,
-    _exit_with_severity_or_verdict,
-    _finalize_compare_result,
-    _load_probe_matrix_changes,
-    _log_debug_resolution,
-    _reject_application_operand,
-    _render_output,
-    _setup_verbosity,
-    _source_is_pack,
-    _warn_unused_set_flags,
-    _write_or_echo,
-)
+from . import cli_resolve
 from .cli_audit import echo_pattern_modulations
 from .cli_compare_fold import (
     _fold_scoped_compat_into_text as _fold_scoped_compat_into_text,
@@ -69,6 +54,7 @@ from .cli_compare_options import (
     _resolve_debug_roots,
     _resolve_demangle,
     _warn_force_public_ignored,
+    echo_coverage_warnings,
 )
 from .cli_dump_helpers import resolve_dump_depth
 from .cli_helpers_compare import (
@@ -106,17 +92,28 @@ from .cli_resolve import (
     classify_compare_operand,
     resolve_directory_compile_context,
 )
-from .cli_secondary_output import reject_incoherent_secondary_output
-from .contract_coverage_exit import announce_coverage_floor, fold_coverage_exit
 from .contract_scoped_promotion import stamp_scoped_result_findings
 from .errors import AbicheckError, ProfileMismatchError, ScopeMismatchError
+from .frontends.cli.options import reject_incoherent_secondary_output
+from .frontends.cli.runtime import (
+    _EXIT_NOT_COMPARABLE,
+    _announce_exit_scheme,
+    _exit_with_severity_or_verdict,
+    _finalize_compare_result,
+    _load_probe_matrix_changes,
+    _log_debug_resolution,
+    _render_output,
+    _setup_verbosity,
+    _write_or_echo,
+)
 from .service_render import ONELINE_FORMAT
+from .workflows.gate import announce_coverage_floor, fold_coverage_exit
 
 if TYPE_CHECKING:
     from .cli_helpers_compare import ResolvedCompareConfig
-    from .dump_manifest import DumpManifest
     from .model import AbiSnapshot
     from .policy_file import PolicyFile
+    from .workflows.extraction import DumpManifest
 
 
 def _resolve_compare_config(
@@ -142,8 +139,8 @@ def _resolve_compare_config(
     ADR-049 receipt can prove *which revision* of the file supplied a value
     rather than only naming its path (Codex review, fresh evidence).
     """
-    from .buildsource.build_config_io import load_build_config_with_digest
     from .cli_helpers_compare import discover_project_config, resolve_compare_config
+    from .workflows.extraction import load_build_config_with_digest
 
     cfg_path = config if config is not None else discover_project_config()
     cfg_sha: str | None = None
@@ -288,6 +285,7 @@ def _needs_inline_embed(
     Those sides get dumped inline at --depth so their L3-L5 facts ride embedded in
     the snapshot; pre-built packs fall through to prepare_embedded_build_source.
     """
+    from .frontends.cli.commands.compare import _source_is_pack  # cycle
     def _raw_evidence(p: Path | None) -> bool:
         return p is not None and not _source_is_pack(p)
 
@@ -332,6 +330,7 @@ def _classify_and_reject_operands(
     per-library comparison; an application/PIE operand is not a library `compare`
     can pair (hint at `appcompat`). A single .so / snapshot / dump falls through.
     """
+    from .frontends.cli.commands.compare import _reject_application_operand  # cycle
     old_kind = classify_compare_operand(old_input)
     new_kind = classify_compare_operand(new_input)
     if old_kind == "app" or new_kind == "app":
@@ -463,23 +462,22 @@ def _report_not_comparable(
         'assurance: "none") if you understand the risk.',
         err=True,
     )
+    refusal = (old.library, old.version, new.version, kind, message)
     if fmt == "json":
+        from .report.not_comparable import render_not_comparable_json
         from .schemas import REPORT_SCHEMA_VERSION
 
-        doc = {
-            "report_schema_version": REPORT_SCHEMA_VERSION,
-            "library": old.library,
-            "old_version": old.version,
-            "new_version": new.version,
-            "verdict": None,
-            "reason": {"kind": kind, "message": message},
-        }
-        _write_or_echo(output, json.dumps(doc, indent=2))
+        _write_or_echo(
+            output,
+            render_not_comparable_json(
+                *refusal, report_schema_version=REPORT_SCHEMA_VERSION
+            ),
+        )
     elif fmt == "sarif":
+        from .report.render_json import render_mapping_as_json
         from .sarif import to_sarif_not_comparable
 
-        doc = to_sarif_not_comparable(old.library, old.version, new.version, kind, message)
-        _write_or_echo(output, json.dumps(doc, indent=2))
+        _write_or_echo(output, render_mapping_as_json(to_sarif_not_comparable(*refusal)))
     elif fmt == "junit":
         from .junit_report import to_junit_xml_not_comparable
 
@@ -487,10 +485,7 @@ def _report_not_comparable(
         _write_or_echo(output, xml)
 
 
-#: The ``compare`` parameters that can set a gate field on the command line.
-#: ``exit_code_scheme`` is its own field; the rest all feed one resolved
-#: :class:`~abicheck.severity.SeverityConfig`, so any one of them being typed
-#: makes the resolved severity explicitly CLI-selected.
+#: The ``compare`` parameters that can set a gate field on the command line. ``exit_code_scheme`` is its own field; the rest all feed one resolved :class:`~abicheck.severity.SeverityConfig`, so any one of them being typed makes the resolved severity explicitly CLI-selected.
 
 def _reject_incoherent_compare_flags(
     *,
@@ -550,8 +545,8 @@ def _preflight_manifests_and_audit(
     old_manifest_obj: DumpManifest | None = None
     new_manifest_obj: DumpManifest | None = None
     if old_dump_manifest is not None or new_dump_manifest is not None:
-        from .dump_manifest import load_manifest
         from .errors import ManifestValidationError
+        from .workflows.extraction import load_manifest
 
         try:
             if old_dump_manifest is not None:
@@ -731,6 +726,8 @@ def _embed_inline_source_sides(
     # extending graph coverage to this path.
     import shutil
     import tempfile
+
+    from .frontends.cli.commands.compare import _embed_inline_source_side  # cycle
 
     # CLI-over-config explicitness read from compare's *real* ctx (where
     # --ast-frontend/--nostdinc are genuine COMMANDLINE params); the inline
@@ -1141,8 +1138,8 @@ def _report_compare_result(
     # cheap (pure pack-directory metadata load, no diffing) and mirrors the
     # identical, already-reviewed fix _fold_evidence_depth_into_json applies
     # for the same class of gap on old_evidence_depth/new_evidence_depth.
-    from .analysis_assurance import compute_analysis_assurance
     from .cli_buildsource_helpers import _resolve_side_pack
+    from .workflows.gate import compute_analysis_assurance
 
     result.analysis_assurance = compute_analysis_assurance(
         result, old, new,
@@ -1153,8 +1150,9 @@ def _report_compare_result(
     if explain_patterns:
         echo_pattern_modulations(result)
 
+    # used_by_old_input/used_by_new_input are the *original* library paths, captured before _embed_inline_source_sides may have rewritten old_input/new_input to a temporary embedded-snapshot .abi.json path (Codex review) -- passing the post-embed operands here would silently drop the same-binary coverage warning for a --old/new-sources or raw --build-info comparison even when the two real binaries are identical.
     _finalize_compare_result(
-        result, old_input, new_input,
+        result, used_by_old_input, used_by_new_input,
         show_redundant=show_redundant, show_filtered=show_filtered,
         severity_config=report_severity,
         contract_evaluation=contract_evaluation,
@@ -1186,7 +1184,7 @@ def _report_compare_result(
     # (cli.py) applies both floors immediately after computing its own base
     # exit code and before returning control to its caller.
     if scoped_exit_code is not None:
-        from .analysis_assurance import (
+        from .workflows.gate import (
             assurance_floor_diagnostic,
             fold_analysis_assurance_exit,
         )
@@ -1231,14 +1229,14 @@ def _report_compare_result(
     # both stayed permanently unstamped even when --contract was
     # given. This must run before _render_output below serializes
     # result.changes, and mirrors the identical fix already applied to the
-    # MCP abi_compare tool (mcp_server.py) -- both share the same traversal
-    # (CodeRabbit review: hand-copying it here previously let one call site
-    # drift out of sync with the other).
+    # MCP abi_compare tool (mcp_server.py) -- both share the same traversal (CodeRabbit review: hand-copying it here previously let one call site drift out of sync with the other).
     if contract_evaluation:
         from .reporter import _finding_id
 
         stamp_scoped_result_findings(result, finding_id=_finding_id)
-
+    # Only the same-binary warning, not every pre-existing coverage_warnings entry ("no binary metadata"/detector-disabled reasons) -- those are deliberately absent from the one-line summary today (existing tests pin exactly zero extra lines).
+    if fmt == ONELINE_FORMAT:
+        echo_coverage_warnings([w for w in result.coverage_warnings if "byte-identical" in w])
     _write_or_echo(
         output,
         _render_compare_report(
@@ -1374,6 +1372,7 @@ def run_compare(
 ) -> None:
     """Run the single-pair (or set fan-out) ``compare`` flow and exit accordingly."""
     from .dry_run import reject_dry_run_with_output
+    from .frontends.cli.commands.compare import _warn_unused_set_flags  # cycle
 
     reject_dry_run_with_output(dry_run, output)
     _reject_incoherent_compare_flags(
@@ -1627,14 +1626,13 @@ def run_compare(
             compiler_path=compiler_path, compiler_prefix=compiler_prefix,
             compiler_option_tokens=compiler_option_tokens,
         )
-        # Dirs the config appended past the CLI -I roots (mirrors the
-        # single-pair path's `config_includes` split below): must survive a
-        # per-library-pair `--old-include`/`--new-include` override, which
-        # otherwise fully replaces `includes` for that side.
+        # Dirs the config appended past the CLI -I roots (mirrors the single-pair
+        # `config_includes` split below): must survive a per-library-pair
+        # `--old/new-include` override, which otherwise replaces `includes`.
         directory_config_includes = tuple(directory_includes[len(includes) :])
-        # Via the ``cli`` module (not a by-name import) so a test that
-        # monkeypatches ``abicheck.cli._dispatch_release_compare`` is honoured.
-        cli._dispatch_release_compare(
+        # Off the owner, never via ``abicheck.cli`` (see install_facade_guard).
+        from .frontends.cli.commands.compare import _dispatch_release_compare
+        _dispatch_release_compare(
             ctx,
             old_dir=old_input, new_dir=new_input,
             headers=headers, includes=directory_includes,
@@ -1787,15 +1785,15 @@ def run_compare(
     # script) drives format detection, metadata, and dependency analysis.
     # Through the ``cli`` module so a monkeypatch on ``abicheck.cli._normalize_binary_input``
     # is honoured (pre-split resolution semantics); the name is re-exported there.
-    old_input, old_fmt = cli._normalize_binary_input(old_input)
-    new_input, new_fmt = cli._normalize_binary_input(new_input)
+    old_input, old_fmt = cli_resolve._normalize_binary_input(old_input)
+    new_input, new_fmt = cli_resolve._normalize_binary_input(new_input)
     # Same linker-script resolution for the paths --used-by/--required-symbol
     # scoping will parse — these were captured before the inline-embed rewrite
     # above may have replaced old_input/new_input with a temporary snapshot, so
     # they need their own normalization rather than inheriting it from old_input/
     # new_input (which, in that case, no longer point at the original library).
-    used_by_old_input, _ = cli._normalize_binary_input(used_by_old_input)
-    used_by_new_input, _ = cli._normalize_binary_input(used_by_new_input)
+    used_by_old_input, _ = cli_resolve._normalize_binary_input(used_by_old_input)
+    used_by_new_input, _ = cli_resolve._normalize_binary_input(used_by_new_input)
     _reject_manifest_non_elf(old_manifest_obj, new_manifest_obj, old_fmt, new_fmt)
     _reject_debug_format_for_non_elf(effective_debug_format, old_fmt, new_fmt)
     _warn_ignored_flags(

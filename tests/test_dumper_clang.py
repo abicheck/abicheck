@@ -1078,6 +1078,59 @@ def test_parse_types_sets_qualified_name_for_namespaced_record() -> None:
     assert types["Global"].qualified_name is None
 
 
+def test_qualtype_strips_anonymous_type_location_from_field_and_param_types() -> None:
+    """A field/param whose declared type is itself a lambda closure (e.g. a
+    class-template specialization instantiated with a lambda argument,
+    ``Guard<decltype([]{})>``) has clang print its `type.qualType` as
+    ``"(lambda at <path>:<line>:<col>)"`` -- verified against real Clang 18
+    output (see `_qualtype`'s own docstring). Left unstripped, that embeds an
+    absolute, checkout-dependent path into `TypeField.type`/`Param.type`,
+    which would manufacture a spurious finding across two checkouts of the
+    identical, unchanged declaration.
+    """
+    root = _tu(
+        {
+            "kind": "CXXRecordDecl",
+            "name": "Guard",
+            "tagUsed": "struct",
+            "loc": {"file": "include/foo.h", "line": 1},
+            "completeDefinition": True,
+            "inner": [
+                {
+                    "kind": "FieldDecl",
+                    "name": "fn",
+                    "type": {"qualType": "(lambda at /a/foo.h:4:29)"},
+                },
+            ],
+        },
+        {
+            "kind": "FunctionDecl",
+            "name": "take_lambda",
+            "loc": {"file": "include/foo.h", "line": 5},
+            "mangledName": "take_lambda",
+            "type": {"qualType": "void ((lambda at /a/foo.h:4:29))"},
+            "inner": [
+                {
+                    "kind": "ParmVarDecl",
+                    "name": "f",
+                    "type": {"qualType": "(lambda at /a/foo.h:4:29)"},
+                },
+            ],
+        },
+    )
+    (guard,) = _ClangAstParser(root, {"take_lambda"}, set()).parse_types()
+    (fn,) = guard.fields
+    # See strip_anonymous_type_location's docstring: line/column and the
+    # declaring header's own basename are kept as discriminators -- only the
+    # absolute, checkout-dependent directory prefix is stripped.
+    assert fn.type == "(lambda:foo.h:4:29)"
+    assert "/a/foo.h" not in fn.type
+
+    (take_lambda,) = _ClangAstParser(root, {"take_lambda"}, set()).parse_functions()
+    assert "/a/foo.h" not in take_lambda.params[0].type
+    assert take_lambda.params[0].type == "(lambda:foo.h:4:29)"
+
+
 def test_parse_enums_sets_qualified_name_for_namespaced_enum() -> None:
     # Mirrors test_parse_types_sets_qualified_name_for_namespaced_record --
     # EnumType.qualified_name (PR #608 follow-up) uses the same scope-derived

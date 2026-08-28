@@ -44,7 +44,7 @@ from .cli_params import (
     SIDED_STR_PARAM,
     SidedChoiceParam,
 )
-from .cli_secondary_output import secondary_output_options as _secondary_output_options
+from .frontends.cli.options import secondary_output_options as _secondary_output_options
 
 if TYPE_CHECKING:
     from .service_scan import CompileContext
@@ -870,9 +870,9 @@ def merge_compile_config(
     intended ``compile:`` settings and still exit 0 — but best-effort (warn +
     CLI-only fallback) for an **auto-discovered** config the user didn't bind to.
     """
-    from .buildsource.inline import discover_build_config, load_build_config
     from .config_paths import project_root_for_config
     from .service_scan import CompileContext
+    from .workflows.extraction import discover_build_config, load_build_config
 
     explicit_config = build_config is not None
     cfg = build_config if explicit_config else discover_build_config(sources)
@@ -1214,8 +1214,8 @@ def output_options(
 #: (Codex review: previously declared inline, separately, by ``compare``
 #: and ``scan --against``, with drifted help text and duplicated
 #: ``reject_incoherent_*`` validation logic) lives in the dependency-free
-#: ``cli_secondary_output`` leaf module, not here -- ``cli_scan_helpers.py``
-#: needs its validator half and sits on an existing import path back into
+#: ``frontends.cli.options.secondary_output`` leaf module, not here --
+#: ``cli_scan_helpers.py`` needs its validator half and sits on an existing import path back into
 #: this module (``cli_options -> cli_resolve -> service_scan -> scan_engine
 #: -> cli_scan_helpers``), so a ``cli_scan_helpers -> cli_options`` edge
 #: would close a real import cycle. Re-exported here only for the two CLI
@@ -1836,7 +1836,7 @@ build_source_compare_options = evidence_options
 #: cap. Re-exported here so every existing caller — the ``cli-contract``
 #: gate's own tests and ``tests/test_config_rebalance.py`` — keeps its
 #: import path, the same pattern used for ``cli_profiles.py`` below.
-from .cli_options_contract import (  # noqa: E402
+from .frontends.cli.options.inventory import (  # noqa: E402
     COMPARE_FLAG_BUDGET as COMPARE_FLAG_BUDGET,
     COMPARE_FLAG_BUDGET_BASE as COMPARE_FLAG_BUDGET_BASE,
     COMPARE_FLAG_BUDGET_RAISES as COMPARE_FLAG_BUDGET_RAISES,
@@ -1865,7 +1865,7 @@ from .cli_options_contract import (  # noqa: E402
 # Spelled ``X as X`` (an explicit re-export) rather than declared in an
 # ``__all__``: this module has never had one, and adding a three-name list
 # would quietly narrow what ``import *`` gives every other consumer.
-from .cli_profiles import (  # noqa: E402
+from .frontends.cli.options.profiles import (  # noqa: E402
     COMPARE_PROFILES as COMPARE_PROFILES,
     RUN_PROFILE_META_KEY as RUN_PROFILE_META_KEY,
     profile_option as profile_option,
@@ -1971,7 +1971,7 @@ def apply_compare_profile(ctx: object, kwargs: dict[str, object]) -> None:
 #: before it. Re-exported here (``X as X``, so the re-export is explicit to
 #: mypy) because it is a shared decorator callers already reach through this
 #: module, and a leaf holding option definitions never imports back.
-from .cli_contract_options import (  # noqa: E402
+from .frontends.cli.options.contract import (  # noqa: E402
     contract_options as contract_options,
     pack_option as pack_option,
 )

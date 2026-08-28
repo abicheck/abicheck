@@ -50,11 +50,10 @@ from abicheck.model import Visibility
 # different mangling schemes and never match. The pure-parser unit suite
 # (``test_dumper_clang.py``) covers the backend logic on every platform.
 #
-# NB: deliberately *not* marked ``integration`` — that marker's Linux gate
-# requires castxml (tests/conftest.py ``_integration_skip_reason``), but the
-# whole point here is the **castxml-absent** host. Each test instead self-skips
-# on its own real tool requirement (clang + g++; the parity test additionally
-# needs castxml).
+# NB: the module isn't marked ``integration`` (that gate requires castxml
+# per tests/conftest.py) since most tests self-skip on clang+g++ alone. The
+# one test below that also needs castxml carries a per-test
+# ``@pytest.mark.integration`` so a castxml-having host's fast lane skips it.
 pytestmark = pytest.mark.skipif(
     not sys.platform.startswith("linux"),
     reason="clang L2 backend integration test is ELF/Linux-scoped (see module docstring)",
@@ -108,6 +107,47 @@ def test_clang_ast_does_not_assign_returned_callback_abi_to_factory(tmp_path: Pa
     (factory,) = _ClangAstParser(root, {"factory"}, set()).parse_functions()
 
     assert factory.contract_attributes == []
+
+
+def test_clang_ast_strips_lambda_location_from_instantiated_param_type(
+    tmp_path: Path,
+) -> None:
+    """Use Clang's real ``qualType`` spelling for a lambda closure type, not a
+    hand-written fixture -- confirms the fix at `dumper_clang._qualtype`
+    against real Clang 18 output, not a guessed AST shape.
+
+    A function template instantiated with a lambda argument prints that
+    instantiation's own parameter `type.qualType` as ``"(lambda at
+    <path>:<line>:<col>)"`` (confirmed empirically: unlike a `decltype(...)`-
+    or typedef-sugared spelling, which clang keeps sugared in `qualType` and
+    only desugars into this form in the separate `desugaredQualType` key, a
+    template parameter substituted directly with the deduced lambda type has
+    no sugar to keep). The absolute header path leaking into a parameter's
+    own recorded type would make two checkouts of the identical, unchanged
+    declaration disagree.
+    """
+    if shutil.which("clang") is None or platform.machine().lower() not in {
+        "x86_64",
+        "amd64",
+    }:
+        pytest.skip("requires an x86-64 clang frontend")
+    header = tmp_path / "call_with.h"
+    header.write_text(
+        "template <typename F>\n"
+        "inline void call_with(F f) {}\n"
+        "inline void invoke() { call_with([]{}); }\n",
+        encoding="utf-8",
+    )
+
+    root, _, _ = _clang_header_dump(
+        [header], [], compiler="clang", lang="c++", gcc_options="-std=c++20"
+    )
+    funcs = _ClangAstParser(root, {"invoke"}, set()).parse_functions()
+    (specialization,) = [
+        f for f in funcs if f.name == "call_with" and f.mangled != "call_with"
+    ]
+    assert str(tmp_path) not in specialization.params[0].type
+    assert specialization.params[0].type.startswith("(lambda")
 
 
 def _have(tool: str) -> bool:
@@ -198,6 +238,7 @@ def test_clang_backend_recovers_c_anonymous_typedef_enum(tmp_path: Path) -> None
     ] == "log_level_t"
 
 
+@pytest.mark.integration
 def test_clang_and_castxml_snapshots_agree_on_public_surface(
     built_lib: tuple[Path, Path],
 ) -> None:

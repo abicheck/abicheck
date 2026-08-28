@@ -263,29 +263,14 @@ _SECTION = "Build query (trust)"
 
 
 def _is_inputs_pack_dir(path: Path | None) -> bool:
-    """True when *path* is a Flow-2 ``abicheck_inputs/`` directory (ADR-035 D5).
+    """Compatibility alias for ``buildsource.inputs_pack.is_inputs_pack_dir``.
 
-    A local copy of ``cli_buildsource_helpers._is_inputs_pack_dir``'s own
-    None/is_dir guard around ``buildsource.inputs_pack.is_inputs_pack``, not
-    an import of it: ``cli_buildsource_helpers`` sits several layers above
-    this module in the real import graph (``cli.py``'s ``dump_cmd`` reaches
-    this module directly, and ``cli_buildsource_helpers`` itself reaches back
-    to ``cli.py`` via ``service -> service_scan -> scan_engine ->
-    cli_buildsource -> cli_dump_helpers``), so importing it here -- even
-    function-locally -- closes a real cycle the AI-readiness
-    ``import-cycle-growth`` gate correctly rejects (confirmed by CI:
-    ``cli -> cli_dump_dry_run_build_query -> cli_buildsource_helpers ->
-    service -> service_scan -> scan_engine -> cli_buildsource ->
-    cli_dump_helpers -> cli``). ``buildsource.inputs_pack.py`` itself has no
-    such path back to ``cli.py``, so importing straight from it is safe --
-    the identical fix already applied to
-    ``buildsource.l2_seed._is_inputs_pack_dir`` for the identical reason.
+    Owned there since ADR-061 Phase 3; this was the third of three copies of
+    the same guard, each local because the original lived in the CLI layer.
     """
-    if path is None or not path.is_dir():
-        return False
-    from .buildsource.inputs_pack import is_inputs_pack
+    from .workflows.extraction import is_inputs_pack_dir
 
-    return is_inputs_pack(path)
+    return is_inputs_pack_dir(path)
 
 
 def _is_pack_dir_any(path: Path | None) -> bool:
@@ -302,7 +287,7 @@ def _is_pack_dir_any(path: Path | None) -> bool:
     every reachability branch in this module that keys off "is this operand
     itself a pack" can safely recognize both the same way too.
     """
-    from .buildsource.inline import is_pack_dir
+    from .workflows.extraction import is_pack_dir
 
     return is_pack_dir(path) or _is_inputs_pack_dir(path)
 
@@ -350,14 +335,13 @@ def _pack_dir_build_evidence(path: Path) -> BuildEvidence | None:
     narrow except), so this function's existing load call already matches
     it exactly.
     """
-    from .buildsource.inline import is_pack_dir
+    from .workflows.extraction import is_pack_dir, validate_inputs_pack
 
     if is_pack_dir(path):
         from .buildsource.pack import BuildSourcePack
 
         return BuildSourcePack.load(path).build_evidence
-    from .buildsource.inputs_pack import _load_build_evidence, load_inputs_manifest
-    from .buildsource.inputs_validate import validate_inputs_pack
+    from .workflows.extraction import _load_build_evidence, load_inputs_manifest
 
     report = validate_inputs_pack(path)
     if report.errors:
@@ -466,7 +450,7 @@ def add_build_query_dry_run_section(
     build_compile_db: str | None,
 ) -> None:
     """Append the ``build.query`` trust/execution report to *result*."""
-    from .buildsource.inline import (
+    from .workflows.extraction import (
         _compile_db_at,
         discover_build_config,
         load_build_config,
@@ -482,7 +466,7 @@ def add_build_query_dry_run_section(
     # data layers" section already does (`normalize_binary_input`/
     # `detect_binary_format`), matching this module's contract.
     if dump_manifest_given and so_path is not None:
-        from .binary_utils import detect_binary_format, normalize_binary_input
+        from .workflows.extraction import detect_binary_format, normalize_binary_input
 
         try:
             _normalized_path, _binary_fmt = normalize_binary_input(so_path)
@@ -1028,7 +1012,7 @@ def add_build_query_dry_run_section(
         # units the capture itself yields (Codex review, fresh evidence).
         # sniff_build_info_format never executes anything (its own
         # docstring), matching this module's read-only contract.
-        from .buildsource.inline import sniff_build_info_format
+        from .workflows.extraction import sniff_build_info_format
 
         if build_info.is_file() and sniff_build_info_format(build_info) in (
             "bazel_aquery",
@@ -1208,7 +1192,7 @@ def add_build_query_dry_run_section(
         # (Codex review, fresh evidence). Reusing this private helper
         # mirrors the existing `_compile_db_at` reuse pattern this module
         # already relies on elsewhere.
-        from .buildsource.inline import _autodiscover_compile_db
+        from .workflows.extraction import _autodiscover_compile_db
 
         try:
             discovered_db = _autodiscover_compile_db(effective_sources)

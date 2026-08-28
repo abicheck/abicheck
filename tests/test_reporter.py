@@ -2,6 +2,8 @@
 
 import json
 
+import pytest
+
 from abicheck.checker import Change, ChangeKind, DiffResult, Verdict
 from abicheck.reporter import to_json, to_markdown, to_review_digest
 
@@ -37,6 +39,16 @@ class TestReviewDigest:
         # Scoped reports label additions as public and show the filtered row.
         assert "Public additions" in out
         assert "Filtered (internal/private)" in out
+
+    def test_coverage_warning_surfaced_in_digest(self):
+        r = _result(Verdict.COMPATIBLE)
+        r.coverage_warnings = ["old and new binaries are byte-identical"]
+        assert "byte-identical" in to_review_digest(r)
+
+    def test_no_coverage_warning_banner_when_none_present(self):
+        r = _result(Verdict.COMPATIBLE)
+        out = to_review_digest(r)
+        assert not any(line.startswith("> ⚠️") for line in out.splitlines())
 
     def test_top_impacted_symbols_truncated(self):
         changes = [
@@ -133,11 +145,7 @@ class TestAnalysisAssuranceExitContributionPersistence:
     `abicheck aggregate` a green result for it (Codex review, PR #780)."""
 
     def test_absent_without_a_real_analysis_assurance_object(self):
-        # No AnalysisAssurance attached (a hand-built DiffResult, same as
-        # every other test in this file) -- nothing to report a
-        # contribution for, mirroring `analysis_assurance` itself being
-        # absent. Preserves back-compat for any consumer reading this
-        # report's exact key set.
+        # No AnalysisAssurance attached (a hand-built DiffResult, same as every other test in this file) -- nothing to report a contribution for, mirroring `analysis_assurance` itself being absent. Preserves back-compat for any consumer reading this report's exact key set.
         r = _result(Verdict.COMPATIBLE)
         d = json.loads(to_json(r))
         assert "analysis_assurance" not in d
@@ -150,8 +158,7 @@ class TestAnalysisAssuranceExitContributionPersistence:
         r.analysis_assurance = AnalysisAssurance(status="partial")
         d = json.loads(to_json(r))
         assert d["analysis_assurance"]["status"] == "partial"
-        # The flag was never requested (require_complete_analysis defaults
-        # False) -- 0 regardless of the underlying status, purely additive.
+        # The flag was never requested (require_complete_analysis defaults False) -- 0 regardless of the underlying status, purely additive.
         assert d["analysis_assurance_exit_contribution"] == 0
 
     def test_one_when_the_flag_is_set_and_status_is_partial(self):
@@ -171,8 +178,7 @@ class TestAnalysisAssuranceExitContributionPersistence:
         assert d["analysis_assurance_exit_contribution"] == 0
 
     def test_persisted_in_leaf_and_root_cause_modes_too(self):
-        # All three JSON paths call the shared add_contract_context -- a
-        # regression pinned to only one mode would miss the other two.
+        # All three JSON paths call the shared add_contract_context -- a regression pinned to only one mode would miss the other two.
         from abicheck.analysis_assurance import AnalysisAssurance
 
         c = Change(ChangeKind.FUNC_REMOVED, "_Z3foov", "Public function removed: foo")
@@ -304,10 +310,7 @@ class TestEvidenceStatusInJson:
         assert d["changes"][0]["evidence_status"] == "not_checkable"
 
     def test_breaking_change_with_no_binary_evidence_is_unattributed(self):
-        # P0 evidence-provider audit: a comparison positively known to have
-        # never examined a real binary (evidence_tiers == ["header"], e.g.
-        # hand-built/loaded snapshots) must not claim "artifact_proven" for
-        # an otherwise-BREAKING_KINDS finding.
+        # P0 evidence-provider audit: a comparison positively known to have never examined a real binary (evidence_tiers == ["header"], e.g. hand-built/loaded snapshots) must not claim "artifact_proven" for an otherwise-BREAKING_KINDS finding.
         c = Change(ChangeKind.FUNC_REMOVED, "_Z3foov", "Public function removed: foo")
         r = _result(Verdict.BREAKING, changes=[c])
         r.evidence_tiers = ["header"]
@@ -386,15 +389,11 @@ class TestEvidenceStatusInJson:
             policy_file=pf,
         )
         d = json.loads(to_json(r))
-        # func_removed is not itself an addition kind -> quality issue, not
-        # "no action required".
+        # func_removed is not itself an addition kind -> quality issue, not "no action required".
         assert d["changes"][0]["recommended_action"] == "review_recommended"
 
     def test_reviewer_action_present_only_for_additions(self):
-        # reviewer_action refines the ambiguous "no_action_required" bucket
-        # with what a *reviewer* (not the old binary consumer) should check;
-        # every other verdict already has reviewer-actionable guidance via
-        # recommended_action itself, so the key is omitted there.
+        # reviewer_action refines the ambiguous "no_action_required" bucket with what a *reviewer* (not the old binary consumer) should check; every other verdict already has reviewer-actionable guidance via recommended_action itself, so the key is omitted there.
         breaking = Change(ChangeKind.FUNC_REMOVED, "s1", "removed")
         api_break = Change(ChangeKind.FIELD_RENAMED, "s2", "renamed")
         risk = Change(
@@ -598,10 +597,7 @@ class TestEvidenceStatusInJson:
         assert d["changes"][0]["recommended_action"] == "recompile_and_relink_required"
 
     def test_leaf_mode_root_type_change_carries_reviewer_action(self):
-        # enum_member_added is both a root-type-change kind (routed through
-        # _leaf_entry, which builds its own dict rather than reusing
-        # _change_to_dict) and an addition -- must carry reviewer_action in
-        # both leaf_changes[] and changes[], matching full-mode entries.
+        # enum_member_added is both a root-type-change kind (routed through _leaf_entry, which builds its own dict rather than reusing _change_to_dict) and an addition -- must carry reviewer_action in both leaf_changes[] and changes[], matching full-mode entries.
         c = Change(ChangeKind.ENUM_MEMBER_ADDED, "E::X", "added")
         r = _result(Verdict.COMPATIBLE, changes=[c])
         d = json.loads(to_json(r, report_mode="leaf"))
@@ -846,10 +842,7 @@ class TestImpactAssessmentRootCause:
     report_mode, unlike root-cause mode's dedicated grouping."""
 
     def test_uncorrelated_finding_has_no_impact_assessment_root_cause(self):
-        # A singleton finding (no caused_by_type, not referenced by any
-        # other finding's caused_by_type) has no impact-assessment signal at
-        # all -- has_signal() gates emitting the whole impact_assessment key,
-        # the same sparse-output rule any other all-defaults assessment gets.
+        # A singleton finding (no caused_by_type, not referenced by any other finding's caused_by_type) has no impact-assessment signal at all -- has_signal() gates emitting the whole impact_assessment key, the same sparse-output rule any other all-defaults assessment gets.
         c = Change(ChangeKind.FUNC_REMOVED, "s", "removed")
         r = _result(Verdict.BREAKING, changes=[c])
         d = json.loads(to_json(r))
@@ -1026,8 +1019,7 @@ class TestImpactAssessmentRootCause:
         group = d["root_causes"][0]
         assert group["strongest_evidence_level"] == "consumer_proven"
         assert group["evidence_levels"] == ["artifact_proven", "consumer_proven"]
-        # The finding's own nested evidence already showed this (unaffected
-        # by the bug -- built directly from correlator membership).
+        # The finding's own nested evidence already showed this (unaffected by the bug -- built directly from correlator membership).
         assert (
             d["changes"][0]["impact_assessment"]["root_cause_evidence"][
                 "strongest_evidence_level"
@@ -1036,8 +1028,7 @@ class TestImpactAssessmentRootCause:
         )
 
     def test_matches_root_cause_mode_id(self):
-        # Cross-check: the unconditional impact_assessment id must equal
-        # --report-mode root-cause's own root_cause_id for the same root.
+        # Cross-check: the unconditional impact_assessment id must equal --report-mode root-cause's own root_cause_id for the same root.
         root = Change(
             ChangeKind.FUNC_REMOVED,
             "ns::internal::helper",
@@ -1133,6 +1124,15 @@ class TestRootCauseMarkdown:
         assert "No ABI changes detected" in md
         assert "Root Causes" not in md
 
+    @pytest.mark.parametrize("mode", ["leaf", "root-cause"])
+    def test_coverage_warning_surfaced_in_alternate_modes(self, mode):
+        # Codex review: _append_confidence_section (the coverage-warning
+        # banner's other home) only runs in full mode -- leaf/root-cause
+        # share _view_preamble instead, which must carry the same banner.
+        r = _result(Verdict.COMPATIBLE)
+        r.coverage_warnings = ["old and new binaries are byte-identical"]
+        assert "byte-identical" in to_markdown(r, report_mode=mode)
+
     def test_carries_severity_summary(self):
         from abicheck.severity import PRESET_DEFAULT
 
@@ -1195,7 +1195,7 @@ class TestMarkdownReporter:
     def test_demangle_rewrites_mangled_names_when_enabled(self, monkeypatch):
         import abicheck.demangle as dm
 
-        monkeypatch.setattr(dm, "demangle_batch", lambda syms: {"_Z3foov": "foo()"})
+        monkeypatch.setattr(dm, "demangle_batch", lambda syms, **kw: {"_Z3foov": "foo()"})
         c = Change(
             ChangeKind.FUNC_REMOVED, "_Z3foov", "Public function removed: _Z3foov"
         )
@@ -1212,7 +1212,7 @@ class TestMarkdownReporter:
         from abicheck.model import AbiSnapshot
         from abicheck.service import render_output
 
-        monkeypatch.setattr(dm, "demangle_batch", lambda syms: {"_Z3foov": "foo()"})
+        monkeypatch.setattr(dm, "demangle_batch", lambda syms, **kw: {"_Z3foov": "foo()"})
         result = _result(
             Verdict.BREAKING,
             [Change(ChangeKind.FUNC_REMOVED, "_Z3foov", "removed _Z3foov")],

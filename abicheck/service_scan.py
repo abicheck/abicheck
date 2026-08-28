@@ -1039,25 +1039,25 @@ def _layers_from_coverage(coverage: list[dict[str, Any]]) -> list[LayerResult]:
 
 def _load_risk_rules_for_service(risk_rules_path: Path) -> Any:
     """Load `--risk-rules` YAML for a service-layer caller (`run_scan`/
-    `_run_scan_one_member`), never a `click` exception.
+    `_run_scan_one_member`), as a plain `ValueError`.
 
-    `cli_scan_baseline._load_risk_rules` raises `click.ClickException` on
-    unreadable/malformed YAML -- fine for the CLI, which is already inside
-    a click command, but `risk_rules_path` is a plain `ScanRequest` field a
-    direct Python API or MCP caller can set too. Re-raising as `ValueError`
-    keeps the service/API boundary click-free (CodeRabbit review) --
-    `run_scan_set_subprocess`'s generic exception-to-string handling would
-    otherwise surface a `click`-flavored message to a caller that never
-    imported click.
+    `risk_rules_path` is a plain `ScanRequest` field a direct Python API caller
+    can set without importing click, so this boundary must not leak a
+    click-flavored failure (CodeRabbit review). ADR-061 Phase 4 moved the loader
+    into the engine, where a malformed profile is a `SnapshotError` -- also not
+    a `ValueError`, so only the caught class changed; `ClickException` is still
+    caught because the CLI-side adapter raises it.
     """
     import click
 
-    from .cli_scan_baseline import _load_risk_rules
+    from .errors import SnapshotError
+    from .workflows.scan_config import load_risk_rules as _load
 
     try:
-        return _load_risk_rules(risk_rules_path)
-    except click.ClickException as exc:
-        raise ValueError(str(exc.format_message())) from exc
+        return _load(risk_rules_path)
+    except (click.ClickException, SnapshotError) as exc:
+        msg = exc.format_message() if isinstance(exc, click.ClickException) else str(exc)
+        raise ValueError(str(msg)) from exc
 
 
 #: Every ``ScanRequest`` field meaningful only for a baseline comparison,
@@ -1168,9 +1168,9 @@ def _scan_request_config(req: ScanRequest) -> Any:
     """
     if not req.contract_evaluation or req.baseline is None:
         return None
-    from .cli_scan_receipt import resolve_scan_config
     from .compatibility_evaluation_frontend import FrontEnd, stated_policy_base
     from .errors import ValidationError
+    from .workflows.scan_config import resolve_scan_config
 
     try:
         return resolve_scan_config(
@@ -1233,12 +1233,12 @@ def run_scan(req: ScanRequest) -> ScanResult:
         SourceScope,
     ) = _scan_imports()
     from .buildsource.crosscheck import ALL_CHECKS
-    from .cli_scan_baseline import _public_provenance_set
     from .scan_engine import (
         _BudgetOverflow,
         _EvidenceContractError,
         run_scan_core,
     )
+    from .workflows.scan_config import public_provenance_set as _public_provenance_set
 
     if len(req.binaries) != 1:
         raise ValueError("run_scan accepts exactly one binary")
@@ -1622,12 +1622,12 @@ def _run_scan_one_member(
         SourceScope,
     ) = _scan_imports()
     from .buildsource.crosscheck import ALL_CHECKS
-    from .cli_scan_baseline import _public_provenance_set
     from .scan_engine import (
         _BudgetOverflow,
         _EvidenceContractError,
         run_scan_core,
     )
+    from .workflows.scan_config import public_provenance_set as _public_provenance_set
 
     sm = SourceMethod(req.source_method) if req.source_method else None
     dp = parse_user_depth(req.depth)

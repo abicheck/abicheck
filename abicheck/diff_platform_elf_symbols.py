@@ -33,8 +33,8 @@ from .diff_versioning import (  # noqa: F401 — re-exported for existing caller
     _UNPARSEABLE_VERSION as _UNPARSEABLE_VERSION,
     _parse_abi_version_tag as _parse_abi_version_tag,
 )
-from .elf_metadata import SymbolBinding, SymbolType
 from .model import AbiSnapshot, stdlib_namespaces_excluded
+from .model.elf_facts import SymbolBinding, SymbolType
 from .name_classification import is_stdlib_local_name_symbol
 
 # Module-level constant: ELF visibility values that form the default<->protected pair (case51).

@@ -73,23 +73,29 @@ from .bundle_manifest import (  # noqa: F401  (re-exported for back-compat)
 )
 from .bundle_models import (  # noqa: F401  (re-exported for back-compat)
     DEFAULT_SYSTEM_PROVIDERS as DEFAULT_SYSTEM_PROVIDERS,
+    PROMOTABLE_C_BOUNDARY_SIGNATURE_BREAK_KINDS,
     BundleDiffResult as BundleDiffResult,
     BundleFinding as BundleFinding,
     BundleSnapshot as BundleSnapshot,
     ConsumerEntry as ConsumerEntry,
     ProviderEntry as ProviderEntry,
     ResolutionGraph as ResolutionGraph,
+    basename_to_bundle_key,
+    consumer_resolves_via_provider as _consumer_resolves_via_provider,
+    diff_change_is_breaking as _diff_change_is_breaking,
 )
 from .bundle_resolution_reachability import (
+    cached_reachable_intra_libraries as _cached_reachable_intra_libraries,
     reachable_intra_libraries as _reachable_intra_libraries,
 )
 from .bundle_soname import hard_link_alias_basenames, soname_matches_providers
-from .checker_policy import ChangeKind, Verdict, compute_verdict
+from .checker_policy import ChangeKind, Verdict, compute_verdict, policy_kind_sets
 from .checker_types import DiffResult
 from .elf_metadata import ElfMetadata, ElfSymbol, SymbolBinding, parse_elf_metadata
 
 if TYPE_CHECKING:
     from .diff_cpp_patterns import BundleMember
+    from .policy_file import PolicyFile
 
 log = logging.getLogger(__name__)
 
@@ -258,10 +264,7 @@ def build_bundle_snapshot_from_metadata(
     for name, meta in metadata.items():
         deadline.check()
         if meta is None or (
-            not meta.soname
-            and not meta.symbols
-            and not meta.imports
-            and not meta.needed
+            not meta.soname and not meta.symbols and not meta.imports and not meta.needed
         ):
             log.debug("bundle: skipping empty metadata for %s", name)
             continue
@@ -760,6 +763,7 @@ def compare_bundle(
     system_providers: Iterable[str] | None = None,
     cohorts: list[str] | None = None,
     policy: str = "strict_abi",
+    policy_file: PolicyFile | None = None,
 ) -> BundleDiffResult:
     """Compute bundle-level findings from per-library diffs and bundle snapshots.
 
@@ -793,15 +797,21 @@ def compare_bundle(
     sys_libs = set(DEFAULT_SYSTEM_PROVIDERS) | explicit_providers
     findings: list[BundleFinding] = []
 
-    # Index per-library diff results by canonical basename. This is the
-    # same key the resolution graph uses for libraries (see
-    # build_bundle_snapshot's `libraries` dict), so look-ups in the
-    # detectors agree. We canonicalise once instead of double-indexing —
-    # double-indexing caused detectors to iterate the same DiffResult
-    # twice when DiffResult.library happened to differ from its basename.
+    # Index per-library diff results by the resolution graph's own
+    # bundle-canonical key, not the raw (possibly SONAME-versioned)
+    # on-disk basename -- see `basename_to_bundle_key`'s own docstring
+    # (G38 plan doc Phase 5). Canonicalise once instead of double-indexing.
+    #
+    # Merge OLD+NEW maps (Codex review): `checker.compare()` sets
+    # `DiffResult.library = old.library`, so a versioned basename that
+    # changed between old and new (`libcore.so.1.2` -> `.1.3`) only
+    # resolves through `old`'s own map. New wins a collision -- it's what
+    # the resolution graph these keys feed into was built from.
+    basename_to_key = {**basename_to_bundle_key(old), **basename_to_bundle_key(new)}
     diff_by_library: dict[str, DiffResult] = {}
     for result in per_library_results:
-        canonical = Path(result.library).name
+        basename = Path(result.library).name
+        canonical = basename_to_key.get(basename, basename)
         diff_by_library.setdefault(canonical, result)
 
     # 1. bundle_library_removed / bundle_library_added (structural)
@@ -810,10 +820,9 @@ def compare_bundle(
     # 2. bundle_intra_dep_removed: an import in the new bundle has no provider.
     findings.extend(_detect_intra_dep_removed(old, new, sys_libs, explicit_providers))
 
-    # 3. bundle_intra_dep_signature_changed: provider's per-library diff
-    #    flagged func_params_changed / func_return_changed / var_type_changed
-    #    on a symbol some sibling imports.
-    findings.extend(_detect_intra_dep_signature_changed(new, diff_by_library))
+    # 3. bundle_intra_dep_signature_changed: a promotable confirmed change
+    #    on a symbol some sibling imports (see that function's docstring).
+    findings.extend(_detect_intra_dep_signature_changed(new, diff_by_library, policy))
 
     # 4. bundle_intra_type_changed: a type_*_changed touches a type that
     #    appears in a public symbol of a sibling library.
@@ -844,6 +853,7 @@ def compare_bundle(
         per_library=list(per_library_results),
         bundle_findings=findings,
         policy=policy,
+        policy_file=policy_file,
     )
 
 
@@ -981,14 +991,11 @@ def _detect_intra_dep_removed(
             # ever provided this symbol, OR the user explicitly asserted a
             # remaining soname) -> trust it unconditionally. Otherwise fall
             # through to the symbol-name check (docstring above).
-            # Known limitation (Codex review, pre-existing -- shared by the
-            # audit-mode sibling below): this allow-list match is absence of
-            # a *bundle* regression, not proof the symbol is exported by a
-            # system DSO -- neither detector parses a system library's own
-            # export table, only its soname, so a genuinely never-provided
-            # symbol (typo, forgotten dependency) is suppressed the same
-            # way a real system-provided one is. Fixing this needs an
-            # actual export-table probe of each allow-listed DSO.
+            # Known limitations (Codex review, shared by the audit-mode
+            # sibling below): (1) absence of a *bundle* regression is not
+            # proof of a system export (no export-table parse); (2) `all()`
+            # below is over every extra edge, not just whichever provides
+            # `symbol`. DEFAULT_SYSTEM_PROVIDERS broadened to reduce (2).
             extra_needed = new.resolution.extra_needed.get(consumer.library, [])
             if (
                 extra_needed
@@ -1152,29 +1159,47 @@ def _detect_unresolved_intra_dependency(
 def _detect_intra_dep_signature_changed(
     new: BundleSnapshot,
     diff_by_library: dict[str, DiffResult],
+    policy: str = "strict_abi",
 ) -> list[BundleFinding]:
     """Promote provider-side signature changes to consumer-side findings.
 
-    For each per-library ``func_params_changed`` / ``func_return_changed``
-    / ``var_type_changed``, look up which siblings import that symbol in
-    the new bundle and emit one finding per (consumer, symbol) pair.
-    Multiple change kinds against the same symbol collapse into one
-    finding to avoid double-counting params+return changes.
+    For each confirmed *promotable* C-boundary signature break
+    (:data:`~abicheck.bundle_models.PROMOTABLE_C_BOUNDARY_SIGNATURE_BREAK_
+    KINDS`, a strict subset of ``CONFIRMED_C_BOUNDARY_SIGNATURE_BREAK_
+    KINDS``), find siblings importing the symbol that *actually resolve it
+    against this provider* (:func:`_consumer_resolves_via_provider`),
+    emitting one finding per (consumer, symbol) pair. *policy*: a
+    named-policy demotion and a ``--policy-file`` override on the diff are
+    both honored, via :func:`_diff_change_is_breaking`. Scanned including
+    ``diff.out_of_surface_changes`` (G38 Phase 14): a headerless break
+    demoted by ``--scope-public-headers`` still breaks the bundle's own
+    linkage contract (``docs/use/multi-binary.md``).
     """
     findings: list[BundleFinding] = []
     seen: set[tuple[str, str, str]] = set()
-    relevant_kinds = {
-        ChangeKind.FUNC_PARAMS_CHANGED,
-        ChangeKind.FUNC_RETURN_CHANGED,
-        ChangeKind.VAR_TYPE_CHANGED,
-    }
+    relevant_kinds = PROMOTABLE_C_BOUNDARY_SIGNATURE_BREAK_KINDS
+    policy_sets = policy_kind_sets(policy)
+    reachable_cache: dict[str, set[str]] = {}
+
+    def _reachable(lib: str) -> set[str]:
+        return _cached_reachable_intra_libraries(new, reachable_cache, lib)
+
     for provider_lib, diff in diff_by_library.items():
-        for change in diff.changes:
+        for change in diff.changes + diff.out_of_surface_changes:
             if change.kind not in relevant_kinds:
+                continue
+            if not _diff_change_is_breaking(diff, change, policy_sets):
                 continue
             consumers = new.resolution.consumers_of(change.symbol)
             consumer_libs = sorted(
-                {c.library for c in consumers if c.library != provider_lib}
+                {
+                    c.library
+                    for c in consumers
+                    if c.library != provider_lib
+                    and _consumer_resolves_via_provider(
+                        new, c, provider_lib, change.symbol, _reachable(c.library)
+                    )
+                }
             )
             if not consumer_libs:
                 continue
@@ -1216,7 +1241,9 @@ def _detect_intra_type_changed(
     pattern where a type defined in core leaks into algo's mangled
     symbols. Misses extern-C function pointers that pass struct
     references (would require type-graph propagation from DWARF, future
-    work — out of scope for ADR-023 first cut).
+    work — out of scope for ADR-023 first cut). Scanned including
+    ``diff.out_of_surface_changes`` (G38 Phase 14, rationale in
+    ``_detect_intra_dep_signature_changed``'s own docstring).
 
     Reachability scope (ADR-027 A3 / D3.2 limitation). The public-vs-internal
     split below is computed from ``ElfMetadata.symbols``, which is parsed from
@@ -1250,7 +1277,7 @@ def _detect_intra_type_changed(
         ChangeKind.INTERNAL_TYPE_LEAKS_VIA_PUBLIC_API,
     }
     for provider_lib, diff in diff_by_library.items():
-        for change in diff.changes:
+        for change in diff.changes + diff.out_of_surface_changes:
             if change.kind not in type_kinds:
                 continue
             type_name = change.symbol
@@ -1334,23 +1361,20 @@ def _detect_provider_changed(
     A symbol that was removed from library A in this release and added
     (with the same mangled name) to library B in the same release is most
     likely a provider move, not an ABI change. Promote both per-library
-    findings into one ``BUNDLE_PROVIDER_CHANGED`` event.
+    findings into one ``BUNDLE_PROVIDER_CHANGED`` event. Scanned including
+    ``diff.out_of_surface_changes`` (G38 Phase 14) -- deliberately still
+    with no reachability requirement, unlike its two siblings: a provider
+    move breaks an external consumer exactly as much as a sibling (ADR-023).
     """
     findings: list[BundleFinding] = []
 
     removed_by: dict[str, str] = {}  # symbol -> library that removed it
     added_by: dict[str, str] = {}  # symbol -> library that added it
     for lib_name, diff in diff_by_library.items():
-        for change in diff.changes:
-            if change.kind in (
-                ChangeKind.FUNC_REMOVED,
-                ChangeKind.VAR_REMOVED,
-            ):
+        for change in diff.changes + diff.out_of_surface_changes:
+            if change.kind in (ChangeKind.FUNC_REMOVED, ChangeKind.VAR_REMOVED):
                 removed_by.setdefault(change.symbol, lib_name)
-            elif change.kind in (
-                ChangeKind.FUNC_ADDED,
-                ChangeKind.VAR_ADDED,
-            ):
+            elif change.kind in (ChangeKind.FUNC_ADDED, ChangeKind.VAR_ADDED):
                 added_by.setdefault(change.symbol, lib_name)
 
     for symbol, old_lib in removed_by.items():

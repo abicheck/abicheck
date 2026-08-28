@@ -92,10 +92,16 @@ _IdIndexProvider = Callable[[], dict[str, str]]
 
 
 def _unwrap_expr(node: dict[str, Any]) -> dict[str, Any]:
-    """Descend through single-child wrapper expressions (casts, ConstantExpr…)."""
+    """Descend through single-child wrapper expressions (casts, ConstantExpr…).
+
+    A malformed/adversarial ``inner`` (present but not a list, e.g. a bare
+    int or dict) degrades to no children, same as a missing key -- it used
+    to raise ``TypeError`` iterating it directly (Codex review, PR #888).
+    """
     cur = node
     while isinstance(cur, dict) and cur.get("kind") in _WRAPPER_EXPR_KINDS:
-        inner = [c for c in cur.get("inner", []) or [] if isinstance(c, dict)]
+        raw = cur.get("inner")
+        inner = [c for c in raw if isinstance(c, dict)] if isinstance(raw, list) else []
         if len(inner) != 1:
             break
         cur = inner[0]

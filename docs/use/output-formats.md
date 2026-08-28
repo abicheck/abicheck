@@ -662,6 +662,12 @@ Every JSON report carries a top-level `report_schema_version` field
 > packaged `.schema.json` for scan output (unlike `compare`'s
 > `compare_report.schema.json`); the version field is honored the same way
 > (accept a shared `MAJOR`, ignore unknown keys) until one exists.
+>
+> `scan --against`'s baseline summary carries an optional `coverage_warnings`
+> list (`scan_schema_version` 1.21), mirroring `compare`'s own top-level
+> field of the same name and shape — e.g. a warning that the two compared
+> binaries are byte-identical (a possible mistaken input, not a real
+> "no ABI differences" result). Omitted when there is nothing to warn about.
 
 ```json
 {

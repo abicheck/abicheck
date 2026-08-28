@@ -35,17 +35,16 @@ from typing import TYPE_CHECKING, Any
 
 import click
 
-from .buildsource.build_query import PRUNED_HEADER_DIR_SEGMENTS
 from .compat.abicc_dump_import import looks_like_perl_dump
 from .errors import SnapshotError
-from .header_utils import iter_directory_headers
+from .workflows.extraction import PRUNED_HEADER_DIR_SEGMENTS, iter_directory_headers
 
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from .dump_manifest import DumpManifest
     from .model import AbiSnapshot
     from .service_scan import CompileContext
+    from .workflows.extraction import DumpManifest
 
 
 def _click_notify(message: str) -> None:
@@ -101,12 +100,7 @@ def _expand_header_inputs(inputs: list[Path]) -> list[Path]:
 
 
 def _sniff_text_format(path: Path) -> str:
-    """Read a small header chunk and return 'json', 'perl', or 'unknown'.
-
-    ADR-059: a gzip/zstd-compressed snapshot is recognized via a bounded
-    decoded prefix, mirroring ``service.sniff_text_format`` (kept as a
-    separate copy here rather than importing that one, matching this
-    module's existing "no cross-import for this exact helper" shape)."""
+    """Read a small header chunk and return 'json', 'perl', 'symvers', or 'unknown'. ADR-059: a gzip/zstd-compressed snapshot is recognized via a bounded decoded prefix, mirroring ``service.sniff_text_format`` (kept as a separate copy here rather than importing that one, matching this module's existing "no cross-import for this exact helper" shape)."""
     from .snapshot_io import bounded_decoded_prefix, detect_snapshot_compression
 
     try:
@@ -132,7 +126,9 @@ def _sniff_text_format(path: Path) -> str:
         return "perl"
     if head.startswith("{"):
         return "json"
-    return "unknown"
+    from .workflows.extraction import looks_like_symvers
+
+    return "symvers" if looks_like_symvers(head) else "unknown"
 
 
 def _detect_binary_format(path: Path) -> str | None:
@@ -140,7 +136,7 @@ def _detect_binary_format(path: Path) -> str | None:
 
     Returns 'elf', 'pe', 'macho', or None for non-binary / unknown.
     """
-    from .binary_utils import detect_binary_format
+    from .workflows.extraction import detect_binary_format
 
     return detect_binary_format(path)
 
@@ -153,7 +149,7 @@ def _resolve_linker_script(path: Path) -> tuple[Path | None, bool]:
     even when no target file could be located); ``resolved_path`` is the first
     ``INPUT()``/``GROUP()`` member that exists next to the script, or *None*.
     """
-    from .binary_utils import resolve_linker_script
+    from .workflows.extraction import resolve_linker_script
 
     return resolve_linker_script(path)
 
@@ -207,7 +203,7 @@ def _apply_native_provenance(
     See ``service._apply_native_provenance``'s identical parameter for why
     (Codex review, fresh evidence).
     """
-    from .provenance import apply_provenance
+    from .workflows.extraction import apply_provenance
 
     return apply_provenance(
         snap,
@@ -421,7 +417,7 @@ def _is_supported_compare_input(path: Path) -> bool:
     To add support for a new ABI snapshot format, edit ``abicheck/classify.py``
     rather than this function.
     """
-    from .classify import is_supported_compare_input
+    from .workflows.extraction import is_supported_compare_input
 
     return is_supported_compare_input(path)
 
@@ -439,7 +435,7 @@ def _looks_like_application(path: Path) -> bool:
     """
     import struct
 
-    from .package import (
+    from .workflows.extraction import (
         _ELF_MAGIC,
         _ET_DYN,
         _has_interp_segment,
@@ -488,7 +484,7 @@ def classify_compare_operand(path: Path) -> str:
     * ``"file"``      — a single ``.so`` / JSON snapshot / Perl dump: the default
       single-pair path, unchanged.
     """
-    from .package import is_package
+    from .workflows.extraction import is_package
 
     if path.is_dir():
         return "directory"

@@ -9,6 +9,7 @@
 - appcompat: --scope-public-headers wiring, -H/-I ignored-mode warning,
   severity options
 """
+
 from __future__ import annotations
 
 import json
@@ -28,9 +29,16 @@ def _write_removed_cpp_symbol(tmp_path: Path) -> tuple[Path, Path]:
     # Use the mangled symbol as the rendered name so the human-format output
     # carries a raw "_Z..." token that demangling can rewrite to "foo()".
     old = AbiSnapshot(
-        library="libtest.so", version="1.0",
-        functions=[Function(name="_Z3foov", mangled="_Z3foov", return_type="int",
-                             visibility=Visibility.PUBLIC)],
+        library="libtest.so",
+        version="1.0",
+        functions=[
+            Function(
+                name="_Z3foov",
+                mangled="_Z3foov",
+                return_type="int",
+                visibility=Visibility.PUBLIC,
+            )
+        ],
     )
     new = AbiSnapshot(library="libtest.so", version="2.0", functions=[])
     old_p = tmp_path / "old.json"
@@ -42,9 +50,16 @@ def _write_removed_cpp_symbol(tmp_path: Path) -> tuple[Path, Path]:
 
 def _write_identical(tmp_path: Path) -> tuple[Path, Path]:
     snap = AbiSnapshot(
-        library="libtest.so", version="1.0",
-        functions=[Function(name="foo", mangled="_Z3foov", return_type="int",
-                             visibility=Visibility.PUBLIC)],
+        library="libtest.so",
+        version="1.0",
+        functions=[
+            Function(
+                name="foo",
+                mangled="_Z3foov",
+                return_type="int",
+                visibility=Visibility.PUBLIC,
+            )
+        ],
     )
     old_p = tmp_path / "old.json"
     new_p = tmp_path / "new.json"
@@ -65,8 +80,10 @@ class TestDemangleTriState:
         module attribute is sufficient. This verifies the *wiring* (which formats
         request demangling), not the platform demangler itself."""
         import abicheck.demangle as _dem
+
         monkeypatch.setattr(
-            _dem, "demangle_text",
+            _dem,
+            "demangle_text",
             lambda text: text.replace("_Z3foov", "foo()"),
         )
 
@@ -74,7 +91,8 @@ class TestDemangleTriState:
         self._patch_demangler(monkeypatch)
         old_p, new_p = _write_removed_cpp_symbol(tmp_path)
         result = CliRunner().invoke(
-            main, ["compare", str(old_p), str(new_p), "--format", "markdown"],
+            main,
+            ["compare", str(old_p), str(new_p), "--format", "markdown"],
         )
         # markdown requests demangling by default -> stub rewrites the symbol.
         assert "foo()" in result.output
@@ -83,35 +101,47 @@ class TestDemangleTriState:
     def test_json_keeps_mangled_by_default(self, tmp_path):
         old_p, new_p = _write_removed_cpp_symbol(tmp_path)
         result = CliRunner().invoke(
-            main, ["compare", str(old_p), str(new_p), "--format", "json"],
+            main,
+            ["compare", str(old_p), str(new_p), "--format", "json"],
         )
         assert "_Z3foov" in result.output
 
     def test_sarif_keeps_mangled_by_default(self, tmp_path):
         old_p, new_p = _write_removed_cpp_symbol(tmp_path)
         result = CliRunner().invoke(
-            main, ["compare", str(old_p), str(new_p), "--format", "sarif"],
+            main,
+            ["compare", str(old_p), str(new_p), "--format", "sarif"],
         )
         assert "_Z3foov" in result.output
 
-    def test_html_keeps_mangled_by_default(self, tmp_path, monkeypatch):
-        # HTML is NOT in the demangle default set: its renderer emits symbols
-        # structurally and demangling the HTML string would inject unescaped
-        # C++ '<'/'>'/'&'. Even with the demangler stubbed, html stays mangled.
+    def test_html_demangles_by_default(self, tmp_path, monkeypatch):
+        # HTML *is* in the demangle default set (code-review report item 8):
+        # html_report.py demangles a symbol before escaping it for HTML, so
+        # a demangled C++ signature's own '<'/'>'/'&' render safely rather
+        # than injecting unescaped markup. The mangled name is preserved
+        # too, as the visible symbol's tooltip (`<abbr title="...">`).
         self._patch_demangler(monkeypatch)
         old_p, new_p = _write_removed_cpp_symbol(tmp_path)
         result = CliRunner().invoke(
-            main, ["compare", str(old_p), str(new_p), "--format", "html"],
+            main,
+            ["compare", str(old_p), str(new_p), "--format", "html"],
         )
-        assert "_Z3foov" in result.output
-        assert "foo()" not in result.output
+        assert "foo()" in result.output
+        assert '<abbr title="_Z3foov">foo()</abbr>' in result.output
 
     def test_no_demangle_override_on_markdown(self, tmp_path, monkeypatch):
         self._patch_demangler(monkeypatch)
         old_p, new_p = _write_removed_cpp_symbol(tmp_path)
         result = CliRunner().invoke(
             main,
-            ["compare", str(old_p), str(new_p), "--format", "markdown", "--no-demangle"],
+            [
+                "compare",
+                str(old_p),
+                str(new_p),
+                "--format",
+                "markdown",
+                "--no-demangle",
+            ],
         )
         # --no-demangle suppresses demangling even on markdown -> stub not run.
         assert "_Z3foov" in result.output
@@ -143,7 +173,8 @@ class TestExitSchemeAnnouncement:
     def test_severity_scheme_announced(self, tmp_path):
         old_p, new_p = _write_identical(tmp_path)
         result = CliRunner().invoke(
-            main, ["compare", str(old_p), str(new_p), "--severity-preset", "default"],
+            main,
+            ["compare", str(old_p), str(new_p), "--severity-preset", "default"],
         )
         assert "Exit-code scheme: severity-aware" in result.stderr
         assert "Exit-code scheme" not in result.stdout
@@ -175,7 +206,8 @@ class TestDebugFormatSelector:
         old_p, new_p = _write_identical(tmp_path)
         # Hidden does not mean removed: --dwarf must remain functional.
         result = CliRunner().invoke(
-            main, ["compare", str(old_p), str(new_p), "--dwarf"],
+            main,
+            ["compare", str(old_p), str(new_p), "--dwarf"],
         )
         assert result.exit_code == 0
 
@@ -189,7 +221,8 @@ class TestDebugFormatSelector:
     def test_debug_format_auto_accepted(self, tmp_path):
         old_p, new_p = _write_identical(tmp_path)
         result = CliRunner().invoke(
-            main, ["compare", str(old_p), str(new_p), "--debug-format", "auto"],
+            main,
+            ["compare", str(old_p), str(new_p), "--debug-format", "auto"],
         )
         assert result.exit_code == 0
 
@@ -201,7 +234,8 @@ class TestDebugFormatSelector:
         old.write_bytes(b"MZ\x90\x00\x03\x00\x00\x00")  # PE magic
         new.write_bytes(b"MZ\x90\x00\x03\x00\x00\x00")
         result = CliRunner().invoke(
-            main, ["compare", str(old), str(new), "--debug-format", "dwarf"],
+            main,
+            ["compare", str(old), str(new), "--debug-format", "dwarf"],
         )
         assert result.exit_code != 0
         combined = result.output + (result.stderr or "")
@@ -221,7 +255,8 @@ class TestReportModeImpact:
     def test_impact_mode_runs(self, tmp_path):
         old_p, new_p = _write_removed_cpp_symbol(tmp_path)
         result = CliRunner().invoke(
-            main, ["compare", str(old_p), str(new_p), "--report-mode", "impact"],
+            main,
+            ["compare", str(old_p), str(new_p), "--report-mode", "impact"],
         )
         # Exit code unchanged: a removed symbol is still a 4 (BREAKING).
         assert result.exit_code == 4
@@ -236,8 +271,11 @@ class TestCompareReleaseDefaults:
         # The flag is documented (rich-click wraps the long toggle across panel
         # lines, so assert the stable primary name) and is a boolean toggle.
         assert "--scope-public-headers" in out
-        opt = next(p for p in main.commands["compare"].params
-                   if getattr(p, "name", "") == "scope_public_headers")
+        opt = next(
+            p
+            for p in main.commands["compare"].params
+            if getattr(p, "name", "") == "scope_public_headers"
+        )
         assert "--no-scope-public-headers" in opt.secondary_opts
 
     def test_jobs_default_zero(self):
@@ -266,9 +304,16 @@ class TestCompareReleaseSeverityExit:
         old_dir.mkdir()
         new_dir.mkdir()
         old = AbiSnapshot(
-            library="libtest.so", version="1.0",
-            functions=[Function(name="foo", mangled="_Z3foov", return_type="int",
-                                 visibility=Visibility.PUBLIC)],
+            library="libtest.so",
+            version="1.0",
+            functions=[
+                Function(
+                    name="foo",
+                    mangled="_Z3foov",
+                    return_type="int",
+                    visibility=Visibility.PUBLIC,
+                )
+            ],
         )
         new = AbiSnapshot(library="libtest.so", version="2.0", functions=[])
         (old_dir / "libtest.json").write_text(snapshot_to_json(old), encoding="utf-8")
@@ -279,8 +324,7 @@ class TestCompareReleaseSeverityExit:
         old_dir, new_dir = self._make_release(tmp_path)
         result = CliRunner().invoke(
             main,
-            ["compare", str(old_dir), str(new_dir),
-             "--severity-preset", "info-only"],
+            ["compare", str(old_dir), str(new_dir), "--severity-preset", "info-only"],
         )
         # info-only downgrades everything below error -> exit 0 despite the break.
         assert result.exit_code == 0
@@ -289,15 +333,15 @@ class TestCompareReleaseSeverityExit:
         old_dir, new_dir = self._make_release(tmp_path)
         result = CliRunner().invoke(
             main,
-            ["compare", str(old_dir), str(new_dir),
-             "--severity-preset", "default"],
+            ["compare", str(old_dir), str(new_dir), "--severity-preset", "default"],
         )
         assert result.exit_code == 4
 
     def test_no_severity_keeps_legacy_exit(self, tmp_path):
         old_dir, new_dir = self._make_release(tmp_path)
         result = CliRunner().invoke(
-            main, ["compare", str(old_dir), str(new_dir)],
+            main,
+            ["compare", str(old_dir), str(new_dir)],
         )
         # Removed C++ symbol == BREAKING == legacy exit 4.
         assert result.exit_code == 4
@@ -321,30 +365,48 @@ class TestScopedExitRespectsSeverity:
         )
         assert result.exit_code == 4
 
-    def test_required_symbol_severity_info_only_exits_zero(self, tmp_path: Path) -> None:
+    def test_required_symbol_severity_info_only_exits_zero(
+        self, tmp_path: Path
+    ) -> None:
         old_p, new_p = _write_removed_cpp_symbol(tmp_path)
         result = CliRunner().invoke(
             main,
-            ["compare", str(old_p), str(new_p), "--required-symbol", "_Z3foov",
-             "--severity-preset", "info-only"],
+            [
+                "compare",
+                str(old_p),
+                str(new_p),
+                "--required-symbol",
+                "_Z3foov",
+                "--severity-preset",
+                "info-only",
+            ],
         )
         # Before the fix this always exited 4 (the legacy scoped-verdict
         # floor), ignoring --severity-preset entirely.
         assert result.exit_code == 0
 
     def test_required_symbol_severity_default_still_exits_breaking(
-        self, tmp_path: Path,
+        self,
+        tmp_path: Path,
     ) -> None:
         old_p, new_p = _write_removed_cpp_symbol(tmp_path)
         result = CliRunner().invoke(
             main,
-            ["compare", str(old_p), str(new_p), "--required-symbol", "_Z3foov",
-             "--severity-preset", "default"],
+            [
+                "compare",
+                str(old_p),
+                str(new_p),
+                "--required-symbol",
+                "_Z3foov",
+                "--severity-preset",
+                "default",
+            ],
         )
         assert result.exit_code == 4
 
     def test_required_symbol_never_present_floors_severity_at_4(
-        self, tmp_path: Path,
+        self,
+        tmp_path: Path,
     ) -> None:
         # Regression (Codex P1): a required symbol absent from *both* old and
         # new is a missing contract with no corresponding diff Change (the
@@ -356,24 +418,40 @@ class TestScopedExitRespectsSeverity:
         old_p, new_p = _write_identical(tmp_path)
         result = CliRunner().invoke(
             main,
-            ["compare", str(old_p), str(new_p), "--required-symbol", "never_existed",
-             "--severity-preset", "default"],
+            [
+                "compare",
+                str(old_p),
+                str(new_p),
+                "--required-symbol",
+                "never_existed",
+                "--severity-preset",
+                "default",
+            ],
         )
         assert result.exit_code == 4
 
     def test_required_symbol_never_present_severity_info_only_exits_zero(
-        self, tmp_path: Path,
+        self,
+        tmp_path: Path,
     ) -> None:
         old_p, new_p = _write_identical(tmp_path)
         result = CliRunner().invoke(
             main,
-            ["compare", str(old_p), str(new_p), "--required-symbol", "never_existed",
-             "--severity-preset", "info-only"],
+            [
+                "compare",
+                str(old_p),
+                str(new_p),
+                "--required-symbol",
+                "never_existed",
+                "--severity-preset",
+                "info-only",
+            ],
         )
         assert result.exit_code == 0
 
     def test_required_symbol_json_severity_block_reflects_scoped_gate(
-        self, tmp_path: Path,
+        self,
+        tmp_path: Path,
     ) -> None:
         # Regression (Codex P2): the JSON `severity` block used to always
         # describe the full-library gate, even for a --required-symbol scope
@@ -381,19 +459,33 @@ class TestScopedExitRespectsSeverity:
         # unrelated symbol -- the scoped gate here is COMPATIBLE/exit 0, but
         # `severity.exit_code` used to still report the full library's 4.
         old = AbiSnapshot(
-            library="libtest.so", version="1.0",
+            library="libtest.so",
+            version="1.0",
             functions=[
-                Function(name="_Z10kept_entryv", mangled="_Z10kept_entryv",
-                          return_type="int", visibility=Visibility.PUBLIC),
-                Function(name="_Z9unrelatedv", mangled="_Z9unrelatedv",
-                          return_type="int", visibility=Visibility.PUBLIC),
+                Function(
+                    name="_Z10kept_entryv",
+                    mangled="_Z10kept_entryv",
+                    return_type="int",
+                    visibility=Visibility.PUBLIC,
+                ),
+                Function(
+                    name="_Z9unrelatedv",
+                    mangled="_Z9unrelatedv",
+                    return_type="int",
+                    visibility=Visibility.PUBLIC,
+                ),
             ],
         )
         new = AbiSnapshot(
-            library="libtest.so", version="2.0",
+            library="libtest.so",
+            version="2.0",
             functions=[
-                Function(name="_Z10kept_entryv", mangled="_Z10kept_entryv",
-                          return_type="int", visibility=Visibility.PUBLIC),
+                Function(
+                    name="_Z10kept_entryv",
+                    mangled="_Z10kept_entryv",
+                    return_type="int",
+                    visibility=Visibility.PUBLIC,
+                ),
             ],
         )
         old_p = tmp_path / "old.json"
@@ -403,9 +495,17 @@ class TestScopedExitRespectsSeverity:
 
         result = CliRunner().invoke(
             main,
-            ["compare", str(old_p), str(new_p),
-             "--required-symbol", "_Z10kept_entryv",
-             "--format", "json", "--severity-preset", "default"],
+            [
+                "compare",
+                str(old_p),
+                str(new_p),
+                "--required-symbol",
+                "_Z10kept_entryv",
+                "--format",
+                "json",
+                "--severity-preset",
+                "default",
+            ],
         )
         assert result.exit_code == 0
         data = json.loads(result.stdout)
@@ -440,10 +540,18 @@ class TestScopedExitRespectsSeverity:
 def _breaking_diff():
     """A real DiffResult with one BREAKING change (func removed)."""
     from abicheck.checker import compare
+
     old = AbiSnapshot(
-        library="libtest.so", version="1.0",
-        functions=[Function(name="_Z3foov", mangled="_Z3foov", return_type="int",
-                             visibility=Visibility.PUBLIC)],
+        library="libtest.so",
+        version="1.0",
+        functions=[
+            Function(
+                name="_Z3foov",
+                mangled="_Z3foov",
+                return_type="int",
+                visibility=Visibility.PUBLIC,
+            )
+        ],
     )
     new = AbiSnapshot(library="libtest.so", version="2.0", functions=[])
     return compare(old, new)
@@ -485,32 +593,46 @@ class TestCompareReleaseExitFloors:
         from abicheck.cli_compare_release import _exit_compare_release
 
         # severity says clean and no operational error -> returns without exiting.
-        assert _exit_compare_release("COMPATIBLE", False, [], severity_exit_code=0) is None
+        assert (
+            _exit_compare_release("COMPATIBLE", False, [], severity_exit_code=0) is None
+        )
 
 
 class TestComputeReleaseSeverityExitCode:
     def test_none_without_flags(self):
         from abicheck.cli_compare_release import _compute_release_severity_exit_code
 
-        assert _compute_release_severity_exit_code(
-            [], None, None, None, None, None) is None
+        assert (
+            _compute_release_severity_exit_code([], None, None, None, None, None)
+            is None
+        )
 
     def test_zero_with_flag_and_no_changes(self):
         from abicheck.cli_compare_release import _compute_release_severity_exit_code
 
-        assert _compute_release_severity_exit_code(
-            [], "info-only", None, None, None, None) == 0
+        assert (
+            _compute_release_severity_exit_code([], "info-only", None, None, None, None)
+            == 0
+        )
 
     def test_aggregates_breaking_change(self):
         from abicheck.cli_compare_release import _compute_release_severity_exit_code
 
         entry = {"library": "libtest.so", "_diff_result": _breaking_diff()}
         # default preset: abi_breaking == error -> exit 4.
-        assert _compute_release_severity_exit_code(
-            [entry], "default", None, None, None, None) == 4
+        assert (
+            _compute_release_severity_exit_code(
+                [entry], "default", None, None, None, None
+            )
+            == 4
+        )
         # info-only downgrades everything below error -> exit 0.
-        assert _compute_release_severity_exit_code(
-            [entry], "info-only", None, None, None, None) == 0
+        assert (
+            _compute_release_severity_exit_code(
+                [entry], "info-only", None, None, None, None
+            )
+            == 0
+        )
 
 
 class TestReleaseSeverityPolicyAndGlobal:
@@ -526,12 +648,17 @@ class TestReleaseSeverityPolicyAndGlobal:
         empty = frozenset()
         all_kinds = frozenset(c.kind for c in diff.changes)
         monkeypatch.setattr(
-            diff, "_effective_kind_sets",
+            diff,
+            "_effective_kind_sets",
             lambda: (empty, empty, all_kinds, empty),
         )
         entry = {"_diff_result": diff}
-        assert _compute_release_severity_exit_code(
-            [entry], "default", None, None, None, None) == 0
+        assert (
+            _compute_release_severity_exit_code(
+                [entry], "default", None, None, None, None
+            )
+            == 0
+        )
 
     def test_per_library_honours_frozen_namespace_floor(self):
         """Codex review on #549: a policy-file override that demotes a kind
@@ -543,20 +670,30 @@ class TestReleaseSeverityPolicyAndGlobal:
         from abicheck.policy_file import PolicyFile
 
         c = Change(
-            ChangeKind.FUNC_REMOVED, "_Z3foov", "removed: foo",
+            ChangeKind.FUNC_REMOVED,
+            "_Z3foov",
+            "removed: foo",
             frozen_namespace_violation="**::detail::r1::*",
         )
         pf = PolicyFile(overrides={ChangeKind.FUNC_REMOVED: Verdict.COMPATIBLE})
         diff = DiffResult(
-            old_version="1.0", new_version="2.0", library="libtest.so",
-            changes=[c], verdict=Verdict.BREAKING, policy_file=pf,
+            old_version="1.0",
+            new_version="2.0",
+            library="libtest.so",
+            changes=[c],
+            verdict=Verdict.BREAKING,
+            policy_file=pf,
         )
         entry = {"_diff_result": diff}
         # default preset: abi_breaking == error. Without the policy_file floor
         # this would wrongly exit 0 (the override demotes FUNC_REMOVED to
         # COMPATIBLE); the frozen guard must keep it at its raw BREAKING exit.
-        assert _compute_release_severity_exit_code(
-            [entry], "default", None, None, None, None) == 4
+        assert (
+            _compute_release_severity_exit_code(
+                [entry], "default", None, None, None, None
+            )
+            == 4
+        )
 
     def test_format_release_junit_forwards_severity_config(self):
         """Codex review on #549: `compare-release --format junit` with a
@@ -569,8 +706,11 @@ class TestReleaseSeverityPolicyAndGlobal:
 
         c = Change(ChangeKind.FUNC_ADDED, "_Z3newv", "new public function")
         diff = DiffResult(
-            old_version="1", new_version="2", library="libfoo.so",
-            changes=[c], verdict=Verdict.COMPATIBLE,
+            old_version="1",
+            new_version="2",
+            library="libfoo.so",
+            changes=[c],
+            verdict=Verdict.COMPATIBLE,
         )
         cfg = resolve_severity_config("default", addition="error")
 
@@ -578,7 +718,10 @@ class TestReleaseSeverityPolicyAndGlobal:
         assert 'failures="0"' in xml_without_config
 
         xml_with_config = _format_release_junit(
-            [(diff, None)], None, [], severity_config=cfg,
+            [(diff, None)],
+            None,
+            [],
+            severity_config=cfg,
         )
         assert 'failures="1"' in xml_with_config
 
@@ -611,8 +754,12 @@ class TestReleaseSeverityPolicyAndGlobal:
 
         # Per-library clean (base 0), but a matrix DiffResult carries a break.
         matrix = _breaking_diff()
-        assert _fold_release_global_severity(
-            0, None, matrix, "default", None, None, None, None) == 4
+        assert (
+            _fold_release_global_severity(
+                0, None, matrix, "default", None, None, None, None
+            )
+            == 4
+        )
 
     def test_fold_bundle_break_raises_exit(self):
         import types
@@ -621,35 +768,144 @@ class TestReleaseSeverityPolicyAndGlobal:
 
         change = _breaking_diff().changes[0]
         finding = types.SimpleNamespace(to_change=lambda: change)
-        bundle = types.SimpleNamespace(bundle_findings=[finding])
-        assert _fold_release_global_severity(
-            0, bundle, None, "default", None, None, None, None) == 4
+        bundle = types.SimpleNamespace(
+            bundle_findings=[finding], policy="strict_abi", policy_file=None
+        )
+        assert (
+            _fold_release_global_severity(
+                0, bundle, None, "default", None, None, None, None
+            )
+            == 4
+        )
+
+    def test_fold_bundle_honors_the_bundle_result_own_policy(self):
+        # G38 stabilization Phase 10 (Codex review, fresh evidence): this
+        # fold previously omitted `policy=` entirely when scoring bundle
+        # findings, unlike the sibling matrix_result branch right below it
+        # -- so a policy that demotes a bundle-promoted kind (plugin_abi
+        # demoting calling_convention_changed) never reached the
+        # severity-aware exit code, even though BundleDiffResult.
+        # bundle_verdict (the displayed verdict) already honors it via its
+        # own `.policy` field.
+        import types
+
+        from abicheck.checker_policy import ChangeKind
+        from abicheck.checker_types import Change
+        from abicheck.cli_compare_release import _fold_release_global_severity
+
+        change = Change(
+            kind=ChangeKind.CALLING_CONVENTION_CHANGED,
+            symbol="core_fn",
+            description="cdecl->fastcall",
+            old_value="cdecl",
+            new_value="fastcall",
+        )
+        finding = types.SimpleNamespace(to_change=lambda: change)
+
+        strict_bundle = types.SimpleNamespace(
+            bundle_findings=[finding], policy="strict_abi", policy_file=None
+        )
+        assert (
+            _fold_release_global_severity(
+                0, strict_bundle, None, "default", None, None, None, None
+            )
+            == 4
+        )
+
+        plugin_bundle = types.SimpleNamespace(
+            bundle_findings=[finding], policy="plugin_abi", policy_file=None
+        )
+        assert (
+            _fold_release_global_severity(
+                0, plugin_bundle, None, "default", None, None, None, None
+            )
+            == 0
+        )
+
+    def test_fold_bundle_honors_the_bundle_result_own_policy_file(self):
+        # G38 Phase 16 (Codex review, fresh evidence): the fold above
+        # started forwarding `bundle_result.policy` -- but not
+        # `bundle_result.policy_file` -- so a `--policy custom.yaml`
+        # override demoting a bundle_* kind to `ignore` already changed
+        # the *displayed* `BundleDiffResult.bundle_verdict` (its own
+        # `.policy_file`-aware property) while the severity-aware process
+        # exit still scored the unmodified bare-policy classification,
+        # letting the two disagree in the identical way Phase 10 already
+        # fixed for `.policy` alone.
+        import types
+
+        from abicheck.checker_policy import ChangeKind, Verdict
+        from abicheck.checker_types import Change
+        from abicheck.cli_compare_release import _fold_release_global_severity
+        from abicheck.policy_file import PolicyFile
+
+        change = Change(
+            kind=ChangeKind.BUNDLE_INTRA_DEP_REMOVED,
+            symbol="core_fn",
+            description="removed",
+            old_value="present",
+            new_value="absent",
+        )
+        finding = types.SimpleNamespace(to_change=lambda: change)
+
+        unmodified = types.SimpleNamespace(
+            bundle_findings=[finding], policy="strict_abi", policy_file=None
+        )
+        assert (
+            _fold_release_global_severity(
+                0, unmodified, None, "default", None, None, None, None
+            )
+            == 4
+        )
+
+        overridden = types.SimpleNamespace(
+            bundle_findings=[finding],
+            policy="strict_abi",
+            policy_file=PolicyFile(
+                overrides={ChangeKind.BUNDLE_INTRA_DEP_REMOVED: Verdict.COMPATIBLE}
+            ),
+        )
+        assert (
+            _fold_release_global_severity(
+                0, overridden, None, "default", None, None, None, None
+            )
+            == 0
+        )
 
     def test_fold_info_only_does_not_escalate(self):
         from abicheck.cli_compare_release import _fold_release_global_severity
 
         matrix = _breaking_diff()
         # info-only downgrades the matrix break below error -> base 0 preserved.
-        assert _fold_release_global_severity(
-            0, None, matrix, "info-only", None, None, None, None) == 0
+        assert (
+            _fold_release_global_severity(
+                0, None, matrix, "info-only", None, None, None, None
+            )
+            == 0
+        )
 
     def test_fold_no_extras_returns_base(self):
         from abicheck.cli_compare_release import _fold_release_global_severity
 
-        assert _fold_release_global_severity(
-            2, None, None, "default", None, None, None, None) == 2
+        assert (
+            _fold_release_global_severity(
+                2, None, None, "default", None, None, None, None
+            )
+            == 2
+        )
 
     def test_resolve_config_none_without_flags(self):
         from abicheck.cli_compare_release import _resolve_release_severity_config
 
-        assert _resolve_release_severity_config(
-            None, None, None, None, None) is None
+        assert _resolve_release_severity_config(None, None, None, None, None) is None
 
     def test_resolve_config_set_with_flag(self):
         from abicheck.cli_compare_release import _resolve_release_severity_config
 
-        assert _resolve_release_severity_config(
-            "strict", None, None, None, None) is not None
+        assert (
+            _resolve_release_severity_config("strict", None, None, None, None)
+            is not None
+        )
 
 
 # ── §6 follow-ups: debug-format auto override + parallel determinism ─────────
@@ -662,7 +918,8 @@ class TestDebugFormatAutoOverride:
         # not error and must exit 0 on identical input).
         old_p, new_p = _write_identical(tmp_path)
         result = CliRunner().invoke(
-            main, ["compare", str(old_p), str(new_p), "--debug-format", "auto", "--dwarf"],
+            main,
+            ["compare", str(old_p), str(new_p), "--debug-format", "auto", "--dwarf"],
         )
         assert result.exit_code == 0
 
@@ -674,7 +931,8 @@ class TestCompareReleaseParallelOrdering:
         import abicheck.cli_compare_release as _cr
 
         monkeypatch.setattr(
-            _cr, "_compare_one_library",
+            _cr,
+            "_compare_one_library",
             lambda key, *a: {"library": key, "key": key},
         )
         keys = ["libc", "liba", "libb"]

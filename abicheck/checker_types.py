@@ -290,16 +290,12 @@ class Change:
     contract_relevance: ContractRelevance | None = None
     contract_reason_code: str | None = None
     contract_assurance: ContractAssurance | None = None
-    # ADR-049 Phase 3's provider-evidence ledger (plan Section 4.1): the ids
-    # of the `contract_evidence` provider records this finding's decision
-    # actually rests on (`contract_evidence_collect.evidence_refs_for_reason`),
-    # or a run-level reference (`RUN_LEVEL_EVIDENCE_REFS`) for a decision made
-    # outside `compare()` by a caller that holds no evidence block -- the
-    # `--used-by`/`--required-symbol` scoped stamp. `None` when contract
-    # evaluation was not requested; `()` is a real value, meaning "this
-    # decision consulted no provider" (a non-entity finding, whose relevance
-    # follows from its `ChangeKind` alone). Kept as a flat tuple for the same
-    # circular-import reason as the three fields above.
+    # ADR-049 Phase 3's provider-evidence ledger (plan Section 4.1): ids of
+    # the `contract_evidence` provider records this finding's decision rests
+    # on, or a run-level reference (`RUN_LEVEL_EVIDENCE_REFS`) for a decision
+    # made outside `compare()` (the `--used-by`/`--required-symbol` stamp).
+    # `None` when not requested; `()` = "consulted no provider". Flat tuple,
+    # same circular-import reason as above.
     contract_evidence_refs: tuple[str, ...] | None = None
     # ADR-049 D1's other half of the canonical per-finding shape, and the one
     # that makes the contract decision *authoritative* rather than shadow:
@@ -361,29 +357,29 @@ class Change:
     # visibility-hidden) symbol, stamped by
     # diff_symbols._check_removed_function/_var_removed on
     # FUNC_REMOVED/FUNC_REMOVED_ELF_ONLY/VAR_REMOVED/FUNC_VISIBILITY_CHANGED
-    # findings (the old side's binding — still real ELF-linkage evidence for
-    # a symbol that went hidden, not just one that vanished outright), and by
-    # diff_platform._diff_elf_deleted_fallback on FUNC_DELETED_ELF_FALLBACK
-    # (the other common export-disappearance path — a function still
-    # declared but silently absent from .dynsym). None for every other
-    # kind, and None here too when the symbol's binding was never
-    # captured (non-ELF platform, older snapshot, ELF metadata without a
-    # matching .dynsym entry). Exists so a suppression rule's ``binding:``
+    # findings (the old side's binding), and by
+    # diff_platform._diff_elf_deleted_fallback on FUNC_DELETED_ELF_FALLBACK.
+    # None for every other kind, and None here too when the symbol's binding
+    # was never captured. Exists so a suppression rule's ``binding:``
     # selector (suppression.py) can narrow a removal rule to the common
     # WEAK-COMDAT-inline case. Provider-side evidence only, NOT proof of
-    # safety: it names the *library's own build*'s linkage, not whether
-    # every consumer already carries its own copy — see AGENTS.md's
-    # "Linkage-blind removal" entry (the extern-template counterexample) and
-    # Suppression.binding's own docstring, which carries the full caveat.
-    # Deliberately a plain string, not
-    # the ``SymbolBinding`` enum itself: mirrors ``old_value``/``new_value``
-    # and every other string-typed selector-facing field already on this
-    # class, and keeps ``model.py``'s ``elf_metadata`` dependency from
-    # leaking into this dataclass's own import surface. Same
-    # ``field(kw_only=True)``-appended-last convention as
-    # ``vtable_covers_unverifiable_layout_gap`` immediately above, for the
-    # identical reason (Change is public API; see that field's own comment).
+    # safety — see AGENTS.md's "Linkage-blind removal" entry. Deliberately a
+    # plain string, not the ``SymbolBinding`` enum itself, mirroring
+    # ``old_value``/``new_value``. Same ``field(kw_only=True)``-appended-last
+    # convention as ``vtable_covers_unverifiable_layout_gap`` above, since
+    # Change is public API.
     symbol_binding: str | None = field(default=None, kw_only=True)
+    # Structured field identity for a field-level Change ("x" in "Widget::x"),
+    # stamped by the six TYPE_FIELD_*/STRUCT_FIELD_* emitters
+    # (diff_types.py/diff_platform.py) so diff_filtering._dedup_cross_kind's
+    # parent-type match can require field agreement instead of dropping any
+    # DWARF field finding whose *type* has an AST-tier finding, regardless of
+    # *which* field changed (Codex review). None for every other kind.
+    field_name: str | None = field(default=None, kw_only=True)
+    # G39 Phase 0: evidence tier(s) producing this finding, same shape as
+    # contract_evidence_refs. Same field(kw_only=True)-appended-last
+    # convention as symbol_binding above (Change is public API).
+    evidence_provenance: tuple[str, ...] | None = field(default=None, kw_only=True)
 
 
 @dataclass
@@ -710,7 +706,7 @@ class DiffResult:
 
     def _effective_verdict_for_change(self, change: Change) -> Verdict:
         """Return the per-change verdict, including frozen namespace guards."""
-        from .severity import effective_verdict_for_change
+        from .reclassify import effective_verdict_for_change  # severity re-exports it
 
         return effective_verdict_for_change(
             change,

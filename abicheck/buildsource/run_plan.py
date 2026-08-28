@@ -97,29 +97,27 @@ toolchain only through ``binding`` (there is no separate "pick a family"
 invocation flag), and ``compiler_version`` is a *constraint* (e.g.
 ``">=14.0,<15"``), not a value to pass through; verifying a resolved
 binding's actual version against it needs a real toolchain-identity probe
-(subprocess), which stays out of this module by design. A P0 audit round
-briefly made :func:`_compose_gcc_options` consult ``compiler_family`` to
-drop ``-stdlib=``/``--target=`` for GCC-family profiles; a later review
-round found that broke real cross-compilation-target correctness for the
-direct-clang backend (the composed string is never actually fed to a
-literal GCC binary anywhere in this pipeline, only ever to Clang -- see
-that function's own docstring), so it was reverted -- a documented gap,
-not an oversight.
+(subprocess), which stays out of this module by design. See AGENTS.md's
+"Toolchain-profile compiler-family rendering" entry and
+:func:`_compose_gcc_options`'s own docstring for why that function does
+*not* special-case ``compiler_family`` -- a P0 audit round tried and
+reverted it after finding it broke real cross-compilation for the
+direct-clang backend.
 
 **The ``profiles.<id>.consumer_compile`` overlay (G34 Phase 0) projects the
 same way, into its own separate fields:** :attr:`RunPlanCheck.
 consumer_compile_gcc_path`/:attr:`RunPlanCheck.consumer_compile_gcc_options`,
-resolved identically to ``compile:``'s own pair but from the profile's
-separate consumer-toolchain overlay (see :class:`~.project_targets.
-ProfileSpec`'s docstring for the producer/consumer distinction). A profile
-with no ``consumer_compile:`` simply leaves both fields empty -- this
-module does not fall back to the producer ``compile:`` overlay's own
-fields for them, since "no consumer overlay" and "an actual empty overlay"
-are meant to look the same to a caller either way. Actually applying these
-fields to a separate header-AST (L2) extraction pass, merged with the
-producer-toolchain binary facts, is not yet wired here -- this module only
-projects the config-schema axis; the extraction/merge integration is
-G34 Phase 0's remaining, larger piece.
+resolved from the profile's separate consumer-toolchain overlay (see
+:class:`~.project_targets.ProfileSpec`'s docstring for the producer/
+consumer split), with no fallback to the producer ``compile:`` overlay's
+own fields when absent. The native ``check-project`` caller applies these
+to a separate candidate dump: same producer binary, headers reparsed
+under the consumer context, and that snapshot is what gets compared.
+
+**Known gap:** only the candidate side gets this treatment --
+``publish-baseline.yml``/``update-main-baseline.yml`` never apply a
+``consumer_compile:`` overlay to the baseline side; see
+``docs/reference/project-targets-schema.md`` and the G34 plan's Phase 0.
 
 **``compile.frontend``/``consumer_compile.frontend`` (G34 Phase B) project
 the same way**, into :attr:`RunPlanCheck.compile_ast_frontend`/
@@ -127,15 +125,12 @@ the same way**, into :attr:`RunPlanCheck.compile_ast_frontend`/
 values the global ``--ast-frontend`` flag accepts, resolved independently
 per overlay, with no fallback from one overlay's field to the other's.
 
-:attr:`~RunPlanCheck.compile_ast_frontend` is threaded all the way through:
-``check-project.yml``'s check job forwards it as ``matrix.compile_ast_frontend
-|| inputs.ast-frontend``, the same per-cell-first precedence
-:attr:`~RunPlanCheck.compile_gcc_path` already uses, so a GCC profile's cell
-and a Clang profile's cell in one run genuinely invoke different frontends.
-:attr:`~RunPlanCheck.consumer_compile_ast_frontend` deliberately is not: it
-describes the *consumer* half of the two-pass L2 extraction G34 Phase 0 has
-not built, so there is no second invocation for it to steer, and forwarding
-it onto the producer pass would apply a consumer overlay to the wrong side.
+:attr:`~RunPlanCheck.compile_ast_frontend` is threaded through as
+``matrix.compile_ast_frontend || inputs.ast-frontend``, the same
+per-cell-first precedence :attr:`~RunPlanCheck.compile_gcc_path` uses.
+:attr:`~RunPlanCheck.consumer_compile_ast_frontend` is forwarded to the
+separate consumer-context candidate dump, never onto the producer-context
+comparison invocation.
 """
 
 from __future__ import annotations
@@ -235,7 +230,7 @@ def _parse_run_plan_gate(d: dict[str, Any]) -> tuple[str | None, str | None]:
     if "gate" not in d:
         return None, None
     gate_raw = d["gate"]
-    from ..aggregate_manifest import (
+    from ..workflows.aggregate import (
         AggregateError,
         OnMissingRequired,
         OnUnexpectedTarget,
@@ -291,30 +286,13 @@ def _compose_gcc_options(compile_spec: ProfileCompileSpec) -> str:
     structured axes this function derives flags from.
 
     **Deliberately not family-aware.** A P0 audit round had this function
-    drop ``-stdlib=``/``--target=`` whenever ``compiler_family: gcc`` was
-    set, reasoning that a real GCC binary rejects both (true: confirmed
-    against GCC 14.2). A later review round found that fix backwards: this
-    composed string is *never* fed to a literal GCC binary anywhere in the
-    current pipeline -- ``--ast-frontend`` only has ``auto``/``castxml``/
-    ``clang``/``hybrid`` (no ``gcc``); castxml's own frontend is always its
-    internal bundled Clang (``--castxml-cc-<id>`` selects an *emulation*
-    mode, not a literal execution path); and the direct-clang backend's
-    ``_resolve_clang_bin`` (``dumper_clang.py``) explicitly *rejects* a
-    ``gcc-path`` that doesn't look clang-family and falls back to host
-    ``clang``/``clang++`` instead. Since the real consumer is always Clang,
-    dropping ``--target=`` actively broke cross-compilation-target
-    correctness for the direct-clang backend: it is the *only* signal
-    available there to steer parsing away from the host architecture (no
-    "probe the real compiler" auto-discovery step exists on that path the
-    way castxml has one), so a GCC-family profile with an explicit
-    ``target:`` would silently have its headers parsed for the runner's
-    architecture instead -- a correctness bug, not merely a redundant flag.
-    Reverted; both flags are emitted unconditionally regardless of
-    ``compiler_family`` again, same as before that audit. A genuine
-    family-specific argv resolver belongs to the toolchain-profile-
-    execution-contract work (AGENTS.md's "Known gaps"), where the actual
-    consuming frontend is known at composition time -- not a per-flag
-    heuristic here that cannot tell which frontend will read its output.
+    drop ``-stdlib=``/``--target=`` for ``compiler_family: gcc``; a later
+    round found the real consumer here is always Clang, never a literal
+    GCC binary, and dropping ``--target=`` broke direct-clang cross-
+    compilation correctness. Reverted; both flags are emitted
+    unconditionally regardless of ``compiler_family``. See AGENTS.md's
+    "Toolchain-profile compiler-family rendering" entry for the full
+    account -- not a per-flag heuristic to re-derive here.
     """
     parts: list[str] = []
     if compile_spec.standard:
@@ -428,6 +406,9 @@ class RunPlanCheck:
     #: ``CheckSpec.allow_new_target``'s own docstring for why a bundle check
     #: can never support this lifecycle state).
     allow_new_target: bool = False
+    #: Whether the profile declares a non-empty ``consumer_compile:``
+    #: overlay -- gates the fallback for the three fields above.
+    consumer_compile_active: bool = False
 
     def to_dict(self) -> dict[str, Any]:
         d: dict[str, Any] = {
@@ -473,6 +454,8 @@ class RunPlanCheck:
             d["dependency_source"] = self.dependency_source
         if self.allow_new_target:
             d["allow_new_target"] = True
+        if self.consumer_compile_active:
+            d["consumer_compile_active"] = True
         return d
 
     @classmethod
@@ -514,6 +497,7 @@ class RunPlanCheck:
             runs_on=_opt_str(d.get("runs_on"), DEFAULT_PROFILE_RUNNER_LABEL),
             dependency_source=_opt_str(d.get("dependency_source")),
             allow_new_target=bool(d.get("allow_new_target", False)),
+            consumer_compile_active=bool(d.get("consumer_compile_active", False)),
         )
 
 
@@ -549,7 +533,7 @@ class RunPlan:
         validation previously only ran on the read path, so a hand-built
         plan's bad value reached disk unchecked and only failed later, on
         whatever consumer read it back)."""
-        from ..aggregate_manifest import (
+        from ..workflows.aggregate import (
             AggregateError,
             OnMissingRequired,
             OnUnexpectedTarget,
@@ -610,7 +594,7 @@ class RunPlan:
         schema = _opt_str(d.get("schema"), RUN_PLAN_SCHEMA)
         version = _run_plan_schema_version(schema)
         if version is not None and version > _RUN_PLAN_SCHEMA_MAX_SUPPORTED:
-            from ..aggregate_manifest import AggregateError
+            from ..workflows.aggregate import AggregateError
 
             raise AggregateError(
                 f"run-plan 'schema' {schema!r} is newer than this tool "
@@ -619,7 +603,7 @@ class RunPlan:
             )
         gate_missing_required, gate_unexpected_target = _parse_run_plan_gate(d)
         if "gate" in d and (version is None or version < 2):
-            from ..aggregate_manifest import AggregateError
+            from ..workflows.aggregate import AggregateError
 
             raise AggregateError(
                 "run-plan 'gate' requires 'schema' >= 'abicheck.run-plan/v2' "
@@ -729,6 +713,16 @@ def _compile_ast_frontend_for_profile(
     profile = config.profiles.get(profile_id)
     compile_spec = profile.compile if profile is not None else None
     return compile_spec.frontend if compile_spec is not None else ""
+
+
+def _consumer_compile_active_for_profile(
+    config: ProjectTargetsConfig, profile_id: str
+) -> bool:
+    """True iff *profile_id* declares a non-empty ``consumer_compile:`` overlay."""
+    profile = config.profiles.get(profile_id)
+    if profile is None or profile.consumer_compile is None:
+        return False
+    return not profile.consumer_compile.is_empty
 
 
 def _consumer_compile_ast_frontend_for_profile(
@@ -875,6 +869,9 @@ def _generate_target_checks(
                     consumer_compile_ast_frontend=(
                         _consumer_compile_ast_frontend_for_profile(config, profile_id)
                     ),
+                    consumer_compile_active=_consumer_compile_active_for_profile(
+                        config, profile_id
+                    ),
                     runs_on=runs_on,
                     dependency_source=dependency_source,
                     allow_new_target=check.allow_new_target,
@@ -976,6 +973,9 @@ def _generate_bundle_checks(
                     ),
                     consumer_compile_ast_frontend=(
                         _consumer_compile_ast_frontend_for_profile(config, profile_id)
+                    ),
+                    consumer_compile_active=_consumer_compile_active_for_profile(
+                        config, profile_id
                     ),
                     runs_on=runs_on,
                     dependency_source=dependency_source,
@@ -1091,7 +1091,7 @@ def to_aggregate_manifest(
     S17/S21's multi-profile/multi-channel same-target checks against each
     other in ``aggregate``'s duplicate-target-id check.
     """
-    from ..aggregate import AGGREGATE_MANIFEST_VERSION
+    from ..workflows.aggregate import AGGREGATE_MANIFEST_VERSION
 
     manifest: dict[str, Any] = {
         "aggregate_manifest_version": AGGREGATE_MANIFEST_VERSION,

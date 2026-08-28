@@ -34,6 +34,7 @@ from .model import (
     AccessLevel,
     EnumMember,
     EnumType,
+    Fact,
     Function,
     Param,
     RecordType,
@@ -961,6 +962,8 @@ class _CastxmlParser:
                         # detector rather than folded into `type` (see
                         # _type_name's CvQualifiedType handling above).
                         is_restrict=p_restrict,
+                        # CastXML never determines va_list-ness at all -- UNSUPPORTED says so plainly, stronger than the omission bridge's NOT_COLLECTED ("not this time" vs. "never from this producer").
+                        is_va_list_fact=Fact.unsupported(),
                     )
                 )
                 ctor_identity_types.append(self._ctor_param_identity_type(p_type_id))
@@ -1489,9 +1492,19 @@ class _CastxmlParser:
         name = strip_anonymous_type_location(override_name or el.get("name", ""))
         is_opaque = el.get("incomplete") == "1"
         vtable = [] if is_opaque else self._build_vtable(el.get("id", ""))
-        # Best-effort layout descriptor (layout-closure work). Direct (non-virtual)
-        # base subobject offsets from each ``<Base offset=...>``; the unit only has
-        # to be consistent across snapshots for change detection, and it is.
+
+        def _base_names(*, virtual: bool) -> list[str]:
+            return [
+                self._type_name(b.get("type", ""))
+                for b in el
+                if b.tag == "Base" and (b.get("virtual") == "1") == virtual
+            ]
+
+        bases = [] if is_opaque else _base_names(virtual=False)
+        virtual_bases = [] if is_opaque else _base_names(virtual=True)
+        # Polymorphic (non-empty vtable) → vtable pointer at offset 0; None when non-polymorphic so the diff can tell "gained a vptr" apart.
+        vptr_offset_bits = 0 if vtable else None
+        # Best-effort layout descriptor (layout-closure work): direct (non-virtual) base subobject offsets from each ``<Base offset=...>``; the unit only has to be consistent across snapshots for change detection, and it is.
         base_offsets: dict[str, int] = {}
         if not is_opaque:
             for b in el:
@@ -1499,39 +1512,26 @@ class _CastxmlParser:
                     off = self._optional_int_attr(b, "offset")
                     if off is not None:
                         base_offsets[self._type_name(b.get("type", ""))] = off
-        # is_standard_layout / is_trivially_copyable / data_size_bits are left
-        # None: "not polymorphic and no virtual bases" is not a sound
-        # standard-layout signal (a mixed-access class is already non-standard-
-        # layout, so the heuristic would flip True→False on gaining a virtual and
-        # emit a spurious STANDARD_LAYOUT_LOST), and CastXML doesn't expose the
-        # trivially-copyable trait directly (Codex review #345).
+        # is_standard_layout / is_trivially_copyable / data_size_bits are left None: "not polymorphic and no virtual bases" is not a sound standard-layout signal (a mixed-access class is already non-standard-layout, so the heuristic would flip True→False on gaining a virtual and emit a spurious STANDARD_LAYOUT_LOST), and CastXML doesn't expose the trivially-copyable trait directly (Codex review #345).
         return RecordType(
             name=name,
             kind=el.tag.lower(),
             size_bits=self._optional_int_attr(el, "size"),
             alignment_bits=self._optional_int_attr(el, "align"),
             fields=[] if is_opaque else self._parse_record_fields(el),
-            bases=[]
-            if is_opaque
-            else [
-                self._type_name(b.get("type", ""))
-                for b in el
-                if b.tag == "Base" and b.get("virtual") != "1"
-            ],
-            virtual_bases=[]
-            if is_opaque
-            else [
-                self._type_name(b.get("type", ""))
-                for b in el
-                if b.tag == "Base" and b.get("virtual") == "1"
-            ],
+            bases=bases,
+            virtual_bases=virtual_bases,
             vtable=vtable,
             is_union=el.tag == "Union",
             is_opaque=is_opaque,
-            # Polymorphic (non-empty vtable) → vtable pointer at offset 0; None
-            # when non-polymorphic so the diff can tell "gained a vptr" apart.
-            vptr_offset_bits=0 if vtable else None,
+            vptr_offset_bits=vptr_offset_bits,
             base_offsets=base_offsets,
+            # castxml genuinely resolves these itself (real semantic analysis, not a heuristic reconstruction), opaque or not -- stated explicitly (kept as individual kwargs, not a **record_layout_facts() spread, so scripts/backend_capabilities.py's AST scanner can still see each field named).
+            bases_fact=Fact.present(bases),
+            virtual_bases_fact=Fact.present(virtual_bases),
+            vtable_fact=Fact.present(vtable),
+            # 0-if-vtable-else-None is the Itanium primary-base heuristic above, not a real offset read -- partial, not present (Codex review; matches vptr_offset_bits's own PARTIAL row).
+            vptr_offset_bits_fact=Fact.partial(vptr_offset_bits),
             qualified_name=self._qualified_type_name(el, leaf_name=name),
             # castxml records the `final` class-key specifier as a `final`
             # token inside the compound ``attributes`` string (e.g.

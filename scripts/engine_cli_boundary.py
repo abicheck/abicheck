@@ -48,8 +48,10 @@ def _read(p: Path) -> str:
 
 
 # Engine-layer trees: the shared compare/scan engine, the Tier-2 service
-# layer, the (not-yet-existing) artifact-application service, and the
-# build-source evidence package. None of these may import ``click`` or a
+# layer, the artifact-application service (the flat ``artifact_*.py``
+# family, plus its ADR-061 Phase 3 migrated home under
+# ``workflows/artifact/``), and the build-source evidence package. None of
+# these may import ``click`` or a
 # ``cli_*`` sibling module — that's a CLI concept leaking into a layer both
 # the CLI and the typed Python API depend on, which is exactly the
 # inversion `scan_engine.py` importing `click` and raising
@@ -58,16 +60,28 @@ def _read(p: Path) -> str:
 # deliberately not covered here — it may import engine modules freely.
 _ENGINE_MODULE_BASENAMES: frozenset[str] = frozenset({"scan_engine.py"})
 
+#: Package-rooted engine-layer trees, matched as a ``tail.startswith(...)``
+#: prefix. ``workflows/artifact/`` is ADR-061 Phase 3's migrated home for
+#: what was the flat ``artifact_*.py`` family (``abicheck/artifact_plan.py``
+#: moved to ``abicheck/workflows/artifact/contracts.py``) -- without this
+#: entry, the migrated module's own docstring claim that "the
+#: engine-cli-boundary gate would reject" a ``click``/``cli_*`` import there
+#: would be false, since the basename-only check below never matches a
+#: module living under a subdirectory (Codex review, fresh evidence).
+_ENGINE_PACKAGE_PREFIXES: tuple[str, ...] = ("buildsource/", "workflows/artifact/")
+
 
 def _is_engine_module(rel: str) -> bool:
     """True if *rel* (posix, relative to repo root) is in the engine layer.
 
     ``abicheck/scan_engine.py``, every ``abicheck/service*.py``, every
     ``abicheck/artifact_*.py`` (the artifact-application service Phase 1 of
-    the convergence plan introduces — doesn't exist yet, covered pre-
+    the convergence plan introduces -- doesn't exist yet, covered pre-
     emptively so this predicate doesn't need a second edit the day it
-    lands), and every ``abicheck/buildsource/**/*.py`` — see this module's
-    own docstring comment for why these trees specifically.
+    lands), every ``abicheck/buildsource/**/*.py``, and every
+    ``abicheck/workflows/artifact/**/*.py`` (that same artifact-application
+    contract's ADR-061 Phase 3 migrated home) -- see this module's own
+    docstring comment for why these trees specifically.
     """
     if not rel.startswith("abicheck/"):
         return False
@@ -78,7 +92,7 @@ def _is_engine_module(rel: str) -> bool:
         basename = tail[: -len(".py")]
         if basename.startswith("service") or basename.startswith("artifact_"):
             return True
-    if tail.startswith("buildsource/") and tail.endswith(".py"):
+    if tail.endswith(".py") and tail.startswith(_ENGINE_PACKAGE_PREFIXES):
         return True
     return False
 
@@ -106,22 +120,10 @@ def _is_engine_module(rel: str) -> bool:
 # below — a real case this format has to disambiguate).
 ENGINE_CLI_BOUNDARY_ALLOWLIST: frozenset[str] = frozenset(
     {
-        "abicheck/buildsource/evidence_policy.py::import click::1",
         "abicheck/scan_engine.py::import click::1",
         "abicheck/scan_engine.py::from .cli_scan_baseline import ...::1",
         "abicheck/scan_engine.py::from .cli_scan_helpers import ...::1",
-        "abicheck/service_compare_pipeline.py::from .cli_buildsource import ...::1",
-        "abicheck/service_dump_pipeline.py::from .cli_dump_helpers import ...::1",
-        "abicheck/service_input_resolution.py::"
-        "from .cli_buildsource_helpers import ...::1",
-        "abicheck/service_input_resolution.py::import click::1",
-        "abicheck/service_input_resolution.py::from .cli_buildsource import ...::1",
-        "abicheck/service_input_resolution.py::from .cli_dump_helpers import ...::1",
         "abicheck/service_scan.py::import click::1",
-        "abicheck/service_scan.py::from .cli_scan_baseline import ...::1",
-        "abicheck/service_scan.py::from .cli_scan_receipt import ...::1",
-        "abicheck/service_scan.py::from .cli_scan_baseline import ...::2",
-        "abicheck/service_scan.py::from .cli_scan_baseline import ...::3",
     }
 )
 

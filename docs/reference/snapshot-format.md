@@ -160,7 +160,7 @@ decompression limits, and what's still deferred).
 
 A snapshot is a single JSON object. The keys below are the ones written by the
 serializer (`abicheck/serialization.py`) from the `AbiSnapshot` model
-(`abicheck/model.py`). Optional keys are omitted or `null` when there is no data
+(`abicheck/model/snapshot.py`). Optional keys are omitted or `null` when there is no data
 (for example, a pure-ELF dump has no `dwarf` or `build_source`).
 
 ### Identity and provenance

@@ -61,23 +61,31 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import date
 from enum import Enum
-from typing import Any, cast
 
 from .checker_policy import (
     ADDITION_KINDS,
-    API_BREAK_KINDS,
-    BREAKING_KINDS,
-    COMPATIBLE_KINDS,
-    RISK_KINDS,
     ChangeKind,
     HasKind,
     Verdict,
-    effective_category,
-    policy_kind_sets,
 )
 from .contract_gating import is_evaluated
 from .errors import PolicyError
-from .reclassify import first_matching_reclassify_verdict
+
+# ADR-061 Phase 2: the per-change effective-verdict resolver, its disclosure
+# sibling, and the kind-set alias/resolver they share now live in
+# ``reclassify.py`` -- the leaf ``checker_types.DiffResult`` (``compare``) and
+# this module (``policy``) may both depend on, since the dependency contract
+# forbids the first importing the second. Re-exported through the redundant-
+# alias form so ``abicheck.severity.effective_verdict_for_change`` /
+# ``reclassify_rule_for_change`` / ``KindSets`` keep working unchanged for
+# every existing caller; see ``reclassify.py``'s docstring for the reasoning.
+from .reclassify import (
+    KindSets as KindSets,
+    effective_verdict_for_change as effective_verdict_for_change,
+    first_matching_reclassify_verdict,
+    reclassify_rule_for_change as reclassify_rule_for_change,
+    resolve_kind_sets as _resolve_kind_sets,
+)
 
 
 def gate_eligible_changes(changes: Sequence[HasKind]) -> list[HasKind]:
@@ -89,15 +97,6 @@ def gate_eligible_changes(changes: Sequence[HasKind]) -> list[HasKind]:
     class of bug ``compute_gate_decision`` was introduced to close.
     """
     return [c for c in changes if is_evaluated(c)]
-
-
-#: Pre-computed (breaking, api_break, compatible, risk) kind sets.
-KindSets = tuple[
-    frozenset[ChangeKind],
-    frozenset[ChangeKind],
-    frozenset[ChangeKind],
-    frozenset[ChangeKind],
-]
 
 
 class SeverityLevel(str, Enum):
@@ -124,28 +123,6 @@ class IssueCategory(str, Enum):
 # When a *policy* is provided, uses the policy-adjusted sets so that
 # kinds downgraded/upgraded by the policy (e.g. sdk_vendor, plugin_abi)
 # are classified correctly.
-
-
-def _resolve_kind_sets(
-    policy: str | None = None,
-    kind_sets: KindSets | None = None,
-) -> KindSets:
-    """Return (breaking, api_break, compatible, risk) kind sets.
-
-    *kind_sets* takes precedence when provided (e.g. from
-    ``DiffResult._effective_kind_sets()`` which includes PolicyFile overrides).
-    Falls back to ``policy_kind_sets(policy)`` or canonical sets.
-    """
-    if kind_sets is not None:
-        return kind_sets
-    if policy is None or policy == "strict_abi":
-        return (
-            frozenset(BREAKING_KINDS),
-            frozenset(API_BREAK_KINDS),
-            frozenset(COMPATIBLE_KINDS),
-            RISK_KINDS,
-        )
-    return policy_kind_sets(policy)
 
 
 def classify_change(
@@ -210,230 +187,6 @@ def classify_change_object(
     return classify_effective_change(
         change, policy=policy, kind_sets=kind_sets, policy_file=policy_file
     )
-
-
-_VERDICT_ORDER = [
-    Verdict.NO_CHANGE,
-    Verdict.COMPATIBLE,
-    Verdict.COMPATIBLE_WITH_RISK,
-    Verdict.API_BREAK,
-    Verdict.BREAKING,
-]
-
-
-def _has_frozen_namespace_violation(change: HasKind) -> bool:
-    """Return True only for a real frozen-namespace tag string."""
-    fnv = getattr(change, "frozen_namespace_violation", None)
-    return isinstance(fnv, str) and bool(fnv)
-
-
-def _raw_verdict_for_kind(kind: ChangeKind, kind_sets: KindSets) -> Verdict:
-    """Return the verdict for *kind* without per-finding overrides."""
-    breaking, api_break, compatible, risk = kind_sets
-    if kind in breaking:
-        return Verdict.BREAKING
-    if kind in api_break:
-        return Verdict.API_BREAK
-    if kind in risk:
-        return Verdict.COMPATIBLE_WITH_RISK
-    if kind in compatible:
-        return Verdict.COMPATIBLE
-    return Verdict.BREAKING
-
-
-def effective_verdict_for_change(
-    change: HasKind,
-    *,
-    policy: str | None = None,
-    kind_sets: KindSets | None = None,
-    policy_file: object | None = None,
-    today: date | None = None,
-) -> Verdict:
-    """Return the effective verdict for one change.
-
-    Policy-file overrides usually move an entire ``ChangeKind`` into another
-    verdict bucket. Frozen-namespace violations are deliberately per-change: if
-    an override would downgrade a tagged finding below the base-policy verdict,
-    the override is ignored for that one finding.
-
-    *today* is forwarded to a matching `reclassify:` rule's own expiry check
-    (:func:`abicheck.reclassify.first_matching_reclassify_verdict`) -- pass a
-    fixed date for a deterministic/testable caller (e.g.
-    ``SuppressionList.audit()``'s own *today* parameter); ``None`` uses the
-    real current date, same as every other caller already relies on.
-    """
-    kind = change.kind
-    base_policy = getattr(policy_file, "base_policy", policy)
-    base_sets = (
-        _resolve_kind_sets(base_policy, None)
-        if policy_file is not None
-        else _resolve_kind_sets(base_policy, kind_sets)
-    )
-
-    eff = getattr(change, "effective_verdict", None)
-    if isinstance(eff, Verdict):
-        raw_v = _raw_verdict_for_kind(kind, base_sets)
-        if (
-            _has_frozen_namespace_violation(change)
-            and _VERDICT_ORDER.index(eff) < _VERDICT_ORDER.index(raw_v)
-        ):
-            return raw_v
-        return eff
-
-    # A: selector-scoped reclassification (abicheck/reclassify.py) --
-    # consulted ahead of the kind-global `overrides` below, mirroring
-    # PolicyFile._resolve_change_verdict's own priority order exactly, so
-    # this per-finding resolver (severity/category buckets, JSON/HTML/SARIF
-    # labels, severity-based gating) agrees with the legacy verdict
-    # PolicyFile.compute_verdict already computes instead of silently
-    # re-deriving a different answer for the same change.
-    reclassify_rules = (
-        getattr(policy_file, "reclassify", None) if policy_file is not None else None
-    )
-    if reclassify_rules:
-        reclass_v = first_matching_reclassify_verdict(reclassify_rules, change, today)
-        if reclass_v is not None:
-            base_v = effective_category(change, *base_sets)
-            if (
-                _has_frozen_namespace_violation(change)
-                and _VERDICT_ORDER.index(reclass_v) < _VERDICT_ORDER.index(base_v)
-            ):
-                return base_v
-            return reclass_v
-
-    overrides = (
-        getattr(policy_file, "overrides", None)
-        if policy_file is not None
-        else None
-    )
-    if overrides and kind in overrides:
-        base_v = effective_category(change, *base_sets)
-        override_v = cast(Verdict, overrides[kind])
-        if (
-            _has_frozen_namespace_violation(change)
-            and _VERDICT_ORDER.index(override_v) < _VERDICT_ORDER.index(base_v)
-        ):
-            return base_v
-        return override_v
-    # Reuses `base_sets` (already computed above from `policy_file.
-    # base_policy` when a policy_file is given) rather than recomputing from
-    # the outer `policy`/`kind_sets` parameters directly (Codex review,
-    # pre-existing bug surfaced by suppression.py's audit() calling this
-    # with only `policy_file=` set, no `policy=`/`kind_sets=`): for a
-    # policy_file whose base_policy isn't strict_abi (e.g. plugin_abi), a
-    # finding with no effective_verdict/reclassify/override match fell all
-    # the way back to strict_abi's own kind sets, silently ignoring the
-    # policy file's own base policy. For the no-policy_file case this is a
-    # pure simplification, not a behavior change: base_sets there is already
-    # computed as `_resolve_kind_sets(policy, kind_sets)` -- identical to
-    # what this line used to recompute.
-    return effective_category(change, *base_sets)
-
-
-def reclassify_rule_for_change(
-    change: HasKind, policy_file: object | None, today: date | None = None
-) -> Any | None:
-    """Return the ``ReclassifyRule`` that actually decided *change*'s
-    effective verdict, or ``None`` if no rule did.
-
-    Mirrors :func:`effective_verdict_for_change`'s own precedence exactly: a
-    rule that *matches* but is shadowed by a higher-priority
-    ``effective_verdict`` (an ADR-027 pipeline modulation) or blocked by the
-    frozen-namespace verdict floor did not actually decide the change's
-    verdict, so it is not "the reclassifying rule" for disclosure purposes
-    even though :meth:`~abicheck.reclassify.ReclassifyRule.matches` would say
-    yes.
-
-    Used by ``reporter.py`` to stamp a per-change ``reclassified_by`` field
-    on the JSON report (Codex review: ``cli_pr_comment``'s
-    ``pr_comment._reclassified_count()`` only recognized the kind-global
-    ``policy_overrides`` map, so a PR comment silently omitted the
-    "reclassified by --policy-file" notice for a finding downgraded by a
-    selector-scoped ``reclassify:`` rule instead). Computing this from the
-    real ``Change`` object here -- rather than having ``pr_comment.py``
-    reimplement selector matching against the JSON report alone -- is
-    deliberate: a JSON-serialized change doesn't carry every selector field a
-    rule can match on (``type_pattern``/``member_name``/``namespace``/
-    ``entity_namespace``/``cause_namespace`` have no JSON counterpart), so a
-    JSON-only reimplementation could not be sound.
-
-    A matching rule whose ``to_verdict`` merely *restates* the verdict the
-    next-priority path (a same-kind ``overrides:`` entry, or the base policy)
-    would already have produced is a no-op, not a reclassification -- e.g.
-    ``func_removed: to: break`` under ``strict_abi``, where ``func_removed``
-    is already BREAKING (Codex review: a matching-but-no-op rule was still
-    stamping ``reclassified_by``, making the PR comment falsely report a
-    downgrade that never happened). Only a rule that actually *changes* the
-    verdict from what would apply in its absence counts as deciding it. That
-    comparison verdict is computed through the identical frozen-namespace
-    floor the ``overrides:`` branch below applies -- not the override's raw
-    value (Codex review, second round: a frozen-namespace finding with e.g.
-    ``overrides: func_removed: ignore`` plus ``reclassify: ... to: break``
-    would, absent the rule, already clamp back to BREAKING via the floor;
-    comparing against the raw COMPATIBLE override instead made the rule read
-    as deciding a verdict that was already going to be BREAKING anyway).
-    """
-    if isinstance(getattr(change, "effective_verdict", None), Verdict):
-        return None
-    rules = (
-        getattr(policy_file, "reclassify", None) if policy_file is not None else None
-    )
-    if not rules:
-        return None
-    base_policy = getattr(policy_file, "base_policy", None)
-    base_sets = _resolve_kind_sets(base_policy, None)
-    base_v = effective_category(change, *base_sets)
-    overrides = (
-        getattr(policy_file, "overrides", None) if policy_file is not None else None
-    )
-    kind = change.kind
-    # The verdict that would apply if *this* reclassify rule didn't exist --
-    # the next step down the same precedence chain effective_verdict_for_change
-    # walks (a same-kind overrides: entry, else the base policy's own
-    # verdict), with the identical frozen-namespace floor clamp the overrides:
-    # branch below applies -- so a rule that merely restates it is recognized
-    # as a no-op regardless of which of the two it happens to restate, and
-    # regardless of whether the floor would already have clamped it.
-    if overrides and kind in overrides:
-        override_v = cast(Verdict, overrides[kind])
-        if (
-            _has_frozen_namespace_violation(change)
-            and _VERDICT_ORDER.index(override_v) < _VERDICT_ORDER.index(base_v)
-        ):
-            next_priority_v = base_v
-        else:
-            next_priority_v = override_v
-    else:
-        next_priority_v = base_v
-    for rule in rules:
-        if rule.matches(change, today):
-            reclass_v = rule.to_verdict
-            # The verdict this matching rule *actually* produces, applying
-            # the identical frozen-namespace floor
-            # effective_verdict_for_change's own reclassify branch applies:
-            # when reclass_v is blocked, that branch returns base_v directly
-            # -- it never falls through to consult overrides:, even though
-            # overrides: would have applied had no reclassify rule matched
-            # at all (Codex review, third round: a blocked rule was
-            # previously always read as a no-op, but the real effective
-            # verdict it produces -- base_v -- can still differ from
-            # next_priority_v, e.g. a global `overrides: ... to: break` with
-            # a frozen-namespace `reclassify: ... to: ignore` blocked back
-            # to a weaker base_v than the override would have given: the
-            # rule genuinely changed the outcome from what overrides: alone
-            # would have produced, just not to the verdict it asked for).
-            effective_v = (
-                base_v
-                if (
-                    _has_frozen_namespace_violation(change)
-                    and _VERDICT_ORDER.index(reclass_v) < _VERDICT_ORDER.index(base_v)
-                )
-                else reclass_v
-            )
-            if effective_v == next_priority_v:
-                return None
-            return rule
-    return None
 
 
 def _reclassify_resolved_to_compatible(

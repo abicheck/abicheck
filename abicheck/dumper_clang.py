@@ -113,6 +113,7 @@ from .model import (
     AccessLevel,
     EnumMember,
     EnumType,
+    Fact,
     Function,
     Param,
     RecordType,
@@ -121,6 +122,7 @@ from .model import (
     Variable,
     Visibility,
 )
+from .name_classification import strip_anonymous_type_location
 from .provenance import (
     build_public_set,
     classify_origin,
@@ -1138,20 +1140,11 @@ class _ClangAstParser:
                     name=str(p.get("name", "")),
                     type=_qualtype(p),
                     pointer_depth=_pointer_depth(_qualtype(p)),
-                    # G31 Phase C: castxml was the ONLY producer of this fact
-                    # (`_resolve_cv_restrict`), so a castxml-vs-clang comparison
-                    # of unchanged headers reported PARAM_RESTRICT_CHANGED for
-                    # every restrict-qualified parameter — the detector compares
-                    # the two bools directly, with no producer gate to decline
-                    # on (unlike `deprecated`/`is_scoped` before this phase).
+                    # G31 Phase C: castxml was the ONLY producer of this fact (`_resolve_cv_restrict`), so a castxml-vs-clang comparison of unchanged headers reported PARAM_RESTRICT_CHANGED for every restrict-qualified parameter -- the detector compares the two bools directly, with no producer gate to decline on (unlike `deprecated`/`is_scoped` before this phase).
                     is_restrict=_clang_param_is_restrict(p),
-                    # G31 Phase C continued: same shape as `is_restrict` above
-                    # — castxml never populated this fact either, so a bare
-                    # comparison of the two bools needs the identical
-                    # producer-reliability gate (`param_va_list`'s registration
-                    # in diff_symbols.py). See
-                    # `dumper_clang_qualifiers._clang_param_is_va_list`.
-                    is_va_list=_clang_param_is_va_list(p),
+                    # G31 Phase C continued: same shape as `is_restrict` above -- castxml never populated this fact either. See `dumper_clang_qualifiers._clang_param_is_va_list`. is_va_list_fact is `partial`, not `present`: the check only covers x86-64 System V, and conservatively answers `False` -- not "confirmed no" -- on any other target (Codex review; target-scoping residual unchanged, per that function's own docstring).
+                    is_va_list=(_iv := _clang_param_is_va_list(p)),
+                    is_va_list_fact=Fact.partial(_iv),
                     # Preserve the actual default-argument value (so a changed
                     # default fires PARAM_DEFAULT_VALUE_CHANGED); fall back to a
                     # bare presence marker when the value can't be evaluated.
@@ -1429,6 +1422,11 @@ class _ClangAstParser:
                 has_anonymous_aggregate_fields=False,
                 source_location=self._source_location(entry),
                 deprecated=deprecated,
+                # Empty lists are the parse's own answer -- matches dumper_castxml.py's opaque-record Fact stance.
+                bases_fact=Fact.present([]),
+                virtual_bases_fact=Fact.present([]),
+                vtable_fact=Fact.present([]),
+                vptr_offset_bits_fact=Fact.partial(None),  # heuristic field (see below), partial even here
             )
         fields = self._parse_fields(node)
         bases, virtual_bases, _base_access = _parse_bases(node)
@@ -1499,6 +1497,9 @@ class _ClangAstParser:
             deprecated=deprecated,
             # G31 Phase C backend audit -- see _clang_record_is_abstract.
             is_abstract=_clang_record_is_abstract(node),
+            # Stated explicitly -- this parse genuinely resolved these. vptr_offset_bits_fact is `partial`, not `present`: 0-if-vtable-else-None is the Itanium primary-base heuristic, not a real offset read (matches vptr_offset_bits's own PARTIAL row).
+            bases_fact=Fact.present(bases), virtual_bases_fact=Fact.present(virtual_bases),
+            vtable_fact=Fact.present(vtable), vptr_offset_bits_fact=Fact.partial(0 if vtable else None),
         )
 
     def _parse_fields(self, node: dict[str, Any]) -> list[TypeField]:
@@ -1733,9 +1734,34 @@ class _Decl:
 
 
 def _qualtype(node: dict[str, Any]) -> str:
+    """A declaration's own ``type.qualType`` spelling -- the single choke
+    point every field/param/variable/function type string in this module is
+    built from (`_parse_fields`, `_parse_functions`'s own signature and
+    param loop, `parse_variables`, `parse_constants`).
+
+    Stripped via :func:`strip_anonymous_type_location`: verified against
+    real Clang 18 (``-ast-dump=json``) that a lambda closure type embedded in
+    a type spelling -- e.g. a class-template specialization instantiated
+    with a lambda argument, ``Guard<decltype([]{})>`` -- prints its
+    ``qualType`` as ``"(lambda at <path>:<line>:<col>)"`` (Clang's
+    TypePrinter, the same diagnostic-style spelling castxml's own XML `name`
+    attribute uses, confirmed on a `FieldDecl` whose declared type IS the
+    lambda type parameter). Left unstripped, that absolute, checkout-
+    dependent path leaks into `TypeField.type`/`Param.type`/`Variable.type`/
+    `Function.return_type`, so two checkouts of the identical, unchanged
+    declaration would produce two different type spellings and could
+    manufacture a spurious finding on the field/param/variable/function
+    carrying it -- the same class of bug `dumper_castxml.py`'s own
+    `strip_anonymous_type_location` calls guard against for its `name`/
+    `qualified_name` fields, just reached through this backend's type-string
+    printer rather than its declaration-name attribute (which, unlike
+    castxml's, never itself embeds a location -- confirmed empirically: a
+    template specialization's own `name` node stays the bare template name,
+    e.g. ``"Guard"``, never ``"Guard<(lambda at ...)>"``).
+    """
     type_obj = node.get("type")
     if isinstance(type_obj, dict):
-        return str(type_obj.get("qualType", ""))
+        return strip_anonymous_type_location(str(type_obj.get("qualType", "")))
     return ""
 
 
@@ -1826,7 +1852,7 @@ def _evaluated_int_value(node: dict[str, Any]) -> int | None:
                 pass
         if cur.get("kind") not in _WRAPPER_EXPR_KINDS:
             break
-        inner = [c for c in cur.get("inner", []) or [] if isinstance(c, dict)]
+        inner = [c for c in raw if isinstance(c, dict)] if isinstance(raw := cur.get("inner"), list) else []
         if len(inner) != 1:
             break
         cur = inner[0]

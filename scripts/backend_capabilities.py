@@ -411,7 +411,25 @@ FACT_ROWS: tuple[FactRow, ...] = (
     ),
     FactRow("RecordType", "fields", _FULL, _FULL),
     FactRow("RecordType", "bases", _FULL, _FULL),
+    FactRow(
+        "RecordType",
+        "bases_fact",
+        _FULL,
+        _FULL,
+        note=(
+            "ADR-063 Phase 0: `Fact[list[str]]` sibling of `bases`. Both "
+            "backends construct it directly (`model.record_layout_facts()`) "
+            "alongside `bases` itself, opaque records included."
+        ),
+    ),
     FactRow("RecordType", "virtual_bases", _FULL, _FULL),
+    FactRow(
+        "RecordType",
+        "virtual_bases_fact",
+        _FULL,
+        _FULL,
+        note="ADR-063 Phase 0: `Fact[list[str]]` sibling of `virtual_bases` — see `bases_fact`.",
+    ),
     FactRow(
         "RecordType",
         "vtable",
@@ -423,6 +441,13 @@ FACT_ROWS: tuple[FactRow, ...] = (
             "compiler-emitted table; castxml's comes from its own bundled "
             "compiler. Both are transitively inherited across bases."
         ),
+    ),
+    FactRow(
+        "RecordType",
+        "vtable_fact",
+        _FULL,
+        _FULL,
+        note="ADR-063 Phase 0: `Fact[list[str]]` sibling of `vtable` — see `bases_fact`.",
     ),
     FactRow("RecordType", "source_location", _FULL, _FULL),
     FactRow("RecordType", "is_union", _FULL, _FULL),
@@ -530,6 +555,24 @@ FACT_ROWS: tuple[FactRow, ...] = (
             "Itanium primary-base rule — so neither tracks a secondary "
             "vtable's placement under multiple inheritance. Only DWARF reads "
             "the compiler's own artificial vptr member for a real offset."
+        ),
+    ),
+    FactRow(
+        "RecordType",
+        "vptr_offset_bits_fact",
+        _PARTIAL,
+        _PARTIAL,
+        note=(
+            "ADR-063 Phase 0: `Fact[int | None]` sibling of `vptr_offset_bits`. "
+            "Unlike `bases_fact`/`virtual_bases_fact`/`vtable_fact`, this one is "
+            "`PARTIAL` on both backends, not `FULL` — `Fact.partial(...)`, not "
+            "`Fact.present(...)` — matching `vptr_offset_bits`'s own row exactly: "
+            "the wrapped value is still the `0`-if-polymorphic Itanium "
+            "primary-base heuristic, which does not track a secondary vtable's "
+            "placement under multiple inheritance, so the wrapper states that "
+            "caveat rather than asserting full determination (a review round on "
+            "the PR that added this row caught the earlier `FULL` claim "
+            "contradicting the legacy field's own row one line above it)."
         ),
     ),
     FactRow(
@@ -667,6 +710,26 @@ FACT_ROWS: tuple[FactRow, ...] = (
             "docstring)."
         ),
     ),
+    FactRow(
+        "Param",
+        "is_va_list_fact",
+        _NONE,
+        _PARTIAL,
+        note=(
+            "ADR-063 Phase 0: `Fact[bool]` sibling of `is_va_list`, now "
+            "constructed directly by both backends. castxml is `NONE`: it "
+            "explicitly states `Fact.unsupported()` — a deliberate status, "
+            "not a hardcoded default, but a status carrying no determined "
+            "value is not extraction, the same distinction this matrix "
+            "already draws for a hardcoded `False`/`None` legacy field (a "
+            "review round on the PR that added this row caught the earlier "
+            "`PARTIAL` claim conflating 'the wrapper is constructed' with "
+            "'a fact was determined'). clang is `PARTIAL`, matching "
+            "`is_va_list` above exactly: the wrapped value is the same "
+            "x86-64-System-V-only determination, `Fact.present(bool)` "
+            "around it doesn't change its precision."
+        ),
+    ),
 )
 
 
@@ -687,13 +750,32 @@ class Evidence(str, Enum):
     ABSENT = "absent"
 
 
+#: `Fact` factory methods that never carry a determined value — a call to one
+#: of these states a fixed *status* regardless of what the parse actually saw,
+#: so it is a placeholder exactly like a hardcoded ``None``/``False`` literal
+#: would be, even though structurally it is an `ast.Call`, not an
+#: `ast.Constant`. `present`/`partial` are the opposite: their value *is* the
+#: extracted fact, so a call to one of those is examined by recursing into its
+#: own first argument instead (see `_is_placeholder_literal`).
+_FACT_STATUS_ONLY_METHODS = frozenset(
+    {"unsupported", "not_collected", "not_applicable", "failed"}
+)
+_FACT_VALUE_METHODS = frozenset({"present", "partial"})
+
+
 def _is_placeholder_literal(node: ast.expr) -> bool:
     """Whether a keyword's value is a hardcoded default rather than a parse.
 
     ``Param(is_restrict=False)`` names the field but extracts nothing, and is
     exactly what a claim of "this backend populates it" must not be built on.
     A constant, or an empty container, is that shape; anything else (a name, a
-    call, a comprehension, a conditional) reads a real value off the AST.
+    call, a comprehension, a conditional) reads a real value off the AST —
+    *except* a `Fact.unsupported()`-shaped call (`_FACT_STATUS_ONLY_METHODS`),
+    which is a placeholder no matter how it's spelled, since it carries no
+    value at all; and a `Fact.present(...)`/`Fact.partial(...)` call
+    (`_FACT_VALUE_METHODS`), which is examined by recursing into its own
+    wrapped value instead of being treated as extraction on the strength of
+    merely being a call.
     """
     if isinstance(node, ast.Constant):
         return True
@@ -701,6 +783,16 @@ def _is_placeholder_literal(node: ast.expr) -> bool:
         return not node.elts
     if isinstance(node, ast.Dict):
         return not node.keys
+    if (
+        isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and isinstance(node.func.value, ast.Name)
+        and node.func.value.id == "Fact"
+    ):
+        if node.func.attr in _FACT_STATUS_ONLY_METHODS:
+            return True
+        if node.func.attr in _FACT_VALUE_METHODS and node.args:
+            return _is_placeholder_literal(node.args[0])
     return False
 
 

@@ -152,8 +152,12 @@ def test_scan_build_new_snapshot_forwards_build_config_ungated(monkeypatch, tmp_
             baseline_compile_context=None,
         )
 
+    # ADR-061 Phase 3: `scan_engine` imports this from its owner
+    # (`workflows.artifact.execute`), so the patch has to land there --
+    # patching the `service_input_resolution` facade rebinds a name nothing
+    # reads and leaves the real resolver running.
     monkeypatch.setattr(
-        "abicheck.service_input_resolution._resolve_side_snapshot_impl", fake_impl
+        "abicheck.workflows.artifact.execute._resolve_side_snapshot_impl", fake_impl
     )
 
     scan_engine._build_new_snapshot(

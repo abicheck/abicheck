@@ -242,12 +242,17 @@ profiles:
 `compile:`'s do, into their own separate pair —
 [`consumer_compile_gcc_path`/`consumer_compile_gcc_options`](run-plan-schema.md#runplancheck-fields)
 — never falling back to the producer overlay's own resolved values when
-absent. **Not yet wired:** actually applying `consumer_compile:` to a
-separate header-AST (L2) extraction pass and merging it with the producer
-toolchain's binary (L0/L1) facts — this schema slice only projects the
-config axis into `run-plan.json`; see
+absent. **Applied, for the candidate side only:** `check-project.yml` runs
+a separate `dump` of the (unchanged) candidate binary under this overlay's
+frontend/binding/options, and the comparison consumes that materialized
+snapshot as the candidate's entire new side — see the
+`compile.frontend`/`consumer_compile.frontend` section immediately below
+for how that separate dump is wired, and its "Known gap" note for what
+still isn't covered (the baseline/old side). This is a real, working
+extraction pass, not the L0/L1-producer-plus-L2-consumer merge originally
+scoped in
 [`docs/contribute/plans/g34-producer-consumer-compiler-profile-separation.md`](../contribute/plans/g34-producer-consumer-compiler-profile-separation.md)'s
-Phase 0 for the remaining extraction/merge integration.
+Phase 0 — see that plan for the design this superseded.
 
 ### `compile.frontend` / `consumer_compile.frontend` — per-profile AST frontend (G34 Phase B)
 
@@ -282,10 +287,26 @@ example above genuinely runs its producer pass under castxml. The one
 exception is a `kind: bundle` check, whose operand is a staging *directory*
 — the root Action rejects any non-`auto` frontend there, so such a cell
 keeps resolving the workflow-global value.
-`consumer_compile.frontend`, by contrast, is still projection only — it
-describes the header-AST pass of the two-pass producer/consumer extraction
-that `consumer_compile:` itself has not built yet, so nothing forwards it;
-see the G34 plan doc's Phase B and Phase 0 for what remains.
+`consumer_compile.frontend` drives a separate candidate dump in the native
+`check-project` pipeline. The dump reads the same producer binary but parses
+its public headers with the consumer overlay's frontend, compiler binding,
+and options; the comparison then consumes that materialized snapshot instead
+of parsing the candidate headers again under the producer context.
+
+**Known gap:** only the *candidate* side is dumped under the consumer
+context today. The baseline (old) side of a real (non-`none`)
+`baseline-channel` comparison is produced hours or days earlier by
+`publish-baseline.yml`/`update-main-baseline.yml`, which read only
+`build-output.json` and have no way to apply a `consumer_compile:` overlay
+to that dump. Comparing a consumer-context candidate against a
+producer-context baseline usually differs enough in extraction-profile
+fingerprint that `compare`'s own comparability gate refuses the pair as
+`NOT_COMPARABLE`/`ProfileMismatchError` rather than silently comparing
+mismatched contexts — so `consumer_compile:` combined with a real baseline
+channel does not yet work end to end. It is unaffected when
+`baseline-channel: none` (an audit-only scan has no baseline snapshot to
+mismatch against). See `abicheck/buildsource/run_plan.py`'s own docstring
+and the G34 plan doc's Phase 0 for what closing this needs.
 
 ### `os:` and `dependency_source:` — how a profile schedules its own check cell (G34 Phase C)
 

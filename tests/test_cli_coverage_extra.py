@@ -90,8 +90,13 @@ class TestDumpNativeBinary:
             platform="pe",
         )
 
-        with patch("abicheck.cli._detect_binary_format", return_value="pe"), \
-             patch("abicheck.cli._dump_native_binary", return_value=mock_snap):
+        # ADR-061 Phase 4: `dump_cmd` calls `_normalize_binary_input`, which
+        # resolves `_detect_binary_format` through `cli_resolve`'s own module
+        # global -- so that is the only place patching it has ever had an
+        # effect. The previous `abicheck.cli.` target was already inert; the
+        # facade split surfaced it by making the attribute stop existing.
+        with patch("abicheck.cli_resolve._detect_binary_format", return_value="pe"), \
+             patch("abicheck.frontends.cli.commands.dump._dump_native_binary", return_value=mock_snap):
             runner = CliRunner()
             result = runner.invoke(main, [
                 "dump", str(pe_file), "--version", "1.0", "--follow-deps",
@@ -128,8 +133,8 @@ class TestDumpNativeBinary:
             captured.update(kwargs)
             return mock_snap
 
-        with patch("abicheck.cli._detect_binary_format", return_value="pe"), \
-             patch("abicheck.cli._dump_native_binary", side_effect=_fake_dump_native):
+        with patch("abicheck.cli_resolve._detect_binary_format", return_value="pe"), \
+             patch("abicheck.frontends.cli.commands.dump._dump_native_binary", side_effect=_fake_dump_native):
             runner = CliRunner()
             result = runner.invoke(main, [
                 "dump", str(pe_file), "--version", "1.0",
@@ -150,8 +155,8 @@ class TestDumpNativeBinary:
         pe_file.write_bytes(_make_pe_bytes())
         mock_snap = AbiSnapshot(library="test.dll", version="1.0", platform="pe")
 
-        with patch("abicheck.cli._detect_binary_format", return_value="pe"), \
-             patch("abicheck.cli._dump_native_binary", return_value=mock_snap):
+        with patch("abicheck.cli_resolve._detect_binary_format", return_value="pe"), \
+             patch("abicheck.frontends.cli.commands.dump._dump_native_binary", return_value=mock_snap):
             runner = CliRunner()
             result = runner.invoke(main, [
                 "dump", str(pe_file), "--version", "1.0",
@@ -179,8 +184,8 @@ class TestDumpNativeBinary:
             platform="pe",
         )
 
-        with patch("abicheck.cli._detect_binary_format", return_value="pe"), \
-             patch("abicheck.cli._dump_native_binary", return_value=mock_snap):
+        with patch("abicheck.cli_resolve._detect_binary_format", return_value="pe"), \
+             patch("abicheck.frontends.cli.commands.dump._dump_native_binary", return_value=mock_snap):
             runner = CliRunner()
             result = runner.invoke(main, [
                 "dump", str(pe_file), "--version", "1.0",

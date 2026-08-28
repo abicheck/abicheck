@@ -41,13 +41,13 @@ Mapping rules:
 from __future__ import annotations
 
 import hashlib
-import io
 import xml.etree.ElementTree as ET
 from typing import TYPE_CHECKING, cast
 
 from .checker_policy import ChangeKind, Verdict
 from .checker_types import Change, DiffResult
 from .contract_gating import is_evaluated
+from .junit_coverage_warnings import append_coverage_warnings_suite
 from .reporter import _finding_id, _suppress_dangling_correlation_notes, apply_show_only
 from .reporter_markdown import _root_cause_key_and_display
 
@@ -910,12 +910,7 @@ def _add_failure(
 
 
 def _build_error_testsuite(library: str, error_msg: str) -> ET.Element:
-    """Build a ``<testsuite>`` with a single errored testcase.
-
-    Used by ``to_junit_xml_multi`` to represent libraries whose comparison
-    failed (e.g. bad input, missing headers) so that CI dashboards show
-    the failure rather than silently omitting the library.
-    """
+    """Build a ``<testsuite>`` with a single errored testcase, used by ``to_junit_xml_multi`` for a library whose comparison failed (bad input, missing headers) so CI dashboards show the failure rather than silently omitting the library."""
     ts = ET.Element("testsuite")
     ts.set("name", library)
     ts.set("tests", "1")
@@ -999,9 +994,9 @@ def to_junit_xml(
     # the assertion failed"). Emitting it as a passing testcase, or omitting
     # it, would let a CI dashboard read "no evidence" as "compatible".
     errors = _append_coverage_suite(root, result)
-
+    warnings = append_coverage_warnings_suite(root, result)
     # Roll up counts
-    root.set("tests", str(int(ts.get("tests", "0")) + errors))
+    root.set("tests", str(int(ts.get("tests", "0")) + errors + warnings))
     root.set("failures", ts.get("failures", "0"))
     root.set("errors", str(errors))
 
@@ -1095,6 +1090,8 @@ def to_junit_xml_multi(
         coverage_errors = _append_coverage_suite(root, result)
         total_tests += coverage_errors
         total_errors += coverage_errors
+        # Per result, mirroring the coverage-error suite above: each library carries its own coverage_warnings, not a document-wide list.
+        total_tests += append_coverage_warnings_suite(root, result)
 
     for entry in error_libraries or []:
         ts = _build_error_testsuite(
@@ -1113,12 +1110,10 @@ def to_junit_xml_multi(
 
 
 def _to_xml_string(root: ET.Element) -> str:
-    """Serialize an ElementTree element to an XML string with declaration."""
-    ET.indent(root)
-    tree = ET.ElementTree(root)
-    buf = io.BytesIO()
-    tree.write(buf, encoding="UTF-8", xml_declaration=True)
-    return buf.getvalue().decode("UTF-8")
+    """Serialize a JUnit element tree to XML (via ``report.render_xml``)."""
+    from .report.render_xml import render_element_as_xml
+
+    return render_element_as_xml(root)
 
 
 def to_junit_xml_not_comparable(

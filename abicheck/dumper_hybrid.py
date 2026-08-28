@@ -47,11 +47,10 @@ their two independent :class:`~abicheck.model.AbiSnapshot`\\ s to
   cross-*producer* without being cross-*comparable*: castxml keeps the
   verbatim source expression where clang emits a literal or a structural
   fingerprint, so its detector gates on the two sides sharing one producer
-  rather than on both merely having a known one. Every such fact records its source in the
-  returned snapshot's ``fact_provenance`` map (see
+  rather than on both merely having a known one. Every such fact records
+  its source in the returned snapshot's ``fact_provenance`` map (see
   ``abicheck/fact_provenance.py``), so detectors can tell which backend
-  backs a fact apart from an unbacked one on a per-declaration basis
-  instead of trusting a whole-snapshot producer tag.
+  backs a fact on a per-declaration basis.
 - **Declaration-existence provenance** (G31 Phase C, hybrid-graph
   provenance-tagging): every merged function/variable also gets a
   ``"visibility"``-named ``fact_provenance`` entry recording which backend
@@ -93,16 +92,15 @@ current producer pair (a clang-recognized template pattern never shares a
 type_map_key with any castxml-matched concrete type — it reaches the merged
 snapshot via the clang-only-append path instead, already carrying the flag
 correctly); kept anyway as a defense-in-depth/honesty measure, the same
-precedent this module already sets for ``RecordType.is_abstract``.
-``has_anonymous_aggregate_fields`` is not provably inert the same way — see
-:func:`_merge_record_type`'s own comment.
+precedent already set for ``RecordType.is_abstract``.
+``has_anonymous_aggregate_fields`` is not provably inert the same way —
+see :func:`_merge_record_type`'s own comment.
 
 Everything not explicitly merged below (bare-keyed ``typedefs``, constants,
 ELF/PE/Mach-O metadata, DWARF metadata, ...) is taken verbatim from the
-castxml snapshot, which is used as the base via ``dataclasses.replace`` --
-except ``typedefs_qualified`` (schema v25), which IS explicitly unioned
-from both sides (see the merge's own comment on that field) since its
-whole purpose is recovering an alias a single backend alone would miss.
+castxml base (``dataclasses.replace``) -- except ``typedefs_qualified``
+(schema v25), unioned from both sides (its own merge comment) to recover
+an alias a single backend alone would miss.
 """
 
 from __future__ import annotations
@@ -114,6 +112,7 @@ from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
+from . import qualified_name_segments
 from .comparability import PROFILE_FIELD_KEYS, _sha256_of
 from .diff_cxx_rules import _skip_template_args, itanium_scope_components
 from .diff_helpers import type_map_key
@@ -633,18 +632,14 @@ def _merge_record_type(
         if value != getattr(t, attr):
             updates[attr] = value
 
-    # G28 Phase 4 (optional ABICHECK_CLANG_LAYOUT_TOOL): clang_t may carry
-    # REAL ASTRecordLayout facts the companion tool already backfilled onto
-    # clang_snap BEFORE this merge (attach_clang_layout runs on clang_snap's
-    # own recursive dump). Without this, a type present on BOTH backends --
-    # the common case -- lost every one of these facts in a hybrid merge
-    # even with the layout tool enabled, while a clang-ONLY type (appended
-    # verbatim below) kept them (Codex review). Never overrides an existing
-    # castxml value -- castxml's own real layout, when present, always wins.
+    # G28 Phase 4 (optional ABICHECK_CLANG_LAYOUT_TOOL): clang_t may carry REAL ASTRecordLayout facts the companion tool already backfilled onto clang_snap BEFORE this merge (attach_clang_layout runs on clang_snap's own recursive dump). Without this, a type present on BOTH backends -- the common case -- lost every one of these facts in a hybrid merge even with the layout tool enabled, while a clang-ONLY type (appended verbatim below) kept them (Codex review). Never overrides an existing castxml value -- castxml's own real layout, when present, always wins.
     if clang_t is not None:
         for attr in _LAYOUT_SCALAR_ATTRS:
             if getattr(t, attr) is None and getattr(clang_t, attr) is not None:
                 updates[attr] = getattr(clang_t, attr)
+                # vptr_offset_bits_fact sibling: carry clang_t's own status so replace_with_fact_sync can't promote its real PARTIAL to present() (same bug class as dumper_layout_backfill.py's DWARF backfill, Codex review).
+                if hasattr(clang_t, f"{attr}_fact"):
+                    updates[f"{attr}_fact"] = getattr(clang_t, f"{attr}_fact")
         if not t.base_offsets and clang_t.base_offsets:
             updates["base_offsets"] = clang_t.base_offsets
         # G31 Phase C fact-completeness (verified against real castxml 0.6.3 +
@@ -652,11 +647,11 @@ def _merge_record_type(
         # fact above, these two are plain `bool = False` -- not an Optional
         # tri-state -- so there is no null "castxml doesn't know" state to key
         # a _backfill_fact()-style None-check off. castxml's own `False` is
-        # ALWAYS structurally correct by construction rather than a
-        # placeholder (castxml never emits an uninstantiated template
-        # pattern as a declaration at all, and it always computes real
-        # per-field offsets for an anonymous-aggregate flatten it can see),
-        # so this is a plain OR-merge, not a None-guarded backfill.
+        # ALWAYS structurally correct by construction rather than a placeholder
+        # (castxml never emits an uninstantiated template pattern as a
+        # declaration at all, and it always computes real per-field offsets
+        # for an anonymous-aggregate flatten it can see), so this is a plain
+        # OR-merge, not a None-guarded backfill.
         #
         # is_template_pattern is empirically INERT here, verified with a real
         # class-template dump: a clang-recognized template PATTERN never
@@ -669,24 +664,21 @@ def _merge_record_type(
         # clang-only-append path below. Kept here anyway (not asserted
         # unreachable) both for defense in depth against a future clang
         # AST-shape change and because it is honest about the invariant this
-        # merge is supposed to preserve, matching this module's own
-        # documented precedent for RecordType.is_abstract (a backfill kept
-        # even though the current producer pair makes it a no-op).
+        # merge is supposed to preserve, matching this module's own documented
+        # precedent for RecordType.is_abstract (a backfill kept even though
+        # the current producer pair makes it a no-op).
         #
-        # has_anonymous_aggregate_fields is NOT provably inert the same way:
-        # a castxml record with real, populated fields already carries
+        # has_anonymous_aggregate_fields is NOT provably inert the same way: a
+        # castxml record with real, populated fields already carries
         # corroborating field-name-overlap evidence dumper_layout_backfill.py
-        # prefers over this flag's own fallback path, but an opaque/
-        # incomplete castxml record (or a future producer shape) could
-        # legitimately reach this merge with an EMPTY `fields` list for a
-        # genuinely anonymous-aggregate-only record, where clang's `True`
-        # is the only signal available.
+        # prefers over this flag's own fallback path, but an opaque/incomplete
+        # castxml record (or a future producer shape) could legitimately reach
+        # this merge with an EMPTY `fields` list for a genuinely
+        # anonymous-aggregate-only record, where clang's `True` is the only
+        # signal available.
         if clang_t.is_template_pattern and not t.is_template_pattern:
             updates["is_template_pattern"] = True
-        if (
-            clang_t.has_anonymous_aggregate_fields
-            and not t.has_anonymous_aggregate_fields
-        ):
+        if clang_t.has_anonymous_aggregate_fields and not t.has_anonymous_aggregate_fields:
             updates["has_anonymous_aggregate_fields"] = True
 
     clang_fields_by_name = {cf.name: cf for cf in clang_t.fields} if clang_t else {}
@@ -697,7 +689,9 @@ def _merge_record_type(
     if merged_fields != t.fields:
         updates["fields"] = merged_fields
 
-    return replace(t, **updates) if updates else t
+    from .model import replace_with_fact_sync
+
+    return replace_with_fact_sync(t, **updates) if updates else t
 
 
 def _merge_enum_type(
@@ -974,6 +968,7 @@ def run_hybrid_dump(
     completely unchanged for both sub-dumps — only the merge step
     (:func:`merge_snapshots`) is new.
     """
-    castxml_snap = dump_fn(so_path, headers, header_backend="castxml", **kwargs)
-    clang_snap = dump_fn(so_path, headers, header_backend="clang", **kwargs)
-    return merge_snapshots(castxml_snap, clang_snap)
+    with qualified_name_segments.defer_closure_identity_renumbering():
+        castxml_snap = dump_fn(so_path, headers, header_backend="castxml", **kwargs)
+        clang_snap = dump_fn(so_path, headers, header_backend="clang", **kwargs)
+    return qualified_name_segments.renumber_anonymous_closure_identities(merge_snapshots(castxml_snap, clang_snap))

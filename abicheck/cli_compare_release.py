@@ -33,6 +33,7 @@ import click
 
 from .api_types import CompareResult
 from .bundle import BundleDiffResult
+from .bundle_models import BundleSignatureEvidence
 from .checker import Change, DiffResult
 from .cli import (
     _build_match_map,
@@ -42,6 +43,7 @@ from .cli import (
     _setup_verbosity,
     _write_or_echo,
 )
+from .cli_compare_receipt import record_release_resolved_config
 from .cli_compare_release_helpers import (  # noqa: F401
     _RELEASE_VERDICT_ORDER,
     _cleanup_temp_dirs,
@@ -82,18 +84,19 @@ from .cli_options import (
     verbose_option,
 )
 from .cli_params import _load_suppression_and_policy
-from .cli_secondary_output import (
+from .errors import ProfileMismatchError, ScopeMismatchError
+from .frontends.cli.options import (
     reject_incoherent_secondary_output,
     secondary_output_options,
 )
-from .errors import ProfileMismatchError, ScopeMismatchError
 from .model import AbiSnapshot
+from .pack_application import resolve_bundle_policy_file
 from .reporter import to_json
 
 if TYPE_CHECKING:
     from .compile_context import CompileContext
     from .pack_application import PackApplication
-    from .severity import SeverityConfig
+    from .workflows.gate import SeverityConfig
 
 # ---------------------------------------------------------------------------
 # release-comparison engine helpers
@@ -170,7 +173,7 @@ def _run_compare_pair(
     old_input, _ = _normalize_binary_input(old_input)
     new_input, _ = _normalize_binary_input(new_input)
 
-    return service.run_compare(
+    result = service.run_compare(
         old_input,
         new_input,
         old_headers=old_headers,
@@ -198,6 +201,8 @@ def _run_compare_pair(
         ),
         compile_context=compile_context,
     )
+    record_release_resolved_config(result.diff, getattr(pack_application, "resolved_config", None))
+    return result
 
 
 _CompareReleaseCommonArgs = tuple[
@@ -223,6 +228,7 @@ _CompareReleaseCommonArgs = tuple[
     str | None,
     "SeverityConfig | None",
     "PackApplication | None",
+    bool,
     bool,
     "CompileContext | None",
 ]
@@ -270,34 +276,24 @@ def _compare_one_library(
     severity_config: SeverityConfig | None = None,
     pack_application: PackApplication | None = None,
     collect_diff_results: bool = False,
+    need_full_snapshots: bool = False,
     compile_context: CompileContext | None = None,
 ) -> dict[str, object]:
-    """Compare one library pair — suitable for parallel dispatch.
+    """Compare one library pair — suitable for parallel dispatch. Any
+    exception yields an ERROR entry rather than aborting the release.
 
-    The entire per-library flow (debug info resolution, comparison, output
-    writing) is wrapped so that *any* exception yields an ERROR entry
-    instead of aborting the whole release comparison.
+    The full :class:`DiffResult` is stashed under ``"_diff_result"``;
+    callers needing it (bundle layer, JUnit) pop it before JSON-serialising.
+    *collect_diff_results* additionally stashes ``"_bundle_key"`` plus
+    either ``"_old_snapshot"``/``"_new_snapshot"`` (when
+    *need_full_snapshots* -- JUnit/``--bundle-facts-out``) or the much
+    smaller ``"_old_bundle_evidence"``/``"_new_bundle_evidence"`` (G38
+    Phase 9's memory fix; see :class:`~abicheck.bundle_models.
+    BundleSignatureEvidence`).
 
-    The full :class:`DiffResult` is stashed in the returned dict under
-    the ``"_diff_result"`` key. Callers that need the full diff (the
-    bundle layer, JUnit aggregation) pop it from the entry before
-    JSON-serialising — keeps the per-library compare a single-pass.
-
-    *collect_diff_results* additionally stashes old+new
-    :class:`AbiSnapshot`\\ s and this library's bundle-canonical key under
-    ``"_old_snapshot"``/``"_new_snapshot"``/``"_bundle_key"`` -- gated
-    (Codex review) since an `AbiSnapshot` is large. Feeds
-    `find_unverified_signature_findings` from ``_collect_bundle_result``
-    (G38 Phase 4 -- see its plan doc's "Update (2026-08-24)" note).
-
-    *severity_config* is forwarded to the per-library ``--output-dir`` JSON
-    write below (Codex review, fresh evidence): without it, that write
-    always used the legacy exit-code scheme's ``ExitDecision`` regardless of
-    whether the release itself resolved and gates on a severity
-    configuration — so a severity-aware release (``severity.addition:
-    error``, say) could exit non-zero at the release level while every
-    per-library report it wrote said ``exit.code: 0``, ``reasons:
-    ["clean"]``, disagreeing with the release's own real exit.
+    *severity_config* is forwarded to the ``--output-dir`` JSON write below
+    (Codex review): without it, that write always used the legacy
+    exit-code scheme regardless of the release's own severity config.
     """
     old_path = old_map[key]
     new_path = new_map[key]
@@ -344,30 +340,30 @@ def _compare_one_library(
             "compatible_additions": len(result.compatible),
             "quality_issues": n_quality,
             "_diff_result": result,
+            **({"coverage_warnings": list(result.coverage_warnings)} if result.coverage_warnings else {}),  # e.g. same-binary; never reached this entry before (Codex review)
         }
         if collect_diff_results:
-            # CodeRabbit review, PR #798: stashed alongside `_diff_result`
-            # so a secondary JUnit render (`--write junit=...`/`--format
-            # junit`) can build its (DiffResult, old_snapshot) pairs
-            # straight from this single primary pass, the same way
-            # annotations already do -- instead of
-            # `_collect_release_extras`'s old independent re-run, whose own
-            # failure path silently *dropped* a pair from the secondary
-            # report on a rerun error even though the primary pass had
-            # already succeeded for it (a truncated JUnit report next to a
-            # complete primary one). Gated on the flag (Codex review,
-            # fresh evidence) -- see this function's own docstring for why.
-            entry["_old_snapshot"] = compare_result.old_snapshot
-            entry["_new_snapshot"] = compare_result.new_snapshot
+            # See this function's own docstring (CodeRabbit review #798;
+            # full- vs. compact-evidence split, G38 Phase 9).
             entry["_bundle_key"] = key
+            if need_full_snapshots:
+                entry["_old_snapshot"] = compare_result.old_snapshot
+                entry["_new_snapshot"] = compare_result.new_snapshot
+            else:
+                entry["_old_bundle_evidence"] = BundleSignatureEvidence.from_snapshot(
+                    compare_result.old_snapshot
+                )
+                entry["_new_bundle_evidence"] = BundleSignatureEvidence.from_snapshot(
+                    compare_result.new_snapshot
+                )
         if contract_evaluation:
             # ADR-049 Phase 7's orthogonal contract-coverage floor (0/1),
             # read off this library's own persisted contract context --
             # aggregated with max() into the release-level exit code in
             # _exit_compare_release, the same "raises a clean 0 to 1, never
             # lowers a real 2/4" rule a single-pair `compare` applies.
-            from .contract_coverage_exit import coverage_exit_floor
             from .contract_coverage_ledger import coverage_failures_for_context
+            from .workflows.gate import coverage_exit_floor
 
             entry["contract_coverage_exit_contribution"] = coverage_exit_floor(result)
             # The *count* of failures is independent of the exit floor above
@@ -401,11 +397,7 @@ def _compare_one_library(
         # abicheck bug), so it gets its own "not_comparable" verdict string
         # instead of falling into the same "ERROR"/exit-4 bucket a genuine
         # crash uses — see _RELEASE_VERDICT_ORDER's dedicated rank for it.
-        kind = (
-            "profile_mismatch"
-            if isinstance(exc, ProfileMismatchError)
-            else "scope_mismatch"
-        )
+        kind = "profile_mismatch" if isinstance(exc, ProfileMismatchError) else "scope_mismatch"
         if output_dir:
             from .schemas import REPORT_SCHEMA_VERSION
 
@@ -516,6 +508,7 @@ def _compare_release_libraries(
     output_dir: Path | None,
     collect_diff_results: bool = False,
     *,
+    need_full_snapshots: bool = False,
     jobs: int = 1,
     scope_to_public_surface: bool = True,
     include_dependencies: bool = True,
@@ -527,9 +520,9 @@ def _compare_release_libraries(
 ) -> tuple[list[dict[str, object]], str, list[tuple[DiffResult, AbiSnapshot]]]:
     """Compare each matched library pair and collect results.
 
-    When *collect_diff_results* is True, ``(DiffResult, old_snapshot)``
-    pairs are collected and returned as the third element of the tuple
-    (used by the JUnit output format).
+    When *collect_diff_results* and *need_full_snapshots* are both True,
+    ``(DiffResult, old_snapshot)`` pairs are collected and returned as the
+    third element of the tuple (used by the JUnit output format).
 
     When *jobs* > 1, comparisons are dispatched in parallel via
     :func:`_compare_one_library` using a :class:`ThreadPoolExecutor` -- not
@@ -568,6 +561,7 @@ def _compare_release_libraries(
         severity_config,
         pack_application,
         collect_diff_results,
+        need_full_snapshots,
         compile_context,
     )
 
@@ -596,9 +590,7 @@ def _compare_release_libraries(
                 click.echo(
                     f"Not comparable: {entry['library']}: {entry['reason']}", err=True
                 )
-        if _RELEASE_VERDICT_ORDER.get(v, 0) > _RELEASE_VERDICT_ORDER.get(
-            worst_verdict, 0
-        ):
+        if _RELEASE_VERDICT_ORDER.get(v, 0) > _RELEASE_VERDICT_ORDER.get(worst_verdict, 0):
             worst_verdict = v
 
     # Cross-library coupling: a coordinated SONAME bump across the release is not
@@ -804,7 +796,7 @@ def _collect_matrix_result(
     pack overriding e.g. ``cxx_standard_floor_raised`` must apply here
     identically, not only to the per-library comparisons.
     """
-    from .cli import _load_probe_matrix_changes
+    from .frontends.cli.runtime import _load_probe_matrix_changes
 
     matrix_changes = _load_probe_matrix_changes(probe_matrix_old, probe_matrix_new)
     if not matrix_changes:
@@ -1015,7 +1007,7 @@ def _release_gating_buckets(
     what blocked the release).
     """
     if severity_config is not None:
-        from .severity import categorize_changes, compute_gate_decision
+        from .workflows.gate import categorize_changes, compute_gate_decision
 
         kind_sets = diff._effective_kind_sets()
         # compute_gate_decision (the single canonical gate computation, also
@@ -1100,10 +1092,9 @@ def _strip_diff_results_and_adjust_verdict(
     a library gated by a promoted addition/quality-issue category (not one of
     the legacy breaking/api_break/risk buckets) still gets a matching
     finding, not an empty list next to a nonzero ``severity.exit_code``.
-    Stripping ``_diff_result`` itself keeps the summary formatter free of any
-    Python-only objects. Additionally, if any library was *removed* from the
-    release and the verdict has not already been escalated, the verdict is
-    bumped to at least ``COMPATIBLE_WITH_RISK``.
+    Stripping the private keys (``_diff_result`` and friends) keeps the
+    summary formatter free of Python-only objects. If any library was
+    *removed*, the verdict is bumped to at least ``COMPATIBLE_WITH_RISK``.
 
     *needs_annotations* gates whether the uncapped ``annotations`` array
     (unlike ``findings`` above, deliberately unbounded -- see its own
@@ -1111,11 +1102,8 @@ def _strip_diff_results_and_adjust_verdict(
     render (primary ``--format json`` or a secondary ``--write
     json=...``) ever reads it, but every entry in ``library_results`` is
     held until the whole release finishes, so building it unconditionally
-    grew a large release's peak memory by the combined size of every
-    library's full finding set even for the common markdown/JUnit-only
-    case that never reads it -- the same class of gap the sibling
-    ``_old_snapshot``/``collect_diff_results`` gate already closed for
-    JUnit specifically.
+    grew peak memory by every library's full finding set even for a
+    markdown/JUnit-only render that never reads it.
 
     Returns the (possibly updated) *worst_verdict* string.
     """
@@ -1154,6 +1142,8 @@ def _strip_diff_results_and_adjust_verdict(
         entry.pop("_diff_result", None)
         entry.pop("_old_snapshot", None)
         entry.pop("_new_snapshot", None)
+        entry.pop("_old_bundle_evidence", None)
+        entry.pop("_new_bundle_evidence", None)
         entry.pop("_bundle_key", None)
     if removed_keys and _RELEASE_VERDICT_ORDER.get(
         worst_verdict, 0
@@ -1452,12 +1442,12 @@ def compare_release_cmd(
           --debug-info2 libfoo-debuginfo-1.1.rpm
     """
 
-    from .package import (
+    from .workflows.extraction import (
         _is_elf_shared_object,
         detect_extractor,
         discover_shared_libraries,
         is_package,
-        resolve_debug_info,
+        resolve_package_debug_info as resolve_debug_info,
     )
 
     _setup_verbosity(verbose)
@@ -1613,7 +1603,7 @@ def compare_release_cmd(
                 # agree with it, instead of also silently resolving None and
                 # falling back to the legacy verdict-based exit (Codex review on
                 # #549).
-                from .severity import PRESET_DEFAULT
+                from .workflows.gate import PRESET_DEFAULT
 
                 severity_config = PRESET_DEFAULT
                 severity_preset = "default"
@@ -1650,8 +1640,15 @@ def compare_release_cmd(
                 collect_diff_results=(
                     fmt == "junit"
                     or secondary_fmt == "junit"
+                    or bundle_facts_out is not None
                     # G38 Phase 4 (_compare_one_library's docstring):
                     or not no_bundle_analysis
+                ),
+                # Phase 9: only JUnit/--bundle-facts-out need AbiSnapshot.
+                need_full_snapshots=(
+                    fmt == "junit"
+                    or secondary_fmt == "junit"
+                    or bundle_facts_out is not None
                 ),
                 jobs=jobs,
                 scope_to_public_surface=scope_public_headers,
@@ -1667,8 +1664,7 @@ def compare_release_cmd(
                 # Resolved here, not in the leaf write_bundle_facts_out() (see its docstring).
                 def _resolve_stranded_library(old_path: Path) -> AbiSnapshot:
                     from .cli_resolve import _resolve_input
-                    from .elf_metadata import parse_elf_metadata
-                    from .header_utils import split_public_header_inputs
+                    from .workflows import extraction
 
                     old_dbg = (
                         resolve_debug_info(old_path, old_debug_dir)
@@ -1677,7 +1673,7 @@ def compare_release_cmd(
                     )
                     # old_h doubles as the public-header set, matching the
                     # normal compare path (else origin=UNKNOWN; Codex review).
-                    pub_headers, pub_dirs = split_public_header_inputs(old_h)
+                    pub_headers, pub_dirs = extraction.split_public_header_inputs(old_h)
                     try:
                         return _resolve_input(
                             old_path,
@@ -1697,7 +1693,7 @@ def compare_release_cmd(
                         return AbiSnapshot(
                             library=old_path.name,
                             version="",
-                            elf=parse_elf_metadata(old_path),
+                            elf=extraction.parse_elf_metadata(old_path),
                         )
 
                 write_bundle_facts_out(
@@ -1769,6 +1765,7 @@ def compare_release_cmd(
                     bundle_system_providers=bundle_system_providers,
                     bundle_cohorts=bundle_cohorts,
                     policy=policy,
+                    policy_file=resolve_bundle_policy_file(suppress, policy, policy_file_path, pack_application),
                 )
 
             # Strip _diff_result from entries and bump verdict for removed libraries.

@@ -34,7 +34,15 @@ on:
     types: [opened, synchronize, reopened, labeled]
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
+  # Event name spelled out explicitly rather than relied on implicitly: a PR
+  # groups (and cancels) by PR number, so a new push supersedes the stale
+  # run for the *same* PR — the case cancellation exists for. schedule/
+  # workflow_dispatch each key off github.run_id, which is unique per run,
+  # so they were never at risk of colliding with each other or with a PR run
+  # even before this — this only makes that isolation legible in the group
+  # name (mutation-schedule-<run_id>, mutation-workflow_dispatch-<run_id>)
+  # instead of leaving a reader to re-derive it from run_id's uniqueness.
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.run_id }}
   cancel-in-progress: true
 
 permissions:
@@ -173,7 +181,11 @@ jobs:
     runs-on: ubuntu-latest
     # A diff-scoped run still has to measure every mutant in a touched module.
     # `serialization.py` alone has more than 1,300 candidates, so the former
-    # two-hour cap cancelled a valid run before it produced a receipt.
+    # two-hour cap cancelled a valid run before it produced a receipt. The
+    # full baseline has also taken just over two hours on GitHub-hosted
+    # runners, so keep a hard ceiling but leave enough headroom for either
+    # measurement to finish and produce a receipt rather than being
+    # cancelled at 120 minutes.
     timeout-minutes: 240
     steps:
       - uses: actions/checkout@v6
@@ -252,6 +264,7 @@ jobs:
             require="--require-baseline"
           fi
           python scripts/check_mutation_score.py --run --diff-scoped \
+            --scope-run-to-diff \
             --base-ref "origin/$BASE_REF" \
             $require \
             --json mutation-receipt.json
@@ -291,3 +304,31 @@ jobs:
             mutation-receipt.json
             mutation-baseline.json
           if-no-files-found: ignore
+      - name: Flag a cancelled or incomplete run
+        # A cancelled scheduled run leaves the per-module baseline drift
+        # gate unchecked for that week with no failing status anywhere a
+        # human would notice — GitHub shows "cancelled" the same neutral
+        # grey as a run nobody was watching for. This makes that silence a
+        # loud, greppable line in the run's own step summary instead,
+        # naming exactly what did not happen and why it matters, for
+        # whichever event produced it.
+        if: always() && cancelled()
+        env:
+          # Through `env`, not expanded into the script — see this
+          # workflow's own zizmor template-injection precedent above.
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          {
+            echo "## :warning: Mutation lane cancelled"
+            echo
+            echo "This \`$EVENT_NAME\` run of the mutation lane was"
+            echo "cancelled before producing a receipt."
+            if [ "$EVENT_NAME" = "schedule" ]; then
+              echo
+              echo "The weekly per-module baseline drift check did **not**"
+              echo "run this week — a regression introduced since the last"
+              echo "successful scheduled run will not be caught until the"
+              echo "next one does complete. Re-run this workflow manually"
+              echo "(workflow_dispatch) if that gap matters before then."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"

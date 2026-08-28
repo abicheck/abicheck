@@ -30,18 +30,20 @@ import sys
 from collections.abc import Callable
 from pathlib import Path
 from types import SimpleNamespace
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 import click
 
 from .bundle import BundleDiffResult, render_bundle_findings_markdown
+from .bundle_models import BundleSignatureEvidence
 from .checker import DiffResult
 from .model import AbiSnapshot
 
 if TYPE_CHECKING:
     from .pack_application import PackApplication
-    from .package import PackageExtractor
-    from .severity import SeverityConfig
+    from .policy_file import PolicyFile
+    from .workflows.extraction import PackageExtractor
+    from .workflows.gate import SeverityConfig
 
 
 _RELEASE_VERDICT_ORDER: dict[str, int] = {
@@ -157,8 +159,8 @@ def _run_bundle_analysis(
     bundle_system_providers: str,
     bundle_cohorts: tuple[str, ...] = (),
     policy: str = "strict_abi",
-    old_snapshots: dict[str, AbiSnapshot] | None = None,
-    new_snapshots: dict[str, AbiSnapshot] | None = None,
+    old_snapshots: dict[str, AbiSnapshot | BundleSignatureEvidence] | None = None,
+    new_snapshots: dict[str, AbiSnapshot | BundleSignatureEvidence] | None = None,
 ) -> BundleDiffResult | None:
     """Run bundle-level (ADR-023) analysis on a compare-release run.
 
@@ -166,8 +168,16 @@ def _run_bundle_analysis(
     :func:`_compare_release_libraries` — no second per-pair compare pass.
 
     Returns None when there is nothing to analyze (e.g. all libraries
-    failed to dump). Errors during analysis are caught and reported as a
-    warning rather than aborting; bundle analysis is additive.
+    failed to dump, or the bundle snapshot itself could not be built --
+    the two cases a caller has no meaningful ``BundleDiffResult`` to
+    inspect regardless). Errors during analysis are caught and reported
+    as a warning rather than aborting; bundle analysis is additive. A
+    failure in ``compare_bundle()`` itself or in the Phase 4
+    signature-evidence check is additionally recorded structurally, in
+    the returned result's own ``analysis_errors`` (G38 stabilization
+    Phase 11 / P0-D), so a JSON/Markdown report consumer can tell
+    "bundle analysis ran clean" apart from "ran, but degraded" without
+    grepping stderr.
 
     *old_snapshots*/*new_snapshots* (G38 Phase 4), when both given and
     non-empty, additionally run
@@ -178,14 +188,21 @@ def _run_bundle_analysis(
     on the stashed release entry, the same key ``old_map``/``new_map`` use
     -- *not* the library's file basename), matching what
     ``BundleSnapshot.resolution`` itself keys providers/consumers by.
+
+    G38 stabilization Phase 12: both stages (the core
+    ``compare_bundle()`` suite and the Phase 4 signature-evidence gate)
+    now run through the single :func:`abicheck.bundle_analysis.
+    analyze_bundle` orchestrator -- the same one
+    :func:`abicheck.bundle_facts.compare_bundle_from_facts` calls for a
+    stored-baseline comparison -- rather than being sequenced by hand here.
+    This function's own job narrows to what only the live release path
+    needs: building the two live ``BundleSnapshot``\\ s, loading an
+    explicit ``--manifest``, and re-surfacing ``analyze_bundle``'s
+    structured ``analysis_errors`` as the same ``click.echo(...,
+    err=True)`` warnings this function has always emitted.
     """
-    from .bundle import (
-        BundleDiffResult,
-        build_bundle_snapshot,
-        compare_bundle,
-        load_manifest,
-    )
-    from .bundle_signature_evidence import find_unverified_signature_findings
+    from .bundle import build_bundle_snapshot, load_manifest
+    from .bundle_analysis import analyze_bundle
 
     if not old_map and not new_map:
         return None
@@ -216,45 +233,24 @@ def _run_bundle_analysis(
     system_extra: list[str] = [
         s.strip() for s in bundle_system_providers.split(",") if s.strip()
     ]
-    try:
-        result = compare_bundle(
-            old_snap,
-            new_snap,
-            per_lib_results,
-            manifest=manifest,
-            system_providers=system_extra or None,
-            cohorts=list(bundle_cohorts) or None,
-            policy=policy,
-        )
-    except Exception as exc:
-        # Analysis-engine bugs should not block the per-library report;
-        # surface as a warning. Future work: surface as a coverage_warning
-        # in the JSON output so downstream CI can detect degradation.
-        click.echo(f"Warning: bundle analysis raised: {exc}", err=True)
-        return BundleDiffResult(old_root=old_snap.root, new_root=new_snap.root)
-
-    if old_snapshots and new_snapshots:
-        # G38 Phase 4: run separately from compare_bundle() itself (a
-        # leaf, generic diff/graph function with no notion of per-library
-        # AbiSnapshots) and folded in here, the one caller that actually
-        # has both. Same additive-degradation contract as compare_bundle
-        # above -- a bug in this newer detector must not blank out the
-        # bundle findings compare_bundle already computed successfully.
-        try:
-            result.bundle_findings.extend(
-                find_unverified_signature_findings(
-                    old_snap,
-                    new_snap,
-                    per_lib_results,
-                    old_snapshots,
-                    new_snapshots,
-                )
-            )
-        except Exception as exc:
-            click.echo(
-                f"Warning: bundle signature-evidence check raised: {exc}",
-                err=True,
-            )
+    result = analyze_bundle(
+        old_snap,
+        new_snap,
+        per_lib_results,
+        manifest=manifest,
+        system_providers=system_extra or None,
+        cohorts=list(bundle_cohorts) or None,
+        policy=policy,
+        old_signature_evidence=old_snapshots or None,
+        new_signature_evidence=new_snapshots or None,
+    )
+    # Re-surface analyze_bundle()'s structured `analysis_errors` as the
+    # same stderr warnings this function has always emitted -- the
+    # orchestrator itself is a pure/leaf function with no CLI-echoing
+    # concerns of its own (it's shared with the stored-facts path, which
+    # has no `click` context to echo into).
+    for err in result.analysis_errors:
+        click.echo(f"Warning: {err}", err=True)
 
     return result
 
@@ -546,13 +542,24 @@ def _collect_bundle_result(
     worst_verdict: str,
     manifest_path: Path | None,
     bundle_system_providers: str,
-    bundle_cohorts: tuple[str, ...] = (),
-    policy: str = "strict_abi",
+    bundle_cohorts: tuple[str, ...] = (), policy: str = "strict_abi", policy_file: PolicyFile | None = None,
 ) -> tuple[BundleDiffResult | None, str]:
-    """Extract stashed DiffResults, run bundle analysis, update worst verdict."""
+    """Extract stashed DiffResults, run bundle analysis, update worst verdict.
+
+    Each entry carries *either* the full ``_old_snapshot``/``_new_snapshot``
+    (JUnit/``--bundle-facts-out`` in effect) *or* the much smaller
+    ``_old_bundle_evidence``/``_new_bundle_evidence`` (G38 stabilization
+    Phase 9's memory fix — see :class:`~abicheck.bundle_models.
+    BundleSignatureEvidence`) — never both, per
+    ``cli_compare_release._compare_one_library``'s own stash logic. Either
+    is duck-type compatible with what
+    :func:`~abicheck.bundle_signature_evidence.find_unverified_signature_
+    findings` reads, so both are folded into the same ``old_snapshots``/
+    ``new_snapshots`` mapping this function has always built. *policy_file* (G38 Phase 16) is set on the result before ``bundle_verdict`` is read.
+    """
     stashed_diffs: list[DiffResult] = []
-    old_snapshots: dict[str, AbiSnapshot] = {}
-    new_snapshots: dict[str, AbiSnapshot] = {}
+    old_snapshots: dict[str, AbiSnapshot | BundleSignatureEvidence] = {}
+    new_snapshots: dict[str, AbiSnapshot | BundleSignatureEvidence] = {}
     for entry in library_results:
         if not isinstance(entry, dict):
             continue
@@ -560,12 +567,12 @@ def _collect_bundle_result(
         if isinstance(diff, DiffResult):
             stashed_diffs.append(diff)
         bundle_key = entry.get("_bundle_key")
-        old_snap = entry.get("_old_snapshot")
-        new_snap = entry.get("_new_snapshot")
+        old_snap = entry.get("_old_snapshot") or entry.get("_old_bundle_evidence")
+        new_snap = entry.get("_new_snapshot") or entry.get("_new_bundle_evidence")
         if (
             isinstance(bundle_key, str)
-            and isinstance(old_snap, AbiSnapshot)
-            and isinstance(new_snap, AbiSnapshot)
+            and isinstance(old_snap, (AbiSnapshot, BundleSignatureEvidence))
+            and isinstance(new_snap, (AbiSnapshot, BundleSignatureEvidence))
         ):
             old_snapshots[bundle_key] = old_snap
             new_snapshots[bundle_key] = new_snap
@@ -581,10 +588,9 @@ def _collect_bundle_result(
         new_snapshots=new_snapshots,
     )
     if bundle_result is not None:
+        bundle_result.policy_file = policy_file  # G38 Phase 16
         bv = bundle_result.bundle_verdict.value
-        if _RELEASE_VERDICT_ORDER.get(bv, 0) > _RELEASE_VERDICT_ORDER.get(
-            worst_verdict, 0
-        ):
+        if _RELEASE_VERDICT_ORDER.get(bv, 0) > _RELEASE_VERDICT_ORDER.get(worst_verdict, 0):
             worst_verdict = bv
     return bundle_result, worst_verdict
 
@@ -704,7 +710,7 @@ def _resolve_release_severity_config(
         )
     ):
         return None
-    from .severity import resolve_severity_config
+    from .workflows.gate import resolve_severity_config
 
     return resolve_severity_config(
         severity_preset,
@@ -751,7 +757,7 @@ def _compute_release_severity_exit_code(
     if resolved_config is None:
         return None
 
-    from .severity import compute_exit_code
+    from .workflows.gate import compute_exit_code
 
     worst = 0
     for entry in library_results:
@@ -797,13 +803,24 @@ def _fold_release_global_severity(
     if config is None:
         return base_code
 
-    from .severity import compute_exit_code
+    from .workflows.gate import compute_exit_code
 
     worst = base_code
     if bundle_result is not None and bundle_result.bundle_findings:
         # Bundle findings carry canonical (partitioned) ChangeKinds.
+        # G38 stabilization Phase 10 (Codex review, fresh evidence): this
+        # omitted `policy=` entirely, unlike the matrix_result branch right
+        # below it -- so a policy that reclassifies a bundle kind (e.g.
+        # `plugin_abi` demoting `calling_convention_changed`, which
+        # `BundleDiffResult.bundle_verdict` already honors via its own
+        # `.policy` field) never reached the severity-aware exit code,
+        # letting the displayed verdict and the process exit disagree.
+        # G38 Phase 16 (Codex review): `policy_file` had the identical gap.
         bundle_changes = [f.to_change() for f in bundle_result.bundle_findings]
-        worst = max(worst, compute_exit_code(bundle_changes, config))
+        worst = max(
+            worst,
+            compute_exit_code(bundle_changes, config, policy=bundle_result.policy, policy_file=bundle_result.policy_file),
+        )
     if matrix_result is not None and matrix_result.changes:
         worst = max(
             worst,
@@ -874,7 +891,7 @@ def _exit_compare_release(
     if worst_verdict == "ERROR":
         sys.exit(max(4, contract_coverage_exit_contribution))
     from .checker_policy import Verdict
-    from .severity import legacy_exit_code
+    from .workflows.gate import legacy_exit_code
 
     code = (
         legacy_exit_code(Verdict[worst_verdict])
@@ -1087,6 +1104,16 @@ def _format_release_json(
             }
             for f in bundle_result.bundle_findings
         ]
+        # G38 P0-D: surface a bundle-analysis-step failure structurally
+        # instead of only as a stderr `click.echo`, so a JSON-consuming
+        # caller (CI gate, PR-comment renderer) can tell "bundle analysis
+        # ran clean" apart from "bundle analysis partially failed, treat
+        # bundle_verdict/bundle_findings as a possibly-incomplete view" --
+        # present only when non-empty, matching this file's established
+        # "present only when active" convention for the other optional
+        # summary keys above.
+        if bundle_result.analysis_errors:
+            summary["bundle_analysis_errors"] = list(bundle_result.analysis_errors)
     if matrix_result is not None:
         # Release-global build-configuration findings (G2: probe matrix).
         # `.changes` is post-suppression, so suppressed findings are
@@ -1203,6 +1230,7 @@ def _format_release_markdown(
             f"({bundle_count} cross-library finding{'s' if bundle_count != 1 else ''}) |",
         )
     lines += _release_md_libraries_table(library_results, _VERDICT_EMOJI)
+    lines += _release_md_coverage_warnings(library_results)
     lines += _release_md_changed_libraries(removed_keys, added_keys, old_map, new_map)
     lines += _release_md_bundle_findings(bundle_result)
     lines += _release_md_matrix_findings(matrix_result)
@@ -1231,13 +1259,18 @@ def _release_md_libraries_table(
     return lines
 
 
+def _release_md_coverage_warnings(library_results: list[dict[str, object]]) -> list[str]:
+    """Per-library `coverage_warnings` (e.g. same-binary) -- absent when none carry any (Codex review: the release table alone omits this signal)."""
+    entries = [f"- `{lib['library']}`: {w}" for lib in library_results for w in cast(list[str], lib.get("coverage_warnings") or [])]
+    return ["", "## ⚠️ Coverage Warnings", "", *entries] if entries else []
+
+
 def _release_md_changed_libraries(
     removed_keys: list[str],
     added_keys: list[str],
     old_map: dict[str, Path],
     new_map: dict[str, Path],
-) -> list[str]:
-    """Markdown sections listing removed/added libraries."""
+) -> list[str]:  # Markdown sections listing removed/added libraries.
     lines: list[str] = []
     if removed_keys:
         lines += ["", "## ⚠️ Removed Libraries", ""]
@@ -1249,15 +1282,20 @@ def _release_md_changed_libraries(
 
 
 def _release_md_bundle_findings(bundle_result: BundleDiffResult | None) -> list[str]:
-    """Markdown section for cross-library (bundle) findings."""
+    """Markdown section for cross-library (bundle) findings. G38 P0-D: a partial ``analysis_errors`` warning is rendered even when ``bundle_findings`` is empty -- an empty finding list after a raised exception means "nothing was checked", not "nothing was found", and a reader must not conflate the two."""
+    lines: list[str] = []
+    if bundle_result is not None and bundle_result.analysis_errors:
+        lines += ["", "## ⚠️ Bundle Analysis Warnings", ""]
+        lines += [f"- {msg}" for msg in bundle_result.analysis_errors]
     if bundle_result is None or not bundle_result.bundle_findings:
-        return []
-    return [
+        return lines
+    lines += [
         "",
         "## 🔗 Bundle (Cross-Library) Findings",
         "",
         *render_bundle_findings_markdown(bundle_result.bundle_findings),
     ]
+    return lines
 
 
 def _release_md_matrix_findings(matrix_result: DiffResult | None) -> list[str]:

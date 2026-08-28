@@ -62,15 +62,6 @@ from .buildsource.crosscheck import (  # noqa: F401 - CrosscheckConfig/run_cross
     CrosscheckConfig,
     run_crosschecks,
 )
-from .buildsource.pattern_scan import scan_files  # noqa: F401 - re-export for tests
-from .buildsource.poi import (  # noqa: F401 - re-export for tests
-    build_points_of_interest,
-    resolve_symbol_tus,
-)
-from .buildsource.preprocessor_scan import (
-    run_preprocessor_scan,  # noqa: F401 - re-export for tests
-)
-from .buildsource.risk import RiskScore, score_changed_paths
 from .buildsource.scan_levels import (
     EvidenceDepth,
     ScanMode,
@@ -85,7 +76,6 @@ from .checker_policy import (  # noqa: F401 - re-export for tests
 )
 from .cli import _safe_write_output, _setup_verbosity, main
 from .cli_compare_options import _cli_flag, _warn_force_public_ignored
-from .cli_help import scan_help_options
 from .cli_options import (
     artifact_set_options,
     compile_context_options,
@@ -131,6 +121,7 @@ from .cli_scan_helpers import (  # noqa: F401 - coverage/depth helpers re-export
     resolve_effective_allow_query,
     scan_pattern_roots,
 )
+from .frontends.cli.help import scan_help_options
 
 # The scan *engine* (classify → always-on tier → level → compare) lives in
 # scan_engine.py, not here — this module is a thin Click front-end over it
@@ -150,6 +141,13 @@ from .scan_engine import (  # noqa: F401 - several re-exported for tests/service
     _load_exports_for_poi,
     run_scan_core,
 )
+from .workflows.extraction import (  # noqa: F401 - re-exported for tests
+    build_points_of_interest,
+    resolve_symbol_tus,
+    run_preprocessor_scan,
+    scan_files,
+)
+from .workflows.scan_config import RiskScore, score_changed_paths
 
 #: Back-compat alias — the resolver moved to ``cli_options`` (ADR-037 D3: one
 #: resolver shared by compare/dump/scan). Kept importable from here for existing
@@ -624,7 +622,7 @@ def _emit_scan_report(
     # that gap gets explained -- so it must fire whenever *either* renderer
     # in play is `text`, not only when the primary one is.
     if fmt != "json" or secondary_fmt == "text":
-        from .contract_coverage_exit import coverage_diagnostic_from_summary
+        from .workflows.gate import coverage_diagnostic_from_summary
 
         # `outcome.exit_code` has ALREADY had the coverage floor folded in
         # by `_run_baseline_compare`, so passing it would make the notice
@@ -662,7 +660,7 @@ def _resolve_artifact_set_paths(spec: str) -> tuple[list[Path], bool]:
     (``explicit=True`` — every named member must resolve and must look like a
     real library, enforced by :func:`bundle.discover_artifact_set`).
     """
-    from .package import discover_shared_libraries
+    from .workflows.extraction import discover_shared_libraries
 
     candidate = Path(spec)
     if "," not in spec and candidate.is_dir():
@@ -1107,7 +1105,7 @@ def _discover_scan_project_config(
     a config the user never explicitly bound to shouldn't fail a run it wasn't
     asked to affect.
     """
-    from .buildsource.inline import discover_build_config
+    from .workflows.extraction import discover_build_config
 
     explicit_config = build_config is not None
     cfg_path = build_config if explicit_config else discover_build_config(sources)
@@ -1123,7 +1121,7 @@ def _discover_scan_project_config(
     _project_sha256: str | None = None
     if cfg_path is not None:
         try:
-            from .buildsource.build_config_io import load_build_config_with_digest
+            from .workflows.extraction import load_build_config_with_digest
 
             project_cfg, _project_sha256 = load_build_config_with_digest(cfg_path)
         except ValueError as exc:
@@ -1502,7 +1500,7 @@ def scan_cmd(
       abicheck scan new.so -H include/ --depth source --since origin/main
     """
     from .dry_run import reject_dry_run_with_output
-    from .package import is_package
+    from .workflows.extraction import is_package
 
     _setup_verbosity(verbose)
 
@@ -1979,7 +1977,7 @@ def scan_cmd(
         # Remove the inferred cmake build dir(s) now that every build-dir-dependent
         # phase has run (or the scan aborted). Best-effort (each thunk is suppressed)
         # so a removal/unlock error never aborts the rest nor masks the real outcome.
-        from .buildsource.build_query import drain_build_dir_cleanups
+        from .workflows.extraction import drain_build_dir_cleanups
 
         drain_build_dir_cleanups(build_dir_cleanups)
 

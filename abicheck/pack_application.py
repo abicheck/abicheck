@@ -246,6 +246,22 @@ class PackApplication:
     #: pack severity level would otherwise make it re-derive one. See that
     #: function for why re-deriving was wrong.
     resolved_exit_code_scheme: str | None = None
+    #: The full, already-resolved ``CompatibilityEvaluationConfig`` this
+    #: application was built from (CLI cleanup phase two, "PR B" effective-
+    #: config parity). Not a pack *contribution* -- ``is_empty()`` below
+    #: deliberately ignores it -- but real pack identity/provenance a caller
+    #: without its own resolved-config object (the directory/package release
+    #: fan-out, which reloads a fresh ``PolicyFile`` per library rather than
+    #: sharing one ``CompatibilityEvaluationConfig``) can stamp onto each
+    #: library's own ``DiffResult.evaluation_config`` the same way single-pair
+    #: ``compare``'s ``cli_compare_receipt.record_resolved_config`` does --
+    #: closing the "release per-library digest loses pack identity" gap
+    #: documented in ``effective_config_digest``'s own module docstring.
+    #: Since a release resolves its ``PackApplication`` once for the whole
+    #: run (not per library), every library shares this identical object,
+    #: which is exactly what makes the digest sensitive to *which pack
+    #: revision* ran rather than only to its current field assignments.
+    resolved_config: Any = None
 
     def is_empty(self) -> bool:
         """True when no pack contributed anything this run applies."""
@@ -310,6 +326,7 @@ def pack_application(config: Any, *, policy_file: PolicyFile | None) -> PackAppl
         resolved_exit_code_scheme=getattr(
             getattr(config, "gate", None), "exit_code_scheme", None
         ),
+        resolved_config=config,
     )
 
 
@@ -358,6 +375,30 @@ def policy_file_with_packs(
             internal_namespaces_stated=True,
         )
     return updated
+
+
+def resolve_bundle_policy_file(
+    suppress: Path | None,
+    policy: str,
+    policy_file_path: Path | None,
+    application: PackApplication | None,
+) -> PolicyFile | None:
+    """Resolve the ``PolicyFile`` a ``compare-release`` bundle analysis
+    should score against (G38 Phase 16), mirroring the per-library/matrix
+    resolve-then-fold-packs pattern (``_load_suppression_and_policy`` then,
+    when a ``--pack`` was resolved, :func:`policy_file_with_packs`) so
+    ``bundle_*`` findings honor the same ``--policy``/``--pack`` overrides
+    every other finding kind already does. Lives here rather than in
+    ``cli_compare_release_helpers.py`` because that module -- and its
+    sibling ``cli_compare_release.py`` -- are pinned at a no-growth line-
+    count baseline (``architecture/debt.yaml``, ADR-061); this module isn't.
+    """
+    from .cli_params import _load_suppression_and_policy
+
+    _, pf = _load_suppression_and_policy(suppress, policy, policy_file_path)
+    if application is not None:
+        pf = policy_file_with_packs(pf, application, base_policy=policy)
+    return pf
 
 
 def apply_to_compare_config(resolved_cfg: Any, application: PackApplication) -> Any:

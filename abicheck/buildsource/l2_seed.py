@@ -96,22 +96,16 @@ def _l2_seed_config(
 
 
 def _is_inputs_pack_dir(path: Path | None) -> bool:
-    """True when *path* is a Flow-2 ``abicheck_inputs/`` directory (ADR-035 D5).
+    """Compatibility alias for ``inputs_pack.is_inputs_pack_dir``.
 
-    A local copy of ``cli_buildsource_helpers._is_inputs_pack_dir``'s own
-    None/is_dir guard around ``inputs_pack.is_inputs_pack``, not an import of
-    it: ``cli_buildsource_helpers`` sits several layers above this leaf
-    module (it is reached from ``cli_buildsource`` -> ``cli_dump_helpers`` ->
-    this module, among other paths), so importing it here -- even
-    function-locally -- closes a real cycle the AI-readiness
-    ``import-cycle-growth`` gate correctly rejects. ``inputs_pack.py`` itself
-    has no such path back to here, so importing straight from it is safe.
+    Owned there since ADR-061 Phase 3; this was one of three copies of the
+    same guard, each kept local because the original lived in the CLI layer.
+    The import stays function-local, as the copy's own note required: this
+    module is reached from ``inline``, and ``inputs_pack`` imports ``inline``.
     """
-    if path is None or not path.is_dir():
-        return False
-    from .inputs_pack import is_inputs_pack
+    from .inputs_pack import is_inputs_pack_dir
 
-    return is_inputs_pack(path)
+    return is_inputs_pack_dir(path)
 
 
 def _l2_seed_pack_build_evidence(path: Path) -> Any:

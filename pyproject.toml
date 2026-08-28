@@ -175,6 +175,11 @@ module = [
     "abicheck.cli_suggest",
     "abicheck.cli_surface",
     "abicheck.compat.cli",
+    # ADR-061 Phase 4 moved `cli.py`'s command bodies and shared runtime here;
+    # they carry the same click-decorator surface `cli` itself did.
+    "abicheck.frontends.cli.commands.compare",
+    "abicheck.frontends.cli.commands.dump",
+    "abicheck.frontends.cli.runtime",
 ]
 disallow_untyped_decorators = false
 disable_error_code = ["no-any-return", "misc"]
@@ -223,6 +228,10 @@ module = [
     "abicheck.buildsource.project_targets",
     "abicheck.buildsource.toolchain_bindings",
     "abicheck.cli_compare_receipt",
+    # ADR-061 Phase 4 moved this out of the flat root into `workflows/`; the
+    # override did not follow it, so `mypy abicheck/` reports one error on a
+    # clean `main` in any environment where the stubs are not visible.
+    "abicheck.workflows.scan_config",
 ]
 disable_error_code = ["import-untyped"]
 
@@ -261,6 +270,12 @@ include = ["abicheck*"]
 [tool.setuptools.package-data]
 "abicheck.schemas" = ["*.json"]
 "abicheck.policies" = ["*.yaml"]
+# kinds.pyi (the ChangeKind mypy stub -- see kinds.py's own docstring) needs
+# an explicit entry: automatic .pyi inclusion was only added in setuptools 69,
+# while build-system.requires above still permits setuptools>=68. Without
+# this, a wheel built with 68 would silently omit the stub, leaving every
+# ChangeKind.FOO access unresolved for anyone installing from that wheel.
+"abicheck.model.change_catalog" = ["*.pyi"]
 
 [tool.coverage.run]
 branch = true
@@ -438,6 +453,20 @@ pytest_add_cli_args = [
     # must run in ordinary CI but cannot run after that in-place narrowing.
     "--ignore=tests/test_mutation_workflow_contract.py",
     "--ignore=tests/test_reusable_workflows.py",
+    # Third member of the same re-entrant-subprocess class as the two
+    # entries above: test_resolver_selects_only_the_current_targets_evidence
+    # runs check-project.yml's "Resolve candidate binary/binaries" step
+    # from a scratch cwd, and that step's own child imports `abicheck` --
+    # resolved to the mutant tree through the inherited PYTHONPATH, so a
+    # mutated module's trampoline pulls in `mutmut.__main__`, whose config
+    # load cannot find `[tool.mutmut]` from that cwd and raises
+    # FileNotFoundError. Reproduce in one line, without mutmut:
+    #   PYTHONPATH=<mutants dir> python -m pytest \
+    #     tests/test_reusable_workflows_project_evidence.py -k resolver_selects
+    # The test is sound and keeps running in every unit lane; only
+    # mutmut's clean-test phase cannot host it. Its kill cost is recorded
+    # in tests/test_mutation_workflow_contract.py::_ACCEPTED_KILL_LOSS.
+    "--ignore=tests/test_reusable_workflows_project_evidence.py",
     "--ignore=tests/test_skill_eval_pack.py",
     "--ignore=tests/test_skill_eval_scenarios.py",
     "--ignore=tests/test_verify_profiles.py",

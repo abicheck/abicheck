@@ -64,9 +64,13 @@ from typing import TYPE_CHECKING, Any
 
 from .api_types import CompareRequest, CompareResult, InputSpec, required_path
 from .compile_context import CompileContext
+from .confidence import note_if_same_binary_compared
 from .dependency_info import populate_pair_dependency_info
 from .errors import ValidationError
-from .service_input_resolution import enforce_requested_depth, resolve_side_snapshot
+from .workflows.artifact.execute import (
+    enforce_requested_depth,
+    resolve_side_snapshot,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -221,7 +225,7 @@ def _reject_unsupported_frontends(
     shared with ``dump``'s own typed path; the ``android`` half names
     ``run_compare_request`` in its message and stays here.
     """
-    from .service_input_resolution import (
+    from .workflows.artifact.resolve import (
         is_raw_source_tree,
         reject_hybrid_source_frontend,
     )
@@ -407,7 +411,10 @@ def classify_compare_pair(
     :func:`abicheck.service.run_compare_request`.
     """
     from . import service
-    from .cli_buildsource import attach_evidence_metrics, prepare_embedded_build_source
+    from .buildsource.evidence_report import (
+        attach_evidence_metrics,
+        prepare_embedded_build_source,
+    )
 
     old, new = pair.old, pair.new
     suppression, pf = service.load_suppression_and_policy(
@@ -452,7 +459,6 @@ def classify_compare_pair(
         None,
         None,
         policy_file=pf,
-        quiet=True,
     )
     result = service.compare_snapshots(
         old,
@@ -479,9 +485,21 @@ def classify_compare_pair(
     )
     if layer_coverage_rows:
         result.layer_coverage = layer_coverage_rows
-    attach_evidence_metrics(result, evidence_metrics, extra_changes or [], quiet=True)
-    result.old_metadata = service.collect_metadata(required_path(request.old, "old"))
-    result.new_metadata = service.collect_metadata(required_path(request.new, "new"))
+    attach_evidence_metrics(result, evidence_metrics, extra_changes or [])
+    # Hash through the full GNU ld linker-script chain to its final resolved
+    # target -- resolve_side_snapshot() already followed the identical chain
+    # to produce `old`/`new` above -- so a (possibly multi-hop) script vs.
+    # its target DSO given as the other `CompareRequest` side still reads as
+    # byte-identical (Codex review, fresh evidence; mirrors the same fix on
+    # `cli_scan_baseline._run_baseline_compare`).
+    from .binary_utils import resolve_linker_script_chain
+
+    def _hashable_path(p: Path) -> Path:  # a text snapshot/manifest can coincidentally match the INPUT()/GROUP() probe -- skip linker-script resolution for it (Codex review)
+        return p if service.sniff_text_format(p) in ("json", "perl", "symvers") else resolve_linker_script_chain(p)
+
+    result.old_metadata = service.collect_metadata(_hashable_path(required_path(request.old, "old")))
+    result.new_metadata = service.collect_metadata(_hashable_path(required_path(request.new, "new")))
+    note_if_same_binary_compared(result)
 
     # P0.4 follow-up (P2 review, discussion_r3787839902): `DiffResult.
     # requested_depth`/`analysis_assurance.requested_depth`/`depth_satisfied`

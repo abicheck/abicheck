@@ -18,8 +18,8 @@ interface contract), [ADR-043](../adr/043-cli-pre-1.0-surface-reset.md) /
 [ADR-056](../adr/056-multi-artifact-library-set-scan.md) (`scan --artifact-set`).
 **Effort:** L (seven independent PRs, plus three convergence prerequisites
 added by the post-#780/#782 review) · **Risk:** mixed — PR 1 is
-presentation-only, PR 1b is gated on new persisted-report schema work, PR 4
-changes what a CI job's exit code means.
+presentation-only, PR 1b **landed** (annotations moved to the Action — see
+its own section below), PR 4 changes what a CI job's exit code means.
 
 > **Review checkpoint (2026-08-16, `main` at `410caf5`, after
 > [#779](https://github.com/abicheck/abicheck/pull/779),
@@ -32,6 +32,38 @@ changes what a CI job's exit code means.
 > exit decision — have to converge first, or deleting the flags merely freezes
 > today's divergence between parallel paths into the removed-flag baseline. The
 > per-PR sections below carry the prerequisites each one gained.
+>
+> **Update (2026-08-27, fresh re-review, `main` at `327df7b`, after
+> [#883](https://github.com/abicheck/abicheck/pull/883)).** Re-checked every
+> claim in this plan against current `main` rather than trusting the prior
+> checkpoints' status cells. Confirmed unchanged: PR 1 (presentation) and PR 2
+> (aggregate policy) are done — **and so is PR E/1b (annotations moved to the
+> Action), missed by this checkpoint's own summary and caught in a later docs
+> sync pass verifying against `abicheck/cli.py`/`action.yml` directly: no
+> `annotate` reference remains in the CLI, and `action.yml` carries real
+> `annotate`/`annotate-additions` inputs. See PR 1b's own section, whose
+> "blocked on a persistence prerequisite" subtitle was itself stale until
+> that pass corrected it.** Pack parity now covers `compare`, the
+> release fan-out, *and* `scan --against` for both policy/contract
+> assignments and `gate.*` fields (PR B's scope is wider than the 2026-08-16
+> update above states — see that section for the current breakdown); the
+> PR 3B build-context-completeness gaps (forced pre-includes, matched-unit
+> include scoping) are closed. #883 itself fixed a real bundle-facts gap
+> this plan's PR B/bundle sections should account for: `PolicyFile` now
+> reaches both per-library *and* bundle-level verdicts (it previously
+> reached only per-library), the JSON resource budget is now applied
+> uniformly to archive and plain-JSON bundle-facts input, and
+> `DEFAULT_SYSTEM_PROVIDERS` grew several more vendor runtimes (oneTBB,
+> oneMKL, Intel runtime, Level Zero) — the latter is explicitly a tactical
+> fix, not the topology model PR B's bundle section still needs (see that
+> section for why a growing global allow-list isn't the end state).
+> **PR 0B/P0 is still the single outstanding item with no code-side gap
+> left** — see its status note below for the ready-to-apply Ruleset
+> artifact this pass added. PR C (typed dump/scan convergence) remains the
+> largest genuinely unfinished slice; its own section below has the fullest,
+> most current account (it has absorbed a long running series of
+> investigate/fix/revert rounds — read its own text, not this summary, for
+> what is actually closed today).
 >
 > **Update (2026-08-16, later the same day).** PR G1 (canonical `ExitDecision`
 > + report block) landed as [#789](https://github.com/abicheck/abicheck/pull/789)
@@ -70,7 +102,7 @@ simplification).
 | `--require-complete-analysis` (compare, scan; new in #780) | **Keep** | Real, distinct axis — but move its semantics into the resolved gate/assurance policy instead of leaving it a CLI-only boolean |
 | `compare --stat`, `compare --recommend` | Remove | `--format review` replaces `--stat`; recommendation becomes an unconditional renderer output |
 | `scan --artifact-set` | **Keep** | Refine the value syntax only (repeatable option / manifest); do not overload positional `DIRECTORY` |
-| `--annotate`, `--annotate-additions` | Remove from CLI (PR 1b, not PR 1) | Options on `compare` alone, shared by both operand shapes (no CLI-level split is possible) — blocked on a release-report persistence prerequisite; see PR 1b |
+| `--annotate`, `--annotate-additions` | **Removed** (PR 1b/E — done) | Options on `compare` alone, shared by both operand shapes (no CLI-level split was possible); the release-report persistence prerequisite landed and the flags are deleted — `compare --annotate` now exits `64` with `No such option`; see PR 1b |
 | `dump --build-query`, `dump --build-compile-db` | Remove from CLI | Move to `.abicheck.yml`; only `build.query` (an executable command) needs the explicit-`--config` trust gate — `build.compile_db` is a data path and carries the ordinary dry-run contract only |
 | `aggregate --on-missing-required`, `--on-unexpected-target` | Remove from CLI | Move the policy into the manifest / run-plan schema alongside the expected target set |
 
@@ -117,6 +149,22 @@ SHA), which is precisely what item 4 exists to make detectable.
 > GitHub MCP server's tool set nor any CLI available in this environment
 > exposes branch-protection/Ruleset administration). Once that toggle is
 > flipped, PR 0B is fully closed.
+>
+> **2026-08-27: the admin action now has a one-command runbook, not just a
+> classification rule to re-derive by hand.**
+> `.github/branch-protection-ruleset.json` is the exact Rulesets API payload
+> for the 14-name required-check list, and
+> `.github/branch-protection-ruleset.md` is the apply/verify runbook (the
+> `gh api` command, how to update rather than duplicate an existing ruleset,
+> and — the part that actually closes this item — a negative-test procedure
+> confirming a deliberately red required check blocks a merge, not just that
+> the rule was configured). `tests/test_required_checks_governance.py`'s
+> `TestBranchRulesetArtifact` keeps the JSON's context list mechanically in
+> sync with `AGENTS.md`'s prose and `verify-merge-checks.yml`'s
+> `REQUIRED_CHECKS` array, so this is a third checked copy of the list, not
+> a fourth hand-copied one. This closes every part of PR 0B/P0 that can be
+> closed from inside a PR; the ruleset still has to actually be applied and
+> the negative test actually run by an admin before this item is done.
 
 **The required-check list must match `.github/AGENTS.md`'s own required-vs-
 informational classification, not the set of workflow names visible in a run
@@ -373,7 +421,16 @@ unreachable).
 
 **Risk:** low — no analysis, verdict, or exit code changes.
 
-## PR 1b — annotations move to the Action (blocked on a persistence prerequisite)
+## PR 1b — annotations move to the Action (done)
+
+**Status: fully landed** (all three steps in "What this means for
+sequencing" below, plus the `scan --against` half of PR E) — verified
+directly against `abicheck/cli.py` (no `annotate` reference remains) and
+`action.yml` (`annotate`/`annotate-additions` are now real, documented
+inputs). This heading's original "(blocked on a persistence prerequisite)"
+qualifier is stale; kept as a section title change rather than rewritten
+prose below, since the body already records each landed slice with its own
+dated status note.
 
 `--annotate`/`--annotate-additions` only do anything when `GITHUB_ACTIONS=true`;
 they emit `::error`/`::warning`/`::notice` workflow commands and are inert in an
@@ -607,19 +664,21 @@ this section, already reads:
 With that in place the Action does not parse stderr, does not re-run any
 comparison, does not guess why the exit was `1`, renders annotations from the
 persisted findings and the Job Summary from the same object, and behaves
-identically for a single pair and a release fan-out — once PR E lands
-`exit` for `scan --against` at whichever location this section's `scan`
-resolution above settles on, while still reading `verdict`/`changes` (or
-that operand's own equivalent) unchanged. The `exit` block is the
+identically for a single pair and a release fan-out — **including
+`scan --against`, whose own `exit` block landed as PR E's first half (see
+above: `report["diff"].exit`, schema 1.18)**, while still reading
+`verdict`/`changes` (or that operand's own equivalent) unchanged. The `exit`
+block is the
 same object PR 4/G formalizes as `ExitDecision`. Build it once and consume it
-once — which is why PR G is split, and the split is load-bearing for this
-section rather than cosmetic: **G1** builds the decision object and emits its
-report block (no CLI behaviour change, no flag removed) and lands *before* PR
+once — which is why PR G is split, and the split was load-bearing for this
+section rather than cosmetic: **G1** built the decision object and emitted its
+report block (no CLI behaviour change, no flag removed) and landed *before* PR
 E; **G2** makes today's `auto` the only gate algorithm and deletes
-`--exit-code-scheme`. Without that split PR E would have to either depend on
-unlanded work or invent the second, Action-shaped spelling this section
-prohibits. If G1 slips, PR E ships its annotations half and leaves the
-gate-explanation half — not a private `exit` block of its own.
+`--exit-code-scheme` (still open — see PR 4's own section). Without that split
+PR E would have had to either depend on unlanded work or invent the second,
+Action-shaped spelling this section prohibits — moot now that G1 landed
+first, exactly as planned: PR E shipped both its annotations half and the
+`scan --against` `exit` block, not merely the former.
 
 **Tests.** A saved report fixture (both a single-library and a release-style
 report) must produce, through the Action's renderer, byte-identical
@@ -1880,13 +1939,17 @@ pipelines a fourth time.
   > (`git_commit`, `version`).
   >
   > **What still blocks routing `dump_cmd`'s real run through
-  > `execute_dump_request` — narrowed to two items, both real.** Blocker 4 is
+  > `execute_dump_request` — narrowed to two items, both real** (as of the
+  > notes below, item 1 itself later split into two: castxml plus the
+  > untested Flow-2 `--inputs` fold — see "Item 2 (castxml) is unchanged,
+  > but is not the *sole* remaining blocker" further down for the current,
+  > correct count). Blocker 4 is
   > closed on measurement, not just on reading: `service.run_dump`'s ELF branch
   > already runs every post-processing pass `perform_elf_dump` does (SYCL,
   > `python_ext`, `python_api`, `numpy_capi`, the G31 header graph, the G28
   > clang-layout attach), the ADR-039 collector now runs inside
   > `_resolve_side_snapshot_impl`, and the whole-snapshot comparison above shows
-  > no difference in any field those produce. What remains:
+  > no difference in any field those produce. What remained:
   >
   > 1. **`--compile-db-filter` would go inert.** `InputSpec` deliberately
   >    carries no `compile_db_filter` (see its own replacement comment), so the
@@ -1905,7 +1968,69 @@ pipelines a fourth time.
   >    non-default backend is not a verified change, and this section has said
   >    so since the previous session.
   >
-  > PR 3C therefore stays blocked, per this section's own ordering rule.
+  > **Item 1 closed (2026-08-21, later session).** `InputSpec.compile_db_filter`
+  > exists now, threaded into `_seeded_includes_and_compile_context` (as
+  > `source_filter`) and into `attach_build_context_for_parsed_headers`, and
+  > `resolve_dump_request` mirrors the CLI's own scope-error refusal —
+  > `compile_db_filter_scope_error`, extracted into
+  > `service_compare_evidence.reject_compile_db_filter_scope_mismatch` so
+  > `CompareRequest.old`/`.new` (which reach the identical fold through
+  > `resolve_compare_request`) share one guard rather than risking a second,
+  > independently-drifting copy. `dump_cmd` forwards its own
+  > `--compile-db-filter` into the request it builds, so `--dry-run` now
+  > records the same filter the real run would apply. Landing this drew eight
+  > separate Codex-caught corrections, six of them to the scope-mismatch guard
+  > itself (`header_conditionals.compile_db_for_filter_scope_check`/
+  > `compile_db_filter_scope_error`) — a `--sources`-only tree with an
+  > auto-discoverable compile database, a nested
+  > `<dir>/build/compile_commands.json`, a pack or Bazel `aquery`/`cquery`
+  > `--build-info`, a `--sources` pack with no `--build-info`, a false positive
+  > when an explicit `--build-info` resolves to nothing, and a Flow-2
+  > `abicheck_inputs/` pack named by `--build-info` — plus two adjacent to it:
+  > `InputSpec.of()`, the public loose-value factory (not the guard's own
+  > logic), not accepting the new `compile_db_filter` keyword, and the guard
+  > being wired into `resolve_dump_request` only rather than also
+  > `CompareRequest`'s identical exposure. Each was traced to a real, reachable
+  > combination rather than a hypothetical, and each is pinned by its own
+  > regression test. **A ninth, related finding was investigated and
+  > deliberately left as a documented gap rather than "fixed": the keyword-only
+  > `build_compile_db` parameter `execute_dump_request`/
+  > `_resolve_side_snapshot_impl` already accept has the identical unguarded
+  > shape, but it is not a field of `DumpRequest`/`InputSpec` at all and has no
+  > real caller anywhere in the codebase today — it exists purely as
+  > scaffolding for the not-yet-landed real-run migration below, so there is no
+  > reachable path to validate a guard against, and closing it belongs with
+  > that migration rather than shipping unverifiable validation code now.** See
+  > the root `AGENTS.md`'s `service_dump_pipeline.py`/PR C "Known gaps" entry
+  > for the full, numbered account (search "Item (1) closed") — not reproduced
+  > here in full, since it is the identical narrative this plan already defers
+  > to for every other slice in this subsection.
+  >
+  > **Item 2 (castxml) is unchanged, but is not the *sole* remaining blocker
+  > — an earlier revision of this note said so, which a later investigation
+  > (below, "Investigated further (2026-08-27)") corrected.** Routing
+  > `dump_cmd`'s real run through `execute_dump_request` needs castxml
+  > (still unavailable in every environment this work has been done in) for
+  > the migration itself, **and** it needs the `_write_snapshot_output`
+  > Flow-2 `--inputs` pack fold verified against a resolve-time-embedded
+  > snapshot — untested as of the 2026-08-27 investigation below, which
+  > verified the rest of the sequence but explicitly left this one
+  > component open. See that note for the precise, current split rather
+  > than trusting this earlier one.
+  >
+  > Separately, a CI-caught regression from an
+  > unrelated fix in the same session — the write-time-embed fix that gave
+  > `dump`'s L4 replay real `public_headers`/`public_header_dirs` (the "second
+  > real bug" two paragraphs up) — asymmetrically widened `scan`'s own
+  > lone-header-file L4 root set relative to `dump`'s, producing a spurious
+  > `source_decl_binary_symbol_mismatch` on an unchanged library; fixed with an
+  > opt-in `l4_public_headers`/`l4_public_header_dirs` override on
+  > `embed_side_build_source`, scoped to `scan`'s candidate resolution alone
+  > (`compare`/`dump`'s typed pipeline are unaffected). Documented in full in
+  > the same root `AGENTS.md` entry.
+  >
+  > PR 3C therefore stays blocked on item 2 (castxml) and the untested Flow-2
+  > `--inputs` fold noted above, per this section's own ordering rule.
 
   Two #782 follow-ups that change the *parsed public surface*, not just
   performance, so they belong before the model is called finished: (1)
@@ -2000,11 +2125,14 @@ pipelines a fourth time.
   > 2. **The L4 extractor default still diverges** between `scan` (clang, via
   >    `embed_build_source`'s `"auto"`) and `dump`/`compare` (castxml, via
   >    `effective_frontend`). Removing the flags does not cause this, but it
-  >    is a live "two interpreters of one config" instance, and it remains
-  >    unverifiable without castxml — re-checked and still absent in the
-  >    2026-08-21 environment.
+  >    is a live "two interpreters of one config" instance. **No longer
+  >    "unverifiable without castxml"** — see the 2026-08-27 note below this
+  >    block, which obtained a real one and reproduced the divergence
+  >    directly; the fix itself is still not attempted, deliberately.
   > 3. **Prerequisite 3's own remaining `-H`-directory gap**, below, is
-  >    unchanged.
+  >    unchanged. **Update (2026-08-27): closed** — see the dated note
+  >    below this list's own section for the fix and its tests. This item
+  >    no longer blocks anything; items 1 and 2 above still do.
   >
   > Deliberately *not* forced through on the strength of blocker 5/6 being
   > closed: the flags' removal moves their inputs into config, and doing that
@@ -2029,6 +2157,310 @@ pipelines a fourth time.
   > removal, then migrate. The first of those three landed in that session
   > (see the same 3A note) and was a user-facing bug fix in its own right;
   > the second and third are untouched.
+  >
+  > **Update (2026-08-21, later still): the first two of item 1's three
+  > sub-ordering steps are now both done — the legacy-match removal decision
+  > was shipped, and `--compile-db-filter` gained typed-API representation
+  > (eight review-caught corrections, plus one related finding deliberately
+  > left as a documented gap; see the 3A sub-section's "Item 1 closed" note
+  > above for the precise split, and the root `AGENTS.md` for the full
+  > numbered account).** Item 1 of this status block therefore narrows from
+  > "typed-API representation... and reordering the write-time embed" to two
+  > remaining pieces, both still open and neither optional: reordering
+  > `_write_snapshot_output`'s provenance/`--inputs`/depth-gate sequence
+  > around a resolve-time embed, and the still-unstarted third step —
+  > actually migrating `dump_cmd`'s real ELF/PE/Mach-O execution onto
+  > `execute_dump_request`. Of those two, only the migration step is blocked
+  > on an external dependency: castxml, unavailable in every environment
+  > this work had been done in as of this note (item 2 of the 3A
+  > sub-section's own "What still blocks routing `dump_cmd`'s real run"
+  > note) — an implementer resuming this item should not read that as
+  > license to skip the reordering, which has no such external blocker and
+  > could be done independently. **Update (2026-08-27): the tooling half of
+  > this specific blocker is closed — see the 2026-08-27 item-2 note below,
+  > which obtained and verified a local, policy-compliant castxml. That
+  > note's own castxml install was used only to reproduce the already-known
+  > L4 extractor divergence (a narrower, already-scoped test run); "the
+  > migration itself" — this bullet's own byte-identical-output
+  > verification — was not attempted in that same session and remains open
+  > for exactly that reason: not for lack of castxml any more, but for lack
+  > of the work itself.** Items 2 (the L4 extractor default divergence) and
+  > 3 (the `-H` directory gap, below) are unchanged in substance as of this
+  > note, item 2's "unverifiable" framing corrected per its own note — item
+  > 3 is later closed (2026-08-27); see that dated note below for the fix.
+  >
+  > **Investigated further (2026-08-27): the reordering is real work to
+  > *verify*, and its depth-gate/provenance/dependency-scope half is now
+  > verified — real evidence, not further reasoning, that
+  > `_write_snapshot_output`'s current sequence already handles a
+  > resolve-time-embedded snapshot correctly there, with no code change
+  > needed for that half.** (The Flow-2 `--inputs` half is separately
+  > addressed below and stays open.) Traced through both functions' actual
+  > bodies rather than reasoned about
+  > abstractly: `execute_dump_request`'s own `enforce_requested_depth`
+  > (`workflows/artifact/execute.py`) and `_write_snapshot_output`'s
+  > `check_requested_depth_satisfied` (`cli_dump_helpers.py`) are not two
+  > independent implementations that could disagree — the latter's
+  > `_DEPTH_RANK`/`_gated_source_label` are a documented `= DEPTH_RANK`
+  > constant and a documented compatibility alias for
+  > `evidence_depth.gated_source_label`, the exact same shared primitives
+  > the former uses — so calling both in sequence (once inside
+  > `execute_dump_request`, once inside `_write_snapshot_output`, if a
+  > migrated `perform_elf_dump` called both) is redundant, not risky.
+  > Likewise the provenance fold (`fold_dump_provenance_into_dict`) and the
+  > dependency-scope resolution (`resolve_dependency_scope`) both read
+  > `snap.build_source`/`snap` state directly, with no dependency on *when*
+  > that state was populated. The one real question this reading could not
+  > settle from the code alone — whether `build_source_already_satisfies`
+  > (PR 3A blocker 5 sub-issue 3) genuinely prevents a second embed against
+  > a *real*, non-stubbed pack the typed pipeline itself produced, and
+  > whether the rest of the sequence still completes correctly around it —
+  > is now answered end to end:
+  > `tests/test_dump_write_after_resolve_time_embed.py` builds a real
+  > library, runs it through the actual `resolve_dump_request`/
+  > `execute_dump_request` split (`--ast-frontend clang` — the header parse
+  > itself never invokes castxml; a policy-non-compliant castxml stub
+  > (`pip install castxml`, 0.4.5, below the 0.6.11 minimum
+  > `castxml_policy.py` enforces for an authoritative scan) had to be
+  > installed in this session purely to satisfy `tests/conftest.py`'s
+  > `integration`-marker gate, which checks only `shutil.which("castxml")`
+  > and cannot tell that this specific test never calls it — a CI lane that
+  > actually runs the `integration` marker has a real, policy-compliant
+  > castxml installed for its other tests, so this is a local-session
+  > workaround, not a statement that the test needs none), and hands the
+  > result straight to
+  > `_write_snapshot_output` with an explicit `--depth source` — asserting
+  > no second embed occurs, the depth gate does not raise, the provenance
+  > fold correctly reports `effective_depth == "source"`/`degraded is
+  > False`, the written JSON's own `build_source.manifest.coverage` rows
+  > report L3/L4 `"present"`, and — since `BuildSourcePack` serializes its
+  > manifest independently of `build_evidence`/`source_abi`/`source_graph`,
+  > so a regression that drops the real per-layer payload while leaving
+  > those coverage labels stale would pass a labels-only check (Codex
+  > review, fresh evidence) — one representative real fact out of each
+  > layer's own serialized payload: the real compile unit's `standard`
+  > (L3), the real `source_decl_to_binary_symbol` mapping entry for the
+  > compiled symbol (L4), and a non-empty `source_graph.nodes` list (L5).
+  > The dependency-scope resolution step is checked too, and separately
+  > from every fact above (Codex review, fresh evidence — an earlier
+  > revision asserted only provenance/`build_source` facts, none of which
+  > `resolve_dependency_scope` touches, so it would have passed unchanged
+  > even with that call removed entirely): `execute_dump_request`'s own
+  > result carries `dependency_scope == "full"` (it never calls this
+  > step), so asserting the *written* JSON's `dependency_scope ==
+  > "filtered"` is real evidence the step ran on the already-embedded
+  > snapshot, not a value merely carried through.
+  > A second case pins the depth gate's own negative direction (a
+  > `depth="binary"` resolve-time result — no header parse at all, so
+  > `build_source` stays genuinely `None` — still raises
+  > `DumpDepthNotSatisfiedError` for an explicit `--depth source`), so the
+  > redundant check is proven to still be a real gate, not merely inert.
+  >
+  > One genuine, previously-undocumented discovery along the way, recorded
+  > in the test's own docstring so it is not rediscovered: a *headers-only*
+  > resolve-time result (no `--sources`/`--build-info` at all) already
+  > populates `snap.build_source` with a real, if L3/L4-empty, pack —
+  > the header-graph attach pass runs and records L5 coverage regardless of
+  > whether any build evidence was given. "No build/source evidence" for
+  > this class of test therefore needs the header parse itself to never
+  > run (`depth="binary"`, no `-H`), not merely L3/L4 to be empty.
+  >
+  > **What this narrows, precisely — the reordering item is narrowed, not
+  > closed.** The depth-gate/provenance/dependency-scope half of the
+  > sequence is verified safe for a resolve-time embed, so no
+  > `_write_snapshot_output` code change is needed for *that* half. **Still
+  > open, and deliberately not folded into "closed" above (Codex review
+  > caught an earlier revision of this note doing exactly that): whether
+  > `_write_snapshot_output`'s Flow-2 `--inputs` pack fold** — the third
+  > name in "provenance/`--inputs`/depth-gate sequence" — **behaves
+  > identically when layered on top of a resolve-time embed.** Untested
+  > here; constructing a real Flow-2 pack fixture was not attempted. This
+  > prerequisite therefore stays open until that combined path has its own
+  > test, alongside the still-unstarted third step: whether the *whole*
+  > migrated pipeline (a real `perform_elf_dump` calling
+  > `execute_dump_request` end to end, ADR-039 collector included) produces
+  > output byte-identical to today's write-time-embed path under the
+  > *default* castxml backend — "the migration itself." **No longer blocked
+  > on castxml being unavailable** (see the 2026-08-27 item-2 note below,
+  > which obtained one), but this exact byte-identical-output verification
+  > was not attempted with it — the castxml install that session was used
+  > only to reproduce the L4 extractor divergence, a different, narrower,
+  > already-scoped test run. This step stays open until someone actually
+  > runs it.
+  >
+  > **Item 2 (the L4 extractor default divergence) is now locally
+  > reconfirmed under real castxml — but this is a reproduction of an
+  > already-established fact, not its first verification, and deliberately
+  > still not fixed (2026-08-27, corrected same day — Codex review caught an
+  > earlier revision of this note overclaiming both halves of that
+  > sentence).** The divergence was already the *fact owner*'s own recorded
+  > finding, not new: `tests/test_dump_scan_l3_comparability.py`'s own
+  > docstring (added in an earlier commit, `2f1accaa`) already states that
+  > running its `scan`-comparison tests under castxml surfaced this exact
+  > divergence and pinned its signature as
+  > `_SCAN_KNOWN_DIVERGENT_FRONTENDS = frozenset({"castxml"})` — and
+  > `.github/workflows/ci.yml`'s `integration` lane already installs a real,
+  > policy-compliant castxml (`./.github/actions/setup-castxml`) and already
+  > runs this exact module there. So this was neither "unverifiable" nor
+  > "first-time" in any absolute sense; what this session's environment
+  > specifically lacked, and what genuinely changed, was a local castxml
+  > install to reproduce that CI-side finding without waiting on a CI run.
+  > A genuine, policy-compliant castxml (0.7.0, conda-forge, within
+  > `castxml_policy.py`'s `>=0.6.11,<0.8.0` range, bundled Clang 20) was
+  > obtained and installed in *this* environment — `.conda` files are zip
+  > archives around zstd-compressed tarballs, not tarballs themselves, and
+  > the extracted binary needs its `share/castxml/` resource tree alongside
+  > it at a real install prefix, not just the bare executable on `PATH` —
+  > and verified via `castxml_policy.evaluate_castxml_version()` returning
+  > `supported=True`. With it, the two already-pinned xfail cases
+  > (`test_scan_against_real_dump_baseline_is_comparable_on_unchanged_source`
+  > and `test_scan_against_real_dump_baseline_matches_reported_cli_invocation`)
+  > were reproduced locally, matching exactly the divergence their own
+  > long-standing module docstring already predicted: `scan`'s
+  > candidate resolution uses `source_extractor="auto"` (`scan_engine.py`,
+  > `_build_new_snapshot`), which `_make_source_extractor`
+  > (`buildsource/inline.py`) resolves to clang, while `dump`/`compare` reach
+  > `effective_frontend(...)` (`service_compare_evidence.py`), which resolves
+  > `"auto"` through `dumper._resolve_header_backend` to castxml
+  > unconditionally (no clang fallback). The rest of the `integration`-marked
+  > suite for this area — `test_dump_cli_typed_api_parity.py`,
+  > `test_dump_scan_l3_comparability.py`'s non-xfailed cases,
+  > `test_dump_write_after_resolve_time_embed.py`,
+  > `test_dump_embed_idempotence.py` — is 23 passed / 9 deselected / 2 xfailed
+  > under real castxml, i.e. this is the *only* known divergence this suite
+  > can currently see.
+  >
+  > Deliberately **not** changed as part of confirming this: flipping
+  > `scan_engine.py`'s `source_extractor="auto"` to
+  > `effective_frontend(compile_context, header_backend)` (or an equivalent
+  > shared resolver — `abicheck/buildsource/source_extractors/` already has
+  > one, `resolve_source_extractor` in its `resolver.py` (re-exported by the
+  > package's `__init__.py`), independent of `_make_source_extractor`, worth
+  > checking for reuse before hand-rolling a call site) would make
+  > `scan --depth source` require castxml at its defaults for every user who
+  > doesn't already have one installed — that line's own existing comment
+  > already names this precisely: "a real behaviour change for real users...
+  > unverifiable without a castxml-capable lane," calling for "its own
+  > dedicated verification against real castxml/clang divergence in
+  > production usage, not a side effect of hardening this module's test
+  > coverage." Having a local castxml install closes the *unverifiable*
+  > half of that sentence for this environment (CI's own `integration` lane
+  > already had it, per above), not the *dedicated verification in
+  > production usage* half — the two xfail tests exercise one project shape
+  > each, not the breadth "production usage" implies, and a default-changing
+  > fix here is exactly the class of decision this file's own established
+  > "known gaps over risky reactive patches" convention (see this plan's own
+  > 2026-08-19 note above, and `AGENTS.md`'s "Known gaps" entries throughout
+  > this same code area) says belongs in its own dedicated, deliberately
+  > verified pass rather than a rushed follow-on to an investigation whose
+  > actual subject was the plan doc, not this call site — not a claim that
+  > any repository rule requires a maintainer's explicit sign-off before it
+  > can land (Codex review — an earlier revision of this note overstated
+  > that). Left as item 2, unchanged in substance, with its "unverifiable"
+  > framing corrected to "verified and reproduced, fix not yet attempted"
+  > so a future session does not have to redo the castxml acquisition to
+  > pick this up.
+
+  > **Item 2 attempted, and reverted: the flag flip is unsafe, and the real
+  > blocking bug is now precisely characterized (2026-08-27).** With a real,
+  > policy-compliant castxml now available, the obvious fix was tried:
+  > `scan_engine.py`'s `source_extractor="auto"` (always clang) changed to
+  > `source_extractor=None`, which `embed_side_build_source` already
+  > documents as the untaken path — it lets the L4 replay frontend resolve
+  > via `service_compare_evidence.effective_frontend`, the same primitive
+  > `dump`/`compare` already use, matching L4 to the L2 header-AST parse
+  > `scan` already runs through the identical `header_backend="auto"`
+  > resolution. Verified against the two `_SCAN_KNOWN_DIVERGENT_FRONTENDS`
+  > xfail tests: the *originally diagnosed* divergence signature
+  > (`COMPATIBLE_WITH_RISK` naming `source_fact_coverage_incomplete`) no
+  > longer reproduced — but a *different*, real failure did:
+  > `source_binary_provenance_mismatch` on both sides ("6/7 exportable
+  > public declarations... do not map to any exported binary symbol").
+  >
+  > Traced to ground rather than left as a surprising number. A minimal
+  > `struct Widget { int x, y; int sum() const {...}; }` + a free function
+  > `compute(const Widget&)`, compiled and dumped directly (`dump --depth
+  > source --ast-frontend castxml`, no `scan` involved) reproduces the
+  > identical shape: `exported_symbols: 2, matched_symbols: 1`. Inspecting
+  > the raw `source_decl_to_binary_symbol` mapping shows why —
+  > `_CastxmlParser.parse_functions()` (`dumper_castxml.py`), reused
+  > verbatim by the castxml L4 extractor's `_parse_root`
+  > (`buildsource/source_extractors/castxml.py`), returns castxml's
+  > compiler-synthesized IMPLICIT special members for `Widget` (three
+  > constructor overloads, two assignment operators, the destructor —
+  > `Widget`'s own real, user-written code declares none of these) as
+  > ordinary `Function` entries, all with a real, public-header-declared
+  > `origin`. `buildsource/source_extractors/base.py`'s `entity_from_function`
+  > — the shared, tool-independent model→`SourceEntity` mapping castxml's
+  > L4 path (and only that path; clang's own L4 extractor builds
+  > `SourceEntity` directly and never goes through this function) routes
+  > through — computes `api_relevant` from `fn.origin`/`fn.access` alone; it
+  > never consults `fn.visibility`, `is_synthetic_ctor_key`/
+  > `is_synthetic_dtor_key`, or castxml's own raw `artificial="1"` XML
+  > attribute. So every one of these six phantom, never-written declarations
+  > lands in the L4 `reachable_source_surface` as real public API — and,
+  > since a *trivial* implicit special member is essentially never emitted
+  > as its own out-of-line symbol, five of the six show up as
+  > `decls_without_symbol`, which is exactly what drags the match ratio low
+  > enough to trip `source_binary_provenance_mismatch`'s "this source
+  > doesn't look like it corresponds to this binary" heuristic — a false
+  > positive of that heuristic, not evidence of an actual checkout/binary
+  > mismatch. (The seventh entry, `compute()` itself, is a *separate*,
+  > already-expected, non-bug absence on both castxml and clang alike — it
+  > is declared and defined only in the `.cpp` TU, never in the public
+  > header, so both backends correctly exclude it from the public source
+  > surface regardless of this bug.)
+  >
+  > This is why the flag flip was reverted rather than shipped: it is
+  > directionally correct (matching L4 to L2's own frontend, exactly as
+  > `embed_side_build_source`'s own docstring already prescribed) but
+  > surfaces a genuine, previously-invisible castxml L4 extractor bug —
+  > invisible before only because `scan`'s L4 replay always used clang
+  > regardless of `--ast-frontend`, so castxml's L4 declaration surface was
+  > never actually exercised end to end through `scan --against` until this
+  > attempt. `dump --depth source --ast-frontend castxml` on any class
+  > relying on the compiler's own implicit special members already carries
+  > this same defect today, independent of `scan` or this migration — it
+  > just has no comparable "provenance mismatch" self-check to trip over it
+  > the way the `scan`-side comparison did.
+  >
+  > **Deliberately not fixed in the same pass, and here is exactly why.**
+  > The obvious-looking fix — exclude `fn.visibility == Visibility.HIDDEN`
+  > from `api_relevant` in `entity_from_function` — was checked directly
+  > against the raw XML and rejected: `castxml.py`'s `_parse_root`
+  > constructs `_CastxmlParser` with **empty** `exported_dynamic`/
+  > `exported_static` sets (L4 has no ELF symbol table to check against at
+  > parse time), so `_visibility()`'s plain ELF-lookup fallback returns
+  > `HIDDEN` unconditionally for *every* ordinary function in this context
+  > too — confirmed directly: `sum()`, the one real, legitimate public
+  > method in the fixture, resolves to `visibility=HIDDEN` under this same
+  > empty-ELF-set L4 parse (only the ctor/dtor-specific fallback in
+  > `_ctor_or_dtor_visibility` treats `artificial` specially; ordinary
+  > methods have no such fallback at L4 parse time at all). Filtering on
+  > `visibility` would therefore exclude every real declaration from L4
+  > along with the phantom ones, not just the phantom ones. The two
+  > synthetic-mangled-name markers already in this codebase
+  > (`is_synthetic_ctor_key`/`is_synthetic_dtor_key`) are closer but still
+  > incomplete: castxml emits a real-looking Itanium mangled name for a
+  > compiler-synthesized `operator=` (confirmed: `_ZN6WidgetaSERKS_`/
+  > `_ZN6WidgetaSEOS_` in the fixture above), so neither marker catches it —
+  > two of the six phantom entries would still leak through. The only
+  > reliable, general signal is castxml's own raw `artificial="1"` XML
+  > attribute, which `_parse_function_element` currently reads *only* for
+  > the `Constructor`/`Destructor` branch and never records on the
+  > `Function` object itself for any other declaration kind (`operator=`
+  > included) — closing this for real needs a new field on the shared,
+  > public `Function` model (a real, if narrow, public-API/schema-version
+  > change per `model.py`'s own documented contract), populated
+  > consistently by both header backends, and re-verified against every
+  > existing consumer of `Function.visibility`'s current HIDDEN/PUBLIC
+  > split before trusting a change to it — a genuine, separate,
+  > cross-cutting fix, not a follow-up edit to `base.py` alone. Filed here,
+  > per this file's own "known gaps over risky reactive patches"
+  > discipline, rather than attempted under continued investigation
+  > pressure. Item 2 therefore stays open, with its blocker now precisely
+  > characterized instead of merely "unverifiable" or "needs its own
+  > dedicated pass" in the abstract.
 
 `dump --build-query` and `dump --build-compile-db` describe how the *project*
 is built, not what this snapshot is. They are already documented as CLI
@@ -2153,16 +2585,40 @@ the parser to lists only — every existing trusted string config would break.
 > test_dry_run_build_query_flow2_packs.py` (the dry-run preview, mirroring
 > the existing classic-pack CLI tests one-for-one).
 >
-> **The `-H` directory gap remains open** (it predates this module —
-> `render_dump_dry_run` has never expanded `-H` directories for validation).
-> Closing it needs a design decision about real directory-walk validation
-> inside `--dry-run`'s own established "cheap, read-only... no I/O beyond
-> stat()/PATH lookups" contract, not a scoped fix to this module alone — so
-> PR 3C's removal itself (`dump --build-query`/`dump --build-compile-db`
-> deletion) should not proceed until it is closed or explicitly accepted as
-> a permanent gap, on top of still waiting on the ordering's own blocker:
-> PR 3A's full convergence (both `dump` and `scan` resolvers), which remains
-> open per that section's own status notes above.
+> **The `-H` directory gap is closed (2026-08-27).** The "design decision"
+> this note originally called for turned out not to be one: `_expand_header_
+> inputs` (`cli_resolve.py`) — the exact function the real run already calls
+> downstream to expand a `-H` directory into its header files, raising
+> `click.ClickException` for a missing path, an empty header directory, or a
+> path that is neither file nor directory — is itself already a pure
+> directory walk (`iter_directory_headers`'s `rglob`) with no compiler/build
+> invocation, squarely inside `--dry-run`'s existing "no I/O beyond
+> stat()/PATH lookups" contract; a `rglob` over an already-resolved local
+> directory is filesystem-stat-family I/O, not the kind of "real work" that
+> contract exists to keep out. `dump_cmd` (`frontends/cli/commands/dump.py`)
+> now calls it once, unconditionally, immediately after `headers` gets its
+> final post-`resolve_dump_collect_context` value — before either the
+> `--dry-run` or the real-run branch — mirroring the exact pattern this same
+> file already uses for its other two unconditional pre-branch usage-error
+> checks (the hybrid+depth rejection, the binary-depth-with-no-SO_PATH
+> rejection). The result is discarded; the call exists purely for its
+> validation side effect, and the real run's own downstream expansion call
+> is untouched (a second, cheap, idempotent directory walk, not worth
+> threading a resolved value through every intermediate call site to avoid).
+> Verified end to end: `dump --dry-run -H <empty-dir>` and `dump -H
+> <empty-dir>` (no `--dry-run`) now produce the byte-identical error message
+> and exit code (1), where the dry-run path previously exited 0. Tests:
+> `tests/test_dry_run_contract.py::TestDumpDryRun::
+> test_dry_run_rejects_empty_header_directory_like_the_real_run` (both
+> invocations, one assertion each) and `::
+> test_dry_run_accepts_a_header_directory_with_real_headers` (the positive
+> control, confirming a real header directory dry-runs cleanly as before).
+>
+> This closes PR 3C prerequisite 3 in full. **PR 3C's removal itself
+> remains blocked**, unchanged by this — the ordering blocker is PR 3A's
+> full convergence (both `dump` and `scan` resolvers), which is a separate,
+> larger item covered in that section's own status notes above and not
+> touched by this fix.
 
 **Risk:** medium — this is a trust boundary, and it is the one item here where
 a mistake is a security regression rather than a UX one.
@@ -2776,9 +3232,10 @@ PR G1 canonical exit decision, part 1 — ExitDecision + reasons + the report
                                        tests; NO CLI change, no flag removed.
                                        Lands before PR E, which consumes it
 PR E  Action machine-report           = PR 1b — uncapped persisted release
-                                       findings, no comparison re-run, no
+      (DONE)                           findings, no comparison re-run, no
                                        stderr inference; reads G1's block
-      └─ then DELETE --annotate, --annotate-additions
+      └─ DELETE --annotate, --annotate-additions — DONE, verified against
+         current abicheck/cli.py and action.yml
 PR F  trusted build config            = PR 3C — build.query executes only
                                        from an explicit --config (a data
                                        path like build.compile_db carries no
@@ -2794,7 +3251,10 @@ PR H  artifact-set semantics          = PR 5 — provider ownership, moved and
 ```
 
 Independent of the chain, unblocked at any time: PR 1 (**done**), PR 2
-(**done**, minus its `.abicheck.yml` gate-policy sourcing follow-up).
+(**done**, minus its `.abicheck.yml` gate-policy sourcing follow-up), PR E /
+1b (**done** — annotations moved to the Action; see PR 1b's own section,
+whose "blocked on a persistence prerequisite" subtitle was stale until this
+pass corrected it).
 
 **Superseded original ordering:**
 

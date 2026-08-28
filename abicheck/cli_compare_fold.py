@@ -261,9 +261,9 @@ class _ScopedFold:
         import json
 
         from .checker_policy import EvidenceStatus
+        from .report.render_text import format_stat_line
         from .reporter import _change_to_dict, _finding_id, to_stat_json
         from .reporter_markdown import _VERDICT_LABEL
-        from .stat_line import format_stat_line
 
         base = to_stat_json(self.result, severity_config=self.severity_config)
         folded = json.loads(self.into_json(base))
@@ -528,7 +528,7 @@ class _ScopedFold:
             )
             root_cause_entries.append((key, root_display, entry))
         for label in missing_labels:
-            from .finding_identity import (
+            from .workflows.findings import (
                 missing_contract_finding,
                 report_canonical_finding_id,
                 report_finding_id,

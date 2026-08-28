@@ -31,6 +31,7 @@ from .diff_helpers import (
     lookup_matched_type as _lookup_matched_type,
     make_change,
     type_map_key,
+    typedef_diff_maps as _typedef_diff_maps,
 )
 from .diff_symbols import (
     _PUBLIC_VIS,
@@ -185,16 +186,12 @@ def _removals_are_unconfirmed(old: AbiSnapshot, new: AbiSnapshot) -> bool:
     )
     if not new_stripped_of_types:
         return False
-    # Corroborate with exported-symbol retention: a stripped-but-intact binary
-    # keeps (almost) all of the old side's exports; if most are gone, the library
-    # genuinely changed and removals are real.
-    #
-    # Only count *exported* symbols (PUBLIC/ELF_ONLY). A DWARF-primary old
-    # snapshot also records internal/static subprograms, but the stripped new
-    # side carries dynamic exports only — counting internals would deflate
-    # retention and defeat the suppression for a genuinely intact comparison.
-    # Prefer functions; fall back to variables for data-only DSOs so a changed
-    # variable surface still surfaces removals (CodeRabbit review on PR #275).
+    # Corroborate with exported-symbol retention: a stripped-but-intact
+    # binary keeps (almost) all of the old side's exports; if most are gone,
+    # removals are real. Only *exported* symbols (PUBLIC/ELF_ONLY) — a
+    # DWARF-primary old snapshot also records internal/static subprograms the
+    # stripped side's exports never carry. Fall back to variables for
+    # data-only DSOs (CodeRabbit review on PR #275).
     old_funcs = _exported_elf_symbol_names(old, symbol_types=FUNCTION_SYMBOL_TYPES)
     new_funcs = _exported_elf_symbol_names(new, symbol_types=FUNCTION_SYMBOL_TYPES)
     if not old_funcs or not new_funcs:
@@ -273,10 +270,9 @@ def _diff_types(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
         # every other consumer already keys on: dumper_hybrid's per-fact
         # provenance dict (type_fact_key/field_fact_key, Codex review PR #608)
         # and diff_filtering._dedup_cross_kind's DWARF<->AST redundancy
-        # correlation, which matches a DWARF field symbol's *bare* parent
-        # type name against the AST-level type symbol (FIX-F) -- a qualified
-        # symbol here would silently stop that correlation from firing for
-        # any namespaced type.
+        # correlation (FIX-F), which bridges a namespaced type's bare-vs-
+        # qualified spelling via the separate ``qualified_name`` field rather
+        # than requiring ``symbol`` itself to be qualified.
         name = t_old.name
         if t_new is None:
             if suppress_removed:
@@ -551,6 +547,11 @@ def _append_type_size_and_alignment_changes(
     t_old: RecordType,
     t_new: RecordType,
 ) -> None:
+    # This caller knows the matched RecordType pair directly, so it can
+    # stamp real identity even when record_canonical_names' bare-name
+    # bridge can't (an unrelated `a::Widget`/`b::Widget` collision
+    # elsewhere in the snapshot -- Codex review).
+    qualified = t_new.qualified_name or t_old.qualified_name
     if (
         t_old.size_bits is not None
         and t_new.size_bits is not None
@@ -563,6 +564,7 @@ def _append_type_size_and_alignment_changes(
                 name=name,
                 old=str(t_old.size_bits),
                 new=str(t_new.size_bits),
+                qualified_name=qualified,
             )
         )
 
@@ -577,6 +579,7 @@ def _append_type_size_and_alignment_changes(
                 symbol=name,
                 name=name,
                 old=str(t_old.alignment_bits),
+                qualified_name=qualified,
                 new=str(t_new.alignment_bits),
             )
         )
@@ -601,10 +604,9 @@ def _try_match_reserved_field(
     candidate: TypeField | None = None
     # Primary: match by offset + type (when available). Excludes candidates
     # already consumed by an earlier reserved-field or rename match at this
-    # offset (multiple distinct added fields can share an offset_bits, e.g.
-    # overlapping anonymous-union members) — otherwise two removed fields
-    # could both claim the same added field, hiding that one was genuinely
-    # dropped (caught in review).
+    # offset (distinct added fields can share an offset_bits, e.g.
+    # overlapping anonymous-union members) — else two removed fields could
+    # claim the same added field, hiding a genuine drop (caught in review).
     if f_old.offset_bits is not None:
         candidate = next(
             (
@@ -682,21 +684,18 @@ def _diff_removed_field(
     added_by_type: dict[str, list[TypeField]],
     reserved_matched_added: set[str],
     renamed_type_changed_added: set[str],
+    *,
+    qualified_name: str | None = None,
 ) -> Change | None:
     """Classify a field missing from the new type as reserved-use, rename(+retype), or removal.
 
     Returns FIELD_RENAMED directly for a pure rename (same offset, identical
-    type, different name) instead of TYPE_FIELD_REMOVED: emitting a redundant,
-    misleading BREAKING removal for a field that still exists at its offset
-    would overstate the severity. This does not rely on ``_diff_field_renames``
-    independently matching the same pair — that detector keys on the *raw*
-    ``(offset_bits, type)`` tuple while canonical-equal-but-differently-spelled
-    types (e.g. ``struct Foo`` vs ``Foo``) would canonicalize equal here but
-    not raw-match there, which would silently drop the finding entirely rather
-    than just double-report it (caught in review). Emitting the same
-    ``FIELD_RENAMED`` shape here (identical description) is safe either way:
-    when ``_diff_field_renames`` *also* fires for a raw-matching pair, the
-    post-processing dedup pass collapses the duplicate.
+    type, different name) instead of TYPE_FIELD_REMOVED, which would overstate
+    the severity. Doesn't rely on ``_diff_field_renames`` also matching the
+    pair — that detector keys on the raw ``(offset_bits, type)`` tuple, which
+    a canonical-equal-but-differently-spelled type (``struct Foo`` vs ``Foo``)
+    can miss (caught in review); emitting the identical shape here is safe
+    either way, since the post-processing dedup pass collapses a duplicate.
     """
     # Check if this is a reserved field put into use
     matched = _try_match_reserved_field(
@@ -713,10 +712,9 @@ def _diff_removed_field(
     if f_old.offset_bits is not None:
         # Excludes candidates already consumed by an earlier reserved-field
         # or rename match at this offset — distinct added fields can share
-        # an offset_bits (e.g. overlapping anonymous-union members), and
-        # without this two removed fields could both claim the same added
-        # field as their target, hiding that one was genuinely dropped
-        # (caught in review).
+        # an offset_bits (overlapping anonymous-union members), and without
+        # this two removed fields could both claim the same target, hiding
+        # that one was genuinely dropped (caught in review).
         candidates = [
             c
             for c in added_by_offset.get(f_old.offset_bits, [])
@@ -727,28 +725,23 @@ def _diff_removed_field(
                 and not _RESERVED_FIELD_RE.match(c.name)
             )
         ]
-        # Prefer an exact pure-rename match over an arbitrary first
-        # candidate: when several distinct fields share an offset
-        # (anonymous-union/overlap layouts), the first unconsumed one in
-        # declaration order might be an unrelated retype while a later one
-        # is the true rename target. Picking the retype first would both
-        # report a false TYPE_FIELD_TYPE_CHANGED here *and* leave the true
-        # rename target for the independent `_diff_field_renames` detector
-        # to separately claim as FIELD_RENAMED — two contradictory findings
-        # for the same old field (caught in review).
+        # Prefer an exact pure-rename match over an arbitrary first candidate:
+        # with several fields sharing an offset (anonymous-union/overlap
+        # layouts), the first unconsumed one might be an unrelated retype
+        # while a later one is the true rename target — picking the retype
+        # first would both misreport TYPE_FIELD_TYPE_CHANGED here and leave
+        # `_diff_field_renames` to separately claim FIELD_RENAMED for the
+        # same old field (caught in review).
         f_new = next(
             (
                 c
                 for c in candidates
                 if (
                     canonicalize_type_name(f_old.type) == canonicalize_type_name(c.type)
-                    # A bit-field's width is a layout property the type
-                    # spelling doesn't capture (e.g. two "unsigned int"
-                    # fields can differ in bit width at the same byte
-                    # offset) — require it to also match before treating
-                    # this as a harmless rename, or a real
-                    # FIELD_BITFIELD_CHANGED break gets masked as a bare
-                    # rename (caught in review).
+                    # A bit-field's width isn't captured by the type spelling
+                    # — require it to also match, or a real
+                    # FIELD_BITFIELD_CHANGED break gets masked as a rename
+                    # (caught in review).
                     and f_old.is_bitfield == c.is_bitfield
                     and f_old.bitfield_bits == c.bitfield_bits
                 )
@@ -774,12 +767,16 @@ def _diff_removed_field(
                 detail=f"{fname} -> {f_new.name}",
                 old=f_old.type,
                 new=f_new.type,
+                qualified_name=qualified_name,
+                field_name=fname,
             )
     return make_change(
         ChangeKind.TYPE_FIELD_REMOVED,
         symbol=name,
         name=name,
         detail=fname,
+        qualified_name=qualified_name,
+        field_name=fname,
     )
 
 
@@ -821,6 +818,9 @@ def _diff_type_fields(
     changes: list[Change] = []
     old_fields = {f.name: f for f in t_old.fields}
     new_fields = {f.name: f for f in t_new.fields}
+    # Same qualified-identity stamp as _append_type_size_and_alignment_changes
+    # above, threaded down to the field-level emitters (Codex review).
+    qualified = t_new.qualified_name or t_old.qualified_name
 
     added_by_offset, added_by_type = _index_added_fields(old_fields, new_fields)
     # Track which added fields were matched as reserved-field activations
@@ -847,6 +847,7 @@ def _diff_type_fields(
                 added_by_type,
                 reserved_matched_added,
                 renamed_type_changed_added,
+                qualified_name=qualified,
             )
             if removed_change is not None:
                 changes.append(removed_change)
@@ -856,7 +857,12 @@ def _diff_type_fields(
             continue
         changes.extend(
             _diff_type_field_pair(
-                name, fname, f_old, f_new, cv_facts_reliable=cv_facts_reliable
+                name,
+                fname,
+                f_old,
+                f_new,
+                cv_facts_reliable=cv_facts_reliable,
+                qualified_name=qualified,
             )
         )
 
@@ -886,16 +892,14 @@ def _diff_type_field_pair(
     f_new: TypeField,
     *,
     cv_facts_reliable: bool = True,
+    qualified_name: str | None = None,
 ) -> list[Change]:
     changes: list[Change] = []
     # Use canonical form for type comparison to avoid false positives from
-    # "struct Foo" vs "Foo" or "const int" vs "int const" differences.
-    # A pointee/by-value cv-qualifier change (``char *`` -> ``const char *``)
-    # leaves the field's size and offset unchanged — it is source-level churn,
-    # not a binary layout break (ISSUE-30/35/65). Top-level field const/volatile
-    # is reported separately by the ``field_qualifiers`` detector. See
-    # _field_type_genuinely_changed for the additional legacy-snapshot
-    # cv_facts_reliable handling.
+    # "struct Foo" vs "Foo" or "const int" vs "int const". A pointee/by-value
+    # cv-qualifier change (``char *`` -> ``const char *``) leaves size/offset
+    # unchanged -- source churn, not a layout break (ISSUE-30/35/65); see
+    # _field_type_genuinely_changed for cv_facts_reliable handling.
     if _field_type_genuinely_changed(
         f_old.type, f_new.type, cv_facts_reliable=cv_facts_reliable
     ):
@@ -907,6 +911,8 @@ def _diff_type_field_pair(
                 detail=fname,
                 old_value=f_old.type,
                 new_value=f_new.type,
+                qualified_name=qualified_name,
+                field_name=fname,
             )
         )
     if (
@@ -922,6 +928,8 @@ def _diff_type_field_pair(
                 detail=fname,
                 old=str(f_old.offset_bits),
                 new=str(f_new.offset_bits),
+                qualified_name=qualified_name,
+                field_name=fname,
             )
         )
     if (
@@ -1205,26 +1213,25 @@ def _vtable_transition_is_evidenced(
     # NOT consulted here: ``vptr_offset_bits``. It reads like the one
     # independent layout witness available, and a previous revision of this
     # function used it as exactly that -- wrongly. At the time, both
-    # producers assigned it as ``0 if vtable else None``
-    # (``dwarf_snapshot.py``, ``dumper_castxml.py``), so on those two
-    # backends ``(old.vptr_offset_bits is None) != (new.vptr_offset_bits is
-    # None)`` was *identical*
-    # to the empty-vs-non-empty vtable transition being guarded: it was true
-    # by construction for every input reaching this point, which silently
-    # made the whole guard a no-op and let the original capture-gap false
-    # positive straight back through (Codex review). ``dumper_castxml.py``
-    # still assigns it exactly that way. ``dwarf_snapshot.py`` no longer
-    # does (G31 Phase C): it now reads a real ``_vptr.<Class>``/base-chain
-    # offset from DWARF in the common case, falling back to the same
-    # ``0 if vtable`` heuristic only for the residual unresolved set -- so
-    # for DWARF specifically the field is no longer purely circular. This
-    # function still doesn't consult it, on purpose: declining to use an
-    # available signal is always safe (the failure mode this guard exists to
-    # avoid only ever ran the other way -- trusting a circular signal AS IF
-    # independent), and using it as a genuine witness for the now-partially-
-    # real DWARF case while still excluding it for castxml's own
-    # still-fully-circular case is its own careful design + FP-verification
-    # effort, not a drive-by extension here — see
+    # producers assigned it as ``0 if vtable else None`` (``dwarf_snapshot.
+    # py``, ``dumper_castxml.py``), so on those two backends
+    # ``(old.vptr_offset_bits is None) != (new.vptr_offset_bits is None)``
+    # was *identical* to the empty-vs-non-empty vtable transition being
+    # guarded: true by construction for every input reaching this point,
+    # which silently made the whole guard a no-op and let the original
+    # capture-gap false positive straight back through (Codex review).
+    # ``dumper_castxml.py`` still assigns it exactly that way. ``dwarf_
+    # snapshot.py`` no longer does (G31 Phase C): it now reads a real
+    # ``_vptr.<Class>``/base-chain offset from DWARF in the common case,
+    # falling back to the same ``0 if vtable`` heuristic only for the
+    # residual unresolved set -- so for DWARF the field is no longer purely
+    # circular. This function still doesn't consult it, on purpose:
+    # declining to use an available signal is always safe (the failure mode
+    # this guard exists to avoid only ever ran the other way -- trusting a
+    # circular signal AS IF independent), and using it as a genuine witness
+    # for the now-partially-real DWARF case while still excluding it for
+    # castxml's own still-fully-circular case is its own careful design +
+    # FP-verification effort, not a drive-by extension here — see
     # ``tests/test_vtable_evidence_guard.py``'s own note on why
     # ``abicheck.dwarf_snapshot`` was dropped from its premise-pin test.
     # Only the optional ``ABICHECK_CLANG_LAYOUT_TOOL`` path computes it from
@@ -1349,22 +1356,18 @@ def _owned_virtual_signatures(name: str, funcs: Mapping[str, Function]) -> set[s
     from .diff_cxx_rules import owner_class_of
     from .type_reachability_spelling import _namespace_suffix_spellings
 
-    # An *exact* comparison was wrong, and wrong in the direction that
-    # silences findings (Codex review). CastXML records a namespaced class
-    # under its bare leaf (`A`) while `owner_class_of` reconstructs the
-    # qualified `ns::A` from the mangled method, so the two never met, both
-    # signature sets came back empty, and the guard fell through to the size
-    # check it is meant to backstop -- suppressing, for instance, a class
-    # losing its last private virtual with no size change, which no other
-    # detector reports.
+    # An *exact* comparison was wrong, in the direction that silences
+    # findings (Codex review). CastXML records a namespaced class under its
+    # bare leaf (`A`) while `owner_class_of` reconstructs the qualified
+    # `ns::A` from the mangled method, so the two never met, both signature
+    # sets came back empty, and the guard fell through to the size check --
+    # suppressing e.g. a class losing its last private virtual with no size
+    # change, which no other detector reports.
     #
-    # Matched through `_namespace_suffix_spellings`, the same
-    # bare-vs-qualified machinery the rest of the codebase resolves type
-    # identities with (it is depth-aware, so a template argument's own `::`
-    # is not mistaken for a namespace boundary). Suffix matching is
-    # deliberately *eager* here: a spurious match makes the two sides' sets
-    # differ, which reads as evidenced and keeps the finding. For a
-    # suppression, erring toward keeping is the only safe direction.
+    # Matched through `_namespace_suffix_spellings` (depth-aware, so a
+    # template argument's own `::` isn't mistaken for a namespace boundary).
+    # Deliberately *eager*: a spurious match makes the two sides' sets
+    # differ, which keeps the finding -- the only safe direction here.
     wanted = {name, *_namespace_suffix_spellings(name)}
 
     def _owns(fn: Function) -> bool:
@@ -1464,15 +1467,12 @@ def _diff_type_vtable(
         return []
     if not _vtable_transition_is_evidenced(name, t_old, t_new, old_funcs, new_funcs):
         return []
-    # Same slot count, same order, and every differing slot is a same-signature
-    # override reusing its base's slot (case185) -> no real layout change, just
-    # a slot's mangled owner renaming from base to derived; func_added (from
-    # diff_symbols._diff_functions) already covers the newly-materialized
-    # symbol. See vtable_slot_is_override_reuse() for why this must mirror
-    # virtual_method_addition()'s exemption (including its own-owner-descends-
-    # from-old-owner guard, so an unrelated same-signature virtual -- e.g. a
-    # sibling base, or a base-class swap -- can't false-suppress a genuine
-    # slot replacement).
+    # Same slot count/order, every differing slot a same-signature override
+    # reusing its base's slot (case185) -> no real layout change, just a
+    # slot's mangled owner renaming base to derived; func_added already
+    # covers the new symbol. Mirrors virtual_method_addition()'s exemption
+    # (own-owner-descends-from-old-owner guard included, so an unrelated
+    # same-signature virtual can't false-suppress a genuine replacement).
     if len(t_old.vtable) == len(t_new.vtable) and all(
         vtable_slot_is_override_reuse(
             old_entry, new_entry, old_funcs, new_funcs, old_types, new_types
@@ -1945,28 +1945,32 @@ def _diff_typedefs(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     excl = _exclude_stdlib_namespaces(old, new)
     # RD2-5: don't manufacture phantom TYPEDEF_REMOVED when the new side is stripped.
     suppress_removed = _removals_are_unconfirmed(old, new)
-    for alias, old_type in old.typedefs.items():
+    old_typedefs, new_typedefs = _typedef_diff_maps(old, new)
+    for alias, old_type in old_typedefs.items():
+        # Full alias: correct for both legacy-DWARF's and the qualified map's keys.
         if _is_non_abi_surface_type(alias, exclude_stdlib_namespaces=excl):
             continue
-        new_type = new.typedefs.get(alias)
+        # symbol/name stay bare like _diff_types (else _enrich_affected_symbols
+        # breaks); qualified_suffix disambiguates description so dedup can't collapse collisions.
+        bare_alias = alias.rsplit("::", 1)[-1]
+        qualified_suffix = f" ({alias})" if alias != bare_alias else ""
+        new_type = new_typedefs.get(alias)
         if new_type is None and suppress_removed:
             continue
         if new_type is None:
             # Version-stamped typedefs (e.g. png_libpng_version_1_6_46) are
-            # compile-time sentinels — their name encodes the version and
-            # changes every release intentionally.  They are never exported as
-            # ELF symbols, so their removal is NOT a binary ABI break.
-            # Require a same-family successor in new_typedefs to avoid hiding
-            # genuine TYPEDEF_REMOVED breaks for names that merely match the
-            # version-stamp pattern.
+            # compile-time sentinels that change every release by design and
+            # are never exported as ELF symbols -- not a binary ABI break.
+            # Require a same-family successor to avoid hiding a genuine
+            # TYPEDEF_REMOVED for a name that merely matches the pattern.
             if _is_version_stamped_typedef(alias) and _has_version_family_successor(
-                alias, new.typedefs
+                alias, new_typedefs
             ):
                 changes.append(
                     make_change(
                         ChangeKind.TYPEDEF_VERSION_SENTINEL,
-                        symbol=alias,
-                        name=alias,
+                        symbol=bare_alias,
+                        name=bare_alias,
                         old_value=old_type,
                     )
                 )
@@ -1975,19 +1979,21 @@ def _diff_typedefs(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
             changes.append(
                 make_change(
                     ChangeKind.TYPEDEF_REMOVED,
-                    symbol=alias,
-                    name=alias,
+                    symbol=bare_alias,
+                    name=bare_alias,
                     old_value=old_type,
+                    description=f"Typedef removed: {bare_alias}{qualified_suffix}",
                 )
             )
         elif new_type != old_type:
             changes.append(
                 make_change(
                     ChangeKind.TYPEDEF_BASE_CHANGED,
-                    symbol=alias,
-                    name=alias,
+                    symbol=bare_alias,
+                    name=bare_alias,
                     old_value=old_type,
                     new_value=new_type,
+                    description=f"Typedef base type changed: {bare_alias}{qualified_suffix}",
                 )
             )
     return changes

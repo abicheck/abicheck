@@ -245,6 +245,7 @@ nav:
       - Detector Impact Contract: contribute/detector-impact-contract.md
       - Use-Case Impact: contribute/use-case-impact.md
       - Performance: contribute/performance.md
+      - Known Gaps & Reverted Fixes: contribute/known-gaps.md
     - Roadmap & Status:
       - Goals: contribute/goals.md
       - SciPy / Scientific-Python Roadmap: contribute/scipy-scientific-python-roadmap.md

@@ -125,6 +125,57 @@ declared multi-target/multi-profile topology is `project`'s job; folding
 already-produced per-check reports back into one gate is `aggregate`'s —
 neither of those two analyzes a binary directly.
 
+### Migrating a multi-library project onto the declarative topology
+
+For a co-versioned release like oneDAL — several libraries, some built under
+divergent compiler flags (e.g. `-fsycl` for a subset) — there are two ways to
+wire `abicheck` into CI. The one every project can use today is
+`abicheck compare` on directory/package inputs (see the table above) driven
+directly from your own workflow, with a release-asset baseline and a
+committed digest anchor — cross-library findings (removed dependencies,
+provider changes) from this path are **ELF/Linux-only**; a Windows/macOS
+release gets per-library results only, with bundle analysis silently
+skipped (see [Platform Support](https://abicheck.github.io/abicheck/user-guide/multi-binary/#platform-support)).
+The other is G30/ADR-047's declarative topology: a
+`.abicheck.yml` `targets:`/`bundles:`/`profiles:`/`baseline:` block, validated
+with `abicheck project validate`, fanned out with `abicheck project plan`,
+and run by the reusable `check-project.yml`/`publish-baseline.yml`
+workflows — zero project-owned Python. See the
+[Project Targets Reference](https://abicheck.github.io/abicheck/reference/project-targets-schema/).
+
+The declarative path isn't a drop-in replacement for every project yet.
+Before adopting it, confirm none of these apply to you:
+
+- **`bundles:` checks only run at `depth: binary`** — `headers`/`build`/
+  `source` are rejected at `project validate`. If your bundle-level check
+  needs header-scope evidence, it can't run through a `bundles:` entry today.
+- **Per-target `public_headers:` is validated but not yet projected into a
+  run-plan cell** — it's schema-checked, but nothing downstream reads it to
+  build a `-H` argument for you.
+- **Stored-facts bundle comparison (`BundleFacts`) has no run-plan/composite
+  Action/`check-project.yml` wiring** — it's reachable from the Python API
+  only, not from the declarative CI surface.
+- **`publish-baseline.yml` expects one `build-output.json` per contract
+  profile** (G30 P1.1). A build system that doesn't emit a per-profile
+  manifest in that shape needs to add one first.
+- **`profiles:` describes a build *lane* (compiler/flags), not a library** —
+  one profile's `targets[]` can list several libraries built under it (see
+  the [`build-output.json` reference](https://abicheck.github.io/abicheck/reference/build-output-schema/)),
+  but a project needs one profile *per distinct build configuration*: e.g.
+  oneDAL needs one profile for its SYCL-built subset and another for the
+  rest, not one profile per library.
+
+None of these block `compare`-based CI today — they're gaps in the
+*declarative* topology specifically, verified directly against
+`abicheck/buildsource/project_targets.py`/`run_plan.py` rather than tracked
+as open punch-list items anywhere: the design history for the bundle-depth
+restriction and the `build-output.json` contract lives in the
+[G30 GitHub Actions integration plan](docs/contribute/plans/g30-github-actions-integration-model.md),
+and for stored-facts bundle comparison in the
+[G38 bundle-facts plan](docs/contribute/plans/g38-bundle-facts-model-and-multibuild-comparability.md)
+— neither doc currently lists these as scheduled work, so check the code
+itself, not just the docs, before relying on a gap having closed.
+
 ---
 
 ## Exit codes
