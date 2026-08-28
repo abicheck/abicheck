@@ -550,7 +550,27 @@ BUG_CLASSES: tuple[BugClass, ...] = (
                     "parenthesis-handling regression in the evaluator itself "
                     "could have passed unnoticed. Fixed by using a truthy "
                     "`a` alongside a falsy `c`, which makes the two "
-                    'groupings genuinely diverge (`"A"` vs `""`).'
+                    'groupings genuinely diverge (`"A"` vs `""`). A sixth '
+                    "review round found two more real gaps in the same "
+                    "harness: (I) hop 4 derived env var names from "
+                    "`_action_yml_env_mapping()`, which deliberately scans "
+                    "the *whole* action.yml file for its own, different "
+                    "purpose — but action.yml's earlier 'Validate mode/"
+                    "input combination' step duplicates some of the same "
+                    "INPUT_* names in its own, differently-isolated env "
+                    "block, so removing an entry from the 'Run abicheck' "
+                    "step specifically (the step this hop actually "
+                    "executes) could still resolve via the validation "
+                    "step's leftover entry. Fixed by reading the "
+                    'step-scoped `_step_env_mapping("Run abicheck")` '
+                    "instead. (II) neither `_run_check_step`/"
+                    "`_consumer_context_step` checked that the step's own "
+                    "`uses:` edge still pointed at the file being loaded "
+                    "and evaluated — repointing either real `uses:` entry "
+                    "to a different action would have left this test "
+                    "evaluating stale files nothing in production actually "
+                    "invokes anymore. Both helpers now assert their step's "
+                    "real `uses:` value before returning it."
                 ),
                 reference="docs/contribute/plans/bug-class-regression-testing.md#phase-6",
             ),

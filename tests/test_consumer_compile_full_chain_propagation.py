@@ -56,14 +56,16 @@ from `check-project.yml`/`check-target/action.yml`, chained:
       -> that same step's `with:` [real expression, evaluated]
       -> root action.yml's own declared `gcc-path`/`gcc-options` inputs,
          resolved to their real INPUT_* env var names via the real
-         "Run abicheck" step's own env block (test_action_run_contract.py's
-         `_action_yml_env_mapping`) -- never a hardcoded `INPUT_GCC_PATH`
-         guess
+         "Run abicheck" step's own, isolated env block
+         (test_action_run_contract.py's `_step_env_mapping`) -- never a
+         hardcoded `INPUT_GCC_PATH` guess
       -> root action.yml's run.sh [real bash execution, via the existing
          test_action_compile_context_parity.py harness]
 
 with one sentinel binding path/options string surviving, unaltered, end
-to end.
+to end. Every real `uses:` edge between the loaded files is also asserted
+(`_run_check_step`/`_consumer_context_step`), not just assumed from their
+hardcoded paths.
 
 Two further Codex review rounds on this same file, both fixed here: (1)
 the first cut evaluated only the consumer-context step's `with:` values,
@@ -75,6 +77,25 @@ OPTIONS` as the env var names fed to `run.sh`, disconnecting hop 3 (the
 resolved `inputs.gcc-path`/`inputs.gcc-options` values) from hop 4 (which
 env vars `run.sh` actually reads) -- a swap of those two mappings in root
 action.yml's own env block would have gone undetected.
+
+A fifth Codex review round found two more real gaps, both fixed here: (3)
+hop 4 read env var names from `_action_yml_env_mapping()`, which
+deliberately scans the *whole* action.yml file (by design, for its own
+different purpose -- see that function's docstring); action.yml's earlier
+"Validate mode/input combination" step duplicates some of the same
+INPUT_* names in its own, differently-isolated env block, so removing an
+entry from the "Run abicheck" step specifically -- the step this hop
+actually executes -- could still resolve via the validation step's
+leftover entry, leaving this test green while production silently dropped
+the value at this hop. Fixed by reading the step-scoped
+`_step_env_mapping("Run abicheck")` instead. (4) neither
+`_run_check_step`/`_consumer_context_step` ever checked that the step's
+own `uses:` edge still pointed at the file being loaded and evaluated --
+repointing "Run check-target"'s `uses:` away from `actions/check-target`,
+or the consumer-context step's `uses:` away from the checked-out
+repository root, would have left this test evaluating stale files nothing
+in production actually invokes anymore. Both helpers now assert their
+step's real `uses:` value before returning it.
 """
 
 from __future__ import annotations
@@ -84,7 +105,7 @@ from typing import Any
 
 from _gha_expr import eval_gha_expression
 from test_action_compile_context_parity import _DUMP_MODE_MARKER, _run_region
-from test_action_run_contract import _action_yml_env_mapping
+from test_action_run_contract import _step_env_mapping
 from test_reusable_workflows_project_evidence import (
     CHECK_PROJECT,
     CHECK_TARGET,
@@ -115,19 +136,49 @@ _WORKFLOW_GLOBAL_AST_FRONTEND = "hybrid"
 
 
 def _run_check_step(name: str) -> dict[str, Any]:
+    """A named step from `check-project.yml`'s `check` job. For "Run
+    check-target" specifically, also asserts its real `uses:` edge still
+    targets `actions/check-target` -- the file this module loads directly
+    as `CHECK_TARGET` and evaluates hop 3's expressions from -- so
+    repointing that edge to a different action (Codex review, PR #906)
+    would fail here rather than leave this test silently evaluating a file
+    production no longer actually invokes at this step."""
     project = _load(CHECK_PROJECT)
-    return next(
+    step = next(
         step for step in _steps(project["jobs"]["check"]) if step.get("name") == name
     )
+    if name == "Run check-target":
+        uses = step.get("uses", "")
+        assert uses.endswith("actions/check-target"), (
+            f"the {name!r} step's own `uses:` ({uses!r}) no longer targets "
+            f"actions/check-target -- this test loads that file directly "
+            f"(CHECK_TARGET) and would silently keep evaluating it even if "
+            f"production repointed this edge elsewhere"
+        )
+    return step
 
 
 def _consumer_context_step() -> dict[str, Any]:
+    """The "Extract candidate consumer context" step from `actions/check-
+    target/action.yml`. Also asserts its real `uses:` edge still targets
+    the checked-out repository root (`./.abicheck-check-target-src`, no
+    subdirectory) -- the same tree root `action.yml` lives in, which hop 4
+    below assumes this step invokes directly (Codex review, PR #906):
+    repointing it to a subdirectory or a different action entirely would
+    otherwise go unnoticed."""
     target = _load(CHECK_TARGET)
-    return next(
+    step = next(
         step
         for step in _steps(target["runs"])
         if step.get("name") == "Extract candidate consumer context"
     )
+    assert step.get("uses") == "./.abicheck-check-target-src", (
+        f"the 'Extract candidate consumer context' step's own `uses:` "
+        f"({step.get('uses')!r}) no longer targets the checked-out "
+        f"repository root -- hop 4 assumes this step invokes root "
+        f"action.yml directly"
+    )
+    return step
 
 
 def _hop3_inputs_from(
@@ -361,15 +412,22 @@ def _assert_reaches_real_dump_cli_invocation(
     gcc_path: str, gcc_options: str, ast_frontend: str
 ) -> None:
     """Hop 4: the values resolved at the end of hops 1-3, mapped to their REAL
-    INPUT_* env var names via root action.yml's own "Run abicheck" step env
-    block (`_action_yml_env_mapping`, from test_action_run_contract.py --
-    never a hardcoded `INPUT_GCC_PATH`/`INPUT_AST_FRONTEND` guess, so a swap
-    of that env block's own mappings would be caught here), fed into
+    INPUT_* env var names via root action.yml's own "Run abicheck" step's
+    OWN, isolated `env:` block (`_step_env_mapping("Run abicheck")`, from
+    test_action_run_contract.py -- never a hardcoded `INPUT_GCC_PATH`/
+    `INPUT_AST_FRONTEND` guess, so a swap of that mapping would be caught
+    here). Deliberately the step-scoped mapping, not the whole-file
+    `_action_yml_env_mapping()`: action.yml's earlier "Validate mode/input
+    combination" step duplicates some of these same INPUT_* names in its
+    OWN, differently-isolated env block (see `_step_env_mapping`'s own
+    docstring), and scanning the whole file would let that duplicate mask
+    a real removal from the "Run abicheck" step specifically -- the one
+    step this hop actually executes (Codex review, PR #906). Fed into
     run.sh's own real dump-mode region (the existing
     test_action_compile_context_parity.py harness -- no new execution
     machinery), producing the real --ast-frontend/--compiler/
     --compiler-option CLI flags."""
-    env_by_input = {inp: var for var, inp in _action_yml_env_mapping().items()}
+    env_by_input = {inp: var for var, inp in _step_env_mapping("Run abicheck").items()}
     for name in ("gcc-path", "gcc-options", "ast-frontend", "gcc-prefix", "sysroot"):
         assert name in env_by_input, (
             f"root action.yml's env block no longer maps input {name!r} to "
