@@ -219,6 +219,18 @@ def _is_fact_typed_expr(node: ast.expr, fact_names: frozenset[str]) -> bool:
         return _is_fact_typed_expr(node.body, fact_names) and _is_fact_typed_expr(
             node.orelse, fact_names
         )
+    if isinstance(node, ast.BoolOp):
+        # `old.bases_fact or new.bases_fact` -- Python's `and`/`or` always
+        # return one of their own operands verbatim (never a synthesized
+        # `True`/`False`, only ever short-circuiting to whichever operand
+        # its own truthiness picks), so if *every* operand is guaranteed
+        # Fact-typed, the result is too, regardless of which one is
+        # actually selected at runtime -- the identical every-operand-
+        # must-agree principle the `IfExp` branch above already applies
+        # to its two branches, generalized to `BoolOp.values`' arbitrary
+        # operand count (`a or b or c` chains to one `BoolOp` node with
+        # three values, not two nested ones).
+        return all(_is_fact_typed_expr(value, fact_names) for value in node.values)
     return False
 
 
@@ -257,6 +269,11 @@ def _candidate_resolves_to_fact(
         ) and _candidate_resolves_to_fact(value.orelse, fact_names, known)
     if isinstance(value, ast.NamedExpr):
         return _candidate_resolves_to_fact(value.value, fact_names, known)
+    if isinstance(value, ast.BoolOp):
+        return all(
+            _candidate_resolves_to_fact(operand, fact_names, known)
+            for operand in value.values
+        )
     return False
 
 
@@ -461,6 +478,22 @@ def _fact_aliases(tree: ast.Module, qualnames: _QualnameSpans) -> dict[str, set[
     # *comprehension's* own scope -- see the comprehension collection
     # branch's own docstring for the full reasoning.
     tuple_loop_candidates: dict[str, list[tuple[str, list[tuple[ast.expr, str]]]]] = {}
+    # A candidate whose *target* binds in one scope but whose *value*
+    # must resolve against a DIFFERENT scope -- so far, only a
+    # comprehension-scope-hopping walrus (Codex review, fresh evidence):
+    # `[(captured := fact) for fact in (rec.bases_fact,)]` binds
+    # `captured` at the *enclosing* scope PEP 572 hops it out to (see the
+    # `NamedExpr` collection branch's own docstring), but its RHS `fact`
+    # is the comprehension's own loop target, only ever known within the
+    # comprehension's own scope -- never the scope `captured` binds in.
+    # Entries here are keyed by the *binding* qualname (the same outer
+    # key `candidates` uses), each carrying its own separate value-
+    # resolution qualname alongside the ordinary `(name, value)` pair --
+    # the identical "one shared qualname per entry can't express both"
+    # problem `tuple_loop_candidates`' own per-element qualname above
+    # already solves, applied to a single scalar value instead of a
+    # tuple's elements.
+    cross_scope_candidates: dict[str, list[tuple[str, ast.expr, str]]] = {}
     # Every name *this* function binds on its own -- every parameter
     # (Fact-typed or not) and every simple assignment target -- used below
     # to stop an inherited alias from shadowing a genuine local rebinding
@@ -627,9 +660,26 @@ def _fact_aliases(tree: ast.Module, qualnames: _QualnameSpans) -> dict[str, set[
             # skipped, `inner`'s own inheritance step never learned this,
             # and the outer alias leaked straight through instead).
             locally_bound.setdefault(binding_qualname, set()).add(node.target.id)
-            candidates.setdefault(binding_qualname, []).append(
-                (node.target.id, node.value)
-            )
+            # No hop -- the walrus's own value resolves in the identical
+            # scope it binds in, the ordinary `candidates` case. A real
+            # hop means the value must still resolve against the
+            # comprehension's own `walrus_qualname` (where it's actually
+            # written and where any comprehension-local alias, e.g. its
+            # own `for` target, becomes known), even though the target
+            # name itself becomes known at `binding_qualname` instead
+            # (Codex review, fresh evidence: `[(captured := fact) for
+            # fact in (rec.bases_fact,)]; captured == other` was missed,
+            # since the pre-fix code resolved `fact` against
+            # `binding_qualname`'s own aliases, where the comprehension's
+            # `for`-bound `fact` was never recorded at all).
+            if binding_qualname == walrus_qualname:
+                candidates.setdefault(binding_qualname, []).append(
+                    (node.target.id, node.value)
+                )
+            else:
+                cross_scope_candidates.setdefault(binding_qualname, []).append(
+                    (node.target.id, node.value, walrus_qualname)
+                )
         elif isinstance(node, (ast.For, ast.AsyncFor)):
             # `for fact, other in pairs:` -- the same tuple-unpacking
             # binding as `ast.Assign`, just via a loop target instead
@@ -1265,6 +1315,24 @@ def _fact_aliases(tree: ast.Module, qualnames: _QualnameSpans) -> dict[str, set[
                         known.add(name)
                         changed = True
                         outer_changed = True
+                # `cross_scope_candidates`' own value/binding scope split
+                # -- the value is checked against *its own* recorded
+                # qualname's converged aliases (`aliases.get(value_
+                # qualname, set())`), never `known` (this loop's current
+                # binding-scope set), since the two can genuinely differ
+                # (see the comprehension-scope-hopping walrus collection
+                # branch's own docstring).
+                for name, value, value_qualname in cross_scope_candidates.get(
+                    qualname, []
+                ):
+                    if name in known:
+                        continue
+                    if _candidate_resolves_to_fact(
+                        value, fact_names, aliases.get(value_qualname, set())
+                    ):
+                        known.add(name)
+                        changed = True
+                        outer_changed = True
                 # `tuple_loop_candidates`' own conjunctive resolution --
                 # unlike `candidates` above (known the moment ANY one
                 # recorded value resolves), a loop-target entry here needs
@@ -1532,6 +1600,8 @@ def fact_equality_misuse_sites(tree: ast.Module, rel: str) -> list[tuple[int, in
             )
         if isinstance(node, ast.NamedExpr):
             return is_fact_typed(node.value, qualname)
+        if isinstance(node, ast.BoolOp):
+            return all(is_fact_typed(operand, qualname) for operand in node.values)
         return False
 
     sites: list[tuple[int, int]] = []

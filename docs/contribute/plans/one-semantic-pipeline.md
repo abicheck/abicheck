@@ -2590,6 +2590,60 @@ tests: `TestAnnotatedWrapperUnwrapsToItsFirstSliceElement` and
 `TestMatchOrPropagatesWholeSubjectCaptures`, both now in `tests/
 test_fact_detector_misuse_alias_edge_cases.py`.
 
+**Two more findings from the next review round, both bounded extensions
+of already-established mechanisms.** (1) None of `_is_fact_typed_expr()`,
+`_candidate_resolves_to_fact()`, or `fact_equality_misuse_sites()`'s own
+terminal `is_fact_typed()` predicate had a `BoolOp` branch, so `(old.
+bases_fact or new.bases_fact) == other` was missed entirely, as was the
+assignment-through-alias form. Python's `and`/`or` always return one of
+their own operands verbatim -- never a synthesized `True`/`False`, only
+ever short-circuiting to whichever operand its own truthiness picks -- so
+if *every* operand of a `BoolOp` is guaranteed Fact-typed, the result is
+too, regardless of which one runtime truthiness actually selects: the
+identical every-operand-must-agree principle the `IfExp` branches already
+established, generalized from two branches to `BoolOp.values`'s arbitrary
+operand count (an `a or b or c` chain is one `BoolOp` node with three
+values, not two nested ones). Fixed by giving all three functions the
+identical recursive `BoolOp` branch, mirroring each one's own existing
+`IfExp` branch exactly. (2) The comprehension-scope-hopping walrus
+collection branch (an earlier round's own fix) registers a hopped
+target's candidate under `binding_qualname` (the enclosing scope PEP 572
+hops it out to), but paired it with `node.value` unconditionally checked
+against that *same* scope's converged aliases at fixed-point time -- even
+though the walrus's RHS is still textually written, and can only ever
+resolve, in the comprehension's *own* scope. `[(captured := fact) for
+fact in (rec.bases_fact,)]; captured == other` was missed: `fact` (the
+comprehension's own `for`-bound target) is never a known alias of
+`binding_qualname` (the enclosing function), only of the comprehension's
+own scope. This is the identical "one shared qualname per entry can't
+express both a binding scope and a resolution scope" problem `tuple_loop_
+candidates`'s own per-element `(elt, elt_qualname)` pairing already
+solves for a tuple's elements -- applied here to a single scalar walrus
+value instead. Fixed with a new `cross_scope_candidates` dict, keyed by
+the binding qualname exactly like `candidates`, but each entry additionally
+carrying the value's own resolution qualname (`walrus_qualname`, only
+populated when a real hop occurred -- the no-hop case still uses the
+ordinary `candidates` dict unchanged); the fixed-point loop resolves each
+entry's value against `aliases.get(value_qualname, set())` rather than
+the current pass's `known` set, mirroring `tuple_loop_candidates`'s own
+per-element resolution exactly. A walrus hopping out of *nested*
+comprehensions (PEP 572 hops out of all of them, not just the innermost)
+resolves correctly too, since `walrus_qualname` still names the
+comprehension it was textually written in.
+
+Verified against both reported repros, a three-way `BoolOp` chain, a
+`BoolOp`-via-alias variant, alias-resolved `BoolOp` operands, a negative
+control pinning the AND semantics (one non-Fact operand disqualifies the
+whole expression) for finding (1); and a non-Fact-RHS negative control, a
+double-hopped nested-comprehension variant, and a no-hop regression guard
+for finding (2) -- all via direct AST reproduction before writing tests.
+Zero existing hits, `mypy`/`ruff` both stayed clean,
+`fact_detector_misuse.py` at 1642 lines (well under the 2000-line hard
+cap). New tests: `TestBoolOpResolvesWhenEveryOperandIsFactTyped` and
+`TestComprehensionWalrusResolvesItsRhsInItsOwnScope`, both in `tests/
+test_fact_detector_misuse_alias_edge_cases.py` (410 lines, well under its
+own 1200-line cap).
+
 ---
 
 ### Phase 1 — finish the `dump`/`scan` typed-API convergence (closes AGENTS.md "PR C")

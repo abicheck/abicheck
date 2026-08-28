@@ -297,3 +297,114 @@ class TestMatchOrPropagatesWholeSubjectCaptures:
         )
         tree = ast.parse(src, filename="x.py")
         assert fact_equality_misuse_sites(tree, "x.py") == []
+
+
+class TestBoolOpResolvesWhenEveryOperandIsFactTyped:
+    """Python's `and`/`or` always return one of their own operands
+    verbatim, never a synthesized `True`/`False` -- so if every operand
+    is guaranteed Fact-typed, the result is too, regardless of which one
+    short-circuit evaluation actually selects."""
+
+    def test_detects_a_direct_or_expression(self) -> None:
+        src = (
+            "def f(old, new, other):\n"
+            "    return (old.bases_fact or new.bases_fact) == other\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert fact_equality_misuse_sites(tree, "x.py") == [(2, 11)]
+
+    def test_detects_a_direct_and_expression(self) -> None:
+        src = (
+            "def f(old, new, other):\n"
+            "    return (old.bases_fact and new.bases_fact) == other\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert fact_equality_misuse_sites(tree, "x.py") == [(2, 11)]
+
+    def test_detects_a_three_way_chain(self) -> None:
+        src = (
+            "def f(a, b, c, other):\n"
+            "    return (a.bases_fact or b.bases_fact or c.bases_fact) == other\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert fact_equality_misuse_sites(tree, "x.py") == [(2, 11)]
+
+    def test_detects_an_assignment_through_a_bool_op_alias(self) -> None:
+        src = (
+            "def f(old, new, other):\n"
+            "    fact = old.bases_fact or new.bases_fact\n"
+            "    return fact == other\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert fact_equality_misuse_sites(tree, "x.py") == [(3, 11)]
+
+    def test_detects_bool_op_operands_resolved_through_existing_aliases(self) -> None:
+        src = (
+            "def f(old, new, other):\n"
+            "    a = old.bases_fact\n"
+            "    b = new.bases_fact\n"
+            "    return (a or b) == other\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert fact_equality_misuse_sites(tree, "x.py") == [(4, 11)]
+
+    def test_ignores_a_bool_op_with_one_non_fact_operand(self) -> None:
+        """Negative control pinning the established AND semantics: every
+        operand must resolve, since a single-operand match cannot be
+        told apart from an ordinary boolean expression that merely
+        happens to read one Fact attribute among other unrelated
+        locals."""
+        src = (
+            "def f(old, new, other):\n"
+            "    return (old.bases_fact or new.plain) == other\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert fact_equality_misuse_sites(tree, "x.py") == []
+
+
+class TestComprehensionWalrusResolvesItsRhsInItsOwnScope:
+    """A walrus that PEP 572 hops out of a comprehension binds its
+    *target* at the enclosing scope it hops to, but its RHS is still
+    written -- and must still resolve -- in the comprehension's own
+    scope, which can differ from the binding scope."""
+
+    def test_detects_a_hopped_walrus_whose_rhs_is_the_loop_target(self) -> None:
+        src = (
+            "def f(rec, other):\n"
+            "    [(captured := fact) for fact in (rec.bases_fact,)]\n"
+            "    return captured == other\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert fact_equality_misuse_sites(tree, "x.py") == [(3, 11)]
+
+    def test_ignores_a_hopped_walrus_with_a_non_fact_rhs(self) -> None:
+        src = (
+            "def f(rec, other):\n"
+            "    [(captured := fact) for fact in (rec.plain,)]\n"
+            "    return captured == other\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert fact_equality_misuse_sites(tree, "x.py") == []
+
+    def test_detects_a_double_hopped_walrus_through_nested_comprehensions(
+        self,
+    ) -> None:
+        src = (
+            "def f(rec, other):\n"
+            "    [[(captured := fact) for fact in (rec.bases_fact,)]"
+            " for _ in range(1)]\n"
+            "    return captured == other\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert fact_equality_misuse_sites(tree, "x.py") == [(3, 11)]
+
+    def test_detects_a_walrus_with_no_hop_still(self) -> None:
+        """Regression guard: a walrus directly inside a function body (no
+        comprehension, no hop) must still resolve the ordinary way."""
+        src = (
+            "def f(rec, other):\n"
+            "    (captured := rec.bases_fact)\n"
+            "    return captured == other\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert fact_equality_misuse_sites(tree, "x.py") == [(3, 11)]
