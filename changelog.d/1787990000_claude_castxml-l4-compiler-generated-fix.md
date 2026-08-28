@@ -38,6 +38,22 @@
   `reachable_declarations`/`decls_without_symbol` forever, even once
   relinked against a real export set that genuinely never mentions it
   (Codex review).
+- **A `compiler_generated` declaration now gets `_demangled_rematch`'s
+  second-tier ABI-tag/substitution-drift rescue too, not just an ordinary
+  declaration.** Both drop paths (first link's `_route_declaration`,
+  the relink's `rematch_declarations`) previously excluded an unmatched
+  `compiler_generated` candidate *before* `_demangled_rematch` ran over
+  `reachable_declarations` — since that function only rematches entities
+  already in the list, a dropped candidate could never reach it. So an
+  implicit special member whose real mangled spelling differs only
+  textually from its export (e.g. castxml's own `_ZN1AaSERKS_`
+  self-substitution form vs. the export's `_ZN1AaSERK1A`, equivalent once
+  demangled) was wrongly dropped even though the export genuinely exists.
+  Fixed by deferring the drop to a new third tier
+  (`ctor_export_match.drop_unmatched_generated_declarations`), run once,
+  after `_demangled_rematch` in both `link_source_abi` and
+  `relink_surface_exports`, instead of inline during routing (Codex
+  review).
 - **Known, accepted residual on the ctor/dtor rescue above**: the rescue is
   class-level, not per-overload — it asks "does this class have *any*
   matching ctor/dtor export at all", not "does *this specific* candidate

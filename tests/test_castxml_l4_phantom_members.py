@@ -37,6 +37,20 @@ from abicheck.buildsource.source_link import link_source_abi
 from abicheck.model import Function, ScopeOrigin
 
 
+def _no_demangler() -> bool:
+    """Mirrors ``test_source_abi.py``'s own helper -- some CI runners (macOS,
+    Windows) have no working C++ demangler (cxxfilt/c++filt), and the
+    demangled-identity second-tier rematch degrades to a no-op without one."""
+    from abicheck.demangle import demangle
+
+    return demangle("_ZN6WidgetC1Ev") is None
+
+
+needs_demangler = pytest.mark.skipif(
+    _no_demangler(), reason="no C++ demangler (cxxfilt/c++filt) available"
+)
+
+
 def _cu(**kw: object) -> CompileUnit:
     base: dict[str, object] = {
         "id": "cu://src/foo.cpp#cfg",
@@ -257,6 +271,37 @@ def test_link_source_abi_rescues_a_synthetic_ctor_key_for_an_abi_tagged_owner() 
     # A real, ABI-tagged export of this same class's constructor.
     surface = link_source_abi([tu], exported_symbols=["_ZN6WidgetB2v1C1ERKS_"])
     assert synthetic_ctor.id in {d.id for d in surface.reachable_declarations}
+
+
+@needs_demangler
+def test_link_source_abi_rescues_a_generated_operator_via_demangled_rematch() -> None:
+    """Codex review, PR #930: a `compiler_generated` entity must reach
+    `_demangled_rematch`'s second-tier substitution/ABI-tag-drift rescue
+    the same way an ordinary declaration does. castxml's implicit
+    `operator=`'s own real mangled name (`_ZN1AaSERKS_`, using the `S_`
+    self-substitution shorthand) and a real export spelled without that
+    substitution (`_ZN1AaSERK1A`) demangle identically
+    (`A::operator=(A const&)`) but are exact-match unequal -- dropping the
+    entity before this second tier runs (as `_route_declaration` used to)
+    would lose it even though the export genuinely exists."""
+    copy_assign = entity_from_function(
+        Function(
+            name="A",
+            mangled="_ZN1AaSERKS_",
+            return_type="A&",
+            source_header="include/a.h",
+            origin=ScopeOrigin.PUBLIC_HEADER,
+            is_compiler_generated=True,
+        )
+    )
+    tu = SourceAbiTu(tu_id="cu://a.cpp#cfg", functions=[copy_assign])
+
+    surface = link_source_abi([tu], exported_symbols=["_ZN1AaSERK1A"])
+    assert copy_assign.id in {d.id for d in surface.reachable_declarations}
+    assert (
+        surface.mappings["source_decl_to_binary_symbol"][copy_assign.identity()]
+        == "_ZN1AaSERK1A"
+    )
 
 
 @pytest.mark.integration

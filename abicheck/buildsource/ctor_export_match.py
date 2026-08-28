@@ -170,6 +170,45 @@ def should_drop_generated_candidate(
     )
 
 
+def drop_unmatched_generated_declarations(
+    declarations: list[SourceEntity],
+    mapping: dict[str, str],
+    exported: set[str],
+    owner_index: dict[str, str],
+) -> list[SourceEntity]:
+    """Remove a ``compiler_generated`` declaration still unmatched after
+    every matching tier -- exact/ctor-fold, the ctor/dtor owner-index
+    rescue, *and* ``source_link._demangled_rematch``'s second-tier
+    substitution/ABI-tag-drift fallback -- has run.
+
+    Deliberately run once, after all three tiers, rather than inline
+    during routing: a ``compiler_generated`` entity previously never
+    reached ``reachable_declarations`` at all when it missed the first,
+    exact-match tier, so `_demangled_rematch` (which only rematches
+    entities already in that list) could never rescue it the way it
+    already rescues an ordinary declaration whose mangled spelling
+    differs only by ABI-tag/substitution drift from its real export
+    (Codex review, PR #930 -- e.g. castxml's `_ZN1AaSERKS_` vs. the export
+    `_ZN1AaSERK1A`, equivalent once demangled). Pops a dropped entity's
+    key out of *mapping* too, so a caller's `decls_without_symbol`
+    computed from it doesn't still list the removed entity.
+    """
+    kept: list[SourceEntity] = []
+    for entity in declarations:
+        if entity.ownership.get("compiler_generated") != "true":
+            kept.append(entity)
+            continue
+        key = entity.identity()
+        primary = mapping.get(key, "") if key else ""
+        export_sym = entity.mangled_name or entity.qualified_name
+        if should_drop_generated_candidate(export_sym, primary, exported, owner_index):
+            if key:
+                mapping.pop(key, None)
+            continue
+        kept.append(entity)
+    return kept
+
+
 def rematch_declarations(
     declarations: list[SourceEntity],
     exported: set[str],
@@ -178,13 +217,16 @@ def rematch_declarations(
     owner_index: dict[str, str],
     match_export: Callable[[str, set[str], dict[str, list[str]], dict[str, str]], tuple[str, list[str]]],
 ) -> tuple[list[SourceEntity], dict[str, str], set[str], dict[str, str]]:
-    """Re-derive decl -> export mapping for a relink, dropping a generated
-    candidate :func:`should_drop_generated_candidate` says has no real export.
+    """Re-derive decl -> export mapping for a relink. Every declaration is
+    kept here, generated candidates included -- the caller must apply
+    :func:`drop_unmatched_generated_declarations` itself, *after* its own
+    demangled-identity second-tier rematch, not this function (Codex
+    review, PR #930: dropping inline here, before that second tier runs,
+    denied a generated candidate the identical ABI-tag/substitution-drift
+    rescue an ordinary declaration already gets).
 
     Split out of ``source_link.relink_surface_exports`` (that file's own
-    no-growth line budget) rather than duplicated -- see this module's
-    docstring for why the relink path needs the identical drop rule
-    ``_route_declaration`` already applies at first link.
+    no-growth line budget) rather than duplicated.
 
     Returns ``(kept_declarations, mapping, matched_symbols, identity_to_qname)``.
     """
@@ -195,10 +237,6 @@ def rematch_declarations(
     for entity in declarations:
         export_sym = entity.mangled_name or entity.qualified_name
         primary, variants = match_export(export_sym, exported, export_index, exact_index)
-        if entity.ownership.get("compiler_generated") == "true" and should_drop_generated_candidate(
-            export_sym, primary, exported, owner_index
-        ):
-            continue
         kept.append(entity)
         key = entity.identity()
         if not key:

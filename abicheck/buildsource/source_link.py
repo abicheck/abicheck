@@ -1276,6 +1276,12 @@ def link_source_abi(
         state.matched_symbols,
         exported,
     )
+    # Third tier for a compiler_generated candidate: dropped only now, after
+    # the demangled-identity rescue above has had the same chance an ordinary
+    # declaration gets (Codex review, PR #930 -- see _route_declaration).
+    surface.reachable_declarations = ctor_export_match.drop_unmatched_generated_declarations(
+        surface.reachable_declarations, state.decl_to_symbol, exported, state.ctor_dtor_owner_index
+    )
     surface.mappings["source_decl_to_binary_symbol"] = dict(
         sorted(state.decl_to_symbol.items())
     )
@@ -1400,14 +1406,19 @@ def relink_surface_exports(
     export_index, exact_index = _build_export_index(exported), _build_exact_index(exported)
     ctor_dtor_owner_index = ctor_export_match.build_ctor_dtor_owner_index(exported)
     # A source-only relink (the parallel-baseline `merge` flow) links against an empty export set first, so
-    # `_route_declaration`'s own compiler_generated miss-drop never fires there. `rematch_declarations` applies
-    # that identical drop rule now that a real export set is known (Codex review, PR #930).
+    # `_route_declaration`'s own compiler_generated miss-drop never fires there. Recompute the mapping for
+    # every declaration (kept unconditionally here -- see rematch_declarations' own docstring for why).
     kept, mapping, matched, identity_to_qname = ctor_export_match.rematch_declarations(
         surface.reachable_declarations, exported, export_index, exact_index, ctor_dtor_owner_index, _match_export
     )
     surface.reachable_declarations = kept
     # Second-tier demangled-identity rematch (ABI-tag / substitution drift).
     _demangled_rematch(surface.reachable_declarations, mapping, matched, exported)
+    # Third tier: drop a still-unmatched compiler_generated candidate only now,
+    # after the demangled rescue above has had its chance (Codex review, PR #930).
+    surface.reachable_declarations = ctor_export_match.drop_unmatched_generated_declarations(
+        surface.reachable_declarations, mapping, exported, ctor_dtor_owner_index
+    )
     surface.mappings["source_decl_to_binary_symbol"] = dict(sorted(mapping.items()))
 
     # Attribute compiler-synthesized exports (vtable/typeinfo/thunk/guard) to their
@@ -1605,11 +1616,12 @@ def _route_declaration(
     keep independent mappings. The exported symbol is the mangled name for C++ or
     the plain qualified name for C / extern "C" decls whose extractor leaves
     mangled_name empty — matching on either avoids false "unmatched" evidence.
-    A ``compiler_generated`` entity (PR #930) is dropped on a miss unless a synthetic ctor/dtor key's owner has one anyway (`ctor_export_match`), or `exported` is empty (unresolved)."""
+    A ``compiler_generated`` entity that never exact/ctor-fold-matches is
+    dropped later, in ``link_source_abi`` after ``_demangled_rematch``'s
+    second-tier pass has had its own chance to rescue it -- not here (PR
+    #930, Codex review) -- so it is always appended below, matched or not."""
     export_sym = entity.mangled_name or entity.qualified_name
     primary, variants = _match_export(export_sym, exported, state.export_index, state.exact_index)
-    if entity.ownership.get("compiler_generated") == "true" and ctor_export_match.should_drop_generated_candidate(export_sym, primary, exported, state.ctor_dtor_owner_index):
-        return
     surface.reachable_declarations.append(entity)
     key = entity.identity()
     if not key:
