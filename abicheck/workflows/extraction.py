@@ -115,7 +115,10 @@ from ..clang_layout_tool import attach_clang_layout
 from ..classify import is_supported_compare_input
 from ..debug_resolver import DebugArtifact, resolve_debug_info
 from ..dump_manifest import DumpManifest, load_manifest
+from ..dumper_cache import ast_memoize_scope
 from ..dumper_clang import resolve_source_frontend_clang_bin
+from ..dumper_clang_streaming import suppress_streaming_prune
+from ..dumper_contract import _manifest_declared_includes
 from ..dumper_scoping import dump_manifest_header_roots, resolve_dependency_scope
 from ..dwarf_snapshot import show_data_sources
 from ..dwarf_unified import parse_dwarf
@@ -169,7 +172,9 @@ __all__ = [
     "_has_shared_object_name",
     "_is_elf_shared_object",
     "_load_build_evidence",
+    "_manifest_declared_includes",
     "apply_provenance",
+    "ast_memoize_scope",
     "attach_build_context_for_parsed_headers",
     "attach_clang_layout",
     "build_inline_coverage",
@@ -241,5 +246,6 @@ __all__ = [
     "sniff_build_info_format",
     "split_public_header_inputs",
     "strip_vendor_hash",
+    "suppress_streaming_prune",
     "validate_inputs_pack",
 ]
