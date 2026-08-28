@@ -20,7 +20,6 @@
         "abicheck/compile_context.py",
         "abicheck/evidence_depth.py",
         "abicheck/name_classification.py",
-        "abicheck/stable_abi.py",
         "abicheck/stable_abi_data.py"
       ]
     },
@@ -114,7 +113,6 @@
         "abicheck/provenance.py",
         "abicheck/python_api.py",
         "abicheck/python_ext.py",
-        "abicheck/snapshot_cache.py",
         "abicheck/source_smoke.py",
         "abicheck/sycl_context.py",
         "abicheck/sycl_metadata.py",
@@ -174,8 +172,6 @@
         "abicheck/diff_vtable_layout.py",
         "abicheck/finding_identity.py",
         "abicheck/probe_harness.py",
-        "abicheck/surface.py",
-        "abicheck/surface_graph.py",
         "abicheck/type_reachability_spelling.py",
         "abicheck/versioned_symbol_scheme.py"
       ]
@@ -191,7 +187,9 @@
         "abicheck/contract_coverage_exit.py",
         "abicheck/exit_decision.py",
         "abicheck/semver.py",
-        "abicheck/severity.py"
+        "abicheck/severity.py",
+        "abicheck/suppression_yaml.py",
+        "abicheck/surface.py"
       ]
     },
     "workflows": {
@@ -219,10 +217,7 @@
         "abicheck/service_metadata_attach.py",
         "abicheck/service_scan.py",
         "abicheck/stack_binding_diff.py",
-        "abicheck/stack_checker.py",
-        "abicheck/suppression.py",
-        "abicheck/suppression_yaml.py",
-        "abicheck/tu_merge.py"
+        "abicheck/stack_checker.py"
       ]
     },
     "report": {
