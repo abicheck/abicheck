@@ -523,6 +523,74 @@ class TestUnmigratedFactReaderSites:
             'object.__getattribute__(rec, "bases")::1'
         ]
 
+    def test_detects_an_aliased_unbound_getattribute_call(self) -> None:
+        """`from builtins import object as O; O.__getattribute__(rec,
+        "bases")` -- the identical dynamic read as the unaliased
+        `object.__getattribute__(...)` spelling, but the receiver-name
+        check originally matched only the two literal spellings `"object"`/
+        `"type"` (Codex review, fresh evidence)."""
+        src = (
+            "from builtins import object as O\n"
+            "def f(rec):\n"
+            '    return O.__getattribute__(rec, "bases")\n'
+        )
+        tree = ast.parse(src, filename="x.py")
+        sites = unmigrated_fact_reader_sites(tree, "x.py", src)
+        assert [attr for _k, _l, attr, _q in sites] == ["bases"]
+
+    def test_ignores_an_unrelated_name_that_merely_matches_the_alias(
+        self,
+    ) -> None:
+        """Negative control: an unrelated class named `O` (no `object`
+        import-alias at all) must not be treated as the builtin merely
+        because it happens to share the alias spelling."""
+        src = (
+            "class O:\n"
+            "    pass\n"
+            "def f(rec):\n"
+            '    return O.__getattribute__(rec, "bases")\n'
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert unmigrated_fact_reader_sites(tree, "x.py", src) == []
+
+    def test_ignores_getattr_shadowed_by_an_enclosing_functions_parameter(
+        self,
+    ) -> None:
+        """`def outer(getattr): def inner(rec): return getattr(rec,
+        "bases")` -- `inner` binds no parameter of its own named
+        `getattr`, but Python's ordinary closure rule still captures the
+        arbitrary callable `outer`'s own parameter holds; `_shadowed()`
+        originally consulted only the call's own innermost qualname, never
+        an enclosing function's binding (Codex review, fresh evidence)."""
+        src = (
+            "def outer(getattr):\n"
+            "    def inner(rec):\n"
+            '        return getattr(rec, "bases")\n'
+            "    return inner\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert unmigrated_fact_reader_sites(tree, "x.py", src) == []
+
+    def test_detects_a_real_getattr_call_despite_enclosing_shadow_in_a_sibling(
+        self,
+    ) -> None:
+        """Negative control: the enclosing-scope shadow above must not
+        leak into an unrelated sibling function's own genuine `getattr()`
+        call."""
+        src = (
+            "def outer(getattr):\n"
+            "    def inner(rec):\n"
+            '        return getattr(rec, "bases")\n'
+            "    return inner\n"
+            "def g(rec):\n"
+            '    return getattr(rec, "bases")\n'
+        )
+        tree = ast.parse(src, filename="x.py")
+        sites = unmigrated_fact_reader_sites(tree, "x.py", src)
+        assert [key for key, _l, _a, _q in sites] == [
+            'x.py::g::bases::getattr(rec, "bases")::getattr(rec, "bases")::1'
+        ]
+
     def test_ignores_an_assignment_target(self) -> None:
         """A `Store` context (`rec.vtable = []`, the legacy-schema backfill
         shape `storage/fact_codec.py` uses) is writing the field, not

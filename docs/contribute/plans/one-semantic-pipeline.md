@@ -1483,6 +1483,38 @@ controls, and a sibling-function negative control (shadowing in one
 function must not leak into another's genuine unbound
 `object.__getattribute__()` call).
 
+**A twentieth review round found two more real gaps, both fixed.** (1)
+**The unbound `__getattribute__` receiver check matched only the two
+literal spellings `"object"`/`"type"`, missing an ordinary import
+alias.** `from builtins import object as O; O.__getattribute__(rec,
+"bases")` is the identical dynamic read as the unaliased spelling, but
+was invisible to the scan entirely. Fixed with a new
+`_unbound_getattribute_receiver_aliases()` helper (always includes the
+bare `"object"`/`"type"`, plus any `from builtins import object as O`/
+`from builtins import type as T`, plus a plain-assignment alias chain,
+mirroring `_builtins_getattr_aliases()`'s own `getattr`-alias chaining
+exactly), consulted in place of the literal two-element tuple; the
+existing `_shadowed()` guard from the nineteenth round applies unchanged,
+since it already checks whatever name was actually matched. (2)
+**`_shadowed()` consulted only a call's own innermost qualname, never an
+enclosing function's binding.** `def outer(getattr): def inner(rec):
+return getattr(rec, "bases")` -- `inner` binds no parameter of its own
+named `getattr`, but Python's ordinary closure rule still captures the
+arbitrary callable `outer`'s own parameter holds, so this was
+unconditionally treated as the real builtin despite being shadowed one
+scope up. Fixed with a new `_lexical_function_parents()` helper -- a
+standalone copy of `fact_detector_misuse.py`'s identical-purpose helper,
+simplified to this module's own coarser, dot-joined qualname scheme (no
+`#lineno` disambiguator, an existing, accepted characteristic of this
+module's qualnames already) -- and widened `_shadowed()` to walk the
+call's entire lexical scope chain, testing membership in each ancestor's
+own `locally_bound` set in turn rather than only the innermost one.
+Verified empirically: still zero existing hits in the real repository,
+baseline stays at 104, `mypy`/`ruff` both stayed clean. Four new tests:
+the aliased-unbound-`__getattribute__` positive case and its
+unrelated-name negative control, and the enclosing-parameter-shadow
+exclusion and its sibling-function negative control.
+
 **Still not landed**: no detector (`diff_layout.py`/`diff_types.py`/
 `diff_param_qualifiers.py`/the reader set the check above now tracks
 precisely) has actually been migrated to read `.status` — the check above

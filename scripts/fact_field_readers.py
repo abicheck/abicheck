@@ -447,6 +447,46 @@ def _locally_bound_names(tree: ast.Module) -> dict[str, set[str]]:
     return bound
 
 
+def _lexical_function_parents(tree: ast.Module) -> dict[str, str]:
+    """Map each function's qualname (the identical key `_enclosing_
+    qualnames`/`_locally_bound_names` use) to its nearest *enclosing
+    function's* qualname -- skipping any intervening class scope -- or
+    `"<module>"` if it has none.
+
+    Used to widen `_shadowed()`'s shadowing check to a call's *entire*
+    lexical scope chain, not just its own innermost function (Codex
+    review, fresh evidence): `def outer(getattr): def inner(rec): return
+    getattr(rec, "bases")` -- `getattr` is an arbitrary callable captured
+    from `outer`'s own parameter via Python's ordinary closure rule, but
+    `inner` binds no parameter of that name itself, so a check restricted
+    to `inner`'s own `locally_bound` entry never saw it, falsely treating
+    the closed-over parameter as the real `getattr` builtin.
+
+    A standalone copy of `fact_detector_misuse.py`'s identical-purpose
+    helper (see `FACT_FIELD_NAMES`'s own docstring for why these two leaf
+    modules stay decoupled), simplified to this module's own coarser,
+    dot-joined qualname scheme (no `#lineno` disambiguator -- an
+    `@overload` stub colliding with its real implementation is an
+    existing, accepted characteristic of this module's qualnames already,
+    not a new risk this helper introduces).
+    """
+    parents: dict[str, str] = {}
+
+    def visit(node: ast.AST, prefix: str, nearest_func: str) -> None:
+        for child in ast.iter_child_nodes(node):
+            if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                qualname = f"{prefix}{child.name}"
+                parents[qualname] = nearest_func
+                visit(child, qualname + ".", qualname)
+            elif isinstance(child, ast.ClassDef):
+                visit(child, f"{prefix}{child.name}.", nearest_func)
+            else:
+                visit(child, prefix, nearest_func)
+
+    visit(tree, "", "<module>")
+    return parents
+
+
 def _imported_class_aliases(tree: ast.Module) -> dict[str, str]:
     """Map every local name *tree* binds to one of `FACT_BRIDGED_CLASS_NAMES`
     -- either via an `import ... as` (`from abicheck.model import
@@ -627,6 +667,52 @@ def _builtins_getattr_aliases(
                 getattr_names.add(local)
                 changed = True
     return frozenset(getattr_names), frozenset(builtins_names)
+
+
+def _unbound_getattribute_receiver_aliases(tree: ast.Module) -> frozenset[str]:
+    """Return every local name *tree* binds to the real `object` or `type`
+    builtin -- always includes the bare `"object"`/`"type"` themselves,
+    plus any `from builtins import object as O`/`from builtins import type
+    as T`, plus a plain assignment chain (`O = object; O2 = O` chains too,
+    resolved to a fixed point, mirroring `_builtins_getattr_aliases()`'s
+    own `getattr`-alias chaining exactly).
+
+    Used by the unbound `__getattribute__` recognition branch (Codex
+    review, fresh evidence): `from builtins import object as O;
+    O.__getattribute__(rec, "bases")` is the identical dynamic read as the
+    unaliased `object.__getattribute__(rec, "bases")` spelling, but the
+    receiver-name check there originally matched only the two literal
+    strings `"object"`/`"type"`, missing this ordinary import-alias form
+    entirely.
+    """
+    names: set[str] = {"object", "type"}
+    assign_candidates: list[tuple[str, str]] = []
+
+    def _add_candidate(target: str, value: ast.expr | None) -> None:
+        if isinstance(value, ast.Name):
+            assign_candidates.append((target, value.id))
+
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom) and node.module == "builtins":
+            for alias in node.names:
+                if alias.name in ("object", "type"):
+                    names.add(alias.asname or alias.name)
+        elif isinstance(node, ast.Assign):
+            for target in node.targets:
+                if isinstance(target, ast.Name):
+                    _add_candidate(target.id, node.value)
+        elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
+            _add_candidate(node.target.id, node.value)
+    changed = True
+    while changed:
+        changed = False
+        for local, ref in assign_candidates:
+            if local in names:
+                continue
+            if ref in names:
+                names.add(local)
+                changed = True
+    return frozenset(names)
 
 
 def _operator_attrgetter_aliases(
@@ -942,12 +1028,25 @@ def unmigrated_fact_reader_sites(
     parents = _parent_map(tree)
     class_aliases = _imported_class_aliases(tree)
     getattr_names, builtins_names = _builtins_getattr_aliases(tree)
+    object_type_names = _unbound_getattribute_receiver_aliases(tree)
     attrgetter_names, operator_names = _operator_attrgetter_aliases(tree)
     locally_bound = _locally_bound_names(tree)
+    lexical_parents = _lexical_function_parents(tree)
 
     def _shadowed(call_node: ast.Call, name: str) -> bool:
         qualname = qualnames.get(call_node.lineno, "<module>")
-        return name in locally_bound.get(qualname, ())
+        # Walk the call's entire lexical scope chain, not just its own
+        # innermost function (Codex review, fresh evidence): a nested
+        # function that binds no parameter of its own can still have the
+        # name shadowed via an ordinary Python closure over an *enclosing*
+        # function's own parameter -- see `_lexical_function_parents`'s
+        # own docstring for the exact repro.
+        while True:
+            if name in locally_bound.get(qualname, ()):
+                return True
+            if qualname == "<module>":
+                return False
+            qualname = lexical_parents.get(qualname, "<module>")
 
     def _expr_text(node: ast.AST) -> str:
         outer = _outermost_containing_expr(node, parents)
@@ -1121,7 +1220,7 @@ def unmigrated_fact_reader_sites(
             and isinstance(node.func, ast.Attribute)
             and node.func.attr == "__getattribute__"
             and isinstance(node.func.value, ast.Name)
-            and node.func.value.id in ("object", "type")
+            and node.func.value.id in object_type_names
             and not _shadowed(node, node.func.value.id)
             and len(node.args) == 2
             and isinstance(node.args[1], ast.Constant)
@@ -1131,8 +1230,12 @@ def unmigrated_fact_reader_sites(
             # `object.__getattribute__(rec, "bases")` -- the unbound-method
             # spelling used to bypass an instance's own overridden
             # `__getattribute__`, reading `rec.bases` exactly the same way.
-            # `object`/`type` are ordinary names here, so a parameter
-            # shadowing either (`def f(object, rec): return object.
+            # `object_type_names` also covers an import alias of either
+            # builtin (`from builtins import object as O; O.
+            # __getattribute__(rec, "bases")` -- Codex review, fresh
+            # evidence), not just the two literal spellings. `object`/
+            # `type`/an alias of either are ordinary names here, so a
+            # parameter shadowing one (`def f(object, rec): return object.
             # __getattribute__(rec, "bases")`) must not match -- the same
             # exclusion the getattr/attrgetter branches above already
             # apply (Codex review, fresh evidence).
