@@ -313,6 +313,16 @@ def _is_fact_typed_annotation(
             return any(
                 _is_fact_typed_annotation(member, fact_names) for member in members
             )
+        if head == "Annotated":
+            # `Annotated[Fact[int], metadata]` -- only the *first* slice
+            # element is the real type; every following element is
+            # arbitrary metadata (PEP 593), never itself a type to check.
+            first = (
+                annotation.slice.elts[0]
+                if isinstance(annotation.slice, ast.Tuple)
+                else annotation.slice
+            )
+            return _is_fact_typed_annotation(first, fact_names)
         return _is_fact_typed_annotation(annotation.value, fact_names)
     return False
 
@@ -761,6 +771,35 @@ def _fact_aliases(tree: ast.Module, qualnames: _QualnameSpans) -> dict[str, set[
                     candidates.setdefault(qualname, []).append(
                         (case.pattern.name, node.subject)
                     )
+                elif isinstance(case.pattern, ast.MatchOr) and case.pattern.patterns:
+                    # `case (C() as fact) | (D() as fact): fact == other`
+                    # -- an OR pattern where *every* alternative is itself
+                    # a top-level `MatchAs` capturing the whole subject
+                    # under the identical name (Codex review, fresh
+                    # evidence). Python requires every alternative of an
+                    # OR pattern to bind the same set of names (a
+                    # SyntaxError otherwise), but not the same *shape* of
+                    # binding -- `case (C(x=fact)) | (D() as fact):`
+                    # legally binds the name `fact` in both branches, but
+                    # only the second branch binds it to the *whole*
+                    # subject, so this alone is not safe to trust as an
+                    # alias. Only when every single alternative is itself
+                    # exactly `MatchAs` with the same name is `fact`
+                    # guaranteed to be the raw subject regardless of which
+                    # alternative matched.
+                    alternatives = case.pattern.patterns
+                    first_alt = alternatives[0]
+                    if (
+                        isinstance(first_alt, ast.MatchAs)
+                        and first_alt.name is not None
+                        and all(
+                            isinstance(alt, ast.MatchAs) and alt.name == first_alt.name
+                            for alt in alternatives
+                        )
+                    ):
+                        candidates.setdefault(qualname, []).append(
+                            (first_alt.name, node.subject)
+                        )
         elif isinstance(node, (ast.Import, ast.ImportFrom)):
             # `import json as fact` / `from pkg import item as fact` --
             # a real local binding too, the identical shadowing shape as

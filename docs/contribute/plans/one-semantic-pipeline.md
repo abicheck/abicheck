@@ -2536,6 +2536,60 @@ repository, `fact_detector_misuse.py` at 1533 lines (well under the
 `TestNamedExpressionsResolveThroughAliasBranches` in `tests/
 test_fact_detector_misuse_def_time_scope.py`.
 
+**Two more findings from the next review round, plus a test-file split
+the second push over the 1200-line cap.** (1) `_is_fact_typed_annotation()`'s
+generic fallback branch (`return _is_fact_typed_annotation(annotation.value,
+fact_names)`) is correct for a plain `Fact[int]` subscript -- `annotation.
+value` is the `Fact` head name itself -- but wrong for `Annotated[Fact[int],
+metadata]` (PEP 593): there, `annotation.value` is `Annotated`, not `Fact`,
+and the real type lives in the subscript's own *slice* (its first element;
+everything after is arbitrary metadata, never itself a type to check).
+`def f(value: Annotated[Fact[int], "meta"], other): return value == other`
+was invisible. Fixed with a dedicated `head == "Annotated"` branch,
+mirroring the existing `Optional`/`Union` branches' own tuple-vs-bare-slice
+handling: recurses into the slice's first element only (`elts[0]` when the
+slice is a `Tuple`, else the bare slice), leaving every later metadata
+element untouched. Composes correctly with the existing `Optional`
+handling (`Annotated[Optional[Fact[int]], "meta"]`), since each branch
+only ever recurses through the same function. (2) The `ast.Match` branch's
+existing whole-subject-capture recognition (`case fact:`/`case SomeClass()
+as fact:`) had no counterpart for an OR pattern where *every* alternative
+independently captures the whole subject under the same name -- `case
+(list() as fact) | (tuple() as fact): fact == other` was invisible, since
+`case.pattern` there is `ast.MatchOr`, never itself an `ast.MatchAs`.
+Python requires every alternative of an OR pattern to bind the identical
+*set* of names (a `SyntaxError` otherwise), but not the identical binding
+*shape* -- `case C(x=fact) | (D() as fact):` legally binds `fact` in both
+branches, but only the second branch binds it to the whole subject, so
+consistency of the bound *name* alone is not sufficient evidence. Fixed
+by requiring every single alternative to itself be exactly `ast.MatchAs`
+with the identical `.name` before treating it as an alias of `node.
+subject` -- verified this correctly rejects the mixed-shape case above
+while still accepting a bare-capture-mixed-with-an-as-pattern OR
+(`case fact | (tuple() as fact):`) and a three-way OR, since each
+alternative there is independently a whole-subject `MatchAs`.
+
+Verified against both reported repros, a multi-metadata-item variant and
+an `Annotated`+`Optional` composition for finding (1), a three-way OR and
+a bare-capture-mixed-with-`MatchAs` OR for finding (2), and negative
+controls for each (a non-Fact `Annotated` type; a non-Fact match subject;
+the mixed-binding-shape OR pattern) via direct AST reproduction before
+writing tests. Adding these tests pushed `tests/test_fact_detector_misuse_
+def_time_scope.py` to 1198 of its own 1200-line test-file cap -- two lines
+of headroom, effectively none -- so its tail (the four most recent
+alias-resolution-edge-case test classes: direct conditional operands,
+`NamedExpr`, `Annotated`, `MatchOr`) was split into a new sibling file,
+`tests/test_fact_detector_misuse_alias_edge_cases.py`, mirroring how that
+file was itself split out of `test_fact_detector_misuse_scoping.py` --
+mechanical extraction, every class moved unchanged, verified both in
+combination and in isolation. `ruff`/`mypy` both stayed clean, still zero
+existing hits in the real repository, `fact_detector_misuse.py` at 1572
+lines (well under the 2000-line hard cap), the def-time-scope test file
+back down to 940 lines, the new edge-case test file at 299 lines. New
+tests: `TestAnnotatedWrapperUnwrapsToItsFirstSliceElement` and
+`TestMatchOrPropagatesWholeSubjectCaptures`, both now in `tests/
+test_fact_detector_misuse_alias_edge_cases.py`.
+
 ---
 
 ### Phase 1 — finish the `dump`/`scan` typed-API convergence (closes AGENTS.md "PR C")
