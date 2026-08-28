@@ -779,11 +779,30 @@ def _paired_match_sequence_candidates(
     Nests through a further sequence pattern matched against a further
     `Tuple`/`List` subject element (`case ((fact, _), tag):` against
     `((rec.bases_fact, "x"), tag)`) the identical way `_paired_unpacking_
-    candidates()` already nests through a further tuple/list target.
+    candidates()` already nests through a further tuple/list target --
+    delegated to `_paired_sub_pattern_candidates()`, which also unwinds a
+    chained `MatchAs` (`case (fact as alias,):`) into every name along
+    the chain and recurses into a structural sub-pattern *wrapped* by
+    `MatchAs` (`case ((fact, _) as alias,):`), not just a bare structural
+    sub-pattern at a position.
+
+    Rejects a *starred* subject element (`match (*extras, rec.bases_fact):`)
+    outright, the same all-or-nothing rule `_paired_unpacking_candidates()`
+    already applies to a starred value display -- a dynamic expansion of
+    unknown length means no position can be confidently attributed to a
+    known subject element.
     """
     if not isinstance(subject, (ast.Tuple, ast.List)):
         return []
     subject_elts = subject.elts
+    if any(isinstance(elt, ast.Starred) for elt in subject_elts):
+        # A starred *subject* element (`match (*extras, rec.bases_fact):`)
+        # is a dynamic expansion of unknown length, so no pattern position
+        # can be confidently attributed to a known subject element -- the
+        # identical rule `_paired_unpacking_candidates()` already applies
+        # to a starred value display (Codex review, fresh evidence: this
+        # guard existed on the assignment-unpacking sibling but not here).
+        return []
     patterns = pattern.patterns
     star_positions = [i for i, p in enumerate(patterns) if isinstance(p, ast.MatchStar)]
     if len(star_positions) > 1:
@@ -802,16 +821,7 @@ def _paired_match_sequence_candidates(
             pairs += list(zip(after, subject_elts[-len(after) :]))
     candidates: list[tuple[str, ast.expr]] = []
     for sub_pattern, sub_subject in pairs:
-        if isinstance(sub_pattern, ast.MatchAs) and sub_pattern.name is not None:
-            candidates.append((sub_pattern.name, sub_subject))
-        elif isinstance(sub_pattern, ast.MatchSequence):
-            candidates.extend(
-                _paired_match_sequence_candidates(sub_pattern, sub_subject)
-            )
-        elif isinstance(sub_pattern, ast.MatchMapping):
-            candidates.extend(
-                _paired_match_mapping_candidates(sub_pattern, sub_subject)
-            )
+        candidates.extend(_paired_sub_pattern_candidates(sub_pattern, sub_subject))
     return candidates
 
 
@@ -849,7 +859,12 @@ def _paired_match_mapping_candidates(
     candidate here; `_match_pattern_names()` already records it as an
     ordinary local bound name. Nests through a further sequence/mapping
     pattern matched against a further literal subject entry the identical
-    way sequence pairing already does.
+    way sequence pairing already does -- delegated to `_paired_sub_
+    pattern_candidates()`, the same shared per-position helper
+    `_paired_match_sequence_candidates()` uses, which also unwinds a
+    chained `MatchAs` (`case {"fact": fact as alias}:`) into every name
+    along the chain and recurses into a structural sub-pattern wrapped by
+    `MatchAs`.
     """
     if not isinstance(subject, ast.Dict) or any(k is None for k in subject.keys):
         return []
@@ -865,16 +880,7 @@ def _paired_match_mapping_candidates(
         sub_subject = subject_by_key.get(key_expr.value)
         if sub_subject is None:
             continue
-        if isinstance(sub_pattern, ast.MatchAs) and sub_pattern.name is not None:
-            candidates.append((sub_pattern.name, sub_subject))
-        elif isinstance(sub_pattern, ast.MatchSequence):
-            candidates.extend(
-                _paired_match_sequence_candidates(sub_pattern, sub_subject)
-            )
-        elif isinstance(sub_pattern, ast.MatchMapping):
-            candidates.extend(
-                _paired_match_mapping_candidates(sub_pattern, sub_subject)
-            )
+        candidates.extend(_paired_sub_pattern_candidates(sub_pattern, sub_subject))
     return candidates
 
 
@@ -904,6 +910,51 @@ def _matchas_chain_names(pattern: ast.pattern) -> list[str]:
         return []
     inner = _matchas_chain_names(pattern.pattern) if pattern.pattern else []
     return [pattern.name, *inner] if pattern.name is not None else inner
+
+
+def _paired_sub_pattern_candidates(
+    sub_pattern: ast.pattern, sub_subject: ast.expr
+) -> list[tuple[str, ast.expr]]:
+    """Pair one structural-pattern position's own *sub_pattern* against
+    its statically-known *sub_subject*, the shared per-position step
+    `_paired_match_sequence_candidates()`/`_paired_match_mapping_
+    candidates()` both delegate to (Codex review, fresh evidence): the
+    previous inline handling recognized only a bare `MatchAs(name=...)`
+    at a position, missing two real shapes. (1) A *chained* `MatchAs`
+    (`case (fact as alias,):`, parsing as `MatchAs(pattern=MatchAs(
+    name="fact"), name="alias")`) recorded only the outer `alias`,
+    leaving `fact` -- an equally real whole-subject alias, per
+    `_matchas_chain_names()`'s own docstring -- unrecorded. (2) A
+    structural sub-pattern *wrapped* by `MatchAs` (`case ((fact, _) as
+    alias,):`) fell through every branch untouched, since the position's
+    own top-level node is `MatchAs`, not `MatchSequence`/`MatchMapping`
+    directly, even though its wrapped pattern is exactly one of those.
+
+    Unwinds the full nested-`MatchAs` chain via `_matchas_chain_names()`
+    first (recording every name along it against the identical
+    *sub_subject*, since Python's `as`-pattern always binds its own name
+    to the same value its wrapped pattern matched against), then finds
+    the chain's innermost non-`MatchAs` wrapped pattern -- skipping past
+    every already-recorded `MatchAs` layer, so a name is never registered
+    twice -- and recurses into it structurally when it is itself a
+    `MatchSequence`/`MatchMapping`. A non-`MatchAs`, non-structural
+    *sub_pattern* (a wildcard `_`, a literal `MatchValue`, a `MatchClass`)
+    contributes no candidate, matching the pre-existing behavior for
+    those shapes.
+    """
+    if isinstance(sub_pattern, ast.MatchAs):
+        candidates = [(name, sub_subject) for name in _matchas_chain_names(sub_pattern)]
+        inner = sub_pattern.pattern
+        while isinstance(inner, ast.MatchAs):
+            inner = inner.pattern
+        if inner is not None:
+            candidates.extend(_paired_sub_pattern_candidates(inner, sub_subject))
+        return candidates
+    if isinstance(sub_pattern, ast.MatchSequence):
+        return _paired_match_sequence_candidates(sub_pattern, sub_subject)
+    if isinstance(sub_pattern, ast.MatchMapping):
+        return _paired_match_mapping_candidates(sub_pattern, sub_subject)
+    return []
 
 
 def _match_pattern_names(pattern: ast.pattern) -> list[str]:

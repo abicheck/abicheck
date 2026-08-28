@@ -3018,6 +3018,62 @@ and `fact_detector_misuse_scope.py` at 945 lines (both well under the
 appended to `tests/test_fact_detector_misuse_alias_edge_cases.py` (1035
 lines, still under its own 1200-line cap).
 
+**Two more findings on the same commit (10th review round), both in the
+structural-pairing per-position handling
+(`_paired_match_sequence_candidates()`/`_paired_match_mapping_
+candidates()`), not the whole-subject `MatchAs`/`MatchOr` branch the
+previous round fixed.** (1) The per-position handling still only ever
+extracted `sub_pattern.name` from a bare `MatchAs`, so a *chained*
+`MatchAs` at a structural position (`case (fact as alias,): return fact
+== other`) recorded only the outer `alias`, missing the inner `fact` --
+the identical nested-`MatchAs` shape the previous round's fix already
+closed at the whole-subject level, just unreached at the per-position
+level. A structural sub-pattern *wrapped* by `MatchAs` at a position
+(`case ((fact, _) as alias,):`) fell through every branch untouched
+too, since the position's own top-level node is `MatchAs`, not
+`MatchSequence`/`MatchMapping` directly. (2) The sequence-pairing
+function accepted a *starred* subject (`match (*extras, rec.
+bases_fact): case (_, fact):`) with no guard at all -- a dynamic
+expansion of unknown length means no pattern position can be
+confidently attributed to a known subject element, the identical rule
+`_paired_unpacking_candidates()` already applies to a starred *value*
+display, just missing on this structural-`match` sibling.
+
+Fixed both per-position gaps with one new shared helper, `_paired_sub_
+pattern_candidates()`, which both `_paired_match_sequence_candidates()`
+and `_paired_match_mapping_candidates()` now delegate their per-position
+step to instead of their own ad hoc `MatchAs`/`MatchSequence`/
+`MatchMapping` branching: it unwinds a chained `MatchAs` via the
+existing `_matchas_chain_names()` (recording every name along the chain
+against the identical sub-subject), then finds the chain's innermost
+non-`MatchAs` wrapped pattern -- skipping past every already-recorded
+`MatchAs` layer so a name is never registered twice -- and recurses into
+it structurally when it is itself a `MatchSequence`/`MatchMapping`.
+Fixed the starred-subject gap with the same `any(isinstance(elt,
+ast.Starred) ...)` guard `_paired_unpacking_candidates()`'s own value
+display already uses, applied to `_paired_match_sequence_candidates()`'s
+subject elements before any positional pairing is attempted (mapping
+pairing is unaffected -- it pairs by literal key, not position, so a
+starred *sequence* element has no analogue there).
+
+Verified against both reported repros (chained `MatchAs` at a sequence
+position, starred subject), the chained-`MatchAs` shape reproduced at a
+mapping position too, a structural sub-pattern wrapped by `MatchAs`
+(both the inner structural capture and the outer wrapping alias,
+independently), and every existing sibling case re-verified unaffected
+(a plain single-level `case fact:`, a sequence wildcard position, a
+`MatchStar`'s own captured name staying an ordinary shadow rather than
+an alias, a non-tuple/list subject, an unstarred subject, and a
+length-mismatch subject), all via direct AST reproduction before
+writing tests. Still zero existing hits, `mypy`/`ruff` both stayed
+clean, `fact_detector_misuse_scope.py` at 996 lines (well under the
+2000-line hard cap). New tests:
+`TestNestedMatchAsChainsInsideStructuralPositions` (3 tests),
+`TestStructuralSubPatternWrappedByMatchAsAtAPosition` (2 tests), and
+`TestStarredSubjectDisqualifiesStructuralSequencePairing` (2 tests),
+appended to `tests/test_fact_detector_misuse_alias_edge_cases.py` (1140
+lines, still under its own 1200-line cap).
+
 ---
 
 ### Phase 1 — finish the `dump`/`scan` typed-API convergence (closes AGENTS.md "PR C")

@@ -1033,3 +1033,108 @@ class TestNestedMatchAsChainsPropagateWholeSubjectCaptures:
         )
         tree = ast.parse(src, filename="x.py")
         assert fact_equality_misuse_sites(tree, "x.py") == []
+
+
+class TestNestedMatchAsChainsInsideStructuralPositions:
+    """`_paired_sub_pattern_candidates()`'s own chained-`MatchAs` handling
+    (Codex review, fresh evidence): `case (fact as alias,): return fact ==
+    other` -- `fact` is the *inner* name of a chained `MatchAs` at a
+    structural-sequence position, the identical nested-`MatchAs` shape
+    `TestNestedMatchAsChainsPropagateWholeSubjectCaptures` already covers
+    at the whole-subject level, but the structural-pairing branch
+    previously extracted only `sub_pattern.name` (the outer name)."""
+
+    def test_detects_a_comparison_through_the_inner_chained_name(self) -> None:
+        src = (
+            "def f(rec, other):\n"
+            "    match (rec.bases_fact,):\n"
+            "        case (fact as alias,):\n"
+            "            return fact == other\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert fact_equality_misuse_sites(tree, "x.py") == [(4, 19)]
+
+    def test_still_detects_a_comparison_through_the_outer_chained_name(self) -> None:
+        """Regression guard: the outer name stays recognized too."""
+        src = (
+            "def f(rec, other):\n"
+            "    match (rec.bases_fact,):\n"
+            "        case (fact as alias,):\n"
+            "            return alias == other\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert fact_equality_misuse_sites(tree, "x.py") == [(4, 19)]
+
+    def test_detects_a_mapping_position_chained_name(self) -> None:
+        src = (
+            "def f(rec, other):\n"
+            '    match {"fact": rec.bases_fact}:\n'
+            '        case {"fact": fact as alias}:\n'
+            "            return fact == other\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert fact_equality_misuse_sites(tree, "x.py") == [(4, 19)]
+
+
+class TestStructuralSubPatternWrappedByMatchAsAtAPosition:
+    """A structural sub-pattern can itself be wrapped by `MatchAs` at a
+    position (`case ((fact, _) as alias,):`) -- previously fell through
+    every branch of the per-position handling untouched, since the
+    position's own top-level node is `MatchAs`, not `MatchSequence`
+    directly (Codex review, fresh evidence)."""
+
+    def test_detects_a_capture_inside_a_wrapped_nested_sequence(self) -> None:
+        src = (
+            "def f(rec, other):\n"
+            '    match ((rec.bases_fact, "x"),):\n'
+            "        case ((fact, _) as alias,):\n"
+            "            return fact == other\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert fact_equality_misuse_sites(tree, "x.py") == [(4, 19)]
+
+    def test_also_detects_the_wrapping_alias_as_a_whole_element_capture(
+        self,
+    ) -> None:
+        """The wrapping `alias` name is a real whole-*element* alias too
+        (bound to the same tuple `(rec.bases_fact, "x")`, not itself
+        Fact-typed) -- comparing it must stay unflagged."""
+        src = (
+            "def f(rec, other):\n"
+            '    match ((rec.bases_fact, "x"),):\n'
+            "        case ((fact, _) as alias,):\n"
+            "            return alias == other\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert fact_equality_misuse_sites(tree, "x.py") == []
+
+
+class TestStarredSubjectDisqualifiesStructuralSequencePairing:
+    """A starred subject element (`match (*extras, rec.bases_fact):`) is a
+    dynamic expansion of unknown length, so no pattern position can be
+    confidently attributed to a known subject element -- the identical
+    rule `_paired_unpacking_candidates()` already applies to a starred
+    value display (Codex review, fresh evidence: this guard existed on
+    the assignment-unpacking sibling but not on the match-subject one)."""
+
+    def test_ignores_a_capture_positioned_against_a_starred_subject(self) -> None:
+        src = (
+            "def f(rec, other, extras):\n"
+            "    match (*extras, rec.bases_fact):\n"
+            "        case (_, fact):\n"
+            "            return fact == other\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert fact_equality_misuse_sites(tree, "x.py") == []
+
+    def test_unstarred_subject_still_pairs_normally(self) -> None:
+        """Regression guard: a subject with no starred element is
+        unaffected by the new guard."""
+        src = (
+            "def f(rec, other, tag):\n"
+            "    match (rec.bases_fact, tag):\n"
+            "        case (fact, _):\n"
+            "            return fact == other\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert fact_equality_misuse_sites(tree, "x.py") == [(4, 19)]
