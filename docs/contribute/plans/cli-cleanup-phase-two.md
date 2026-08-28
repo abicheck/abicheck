@@ -2654,7 +2654,16 @@ pipelines a fourth time.
   > the exact same native `dump` CLI path the baseline itself took, unflagged
   > `"auto"` and all, so a `--sources new=<tree>` new side resolves clang,
   > not castxml, pairing clang with clang instead of demonstrating the
-  > divergence.** "`compare`'s implicit-dump operand" instead names the
+  > divergence. **`sources` and `build_info` are not equivalent here, though
+  > (Codex review, fresh evidence): a `--build-info`-only new side (no
+  > `--sources`) still enters this same nested `dump_cmd` invocation, but
+  > `_run_inline_source_abi(sources, ...)` (`buildsource/inline.py`) returns
+  > `(None, [])` immediately when `sources is None` -- before
+  > `_make_source_extractor()` is ever called -- since a raw `--build-info`
+  > supplies only L3 compile-unit evidence, never an L4 source tree to
+  > extract from. So `--build-info`-only resolves no extractor at all
+  > (clang or castxml), and only a raw `--sources` value actually reaches
+  > and exercises this resolution.** "`compare`'s implicit-dump operand" instead names the
   > *typed* pipeline `resolve_compare_request`/`resolve_side_snapshot`
   > share with `execute_dump_request` (`header_conditionals.py`'s own
   > module-header comment) -- reached only when `compare` resolves a side
@@ -2675,8 +2684,12 @@ pipelines a fourth time.
   > for `embed_build_source` to call `collect_inline_pack()` against, so it
   > produces no new-side L4 evidence to diverge on at all -- the actual
   > reproduction needs a typed `CompareRequest(old=..., new=InputSpec(path=
-  > new_so, sources=<the same tree the baseline was dumped from>,
-  > depth="source", ...))` call, with a real, raw (non-pack) `sources` value
+  > new_so, sources=<the same tree the baseline was dumped from>, ...),
+  > depth="source")` call -- `depth` lives on `CompareRequest` itself, not
+  > `InputSpec` (Codex review, fresh evidence, correcting this exact
+  > paragraph's own prior misplacement, which would raise `TypeError:
+  > InputSpec.__init__() got an unexpected keyword argument 'depth'` before
+  > ever reaching the resolver) -- with a real, raw (non-pack) `sources` value
   > on the `InputSpec` itself, so `resolve_side_snapshot` reaches
   > `effective_frontend`
   > directly, pairing a clang-derived old side against a castxml-derived new
