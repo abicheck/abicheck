@@ -1521,6 +1521,33 @@ the aliased-unbound-`__getattribute__` positive case and its
 unrelated-name negative control, and the enclosing-parameter-shadow
 exclusion and its sibling-function negative control.
 
+**A further Codex review round found the `attrgetter` branch's own
+baseline key never actually fingerprinted the read's containing
+expression, unlike every other reader form.** `outer_text = ast.
+get_source_segment(source, node) ...` used the attrgetter *call's own*
+bare text for both the outer-expression and expr-text key slots, instead
+of climbing to the read's real outermost containing expression via
+`_expr_text()` the way the plain-attribute/`getattr`/`__getattribute__`
+branches already do. `old_decision(attrgetter("bases")(rec))` and
+`keep(attrgetter("bases")(rec))` -- two attrgetter reads with an
+identical bare call but different containing expressions -- collapsed to
+the exact same key, ending in occurrence `1` for both once sorted by
+position; migrating the first reader while adding an unrelated new one
+at the same rank would silently reuse the vacated key, the exact
+collision `_outermost_containing_expr()` exists to close for every other
+form (the very finding that motivated that helper's own creation
+several rounds above -- this branch was simply never wired to it). Fixed
+by computing `outer_text = _expr_text(node)` (the containing expression)
+separately from `text` (the call's own bare source), matching the
+six-part key's established `(qualname, attr, outer_text, text,
+occurrence)` shape exactly. Verified empirically: still zero existing
+hits in the real repository (no `attrgetter` read exists anywhere in
+`abicheck/` today, so the baseline itself is unaffected by the key-shape
+fix), baseline count is unchanged, `mypy`/`ruff` both stayed clean. New
+test: two attrgetter reads sharing identical bare-call text inside
+different containing expressions, pinning that they now get distinct
+keys.
+
 **A further Codex review round confirmed, with a concrete repro, a gap
 `_locally_bound_names()`'s own docstring had already predicted but left
 unattempted -- recorded here as an accepted known gap rather than a bug

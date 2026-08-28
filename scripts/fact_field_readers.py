@@ -1169,9 +1169,21 @@ def unmigrated_fact_reader_sites(
             # chaining a *second* attribute access) stays out of scope,
             # the same "no type inference" limit the plain `getattr` case
             # already accepts for a non-literal default.
-            outer_text = (
+            # Fingerprinted the same way every other reader form is
+            # (Codex review, fresh evidence): `outer_text` climbs to the
+            # read's own *outermost containing expression* via
+            # `_expr_text()`, distinct from `text`, the call's own bare
+            # source -- an earlier revision used the call's own bare text
+            # for both slots, so `old_decision(attrgetter("bases")(rec))`
+            # and `keep(attrgetter("bases")(rec))` produced the identical
+            # key. Migrating the first reader while adding an unrelated
+            # new one at the same rank would then have silently reused
+            # the vacated key, the exact collision `_outermost_containing_
+            # expr()` exists to close for every other form.
+            text = (
                 ast.get_source_segment(source, node) if source else None
             ) or "<unavailable>"
+            outer_text = _expr_text(node)
             qualname = qualnames.get(node.lineno, "<module>")
             for call_arg in node.func.args:
                 if (
@@ -1186,7 +1198,7 @@ def unmigrated_fact_reader_sites(
                             call_arg.value,
                             qualname,
                             outer_text,
-                            outer_text,
+                            text,
                         )
                     )
             continue

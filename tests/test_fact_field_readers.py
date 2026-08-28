@@ -450,6 +450,32 @@ class TestUnmigratedFactReaderSites:
             'operator.attrgetter("bases")(rec)::1'
         ]
 
+    def test_keys_two_attrgetter_reads_by_their_own_containing_expression(
+        self,
+    ) -> None:
+        """`old_decision(attrgetter("bases")(rec))` and `keep(attrgetter(
+        "bases")(rec))` -- two attrgetter reads sharing an identical bare
+        call text but sitting inside different containing expressions --
+        must get distinct keys (Codex review, fresh evidence: an earlier
+        revision fingerprinted the attrgetter branch by the call's own
+        bare text alone, not its outermost containing expression the way
+        every other reader form already is, so both reads collapsed to
+        the identical key -- migrating one while adding an unrelated new
+        read at the same rank would silently reuse the vacated key)."""
+        src = (
+            "def f(rec):\n"
+            '    old_decision(attrgetter("bases")(rec))\n'
+            '    keep(attrgetter("bases")(rec))\n'
+        )
+        tree = ast.parse(src, filename="x.py")
+        sites = unmigrated_fact_reader_sites(tree, "x.py", src)
+        assert [key for key, _l, _a, _q in sites] == [
+            'x.py::f::bases::old_decision(attrgetter("bases")(rec))::'
+            'attrgetter("bases")(rec)::1',
+            'x.py::f::bases::keep(attrgetter("bases")(rec))::'
+            'attrgetter("bases")(rec)::1',
+        ]
+
     def test_detects_a_bound_getattribute_call_naming_a_bridged_attr(
         self,
     ) -> None:
