@@ -119,3 +119,12 @@
   a real tri-state export-resolution signal threaded through both
   functions' public signatures and every one of their callers — a
   genuine API-shape change, not a follow-up to this predicate.
+- **The whole-snapshot disk cache (`snapshot_cache._SNAPSHOT_CACHE_VERSION`)
+  is bumped alongside `CASTXML_EXTRACTOR_VERSION`.** That constant gates a
+  separate, cross-process cache from `AbiSnapshot.SCHEMA_VERSION` -- a warm
+  cache entry from before this fix would replay `is_compiler_generated=None`
+  on every declaration (silently masking this whole fix) even though the
+  entry re-serializes under the new schema version on read, since
+  `SCHEMA_VERSION` only gates the on-disk snapshot JSON shape, not whether a
+  cached snapshot's own content is stale relative to the extraction logic
+  that produced it (Codex review).

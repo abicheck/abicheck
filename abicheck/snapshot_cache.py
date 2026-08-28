@@ -45,7 +45,7 @@ MAX_ENTRIES: int = 100
 #: key invalidates all previously-cached entries on upgrade rather than risk
 #: serving a stale snapshot computed by an older, behaviorally-different
 #: abicheck version.
-_SNAPSHOT_CACHE_VERSION: str = "20"
+_SNAPSHOT_CACHE_VERSION: str = "21"
 # v2: castxml's CvQualifiedType type-name spelling changed for a
 # volatile-qualified pointer/reference VALUE (now a suffix, "T * volatile",
 # matching clang's own convention, rather than always a prefix) -- an
@@ -265,6 +265,18 @@ _SNAPSHOT_CACHE_VERSION: str = "20"
 # A warm cache from before this fix would keep serving the overclaimed
 # ``PRESENT`` status this fix exists to correct. Bumped so upgrading forces
 # re-extraction instead of silently replaying the stale status.
+#
+# v21 (PR C item 3, Codex review): castxml/direct-clang started stamping
+# ``Function.is_compiler_generated`` (schema v27) from castxml's own
+# ``artificial="1"`` attribute / clang's implicit-node-skipping guarantee --
+# the same TU inputs now produce a different ``AbiSnapshot``, with no change
+# to any caller-supplied cache-key input. A warm whole-snapshot cache entry
+# from before this fix would keep replaying ``is_compiler_generated=None``
+# on every declaration (silently masking the phantom-implicit-member L4
+# link fix this same change makes) even after re-serializing under schema
+# v27, since ``SCHEMA_VERSION`` gates the on-disk snapshot JSON format only,
+# not this separate whole-process disk cache. Bumped so upgrading forces
+# re-extraction instead of silently replaying the stale, unstamped facts.
 
 
 def _get_cache_dir() -> Path:
