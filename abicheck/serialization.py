@@ -27,6 +27,7 @@ if TYPE_CHECKING:
     from .bundle_facts import BundleFacts
     from .snapshot_io import SnapshotWriteResult
 from . import qualified_name_segments
+from .dwarf_metadata_codec import decode_dwarf_advanced_metadata, decode_dwarf_metadata
 from .errors import IncompatibleSnapshotSchemaError, SnapshotError
 from .model import (
     AbiSnapshot,
@@ -52,7 +53,6 @@ from .storage.fact_codec import (
     decode_fact,
     decode_record_facts,
     encode_fact_fields,
-    legacy_dwarf_evidence_state,
 )
 
 # Current schema version for snapshot serialization.
@@ -608,82 +608,6 @@ def _macho_from_dict(e: dict[str, Any]) -> Any:
     )
 
 
-def _dwarf_from_dict(d: dict[str, Any]) -> Any:
-    from .dwarf_metadata import DwarfMetadata, EnumInfo, FieldInfo, StructLayout
-
-    structs = {
-        name: StructLayout(
-            name=s.get("name", name),
-            byte_size=s.get("byte_size", 0),
-            alignment=s.get("alignment", 0),
-            fields=[
-                FieldInfo(
-                    name=f.get("name", ""),
-                    type_name=f.get("type_name", "unknown"),
-                    byte_offset=f.get("byte_offset", 0),
-                    byte_size=f.get("byte_size", 0),
-                    bit_offset=f.get("bit_offset", 0),
-                    bit_size=f.get("bit_size", 0),
-                )
-                for f in s.get("fields", [])
-            ],
-            is_union=s.get("is_union", False),
-        )
-        for name, s in d.get("structs", {}).items()
-    }
-
-    enums = {
-        name: EnumInfo(
-            name=e.get("name", name),
-            underlying_byte_size=e.get("underlying_byte_size", 0),
-            members=e.get("members", {}),
-        )
-        for name, e in d.get("enums", {}).items()
-    }
-
-    return DwarfMetadata(
-        structs=structs,
-        enums=enums,
-        base_types={k: int(v) for k, v in d.get("base_types", {}).items()},
-        has_dwarf=d.get("has_dwarf", False),
-        evidence_source=d.get("evidence_source", "unknown"),
-        evidence_state=legacy_dwarf_evidence_state(d),
-        cu_total=d.get("cu_total", 0),
-        cu_failed=d.get("cu_failed", 0),
-    )
-
-
-def _dwarf_advanced_from_dict(d: dict[str, Any]) -> Any:
-    from .dwarf_advanced import AdvancedDwarfMetadata, ToolchainInfo
-
-    tc = d.get("toolchain", {})
-    toolchain = ToolchainInfo(
-        producer_string=tc.get("producer_string", ""),
-        compiler=tc.get("compiler", ""),
-        version=tc.get("version", ""),
-        abi_flags=set(tc.get("abi_flags", [])),
-        vector_abi_flags=set(tc.get("vector_abi_flags", [])),
-    )
-    return AdvancedDwarfMetadata(
-        has_dwarf=d.get("has_dwarf", False),
-        evidence_state=legacy_dwarf_evidence_state(d),
-        cu_total=d.get("cu_total", 0),
-        cu_failed=d.get("cu_failed", 0),
-        target_arch=d.get("target_arch", ""),
-        toolchain=toolchain,
-        calling_conventions=d.get("calling_conventions", {}),
-        value_abi_traits=d.get("value_abi_traits", {}),
-        return_value_sizes=d.get("return_value_sizes", {}),
-        return_memory_classified=set(d.get("return_memory_classified", [])),
-        packed_structs=set(d.get("packed_structs", [])),
-        all_struct_names=set(d.get("all_struct_names", [])),
-        frame_registers=d.get("frame_registers", {}),
-        callee_saved_regs={
-            k: frozenset(v) for k, v in d.get("callee_saved_regs", {}).items()
-        },
-    )
-
-
 def _sycl_from_dict(d: dict[str, Any]) -> Any:
     from .sycl_metadata import SyclMetadata, SyclPluginInfo
 
@@ -1042,8 +966,8 @@ def snapshot_from_dict(d: dict[str, Any]) -> AbiSnapshot:
     elf = _sub_block(_elf_from_dict, elf_data)
     pe = _sub_block(_pe_from_dict, pe_data)
     macho = _sub_block(_macho_from_dict, macho_data)
-    dwarf = _sub_block(_dwarf_from_dict, dwarf_data)
-    dwarf_advanced = _sub_block(_dwarf_advanced_from_dict, dwarf_adv_data)
+    dwarf = _sub_block(decode_dwarf_metadata, dwarf_data)
+    dwarf_advanced = _sub_block(decode_dwarf_advanced_metadata, dwarf_adv_data)
 
     sycl_data = d.get("sycl")
     sycl = _sub_block(_sycl_from_dict, sycl_data)
