@@ -980,37 +980,59 @@ reader is checked," and it takes exactly this kind of real scan to find
 the readers a hand audit keeps missing.
 
 The check's baseline (`KNOWN_UNMIGRATED_READERS`, allowlist-and-shrink,
-`IMPORT_CYCLE_ALLOWLIST`'s own convention) therefore records 91 currently-
+`IMPORT_CYCLE_ALLOWLIST`'s own convention) therefore records 99 currently-
 known reader sites across the nine-plus-fourteen-plus-three modules named
 above and throughout this Design section, keyed
-`"<rel>::<attr>::<occurrence>"` (stable across an unrelated edit
-elsewhere in the file, matching `ENGINE_CLI_BOUNDARY_ALLOWLIST`'s own
-keying rationale) — generated directly from the real AST scan, not
-hand-counted, so the baseline itself cannot silently drift from what the
-scan actually finds. `EXEMPT_MODULES` is the separate, non-shrinking set
-this check never even scans: `model/entities.py`/`model/declarations.py`
-(the fields' own dataclass definition and `__post_init__` omission-bridge
-implementation) and `dwarf_snapshot.py`/`dumper_layout_backfill.py` (the
-DWARF producer and DWARF-backfill merge, which compute or combine the raw
-legacy value itself rather than making a compatibility decision from it —
-the same role `RecordType(bases=...)`'s own keyword construction plays at
-every producer, which this attribute-*read* scan can't see at all since it
-only looks at reads on an existing instance). No type inference is
+`"<rel>::<qualname>::<attr>::<occurrence>"` -- `qualname` the enclosing
+function (`<module>` for module-level code, `Class.method` for a method),
+`occurrence` scoped to that same function (not merely the file). A first
+draft keyed only `"<rel>::<attr>::<occurrence>"`; a Codex review round
+caught the real gap in that: an existing read migrated or deleted and a
+different, unrelated read of the same attribute later added to the same
+file would silently inherit the vacated occurrence number and read as an
+already-reviewed site — scoping the counter to `(qualname, attr)` needs
+the new read to land in the exact same function at the exact same rank to
+collide, a real coincidence rather than a routine edit's side effect.
+
+`EXEMPT_FUNCTIONS` is the separate, non-shrinking set of specific
+functions this check never flags: `RecordType.__post_init__`/
+`Param.__post_init__` (the fields' own `__post_init__` omission-bridge
+implementation) and two specific DWARF functions,
+`dwarf_snapshot._DwarfSnapshotBuilder._finalize_vptr_offsets` and
+`dumper_layout_backfill._backfilled_record`, which compute or combine the
+raw legacy value itself rather than making a compatibility decision from
+it. **Function-scoped, not module-scoped — a first draft exempted the
+whole `dwarf_snapshot.py`/`dumper_layout_backfill.py` modules, and a
+Codex review round found that was wrong**: both files hold a second kind
+of function that genuinely *decides* something from these fields rather
+than merely computing them --
+`_DwarfSnapshotBuilder._filter_types_by_reachability` reads `bases`/
+`virtual_bases` to decide which types survive into the exported snapshot
+(dropping one on a false "no bases" reading is a real, silent
+correctness loss, not a cosmetic one), and `dumper_layout_backfill.
+_fields_corroborate` reads `bases`/`virtual_bases`/`vtable` to decide
+whether two records structurally match across the header/DWARF backfill.
+A whole-module exemption hid both from the scan entirely; narrowing to
+function scope surfaced them as two more genuine, previously-invisible
+readers, now real `KNOWN_UNMIGRATED_READERS` entries themselves (bringing
+the total from the originally-reported 91 to 99). No type inference is
 attempted — verified empirically, by running the scan against the whole
-package before writing the baseline, that all 91 hits are genuinely
+package before writing the baseline, that all 99 hits are genuinely
 `RecordType`/`Param` accesses with zero cross-class collisions. Tests:
 `tests/test_fact_field_readers.py` (the real repository has zero unlisted
 violations; every baseline/exempt entry still names something real; the
-AST primitive's own contract — attrs detected, `Store` ignored, occurrence
-numbering — pinned directly; and two end-to-end cases against a throwaway
-`abicheck/`-shaped tree confirming the check function itself, not only the
-primitive, both fires on a new violation and stays silent on a baselined
-one).
+AST primitive's own contract — attrs detected, `Store` ignored,
+per-function occurrence numbering, module/class qualname derivation —
+pinned directly; and end-to-end cases against a throwaway `abicheck/`-
+shaped tree confirming the check function itself, not only the primitive,
+fires on a new violation, stays silent on a baselined one, and respects a
+function-scoped exemption without leaking to a sibling function in the
+same file).
 
 **Still not landed**: no detector (`diff_layout.py`/`diff_types.py`/
-`diff_param_qualifiers.py`/the fourteen-plus-three-reader set the check
+`diff_param_qualifiers.py`/the fourteen-plus-five-reader set the check
 above now tracks precisely) has actually been migrated to read `.status`
-— the check above only *guards* the 91 existing sites against a new,
+— the check above only *guards* the 99 existing sites against a new,
 unreviewed one joining them; it does not change what any of them do.
 Migrating a detector now would add real complexity for zero behavior
 change until every producer's own construction is at least this explicit

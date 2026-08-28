@@ -18,13 +18,17 @@
 ``scripts/check_ai_readiness.py``) — ADR-063 Phase 0's "widened, non-glob
 AI-readiness check" (``docs/contribute/plans/one-semantic-pipeline.md``).
 
-The check ERRORs if a module outside ``EXEMPT_MODULES`` reads one of
+The check ERRORs if a function outside ``EXEMPT_FUNCTIONS`` reads one of
 ``RecordType.bases``/``virtual_bases``/``vtable`` or ``Param.is_va_list``
 directly (an ``ast.Load``), without the site being a previously reviewed
 ``KNOWN_UNMIGRATED_READERS`` baseline entry — the same allowlist-and-shrink
 design ``ENGINE_CLI_BOUNDARY_ALLOWLIST``/``IMPORT_CYCLE_ALLOWLIST`` already
-use. This file pins that the real repository has no *unlisted* violation
-and that the detection logic itself actually catches a direct read.
+use. Exemption and the baseline key are both *function*-scoped, not
+module- or file-scoped (a Codex review round found a whole-module exemption
+hid two genuine decision functions living inside otherwise-exempt producer
+modules) — see the gate's own docstring for that history. This file pins
+that the real repository has no *unlisted* violation and that the
+detection logic itself actually catches a direct read.
 """
 
 from __future__ import annotations
@@ -41,7 +45,7 @@ if str(_REPO_ROOT) not in sys.path:
 
 from scripts.check_ai_readiness import Findings  # noqa: E402
 from scripts.fact_field_readers import (  # noqa: E402
-    EXEMPT_MODULES,
+    EXEMPT_FUNCTIONS,
     FACT_BRIDGED_ATTRS,
     KNOWN_UNMIGRATED_READERS,
     check_fact_field_readers,
@@ -72,28 +76,39 @@ def test_baseline_entries_are_real_sites() -> None:
     seen: set[str] = set()
     for path in sorted(gate.PKG.rglob("*.py")):
         rel = gate._rel(path)
-        if rel in EXEMPT_MODULES:
-            continue
         try:
             tree = ast.parse(gate._read(path), filename=rel)
         except SyntaxError:
             continue
-        seen.update(
-            key for key, _lineno, _attr in unmigrated_fact_reader_sites(tree, rel)
-        )
+        for key, _lineno, _attr, qualname in unmigrated_fact_reader_sites(tree, rel):
+            if f"{rel}::{qualname}" in EXEMPT_FUNCTIONS:
+                continue
+            seen.add(key)
     stale = KNOWN_UNMIGRATED_READERS - seen
     assert stale == set(), f"Stale baseline entries (no longer a real read): {stale}"
 
 
-def test_exempt_modules_are_real_files() -> None:
-    """An ``EXEMPT_MODULES`` entry naming a file that no longer exists (a
-    rename, a deletion) is a silent hole — the exemption would then apply
-    to nothing, while a reviewer reading the set believes it still covers a
-    real bridge/producer module."""
-    for rel in EXEMPT_MODULES:
-        assert (_REPO_ROOT / rel).is_file(), (
-            f"EXEMPT_MODULES names a missing file: {rel}"
-        )
+def test_exempt_functions_are_real_sites() -> None:
+    """Every ``EXEMPT_FUNCTIONS`` entry must still name a function that
+    actually contains a `Fact`-bridged read today — a stale entry (the
+    function was deleted, renamed, or no longer touches these fields at
+    all) is silently exempting nothing, which reads as coverage that isn't
+    there."""
+    import scripts.fact_field_readers as gate
+
+    covering: set[str] = set()
+    for path in sorted(gate.PKG.rglob("*.py")):
+        rel = gate._rel(path)
+        try:
+            tree = ast.parse(gate._read(path), filename=rel)
+        except SyntaxError:
+            continue
+        for _key, _lineno, _attr, qualname in unmigrated_fact_reader_sites(tree, rel):
+            covering.add(f"{rel}::{qualname}")
+    stale = EXEMPT_FUNCTIONS - covering
+    assert stale == set(), (
+        f"Stale EXEMPT_FUNCTIONS entries (cover no real read): {stale}"
+    )
 
 
 class TestUnmigratedFactReaderSites:
@@ -110,8 +125,9 @@ class TestUnmigratedFactReaderSites:
         )
         tree = ast.parse(src, filename="x.py")
         sites = unmigrated_fact_reader_sites(tree, "x.py")
-        attrs = {attr for _key, _lineno, attr in sites}
+        attrs = {attr for _key, _lineno, attr, _qualname in sites}
         assert attrs == FACT_BRIDGED_ATTRS
+        assert all(qualname == "f" for _k, _l, _a, qualname in sites)
 
     def test_ignores_an_assignment_target(self) -> None:
         """A `Store` context (`rec.vtable = []`, the legacy-schema backfill
@@ -127,27 +143,43 @@ class TestUnmigratedFactReaderSites:
         tree = ast.parse(src, filename="x.py")
         assert unmigrated_fact_reader_sites(tree, "x.py") == []
 
-    def test_occurrence_numbering_is_stable_per_attr_per_file(self) -> None:
-        """Two reads of the same attribute in one file get distinct,
-        top-to-bottom-ordered occurrence numbers — the key format
-        `ENGINE_CLI_BOUNDARY_ALLOWLIST` already established, so an
-        unrelated edit elsewhere in the file (which changes line numbers
-        but not which reads exist, in which order) doesn't silently
-        invalidate the baseline."""
-        src = "def f(rec):\n    a = rec.bases\n    b = rec.bases\n"
+    def test_module_level_read_gets_the_module_qualname(self) -> None:
+        src = "REC = None\nX = REC.bases\n"
         tree = ast.parse(src, filename="x.py")
-        keys = [
-            key for key, _lineno, _attr in unmigrated_fact_reader_sites(tree, "x.py")
-        ]
-        assert keys == ["x.py::bases::1", "x.py::bases::2"]
+        sites = unmigrated_fact_reader_sites(tree, "x.py")
+        assert [qualname for _k, _l, _a, qualname in sites] == ["<module>"]
+
+    def test_method_gets_a_class_qualified_name(self) -> None:
+        src = "class C:\n    def m(self, rec):\n        return rec.bases\n"
+        tree = ast.parse(src, filename="x.py")
+        sites = unmigrated_fact_reader_sites(tree, "x.py")
+        assert [qualname for _k, _l, _a, qualname in sites] == ["C.m"]
+
+    def test_occurrence_numbering_is_scoped_to_the_enclosing_function(self) -> None:
+        """Two reads of the same attribute in the same function get
+        distinct, top-to-bottom-ordered occurrence numbers *within that
+        function* — not merely within the file. A second, unrelated
+        function reading the same attribute starts its own count at 1
+        rather than continuing the first function's count, which is what
+        keeps a migrated-and-replaced read from silently inheriting an
+        unrelated new read's key (Codex review — see the gate's own
+        docstring)."""
+        src = (
+            "def f(rec):\n"
+            "    a = rec.bases\n"
+            "    b = rec.bases\n"
+            "def g(rec):\n"
+            "    c = rec.bases\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        keys = [key for key, _l, _a, _q in unmigrated_fact_reader_sites(tree, "x.py")]
+        assert keys == ["x.py::f::bases::1", "x.py::f::bases::2", "x.py::g::bases::1"]
 
     def test_two_different_attrs_on_the_same_line_each_get_their_own_key(self) -> None:
         src = "def f(rec):\n    return rec.bases, rec.vtable\n"
         tree = ast.parse(src, filename="x.py")
-        keys = {
-            key for key, _lineno, _attr in unmigrated_fact_reader_sites(tree, "x.py")
-        }
-        assert keys == {"x.py::bases::1", "x.py::vtable::1"}
+        keys = {key for key, _l, _a, _q in unmigrated_fact_reader_sites(tree, "x.py")}
+        assert keys == {"x.py::f::bases::1", "x.py::f::vtable::1"}
 
 
 def test_check_reports_a_new_unlisted_violation(
@@ -191,10 +223,43 @@ def test_check_is_silent_for_a_baselined_violation(
     monkeypatch.setattr(
         gate,
         "KNOWN_UNMIGRATED_READERS",
-        frozenset({"abicheck/a_new_reader.py::bases::1"}),
+        frozenset({"abicheck/a_new_reader.py::f::bases::1"}),
     )
 
     findings = Findings()
     check_fact_field_readers(findings)
     errors = [m for c, m in findings.errors if c == "fact-field-readers"]
     assert errors == []
+
+
+def test_check_respects_exempt_functions(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A read inside a function named in `EXEMPT_FUNCTIONS` is silent even
+    though it is neither in `KNOWN_UNMIGRATED_READERS` nor migrated — pins
+    that exemption is checked independently of the baseline, and that it is
+    scoped to the *function*, not the whole file (a sibling function in the
+    same file, reading the same attribute, still fails the gate)."""
+    import scripts.fact_field_readers as gate
+
+    pkg = tmp_path / "abicheck"
+    pkg.mkdir()
+    (pkg / "producer.py").write_text(
+        "def _construct(rec):\n"
+        "    return rec.bases\n"
+        "def _decide(rec):\n"
+        "    return rec.bases\n"
+    )
+
+    monkeypatch.setattr(gate, "ROOT", tmp_path)
+    monkeypatch.setattr(gate, "PKG", pkg)
+    monkeypatch.setattr(
+        gate, "EXEMPT_FUNCTIONS", frozenset({"abicheck/producer.py::_construct"})
+    )
+    monkeypatch.setattr(gate, "KNOWN_UNMIGRATED_READERS", frozenset())
+
+    findings = Findings()
+    check_fact_field_readers(findings)
+    errors = [m for c, m in findings.errors if c == "fact-field-readers"]
+    assert len(errors) == 1
+    assert "producer.py:4" in errors[0]
