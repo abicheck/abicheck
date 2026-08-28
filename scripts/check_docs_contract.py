@@ -1277,7 +1277,9 @@ _RETIRED_SURFACES: tuple[tuple[str, tuple[str, ...], frozenset[str]], ...] = (
             "mcp-tools-reference.md",
             "abicheck[mcp]",
         ),
-        frozenset({"start/upgrading-to-0.6.md", "AGENTS.md"}),
+        frozenset(
+            {"start/upgrading-to-0.6.md", "AGENTS.md", "contribute/known-gaps.md"}
+        ),
     ),
     (
         "--source-abi / --source-graph (pre-ADR-043 `collect` command flags)",
@@ -1303,6 +1305,7 @@ _RETIRED_SURFACES: tuple[tuple[str, tuple[str, ...], frozenset[str]], ...] = (
         frozenset(
             {
                 "AGENTS.md",
+                "contribute/known-gaps.md",
                 "use/github-action.md",
                 # Names the retired spellings once, to point a reader at the
                 # --compiler* replacements -- the page documenting the family.
@@ -1388,6 +1391,7 @@ _RETIRED_SURFACES: tuple[tuple[str, tuple[str, ...], frozenset[str]], ...] = (
         frozenset(
             {
                 "AGENTS.md",
+                "contribute/known-gaps.md",
                 # A point-in-time design review: it inventories the surface
                 # as it was, in its own historical-record capacity.
                 "contribute/config-key-review.md",
@@ -1400,7 +1404,13 @@ _RETIRED_SURFACES: tuple[tuple[str, tuple[str, ...], frozenset[str]], ...] = (
         " like 'security'; the Action's own `policy-file` input, without the"
         " leading dashes, is unaffected and still valid)",
         ("--policy-file",),
-        frozenset({"AGENTS.md", "reference/github-action-inputs.md"}),
+        frozenset(
+            {
+                "AGENTS.md",
+                "contribute/known-gaps.md",
+                "reference/github-action-inputs.md",
+            }
+        ),
     ),
     (
         "--secondary-format/--secondary-output (folded into --write"
@@ -1467,6 +1477,7 @@ _RETIRED_SURFACES: tuple[tuple[str, tuple[str, ...], frozenset[str]], ...] = (
         frozenset(
             {
                 "AGENTS.md",
+                "contribute/known-gaps.md",
                 # Explicit migration notes naming the retired flags and
                 # their aggregate: gate: replacement in the same breath,
                 # same reasoning as the --stat/--recommend entry above.

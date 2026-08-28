@@ -203,7 +203,7 @@ def _apply_native_provenance(
     See ``service._apply_native_provenance``'s identical parameter for why
     (Codex review, fresh evidence).
     """
-    from .provenance import apply_provenance
+    from .workflows.extraction import apply_provenance
 
     return apply_provenance(
         snap,
@@ -417,7 +417,7 @@ def _is_supported_compare_input(path: Path) -> bool:
     To add support for a new ABI snapshot format, edit ``abicheck/classify.py``
     rather than this function.
     """
-    from .classify import is_supported_compare_input
+    from .workflows.extraction import is_supported_compare_input
 
     return is_supported_compare_input(path)
 
@@ -435,7 +435,7 @@ def _looks_like_application(path: Path) -> bool:
     """
     import struct
 
-    from .package import (
+    from .workflows.extraction import (
         _ELF_MAGIC,
         _ET_DYN,
         _has_interp_segment,
@@ -484,7 +484,7 @@ def classify_compare_operand(path: Path) -> str:
     * ``"file"``      — a single ``.so`` / JSON snapshot / Perl dump: the default
       single-pair path, unchanged.
     """
-    from .package import is_package
+    from .workflows.extraction import is_package
 
     if path.is_dir():
         return "directory"

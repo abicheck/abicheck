@@ -489,20 +489,43 @@ BUG_CLASSES: tuple[BugClass, ...] = (
             "bytes, and untrusted data cannot create additional commands, "
             "$GITHUB_OUTPUT records, paths, or side effects."
         ),
-        fixed_by=(705, 758),
-        seed_tests=("tests/test_reusable_workflow_execution.py",),
+        fixed_by=(705, 758, 836, 919),
+        seed_tests=(
+            "tests/test_reusable_workflow_execution.py",
+            "tests/test_check_project_workflow_execution.py",
+            "tests/test_action_run_sh_helpers.py",
+        ),
         public_surfaces=("github-action",),
+        axes={
+            "adversarial-shape": (
+                "path-traversal",
+                "shell-metacharacters",
+                "command-substitution",
+                "spaces",
+                "tab",
+                "leading-dash-flag-shaped",
+                "multiple-flags-shaped",
+                "quotes",
+                "redirects",
+                "newline-record-injection",
+                "non-ascii",
+                "empty-string",
+            )
+        },
         known_gaps=(
             KnownGap(
                 description=(
-                    "The seed test's own hostile-input corpus is scoped "
-                    "to `check-single.yml`'s shell steps only "
-                    '(`CHECK_SINGLE = "check-single.yml"`) — not every '
-                    "scalar input across the repository's other shell "
-                    "scripts and composite-action steps, which "
-                    "bug-class-regression-testing.md's Phase 8 names as "
-                    "the full target-script inventory this class's "
-                    "invariant is stated over (Codex review, PR #885)."
+                    "The hostile-input execution corpus (shared via "
+                    "`_workflow_exec.HOSTILE_SCALAR_CORPUS`, Phase 8) now "
+                    "covers two independently-maintained real sanitizer "
+                    "copies (`check-single.yml`/`check-project.yml`) plus "
+                    "`action/run.sh`'s word-splitting-sensitive `add_flag`/"
+                    "`add_sided_flag` helpers — not every scalar input "
+                    "across the repository's other shell scripts and "
+                    "composite-action steps (e.g. the other workflows' "
+                    "`run:` steps enumerated in the plan's own target-"
+                    "script inventory), which is still the full scope "
+                    "Phase 8's invariant is stated over."
                 ),
                 reference="docs/contribute/plans/bug-class-regression-testing.md#phase-8",
             ),
