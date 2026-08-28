@@ -956,16 +956,1842 @@ confirmed to fail against the pre-change code (`git stash`); the
 representational-only assertions pass either way, since they pin
 already-correct, now-explicit behavior rather than a regression.
 
+**The widened, non-glob AI-readiness check — landed (third slice).**
+`scripts/fact_field_readers.py` (registered by `check_ai_readiness.py` as
+`fact-field-readers`) is the real, repo-wide static scan this Design
+section names: an AST walk for a direct attribute *read* (`ast.Load`) of
+`bases`/`virtual_bases`/`vtable`/`vptr_offset_bits`/`is_va_list` anywhere
+under `abicheck/`, not a `diff_*.py` glob — because a glob is exactly what let this section's
+own hand-enumeration repeatedly miss a real reader across several review
+rounds (the fifth, then the tenth call site each surfaced only in a later
+pass). Auditing the real tree while building this check (rather than
+trusting that hand list) found **three more genuine semantic readers the
+plan's own nine-reader table doesn't name**:
+`buildsource/header_graph.py`'s inheritance-edge emitter (walks `rt.bases`
+to build the L5 source graph's `INHERITS` edges), `buildsource/
+source_extractors/base.py`'s `entity_from_record()` (folds `rec.bases`/
+`rec.vtable` into the L4/L5 source-ABI-replay entity-identity fingerprint),
+and `idioms.py`'s factory/non-virtual-destructor anti-pattern detectors
+(`_recognise_factory`/`_is_virtual_dtor_present`/`_collect_base_targets`/
+`_detect_non_virtual_dtor`, all reading `rec.vtable`/`rec.bases` directly)
+— confirming this Design section's own conclusion in the most direct way
+possible: a hand-maintained list is not the same invariant as "every known
+reader is checked," and it takes exactly this kind of real scan to find
+the readers a hand audit keeps missing.
+
+The check's baseline (`KNOWN_UNMIGRATED_READERS`, allowlist-and-shrink,
+`IMPORT_CYCLE_ALLOWLIST`'s own convention) currently records every known
+reader site across the modules named above and throughout this Design
+section (including `vptr_offset_bits` and every dynamic-read form later
+review rounds added -- `getattr`/its aliases, `operator.attrgetter`,
+`__getattribute__`, `MatchClass` keyword and positional patterns -- each
+described in its own round below) — the exact count is deliberately not
+restated here as a number (Codex review, fresh evidence: an earlier
+revision of this paragraph copied the count by hand and went stale the
+moment a later round changed it, the same drift risk every "stays at N"
+review-note copy below carried too -- those now read "the baseline count
+is unchanged" instead of a literal figure, for the identical reason).
+`len(KNOWN_UNMIGRATED_READERS)` in the source is this baseline's own fact
+owner, and the count is explicitly expected to shrink as readers migrate.
+Each site is keyed `"<rel>::<qualname>::<attr>::
+<outer-expr-text>::<expr-text>::<occurrence>"` -- `qualname` the enclosing
+function (`<module>` for module-level code, `Class.method` for a method),
+`outer-expr-text` the read's own outermost containing expression
+(`_outermost_containing_expr`, climbing every enclosing `ast.expr` up to
+the first statement boundary), `expr-text` the read's own exact bare
+source text (`ast.get_source_segment`), `occurrence` a rank among reads
+sharing all four of those. This is the *final* key shape, landed by the
+"fingerprint the containing expression" round further below -- the count
+and key shape in this paragraph previously described only the check's
+*first* landed slice, silently contradicting the append-only review notes
+below it once those notes moved past it (Codex review, fresh evidence);
+readers auditing the gate should treat the review notes' own final state
+as authoritative, and this paragraph is now kept in sync with it rather
+than left as a stale first draft. That first draft keyed only
+`"<rel>::<attr>::<occurrence>"`; a
+Codex review round caught the real gap in that: an existing read migrated
+or deleted and a different, unrelated read of the same attribute later
+added to the same file would silently inherit the vacated occurrence
+number and read as an already-reviewed site — scoping the counter to
+`(qualname, attr)` needs the new read to land in the exact same function at
+the exact same rank to collide, a real coincidence rather than a routine
+edit's side effect.
+
+**A second Codex round found the function-scoped key still collides.**
+`diff_param_qualifiers.py`'s `if not p_old.is_va_list and p_new.is_va_list:`
+has two DIFFERENT reads (`p_old.is_va_list`, `p_new.is_va_list`) on one
+line, in the same function — a purely positional rank can't tell them
+apart, or protect a future, unrelated third read from inheriting one's
+rank once it's migrated away. Fixed by folding the read's own source text
+into the key (`ast.get_source_segment`, scoping the occurrence counter to
+`(qualname, attr, text)`) — a collision now needs the new read to be the
+*textually identical* expression, not merely occupy the same rank in the
+same function. Every key in the baseline below carries this shape.
+
+`EXEMPT_FUNCTIONS` is the separate, non-shrinking set of specific
+functions this check never flags: `RecordType.__post_init__`/
+`Param.__post_init__` (the fields' own `__post_init__` omission-bridge
+implementation) and two specific DWARF functions,
+`dwarf_snapshot._DwarfSnapshotBuilder._finalize_vptr_offsets` and
+`dumper_layout_backfill._backfilled_record`, which compute or combine the
+raw legacy value itself rather than making a compatibility decision from
+it. **Function-scoped, not module-scoped — a first draft exempted the
+whole `dwarf_snapshot.py`/`dumper_layout_backfill.py` modules, and a
+Codex review round found that was wrong**: both files hold a second kind
+of function that genuinely *decides* something from these fields rather
+than merely computing them --
+`_DwarfSnapshotBuilder._filter_types_by_reachability` reads `bases`/
+`virtual_bases` to decide which types survive into the exported snapshot
+(dropping one on a false "no bases" reading is a real, silent
+correctness loss, not a cosmetic one), and `dumper_layout_backfill.
+_fields_corroborate` reads `bases`/`virtual_bases`/`vtable` to decide
+whether two records structurally match across the header/DWARF backfill.
+A whole-module exemption hid both from the scan entirely; narrowing to
+function scope surfaced them as two more genuine, previously-invisible
+readers, now real `KNOWN_UNMIGRATED_READERS` entries themselves (bringing
+the total from the originally-reported 91 to 99).
+
+**Two more real gaps found in the same review round, both fixed.** (1)
+`RecordType.vptr_offset_bits` was originally left out of
+`FACT_BRIDGED_ATTRS` on the theory that it was "already meaningfully
+`None`... never itself ambiguous" before this phase — false: it carries
+the identical `_OMITTED_VPTR_OFFSET_BITS` sentinel-based omission bridge
+the other four fields use (`RecordType()` backfills `Fact.not_collected()`;
+`RecordType(vptr_offset_bits=None)` backfills `Fact.present(None)` — two
+different Facts for the same `None` legacy value), so a direct read has
+the identical ambiguity. Adding it surfaced four more real reader sites
+(`diff_layout.py`'s `_check_vptr_introduced`/`_has_layout_descriptor`).
+(2) The scan matched only `ast.Attribute` nodes, missing a dynamic
+`getattr(obj, "vtable", ...)` read with the attribute name as a literal
+string constant — `diff_cpp_patterns._is_empty_record` reads `vtable`
+exactly this way, invisible to the original scan. Fixed by also matching
+a `getattr()` call whose second argument is a string-literal `ast.Constant`
+naming one of the bridged attributes (a non-literal name stays out of
+scope, the same no-type-inference limit already stated for the attribute
+case). No type inference is attempted — verified empirically, by running
+the scan against the whole package before writing the baseline, that
+every hit recorded there is genuinely a `RecordType`/`Param` access
+(attribute or `getattr`) with zero cross-class collisions. Tests:
+`tests/test_fact_field_readers.py` (the real repository has zero unlisted
+violations; every baseline/exempt entry still names something real; the
+AST primitive's own contract — attrs detected including `vptr_offset_bits`,
+`getattr` calls detected and a non-matching/dynamic name ignored, `Store`
+ignored, per-function occurrence numbering, module/class qualname
+derivation — pinned directly; and end-to-end cases against a throwaway
+`abicheck/`-shaped tree confirming the check function itself, not only the
+primitive, fires on a new violation, stays silent on a baselined one, and
+respects a function-scoped exemption without leaking to a sibling function
+in the same file).
+
+**A fifth Codex review round found two more real gaps, both fixed.** (1)
+The scan matched an `ast.Attribute` read and a `getattr()` call, but not a
+structural-pattern-matching read: `case RecordType(bases=[]):` reads
+`bases` via `ast.MatchClass.kwd_attrs` (a `list[str]`, paired positionally
+with `kwd_patterns`), a node shape neither branch recognized — invisible
+to the check even though it collapses unavailable and confirmed-empty the
+same way a direct attribute read does. Fixed by matching a `MatchClass`
+node's `kwd_attrs` against `FACT_BRIDGED_ATTRS` too, keyed by the matched
+keyword pattern's own location and the whole class pattern's source text
+(`RecordType(bases=[])`) as `expr-text`, since a `MatchClass` node carries
+no location for a single keyword on its own. Verified empirically to have
+zero existing hits — no `match`/`case` statement in the repository
+currently patterns on any of these five fields, so the baseline count is unchanged. (2) The root `AGENTS.md`'s AI-readiness gate table (the canonical
+verification contract every other check is listed in) had no row for
+`fact-field-readers`, leaving it undiscoverable from that table — added
+alongside `engine-cli-boundary`'s own row. New test:
+`test_detects_a_structural_pattern_match_naming_a_bridged_attr`.
+
+**A sixth Codex review round found two more real gaps in the same area,
+both fixed.** (1) *Positional* class patterns: `case RecordType(_, _, _,
+_, _, []):` reads a field via `cls.__match_args__` positionally, which
+`MatchClass.kwd_attrs` (the previous fix's whole mechanism) doesn't cover
+at all — an empty `kwd_attrs` list for a purely positional pattern, so
+the loop finds nothing. Resolving *which* position maps to which field
+would need real `__match_args__` introspection (the dataclass's own
+declared field order) this pure-AST scan can't do — instead of leaving
+this silently invisible, ANY non-empty positional pattern on a
+`MatchClass` whose `cls` resolves by bare name to `RecordType`/`Param`
+(`FACT_BRIDGED_CLASS_NAMES`, a new two-name constant) is reported with a
+synthetic `<positional>` attr, on this module's own established
+false-positive-over-false-negative principle. (2) A deeper, third-round
+collision in the baseline key itself: two DIFFERENT call sites sharing
+identical bare attribute text — `old_decision(rec.bases)` and, elsewhere
+in the same function, `keep(rec.bases)` — still differed only by
+occurrence ordinal even after the previous two rounds' fixes (function
+scope, then bare-expression text), because the key never looked past the
+attribute node itself to the *expression containing it*. Migrating
+`old_decision` away and adding an unrelated third read anywhere in the
+same function re-numbers the survivors in encounter order — `keep`
+silently drops to rank 1 (harmless, it was already reviewed), but the new
+read then lands on rank 2, silently inheriting `keep`'s own baseline
+approval. Fixed with `_outermost_containing_expr()`: a one-pass parent
+map, then climbing every enclosing `ast.expr` up to (but never past) the
+first statement boundary. Deliberately the containing *expression*, not
+the containing *statement* — a first attempt at this same fix climbed to
+the nearest `ast.stmt` instead, which for `if not p_old.is_va_list and
+p_new.is_va_list: changes.append(make_change(...))` pulled the *entire
+if-body* into the key (a ~970-character entry that would silently break
+on any unrelated edit inside that body) — caught before landing by
+checking the actual generated key lengths, not just that the fix
+compiled. Stopping at the expression boundary gives the whole boolean
+test (`not p_old.is_va_list and p_new.is_va_list`, shared correctly by
+both reads, still disambiguated between them by the existing bare-text
+component) without the body. Key format is now `"<rel>::<qualname>::
+<attr>::<outer-expr>::<expr-text>::<occurrence>"` — five components before
+the ordinal, not three. Baseline regenerated directly from the real scan
+(still the same number of entries, only the key shape changed) and re-verified at zero
+unlisted violations. New tests: two different call sites with identical
+bare text now getting distinct keys with no ordinal needed, a compound
+statement's body confirmed excluded from the key, a positional pattern on
+a bridged class detected, and one on an unrelated class ignored.
+
+**A seventh Codex review round found the positional-pattern fix itself
+was defeated by an import alias, fixed in the same PR.** `from
+abicheck.model import RecordType as RT` then `case RT(_, _, _, _, _,
+[]):` names the identical class, but a bare `node.cls.id in
+FACT_BRIDGED_CLASS_NAMES` check rejects `"RT"` outright — invisible to
+the positional-pattern fix despite being exactly the shape it exists to
+catch. Fixed with `_imported_class_aliases()`: maps every local name an
+`import`/`from ... import` statement binds one of `FACT_BRIDGED_CLASS_
+NAMES` under (via `as`) back to its real name, whole-tree rather than
+function-scoped (an import is visible for its entire enclosing scope
+regardless of where a later pattern uses it) — the positional-pattern
+check resolves through this map before testing membership. Verified
+empirically: still zero existing hits, baseline count is unchanged. New tests:
+a positional pattern through an import alias detected, one on an alias
+of an unrelated class ignored.
+
+**An eighth Codex review round found two more real gaps, both fixed in
+the same PR -- the same two mechanisms, probed one alias mechanism
+further each.** (1) `RT = RecordType` (a plain module-level assignment,
+not an `import ... as`) then `case RT(_, _, _, _, _, []):` -- the
+import-alias fix from the previous round only visited `Import`/
+`ImportFrom` nodes, so a simple name assignment was invisible to it.
+Fixed by extending `_imported_class_aliases()` to also collect a
+single-target `name = OtherName` assignment as a candidate, resolved to
+`FACT_BRIDGED_CLASS_NAMES` (directly, or transitively through an
+already-resolved alias -- `RT2 = RT` chains too) the same fixed-point
+way `fact_detector_misuse._fact_aliases` already chains local aliases.
+(2) `import builtins; builtins.getattr(rec, "bases")` and `from builtins
+import getattr as read_attr` are both the identical read as a bare
+`getattr(rec, "bases")` call, but the existing check only matched an
+`ast.Call` whose `func` was literally the bare `ast.Name` `"getattr"`.
+Fixed with `_builtins_getattr_aliases()`: collects every local name bound
+to the real `getattr` builtin (the bare name itself, plus any `from
+builtins import getattr as X`) and every local name bound to the
+`builtins` module itself (`import builtins`, `import builtins as b`),
+and the `getattr`-detection branch now also matches a qualified call
+(`<name>.getattr(...)`) whose base resolves to one of those module
+names. Verified empirically: still zero existing hits, baseline count is unchanged. New tests: a local class-name alias detected and a negative control
+for an unrelated class, a qualified `builtins.getattr` call detected, an
+aliased `getattr` import detected, and a negative control for a call
+qualified through an unrelated module.
+
+**A ninth Codex review round found two more real gaps, both fixed in the
+same PR -- the same two mechanisms probed one further indirection layer
+each, matching the eighth round's own framing.** (1) `read_attr = getattr`
+then `read_attr(rec, "bases")` is the identical dynamic read as a bare
+`getattr(rec, "bases")` call, but `_builtins_getattr_aliases()` only ever
+collected the bare name and a `from builtins import getattr as X` import
+-- a plain assignment chain to the builtin callable was invisible, the
+identical gap the eighth round's fix (1) already closed for a *class*
+alias but left open for `getattr` itself. Fixed by extending
+`_builtins_getattr_aliases()` with the same fixed-point assignment-chaining
+`_imported_class_aliases` already does (`RT = RecordType`, `RT2 = RT`),
+just for the builtin callable instead of a class name. (2) `rec.bases +=
+inherited` updates a bridged field, but Python marks the target Attribute
+node `ast.Store` even though the operation reads the field's existing
+value first, to combine it with the right-hand side, before writing the
+result back -- an ordinary `Store`/`Del` (a plain overwrite) genuinely
+never reads, but an `AugAssign` target always does, and the existing
+Load-only restriction missed this distinction entirely: the target
+Attribute node is still visited independently by `ast.walk` (it's a child
+of the `AugAssign`), but its `Store` context skipped the ordinary
+attribute branch too. Fixed with a dedicated `ast.AugAssign` branch
+matching the target's own attribute name, keyed on the target Attribute
+node itself (not the whole `AugAssign` statement) so its site/text line up
+with an ordinary attribute read at the same position. Verified
+empirically: still zero existing hits, baseline count is unchanged. New tests: a
+local `getattr` alias detected, a chained `getattr` alias detected, an
+augmented assignment detected, and a negative control confirming an
+ordinary `Store` overwrite is still not flagged.
+
+**A tenth Codex review round found two more real gaps, both small,
+bounded extensions of already-built mechanisms -- fixed, matching the
+review-convergence status already posted on this PR (further exotic
+indirection is documented as a known gap; a bounded combination of two
+already-supported mechanisms is not).** (1) `RT: type = RecordType` then
+`case RT(_, _, _, _, _, []):` -- an ordinary annotated assignment
+(`ast.AnnAssign`), not the `ast.Assign` the class-alias collector already
+matched. The same gap the eighth round's fix (1) closed for a plain
+`RT = RecordType`, reached through a differently-typed AST node the
+collector never visited. Fixed by adding an `ast.AnnAssign` branch to
+`_imported_class_aliases()` alongside the existing `ast.Assign` one,
+feeding the identical fixed-point chain. (2) `read_attr = builtins.
+getattr` then `read_attr(rec, "bases")` -- combining two mechanisms this
+file already supports independently (the qualified-call recognition from
+round eight and the plain-assignment chaining from round nine) in a way
+neither alone catches: the assignment's own value is `builtins.getattr`
+(an `ast.Attribute`), not a bare `ast.Name`, so the existing candidate
+collector -- which only ever matched an `ast.Name` value -- never added
+it. Fixed with a second candidate list resolved once, after the walk
+finishes collecting every `import builtins` occurrence (needed since,
+unlike the plain-name candidates, this resolution needs the *complete*
+`builtins_names` set before it can tell whether the qualifying name is
+really the `builtins` module). Verified empirically: still zero existing
+hits, baseline count is unchanged. New tests: an annotated class alias detected
+through a positional pattern, and a qualified assignment to the
+`getattr` builtin detected.
+
+**An eleventh Codex review round found one more real gap, the same
+small, bounded shape as round ten's fix (1) -- fixed.** `read_attr:
+Callable[..., object] = getattr` then `read_attr(rec, "bases")` -- the
+annotated-assignment spelling of the `getattr`-alias assignment, an
+`ast.AnnAssign` the candidate collector never matched (it only ever
+walked `ast.Assign`). The same gap round ten's fix (1) already closed
+for `_imported_class_aliases()`, now closed for `_builtins_getattr_
+aliases()` too, for both the plain-name and qualified-attribute value
+shapes -- factored into one shared `_add_candidate()` helper so the
+`ast.Assign` and `ast.AnnAssign` branches can't independently drift on
+which value shapes each recognizes. Verified empirically: still zero
+existing hits, baseline count is unchanged. New tests: an annotated `getattr`
+alias detected, and the annotated form of the qualified spelling
+(`read_attr: object = builtins.getattr`) detected too.
+
+**A twelfth Codex review round found one more real gap, the class-alias
+mirror of round eleven's `getattr` fix -- fixed.** `import abicheck.model
+as model; RT = model.RecordType` then `case RT(_, _, _, _, _, []):` --
+combining two already-supported forms (a qualified class reference,
+already recognized when used directly as `model.RecordType(...)`-shaped
+construction elsewhere in this file's own reasoning, and an assignment
+alias) in a way neither alone catches: the assignment's own value is
+`model.RecordType`, an `ast.Attribute`, not a bare `ast.Name`, so
+`_imported_class_aliases()`'s candidate collector never resolved it.
+Fixed by resolving a qualified-attribute RHS immediately whenever its own
+`.attr` is one of `FACT_BRIDGED_CLASS_NAMES` -- matching the identical
+name-only stance the `import ... as` branch already takes for its own
+qualifying source module (never checked either way) -- factored into one
+shared `_register_assign()` helper (mirroring round eleven's
+`_add_candidate()` for `_builtins_getattr_aliases()`) so the `ast.Assign`
+and `ast.AnnAssign` branches can't independently drift on which RHS
+shapes each recognizes. Verified empirically: still zero existing hits,
+baseline count is unchanged. New test: a qualified class alias detected through
+a positional pattern.
+
+**A thirteenth Codex review round found one more real gap, applying to
+both alias resolvers at once -- fixed.** `RT = Alias = RecordType` (an
+ordinary chained assignment) then `case RT(_, _, _, _, _, []):`, and the
+identical shape for `_builtins_getattr_aliases()`: `read1 = read2 =
+getattr` then `read1(rec, "bases")` -- both resolvers' `ast.Assign`
+branches were still restricted to `len(node.targets) == 1`, so a chained
+assignment (every target receiving the identical RHS, unlike a
+tuple-unpacking target, which has no single value to attribute) was
+excluded the same way the fifth-Codex-round-in-`fact_detector_misuse.py`
+finding was for that module's own candidate collector. Fixed by looping
+over every target in `node.targets` and registering each plain-`Name`
+one, in both `_imported_class_aliases()` and `_builtins_getattr_
+aliases()`. Verified empirically: still zero existing hits, baseline
+count is unchanged. New tests: a chained class alias detected through a
+positional pattern, and a chained `getattr` alias detected.
+
+**A fourteenth Codex review round found one more real gap -- fixed.**
+`import builtins; b = builtins` then `b.getattr(rec, "bases")` --
+`builtins_names` was only ever populated from a real `import` statement
+(`import builtins`/`import builtins as b`), never from a plain assignment
+alias of an already-known one. Fixed by resolving `builtins_names` to a
+fixed point too, reusing the identical `assign_candidates` list the
+`getattr` alias chain already builds (it already captures every simple
+Name-valued assignment, not just getattr-related ones) -- resolved
+*before* the existing `qualified_candidates` step, so `b.getattr(...)`
+is recognized through the now-expanded `builtins_names` as well.
+Verified empirically: still zero existing hits, baseline count is unchanged.
+New test: a call through an assigned alias of the `builtins` module.
+
+**A fifteenth Codex review round found the scan still missed two more
+standard dynamic-attribute-reading forms, distinct from `getattr`'s own
+alias family the previous several rounds closed -- both fixed.**
+`operator.attrgetter("bases")(rec)` and `object.__getattribute__(rec,
+"bases")`/`rec.__getattribute__("bases")` read the identical legacy value
+through different standard-library entry points -- `getattr()` is itself
+defined in terms of `__getattribute__`, and `attrgetter` is the
+callable-returning equivalent -- so unavailable evidence could again read
+as confirmed-empty while the required gate passed. Fixed with a new
+`_is_attrgetter_constructor_call()` helper (recognizing both the
+qualified `operator.attrgetter(...)` spelling and the bare one reached
+via `from operator import attrgetter`) plus two new branches matching a
+`__getattribute__` call in both its bound (`rec.__getattribute__
+("bases")`) and unbound (`object.__getattribute__(rec, "bases")`/`type.
+__getattribute__(rec, "bases")`) forms. Both stay scoped to the same "no
+type inference" limit as every other branch here: only a single,
+literal-string field name is recognized -- `attrgetter("a.b")`'s dotted
+chain, and a two-step `getter = attrgetter(...); getter(rec)` indirection
+through an intermediate variable, are both out of scope, the identical
+limit a non-literal `getattr()` default already accepts. Deliberately no
+local-alias resolution for `attrgetter` itself, unlike `getattr`'s own
+now-elaborate alias-chain tracking -- `attrgetter` returns a *callable*
+assigned once and invoked later, which is exactly the two-step
+indirection this scan already excludes for every other form, so building
+the same machinery for it would recognize a shape this scan otherwise
+deliberately doesn't. Verified empirically: still zero existing hits in
+the real repository, baseline count is unchanged. Eight new tests: the
+qualified and bare `attrgetter` forms, a dotted-name negative control, the
+variable-indirection negative control, the bound and unbound
+`__getattribute__` forms, and a non-matching-name negative control for
+the latter.
+
+**A sixteenth Codex review round found two more real gaps in the new
+`attrgetter` recognition itself, both fixed.** (1) **An ordinary import
+alias of either `operator` or `attrgetter` bypassed the gate.** `import
+operator as op; op.attrgetter("bases")(rec)` and `from operator import
+attrgetter as ag; ag("bases")(rec)` both read the identical legacy field
+as the unaliased spellings, but the fifteenth round's matching checked
+only the exact literal names `"operator"`/`"attrgetter"`. Fixed with a
+new `_operator_attrgetter_aliases()` -- the identical import-alias
+mechanism `_builtins_getattr_aliases()` already provides for `getattr`/
+`builtins`, applied to this pair -- resolving `import operator as X` and
+`from operator import attrgetter as X` into the two name sets `_is_
+attrgetter_constructor_call()` now checks against, instead of two hard-
+coded literals. Deliberately narrower than `_builtins_getattr_aliases()`'s
+own multi-round evolution: no assignment-chain resolution (`op2 = op`,
+`ag2 = ag`) was added, since neither finding asked for it and this stays
+consistent with `attrgetter`'s own existing "no local-alias resolution"
+stance for a *constructed getter value* -- only the two `import`-form
+aliases this finding named are covered. (2) **Only the first argument to
+`attrgetter` was inspected.** `attrgetter` accepts any number of
+positional field names and reads every one of them --
+`attrgetter("size_bits", "bases")(rec)` reads `bases` too, but the
+fifteenth round's own code checked only `node.func.args[0]`, so a bridged
+field named anywhere but first was invisible. Fixed by moving the whole
+`attrgetter` case out of the single-attribute `elif` chain into its own
+top-level handler (mirroring how `MatchClass` is already handled
+separately, since it too can produce more than one match per node),
+inspecting every literal, string-constant positional argument
+independently and reporting each bridged one as its own site. Verified
+empirically: still zero existing hits in the real repository, baseline
+count is unchanged. Five new tests: the `import ... as`/`from ... import ... as`
+alias forms, a multi-argument call with the bridged field in the second
+position, a multi-argument call with two independently-bridged fields
+(both reported), and a multi-argument negative control naming no bridged
+field at all. A sixth, separate finding from the same round (a stale
+"landed" paragraph in this Design section still describing the check's
+*first* slice -- 99 sites, the pre-fingerprint key shape -- contradicting
+the append-only review notes once they moved past it) is fixed directly
+in that paragraph itself, not narrated as its own round here.
+
+**A seventeenth Codex review round found two more real gaps, one in the
+new `attrgetter` alias resolution and one a genuine false positive in the
+existing `getattr` recognition -- both fixed, the second with a real
+mid-fix correction.** (1) **A plain-assignment alias of `operator`/
+`attrgetter` was still out of scope.** `import operator as op; op2 = op;
+op2.attrgetter("bases")(rec)` and `from operator import attrgetter as ag;
+ag2 = ag; ag2("bases")(rec)` read the identical legacy field as the
+unaliased/singly-import-aliased spellings, but the previous round's own
+docstring claimed "a `Call`-typed value has no simple assignment shape to
+chain through" -- true, but irrelevant: `op`/`ag` are ordinary references
+(a module, a builtin callable) *before* being called, chaining through a
+plain assignment exactly the way `_builtins_getattr_aliases()`'s own
+`getattr`/`builtins` resolution already does. Fixed by giving
+`_operator_attrgetter_aliases()` the identical fixed-point assignment-
+chaining pattern that function already uses. (2) **A local binding that
+shadows the bare `getattr`/`builtins` names was never excluded from the
+builtin match at all.** `def f(getattr, rec): return getattr(rec,
+"bases")` -- an ordinary, unrelated function parameter reusing the name
+`getattr` -- was unconditionally treated as the real builtin, blocking a
+valid, unrelated change. Fixed with a new `_locally_bound_names()`,
+consulted at each `getattr`/`builtins` match site. **The first revision of
+that helper also covered ordinary `ast.Assign`/`ast.AnnAssign` targets,
+not just parameters, and immediately broke six existing tests** --
+`read_attr = getattr; read_attr(rec, "bases")` IS a genuine local
+assignment target of the identical shape, but treating that assignment as
+"shadowing" is backwards: it's *how* the existing alias-resolution
+mechanism makes `read_attr` trustworthy in the first place, not a reason
+to distrust it. Telling a real shadow (`getattr = some_unrelated_value`)
+apart from a real alias assignment (`read_attr = getattr`) needs
+per-assignment tracing of what each target's own value resolves to --
+information `_builtins_getattr_aliases()`'s own internal `assign_
+candidates` already computes but doesn't expose, and doing so scoped
+per-function is a real, separate follow-up, not attempted here. Since a
+parameter can never be an alias source in that same sense (nothing in a
+function signature assigns FROM `getattr`), `_locally_bound_names()` was
+narrowed to parameters only, closing the reported false positive with no
+risk of this conflict -- and `def f(rec): getattr = some_other_thing;
+getattr(rec, "bases")` (an ordinary reassignment shadow, not reported by
+this round) is left as a documented, accepted residual false positive
+rather than a silently reintroduced one, pinned by its own test. Verified
+empirically: still zero existing hits in the real repository, baseline
+count is unchanged, and `mypy`/`ruff` both stayed clean. Five new tests: the
+two chained-alias `attrgetter`/`operator` forms, the shadowed-parameter
+negative control, its sibling-function negative control (shadowing in one
+function must not leak into another), and the residual-gap documentation
+test.
+
+**An eighteenth review round found one more real gap and one real test-
+suite performance problem, both fixed.** (1) **The `attrgetter`
+recognition never consulted the shadowing check the `getattr` branch
+already got.** `def f(operator, rec): return operator.attrgetter("bases")
+(rec)` -- an ordinary, unrelated parameter reusing the name `operator` --
+was unconditionally treated as the real module, the identical false
+positive the `getattr`-shadowing round fixed for that branch specifically,
+left open here since this branch was added afterward and never wired to
+`_locally_bound_names()`/`_shadowed()` at all. Fixed with a new
+`_attrgetter_matched_name()` helper (re-deriving which of `_is_attrgetter_
+constructor_call()`'s two recognized shapes actually matched, narrowly
+typed so the call site doesn't need its own unchecked `ast.Attribute`/
+`ast.Name` assumption -- mypy can't narrow `node.func.func`'s type through
+a boolean `and`-chain the way an explicit `isinstance` inside a dedicated
+function can) and a `not _shadowed(...)` guard on the same branch. (2)
+**Three of this file's own tests each independently re-parsed and
+re-scanned every `abicheck/**/*.py` file from scratch.** `test_no_
+unlisted_violation_in_real_repo`/`test_baseline_entries_are_real_sites`/
+`test_exempt_functions_are_real_sites` each ran their own full
+`PKG.rglob("*.py")` walk -- ~14s apiece on a real measurement, ~42s total,
+consuming close to this whole file's share of the documented 43-second
+fast-suite budget by itself. Fixed with a new module-scoped `_repo_
+reader_scan` pytest fixture running the walk exactly once; all three
+assertions are pure derivations of the identical underlying scan data.
+`test_no_unlisted_violation_in_real_repo`'s own derivation no longer
+calls `check_fact_field_readers()` directly, but is provably equivalent
+to it -- that function's own filtering is exactly the same two-step check
+(`EXEMPT_FUNCTIONS`, then `KNOWN_UNMIGRATED_READERS` membership) applied
+to the identical scan, confirmed by reading its source rather than
+assumed; `check_fact_field_readers()`'s own Findings/message-building glue
+stays independently, directly tested by this file's existing synthetic-
+fixture tests (`test_check_reports_a_new_violation`/`test_check_is_
+silent_for_clean_code`), so nothing lost real coverage. Verified
+empirically: still zero existing hits, baseline count is unchanged, `mypy`/
+`ruff` both stayed clean, and this file's own runtime dropped from ~26s
+to ~9s for its (now 60, previously 57) tests. Three new tests: the
+shadowed-`operator`-parameter and shadowed-bare-`attrgetter`-parameter
+negative controls, and a sibling-function negative control (shadowing in
+one function must not leak into another's genuine `attrgetter()` call).
+
+**A nineteenth review round found the identical shadowing gap in the
+unbound `__getattribute__` branch's sibling** -- the bound form
+(`rec.__getattribute__("bases")`) has no builtin name to shadow (its
+receiver is an arbitrary object, exactly like `rec.bases_fact` itself), but
+the unbound form (`object.__getattribute__(rec, "bases")`) names the
+builtin `object`/`type` the same way the `getattr`/`attrgetter` branches
+name theirs, and it was the one branch of the four dynamic-reader forms
+never wired to `_shadowed()`: `def f(object, rec): return object.
+__getattribute__(rec, "bases")` -- an ordinary, unrelated parameter reusing
+the name `object` -- was unconditionally treated as the builtin, the
+identical false positive already fixed for `getattr` and (eighteenth round)
+`attrgetter`. Fixed with a `not _shadowed(node, node.func.value.id)` guard
+on the same condition, mirroring the other three branches exactly -- no new
+helper needed here, since `node.func.value.id` is already narrowed to
+`ast.Name` by the existing `isinstance` checks in the same `and`-chain, one
+level shallower than the attrgetter branch's `node.func.func` access that
+needed its own dedicated helper in the eighteenth round. Verified
+empirically: still zero existing hits in the real repository, baseline
+count is unchanged, `mypy`/`ruff` both stayed clean. Three new tests: the
+shadowed-`object`-parameter and shadowed-`type`-parameter negative
+controls, and a sibling-function negative control (shadowing in one
+function must not leak into another's genuine unbound
+`object.__getattribute__()` call).
+
+**A twentieth review round found two more real gaps, both fixed.** (1)
+**The unbound `__getattribute__` receiver check matched only the two
+literal spellings `"object"`/`"type"`, missing an ordinary import
+alias.** `from builtins import object as O; O.__getattribute__(rec,
+"bases")` is the identical dynamic read as the unaliased spelling, but
+was invisible to the scan entirely. Fixed with a new
+`_unbound_getattribute_receiver_aliases()` helper (always includes the
+bare `"object"`/`"type"`, plus any `from builtins import object as O`/
+`from builtins import type as T`, plus a plain-assignment alias chain,
+mirroring `_builtins_getattr_aliases()`'s own `getattr`-alias chaining
+exactly), consulted in place of the literal two-element tuple; the
+existing `_shadowed()` guard from the nineteenth round applies unchanged,
+since it already checks whatever name was actually matched. (2)
+**`_shadowed()` consulted only a call's own innermost qualname, never an
+enclosing function's binding.** `def outer(getattr): def inner(rec):
+return getattr(rec, "bases")` -- `inner` binds no parameter of its own
+named `getattr`, but Python's ordinary closure rule still captures the
+arbitrary callable `outer`'s own parameter holds, so this was
+unconditionally treated as the real builtin despite being shadowed one
+scope up. Fixed with a new `_lexical_function_parents()` helper -- a
+standalone copy of `fact_detector_misuse.py`'s identical-purpose helper,
+simplified to this module's own coarser, dot-joined qualname scheme (no
+`#lineno` disambiguator, an existing, accepted characteristic of this
+module's qualnames already) -- and widened `_shadowed()` to walk the
+call's entire lexical scope chain, testing membership in each ancestor's
+own `locally_bound` set in turn rather than only the innermost one.
+Verified empirically: still zero existing hits in the real repository,
+baseline count is unchanged, `mypy`/`ruff` both stayed clean. Four new tests:
+the aliased-unbound-`__getattribute__` positive case and its
+unrelated-name negative control, and the enclosing-parameter-shadow
+exclusion and its sibling-function negative control.
+
+**A further Codex review round found the `attrgetter` branch's own
+baseline key never actually fingerprinted the read's containing
+expression, unlike every other reader form.** `outer_text = ast.
+get_source_segment(source, node) ...` used the attrgetter *call's own*
+bare text for both the outer-expression and expr-text key slots, instead
+of climbing to the read's real outermost containing expression via
+`_expr_text()` the way the plain-attribute/`getattr`/`__getattribute__`
+branches already do. `old_decision(attrgetter("bases")(rec))` and
+`keep(attrgetter("bases")(rec))` -- two attrgetter reads with an
+identical bare call but different containing expressions -- collapsed to
+the exact same key, ending in occurrence `1` for both once sorted by
+position; migrating the first reader while adding an unrelated new one
+at the same rank would silently reuse the vacated key, the exact
+collision `_outermost_containing_expr()` exists to close for every other
+form (the very finding that motivated that helper's own creation
+several rounds above -- this branch was simply never wired to it). Fixed
+by computing `outer_text = _expr_text(node)` (the containing expression)
+separately from `text` (the call's own bare source), matching the
+six-part key's established `(qualname, attr, outer_text, text,
+occurrence)` shape exactly. Verified empirically: still zero existing
+hits in the real repository (no `attrgetter` read exists anywhere in
+`abicheck/` today, so the baseline itself is unaffected by the key-shape
+fix), baseline count is unchanged, `mypy`/`ruff` both stayed clean. New
+test: two attrgetter reads sharing identical bare-call text inside
+different containing expressions, pinning that they now get distinct
+keys.
+
+**A further Codex review round confirmed, with a concrete repro, a gap
+`_locally_bound_names()`'s own docstring had already predicted but left
+unattempted -- recorded here as an accepted known gap rather than a bug
+fix, since a correct fix needs real per-position dataflow this module
+does not have.** `def f(getattr, rec): getattr = builtins.getattr; return
+getattr(rec, "bases")` -- a shadowing parameter later *rebound* to a
+genuine alias source -- currently reports no site at all, even though the
+call genuinely reads a bridged field through that rebound name (the
+sibling `attrgetter`/`operator` shape has the identical gap). Correctly
+distinguishing this from a genuine, still-shadowing parameter (`getattr =
+some_unrelated_value`) needs order-aware tracing of which assignment is
+actually in effect at the call's own position -- an order-*blind* "was
+this name ever reassigned to a recognized alias anywhere in the scope"
+check is unsound in the other direction, since `def f(getattr, rec):
+result = getattr(rec, "bases"); getattr = builtins.getattr` calls
+`getattr` *before* the rebind, while it still holds the arbitrary
+parameter value, and would be wrongly excluded by that simpler check.
+This module's presence/absence-only shadowing model has no notion of
+"which binding is in effect here" at all; building one is a materially
+larger change than every guard condition landed incrementally so far --
+it took `fact_detector_misuse.py`'s own alias machinery upwards of twenty
+review rounds to reach exactly this kind of order-sensitivity for a
+structurally similar problem. Recorded directly in `_locally_bound_
+names()`'s own docstring (extending the paragraph that already predicted
+this shape) rather than fixed under review pressure: this is a false
+*negative*, the direction this module's own "a false positive is far
+cheaper than the false negative it closes" trade-off argues hardest
+against silently accepting, but an incorrect, order-blind attempt risks
+trading it for a new false positive on a genuine shadow -- not obviously
+an improvement, and not the kind of bounded, single-condition extension
+every other round in this section landed. Revisit with real per-position
+tracing if this shape is found in practice.
+
+**Two further Codex review rounds found two more real gaps, both fixed,
+in the same area the previous several rounds had already been hardening.**
+(1) **`_operator_attrgetter_aliases()` seeded `"attrgetter"`/`"operator"`
+into their own alias sets unconditionally**, mirroring how
+`_builtins_getattr_aliases()` correctly seeds the real builtin
+`"getattr"` -- but `attrgetter`/`operator` are not builtins; nothing makes
+either name mean the stdlib module/function without a real `import
+operator`/`from operator import attrgetter` somewhere in the file. An
+ordinary, unrelated local function or variable sharing either name --
+`def attrgetter(rec, name): ...` with no import anywhere -- was therefore
+wrongly recognized as the real constructor. Fixed by seeding both sets
+empty and relying entirely on the module's own existing real-import scan
+(the same one every `getattr`/`builtins` qualified-alias branch already
+required) -- an asymmetry the fix's own docstring now states explicitly,
+since a future reader could otherwise "fix" the asymmetry the wrong way
+by re-adding the unconditional seed. New tests: an unrelated local
+`attrgetter` function with no import, and its dotted-access sibling (an
+unrelated `operator`-named local variable with its own `attrgetter`
+method), both in `tests/test_fact_field_readers_wrapper_scoping.py`. Two
+of this area's own pre-existing shadowing tests
+(`test_ignores_attrgetter_shadowed_by_an_operator_parameter`/
+`test_ignores_attrgetter_shadowed_by_a_bare_attrgetter_parameter`) had no
+real import in their fixtures either, so under this fix they would have
+passed for the wrong reason (no import at all, rather than the shadowing
+guard) -- both were corrected to include a real module-level import, so
+they keep testing the shadowing check specifically rather than silently
+degrading into a second copy of the new import-requirement test.
+
+(2) **`_outermost_containing_expr()` stopped climbing one level too early
+at a keyword-argument value or a comprehension's own `for ... in ...`
+clause**, since neither `ast.keyword` nor `ast.comprehension` is itself an
+`ast.expr` -- the climb's own guard condition (`isinstance(parent,
+ast.expr)`) correctly stops at any *ordinary* non-expression boundary
+(a statement), but these two wrapper node types are not statements
+either; they are transparent syntactic scaffolding a real containing
+expression still continues through. Two real examples surfaced by
+regenerating the baseline against the fix: `make_change(...,
+old_value=str(t_old.bases), ...)` (a keyword argument) and
+`{_topmost_scope_suffix(b) for b in header.bases + header.virtual_bases}`
+(a comprehension's own iterable clause) both had their previously-recorded
+`outer-expr-text` narrower than the real surrounding expression, silently
+under-recording how much context a reader site's own key actually
+carries. Fixed with a new `_TRANSPARENT_EXPR_WRAPPER_TYPES = (ast.keyword,
+ast.comprehension)` tuple, checked alongside `ast.expr` in the climb's own
+condition. This legitimately reshaped 19 pre-existing, already-reviewed
+`KNOWN_UNMIGRATED_READERS` entries (same underlying sites, wider
+`outer-expr-text`) -- the baseline was regenerated from a fresh real-repo
+scan rather than hand-edited, with the count confirmed unchanged (104
+before and after) and every reshaped key confirmed a 1:1 rename of an
+existing site, not a new or missing violation. New tests, in
+`tests/test_fact_field_readers_wrapper_scoping.py`: a keyword-argument
+read climbing to its enclosing call, a comprehension read climbing to its
+enclosing display, and two reads sharing identical attribute/expression
+text but wrapped in different keyword arguments of different calls,
+pinning that each climbs to its own enclosing call rather than the two
+collapsing onto a shared inner boundary.
+
+Both fixes' new tests were split into a new sibling file,
+`tests/test_fact_field_readers_wrapper_scoping.py`, rather than appended
+to `test_fact_field_readers.py` -- which was already within a few lines of
+the architecture gate's 1200-line test-file cap once the two `test_
+ignores_an_unrelated_*_with_no_import` and three climbing tests were
+added -- mirroring how `tests/test_fact_detector_misuse_def_time_scope.py`
+was split out of `test_fact_detector_misuse.py` for the identical reason.
+Verified empirically: still zero existing `attrgetter`/`operator` false
+positives introduced against the real repository (the baseline
+regeneration's own 104-in/104-out count is the check), `mypy`/`ruff` both
+stayed clean, and `python scripts/check_architecture.py` reports 0 errors
+with both test files under the cap.
+
+**A further Codex review round found a fresh repro for a residual this
+module's own docstring had already named, explicitly, as an accepted,
+narrow gap -- attempted a fix, and reverted it after the fix's own blast
+radius and residual coverage didn't justify it.** `unmigrated_fact_reader_
+sites`'s docstring already states: "A genuinely duplicated expression (the
+identical containing expression appearing twice, with identical bare-read
+text, in one function) still falls back to the ordinal, an accepted,
+narrow residual." Codex's repro sharpens *why* that's a real risk, not
+just a curiosity: `decide(rec.bases)` under `if cond:` and, separately,
+under `else:` gets two baseline entries differing only by occurrence rank
+(`...::1`, `...::2`); deleting the `if` branch's call and adding a
+*different*, genuinely new `decide(rec.bases)` call somewhere else in the
+function re-numbers the survivors from scratch, so the new call can land
+on the vacated rank and silently inherit an unrelated site's approval.
+
+Attempted a fix: `_branch_path()`, walking a read's ancestors up to its
+enclosing function and recording which alternative of each `if`/`try`/
+`match`/loop-`else` it sits in, added as a new key segment. A first cut
+used a bare structural label (`"if"`/`"else"`) -- verified against the
+exact repro and found **insufficient**: two separate, sibling `if`
+statements in the same function both mark as plain `"if"` regardless of
+which one, so Codex's own repro (the read moving from a deleted `else:`
+to a *different* `if` statement elsewhere) still collided. Revised to
+carry the branch's own *governing* text (`f"if:{test text}"`,
+`f"except:{i}:{type text}"`, `f"case:{i}:{pattern text}"`) rather than a
+bare label -- deliberately still not the *body* text
+`_outermost_containing_expr`'s own docstring already rejected including
+(a change anywhere inside the branch's own body would then reshape the
+key for no reason); only the governing condition/type/pattern, which
+changes only when the branch's own identity does. This version correctly
+closed Codex's exact repro and a hand-built adversarial variant reusing
+the identical condition-variable name across separate `if` statements,
+verified empirically both ways.
+
+**Reverted anyway, after actually running the full existing suite --
+not because the mechanism was wrong, but because its true cost wasn't
+visible until measured.** The new key segment is a real structural
+change to the key *shape* for every entry, not just branching ones: a
+non-branching read's `branch_marker` is `""`, but the key is still built
+by `"::"`-joining a fixed number of components, so every one of the 40+
+existing hand-written key-literal tests in this file failed --  not
+because their logic was wrong, but because every expected key string now
+needs an inserted empty `"::"` segment before the occurrence rank, and
+the 104-entry `KNOWN_UNMIGRATED_READERS` baseline needs a full
+regeneration for the same reason. That is a large, mechanical, but
+genuinely invasive change for a gap this module's own docstring had
+*already* scoped and accepted as narrow -- and even after paying that
+cost, a residual remains (two sibling branches with byte-identical
+governing text, e.g. two separately-written `if cond:` blocks with the
+identical condition spelling and an identical duplicated call inside
+each) still falls back to the ordinal, unchanged from before the
+attempt. Weighed against this module's own established discipline
+(documented elsewhere in this same file and in AGENTS.md's "attempted
+twice, reverted twice" pattern): a fix that trades a large, invasive
+change and a full baseline regeneration for a *narrower*, not
+*eliminated*, version of an already-accepted, already-documented residual
+is not a clear improvement, so it was reverted rather than shipped.
+`git diff` after the revert is clean (`scripts/fact_field_readers.py`
+byte-identical to before the attempt); the full existing test suite
+(73 tests across this file and its wrapper-scoping sibling) passes
+unchanged. The residual stays exactly as this module's own docstring
+already described it before this round: an accepted, narrow gap, now
+with a concretely verified (not merely hypothetical) repro on record here
+and in the PR's own review thread.
+
+**A further Codex review round found two more real gaps, both fixed.**
+(1) **The attrgetter branch required the constructor call to be
+*immediately* invoked** (`attrgetter("bases")(rec)`, matched via
+`isinstance(node, ast.Call) and isinstance(node.func, ast.Call) and
+_is_attrgetter_constructor_call(node.func, ...)`), missing the equally
+common callback spelling entirely: `sorted(records,
+key=operator.attrgetter("bases"))` and `map(attrgetter("bases"),
+records)` both construct the identical getter, just hand it to another
+function instead of calling it themselves -- the read still happens, on
+whatever `sorted`/`map` eventually calls it with. Fixed by matching the
+constructor call directly (`_is_attrgetter_constructor_call(node, ...)`,
+no outer-call requirement at all) -- the same conservative-by-design
+principle every other branch here already follows: a false positive
+(a constructed-but-never-called getter) costs a reviewed baseline entry,
+a false negative would be silent. This also closes, as a side effect
+rather than a targeted fix, the previously-documented two-step
+local-variable-indirection gap (`getter = attrgetter("bases");
+getter(rec)`) -- `_is_attrgetter_constructor_call()`'s own docstring
+previously stated this was deliberately out of scope, "the same
+`x = attrgetter` equivalent of `_builtins_getattr_aliases()`" that
+`attrgetter` doesn't get; both that docstring and `unmigrated_fact_
+reader_sites()`'s own attrgetter-branch comment were corrected to
+describe the new, broader match instead of the narrower one they no
+longer describe. One consequence worth naming: `text` (the read's own
+bare source, previously the *whole* double-call `attrgetter("bases")
+(rec)`) is now just the constructor call's own text (`attrgetter(
+"bases")`), since that call is what's actually matched -- `outer_text`
+is unaffected (`_outermost_containing_expr()` still climbs through the
+immediate outer call when there is one, since `ast.Call` is itself an
+`ast.expr`). Every existing attrgetter test asserting an exact key
+literal for the immediate-double-call shape needed updating to the
+narrower `text` value; the real repository baseline is unaffected (still
+zero existing attrgetter reads anywhere in `abicheck/`).
+
+(2) **`_locally_bound_names()` only ever tracked a *parameter* as a
+locally-bound name, never a nested `def`/`class` statement's own
+*name*.** `def getattr(obj, name): return None` followed by `getattr(rec,
+"bases")` -- an ordinary, unrelated function definition sharing the
+builtin-looking name `getattr`, at module scope or nested inside the
+calling function itself -- was still unconditionally treated as the real
+builtin, since a def/class statement's own binding target (Python's
+ordinary `STORE_NAME`/`STORE_FAST` rule, the identical rule
+`fact_detector_misuse.py`'s own `_def_containing_qualnames` already
+models for the sibling module) was invisible to this module's shadowing
+check. Fixed by threading a `nearest_func` parameter through `_locally_
+bound_names()`'s walk (mirroring `_lexical_function_parents`'s identical
+concept -- class bodies stay transparent, the same simplified model this
+whole module already uses) and recording each `def`/`class`'s own `name`
+against whichever scope directly contains it, alongside its existing
+parameter tracking.
+
+Both fixes' new tests, plus the attrgetter-indirection test repurposed
+from a negative to a positive control (its old premise -- "no local-alias
+resolution for attrgetter" -- no longer holds), went into `tests/
+test_fact_field_readers_wrapper_scoping.py` (room remained under the
+architecture gate's 1200-line cap; one existing test was moved there from
+`test_fact_field_readers.py` to keep the main file under the cap after
+its own docstring updates grew it past 1200). Verified empirically: still
+zero existing hits in the real repository, `mypy`/`ruff` both stayed
+clean, and `python scripts/check_architecture.py` reports 0 errors with
+both test files under the cap.
+
+**A further Codex review round found a real regression in finding 4's own
+fix, plus one more real gap in the module's line-based qualname model,
+both fixed.**
+
+**(1) The class-body-transparency fix used the wrong scope concept.**
+Finding 4's fix threaded a `nearest_func` parameter, skipping class
+layers the same way `_lexical_function_parents` deliberately does for
+*closure* purposes -- but a method's own *name* does not bind into its
+enclosing function/module namespace at all; it becomes a class attribute
+(`C.getattr`), invisible to an ordinary bare-name lookup anywhere outside
+the class body. Recording it against the skip-class `nearest_func` meant
+`class C: def getattr(self, name): ...` made an *unrelated* function
+elsewhere in the same module -- with no textual relationship to `C` at
+all -- read as if it had a local `getattr` binding, silently excluding
+its own genuine `getattr(rec, "bases")` call. Fixed by replacing
+`nearest_func` with `binding_scope: str | None` -- the scope a bare name
+actually *binds into*, as opposed to "the scope a closure looks up
+through" -- `None` while directly inside a class body (nothing recorded
+there at all, matching how `_shadowed()` never queries a class-body scope
+either, since none of this module's qualname machinery models one), and
+the function's own qualname once recursed into a function body (an
+ordinary nested function's own name genuinely does bind into its
+immediately enclosing function, unlike a method's into its class). New
+tests: the reported case, and the identical class-body-transparency rule
+for a nested `class` (not just a nested `def`) shadowing `attrgetter`.
+
+**(2) A parameter default value/annotation was attributed to the
+function's own body scope, not the enclosing scope it actually evaluates
+in.** `def f(getattr, x=getattr(rec, "bases")): ...` -- Python evaluates
+the default *before* `f`'s own parameters exist, so this call genuinely
+reads the real builtin, but `_enclosing_qualnames()`'s `[child.lineno,
+end]` range covers the function's own signature line too, so `_shadowed()`
+saw `f`'s own (not-yet-bound) parameter `getattr` and wrongly excluded a
+real read. A decorator needs no equivalent fix -- it sits on a line
+strictly *before* `child.lineno`, already outside the function's own
+range by construction. Fixed by registering each default/annotation's own
+`[lineno, end_lineno]` range under the *current* (enclosing, pre-function)
+qualname -- narrower than the function's own range in the ordinary case,
+so the existing smallest-range-wins tie-break lets it correctly override
+the function's own broader range for just those lines. A default/
+annotation sharing a line with genuine function-*body* code (a one-liner
+`def f(x=getattr(rec, "bases")): return x`) is a real, accepted residual
+this line-based model can't distinguish further -- the same granularity
+limit this function's own docstring already accepts throughout. New
+tests: the reported case, a negative control confirming an ordinary body
+call is still correctly shadowed, and a negative control confirming a
+default nested inside a function that genuinely declares the shadowing
+parameter is still correctly excluded (this fix only corrects the
+function's own signature line being wrongly attributed to itself, not
+shadowing in general).
+
+Both fixes' new tests went into `tests/test_fact_field_readers_wrapper_
+scoping.py` (room remained under the architecture gate's 1200-line cap).
+Verified empirically: still zero existing hits in the real repository,
+`mypy`/`ruff` both stayed clean.
+
+**A further Codex review round found two more real gaps, both fixed.**
+
+**(3) No branch recognized a mapping-based field read at all.**
+`vars(rec)["bases"]`/`rec.__dict__["bases"]` both read the exact same
+normalized legacy value `rec.bases` does, through the instance's own
+`__dict__` mapping rather than attribute-lookup machinery -- invisible
+to every existing branch (`ast.Attribute`, `getattr()`, `attrgetter()`,
+`__getattribute__()`), none of which is an `ast.Subscript`. Added as a
+new branch matching a `Subscript` in `ast.Load` context with a literal
+string key in `FACT_BRIDGED_ATTRS`, whose `.value` is either a `vars(...)`
+call (gated on `_shadowed()` for the `vars` spelling, an ordinary
+bare-name call the same shadowing guard every other dynamic form already
+gets) or a `.__dict__` attribute access (matched unconditionally -- an
+attribute access, unlike a bare name, has nothing for a local binding to
+shadow). A non-literal key (`vars(rec)[name]`) stays out of scope, the
+same "no type inference" limit every other dynamic-read form here
+already accepts. New tests: both positive forms, a shadowed-`vars`-
+parameter negative control, a non-literal-key negative control, and an
+unrelated-key negative control.
+
+**(4) `_locally_bound_names()` never visited `ast.Import`/`ast.
+ImportFrom` at all.** `from helper import getattr` then `getattr(rec,
+"bases")` -- an ordinary import of an unrelated module's own `getattr`
+symbol, reusing the builtin-looking bare name -- was still treated as
+the real builtin, since an import statement's own binding was invisible
+the same way a bare parameter/`def`/`class` name once was (findings 4-5
+above, before those were fixed). Fixed by recording each imported name
+(`alias.asname` if given, else the plain name, with the identical
+first-`.`-segment split `fact_detector_misuse.py`'s own import branch
+already applies for an unaliased dotted `import a.b.c`) against
+whichever scope directly contains the import statement -- with a
+deliberate carve-out for the specific imports this module already
+recognizes elsewhere as a genuine alias *source* for a real builtin/
+`operator` symbol: `from builtins import getattr`/`object`/`type`, `from
+operator import attrgetter`, and a bare `import builtins`/`operator`.
+Recording one of *those* as a local binding here too would have made
+`_shadowed()` see it as shadowing itself, silently breaking the very
+recognition it exists to enable -- e.g. `from operator import
+attrgetter; attrgetter("bases")(rec)` would have stopped being
+recognized at all, a real regression rather than an incomplete fix. Every
+*other* import, including an aliased `from builtins import getattr as g`
+(recognized under the alias `g`, excluded the identical way), still binds
+and shadows normally. New tests: an unrelated module-scope import shadow,
+its aliased-import variant, the identical shadow established inside a
+function body instead of at module scope, a sibling-function negative
+control (the shadow in one function must not suppress detection in an
+unrelated one), and four positive controls confirming every one of the
+five recognized-import carve-outs (`from builtins import getattr`, its
+aliased spelling, `from operator import attrgetter`, and a bare `import
+operator`) still resolves correctly.
+
+Both fixes verified empirically: still zero existing hits in the real
+repository, `mypy`/`ruff` both stayed clean. New tests in
+`TestMappingBasedFieldReads` and `TestImportedNamesShadowBuiltinRecognition`
+(`tests/test_fact_field_readers_wrapper_scoping.py`).
+
+**A further Codex review round found one more real gap in the mapping-
+subscript fix above.** `vars(rec).get("bases")`/`rec.__dict__.get(
+"bases")` -- the `dict.get()` spelling of the identical mapping read --
+were both still invisible, since neither is an `ast.Subscript`, the only
+shape the previous fix's branch matched. Fixed by factoring the shared
+"is this a mapping over the instance's own `__dict__`" check (`vars(
+...)`/`.__dict__`) out into a new `_is_mapping_receiver()` helper, reused
+by both the existing subscript branch and a new `.get()`-call branch --
+so the two forms can't independently drift on what counts as a
+recognized mapping receiver, the same lesson this file's own earlier
+entries (the attrgetter-vs-`__getattribute__` alias sets, the vars/
+`__dict__` shadowing rules) keep re-learning about duplicated conditions.
+An optional second `.get()` argument (the default) is accepted but not
+inspected, matching how `getattr()`'s own third argument is treated
+elsewhere in this module. New tests: both mapping-receiver forms with
+`.get()`, a call carrying an explicit default, a shadowed-`vars`-
+parameter negative control, an unrelated-key negative control, and a
+negative control confirming an ordinary `.get()` call on some unrelated
+object (not `vars(...)`/`.__dict__`) is never flagged merely because its
+argument happens to spell a bridged field name.
+
+Verified empirically: still zero existing hits in the real repository,
+`mypy`/`ruff` both stayed clean. New tests in `TestMappingGetFieldReads`
+(`tests/test_fact_field_readers_wrapper_scoping.py`).
+
+**A further Codex review round found one more real gap: `_is_mapping_
+receiver()` only ever matched the bare literal spelling `vars`, not a
+real alias of it.** `import builtins; builtins.vars(rec)["bases"]` (a
+qualified call through a real `builtins` alias) and `read_map = vars;
+read_map(rec).get("bases")` (a plain assignment alias) were both
+invisible -- the identical gap `_builtins_getattr_aliases()` already
+closed for `getattr` specifically, never extended to `vars`. Fixed with
+a new, generalized `_builtins_symbol_aliases(tree, symbol,
+builtins_names)`: the *symbol*-specific half of that same alias-
+resolution mechanism (import-from, a plain-assignment chain resolved to
+a fixed point, a qualified `X.symbol` chain), taking the caller's
+already-resolved `builtins_names` as a parameter rather than re-deriving
+it, so `vars` doesn't need a third hand-duplicated copy of the shared
+`import builtins`/module-alias collection `_builtins_getattr_aliases()`
+itself already owns. `_builtins_getattr_aliases()` itself was left
+unchanged rather than refactored to share this helper -- it is already
+hardened across five prior review rounds (see its own docstring), and
+generalizing it risks reopening one of them for no benefit, since it
+already returns exactly the `builtins_names` this function needs.
+
+**A real regression caught before the tests even ran, by the tests
+themselves rather than a fresh review round: an aliased import of `vars`
+(`from builtins import vars as V`) was still wrongly excluded, for a
+different reason than the one this fix targets.** `_locally_bound_names`'s
+own recognized-import carve-out (added two rounds earlier for `getattr`/
+`object`/`type`/`attrgetter`) had no entry for `vars` at all, so `from
+builtins import vars as V` was itself recorded as an ordinary local
+binding of `V` at module scope — making `_shadowed()` see `V` as shadowed
+by its *own* import statement, the exact inversion the carve-out exists
+to prevent. Fixed by adding `"vars"` to that carve-out's recognized-name
+set, alongside the new alias-resolution fix above (not a separate,
+unrelated bug — the same "this import is a recognized alias *source*,
+not a shadow" principle, just missing one more entry).
+
+Verified against the reported qualified-call and assigned-alias repros,
+an imported-alias positive control, and three negative controls (a
+`builtins`-shadowing parameter, an aliased-import self-shadow, and an
+unrelated object's own `.vars()` method). Zero existing hits, `mypy`/
+`ruff` both stayed clean. New tests in `TestVarsAliasesInMappingReads`
+(`tests/test_fact_field_readers_wrapper_scoping.py`).
+
+**A further Codex review round found one more real gap: `_operator_
+attrgetter_aliases()`'s own assignment-chain resolution never recognized
+a *qualified* RHS.** `import operator as op; ag = op.attrgetter;
+ag("bases")(rec)` was invisible, since `_add_candidate()` only ever
+matched a plain `ast.Name` value -- the identical gap `_builtins_getattr_
+aliases()`'s own `qualified_candidates` mechanism already closes for
+`read_attr = builtins.getattr`. Fixed the same way: a qualified
+`X.attrgetter` assignment is collected into a new `qualified_candidates`
+list during the same walk, resolved once the walk (and therefore
+`operator_names`) is complete -- since, unlike the plain-name chain, this
+needs the *complete* set to know whether `X` really is a resolved
+`operator` alias. The resolution order matters: `operator_names`'s own
+fixed point runs first, then the qualified resolution folds into
+`attrgetter_names`, then `attrgetter_names`'s own plain-name fixed point
+runs last -- so a name assigned from a qualified alias can itself be
+chained further (`ag = op.attrgetter; ag2 = ag`).
+
+Verified against the reported repro, a further-chained variant
+(confirming the qualified resolution feeds back into the existing
+plain-name chain), and a negative control for an unrelated object's own
+`.attrgetter` attribute. Zero existing hits, `mypy`/`ruff` both stayed
+clean, `fact_field_readers.py` at 1741 lines (well under the 2000-line
+hard cap). New tests in `TestQualifiedAttrgetterAssignmentAliases`
+(`tests/test_fact_field_readers_wrapper_scoping.py`).
+
+**One more finding, from the next review round: the unbound-method
+`object.__getattribute__(rec, "bases")` call branch only ever matched a
+call made directly off `object`/`type`/an alias of either receiver -- it
+had no notion of the *method itself* being lifted out to a plain name
+first.** `read_attr = object.__getattribute__; read_attr(rec, "bases")`
+performs the identical unbound-method read, but the call-matching branch
+requires `node.func` to still be an `ast.Attribute` (`X.__getattribute__
+(...)`) -- once the method is assigned to `read_attr`, `node.func` is an
+`ast.Name`, and neither this branch nor `_unbound_getattribute_receiver_
+aliases()` (which tracks aliases of the *receiver* `object`/`type`, not of
+the method) had anything to recognize it. Fixed with a new
+`_unbound_getattribute_method_aliases(tree, object_type_names)`, mirroring
+`_builtins_symbol_aliases()`'s own qualified-candidate mechanism: a plain
+assignment whose RHS is `X.__getattribute__` for some `X` already in the
+caller's resolved `object_type_names` seeds the set, then an ordinary
+plain-name chain resolves further aliases of that alias to a fixed point
+-- so a receiver alias (`from builtins import object as O`) and a method
+alias (`read_attr = O.__getattribute__`) compose correctly together. A new
+call-matching branch was added alongside the existing unbound-receiver
+branch, requiring the same `not _shadowed(...)`/two-args/literal-string-
+argument/`FACT_BRIDGED_ATTRS` shape the existing branches already enforce.
+
+Verified against the reported repro, a chained-alias variant, a
+receiver-alias-composed-with-method-alias variant, the `type.
+__getattribute__` sibling spelling, and two negative controls (a
+shadowing parameter; a non-bridged attribute argument) via direct AST
+reproduction before writing tests. Zero existing hits, `mypy`/`ruff` both
+stayed clean, `fact_field_readers.py` at 1821 lines (well under the
+2000-line hard cap, though headroom is narrowing -- the next finding in
+this area should reassess whether a sibling module split is due before
+adding more). New tests in `TestUnboundGetattributeMethodAliases`
+(`tests/test_fact_field_readers_wrapper_scoping.py`).
+
+**One more finding, from the next review round: the mapping-subscript
+branch's `ast.Load`-only restriction missed the augmented-assignment
+shape entirely, the identical gap the dedicated `ast.Attribute`-target
+`AugAssign` branch already exists to close for the plain-attribute
+form.** `rec.__dict__["bases"] += values` / `vars(rec)["bases"] += values`
+both read the field's existing value before combining it with the
+right-hand side, but Python marks an `AugAssign` target `ast.Store`
+regardless of its shape -- the target `Subscript` node is still visited
+independently by `ast.walk` (it's a child of the `AugAssign`), but its
+`Store` context skips the ordinary, `Load`-only Subscript branch too, so
+nothing caught it. Fixed with a new `ast.AugAssign` branch matching a
+`Subscript` target with a literal string key naming a bridged attribute,
+gated on `_is_mapping_receiver(node.target.value)` -- mirroring the
+existing attribute-target `AugAssign` branch exactly, including keying
+the finding on the target `Subscript` node itself (not the whole
+`AugAssign` statement) so its site/text line up with an ordinary
+subscript read at the same position.
+
+Verified against both mapping spellings (`rec.__dict__[...]`/
+`vars(rec)[...]`) and three negative controls (a non-bridged key; a
+plain, non-augmented overwrite, which genuinely never reads and correctly
+stays unflagged; a non-mapping receiver) via direct AST reproduction
+before writing tests. Zero existing hits, `mypy`/`ruff` both stayed clean,
+`fact_field_readers.py` at 1845 lines -- still under the 2000-line hard
+cap, but headroom has narrowed enough (155 lines) that the next finding
+in this area should split a sibling module before adding more, per the
+prior round's own note. New tests in
+`TestAugmentedAssignmentThroughMappingReceivers` (`tests/
+test_fact_field_readers_wrapper_scoping.py`).
+
+**Two more findings from the next review round, plus the sibling-module
+split the prior round's own note said was due.** (1) `_locally_bound_
+names()`/`_enclosing_qualnames()` deliberately don't model an `ast.Lambda`
+as its own scope at all (see either function's own docstring on why this
+module's design stays coarser than `fact_detector_misuse.py`'s) -- a
+lambda's body shares its *enclosing* function's qualname, so a lambda's
+own parameter was never recorded as bound anywhere `_shadowed()`'s
+qualname-based check could see. `lambda getattr, rec: getattr(rec,
+"bases")` -- an ordinary, unrelated lambda parameter reusing the
+builtin-looking name -- was still treated as the real builtin. Rather
+than widening the qualname/scope machinery itself (a materially larger
+change touching three functions' worth of established, narrower-by-design
+modeling), `_shadowed()` now also walks the call's own true AST ancestry
+(via the already-available `parents` map) checking every enclosing
+`ast.Lambda`'s own parameters directly -- exact by construction, so it
+can never misattribute a shadow to a call genuinely outside the lambda,
+even one sharing the same line/qualname the coarser qualname model would
+conflate them under (verified with a dedicated negative control: a
+genuine `getattr` call textually outside the lambda, in the same
+function, still gets caught). `_shadowed()`'s own parameter type widened
+from `ast.Call` to `ast.expr`, since it only ever consults `.lineno` and
+walks `parents` -- neither Call-specific -- and the new bare-`ast.Name`
+use site from finding (2) needs the wider type too. (2)
+`_is_mapping_receiver()` only ever matched `vars(rec)`/`X.__dict__`
+directly at the point it inspects an expression -- `fields = vars(rec);
+fields["bases"]` / `fields = rec.__dict__; fields.get("bases")` were both
+invisible once the mapping was stored in an intermediate variable first,
+the same "no alias tracking" gap this module's other alias helpers
+already close for `getattr`/`vars`/`attrgetter` themselves, unclosed here
+for their own *result*. Fixed with a new `_mapping_receiver_aliases()`
+(the identical name-only, fixed-point assignment-chain pattern every
+other alias helper in this module already uses), consulted by
+`_is_mapping_receiver()`'s new final branch, gated on `_shadowed()` the
+same way the direct `vars(rec)` form already is.
+
+**The sibling-module split (Codex/CodeRabbit finding notwithstanding --
+this one was self-imposed, per the prior round's own note, once the two
+fixes above pushed the file to 1975 of 2000 lines, only 25 short of the
+hard cap).** `scripts/fact_field_readers_scope.py` now holds
+`_enclosing_qualnames`, `_parent_map`, `_TRANSPARENT_EXPR_WRAPPER_TYPES`,
+`_outermost_containing_expr`, `_locally_bound_names`, and `_lexical_
+function_parents` -- a mechanical extraction, not a redesign, mirroring
+`fact_detector_misuse_scope.py`'s own identical split from the sibling
+gate: every function moved unchanged, as one contiguous block, with a
+matching sys.path guard (`fact_field_readers.py` importing the sibling
+module whether run directly or loaded as `scripts.fact_field_readers` by
+a test that never imports `check_ai_readiness.py` first) verified by
+running `tests/test_fact_field_readers_wrapper_scoping.py` in isolation,
+not just as part of the full suite -- the exact scenario a missing guard
+would silently pass in a full run and fail only in isolation. Registered
+in `scripts/CLAUDE.md`'s Inventory table.
+
+Verified against both reported repros, a positive control for each (a
+genuinely unrelated lambda/an unrelated dict alias must still be
+caught/stay unflagged), a chained-mapping-alias variant, and negative
+controls for shadowing and a non-bridged key, via direct AST reproduction
+before writing tests -- including confirming the closure-shadow case
+(`def outer(getattr): return (lambda rec: getattr(rec, "bases"))(None)`)
+and a nested-lambda shadow both still resolve correctly with the new
+ancestor-walk check running ahead of the pre-existing qualname-based one.
+Zero existing hits, `mypy`/`ruff` both stayed clean,
+`fact_field_readers.py` back down to 1615 lines after the split (well
+under the 2000-line hard cap, real headroom restored) plus the new 410-line
+`fact_field_readers_scope.py`. New tests:
+`TestLambdaParametersShadowDynamicReaders` and
+`TestMappingReceiverAliasesResolveThroughLocalNames` in `tests/
+test_fact_field_readers_wrapper_scoping.py`.
+
+**Two more findings from the next review round, plus a second test-file
+split once the second push crossed the 1200-line cap outright.** (1)
+Neither the mapping-`.get()` branch nor the subscript branch matches
+`vars(rec).__getitem__("bases")` (the explicit dunder-method spelling of
+the identical subscript read) or `operator.getitem(vars(rec), "bases")`
+(the standard-library callable spelling) -- both read the exact same
+normalized legacy value already caught elsewhere. Fixed with two new
+sibling branches: a `__getitem__` call on a mapping receiver, and a
+`getitem` call through a real `operator` module alias (`operator_names`,
+already resolved by `_operator_attrgetter_aliases()` for `attrgetter`'s
+own qualified form -- reused as-is, not re-derived), gated on `_shadowed()`
+the same way every other module-qualified call in this file already is.
+(2) Every alias-collection helper in this module (`_builtins_getattr_
+aliases`, `_operator_attrgetter_aliases`, `_unbound_getattribute_receiver_
+aliases`, `_builtins_symbol_aliases`, `_mapping_receiver_aliases`) is
+deliberately name-only and whole-tree, with no notion of *which* scope a
+given alias was actually recognized in -- and `_locally_bound_names()`'s
+own recognized-import carve-out (the mechanism that keeps a genuine alias
+import like `from operator import attrgetter as ag` from being wrongly
+treated as a shadow of itself) simply *omits* such an import from its
+`bound` dict entirely, rather than recording anywhere that it was
+recognized. `_shadowed()`'s outward closure walk had nothing to stop it
+at the scope the alias was actually resolved in, so it kept walking past
+that scope to search an *enclosing* one -- and if that enclosing scope
+happened to bind the same bare name to something completely unrelated
+(`from helper import ag` at module scope, an ordinary, unrecognized
+import), the walk wrongly treated that unrelated binding as a shadow of
+the genuinely-resolved inner alias. `from helper import ag` at module
+scope, `from operator import attrgetter as ag` inside `f`, `ag("bases")
+(rec)` inside `f` -- a real field read -- was invisible. Rather than
+threading real per-scope alias resolution through all five of those
+name-collection helpers (the kind of redesign `fact_detector_misuse.py`'s
+own `_imported_fact_aliases()` docstring already declined for an
+analogous reason -- see its "known gap" entry earlier in this doc),
+`_locally_bound_names()` now returns a *second* dict alongside its
+existing one: which names were recognized as a genuine alias source, per
+scope, rather than discarding that information. `_shadowed()`'s walk now
+checks this second dict at each scope it passes through and returns
+`False` (unshadowed) the moment it finds the name recognized there,
+before ever reaching an enclosing scope's own (potentially unrelated)
+binding. This is a real, bounded fix rather than the declined redesign,
+because it reuses the exact closure-walk mechanism `_shadowed()` already
+has -- the only change is giving it one more signal to stop on, not
+teaching every alias helper to understand scope.
+
+Verified against both reported repros, an aliased-import variant of the
+`operator.getitem` fix, and negative controls for each (a non-mapping
+`__getitem__` receiver; a shadowed `operator` parameter; an unrelated
+outer import with no inner recognized re-import, confirming the fix
+doesn't widen recognition, only stops the walk early once a real alias is
+found; a genuine parameter shadow, confirming ordinary shadowing is
+unaffected; a closure through a real recognized alias from an *enclosing*
+scope with no re-import of its own, confirming the pre-existing
+closure-walk behavior survives) via direct AST reproduction before
+writing tests. Adding these tests pushed `tests/
+test_fact_field_readers_wrapper_scoping.py` to 1219 of its own 1200-line
+cap -- over it outright -- so its tail (the five most recent test
+classes: augmented assignment through mapping receivers, lambda parameter
+shadowing, mapping-receiver aliases, explicit mapping-item readers,
+per-scope dynamic-reader alias resolution) was split into a new sibling
+file, `tests/test_fact_field_readers_later_fixes.py`, mirroring the
+`test_fact_detector_misuse_alias_edge_cases.py` precedent on the sibling
+gate -- mechanical extraction, every class moved unchanged, verified both
+in combination and in isolation. Zero existing hits, `mypy`/`ruff` both
+stayed clean, `fact_field_readers.py` at 1662 lines,
+`fact_field_readers_scope.py` at 439 lines, the wrapper-scoping test file
+back down to 936 lines, the new later-fixes test file at 315 lines -- all
+well under their respective caps. New tests:
+`TestExplicitMappingItemReaders` and `TestDynamicReaderAliasesResolvePer
+LexicalScope`, both now in `tests/test_fact_field_readers_later_fixes.py`.
+
+**One more finding from the next review round, on the same `operator.
+getitem` shape just landed.** The new `getitem` call-matching branch
+required an `ast.Attribute` callee (`operator.getitem(...)` through a
+resolved `operator` module alias) -- `_operator_attrgetter_aliases()`
+resolves `getitem`'s *own* bare-name import alias family nowhere at all,
+unlike `attrgetter`, which already gets the identical import-seeded/
+chained/qualified resolution via `attrgetter_names`. `from operator
+import getitem as gi; gi(vars(rec), "bases")` was invisible. Fixed by
+widening `_operator_attrgetter_aliases()` to also return a third set,
+`getitem_names`, resolved by literally duplicating `attrgetter_names`'s
+own three-stage mechanism (import-seeded from `from operator import
+getitem [as X]`, a plain-assignment chain, and a qualified `X.getitem`
+assignment once `operator_names` is known) against a separate `getitem`-
+tagged qualified-candidate list, sharing this same function's
+`operator_names`/`assign_candidates` collection so the two families can't
+independently drift on what counts as a resolved `operator` alias. A new
+sibling call-matching branch (bare `ast.Name` callee, `node.func.id in
+getitem_names`) was added alongside the existing qualified-form branch.
+
+**A second, self-found gap surfaced while first verifying this fix
+empirically, before any external review flagged it: `_locally_bound_
+names()`'s recognized-import carve-out had no entry for `from operator
+import getitem`, unlike its sibling `attrgetter`.** Without that entry,
+the new alias import was recorded as an *ordinary* local binding rather
+than a recognized alias source -- making `_shadowed()` see the import
+itself as shadowing its own later use, the exact inversion that carve-out
+exists to prevent (the same class of bug the `vars` alias round earlier
+in this file's own history already hit and fixed for an identical
+reason). Caught before this even reached review, since the very first
+empirical check of the direct, unaliased import form returned no site at
+all -- confirming the value of reproducing every case via `python3 -c`
+*before* writing tests, not just the one the review comment names. Fixed
+by adding `"getitem"` alongside `"attrgetter"` in that carve-out's
+recognized-name set.
+
+Verified against the reported repro, an unaliased variant, a chained-
+alias variant, and the qualified-assignment form (`gi = operator.
+getitem`), plus negative controls (an unrelated local function with no
+import; a shadowing parameter) -- all via direct AST reproduction before
+writing tests, and re-verified after the carve-out fix confirmed both the
+previously-broken direct-import forms and the previously-working chained/
+qualified forms all resolve correctly together. Still zero existing hits,
+`mypy`/`ruff` both stayed clean, `fact_field_readers.py` at 1720 lines
+(well under the 2000-line hard cap). New tests:
+`TestGetitemImportAliasesResolveTheBareCallableForm` in `tests/
+test_fact_field_readers_later_fixes.py` (403 lines, well under its own
+1200-line cap).
+
+**Two more findings from the next review round.** (1) None of the alias
+collectors ever recognized `ast.NamedExpr` -- only `ast.Assign`/
+`ast.AnnAssign` -- so `(read := getattr)(rec, "bases")` and `(fields :=
+vars(rec))["bases"]` were both invisible. Fixing this needed two separate
+changes, not one, since the walrus repro packs two distinct gaps into one
+expression: the *alias* itself (`read`, `fields`, real bindings a later,
+ordinary reference should resolve through) needed a `NamedExpr` branch in
+every alias-collecting function's own `ast.Assign`/`ast.AnnAssign` walk
+(`_imported_class_aliases`, `_builtins_getattr_aliases`,
+`_builtins_symbol_aliases`, `_unbound_getattribute_receiver_aliases`,
+`_unbound_getattribute_method_aliases`, `_mapping_receiver_aliases`,
+`_operator_attrgetter_aliases` -- all seven, applied mechanically since
+every one of them shares the identical structural gap, not just the two
+functions the finding itself named) -- and, separately, the walrus used
+*directly* as the call's own callee or mapping receiver (as both reported
+repros actually are) reads the field right there, in the very expression
+that introduces the alias, which no amount of alias-table lookup can
+catch since there is no later reference to look up. Fixed with a small,
+targeted unwrap at the two sites the finding actually named: `_is_mapping_
+receiver()` now unwraps a `NamedExpr` to its own `.value` before any of
+its existing checks run (composing for free with every shape it already
+recognizes), and the `getattr`-call-matching branch gained a third
+alternative recognizing `node.func` as a `NamedExpr` whose own `.value` is
+a known `getattr` name. (2) `_locally_bound_names()` modeled only a
+parameter, a `def`/`class` name, and an import as a real local binding --
+a `for` target, a `with ... as` target, an `except ... as` name, a
+comprehension's own `for` target, and a `match` capture were all invisible
+to it, so `for getattr in funcs: return getattr(rec, "bases")` (an
+ordinary, unrelated loop variable reusing the builtin-looking name) was
+still unconditionally flagged as a real read -- a false positive on
+genuinely valid code, not a missed misuse. Fixed as one generalized
+shadowing class, per the finding's own suggestion, rather than five
+hand-rolled special cases: `_target_bound_names()` extracts every plain
+name a `for`/`with` target binds (recursing through `Tuple`/`List`/
+`Starred` nesting), and `_match_pattern_captures()` walks a `match`
+pattern's own subtree for every `MatchAs`/`MatchStar`/`MatchMapping`
+capture regardless of nesting depth. None of these five forms introduces
+its own new scope (a `for`/`with`/`except`/`match` binds directly into
+whatever function already contains it, and this module's own line-based
+scope model already resolves a comprehension's `elt` to its enclosing
+*function*, matching its established coarser granularity) -- so every
+binding is recorded against the current `binding_scope` directly, the
+same target a parameter already uses.
+
+Verified against both reported repros for finding (1) plus a later-use
+(non-inline) variant, a shadowed-parameter negative control, and an
+unrelated-builtin negative control; and all five reported binding shapes
+for finding (2) (`for`, tuple-unpacking `for`, `with ... as`,
+`except ... as`, a comprehension target, a bare match capture, an
+as-pattern match capture, and a capture nested inside a class pattern),
+plus a positive control confirming an unrelated `for` loop doesn't
+suppress a real read elsewhere in the same function -- all via direct AST
+reproduction before writing tests. Still zero existing hits, `mypy`/
+`ruff` both stayed clean, `fact_field_readers.py` at 1765 lines and
+`fact_field_readers_scope.py` at 538 lines (both well under the 2000-line
+hard cap). New tests: `TestNamedExprAliasesAndInlineCallsAreRecognized`
+and `TestLexicalBindingFormsAreTreatedAsShadows`, both appended to `tests/
+test_fact_field_readers_later_fixes.py` (558 lines, well under its own
+1200-line cap).
+
+**Two more findings from the next review round, plus one declined as a
+re-raise of an already-decided, documented tradeoff.** (1) The lexical-
+binding-forms fix's own comprehension-target handling (previous round)
+was a real regression, caught by review: it recorded a comprehension's
+`for` target against `_locally_bound_names()`'s coarser, function-only
+qualname model -- correct for `for`/`with`/`except`/`match` (none of
+which are block-scoped in Python), but a comprehension genuinely *does*
+introduce its own new scope, so that recording shadowed every call
+anywhere later in the *whole enclosing function*, not just calls
+genuinely inside the comprehension. `[x for getattr in funcs]` followed
+by an unrelated, later `getattr(rec, "bases")` in the same function was
+wrongly suppressed. Fixed by reverting that one binding form out of
+`_locally_bound_names()` entirely and handling it instead in
+`_shadowed()`'s own real AST-ancestor walk -- the identical mechanism
+already used for a `lambda` parameter's identical "not a scope this
+module's coarser qualname model tracks" shape -- so a comprehension
+target shadows exactly the calls nested inside it (`elt`, filters, later
+generators), never anything outside it. The *outermost* generator's own
+iterable is the one exception (mirroring `fact_detector_misuse_scope.py`'s
+identical carve-out for the same construct): it evaluates in the scope
+enclosing the comprehension, before the comprehension's own target
+exists, so `[x for getattr in getattr(rec, "bases")]` must still be
+flagged. Implementing this exactly needed one more structural fact about
+the AST than the analogous fix in the sibling module: a comprehension's
+`generators[0]` holds the `ast.comprehension` *clause* object, not its
+`.iter` directly, so the ancestor walk tracks which clause object it just
+ascended through (`outermost_iter_clause`) across the next hop, rather
+than comparing the immediate child against `.iter` at the point the
+`ListComp`/etc. itself is reached -- a first attempt compared against
+`generators[0].iter` directly and silently never matched, since the
+ancestor walk's immediate child at that point is always the clause
+object. (2) A lambda's own default value expression evaluates at lambda-
+*creation* time, in the enclosing scope, before the lambda's own
+parameters exist at all -- the identical def-time-vs-body-time
+distinction `_enclosing_qualnames`'s own default/annotation handling
+already draws for a named `def` -- but `_shadowed()`'s lambda-ancestor
+check unconditionally treated any call reached through a `Lambda`
+ancestor as shadowed by its parameters, regardless of whether the call
+came from the lambda's `body` or its `args` (default values). `lambda
+getattr=getattr(rec, "bases"): getattr` read the real builtin in its
+default, but was wrongly treated as shadowed. Fixed by checking `child is
+node.body` at the point the walk reaches the `Lambda` ancestor -- exact
+by construction (true only on the hop ascending directly out of the body
+subtree, however deeply nested; false for every hop coming from `args`
+instead) -- and only checking the lambda's own parameters when that holds.
+
+(3) **Declined, citing an already-documented rationale rather than
+re-implementing.** `_builtins_getattr_aliases()`'s own plain-assignment
+alias resolution (`read = getattr`) is deliberately whole-tree/module-
+wide, not per-function -- its own docstring already states this
+explicitly ("Whole-tree, matching `_imported_class_aliases`'s own scope
+for the identical reason"), and `_imported_class_aliases()`'s own
+docstring gives the reason: "every mechanism here is almost always module
+level, and scanning the whole tree is the same over-approximating-is-safe
+stance this module already takes elsewhere." The finding reproduces
+exactly the false-positive shape that stance already, deliberately
+accepts: two unrelated functions each assigning the identical local name
+`read` to two different values (`read = getattr` in one, `read = helper`
+in another) both have their own `read(rec, "bases")` call flagged, since
+the alias name is resolved once, globally. This is the identical class of
+question already decided (and declined, twice, with the identical
+citation) earlier in this same PR's review history for
+`_imported_fact_aliases`'s own module-wide import-alias resolution (see
+that thread's own "convergence note") -- a correct fix needs the same
+kind of per-scope threading through the fixed-point alias resolution that
+was already judged "a real, if narrow, redesign... not a follow-up to the
+last one" there, not a bounded extension of an established mechanism.
+Documented as a known, pre-existing, deliberately-accepted tradeoff
+rather than re-litigated.
+
+Verified against both reported repros for findings (1)/(2), a positive
+control confirming each fix's *intended* shadowing case still works
+(comprehension elt/filter/non-outermost-generator shadowing; a lambda
+body genuinely shadowed by its own parameter), and the outermost-
+generator-iterable exception itself for both a list comprehension and a
+set comprehension, all via direct AST reproduction before writing tests.
+Still zero existing hits, `mypy`/`ruff` both stayed clean,
+`fact_field_readers.py` at 1829 lines and `fact_field_readers_scope.py`
+at 556 lines (both well under the 2000-line hard cap). New tests:
+`TestComprehensionTargetShadowsOnlyWithinTheComprehension` and
+`TestLambdaDefaultsEvaluateBeforeParameterShadows`, both appended to
+`tests/test_fact_field_readers_later_fixes.py` (660 lines, well under its
+own 1200-line cap).
+
+**Two more findings from the next review round: one fixed, a bounded
+extension of an established mechanism; one declined as needing a real
+redesign rather than a bounded fix.** (1) `dict.__getitem__(vars(rec),
+"bases")` -- the *unbound*-method spelling of the bound
+`vars(rec).__getitem__("bases")` form already recognized, the identical
+relationship `object.__getattribute__(rec, "bases")` already has to
+`rec.__getattribute__("bases")` elsewhere in this module -- was invisible.
+Fixed by resolving `dict`'s own alias family through `_builtins_symbol_
+aliases()`'s already-generic mechanism (the same one `vars` itself already
+uses -- `dict_names = _builtins_symbol_aliases(tree, "dict",
+builtins_names)`, no new collector needed, since `dict` is a real,
+always-in-scope builtin in the identical "no import required" category
+`getattr` itself is in) and adding one new call-matching branch mirroring
+the bound form's own shape, with the receiver check against `dict_names`
+instead of `_is_mapping_receiver()`. **Proactively verified every sibling
+alias form before writing tests, per this file's own established
+discipline (a prior round's own self-found regression) rather than only
+the one reported repro** -- the aliased-import form (`from builtins import
+dict as D; D.__getitem__(...)`) initially produced no site at all, traced
+to the identical class of bug caught earlier in this same file's history:
+`_locally_bound_names()`'s recognized-import carve-out had no entry for
+`"dict"` alongside its existing `"getattr"`/`"object"`/`"type"`/`"vars"`
+tuple, so the import itself was recorded as an ordinary local binding
+rather than a recognized alias source, making `_shadowed()` see the
+import as shadowing its own later use. Fixed by adding `"dict"` to that
+tuple, then re-verified every alias shape together (bare import, aliased
+import, plain-assignment chain, qualified `builtins.dict`) rather than
+re-testing only the one that had been broken.
+
+(2) **Declined, documented as a known gap needing real redesign rather
+than attempted under review pressure.** `class C: def getattr(self,
+name): ...; value = getattr(rec, "bases")` -- a class-body-level call
+(not inside a method) genuinely does see an earlier same-class-body
+binding via ordinary sequential class-body execution, but
+`_locally_bound_names()` passes `binding_scope=None` when descending into
+a `ClassDef`, discarding every binding made anywhere in the class body,
+not just a method's own name -- so this reads as an unshadowed real
+`getattr` call and is wrongly flagged. Investigated a same-round fix and
+found it structurally unsound, not merely inconvenient: this module's
+`_enclosing_qualnames()` gives class-body-level code no distinct qualname
+of its own at all (it inherits whichever qualname encloses the `class`
+statement, confirmed directly -- the reported repro's own call resolved
+to qualname `"<module>"`), which is exactly why `binding_scope=None` was
+chosen for class bodies in the first place (a documented, deliberate
+fix, see `_locally_bound_names()`'s own "That 'directly, syntactically
+contains it' scope is NOT simply the nearest enclosing function" section):
+recording a class-body binding (in particular a method's own name)
+against the *same* qualname that also covers code genuinely *outside* and
+*after* the class statement would leak it there too -- `class C: def
+getattr(self, name): ...` followed by a real, unrelated
+`getattr(rec, "bases")` **after** the class definition, at the same outer
+scope, would then be wrongly excluded, reintroducing a worse version of
+the exact bug that `None` was chosen to prevent. A correct fix needs a
+genuinely distinct, *position-based* class-body scope (mirroring how a
+comprehension's own scope was just handled above via `_shadowed()`'s
+AST-ancestor walk rather than the qualname model) -- and, unlike the
+comprehension case, get it *order-sensitive* too, since class-body
+execution is sequential top-to-bottom, ordinary code (a call before the
+shadowing `def` must still see the real builtin) -- exactly the
+"materially larger change than the guard conditions this module has
+added incrementally so far" `_locally_bound_names()`'s own docstring
+already names as a known, deliberately-unattempted gap for a
+structurally identical reordering problem. Recorded here rather than
+attempted as a reactive same-round patch.
+
+Verified against the reported repro, the aliased/bare-import/plain-
+assignment/qualified alias forms, and negative controls (a `dict`
+parameter shadow; an unrelated mapping-receiver argument) for finding
+(1), via direct AST reproduction before writing tests. Still zero
+existing hits, `mypy`/`ruff` both stayed clean, `fact_field_readers.py`
+at 1859 lines and `fact_field_readers_scope.py` at 558 lines (both well
+under the 2000-line hard cap). New tests:
+`TestUnboundDictGetitemMappingReaders`, appended to `tests/
+test_fact_field_readers_later_fixes.py` (728 lines, well under its own
+1200-line cap).
+
 **Still not landed**: no detector (`diff_layout.py`/`diff_types.py`/
-`diff_param_qualifiers.py`/the nine-reader table above) has been migrated
-to read `.status`, and the widened, non-glob AI-readiness check this
-Design section describes has not been written. Migrating a detector now
-would add real complexity for zero behavior change until every producer's
-own construction is at least this explicit — landed as of this slice for
-the five fields this phase scoped — deferred deliberately, not silently,
-per this plan's own "vertical slice, not flag day" discipline: each slice
-is a primitive the rest of Phase 0 builds on, landed and tested on its own
-rather than held until every consumer migrates too.
+`diff_param_qualifiers.py`/the reader set the check above now tracks
+precisely) has actually been migrated to read `.status` — the check above
+only *guards* the existing sites against a new, unreviewed one
+joining them; it does not change what any of them do.
+Migrating a detector now would add real complexity for zero behavior
+change until every producer's own construction is at least this explicit
+— landed as of the second slice for the five fields this phase scoped —
+deferred deliberately, not silently, per this plan's own "vertical slice,
+not flag day" discipline: each slice is a primitive the rest of Phase 0
+builds on, landed and tested on its own rather than held until every
+consumer migrates too.
+
+**Three more `fact-field-readers` findings (same review round), all
+bounded extensions of already-shipped alias/constructor-recognition
+mechanisms — fixed, one after chasing a real self-inflicted regression
+this same class of bug had already produced twice.** (1) `dict.get(vars
+(rec), "bases")` — the unbound-method spelling of the already-recognized
+bound `vars(rec).get("bases")` form, the identical relationship the
+already-shipped unbound `dict.__getitem__` branch has to its own bound
+sibling. A straightforward mirror of that branch, reusing `dict_names`
+unchanged. (2) `operator.attrgetter("bases.foo")` — a dotted attrgetter
+path. The existing docstring's blanket "no type inference" framing for a
+dotted argument was overbroad: the *first* dotted component is read
+directly off the literal string (`field.partition(".")`), no inference
+needed, while a *later* component genuinely would need to know the
+runtime type of what the first component reads — so only the first
+component is matched, keeping the "no type inference" limit exactly
+where it actually applies. Verified a multi-argument call
+(`attrgetter("size_bits", "bases.foo")`) still reports only the real
+`FACT_BRIDGED_ATTRS` hit, and that a bridged name appearing in a
+*non-first* component (`attrgetter("foo.bases")`) stays correctly out of
+scope. (3) `operator.itemgetter("bases")(vars(rec))` — the `attrgetter`-
+shaped constructor spelling of a subscript read, previously entirely
+untracked (no `itemgetter_names` alias family existed at all). Added by
+widening `_operator_attrgetter_aliases()`'s return to a 4-tuple
+(`itemgetter_names` resolved the identical import-seeded/chained/
+qualified way `attrgetter_names`/`getitem_names` already are) and a new
+`_is_itemgetter_constructor_call()`/`_itemgetter_matched_name()` pair
+mirroring the attrgetter versions — but with one deliberate difference:
+unlike `attrgetter`'s "match wherever constructed, regardless of how the
+getter is later used" stance, `itemgetter` is matched only at the
+*outer*, immediate call, gated on `_is_mapping_receiver()` the same way
+every other subscript-reading form here already is. The reason the two
+forms can't share one stance: `attrgetter("bases")(x)` reads `x.bases`
+for *any* `x`, so there's no narrower receiver shape to require, while
+`itemgetter("bases")(x)` reads `x["bases"]`, exactly as legitimate for an
+arbitrary unrelated mapping as for an instance's own `vars()`/
+`__dict__` — an ungated constructor-wide match would have been far
+noisier than its `dict.get`/`operator.getitem` siblings.
+
+**A real self-inflicted regression, caught by proactively verifying every
+sibling alias form before writing tests rather than only the one repro —
+the third instance of this exact bug class this session (a new alias
+family missing its own entry in `_locally_bound_names()`'s recognized-
+import carve-out tuple, `fact_field_readers_scope.py`).** The bare-name
+forms (`from operator import itemgetter`, and its own `as` alias) both
+returned `[]` — a genuine false negative, not merely an incomplete
+positive check — because the carve-out tuple gating which imports are
+treated as a real alias *source* rather than an ordinary shadowable local
+binding still only listed `("attrgetter", "getitem")` for the `operator`
+module; `itemgetter` was never added alongside them. Without the
+carve-out entry, `_locally_bound_names()` recorded the bare `itemgetter`
+import as an ordinary local binding, and `_shadowed()` then read it back
+as shadowing itself — every bare-name itemgetter call was wrongly
+excluded. Root-caused (not guessed) by adding temporary trace prints at
+each condition in the new matching branch, isolating the exact point
+where `_shadowed(...)` returned `True` for an unshadowed name, rather
+than assuming which of the several new conditions was at fault. Fixed by
+adding `itemgetter` to the tuple (now `("attrgetter", "getitem",
+"itemgetter")`) and updating the docstring paragraph that enumerates the
+carved-out spellings to match. Re-verified every sibling form afterward
+(bare, aliased, `operator`-qualified, an aliased `operator` module, a
+plain-assignment alias of the `operator` module, a qualified-assignment
+alias) rather than stopping at the one repro that first surfaced the gap.
+
+**A file-size consequence, handled the established way rather than
+reactively.** Adding the itemgetter machinery pushed `fact_field_
+readers.py` to 2019 lines — over the AI-readiness gate's 2000-line hard
+cap. Rather than trim content, the `_operator_attrgetter_aliases()`/
+`_is_attrgetter_constructor_call()`/`_attrgetter_matched_name()`/
+`_is_itemgetter_constructor_call()`/`_itemgetter_matched_name()` block
+(self-contained — no dependency on anything else in the module besides
+bare `ast`) was moved to `fact_field_readers_scope.py` as a second,
+later block, exactly mirroring how that sibling module's *first* block
+was split out originally; the module's own docstring was extended to
+record the second move. `fact_field_readers.py` dropped to 1701 lines,
+`fact_field_readers_scope.py` grew to 896 — both comfortably under the
+cap. Verified with the full existing 176-test suite plus 33 new
+positive/negative-control tests (three new classes —
+`TestUnboundDictGetMappingReaders`, `TestAttrgetterDottedPaths`,
+`TestItemgetterMappingReaders` — appended to `tests/test_fact_field_
+readers_later_fixes.py`, 974 lines, well under its own 1200-line cap),
+`mypy`/`ruff format`/`ruff check` all clean on both touched scripts,
+`check_architecture.py` and `check_ai_readiness.py` both at 0 errors, and
+`check_docs_contract.py` unchanged at its two pre-existing warnings.
+
+**One more finding on the same round's itemgetter fix: only a single
+constructor argument was ever inspected.** `operator.itemgetter("foo",
+"bases")(vars(rec))` returns a getter that reads *both* requested keys as
+a tuple — real, documented `itemgetter` behavior, and the identical
+multi-key shape `attrgetter`'s own recognition already handles — but the
+new itemgetter branch's own `len(node.func.args) == 1` guard (and
+`_is_itemgetter_constructor_call()`'s matching `len(node.args) == 1`)
+silently missed a bridged key riding alongside an unrelated one. Fixed by
+widening `_is_itemgetter_constructor_call()` to `len(node.args) >= 1`
+(mirroring `_is_attrgetter_constructor_call()`'s identical bound) and
+restructuring the itemgetter branch from the single-attribute elif chain
+into its own top-level case — the same reason the `attrgetter` branch
+itself is a top-level case rather than folded into that chain: it now
+iterates every constructor argument and reports each bridged, literal
+string-constant key independently, rather than fitting into a chain
+shaped for exactly one `attr` per matched node.
+
+Verified against the reported multi-key repro, both keys bridged
+(reporting both independently), the bare (non-qualified) spelling,
+a no-bridged-keys negative control, a non-mapping-receiver negative
+control, and a shadowed-`operator`-parameter negative control, via direct
+AST reproduction before writing tests. The full existing single-key
+suite (dict.get, dotted attrgetter, single-key itemgetter, and every
+other already-shipped reader form) re-verified unaffected. Still zero
+existing hits, `mypy`/`ruff` both stayed clean, `fact_field_readers.py`
+at 1733 lines and `fact_field_readers_scope.py` at 901 lines (both well
+under the 2000-line hard cap). New tests:
+`test_inspects_every_key_in_a_multi_key_getter`,
+`test_reports_each_bridged_key_independently`,
+`test_multi_key_bare_spelling_still_recognized`,
+`test_ignores_a_multi_key_getter_with_no_bridged_keys`, appended to
+`TestItemgetterMappingReaders` in `tests/test_fact_field_readers_later_
+fixes.py` (1014 lines, well under its own 1200-line cap).
+
+**Two more `fact-field-readers` findings (next review round), both real,
+both bounded extensions of already-shipped mechanisms.** (1) `_shadowed()`'s
+comprehension-generator handling blanket-checked *every* generator's own
+target against a call reached through any generator's iterable -- correct
+for the outermost generator (already excluded entirely, since it evaluates
+before any target exists) but wrong for a *non*-outermost one: `[x for x in
+xs for getattr in getattr(rec, "bases")]` -- the second generator's own
+iterable evaluates *before that same generator's own target* is bound, the
+identical binding-order rule the outermost generator's iterable already
+gets, just one level less special-cased. Fixed by generalizing the single
+`outermost_iter_clause` tracked during the ascent into
+`comprehension_gen_clause`/`comprehension_via_iter`, identifying *which*
+generator (by index, via `node.generators.index(...)`) and *which part* of
+it (`.iter`, evaluating before that generator's own target; `.ifs`,
+evaluating after) the call was reached through, then shadowing only
+against the generators that are actually already bound at that point: none
+for the outermost iterable, generators strictly before the current one for
+a non-outermost iterable, the current generator inclusive for a filter, and
+every generator for the comprehension's own final `elt`/`key`/`value`
+(reached with no intervening generator clause at all). (2) `operator.
+itemgetter("bases")(vars(rec))` was recognized only at the point of
+immediate construction-and-call -- `get = operator.itemgetter("bases");
+get(vars(rec))`, storing the constructed getter in a variable first before
+calling it, is ordinary, common Python that was silently missed. Fixed
+with a new `_itemgetter_alias_keys()`, tracking every local name bound via
+a plain `ast.Assign` to the *result* of an itemgetter-constructor call,
+mapped to that call's own literal keys -- deliberately not chased through
+a *further* plain-name alias (`get2 = get`, the same "no type inference
+beyond one hop" limit already accepted elsewhere in this module) and
+dropped entirely for a name assigned more than once anywhere in the file
+(ambiguous by the second assignment, so guessing which one a later call
+used would risk fabricating a false positive rather than merely missing a
+true one).
+
+Both pre-existing tests that pinned the exact gaps these fixes close were
+corrected rather than left pinning a now-fixed bug -- the fourth and fifth
+instances of this exact pattern this plan has now recorded.
+`test_still_shadows_within_a_non_outermost_generators_iterable` used a
+repro where the shadowing target was the call's *own* generator's target
+(self-shadowing, the bug), not an *earlier* generator's target (the
+positive control its own docstring actually claimed to be testing) --
+corrected to the earlier-target repro, with a new sibling test class,
+`TestComprehensionGeneratorBindingOrder`, exhaustively covering all four
+binding-order cases (a generator's own iterable, its own filter, the final
+element expression, and a third generator confirming the rule generalizes
+past two). `test_does_not_match_a_getter_constructed_but_not_immediately_
+called` asserted `== []` for exactly the aliased-itemgetter repro this
+round's second fix now correctly detects -- renamed and rewritten to
+assert the real, single hit, with a new sibling test pinning the
+one-hop-only chased-no-further limit explicitly rather than leaving it
+implicit.
+
+Verified against both reported repros, every binding-order permutation
+listed above, the reassigned-variable and chained-second-name negative
+controls for the itemgetter alias case, and every existing sibling form
+(dict.get, dotted attrgetter, direct-call itemgetter, multi-key itemgetter)
+re-verified unaffected, all via direct AST reproduction before writing
+tests. Still zero existing hits, `mypy`/`ruff` both stayed clean,
+`fact_field_readers.py` at 1809 lines and `fact_field_readers_scope.py` at
+966 lines (both well under the 2000-line hard cap). New tests:
+`TestComprehensionGeneratorBindingOrder` (4 tests) and
+`test_detects_a_getter_assigned_to_a_variable_before_being_called`/
+`test_does_not_chase_an_aliased_getter_through_a_second_name`/
+`test_ignores_a_reassigned_getter_variable` in
+`TestItemgetterMappingReaders`, all in `tests/test_fact_field_readers_
+later_fixes.py` (1113 lines, still under its own 1200-line cap).
+
+A follow-up Codex review on the same commit found `_itemgetter_alias_keys()`
+walked only `ast.Assign` -- `get: object = operator.itemgetter("bases")`
+(an annotated assignment) and `(get := operator.itemgetter("bases"))`
+(a named expression/walrus, bound and referenced later, not the immediate-
+self-call shape) construct and bind the identical getter through a
+different Python binding statement, and both were silently missed:
+`unmigrated_fact_reader_sites()` returned no site for either form, so the
+ERROR-level gate could be bypassed by simply spelling the same alias
+through `AnnAssign`/`NamedExpr` instead of `Assign`. Fixed by generalizing
+`_itemgetter_alias_keys()`'s walk to the identical three-branch shape
+`_mapping_receiver_aliases()` (`fact_field_readers.py`) already uses for
+this exact purpose -- a shared `_record(target, value)` helper called from
+`ast.Assign`, `ast.AnnAssign`, and `ast.NamedExpr` branches, preserving the
+existing ambiguity rule (a name assigned more than once anywhere in the
+tree is dropped entirely, regardless of which binding forms produced the
+multiple assignments).
+
+Verified against both reported repros (AnnAssign, NamedExpr-then-later-call),
+a multi-key variant of each, the bare (non-qualified) `itemgetter` spelling
+combined with each, the original plain-`ast.Assign` case as a regression
+check, and the reassigned-variable and non-mapping-receiver negative
+controls for both new forms -- all via direct AST reproduction before
+writing tests. One further shape was checked and found out of scope for
+this finding: `(get := operator.itemgetter("bases"))(vars(rec))`, an
+immediate self-call on the walrus expression itself (no later reference to
+`get` at all), stays undetected -- distinct from the reported "store then
+call later" pattern the review actually named, and from the already-handled
+`operator.itemgetter("bases")(vars(rec))` immediate-construction-and-call
+form (whose `func` is the `Call` node itself, not a `NamedExpr` wrapping
+one); left as an unreported, narrower residual rather than folded into this
+fix's scope. Still zero existing hits, `mypy`/`ruff` both stayed clean,
+`fact_field_readers_scope.py` at 989 lines (well under the 2000-line hard
+cap). New tests split into a dedicated sibling file,
+`tests/test_fact_field_readers_itemgetter_binding_forms.py` (9 tests, two
+classes: `TestItemgetterConstructorAliasedThroughAnnAssign`/
+`TestItemgetterConstructorAliasedThroughNamedExpr`), rather than appended to
+`test_fact_field_readers_later_fixes.py`, which had only ~87 lines of
+headroom left under its own 1200-line cap.
+
+**The "left as an unreported, narrower residual" shape above turned out not
+to stay a residual: a follow-up Codex review round named it directly and it
+turned out to be a bounded, mechanical extension of an already-established
+sibling mechanism, not exotic indirection worth declining.**
+`(get := operator.itemgetter("bases"))(vars(rec))` -- the outer call's own
+`func` is the `ast.NamedExpr` itself, not a `Call`, so neither the
+immediate-construction-and-call branch (which requires `node.func` to
+literally be the constructor `Call`) nor the plain-Name alias branch (which
+requires `node.func` to be a bare `Name`) ever matched, and
+`unmigrated_fact_reader_sites()` returned no site -- letting a bridged-field
+read bypass the ERROR-level gate. The review pointed at the exact right
+precedent to mirror: this module already handles the identical shape for
+`getattr` (`(read := getattr)(rec, "bases")`, checked against the walrus's
+own `.value` -- what is actually being called -- not its `.target`). Fixed
+with a new branch matching `isinstance(node.func, ast.NamedExpr) and
+isinstance(node.func.value, ast.Call) and _is_itemgetter_constructor_call
+(node.func.value, ...)`, inspecting every constructor argument the same
+multi-key way the immediate-construction-and-call branch already does, and
+gated by `_shadowed()` against `_itemgetter_matched_name(node.func.value)`
+-- the same "is the `itemgetter`/`operator` name itself locally shadowed at
+this point" check the immediate-call branch already applies, just against
+the walrus's wrapped call rather than `node.func` directly.
+
+Verified against the reported repro, a multi-key variant, the bare
+(non-qualified) `itemgetter` spelling, a no-bridged-keys negative control, a
+non-mapping-receiver negative control, a shadowed-`operator`-parameter
+negative control, and every existing sibling form re-verified unaffected
+(the walrus-then-later-call form, the plain-`ast.Assign`/`AnnAssign` forms,
+the immediate-construction-and-call form with no assignment at all, the
+sibling `getattr` walrus-callee mechanism, and the still-undetected
+two-hop-alias-chain residual staying correctly out of scope), all via direct
+AST reproduction before writing tests. Still zero existing hits, `mypy`/
+`ruff` both stayed clean, `fact_field_readers.py` at 1858 lines (well under
+the 2000-line hard cap). New tests: `TestItemgetterConstructedAndCalledThrough
+AWalrusCallee` (6 tests), appended to
+`tests/test_fact_field_readers_itemgetter_binding_forms.py` (235 lines,
+plenty of headroom under its own 1200-line cap -- the natural home for this
+fix, unlike the two files already tight on headroom).
+
+**Separately, this same round brought PR #921's branch up to date with
+`main`, closing a CI `architecture` step failure (`abicheck/contract_
+evidence.py:86: model -> policy is forbidden`, a `compare -> model ->
+policy -> compare` dependency cycle) that was never this PR's own doing.**
+The branch was 53 commits behind `main`; `main` had already merged a fix
+for the identical cycle (PR #931,
+`fix/contract-evidence-model-policy-cycle`) before this round started, so
+merging `main` in (a clean merge, no conflicts) was sufficient -- no
+independent architecture fix was needed on this branch. Verified with
+`python scripts/check_architecture.py` reporting `0 error(s)` both on the
+merge commit and, separately, on `main` itself before merging.
+
+**A further Codex review round read the gate's own error message as
+promising a recognition mechanism that does not exist, and was declined
+as a detection-logic change while accepted as a wording fix.** The
+finding: "when migrated code first checks `rec.bases_fact.status` and
+then reads `rec.bases`, `unmigrated_fact_reader_sites()` still returns
+the legacy read... the gate needs to recognize an applicable
+sibling-status guard before reporting the legacy read (or change the
+contract and diagnostic to require reading the Fact value instead)."
+Investigated both halves of that either/or separately. Recognizing "a
+preceding, applicable sibling-status guard" correctly needs genuine
+control-flow analysis this scan deliberately doesn't have (a plain,
+position-blind AST walk, per this module's own docstring) --
+what counts as "preceding" (same branch? any earlier line in the same
+function? does it need to dominate every path to the read?), what
+counts as an "applicable" check (equality against a specific
+`FactStatus` member? a truthiness test? membership?), and whether the
+guard's branch is even the one containing the read, are all genuine
+design questions with no existing precedent to model after -- and
+`grep -rn "_fact\.status\b" abicheck/` confirms zero real call sites in
+the codebase exercise this pattern today, matching the plan doc's own
+already-recorded "Still not landed: no detector... has actually been
+migrated to read `.status`" note two entries above. Building real
+control-flow recognition for a pattern nothing in the tree uses yet,
+under review pressure, risks exactly the "attractive nuisance" this
+plan's own established discipline warns against -- a heuristic that
+could produce false negatives (masking a genuinely unguarded read that
+merely happens to share a function with an unrelated status check
+elsewhere) for a benefit no real caller currently needs.
+
+The second half -- "change the contract and diagnostic" -- was the real,
+actionable gap: the message's previous wording ("either migrate this
+reader to check .status first, or add its stable key to
+KNOWN_UNMIGRATED_READERS") is genuinely ambiguous between "replace the
+legacy-field read with a `Fact[...]`-sibling read" (the actual intended
+migration path, which naturally stops matching this scan's own
+attribute-read pattern once done, needing no new recognition logic at
+all) and "add a status check immediately before the still-present
+legacy read" (the reading Codex's finding took, which this scan can
+never honor without the unbuilt control-flow analysis above). Tightened
+the message to state the "no control-flow analysis, a preceding check
+does not exempt the read" contract explicitly, so a developer reading
+it cannot come away expecting a recognition mechanism the scan doesn't
+have. Verified the new wording against a real preceding-`.status`-check
+repro (confirming it still, correctly, fires) and against the existing
+end-to-end violation-reporting test, and confirmed no existing test
+pinned the old wording (`grep`-checked across every `test_fact_field_
+readers*.py` file) before changing it. Still zero existing hits,
+`mypy`/`ruff` both stayed clean, `fact_field_readers.py` at 1863 lines
+(well under the 2000-line hard cap). New tests split into a dedicated
+small sibling file, `tests/test_fact_field_readers_status_check_
+diagnostic.py` (2 tests), rather than appended to
+`test_fact_field_readers.py`, which had only ~24 lines of headroom left
+under its own 1200-line cap.
 
 ---
 
