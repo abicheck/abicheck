@@ -23,6 +23,7 @@
         "abicheck/contract_relevance_types.py",
         "abicheck/detectors.py",
         "abicheck/elf_symbol_filter.py",
+        "abicheck/environment_matrix.py",
         "abicheck/evidence_depth.py",
         "abicheck/fact_provenance.py",
         "abicheck/name_classification.py"
@@ -111,7 +112,6 @@
         "abicheck/dumper_elf_fallback.py",
         "abicheck/dumper_elf_symbols.py",
         "abicheck/dumper_layout_backfill.py",
-        "abicheck/dumper_manifest.py",
         "abicheck/dumper_scoping.py",
         "abicheck/dumper_sysinc.py",
         "abicheck/dumper_toolchain.py",
@@ -252,8 +252,7 @@
         "abicheck/debian_symbols.py",
         "abicheck/dependency_info.py",
         "abicheck/dumper_hybrid.py",
-        "abicheck/effective_config_digest.py",
-        "abicheck/environment_matrix.py",
+        "abicheck/dumper_manifest.py",
         "abicheck/resolver.py",
         "abicheck/service.py",
         "abicheck/service_compare_evidence.py",
@@ -277,6 +276,7 @@
         "abicheck/annotations.py",
         "abicheck/annotations_step_summary.py",
         "abicheck/appcompat_html.py",
+        "abicheck/effective_config_digest.py",
         "abicheck/reporter.py"
       ]
     },
