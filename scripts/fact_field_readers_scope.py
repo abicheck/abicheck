@@ -355,12 +355,13 @@ def _locally_bound_names(
     **Carved out: an import this module already recognizes as a genuine
     alias *source* for a builtin/`operator` symbol must NOT be treated as
     a shadow of itself.** `from builtins import getattr` (bare, no
-    `as`), `from builtins import object`/`type`/`vars`, `from operator
-    import attrgetter`/`getitem`, and a bare `import builtins`/`import
-    operator` are all already resolved elsewhere in this module
+    `as`), `from builtins import object`/`type`/`vars`/`dict`, `from
+    operator import attrgetter`/`getitem`, and a bare `import builtins`/
+    `import operator` are all already resolved elsewhere in this module
     (`_builtins_getattr_aliases()`, `_unbound_getattribute_receiver_
-    aliases()`, `_builtins_symbol_aliases()`,
-    `_operator_attrgetter_aliases()`) as
+    aliases()`, `_builtins_symbol_aliases()` -- covering both `vars` and
+    `dict`, its own reused-elsewhere generality -- `_operator_
+    attrgetter_aliases()`) as
     evidence that the bound name genuinely *is* the real builtin/operator
     symbol -- recording that same binding here too would make
     `_shadowed()` see it as a local shadow and wrongly exclude the very
@@ -478,7 +479,8 @@ def _locally_bound_names(
                         bound_name = alias.asname or alias.name
                         recognized = (
                             child.module == "builtins"
-                            and alias.name in ("getattr", "object", "type", "vars")
+                            and alias.name
+                            in ("getattr", "object", "type", "vars", "dict")
                         ) or (
                             child.module == "operator"
                             and alias.name in ("attrgetter", "getitem")

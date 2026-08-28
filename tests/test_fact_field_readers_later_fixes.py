@@ -660,3 +660,68 @@ class TestLambdaDefaultsEvaluateBeforeParameterShadows:
         )
         tree = ast.parse(src, filename="x.py")
         assert unmigrated_fact_reader_sites(tree, "x.py", src) == []
+
+
+class TestUnboundDictGetitemMappingReaders:
+    """`dict.__getitem__(vars(rec), "bases")` -- the *unbound*-method
+    spelling of the bound `vars(rec).__getitem__("bases")` form -- reads
+    the identical normalized legacy value, the same relationship
+    `object.__getattribute__(rec, "bases")` already has to
+    `rec.__getattribute__("bases")` elsewhere in this module (Codex
+    review, fresh evidence). `dict_names` is resolved via
+    `_builtins_symbol_aliases()`'s already-generic mechanism (the same
+    one `vars` itself already uses), so every alias shape that mechanism
+    covers -- a bare/aliased `from builtins import dict [as D]`, a plain
+    assignment chain, and a qualified `builtins.dict` -- is covered for
+    free."""
+
+    def test_detects_the_unbound_bare_form(self) -> None:
+        src = 'def f(rec):\n    return dict.__getitem__(vars(rec), "bases")\n'
+        tree = ast.parse(src, filename="x.py")
+        sites = unmigrated_fact_reader_sites(tree, "x.py", src)
+        assert len(sites) == 1
+        assert sites[0][2] == "bases"
+
+    def test_detects_an_aliased_import_form(self) -> None:
+        src = (
+            "from builtins import dict as D\n"
+            'def f(rec):\n    return D.__getitem__(vars(rec), "bases")\n'
+        )
+        tree = ast.parse(src, filename="x.py")
+        sites = unmigrated_fact_reader_sites(tree, "x.py", src)
+        assert len(sites) == 1
+        assert sites[0][2] == "bases"
+
+    def test_detects_a_plain_assignment_alias_form(self) -> None:
+        src = (
+            'def f(rec):\n    D = dict\n    return D.__getitem__(vars(rec), "bases")\n'
+        )
+        tree = ast.parse(src, filename="x.py")
+        sites = unmigrated_fact_reader_sites(tree, "x.py", src)
+        assert len(sites) == 1
+        assert sites[0][2] == "bases"
+
+    def test_ignores_a_dict_parameter_shadow(self) -> None:
+        src = 'def f(rec, dict):\n    return dict.__getitem__(vars(rec), "bases")\n'
+        tree = ast.parse(src, filename="x.py")
+        assert unmigrated_fact_reader_sites(tree, "x.py", src) == []
+
+    def test_ignores_an_unrelated_mapping_receiver_argument(self) -> None:
+        """Negative control: the first argument must itself be a
+        recognized mapping receiver -- an arbitrary local reusing a
+        `dict`-suggestive name is not."""
+        src = (
+            "def f(rec, other_dict):\n"
+            '    return dict.__getitem__(other_dict, "bases")\n'
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert unmigrated_fact_reader_sites(tree, "x.py", src) == []
+
+    def test_still_detects_the_bound_form(self) -> None:
+        """Regression guard: the fix must not disturb the existing bound
+        `vars(rec).__getitem__("bases")` recognition."""
+        src = 'def f(rec):\n    return vars(rec).__getitem__("bases")\n'
+        tree = ast.parse(src, filename="x.py")
+        sites = unmigrated_fact_reader_sites(tree, "x.py", src)
+        assert len(sites) == 1
+        assert sites[0][2] == "bases"

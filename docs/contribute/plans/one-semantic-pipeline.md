@@ -2375,6 +2375,82 @@ at 556 lines (both well under the 2000-line hard cap). New tests:
 `tests/test_fact_field_readers_later_fixes.py` (660 lines, well under its
 own 1200-line cap).
 
+**Two more findings from the next review round: one fixed, a bounded
+extension of an established mechanism; one declined as needing a real
+redesign rather than a bounded fix.** (1) `dict.__getitem__(vars(rec),
+"bases")` -- the *unbound*-method spelling of the bound
+`vars(rec).__getitem__("bases")` form already recognized, the identical
+relationship `object.__getattribute__(rec, "bases")` already has to
+`rec.__getattribute__("bases")` elsewhere in this module -- was invisible.
+Fixed by resolving `dict`'s own alias family through `_builtins_symbol_
+aliases()`'s already-generic mechanism (the same one `vars` itself already
+uses -- `dict_names = _builtins_symbol_aliases(tree, "dict",
+builtins_names)`, no new collector needed, since `dict` is a real,
+always-in-scope builtin in the identical "no import required" category
+`getattr` itself is in) and adding one new call-matching branch mirroring
+the bound form's own shape, with the receiver check against `dict_names`
+instead of `_is_mapping_receiver()`. **Proactively verified every sibling
+alias form before writing tests, per this file's own established
+discipline (a prior round's own self-found regression) rather than only
+the one reported repro** -- the aliased-import form (`from builtins import
+dict as D; D.__getitem__(...)`) initially produced no site at all, traced
+to the identical class of bug caught earlier in this same file's history:
+`_locally_bound_names()`'s recognized-import carve-out had no entry for
+`"dict"` alongside its existing `"getattr"`/`"object"`/`"type"`/`"vars"`
+tuple, so the import itself was recorded as an ordinary local binding
+rather than a recognized alias source, making `_shadowed()` see the
+import as shadowing its own later use. Fixed by adding `"dict"` to that
+tuple, then re-verified every alias shape together (bare import, aliased
+import, plain-assignment chain, qualified `builtins.dict`) rather than
+re-testing only the one that had been broken.
+
+(2) **Declined, documented as a known gap needing real redesign rather
+than attempted under review pressure.** `class C: def getattr(self,
+name): ...; value = getattr(rec, "bases")` -- a class-body-level call
+(not inside a method) genuinely does see an earlier same-class-body
+binding via ordinary sequential class-body execution, but
+`_locally_bound_names()` passes `binding_scope=None` when descending into
+a `ClassDef`, discarding every binding made anywhere in the class body,
+not just a method's own name -- so this reads as an unshadowed real
+`getattr` call and is wrongly flagged. Investigated a same-round fix and
+found it structurally unsound, not merely inconvenient: this module's
+`_enclosing_qualnames()` gives class-body-level code no distinct qualname
+of its own at all (it inherits whichever qualname encloses the `class`
+statement, confirmed directly -- the reported repro's own call resolved
+to qualname `"<module>"`), which is exactly why `binding_scope=None` was
+chosen for class bodies in the first place (a documented, deliberate
+fix, see `_locally_bound_names()`'s own "That 'directly, syntactically
+contains it' scope is NOT simply the nearest enclosing function" section):
+recording a class-body binding (in particular a method's own name)
+against the *same* qualname that also covers code genuinely *outside* and
+*after* the class statement would leak it there too -- `class C: def
+getattr(self, name): ...` followed by a real, unrelated
+`getattr(rec, "bases")` **after** the class definition, at the same outer
+scope, would then be wrongly excluded, reintroducing a worse version of
+the exact bug that `None` was chosen to prevent. A correct fix needs a
+genuinely distinct, *position-based* class-body scope (mirroring how a
+comprehension's own scope was just handled above via `_shadowed()`'s
+AST-ancestor walk rather than the qualname model) -- and, unlike the
+comprehension case, get it *order-sensitive* too, since class-body
+execution is sequential top-to-bottom, ordinary code (a call before the
+shadowing `def` must still see the real builtin) -- exactly the
+"materially larger change than the guard conditions this module has
+added incrementally so far" `_locally_bound_names()`'s own docstring
+already names as a known, deliberately-unattempted gap for a
+structurally identical reordering problem. Recorded here rather than
+attempted as a reactive same-round patch.
+
+Verified against the reported repro, the aliased/bare-import/plain-
+assignment/qualified alias forms, and negative controls (a `dict`
+parameter shadow; an unrelated mapping-receiver argument) for finding
+(1), via direct AST reproduction before writing tests. Still zero
+existing hits, `mypy`/`ruff` both stayed clean, `fact_field_readers.py`
+at 1859 lines and `fact_field_readers_scope.py` at 558 lines (both well
+under the 2000-line hard cap). New tests:
+`TestUnboundDictGetitemMappingReaders`, appended to `tests/
+test_fact_field_readers_later_fixes.py` (728 lines, well under its own
+1200-line cap).
+
 **Still not landed**: no detector (`diff_layout.py`/`diff_types.py`/
 `diff_param_qualifiers.py`/the reader set the check above now tracks
 precisely) has actually been migrated to read `.status` — the check above

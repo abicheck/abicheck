@@ -1192,6 +1192,11 @@ def unmigrated_fact_reader_sites(
     getattr_names, builtins_names = _builtins_getattr_aliases(tree)
     vars_names = _builtins_symbol_aliases(tree, "vars", builtins_names)
     mapping_receiver_names = _mapping_receiver_aliases(tree, vars_names, builtins_names)
+    # `dict` is a real, always-in-scope builtin (the identical "no import
+    # required" category `getattr` itself is in), so its own alias family
+    # is resolved the same reusable way `vars`'s already is -- no new
+    # collector needed.
+    dict_names = _builtins_symbol_aliases(tree, "dict", builtins_names)
     object_type_names = _unbound_getattribute_receiver_aliases(tree)
     unbound_getattribute_names = _unbound_getattribute_method_aliases(
         tree, object_type_names
@@ -1720,6 +1725,31 @@ def unmigrated_fact_reader_sites(
             # `rec.bases` elsewhere in this module (Codex review, fresh
             # evidence).
             attr = node.args[0].value
+            record_node = node
+        elif (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and node.func.attr == "__getitem__"
+            and isinstance(node.func.value, ast.Name)
+            and node.func.value.id in dict_names
+            and not _shadowed(node, node.func.value.id)
+            and len(node.args) == 2
+            and _is_mapping_receiver(node.args[0])
+            and isinstance(node.args[1], ast.Constant)
+            and isinstance(node.args[1].value, str)
+            and node.args[1].value in FACT_BRIDGED_ATTRS
+        ):
+            # `dict.__getitem__(vars(rec), "bases")` -- the *unbound*-
+            # method spelling of the bound `vars(rec).__getitem__("bases")`
+            # form just above, the identical relationship
+            # `object.__getattribute__(rec, "bases")` already has to
+            # `rec.__getattribute__("bases")` elsewhere in this module
+            # (Codex review, fresh evidence). `dict_names` covers an
+            # import alias of `dict` too (`from builtins import dict as
+            # D; D.__getitem__(vars(rec), "bases")`), reusing
+            # `_builtins_symbol_aliases()`'s already-generic mechanism
+            # rather than a fourth hand-duplicated alias collector.
+            attr = node.args[1].value
             record_node = node
         elif (
             isinstance(node, ast.Call)
