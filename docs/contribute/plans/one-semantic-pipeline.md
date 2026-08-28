@@ -2688,6 +2688,57 @@ classes: `TestItemgetterConstructorAliasedThroughAnnAssign`/
 `test_fact_field_readers_later_fixes.py`, which had only ~87 lines of
 headroom left under its own 1200-line cap.
 
+**The "left as an unreported, narrower residual" shape above turned out not
+to stay a residual: a follow-up Codex review round named it directly and it
+turned out to be a bounded, mechanical extension of an already-established
+sibling mechanism, not exotic indirection worth declining.**
+`(get := operator.itemgetter("bases"))(vars(rec))` -- the outer call's own
+`func` is the `ast.NamedExpr` itself, not a `Call`, so neither the
+immediate-construction-and-call branch (which requires `node.func` to
+literally be the constructor `Call`) nor the plain-Name alias branch (which
+requires `node.func` to be a bare `Name`) ever matched, and
+`unmigrated_fact_reader_sites()` returned no site -- letting a bridged-field
+read bypass the ERROR-level gate. The review pointed at the exact right
+precedent to mirror: this module already handles the identical shape for
+`getattr` (`(read := getattr)(rec, "bases")`, checked against the walrus's
+own `.value` -- what is actually being called -- not its `.target`). Fixed
+with a new branch matching `isinstance(node.func, ast.NamedExpr) and
+isinstance(node.func.value, ast.Call) and _is_itemgetter_constructor_call
+(node.func.value, ...)`, inspecting every constructor argument the same
+multi-key way the immediate-construction-and-call branch already does, and
+gated by `_shadowed()` against `_itemgetter_matched_name(node.func.value)`
+-- the same "is the `itemgetter`/`operator` name itself locally shadowed at
+this point" check the immediate-call branch already applies, just against
+the walrus's wrapped call rather than `node.func` directly.
+
+Verified against the reported repro, a multi-key variant, the bare
+(non-qualified) `itemgetter` spelling, a no-bridged-keys negative control, a
+non-mapping-receiver negative control, a shadowed-`operator`-parameter
+negative control, and every existing sibling form re-verified unaffected
+(the walrus-then-later-call form, the plain-`ast.Assign`/`AnnAssign` forms,
+the immediate-construction-and-call form with no assignment at all, the
+sibling `getattr` walrus-callee mechanism, and the still-undetected
+two-hop-alias-chain residual staying correctly out of scope), all via direct
+AST reproduction before writing tests. Still zero existing hits, `mypy`/
+`ruff` both stayed clean, `fact_field_readers.py` at 1858 lines (well under
+the 2000-line hard cap). New tests: `TestItemgetterConstructedAndCalledThrough
+AWalrusCallee` (6 tests), appended to
+`tests/test_fact_field_readers_itemgetter_binding_forms.py` (235 lines,
+plenty of headroom under its own 1200-line cap -- the natural home for this
+fix, unlike the two files already tight on headroom).
+
+**Separately, this same round brought PR #921's branch up to date with
+`main`, closing a CI `architecture` step failure (`abicheck/contract_
+evidence.py:86: model -> policy is forbidden`, a `compare -> model ->
+policy -> compare` dependency cycle) that was never this PR's own doing.**
+The branch was 53 commits behind `main`; `main` had already merged a fix
+for the identical cycle (PR #931,
+`fix/contract-evidence-model-policy-cycle`) before this round started, so
+merging `main` in (a clean merge, no conflicts) was sufficient -- no
+independent architecture fix was needed on this branch. Verified with
+`python scripts/check_architecture.py` reporting `0 error(s)` both on the
+merge commit and, separately, on `main` itself before merging.
+
 ---
 
 ### Phase 1 — finish the `dump`/`scan` typed-API convergence (closes AGENTS.md "PR C")

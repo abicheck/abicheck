@@ -1411,6 +1411,55 @@ def unmigrated_fact_reader_sites(
             continue
         if (
             isinstance(node, ast.Call)
+            and isinstance(node.func, ast.NamedExpr)
+            and isinstance(node.func.value, ast.Call)
+            and _is_itemgetter_constructor_call(
+                node.func.value, itemgetter_names, operator_names
+            )
+            and not _shadowed(
+                node.func.value, _itemgetter_matched_name(node.func.value)
+            )
+            and len(node.args) == 1
+            and _is_mapping_receiver(node.args[0])
+        ):
+            # `(get := operator.itemgetter("bases"))(vars(rec))` -- a
+            # walrus used directly as the call's own callee, immediately
+            # invoking the getter it just constructed, rather than binding
+            # `get` for a *later* call (already handled by the plain-Name
+            # alias branch below via `itemgetter_alias_keys`) (Codex
+            # review, fresh evidence). Mirrors the identical `getattr`
+            # walrus-callee handling above (`(read := getattr)(rec,
+            # "bases")`): checked against the walrus's own `.value` (the
+            # itemgetter constructor call actually being invoked), not its
+            # `.target` (the alias name being bound, irrelevant to whether
+            # *this* call is a bridged-field read). Every constructor
+            # argument is inspected, the identical multi-key handling the
+            # immediate-construction-and-call branch above already applies.
+            text = (
+                ast.get_source_segment(source, node) if source else None
+            ) or "<unavailable>"
+            outer_text = _expr_text(node)
+            qualname = qualnames.get(node.lineno, "<module>")
+            for call_arg in node.func.value.args:
+                if not (
+                    isinstance(call_arg, ast.Constant)
+                    and isinstance(call_arg.value, str)
+                    and call_arg.value in FACT_BRIDGED_ATTRS
+                ):
+                    continue
+                matches.append(
+                    (
+                        node.lineno,
+                        node.col_offset,
+                        call_arg.value,
+                        qualname,
+                        outer_text,
+                        text,
+                    )
+                )
+            continue
+        if (
+            isinstance(node, ast.Call)
             and isinstance(node.func, ast.Name)
             and node.func.id in itemgetter_alias_keys
             and not _shadowed(node, node.func.id)
