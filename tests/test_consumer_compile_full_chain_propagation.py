@@ -134,6 +134,15 @@ _WORKFLOW_GLOBAL_GCC_PATH = "/opt/SENTINEL-workflow-global/bin/gcc"
 _SENTINEL_CONSUMER_AST_FRONTEND = "clang"
 _WORKFLOW_GLOBAL_AST_FRONTEND = "hybrid"
 
+# Distinct sentinels for the fallback-branch test below: an ACTIVE overlay
+# that only sets `frontend:` leaves gcc-path/gcc-options unset, which must
+# fall back to these nonempty workflow-global values -- not to "" (the
+# marker-only test's scenario) and not leaked when inactive (the bundle/
+# no-overlay test's scenario). Distinct from every other sentinel in this
+# module so a wrong-source value is unambiguous.
+_FALLBACK_GCC_PATH = "/opt/SENTINEL-fallback-toolchain/bin/gcc"
+_FALLBACK_GCC_OPTIONS = "-DFALLBACK_SENTINEL=1"
+
 
 def _run_check_step(name: str) -> dict[str, Any]:
     """A named step from `check-project.yml`'s `check` job. For "Run
@@ -430,6 +439,114 @@ def test_marker_only_overlay_activates_the_consumer_step_without_any_field() -> 
         "a marker-only overlay (no resolvable ast-frontend/gcc-path/"
         "gcc-options) must still activate the consumer-context step's own "
         "scheduling guard from its presence marker alone"
+    )
+
+
+def test_partial_overlay_falls_back_to_workflow_global_per_field() -> None:
+    """Codex review (PR #906): a real third state neither prior test
+    exercises. The main test's overlay resolves every field itself; the
+    marker-only test's overlay resolves NO field and pairs it with empty
+    workflow-globals. Neither can catch a regression in the real per-field
+    fallback (`matrix.consumer_compile_gcc_path || inputs.gcc-path`, not a
+    blanket `|| ''`): an ACTIVE overlay that sets only `frontend:` -- a
+    real, common shape (pin the consumer's header frontend, reuse the
+    caller's own workflow-global compiler for the rest) -- must fall back
+    to the workflow-global `gcc-path`/`gcc-options` for the two fields it
+    left unset, while still keeping its own `frontend` value rather than
+    the workflow-global's. Deleting `inputs.gcc-path`/`inputs.gcc-options`/
+    `inputs.ast-frontend` from any of the three real fallback expressions
+    would leave every other test in this file green while this exact
+    scenario silently loses its compiler context."""
+    raw = {
+        "targets": TestConsumerCompileOverlayProjection._RAW["targets"],
+        "profiles": {
+            "partial-overlay": {
+                "contract": True,
+                # Only `frontend:` -- gcc_path/gcc_options resolve empty
+                # from the overlay itself (no `binding`/`standard`/
+                # `stdlib`), but the overlay is still genuinely active.
+                "consumer_compile": {"frontend": _SENTINEL_CONSUMER_AST_FRONTEND},
+            },
+        },
+        "baseline": TestConsumerCompileOverlayProjection._RAW["baseline"],
+    }
+    config = _parsed(raw)
+    plan, report = generate_run_plan(config, {"partial-overlay": _bo("libfoo")})
+    assert report.ok
+    [check] = plan.checks
+    matrix = check.to_dict()
+    assert matrix["consumer_compile_active"] is True
+    assert matrix["consumer_compile_ast_frontend"] == _SENTINEL_CONSUMER_AST_FRONTEND
+    assert "consumer_compile_gcc_path" not in matrix
+    assert "consumer_compile_gcc_options" not in matrix
+
+    run_step = _run_check_step("Run check-target")
+    _assert_run_check_target_step_guard_fires(run_step)
+    # Nonempty workflow-global sentinels, distinct from the consumer's own
+    # frontend sentinel and from every other sentinel in this module, so a
+    # leaked or wrongly-sourced value is unambiguous either way.
+    workflow_inputs = {
+        "gcc-path": _FALLBACK_GCC_PATH,
+        "gcc-options": _FALLBACK_GCC_OPTIONS,
+        "ast-frontend": _WORKFLOW_GLOBAL_AST_FRONTEND,
+    }
+    consumer_gcc_path = eval_gha_expression(
+        run_step["with"]["consumer-gcc-path"], matrix=matrix, inputs=workflow_inputs
+    )
+    consumer_gcc_options = eval_gha_expression(
+        run_step["with"]["consumer-gcc-options"], matrix=matrix, inputs=workflow_inputs
+    )
+    consumer_ast_frontend = eval_gha_expression(
+        run_step["with"]["consumer-ast-frontend"], matrix=matrix, inputs=workflow_inputs
+    )
+    consumer_compile_active = eval_gha_expression(
+        run_step["with"]["consumer-compile-active"], matrix=matrix, inputs={}
+    )
+    kind = eval_gha_expression(run_step["with"]["kind"], matrix=matrix)
+    baseline_channel = eval_gha_expression(
+        run_step["with"]["baseline-channel"], matrix=matrix
+    )
+    # The two unset overlay fields fall back to the workflow-global input...
+    assert consumer_gcc_path == _FALLBACK_GCC_PATH
+    assert consumer_gcc_options == _FALLBACK_GCC_OPTIONS
+    # ...while the one the overlay DID set keeps its own value, not the
+    # (here, deliberately different) workflow-global's.
+    assert consumer_ast_frontend == _SENTINEL_CONSUMER_AST_FRONTEND
+
+    consumer_step = _consumer_context_step()
+    hop3_inputs = _hop3_inputs_from(
+        kind=kind,
+        baseline_channel=baseline_channel,
+        consumer_compile_active=consumer_compile_active,
+        consumer_ast_frontend=consumer_ast_frontend,
+        consumer_gcc_path=consumer_gcc_path,
+        consumer_gcc_options=consumer_gcc_options,
+    )
+    steps_context = {
+        "resolve.outputs.outcome": "resolved",
+        "collect_verify.outcome": "success",
+        "collect_replay.outcome": "success",
+    }
+    guard = eval_gha_expression(
+        consumer_step["if"], inputs=hop3_inputs, steps=steps_context
+    )
+    assert guard is True
+
+    final_gcc_path = eval_gha_expression(
+        consumer_step["with"]["gcc-path"], inputs=hop3_inputs
+    )
+    final_gcc_options = eval_gha_expression(
+        consumer_step["with"]["gcc-options"], inputs=hop3_inputs
+    )
+    final_ast_frontend = eval_gha_expression(
+        consumer_step["with"]["ast-frontend"], inputs=hop3_inputs
+    )
+    assert final_gcc_path == _FALLBACK_GCC_PATH
+    assert final_gcc_options == _FALLBACK_GCC_OPTIONS
+    assert final_ast_frontend == _SENTINEL_CONSUMER_AST_FRONTEND
+
+    _assert_reaches_real_dump_cli_invocation(
+        final_gcc_path, final_gcc_options, final_ast_frontend
     )
 
 
