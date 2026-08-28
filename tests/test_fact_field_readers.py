@@ -490,6 +490,26 @@ class TestUnmigratedFactReaderSites:
             'builtins.getattr(rec, "bases", None)::1'
         ]
 
+    def test_detects_a_call_through_an_assigned_alias_of_builtins(self) -> None:
+        """`import builtins; b = builtins` then `b.getattr(rec, "bases")`
+        -- a plain assignment alias of the `builtins` module itself, not
+        just an `import ... as` one (Codex review, fresh evidence:
+        `builtins_names` was only ever populated from a real `import`
+        statement)."""
+        src = (
+            "import builtins\n"
+            "b = builtins\n"
+            "def f(rec):\n"
+            '    return b.getattr(rec, "bases")\n'
+        )
+        tree = ast.parse(src, filename="x.py")
+        keys = [
+            key for key, _l, _a, _q in unmigrated_fact_reader_sites(tree, "x.py", src)
+        ]
+        assert keys == [
+            'x.py::f::bases::b.getattr(rec, "bases")::b.getattr(rec, "bases")::1'
+        ]
+
     def test_detects_an_aliased_getattr_import(self) -> None:
         """`from builtins import getattr as read_attr` then
         `read_attr(rec, "vtable", None)`."""

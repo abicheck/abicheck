@@ -1275,6 +1275,19 @@ aliases()`. Verified empirically: still zero existing hits, baseline
 stays at 104. New tests: a chained class alias detected through a
 positional pattern, and a chained `getattr` alias detected.
 
+**A fourteenth Codex review round found one more real gap -- fixed.**
+`import builtins; b = builtins` then `b.getattr(rec, "bases")` --
+`builtins_names` was only ever populated from a real `import` statement
+(`import builtins`/`import builtins as b`), never from a plain assignment
+alias of an already-known one. Fixed by resolving `builtins_names` to a
+fixed point too, reusing the identical `assign_candidates` list the
+`getattr` alias chain already builds (it already captures every simple
+Name-valued assignment, not just getattr-related ones) -- resolved
+*before* the existing `qualified_candidates` step, so `b.getattr(...)`
+is recognized through the now-expanded `builtins_names` as well.
+Verified empirically: still zero existing hits, baseline stays at 104.
+New test: a call through an assigned alias of the `builtins` module.
+
 **Still not landed**: no detector (`diff_layout.py`/`diff_types.py`/
 `diff_param_qualifiers.py`/the reader set the check above now tracks
 precisely) has actually been migrated to read `.status` — the check above

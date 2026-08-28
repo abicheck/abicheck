@@ -461,22 +461,26 @@ def _builtins_getattr_aliases(
     `read_attr = builtins.getattr`, plus an *annotated* assignment of
     either shape, e.g. `read_attr: Callable[..., object] = getattr`), and
     every local name bound to the `builtins` module itself (`import
-    builtins`, `import builtins as b`) -- used to recognize `builtins.
-    getattr(...)`/`b.getattr(...)` alongside a bare call. All are real
-    (Codex review, fresh evidence, four rounds: `import builtins;
-    builtins.getattr(rec, "bases")`, `from builtins import getattr as
-    read_attr`, `read_attr = getattr; read_attr(rec, "bases")`, combining
-    the qualified-call recognition with the plain-assignment chaining as
-    `read_attr = builtins.getattr; read_attr(rec, "bases")`, the
-    annotated-assignment spelling of either -- `read_attr: Callable[...,
-    object] = getattr` -- and a chained assignment, `read1 = read2 =
-    getattr` -- are all invisible to a scan that only matches the literal
-    bare callee `getattr`). Whole-tree, matching `_imported_class_
-    aliases`'s own scope for the identical reason -- and the plain-
-    assignment chaining mirrors that function's own fixed-point
-    resolution of `RT = RecordType`/`RT2 = RT` exactly, just for the
-    builtin callable instead of a class name; the annotated-assignment and
-    chained-assignment branches mirror that same function's own
+    builtins`, `import builtins as b`, or a plain assignment alias of an
+    already-known one, `b = builtins` -- resolved to a fixed point the
+    same way a `getattr` alias chain already is) -- used to recognize
+    `builtins.getattr(...)`/`b.getattr(...)` alongside a bare call. All
+    are real (Codex review, fresh evidence, five rounds: `import
+    builtins; builtins.getattr(rec, "bases")`, `from builtins import
+    getattr as read_attr`, `read_attr = getattr; read_attr(rec,
+    "bases")`, combining the qualified-call recognition with the
+    plain-assignment chaining as `read_attr = builtins.getattr;
+    read_attr(rec, "bases")`, the annotated-assignment spelling of either
+    -- `read_attr: Callable[..., object] = getattr` -- a chained
+    assignment, `read1 = read2 = getattr` -- and a plain assignment alias
+    of the `builtins` module itself, `b = builtins` -- are all invisible
+    to a scan that only matches the literal bare callee `getattr`).
+    Whole-tree, matching `_imported_class_aliases`'s own scope for the
+    identical reason -- and the plain-assignment chaining mirrors that
+    function's own fixed-point resolution of `RT = RecordType`/`RT2 = RT`
+    exactly, just for the builtin callable (and, now, the `builtins`
+    module name itself) instead of a class name; the annotated-assignment
+    and chained-assignment branches mirror that same function's own
     `ast.AnnAssign`/multi-target `ast.Assign` handling.
     """
     getattr_names = {"getattr"}
@@ -519,6 +523,23 @@ def _builtins_getattr_aliases(
                     _add_candidate(target.id, node.value)
         elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
             _add_candidate(node.target.id, node.value)
+    # `b = builtins` -- a plain assignment alias of the `builtins` module
+    # itself, resolved to a fixed point the same way a `getattr` alias
+    # chain already is, reusing the identical `assign_candidates` list
+    # (Codex review, fresh evidence: `import builtins; b = builtins`
+    # then `b.getattr(rec, "bases")` was invisible, since `builtins_names`
+    # was only ever populated from a real `import` statement). Resolved
+    # *before* `qualified_candidates` below, so `b.getattr(...)` is
+    # recognized through the now-expanded `builtins_names` too.
+    changed = True
+    while changed:
+        changed = False
+        for local, ref in assign_candidates:
+            if local in builtins_names:
+                continue
+            if ref in builtins_names:
+                builtins_names.add(local)
+                changed = True
     for local, base in qualified_candidates:
         if base in builtins_names:
             getattr_names.add(local)
