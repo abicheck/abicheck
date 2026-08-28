@@ -345,8 +345,10 @@ Core pipeline (in order of data flow):
      severity/exit-code-scheme strings by `cli_compare_release_helpers.
      apply_release_gate_pack`, called once before every downstream consumer
      of those strings reads them (see that plan section for what's still
-     open — the full `GateOptions` unification and the effective-config
-     digest). Two review findings
+     open — the full `GateOptions` unification, reassigned to PR G2's own
+     prerequisite work rather than attempted reactively inside PR B; PR B's
+     other stated goal, the effective-config digest recorded in every
+     report, has already landed). Two review findings
      worth not rediscovering: the gate application must *read* the resolved
      `gate.exit_code_scheme` rather than re-derive one (re-deriving let a
      severity-only gate pack override an explicit `--exit-code-scheme
@@ -4353,6 +4355,39 @@ Once a root command genuinely clears the bar above, pick the right home:
   involved. Filed here per this file's own "known gaps over risky reactive
   patches" convention rather than attempted under review pressure on an
   unrelated PR.
+
+- **`DEFAULT_SYSTEM_PROVIDERS` (`bundle_models.py`) is a hand-maintained
+  soname allow-list, not a real topology model for bundle-level
+  system-provider classification -- a tactical fix that has grown, not a
+  designed feature (Codex review on #791, fresh evidence; distinct from
+  the bundle-policy-override gap immediately above, which is about
+  applying policy to an already-computed `BUNDLE_*` finding, not about
+  which imports get classified as bundle-external in the first place).**
+  `bundle.compare_bundle()`'s unresolved-import check
+  (`ChangeKind.BUNDLE_INTRA_DEP_REMOVED`) ignores an import against any
+  soname in `set(DEFAULT_SYSTEM_PROVIDERS) | set(bundle_system_providers)`
+  -- correct for the ordinary libc/libstdc++/libpthread runtime set the
+  constant started from, but each addition since (oneTBB's `libtbb.so.*`
+  and its allocator-proxy libs, oneMKL/Intel-runtime and Level Zero
+  entries) was a real, reported false positive fixed by naming one more
+  vendor runtime rather than by asking what "system-provided" actually
+  means for a bundle. Nothing distinguishes "genuinely provided by the
+  platform, present on every host" from "provided by a specific vendor
+  SDK/runtime this bundle happens to also depend on, but which some other
+  bundle build might statically link or vendor instead" -- so a growing
+  vendor runtime not yet on this list still reproduces the exact false
+  positive the list exists to prevent, and there is no way for a caller
+  to express "this bundle's own topology treats library X as external"
+  short of `bundle_system_providers`' own free-form, per-invocation
+  override. **Not fixed here**: a real fix needs an actual topology model
+  (e.g. deriving "external to this bundle" from the release's own
+  declared library set plus a documented, extensible provider-classes
+  registry, rather than one flat frozenset every new vendor runtime has
+  to be manually added to) -- a genuine, undesigned feature for the
+  bundle-analysis subsystem, not a one-line allow-list extension. Filed
+  here per this file's own "known gaps over risky reactive patches"
+  convention rather than attempted under review pressure on an unrelated
+  PR.
 
 - **PR C (typed `dump`/`scan` convergence, CLI cleanup phase two's PR 3A) —
   investigated in depth; one real, scoped, verified slice landed; the full
