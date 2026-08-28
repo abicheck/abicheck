@@ -1075,6 +1075,27 @@ today. New tests: an annotated local assignment, a bare annotated local
 with no value, a closure over an outer alias, and the sibling-leakage
 negative control restated for this fix.
 
+**A fourth Codex round found the closure-inheritance fix itself was
+wrong for one real shape, fixed in the same PR.** That fix derived a
+qualname's "lexical parent" by string-splitting the dotted qualname
+(`rsplit(".", 1)`) — correct for a plain nested function, but wrong for a
+class *nested inside* a function: `fact = rec.bases_fact` in an outer
+function, then `class C: def method(self): return fact == other` still
+closes `method` over `fact` in real Python (a class body isn't a closure
+scope, but the function wrapping it still is), yet the dotted qualname
+`"f.C.method"` splits to `"f.C"` — a synthetic scope no real function
+owns, so it was never itself processed or seeded, silently breaking the
+chain there. Fixed with `_lexical_function_parents()`: walks the tree
+directly, tracking each function's nearest *enclosing function*
+separately from the dotted-name prefix (skipping over any intervening
+class layer), giving the real Python closure-scope chain instead of one
+reconstructed from a string that conflates class and function nesting.
+Qualnames are now processed in order of true scope-nesting depth (walking
+this parent map) rather than dot-count, so a parent is still always
+resolved before a child consults it. Verified empirically: still zero
+existing hits. New test:
+`test_detects_a_comparison_through_a_closure_over_a_class_nested_method`.
+
 ---
 
 ### Phase 1 — finish the `dump`/`scan` typed-API convergence (closes AGENTS.md "PR C")

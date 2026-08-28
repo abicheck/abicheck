@@ -206,6 +206,24 @@ class TestFactEqualityMisuseSites:
         tree = ast.parse(src, filename="x.py")
         assert fact_equality_misuse_sites(tree, "x.py") == []
 
+    def test_detects_a_comparison_through_a_closure_over_a_class_nested_method(
+        self,
+    ) -> None:
+        """`fact = rec.bases_fact` in an outer function, then `class C:
+        def method(self): return fact == other` -- Python still closes
+        `method` over `fact` right through the intervening class body
+        (Codex review: a class scope between the alias and its use must
+        not break the closure-inheritance fix)."""
+        src = (
+            "def f(rec, other):\n"
+            "    fact = rec.bases_fact\n"
+            "    class C:\n"
+            "        def method(self):\n"
+            "            return fact == other\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert fact_equality_misuse_sites(tree, "x.py") == [(5, 19)]
+
     def test_detects_a_comparison_between_two_fact_annotated_parameters(
         self,
     ) -> None:

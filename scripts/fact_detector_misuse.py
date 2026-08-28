@@ -177,6 +177,42 @@ def _enclosing_qualnames(tree: ast.Module) -> dict[int, str]:
     return by_line
 
 
+def _lexical_function_parents(tree: ast.Module) -> dict[str, str]:
+    """Map each function's qualname to its nearest *enclosing function's*
+    qualname -- skipping any intervening class scope -- or `"<module>"` if
+    it has none. This is Python's real closure-scope chain: a method
+    cannot close over its own class body's locals, but it (and any
+    function nested inside it, class layers included) can still close
+    over an enclosing *function's* locals right through an intervening
+    class definition (Codex review, fresh evidence: `fact = rec.
+    bases_fact` in an outer function, then `class C: def method(self):
+    return fact == other`, still closes over `fact`).
+
+    `_enclosing_qualnames`'s own dotted qualname is the wrong source for
+    this: it includes a class layer as its own dot-segment (`"outer.C.
+    method"`), so a purely string-based `rsplit` on it lands on the
+    synthetic scope `"outer.C"` -- a scope no function actually owns, so
+    it never gets processed or seeded and the chain silently breaks
+    there. This walks the tree itself instead, tracking the *nearest
+    enclosing function* separately from the dotted-name prefix.
+    """
+    parents: dict[str, str] = {}
+
+    def visit(node: ast.AST, prefix: str, nearest_func: str) -> None:
+        for child in ast.iter_child_nodes(node):
+            if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                qualname = f"{prefix}{child.name}"
+                parents[qualname] = nearest_func
+                visit(child, qualname + ".", qualname)
+            elif isinstance(child, ast.ClassDef):
+                visit(child, f"{prefix}{child.name}.", nearest_func)
+            else:
+                visit(child, prefix, nearest_func)
+
+    visit(tree, "", "<module>")
+    return parents
+
+
 def _fact_aliases(tree: ast.Module, qualnames: dict[int, str]) -> dict[str, set[str]]:
     """Map each function's qualname to the local names, within that
     function, known to hold a `Fact[T]` value (Codex review, fresh
@@ -225,20 +261,32 @@ def _fact_aliases(tree: ast.Module, qualnames: dict[int, str]) -> dict[str, set[
     is Fact-typed regardless of what (if anything) resolves on the RHS.
 
     **Aliases propagate from an enclosing function into a nested one
-    (Codex review, fresh evidence).** `fact = rec.bases_fact` in an outer
-    function, then `def inner(): return fact == other` -- `inner`'s own
-    qualname (e.g. `"f.inner"`) has no assignment of its own establishing
-    `fact`, so a lookup scoped strictly to that exact qualname misses it,
-    even though `fact` is a real, visible closure variable there. Resolved
-    by processing qualnames in shallowest-first order (by dot-count -- a
-    real approximation of "outer scopes before inner ones", not exact
-    Python scoping since a class body isn't actually a closure scope for
-    its methods, but the same over-approximating-is-safe direction this
-    whole module already takes) and seeding each qualname's known-alias
-    set with its lexical parent's *already-resolved* set before running
-    the fixed point over its own candidates -- so a nested function's own
-    reassignment of an inherited alias is caught too, not just a bare
-    read of the outer name.
+    (Codex review, two rounds, fresh evidence both times).** `fact =
+    rec.bases_fact` in an outer function, then `def inner(): return fact
+    == other` -- `inner`'s own qualname (e.g. `"f.inner"`) has no
+    assignment of its own establishing `fact`, so a lookup scoped
+    strictly to that exact qualname misses it, even though `fact` is a
+    real, visible closure variable there. Resolved by seeding each
+    function's known-alias set with its lexical parent's *already-
+    resolved* set before running the fixed point over its own candidates,
+    processed in order of increasing scope-nesting depth so a parent is
+    always resolved before its children consult it -- so a nested
+    function's own reassignment of an inherited alias is caught too, not
+    just a bare read of the outer name.
+
+    A first version of this fix derived "lexical parent" from the dotted
+    qualname alone (`rsplit(".", 1)`), which a second review round found
+    wrong for a class *nested inside* a function: `fact = rec.bases_fact`
+    in an outer function, then `class C: def method(self): return fact ==
+    other` -- Python still closes `method` over `fact` right through the
+    intervening class body, but the dotted qualname `"f.C.method"` splits
+    to the synthetic parent `"f.C"`, a scope no real function owns, so it
+    is never itself processed or seeded and the chain silently breaks
+    there. Fixed by computing the true lexical parent from the tree
+    directly (:func:`_lexical_function_parents`, which tracks the
+    nearest *enclosing function*, skipping class layers, separately from
+    the dotted-name prefix `_enclosing_qualnames` builds) instead of
+    trying to reconstruct it from the qualname string.
     """
     aliases: dict[str, set[str]] = {}
     candidates: dict[str, list[tuple[str, ast.expr]]] = {}
@@ -267,10 +315,15 @@ def _fact_aliases(tree: ast.Module, qualnames: dict[int, str]) -> dict[str, set[
                 if _is_fact_typed_annotation(arg.annotation):
                     aliases.setdefault(qualname, set()).add(arg.arg)
 
-    def _parent_qualname(qualname: str) -> str | None:
-        if qualname == "<module>" or "." not in qualname:
-            return "<module>" if qualname != "<module>" else None
-        return qualname.rsplit(".", 1)[0]
+    lexical_parents = _lexical_function_parents(tree)
+
+    def _scope_depth(qualname: str) -> int:
+        depth = 0
+        current = qualname
+        while current in lexical_parents:
+            current = lexical_parents[current]
+            depth += 1
+        return depth
 
     # Every scope actually in the tree, not just ones with a candidate or a
     # directly-annotated alias of their own -- otherwise a scope with
@@ -280,9 +333,9 @@ def _fact_aliases(tree: ast.Module, qualnames: dict[int, str]) -> dict[str, set[
     all_qualnames = (
         set(candidates) | set(aliases) | set(qualnames.values()) | {"<module>"}
     )
-    for qualname in sorted(all_qualnames, key=lambda q: q.count(".")):
+    for qualname in sorted(all_qualnames, key=_scope_depth):
         known = aliases.setdefault(qualname, set())
-        parent = _parent_qualname(qualname)
+        parent = lexical_parents.get(qualname)
         if parent is not None:
             known |= aliases.get(parent, set())
         changed = True
