@@ -105,7 +105,7 @@ from typing import Any
 
 from _gha_expr import eval_gha_expression
 from test_action_compile_context_parity import _DUMP_MODE_MARKER, _run_region
-from test_action_run_contract import _step_env_mapping
+from test_action_run_contract import ACTION_YML, _step_env_mapping
 from test_reusable_workflows_project_evidence import (
     CHECK_PROJECT,
     CHECK_TARGET,
@@ -666,6 +666,29 @@ def test_no_baseline_channel_activates_the_consumer_step_via_its_own_arm() -> No
     assert final_ast_frontend == _SENTINEL_CONSUMER_AST_FRONTEND
 
 
+def _assert_run_abicheck_step_invokes_run_sh() -> None:
+    """Root action.yml's own "Run abicheck" step's real `run:` command must
+    still invoke `action/run.sh` -- the same file `test_action_compile_
+    context_parity.py`'s `RUN_SH` constant (and therefore `_run_region`,
+    which hop 4 calls below) hardcodes. Without this check, repointing that
+    step's `run:` to a different script would disconnect production from
+    the compiler flags this test verifies while `_run_region` kept
+    executing the stale `action/run.sh` and passing regardless (Codex
+    review, PR #906)."""
+    action = _load(ACTION_YML)
+    step = next(
+        step for step in _steps(action["runs"]) if step.get("name") == "Run abicheck"
+    )
+    run_cmd = step.get("run", "")
+    assert "action/run.sh" in run_cmd, (
+        f"root action.yml's 'Run abicheck' step no longer invokes "
+        f"action/run.sh ({run_cmd!r}) -- hop 4 below executes that file "
+        f"directly via test_action_compile_context_parity.py's RUN_SH "
+        f"constant and would silently keep testing a script production no "
+        f"longer runs"
+    )
+
+
 def _assert_reaches_real_dump_cli_invocation(
     gcc_path: str, gcc_options: str, ast_frontend: str
 ) -> None:
@@ -683,8 +706,10 @@ def _assert_reaches_real_dump_cli_invocation(
     step this hop actually executes (Codex review, PR #906). Fed into
     run.sh's own real dump-mode region (the existing
     test_action_compile_context_parity.py harness -- no new execution
-    machinery), producing the real --ast-frontend/--compiler/
-    --compiler-option CLI flags."""
+    machinery, but its own `RUN_SH` edge is asserted first via
+    `_assert_run_abicheck_step_invokes_run_sh`), producing the real
+    --ast-frontend/--compiler/--compiler-option CLI flags."""
+    _assert_run_abicheck_step_invokes_run_sh()
     env_by_input = {inp: var for var, inp in _step_env_mapping("Run abicheck").items()}
     for name in ("gcc-path", "gcc-options", "ast-frontend", "gcc-prefix", "sysroot"):
         assert name in env_by_input, (
