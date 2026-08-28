@@ -1111,6 +1111,35 @@ Verified empirically: still zero existing hits. New tests: an aliased
 constructor-call comparison, an aliased annotation comparison, and a
 negative control for an unrelated import merely sharing the alias name.
 
+**A fifth Codex round found the closure-inheritance fix itself produces a
+real false *positive*, not a missed detection -- fixed in the same PR.**
+Every prior round in this section closed a *false-negative* gap (misuse
+that should have been flagged but wasn't); this one is the opposite
+direction, which this module's usual "a false positive here is cheaper
+than a false negative" stance does not cover -- a false positive means
+rejecting valid code as a hard CI error. `fact = rec.bases_fact` in an
+outer function, then `def inner(fact, other): return fact == other` --
+`inner`'s own `fact` parameter is an ordinary, unrelated local that merely
+reuses the name; Python's scoping makes it local to the whole inner
+function (shadowing the outer alias throughout, not just after some
+reassignment point), but the closure-inheritance fix's `known |=
+aliases.get(parent, set())` unconditionally unioned the parent's alias set
+into every child scope, with no way to exclude a name the child rebinds
+itself. Fixed by tracking `locally_bound`: every name a function binds on
+its own -- every parameter (Fact-typed or not) and every simple assignment
+target, collected in the same walk that already builds `aliases` and
+`candidates` -- and subtracting it from the inherited set before seeding:
+`known |= aliases.get(parent, set()) - locally_bound.get(qualname,
+set())`. Verified empirically: the shadowed-parameter case now correctly
+reports no misuse, the real (non-shadowed) closure case from the fourth
+round is unaffected, and the real repository still reports zero
+violations. New tests:
+`test_ignores_a_parameter_that_shadows_an_outer_fact_alias` and
+`test_ignores_a_reassigned_local_that_shadows_an_outer_fact_alias` (the
+latter pinning that the shadowing rule applies to a plain reassignment,
+not just a parameter, and that it covers the whole function body, not
+only the lines after the reassignment).
+
 ---
 
 ### Phase 1 — finish the `dump`/`scan` typed-API convergence (closes AGENTS.md "PR C")

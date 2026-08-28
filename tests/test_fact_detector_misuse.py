@@ -224,6 +224,43 @@ class TestFactEqualityMisuseSites:
         tree = ast.parse(src, filename="x.py")
         assert fact_equality_misuse_sites(tree, "x.py") == [(5, 19)]
 
+    def test_ignores_a_parameter_that_shadows_an_outer_fact_alias(self) -> None:
+        """`fact = rec.bases_fact` in an outer function, then `def
+        inner(fact, other): return fact == other` -- `inner`'s own `fact`
+        parameter is an ordinary, unrelated local that merely reuses the
+        name; Python's scoping makes it local to the whole function,
+        shadowing the outer alias throughout (Codex review, fresh
+        evidence: unconditionally inheriting the parent's alias set is a
+        real false positive here, not a missed detection -- valid code
+        must not be flagged)."""
+        src = (
+            "def f(rec, other):\n"
+            "    fact = rec.bases_fact\n"
+            "    def inner(fact, other):\n"
+            "        return fact == other\n"
+            "    return inner(1, other)\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert fact_equality_misuse_sites(tree, "x.py") == []
+
+    def test_ignores_a_reassigned_local_that_shadows_an_outer_fact_alias(
+        self,
+    ) -> None:
+        """The same shadowing rule for a plain reassignment, not just a
+        parameter: `fact = rec.bases_fact` outer, then `def inner(other):
+        fact = 1; return fact == other` -- `fact` is local to `inner` for
+        its whole body, not just after the reassignment line."""
+        src = (
+            "def f(rec, other):\n"
+            "    fact = rec.bases_fact\n"
+            "    def inner(other):\n"
+            "        fact = 1\n"
+            "        return fact == other\n"
+            "    return inner(other)\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert fact_equality_misuse_sites(tree, "x.py") == []
+
     def test_detects_a_comparison_between_two_fact_annotated_parameters(
         self,
     ) -> None:

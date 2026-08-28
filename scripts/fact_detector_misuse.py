@@ -310,10 +310,44 @@ def _fact_aliases(tree: ast.Module, qualnames: dict[int, str]) -> dict[str, set[
     nearest *enclosing function*, skipping class layers, separately from
     the dotted-name prefix `_enclosing_qualnames` builds) instead of
     trying to reconstruct it from the qualname string.
+
+    **A local rebinding shadows an inherited alias -- a real false
+    *positive*, not a missed detection (Codex review, fresh evidence).**
+    `fact = rec.bases_fact` in an outer function, then `def inner(fact,
+    other): return fact == other` -- `inner`'s own `fact` parameter is an
+    ordinary, unrelated local that merely reuses the outer name; Python's
+    scoping rule makes a name bound *anywhere* in a function (a parameter,
+    or an assignment target, regardless of line order) local to the
+    *whole* function, shadowing an outer one throughout. Unconditionally
+    inheriting the parent's alias set flagged this valid code as a hard
+    CI error -- the one direction this module's "false positive is
+    cheaper than false negative" stance does *not* cover, since a false
+    positive here isn't a harmless extra review, it's rejecting correct
+    code. Fixed by collecting every name each function binds on its own
+    (every parameter, Fact-typed or not, and every simple assignment
+    target) and excluding those from what it inherits from its lexical
+    parent -- a genuine shadow is no longer treated as an alias, while an
+    outer alias a function does *not* rebind still propagates in
+    unchanged.
     """
     fact_names = _imported_fact_aliases(tree)
     aliases: dict[str, set[str]] = {}
     candidates: dict[str, list[tuple[str, ast.expr]]] = {}
+    # Every name *this* function binds on its own -- every parameter
+    # (Fact-typed or not) and every simple assignment target -- used below
+    # to stop an inherited alias from shadowing a genuine local rebinding
+    # (Codex review, fresh evidence): `fact = rec.bases_fact` in an outer
+    # function, then `def inner(fact, other): return fact == other`, where
+    # `inner`'s own `fact` parameter is an ordinary, unrelated local that
+    # merely reuses the name -- unconditionally inheriting the parent's
+    # alias set would flag valid code as a false positive. Python's own
+    # scoping rule is that *any* binding of a name anywhere in a function
+    # (a parameter, or an assignment target, regardless of order) makes
+    # that name local to the *whole* function, shadowing an outer one for
+    # every line in it -- not narrowed to after the rebinding, the same
+    # over-approximating-is-safe direction used everywhere else in this
+    # module, just applied here to exclude a name rather than include one.
+    locally_bound: dict[str, set[str]] = {}
     for node in ast.walk(tree):
         if (
             isinstance(node, ast.Assign)
@@ -322,8 +356,10 @@ def _fact_aliases(tree: ast.Module, qualnames: dict[int, str]) -> dict[str, set[
         ):
             qualname = qualnames.get(node.lineno, "<module>")
             candidates.setdefault(qualname, []).append((node.targets[0].id, node.value))
+            locally_bound.setdefault(qualname, set()).add(node.targets[0].id)
         elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
             qualname = qualnames.get(node.lineno, "<module>")
+            locally_bound.setdefault(qualname, set()).add(node.target.id)
             if _is_fact_typed_annotation(node.annotation, fact_names):
                 aliases.setdefault(qualname, set()).add(node.target.id)
             elif node.value is not None:
@@ -334,8 +370,11 @@ def _fact_aliases(tree: ast.Module, qualnames: dict[int, str]) -> dict[str, set[
                 *node.args.posonlyargs,
                 *node.args.args,
                 *node.args.kwonlyargs,
+                *((node.args.vararg,) if node.args.vararg else ()),
+                *((node.args.kwarg,) if node.args.kwarg else ()),
             )
             for arg in all_args:
+                locally_bound.setdefault(qualname, set()).add(arg.arg)
                 if _is_fact_typed_annotation(arg.annotation, fact_names):
                     aliases.setdefault(qualname, set()).add(arg.arg)
 
@@ -361,7 +400,8 @@ def _fact_aliases(tree: ast.Module, qualnames: dict[int, str]) -> dict[str, set[
         known = aliases.setdefault(qualname, set())
         parent = lexical_parents.get(qualname)
         if parent is not None:
-            known |= aliases.get(parent, set())
+            shadowed = locally_bound.get(qualname, set())
+            known |= aliases.get(parent, set()) - shadowed
         changed = True
         while changed:
             changed = False
