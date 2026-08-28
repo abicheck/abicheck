@@ -2435,6 +2435,56 @@ New tests:
 `TestDirectConditionalOperandsResolveThroughAliasBranches` in `tests/
 test_fact_detector_misuse_def_time_scope.py`.
 
+**A CodeRabbit review round re-raised the postponed-annotations question
+this module's own walrus-in-annotation collection loop already reasoned
+through and deliberately declined to special-case -- investigated afresh,
+the standing decision stands, not re-implemented.** The finding: `_fact_
+aliases()` registers a walrus target found inside a parameter's own
+annotation or the `->` return annotation as bound at def-time
+unconditionally, even when the module carries `from __future__ import
+annotations` (PEP 563), under which an annotation expression is never
+evaluated at all -- it is stored as an unparsed string, so the walrus
+inside it never actually executes and the name it would have bound is
+never really available. This is not a new observation: the exact same
+walrus-collection loop's own inline comment already states this trade-off
+explicitly ("absent `from __future__ import annotations` ... unconditionally
+walking here too matches that established, deliberately conservative
+choice rather than adding a second, narrower rule: a walrus that in fact
+never executes under postponed evaluation registering a spurious alias is
+a false positive, the safe direction this whole module already accepts
+throughout"). Re-verified the reasoning still holds rather than accepting
+it on faith: (1) this repository's own `AGENTS.md` convention mandates
+`from __future__ import annotations` in every scanned production file
+(`abicheck/**/*.py`), so a correct implementation would need to gate on a
+per-*module* fact (does the scanned file itself carry the future import)
+threaded specifically into the annotation-embedded half of the walrus
+walk -- default-expression walruses are unaffected by PEP 563 and must
+keep binding eagerly regardless, so the two subtrees this loop currently
+treats identically (`walrus_subtrees = [*node.args.defaults, *node.args.
+kw_defaults]`, with annotations appended after) would need to split back
+apart, undoing the very unification that closed the earlier annotation-
+vs-default gap this class of finding exists to prevent reopening; (2) the
+scenario itself -- a walrus operator inside a type annotation, assigning a
+`Fact[...]`-typed value as a side effect of annotating a parameter -- is
+adversarial, not a pattern any real detector code in this repository
+would plausibly write, unlike every other alias shape this module has
+special-cased so far (each traced to an ordinary, unremarkable refactor a
+real contributor could genuinely perform); (3) the failure direction is
+already the accepted one throughout this module -- an over-approximated
+alias only ever risks flagging a comparison that, if the annotation truly
+never executes, would itself raise `NameError` before reaching the
+comparison, so the practical cost of not fixing it is a spurious ERROR on
+code that cannot run as written, not a missed real misuse. Given the
+fix's real complexity (a second, narrower rule threaded through one
+specific subtree of an already-hardened, many-times-reviewed collection
+loop) against a scenario with no plausible real-world occurrence, this is
+documented as a known, deliberate, already-reasoned-through accepted
+false-positive direction rather than implemented -- consistent with this
+module's own established "the safe direction this whole module already
+accepts throughout" principle, not a gap distinct from what the code
+already states. No code change; replied to the review thread pointing at
+the existing docstring's own reasoning.
+
 ---
 
 ### Phase 1 — finish the `dump`/`scan` typed-API convergence (closes AGENTS.md "PR C")
