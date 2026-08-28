@@ -1847,11 +1847,17 @@ def check_fact_field_readers(f: Findings) -> None:
                 continue
             f.err(
                 "fact-field-readers",
-                f"{rel}:{lineno}: reads `{attr}` directly without checking "
-                "its Fact[...] sibling's .status -- this collapses "
-                "'confirmed empty/false' and 'no evidence' onto the same "
-                "value; either migrate this reader to check .status first, "
-                "or add its stable key to KNOWN_UNMIGRATED_READERS in "
+                f"{rel}:{lineno}: reads `{attr}` directly without ever "
+                "consulting its Fact[...] sibling's .status anywhere in "
+                "this reader -- this collapses 'confirmed empty/false' "
+                "and 'no evidence' onto the same value; either migrate "
+                "this reader's own logic to read the Fact[...] sibling's "
+                ".value/.status instead of the raw legacy field (a "
+                "preceding .status check that still reads the legacy "
+                "field afterward is NOT recognized as compliant -- this "
+                "scan has no control-flow analysis and flags the direct "
+                "read regardless of what precedes it), or add its stable "
+                "key to KNOWN_UNMIGRATED_READERS in "
                 "scripts/fact_field_readers.py if it's a genuinely new, "
                 "reviewed baseline entry (see "
                 "docs/contribute/plans/one-semantic-pipeline.md Phase 0)",

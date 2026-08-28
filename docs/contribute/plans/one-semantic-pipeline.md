@@ -2739,6 +2739,60 @@ independent architecture fix was needed on this branch. Verified with
 `python scripts/check_architecture.py` reporting `0 error(s)` both on the
 merge commit and, separately, on `main` itself before merging.
 
+**A further Codex review round read the gate's own error message as
+promising a recognition mechanism that does not exist, and was declined
+as a detection-logic change while accepted as a wording fix.** The
+finding: "when migrated code first checks `rec.bases_fact.status` and
+then reads `rec.bases`, `unmigrated_fact_reader_sites()` still returns
+the legacy read... the gate needs to recognize an applicable
+sibling-status guard before reporting the legacy read (or change the
+contract and diagnostic to require reading the Fact value instead)."
+Investigated both halves of that either/or separately. Recognizing "a
+preceding, applicable sibling-status guard" correctly needs genuine
+control-flow analysis this scan deliberately doesn't have (a plain,
+position-blind AST walk, per this module's own docstring) --
+what counts as "preceding" (same branch? any earlier line in the same
+function? does it need to dominate every path to the read?), what
+counts as an "applicable" check (equality against a specific
+`FactStatus` member? a truthiness test? membership?), and whether the
+guard's branch is even the one containing the read, are all genuine
+design questions with no existing precedent to model after -- and
+`grep -rn "_fact\.status\b" abicheck/` confirms zero real call sites in
+the codebase exercise this pattern today, matching the plan doc's own
+already-recorded "Still not landed: no detector... has actually been
+migrated to read `.status`" note two entries above. Building real
+control-flow recognition for a pattern nothing in the tree uses yet,
+under review pressure, risks exactly the "attractive nuisance" this
+plan's own established discipline warns against -- a heuristic that
+could produce false negatives (masking a genuinely unguarded read that
+merely happens to share a function with an unrelated status check
+elsewhere) for a benefit no real caller currently needs.
+
+The second half -- "change the contract and diagnostic" -- was the real,
+actionable gap: the message's previous wording ("either migrate this
+reader to check .status first, or add its stable key to
+KNOWN_UNMIGRATED_READERS") is genuinely ambiguous between "replace the
+legacy-field read with a `Fact[...]`-sibling read" (the actual intended
+migration path, which naturally stops matching this scan's own
+attribute-read pattern once done, needing no new recognition logic at
+all) and "add a status check immediately before the still-present
+legacy read" (the reading Codex's finding took, which this scan can
+never honor without the unbuilt control-flow analysis above). Tightened
+the message to state the "no control-flow analysis, a preceding check
+does not exempt the read" contract explicitly, so a developer reading
+it cannot come away expecting a recognition mechanism the scan doesn't
+have. Verified the new wording against a real preceding-`.status`-check
+repro (confirming it still, correctly, fires) and against the existing
+end-to-end violation-reporting test, and confirmed no existing test
+pinned the old wording (`grep`-checked across every `test_fact_field_
+readers*.py` file) before changing it. Still zero existing hits,
+`mypy`/`ruff` both stayed clean, `fact_field_readers.py` at 1863 lines
+(well under the 2000-line hard cap). New tests split into a dedicated
+small sibling file, `tests/test_fact_field_readers_status_check_
+diagnostic.py` (2 tests), rather than appended to
+`test_fact_field_readers.py`, which had only ~24 lines of headroom left
+under its own 1200-line cap.
+
 ---
 
 ### Phase 1 — finish the `dump`/`scan` typed-API convergence (closes AGENTS.md "PR C")
