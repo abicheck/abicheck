@@ -629,7 +629,21 @@ BUG_CLASSES: tuple[BugClass, ...] = (
                     "outputs.outcome` key at all (mirroring the real "
                     "workflow, where that property is genuinely "
                     "undefined, not the string `'resolved'`), proving the "
-                    "guard's first disjunct alone carries the scenario."
+                    "guard's first disjunct alone carries the scenario. A "
+                    "tenth review round found the bundle/no-overlay "
+                    "leak-proof test checked only `consumer-gcc-path`/"
+                    "`consumer-ast-frontend`, never `consumer-gcc-options` "
+                    "— which has the identical `matrix.consumer_compile_"
+                    "active && ... || inputs.gcc-options || ''` shape, so "
+                    "a regression there (dropping the `kind != 'bundle'` "
+                    "gate, or reordering the fallback) could have let an "
+                    "inactive/bundle cell's workflow-global option leak "
+                    "through while every other assertion in this test "
+                    "stayed green. Fixed by adding a distinct `_WORKFLOW_"
+                    "GLOBAL_GCC_OPTIONS` sentinel and asserting `consumer-"
+                    "gcc-options` resolves empty for both the bundle-kind "
+                    "and no-overlay cases, mirroring the existing gcc-path/"
+                    "ast-frontend checks exactly."
                 ),
                 reference="docs/contribute/plans/bug-class-regression-testing.md#phase-6",
             ),

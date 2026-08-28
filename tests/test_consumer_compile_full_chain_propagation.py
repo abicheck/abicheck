@@ -125,6 +125,7 @@ _SENTINEL_PRODUCER_GCC_PATH = "/opt/SENTINEL-producer-toolchain/bin/g++"
 # marker_alone's own subject) holds under real evaluation, not just text
 # matching.
 _WORKFLOW_GLOBAL_GCC_PATH = "/opt/SENTINEL-workflow-global/bin/gcc"
+_WORKFLOW_GLOBAL_GCC_OPTIONS = "-DWORKFLOW_GLOBAL_SENTINEL=1"
 
 # The `frontend` field of the same `consumer_compile` concern, threaded
 # through the identical hops via its own sentinel/fallback pair -- must be
@@ -711,27 +712,41 @@ def _assert_reaches_real_dump_cli_invocation(
 
 def test_bundle_kind_and_no_overlay_never_leak_the_workflow_global_path() -> None:
     """A companion to the first test's "distinct sentinel" trick, checked
-    directly against the real hop-2 expressions -- gcc-path and, since the
-    third Codex review round, ast-frontend too -- for the two cases that
-    must resolve empty regardless of what the workflow-global input
-    carries: a bundle-kind cell (never gets consumer fields at all), and a
-    non-overlay profile (`consumer_compile_active` false)."""
+    directly against the real hop-2 expressions -- gcc-path, gcc-options
+    (since a further Codex review round), and ast-frontend -- for the two
+    cases that must resolve empty regardless of what the workflow-global
+    input carries: a bundle-kind cell (never gets consumer fields at all),
+    and a non-overlay profile (`consumer_compile_active` false).
+    `consumer-gcc-options` was previously left unchecked here even though
+    its own expression has the identical `matrix.consumer_compile_active
+    && ... || inputs.gcc-options || ''` shape -- a regression there could
+    have let an inactive/bundle cell's workflow-global option leak through
+    while every other assertion in this test stayed green."""
     run_step = _run_check_step("Run check-target")
     gcc_path_expr = run_step["with"]["consumer-gcc-path"]
+    gcc_options_expr = run_step["with"]["consumer-gcc-options"]
     ast_frontend_expr = run_step["with"]["consumer-ast-frontend"]
 
     bundle_matrix = {
         "kind": "bundle",
         "consumer_compile_active": True,
         "consumer_compile_gcc_path": _SENTINEL_CONSUMER_GCC_PATH,
+        "consumer_compile_gcc_options": _FALLBACK_GCC_OPTIONS,
         "consumer_compile_ast_frontend": _SENTINEL_CONSUMER_AST_FRONTEND,
     }
     bundle_inputs = {
         "gcc-path": _WORKFLOW_GLOBAL_GCC_PATH,
+        "gcc-options": _WORKFLOW_GLOBAL_GCC_OPTIONS,
         "ast-frontend": _WORKFLOW_GLOBAL_AST_FRONTEND,
     }
     assert (
         eval_gha_expression(gcc_path_expr, matrix=bundle_matrix, inputs=bundle_inputs)
+        == ""
+    )
+    assert (
+        eval_gha_expression(
+            gcc_options_expr, matrix=bundle_matrix, inputs=bundle_inputs
+        )
         == ""
     )
     assert (
@@ -744,11 +759,18 @@ def test_bundle_kind_and_no_overlay_never_leak_the_workflow_global_path() -> Non
     no_overlay_matrix = {"kind": "target", "consumer_compile_active": False}
     no_overlay_inputs = {
         "gcc-path": _WORKFLOW_GLOBAL_GCC_PATH,
+        "gcc-options": _WORKFLOW_GLOBAL_GCC_OPTIONS,
         "ast-frontend": _WORKFLOW_GLOBAL_AST_FRONTEND,
     }
     assert (
         eval_gha_expression(
             gcc_path_expr, matrix=no_overlay_matrix, inputs=no_overlay_inputs
+        )
+        == ""
+    )
+    assert (
+        eval_gha_expression(
+            gcc_options_expr, matrix=no_overlay_matrix, inputs=no_overlay_inputs
         )
         == ""
     )
