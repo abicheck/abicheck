@@ -2371,26 +2371,42 @@ pipelines a fourth time.
   > `--exit-code-scheme` are all still live CLI options. Nothing in this
   > section had gone stale.
   >
-  > This session's own environment reconfirms the castxml-availability
-  > problem independently rather than resolving it, adding one new negative
-  > data point: `apt-get install castxml` on this container's Ubuntu base
-  > resolves to `0.6.3-1build2` — still below `castxml_policy.py`'s
-  > `>=0.6.11` floor, so the system package manager is not a viable source
-  > either, on top of pip's already-documented `0.4.5` ceiling. A
-  > conda-forge `castxml-0.7.0-hde8d07d_0.conda` package (the same
-  > version/channel the 2026-08-27 note below obtained a working build
-  > from) is fetchable through this session's proxy and extracts cleanly,
-  > but its `bin/castxml` links against `libclang-cpp.so.20.1`, and the
-  > obvious conda-forge counterpart package
-  > (`libclang-cpp-20.1.8-root_*.conda`) ships only a broken symlink to that
-  > filename, not the real payload — the actual shared object lives in a
-  > different, non-obviously-named package in conda-forge's split LLVM/clang
-  > stack. Assembling the full dependency chain by hand was not completed in
-  > this session; the 2026-08-27 note's own successful install is the
-  > existing record of a route that works, and an implementer resuming this
-  > item should follow that note's recipe rather than re-discover the
-  > package split from scratch. The byte-identical migration verification
-  > itself remains open, unchanged from the note above.
+  > **Correction (Codex review, same PR): the castxml-tooling paragraph this
+  > note originally carried here sent an implementer the wrong way and is
+  > replaced rather than kept for history.** It reported `apt`'s castxml
+  > (0.6.3, below the 0.6.11 floor) and a hand-assembled conda-forge 0.7.0
+  > build with an unresolved `libclang-cpp.so.20.1` dependency — both real
+  > observations, but neither needed: this repository already ships a
+  > checksum-pinned installer, `action/install-castxml.sh` (the same one
+  > `.github/actions/setup-castxml` and the CI `integration` lane use), with
+  > a `castxml-ubuntu-24.04-x86_64` asset. Running it in this session's own
+  > Ubuntu 24.04/x86_64 container installed CastXML `0.6.20260105-g9864b1e`
+  > (bundled Clang 21.1.8) in under a minute, no dependency assembly
+  > required, and `castxml_policy.evaluate_castxml_version()` confirms
+  > `supported=True` against its real `--version` output. **Any future note
+  > in this section needing a policy-compliant castxml should run
+  > `action/install-castxml.sh` first, not reach for `apt`/`pip`/conda-forge
+  > by hand** — those three all genuinely fail the way the replaced
+  > paragraph described, but the working answer was already checked in.
+  >
+  > With that installer's castxml on `PATH`, `tests/
+  > test_dump_write_after_resolve_time_embed.py`'s three cases — previously
+  > only exercised under `--ast-frontend clang` per that module's own notes
+  > above, since no working castxml was available in the sessions that wrote
+  > it — now run and pass under the `integration` marker with a real,
+  > policy-compliant castxml present (not re-verified against the *default*
+  > castxml backend specifically, since that suite still pins
+  > `--ast-frontend clang` explicitly rather than exercising an unflagged
+  > `dump`/`execute_dump_request` call; that distinction is unchanged by
+  > this note). `tests/test_dump_scan_l3_comparability.py` was re-run too, as
+  > a reconfirmation rather than a new finding: 4 passed, 2 xfailed — the
+  > same `_SCAN_KNOWN_DIVERGENT_FRONTENDS` signature the fact owner already
+  > documents, not a new or different divergence. Neither run moves the
+  > still-open items: the whole migrated pipeline's byte-identical-output
+  > verification under the default castxml backend, and item 2's L4
+  > extractor default divergence fix, are both untouched — this note only
+  > removes a wrong tooling recipe and confirms the right one works here,
+  > it does not attempt the migration itself.
   >
   > **Item 2 (the L4 extractor default divergence) is now locally
   > reconfirmed under real castxml — but this is a reproduction of an
