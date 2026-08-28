@@ -345,8 +345,13 @@ Core pipeline (in order of data flow):
      severity/exit-code-scheme strings by `cli_compare_release_helpers.
      apply_release_gate_pack`, called once before every downstream consumer
      of those strings reads them (see that plan section for what's still
-     open — the full `GateOptions` unification and the effective-config
-     digest). Two review findings
+     open — the full `GateOptions` unification, reassigned to PR G2's own
+     prerequisite work rather than attempted reactively inside PR B; PR B's
+     other stated goal, the effective-config digest, has already landed for
+     the native compare/release JSON path, the `--stat` JSON summary, and
+     `scan --against` JSON -- non-JSON renderers (Markdown, review, SARIF,
+     JUnit, HTML) and `compat check` don't carry it, see that plan
+     section's own PR B note for the exact scope). Two review findings
      worth not rediscovering: the gate application must *read* the resolved
      `gate.exit_code_scheme` rather than re-derive one (re-deriving let a
      severity-only gate pack override an explicit `--exit-code-scheme
