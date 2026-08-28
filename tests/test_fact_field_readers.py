@@ -145,7 +145,8 @@ class TestUnmigratedFactReaderSites:
         tree = ast.parse(src, filename="x.py")
         sites = unmigrated_fact_reader_sites(tree, "x.py", src)
         assert [key for key, _l, _a, _q in sites] == [
-            'x.py::f::vtable::getattr(rec, "vtable", None)::1'
+            'x.py::f::vtable::getattr(rec, "vtable", None) or []::'
+            'getattr(rec, "vtable", None)::1'
         ]
 
     def test_detects_a_structural_pattern_match_naming_a_bridged_attr(
@@ -165,7 +166,7 @@ class TestUnmigratedFactReaderSites:
         tree = ast.parse(src, filename="x.py")
         sites = unmigrated_fact_reader_sites(tree, "x.py", src)
         assert [key for key, _l, _a, _q in sites] == [
-            "x.py::f::bases::RecordType(bases=[])::1"
+            "x.py::f::bases::RecordType(bases=[])::RecordType(bases=[])::1"
         ]
 
     def test_ignores_a_getattr_call_with_a_non_matching_or_dynamic_name(self) -> None:
@@ -224,9 +225,9 @@ class TestUnmigratedFactReaderSites:
             key for key, _l, _a, _q in unmigrated_fact_reader_sites(tree, "x.py", src)
         ]
         assert keys == [
-            "x.py::f::bases::rec.bases::1",
-            "x.py::f::bases::rec.bases::2",
-            "x.py::g::bases::rec.bases::1",
+            "x.py::f::bases::rec.bases::rec.bases::1",
+            "x.py::f::bases::rec.bases::rec.bases::2",
+            "x.py::g::bases::rec.bases::rec.bases::1",
         ]
 
     def test_two_different_attrs_on_the_same_line_each_get_their_own_key(self) -> None:
@@ -236,8 +237,8 @@ class TestUnmigratedFactReaderSites:
             key for key, _l, _a, _q in unmigrated_fact_reader_sites(tree, "x.py", src)
         }
         assert keys == {
-            "x.py::f::bases::rec.bases::1",
-            "x.py::f::vtable::rec.vtable::1",
+            "x.py::f::bases::rec.bases, rec.vtable::rec.bases::1",
+            "x.py::f::vtable::rec.bases, rec.vtable::rec.vtable::1",
         }
 
     def test_two_different_reads_on_the_same_line_get_distinct_keys(self) -> None:
@@ -254,9 +255,87 @@ class TestUnmigratedFactReaderSites:
             key for key, _l, _a, _q in unmigrated_fact_reader_sites(tree, "x.py", src)
         ]
         assert keys == [
-            "x.py::f::is_va_list::p_old.is_va_list::1",
-            "x.py::f::is_va_list::p_new.is_va_list::1",
+            "x.py::f::is_va_list::not p_old.is_va_list and p_new.is_va_list::"
+            "p_old.is_va_list::1",
+            "x.py::f::is_va_list::not p_old.is_va_list and p_new.is_va_list::"
+            "p_new.is_va_list::1",
         ]
+
+    def test_two_different_call_sites_with_identical_bare_text_get_distinct_keys(
+        self,
+    ) -> None:
+        """`old_decision(rec.bases)` and, elsewhere in the same function,
+        `keep(rec.bases)` -- two DIFFERENT call sites sharing the identical
+        bare `rec.bases` spelling. Before including the outermost containing
+        expression in the key, these differed only by occurrence ordinal,
+        which a later migration (removing one, adding an unrelated third
+        read) could silently reassign onto the wrong site (Codex review,
+        third round, fresh evidence). The outer-expression component alone
+        already tells them apart, with no ordinal involved."""
+        src = "def f(rec):\n    old_decision(rec.bases)\n    keep(rec.bases)\n"
+        tree = ast.parse(src, filename="x.py")
+        keys = [
+            key for key, _l, _a, _q in unmigrated_fact_reader_sites(tree, "x.py", src)
+        ]
+        assert keys == [
+            "x.py::f::bases::old_decision(rec.bases)::rec.bases::1",
+            "x.py::f::bases::keep(rec.bases)::rec.bases::1",
+        ]
+
+    def test_key_does_not_pull_in_a_compound_statements_body(self) -> None:
+        """The outermost containing expression must stop at the statement
+        boundary -- for `if <test-with-a-read>: <body>`, the key's
+        outer-expression component is the test alone, not the whole `if`
+        block, so an edit to unrelated code in the body doesn't silently
+        invalidate an already-reviewed baseline entry."""
+        src = (
+            "def f(rec):\n"
+            "    if rec.bases:\n"
+            "        do_something_unrelated()\n"
+            "        do_more_unrelated_things()\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        keys = [
+            key for key, _l, _a, _q in unmigrated_fact_reader_sites(tree, "x.py", src)
+        ]
+        assert keys == ["x.py::f::bases::rec.bases::rec.bases::1"]
+
+    def test_detects_a_positional_structural_pattern_on_a_bridged_class(
+        self,
+    ) -> None:
+        """`case RecordType(_, _, _, _, _, []):` reads a field positionally
+        via `cls.__match_args__`, not `MatchClass.kwd_attrs` -- the earlier
+        keyword-only fix's own `kwd_attrs` loop sees an empty list here and
+        reports nothing (Codex review, fresh evidence). Since resolving
+        which position maps to which field needs real `__match_args__`
+        introspection this scan can't do, any non-empty positional pattern
+        on a known bridged class is reported unconditionally."""
+        src = (
+            "def f(rec):\n"
+            "    match rec:\n"
+            "        case RecordType(_, _, _, _, _, []):\n"
+            "            return True\n"
+            "    return False\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        keys = [
+            key for key, _l, _a, _q in unmigrated_fact_reader_sites(tree, "x.py", src)
+        ]
+        assert keys == [
+            "x.py::f::<positional>::RecordType(_, _, _, _, _, [])::"
+            "RecordType(_, _, _, _, _, [])::1"
+        ]
+
+    def test_ignores_a_positional_pattern_on_an_unrelated_class(self) -> None:
+        src = (
+            "def f(rec):\n"
+            "    match rec:\n"
+            "        case Unrelated(_, _, []):\n"
+            "            return True\n"
+            "    return False\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert unmigrated_fact_reader_sites(tree, "x.py", src) == []
 
 
 def test_check_reports_a_new_unlisted_violation(
@@ -300,7 +379,7 @@ def test_check_is_silent_for_a_baselined_violation(
     monkeypatch.setattr(
         gate,
         "KNOWN_UNMIGRATED_READERS",
-        frozenset({"abicheck/a_new_reader.py::f::bases::rec.bases::1"}),
+        frozenset({"abicheck/a_new_reader.py::f::bases::rec.bases::rec.bases::1"}),
     )
 
     findings = Findings()

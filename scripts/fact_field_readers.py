@@ -104,6 +104,13 @@ FACT_BRIDGED_ATTRS: frozenset[str] = frozenset(
     {"bases", "virtual_bases", "vtable", "is_va_list", "vptr_offset_bits"}
 )
 
+#: The two dataclasses `FACT_BRIDGED_ATTRS` fields live on
+#: (`model/entities.py`'s `RecordType`, `model/declarations.py`'s
+#: `Param`). Used only by the positional-class-pattern branch below --
+#: every other branch matches purely on attribute *name*, with no need to
+#: know which class it belongs to.
+FACT_BRIDGED_CLASS_NAMES: frozenset[str] = frozenset({"RecordType", "Param"})
+
 #: Permanently exempt, keyed `"<rel>::<qualname>"` (qualname is the
 #: function's own name, dotted through an enclosing class -- `Class.method`
 #: for a method, tracked through nested `def`s the same way Python's own
@@ -131,19 +138,24 @@ EXEMPT_FUNCTIONS: frozenset[str] = frozenset(
 )
 
 #: Every currently-known unmigrated semantic reader, keyed
-#: `"<rel>::<qualname>::<attr>::<expr-text>::<occurrence>"` -- `qualname`
-#: is the enclosing function (`<module>` for module-level code,
-#: `Class.method` for a method), `expr-text` is the read's own exact
-#: source text (`ast.get_source_segment`, e.g. `"p_old.is_va_list"` or
-#: `'getattr(t, "vtable", None)'`), and `occurrence` is a 1-based rank
-#: among reads sharing all three of those, in top-to-bottom (line, column)
-#: order -- almost always `1`, since two *textually identical* reads in
-#: one function are rare. Keying on the real expression text (not just a
-#: positional ordinal) is what keeps a migrated-and-replaced read from
-#: silently inheriting an unrelated new read's key -- see this module's
-#: own docstring. Closing one of these (migrating the reader to check
-#: `.status` before trusting the legacy value) removes its entry here; a
-#: brand-new, unlisted hit fails the gate.
+#: `"<rel>::<qualname>::<attr>::<outer-expr>::<expr-text>::<occurrence>"` --
+#: `qualname` is the enclosing function (`<module>` for module-level code,
+#: `Class.method` for a method); `outer-expr` is the read's *outermost
+#: containing expression* (`_outermost_containing_expr`, e.g. the whole
+#: `old_decision(rec.bases)` call, or the whole `not p_old.is_va_list and
+#: p_new.is_va_list` boolean test -- never a compound statement's body);
+#: `expr-text` is the read's own bare exact source text
+#: (`ast.get_source_segment`, e.g. `"p_old.is_va_list"` or `'getattr(t,
+#: "vtable", None)'`); `occurrence` is a 1-based rank among reads sharing
+#: all four of those, in top-to-bottom (line, column) order -- almost
+#: always `1`. Keying on real expression text at two nesting levels (not
+#: just a positional ordinal) is what keeps a migrated-and-replaced read
+#: from silently inheriting an unrelated new read's key, at either
+#: granularity -- see this module's own docstring for the three
+#: successive collision classes this key shape had to close. Closing one
+#: of these (migrating the reader to check `.status` before trusting the
+#: legacy value) removes its entry here; a brand-new, unlisted hit fails
+#: the gate.
 #:
 #: The nine modules the plan doc's own Design section names
 #: (`docs/contribute/plans/one-semantic-pipeline.md`, "nine distinct
@@ -160,110 +172,110 @@ EXEMPT_FUNCTIONS: frozenset[str] = frozenset(
 #: module's own docstring).
 KNOWN_UNMIGRATED_READERS: frozenset[str] = frozenset(
     {
-        "abicheck/buildsource/header_graph.py::_flat_structural_type_edges::bases::rt.bases::1",
-        "abicheck/buildsource/source_extractors/base.py::entity_from_record::bases::rec.bases::1",
-        "abicheck/buildsource/source_extractors/base.py::entity_from_record::vtable::rec.vtable::1",
-        "abicheck/contract_evidence_collect.py::build_type_graph::bases::rec.bases::1",
-        "abicheck/contract_evidence_collect.py::build_type_graph::virtual_bases::rec.virtual_bases::1",
-        'abicheck/diff_cpp_patterns.py::_is_empty_record::vtable::getattr(t, "vtable", None)::1',
-        "abicheck/diff_cxx_rules.py::_transitive_bases::bases::rec.bases::1",
-        "abicheck/diff_cxx_rules.py::_transitive_bases::bases::start.bases::1",
-        "abicheck/diff_cxx_rules.py::_transitive_bases::virtual_bases::rec.virtual_bases::1",
-        "abicheck/diff_cxx_rules.py::_transitive_bases::virtual_bases::start.virtual_bases::1",
-        "abicheck/diff_cxx_rules.py::virtual_method_addition::vtable::t_new.vtable::1",
-        "abicheck/diff_cxx_rules.py::virtual_method_addition::vtable::t_old.vtable::1",
-        "abicheck/diff_layout.py::_check_vptr_introduced::vptr_offset_bits::new_rec.vptr_offset_bits::1",
-        "abicheck/diff_layout.py::_check_vptr_introduced::vptr_offset_bits::new_rec.vptr_offset_bits::2",
-        "abicheck/diff_layout.py::_check_vptr_introduced::vptr_offset_bits::old_rec.vptr_offset_bits::1",
-        "abicheck/diff_layout.py::_check_vptr_introduced::vtable::new_rec.vtable::1",
-        "abicheck/diff_layout.py::_check_vptr_introduced::vtable::old_rec.vtable::1",
-        "abicheck/diff_layout.py::_has_layout_descriptor::vptr_offset_bits::rec.vptr_offset_bits::1",
-        "abicheck/diff_param_qualifiers.py::param_va_list_changes::is_va_list::p_new.is_va_list::1",
-        "abicheck/diff_param_qualifiers.py::param_va_list_changes::is_va_list::p_new.is_va_list::2",
-        "abicheck/diff_param_qualifiers.py::param_va_list_changes::is_va_list::p_old.is_va_list::1",
-        "abicheck/diff_param_qualifiers.py::param_va_list_changes::is_va_list::p_old.is_va_list::2",
-        "abicheck/diff_stdlib_impl.py::_public_by_value_type_closure::bases::record.bases::1",
-        "abicheck/diff_stdlib_impl.py::_public_by_value_type_closure::virtual_bases::record.virtual_bases::1",
-        "abicheck/diff_time64.py::_fold_record_tokens::bases::rec.bases::1",
-        "abicheck/diff_time64.py::_fold_record_tokens::virtual_bases::rec.virtual_bases::1",
-        "abicheck/diff_types.py::_diff_type_bases::bases::t_new.bases::1",
-        "abicheck/diff_types.py::_diff_type_bases::bases::t_new.bases::2",
-        "abicheck/diff_types.py::_diff_type_bases::bases::t_new.bases::3",
-        "abicheck/diff_types.py::_diff_type_bases::bases::t_new.bases::4",
-        "abicheck/diff_types.py::_diff_type_bases::bases::t_old.bases::1",
-        "abicheck/diff_types.py::_diff_type_bases::bases::t_old.bases::2",
-        "abicheck/diff_types.py::_diff_type_bases::bases::t_old.bases::3",
-        "abicheck/diff_types.py::_diff_type_bases::bases::t_old.bases::4",
-        "abicheck/diff_types.py::_diff_type_bases::virtual_bases::t_new.virtual_bases::1",
-        "abicheck/diff_types.py::_diff_type_bases::virtual_bases::t_new.virtual_bases::2",
-        "abicheck/diff_types.py::_diff_type_bases::virtual_bases::t_new.virtual_bases::3",
-        "abicheck/diff_types.py::_diff_type_bases::virtual_bases::t_old.virtual_bases::1",
-        "abicheck/diff_types.py::_diff_type_bases::virtual_bases::t_old.virtual_bases::2",
-        "abicheck/diff_types.py::_diff_type_bases::virtual_bases::t_old.virtual_bases::3",
-        "abicheck/diff_types.py::_diff_type_vtable::vtable::t_new.vtable::1",
-        "abicheck/diff_types.py::_diff_type_vtable::vtable::t_new.vtable::2",
-        "abicheck/diff_types.py::_diff_type_vtable::vtable::t_new.vtable::3",
-        "abicheck/diff_types.py::_diff_type_vtable::vtable::t_new.vtable::4",
-        "abicheck/diff_types.py::_diff_type_vtable::vtable::t_new.vtable::5",
-        "abicheck/diff_types.py::_diff_type_vtable::vtable::t_old.vtable::1",
-        "abicheck/diff_types.py::_diff_type_vtable::vtable::t_old.vtable::2",
-        "abicheck/diff_types.py::_diff_type_vtable::vtable::t_old.vtable::3",
-        "abicheck/diff_types.py::_diff_type_vtable::vtable::t_old.vtable::4",
-        "abicheck/diff_types.py::_diff_type_vtable::vtable::t_old.vtable::5",
-        "abicheck/diff_types.py::_new_field_change_kind::virtual_bases::t_new.virtual_bases::1",
-        "abicheck/diff_types.py::_new_field_change_kind::vtable::t_new.vtable::1",
-        "abicheck/diff_types.py::_vtable_transition_is_evidenced::virtual_bases::t_new.virtual_bases::1",
-        "abicheck/diff_types.py::_vtable_transition_is_evidenced::virtual_bases::t_old.virtual_bases::1",
-        "abicheck/diff_types.py::_vtable_transition_is_evidenced::vtable::t_new.vtable::1",
-        "abicheck/diff_types.py::_vtable_transition_is_evidenced::vtable::t_old.vtable::1",
-        "abicheck/diff_types.py::_vtable_transition_rests_on_unresolved_evidence::bases::t_new.bases::1",
-        "abicheck/diff_types.py::_vtable_transition_rests_on_unresolved_evidence::bases::t_old.bases::1",
-        "abicheck/diff_types.py::_vtable_transition_rests_on_unresolved_evidence::virtual_bases::t_new.virtual_bases::1",
-        "abicheck/diff_types.py::_vtable_transition_rests_on_unresolved_evidence::virtual_bases::t_old.virtual_bases::1",
-        "abicheck/diff_types.py::_vtable_transition_rests_on_unresolved_evidence::vtable::t_new.vtable::1",
-        "abicheck/diff_types.py::_vtable_transition_rests_on_unresolved_evidence::vtable::t_old.vtable::1",
-        "abicheck/diff_vtable_layout.py::_diff_vtable_layout::bases::n.bases::1",
-        "abicheck/diff_vtable_layout.py::_diff_vtable_layout::bases::o.bases::1",
-        "abicheck/diff_vtable_layout.py::_diff_vtable_layout::virtual_bases::n.virtual_bases::1",
-        "abicheck/diff_vtable_layout.py::_diff_vtable_layout::virtual_bases::n.virtual_bases::2",
-        "abicheck/diff_vtable_layout.py::_diff_vtable_layout::virtual_bases::n.virtual_bases::3",
-        "abicheck/diff_vtable_layout.py::_diff_vtable_layout::virtual_bases::n.virtual_bases::4",
-        "abicheck/diff_vtable_layout.py::_diff_vtable_layout::virtual_bases::o.virtual_bases::1",
-        "abicheck/diff_vtable_layout.py::_diff_vtable_layout::virtual_bases::o.virtual_bases::2",
-        "abicheck/diff_vtable_layout.py::_diff_vtable_layout::virtual_bases::o.virtual_bases::3",
-        "abicheck/diff_vtable_layout.py::_diff_vtable_layout::virtual_bases::o.virtual_bases::4",
-        "abicheck/diff_vtable_layout.py::_diff_vtable_layout::virtual_bases::o.virtual_bases::5",
-        "abicheck/diff_vtable_layout.py::_is_polymorphic::bases::rec.bases::1",
-        "abicheck/diff_vtable_layout.py::_is_polymorphic::virtual_bases::rec.virtual_bases::1",
-        "abicheck/diff_vtable_layout.py::_is_polymorphic::vtable::rec.vtable::1",
-        "abicheck/diff_vtable_layout.py::_secondary_groups::bases::rec.bases::1",
-        "abicheck/diff_vtable_layout.py::_secondary_groups::virtual_bases::rec.virtual_bases::1",
-        "abicheck/dumper_layout_backfill.py::_fields_corroborate::bases::dwarf.bases::1",
-        "abicheck/dumper_layout_backfill.py::_fields_corroborate::bases::header.bases::1",
-        "abicheck/dumper_layout_backfill.py::_fields_corroborate::virtual_bases::dwarf.virtual_bases::1",
-        "abicheck/dumper_layout_backfill.py::_fields_corroborate::virtual_bases::header.virtual_bases::1",
-        "abicheck/dumper_layout_backfill.py::_fields_corroborate::vtable::dwarf.vtable::1",
-        "abicheck/dumper_layout_backfill.py::_fields_corroborate::vtable::dwarf.vtable::2",
-        "abicheck/dumper_scoping.py::_kept_signature_haystack::bases::rec.bases::1",
-        "abicheck/dumper_scoping.py::_kept_signature_haystack::virtual_bases::rec.virtual_bases::1",
-        "abicheck/dwarf_snapshot.py::_DwarfSnapshotBuilder._filter_types_by_reachability::bases::rec.bases::1",
-        "abicheck/dwarf_snapshot.py::_DwarfSnapshotBuilder._filter_types_by_reachability::virtual_bases::rec.virtual_bases::1",
-        "abicheck/export_surface.py::_unresolved_type_edges::bases::rec.bases::1",
-        "abicheck/export_surface.py::_unresolved_type_edges::virtual_bases::rec.virtual_bases::1",
-        "abicheck/idioms.py::_collect_base_targets::bases::rec.bases::1",
-        "abicheck/idioms.py::_detect_non_virtual_dtor::vtable::rec.vtable::1",
-        "abicheck/idioms.py::_has_virtual_destructor::vtable::rec.vtable::1",
-        "abicheck/idioms.py::_recognise_factory::vtable::rec.vtable::1",
-        "abicheck/internal_leak.py::_enqueue_record_children::bases::rec.bases::1",
-        "abicheck/internal_leak.py::_enqueue_record_children::virtual_bases::rec.virtual_bases::1",
-        "abicheck/surface.py::_walk_exact_type_closure::bases::rec_node.bases::1",
-        "abicheck/surface.py::_walk_exact_type_closure::virtual_bases::rec_node.virtual_bases::1",
-        "abicheck/surface.py::_walk_type_closure::bases::rec_node.bases::1",
-        "abicheck/surface.py::_walk_type_closure::virtual_bases::rec_node.virtual_bases::1",
-        "abicheck/surface_graph.py::_build_type_refs::bases::rec.bases::1",
-        "abicheck/surface_graph.py::_build_type_refs::virtual_bases::rec.virtual_bases::1",
-        "abicheck/type_reachability.py::_walk_reached_records::bases::rec.bases::1",
-        "abicheck/type_reachability.py::_walk_reached_records::virtual_bases::rec.virtual_bases::1",
+        "abicheck/buildsource/header_graph.py::_flat_structural_type_edges::bases::rt.bases::rt.bases::1",
+        "abicheck/buildsource/source_extractors/base.py::entity_from_record::bases::f\"{rec.kind}|size={rec.size_bits}|align={rec.alignment_bits}\"\n        f\"|bases={','.join(rec.bases)}|vt={','.join(rec.vtable)}|{field_repr}\"::rec.bases::1",
+        "abicheck/buildsource/source_extractors/base.py::entity_from_record::vtable::f\"{rec.kind}|size={rec.size_bits}|align={rec.alignment_bits}\"\n        f\"|bases={','.join(rec.bases)}|vt={','.join(rec.vtable)}|{field_repr}\"::rec.vtable::1",
+        "abicheck/contract_evidence_collect.py::build_type_graph::bases::list(rec.bases) + list(rec.virtual_bases)::rec.bases::1",
+        "abicheck/contract_evidence_collect.py::build_type_graph::virtual_bases::list(rec.bases) + list(rec.virtual_bases)::rec.virtual_bases::1",
+        'abicheck/diff_cpp_patterns.py::_is_empty_record::vtable::getattr(t, "vtable", None) or []::getattr(t, "vtable", None)::1',
+        "abicheck/diff_cxx_rules.py::_transitive_bases::bases::[*start.bases, *start.virtual_bases]::start.bases::1",
+        "abicheck/diff_cxx_rules.py::_transitive_bases::bases::stack.extend((*rec.bases, *rec.virtual_bases))::rec.bases::1",
+        "abicheck/diff_cxx_rules.py::_transitive_bases::virtual_bases::[*start.bases, *start.virtual_bases]::start.virtual_bases::1",
+        "abicheck/diff_cxx_rules.py::_transitive_bases::virtual_bases::stack.extend((*rec.bases, *rec.virtual_bases))::rec.virtual_bases::1",
+        "abicheck/diff_cxx_rules.py::virtual_method_addition::vtable::t_old.vtable != t_new.vtable::t_new.vtable::1",
+        "abicheck/diff_cxx_rules.py::virtual_method_addition::vtable::t_old.vtable != t_new.vtable::t_old.vtable::1",
+        'abicheck/diff_layout.py::_check_vptr_introduced::vptr_offset_bits::f"vptr@{new_rec.vptr_offset_bits}"::new_rec.vptr_offset_bits::1',
+        "abicheck/diff_layout.py::_check_vptr_introduced::vptr_offset_bits::not old_rec.vtable\n        and old_rec.vptr_offset_bits is None\n        and new_rec.vtable\n        and new_rec.vptr_offset_bits is not None::new_rec.vptr_offset_bits::1",
+        "abicheck/diff_layout.py::_check_vptr_introduced::vptr_offset_bits::not old_rec.vtable\n        and old_rec.vptr_offset_bits is None\n        and new_rec.vtable\n        and new_rec.vptr_offset_bits is not None::old_rec.vptr_offset_bits::1",
+        "abicheck/diff_layout.py::_check_vptr_introduced::vtable::not old_rec.vtable\n        and old_rec.vptr_offset_bits is None\n        and new_rec.vtable\n        and new_rec.vptr_offset_bits is not None::new_rec.vtable::1",
+        "abicheck/diff_layout.py::_check_vptr_introduced::vtable::not old_rec.vtable\n        and old_rec.vptr_offset_bits is None\n        and new_rec.vtable\n        and new_rec.vptr_offset_bits is not None::old_rec.vtable::1",
+        "abicheck/diff_layout.py::_has_layout_descriptor::vptr_offset_bits::rec.data_size_bits is not None\n        or (vtable_facts_reliable and rec.vptr_offset_bits is not None)\n        or bool(rec.base_offsets)::rec.vptr_offset_bits::1",
+        "abicheck/diff_param_qualifiers.py::param_va_list_changes::is_va_list::not p_old.is_va_list and p_new.is_va_list::p_new.is_va_list::1",
+        "abicheck/diff_param_qualifiers.py::param_va_list_changes::is_va_list::not p_old.is_va_list and p_new.is_va_list::p_old.is_va_list::1",
+        "abicheck/diff_param_qualifiers.py::param_va_list_changes::is_va_list::p_old.is_va_list and not p_new.is_va_list::p_new.is_va_list::1",
+        "abicheck/diff_param_qualifiers.py::param_va_list_changes::is_va_list::p_old.is_va_list and not p_new.is_va_list::p_old.is_va_list::1",
+        "abicheck/diff_stdlib_impl.py::_public_by_value_type_closure::bases::(*record.bases, *record.virtual_bases)::record.bases::1",
+        "abicheck/diff_stdlib_impl.py::_public_by_value_type_closure::virtual_bases::(*record.bases, *record.virtual_bases)::record.virtual_bases::1",
+        "abicheck/diff_time64.py::_fold_record_tokens::bases::list(rec.bases) + list(rec.virtual_bases)::rec.bases::1",
+        "abicheck/diff_time64.py::_fold_record_tokens::virtual_bases::list(rec.bases) + list(rec.virtual_bases)::rec.virtual_bases::1",
+        "abicheck/diff_types.py::_diff_type_bases::bases::old_bases_set == new_bases_set and t_old.bases != t_new.bases::t_new.bases::1",
+        "abicheck/diff_types.py::_diff_type_bases::bases::old_bases_set == new_bases_set and t_old.bases != t_new.bases::t_old.bases::1",
+        "abicheck/diff_types.py::_diff_type_bases::bases::set(t_new.bases)::t_new.bases::1",
+        "abicheck/diff_types.py::_diff_type_bases::bases::set(t_old.bases)::t_old.bases::1",
+        "abicheck/diff_types.py::_diff_type_bases::bases::str(t_new.bases)::t_new.bases::1",
+        "abicheck/diff_types.py::_diff_type_bases::bases::str(t_new.bases)::t_new.bases::2",
+        "abicheck/diff_types.py::_diff_type_bases::bases::str(t_old.bases)::t_old.bases::1",
+        "abicheck/diff_types.py::_diff_type_bases::bases::str(t_old.bases)::t_old.bases::2",
+        "abicheck/diff_types.py::_diff_type_bases::virtual_bases::set(t_new.virtual_bases)::t_new.virtual_bases::1",
+        "abicheck/diff_types.py::_diff_type_bases::virtual_bases::set(t_old.virtual_bases)::t_old.virtual_bases::1",
+        "abicheck/diff_types.py::_diff_type_bases::virtual_bases::str(sorted(t_new.virtual_bases))::t_new.virtual_bases::1",
+        "abicheck/diff_types.py::_diff_type_bases::virtual_bases::str(sorted(t_old.virtual_bases))::t_old.virtual_bases::1",
+        "abicheck/diff_types.py::_diff_type_bases::virtual_bases::str(t_new.virtual_bases)::t_new.virtual_bases::1",
+        "abicheck/diff_types.py::_diff_type_bases::virtual_bases::str(t_old.virtual_bases)::t_old.virtual_bases::1",
+        'abicheck/diff_types.py::_diff_type_vtable::vtable::", ".join(t_new.vtable)::t_new.vtable::1',
+        'abicheck/diff_types.py::_diff_type_vtable::vtable::", ".join(t_old.vtable)::t_old.vtable::1',
+        'abicheck/diff_types.py::_diff_type_vtable::vtable::f"vtable reordered: {name}"\n        if Counter(t_old.vtable) == Counter(t_new.vtable)\n        else f"vtable changed: {name}"::t_new.vtable::1',
+        'abicheck/diff_types.py::_diff_type_vtable::vtable::f"vtable reordered: {name}"\n        if Counter(t_old.vtable) == Counter(t_new.vtable)\n        else f"vtable changed: {name}"::t_old.vtable::1',
+        "abicheck/diff_types.py::_diff_type_vtable::vtable::len(t_old.vtable) == len(t_new.vtable) and all(\n        vtable_slot_is_override_reuse(\n            old_entry, new_entry, old_funcs, new_funcs, old_types, new_types\n        )\n        for old_entry, new_entry in zip(t_old.vtable, t_new.vtable)\n    )::t_new.vtable::1",
+        "abicheck/diff_types.py::_diff_type_vtable::vtable::len(t_old.vtable) == len(t_new.vtable) and all(\n        vtable_slot_is_override_reuse(\n            old_entry, new_entry, old_funcs, new_funcs, old_types, new_types\n        )\n        for old_entry, new_entry in zip(t_old.vtable, t_new.vtable)\n    )::t_old.vtable::1",
+        "abicheck/diff_types.py::_diff_type_vtable::vtable::t_old.vtable == t_new.vtable::t_new.vtable::1",
+        "abicheck/diff_types.py::_diff_type_vtable::vtable::t_old.vtable == t_new.vtable::t_old.vtable::1",
+        "abicheck/diff_types.py::_diff_type_vtable::vtable::zip(t_old.vtable, t_new.vtable)::t_new.vtable::1",
+        "abicheck/diff_types.py::_diff_type_vtable::vtable::zip(t_old.vtable, t_new.vtable)::t_old.vtable::1",
+        "abicheck/diff_types.py::_new_field_change_kind::virtual_bases::bool(t_new.vtable or t_new.virtual_bases)::t_new.virtual_bases::1",
+        "abicheck/diff_types.py::_new_field_change_kind::vtable::bool(t_new.vtable or t_new.virtual_bases)::t_new.vtable::1",
+        "abicheck/diff_types.py::_vtable_transition_is_evidenced::virtual_bases::list(t_old.virtual_bases) != list(t_new.virtual_bases)::t_new.virtual_bases::1",
+        "abicheck/diff_types.py::_vtable_transition_is_evidenced::virtual_bases::list(t_old.virtual_bases) != list(t_new.virtual_bases)::t_old.virtual_bases::1",
+        "abicheck/diff_types.py::_vtable_transition_is_evidenced::vtable::t_old.vtable and t_new.vtable::t_new.vtable::1",
+        "abicheck/diff_types.py::_vtable_transition_is_evidenced::vtable::t_old.vtable and t_new.vtable::t_old.vtable::1",
+        "abicheck/diff_types.py::_vtable_transition_rests_on_unresolved_evidence::bases::list(t_old.bases) != list(t_new.bases)::t_new.bases::1",
+        "abicheck/diff_types.py::_vtable_transition_rests_on_unresolved_evidence::bases::list(t_old.bases) != list(t_new.bases)::t_old.bases::1",
+        "abicheck/diff_types.py::_vtable_transition_rests_on_unresolved_evidence::virtual_bases::list(t_old.virtual_bases) != list(t_new.virtual_bases)::t_new.virtual_bases::1",
+        "abicheck/diff_types.py::_vtable_transition_rests_on_unresolved_evidence::virtual_bases::list(t_old.virtual_bases) != list(t_new.virtual_bases)::t_old.virtual_bases::1",
+        "abicheck/diff_types.py::_vtable_transition_rests_on_unresolved_evidence::vtable::t_old.vtable and t_new.vtable::t_new.vtable::1",
+        "abicheck/diff_types.py::_vtable_transition_rests_on_unresolved_evidence::vtable::t_old.vtable and t_new.vtable::t_old.vtable::1",
+        "abicheck/diff_vtable_layout.py::_diff_vtable_layout::bases::o.bases == n.bases and o.virtual_bases == n.virtual_bases::n.bases::1",
+        "abicheck/diff_vtable_layout.py::_diff_vtable_layout::bases::o.bases == n.bases and o.virtual_bases == n.virtual_bases::o.bases::1",
+        'abicheck/diff_vtable_layout.py::_diff_vtable_layout::virtual_bases::", ".join(n.virtual_bases)::n.virtual_bases::1',
+        'abicheck/diff_vtable_layout.py::_diff_vtable_layout::virtual_bases::", ".join(o.virtual_bases)::o.virtual_bases::1',
+        "abicheck/diff_vtable_layout.py::_diff_vtable_layout::virtual_bases::len(o.virtual_bases) > 1\n            and set(o.virtual_bases) == set(n.virtual_bases)\n            and o.virtual_bases != n.virtual_bases::n.virtual_bases::1",
+        "abicheck/diff_vtable_layout.py::_diff_vtable_layout::virtual_bases::len(o.virtual_bases) > 1\n            and set(o.virtual_bases) == set(n.virtual_bases)\n            and o.virtual_bases != n.virtual_bases::n.virtual_bases::2",
+        "abicheck/diff_vtable_layout.py::_diff_vtable_layout::virtual_bases::len(o.virtual_bases) > 1\n            and set(o.virtual_bases) == set(n.virtual_bases)\n            and o.virtual_bases != n.virtual_bases::o.virtual_bases::1",
+        "abicheck/diff_vtable_layout.py::_diff_vtable_layout::virtual_bases::len(o.virtual_bases) > 1\n            and set(o.virtual_bases) == set(n.virtual_bases)\n            and o.virtual_bases != n.virtual_bases::o.virtual_bases::2",
+        "abicheck/diff_vtable_layout.py::_diff_vtable_layout::virtual_bases::len(o.virtual_bases) > 1\n            and set(o.virtual_bases) == set(n.virtual_bases)\n            and o.virtual_bases != n.virtual_bases::o.virtual_bases::3",
+        "abicheck/diff_vtable_layout.py::_diff_vtable_layout::virtual_bases::o.bases == n.bases and o.virtual_bases == n.virtual_bases::n.virtual_bases::1",
+        "abicheck/diff_vtable_layout.py::_diff_vtable_layout::virtual_bases::o.bases == n.bases and o.virtual_bases == n.virtual_bases::o.virtual_bases::1",
+        "abicheck/diff_vtable_layout.py::_is_polymorphic::bases::rec.bases::rec.bases::1",
+        "abicheck/diff_vtable_layout.py::_is_polymorphic::virtual_bases::rec.vtable or rec.virtual_bases::rec.virtual_bases::1",
+        "abicheck/diff_vtable_layout.py::_is_polymorphic::vtable::rec.vtable or rec.virtual_bases::rec.vtable::1",
+        "abicheck/diff_vtable_layout.py::_secondary_groups::bases::rec.bases::rec.bases::1",
+        "abicheck/diff_vtable_layout.py::_secondary_groups::virtual_bases::rec.virtual_bases::rec.virtual_bases::1",
+        "abicheck/dumper_layout_backfill.py::_fields_corroborate::bases::dwarf.bases + dwarf.virtual_bases::dwarf.bases::1",
+        "abicheck/dumper_layout_backfill.py::_fields_corroborate::bases::header.bases + header.virtual_bases::header.bases::1",
+        "abicheck/dumper_layout_backfill.py::_fields_corroborate::virtual_bases::dwarf.bases + dwarf.virtual_bases::dwarf.virtual_bases::1",
+        "abicheck/dumper_layout_backfill.py::_fields_corroborate::virtual_bases::header.bases + header.virtual_bases::header.virtual_bases::1",
+        "abicheck/dumper_layout_backfill.py::_fields_corroborate::vtable::header.has_anonymous_aggregate_fields and not dwarf.vtable::dwarf.vtable::1",
+        "abicheck/dumper_layout_backfill.py::_fields_corroborate::vtable::not dwarf.vtable and (\n            not header.fields or header.has_anonymous_aggregate_fields\n        )::dwarf.vtable::1",
+        "abicheck/dumper_scoping.py::_kept_signature_haystack::bases::texts.extend(rec.bases)::rec.bases::1",
+        "abicheck/dumper_scoping.py::_kept_signature_haystack::virtual_bases::texts.extend(rec.virtual_bases)::rec.virtual_bases::1",
+        "abicheck/dwarf_snapshot.py::_DwarfSnapshotBuilder._filter_types_by_reachability::bases::rec.bases + rec.virtual_bases::rec.bases::1",
+        "abicheck/dwarf_snapshot.py::_DwarfSnapshotBuilder._filter_types_by_reachability::virtual_bases::rec.bases + rec.virtual_bases::rec.virtual_bases::1",
+        "abicheck/export_surface.py::_unresolved_type_edges::bases::(*rec.bases, *rec.virtual_bases)::rec.bases::1",
+        "abicheck/export_surface.py::_unresolved_type_edges::virtual_bases::(*rec.bases, *rec.virtual_bases)::rec.virtual_bases::1",
+        "abicheck/idioms.py::_collect_base_targets::bases::rec.bases::rec.bases::1",
+        "abicheck/idioms.py::_detect_non_virtual_dtor::vtable::not rec.vtable::rec.vtable::1",
+        "abicheck/idioms.py::_has_virtual_destructor::vtable::rec.vtable::rec.vtable::1",
+        "abicheck/idioms.py::_recognise_factory::vtable::rec is not None and rec.vtable::rec.vtable::1",
+        "abicheck/internal_leak.py::_enqueue_record_children::bases::rec.bases::rec.bases::1",
+        "abicheck/internal_leak.py::_enqueue_record_children::virtual_bases::rec.virtual_bases::rec.virtual_bases::1",
+        "abicheck/surface.py::_walk_exact_type_closure::bases::(*rec_node.bases, *rec_node.virtual_bases)::rec_node.bases::1",
+        "abicheck/surface.py::_walk_exact_type_closure::virtual_bases::(*rec_node.bases, *rec_node.virtual_bases)::rec_node.virtual_bases::1",
+        "abicheck/surface.py::_walk_type_closure::bases::(*rec_node.bases, *rec_node.virtual_bases)::rec_node.bases::1",
+        "abicheck/surface.py::_walk_type_closure::virtual_bases::(*rec_node.bases, *rec_node.virtual_bases)::rec_node.virtual_bases::1",
+        "abicheck/surface_graph.py::_build_type_refs::bases::rec.bases::rec.bases::1",
+        "abicheck/surface_graph.py::_build_type_refs::virtual_bases::rec.virtual_bases::rec.virtual_bases::1",
+        "abicheck/type_reachability.py::_walk_reached_records::bases::[f.type for f in rec.fields] + [\n                *rec.bases,\n                *rec.virtual_bases,\n            ]::rec.bases::1",
+        "abicheck/type_reachability.py::_walk_reached_records::virtual_bases::[f.type for f in rec.fields] + [\n                *rec.bases,\n                *rec.virtual_bases,\n            ]::rec.virtual_bases::1",
     }
 )
 
@@ -328,6 +340,39 @@ def _enclosing_qualnames(tree: ast.Module) -> dict[int, str]:
     return by_line
 
 
+def _parent_map(tree: ast.Module) -> dict[int, ast.AST]:
+    """Map ``id(child)`` to its immediate AST parent, for every node in
+    *tree*. `ast.walk`/`ast.iter_child_nodes` expose no ancestor link on
+    their own, so this is one pass building the reverse edge, consulted by
+    :func:`_outermost_containing_expr`.
+    """
+    parents: dict[int, ast.AST] = {}
+    for parent in ast.walk(tree):
+        for child in ast.iter_child_nodes(parent):
+            parents[id(child)] = parent
+    return parents
+
+
+def _outermost_containing_expr(node: ast.AST, parents: dict[int, ast.AST]) -> ast.AST:
+    """Walk *node*'s ancestors (via *parents*, from :func:`_parent_map`) up
+    through every enclosing `ast.expr`, stopping at the outermost one --
+    the whole `old_decision(rec.bases)` call, or the whole `not p_old.
+    is_va_list and p_new.is_va_list` boolean test, but never further: the
+    next ancestor up is always a *statement* (`Expr`/`If`/`Return`/...),
+    whose own body/orelse this must not pull in.
+
+    Deliberately narrower than the *enclosing statement* an earlier
+    revision of this function used -- see :func:`unmigrated_fact_reader_
+    sites`'s own docstring for why that was wrong (a compound statement's
+    body dwarfs and destabilizes the key for no benefit the expression
+    boundary doesn't already give).
+    """
+    current = node
+    while id(current) in parents and isinstance(parents[id(current)], ast.expr):
+        current = parents[id(current)]
+    return current
+
+
 def unmigrated_fact_reader_sites(
     tree: ast.Module, rel: str, source: str = ""
 ) -> list[tuple[str, int, str, str]]:
@@ -364,21 +409,71 @@ def unmigrated_fact_reader_sites(
     `abicheck/` today -- no match/case statement currently patterns on any
     of these five fields.
 
-    **The key includes the read's own source text, not just a positional
-    ordinal (Codex review, fresh evidence).** `diff_param_qualifiers.py`'s
-    `if not p_old.is_va_list and p_new.is_va_list:` has two DIFFERENT
-    reads (`p_old.is_va_list`, `p_new.is_va_list`) on one line, in the same
-    function -- a purely positional occurrence count (even scoped to the
-    enclosing function, this module's own earlier fix) can't tell them
-    apart from each other or from a future, unrelated third read sharing
-    the same rank after one of the two is migrated away. `ast.
-    get_source_segment` recovers the exact expression text
-    (`"p_old.is_va_list"` vs. `"p_new.is_va_list"`), included in the key
-    verbatim -- a collision now needs the new read to be the *textually
-    identical* expression, not merely occupy the same rank.
+    A *positional* class pattern (`case RecordType(_, _, _, _, _, []):`)
+    is also flagged, though it can't be resolved to a specific field name
+    (Codex review, fresh evidence): a positional pattern's Nth element
+    binds to `cls.__match_args__[N]`, generated by `@dataclass` in
+    declaration order -- deriving that order correctly and keeping it in
+    sync with `model/entities.py`/`declarations.py` would need real
+    introspection this pure-AST, pre-`pip install` script can't do (the
+    same "no type inference" limit already stated below). Rather than
+    silently missing this shape the way the keyword-only fix above still
+    would have, ANY non-empty positional pattern on a `MatchClass` whose
+    `cls` resolves (by bare name) to `RecordType`/`Param`
+    (`FACT_BRIDGED_CLASS_NAMES`) is reported with a synthetic
+    `<positional>` attr, on the conservative-by-design principle this
+    whole module already applies: a false positive here (a positional
+    pattern that happens to touch none of the five bridged fields) costs a
+    reviewed baseline entry; a false negative would be silent.
+
+    **The key also fingerprints the *containing expression*, not only the
+    read's own bare expression (Codex review, third round, fresh
+    evidence).** Two DIFFERENT call sites sharing the same bare attribute
+    spelling -- `old_decision(rec.bases)` and, elsewhere in the same
+    function, `keep(rec.bases)` -- previously produced keys differing only
+    by occurrence ordinal (`...::rec.bases::1`, `...::rec.bases::2`).
+    Migrating `old_decision` away and adding an unrelated third read
+    (`unrelated_new_decision(rec.bases)`) anywhere in the same function
+    re-numbers the survivors from scratch in encounter order -- `keep`
+    silently drops to rank 1 (colliding with `old_decision`'s vacated key,
+    harmless since `keep` was already reviewed) but the *new* read then
+    lands on rank 2, silently inheriting `keep`'s own baseline entry. Purely
+    positional disambiguation among textually-identical bare reads can
+    never close this: two different call sites are not the same site no
+    matter what they're numbered. Fixed by including each read's
+    *outermost containing expression* (climbing every enclosing `ast.expr`
+    via a one-pass parent map, stopping at the first statement boundary --
+    :func:`_outermost_containing_expr`) in the key alongside the read's own
+    bare expression text: `old_decision(rec.bases)` and `keep(rec.bases)`
+    now differ at that component regardless of ordinal, closing the common
+    case without an ordinal at all. **Deliberately the containing
+    *expression*, not the containing *statement*** -- a first version of
+    this fix climbed to the nearest `ast.stmt` instead, which for a
+    compound statement (`if <test>: <body>`) pulls in the entire body,
+    not just the condition: `diff_param_qualifiers.py`'s `if not p_old.
+    is_va_list and p_new.is_va_list: changes.append(make_change(...))`
+    produced an unwieldy, body-dependent key that would silently break the
+    moment anything *inside that body* changed, regardless of whether the
+    read itself did. Stopping at the outermost *expression* instead gives
+    `not p_old.is_va_list and p_new.is_va_list` -- the whole boolean test,
+    still shared by both reads, but none of the body -- so the bare
+    expression text (kept, not replaced) is still what tells `p_old.
+    is_va_list` and `p_new.is_va_list` apart from each other, exactly as
+    the previous round already fixed. A genuinely duplicated expression
+    (the identical containing expression appearing twice, with identical
+    bare-read text, in one function) still falls back to the ordinal, an
+    accepted, narrow residual matching this module's own "false positive
+    over false negative" stance throughout.
     """
     qualnames = _enclosing_qualnames(tree)
-    matches: list[tuple[int, int, str, str, str]] = []
+    parents = _parent_map(tree)
+
+    def _expr_text(node: ast.AST) -> str:
+        outer = _outermost_containing_expr(node, parents)
+        text = ast.get_source_segment(source, outer) if source else None
+        return text or "<unavailable>"
+
+    matches: list[tuple[int, int, str, str, str, str]] = []
     for node in ast.walk(tree):
         if isinstance(node, ast.MatchClass):
             # `case RecordType(bases=[]):` -- structural pattern matching
@@ -386,6 +481,11 @@ def unmigrated_fact_reader_sites(
             # positionally with `kwd_patterns`) without ever producing an
             # `ast.Attribute` or a `getattr()` call (Codex review, fresh
             # evidence): invisible to both branches below.
+            # A MatchClass pattern node is not itself an `ast.expr` (it's a
+            # `pattern`), so `_expr_text` on it degenerates to the identical
+            # `class_text` -- there's no larger *expression* to climb into
+            # here, and the whole class pattern is already the right
+            # granularity for both key components.
             class_text = (
                 ast.get_source_segment(source, node) if source else None
             ) or "<unavailable>"
@@ -399,6 +499,31 @@ def unmigrated_fact_reader_sites(
                         kwd_pattern.col_offset,
                         kwd_attr,
                         qualname,
+                        class_text,
+                        class_text,
+                    )
+                )
+            if node.patterns and (
+                (
+                    isinstance(node.cls, ast.Name)
+                    and node.cls.id in FACT_BRIDGED_CLASS_NAMES
+                )
+                or (
+                    isinstance(node.cls, ast.Attribute)
+                    and node.cls.attr in FACT_BRIDGED_CLASS_NAMES
+                )
+            ):
+                # A positional pattern can't be resolved to a specific
+                # field name without real `__match_args__` introspection
+                # (see this function's own docstring) -- report it
+                # unconditionally rather than silently missing it.
+                matches.append(
+                    (
+                        node.lineno,
+                        node.col_offset,
+                        "<positional>",
+                        qualname,
+                        class_text,
                         class_text,
                     )
                 )
@@ -425,14 +550,16 @@ def unmigrated_fact_reader_sites(
             ast.get_source_segment(source, node) if source else None
         ) or "<unavailable>"
         qualname = qualnames.get(node.lineno, "<module>")
-        matches.append((node.lineno, node.col_offset, attr, qualname, text))
+        matches.append(
+            (node.lineno, node.col_offset, attr, qualname, _expr_text(node), text)
+        )
     matches.sort(key=lambda m: (m[0], m[1]))
-    occurrence: dict[tuple[str, str, str], int] = {}
+    occurrence: dict[tuple[str, str, str, str], int] = {}
     sites: list[tuple[str, int, str, str]] = []
-    for lineno, _col, attr, qualname, text in matches:
-        occ_key = (qualname, attr, text)
+    for lineno, _col, attr, qualname, outer_text, text in matches:
+        occ_key = (qualname, attr, outer_text, text)
         occurrence[occ_key] = occurrence.get(occ_key, 0) + 1
-        key = f"{rel}::{qualname}::{attr}::{text}::{occurrence[occ_key]}"
+        key = f"{rel}::{qualname}::{attr}::{outer_text}::{text}::{occurrence[occ_key]}"
         sites.append((key, lineno, attr, qualname))
     return sites
 

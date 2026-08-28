@@ -1081,6 +1081,50 @@ verification contract every other check is listed in) had no row for
 alongside `engine-cli-boundary`'s own row. New test:
 `test_detects_a_structural_pattern_match_naming_a_bridged_attr`.
 
+**A sixth Codex review round found two more real gaps in the same area,
+both fixed.** (1) *Positional* class patterns: `case RecordType(_, _, _,
+_, _, []):` reads a field via `cls.__match_args__` positionally, which
+`MatchClass.kwd_attrs` (the previous fix's whole mechanism) doesn't cover
+at all — an empty `kwd_attrs` list for a purely positional pattern, so
+the loop finds nothing. Resolving *which* position maps to which field
+would need real `__match_args__` introspection (the dataclass's own
+declared field order) this pure-AST scan can't do — instead of leaving
+this silently invisible, ANY non-empty positional pattern on a
+`MatchClass` whose `cls` resolves by bare name to `RecordType`/`Param`
+(`FACT_BRIDGED_CLASS_NAMES`, a new two-name constant) is reported with a
+synthetic `<positional>` attr, on this module's own established
+false-positive-over-false-negative principle. (2) A deeper, third-round
+collision in the baseline key itself: two DIFFERENT call sites sharing
+identical bare attribute text — `old_decision(rec.bases)` and, elsewhere
+in the same function, `keep(rec.bases)` — still differed only by
+occurrence ordinal even after the previous two rounds' fixes (function
+scope, then bare-expression text), because the key never looked past the
+attribute node itself to the *expression containing it*. Migrating
+`old_decision` away and adding an unrelated third read anywhere in the
+same function re-numbers the survivors in encounter order — `keep`
+silently drops to rank 1 (harmless, it was already reviewed), but the new
+read then lands on rank 2, silently inheriting `keep`'s own baseline
+approval. Fixed with `_outermost_containing_expr()`: a one-pass parent
+map, then climbing every enclosing `ast.expr` up to (but never past) the
+first statement boundary. Deliberately the containing *expression*, not
+the containing *statement* — a first attempt at this same fix climbed to
+the nearest `ast.stmt` instead, which for `if not p_old.is_va_list and
+p_new.is_va_list: changes.append(make_change(...))` pulled the *entire
+if-body* into the key (a ~970-character entry that would silently break
+on any unrelated edit inside that body) — caught before landing by
+checking the actual generated key lengths, not just that the fix
+compiled. Stopping at the expression boundary gives the whole boolean
+test (`not p_old.is_va_list and p_new.is_va_list`, shared correctly by
+both reads, still disambiguated between them by the existing bare-text
+component) without the body. Key format is now `"<rel>::<qualname>::
+<attr>::<outer-expr>::<expr-text>::<occurrence>"` — five components before
+the ordinal, not three. Baseline regenerated directly from the real scan
+(still 104 entries, only the key shape changed) and re-verified at zero
+unlisted violations. New tests: two different call sites with identical
+bare text now getting distinct keys with no ordinal needed, a compound
+statement's body confirmed excluded from the key, a positional pattern on
+a bridged class detected, and one on an unrelated class ignored.
+
 **Still not landed**: no detector (`diff_layout.py`/`diff_types.py`/
 `diff_param_qualifiers.py`/the reader set the check above now tracks
 precisely) has actually been migrated to read `.status` — the check above
