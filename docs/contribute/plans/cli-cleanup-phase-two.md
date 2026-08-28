@@ -2572,8 +2572,12 @@ pipelines a fourth time.
   > has no env-var awareness to override, but `effective_frontend` picks up
   > the override too, so they land on the same backend by coincidence, not
   > because the underlying resolution logic agrees. Neither caller passes
-  > an override; with the environment variable unset, both correctly
-  > resolve to castxml. Confirmed directly: a `dump`-CLI-written baseline's
+  > an override; with the environment variable unset, native `dump`
+  > routes unresolved `"auto"` to clang while `compare`/`execute_dump_
+  > request` resolve it to castxml (Codex/CodeRabbit review: the previous
+  > wording here said "both correctly resolve to castxml", contradicting
+  > the disagreement this whole paragraph exists to state). Confirmed
+  > directly: a `dump`-CLI-written baseline's
   > `build_source.source_abi.coverage.fact_set.producer` reads
   > `"abicheck-cc-clang-extractor"`; the identical input run through
   > `resolve_dump_request`/`execute_dump_request` reads `"castxml-source"`.
@@ -2707,10 +2711,15 @@ pipelines a fourth time.
   > silently flip this default from clang to castxml -- so "byte-identical
   > to today's output" is not actually the right acceptance bar for L4
   > facts specifically; today's output is itself one side of a pre-existing,
-  > real disagreement, not a stable target to match. (Now that item 3 is
-  > fixed, this flip no longer imports a live bug -- but it is still a real,
-  > user-facing default change that needs to be a deliberate decision, not
-  > a side effect discovered mid-migration.) A correct migration plan needs
+  > real disagreement, not a stable target to match. (Item 3's fix is not
+  > merged on this tree -- see this plan's own item-3 status note above --
+  > so this flip still imports a live bug today; once that separate PR
+  > lands, this specific regression risk is removed, but it is still a
+  > real, user-facing default change that needs to be a deliberate
+  > decision, not a side effect discovered mid-migration -- Codex/
+  > CodeRabbit review: the previous wording here said "now that item 3 is
+  > fixed", contradicting this same section's own earlier correction.) A
+  > correct migration plan needs
   > to decide this divergence's resolution *before* attempting
   > byte-identical verification, not discover it via a failing diff
   > mid-migration.
