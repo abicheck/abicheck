@@ -371,6 +371,75 @@ class TestUnmigratedFactReaderSites:
         tree = ast.parse(src, filename="x.py")
         assert unmigrated_fact_reader_sites(tree, "x.py", src) == []
 
+    def test_detects_a_positional_pattern_through_a_local_class_alias(self) -> None:
+        """`RT = RecordType` then `case RT(_, _, _, _, _, []):` -- a plain
+        local assignment, not an `import ... as` (Codex review: aliasing
+        must not require the `import` spelling to be recognized)."""
+        src = (
+            "RT = RecordType\n"
+            "def f(rec):\n"
+            "    match rec:\n"
+            "        case RT(_, _, _, _, _, []):\n"
+            "            return True\n"
+            "    return False\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        keys = [
+            key for key, _l, _a, _q in unmigrated_fact_reader_sites(tree, "x.py", src)
+        ]
+        assert keys == [
+            "x.py::f::<positional>::RT(_, _, _, _, _, [])::RT(_, _, _, _, _, [])::1"
+        ]
+
+    def test_ignores_a_local_alias_of_an_unrelated_class(self) -> None:
+        src = (
+            "U = Unrelated\n"
+            "def f(rec):\n"
+            "    match rec:\n"
+            "        case U(_, _, []):\n"
+            "            return True\n"
+            "    return False\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert unmigrated_fact_reader_sites(tree, "x.py", src) == []
+
+    def test_detects_a_qualified_builtins_getattr_call(self) -> None:
+        """`import builtins; builtins.getattr(rec, "bases")` is the
+        identical read as bare `getattr(rec, "bases")` (Codex review:
+        qualifying the call through the `builtins` module must not defeat
+        the scan)."""
+        src = 'import builtins\ndef f(rec):\n    return builtins.getattr(rec, "bases", None)\n'
+        tree = ast.parse(src, filename="x.py")
+        keys = [
+            key for key, _l, _a, _q in unmigrated_fact_reader_sites(tree, "x.py", src)
+        ]
+        assert keys == [
+            'x.py::f::bases::builtins.getattr(rec, "bases", None)::'
+            'builtins.getattr(rec, "bases", None)::1'
+        ]
+
+    def test_detects_an_aliased_getattr_import(self) -> None:
+        """`from builtins import getattr as read_attr` then
+        `read_attr(rec, "vtable", None)`."""
+        src = (
+            "from builtins import getattr as read_attr\n"
+            "def f(rec):\n"
+            '    return read_attr(rec, "vtable", None)\n'
+        )
+        tree = ast.parse(src, filename="x.py")
+        keys = [
+            key for key, _l, _a, _q in unmigrated_fact_reader_sites(tree, "x.py", src)
+        ]
+        assert keys == [
+            'x.py::f::vtable::read_attr(rec, "vtable", None)::'
+            'read_attr(rec, "vtable", None)::1'
+        ]
+
+    def test_ignores_a_qualified_call_on_an_unrelated_module(self) -> None:
+        src = 'import somewhere\ndef f(rec):\n    return somewhere.getattr(rec, "bases", None)\n'
+        tree = ast.parse(src, filename="x.py")
+        assert unmigrated_fact_reader_sites(tree, "x.py", src) == []
+
 
 def test_check_reports_a_new_unlisted_violation(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch

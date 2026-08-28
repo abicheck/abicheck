@@ -374,27 +374,79 @@ def _outermost_containing_expr(node: ast.AST, parents: dict[int, ast.AST]) -> as
 
 
 def _imported_class_aliases(tree: ast.Module) -> dict[str, str]:
-    """Map every local name *tree* imports one of `FACT_BRIDGED_CLASS_NAMES`
-    under (via `as`) back to its real name -- `from abicheck.model import
-    RecordType as RT` maps `"RT" -> "RecordType"` (Codex review, fresh
+    """Map every local name *tree* binds to one of `FACT_BRIDGED_CLASS_NAMES`
+    -- either via an `import ... as` (`from abicheck.model import
+    RecordType as RT` maps `"RT" -> "RecordType"`) or a simple whole-tree
+    name assignment (`RT = RecordType` maps the same way; a further
+    `RT2 = RT` chains to `"RecordType"` too, resolved to a fixed point the
+    same way `fact_detector_misuse._fact_aliases` chains local aliases) --
+    back to its real name. Both are real, found by Codex review with fresh
     evidence: a positional class pattern on such an alias, `case
     RT(_, _, _, _, _, []):`, is invisible to a bare-name check against the
-    literal `RecordType`/`Param` spellings). An import with no `as` needs
-    no entry -- the bare name already matches directly. Whole-tree, not
-    function-scoped: an import is visible for its whole enclosing scope
-    (almost always module level) regardless of where in the file a
-    positional pattern later uses it, and scanning the whole tree is the
-    same over-approximating-is-safe stance this module already takes
-    elsewhere.
+    literal `RecordType`/`Param` spellings, whichever way the alias was
+    established. An import/assignment with no local rename needs no entry
+    -- the bare name already matches directly. Whole-tree, not
+    function-scoped: both mechanisms are almost always module level, and
+    scanning the whole tree is the same over-approximating-is-safe stance
+    this module already takes elsewhere.
     """
     aliases: dict[str, str] = {}
+    assign_candidates: list[tuple[str, str]] = []
     for node in ast.walk(tree):
         if isinstance(node, (ast.Import, ast.ImportFrom)):
             for alias in node.names:
                 local = alias.asname or alias.name
                 if alias.name in FACT_BRIDGED_CLASS_NAMES and local != alias.name:
                     aliases[local] = alias.name
+        elif (
+            isinstance(node, ast.Assign)
+            and len(node.targets) == 1
+            and isinstance(node.targets[0], ast.Name)
+            and isinstance(node.value, ast.Name)
+        ):
+            assign_candidates.append((node.targets[0].id, node.value.id))
+    changed = True
+    while changed:
+        changed = False
+        for local, ref in assign_candidates:
+            if local in aliases:
+                continue
+            if ref in FACT_BRIDGED_CLASS_NAMES:
+                aliases[local] = ref
+                changed = True
+            elif ref in aliases:
+                aliases[local] = aliases[ref]
+                changed = True
     return aliases
+
+
+def _builtins_getattr_aliases(
+    tree: ast.Module,
+) -> tuple[frozenset[str], frozenset[str]]:
+    """Return ``(getattr_names, builtins_module_names)``: every local name
+    *tree* binds to the real `getattr` builtin (always includes the bare
+    `"getattr"` itself, plus any `from builtins import getattr as X`), and
+    every local name bound to the `builtins` module itself (`import
+    builtins`, `import builtins as b`) -- used to recognize `builtins.
+    getattr(...)`/`b.getattr(...)` alongside a bare call. Both are real
+    (Codex review, fresh evidence: `import builtins;
+    builtins.getattr(rec, "bases")` and `from builtins import getattr as
+    read_attr` are both invisible to a scan that only matches the literal
+    bare callee `getattr`). Whole-tree, matching `_imported_class_
+    aliases`'s own scope for the identical reason.
+    """
+    getattr_names = {"getattr"}
+    builtins_names: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                if alias.name == "builtins":
+                    builtins_names.add(alias.asname or alias.name)
+        elif isinstance(node, ast.ImportFrom) and node.module == "builtins":
+            for alias in node.names:
+                if alias.name == "getattr":
+                    getattr_names.add(alias.asname or alias.name)
+    return frozenset(getattr_names), frozenset(builtins_names)
 
 
 def unmigrated_fact_reader_sites(
@@ -503,6 +555,7 @@ def unmigrated_fact_reader_sites(
     qualnames = _enclosing_qualnames(tree)
     parents = _parent_map(tree)
     class_aliases = _imported_class_aliases(tree)
+    getattr_names, builtins_names = _builtins_getattr_aliases(tree)
 
     def _expr_text(node: ast.AST) -> str:
         outer = _outermost_containing_expr(node, parents)
@@ -571,8 +624,15 @@ def unmigrated_fact_reader_sites(
             attr = node.attr
         elif (
             isinstance(node, ast.Call)
-            and isinstance(node.func, ast.Name)
-            and node.func.id == "getattr"
+            and (
+                (isinstance(node.func, ast.Name) and node.func.id in getattr_names)
+                or (
+                    isinstance(node.func, ast.Attribute)
+                    and node.func.attr == "getattr"
+                    and isinstance(node.func.value, ast.Name)
+                    and node.func.value.id in builtins_names
+                )
+            )
             and len(node.args) >= 2
             and isinstance(node.args[1], ast.Constant)
             and isinstance(node.args[1].value, str)

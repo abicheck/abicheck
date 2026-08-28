@@ -1141,6 +1141,33 @@ empirically: still zero existing hits, baseline stays at 104. New tests:
 a positional pattern through an import alias detected, one on an alias
 of an unrelated class ignored.
 
+**An eighth Codex review round found two more real gaps, both fixed in
+the same PR -- the same two mechanisms, probed one alias mechanism
+further each.** (1) `RT = RecordType` (a plain module-level assignment,
+not an `import ... as`) then `case RT(_, _, _, _, _, []):` -- the
+import-alias fix from the previous round only visited `Import`/
+`ImportFrom` nodes, so a simple name assignment was invisible to it.
+Fixed by extending `_imported_class_aliases()` to also collect a
+single-target `name = OtherName` assignment as a candidate, resolved to
+`FACT_BRIDGED_CLASS_NAMES` (directly, or transitively through an
+already-resolved alias -- `RT2 = RT` chains too) the same fixed-point
+way `fact_detector_misuse._fact_aliases` already chains local aliases.
+(2) `import builtins; builtins.getattr(rec, "bases")` and `from builtins
+import getattr as read_attr` are both the identical read as a bare
+`getattr(rec, "bases")` call, but the existing check only matched an
+`ast.Call` whose `func` was literally the bare `ast.Name` `"getattr"`.
+Fixed with `_builtins_getattr_aliases()`: collects every local name bound
+to the real `getattr` builtin (the bare name itself, plus any `from
+builtins import getattr as X`) and every local name bound to the
+`builtins` module itself (`import builtins`, `import builtins as b`),
+and the `getattr`-detection branch now also matches a qualified call
+(`<name>.getattr(...)`) whose base resolves to one of those module
+names. Verified empirically: still zero existing hits, baseline stays at
+104. New tests: a local class-name alias detected and a negative control
+for an unrelated class, a qualified `builtins.getattr` call detected, an
+aliased `getattr` import detected, and a negative control for a call
+qualified through an unrelated module.
+
 **Still not landed**: no detector (`diff_layout.py`/`diff_types.py`/
 `diff_param_qualifiers.py`/the reader set the check above now tracks
 precisely) has actually been migrated to read `.status` — the check above
