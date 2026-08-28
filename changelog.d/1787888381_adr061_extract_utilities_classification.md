@@ -148,3 +148,48 @@
   import (already used elsewhere in the same file), and the now-redundant
   function-local import block was removed entirely -- netting a net
   *reduction* in that file's line count relative to the PR base.
+
+  **Post-merge cross-PR collision found and fixed (proactive merge
+  simulation, not a review finding)**: `binder.py`/`resolver.py`'s
+  `extract` classification above was individually import-safe against this
+  PR's own base commit, but a real merge-order collision surfaces once the
+  parallel `claude/adr061-report-classification` PR (which independently
+  classifies `stack_report.py` as `report`) lands alongside it --
+  `stack_report.py` imports `SymbolBinding`/`DependencyGraph` from
+  `binder.py`/`resolver.py` purely for type hints on already-computed
+  result objects it formats, and `report`'s `may_import` is
+  `[compare, model, policy, workflows]`, with no `extract`. Neither PR's
+  own isolated `check_architecture.py` run could see this, since each was
+  checked against a base commit that didn't yet carry the other's
+  classification. Caught by a deliberate sequential-merge simulation of
+  all five parallel ADR-061 classification branches into one throwaway
+  worktree.
+
+  Re-reading `binder.py`/`resolver.py` against this repo's own task-routing
+  table (`AGENTS.md`) shows `extract` was the wrong layer for them in the
+  first place, independent of the collision: `resolver.py`'s own docstring
+  is "Transitive ELF dependency resolution with loader-accurate search
+  order" and `binder.py`'s is "Symbol binding simulation across a resolved
+  dependency graph" -- both are **coordinating dependency behavior** over
+  already-extracted ELF facts (`resolver.py` calls `elf_metadata.
+  parse_elf_metadata`, then simulates the dynamic linker's own multi-step
+  search algorithm; `binder.py` walks the resulting graph simulating
+  symbol resolution), which is `workflows`'s own table entry ("Coordinate
+  dump, compare, scan, release, aggregate, project, or **dependency
+  behavior**"), not "read a binary ... fact" (`extract`'s entry). Moved
+  both from `extract`'s to `workflows`'s `legacy_paths` -- safe for their
+  own imports (`workflows`'s `may_import` includes `extract`, so
+  `resolver.py`'s `elf_metadata` import and `binder.py`'s `resolver.py`
+  import are both still permitted), and it resolves the collision, since
+  `report -> workflows` is allowed. `debug_resolver.py`, the third file
+  classified `extract` alongside these two in the same commit, stays
+  `extract` -- it has no report-layer consumer and no comparable
+  dependency-coordination shape (it resolves one binary's own debug-info
+  artifact, not a graph of them).
+
+  Verified via `scripts/check_architecture.py` (0 errors, this branch in
+  isolation) and, more importantly, by re-running the full five-branch
+  merge simulation with this fix applied (0 errors across the fully-merged
+  state). No Python source changed -- this is a pure `architecture/
+  modules.yaml` reclassification, so no test/mypy re-verification beyond
+  the architecture gate was needed.

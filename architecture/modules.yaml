@@ -40,7 +40,6 @@
       "legacy_paths": [
         "abicheck/_compiler_options.py",
         "abicheck/binary_utils.py",
-        "abicheck/binder.py",
         "abicheck/btf_metadata.py",
         "abicheck/build_mode.py",
         "abicheck/buildsource/archive_graph.py",
@@ -113,7 +112,6 @@
         "abicheck/provenance.py",
         "abicheck/python_api.py",
         "abicheck/python_ext.py",
-        "abicheck/resolver.py",
         "abicheck/source_smoke.py",
         "abicheck/sycl_context.py",
         "abicheck/sycl_metadata.py",
@@ -198,8 +196,10 @@
         "policy"
       ],
       "legacy_paths": [
+        "abicheck/binder.py",
         "abicheck/buildsource/baseline_publish.py",
         "abicheck/compatibility_evaluation_frontend.py",
+        "abicheck/resolver.py",
         "abicheck/service.py",
         "abicheck/service_compare_evidence.py",
         "abicheck/service_compare_pipeline.py",
