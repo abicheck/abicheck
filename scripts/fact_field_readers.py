@@ -1306,6 +1306,69 @@ def unmigrated_fact_reader_sites(
                     )
                 )
             continue
+        if (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Call)
+            and _is_itemgetter_constructor_call(
+                node.func, itemgetter_names, operator_names
+            )
+            and not _shadowed(node.func, _itemgetter_matched_name(node.func))
+            and len(node.args) == 1
+            and _is_mapping_receiver(node.args[0])
+        ):
+            # `operator.itemgetter("bases")(vars(rec))` -- the
+            # `attrgetter`-shaped constructor spelling of the identical
+            # subscript read, for the *bare* or `operator`-qualified
+            # `itemgetter` (`itemgetter_names`/`operator_names`, resolved
+            # the same way `attrgetter`'s own aliasing already is) (Codex
+            # review, fresh evidence). Matched only at the outer, immediate
+            # call -- unlike `attrgetter`'s own wider "match wherever
+            # constructed" stance, this requires the constructed getter to
+            # be called directly on a real mapping receiver, the identical
+            # `_is_mapping_receiver()` gate every other subscript-reading
+            # form here already applies, since an ungated `itemgetter(...)`
+            # constructor match would also fire for a completely unrelated
+            # mapping's own "bases" key -- see `_is_itemgetter_constructor_
+            # call()`'s own docstring for why the two forms don't share one
+            # stance.
+            #
+            # **Every constructor argument is inspected, not only a lone
+            # one, mirroring `attrgetter`'s own multi-key handling above
+            # (Codex review, fresh evidence).** `operator.itemgetter(
+            # "foo", "bases")(vars(rec))` returns a getter that reads
+            # *both* requested keys as a tuple -- Python's own documented
+            # `itemgetter` behavior -- so requiring exactly one
+            # constructor argument silently missed the second, bridged
+            # key. Handled as its own top-level case (like `attrgetter`
+            # above), not folded into the single-attribute chain below,
+            # for the identical reason: each literal, string-constant
+            # argument matching a bridged name is its own real read,
+            # reported independently. A non-literal argument stays out of
+            # scope, the same "no type inference" limit every other form
+            # here already accepts.
+            text = (
+                ast.get_source_segment(source, node) if source else None
+            ) or "<unavailable>"
+            outer_text = _expr_text(node)
+            qualname = qualnames.get(node.lineno, "<module>")
+            for call_arg in node.func.args:
+                if not (
+                    isinstance(call_arg, ast.Constant)
+                    and isinstance(call_arg.value, str)
+                    and call_arg.value in FACT_BRIDGED_ATTRS
+                ):
+                    continue
+                matches.append(
+                    (
+                        node.lineno,
+                        node.col_offset,
+                        call_arg.value,
+                        qualname,
+                        outer_text,
+                        text,
+                    )
+                )
+            continue
         record_node: ast.expr
         if (
             isinstance(node, ast.Attribute)
@@ -1601,37 +1664,6 @@ def unmigrated_fact_reader_sites(
             # getitem(...)` form the branch above matches (Codex review,
             # fresh evidence).
             attr = node.args[1].value
-            record_node = node
-        elif (
-            isinstance(node, ast.Call)
-            and isinstance(node.func, ast.Call)
-            and _is_itemgetter_constructor_call(
-                node.func, itemgetter_names, operator_names
-            )
-            and not _shadowed(node.func, _itemgetter_matched_name(node.func))
-            and len(node.args) == 1
-            and _is_mapping_receiver(node.args[0])
-            and len(node.func.args) == 1
-            and isinstance(node.func.args[0], ast.Constant)
-            and isinstance(node.func.args[0].value, str)
-            and node.func.args[0].value in FACT_BRIDGED_ATTRS
-        ):
-            # `operator.itemgetter("bases")(vars(rec))` -- the
-            # `attrgetter`-shaped constructor spelling of the identical
-            # subscript read, for the *bare* or `operator`-qualified
-            # `itemgetter` (`itemgetter_names`/`operator_names`, resolved
-            # the same way `attrgetter`'s own aliasing already is) (Codex
-            # review, fresh evidence). Matched only at the outer, immediate
-            # call -- unlike `attrgetter`'s own wider "match wherever
-            # constructed" stance, this requires the constructed getter to
-            # be called directly on a real mapping receiver, the identical
-            # `_is_mapping_receiver()` gate every other subscript-reading
-            # form here already applies, since an ungated `itemgetter(...)`
-            # constructor match would also fire for a completely unrelated
-            # mapping's own "bases" key -- see `_is_itemgetter_constructor_
-            # call()`'s own docstring for why the two forms don't share one
-            # stance.
-            attr = node.func.args[0].value
             record_node = node
         else:
             continue

@@ -866,6 +866,13 @@ def _is_itemgetter_constructor_call(
     unrelated mapping as for an instance's own `vars()`/`__dict__`, so
     requiring a real mapping receiver keeps this form no noisier than its
     already-shipped `dict.get`/`operator.getitem` siblings.
+
+    At least one positional argument, not exactly one (Codex review, fresh
+    evidence, second round): `operator.itemgetter("foo", "bases")(x)`
+    returns a getter reading *both* keys as a tuple -- real, documented
+    `itemgetter` behavior -- so the caller must inspect every constructor
+    argument for a bridged name, the identical multi-key handling
+    `_is_attrgetter_constructor_call()` already applies.
     """
     return (
         isinstance(node, ast.Call)
@@ -878,7 +885,7 @@ def _is_itemgetter_constructor_call(
             )
             or (isinstance(node.func, ast.Name) and node.func.id in itemgetter_names)
         )
-        and len(node.args) == 1
+        and len(node.args) >= 1
     )
 
 

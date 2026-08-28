@@ -2548,6 +2548,40 @@ readers_later_fixes.py`, 974 lines, well under its own 1200-line cap),
 `check_architecture.py` and `check_ai_readiness.py` both at 0 errors, and
 `check_docs_contract.py` unchanged at its two pre-existing warnings.
 
+**One more finding on the same round's itemgetter fix: only a single
+constructor argument was ever inspected.** `operator.itemgetter("foo",
+"bases")(vars(rec))` returns a getter that reads *both* requested keys as
+a tuple — real, documented `itemgetter` behavior, and the identical
+multi-key shape `attrgetter`'s own recognition already handles — but the
+new itemgetter branch's own `len(node.func.args) == 1` guard (and
+`_is_itemgetter_constructor_call()`'s matching `len(node.args) == 1`)
+silently missed a bridged key riding alongside an unrelated one. Fixed by
+widening `_is_itemgetter_constructor_call()` to `len(node.args) >= 1`
+(mirroring `_is_attrgetter_constructor_call()`'s identical bound) and
+restructuring the itemgetter branch from the single-attribute elif chain
+into its own top-level case — the same reason the `attrgetter` branch
+itself is a top-level case rather than folded into that chain: it now
+iterates every constructor argument and reports each bridged, literal
+string-constant key independently, rather than fitting into a chain
+shaped for exactly one `attr` per matched node.
+
+Verified against the reported multi-key repro, both keys bridged
+(reporting both independently), the bare (non-qualified) spelling,
+a no-bridged-keys negative control, a non-mapping-receiver negative
+control, and a shadowed-`operator`-parameter negative control, via direct
+AST reproduction before writing tests. The full existing single-key
+suite (dict.get, dotted attrgetter, single-key itemgetter, and every
+other already-shipped reader form) re-verified unaffected. Still zero
+existing hits, `mypy`/`ruff` both stayed clean, `fact_field_readers.py`
+at 1733 lines and `fact_field_readers_scope.py` at 901 lines (both well
+under the 2000-line hard cap). New tests:
+`test_inspects_every_key_in_a_multi_key_getter`,
+`test_reports_each_bridged_key_independently`,
+`test_multi_key_bare_spelling_still_recognized`,
+`test_ignores_a_multi_key_getter_with_no_bridged_keys`, appended to
+`TestItemgetterMappingReaders` in `tests/test_fact_field_readers_later_
+fixes.py` (1014 lines, well under its own 1200-line cap).
+
 ---
 
 ### Phase 1 — finish the `dump`/`scan` typed-API convergence (closes AGENTS.md "PR C")

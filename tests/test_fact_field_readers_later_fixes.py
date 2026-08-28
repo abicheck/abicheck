@@ -968,3 +968,47 @@ class TestItemgetterMappingReaders:
         sites = unmigrated_fact_reader_sites(tree, "x.py", src)
         assert len(sites) == 1
         assert sites[0][2] == "bases"
+
+    def test_inspects_every_key_in_a_multi_key_getter(self) -> None:
+        """`operator.itemgetter("foo", "bases")(vars(rec))` returns a
+        getter reading *both* requested keys as a tuple -- real,
+        documented `itemgetter` behavior -- so a bridged key must be
+        recognized regardless of its position among several (Codex
+        review, fresh evidence: the original fix required exactly one
+        constructor argument, silently missing every multi-key form)."""
+        src = (
+            "import operator\n"
+            'def f(rec):\n    return operator.itemgetter("foo", "bases")(vars(rec))\n'
+        )
+        tree = ast.parse(src, filename="x.py")
+        sites = unmigrated_fact_reader_sites(tree, "x.py", src)
+        assert len(sites) == 1
+        assert sites[0][2] == "bases"
+
+    def test_reports_each_bridged_key_independently(self) -> None:
+        src = (
+            "import operator\n"
+            "def f(rec):\n"
+            '    return operator.itemgetter("bases", "vtable")(vars(rec))\n'
+        )
+        tree = ast.parse(src, filename="x.py")
+        sites = unmigrated_fact_reader_sites(tree, "x.py", src)
+        assert {s[2] for s in sites} == {"bases", "vtable"}
+
+    def test_multi_key_bare_spelling_still_recognized(self) -> None:
+        src = (
+            "from operator import itemgetter\n"
+            'def f(rec):\n    return itemgetter("foo", "bases")(vars(rec))\n'
+        )
+        tree = ast.parse(src, filename="x.py")
+        sites = unmigrated_fact_reader_sites(tree, "x.py", src)
+        assert len(sites) == 1
+        assert sites[0][2] == "bases"
+
+    def test_ignores_a_multi_key_getter_with_no_bridged_keys(self) -> None:
+        src = (
+            "import operator\n"
+            'def f(rec):\n    return operator.itemgetter("foo", "bar")(vars(rec))\n'
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert unmigrated_fact_reader_sites(tree, "x.py", src) == []
