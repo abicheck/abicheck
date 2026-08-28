@@ -2504,19 +2504,35 @@ pipelines a fourth time.
   > closes this specific gap by coincidence: `_make_source_extractor` was
   > already going to pick clang by default, and the env var pushes
   > `effective_frontend` to the identical choice. **`ABICHECK_AST_
-  > FRONTEND=hybrid` closes it too, for the same coincidental reason
-  > (Codex review, fresh evidence: an earlier version of this note said
-  > "only ... clang", omitting this case)** -- `dumper._resolve_header_
-  > backend("auto")` recognizes `"hybrid"` as a legal literal value the
-  > same way it recognizes `"castxml"`/`"clang"`, so `effective_frontend`
-  > resolves to `"hybrid"` for the typed/compare path, and
-  > `_make_source_extractor("hybrid", ...)` selects clang regardless --
-  > its own branch only special-cases the literal string `"castxml"`,
-  > treating every other value (including `"hybrid"`) as clang. The
-  > native `dump` CLI's own env-var-blind `"auto"` also resolves to clang
-  > independently, so both sides again converge by coincidence. `castxml`
-  > is therefore the only `ABICHECK_AST_FRONTEND` value that does *not*
-  > close this gap.
+  > FRONTEND=hybrid` does NOT close it for the raw-source `--depth source`
+  > reproduction -- it turns the discrepancy into native success vs.
+  > typed/compare rejection, not agreement (Codex review, fresh evidence,
+  > correcting this exact paragraph's own prior claim that hybrid closes
+  > the gap "too, for the same coincidental reason").** Both
+  > `resolve_dump_request()` and `resolve_compare_request()` call
+  > `workflows.artifact.resolve.reject_hybrid_source_frontend()` before
+  > embedding, which resolves the environment-selected frontend via the
+  > *same* `effective_frontend()` this paragraph already relies on -- so
+  > with `ABICHECK_AST_FRONTEND=hybrid` set, that guard sees
+  > `effective_frontend(...) == "hybrid"` for a raw (non-pack) `sources`
+  > tree under `depth="source"` and raises `ValidationError` outright,
+  > before `_make_source_extractor("hybrid", ...)` is ever reached. The
+  > native `dump` CLI carries the identical guard
+  > (`_dump_will_attempt_hybrid_l4_extraction`,
+  > `frontends/cli/commands/dump.py`) but only fires it when the CLI's own
+  > *resolved* `header_backend` is literally `"hybrid"` -- which, per this
+  > note's own earlier finding, only happens from an explicit
+  > `--ast-frontend hybrid` flag or a `compile.frontend: hybrid` config,
+  > never from the (env-var-blind) `"auto"` default. So with only
+  > `ABICHECK_AST_FRONTEND=hybrid` set and no explicit flag/config, the
+  > native `dump` CLI's guard never fires, `header_backend` stays `"auto"`,
+  > and `_make_source_extractor("auto", ...)` proceeds to clang and
+  > succeeds -- while the typed/compare path raises `ValidationError` for
+  > the identical input. `ABICHECK_AST_FRONTEND=clang` is therefore the
+  > *only* `ABICHECK_AST_FRONTEND` value that closes this gap by genuine
+  > agreement (both sides succeed and resolve clang); `hybrid` closes
+  > nothing and `castxml` leaves the original clang-vs-castxml disagreement
+  > standing.
   >
   > The config half of the original qualification does hold, but only for
   > the **CLI-vs-CLI** pairing, not the CLI-vs-typed-API one: a project
@@ -2571,30 +2587,19 @@ pipelines a fourth time.
   > `workflows.artifact.execute.embed_side_build_source`, whose
   > `source_extractor: str | None = None` parameter's own docstring already
   > states the contract: `None` keeps that function's own
-  > `service_compare_evidence.effective_frontend` resolution, which resolves
-  > `"auto"` to **castxml** (the identical resolution this plan's item 2
-  > notes above already established for the L2 header-AST pass) *unless*
-  > `ABICHECK_AST_FRONTEND` is set in the environment, in which case
-  > `dumper._resolve_header_backend` (the function `effective_frontend`
-  > delegates to) honors it instead. **Qualification (Codex review, fresh
-  > evidence): the divergence described below is therefore conditional on
-  > that environment variable, not universal.** With `ABICHECK_AST_
-  > FRONTEND` unset (the common case) or explicitly set to `castxml`, the
-  > two sides disagree exactly as described (clang vs. castxml). With it
-  > set to `clang` **or `hybrid`** (Codex review, fresh evidence: an
-  > earlier version of this note omitted the `hybrid` case), both sides
-  > resolve to clang -- `_make_source_extractor` has no env-var awareness
-  > to override and treats anything but the literal `"castxml"` as clang,
-  > but `effective_frontend` picks up the override too (`hybrid` is a
-  > recognized literal value, same as `clang`), so they land on the same
-  > backend by coincidence, not because the underlying resolution logic
-  > agrees. Neither caller passes
-  > an override; with the environment variable unset, native `dump`
-  > routes unresolved `"auto"` to clang while `compare`/`execute_dump_
-  > request` resolve it to castxml (Codex/CodeRabbit review: the previous
-  > wording here said "both correctly resolve to castxml", contradicting
-  > the disagreement this whole paragraph exists to state). Confirmed
-  > directly: a `dump`-CLI-written baseline's
+  > `service_compare_evidence.effective_frontend` resolution -- the
+  > identical native-`dump`-CLI-vs-typed/`compare` pairing, `ABICHECK_AST_
+  > FRONTEND`-vs-config precedence, and per-value outcome (unset/`castxml`
+  > disagree; `clang` converges on clang by coincidence; `hybrid` does
+  > *not* converge -- it turns the divergence into native success vs.
+  > typed/compare `ValidationError` rejection) the "Third qualification"
+  > note above already establishes in full **(consolidated here rather
+  > than restated a second time, per this file's own single-owner
+  > documentation contract; Codex review, fresh evidence)** -- see that
+  > note for the complete per-value matrix and reasoning.
+  >
+  > Confirmed directly, with the environment variable unset: a
+  > `dump`-CLI-written baseline's
   > `build_source.source_abi.coverage.fact_set.producer` reads
   > `"abicheck-cc-clang-extractor"`; the identical input run through
   > `resolve_dump_request`/`execute_dump_request` reads `"castxml-source"`.
@@ -2610,10 +2615,16 @@ pipelines a fourth time.
   > so a `scan --against` a `dump`-CLI-written baseline happens to have both
   > sides agree by accident (verified: `scan --against` a plain `dump`
   > baseline for the fixture above reports `NO_CHANGE`, not
-  > `NOT_COMPARABLE`) — but `compare oldbaseline.json new.so` (`dump`'s own
-  > CLI baseline against `compare`'s own implicit-dump resolution of the
-  > live binary) pairs a clang-derived old side against a castxml-derived
-  > new side, and the `profile_fingerprint`/`scope_fingerprint`
+  > `NOT_COMPARABLE`) — but `compare oldbaseline.json new.so --sources
+  > new=<tree> --depth source` (`dump`'s own CLI baseline against
+  > `compare`'s own implicit-dump resolution of the live binary, given the
+  > same source tree so its new side actually runs L4 replay -- a bare
+  > `compare oldbaseline.json new.so` with no `sources`/`build_info` input
+  > has nothing for `embed_build_source` to call `collect_inline_pack()`
+  > against, so it produces no new-side L4 evidence to diverge on at all,
+  > Codex review, fresh evidence) pairs a clang-derived old side against a
+  > castxml-derived new side, and the `profile_fingerprint`/
+  > `scope_fingerprint`
   > comparability gate does not consult the extractor choice, so this does
   > **not** surface as `NOT_COMPARABLE`. **Correction (Codex review, fresh
   > evidence): the extractor choice is not *unrecorded* -- it already reads
