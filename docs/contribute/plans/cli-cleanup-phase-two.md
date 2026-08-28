@@ -2780,8 +2780,11 @@ report.
 B's own "finalized" note below, per Codex review, PR #910 — the two must
 agree): the `GateOptions` half of "land first" above was reassigned to PR
 G2, not landed as part of PR B.** PR B's own two stated goals — pack parity
-across every front end, and the effective-config digest in every report —
-are both landed (see PR B's "finalized" note below). The single shared
+across every CLI command path, and the effective-config digest in every
+report — are both landed (see PR B's "finalized" note below; the typed
+Python API's own pack-parity gap — `ScanRequest` has no pack field,
+`CompareRequest` carries no `gate.*` equivalent — is separate, outstanding
+work, not part of what PR B closed). The single shared
 `GateOptions` object this paragraph originally asked for is not: it needs a
 genuine rewrite of the release fan-out's own severity/exit-code-scheme
 representation, immediately ahead of PR G2's own not-yet-designed rewrite of
@@ -3283,8 +3286,10 @@ PR A  repository governance          = PR 0B — required checks / Ruleset,
                                        exact-merge-SHA verification
 PR B  effective configuration parity  — packs resolved once into one
       (DONE)                           CompatibilityEvaluationConfig, pack
-                                       parity across every front end, and
-                                       an effective-config digest in every
+                                       parity across every CLI command
+                                       path (typed-API parity is separate,
+                                       outstanding work), and an
+                                       effective-config digest in every
                                        report; the release fan-out's own
                                        typed GateOptions object is
                                        deliberately reassigned to PR G2,
