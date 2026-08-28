@@ -182,6 +182,8 @@
         "abicheck/service.py",
         "abicheck/service_compare_evidence.py",
         "abicheck/service_compare_pipeline.py",
+        "abicheck/service_dump_native.py",
+        "abicheck/service_dump_native_pe.py",
         "abicheck/service_dump_pipeline.py",
         "abicheck/service_input_resolution.py",
         "abicheck/service_scan.py"

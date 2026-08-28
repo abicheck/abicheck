@@ -81,3 +81,32 @@
   independently-verifiable" bar without risking a half-migration; see the PR
   body for the fuller investigation and what was deliberately left as
   follow-up work.
+
+  **Post-review fix: both new files gained the `workflows` layer
+  classification their own siblings already carry.** A Codex review finding
+  correctly pointed out that `run_dump`'s own dump-orchestration role
+  matches `AGENTS.md`'s task-routing table entry for `workflows/`
+  ("Coordinate dump, compare, scan, release, aggregate, project, or
+  dependency behavior") — but its proposed remedy (implement it fresh under
+  `abicheck/workflows/`) would have been inconsistent with how every other
+  `service_*` sibling in this exact cluster was migrated: `service.py`,
+  `service_compare_pipeline.py`, `service_dump_pipeline.py`,
+  `service_input_resolution.py`, and `service_compare_evidence.py` are
+  *already* classified `workflows` in `architecture/modules.yaml`'s
+  `legacy_paths` — logically owned by that layer while still physically
+  flat, exactly the virtual-classification-before-physical-move pattern
+  this same ADR-061 pass already used for the `policy`/`extract` layers.
+  The real gap the review surfaced: `service_dump_native.py`/
+  `service_dump_native_pe.py`, split out of an already-`workflows`-
+  classified file and doing the identical kind of dump-coordination work,
+  were left with no `legacy_paths` entry in either layer at all — an
+  inconsistency with their own immediate precedent, not a design
+  disagreement. Fixed by adding both to `workflows`'s `legacy_paths`,
+  matching their siblings exactly. `python scripts/check_architecture.py`
+  stays 0 errors (workflows' `may_import` already covers everything
+  these two files import, since they inherited `service.py`'s own import
+  set unchanged). Physically moving this whole `service_*` dump-
+  orchestration cluster into `abicheck/workflows/` remains a real,
+  separate follow-up — the same one the module map's `service_dump_
+  pipeline.py`/`service_compare_pipeline.py` entries already imply — not
+  something this PR's own scope extends to.
