@@ -23,8 +23,6 @@ from typing import TYPE_CHECKING, Any
 
 import click
 
-from . import dumper_cache
-
 # `resolve_dump_depth`/`resolve_dump_collect_context` moved to
 # `cli_dump_depth.py`, purely to stay under the AI-readiness 2000-line hard
 # cap (see that module's own docstring). Re-exported here (the `as`-aliased
@@ -58,7 +56,6 @@ from .cli_dump_protocols import (
     WriteSnapshotOutput as _WriteSnapshotOutput,
 )
 from .dumper import dump
-from .dumper_clang_streaming import suppress_streaming_prune
 from .errors import AbicheckError
 from .evidence_depth import (
     DEPTH_RANK,
@@ -74,12 +71,15 @@ from .workflows.artifact import ResolvedArtifactPlan
 # unlike the four names in the lazy `__getattr__` shim further down, which
 # nothing in this module calls itself.
 from .workflows.extraction import (
+    _manifest_declared_includes,
+    ast_memoize_scope,
     attach_build_context_for_parsed_headers,
     detect_binary_format,
     dump_manifest_header_roots as _dump_manifest_header_roots,
     include_operand_dirs,
     normalize_binary_input,
     show_data_sources,
+    suppress_streaming_prune,
 )
 
 if TYPE_CHECKING:
@@ -533,7 +533,6 @@ def _add_dump_manifest_section(result: Any, dump_manifest: Any) -> None:
     ``-MD``-depfile digest that only exists once a real L2 extraction runs.
     """
     from .comparability import compute_extraction_contract, manifest_tu_scope_field
-    from .dumper_contract import _manifest_declared_includes
 
     contract = compute_extraction_contract(
         declared_headers=list(dump_manifest.roots),
@@ -1293,9 +1292,7 @@ def perform_elf_dump(
         # visibility into this flag on its own, and pruning happens well
         # before `write_snapshot_output`'s post-hoc filter below.
         with (
-            dumper_cache.ast_memoize_scope()
-            if headers and not dwarf_only
-            else nullcontext(),
+            ast_memoize_scope() if headers and not dwarf_only else nullcontext(),
             suppress_streaming_prune() if include_dependencies else nullcontext(),
         ):
             snap = dump(
