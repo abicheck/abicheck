@@ -2130,7 +2130,9 @@ pipelines a fourth time.
   >    block, which obtained a real one and reproduced the divergence
   >    directly; the fix itself is still not attempted, deliberately.
   > 3. **Prerequisite 3's own remaining `-H`-directory gap**, below, is
-  >    unchanged.
+  >    unchanged. **Update (2026-08-27): closed** — see the dated note
+  >    below this list's own section for the fix and its tests. This item
+  >    no longer blocks anything; items 1 and 2 above still do.
   >
   > Deliberately *not* forced through on the strength of blocker 5/6 being
   > closed: the flags' removal moves their inputs into config, and doing that
@@ -2183,8 +2185,9 @@ pipelines a fourth time.
   > verification — was not attempted in that same session and remains open
   > for exactly that reason: not for lack of castxml any more, but for lack
   > of the work itself.** Items 2 (the L4 extractor default divergence) and
-  > 3 (the `-H` directory gap, below) are unchanged in substance, item 2's
-  > "unverifiable" framing corrected per its own note.
+  > 3 (the `-H` directory gap, below) are unchanged in substance as of this
+  > note, item 2's "unverifiable" framing corrected per its own note — item
+  > 3 is later closed (2026-08-27); see that dated note below for the fix.
   >
   > **Investigated further (2026-08-27): the reordering is real work to
   > *verify*, and its depth-gate/provenance/dependency-scope half is now
@@ -2358,6 +2361,107 @@ pipelines a fourth time.
   > so a future session does not have to redo the castxml acquisition to
   > pick this up.
 
+  > **Item 2 attempted, and reverted: the flag flip is unsafe, and the real
+  > blocking bug is now precisely characterized (2026-08-27).** With a real,
+  > policy-compliant castxml now available, the obvious fix was tried:
+  > `scan_engine.py`'s `source_extractor="auto"` (always clang) changed to
+  > `source_extractor=None`, which `embed_side_build_source` already
+  > documents as the untaken path — it lets the L4 replay frontend resolve
+  > via `service_compare_evidence.effective_frontend`, the same primitive
+  > `dump`/`compare` already use, matching L4 to the L2 header-AST parse
+  > `scan` already runs through the identical `header_backend="auto"`
+  > resolution. Verified against the two `_SCAN_KNOWN_DIVERGENT_FRONTENDS`
+  > xfail tests: the *originally diagnosed* divergence signature
+  > (`COMPATIBLE_WITH_RISK` naming `source_fact_coverage_incomplete`) no
+  > longer reproduced — but a *different*, real failure did:
+  > `source_binary_provenance_mismatch` on both sides ("6/7 exportable
+  > public declarations... do not map to any exported binary symbol").
+  >
+  > Traced to ground rather than left as a surprising number. A minimal
+  > `struct Widget { int x, y; int sum() const {...}; }` + a free function
+  > `compute(const Widget&)`, compiled and dumped directly (`dump --depth
+  > source --ast-frontend castxml`, no `scan` involved) reproduces the
+  > identical shape: `exported_symbols: 2, matched_symbols: 1`. Inspecting
+  > the raw `source_decl_to_binary_symbol` mapping shows why —
+  > `_CastxmlParser.parse_functions()` (`dumper_castxml.py`), reused
+  > verbatim by the castxml L4 extractor's `_parse_root`
+  > (`buildsource/source_extractors/castxml.py`), returns castxml's
+  > compiler-synthesized IMPLICIT special members for `Widget` (three
+  > constructor overloads, two assignment operators, the destructor —
+  > `Widget`'s own real, user-written code declares none of these) as
+  > ordinary `Function` entries, all with a real, public-header-declared
+  > `origin`. `buildsource/source_extractors/base.py`'s `entity_from_function`
+  > — the shared, tool-independent model→`SourceEntity` mapping castxml's
+  > L4 path (and only that path; clang's own L4 extractor builds
+  > `SourceEntity` directly and never goes through this function) routes
+  > through — computes `api_relevant` from `fn.origin`/`fn.access` alone; it
+  > never consults `fn.visibility`, `is_synthetic_ctor_key`/
+  > `is_synthetic_dtor_key`, or castxml's own raw `artificial="1"` XML
+  > attribute. So every one of these six phantom, never-written declarations
+  > lands in the L4 `reachable_source_surface` as real public API — and,
+  > since a *trivial* implicit special member is essentially never emitted
+  > as its own out-of-line symbol, five of the six show up as
+  > `decls_without_symbol`, which is exactly what drags the match ratio low
+  > enough to trip `source_binary_provenance_mismatch`'s "this source
+  > doesn't look like it corresponds to this binary" heuristic — a false
+  > positive of that heuristic, not evidence of an actual checkout/binary
+  > mismatch. (The seventh entry, `compute()` itself, is a *separate*,
+  > already-expected, non-bug absence on both castxml and clang alike — it
+  > is declared and defined only in the `.cpp` TU, never in the public
+  > header, so both backends correctly exclude it from the public source
+  > surface regardless of this bug.)
+  >
+  > This is why the flag flip was reverted rather than shipped: it is
+  > directionally correct (matching L4 to L2's own frontend, exactly as
+  > `embed_side_build_source`'s own docstring already prescribed) but
+  > surfaces a genuine, previously-invisible castxml L4 extractor bug —
+  > invisible before only because `scan`'s L4 replay always used clang
+  > regardless of `--ast-frontend`, so castxml's L4 declaration surface was
+  > never actually exercised end to end through `scan --against` until this
+  > attempt. `dump --depth source --ast-frontend castxml` on any class
+  > relying on the compiler's own implicit special members already carries
+  > this same defect today, independent of `scan` or this migration — it
+  > just has no comparable "provenance mismatch" self-check to trip over it
+  > the way the `scan`-side comparison did.
+  >
+  > **Deliberately not fixed in the same pass, and here is exactly why.**
+  > The obvious-looking fix — exclude `fn.visibility == Visibility.HIDDEN`
+  > from `api_relevant` in `entity_from_function` — was checked directly
+  > against the raw XML and rejected: `castxml.py`'s `_parse_root`
+  > constructs `_CastxmlParser` with **empty** `exported_dynamic`/
+  > `exported_static` sets (L4 has no ELF symbol table to check against at
+  > parse time), so `_visibility()`'s plain ELF-lookup fallback returns
+  > `HIDDEN` unconditionally for *every* ordinary function in this context
+  > too — confirmed directly: `sum()`, the one real, legitimate public
+  > method in the fixture, resolves to `visibility=HIDDEN` under this same
+  > empty-ELF-set L4 parse (only the ctor/dtor-specific fallback in
+  > `_ctor_or_dtor_visibility` treats `artificial` specially; ordinary
+  > methods have no such fallback at L4 parse time at all). Filtering on
+  > `visibility` would therefore exclude every real declaration from L4
+  > along with the phantom ones, not just the phantom ones. The two
+  > synthetic-mangled-name markers already in this codebase
+  > (`is_synthetic_ctor_key`/`is_synthetic_dtor_key`) are closer but still
+  > incomplete: castxml emits a real-looking Itanium mangled name for a
+  > compiler-synthesized `operator=` (confirmed: `_ZN6WidgetaSERKS_`/
+  > `_ZN6WidgetaSEOS_` in the fixture above), so neither marker catches it —
+  > two of the six phantom entries would still leak through. The only
+  > reliable, general signal is castxml's own raw `artificial="1"` XML
+  > attribute, which `_parse_function_element` currently reads *only* for
+  > the `Constructor`/`Destructor` branch and never records on the
+  > `Function` object itself for any other declaration kind (`operator=`
+  > included) — closing this for real needs a new field on the shared,
+  > public `Function` model (a real, if narrow, public-API/schema-version
+  > change per `model.py`'s own documented contract), populated
+  > consistently by both header backends, and re-verified against every
+  > existing consumer of `Function.visibility`'s current HIDDEN/PUBLIC
+  > split before trusting a change to it — a genuine, separate,
+  > cross-cutting fix, not a follow-up edit to `base.py` alone. Filed here,
+  > per this file's own "known gaps over risky reactive patches"
+  > discipline, rather than attempted under continued investigation
+  > pressure. Item 2 therefore stays open, with its blocker now precisely
+  > characterized instead of merely "unverifiable" or "needs its own
+  > dedicated pass" in the abstract.
+
 `dump --build-query` and `dump --build-compile-db` describe how the *project*
 is built, not what this snapshot is. They are already documented as CLI
 equivalents of the `.abicheck.yml` `build.query` / `build.compile_db` fields,
@@ -2481,16 +2585,40 @@ the parser to lists only — every existing trusted string config would break.
 > test_dry_run_build_query_flow2_packs.py` (the dry-run preview, mirroring
 > the existing classic-pack CLI tests one-for-one).
 >
-> **The `-H` directory gap remains open** (it predates this module —
-> `render_dump_dry_run` has never expanded `-H` directories for validation).
-> Closing it needs a design decision about real directory-walk validation
-> inside `--dry-run`'s own established "cheap, read-only... no I/O beyond
-> stat()/PATH lookups" contract, not a scoped fix to this module alone — so
-> PR 3C's removal itself (`dump --build-query`/`dump --build-compile-db`
-> deletion) should not proceed until it is closed or explicitly accepted as
-> a permanent gap, on top of still waiting on the ordering's own blocker:
-> PR 3A's full convergence (both `dump` and `scan` resolvers), which remains
-> open per that section's own status notes above.
+> **The `-H` directory gap is closed (2026-08-27).** The "design decision"
+> this note originally called for turned out not to be one: `_expand_header_
+> inputs` (`cli_resolve.py`) — the exact function the real run already calls
+> downstream to expand a `-H` directory into its header files, raising
+> `click.ClickException` for a missing path, an empty header directory, or a
+> path that is neither file nor directory — is itself already a pure
+> directory walk (`iter_directory_headers`'s `rglob`) with no compiler/build
+> invocation, squarely inside `--dry-run`'s existing "no I/O beyond
+> stat()/PATH lookups" contract; a `rglob` over an already-resolved local
+> directory is filesystem-stat-family I/O, not the kind of "real work" that
+> contract exists to keep out. `dump_cmd` (`frontends/cli/commands/dump.py`)
+> now calls it once, unconditionally, immediately after `headers` gets its
+> final post-`resolve_dump_collect_context` value — before either the
+> `--dry-run` or the real-run branch — mirroring the exact pattern this same
+> file already uses for its other two unconditional pre-branch usage-error
+> checks (the hybrid+depth rejection, the binary-depth-with-no-SO_PATH
+> rejection). The result is discarded; the call exists purely for its
+> validation side effect, and the real run's own downstream expansion call
+> is untouched (a second, cheap, idempotent directory walk, not worth
+> threading a resolved value through every intermediate call site to avoid).
+> Verified end to end: `dump --dry-run -H <empty-dir>` and `dump -H
+> <empty-dir>` (no `--dry-run`) now produce the byte-identical error message
+> and exit code (1), where the dry-run path previously exited 0. Tests:
+> `tests/test_dry_run_contract.py::TestDumpDryRun::
+> test_dry_run_rejects_empty_header_directory_like_the_real_run` (both
+> invocations, one assertion each) and `::
+> test_dry_run_accepts_a_header_directory_with_real_headers` (the positive
+> control, confirming a real header directory dry-runs cleanly as before).
+>
+> This closes PR 3C prerequisite 3 in full. **PR 3C's removal itself
+> remains blocked**, unchanged by this — the ordering blocker is PR 3A's
+> full convergence (both `dump` and `scan` resolvers), which is a separate,
+> larger item covered in that section's own status notes above and not
+> touched by this fix.
 
 **Risk:** medium — this is a trust boundary, and it is the one item here where
 a mistake is a security regression rather than a UX one.
