@@ -550,6 +550,121 @@ def test_partial_overlay_falls_back_to_workflow_global_per_field() -> None:
     )
 
 
+def test_no_baseline_channel_activates_the_consumer_step_via_its_own_arm() -> None:
+    """Codex review (PR #906): every scenario above supplies `baseline-
+    channel: release` alongside `steps.resolve.outputs.outcome: 'resolved'`
+    in its `steps_context`, so none of them requires the consumer-context
+    step's own guard's `inputs.baseline-channel == 'none'` arm at all --
+    the guard's `(inputs.baseline-channel == 'none' || steps.resolve.
+    outputs.outcome == 'resolved')` clause is always satisfied through its
+    SECOND disjunct in every prior test, so deleting or inverting the first
+    would still leave every other test in this file green while a real
+    `channel: none` check (no baseline needed -- `actions/check-target/
+    action.yml`'s own "Resolve baseline" step's `if: inputs.baseline-
+    channel != 'none'` means it never runs and never sets that output)
+    silently loses its consumer-context dump in production.
+
+    Exercises that arm directly: a `channel: "none"` target check, and a
+    `steps` context with NO `resolve.outputs.outcome` key at all -- mirrors
+    the real workflow, where that step never running means the property is
+    genuinely undefined (evaluates to `None`, not the string `'resolved'`),
+    so this scenario's guard must carry itself via the first disjunct
+    alone."""
+    raw = {
+        "targets": {
+            "libfoo": {
+                "kind": "library",
+                "binary_pattern": "build/libfoo*.so",
+                "checks": [
+                    {"channel": "none", "depth": "headers", "required": True},
+                ],
+            },
+        },
+        "profiles": {
+            "no-baseline": {
+                "contract": True,
+                "consumer_compile": {"frontend": _SENTINEL_CONSUMER_AST_FRONTEND},
+            },
+        },
+        "baseline": TestConsumerCompileOverlayProjection._RAW["baseline"],
+    }
+    config = _parsed(raw)
+    plan, report = generate_run_plan(config, {"no-baseline": _bo("libfoo")})
+    assert report.ok
+    [check] = plan.checks
+    matrix = check.to_dict()
+    assert matrix["baseline_channel"] == "none"
+    assert matrix["consumer_compile_active"] is True
+
+    run_step = _run_check_step("Run check-target")
+    _assert_run_check_target_step_guard_fires(run_step)
+    workflow_inputs = {"gcc-path": "", "gcc-options": "", "ast-frontend": ""}
+    consumer_gcc_path = eval_gha_expression(
+        run_step["with"]["consumer-gcc-path"], matrix=matrix, inputs=workflow_inputs
+    )
+    consumer_gcc_options = eval_gha_expression(
+        run_step["with"]["consumer-gcc-options"], matrix=matrix, inputs=workflow_inputs
+    )
+    consumer_ast_frontend = eval_gha_expression(
+        run_step["with"]["consumer-ast-frontend"], matrix=matrix, inputs=workflow_inputs
+    )
+    consumer_compile_active = eval_gha_expression(
+        run_step["with"]["consumer-compile-active"], matrix=matrix, inputs={}
+    )
+    kind = eval_gha_expression(run_step["with"]["kind"], matrix=matrix)
+    baseline_channel = eval_gha_expression(
+        run_step["with"]["baseline-channel"], matrix=matrix
+    )
+    assert baseline_channel == "none"
+    assert consumer_ast_frontend == _SENTINEL_CONSUMER_AST_FRONTEND
+
+    consumer_step = _consumer_context_step()
+    hop3_inputs = _hop3_inputs_from(
+        kind=kind,
+        baseline_channel=baseline_channel,
+        consumer_compile_active=consumer_compile_active,
+        consumer_ast_frontend=consumer_ast_frontend,
+        consumer_gcc_path=consumer_gcc_path,
+        consumer_gcc_options=consumer_gcc_options,
+    )
+    # Deliberately no "resolve.outputs.outcome" key at all -- the real
+    # "Resolve baseline" step never runs for a channel: none check, so this
+    # property is genuinely undefined, not the string 'resolved'.
+    steps_context = {
+        "collect_verify.outcome": "success",
+        "collect_replay.outcome": "success",
+    }
+    guard = eval_gha_expression(
+        consumer_step["if"], inputs=hop3_inputs, steps=steps_context
+    )
+    assert guard is True, (
+        "a channel: none check (no baseline) must still activate the "
+        "consumer-context step's own scheduling guard via its "
+        "`inputs.baseline-channel == 'none'` arm alone, with no "
+        "`steps.resolve.outputs.outcome` present at all"
+    )
+
+    final_gcc_path = eval_gha_expression(
+        consumer_step["with"]["gcc-path"], inputs=hop3_inputs
+    )
+    final_gcc_options = eval_gha_expression(
+        consumer_step["with"]["gcc-options"], inputs=hop3_inputs
+    )
+    final_ast_frontend = eval_gha_expression(
+        consumer_step["with"]["ast-frontend"], inputs=hop3_inputs
+    )
+    # Not carried through hop 4 (`_assert_reaches_real_dump_cli_invocation`
+    # unconditionally asserts `--compiler`/`--compiler-option` are present,
+    # which `add_single_flag`/`add_flag_shlex_split` in run.sh correctly
+    # omit for an empty value -- the marker-only test above has the
+    # identical shape and is likewise not carried through hop 4). This
+    # test's own subject -- the guard's `baseline-channel == 'none'` arm --
+    # is already fully exercised by the `guard is True` assertion.
+    assert final_gcc_path == ""
+    assert final_gcc_options == ""
+    assert final_ast_frontend == _SENTINEL_CONSUMER_AST_FRONTEND
+
+
 def _assert_reaches_real_dump_cli_invocation(
     gcc_path: str, gcc_options: str, ast_frontend: str
 ) -> None:
