@@ -261,6 +261,115 @@ class TestFactEqualityMisuseSites:
         tree = ast.parse(src, filename="x.py")
         assert fact_equality_misuse_sites(tree, "x.py") == []
 
+    def test_ignores_a_tuple_unpacking_target_that_shadows_an_outer_fact_alias(
+        self,
+    ) -> None:
+        """The shadowing rule extends to a tuple-unpacking assignment
+        target, not just a bare-name one (Codex review, fresh evidence):
+        `fact = rec.bases_fact` outer, then `def inner(pair, other):
+        fact, other = pair; return fact == other` -- `inner`'s own `fact`
+        is bound by ordinary unpacking, still local to the whole function,
+        still shadowing the outer alias throughout."""
+        src = (
+            "def f(rec, pair, other):\n"
+            "    fact = rec.bases_fact\n"
+            "    def inner(pair, other):\n"
+            "        fact, other = pair\n"
+            "        return fact == other\n"
+            "    return inner(pair, other)\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert fact_equality_misuse_sites(tree, "x.py") == []
+
+    def test_ignores_a_for_loop_target_that_shadows_an_outer_fact_alias(
+        self,
+    ) -> None:
+        """A `for` loop target is a real local binding too, the same as an
+        assignment target or a parameter."""
+        src = (
+            "def f(rec, items, other):\n"
+            "    fact = rec.bases_fact\n"
+            "    def inner(items, other):\n"
+            "        for fact in items:\n"
+            "            pass\n"
+            "        return fact == other\n"
+            "    return inner(items, other)\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert fact_equality_misuse_sites(tree, "x.py") == []
+
+    def test_ignores_a_with_statement_target_that_shadows_an_outer_fact_alias(
+        self,
+    ) -> None:
+        """`with ctx() as fact:` binds `fact` locally too."""
+        src = (
+            "def f(rec, ctx, other):\n"
+            "    fact = rec.bases_fact\n"
+            "    def inner(ctx, other):\n"
+            "        with ctx() as fact:\n"
+            "            return fact == other\n"
+            "    return inner(ctx, other)\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert fact_equality_misuse_sites(tree, "x.py") == []
+
+    def test_ignores_an_except_handler_name_that_shadows_an_outer_fact_alias(
+        self,
+    ) -> None:
+        """`except SomeError as fact:` binds `fact` locally too, even
+        though Python deletes it again at the end of the handler block."""
+        src = (
+            "def f(rec, other):\n"
+            "    fact = rec.bases_fact\n"
+            "    def inner(other):\n"
+            "        try:\n"
+            "            pass\n"
+            "        except Exception as fact:\n"
+            "            return fact == other\n"
+            "        return None\n"
+            "    return inner(other)\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert fact_equality_misuse_sites(tree, "x.py") == []
+
+    def test_detects_a_real_misuse_after_two_functions_share_a_bare_name(
+        self,
+    ) -> None:
+        """Two independent, same-named function definitions (the shape an
+        `@overload` stub and its real implementation share) must each be
+        checked on their own -- a real misuse in the *second* `f` must
+        still be reported (Codex review, fresh evidence: the qualname
+        collision that let one `f`'s alias data leak into the other's
+        must not swing the other way into silently merging away a real
+        finding, either)."""
+        src = (
+            "def f(rec, other):\n"
+            "    return rec.bases_fact == other\n"
+            "def f(rec, other):\n"
+            "    return rec.bases_fact == other\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        sites = fact_equality_misuse_sites(tree, "x.py")
+        assert sites == [(2, 11), (4, 11)]
+
+    def test_ignores_an_overload_stubs_annotated_parameter_in_the_real_impl(
+        self,
+    ) -> None:
+        """`@overload`-shaped collision: a stub's `x: Fact[int]` parameter
+        must not leak into a same-named real implementation's own,
+        unrelated `x` local (Codex review, fresh evidence) -- distinct
+        `def`s of the same name are distinct scopes, exactly as much as
+        two same-named functions in different files would be."""
+        src = (
+            "def f(x: Fact[int], other):\n"
+            "    return None\n"
+            "\n"
+            "def f(x, other):\n"
+            "    return x == other\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert fact_equality_misuse_sites(tree, "x.py") == []
+
     def test_detects_a_comparison_between_two_fact_annotated_parameters(
         self,
     ) -> None:

@@ -1163,6 +1163,41 @@ match assumes `func.value` is a bare `ast.Name`, not an arbitrary
 arbitrary-attribute-chain resolution respectively -- their own scoped
 redesigns, not follow-ups to the fixes already in this file.
 
+**A further Codex review round found two more real false *positives* on
+the shadowing fix's own machinery -- both fixed, since a false positive
+here (rejecting valid code) is never treated as a convergence-eligible
+finding regardless of how many rounds precede it.** (1) `locally_bound`
+only ever recorded a bare `ast.Name` assignment target and a function's
+own parameters, so `fact, other = pair` (ordinary tuple-unpacking) inside
+a nested function shadowing an outer `fact = rec.bases_fact` alias was
+never recorded as a local binding -- the nested function's own `fact`
+still read as the *outer* alias, flagging a valid `fact == other`. Fixed
+with `_bound_names()`, a small recursive helper unpacking `ast.Tuple`/
+`ast.List`/`ast.Starred` targets, wired into `locally_bound` for
+`ast.Assign` (all targets, not just the single-`Name` case `candidates`
+stays restricted to), plus the other real Python local-binding forms the
+same review comment named: a `for`/`async for` loop target, a `with`/
+`async with` `as` target, and an `except ... as name:` handler name.
+(2) `_enclosing_qualnames`/`_lexical_function_parents` both keyed a
+function purely by its dotted name, so two functions sharing one bare
+name -- the shape a `@typing.overload`-decorated stub and its real
+implementation share -- collapsed onto the same qualname key, and
+`_fact_aliases` merged their alias/candidate data: a stub's `x:
+Fact[int]` parameter leaked into a same-named real implementation's own,
+unrelated `x` local, flagging a valid `x == other`. Fixed by folding each
+`def`'s own line number into its qualname (`f"{prefix}{child.name}#
+{child.lineno}"`) in both helpers identically -- safe here in a way it
+would not be in `fact_field_readers.py`'s identical-*looking* helper: this
+module's qualname is purely internal (`fact_equality_misuse_sites` returns
+only `(lineno, col_offset)`, never a qualname-derived key), so there is no
+external format to keep stable. Verified empirically: still zero existing
+hits in the real repository, and a positive control confirms two
+independent same-named functions are still each checked for real misuse
+on their own (neither silently swallows the other's genuine violation).
+Six new tests: tuple-unpacking, `for`, `with`, and `except-as` shadowing,
+plus a two-independent-same-name-functions-both-flagged positive control
+and the `@overload`-shaped negative control itself.
+
 ---
 
 ### Phase 1 — finish the `dump`/`scan` typed-API convergence (closes AGENTS.md "PR C")

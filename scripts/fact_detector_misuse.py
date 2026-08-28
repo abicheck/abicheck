@@ -197,13 +197,30 @@ def _enclosing_qualnames(tree: ast.Module) -> dict[int, str]:
     Deliberately a standalone copy of `fact_field_readers.py`'s identical
     helper rather than a shared import -- see `FACT_FIELD_NAMES`'s own
     docstring for why these two leaf modules stay decoupled.
+
+    **Each `def`'s own line number is folded into its qualname (Codex
+    review, fresh evidence): a `@typing.overload`-decorated stub and its
+    real implementation share one bare name (`"f"`) -- two genuinely
+    separate function objects/scopes, exactly as distinct as any other two
+    same-named functions in different modules, but this scan's own
+    dotted-name qualname collapsed them to one key. `_fact_aliases` then
+    merged their alias/candidate data: a stub parameter annotated
+    `Fact[...]` fed the real implementation's own unrelated `x` local, so
+    a valid `x == other` comparison in the implementation was reported as
+    a hard error. Unlike `fact_field_readers.py`'s identical-looking
+    helper, nothing here persists a qualname in an external baseline key
+    (`fact_equality_misuse_sites` returns only `(lineno, col_offset)`), so
+    there is no format to keep stable -- appending `#<lineno>` unique to
+    each `def` costs nothing outside this module and gives every function
+    definition its own real scope identity while `_lexical_function_
+    parents` (below) keeps the identical lineage relationship.
     """
     ranges: list[tuple[int, int, str]] = []
 
     def visit(node: ast.AST, prefix: str) -> None:
         for child in ast.iter_child_nodes(node):
             if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                qualname = f"{prefix}{child.name}"
+                qualname = f"{prefix}{child.name}#{child.lineno}"
                 end = getattr(child, "end_lineno", child.lineno)
                 ranges.append((child.lineno, end, qualname))
                 visit(child, qualname + ".")
@@ -245,7 +262,15 @@ def _lexical_function_parents(tree: ast.Module) -> dict[str, str]:
     def visit(node: ast.AST, prefix: str, nearest_func: str) -> None:
         for child in ast.iter_child_nodes(node):
             if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                qualname = f"{prefix}{child.name}"
+                # `#<lineno>` disambiguator, matching `_enclosing_
+                # qualnames`'s own scheme exactly (Codex review, fresh
+                # evidence -- see that function's own docstring): two
+                # same-named `def`s (e.g. an `@overload` stub and its real
+                # implementation) must resolve to two distinct scopes here
+                # too, not just in the line-number map, or this function's
+                # own `parents` dict would still let one collapse onto the
+                # other's already-processed entry.
+                qualname = f"{prefix}{child.name}#{child.lineno}"
                 parents[qualname] = nearest_func
                 visit(child, qualname + ".", qualname)
             elif isinstance(child, ast.ClassDef):
@@ -255,6 +280,31 @@ def _lexical_function_parents(tree: ast.Module) -> dict[str, str]:
 
     visit(tree, "", "<module>")
     return parents
+
+
+def _bound_names(target: ast.expr) -> list[str]:
+    """Yield every plain name a single assignment/binding *target* binds,
+    recursively unpacking `ast.Tuple`/`ast.List`/`ast.Starred` targets
+    (Codex review, fresh evidence): `fact, other = pair` binds `fact` as
+    an ordinary tuple-unpacking element, which a check restricted to a
+    bare `ast.Name` target never saw -- so `fact` still read as the
+    *outer* alias for the whole function it appears in, the same
+    "unconditionally inherit the parent's alias set" false positive the
+    shadowing fix already closed for a plain `fact = ...`/parameter
+    binding, just reached through a different target shape. An
+    `ast.Attribute`/`ast.Subscript` target (`obj.fact = x`, `d["fact"] =
+    x`) binds no new *name* at all -- correctly ignored here, the same as
+    the shadowing fix's existing exclusion.
+    """
+    names: list[str] = []
+    if isinstance(target, ast.Name):
+        names.append(target.id)
+    elif isinstance(target, ast.Starred):
+        names.extend(_bound_names(target.value))
+    elif isinstance(target, (ast.Tuple, ast.List)):
+        for elt in target.elts:
+            names.extend(_bound_names(elt))
+    return names
 
 
 def _fact_aliases(tree: ast.Module, qualnames: dict[int, str]) -> dict[str, set[str]]:
@@ -370,14 +420,22 @@ def _fact_aliases(tree: ast.Module, qualnames: dict[int, str]) -> dict[str, set[
     # module, just applied here to exclude a name rather than include one.
     locally_bound: dict[str, set[str]] = {}
     for node in ast.walk(tree):
-        if (
-            isinstance(node, ast.Assign)
-            and len(node.targets) == 1
-            and isinstance(node.targets[0], ast.Name)
-        ):
+        if isinstance(node, ast.Assign):
             qualname = qualnames.get(node.lineno, "<module>")
-            candidates.setdefault(qualname, []).append((node.targets[0].id, node.value))
-            locally_bound.setdefault(qualname, set()).add(node.targets[0].id)
+            for target in node.targets:
+                for name in _bound_names(target):
+                    locally_bound.setdefault(qualname, set()).add(name)
+            # The alias-*candidate* pool (a specific value attributed to a
+            # specific name, fed through the fixed point below) stays
+            # restricted to the simple single-`Name`-target shape -- a
+            # tuple-unpacking target (`a, b = pair`) has no single value
+            # to attribute to `a` alone, so it can only ever widen
+            # `locally_bound` (correct: it's still a real binding), never
+            # `candidates`.
+            if len(node.targets) == 1 and isinstance(node.targets[0], ast.Name):
+                candidates.setdefault(qualname, []).append(
+                    (node.targets[0].id, node.value)
+                )
         elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
             qualname = qualnames.get(node.lineno, "<module>")
             locally_bound.setdefault(qualname, set()).add(node.target.id)
@@ -385,6 +443,28 @@ def _fact_aliases(tree: ast.Module, qualnames: dict[int, str]) -> dict[str, set[
                 aliases.setdefault(qualname, set()).add(node.target.id)
             elif node.value is not None:
                 candidates.setdefault(qualname, []).append((node.target.id, node.value))
+        elif isinstance(node, (ast.For, ast.AsyncFor)):
+            # `for fact, other in pairs:` -- the same tuple-unpacking
+            # binding as `ast.Assign`, just via a loop target instead
+            # (Codex review, fresh evidence: "the other Python binding
+            # forms" alongside unpacking).
+            qualname = qualnames.get(node.lineno, "<module>")
+            for name in _bound_names(node.target):
+                locally_bound.setdefault(qualname, set()).add(name)
+        elif isinstance(node, (ast.With, ast.AsyncWith)):
+            # `with ctx() as fact:` -- likewise a real local binding.
+            qualname = qualnames.get(node.lineno, "<module>")
+            for item in node.items:
+                if item.optional_vars is not None:
+                    for name in _bound_names(item.optional_vars):
+                        locally_bound.setdefault(qualname, set()).add(name)
+        elif isinstance(node, ast.ExceptHandler):
+            # `except SomeError as fact:` -- `node.name` is a bare `str`,
+            # not an `ast.Name` (Python's own grammar for this one binding
+            # form), so it doesn't go through `_bound_names`.
+            if node.name is not None:
+                qualname = qualnames.get(node.lineno, "<module>")
+                locally_bound.setdefault(qualname, set()).add(node.name)
         elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
             qualname = qualnames.get(node.lineno, "<module>")
             all_args = (
