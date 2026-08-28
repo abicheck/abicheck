@@ -48,15 +48,21 @@ its own section below), PR 4 changes what a CI job's exit code means.
 > assignments and `gate.*` fields (PR B's scope is wider than the 2026-08-16
 > update above states — see that section for the current breakdown); the
 > PR 3B build-context-completeness gaps (forced pre-includes, matched-unit
-> include scoping) are closed. #883 itself fixed a real bundle-facts gap
-> this plan's PR B/bundle sections should account for: `PolicyFile` now
-> reaches both per-library *and* bundle-level verdicts (it previously
-> reached only per-library), the JSON resource budget is now applied
-> uniformly to archive and plain-JSON bundle-facts input, and
+> include scoping) are closed. #883 itself fixed a real bundle-facts gap:
+> `PolicyFile` now reaches both per-library *and* bundle-level verdicts (it
+> previously reached only per-library), the JSON resource budget is now
+> applied uniformly to archive and plain-JSON bundle-facts input, and
 > `DEFAULT_SYSTEM_PROVIDERS` grew several more vendor runtimes (oneTBB,
 > oneMKL, Intel runtime, Level Zero) — the latter is explicitly a tactical
-> fix, not the topology model PR B's bundle section still needs (see that
-> section for why a growing global allow-list isn't the end state).
+> fix, not a real topology model for bundle-level system-provider
+> classification. **Correction (2026-08-28): this was never actually PR B's
+> own scope** — PR B's two stated goals (pack parity, effective-config
+> digest) are about *configuration* reaching every front end, not about
+> bundle *verdict topology*; the growing-allow-list gap and the sibling
+> "bundle-level findings never respect any policy override" gap this same
+> review round found are recorded as their own, separate, undesigned
+> feature in the root `AGENTS.md`'s "Known gaps" section instead — see PR
+> B's own "finalized" note below for why they don't block PR B closing.
 > **PR 0B/P0 is still the single outstanding item with no code-side gap
 > left** — see its status note below for the ready-to-apply Ruleset
 > artifact this pass added. PR C (typed dump/scan convergence) remains the
@@ -2989,10 +2995,38 @@ report.
 > from `TestGateBlanking` to assert the new, accurate provenance instead of
 > the old blanked-to-default one.
 
+> **PR B finalized (2026-08-28).** Both of PR B's own stated goals are fully
+> landed: pack parity across every front end (`compare`, the release
+> fan-out, `scan --against`, both `policy.overrides`/`surface.
+> internal_namespaces` *and* `gate.*` fields — slices 1-3) and the
+> effective-config digest recorded in every report (slice 4). The one
+> remaining loose end named above — a typed `GateOptions` object the
+> release fan-out's own severity/exit-code-scheme resolution is built from,
+> replacing its six-raw-string threading — is deliberately **not** PR B's
+> to close. It was investigated in slice 4's own pass and found to need a
+> genuine rewrite of the release fan-out's internal representation, in the
+> single most reviewed area of this plan, immediately ahead of PR G2's own
+> not-yet-designed rewrite of the identical logic (the ADR-gated one-gate-
+> algorithm unification `--exit-code-scheme` removal needs) — building it
+> now risks colliding with a design that doesn't exist yet, rather than
+> simplifying ahead of it. Reassigned explicitly to PR G2 as one of *its*
+> prerequisites (see that section's own "(1) Pack parity" and "(2) One
+> canonical `ExitDecision`" pair below — the `GateOptions` unification
+> belongs with (2), since it's the same rewrite), not tracked as
+> outstanding PR B work. See the "Ordering" table at the bottom, which now
+> marks PR B **(DONE)** on this basis.
+
 This is also PR 1b/E's prerequisite, which is why it sits early in the
 reviewed ordering rather than inside PR 4.
 
-**(2) One canonical `ExitDecision` — the review's PR G proper.** Since #780
+**(2) One canonical `ExitDecision` — the review's PR G proper.** This
+prerequisite also inherits PR B's one deliberately-deferred item (see PR B's
+"finalized" note above): the release fan-out's own severity/exit-code-scheme
+resolution still threads six raw strings through four functions instead of
+one typed `GateOptions` object the way `compare`/`scan` already share via
+`ResolvedCompareConfig`. That rewrite belongs here, not as separate PR B
+follow-up, since it touches the identical exit-code-computation logic this
+`ExitDecision` unification is already rewriting. Since #780
 this is no longer two axes but a set of them, and a flat `max()` is not the
 whole rule: scan budget overflow (`5`) is scan-only, and so is a pinned depth
 whose evidence can't be collected (`_EvidenceContractError`, exit `1`); usage
@@ -3213,11 +3247,14 @@ slice that made it safe.
 ```text
 PR A  repository governance          = PR 0B — required checks / Ruleset,
                                        exact-merge-SHA verification
-PR B  effective configuration parity — packs resolved once into one
-                                       CompatibilityEvaluationConfig +
-                                       GateOptions, shared by compare /
-                                       release / scan / Action, digest in
-                                       every report
+PR B  effective configuration parity  — packs resolved once into one
+      (DONE)                           CompatibilityEvaluationConfig, pack
+                                       parity across every front end, and
+                                       an effective-config digest in every
+                                       report; the release fan-out's own
+                                       typed GateOptions object is
+                                       deliberately reassigned to PR G2,
+                                       see PR B's own section for why
 PR C  typed dump+scan convergence     = PR 3A — DumpRequest →
                                        ResolvedDumpRequest → DumpResult, one
                                        resolver for dump CLI/Python/Action
