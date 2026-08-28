@@ -1434,10 +1434,19 @@ elif [[ "$MODE" == "scan" ]]; then
       # value has no line-based limit: setting IFS to comma alone (no
       # whitespace) makes unquoted expansion split only on commas, embedded
       # newlines included, matching str.split(",") exactly.
+      # -f (noglob) is required alongside IFS splitting: an unquoted array
+      # assignment word-splits *then* pathname-expands each resulting word,
+      # so a member containing a glob metacharacter (e.g. "*.so,z.so") would
+      # otherwise silently expand "*.so" against the working directory and
+      # scan whatever files happen to match, not the literal requested
+      # member (Codex review, security-relevant for an untrusted Action
+      # input).
       _old_ifs="$IFS"
       IFS=','
-      # shellcheck disable=SC2206  # intentional word-splitting on IFS=','
+      set -f
+      # shellcheck disable=SC2206  # intentional word-splitting on IFS=','; -f above suppresses globbing
       _scan_artifact_set_members=($SCAN_ARTIFACT_SET)
+      set +f
       IFS="$_old_ifs"
       for _scan_artifact_set_member in "${_scan_artifact_set_members[@]}"; do
         # Trim surrounding whitespace (xargs-free, no subshell/echo pitfalls).

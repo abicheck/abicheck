@@ -62,7 +62,7 @@ def _bash_executable() -> str:
     return "bash"
 
 
-def _run_cmd(env_extra: dict[str, str]) -> list[str]:
+def _run_cmd(env_extra: dict[str, str], *, cwd: Path | None = None) -> list[str]:
     """Source the real mode-branch region with *env_extra* set, return CMD."""
     script = (
         _mode_branches_region()
@@ -78,7 +78,7 @@ def _run_cmd(env_extra: dict[str, str]) -> list[str]:
     try:
         result = subprocess.run(
             [_bash_executable(), script_path],
-            capture_output=True, text=True, encoding="utf-8", env=env,
+            capture_output=True, text=True, encoding="utf-8", env=env, cwd=cwd,
         )
     finally:
         os.unlink(script_path)
@@ -168,6 +168,27 @@ class TestScanArtifactSetForwarding:
         assert cmd[i + 1] == "a.so"
         j = cmd.index("--artifact-set", i + 1)
         assert cmd[j + 1] == "b.so"
+
+    def test_new_library_set_does_not_glob_expand_members(
+        self, tmp_path: Path
+    ) -> None:
+        # P2 regression (Codex review, security-relevant): an unquoted array
+        # assignment word-splits *then* pathname-expands each word, so a
+        # member containing a glob metacharacter (e.g. "*.so") would
+        # otherwise silently expand against whatever happens to match in the
+        # working directory instead of being forwarded literally. A decoy
+        # file that *would* match if globbing fired proves the negative.
+        (tmp_path / "decoy.so").touch()
+        cmd = _run_cmd(
+            {"INPUT_MODE": "scan", "INPUT_NEW_LIBRARY_SET": "*.so,z.so"},
+            cwd=tmp_path,
+        )
+        assert cmd.count("--artifact-set") == 2
+        i = cmd.index("--artifact-set")
+        assert cmd[i + 1] == "*.so"
+        j = cmd.index("--artifact-set", i + 1)
+        assert cmd[j + 1] == "z.so"
+        assert "decoy.so" not in cmd
 
     def test_new_library_set_forwards_bundle_system_providers(self) -> None:
         cmd = _run_cmd(
