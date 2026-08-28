@@ -1168,3 +1168,133 @@ def _locally_bound_constructor_shadow_names(
             for alias in node.names:
                 _add(qualname, alias.asname or alias.name.split(".", 1)[0])
     return shadows
+
+
+def _scope_chain_union(
+    qualname: str, per_scope: dict[str, set[str]], lexical_parents: dict[str, str]
+) -> set[str]:
+    """Union *per_scope*'s own entry for *qualname* with every one of its
+    lexical-function ancestors' entries, walking `lexical_parents` (the
+    real closure-scope chain, skipping class layers) until it bottoms
+    out at `"<module>"` -- the shared "does this name resolve to
+    something bound anywhere in my own closure chain" walk this module's
+    several independent per-scope dicts (a shadowed constructor name, a
+    constructor alias, a constructor-method alias) all need identically
+    (Codex review, fresh evidence: `def outer(Fact): def inner(other):
+    return Fact(1) == other` -- `inner`'s own entry is empty, since
+    `Fact` is `outer`'s binding, not `inner`'s own, but `inner` still
+    genuinely sees it through the closure). One shared walk instead of
+    the identical loop hand-rolled once per dict.
+    """
+    result: set[str] = set()
+    seen: set[str] = set()
+    current: str | None = qualname
+    while current is not None and current not in seen:
+        seen.add(current)
+        result |= per_scope.get(current, set())
+        current = lexical_parents.get(current)
+    return result
+
+
+def _constructor_alias_names(
+    tree: ast.Module,
+    qualnames: _QualnameSpans,
+    fact_names: frozenset[str],
+    locally_bound_shadows: dict[str, set[str]],
+    lexical_parents: dict[str, str],
+) -> dict[str, set[str]]:
+    """Map each scope's own qualname to local names bound, via a plain
+    single-target assignment, directly to the `Fact` constructor itself
+    (or an already-recognized alias of it) -- `F = Fact` -- as opposed to
+    a `Fact[T]` *value* (`_fact_aliases()`'s own, differently-shaped
+    concern) (Codex review, fresh evidence): `F(1) == other`/`F.
+    present(1) == other` are exactly as real a misuse as `Fact(1) ==
+    other`/`Fact.present(1) == other`, since `F` is the identical
+    constructor under a local name, but `_is_fact_typed_expr()`'s own
+    constructor-call recognition is a scope-blind lookup against the
+    single, whole-tree `fact_names` set, with no notion of a *local*
+    rebinding extending it. Deliberately narrow, no type inference: only
+    `target = <bare Name in fact_names>`, a single target, is recognized
+    -- a further, transitive rename (`G = F`) is a real, if narrower,
+    sibling gap left uncollected, the identical "one hop only" limit
+    already accepted elsewhere in this module's own alias tracking.
+
+    **`locally_bound_shadows`/`lexical_parents` guard a real false
+    positive found during this fix's own proactive sibling verification,
+    not a reported finding**: `def f(Fact, other): F = Fact; return F(1)
+    == other` has a parameter named `Fact` shadowing the real constructor
+    for the whole function, so `F = Fact` binds `F` to that *parameter's*
+    runtime value, not to the real `Fact` constructor -- registering `F`
+    as a constructor alias here would fabricate a misuse site out of an
+    unrelated local rebinding. Skipped whenever the RHS name is itself
+    shadowed anywhere in its own closure-scope chain
+    (`_scope_chain_union`), the identical check `is_fact_typed()` already
+    applies to a bare constructor reference.
+    """
+    aliases: dict[str, set[str]] = {}
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Assign) or len(node.targets) != 1:
+            continue
+        target = node.targets[0]
+        value = node.value
+        if (
+            isinstance(target, ast.Name)
+            and isinstance(value, ast.Name)
+            and value.id in fact_names
+        ):
+            qualname = _qualname_at((node.lineno, node.col_offset), qualnames)
+            if value.id in _scope_chain_union(
+                qualname, locally_bound_shadows, lexical_parents
+            ):
+                continue
+            aliases.setdefault(qualname, set()).add(target.id)
+    return aliases
+
+
+def _constructor_method_alias_names(
+    tree: ast.Module,
+    qualnames: _QualnameSpans,
+    fact_names: frozenset[str],
+    locally_bound_shadows: dict[str, set[str]],
+    lexical_parents: dict[str, str],
+) -> dict[str, set[str]]:
+    """Map each scope's own qualname to local names bound, via a plain
+    single-target assignment, to an *unbound reference* of one of the
+    `Fact` constructor's own classmethods -- `make_fact = Fact.present`
+    (Codex review, fresh evidence): a later *direct* call `make_fact(1)`
+    is exactly `Fact.present(1)`, but nothing recognized `make_fact` as
+    anything at all. Unlike `_constructor_alias_names()` (where the bound
+    name behaves exactly like `Fact` itself, in both call and further-
+    attribute-access position), a classmethod reference is only ever
+    meaningfully *called directly* -- `make_fact.present(...)` would be
+    nonsensical -- so this is tracked as its own, separate set rather
+    than folded into the constructor-alias one, and the caller must
+    check it only against a direct `ast.Call` whose own `func` is a bare
+    `ast.Name`, never composed into the general `fact_names` substitution
+    the constructor-alias set participates in.
+
+    **`locally_bound_shadows`/`lexical_parents` guard the identical
+    shadowing hazard `_constructor_alias_names()`'s own docstring
+    describes** -- `def f(Fact, other): make_fact = Fact.present; ...`
+    with `Fact` itself a shadowing parameter would otherwise fabricate a
+    classmethod alias off the parameter's own runtime value.
+    """
+    aliases: dict[str, set[str]] = {}
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Assign) or len(node.targets) != 1:
+            continue
+        target = node.targets[0]
+        value = node.value
+        if (
+            isinstance(target, ast.Name)
+            and isinstance(value, ast.Attribute)
+            and isinstance(value.value, ast.Name)
+            and value.value.id in fact_names
+        ):
+            qualname = _qualname_at((node.lineno, node.col_offset), qualnames)
+            if value.value.id in _scope_chain_union(
+                qualname, locally_bound_shadows, lexical_parents
+            ):
+                continue
+            aliases.setdefault(qualname, set()).add(target.id)
+    return aliases

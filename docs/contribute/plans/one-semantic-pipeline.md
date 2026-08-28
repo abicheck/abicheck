@@ -5152,6 +5152,71 @@ had ample headroom, unlike the script file itself):
 `TestAliasResolutionInsideAStaticSubscript` (8 tests) in
 `tests/test_fact_detector_misuse_static_subscript.py`.
 
+**A further round tracked assignment aliases of the `Fact` constructor
+itself** (Codex review, fresh evidence): `F = Fact` or `make_fact =
+Fact.present`, followed by `F(1) == other`/`make_fact(1) == other`,
+went unrecognized -- `F`/`make_fact` is a genuine, if local, name for
+the identical constructor, not merely a shadow of it, but neither
+`_is_fact_typed_expr()`'s scope-blind lookup nor the shadow-tracking
+fix above had any notion of a local rebinding *extending* the
+constructor set. Reproduced both sub-cases directly (0 hits, expected
+1 each) before designing a fix.
+
+Given `fact_detector_misuse.py`'s tight headroom (1959/2000 lines),
+both new collectors -- `_constructor_alias_names()` (`F = Fact`: a
+bound name behaves exactly like `Fact` itself, in both call and
+further-attribute-access position, so it's *added* into the effective
+`fact_names` set the same way a shadow is subtracted) and
+`_constructor_method_alias_names()` (`make_fact = Fact.present`: an
+*unbound classmethod reference*, tracked as its own, separate set,
+recognized only against a direct `ast.Call` whose `func` is a bare
+`ast.Name`, never composed into the general substitution set -- a
+further attribute access off it, `make_fact.foo`, would be nonsensical)
+-- went into `fact_detector_misuse_scope.py`, which had ample room. The
+existing hand-rolled closure-scope-chain walk in `fact_detector_misuse.
+py` (`_shadowed_constructor_names()`) was also generalized into a new
+shared `_scope_chain_union()` helper (in the scope module) and reused
+for both the shadow set and the two new alias sets, netting a small
+reduction in the primary file's own line count that offset most of the
+new wiring code -- both fixed-cap files stayed within budget without a
+module split this round. Both `F = Fact` and `make_fact = Fact.present`
+are recognized only via a plain single-target `ast.Assign` (no type
+inference, "one hop only" -- a further transitive rename `G = F` is a
+documented, accepted residual, the identical limit already accepted
+elsewhere in this module's alias tracking).
+
+**Proactive sibling verification for this round found a real false
+positive of its own, before it shipped, not a reported finding**:
+`def f(Fact, other): F = Fact; return F(1) == other` has a parameter
+named `Fact` shadowing the real constructor for the whole function, so
+`F = Fact` binds `F` to that *parameter's* runtime value, not to the
+real constructor -- registering `F` as a constructor alias
+unconditionally would have fabricated a misuse site out of an unrelated
+local rebinding, and the identical hazard applies to the classmethod-
+alias form. Fixed by threading `locally_bound_shadows`/`lexical_parents`
+into both new collectors and skipping registration whenever the RHS
+name is itself shadowed anywhere in its own closure-scope chain (via
+the same `_scope_chain_union()` walk), including through a nested
+closure over the shadowing outer scope.
+
+Verified via direct AST reproduction against 20 cases before writing
+any test: both reported sub-cases, a classmethod alias of a different
+method, aliasing through an already-import-aliased name (both bare and
+classmethod forms), nested-closure inheritance of both alias kinds, a
+sibling function unaffected, a bare alias composing with a further
+attribute call, the transitive (two-hop) alias correctly *not* chased,
+both alias kinds correctly *not* recognized via tuple-unpack (not a
+single target), two negative controls (aliasing an unrelated name,
+aliasing a non-`Fact` attribute access), both pre-existing regressions
+(bare import, classmethod constructor) still recognized, the
+shadow-guard false positive fixed in both forms, and the shadow-guard
+holding through a nested closure. `mypy`/`ruff` both stayed clean;
+`fact_detector_misuse.py` at 1966 lines and `fact_detector_misuse_
+scope.py` at 1300 lines, both still under their respective caps. New
+tests: `TestConstructorAssignmentAliasesAreRecognized` (13 tests) and
+`TestShadowedConstructorSuppressesItsOwnAlias` (3 tests), both appended
+to `tests/test_fact_detector_misuse_constructor_shadow.py`.
+
 ---
 
 ### Phase 1 — finish the `dump`/`scan` typed-API convergence (closes AGENTS.md "PR C")

@@ -69,6 +69,8 @@ if str(Path(__file__).resolve().parent) not in sys.path:
     sys.path.insert(0, str(Path(__file__).resolve().parent))
 from fact_detector_misuse_scope import (  # noqa: E402
     _bound_names,
+    _constructor_alias_names,
+    _constructor_method_alias_names,
     _def_containing_qualnames,
     _enclosing_qualnames,
     _lexical_function_parents,
@@ -78,6 +80,7 @@ from fact_detector_misuse_scope import (  # noqa: E402
     _paired_unpacking_candidates,
     _qualname_at,
     _QualnameSpans,
+    _scope_chain_union,
 )
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -1851,46 +1854,46 @@ def fact_equality_misuse_sites(tree: ast.Module, rel: str) -> list[tuple[int, in
     fact_names = _imported_fact_aliases(tree)
     locally_bound_shadows = _locally_bound_constructor_shadow_names(tree, qualnames)
     lexical_parents = _lexical_function_parents(tree)
-
-    def _shadowed_constructor_names(qualname: str) -> set[str]:
-        # A locally-bound name (a parameter, an assignment/loop/
-        # comprehension target, or a renaming import) shadows an outer
-        # `Fact` (or an imported alias of it) not just within that scope
-        # itself, but for every *nested* function closing over it too,
-        # the ordinary Python closure rule (Codex review, fresh
-        # evidence: `def outer(Fact): def inner(other): return Fact(1)
-        # == other` -- `inner`'s own `locally_bound_shadows` entry is
-        # empty, since `Fact` is `outer`'s parameter, not `inner`'s own
-        # -- but `inner` still genuinely sees `outer`'s `Fact`, not the
-        # module-level one). Walks the real lexical-function-parent
-        # chain (skipping class layers, the identical closure-scope
-        # chain `_fact_aliases()`'s own alias inheritance already
-        # walks), unioning every ancestor's own bound-name set rather
-        # than stopping at the first one.
-        shadowed: set[str] = set()
-        seen: set[str] = set()
-        current: str | None = qualname
-        while current is not None and current not in seen:
-            seen.add(current)
-            shadowed |= locally_bound_shadows.get(current, set())
-            current = lexical_parents.get(current)
-        return shadowed
+    constructor_aliases = _constructor_alias_names(
+        tree, qualnames, fact_names, locally_bound_shadows, lexical_parents
+    )
+    constructor_method_aliases = _constructor_method_alias_names(
+        tree, qualnames, fact_names, locally_bound_shadows, lexical_parents
+    )
 
     def is_fact_typed(node: ast.expr, qualname: str) -> bool:
         # `def f(Fact, other): return Fact(1) == other` -- an ordinary
         # parameter reusing the constructor's own name shadows it for
-        # the whole function (Codex review, fresh evidence):
-        # `_is_fact_typed_expr()`'s constructor-call recognition is a
-        # pure, scope-blind lookup against the single, whole-tree
-        # `fact_names` set, so a locally-shadowed `Fact` was still
-        # treated as the real constructor. Filtered per-qualname via
-        # `_shadowed_constructor_names()` -- see `_locally_bound_
-        # constructor_shadow_names()`'s own docstring for exactly which
-        # binding forms this covers (parameters, assignment/loop/
-        # comprehension targets, and a renaming import) and which
-        # narrower forms are an accepted, documented residual.
-        effective_fact_names = fact_names - _shadowed_constructor_names(qualname)
+        # the whole function (Codex review, fresh evidence): `_is_fact_
+        # typed_expr()`'s constructor-call recognition is a pure,
+        # scope-blind lookup against the single, whole-tree `fact_names`
+        # set, so a locally-shadowed `Fact` was still treated as the
+        # real constructor. `F = Fact` is the opposite direction of the
+        # same gap -- a real local alias of the constructor itself
+        # (`_constructor_alias_names()`), not merely a shadow -- so it's
+        # *added* into the effective set the same way a shadow is
+        # subtracted from it; both walk the real closure-scope chain via
+        # `_scope_chain_union()`, see `_locally_bound_constructor_
+        # shadow_names()`/`_constructor_alias_names()`'s own docstrings
+        # for exactly which binding forms each covers.
+        effective_fact_names = fact_names - _scope_chain_union(
+            qualname, locally_bound_shadows, lexical_parents
+        ) | _scope_chain_union(qualname, constructor_aliases, lexical_parents)
         if _is_fact_typed_expr(node, effective_fact_names):
+            return True
+        if (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Name)
+            and node.func.id
+            in _scope_chain_union(qualname, constructor_method_aliases, lexical_parents)
+        ):
+            # `make_fact = Fact.present; make_fact(1) == other` -- a
+            # direct call through a local name bound to an *unbound
+            # classmethod reference*, not the constructor name itself
+            # (`_constructor_method_alias_names()`'s own docstring: this
+            # is why it's a separate set, never folded into
+            # `effective_fact_names`, which participates in the general
+            # `Attribute`-call recognition too).
             return True
         if isinstance(node, ast.Name):
             return node.id in aliases.get(qualname, ())
