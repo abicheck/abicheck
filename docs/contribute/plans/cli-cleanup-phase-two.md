@@ -2462,6 +2462,91 @@ pipelines a fourth time.
   > characterized instead of merely "unverifiable" or "needs its own
   > dedicated pass" in the abstract.
 
+  > **A new, previously-undocumented divergence found while investigating
+  > item 2's migration risk directly (2026-08-28): `dump`'s own CLI L4
+  > extractor default disagrees with `compare`'s implicit-dump operand and
+  > the typed `execute_dump_request` pipeline — a real bug, unrelated to
+  > whether the migration happens, and it changes the migration's risk
+  > profile rather than only its verification burden.** Traced end to end,
+  > not guessed: `perform_elf_dump` (`cli_dump_helpers.py`) receives
+  > `header_backend` from the CLI's own resolved value and forwards it
+  > **unresolved** — `extractor=header_backend`, still the literal string
+  > `"auto"` when `--ast-frontend` is not given — all the way down through
+  > `_write_snapshot_output` → `embed_build_source` → `collect_inline_pack`
+  > to `buildsource.inline._make_source_extractor`, which (per its own,
+  > already-documented behavior) treats anything but the literal string
+  > `"castxml"` as clang. So a plain `dump --depth source` with no explicit
+  > `--ast-frontend` resolves its L4 source-ABI replay to **clang**.
+  > Confirmed with a debug spy on the real CLI invocation (`header_backend`
+  > captured as the literal `"auto"` at the `perform_elf_dump` call site).
+  >
+  > `compare`'s implicit-dump operand and `execute_dump_request` both reach
+  > L4 replay through the *same* shared primitive,
+  > `workflows.artifact.execute.embed_side_build_source`, whose
+  > `source_extractor: str | None = None` parameter's own docstring already
+  > states the contract: `None` keeps that function's own
+  > `service_compare_evidence.effective_frontend` resolution, which resolves
+  > `"auto"` to **castxml** unconditionally (the identical resolution this
+  > plan's item 2 notes above already established for the L2 header-AST
+  > pass). Neither caller passes an override, so both correctly resolve to
+  > castxml. Confirmed directly: a `dump`-CLI-written baseline's
+  > `build_source.source_abi.coverage.fact_set.producer` reads
+  > `"abicheck-cc-clang-extractor"`; the identical input run through
+  > `resolve_dump_request`/`execute_dump_request` reads `"castxml-source"`.
+  > Every other field of the two runs' *flat* (L0-L2) snapshot payload was
+  > confirmed byte-identical (modulo `created_at`/`dependency_scope`, both
+  > already-documented, expected differences) — this is specifically an L4
+  > extractor-selection divergence, not a wider parity gap.
+  >
+  > This is a **third** instance of the "L4 extractor default" divergence
+  > this plan already tracks for `scan` (item 2, two notes above) — but on
+  > the opposite side of the pairing this whole area cares about most:
+  > `scan`'s own candidate resolution *also* defaults to clang (documented),
+  > so a `scan --against` a `dump`-CLI-written baseline happens to have both
+  > sides agree by accident (verified: `scan --against` a plain `dump`
+  > baseline for the fixture above reports `NO_CHANGE`, not
+  > `NOT_COMPARABLE`) — but `compare oldbaseline.json new.so` (`dump`'s own
+  > CLI baseline against `compare`'s own implicit-dump resolution of the
+  > live binary) pairs a clang-derived old side against a castxml-derived
+  > new side, and neither the `profile_fingerprint`/`scope_fingerprint`
+  > comparability gate nor the extractor choice itself is recorded anywhere
+  > a consumer can see, so this does **not** surface as `NOT_COMPARABLE` —
+  > it silently produces two different sets of L4-derived facts for the
+  > "same" comparison, real only when the two extractors actually disagree
+  > about a declaration (item 3's own castxml phantom-implicit-member bug
+  > is exactly such a disagreement: clang does not have it, so a clang-L4
+  > `dump` baseline compared against a castxml-L4 live resolution of a class
+  > with implicit special members is a live vector for a spurious
+  > `source_binary_provenance_mismatch`-shaped finding, though this was not
+  > separately reproduced with a repro that isolates it from item 3's own
+  > repro).
+  >
+  > **Deliberately not fixed here, in either direction, and here is why
+  > both "obvious" fixes are each their own real behavior change:** (a)
+  > making `dump`'s CLI resolve `header_backend` through
+  > `effective_frontend` before forwarding it as `extractor=` would align it
+  > with `compare`/the typed pipeline — but it would also mean every plain
+  > `dump --depth source` newly inherits item 3's still-open castxml
+  > phantom-implicit-member bug, which `dump`'s current (accidental) clang
+  > default does not have; that is a real regression for real users unless
+  > item 3 is fixed first. (b) making `compare`/the typed pipeline default
+  > to clang to match `dump`'s CLI would contradict the established,
+  > intentional "castxml is the canonical L2/L4 default" architecture this
+  > whole codebase is built around (`dumper._resolve_header_backend`), for
+  > reasons that have nothing to do with this one CLI code path. Either
+  > direction is a real, user-facing behavior change needing its own
+  > dedicated, verified pass — not a byproduct of characterizing item 2's
+  > migration risk. What this finding *does* change is item 2's own risk
+  > calculus: a naive migration of `dump`'s CLI onto `execute_dump_request`
+  > would, as a side effect, silently flip this default from clang to
+  > castxml (fixing this divergence but importing item 3's bug at the same
+  > time) — so "byte-identical to today's output" is not actually the right
+  > acceptance bar for L4 facts specifically; today's output is itself one
+  > side of a pre-existing, real disagreement, not a stable target to match.
+  > A correct migration plan needs to decide this divergence's resolution
+  > *before* attempting byte-identical verification, not discover it via a
+  > failing diff mid-migration.
+
 `dump --build-query` and `dump --build-compile-db` describe how the *project*
 is built, not what this snapshot is. They are already documented as CLI
 equivalents of the `.abicheck.yml` `build.query` / `build.compile_db` fields,
