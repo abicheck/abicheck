@@ -11,6 +11,7 @@
       "path": "abicheck/model",
       "may_import": [],
       "legacy_paths": [
+        "abicheck/buildsource/graph_facts.py",
         "abicheck/buildsource/model.py",
         "abicheck/buildsource/pack.py",
         "abicheck/buildsource/scan_levels.py",
@@ -25,6 +26,9 @@
       "path": "abicheck/storage",
       "may_import": [
         "model"
+      ],
+      "legacy_paths": [
+        "abicheck/buildsource/build_cache.py"
       ]
     },
     "extract": {
@@ -37,11 +41,30 @@
         "abicheck/_compiler_options.py",
         "abicheck/binary_utils.py",
         "abicheck/build_mode.py",
+        "abicheck/buildsource/archive_graph.py",
+        "abicheck/buildsource/build_config_schema.py",
+        "abicheck/buildsource/call_graph.py",
+        "abicheck/buildsource/callback_graph.py",
+        "abicheck/buildsource/clang_ast_run.py",
+        "abicheck/buildsource/comdat_groups.py",
         "abicheck/buildsource/embed.py",
+        "abicheck/buildsource/export_accounting.py",
+        "abicheck/buildsource/header_compile_context.py",
+        "abicheck/buildsource/header_graph.py",
+        "abicheck/buildsource/include_graph.py",
         "abicheck/buildsource/inline.py",
+        "abicheck/buildsource/inputs_emit.py",
         "abicheck/buildsource/inputs_pack.py",
         "abicheck/buildsource/l2_seed.py",
+        "abicheck/buildsource/link_attribution.py",
+        "abicheck/buildsource/macro_graph.py",
+        "abicheck/buildsource/override_graph.py",
+        "abicheck/buildsource/pack_shape.py",
+        "abicheck/buildsource/providers.py",
         "abicheck/buildsource/risk.py",
+        "abicheck/buildsource/template_graph_extractor.py",
+        "abicheck/buildsource/template_graph_value_decls.py",
+        "abicheck/buildsource/type_graph.py",
         "abicheck/debug_resolver.py",
         "abicheck/dump_manifest.py",
         "abicheck/dumper_clang.py",
@@ -56,8 +79,8 @@
         "abicheck/pe_metadata.py",
         "abicheck/python_api.py",
         "abicheck/python_ext.py",
-        "abicheck/symvers_metadata.py",
-        "abicheck/sycl_metadata.py"
+        "abicheck/sycl_metadata.py",
+        "abicheck/symvers_metadata.py"
       ]
     },
     "compare": {
@@ -66,6 +89,11 @@
         "model"
       ],
       "legacy_paths": [
+        "abicheck/buildsource/build_diff.py",
+        "abicheck/buildsource/crosscheck_base.py",
+        "abicheck/buildsource/crosscheck_coherence.py",
+        "abicheck/buildsource/graph_reconcile.py",
+        "abicheck/buildsource/source_diff.py",
         "abicheck/confidence.py",
         "abicheck/diff_abi_tags.py",
         "abicheck/diff_atomic.py",
@@ -131,6 +159,7 @@
         "policy"
       ],
       "legacy_paths": [
+        "abicheck/buildsource/baseline_publish.py",
         "abicheck/compatibility_evaluation_frontend.py",
         "abicheck/service.py",
         "abicheck/service_compare_evidence.py",
