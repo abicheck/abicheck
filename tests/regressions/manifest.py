@@ -516,7 +516,7 @@ BUG_CLASSES: tuple[BugClass, ...] = (
             "every kind has a mapping, and every mapping key names an "
             "existing kind."
         ),
-        fixed_by=(753, 759),
+        fixed_by=(753, 759, 932),
         seed_tests=(
             "tests/test_canonical_finding_id_completeness.py",
             "tests/test_report_classifications_unit.py",
@@ -558,7 +558,7 @@ BUG_CLASSES: tuple[BugClass, ...] = (
             "result must agree, checked independently, not all derived "
             "from one production helper."
         ),
-        fixed_by=(834, 838, 860, 883),
+        fixed_by=(834, 838, 860, 883, 932),
         seed_tests=(
             "tests/test_fact_conservation_properties.py",
             "tests/test_bundle_side_input.py",
