@@ -1235,6 +1235,27 @@ def _fact_aliases(tree: ast.Module, qualnames: _QualnameSpans) -> dict[str, set[
             qualname = _qualname_at((node.lineno, node.col_offset), qualnames)
             for name in _bound_names(node.target):
                 locally_bound.setdefault(qualname, set()).add(name)
+            # `for fact in (old.bases_fact, new.bases_fact): return fact ==
+            # other` -- a single loop target bound, one iteration at a
+            # time, to every element of a literal `Tuple`/`List` display
+            # (Codex review, fresh evidence). Unlike `_paired_unpacking_
+            # candidates` (which pairs *distinct* targets to distinct RHS
+            # elements in one assignment), every iteration reuses the
+            # *same* target name -- so the alias only holds if *every*
+            # element is definitively Fact-typed, not merely one of them
+            # (`for x in (rec.bases_fact, some_other_call()):` must stay
+            # unflagged, since `x` is only sometimes a Fact). One
+            # representative element is enough for the fixed point below,
+            # which only asks whether *a* candidate value is Fact-typed.
+            if (
+                isinstance(node.target, ast.Name)
+                and isinstance(node.iter, (ast.Tuple, ast.List))
+                and node.iter.elts
+                and all(_is_fact_typed_expr(elt, fact_names) for elt in node.iter.elts)
+            ):
+                candidates.setdefault(qualname, []).append(
+                    (node.target.id, node.iter.elts[0])
+                )
         elif isinstance(node, (ast.With, ast.AsyncWith)):
             # `with ctx() as fact:` -- likewise a real local binding.
             qualname = _qualname_at((node.lineno, node.col_offset), qualnames)
@@ -1402,6 +1423,40 @@ def _fact_aliases(tree: ast.Module, qualnames: _QualnameSpans) -> dict[str, set[
                         candidates.setdefault(enclosing, []).append(
                             (walrus.target.id, walrus.value)
                         )
+        elif isinstance(node, ast.ClassDef):
+            # A walrus inside a class base or metaclass keyword --
+            # `class C(make_base(fact := rec.vtable_fact)): ...` -- binds
+            # `fact` in the scope containing the `class` statement, the
+            # identical PEP 572-independent evaluation-time rule the
+            # `FunctionDef`/`AsyncFunctionDef`/`Lambda` branch above
+            # already applies to a default expression (Codex review,
+            # fresh evidence): a class header executes while the scope
+            # *containing* the class statement is active, before the
+            # new class's own body scope even exists, so the generic,
+            # position-based `NamedExpr` branch's `class-body` attribution
+            # -- correct for a walrus inside the body itself -- is wrong
+            # here, silently losing an alias a later, genuinely outer
+            # `fact == other` needs. `_default_and_annotation_scope_
+            # overrides()` already draws this identical distinction for
+            # the *read* side (`class Outer: fact = rec.bases_fact; class
+            # Inner(make_base(fact == other)): ...`); this is its sibling
+            # fix for a *binding* found the same way. Uses the same
+            # `def_containing`/`_iter_default_subtree` machinery -- a
+            # base/keyword containing its own lambda/comprehension stops
+            # at that boundary identically, and the walrus is excluded
+            # from the generic branch via `default_walrus_ids` so it
+            # isn't also (mis)processed there.
+            enclosing = def_containing.get((node.lineno, node.col_offset), "<module>")
+            for base_or_keyword in (*node.bases, *(kw.value for kw in node.keywords)):
+                for walrus in _iter_default_subtree(base_or_keyword):
+                    if isinstance(walrus, ast.NamedExpr) and isinstance(
+                        walrus.target, ast.Name
+                    ):
+                        default_walrus_ids.add(id(walrus))
+                        locally_bound.setdefault(enclosing, set()).add(walrus.target.id)
+                        candidates.setdefault(enclosing, []).append(
+                            (walrus.target.id, walrus.value)
+                        )
         elif isinstance(
             node, (ast.ListComp, ast.SetComp, ast.DictComp, ast.GeneratorExp)
         ):
@@ -1414,6 +1469,27 @@ def _fact_aliases(tree: ast.Module, qualnames: _QualnameSpans) -> dict[str, set[
             for generator in node.generators:
                 for name in _bound_names(generator.target):
                     locally_bound.setdefault(qualname, set()).add(name)
+                # The comprehension equivalent of the `for`-loop literal-
+                # collection case above -- `[fact == other for fact in
+                # (old.bases_fact, new.bases_fact)]` -- the identical
+                # every-element-Fact-typed requirement, attributed to the
+                # comprehension's own scope (`qualname`, already resolved
+                # above), which is where the target itself is bound
+                # regardless of which scope the iterable expression's own
+                # free names would resolve in (Codex review, fresh
+                # evidence).
+                if (
+                    isinstance(generator.target, ast.Name)
+                    and isinstance(generator.iter, (ast.Tuple, ast.List))
+                    and generator.iter.elts
+                    and all(
+                        _is_fact_typed_expr(elt, fact_names)
+                        for elt in generator.iter.elts
+                    )
+                ):
+                    candidates.setdefault(qualname, []).append(
+                        (generator.target.id, generator.iter.elts[0])
+                    )
 
     # A `global`/`nonlocal`-declared name is never a real local rebinding
     # -- exclude it from the shadowing subtraction now that every

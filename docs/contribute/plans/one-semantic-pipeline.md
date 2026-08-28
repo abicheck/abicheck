@@ -2073,6 +2073,72 @@ time_scope.py` (room remained under the architecture gate's 1200-line
 cap). Verified empirically: still zero existing hits in the real
 repository, and `mypy`/`ruff` both stayed clean.
 
+**A further Codex review round found two more real gaps, both direct
+siblings of already-fixed shapes above, both fixed.**
+
+**(1) A walrus inside a class base or metaclass keyword expression had no
+binding-side counterpart to the read-side fix already covering that same
+header text.** `_default_and_annotation_scope_overrides()`'s `ClassDef`
+branch already routes a bare `==`/`!=` comparison found directly in a
+base/keyword expression to the scope containing the `class` statement --
+but `_fact_aliases()`'s own walrus-binding handling (the branch that lets
+`(fact := rec.bases_fact)` be *usable* later, not just recognized
+inline) only ever special-cased a `FunctionDef`/`AsyncFunctionDef`/
+`Lambda`'s own default/annotation subtrees, with no equivalent branch for
+`ast.ClassDef` at all. `class C(make_base(fact := rec.vtable_fact)): ...`
+therefore bound `fact` in the not-yet-created class-body scope (the
+generic, position-based `NamedExpr` branch's default attribution), not
+the scope actually executing the class header -- silently losing an
+alias a later, genuinely outer `fact == other` needs. Fixed with the
+identical mechanism the `FunctionDef`/`Lambda` branch already uses,
+mirrored into a new `ast.ClassDef` branch: walk every base and keyword
+value through `_iter_default_subtree()`, register any walrus found there
+against `def_containing`'s own entry for the class statement, and mark
+it via `default_walrus_ids` so the generic branch doesn't also
+(mis)process it. One subtlety worth recording: `ast.ClassDef` already
+matches an *earlier*, unrelated `elif` branch in the same walk (the
+def/class own-name binding fix from an earlier round) -- placing the new
+branch there would have made it unreachable dead code, since Python's
+`elif` chain stops at the first match per node per loop iteration. The
+new branch instead joins the *second*, independent `if`/`elif` chain the
+`FunctionDef`/`Lambda` default-handling branch already starts (Python
+allows a fresh `if` after an `elif` chain ends; the two chains run
+sequentially, not exclusively, for a single node), confirmed correct by
+tracing a `ClassDef` node's own execution path through both chains
+directly rather than assuming placement.
+
+**(2) A single `for`/comprehension loop target bound, one iteration at a
+time, to every element of a literal `Tuple`/`List` display of
+Fact-typed values had no propagation at all -- the loop-target
+counterpart of `_paired_unpacking_candidates()`'s already-fixed
+assignment-side handling.** `for fact in (old.bases_fact, new.bases_
+fact): return fact == other` only ever recorded `fact` as an ordinary
+local binding (shadowing an *outer* alias correctly), never as a
+candidate in its own right, so the misuse this loop actually performs
+went undetected. Unlike the paired-unpacking case -- where *distinct*
+targets each pair with a *distinct* RHS element -- a loop target reuses
+the *same* name across every iteration, so the alias only holds if
+*every* element is definitively Fact-typed, not merely one of them
+(`for x in (rec.bases_fact, some_other_call()):` must stay unflagged,
+since `x` is only sometimes a Fact). Fixed by checking, for both `ast.
+For`/`ast.AsyncFor` and a comprehension's own each-generator loop, that
+the target is a bare `Name`, the iterable is a literal `Tuple`/`List`
+display, and every element satisfies `_is_fact_typed_expr()` before
+registering one representative element as a candidate (the fixed-point
+resolver only needs one Fact-typed candidate value per name to mark it
+known). Verified against the exact reported repro plus its comprehension
+form (`[fact == other for fact in (old.bases_fact, new.bases_fact)]`),
+a negative control with a mixed Fact/non-Fact tuple, a negative control
+with a bare (non-literal) iterable, and a negative control confirming
+the alias stays scoped to the function that actually established it
+(an unrelated sibling function's own same-named parameter is unaffected).
+
+Both fixes verified empirically: still zero existing hits in the real
+repository, and `mypy`/`ruff` both stayed clean. New tests in `tests/
+test_fact_detector_misuse_def_time_scope.py` (room remained under the
+architecture gate's 1200-line cap): `TestClassHeaderWalrusContainingScope`
+and `TestForLoopLiteralCollectionAliases`.
+
 ---
 
 ### Phase 1 — finish the `dump`/`scan` typed-API convergence (closes AGENTS.md "PR C")

@@ -423,3 +423,141 @@ class TestElementwiseTupleUnpackingAliases:
         )
         tree = ast.parse(src, filename="x.py")
         assert fact_equality_misuse_sites(tree, "x.py") == []
+
+
+class TestClassHeaderWalrusContainingScope:
+    """A walrus inside a class base or metaclass keyword expression is
+    the *binding*-side sibling of ``TestClassHeaderContainingScope``
+    above: it binds its target in the scope containing the `class`
+    statement, not the new class's own body (Codex review, fresh
+    evidence). The read-side fix already covered a comparison found
+    inside a base/keyword expression; this covers a walrus found there
+    that later needs to be *usable* as an alias outside the class."""
+
+    def test_detects_a_comparison_through_a_walrus_in_a_class_base(self) -> None:
+        """`class C(make_base(fact := rec.vtable_fact)): ...` -- `fact`
+        binds while the `class C(...)` header executes, in whatever
+        scope directly contains it, so a later, genuinely outer `fact ==
+        other` must resolve it."""
+        src = (
+            "def make_base(v):\n"
+            "    return object\n"
+            "def f(rec, other):\n"
+            "    class C(make_base(fact := rec.vtable_fact)):\n"
+            "        pass\n"
+            "    return fact == other\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert fact_equality_misuse_sites(tree, "x.py") == [(6, 11)]
+
+    def test_detects_a_comparison_through_a_walrus_in_a_metaclass_keyword(
+        self,
+    ) -> None:
+        """The identical containing-scope rule for a walrus inside a
+        keyword argument (e.g. `metaclass=`), not just a positional
+        base."""
+        src = (
+            "def make_meta(v):\n"
+            "    return type\n"
+            "def f(rec, other):\n"
+            "    class C(metaclass=make_meta(fact := rec.vtable_fact)):\n"
+            "        pass\n"
+            "    return fact == other\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert fact_equality_misuse_sites(tree, "x.py") == [(6, 11)]
+
+    def test_ignores_a_walrus_shadowed_by_a_real_outer_parameter(self) -> None:
+        """Negative control: an outer parameter of the same name
+        genuinely shadows the class-header walrus's target, so no
+        finding should fire."""
+        src = (
+            "def make_base(v):\n"
+            "    return object\n"
+            "def outer(fact):\n"
+            "    def f(rec, other):\n"
+            "        class C(make_base(fact := rec.vtable_fact)):\n"
+            "            pass\n"
+            "        return fact == other\n"
+            "    return f\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert fact_equality_misuse_sites(tree, "x.py") == [(7, 15)]
+
+
+class TestForLoopLiteralCollectionAliases:
+    """A single `for`/comprehension loop target bound, one iteration at a
+    time, to every element of a literal `Tuple`/`List` display of
+    definitively Fact-typed values is a real alias for the loop body
+    (Codex review, fresh evidence) -- the loop-target counterpart of
+    `_paired_unpacking_candidates`'s assignment-side handling."""
+
+    def test_detects_a_comparison_through_a_for_loop_over_a_fact_tuple(
+        self,
+    ) -> None:
+        src = (
+            "def f(old, new, other):\n"
+            "    for fact in (old.bases_fact, new.bases_fact):\n"
+            "        return fact == other\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert fact_equality_misuse_sites(tree, "x.py") == [(3, 15)]
+
+    def test_detects_a_comparison_through_a_for_loop_over_a_fact_list(self) -> None:
+        src = (
+            "def f(old, new, other):\n"
+            "    for fact in [old.bases_fact, new.bases_fact]:\n"
+            "        return fact == other\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert fact_equality_misuse_sites(tree, "x.py") == [(3, 15)]
+
+    def test_detects_a_comparison_through_a_comprehension_over_a_fact_tuple(
+        self,
+    ) -> None:
+        src = (
+            "def f(old, new, other):\n"
+            "    return [fact == other for fact in (old.bases_fact, new.bases_fact)]\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert fact_equality_misuse_sites(tree, "x.py") == [(2, 12)]
+
+    def test_ignores_a_for_loop_over_a_partially_fact_typed_tuple(self) -> None:
+        """Negative control: only *some* elements are Fact-typed, so the
+        loop target isn't reliably a Fact on every iteration -- must not
+        be treated as an alias."""
+        src = (
+            "def f(old, other):\n"
+            "    def some_call():\n"
+            "        return 1\n"
+            "    for x in (old.bases_fact, some_call()):\n"
+            "        return x == other\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert fact_equality_misuse_sites(tree, "x.py") == []
+
+    def test_ignores_a_for_loop_over_an_opaque_iterable(self) -> None:
+        """Negative control: an ordinary opaque iterable (a bare `Name`,
+        not a literal display) has no per-element evidence at all, so
+        this must not spuriously flag it."""
+        src = "def f(pairs, other):\n    for x in pairs:\n        return x == other\n"
+        tree = ast.parse(src, filename="x.py")
+        assert fact_equality_misuse_sites(tree, "x.py") == []
+
+    def test_ignores_a_sibling_functions_unrelated_comparison(self) -> None:
+        """Negative control: the alias is genuinely scoped to the
+        function whose loop actually established it -- an unrelated
+        sibling function's own, unrelated `fact == other` (a plain
+        parameter, never bound to a Fact anywhere in that function) must
+        not be flagged just because *some* function in the module has a
+        Fact-typed loop target of the same name."""
+        src = (
+            "def f(old, new):\n"
+            "    for fact in (old.bases_fact, new.bases_fact):\n"
+            "        pass\n"
+            "    return fact\n"
+            "def g(fact, other):\n"
+            "    return fact == other\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert fact_equality_misuse_sites(tree, "x.py") == []
