@@ -82,6 +82,23 @@ scope.py`) and an optional `global_names` parameter on
 every non-module ancestor's own contribution -- the name still resolves
 through whatever module scope's own entry says, since the walk reaches
 `"<module>"` as the chain's terminal scope regardless.
+
+**A further round found the shadow collector only ever recorded a
+`def`'s own *parameters*, never a nested `def`/`class` statement's own
+*name*** (`TestNestedDefinitionsShadowTheConstructorName` below): `def
+outer(other): def Fact(x): return x; return Fact(1) == other` was still
+read as the real constructor, since nothing recorded the nested
+function's own name as a binding in its containing scope -- the
+identical `STORE_NAME`/`STORE_FAST` rule an ordinary assignment already
+gets (Codex review, fresh evidence). Fixed by resolving each `def`/
+`class` node's own containing qualname via the already-existing
+`_def_containing_qualnames()` helper (used elsewhere in this module for
+the identical "a def/class statement's name binds into whatever
+namespace textually contains it" question) and recording the
+definition's own `.name` there, entirely inside `fact_detector_misuse_
+scope.py` -- no change to `fact_detector_misuse.py` itself was needed,
+which mattered given its own tight remaining headroom under the
+2000-line hard cap.
 """
 
 from __future__ import annotations
@@ -643,3 +660,138 @@ class TestGlobalDeclarationBypassesEnclosingShadow:
         )
         tree = ast.parse(src, filename="x.py")
         assert fact_equality_misuse_sites(tree, "x.py") == []
+
+
+class TestNestedDefinitionsShadowTheConstructorName:
+    """A nested `def Fact(...):`/`class Fact:` binds `Fact` as a local in
+    whatever scope directly *contains* it -- the same `STORE_NAME`/
+    `STORE_FAST` binding rule an ordinary assignment already gets, but
+    the collector previously recorded only such a definition's own
+    parameters, never the definition's own name (Codex review, fresh
+    evidence)."""
+
+    def test_nested_function_definition_shadows_the_constructor(self) -> None:
+        src = (
+            "from abicheck.model.fact import Fact\n"
+            "def outer(other):\n"
+            "    def Fact(x):\n"
+            "        return x\n"
+            "    return Fact(1) == other\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert fact_equality_misuse_sites(tree, "x.py") == []
+
+    def test_nested_class_definition_shadows_the_constructor(self) -> None:
+        src = (
+            "from abicheck.model.fact import Fact\n"
+            "def outer(other):\n"
+            "    class Fact:\n"
+            "        def __call__(self, x):\n"
+            "            return x\n"
+            "    return Fact(1) == other\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert fact_equality_misuse_sites(tree, "x.py") == []
+
+    def test_nested_function_shadow_is_scoped_to_its_own_function_only(self) -> None:
+        src = (
+            "from abicheck.model.fact import Fact\n"
+            "def outer(other):\n"
+            "    def Fact(x):\n"
+            "        return x\n"
+            "    return Fact(1) == other\n"
+            "def g(other):\n"
+            "    return Fact(1) == other\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        sites = fact_equality_misuse_sites(tree, "x.py")
+        assert len(sites) == 1
+        assert sites[0][0] == 7
+
+    def test_nested_class_shadow_is_scoped_to_its_own_function_only(self) -> None:
+        src = (
+            "from abicheck.model.fact import Fact\n"
+            "def outer(other):\n"
+            "    class Fact:\n"
+            "        def __call__(self, x):\n"
+            "            return x\n"
+            "    return Fact(1) == other\n"
+            "def g(other):\n"
+            "    return Fact(1) == other\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        sites = fact_equality_misuse_sites(tree, "x.py")
+        assert len(sites) == 1
+        assert sites[0][0] == 8
+
+    def test_further_nested_closure_inherits_a_def_shadowed_name(self) -> None:
+        src = (
+            "from abicheck.model.fact import Fact\n"
+            "def outer(other):\n"
+            "    def Fact(x):\n"
+            "        return x\n"
+            "    def inner():\n"
+            "        return Fact(1) == other\n"
+            "    return inner\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert fact_equality_misuse_sites(tree, "x.py") == []
+
+    def test_a_module_level_function_definition_also_shadows(self) -> None:
+        src = (
+            "from abicheck.model.fact import Fact\n"
+            "def Fact(x):\n"
+            "    return x\n"
+            "def g(other):\n"
+            "    return Fact(1) == other\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert fact_equality_misuse_sites(tree, "x.py") == []
+
+    def test_a_nested_definition_of_an_unrelated_name_is_unaffected(self) -> None:
+        """Regression guard: an ordinary nested `def helper(...):` must
+        not itself suppress recognition of the real constructor."""
+        src = (
+            "from abicheck.model.fact import Fact\n"
+            "def outer(other):\n"
+            "    def helper(x):\n"
+            "        return x\n"
+            "    return Fact(1) == other\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert len(fact_equality_misuse_sites(tree, "x.py")) == 1
+
+    def test_composes_with_the_global_bypass(self) -> None:
+        """A nested `global Fact` still routes straight to module scope
+        even when a sibling nested `def Fact` in the same enclosing
+        function would otherwise shadow it -- the two mechanisms don't
+        interfere with each other."""
+        src = (
+            "from abicheck.model.fact import Fact\n"
+            "def outer(other):\n"
+            "    def Fact(x):\n"
+            "        return x\n"
+            "    def inner():\n"
+            "        global Fact\n"
+            "        return Fact.present(1) == other\n"
+            "    return inner\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert len(fact_equality_misuse_sites(tree, "x.py")) == 1
+
+    def test_regressions_unaffected_bare_import_and_classmethod(self) -> None:
+        src = (
+            "from abicheck.model.fact import Fact\n"
+            "def f(other):\n"
+            "    return Fact(1) == other\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert len(fact_equality_misuse_sites(tree, "x.py")) == 1
+
+        src2 = (
+            "from abicheck.model.fact import Fact\n"
+            "def f(other):\n"
+            "    return Fact.present(1) == other\n"
+        )
+        tree2 = ast.parse(src2, filename="x.py")
+        assert len(fact_equality_misuse_sites(tree2, "x.py")) == 1

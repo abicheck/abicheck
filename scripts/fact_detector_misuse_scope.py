@@ -1119,11 +1119,24 @@ def _locally_bound_constructor_shadow_names(
     independent purpose.
     """
     shadows: dict[str, set[str]] = {}
+    def_containing = _def_containing_qualnames(tree)
 
     def _add(qualname: str, name: str) -> None:
         shadows.setdefault(qualname, set()).add(name)
 
     for node in ast.walk(tree):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            # A nested `def Fact(...):`/`class Fact:` binds `Fact` as a
+            # local in whatever scope directly *contains* it, not within
+            # its own new scope -- the identical `STORE_NAME`/`STORE_FAST`
+            # rule `_def_containing_qualnames()`'s own docstring states
+            # (Codex review, fresh evidence: `def outer(other): def
+            # Fact(x): return x; return Fact(1) == other` was still read
+            # as the real constructor, since nothing recorded the nested
+            # def's own name as a shadow, only its parameters).
+            containing = def_containing.get((node.lineno, node.col_offset))
+            if containing is not None:
+                _add(containing, node.name)
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)):
             qualname = _qualname_at((node.lineno, node.col_offset), qualnames)
             all_args = (

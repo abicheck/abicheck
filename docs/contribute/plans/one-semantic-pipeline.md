@@ -5268,6 +5268,47 @@ split) and `fact_detector_misuse_scope.py` at 1356 lines (still ample).
 New tests: `TestGlobalDeclarationBypassesEnclosingShadow` (10 tests),
 appended to `tests/test_fact_detector_misuse_constructor_shadow.py`.
 
+**A further round found the shadow collector recorded only a `def`'s
+own parameters, never a nested `def`/`class` statement's own name**
+(Codex review, fresh evidence): `def outer(other): def Fact(x): return
+x; return Fact(1) == other` was still read as the real constructor,
+since nothing recorded the nested function's own name as a binding in
+its containing scope -- the identical `STORE_NAME`/`STORE_FAST` rule an
+ordinary assignment already gets. Reproduced directly for both the
+`def Fact` and `class Fact` forms (0 hits each, expected 0 -- i.e. both
+were false positives: the constructor was wrongly recognized) before
+designing a fix.
+
+Fixed entirely inside `fact_detector_misuse_scope.py`'s existing
+`_locally_bound_constructor_shadow_names()`: resolves each `FunctionDef`/
+`AsyncFunctionDef`/`ClassDef` node's own containing qualname via the
+already-existing `_def_containing_qualnames()` helper (already used
+elsewhere in this module for the identical "a def/class statement's own
+name binds into whatever namespace textually contains it" question --
+distinct from the closure-scope chain `_lexical_function_parents`
+answers, since a def/class statement's binding target is never about
+free-variable lookup) and records the definition's own `.name` there.
+No change to `fact_detector_misuse.py` itself was needed at all --
+deliberate, given that file's own tight remaining headroom (1974/2000
+lines) after the previous two rounds.
+
+Verified via direct AST reproduction against 10 cases before writing
+tests: both reported forms, each correctly scoped to its own containing
+function only (a sibling function unaffected), a further-nested closure
+correctly inheriting the def-shadowed name, a module-level `def Fact`
+also shadowing, both pre-existing regressions (bare import, classmethod
+constructor) still recognized, an unrelated nested `def helper(...)`
+correctly not affecting recognition, and the trickiest composition --
+a sibling nested `def Fact` in the same enclosing function that would
+otherwise shadow it, with an inner `global Fact` still correctly
+bypassing straight to module scope, confirming the two mechanisms
+(this round's def/class shadow and the previous round's global bypass)
+don't interfere with each other. `mypy`/`ruff` both stayed clean;
+`fact_detector_misuse.py` unchanged at 1974 lines and
+`fact_detector_misuse_scope.py` at 1369 lines (still ample headroom).
+New tests: `TestNestedDefinitionsShadowTheConstructorName` (10 tests),
+appended to `tests/test_fact_detector_misuse_constructor_shadow.py`.
+
 ---
 
 ### Phase 1 — finish the `dump`/`scan` typed-API convergence (closes AGENTS.md "PR C")
