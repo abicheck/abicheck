@@ -289,9 +289,9 @@ class TestResolveInput:
         header.write_text("void f();\n")
         snap = AbiSnapshot(library="test", version="1.0")
         with (
-            patch("abicheck.service._dump_elf", return_value=snap),
+            patch("abicheck.service_dump_native._dump_elf", return_value=snap),
             patch(
-                "abicheck.service._attach_header_graph", return_value=snap
+                "abicheck.service_dump_native._attach_header_graph", return_value=snap
             ) as mock_attach,
         ):
             run_dump(p, "elf", headers=[header], includes=[], lang="c++")
@@ -309,9 +309,9 @@ class TestResolveInput:
         header.write_text("void f(void);\n")
         snap = AbiSnapshot(library="test", version="1.0")
         with (
-            patch("abicheck.service._dump_elf", return_value=snap),
+            patch("abicheck.service_dump_native._dump_elf", return_value=snap),
             patch(
-                "abicheck.service._attach_header_graph", return_value=snap
+                "abicheck.service_dump_native._attach_header_graph", return_value=snap
             ) as mock_attach,
         ):
             run_dump(p, "elf", headers=[header], includes=[], lang="c")
@@ -337,8 +337,8 @@ class TestResolveInput:
         explicit_dir = tmp_path / "explicit"
         snap = AbiSnapshot(library="test", version="1.0")
         with (
-            patch("abicheck.service._dump_elf", return_value=snap) as mock_dump_elf,
-            patch("abicheck.service._attach_header_graph", return_value=snap),
+            patch("abicheck.service_dump_native._dump_elf", return_value=snap) as mock_dump_elf,
+            patch("abicheck.service_dump_native._attach_header_graph", return_value=snap),
         ):
             run_dump(
                 p,
@@ -368,9 +368,9 @@ class TestResolveInput:
         explicit_dir = tmp_path / "explicit"
         snap = AbiSnapshot(library="test", version="1.0")
         with (
-            patch("abicheck.service._dump_elf", return_value=snap),
+            patch("abicheck.service_dump_native._dump_elf", return_value=snap),
             patch(
-                "abicheck.service._attach_header_graph", return_value=snap
+                "abicheck.service_dump_native._attach_header_graph", return_value=snap
             ) as mock_attach,
         ):
             run_dump(
@@ -399,9 +399,9 @@ class TestResolveInput:
         header.write_text("void f();\n")
         snap = AbiSnapshot(library="test", version="1.0")
         with (
-            patch("abicheck.service._dump_pe", return_value=snap),
+            patch("abicheck.service_dump_native._dump_pe", return_value=snap),
             patch(
-                "abicheck.service._attach_header_graph", return_value=snap
+                "abicheck.service_dump_native._attach_header_graph", return_value=snap
             ) as mock_attach,
         ):
             run_dump(p, "pe", headers=[header], includes=[], lang="c++")
@@ -418,9 +418,9 @@ class TestResolveInput:
         header.write_text("void f(void);\n")
         snap = AbiSnapshot(library="test", version="1.0")
         with (
-            patch("abicheck.service._dump_pe", return_value=snap),
+            patch("abicheck.service_dump_native._dump_pe", return_value=snap),
             patch(
-                "abicheck.service._attach_header_graph", return_value=snap
+                "abicheck.service_dump_native._attach_header_graph", return_value=snap
             ) as mock_attach,
         ):
             run_dump(p, "pe", headers=[header], includes=[], lang="C")
@@ -567,7 +567,7 @@ class TestRunDump:
         p = tmp_path / "lib.so"
         p.write_bytes(b"\x7fELF" + b"\x00" * 100)
         snap = AbiSnapshot(library="test", version="1.0")
-        with patch("abicheck.service._dump_elf", return_value=snap):
+        with patch("abicheck.service_dump_native._dump_elf", return_value=snap):
             result = run_dump(p, "elf")
         assert result is snap
 
@@ -575,7 +575,7 @@ class TestRunDump:
         p = tmp_path / "lib.dll"
         p.write_bytes(b"MZ" + b"\x00" * 100)
         snap = AbiSnapshot(library="test", version="1.0")
-        with patch("abicheck.service._dump_pe", return_value=snap):
+        with patch("abicheck.service_dump_native._dump_pe", return_value=snap):
             result = run_dump(p, "pe")
         assert result is snap
 
@@ -583,7 +583,7 @@ class TestRunDump:
         p = tmp_path / "lib.dylib"
         p.write_bytes(b"\xfe\xed\xfa\xce" + b"\x00" * 100)
         snap = AbiSnapshot(library="test", version="1.0")
-        with patch("abicheck.service._dump_macho", return_value=snap):
+        with patch("abicheck.service_dump_native._dump_macho", return_value=snap):
             result = run_dump(p, "macho")
         assert result is snap
 
@@ -615,7 +615,7 @@ class TestRunDumpHybridNormalization:
             library="test", version="1.0", from_headers=True, ast_producer="clang"
         )
         with patch(
-            "abicheck.service._dump_elf",
+            "abicheck.service_dump_native._dump_elf",
             side_effect=self._fake_dump_elf(castxml_snap, clang_snap),
         ):
             result = run_dump(p, "elf", header_backend="HYBRID")
@@ -632,7 +632,7 @@ class TestRunDumpHybridNormalization:
             library="test", version="1.0", from_headers=True, ast_producer="clang"
         )
         with patch(
-            "abicheck.service._dump_elf",
+            "abicheck.service_dump_native._dump_elf",
             side_effect=self._fake_dump_elf(castxml_snap, clang_snap),
         ):
             result = run_dump(p, "elf")  # header_backend defaults to "auto"
@@ -677,10 +677,10 @@ class TestRunDumpHybridHeaderGraphAttachedOnce:
 
         with (
             patch(
-                "abicheck.service._dump_elf",
+                "abicheck.service_dump_native._dump_elf",
                 side_effect=self._fake_dump_elf(castxml_snap, clang_snap),
             ),
-            patch("abicheck.service._attach_header_graph", side_effect=_fake_attach),
+            patch("abicheck.service_dump_native._attach_header_graph", side_effect=_fake_attach),
         ):
             result = run_dump(p, "elf", header_backend="hybrid")
 
@@ -734,10 +734,10 @@ class TestRunDumpHybridDoesNotDoubleEnrichLayout:
 
         with (
             patch(
-                "abicheck.service._dump_elf",
+                "abicheck.service_dump_native._dump_elf",
                 side_effect=self._fake_dump_elf(castxml_snap, clang_snap),
             ),
-            patch("abicheck.service.attach_clang_layout", side_effect=_fake_attach),
+            patch("abicheck.service_dump_native.attach_clang_layout", side_effect=_fake_attach),
         ):
             result = run_dump(p, "elf", header_backend="hybrid")
 
@@ -1225,7 +1225,7 @@ class TestDumpElf:
         p = tmp_path / "lib.so"
         p.write_bytes(b"\x7fELF" + b"\x00" * 100)
         snap = AbiSnapshot(library="test", version="1.0")
-        with patch("abicheck.service.expand_header_inputs", return_value=[]):
+        with patch("abicheck.service_dump_native.expand_header_inputs", return_value=[]):
             with patch("abicheck.dumper.dump", return_value=snap):
                 result = _dump_elf(p, [], [], "1.0", "c++")
         assert result is snap
@@ -1238,7 +1238,7 @@ class TestDumpElf:
         h = tmp_path / "foo.h"
         h.write_text("")
         bad_inc = tmp_path / "nonexistent"
-        with patch("abicheck.service.expand_header_inputs", return_value=[h]):
+        with patch("abicheck.service_dump_native.expand_header_inputs", return_value=[h]):
             with pytest.raises(ValidationError, match="Include directory"):
                 _dump_elf(p, [h], [bad_inc], "1.0", "c++")
 
@@ -1247,7 +1247,7 @@ class TestDumpElf:
 
         p = tmp_path / "lib.so"
         p.write_bytes(b"\x00" * 10)
-        with patch("abicheck.service.expand_header_inputs", return_value=[]):
+        with patch("abicheck.service_dump_native.expand_header_inputs", return_value=[]):
             with patch("abicheck.dumper.dump", side_effect=RuntimeError("bad elf")):
                 with pytest.raises(SnapshotError, match="Failed to dump"):
                     _dump_elf(p, [], [], "1.0", "c++")
@@ -1260,7 +1260,7 @@ class TestDumpElf:
         inc = tmp_path / "inc"
         inc.mkdir()
         snap = AbiSnapshot(library="test", version="1.0")
-        with patch("abicheck.service.expand_header_inputs", return_value=[]):
+        with patch("abicheck.service_dump_native.expand_header_inputs", return_value=[]):
             with patch("abicheck.dumper.dump", return_value=snap):
                 result = _dump_elf(p, [], [inc], "1.0", "c++")
         assert result is snap
@@ -1271,7 +1271,7 @@ class TestDumpElf:
         p = tmp_path / "lib.so"
         p.write_bytes(b"\x7fELF" + b"\x00" * 100)
         snap = AbiSnapshot(library="test", version="1.0")
-        with patch("abicheck.service.expand_header_inputs", return_value=[]):
+        with patch("abicheck.service_dump_native.expand_header_inputs", return_value=[]):
             with patch("abicheck.dumper.dump", return_value=snap) as mock_dump:
                 _dump_elf(p, [], [], "1.0", "c")
         call_kwargs = mock_dump.call_args
@@ -1289,7 +1289,7 @@ class TestDumpElf:
         p.write_bytes(b"\x7fELF" + b"\x00" * 100)
         snap = AbiSnapshot(library="test", version="1.0")
         with (
-            patch("abicheck.service.expand_header_inputs", return_value=[]),
+            patch("abicheck.service_dump_native.expand_header_inputs", return_value=[]),
             patch(
                 "abicheck.debug_resolver.resolve_debug_info", return_value=None
             ) as mock_resolve,
@@ -1315,7 +1315,7 @@ class TestDumpElf:
         p.write_bytes(b"\x7fELF" + b"\x00" * 100)
         snap = AbiSnapshot(library="test", version="1.0")
         with (
-            patch("abicheck.service.expand_header_inputs", return_value=[]),
+            patch("abicheck.service_dump_native.expand_header_inputs", return_value=[]),
             patch(
                 "abicheck.debug_resolver.resolve_debug_info", return_value=None
             ) as mock_resolve,
@@ -3769,7 +3769,7 @@ class TestPeHeaderScoping:
             patch("abicheck.pe_metadata.parse_pe_metadata", return_value=pe_meta),
             patch("abicheck.dumper._dump_pe", return_value=scoped),
             patch(
-                "abicheck.service._extract_pdb_debug",
+                "abicheck.service_dump_native_pe._extract_pdb_debug",
                 return_value=(dwarf_meta, dwarf_adv),
             ),
         ):
@@ -3878,7 +3878,7 @@ class TestRunDumpHeaderWiring:
         p = tmp_path / "lib.dll"
         p.write_bytes(b"MZ" + b"\x00" * 100)
         snap = AbiSnapshot(library="lib", version="1.0", platform="pe")
-        with patch("abicheck.service._dump_pe", return_value=snap) as mock_pe:
+        with patch("abicheck.service_dump_native._dump_pe", return_value=snap) as mock_pe:
             run_dump(p, "pe", [Path("api.h")], [Path("inc")], "1.0", "c++")
         assert mock_pe.call_args.kwargs["headers"] == [Path("api.h")]
         assert mock_pe.call_args.kwargs["includes"] == [Path("inc")]
@@ -3887,7 +3887,7 @@ class TestRunDumpHeaderWiring:
         p = tmp_path / "lib.dylib"
         p.write_bytes(b"\xfe\xed\xfa\xce" + b"\x00" * 100)
         snap = AbiSnapshot(library="lib", version="1.0", platform="macho")
-        with patch("abicheck.service._dump_macho", return_value=snap) as mock_macho:
+        with patch("abicheck.service_dump_native._dump_macho", return_value=snap) as mock_macho:
             run_dump(p, "macho", [Path("api.h")], [], "1.0", "c++")
         assert mock_macho.call_args.kwargs["headers"] == [Path("api.h")]
 
@@ -3907,7 +3907,7 @@ class TestRunDumpHeaderGraph:
         p = tmp_path / "lib.dll"
         p.write_bytes(b"MZ" + b"\x00" * 100)
         snap = AbiSnapshot(library="lib", version="1.0", platform="pe")
-        with patch("abicheck.service._dump_pe", return_value=snap):
+        with patch("abicheck.service_dump_native._dump_pe", return_value=snap):
             result = run_dump(p, "pe", [Path("api.h")], [], "1.0", "c++")
         assert result.build_source is not None
 
@@ -3915,7 +3915,7 @@ class TestRunDumpHeaderGraph:
         p = tmp_path / "lib.dll"
         p.write_bytes(b"MZ" + b"\x00" * 100)
         snap = AbiSnapshot(library="lib", version="1.0", platform="pe")
-        with patch("abicheck.service._dump_pe", return_value=snap):
+        with patch("abicheck.service_dump_native._dump_pe", return_value=snap):
             result = run_dump(p, "pe", [], [], "1.0", "c++")
         assert result.build_source is None
 
@@ -3932,7 +3932,7 @@ class TestRunDumpHeaderGraph:
         )
         ast = {"kind": "TranslationUnitDecl", "inner": []}
         with (
-            patch("abicheck.service._dump_pe", return_value=snap),
+            patch("abicheck.service_dump_native._dump_pe", return_value=snap),
             patch(
                 "abicheck.dumper._clang_header_dump", return_value=(ast, None, False)
             ) as mock_ast,
@@ -3983,7 +3983,7 @@ class TestRunDumpHeaderGraph:
         ast = {"kind": "TranslationUnitDecl", "inner": []}
         cc = CompileContext(frontend_context="device")
         with (
-            patch("abicheck.service._dump_pe", return_value=snap),
+            patch("abicheck.service_dump_native._dump_pe", return_value=snap),
             patch(
                 "abicheck.dumper._clang_header_dump", return_value=(ast, None, False)
             ) as mock_ast,
@@ -4003,7 +4003,7 @@ class TestRunDumpHeaderGraph:
             raise SnapshotError("clang not found")
 
         with (
-            patch("abicheck.service._dump_pe", return_value=snap),
+            patch("abicheck.service_dump_native._dump_pe", return_value=snap),
             patch("abicheck.dumper._clang_header_dump", side_effect=_raise) as mock_ast,
         ):
             result = run_dump(p, "pe", [header], [], "1.0", "c++")
@@ -4029,7 +4029,7 @@ class TestRunDumpHeaderGraph:
         snap = AbiSnapshot(library="lib", version="1.0", platform="pe")
         ast = {"kind": "TranslationUnitDecl", "inner": []}
         with (
-            patch("abicheck.service._dump_pe", return_value=snap),
+            patch("abicheck.service_dump_native._dump_pe", return_value=snap),
             patch(
                 "abicheck.dumper._clang_header_dump", return_value=(ast, None, False)
             ) as mock_ast,
@@ -4057,7 +4057,7 @@ class TestRunDumpHeaderGraph:
             stderr = ""
 
         with (
-            patch("abicheck.service._dump_pe", return_value=snap),
+            patch("abicheck.service_dump_native._dump_pe", return_value=snap),
             patch("abicheck.dumper._clang_header_dump", return_value=(ast, None, False)),
             patch(
                 "abicheck.buildsource.include_graph.shutil.which",
@@ -4101,7 +4101,7 @@ class TestRunDumpHeaderGraph:
             returncode = 0
 
         with (
-            patch("abicheck.service._dump_pe", return_value=snap),
+            patch("abicheck.service_dump_native._dump_pe", return_value=snap),
             patch("abicheck.dumper._clang_header_dump", return_value=(ast, None, False)),
             patch(
                 "abicheck.buildsource.include_graph.shutil.which",
@@ -4159,7 +4159,7 @@ class TestRunDumpHeaderGraph:
             return _OkProc() if str(good) in cmd else _FailProc()
 
         with (
-            patch("abicheck.service._dump_pe", return_value=snap),
+            patch("abicheck.service_dump_native._dump_pe", return_value=snap),
             patch("abicheck.dumper._clang_header_dump", return_value=(ast, None, False)),
             patch(
                 "abicheck.buildsource.include_graph.shutil.which",
@@ -4200,7 +4200,7 @@ class TestRunDumpHeaderGraph:
         # test used to check is gone; see
         # test_header_graph_includes_folds_include_edges above for the
         # include-edge content check).
-        with patch("abicheck.service._dump_pe", return_value=snap):
+        with patch("abicheck.service_dump_native._dump_pe", return_value=snap):
             result = run_dump(p, "pe", [header], [], "1.0", "c++")
         assert result.build_source is not None
 
@@ -4227,10 +4227,10 @@ class TestRunDumpHeaderGraphSkippedForDwarfOnly:
             return _snap
 
         with (
-            patch("abicheck.service._dump_elf", return_value=snap),
-            patch("abicheck.service._attach_header_graph", side_effect=_fake_attach),
+            patch("abicheck.service_dump_native._dump_elf", return_value=snap),
+            patch("abicheck.service_dump_native._attach_header_graph", side_effect=_fake_attach),
             patch(
-                "abicheck.service.attach_clang_layout", side_effect=lambda s, *a, **k: s
+                "abicheck.service_dump_native.attach_clang_layout", side_effect=lambda s, *a, **k: s
             ),
         ):
             result = run_dump(p, "elf", [header], [], "1.0", "c++", dwarf_only=True)
@@ -4251,10 +4251,10 @@ class TestRunDumpHeaderGraphSkippedForDwarfOnly:
             return _snap
 
         with (
-            patch("abicheck.service._dump_elf", return_value=snap),
-            patch("abicheck.service._attach_header_graph", side_effect=_fake_attach),
+            patch("abicheck.service_dump_native._dump_elf", return_value=snap),
+            patch("abicheck.service_dump_native._attach_header_graph", side_effect=_fake_attach),
             patch(
-                "abicheck.service.attach_clang_layout", side_effect=lambda s, *a, **k: s
+                "abicheck.service_dump_native.attach_clang_layout", side_effect=lambda s, *a, **k: s
             ),
         ):
             run_dump(p, "elf", [header], [], "1.0", "c++", dwarf_only=False)
@@ -4283,8 +4283,8 @@ class TestRunDumpHeaderGraphSkippedForDwarfOnly:
             return _snap
 
         with (
-            patch("abicheck.service._dump_elf", side_effect=_fake_dump_elf),
-            patch("abicheck.service._attach_header_graph", side_effect=_fake_attach),
+            patch("abicheck.service_dump_native._dump_elf", side_effect=_fake_dump_elf),
+            patch("abicheck.service_dump_native._attach_header_graph", side_effect=_fake_attach),
         ):
             run_dump(p, "elf", header_backend="hybrid", dwarf_only=True)
 
@@ -4312,10 +4312,10 @@ class TestRunDumpHeaderGraphSkippedForDwarfOnly:
             return _snap
 
         with (
-            patch("abicheck.service._dump_elf", return_value=snap),
-            patch("abicheck.service._attach_header_graph", side_effect=_fake_attach),
+            patch("abicheck.service_dump_native._dump_elf", return_value=snap),
+            patch("abicheck.service_dump_native._attach_header_graph", side_effect=_fake_attach),
             patch(
-                "abicheck.service.attach_clang_layout", side_effect=lambda s, *a, **k: s
+                "abicheck.service_dump_native.attach_clang_layout", side_effect=lambda s, *a, **k: s
             ),
         ):
             run_dump(p, "elf", [header], [], "1.0", "c++", symbols_only=True)
@@ -4344,9 +4344,9 @@ class TestRunDumpHeaderGraphSkippedForDwarfOnly:
             return snap
 
         with (
-            patch("abicheck.service._dump_elf", side_effect=_fake_dump_elf),
+            patch("abicheck.service_dump_native._dump_elf", side_effect=_fake_dump_elf),
             patch(
-                "abicheck.service.attach_clang_layout", side_effect=lambda s, *a, **k: s
+                "abicheck.service_dump_native.attach_clang_layout", side_effect=lambda s, *a, **k: s
             ),
         ):
             assert not dumper_cache.ast_memoize_active()
@@ -4372,10 +4372,10 @@ class TestRunDumpHeaderGraphSkippedForDwarfOnly:
             return _snap
 
         with (
-            patch("abicheck.service._dump_pe", return_value=snap),
-            patch("abicheck.service._attach_header_graph", side_effect=_fake_attach),
+            patch("abicheck.service_dump_native._dump_pe", return_value=snap),
+            patch("abicheck.service_dump_native._attach_header_graph", side_effect=_fake_attach),
             patch(
-                "abicheck.service.attach_clang_layout", side_effect=lambda s, *a, **k: s
+                "abicheck.service_dump_native.attach_clang_layout", side_effect=lambda s, *a, **k: s
             ),
         ):
             run_dump(p, "pe", [header], [], "1.0", "c++", symbols_only=True)
@@ -4397,10 +4397,10 @@ class TestRunDumpHeaderGraphSkippedForDwarfOnly:
             return _snap
 
         with (
-            patch("abicheck.service._dump_macho", return_value=snap),
-            patch("abicheck.service._attach_header_graph", side_effect=_fake_attach),
+            patch("abicheck.service_dump_native._dump_macho", return_value=snap),
+            patch("abicheck.service_dump_native._attach_header_graph", side_effect=_fake_attach),
             patch(
-                "abicheck.service.attach_clang_layout", side_effect=lambda s, *a, **k: s
+                "abicheck.service_dump_native.attach_clang_layout", side_effect=lambda s, *a, **k: s
             ),
         ):
             run_dump(p, "macho", [header], [], "1.0", "c++", symbols_only=True)
@@ -4702,7 +4702,7 @@ class TestCliNativeBinaryHeaderWiring:
         p = tmp_path / "lib.dll"
         p.write_bytes(b"MZ" + b"\x00" * 100)
         snap = AbiSnapshot(library="lib", version="1.0", platform="pe")
-        with patch("abicheck.service._dump_pe", return_value=snap) as mock_pe:
+        with patch("abicheck.service_dump_native._dump_pe", return_value=snap) as mock_pe:
             _dump_native_binary(p, "pe", [Path("api.h")], [Path("inc")], "1.0", "c++")
         assert mock_pe.call_args.kwargs["headers"] == [Path("api.h")]
         assert mock_pe.call_args.kwargs["includes"] == [Path("inc")]
@@ -4713,7 +4713,7 @@ class TestCliNativeBinaryHeaderWiring:
         p = tmp_path / "lib.dylib"
         p.write_bytes(b"\xfe\xed\xfa\xce" + b"\x00" * 100)
         snap = AbiSnapshot(library="lib", version="1.0", platform="macho")
-        with patch("abicheck.service._dump_macho", return_value=snap) as mock_macho:
+        with patch("abicheck.service_dump_native._dump_macho", return_value=snap) as mock_macho:
             _dump_native_binary(p, "macho", [Path("api.h")], [], "1.0", "c++")
         assert mock_macho.call_args.kwargs["headers"] == [Path("api.h")]
 
@@ -4724,7 +4724,7 @@ class TestCliNativeBinaryHeaderWiring:
 
         p = tmp_path / "lib.dll"
         p.write_bytes(b"MZ" + b"\x00" * 100)
-        with patch("abicheck.service._dump_pe", side_effect=SnapshotError("boom")):
+        with patch("abicheck.service_dump_native._dump_pe", side_effect=SnapshotError("boom")):
             with pytest.raises(click.ClickException, match="boom"):
                 _dump_native_binary(p, "pe", [], [], "1.0", "c++")
 
@@ -4735,7 +4735,7 @@ class TestCliNativeBinaryHeaderWiring:
 
         p = tmp_path / "lib.dylib"
         p.write_bytes(b"\xfe\xed\xfa\xce" + b"\x00" * 100)
-        with patch("abicheck.service._dump_macho", side_effect=SnapshotError("nope")):
+        with patch("abicheck.service_dump_native._dump_macho", side_effect=SnapshotError("nope")):
             with pytest.raises(click.ClickException, match="nope"):
                 _dump_native_binary(p, "macho", [], [], "1.0", "c++")
 
@@ -4967,7 +4967,7 @@ class TestRunDumpDependencyScope:
         elf_path = tmp_path / "lib.so"
         elf_path.write_bytes(b"\x7fELF" + b"\x00" * 100)
         fake_snap = AbiSnapshot(library="lib.so", version="1.0", from_headers=True)
-        with patch("abicheck.service._run_dump_uncached", return_value=fake_snap):
+        with patch("abicheck.service_dump_native._run_dump_uncached", return_value=fake_snap):
             result = run_dump(elf_path, "elf")
         assert result.dependency_scope == "full"
 
@@ -4975,7 +4975,7 @@ class TestRunDumpDependencyScope:
         elf_path = tmp_path / "lib.so"
         elf_path.write_bytes(b"\x7fELF" + b"\x00" * 100)
         fake_snap = AbiSnapshot(library="lib.so", version="1.0", from_headers=True)
-        with patch("abicheck.service._run_dump_uncached", return_value=fake_snap):
+        with patch("abicheck.service_dump_native._run_dump_uncached", return_value=fake_snap):
             result = run_dump(elf_path, "elf", include_dependencies=False)
         assert result.dependency_scope == "filtered"
 
