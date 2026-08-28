@@ -169,6 +169,27 @@ def _outermost_containing_expr(node: ast.AST, parents: dict[int, ast.AST]) -> as
     return current
 
 
+def _target_bound_names(target: ast.expr) -> list[str]:
+    """Every plain name *target* binds -- a bare `ast.Name`, or every
+    name nested inside a `Tuple`/`List`/`Starred` unpacking target
+    (`for getattr, _ in pairs:` binds `getattr` exactly like a bare
+    `for getattr in ...:` does). Module-level (not nested inside
+    `_locally_bound_names()`) so `fact_field_readers.py`'s own
+    `_shadowed()` can reuse it for a comprehension's own `for` target --
+    see that function's own docstring for why a comprehension's target
+    is handled there, via a real AST-ancestor check, rather than here."""
+    if isinstance(target, ast.Name):
+        return [target.id]
+    if isinstance(target, ast.Starred):
+        return _target_bound_names(target.value)
+    if isinstance(target, (ast.Tuple, ast.List)):
+        names: list[str] = []
+        for elt in target.elts:
+            names.extend(_target_bound_names(elt))
+        return names
+    return []
+
+
 def _locally_bound_names(
     tree: ast.Module,
 ) -> tuple[dict[str, set[str]], dict[str, set[str]]]:
@@ -351,58 +372,64 @@ def _locally_bound_names(
     which is excluded the identical way -- still binds and shadows
     normally.
 
-    **A `for` target, a `with ... as` target, an `except ... as` name, a
-    comprehension's own `for` target, and a `match` capture are all real
-    lexical bindings too -- the identical class of gap as the `def`/
-    `class`/import bindings above, just for five more binding *forms*
-    rather than a sixth binding *site* (Codex review, fresh evidence).**
-    `for getattr in funcs: return getattr(rec, "bases")` -- an ordinary,
-    unrelated loop variable reusing the builtin-looking name -- was still
-    unconditionally treated as the real builtin, since none of `ast.For`/
-    `ast.AsyncFor`/`ast.With`/`ast.AsyncWith`/`ast.ExceptHandler`/a
-    comprehension's own `generators`/`ast.Match` was ever specially
+    **A `for` target, a `with ... as` target, an `except ... as` name, and
+    a `match` capture are all real lexical bindings too -- the identical
+    class of gap as the `def`/`class`/import bindings above, just for four
+    more binding *forms* rather than a fifth binding *site* (Codex review,
+    fresh evidence).** `for getattr in funcs: return getattr(rec,
+    "bases")` -- an ordinary, unrelated loop variable reusing the
+    builtin-looking name -- was still unconditionally treated as the real
+    builtin, since none of `ast.For`/`ast.AsyncFor`/`ast.With`/
+    `ast.AsyncWith`/`ast.ExceptHandler`/`ast.Match` was ever specially
     recognized here; the fallback walk only ever recurses into each of
     these, it never records what they themselves bind. The identical
     false-positive shape reproduces for `with cm() as getattr:`, `except
-    Exception as getattr:`, `[getattr(rec, "bases") for getattr in
-    funcs]`, and `case getattr: return getattr(rec, "bases")`.
+    Exception as getattr:`, and `case getattr: return getattr(rec,
+    "bases")`.
 
-    Modeled as one generalized shadowing class rather than five
+    Modeled as one generalized shadowing class rather than four
     independently-hand-rolled ones, per the review finding's own
-    suggestion: `_target_bound_names()` extracts every plain name a `for`/
-    `with` target binds (recursing through `Tuple`/`List`/`Starred`
-    nesting -- `for getattr, _ in pairs:` binds `getattr` exactly like a
-    bare `for getattr in ...:` does), and `_match_pattern_captures()`
-    extracts every capture a `match` pattern binds (`ast.walk` over the
-    pattern subtree, since a capture can nest arbitrarily deep inside a
-    class/sequence/mapping/OR pattern, and Python already requires every
-    alternative of an OR pattern to bind the identical name set, so
-    walking the whole pattern once is sound regardless of which
-    alternative a real match would take). None of these five forms
-    introduces its own new *scope* the way a `def`/comprehension does for
-    its *body* (a `for`/`with`/`except`/`match` binds directly into
-    whatever function scope already contains it, and this module's own
-    line-based `_enclosing_qualnames` already resolves a comprehension's
-    `elt` to its enclosing *function*, not a comprehension-specific scope,
-    matching this module's own established coarser granularity) -- so
-    every one of these bindings is recorded against the current
-    `binding_scope` directly, the same target every parameter already
-    uses, never a new one.
+    suggestion: `_target_bound_names()` (module-level, shared with
+    `fact_field_readers.py`'s own `_shadowed()`) extracts every plain name
+    a `for`/`with` target binds (recursing through `Tuple`/`List`/
+    `Starred` nesting -- `for getattr, _ in pairs:` binds `getattr`
+    exactly like a bare `for getattr in ...:` does), and
+    `_match_pattern_captures()` extracts every capture a `match` pattern
+    binds (`ast.walk` over the pattern subtree, since a capture can nest
+    arbitrarily deep inside a class/sequence/mapping/OR pattern, and
+    Python already requires every alternative of an OR pattern to bind the
+    identical name set, so walking the whole pattern once is sound
+    regardless of which alternative a real match would take). None of
+    these four forms introduces its own new *scope* the way a `def` does
+    for its *body* (a `for`/`with`/`except`/`match` binds directly into
+    whatever function scope already contains it) -- so every one of these
+    bindings is recorded against the current `binding_scope` directly, the
+    same target every parameter already uses, never a new one.
+
+    **Deliberately excludes a comprehension's own `for` target, unlike the
+    four forms above -- a real regression in an earlier revision of this
+    same fix, caught by review (Codex review, fresh evidence).** A
+    comprehension genuinely *does* introduce its own new scope in Python
+    3 (unlike a plain `for`/`with`/`except`/`match`, none of which are
+    block-scoped), so its target must shadow calls *inside* the
+    comprehension (its `elt`, its filters, its later generators) without
+    leaking into the rest of the enclosing function -- `[x for getattr in
+    funcs]` followed by a genuine, unrelated `getattr(rec, "bases")` later
+    in the same function must still be flagged. Recording the target
+    against `binding_scope` (this module's coarser, line-based/function-
+    only qualname model, with no comprehension-specific scope of its own)
+    got this backwards: it correctly shadowed calls *inside* the
+    comprehension, but also wrongly shadowed every *unrelated* call
+    anywhere later in the whole enclosing function. Handled instead by
+    `fact_field_readers.py`'s own `_shadowed()`, via a real AST-ancestor
+    check against the call's true position -- exact by construction, so it
+    can never leak outside the comprehension the way this qualname-keyed
+    dict would -- mirroring how that function already handles a `lambda`
+    parameter's identical "not a scope this module's coarser qualname
+    model tracks" shape (see its own docstring).
     """
     bound: dict[str, set[str]] = {}
     recognized_aliases: dict[str, set[str]] = {}
-
-    def _target_bound_names(target: ast.expr) -> list[str]:
-        if isinstance(target, ast.Name):
-            return [target.id]
-        if isinstance(target, ast.Starred):
-            return _target_bound_names(target.value)
-        if isinstance(target, (ast.Tuple, ast.List)):
-            names: list[str] = []
-            for elt in target.elts:
-                names.extend(_target_bound_names(elt))
-            return names
-        return []
 
     def _match_pattern_captures(pattern: ast.pattern) -> list[str]:
         names: list[str] = []
@@ -434,15 +461,6 @@ def _locally_bound_names(
             elif isinstance(child, ast.ExceptHandler):
                 if binding_scope is not None and child.name is not None:
                     bound.setdefault(binding_scope, set()).add(child.name)
-                visit(child, prefix, binding_scope)
-            elif isinstance(
-                child, (ast.ListComp, ast.SetComp, ast.DictComp, ast.GeneratorExp)
-            ):
-                if binding_scope is not None:
-                    for generator in child.generators:
-                        bound.setdefault(binding_scope, set()).update(
-                            _target_bound_names(generator.target)
-                        )
                 visit(child, prefix, binding_scope)
             elif isinstance(child, ast.Match):
                 if binding_scope is not None:

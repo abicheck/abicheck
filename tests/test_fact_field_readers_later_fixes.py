@@ -556,3 +556,107 @@ class TestLexicalBindingFormsAreTreatedAsShadows:
         sites = unmigrated_fact_reader_sites(tree, "x.py", src)
         assert len(sites) == 1
         assert sites[0][2] == "bases"
+
+
+class TestComprehensionTargetShadowsOnlyWithinTheComprehension:
+    """A comprehension genuinely introduces its own new scope in Python 3
+    -- unlike a plain `for`/`with`/`except`/`match`, none of which are
+    block-scoped -- so its own target must shadow calls *inside* the
+    comprehension without leaking into the rest of the enclosing function
+    (Codex review, fresh evidence, a real regression in an earlier
+    revision of the lexical-binding-forms fix): `[x for getattr in
+    funcs]` followed by a genuine, unrelated `getattr(rec, "bases")` later
+    in the same function was wrongly suppressed."""
+
+    def test_does_not_leak_the_comprehension_target_into_the_rest_of_the_function(
+        self,
+    ) -> None:
+        src = (
+            "def f(rec, funcs):\n"
+            "    _ = [x for getattr in funcs]\n"
+            '    return getattr(rec, "bases")\n'
+        )
+        tree = ast.parse(src, filename="x.py")
+        sites = unmigrated_fact_reader_sites(tree, "x.py", src)
+        assert len(sites) == 1
+        assert sites[0][2] == "bases"
+
+    def test_still_shadows_within_the_comprehension_elt(self) -> None:
+        """Positive control: the target must still shadow calls genuinely
+        inside the comprehension's own `elt`."""
+        src = (
+            "def f(rec, funcs):\n"
+            '    return [getattr(rec, "bases") for getattr in funcs]\n'
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert unmigrated_fact_reader_sites(tree, "x.py", src) == []
+
+    def test_still_shadows_within_a_generator_filter(self) -> None:
+        """Positive control: an `if` filter clause is also inside the
+        comprehension's own scope."""
+        src = (
+            "def f(rec, funcs):\n"
+            '    return [x for getattr in funcs if getattr(rec, "bases")]\n'
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert unmigrated_fact_reader_sites(tree, "x.py", src) == []
+
+    def test_still_shadows_within_a_non_outermost_generators_iterable(self) -> None:
+        """Positive control: only the *outermost* generator's own
+        iterable evaluates outside the comprehension's scope -- a second
+        generator's iterable is still inside it."""
+        src = (
+            "def f(rec, funcs):\n"
+            "    return [x for y in funcs "
+            'for getattr in getattr(rec, "bases")]\n'
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert unmigrated_fact_reader_sites(tree, "x.py", src) == []
+
+    def test_the_outermost_iterable_itself_is_not_shadowed_by_its_own_target(
+        self,
+    ) -> None:
+        """The one real exception: the outermost generator's own iterable
+        evaluates in the scope enclosing the comprehension, before the
+        comprehension's own target exists -- so a target reusing the same
+        name as a real callee in that one position must still be
+        detected."""
+        src = (
+            'def f(rec, funcs):\n    return [x for getattr in getattr(rec, "bases")]\n'
+        )
+        tree = ast.parse(src, filename="x.py")
+        sites = unmigrated_fact_reader_sites(tree, "x.py", src)
+        assert len(sites) == 1
+        assert sites[0][2] == "bases"
+
+
+class TestLambdaDefaultsEvaluateBeforeParameterShadows:
+    """A lambda's own default value expression evaluates at lambda-
+    *creation* time, in the enclosing scope, before the lambda's own
+    parameters exist at all -- the identical def-time-vs-body-time
+    distinction `_enclosing_qualnames`'s own default/annotation handling
+    already draws for a named `def` (Codex review, fresh evidence):
+    `lambda getattr=getattr(rec, "bases"): getattr` was wrongly treated
+    as shadowed by the lambda's own `getattr` parameter."""
+
+    def test_detects_a_real_read_in_a_lambda_default_shadowed_by_its_own_param(
+        self,
+    ) -> None:
+        src = (
+            "def f(rec):\n"
+            '    return (lambda getattr=getattr(rec, "bases"): getattr)()\n'
+        )
+        tree = ast.parse(src, filename="x.py")
+        sites = unmigrated_fact_reader_sites(tree, "x.py", src)
+        assert len(sites) == 1
+        assert sites[0][2] == "bases"
+
+    def test_still_ignores_a_real_shadow_inside_the_lambda_body(self) -> None:
+        """Positive control: the lambda's own body genuinely is shadowed
+        by its parameter."""
+        src = (
+            "def f(rec, some_getattr):\n"
+            '    return (lambda getattr: getattr(rec, "bases"))(some_getattr)\n'
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert unmigrated_fact_reader_sites(tree, "x.py", src) == []

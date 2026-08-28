@@ -2291,6 +2291,90 @@ and `TestLexicalBindingFormsAreTreatedAsShadows`, both appended to `tests/
 test_fact_field_readers_later_fixes.py` (558 lines, well under its own
 1200-line cap).
 
+**Two more findings from the next review round, plus one declined as a
+re-raise of an already-decided, documented tradeoff.** (1) The lexical-
+binding-forms fix's own comprehension-target handling (previous round)
+was a real regression, caught by review: it recorded a comprehension's
+`for` target against `_locally_bound_names()`'s coarser, function-only
+qualname model -- correct for `for`/`with`/`except`/`match` (none of
+which are block-scoped in Python), but a comprehension genuinely *does*
+introduce its own new scope, so that recording shadowed every call
+anywhere later in the *whole enclosing function*, not just calls
+genuinely inside the comprehension. `[x for getattr in funcs]` followed
+by an unrelated, later `getattr(rec, "bases")` in the same function was
+wrongly suppressed. Fixed by reverting that one binding form out of
+`_locally_bound_names()` entirely and handling it instead in
+`_shadowed()`'s own real AST-ancestor walk -- the identical mechanism
+already used for a `lambda` parameter's identical "not a scope this
+module's coarser qualname model tracks" shape -- so a comprehension
+target shadows exactly the calls nested inside it (`elt`, filters, later
+generators), never anything outside it. The *outermost* generator's own
+iterable is the one exception (mirroring `fact_detector_misuse_scope.py`'s
+identical carve-out for the same construct): it evaluates in the scope
+enclosing the comprehension, before the comprehension's own target
+exists, so `[x for getattr in getattr(rec, "bases")]` must still be
+flagged. Implementing this exactly needed one more structural fact about
+the AST than the analogous fix in the sibling module: a comprehension's
+`generators[0]` holds the `ast.comprehension` *clause* object, not its
+`.iter` directly, so the ancestor walk tracks which clause object it just
+ascended through (`outermost_iter_clause`) across the next hop, rather
+than comparing the immediate child against `.iter` at the point the
+`ListComp`/etc. itself is reached -- a first attempt compared against
+`generators[0].iter` directly and silently never matched, since the
+ancestor walk's immediate child at that point is always the clause
+object. (2) A lambda's own default value expression evaluates at lambda-
+*creation* time, in the enclosing scope, before the lambda's own
+parameters exist at all -- the identical def-time-vs-body-time
+distinction `_enclosing_qualnames`'s own default/annotation handling
+already draws for a named `def` -- but `_shadowed()`'s lambda-ancestor
+check unconditionally treated any call reached through a `Lambda`
+ancestor as shadowed by its parameters, regardless of whether the call
+came from the lambda's `body` or its `args` (default values). `lambda
+getattr=getattr(rec, "bases"): getattr` read the real builtin in its
+default, but was wrongly treated as shadowed. Fixed by checking `child is
+node.body` at the point the walk reaches the `Lambda` ancestor -- exact
+by construction (true only on the hop ascending directly out of the body
+subtree, however deeply nested; false for every hop coming from `args`
+instead) -- and only checking the lambda's own parameters when that holds.
+
+(3) **Declined, citing an already-documented rationale rather than
+re-implementing.** `_builtins_getattr_aliases()`'s own plain-assignment
+alias resolution (`read = getattr`) is deliberately whole-tree/module-
+wide, not per-function -- its own docstring already states this
+explicitly ("Whole-tree, matching `_imported_class_aliases`'s own scope
+for the identical reason"), and `_imported_class_aliases()`'s own
+docstring gives the reason: "every mechanism here is almost always module
+level, and scanning the whole tree is the same over-approximating-is-safe
+stance this module already takes elsewhere." The finding reproduces
+exactly the false-positive shape that stance already, deliberately
+accepts: two unrelated functions each assigning the identical local name
+`read` to two different values (`read = getattr` in one, `read = helper`
+in another) both have their own `read(rec, "bases")` call flagged, since
+the alias name is resolved once, globally. This is the identical class of
+question already decided (and declined, twice, with the identical
+citation) earlier in this same PR's review history for
+`_imported_fact_aliases`'s own module-wide import-alias resolution (see
+that thread's own "convergence note") -- a correct fix needs the same
+kind of per-scope threading through the fixed-point alias resolution that
+was already judged "a real, if narrow, redesign... not a follow-up to the
+last one" there, not a bounded extension of an established mechanism.
+Documented as a known, pre-existing, deliberately-accepted tradeoff
+rather than re-litigated.
+
+Verified against both reported repros for findings (1)/(2), a positive
+control confirming each fix's *intended* shadowing case still works
+(comprehension elt/filter/non-outermost-generator shadowing; a lambda
+body genuinely shadowed by its own parameter), and the outermost-
+generator-iterable exception itself for both a list comprehension and a
+set comprehension, all via direct AST reproduction before writing tests.
+Still zero existing hits, `mypy`/`ruff` both stayed clean,
+`fact_field_readers.py` at 1829 lines and `fact_field_readers_scope.py`
+at 556 lines (both well under the 2000-line hard cap). New tests:
+`TestComprehensionTargetShadowsOnlyWithinTheComprehension` and
+`TestLambdaDefaultsEvaluateBeforeParameterShadows`, both appended to
+`tests/test_fact_field_readers_later_fixes.py` (660 lines, well under its
+own 1200-line cap).
+
 **Still not landed**: no detector (`diff_layout.py`/`diff_types.py`/
 `diff_param_qualifiers.py`/the reader set the check above now tracks
 precisely) has actually been migrated to read `.status` — the check above

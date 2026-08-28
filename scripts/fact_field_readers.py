@@ -102,6 +102,7 @@ from fact_field_readers_scope import (  # noqa: E402
     _locally_bound_names,
     _outermost_containing_expr,
     _parent_map,
+    _target_bound_names,
 )
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -1226,17 +1227,80 @@ def unmigrated_fact_reader_sites(
         # `.lineno` and walks `parents`, both common to any expression, so
         # the narrower `ast.Call` annotation was never load-bearing.
         node: ast.AST = call_node
+        # Set only while ascending through the *outermost* generator
+        # clause's own `.iter` subtree -- carried forward across the next
+        # hop (from the `ast.comprehension` clause object up to its owning
+        # `ListComp`/etc.) since that clause object, not `.iter` itself, is
+        # what a comprehension's own `generators[0]` actually holds; see
+        # the comprehension branch below for why this matters.
+        outermost_iter_clause: ast.comprehension | None = None
         while id(node) in parents:
+            child = node
             node = parents[id(node)]
+            if isinstance(node, ast.comprehension):
+                outermost_iter_clause = node if child is node.iter else None
+                continue
             if isinstance(node, ast.Lambda):
-                lambda_args = (
-                    *node.args.posonlyargs,
-                    *node.args.args,
-                    *node.args.kwonlyargs,
-                    *((node.args.vararg,) if node.args.vararg else ()),
-                    *((node.args.kwarg,) if node.args.kwarg else ()),
-                )
-                if any(arg.arg == name for arg in lambda_args):
+                # Only a call reached from the lambda's own *body* is
+                # shadowed by its parameters -- a default value is a
+                # child of `node.args`, not `node.body`, and evaluates at
+                # lambda-*creation* time, in the enclosing scope, before
+                # the lambda's own parameters exist at all (Codex review,
+                # fresh evidence): `lambda getattr=getattr(rec, "bases"):
+                # getattr` -- the default reads the real builtin, but was
+                # still treated as shadowed by the lambda's own `getattr`
+                # parameter, the identical def-time-vs-body-time
+                # distinction `_enclosing_qualnames`'s own default/
+                # annotation handling already draws for a named `def`.
+                # `child is node.body` is exact rather than merely
+                # line-based: it's true only on the hop that ascends
+                # directly out of the body subtree (however deeply the
+                # call is nested inside it), and false for every hop
+                # coming from `node.args` instead.
+                if child is node.body:
+                    lambda_args = (
+                        *node.args.posonlyargs,
+                        *node.args.args,
+                        *node.args.kwonlyargs,
+                        *((node.args.vararg,) if node.args.vararg else ()),
+                        *((node.args.kwarg,) if node.args.kwarg else ()),
+                    )
+                    if any(arg.arg == name for arg in lambda_args):
+                        return True
+            elif isinstance(
+                node, (ast.ListComp, ast.SetComp, ast.DictComp, ast.GeneratorExp)
+            ):
+                # A comprehension's own `for` target shadows innermost
+                # too, checked here rather than through the qualname
+                # system for the identical reason a lambda parameter is
+                # (Codex review, fresh evidence, a real regression in an
+                # earlier revision of this same fix): a comprehension
+                # genuinely introduces its own new scope in Python 3, so
+                # recording its target against the coarser, function-only
+                # qualname model `_locally_bound_names()` uses elsewhere
+                # would shadow every call anywhere later in the *whole
+                # enclosing function*, not just calls genuinely inside the
+                # comprehension -- `[x for getattr in funcs]` followed by
+                # an unrelated, later `getattr(rec, "bases")` in the same
+                # function must still be flagged. The one exception is the
+                # *outermost* generator's own iterable, which evaluates in
+                # whatever scope encloses the comprehension itself, before
+                # the comprehension's own targets exist (the identical
+                # exception `fact_detector_misuse_scope.py`'s own
+                # comprehension handling already carves out for the same
+                # construct). `outermost_iter_clause` (set on the previous
+                # hop, through the `ast.comprehension` clause object
+                # itself -- not `.iter` directly, since that clause object
+                # is what `node.generators[0]` actually holds) identifies
+                # exactly that one excluded child, however deeply the call
+                # is nested inside the iterable expression.
+                if node.generators and outermost_iter_clause is node.generators[0]:
+                    pass
+                elif any(
+                    bound_name == name
+                    for generator in node.generators
+                    for bound_name in _target_bound_names(generator.target)
+                ):
                     return True
         qualname = qualnames.get(call_node.lineno, "<module>")
         # Walk the call's entire lexical scope chain, not just its own
