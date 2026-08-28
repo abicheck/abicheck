@@ -74,13 +74,13 @@ class TestRunDumpRenumbersAfterClangLayoutAttach:
         p.write_bytes(b"\x7fELF" + b"\x00" * 100)
 
         with (
-            patch("abicheck.service._dump_elf", side_effect=_fake_dump),
+            patch("abicheck.service_dump_native._dump_elf", side_effect=_fake_dump),
             patch(
-                "abicheck.service._attach_header_graph",
+                "abicheck.service_dump_native._attach_header_graph",
                 side_effect=lambda s, *_a, **_k: s,
             ),
             patch(
-                "abicheck.service.attach_clang_layout",
+                "abicheck.service_dump_native.attach_clang_layout",
                 side_effect=_fake_attach_clang_layout,
             ),
         ):
@@ -97,13 +97,13 @@ class TestRunDumpRenumbersAfterClangLayoutAttach:
         p.write_bytes(b"MZ" + b"\x00" * 100)
 
         with (
-            patch("abicheck.service._dump_pe", side_effect=_fake_dump),
+            patch("abicheck.service_dump_native._dump_pe", side_effect=_fake_dump),
             patch(
-                "abicheck.service._attach_header_graph",
+                "abicheck.service_dump_native._attach_header_graph",
                 side_effect=lambda s, *_a, **_k: s,
             ),
             patch(
-                "abicheck.service.attach_clang_layout",
+                "abicheck.service_dump_native.attach_clang_layout",
                 side_effect=_fake_attach_clang_layout,
             ),
         ):
@@ -120,13 +120,13 @@ class TestRunDumpRenumbersAfterClangLayoutAttach:
         p.write_bytes(b"\xcf\xfa\xed\xfe" + b"\x00" * 100)
 
         with (
-            patch("abicheck.service._dump_macho", side_effect=_fake_dump),
+            patch("abicheck.service_dump_native._dump_macho", side_effect=_fake_dump),
             patch(
-                "abicheck.service._attach_header_graph",
+                "abicheck.service_dump_native._attach_header_graph",
                 side_effect=lambda s, *_a, **_k: s,
             ),
             patch(
-                "abicheck.service.attach_clang_layout",
+                "abicheck.service_dump_native.attach_clang_layout",
                 side_effect=_fake_attach_clang_layout,
             ),
         ):
