@@ -2635,15 +2635,35 @@ pipelines a fourth time.
   > so a `scan --against` a `dump`-CLI-written baseline happens to have both
   > sides agree by accident (verified: `scan --against` a plain `dump`
   > baseline for the fixture above reports `NO_CHANGE`, not
-  > `NOT_COMPARABLE`) — but `compare oldbaseline.json new.so --sources
-  > new=<tree> --depth source` (`dump`'s own CLI baseline against
-  > `compare`'s own implicit-dump resolution of the live binary, given the
-  > same source tree so its new side actually runs L4 replay -- a bare
-  > `compare oldbaseline.json new.so` with no `sources`/`build_info` input
-  > has nothing for `embed_build_source` to call `collect_inline_pack()`
-  > against, so it produces no new-side L4 evidence to diverge on at all,
-  > Codex review, fresh evidence) pairs a clang-derived old side against a
-  > castxml-derived new side, and the `profile_fingerprint`/
+  > `NOT_COMPARABLE`) — but `dump`'s own CLI baseline compared against
+  > `compare`'s implicit-dump resolution of the identical live binary pairs
+  > a clang-derived old side against a castxml-derived new side. **This is
+  > not reproducible through the native `compare` CLI's own `--old/new-
+  > sources`/`--build-info` flags at all (Codex review, fresh evidence,
+  > correcting this exact paragraph's own prior `compare oldbaseline.json
+  > new.so --sources new=<tree>` reproduction command) -- a raw, non-pack
+  > `sources`/`build_info` value on either side makes `_needs_inline_embed()`
+  > true, which routes through `_embed_inline_source_sides()` /
+  > `_embed_inline_source_side()`'s own nested `ctx.invoke(dump_cmd, ...)` --
+  > the exact same native `dump` CLI path the baseline itself took, unflagged
+  > `"auto"` and all, so a `--sources new=<tree>` new side resolves clang,
+  > not castxml, pairing clang with clang instead of demonstrating the
+  > divergence.** "`compare`'s implicit-dump operand" instead names the
+  > *typed* pipeline `resolve_compare_request`/`resolve_side_snapshot`
+  > share with `execute_dump_request` (`header_conditionals.py`'s own
+  > module-header comment) -- reached only when `compare` resolves a side
+  > with no CLI-level raw `--sources`/`--build-info` flag at all (an
+  > `.abicheck.yml`-discovered `sources:`/`build:` config, or a direct typed
+  > `CompareRequest` call). A bare `compare oldbaseline.json new.so` with no
+  > `sources`/`build_info` input anywhere (CLI flag or config) has nothing
+  > for `embed_build_source` to call `collect_inline_pack()` against, so it
+  > produces no new-side L4 evidence to diverge on at all -- the actual
+  > reproduction needs a typed `CompareRequest(old=..., new=InputSpec(path=
+  > new_so, ...))` call (or an `.abicheck.yml` pinning `sources:`/`build:`
+  > for the new side, discovered automatically rather than passed as a raw
+  > CLI flag) so `resolve_side_snapshot` reaches `effective_frontend`
+  > directly, pairing a clang-derived old side against a castxml-derived new
+  > side as originally intended -- and the `profile_fingerprint`/
   > `scope_fingerprint`
   > comparability gate does not consult the extractor choice, so this does
   > **not** surface as `NOT_COMPARABLE`. **Correction (Codex review, fresh
