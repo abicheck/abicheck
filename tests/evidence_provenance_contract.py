@@ -65,8 +65,33 @@ The contract
 from __future__ import annotations
 
 #: Producers set a constant evidence_provenance tuple for every instance of
-#: this kind. Empty until Phase 1's first slice wires one.
-PROVENANCE_STATIC: frozenset[str] = frozenset()
+#: this kind. G39 Phase 1's first slice (L0/L1-only detectors,
+#: diff_platform_elf_dynamic._diff_security_hardening): both kinds read
+#: only old_elf.has_stack_canary/has_fortify_source, themselves derived
+#: purely from .dynsym import/symbol names (elf_metadata._finalize_
+#: hardening) -- both:l0:elf_symtab on every instance, verified by
+#: tests/_detector_mutations.py's _m_stack_canary_removed/
+#: _m_fortify_source_weakened.
+#: G39 Phase 1's second sub-slice: the remaining kinds in the same
+#: diff_platform_elf_dynamic detectors. Each traced to elf_metadata's
+#: exact field-derivation code (`_parse_segments`/`_finalize_hardening`/
+#: `_parse_dynamic`): relro_weakened/pie_disabled are genuine composites
+#: (program-header + .dynamic, and .dynamic + ELF-header, respectively);
+#: writable_executable_segment/executable_stack/executable_stack_removed
+#: are pure program-header reads. Verified by tests/_detector_mutations.py's
+#: _m_relro_weakened/_m_pie_disabled/_m_writable_executable_segment/
+#: _m_executable_stack_introduced/_m_executable_stack_removed.
+PROVENANCE_STATIC: frozenset[str] = frozenset(
+    {
+        "executable_stack",
+        "executable_stack_removed",
+        "fortify_source_weakened",
+        "pie_disabled",
+        "relro_weakened",
+        "stack_canary_removed",
+        "writable_executable_segment",
+    }
+)
 
 #: Producers compute evidence_provenance per instance. Empty until Phase 1's
 #: L2+ slice wires one.
@@ -156,8 +181,6 @@ PROVENANCE_UNVERIFIED = frozenset(
         "enum_underlying_size_changed",
         "evidence_required_missing",
         "exceptions_mode_changed",
-        "executable_stack",
-        "executable_stack_removed",
         "experimental_graduated",
         "experimental_removed_without_replacement",
         "exported_not_public",
@@ -178,7 +201,6 @@ PROVENANCE_UNVERIFIED = frozenset(
         "field_renamed",
         "flexible_array_member_changed",
         "float_abi_changed",
-        "fortify_source_weakened",
         "frame_register_changed",
         "func_added",
         "func_became_inline",
@@ -287,7 +309,6 @@ PROVENANCE_UNVERIFIED = frozenset(
         "pe_import_load_mode_changed",
         "pe_machine_changed",
         "pe_ordinal_retargeted",
-        "pie_disabled",
         "platform_baseline_floor_raised",
         "polymorphic_type_non_virtual_dtor",
         "private_header_leak",
@@ -323,7 +344,6 @@ PROVENANCE_UNVERIFIED = frozenset(
         "python_api_stub_invalid",
         "python_gil_abi_changed",
         "python_stable_abi_violation",
-        "relro_weakened",
         "removed_const_overload",
         "return_pointer_level_changed",
         "rpath_changed",
@@ -348,7 +368,6 @@ PROVENANCE_UNVERIFIED = frozenset(
         "source_level_kind_changed",
         "source_surface_dso_mismatch",
         "source_to_binary_mapping_changed",
-        "stack_canary_removed",
         "standard_layout_lost",
         "static_tls_introduced",
         "static_tls_removed",
@@ -471,7 +490,6 @@ PROVENANCE_UNVERIFIED = frozenset(
         "wheel_rpath_not_portable",
         "wheel_tag_architecture_mismatch",
         "whole_program_vtables_mode_changed",
-        "writable_executable_segment",
         "x86_isa_baseline_raised",
     }
 )
