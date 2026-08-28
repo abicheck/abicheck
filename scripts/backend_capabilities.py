@@ -274,6 +274,21 @@ FACT_ROWS: tuple[FactRow, ...] = (
     ),
     FactRow("Function", "hidden_friend_owner", _FULL, _FULL),
     FactRow("Function", "elf_binding", _OTHER, _OTHER, note=_DYNSYM),
+    FactRow(
+        "Function",
+        "is_compiler_generated",
+        _FULL,
+        _NONE,
+        note=(
+            "castxml reads its own `artificial=\"1\"` XML attribute (any "
+            "function-like element, not just Constructor/Destructor). clang "
+            "never derives this per-declaration -- it hardcodes False for "
+            "every Function it emits, which is still a correct answer, not "
+            "a gap: its own AST walk skips a node entirely whenever it is "
+            "`isImplicit`, so a node reaching `parse_functions()` is "
+            "structurally guaranteed to have been written by the user."
+        ),
+    ),
     # ── Variable ───────────────────────────────────────────────────────────
     FactRow("Variable", "name", _FULL, _FULL),
     FactRow("Variable", "mangled", _FULL, _FULL),

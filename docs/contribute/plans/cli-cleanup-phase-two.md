@@ -2462,6 +2462,58 @@ pipelines a fourth time.
   > characterized instead of merely "unverifiable" or "needs its own
   > dedicated pass" in the abstract.
 
+  > **The castxml L4 extractor bug is fixed (2026-08-28).** A new field,
+  > `Function.is_compiler_generated` (schema v27), records castxml's own
+  > `artificial="1"` XML attribute — read for ANY function-like element,
+  > not just `Constructor`/`Destructor` where it was already read for
+  > `_ctor_or_dtor_visibility` — closing the exact gap this entry
+  > identified as the only reliable, general signal (the two pre-existing
+  > synthetic-mangled-name markers, `is_synthetic_ctor_key`/
+  > `is_synthetic_dtor_key`, could not catch a synthesized `operator=`,
+  > which castxml gives a real-looking Itanium mangled name). The
+  > direct-clang L2 backend stamps `is_compiler_generated=False`
+  > unconditionally, not per-node: its own `_walk` already skips
+  > `_categorize` entirely whenever a node is `isImplicit`, so a node
+  > reaching `parse_functions()`'s output is structurally guaranteed to
+  > have been written by the user — confirmed by reading `dumper_clang.py`
+  > directly, not assumed. `entity_from_function`'s `api_relevant`
+  > computation now excludes a confirmed `is_compiler_generated is True`
+  > declaration regardless of origin/access, closing the false-positive
+  > `source_binary_provenance_mismatch` this entry's own repro produced.
+  > Every existing consumer of `Function.visibility` was checked and needed
+  > no change — this fix is additive (a new field, a new exclusion
+  > condition gated on a confirmed `True`) rather than a change to
+  > `visibility`'s own HIDDEN/PUBLIC split, so nothing that already reads
+  > `visibility` observes different behavior.
+  >
+  > Verified against real castxml 0.7.0 and real clang 20, not only against
+  > hand-built fixtures: `tests/test_castxml_l4_phantom_members.py::
+  > test_castxml_l4_extract_excludes_implicit_special_members_from_reachable_surface`
+  > reproduces this entry's own exact repro end to end through the real
+  > `CastxmlSourceExtractor.extract` → `link_source_abi` pipeline (not a
+  > synthetic fixture) — confirmed to fail against the pre-fix code with
+  > the identical `7` exportable-declarations / `1` matched shape this
+  > entry's own investigation found, and to pass after it with a clean
+  > `1/1`. Further coverage: `tests/test_castxml_compiler_generated.py`
+  > (the castxml parser level, hand-built XML mirroring real castxml
+  > output element-for-element), `tests/
+  > test_dumper_clang_compiler_generated.py` (the direct-clang parser
+  > level, plus a direct pin that an `isImplicit` node never reaches
+  > `parse_functions()`'s output at all), and `tests/
+  > test_serialization_function_compiler_generated.py` (schema-v27
+  > round-trip, including a pre-v27 snapshot dict loading the field as
+  > `None`).
+  >
+  > **Deliberately not done in this same pass, per this entry's own
+  > established caution and the plan's item 2 section above**: flipping
+  > `scan_engine.py`'s `source_extractor="auto"` to follow
+  > `effective_frontend` (closing the scan-vs-dump/compare L4 extractor
+  > default divergence item 2 documents) — that remains a separate,
+  > deliberately deferred decision needing its own dedicated verification
+  > in production usage, not a byproduct of fixing the bug that blocked it.
+  > This fix removes that decision's main objection (castxml's L4 surface
+  > was unsafe to trust), but does not itself change any default.
+
 `dump --build-query` and `dump --build-compile-db` describe how the *project*
 is built, not what this snapshot is. They are already documented as CLI
 equivalents of the `.abicheck.yml` `build.query` / `build.compile_db` fields,

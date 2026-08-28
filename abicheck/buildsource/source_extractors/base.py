@@ -173,7 +173,22 @@ def entity_from_function(fn: Function) -> SourceEntity:
         visibility=_visibility(fn.origin),
         # Private/protected members of a public class are not part of the callable
         # public surface, so keep them off it (Codex review #335, P2).
-        api_relevant=fn.origin in _PUBLIC_ORIGINS and fn.access not in _NON_PUBLIC_ACCESS,
+        # A confirmed compiler-generated declaration (fn.is_compiler_generated
+        # is True) is excluded regardless of origin/access: it has no real
+        # source declaration of its own to be public or private about, and a
+        # trivial implicit special member is essentially never emitted as
+        # its own out-of-line symbol -- letting it into the reachable
+        # source surface drags the declaration-to-binary-symbol match ratio
+        # down enough to trip a false-positive provenance-mismatch finding
+        # (see AGENTS.md's "PR C" known-gaps entry for the full account).
+        # `is None` (older snapshot / DWARF-only path -- "not captured")
+        # deliberately does not exclude, matching the tri-state convention
+        # every other confirmed-True-only exclusion in this codebase uses.
+        api_relevant=(
+            fn.origin in _PUBLIC_ORIGINS
+            and fn.access not in _NON_PUBLIC_ACCESS
+            and fn.is_compiler_generated is not True
+        ),
         confidence=LayerConfidence.HIGH,
     )
 
