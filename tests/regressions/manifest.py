@@ -418,28 +418,79 @@ BUG_CLASSES: tuple[BugClass, ...] = (
         fixed_by=(860, 883, 886),
         seed_tests=(
             "tests/test_run_plan.py",
+            "tests/test_run_plan_consumer_compile_active.py",
             "tests/test_project_targets_consumer_compile.py",
             "tests/test_cli_compare_release_bundle_signature_wiring.py",
+            "tests/test_reusable_workflows_project_evidence.py",
+            "tests/test_action_compile_context_parity.py",
         ),
         known_gaps=(
             KnownGap(
                 description=(
-                    "No generalized sentinel-propagation matrix exists yet "
-                    "covering every public entry point named in "
-                    "bug-class-regression-testing.md's Phase 6. Of the two "
-                    "seed tests, only `test_run_plan.py`'s "
-                    "`TestConsumerCompileOverlayProjection` covers the "
-                    "'reaches every consumer' half of this class's own "
-                    "invariant (`profiles.<id>.consumer_compile` reaching "
-                    "the generated run-plan cell, via `generate_run_plan` "
-                    "directly — no CLI, no python-api); "
-                    "`test_project_targets_consumer_compile.py` only "
-                    "exercises the 'rejected at the public boundary' half "
-                    "(schema parsing/round-tripping) and on its own would "
-                    "leave a dropped forwarding edge undetected — it was "
-                    "the sole seed here until this was found to be a real "
-                    "gap (Codex review, PR #885). Neither reaches every "
-                    "config path Phase 6 names, only this one."
+                    "Phase 6's own `consumer_compile` concern now has a "
+                    "genuinely closed chain, used as this class's first "
+                    "full worked example rather than a new abstraction: "
+                    "(1) five state distinctions — omitted (`test_project_"
+                    "targets_consumer_compile.py::"
+                    "test_profile_without_consumer_compile_overlay_is_"
+                    "none`), explicit `null` (rejected at the boundary, "
+                    "`..._explicit_null_raises`), explicit empty `{}` "
+                    "(indistinguishable from omitted downstream by design, "
+                    "`..._explicit_empty_mapping_is_indistinguishable_"
+                    "from_absent`), default field composition (`test_run_"
+                    "plan.py`'s `TestConsumerCompileOverlayProjection."
+                    "test_consumer_binding_absent_from_resolved_bindings_"
+                    "leaves_path_empty`), and explicit-equal-to-the-"
+                    "producer's-own-value (`test_run_plan_consumer_compile_"
+                    "active.py`'s `test_consumer_compile_overlay_equal_to_"
+                    "producer_is_still_active` — proving the overlay's own "
+                    "*presence* marker survives even when its resolved values "
+                    "coincide with the producer's, so it isn't silently "
+                    "collapsed into the 'no overlay' state). (2) every hop "
+                    "of the real chain is now asserted, not just the "
+                    "first: config → `generate_run_plan()` cell (as "
+                    "before) → `check-project.yml`'s `Run check-target` "
+                    "step → `check-target/action.yml`'s own 'Extract "
+                    "candidate consumer context' step (the previously-"
+                    "untested hop — only `ast-frontend` had a forwarding "
+                    "assertion there, `gcc-path`/`gcc-options` had none, "
+                    "found while doing this phase's work, not a "
+                    "pre-existing reported bug) → the root Action's "
+                    "`run.sh`, whose real `--compiler`/`--compiler-option` "
+                    "CLI-flag construction from those same inputs is "
+                    "executed (not just text-matched) by `test_action_"
+                    "compile_context_parity.py`. (3) a mutation check "
+                    "(`TestConsumerCompilePropagationChainMutationCheck` "
+                    "in `test_reusable_workflows_project_evidence.py`) "
+                    "proves the hop-3 assertion actually fails, naming the "
+                    "broken field, for both ways a forwarding edge "
+                    "realistically breaks (repointed to a sibling input; "
+                    "dropped from `with:` entirely) — the Phase 6 "
+                    "requirement that a harness be shown to catch #860/"
+                    "#883's own class before merge, not just assert "
+                    "today's wiring is correct."
+                ),
+                reference="docs/contribute/plans/bug-class-regression-testing.md#phase-6",
+            ),
+            KnownGap(
+                description=(
+                    "Still open: (a) this closed chain reaches config -> "
+                    "generate_run_plan() -> the composite-Action/reusable-"
+                    "workflow path only — no seed test drives the same "
+                    "consumer_compile value through the native Python API "
+                    "or a `project`/`aggregate` CLI invocation end to end; "
+                    "(b) Phase 6 names seven other configurable concerns "
+                    "(policy/policy-file, frontend/compiler as a general "
+                    "per-entry-point concern beyond this one profile field, "
+                    "include roots, evidence-pack/target attribution, "
+                    "safety budgets, suppression/filtering, per-library "
+                    "override, output/report options) — none has yet had "
+                    "this same five-state/full-chain/mutation-check "
+                    "treatment; consumer_compile was chosen as the first "
+                    "worked example specifically because #860/#883's own "
+                    "history and this class's pre-existing seed tests "
+                    "already pointed at it, not because it's necessarily "
+                    "representative of the others' own chain shapes."
                 ),
                 reference="docs/contribute/plans/bug-class-regression-testing.md#phase-6",
             ),
