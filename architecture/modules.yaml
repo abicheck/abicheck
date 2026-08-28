@@ -214,7 +214,6 @@
         "abicheck/contract_evaluation.py",
         "abicheck/contract_evidence_collect.py",
         "abicheck/export_surface.py",
-        "abicheck/pattern_verdicts.py",
         "abicheck/semver.py",
         "abicheck/suppression_yaml.py",
         "abicheck/surface.py"
