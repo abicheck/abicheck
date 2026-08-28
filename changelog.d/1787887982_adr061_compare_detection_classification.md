@@ -7,8 +7,8 @@
   sibling of the already-classified `finding_identity.py` -- old/new
   symbol-identity canonicalization, importing only `model`), and
   `versioned_symbol_scheme.py` (the ICU-style versioned-symbol-name
-  matcher that folds `foo_75`/`foo_78` into one identity across old/new --
-  no local imports at all). Verified via `scripts/check_architecture.py`
+  matcher that folds `foo_75`/`foo_78` into one identity across old/new).
+  Verified via `scripts/check_architecture.py`
   (0 errors, no new dependency cycle), `scripts/check_ai_readiness.py` (0
   errors), `mypy abicheck/` (17 errors, unchanged from the documented
   yaml-stub-only baseline), `scripts/adr_status_sync.py` (clean), and the
@@ -32,6 +32,23 @@
   unclassified; the shared synthetic-ctor/dtor-key primitives belong with
   `dumper_castxml.py`'s own eventual `extract` classification (or `model`,
   if split out) in a follow-up.
+
+  **`versioned_symbol_scheme.py`'s own "no local imports at all" claim
+  was also wrong, per a third Codex review finding, real and confirmed by
+  reading the file.** It imported `ChangeKind` from `checker_policy.py`
+  (currently unclassified, so no live violation, but genuinely policy-
+  shaped and the eventual target of a future `policy` classification per
+  PR #913's own investigation) rather than from `ChangeKind`'s canonical
+  home, `model.change_catalog.kinds` (moved there by PR #902's model
+  split -- `checker_policy.py`'s own `ChangeKind` is an unchanged
+  re-export, `from .model.change_catalog.kinds import ChangeKind as
+  ChangeKind`). Unlike the two reverts above, this one had no live
+  cross-PR collision to force a revert -- fixed the import itself
+  instead, pointing directly at the canonical, already-`model`-classified
+  source rather than routing through an unclassified re-export.
+  Behavior-identical (same class, same object identity), verified via
+  `mypy abicheck/versioned_symbol_scheme.py` (clean) and
+  `pytest -k versioned_symbol` (60 passed, 1 skipped).
 
   **`type_metadata.py` was initially classified `compare` in this same
   batch and reverted after a Codex review finding, real and confirmed by
