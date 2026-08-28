@@ -531,6 +531,17 @@ def _def_containing_qualnames(tree: ast.Module) -> dict[tuple[int, int], str]:
     dedicated walk tracks the containing scope explicitly instead of
     relying on span containment for a position that is, by construction,
     inside the very span whose *container* is being asked for.
+
+    **A `Lambda`'s own containing scope is recorded too (Codex review,
+    fresh evidence).** A lambda has no *name* to bind -- unlike a `def`/
+    `class` statement, its introduction is an expression, not a statement
+    -- but its own default values still evaluate at lambda-creation time
+    in whatever scope directly contains it, the identical rule a method's
+    default already relies on this function for. `fact = rec.bases_fact;
+    cb = lambda x=fact: x == other` inside a function has no entry to
+    resolve against without this, so both the pending-default alias
+    resolution and the comparison-scope override below silently fell back
+    to `"<module>"` regardless of the lambda's real containing scope.
     """
     containing: dict[tuple[int, int], str] = {}
 
@@ -542,6 +553,7 @@ def _def_containing_qualnames(tree: ast.Module) -> dict[tuple[int, int], str]:
                 visit(child, qualname + ".", qualname)
             elif isinstance(child, ast.Lambda):
                 qualname = f"{prefix}<lambda>#{child.lineno}:{child.col_offset}"
+                containing[child.lineno, child.col_offset] = scope_qualname
                 visit(child, qualname + ".", qualname)
             elif isinstance(
                 child, (ast.ListComp, ast.SetComp, ast.DictComp, ast.GeneratorExp)
@@ -1008,20 +1020,33 @@ def _fact_aliases(tree: ast.Module, qualnames: _QualnameSpans) -> dict[str, set[
                     )
             # A walrus *inside* a default expression -- `def inner(x=(fact
             # := rec.bases_fact)):` -- binds `fact` in the scope the
-            # default is evaluated in too, which is the *enclosing* scope
-            # (Python's own default-evaluation rule, the same one the
-            # pending-defaults handling above already relies on), not
-            # `inner`'s own body scope (Codex review, fresh evidence): the
-            # generic, position-based `NamedExpr` branch would otherwise
-            # attribute it to `inner` -- the smallest span containing the
-            # walrus's own position, since a default expression is
-            # textually part of the `def`/lambda's own span -- silently
-            # losing an alias a later, genuinely outer `fact == other`
-            # needs. Registered directly in the enclosing scope
-            # (`lexical_parents[qualname]`, computed once up front for
-            # exactly this kind of use) as an ordinary local binding, and
-            # excluded from the generic branch via `default_walrus_ids` so
-            # it isn't also (mis)processed there.
+            # default is evaluated in too, which is the scope that
+            # directly, syntactically contains the `def`/lambda (Python's
+            # own default-evaluation rule, the same one the pending-
+            # defaults handling above already relies on), not `inner`'s
+            # own body scope (Codex review, fresh evidence): the generic,
+            # position-based `NamedExpr` branch would otherwise attribute
+            # it to `inner` -- the smallest span containing the walrus's
+            # own position, since a default expression is textually part
+            # of the `def`/lambda's own span -- silently losing an alias a
+            # later, genuinely outer `fact == other` needs. Registered
+            # directly in the containing scope (`def_containing`, computed
+            # once up front for exactly this kind of use) as an ordinary
+            # local binding, and excluded from the generic branch via
+            # `default_walrus_ids` so it isn't also (mis)processed there.
+            #
+            # **`def_containing`, not `lexical_parents` (Codex review,
+            # fresh evidence).** A *method's* own default-embedded walrus
+            # is evaluated while its containing *class body* executes,
+            # ordinary class-body code, not a closure lookup --
+            # `lexical_parents` intentionally skips that class layer for
+            # the different question of a method *body*'s own free-
+            # variable lookup, the identical class-skipping issue the
+            # sibling `pending_defaults`/`_default_and_annotation_scope_
+            # overrides()` fixes already had to make for the same reason.
+            # `class C: fact = 1; def f(self, x=(fact := rec.bases_fact)):
+            # ...` must publish `fact` to `C`'s own class-body scope, not
+            # skip past it to whatever encloses `C`.
             #
             # **Stops at a nested scope boundary, via `_iter_default_
             # subtree()` (Codex review, fresh evidence).** A default
@@ -1035,7 +1060,7 @@ def _fact_aliases(tree: ast.Module, qualnames: _QualnameSpans) -> dict[str, set[
             # same way. An unrestricted `ast.walk(default_expr)` crossed
             # that boundary too, wrongly publishing the lambda-local walrus
             # target as an alias of the *enclosing* (here, module) scope.
-            enclosing = lexical_parents.get(qualname, "<module>")
+            enclosing = def_containing.get((node.lineno, node.col_offset), "<module>")
             for default_expr in (*node.args.defaults, *node.args.kw_defaults):
                 if default_expr is None:
                     continue
@@ -1359,9 +1384,31 @@ def _default_and_annotation_scope_overrides(
     itself already resolves a *binding* found inside a default/annotation
     correctly (the walrus case), this is the sibling fix for a *read* (an
     `==`/`!=` comparison) found there instead.
+
+    **Also overrides a `ClassDef`'s own base/keyword expressions to its
+    containing scope (Codex review, fresh evidence).** A base class or
+    metaclass keyword (`class Inner(make_base(fact == other)): ...`) is
+    evaluated while the *class statement itself* executes -- in whatever
+    scope directly, syntactically contains that `class` statement -- never
+    inside the new class's own body, even though `_enclosing_qualnames`
+    assigns the entire `ClassDef` span, bases and keywords included, to
+    the inner class-body scope (correct for the body's own statements,
+    wrong for the header that precedes them). `class Outer: fact = rec.
+    bases_fact; class Inner(make_base(fact == other)): ...` was silently
+    missed: position-based resolution attributed the comparison to
+    `Outer.Inner<class-body>`, whose own alias set has no relationship to
+    `Outer<class-body>`'s (a class body's own locals give no visibility to
+    a *nested* class the way an enclosing function's would -- `_lexical_
+    function_parents` never produces a class-body-derived key at all).
     """
     overrides: dict[int, str] = {}
     for node in ast.walk(tree):
+        if isinstance(node, ast.ClassDef):
+            enclosing = def_containing.get((node.lineno, node.col_offset), "<module>")
+            for base_or_keyword in (*node.bases, *(kw.value for kw in node.keywords)):
+                for descendant in _iter_default_subtree(base_or_keyword):
+                    overrides[id(descendant)] = enclosing
+            continue
         if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)):
             continue
         enclosing = def_containing.get((node.lineno, node.col_offset), "<module>")

@@ -1758,6 +1758,58 @@ tests: the nested-lambda-walrus exclusion and a negative control (a
 walrus directly inside a default, no nested scope in the way, must still
 be published to the enclosing scope exactly as before).
 
+**A further Codex review round found three more real gaps in the same
+containing-scope machinery, all fixed.** (1) **`_def_containing_
+qualnames()` recorded a containing scope for a `def`/`class` statement
+but never for a `Lambda`.** A lambda has no *name* to bind (unlike a
+`def`/`class` statement, its introduction is an expression, not a
+statement) -- but its own default values still evaluate at
+lambda-creation time in whatever scope directly contains it, the
+identical rule a method's own default already relies on this function
+for. `fact = rec.bases_fact; cb = lambda x=fact: x == other` inside a
+function had no entry to resolve against, so both the pending-default
+alias resolution and the comparison-scope override silently fell back to
+`"<module>"` regardless of the lambda's real containing scope. Fixed by
+recording `containing[lambda.lineno, lambda.col_offset] = scope_qualname`
+in the `Lambda` branch, mirroring the `FunctionDef`/`ClassDef` branches
+exactly. (2) **A nested class's own base/keyword expressions were
+attributed to the *inner* class's own body scope instead of the scope
+that actually contains the `class` statement.** `class Outer: fact =
+rec.bases_fact; class Inner(make_base(fact == other)): ...` -- a base
+class or metaclass keyword executes while the `class Inner` statement
+itself runs, in `Outer`'s own scope, never inside `Inner`'s own (not yet
+even created) body -- but `_enclosing_qualnames` assigns the *entire*
+`ClassDef` span, bases and keywords included, to the inner class-body
+scope (correct for the body's own statements, wrong for the header that
+precedes them), and `_default_and_annotation_scope_overrides()` had no
+`ClassDef` branch at all to correct it. Fixed by extending that function
+with a `ClassDef` branch: walk `node.bases`/`(kw.value for kw in
+node.keywords)` through the same `_iter_default_subtree()` boundary-aware
+walker the `FunctionDef`/`Lambda` branch already uses, overriding each to
+the `ClassDef`'s own containing scope (from `def_containing`) rather than
+its class-body scope. (3) **The walrus-inside-a-default collector's own
+`enclosing` computation still used `lexical_parents`, not
+`def_containing`, even after the sibling `pending_defaults` resolution
+and `_default_and_annotation_scope_overrides()` were both already fixed
+to use the latter (two rounds above).** A *method's* own default-embedded
+walrus is evaluated while its containing *class body* executes -- ordinary
+class-body code, not a closure lookup -- but `lexical_parents`
+intentionally skips that class layer for the different question of a
+method *body*'s own free-variable lookup: `fact = 1; class C: def
+f(self, x=(fact := rec.bases_fact)): ...` wrongly bound the walrus target
+to the *module's* `fact` (skipping straight past `C`'s own class-body
+scope), so a later, genuinely unrelated module-level `fact == other`
+read past that point was rejected, and the actual class-body-scoped
+`fact` the walrus meant to bind was invisible to a use elsewhere in that
+same class body. Fixed by switching this one remaining call site to
+`def_containing.get((node.lineno, node.col_offset), "<module>")`,
+matching its two siblings. Verified empirically: still zero existing
+hits in the real repository, and `mypy`/`ruff` both stayed clean. Five
+new tests: the lambda-default-inherits-containing-scope case, the
+nested-class-header case, the method-default-walrus-binds-in-class-
+namespace case and its positive control (the same walrus target visible
+elsewhere in that class body).
+
 ---
 
 ### Phase 1 — finish the `dump`/`scan` typed-API convergence (closes AGENTS.md "PR C")

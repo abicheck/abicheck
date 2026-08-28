@@ -1114,3 +1114,85 @@ class TestFactEqualityMisuseSitesScoping:
         )
         tree = ast.parse(src, filename="x.py")
         assert fact_equality_misuse_sites(tree, "x.py") == [(4, 6)]
+
+    def test_a_lambdas_own_default_inherits_its_containing_scopes_alias(
+        self,
+    ) -> None:
+        """`fact = rec.bases_fact; cb = lambda x=fact: x == other` -- a
+        lambda has no *name* to bind (unlike a `def`/`class` statement),
+        but its own default value still evaluates at lambda-creation time
+        in whatever scope directly contains it. `_def_containing_
+        qualnames` previously recorded a containing scope for a `def`/
+        `class` but never for a `Lambda`, so both the pending-default
+        alias resolution and the comparison-scope override silently fell
+        back to `<module>` regardless of the lambda's real containing
+        scope (Codex review, fresh evidence)."""
+        src = (
+            "def f(rec, other):\n"
+            "    fact = rec.bases_fact\n"
+            "    cb = lambda x=fact: x == other\n"
+            "    return cb\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert fact_equality_misuse_sites(tree, "x.py") == [(3, 24)]
+
+    def test_a_nested_class_header_evaluates_in_the_containing_class_scope(
+        self,
+    ) -> None:
+        """`class Outer: fact = rec.bases_fact; class Inner(make_base(fact
+        == other)): ...` -- a nested class's own base/keyword expressions
+        execute while the `class Inner` statement itself runs, in
+        `Outer`'s own class-body scope, not inside `Inner`'s own (not yet
+        even created) body scope. `_enclosing_qualnames` assigns the
+        entire `ClassDef` span -- bases and keywords included -- to the
+        inner class-body scope, which is right for the body's own
+        statements but wrong for the header that precedes them (Codex
+        review, fresh evidence)."""
+        src = (
+            "def f(rec, other):\n"
+            "    class Outer:\n"
+            "        fact = rec.bases_fact\n"
+            "        class Inner(make_base(fact == other)):\n"
+            "            pass\n"
+            "    return Outer\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert fact_equality_misuse_sites(tree, "x.py") == [(4, 30)]
+
+    def test_a_method_default_walrus_binds_in_the_class_namespace(
+        self,
+    ) -> None:
+        """`fact = 1; class C: def f(self, x=(fact := rec.bases_fact)):
+        ...` -- the walrus inside a *method's* own default executes while
+        the containing class body runs, so it must bind `C`'s own
+        class-body `fact`, not the module-level `fact` -- `lexical_
+        parents` deliberately skips the class layer (it answers the
+        method *body*'s own free-variable lookup, a different question),
+        so this must use the same `def_containing` primitive the sibling
+        `pending_defaults` fix already uses (Codex review, fresh
+        evidence)."""
+        src = (
+            "fact = 1\n"
+            "class C:\n"
+            "    def f(self, x=(fact := rec.bases_fact)):\n"
+            "        return x\n"
+            "print(fact == other)\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert fact_equality_misuse_sites(tree, "x.py") == []
+
+    def test_a_method_default_walrus_is_visible_within_the_same_class_body(
+        self,
+    ) -> None:
+        """Positive control for the test above: the class-body `fact`
+        the method-default walrus actually binds must still be visible to
+        an ordinary read elsewhere in that same class body."""
+        src = (
+            "class C:\n"
+            "    fact = 1\n"
+            "    def f(self, x=(fact := rec.bases_fact)):\n"
+            "        return x\n"
+            "    result = fact == other\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert fact_equality_misuse_sites(tree, "x.py") == [(5, 13)]
