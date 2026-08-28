@@ -2112,6 +2112,77 @@ under the 2000-line hard cap, real headroom restored) plus the new 410-line
 `TestMappingReceiverAliasesResolveThroughLocalNames` in `tests/
 test_fact_field_readers_wrapper_scoping.py`.
 
+**Two more findings from the next review round, plus a second test-file
+split once the second push crossed the 1200-line cap outright.** (1)
+Neither the mapping-`.get()` branch nor the subscript branch matches
+`vars(rec).__getitem__("bases")` (the explicit dunder-method spelling of
+the identical subscript read) or `operator.getitem(vars(rec), "bases")`
+(the standard-library callable spelling) -- both read the exact same
+normalized legacy value already caught elsewhere. Fixed with two new
+sibling branches: a `__getitem__` call on a mapping receiver, and a
+`getitem` call through a real `operator` module alias (`operator_names`,
+already resolved by `_operator_attrgetter_aliases()` for `attrgetter`'s
+own qualified form -- reused as-is, not re-derived), gated on `_shadowed()`
+the same way every other module-qualified call in this file already is.
+(2) Every alias-collection helper in this module (`_builtins_getattr_
+aliases`, `_operator_attrgetter_aliases`, `_unbound_getattribute_receiver_
+aliases`, `_builtins_symbol_aliases`, `_mapping_receiver_aliases`) is
+deliberately name-only and whole-tree, with no notion of *which* scope a
+given alias was actually recognized in -- and `_locally_bound_names()`'s
+own recognized-import carve-out (the mechanism that keeps a genuine alias
+import like `from operator import attrgetter as ag` from being wrongly
+treated as a shadow of itself) simply *omits* such an import from its
+`bound` dict entirely, rather than recording anywhere that it was
+recognized. `_shadowed()`'s outward closure walk had nothing to stop it
+at the scope the alias was actually resolved in, so it kept walking past
+that scope to search an *enclosing* one -- and if that enclosing scope
+happened to bind the same bare name to something completely unrelated
+(`from helper import ag` at module scope, an ordinary, unrecognized
+import), the walk wrongly treated that unrelated binding as a shadow of
+the genuinely-resolved inner alias. `from helper import ag` at module
+scope, `from operator import attrgetter as ag` inside `f`, `ag("bases")
+(rec)` inside `f` -- a real field read -- was invisible. Rather than
+threading real per-scope alias resolution through all five of those
+name-collection helpers (the kind of redesign `fact_detector_misuse.py`'s
+own `_imported_fact_aliases()` docstring already declined for an
+analogous reason -- see its "known gap" entry earlier in this doc),
+`_locally_bound_names()` now returns a *second* dict alongside its
+existing one: which names were recognized as a genuine alias source, per
+scope, rather than discarding that information. `_shadowed()`'s walk now
+checks this second dict at each scope it passes through and returns
+`False` (unshadowed) the moment it finds the name recognized there,
+before ever reaching an enclosing scope's own (potentially unrelated)
+binding. This is a real, bounded fix rather than the declined redesign,
+because it reuses the exact closure-walk mechanism `_shadowed()` already
+has -- the only change is giving it one more signal to stop on, not
+teaching every alias helper to understand scope.
+
+Verified against both reported repros, an aliased-import variant of the
+`operator.getitem` fix, and negative controls for each (a non-mapping
+`__getitem__` receiver; a shadowed `operator` parameter; an unrelated
+outer import with no inner recognized re-import, confirming the fix
+doesn't widen recognition, only stops the walk early once a real alias is
+found; a genuine parameter shadow, confirming ordinary shadowing is
+unaffected; a closure through a real recognized alias from an *enclosing*
+scope with no re-import of its own, confirming the pre-existing
+closure-walk behavior survives) via direct AST reproduction before
+writing tests. Adding these tests pushed `tests/
+test_fact_field_readers_wrapper_scoping.py` to 1219 of its own 1200-line
+cap -- over it outright -- so its tail (the five most recent test
+classes: augmented assignment through mapping receivers, lambda parameter
+shadowing, mapping-receiver aliases, explicit mapping-item readers,
+per-scope dynamic-reader alias resolution) was split into a new sibling
+file, `tests/test_fact_field_readers_later_fixes.py`, mirroring the
+`test_fact_detector_misuse_alias_edge_cases.py` precedent on the sibling
+gate -- mechanical extraction, every class moved unchanged, verified both
+in combination and in isolation. Zero existing hits, `mypy`/`ruff` both
+stayed clean, `fact_field_readers.py` at 1662 lines,
+`fact_field_readers_scope.py` at 439 lines, the wrapper-scoping test file
+back down to 936 lines, the new later-fixes test file at 315 lines -- all
+well under their respective caps. New tests:
+`TestExplicitMappingItemReaders` and `TestDynamicReaderAliasesResolvePer
+LexicalScope`, both now in `tests/test_fact_field_readers_later_fixes.py`.
+
 **Still not landed**: no detector (`diff_layout.py`/`diff_types.py`/
 `diff_param_qualifiers.py`/the reader set the check above now tracks
 precisely) has actually been migrated to read `.status` — the check above

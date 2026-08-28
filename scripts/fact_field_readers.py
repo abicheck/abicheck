@@ -1144,7 +1144,7 @@ def unmigrated_fact_reader_sites(
         tree, object_type_names
     )
     attrgetter_names, operator_names = _operator_attrgetter_aliases(tree)
-    locally_bound = _locally_bound_names(tree)
+    locally_bound, recognized_alias_scopes = _locally_bound_names(tree)
     lexical_parents = _lexical_function_parents(tree)
 
     def _shadowed(call_node: ast.expr, name: str) -> bool:
@@ -1196,6 +1196,15 @@ def unmigrated_fact_reader_sites(
         while True:
             if name in locally_bound.get(qualname, ()):
                 return True
+            # A recognized alias-source import (`from operator import
+            # attrgetter as ag`) resolves the name definitively at this
+            # scope -- stop here, unshadowed, rather than continuing to
+            # walk outward and potentially finding a completely
+            # unrelated same-named binding in an enclosing scope (Codex
+            # review, fresh evidence: see `_locally_bound_names()`'s own
+            # docstring for the exact repro this closes).
+            if name in recognized_alias_scopes.get(qualname, ()):
+                return False
             if qualname == "<module>":
                 return False
             qualname = lexical_parents.get(qualname, "<module>")
@@ -1546,6 +1555,44 @@ def unmigrated_fact_reader_sites(
             # inspected, matching how `getattr()`'s own third argument
             # is treated elsewhere in this module.
             attr = node.args[0].value
+            record_node = node
+        elif (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and node.func.attr == "__getitem__"
+            and _is_mapping_receiver(node.func.value)
+            and len(node.args) == 1
+            and isinstance(node.args[0], ast.Constant)
+            and isinstance(node.args[0].value, str)
+            and node.args[0].value in FACT_BRIDGED_ATTRS
+        ):
+            # `vars(rec).__getitem__("bases")` -- the explicit dunder-
+            # method spelling of the identical subscript read
+            # `vars(rec)["bases"]` already catches, the same bound-method
+            # relationship `rec.__getattribute__("bases")` already has to
+            # `rec.bases` elsewhere in this module (Codex review, fresh
+            # evidence).
+            attr = node.args[0].value
+            record_node = node
+        elif (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and node.func.attr == "getitem"
+            and isinstance(node.func.value, ast.Name)
+            and node.func.value.id in operator_names
+            and not _shadowed(node, node.func.value.id)
+            and len(node.args) == 2
+            and _is_mapping_receiver(node.args[0])
+            and isinstance(node.args[1], ast.Constant)
+            and isinstance(node.args[1].value, str)
+            and node.args[1].value in FACT_BRIDGED_ATTRS
+        ):
+            # `operator.getitem(vars(rec), "bases")` -- the standard-
+            # library callable spelling of the identical subscript read,
+            # via a real `operator` module alias (`operator_names`, the
+            # same resolved set `attrgetter`'s own module-qualified form
+            # already uses) (Codex review, fresh evidence).
+            attr = node.args[1].value
             record_node = node
         else:
             continue

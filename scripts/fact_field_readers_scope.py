@@ -169,11 +169,34 @@ def _outermost_containing_expr(node: ast.AST, parents: dict[int, ast.AST]) -> as
     return current
 
 
-def _locally_bound_names(tree: ast.Module) -> dict[str, set[str]]:
+def _locally_bound_names(
+    tree: ast.Module,
+) -> tuple[dict[str, set[str]], dict[str, set[str]]]:
     """Map each function's qualname (the identical key `_enclosing_
     qualnames` uses) to every *parameter* name it declares -- not an
     ordinary assignment target, and not a name bound inside a *nested*
-    function's own body.
+    function's own body -- as the first of two returned dicts; the second
+    maps each qualname to every name recognized there as a genuine
+    alias-source import (see the "Carved out" section below) instead of
+    an ordinary shadow.
+
+    **The second dict exists to stop `_shadowed()`'s own outward closure
+    walk at the scope a recognized alias resolves, rather than letting it
+    keep walking past that scope entirely (Codex review, fresh
+    evidence).** `from helper import ag` at module scope, then `from
+    operator import attrgetter as ag` inside `f`, then `ag("bases")(rec)`
+    inside `f` -- a real field read, since `f`'s own import genuinely
+    resolves `ag` to `operator.attrgetter`. The recognized-import
+    exclusion below correctly keeps `f`'s own import out of the first
+    dict (it is not a shadow), but that alone left `_shadowed()`'s walk
+    with nothing to stop it at `f` -- it kept walking outward to
+    `<module>`, found the *unrelated* `ag` import recorded there, and
+    wrongly treated that completely different binding as a shadow of the
+    call inside `f`. Recording the recognized name in this second dict
+    lets `_shadowed()` stop -- unshadowed -- the moment it passes through
+    the scope where the alias was actually recognized, instead of
+    continuing to search outer scopes for an unrelated same-named binding
+    that has nothing to do with the resolved alias.
 
     **Used to exclude a shadowed name from builtin recognition (Codex
     review, fresh evidence).** `def f(getattr, rec): return getattr(rec,
@@ -328,6 +351,7 @@ def _locally_bound_names(tree: ast.Module) -> dict[str, set[str]]:
     normally.
     """
     bound: dict[str, set[str]] = {}
+    recognized_aliases: dict[str, set[str]] = {}
 
     def visit(node: ast.AST, prefix: str, binding_scope: str | None) -> None:
         for child in ast.iter_child_nodes(node):
@@ -342,7 +366,12 @@ def _locally_bound_names(tree: ast.Module) -> dict[str, set[str]]:
                             child.module == "builtins"
                             and alias.name in ("getattr", "object", "type", "vars")
                         ) or (child.module == "operator" and alias.name == "attrgetter")
-                    if recognized or binding_scope is None:
+                    if binding_scope is None:
+                        continue
+                    if recognized:
+                        recognized_aliases.setdefault(binding_scope, set()).add(
+                            bound_name
+                        )
                         continue
                     bound.setdefault(binding_scope, set()).add(bound_name)
             elif isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef)):
@@ -367,7 +396,7 @@ def _locally_bound_names(tree: ast.Module) -> dict[str, set[str]]:
                 visit(child, prefix, binding_scope)
 
     visit(tree, "", "<module>")
-    return bound
+    return bound, recognized_aliases
 
 
 def _lexical_function_parents(tree: ast.Module) -> dict[str, str]:
