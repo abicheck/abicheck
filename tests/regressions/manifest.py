@@ -415,31 +415,37 @@ BUG_CLASSES: tuple[BugClass, ...] = (
             "relevant consumer with identical semantics, or is rejected "
             "at the public boundary — no third state."
         ),
-        fixed_by=(860, 883, 886),
+        fixed_by=(860, 883, 886, 906),
         seed_tests=(
             "tests/test_run_plan.py",
+            "tests/test_run_plan_consumer_compile_active.py",
             "tests/test_project_targets_consumer_compile.py",
             "tests/test_cli_compare_release_bundle_signature_wiring.py",
+            "tests/test_reusable_workflows_project_evidence.py",
+            "tests/test_action_compile_context_parity.py",
+            "tests/test_gha_expr.py",
+            "tests/test_consumer_compile_full_chain_propagation.py",
         ),
         known_gaps=(
             KnownGap(
                 description=(
-                    "No generalized sentinel-propagation matrix exists yet "
-                    "covering every public entry point named in "
-                    "bug-class-regression-testing.md's Phase 6. Of the two "
-                    "seed tests, only `test_run_plan.py`'s "
-                    "`TestConsumerCompileOverlayProjection` covers the "
-                    "'reaches every consumer' half of this class's own "
-                    "invariant (`profiles.<id>.consumer_compile` reaching "
-                    "the generated run-plan cell, via `generate_run_plan` "
-                    "directly — no CLI, no python-api); "
-                    "`test_project_targets_consumer_compile.py` only "
-                    "exercises the 'rejected at the public boundary' half "
-                    "(schema parsing/round-tripping) and on its own would "
-                    "leave a dropped forwarding edge undetected — it was "
-                    "the sole seed here until this was found to be a real "
-                    "gap (Codex review, PR #885). Neither reaches every "
-                    "config path Phase 6 names, only this one."
+                    "Still open: (a) this closed chain reaches config -> "
+                    "generate_run_plan() -> the composite-Action/reusable-"
+                    "workflow path only — no seed test drives the same "
+                    "consumer_compile value through the native Python API "
+                    "or a `project`/`aggregate` CLI invocation end to end; "
+                    "(b) Phase 6 names eight other configurable concerns "
+                    "(policy/policy-file, frontend/compiler as a general "
+                    "per-entry-point concern beyond this one profile field, "
+                    "include roots, evidence-pack/target attribution, "
+                    "safety budgets, suppression/filtering, per-library "
+                    "override, output/report options) — none has yet had "
+                    "this same five-state/full-chain/mutation-check "
+                    "treatment; consumer_compile was chosen as the first "
+                    "worked example specifically because #860/#883's own "
+                    "history and this class's pre-existing seed tests "
+                    "already pointed at it, not because it's necessarily "
+                    "representative of the others' own chain shapes."
                 ),
                 reference="docs/contribute/plans/bug-class-regression-testing.md#phase-6",
             ),
@@ -453,18 +459,23 @@ BUG_CLASSES: tuple[BugClass, ...] = (
             "highly-compressible fixture whose actual required parameters "
             "never approach the boundary being defended."
         ),
-        fixed_by=(699, 721),
-        seed_tests=("tests/test_snapshot_compression.py",),
+        fixed_by=(699, 721, 911),
+        seed_tests=(
+            "tests/test_snapshot_compression.py",
+            "tests/test_snapshot_compression_public_api_scale.py",
+        ),
+        public_surfaces=("python-api", "cli"),
         axes={"algorithm": ("zstd", "gzip")},
         known_gaps=(
             KnownGap(
                 description=(
-                    "The seed test calls `abicheck.serialization`/"
-                    "`abicheck.snapshot_io`'s real read/write chokepoints "
-                    "directly (real gzip/zstd, real scale) but never "
-                    "through `abicheck.service`/the CLI — no python-api "
-                    "or CLI-level round-trip test exists for this class "
-                    "yet."
+                    "No archive/bundle-reader (`snapshot_cache.py`, "
+                    "the G40 bundle-facts archive path) or python-api/"
+                    "CLI-level round trip has yet been generalized to "
+                    "the same production scale for a mixed-container "
+                    "payload — only the flat AbiSnapshot storage "
+                    "envelope has a scale-realistic seed test at every "
+                    "layer."
                 ),
                 reference="docs/contribute/plans/bug-class-regression-testing.md#phase-7",
             ),
@@ -478,20 +489,43 @@ BUG_CLASSES: tuple[BugClass, ...] = (
             "bytes, and untrusted data cannot create additional commands, "
             "$GITHUB_OUTPUT records, paths, or side effects."
         ),
-        fixed_by=(705, 758),
-        seed_tests=("tests/test_reusable_workflow_execution.py",),
+        fixed_by=(705, 758, 836, 919),
+        seed_tests=(
+            "tests/test_reusable_workflow_execution.py",
+            "tests/test_check_project_workflow_execution.py",
+            "tests/test_action_run_sh_helpers.py",
+        ),
         public_surfaces=("github-action",),
+        axes={
+            "adversarial-shape": (
+                "path-traversal",
+                "shell-metacharacters",
+                "command-substitution",
+                "spaces",
+                "tab",
+                "leading-dash-flag-shaped",
+                "multiple-flags-shaped",
+                "quotes",
+                "redirects",
+                "newline-record-injection",
+                "non-ascii",
+                "empty-string",
+            )
+        },
         known_gaps=(
             KnownGap(
                 description=(
-                    "The seed test's own hostile-input corpus is scoped "
-                    "to `check-single.yml`'s shell steps only "
-                    '(`CHECK_SINGLE = "check-single.yml"`) — not every '
-                    "scalar input across the repository's other shell "
-                    "scripts and composite-action steps, which "
-                    "bug-class-regression-testing.md's Phase 8 names as "
-                    "the full target-script inventory this class's "
-                    "invariant is stated over (Codex review, PR #885)."
+                    "The hostile-input execution corpus (shared via "
+                    "`_workflow_exec.HOSTILE_SCALAR_CORPUS`, Phase 8) now "
+                    "covers two independently-maintained real sanitizer "
+                    "copies (`check-single.yml`/`check-project.yml`) plus "
+                    "`action/run.sh`'s word-splitting-sensitive `add_flag`/"
+                    "`add_sided_flag` helpers — not every scalar input "
+                    "across the repository's other shell scripts and "
+                    "composite-action steps (e.g. the other workflows' "
+                    "`run:` steps enumerated in the plan's own target-"
+                    "script inventory), which is still the full scope "
+                    "Phase 8's invariant is stated over."
                 ),
                 reference="docs/contribute/plans/bug-class-regression-testing.md#phase-8",
             ),

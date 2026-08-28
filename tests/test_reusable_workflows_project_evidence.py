@@ -52,6 +52,15 @@ def test_consumer_compile_context_uses_a_separate_extraction() -> None:
     assert consumer["with"]["mode"] == "dump"
     assert consumer["with"]["new-library"] == "${{ inputs.new-library }}"
     assert consumer["with"]["ast-frontend"] == "${{ inputs.consumer-ast-frontend }}"
+    # gcc-path/gcc-options were the two fields this hop's own `if:` guard
+    # already gated activation on (see test_consumer_dump_activates_from_
+    # the_overlay_marker_alone) but never itself asserted forwarding for --
+    # a real edge in the wiring chain a config's consumer_compile.binding/
+    # standard/stdlib ultimately has to cross to reach the actual dump
+    # invocation (bug-class-regression-testing.md Phase 6), left untested
+    # even though ast-frontend's identically-shaped sibling line was.
+    assert consumer["with"]["gcc-path"] == "${{ inputs.consumer-gcc-path }}"
+    assert consumer["with"]["gcc-options"] == "${{ inputs.consumer-gcc-options }}"
     analysis = next(step for step in steps if step.get("name") == "Run analysis")
     assert "check-target-consumer.abi.json" in analysis["with"]["new-library"]
     assert "consumer_context.outcome == 'success'" in analysis["with"]["header"]
@@ -728,3 +737,89 @@ def test_resolver_rejects_escape_without_outside_side_effects(
     assert sentinel.read_text() == "unchanged"
     assert sorted(path.name for path in outside.iterdir()) == ["sentinel"]
     assert "evidence-pack=" not in github_output.read_text()
+
+
+def _assert_step_input_forwards(
+    step: dict[str, Any], field: str, expected_expr: str
+) -> None:
+    """A single-hop propagation assertion (bug-class-regression-testing.md
+    Phase 6's "mechanism": one field, through one edge of the chain), with
+    a message that names both the missing/wrong field and what it actually
+    resolved to -- the "proving the harness would have caught #860/#883
+    before merge, not only after" bar Phase 6's own mutation-check
+    requirement sets, restated as one reusable, directly-testable
+    predicate rather than a bespoke ``assert`` at every call site.
+    """
+    actual = step.get("with", {}).get(field)
+    if actual != expected_expr:
+        name = step.get("name", "<unnamed step>")
+        raise AssertionError(
+            f"step {name!r} input {field!r} does not forward "
+            f"{expected_expr!r} -- got {actual!r} instead. A forwarding "
+            f"edge in the consumer_compile propagation chain was dropped "
+            f"or renamed."
+        )
+
+
+class TestConsumerCompilePropagationChainMutationCheck:
+    """Proves `_assert_step_input_forwards` -- the primitive the
+    consumer_compile chain's own hop-2/hop-3 tests above are built from --
+    actually fails, and names the missing edge, when a forwarding edge is
+    dropped. Per Phase 6's own "mutation check": deliberately removing one
+    forwarding edge in a copy of the matrix harness must make the suite
+    fail and name the missing path, not silently pass.
+
+    Mutates an in-memory COPY of the real, parsed check-target/action.yml
+    (never the file on disk) so this is a property of the assertion
+    helper itself, not a live edit to shipped wiring.
+    """
+
+    @staticmethod
+    def _consumer_context_step() -> dict[str, Any]:
+        target = _load(CHECK_TARGET)
+        steps = _steps(target["runs"])
+        return next(
+            step
+            for step in steps
+            if step.get("name") == "Extract candidate consumer context"
+        )
+
+    def test_passes_against_the_real_wiring(self) -> None:
+        step = self._consumer_context_step()
+        _assert_step_input_forwards(step, "gcc-path", "${{ inputs.consumer-gcc-path }}")
+        _assert_step_input_forwards(
+            step, "gcc-options", "${{ inputs.consumer-gcc-options }}"
+        )
+
+    def test_fails_and_names_the_field_when_the_edge_is_dropped(self) -> None:
+        """Simulates the exact #860/#883 shape: a forwarding edge silently
+        reverting to some other value (here, the shared/producer gcc-path
+        input) rather than the consumer-specific one -- the mistake a
+        careless refactor of this step could make, since both inputs exist
+        on the same step and a copy-paste error is a real, plausible way to
+        drop this specific edge."""
+        step = self._consumer_context_step()
+        mutated = dict(step)
+        mutated["with"] = {**step["with"], "gcc-path": "${{ inputs.gcc-path }}"}
+
+        with pytest.raises(AssertionError) as excinfo:
+            _assert_step_input_forwards(
+                mutated, "gcc-path", "${{ inputs.consumer-gcc-path }}"
+            )
+
+        message = str(excinfo.value)
+        assert "gcc-path" in message
+        assert "consumer-gcc-path" in message
+        assert "${{ inputs.gcc-path }}" in message
+
+    def test_fails_when_the_field_is_removed_entirely(self) -> None:
+        """The other real shape a dropped edge takes: the key vanishes
+        from `with:` altogether rather than being repointed."""
+        step = self._consumer_context_step()
+        mutated = dict(step)
+        mutated["with"] = {k: v for k, v in step["with"].items() if k != "gcc-options"}
+
+        with pytest.raises(AssertionError, match="gcc-options"):
+            _assert_step_input_forwards(
+                mutated, "gcc-options", "${{ inputs.consumer-gcc-options }}"
+            )

@@ -25,7 +25,7 @@ from abicheck.dumper_layout_backfill import (
     backfill_dwarf_layout,
     dwarf_layout_types_or_empty,
 )
-from abicheck.model import RecordType, TypeField
+from abicheck.model import Fact, RecordType, TypeField
 from abicheck.model.availability import FactStatus
 
 
@@ -809,6 +809,44 @@ class TestBackfilledRecordFactSync:
         assert merged.vptr_offset_bits == 64
         assert merged.vptr_offset_bits_fact is not None
         assert merged.vptr_offset_bits_fact.value == 64
+
+    def test_header_own_partial_vptr_fact_survives_backfill(self) -> None:
+        """Codex review, PR #909: when header's own heuristic value wins
+        (dwarf doesn't override it), its real Fact.partial(...) status must
+        survive too -- replace_with_fact_sync's default derivation would
+        otherwise silently promote it to Fact.present(...), a confirmed
+        determination the value never became."""
+        header = RecordType(
+            name="Widget",
+            kind="class",
+            vptr_offset_bits=0,
+            vptr_offset_bits_fact=Fact.partial(0),
+        )
+        dwarf = RecordType(name="Widget", kind="class", vptr_offset_bits=64)
+        merged = _backfilled_record(header, dwarf)
+        assert merged.vptr_offset_bits == 0
+        assert merged.vptr_offset_bits_fact == Fact.partial(0)
+
+    def test_dwarf_own_fact_status_carries_when_dwarf_value_wins(self) -> None:
+        """Negative control for the fix above: when header has no value and
+        dwarf's does win, the *dwarf* side's own Fact status is what should
+        be carried -- not header's stale one, and not an unconditional
+        Fact.present() either."""
+        header = RecordType(
+            name="Widget",
+            kind="class",
+            vptr_offset_bits=None,
+            vptr_offset_bits_fact=Fact.not_collected(),
+        )
+        dwarf = RecordType(
+            name="Widget",
+            kind="class",
+            vptr_offset_bits=64,
+            vptr_offset_bits_fact=Fact.partial(64),
+        )
+        merged = _backfilled_record(header, dwarf)
+        assert merged.vptr_offset_bits == 64
+        assert merged.vptr_offset_bits_fact == Fact.partial(64)
 
     def test_hybrid_merge_snapshots_keeps_vptr_fact_in_sync_too(self) -> None:
         # Same bug, reached via dumper_hybrid.merge_snapshots's castxml+clang

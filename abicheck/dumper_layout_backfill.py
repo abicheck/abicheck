@@ -338,6 +338,16 @@ def _backfilled_record(header: RecordType, dwarf: RecordType) -> RecordType:
             if header.vptr_offset_bits is not None
             else dwarf.vptr_offset_bits
         ),
+        # Whichever side's *value* wins above must also supply its own Fact
+        # status -- otherwise replace_with_fact_sync's default derivation
+        # would stamp Fact.present(...) even when the surviving value is
+        # still header's own PARTIAL heuristic, silently promoting it to a
+        # confirmed determination it never became (Codex review, PR #909).
+        vptr_offset_bits_fact=(
+            header.vptr_offset_bits_fact
+            if header.vptr_offset_bits is not None
+            else dwarf.vptr_offset_bits_fact
+        ),
         base_offsets=header.base_offsets or dwarf.base_offsets,
         data_size_bits=(
             header.data_size_bits

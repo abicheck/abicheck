@@ -1442,12 +1442,12 @@ def compare_release_cmd(
           --debug-info2 libfoo-debuginfo-1.1.rpm
     """
 
-    from .package import (
+    from .workflows.extraction import (
         _is_elf_shared_object,
         detect_extractor,
         discover_shared_libraries,
         is_package,
-        resolve_debug_info,
+        resolve_package_debug_info as resolve_debug_info,
     )
 
     _setup_verbosity(verbose)

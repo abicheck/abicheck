@@ -45,7 +45,7 @@ MAX_ENTRIES: int = 100
 #: key invalidates all previously-cached entries on upgrade rather than risk
 #: serving a stale snapshot computed by an older, behaviorally-different
 #: abicheck version.
-_SNAPSHOT_CACHE_VERSION: str = "19"
+_SNAPSHOT_CACHE_VERSION: str = "20"
 # v2: castxml's CvQualifiedType type-name spelling changed for a
 # volatile-qualified pointer/reference VALUE (now a suffix, "T * volatile",
 # matching clang's own convention, rather than always a prefix) -- an
@@ -256,6 +256,15 @@ _SNAPSHOT_CACHE_VERSION: str = "19"
 # would keep making a real abstractness transition on a namespaced
 # clang-only type undetectable even after upgrading to the fix. Bumped so
 # the upgrade forces re-extraction instead of replaying the inert stamp.
+#
+# v20 (ADR-063 Phase 0, Codex review on #909): castxml/direct-clang started
+# constructing ``vptr_offset_bits_fact``/``is_va_list_fact`` as
+# ``Fact.partial(...)`` instead of ``Fact.present(...)`` for the
+# already-documented heuristic/target-scoped values -- a real change to
+# snapshot content with no change to any caller-supplied cache-key input.
+# A warm cache from before this fix would keep serving the overclaimed
+# ``PRESENT`` status this fix exists to correct. Bumped so upgrading forces
+# re-extraction instead of silently replaying the stale status.
 
 
 def _get_cache_dir() -> Path:

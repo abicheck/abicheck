@@ -304,7 +304,7 @@ class TestTheGatingConditionIsVisible:
         it, so the base exit has to come from the caller here rather than
         from a fixture that cannot exist.
         """
-        from abicheck.contract_coverage_exit import _coverage_message
+        from abicheck.policy.contract_coverage_exit import _coverage_message
 
         message = _coverage_message(["old/export_table"], 1, 4)
         assert "floored" not in message
@@ -314,7 +314,7 @@ class TestTheGatingConditionIsVisible:
         """`base_exit == floor` is its own case. "Floored" would claim a change
         the axis did not make alone, and "below ... which stands" is simply
         false when the two are equal (CodeRabbit review)."""
-        from abicheck.contract_coverage_exit import _coverage_message
+        from abicheck.policy.contract_coverage_exit import _coverage_message
 
         tie = _coverage_message(["old/export_table"], 1, 1)
         assert "already 1" in tie

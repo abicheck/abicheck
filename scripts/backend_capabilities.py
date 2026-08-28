@@ -560,9 +560,20 @@ FACT_ROWS: tuple[FactRow, ...] = (
     FactRow(
         "RecordType",
         "vptr_offset_bits_fact",
-        _FULL,
-        _FULL,
-        note="ADR-063 Phase 0: `Fact[int | None]` sibling of `vptr_offset_bits` — see `bases_fact`.",
+        _PARTIAL,
+        _PARTIAL,
+        note=(
+            "ADR-063 Phase 0: `Fact[int | None]` sibling of `vptr_offset_bits`. "
+            "Unlike `bases_fact`/`virtual_bases_fact`/`vtable_fact`, this one is "
+            "`PARTIAL` on both backends, not `FULL` — `Fact.partial(...)`, not "
+            "`Fact.present(...)` — matching `vptr_offset_bits`'s own row exactly: "
+            "the wrapped value is still the `0`-if-polymorphic Itanium "
+            "primary-base heuristic, which does not track a secondary vtable's "
+            "placement under multiple inheritance, so the wrapper states that "
+            "caveat rather than asserting full determination (a review round on "
+            "the PR that added this row caught the earlier `FULL` claim "
+            "contradicting the legacy field's own row one line above it)."
+        ),
     ),
     FactRow(
         "RecordType",

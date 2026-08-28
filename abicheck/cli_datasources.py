@@ -21,8 +21,11 @@ def print_data_sources(
     sources_path: Path | None = None,
 ) -> None:
     """Print data source diagnostic information for a binary."""
-    from .dwarf_snapshot import show_data_sources
-    from .workflows.extraction import detect_binary_format, normalize_binary_input
+    from .workflows.extraction import (
+        detect_binary_format,
+        normalize_binary_input,
+        show_data_sources,
+    )
 
     normalized_path, binary_fmt = normalize_binary_input(so_path)
     if binary_fmt is None:
@@ -32,8 +35,7 @@ def print_data_sources(
     build_source_pack = None
 
     if binary_fmt == "elf":
-        from .dwarf_unified import parse_dwarf
-        from .workflows.extraction import parse_elf_metadata
+        from .workflows.extraction import parse_dwarf, parse_elf_metadata
 
         elf_meta = parse_elf_metadata(normalized_path)
         dwarf_meta, _ = parse_dwarf(normalized_path)

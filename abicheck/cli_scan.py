@@ -660,7 +660,7 @@ def _resolve_artifact_set_paths(spec: str) -> tuple[list[Path], bool]:
     (``explicit=True`` — every named member must resolve and must look like a
     real library, enforced by :func:`bundle.discover_artifact_set`).
     """
-    from .package import discover_shared_libraries
+    from .workflows.extraction import discover_shared_libraries
 
     candidate = Path(spec)
     if "," not in spec and candidate.is_dir():
@@ -1500,7 +1500,7 @@ def scan_cmd(
       abicheck scan new.so -H include/ --depth source --since origin/main
     """
     from .dry_run import reject_dry_run_with_output
-    from .package import is_package
+    from .workflows.extraction import is_package
 
     _setup_verbosity(verbose)
 
