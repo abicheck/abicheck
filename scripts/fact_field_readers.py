@@ -1122,6 +1122,7 @@ def unmigrated_fact_reader_sites(
             and node.func.attr == "__getattribute__"
             and isinstance(node.func.value, ast.Name)
             and node.func.value.id in ("object", "type")
+            and not _shadowed(node, node.func.value.id)
             and len(node.args) == 2
             and isinstance(node.args[1], ast.Constant)
             and isinstance(node.args[1].value, str)
@@ -1130,6 +1131,11 @@ def unmigrated_fact_reader_sites(
             # `object.__getattribute__(rec, "bases")` -- the unbound-method
             # spelling used to bypass an instance's own overridden
             # `__getattribute__`, reading `rec.bases` exactly the same way.
+            # `object`/`type` are ordinary names here, so a parameter
+            # shadowing either (`def f(object, rec): return object.
+            # __getattribute__(rec, "bases")`) must not match -- the same
+            # exclusion the getattr/attrgetter branches above already
+            # apply (Codex review, fresh evidence).
             attr = node.args[1].value
             record_node = node
         else:

@@ -1459,6 +1459,30 @@ shadowed-`operator`-parameter and shadowed-bare-`attrgetter`-parameter
 negative controls, and a sibling-function negative control (shadowing in
 one function must not leak into another's genuine `attrgetter()` call).
 
+**A nineteenth review round found the identical shadowing gap in the
+unbound `__getattribute__` branch's sibling** -- the bound form
+(`rec.__getattribute__("bases")`) has no builtin name to shadow (its
+receiver is an arbitrary object, exactly like `rec.bases_fact` itself), but
+the unbound form (`object.__getattribute__(rec, "bases")`) names the
+builtin `object`/`type` the same way the `getattr`/`attrgetter` branches
+name theirs, and it was the one branch of the four dynamic-reader forms
+never wired to `_shadowed()`: `def f(object, rec): return object.
+__getattribute__(rec, "bases")` -- an ordinary, unrelated parameter reusing
+the name `object` -- was unconditionally treated as the builtin, the
+identical false positive already fixed for `getattr` and (eighteenth round)
+`attrgetter`. Fixed with a `not _shadowed(node, node.func.value.id)` guard
+on the same condition, mirroring the other three branches exactly -- no new
+helper needed here, since `node.func.value.id` is already narrowed to
+`ast.Name` by the existing `isinstance` checks in the same `and`-chain, one
+level shallower than the attrgetter branch's `node.func.func` access that
+needed its own dedicated helper in the eighteenth round. Verified
+empirically: still zero existing hits in the real repository, baseline
+stays at 104, `mypy`/`ruff` both stayed clean. Three new tests: the
+shadowed-`object`-parameter and shadowed-`type`-parameter negative
+controls, and a sibling-function negative control (shadowing in one
+function must not leak into another's genuine unbound
+`object.__getattribute__()` call).
+
 **Still not landed**: no detector (`diff_layout.py`/`diff_types.py`/
 `diff_param_qualifiers.py`/the reader set the check above now tracks
 precisely) has actually been migrated to read `.status` — the check above

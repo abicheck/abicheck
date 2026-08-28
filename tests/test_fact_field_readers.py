@@ -484,6 +484,45 @@ class TestUnmigratedFactReaderSites:
         tree = ast.parse(src, filename="x.py")
         assert unmigrated_fact_reader_sites(tree, "x.py", src) == []
 
+    def test_ignores_unbound_getattribute_shadowed_by_a_parameter(self) -> None:
+        """`def f(object, rec): return object.__getattribute__(rec,
+        "bases")` -- an ordinary, unrelated parameter reusing the name
+        `object` must not be treated as the builtin (Codex review: the
+        unbound `__getattribute__` branch never consulted the shadowing
+        check at all, unlike its sibling bound form and the getattr/
+        attrgetter branches above)."""
+        src = 'def f(object, rec):\n    return object.__getattribute__(rec, "bases")\n'
+        tree = ast.parse(src, filename="x.py")
+        assert unmigrated_fact_reader_sites(tree, "x.py", src) == []
+
+    def test_ignores_unbound_getattribute_shadowed_by_a_type_parameter(
+        self,
+    ) -> None:
+        """The identical shadowing for the `type.__getattribute__(...)`
+        spelling."""
+        src = 'def f(type, rec):\n    return type.__getattribute__(rec, "bases")\n'
+        tree = ast.parse(src, filename="x.py")
+        assert unmigrated_fact_reader_sites(tree, "x.py", src) == []
+
+    def test_detects_a_real_unbound_getattribute_call_despite_shadowing_in_a_sibling(
+        self,
+    ) -> None:
+        """Negative control: shadowing in one function must not leak into
+        an unrelated sibling function's own genuine unbound
+        `object.__getattribute__()` call."""
+        src = (
+            "def f(object, rec):\n"
+            '    return object.__getattribute__(rec, "bases")\n'
+            "def g(rec):\n"
+            '    return object.__getattribute__(rec, "bases")\n'
+        )
+        tree = ast.parse(src, filename="x.py")
+        sites = unmigrated_fact_reader_sites(tree, "x.py", src)
+        assert [key for key, _l, _a, _q in sites] == [
+            'x.py::g::bases::object.__getattribute__(rec, "bases")::'
+            'object.__getattribute__(rec, "bases")::1'
+        ]
+
     def test_ignores_an_assignment_target(self) -> None:
         """A `Store` context (`rec.vtable = []`, the legacy-schema backfill
         shape `storage/fact_codec.py` uses) is writing the field, not
