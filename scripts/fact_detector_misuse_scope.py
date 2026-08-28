@@ -1321,6 +1321,45 @@ def _resolve_effective_fact_names(
     return frozenset(result)
 
 
+def _single_target_binding(
+    node: ast.Assign | ast.AnnAssign,
+) -> tuple[ast.expr, ast.expr] | None:
+    """Return `(target, value)` for a single-target `ast.Assign` or a
+    *valued* `ast.AnnAssign` with a bare-`Name`/`Attribute`/`Subscript`
+    target -- the two node shapes a detector-style "name = <constructor
+    expression>" alias binding is actually written as (Codex review,
+    fresh evidence): `make_fact: Callable[..., Fact[int]] = Fact.present`
+    is an `ast.AnnAssign`, invisible to an `ast.Assign`-only walk.
+    `None` for every other shape (a tuple-unpacking `Assign`, a bare
+    `AnnAssign` with no value, or anything else) -- both callers below
+    already require the *target* itself to be a bare `ast.Name`, so this
+    helper doesn't narrow that further.
+    """
+    if isinstance(node, ast.Assign) and len(node.targets) == 1:
+        return node.targets[0], node.value
+    if isinstance(node, ast.AnnAssign) and node.value is not None:
+        return node.target, node.value
+    return None
+
+
+def _unwrap_generic_receiver(value: ast.expr) -> ast.expr:
+    """Unwrap a generic-specialized receiver's own `ast.Subscript` --
+    `Fact[int]`/`Fact[int].present` -- down to the bare expression a
+    specialization wraps, the identical single-unwrap rule `_is_fact_
+    typed_expr()`'s own constructor-call recognition already applies
+    (Codex review, fresh evidence): `F = Fact[int]`/`make_fact =
+    Fact[int].present` went unrecognized as aliases, even though the
+    *direct*-call form (`Fact[int](...)`/`Fact[int].present(...)`) was
+    already resolved, since subscripting a class produces a
+    `_GenericAlias` whose own `__call__`/attribute access delegates
+    straight through to the real class -- a no-op for anything but a
+    literal subscript receiver.
+    """
+    if isinstance(value, ast.Subscript):
+        return value.value
+    return value
+
+
 def _constructor_alias_names(
     tree: ast.Module,
     qualnames: _QualnameSpans,
@@ -1361,13 +1400,23 @@ def _constructor_alias_names(
     def inner(other): global Fact; F = Fact; return F(1) == other` must
     still register `F` as a real alias, since `inner`'s own `global Fact`
     routes its `Fact` reference to module scope, not `outer`'s parameter.
+
+    **Also recognizes an `ast.AnnAssign` binding and a generic-
+    specialized (`Fact[int]`) receiver (Codex review, fresh evidence,
+    both findings against the same commit)**: `F: type[Fact[int]] =
+    Fact[int]` combines both extensions at once -- see
+    `_single_target_binding()`/`_unwrap_generic_receiver()`'s own
+    docstrings for exactly what each covers.
     """
     aliases: dict[str, set[str]] = {}
     for node in ast.walk(tree):
-        if not isinstance(node, ast.Assign) or len(node.targets) != 1:
+        if not isinstance(node, (ast.Assign, ast.AnnAssign)):
             continue
-        target = node.targets[0]
-        value = node.value
+        pair = _single_target_binding(node)
+        if pair is None:
+            continue
+        target, value = pair
+        value = _unwrap_generic_receiver(value)
         if (
             isinstance(target, ast.Name)
             and isinstance(value, ast.Name)
@@ -1437,26 +1486,37 @@ def _constructor_method_alias_names(
     classmethod alias off the parameter's own runtime value.
     `global_names` is the identical `global`-bypass exception described
     there too.
+
+    **Also recognizes an `ast.AnnAssign` binding and a generic-
+    specialized (`Fact[int]`) receiver (Codex review, fresh evidence,
+    both findings against the same commit)**: `make_fact: Callable[...,
+    Fact[int]] = Fact[int].present` combines both extensions at once --
+    see `_single_target_binding()`/`_unwrap_generic_receiver()`'s own
+    docstrings for exactly what each covers.
     """
     aliases: dict[str, set[str]] = {}
     for node in ast.walk(tree):
-        if not isinstance(node, ast.Assign) or len(node.targets) != 1:
+        if not isinstance(node, (ast.Assign, ast.AnnAssign)):
             continue
-        target = node.targets[0]
-        value = node.value
-        if (
+        pair = _single_target_binding(node)
+        if pair is None:
+            continue
+        target, value = pair
+        if not (
             isinstance(target, ast.Name)
             and isinstance(value, ast.Attribute)
             and value.attr in _FACT_CONSTRUCTOR_METHOD_NAMES
-            and isinstance(value.value, ast.Name)
-            and value.value.id in fact_names
         ):
-            qualname = _qualname_at((node.lineno, node.col_offset), qualnames)
-            if value.value.id in _scope_chain_union(
-                qualname, locally_bound_shadows, lexical_parents, global_names
-            ):
-                continue
-            aliases.setdefault(qualname, set()).add(target.id)
+            continue
+        receiver = _unwrap_generic_receiver(value.value)
+        if not (isinstance(receiver, ast.Name) and receiver.id in fact_names):
+            continue
+        qualname = _qualname_at((node.lineno, node.col_offset), qualnames)
+        if receiver.id in _scope_chain_union(
+            qualname, locally_bound_shadows, lexical_parents, global_names
+        ):
+            continue
+        aliases.setdefault(qualname, set()).add(target.id)
     return aliases
 
 

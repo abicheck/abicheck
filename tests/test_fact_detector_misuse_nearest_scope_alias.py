@@ -56,6 +56,20 @@ union since it needs no `fact_names` base) through the same
 name, with a constructor-alias mention checked before a shadow mention
 within the same scope (so `F = Fact` still resolves as an alias at its
 *own* defining scope, not merely as an ordinary local binding).
+
+**A further round found the alias collectors missed two more binding
+shapes (Codex review, fresh evidence, two findings against the same
+commit):** (C) `make_fact: Callable[..., Fact[int]] = Fact.present` is
+an `ast.AnnAssign`, invisible to both `_constructor_alias_names()`'s
+and `_constructor_method_alias_names()`'s own `ast.Assign`-only walk.
+(D) `make_fact = Fact[int].present` -- a generic-specialized receiver
+-- was already resolved by the *direct*-call path (`Fact[int].
+present(...)`) but not by the alias-collection path, which required a
+bare `ast.Name` receiver. Fixed by a shared `_single_target_binding()`
+(recognizes a single-target `Assign` or a valued `AnnAssign` alike) and
+`_unwrap_generic_receiver()` (the identical single-`Subscript`-unwrap
+rule the direct-call resolver already applies), both in
+`fact_detector_misuse_scope.py`, used by both collectors.
 """
 
 from __future__ import annotations
@@ -243,3 +257,106 @@ class TestNearestScopeWinsForConstructorAliases:
         src = "def f(Fact, other):\n    return Fact(1) == other\n"
         tree = ast.parse(src, filename="x.py")
         assert fact_equality_misuse_sites(tree, "x.py") == []
+
+
+class TestAlternateBindingShapesAreRecognized:
+    """Finding (C): an `ast.AnnAssign` binding is exactly as real an
+    alias source as an `ast.Assign`. Finding (D): a generic-specialized
+    (`Fact[int]`) receiver composes with alias collection the same way
+    it already does with the direct-call path."""
+
+    def test_annassign_classmethod_alias(self) -> None:
+        src = (
+            "from abicheck.model.fact import Fact\n"
+            "def f(other):\n"
+            "    make_fact: object = Fact.present\n"
+            "    return make_fact(1) == other\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert len(fact_equality_misuse_sites(tree, "x.py")) == 1
+
+    def test_annassign_bare_alias(self) -> None:
+        src = (
+            "from abicheck.model.fact import Fact\n"
+            "def f(other):\n"
+            "    F: object = Fact\n"
+            "    return F(1) == other\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert len(fact_equality_misuse_sites(tree, "x.py")) == 1
+
+    def test_subscript_specialized_classmethod_alias(self) -> None:
+        src = (
+            "from abicheck.model.fact import Fact\n"
+            "def f(other):\n"
+            "    make_fact = Fact[int].present\n"
+            "    return make_fact(1) == other\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert len(fact_equality_misuse_sites(tree, "x.py")) == 1
+
+    def test_subscript_specialized_bare_alias(self) -> None:
+        src = (
+            "from abicheck.model.fact import Fact\n"
+            "def f(other):\n"
+            "    F = Fact[int]\n"
+            "    return F(1) == other\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert len(fact_equality_misuse_sites(tree, "x.py")) == 1
+
+    def test_combined_annassign_and_subscript(self) -> None:
+        src = (
+            "from abicheck.model.fact import Fact\n"
+            "def f(other):\n"
+            "    make_fact: object = Fact[int].present\n"
+            "    return make_fact(1) == other\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert len(fact_equality_misuse_sites(tree, "x.py")) == 1
+
+    def test_annassign_with_no_value_is_not_registered(self) -> None:
+        """A bare annotation (`F: object` with no `=`) binds nothing at
+        all -- `_single_target_binding()` correctly requires a value."""
+        src = (
+            "from abicheck.model.fact import Fact\n"
+            "def f(other):\n"
+            "    F: object\n"
+            "    F = None\n"
+            "    return F(1) == other\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert fact_equality_misuse_sites(tree, "x.py") == []
+
+    def test_annassign_alias_shadowed_by_a_parameter_still_suppressed(self) -> None:
+        src = "def f(Fact, other):\n    F: object = Fact\n    return F(1) == other\n"
+        tree = ast.parse(src, filename="x.py")
+        assert fact_equality_misuse_sites(tree, "x.py") == []
+
+    def test_subscript_alias_shadowed_by_a_parameter_still_suppressed(self) -> None:
+        src = "def f(Fact, other):\n    F = Fact[int]\n    return F(1) == other\n"
+        tree = ast.parse(src, filename="x.py")
+        assert fact_equality_misuse_sites(tree, "x.py") == []
+
+    def test_regression_tuple_unpack_still_not_recognized(self) -> None:
+        """Deliberately narrow, no type inference: only a single-target
+        binding is recognized -- a tuple-unpacking `Assign` still isn't."""
+        src = (
+            "from abicheck.model.fact import Fact\n"
+            "def f(other):\n"
+            "    F, G = Fact, Fact\n"
+            "    return F(1) == other\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert fact_equality_misuse_sites(tree, "x.py") == []
+
+    def test_regression_plain_assign_forms_still_recognized(self) -> None:
+        src = (
+            "from abicheck.model.fact import Fact\n"
+            "def f(other):\n"
+            "    F = Fact\n"
+            "    make_fact = Fact.present\n"
+            "    return F(1) == other and make_fact(1) == other\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert len(fact_equality_misuse_sites(tree, "x.py")) == 2

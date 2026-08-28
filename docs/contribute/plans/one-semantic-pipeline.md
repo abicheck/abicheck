@@ -5574,6 +5574,52 @@ the 2000-line hard cap). New tests: a new dedicated file,
 appending to `test_fact_detector_misuse_constructor_shadow.py`, which
 had grown to 1049/1200 lines and was getting tight.
 
+**A further round found the alias collectors missed two more binding
+shapes, both against the same commit.**
+
+(C) **`ast.AnnAssign` bindings were invisible to both collectors**
+(Codex review, fresh evidence): `make_fact: Callable[..., Fact[int]] =
+Fact.present` (or `F: type[Fact[int]] = Fact`) is an `ast.AnnAssign`,
+but `_constructor_alias_names()`/`_constructor_method_alias_names()`
+only ever matched `ast.Assign`. Reproduced directly (both bare and
+classmethod forms, 0 hits each, expected 1) before designing a fix.
+
+(D) **A generic-specialized receiver was resolved by the direct-call
+path but not the alias-collection path** (Codex review, fresh
+evidence): `make_fact = Fact[int].present` -- the direct call
+`Fact[int].present(...)` was already recognized (`_is_fact_typed_expr()`
+already unwraps a single `Subscript` receiver), but the *alias*
+collector required a bare `ast.Name` receiver, so binding it to a name
+first and calling through that name bypassed the gate. Reproduced
+directly (both bare and classmethod forms, 0 hits each, expected 1)
+before designing a fix.
+
+Both findings share the identical fix: two small shared helpers in
+`fact_detector_misuse_scope.py`, right before `_constructor_alias_
+names()` -- `_single_target_binding()` (returns `(target, value)` for a
+single-target `ast.Assign` **or** a valued `ast.AnnAssign`, `None`
+otherwise) and `_unwrap_generic_receiver()` (unwraps a single
+`ast.Subscript` receiver, the identical rule `_is_fact_typed_expr()`'s
+own constructor-call recognition already applies). Both collectors' own
+walks now check `isinstance(node, (ast.Assign, ast.AnnAssign))` before
+calling `_single_target_binding()` (needed for mypy's own type
+narrowing on `node.lineno`/`node.col_offset`, since `ast.walk()` yields
+the un-narrowed `ast.AST` base type) and unwrap the RHS receiver before
+the existing `fact_names` membership check.
+
+Verified via direct AST reproduction against 12 cases before writing
+tests: both new findings in both bare and classmethod-alias forms, the
+two combined (`AnnAssign` + `Subscript` together), a bare annotation
+with no value correctly registering nothing, both new forms correctly
+still suppressed by a parameter shadow, and three pre-existing
+regressions (plain `Assign` bare and classmethod aliases, tuple-unpack
+still not recognized). `mypy`/`ruff` both stayed clean;
+`fact_detector_misuse_scope.py` at 1574 lines (still comfortably under
+the 2000-line hard cap, though now further past the 1500-line soft
+WARN threshold). New tests: `TestAlternateBindingShapesAreRecognized`
+(10 tests), appended to `tests/test_fact_detector_misuse_nearest_scope_
+alias.py` (still well under its own 1200-line cap).
+
 ---
 
 ### Phase 1 — finish the `dump`/`scan` typed-API convergence (closes AGENTS.md "PR C")
