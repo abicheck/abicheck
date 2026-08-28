@@ -2931,10 +2931,15 @@ independently-drifting restatements (Codex review, PR #910, `docs/AGENTS.md`'s
 > not three approximations of one shape. `report_schema_version` 2.45 /
 > `scan_schema_version` 1.19 (additive keys: `effective_config_digest`/
 > `effective_config_fields`). **Scope correction (Codex review, fresh
-> evidence): "in every report" overstates this -- the digest reaches only
-> the native JSON report path.** `add_effective_config_digest` is called
-> from exactly two places (`reporter.py`'s JSON summary builder and
-> `cli_scan_baseline.py`'s `scan --against` JSON path) -- the Markdown,
+> evidence, two rounds — the first draft of this correction undercounted
+> the call sites and is itself corrected here): "in every report"
+> overstates this -- the digest reaches only the native JSON report
+> path.** `add_effective_config_digest` is called from exactly three
+> places: `reporter_contract_blocks.py`'s own `add_contract_context` (the
+> principal full-JSON path every ordinary `compare`/release JSON report
+> goes through, gated on `include_exit_decision`), `reporter.py`'s
+> separate `--stat` JSON summary builder, and `cli_scan_baseline.py`'s
+> `scan --against` JSON path -- the Markdown,
 > review, SARIF, JUnit, and HTML renderers (`html_report.py`, `sarif.py`,
 > `junit_report.py`, and `reporter.py`'s own non-JSON renderers) never call
 > it, so a user selecting one of those output formats gets no
