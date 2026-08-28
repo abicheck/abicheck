@@ -1168,6 +1168,35 @@ for an unrelated class, a qualified `builtins.getattr` call detected, an
 aliased `getattr` import detected, and a negative control for a call
 qualified through an unrelated module.
 
+**A ninth Codex review round found two more real gaps, both fixed in the
+same PR -- the same two mechanisms probed one further indirection layer
+each, matching the eighth round's own framing.** (1) `read_attr = getattr`
+then `read_attr(rec, "bases")` is the identical dynamic read as a bare
+`getattr(rec, "bases")` call, but `_builtins_getattr_aliases()` only ever
+collected the bare name and a `from builtins import getattr as X` import
+-- a plain assignment chain to the builtin callable was invisible, the
+identical gap the eighth round's fix (1) already closed for a *class*
+alias but left open for `getattr` itself. Fixed by extending
+`_builtins_getattr_aliases()` with the same fixed-point assignment-chaining
+`_imported_class_aliases` already does (`RT = RecordType`, `RT2 = RT`),
+just for the builtin callable instead of a class name. (2) `rec.bases +=
+inherited` updates a bridged field, but Python marks the target Attribute
+node `ast.Store` even though the operation reads the field's existing
+value first, to combine it with the right-hand side, before writing the
+result back -- an ordinary `Store`/`Del` (a plain overwrite) genuinely
+never reads, but an `AugAssign` target always does, and the existing
+Load-only restriction missed this distinction entirely: the target
+Attribute node is still visited independently by `ast.walk` (it's a child
+of the `AugAssign`), but its `Store` context skipped the ordinary
+attribute branch too. Fixed with a dedicated `ast.AugAssign` branch
+matching the target's own attribute name, keyed on the target Attribute
+node itself (not the whole `AugAssign` statement) so its site/text line up
+with an ordinary attribute read at the same position. Verified
+empirically: still zero existing hits, baseline stays at 104. New tests: a
+local `getattr` alias detected, a chained `getattr` alias detected, an
+augmented assignment detected, and a negative control confirming an
+ordinary `Store` overwrite is still not flagged.
+
 **Still not landed**: no detector (`diff_layout.py`/`diff_types.py`/
 `diff_param_qualifiers.py`/the reader set the check above now tracks
 precisely) has actually been migrated to read `.status` — the check above

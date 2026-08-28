@@ -425,18 +425,25 @@ def _builtins_getattr_aliases(
 ) -> tuple[frozenset[str], frozenset[str]]:
     """Return ``(getattr_names, builtins_module_names)``: every local name
     *tree* binds to the real `getattr` builtin (always includes the bare
-    `"getattr"` itself, plus any `from builtins import getattr as X`), and
+    `"getattr"` itself, plus any `from builtins import getattr as X`, plus
+    a plain assignment chain such as `read_attr = getattr` --
+    `read_attr2 = read_attr` chains too, resolved to a fixed point), and
     every local name bound to the `builtins` module itself (`import
     builtins`, `import builtins as b`) -- used to recognize `builtins.
-    getattr(...)`/`b.getattr(...)` alongside a bare call. Both are real
+    getattr(...)`/`b.getattr(...)` alongside a bare call. All are real
     (Codex review, fresh evidence: `import builtins;
-    builtins.getattr(rec, "bases")` and `from builtins import getattr as
-    read_attr` are both invisible to a scan that only matches the literal
-    bare callee `getattr`). Whole-tree, matching `_imported_class_
-    aliases`'s own scope for the identical reason.
+    builtins.getattr(rec, "bases")`, `from builtins import getattr as
+    read_attr`, and `read_attr = getattr; read_attr(rec, "bases")` are all
+    invisible to a scan that only matches the literal bare callee
+    `getattr`). Whole-tree, matching `_imported_class_aliases`'s own scope
+    for the identical reason -- and the plain-assignment chaining mirrors
+    that function's own fixed-point resolution of `RT = RecordType`/
+    `RT2 = RT` exactly, just for the builtin callable instead of a class
+    name.
     """
     getattr_names = {"getattr"}
     builtins_names: set[str] = set()
+    assign_candidates: list[tuple[str, str]] = []
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
             for alias in node.names:
@@ -446,6 +453,22 @@ def _builtins_getattr_aliases(
             for alias in node.names:
                 if alias.name == "getattr":
                     getattr_names.add(alias.asname or alias.name)
+        elif (
+            isinstance(node, ast.Assign)
+            and len(node.targets) == 1
+            and isinstance(node.targets[0], ast.Name)
+            and isinstance(node.value, ast.Name)
+        ):
+            assign_candidates.append((node.targets[0].id, node.value.id))
+    changed = True
+    while changed:
+        changed = False
+        for local, ref in assign_candidates:
+            if local in getattr_names:
+                continue
+            if ref in getattr_names:
+                getattr_names.add(local)
+                changed = True
     return frozenset(getattr_names), frozenset(builtins_names)
 
 
@@ -551,6 +574,34 @@ def unmigrated_fact_reader_sites(
     bare-read text, in one function) still falls back to the ordinal, an
     accepted, narrow residual matching this module's own "false positive
     over false negative" stance throughout.
+
+    **A local alias of the `getattr` builtin itself is resolved too (Codex
+    review, fresh evidence).** `read_attr = getattr` then `read_attr(rec,
+    "bases")` is the identical dynamic read as `getattr(rec, "bases")`, but
+    `_builtins_getattr_aliases()` originally only ever collected the bare
+    name and a `from builtins import getattr as X` import -- a plain
+    assignment chain was invisible. Fixed by extending that function with
+    the same fixed-point assignment-chaining `_imported_class_aliases`
+    already does for a class alias (`RT = RecordType`, `RT2 = RT`), just
+    for the builtin callable instead of a class name -- see that function's
+    own docstring.
+
+    **An augmented assignment is treated as an implicit read of its target
+    (Codex review, fresh evidence).** `rec.bases += inherited` updates a
+    bridged field, but Python represents the *target* Attribute node with
+    `ast.Store` context even though the operation reads the field's
+    existing value first, to combine it with the right-hand side, before
+    writing the result back -- an ordinary `Store`/`Del` (a plain
+    `record.vtable = []` overwrite, this function's own opening paragraph)
+    genuinely never reads, but an `AugAssign` target always does. The
+    Load-only restriction above therefore missed this shape entirely: the
+    target Attribute node is still visited independently by `ast.walk`
+    (it's a child of the `AugAssign`), but its `Store` context skips the
+    ordinary attribute branch too, so nothing caught it. Fixed with a
+    dedicated `ast.AugAssign` branch matching the target's own attribute
+    name, keyed on the target Attribute node itself (not the whole
+    `AugAssign` statement) so its site/text line up with an ordinary
+    attribute read at the same position.
     """
     qualnames = _enclosing_qualnames(tree)
     parents = _parent_map(tree)
@@ -616,12 +667,32 @@ def unmigrated_fact_reader_sites(
                     )
                 )
             continue
+        record_node: ast.expr
         if (
             isinstance(node, ast.Attribute)
             and node.attr in FACT_BRIDGED_ATTRS
             and isinstance(node.ctx, ast.Load)
         ):
             attr = node.attr
+            record_node = node
+        elif (
+            isinstance(node, ast.AugAssign)
+            and isinstance(node.target, ast.Attribute)
+            and node.target.attr in FACT_BRIDGED_ATTRS
+        ):
+            # `rec.bases += inherited` -- Python marks the target `ast.
+            # Store`, even though the operation reads the field's existing
+            # value before combining it with the right-hand side (Codex
+            # review, fresh evidence). The Load-only restriction above
+            # therefore misses it entirely: the target Attribute node is
+            # still visited independently by `ast.walk` (it's a child of
+            # this AugAssign), but its `ctx` is `Store`, so the branch
+            # above skips it too -- this is the only place this implicit
+            # read is caught, keyed on the target attribute itself (not
+            # the whole AugAssign statement) so its site/text line up with
+            # an ordinary attribute read.
+            attr = node.target.attr
+            record_node = node.target
         elif (
             isinstance(node, ast.Call)
             and (
@@ -639,14 +710,22 @@ def unmigrated_fact_reader_sites(
             and node.args[1].value in FACT_BRIDGED_ATTRS
         ):
             attr = node.args[1].value
+            record_node = node
         else:
             continue
         text = (
-            ast.get_source_segment(source, node) if source else None
+            ast.get_source_segment(source, record_node) if source else None
         ) or "<unavailable>"
-        qualname = qualnames.get(node.lineno, "<module>")
+        qualname = qualnames.get(record_node.lineno, "<module>")
         matches.append(
-            (node.lineno, node.col_offset, attr, qualname, _expr_text(node), text)
+            (
+                record_node.lineno,
+                record_node.col_offset,
+                attr,
+                qualname,
+                _expr_text(record_node),
+                text,
+            )
         )
     matches.sort(key=lambda m: (m[0], m[1]))
     occurrence: dict[tuple[str, str, str, str], int] = {}

@@ -440,6 +440,62 @@ class TestUnmigratedFactReaderSites:
         tree = ast.parse(src, filename="x.py")
         assert unmigrated_fact_reader_sites(tree, "x.py", src) == []
 
+    def test_detects_a_local_alias_of_the_getattr_builtin(self) -> None:
+        """`read_attr = getattr` then `read_attr(rec, "bases")` is the
+        identical dynamic read as a bare `getattr(rec, "bases")` call
+        (Codex review, fresh evidence: a plain assignment chain to the
+        builtin callable bypassed the scan the same way a local class
+        alias once did)."""
+        src = (
+            'def f(rec):\n    read_attr = getattr\n    return read_attr(rec, "bases")\n'
+        )
+        tree = ast.parse(src, filename="x.py")
+        keys = [
+            key for key, _l, _a, _q in unmigrated_fact_reader_sites(tree, "x.py", src)
+        ]
+        assert keys == [
+            'x.py::f::bases::read_attr(rec, "bases")::read_attr(rec, "bases")::1'
+        ]
+
+    def test_detects_a_chained_alias_of_the_getattr_builtin(self) -> None:
+        """`read_attr = getattr; read_attr2 = read_attr` -- the same
+        fixed-point chaining `_imported_class_aliases` already does for a
+        class alias, applied to the builtin callable."""
+        src = (
+            "def f(rec):\n"
+            "    read_attr = getattr\n"
+            "    read_attr2 = read_attr\n"
+            '    return read_attr2(rec, "vtable")\n'
+        )
+        tree = ast.parse(src, filename="x.py")
+        keys = [
+            key for key, _l, _a, _q in unmigrated_fact_reader_sites(tree, "x.py", src)
+        ]
+        assert keys == [
+            'x.py::f::vtable::read_attr2(rec, "vtable")::read_attr2(rec, "vtable")::1'
+        ]
+
+    def test_detects_an_augmented_assignment_to_a_bridged_attr(self) -> None:
+        """`rec.bases += inherited` -- Python marks the target `Store`, but
+        the operation reads the field's existing value first (Codex
+        review, fresh evidence): the Load-only restriction otherwise
+        missed this entirely."""
+        src = "def f(rec, inherited):\n    rec.bases += inherited\n"
+        tree = ast.parse(src, filename="x.py")
+        keys = [
+            key for key, _l, _a, _q in unmigrated_fact_reader_sites(tree, "x.py", src)
+        ]
+        assert keys == ["x.py::f::bases::rec.bases::rec.bases::1"]
+
+    def test_ignores_an_ordinary_assignment_to_a_bridged_attr(self) -> None:
+        """A plain overwrite (`Store`, not `AugAssign`) is still not a
+        read -- this function's own opening paragraph, re-pinned alongside
+        the new `AugAssign` branch to confirm it didn't widen the ordinary
+        `Store` case too."""
+        src = "def f(rec):\n    rec.bases = []\n"
+        tree = ast.parse(src, filename="x.py")
+        assert unmigrated_fact_reader_sites(tree, "x.py", src) == []
+
 
 def test_check_reports_a_new_unlisted_violation(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
