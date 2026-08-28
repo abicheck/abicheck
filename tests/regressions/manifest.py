@@ -459,18 +459,23 @@ BUG_CLASSES: tuple[BugClass, ...] = (
             "highly-compressible fixture whose actual required parameters "
             "never approach the boundary being defended."
         ),
-        fixed_by=(699, 721),
-        seed_tests=("tests/test_snapshot_compression.py",),
+        fixed_by=(699, 721, 911),
+        seed_tests=(
+            "tests/test_snapshot_compression.py",
+            "tests/test_snapshot_compression_public_api_scale.py",
+        ),
+        public_surfaces=("python-api", "cli"),
         axes={"algorithm": ("zstd", "gzip")},
         known_gaps=(
             KnownGap(
                 description=(
-                    "The seed test calls `abicheck.serialization`/"
-                    "`abicheck.snapshot_io`'s real read/write chokepoints "
-                    "directly (real gzip/zstd, real scale) but never "
-                    "through `abicheck.service`/the CLI — no python-api "
-                    "or CLI-level round-trip test exists for this class "
-                    "yet."
+                    "No archive/bundle-reader (`snapshot_cache.py`, "
+                    "the G40 bundle-facts archive path) or python-api/"
+                    "CLI-level round trip has yet been generalized to "
+                    "the same production scale for a mixed-container "
+                    "payload — only the flat AbiSnapshot storage "
+                    "envelope has a scale-realistic seed test at every "
+                    "layer."
                 ),
                 reference="docs/contribute/plans/bug-class-regression-testing.md#phase-7",
             ),

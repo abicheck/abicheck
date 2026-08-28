@@ -1335,6 +1335,32 @@ IMPORT_CYCLE_ALLOWLIST: frozenset[frozenset[str]] = frozenset(
                 "service_header_graph_attach",
                 "service_input_resolution",
                 "service_scan",
+                # `service_dump_native` joins the same SCC on exactly the terms
+                # `service_header_graph_attach` above was signed off under -- a
+                # *split* of an existing member (ADR-061 "make service.py a
+                # thin facade" pass), not a new dependency direction.
+                # `run_dump`/`_run_dump_uncached`/`_dump_elf` and siblings were
+                # previously defined directly in `service.py` (the same
+                # file-size-cap reason the earlier splits give); this module
+                # imports `service_scan.expand_header_inputs` at its own tail
+                # (the identical edge `service.py` itself already carried via
+                # its own tail-of-file `from .service_scan import (...)`
+                # re-export block, now moved rather than added) and
+                # `service_header_graph_attach._attach_header_graph` eagerly
+                # at its top (an edge `service.py` already carried too). Both
+                # edges land on already-member modules, and `service` imports
+                # this module back at its own tail -- so this closes the same
+                # cluster of cycles through already-member modules, not a new
+                # one. `service_dump_native_pe` (the PE/Mach-O half of the
+                # same original block, split out purely to keep this new
+                # module under the 800-line production cap a genuinely new
+                # file gets no debt-ledger baseline to grow into) reaches
+                # `service_header_scoped` only via the same lazy
+                # `importlib.import_module` indirection `service.py`'s own
+                # docstring already documents as invisible to this check's
+                # static AST walk -- it carries no static edge into this
+                # cluster and is deliberately not listed here.
+                "service_dump_native",
                 # ADR-061 Phase 3 split `service_input_resolution` (already a
                 # member, two entries up) into `workflows.artifact.resolve` and
                 # `workflows.artifact.execute`, leaving the old path as a
@@ -2228,7 +2254,7 @@ CLI_CONTRACT_ALLOWLIST: frozenset[str] = frozenset(
         # Native ELF CLI dump (P0 item 2): calls `dumper.dump()` directly
         # rather than through `service_dump_pipeline.run_dump_request` —
         # tracked as Phase 1 item 1 of the convergence plan.
-        "abicheck/cli_dump_helpers.py:1302:19:dumper.dump",
+        "abicheck/cli_dump_helpers.py:1301:19:dumper.dump",
         # Standalone application-compatibility (P0 item 6): dumps both
         # sides directly rather than through any of the other paths.
         "abicheck/appcompat.py:1604:19:dumper.dump",

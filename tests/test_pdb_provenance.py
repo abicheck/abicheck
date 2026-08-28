@@ -414,7 +414,7 @@ class TestDumpPeFallbackBuildsPdbTypes:
         import types as _t
         import warnings as _w
 
-        from abicheck import service
+        from abicheck import service, service_dump_native_pe
         from abicheck.model import ScopeOrigin as _SO
 
         hdr = tmp_path / "api.h"
@@ -433,10 +433,18 @@ class TestDumpPeFallbackBuildsPdbTypes:
         meta.structs["Widget"] = StructLayout(
             name="Widget", byte_size=4, decl_file="api.h"
         )
-        monkeypatch.setattr(service, "_extract_pdb_debug", lambda p, pp: (meta, None))
+        # `service._dump_pe` (called below via the still-valid `service.`
+        # re-export) resolves both of these names against
+        # `service_dump_native_pe`'s own module globals, not `service`'s --
+        # see that module's own "test-patch note" docstring.
+        monkeypatch.setattr(
+            service_dump_native_pe, "_extract_pdb_debug", lambda p, pp: (meta, None)
+        )
         # Header scoping falls back (castxml/mangling gap).
         monkeypatch.setattr(
-            service, "_try_header_scoped_dump", lambda *a, **k: (None, "mangling-fallback")
+            service_dump_native_pe,
+            "_try_header_scoped_dump",
+            lambda *a, **k: (None, "mangling-fallback"),
         )
 
         with _w.catch_warnings():
