@@ -1530,7 +1530,8 @@ class _CastxmlParser:
             bases_fact=Fact.present(bases),
             virtual_bases_fact=Fact.present(virtual_bases),
             vtable_fact=Fact.present(vtable),
-            vptr_offset_bits_fact=Fact.present(vptr_offset_bits),
+            # 0-if-vtable-else-None is the Itanium primary-base heuristic above, not a real offset read -- partial, not present (Codex review; matches vptr_offset_bits's own PARTIAL row).
+            vptr_offset_bits_fact=Fact.partial(vptr_offset_bits),
             qualified_name=self._qualified_type_name(el, leaf_name=name),
             # castxml records the `final` class-key specifier as a `final`
             # token inside the compound ``attributes`` string (e.g.
