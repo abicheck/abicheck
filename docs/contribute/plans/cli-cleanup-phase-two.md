@@ -2536,11 +2536,22 @@ pipelines a fourth time.
   > action to align either, for a simpler reason — `effective_frontend`'s
   > bare default (an un-set `DumpRequest.frontend`, still `"auto"`) is
   > already castxml, so that direction was never divergent from a config
-  > pin in the first place. The claim above holds precisely for a typed
-  > request that leaves *both* `DumpRequest.frontend` and
-  > `input.compile.frontend` at their defaults (`"auto"`/unset) — that is
-  > the shape that survives a config-pinned frontend unclosed, not every
-  > typed request unconditionally.
+  > pin in the first place -- **when no `ABICHECK_AST_FRONTEND` override
+  > is set (Codex review, fresh evidence, correcting this exact claim).**
+  > `dumper._resolve_header_backend`'s own precedence honors an *explicit*
+  > `castxml`/`clang`/`hybrid` verbatim, consulting `ABICHECK_AST_FRONTEND`
+  > only for the `"auto"` case -- so the native CLI's config-forwarded
+  > explicit `"castxml"` string is env-var-blind, but a bare typed
+  > request's un-set `"auto"` default is not: with `ABICHECK_AST_
+  > FRONTEND=clang` set, the CLI stays castxml (explicit, ignores the env
+  > var) while the typed request resolves clang (auto, honors it) -- the
+  > two diverge again, contrary to the "needs no typed-side action" claim
+  > this paragraph made without that qualification. The claim above holds
+  > precisely for a typed request that leaves *both* `DumpRequest.frontend`
+  > and `input.compile.frontend` at their defaults (`"auto"`/unset) *and*
+  > no `ABICHECK_AST_FRONTEND` override selects a frontend — that is the
+  > shape that survives a config-pinned frontend unclosed, not every typed
+  > request unconditionally.
   >
   > `compare`'s implicit-dump operand and `execute_dump_request` both reach
   > L4 replay through the *same* shared primitive,
