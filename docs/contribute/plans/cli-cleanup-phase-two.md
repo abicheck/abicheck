@@ -57,8 +57,10 @@ its own section below), PR 4 changes what a CI job's exit code means.
 > fix, not a real topology model for bundle-level system-provider
 > classification. **Correction (2026-08-28): this was never actually PR B's
 > own scope** — PR B's two stated goals (pack parity, effective-config
-> digest) are about *configuration* reaching every front end, not about
-> bundle *verdict topology*; the growing-allow-list gap is recorded in the
+> digest) are about *configuration* reaching every relevant CLI command
+> path (typed-API pack parity is separate, outstanding work — see PR B's
+> own "finalized" note below), not about bundle *verdict topology*; the
+> growing-allow-list gap is recorded in the
 > root `AGENTS.md`'s "Known gaps" section, pointing at `g42-check-identity-
 > environments-and-provider-resolution.md`'s own "Environment-aware
 > system-provider resolution" design rather than sketching a competing fix
