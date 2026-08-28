@@ -508,6 +508,86 @@ class TestFactEqualityMisuseSites:
         tree = ast.parse(src, filename="x.py")
         assert fact_equality_misuse_sites(tree, "x.py") == [(3, 15)]
 
+    def test_ignores_a_walrus_target_that_shadows_an_outer_fact_alias(
+        self,
+    ) -> None:
+        """`fact = rec.bases_fact` outer, then `def inner(other): (fact
+        := 1); return fact == other` -- a walrus outside a comprehension
+        is an ordinary local binding, just like a plain assignment (Codex
+        review, fresh evidence): an earlier revision of the walrus fix
+        exempted every walrus target from `locally_bound` on the theory
+        that PEP 572's scope-hopping rule always applies, but that rule
+        only fires *inside* a comprehension -- this ordinary, unrelated
+        rebinding must still shadow the outer alias."""
+        src = (
+            "def f(rec, other):\n"
+            "    fact = rec.bases_fact\n"
+            "    def inner(other):\n"
+            "        (fact := 1)\n"
+            "        return fact == other\n"
+            "    return inner(other)\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert fact_equality_misuse_sites(tree, "x.py") == []
+
+    def test_detects_a_walrus_that_hops_out_of_a_comprehension(self) -> None:
+        """A walrus used *directly inside* a comprehension is the one
+        real PEP 572 exception: it binds into the nearest *enclosing*
+        non-comprehension scope, not the comprehension's own -- so a
+        later use outside the comprehension entirely must still resolve
+        it."""
+        src = (
+            "def f(recs, other):\n"
+            "    [y for y in recs if (fact := y.bases_fact)]\n"
+            "    return fact == other\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert fact_equality_misuse_sites(tree, "x.py") == [(3, 11)]
+
+    def test_detects_a_parameter_default_referencing_an_outer_fact_alias(
+        self,
+    ) -> None:
+        """`fact = rec.bases_fact` outer, then `def inner(fact=fact):
+        return fact == other` -- the default is evaluated in the
+        enclosing scope, so calling `inner()` with no override genuinely
+        compares the outer Fact value, even though the parameter's own
+        name is otherwise excluded from the inherited alias set (Codex
+        review, fresh evidence)."""
+        src = (
+            "def f(rec, other):\n"
+            "    fact = rec.bases_fact\n"
+            "    def inner(fact=fact):\n"
+            "        return fact == other\n"
+            "    return inner()\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert fact_equality_misuse_sites(tree, "x.py") == [(4, 15)]
+
+    def test_detects_a_directly_fact_typed_parameter_default(self) -> None:
+        """`def inner(fact=rec.bases_fact): return fact == other` -- the
+        default itself is directly recognizable as Fact-typed, no alias
+        chain needed."""
+        src = (
+            "def f(rec, other):\n"
+            "    def inner(fact=rec.bases_fact):\n"
+            "        return fact == other\n"
+            "    return inner()\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert fact_equality_misuse_sites(tree, "x.py") == [(3, 15)]
+
+    def test_ignores_an_ordinary_parameter_default(self) -> None:
+        """A negative control: a parameter default that isn't Fact-typed
+        at all must not be flagged just because *some* default exists."""
+        src = (
+            "def f(rec, other):\n"
+            "    def inner(fact=1):\n"
+            "        return fact == other\n"
+            "    return inner()\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert fact_equality_misuse_sites(tree, "x.py") == []
+
     def test_detects_a_comparison_between_two_fact_annotated_parameters(
         self,
     ) -> None:

@@ -565,6 +565,11 @@ def _fact_aliases(tree: ast.Module, qualnames: _QualnameSpans) -> dict[str, set[
     unchanged.
     """
     fact_names = _imported_fact_aliases(tree)
+    # Computed up front (not after the walk below, as in an earlier
+    # revision) so the walrus-target branch inside that same walk can
+    # already use it to hop a comprehension-scoped walrus target out to
+    # its real PEP 572 binding scope -- see that branch's own comment.
+    lexical_parents = _lexical_function_parents(tree)
     aliases: dict[str, set[str]] = {}
     candidates: dict[str, list[tuple[str, ast.expr]]] = {}
     # Every name *this* function binds on its own -- every parameter
@@ -582,6 +587,16 @@ def _fact_aliases(tree: ast.Module, qualnames: _QualnameSpans) -> dict[str, set[
     # over-approximating-is-safe direction used everywhere else in this
     # module, just applied here to exclude a name rather than include one.
     locally_bound: dict[str, set[str]] = {}
+    # `(qualname, arg_name, default_expr)` -- a parameter default whose
+    # Fact-typedness can't be decided during this same walk, since it
+    # must be checked against its *enclosing* scope's alias set (where a
+    # default expression is genuinely evaluated -- Python's own binding
+    # rule), not the function's own (which has already had this exact
+    # name excluded via the shadowing subtraction, since the parameter
+    # itself is always in that scope's own `locally_bound`). Resolved in
+    # a dedicated pass after the fixed point below has already stabilized
+    # every scope's own alias set -- see that pass's own comment.
+    pending_defaults: list[tuple[str, str, ast.expr]] = []
     for node in ast.walk(tree):
         if isinstance(node, ast.Assign):
             qualname = _qualname_at((node.lineno, node.col_offset), qualnames)
@@ -617,25 +632,38 @@ def _fact_aliases(tree: ast.Module, qualnames: _QualnameSpans) -> dict[str, set[
             # typed_expr`'s own NamedExpr branch for that half): `fact`
             # itself becomes usable later in the same scope, e.g. `if
             # (fact := rec.bases_fact) is not None: return fact == other`
-            # (Codex review, fresh evidence). Registered as an ordinary
-            # candidate, feeding the identical fixed-point resolution
-            # every other alias source already does -- not added to
-            # `locally_bound`, since a walrus target is deliberately
-            # exempt from Python's own "assignment anywhere makes a name
-            # local to the whole function" rule (PEP 572): unlike every
-            # other binding form handled here, it explicitly binds into
-            # the nearest *containing* scope, hopping out of a
-            # comprehension's own scope entirely when used inside one --
-            # so treating it as function-local here (and risking an
-            # incorrect shadow of a genuine outer alias) would be wrong in
-            # the specific case this module already added a real scope
-            # for. `qualnames` has no notion of that scope-hopping rule,
-            # so this alias is deliberately still keyed to whatever scope
-            # `_qualname_at` reports for its own position -- correct
-            # outside a comprehension (the overwhelmingly common case),
-            # an accepted narrow residual inside one.
-            qualname = _qualname_at((node.lineno, node.col_offset), qualnames)
-            candidates.setdefault(qualname, []).append((node.target.id, node.value))
+            # (Codex review, fresh evidence).
+            #
+            # **Bound to the scope PEP 572 actually assigns it to, not
+            # simply wherever it's lexically written (Codex review, fresh
+            # evidence, second round on this same branch).** Outside a
+            # comprehension, a walrus target binds to its immediately
+            # enclosing scope exactly like an ordinary assignment does --
+            # the first revision of this branch treated *every* walrus as
+            # exempt from `locally_bound`, on the theory that its PEP 572
+            # scope-hopping rule always applies; that rule is real, but it
+            # only fires when the walrus sits *directly inside a
+            # comprehension*, and skipping `locally_bound` unconditionally
+            # meant a nested function's own `(fact := 1)` -- an ordinary,
+            # unrelated local rebinding, no comprehension involved at all
+            # -- failed to shadow a genuine outer alias of the same name,
+            # a real false positive. Fixed by hopping the *comprehension*
+            # case out to its real binding scope (the nearest enclosing
+            # non-comprehension scope, walking `lexical_parents` -- a
+            # walrus can sit inside several nested comprehensions at once,
+            # and PEP 572 hops out of all of them, not just the innermost)
+            # while treating every other case as an ordinary local
+            # binding, added to `locally_bound` the same as any other
+            # assignment target.
+            walrus_qualname = _qualname_at((node.lineno, node.col_offset), qualnames)
+            binding_qualname = walrus_qualname
+            while binding_qualname.rsplit(".", 1)[-1].startswith("<comp>#"):
+                binding_qualname = lexical_parents.get(binding_qualname, "<module>")
+            if binding_qualname == walrus_qualname:
+                locally_bound.setdefault(binding_qualname, set()).add(node.target.id)
+            candidates.setdefault(binding_qualname, []).append(
+                (node.target.id, node.value)
+            )
         elif isinstance(node, (ast.For, ast.AsyncFor)):
             # `for fact, other in pairs:` -- the same tuple-unpacking
             # binding as `ast.Assign`, just via a loop target instead
@@ -679,6 +707,25 @@ def _fact_aliases(tree: ast.Module, qualnames: _QualnameSpans) -> dict[str, set[
                 locally_bound.setdefault(qualname, set()).add(arg.arg)
                 if _is_fact_typed_annotation(arg.annotation, fact_names):
                     aliases.setdefault(qualname, set()).add(arg.arg)
+            # A parameter's own *default value* -- evaluated once, in the
+            # enclosing scope, at `def`/lambda time -- can itself be
+            # Fact-typed (Codex review, fresh evidence): `fact = rec.
+            # bases_fact; def inner(fact=fact): return fact == other` --
+            # calling `inner()` with no override genuinely runs the
+            # comparison against that outer Fact value, but the parameter
+            # is already unconditionally excluded from the inherited
+            # alias set (`locally_bound`, just above) regardless of what
+            # its own default is. Positional defaults right-align against
+            # `posonlyargs + args` (the last `len(defaults)` of them);
+            # `kw_defaults` pairs positionally with `kwonlyargs`, `None`
+            # for a keyword-only parameter with no default at all.
+            positional = (*node.args.posonlyargs, *node.args.args)
+            offset = len(positional) - len(node.args.defaults)
+            for arg, default in zip(positional[offset:], node.args.defaults):
+                pending_defaults.append((qualname, arg.arg, default))
+            for arg, kw_default in zip(node.args.kwonlyargs, node.args.kw_defaults):
+                if kw_default is not None:
+                    pending_defaults.append((qualname, arg.arg, kw_default))
         elif isinstance(
             node, (ast.ListComp, ast.SetComp, ast.DictComp, ast.GeneratorExp)
         ):
@@ -691,8 +738,6 @@ def _fact_aliases(tree: ast.Module, qualnames: _QualnameSpans) -> dict[str, set[
             for generator in node.generators:
                 for name in _bound_names(generator.target):
                     locally_bound.setdefault(qualname, set()).add(name)
-
-    lexical_parents = _lexical_function_parents(tree)
 
     def _scope_depth(qualname: str) -> int:
         depth = 0
@@ -730,6 +775,20 @@ def _fact_aliases(tree: ast.Module, qualnames: _QualnameSpans) -> dict[str, set[
                 ):
                     known.add(name)
                     changed = True
+
+    # Resolve every pending parameter default now that each scope's own
+    # alias set has stabilized -- a default expression is evaluated in
+    # the *enclosing* scope (Python's own binding rule for a default
+    # value, unlike the parameter itself), so a bare-name default is
+    # checked against the enclosing scope's already-final alias set, not
+    # the function's own (which excludes the parameter's name entirely,
+    # by construction -- see the collection site's own comment).
+    for qualname, arg_name, default in pending_defaults:
+        parent = lexical_parents.get(qualname, "<module>")
+        if _is_fact_typed_expr(default, fact_names) or (
+            isinstance(default, ast.Name) and default.id in aliases.get(parent, ())
+        ):
+            aliases.setdefault(qualname, set()).add(arg_name)
     return aliases
 
 

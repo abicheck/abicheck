@@ -1307,6 +1307,48 @@ repository. Four new tests: the exact same-line lambda/outer-alias repro
 `fact == other` occurrences was reported), a chained assignment, an
 inline walrus comparison, and a walrus alias reused on a later line.
 
+**A further Codex review round found two more real gaps, both in the
+walrus/parameter machinery this section had just built -- both fixed.**
+(1) **The walrus fix's own "deliberately not chasing PEP 572's
+scope-hopping rule" residual was, on inspection, backwards -- a real
+false positive, not merely an accepted narrow gap.** The previous round
+exempted *every* walrus target from `locally_bound` on the theory that
+its scope-hopping rule always applies; that rule is real, but only fires
+when the walrus sits *directly inside a comprehension* -- everywhere
+else, a walrus binds to its immediately enclosing scope exactly like an
+ordinary assignment. Unconditionally exempting it meant an entirely
+ordinary, comprehension-free rebinding (`fact = rec.bases_fact` outer,
+then `def inner(other): (fact := 1); return fact == other`) failed to
+shadow the outer alias, flagging valid code. Fixed by hopping only the
+genuine comprehension case out to its real PEP 572 binding scope (the
+nearest enclosing *non*-comprehension scope, walking `lexical_parents` --
+moved earlier in the function so this same walk can use it -- through
+every nested comprehension layer, not just the innermost one) and
+treating every other case as an ordinary local binding, added to
+`locally_bound` the same as any other assignment target. (2) **A
+parameter's own default value can be Fact-typed, and nothing examined
+it.** `fact = rec.bases_fact; def inner(fact=fact): return fact ==
+other` -- calling `inner()` with no override genuinely runs the
+comparison against the outer Fact value (a default is evaluated once, in
+the *enclosing* scope, at `def`/lambda time), but the parameter was
+already unconditionally excluded from the inherited alias set regardless
+of what its own default was. Fixed by pairing `args.defaults`/
+`kw_defaults` with their parameters (positional defaults right-align
+against `posonlyargs + args`; `kw_defaults` pairs positionally with
+`kwonlyargs`, `None` for one with no default) and resolving each pending
+default in a dedicated pass *after* the fixed point has already
+stabilized every scope's own alias set -- a default expression must be
+checked against its *enclosing* scope's final alias set, not the
+function's own (which excludes this exact name by construction), so this
+can't be folded into the same single fixed-point pass every other alias
+source already uses. Verified empirically: still zero existing hits in
+the real repository, and positive/negative controls confirm a walrus
+alias used without shadowing, a walrus hopping out of a comprehension,
+and an ordinary (non-Fact) parameter default all still behave correctly.
+Five new tests: the walrus-shadow false positive and its walrus-hops-out
+positive control, a default referencing an outer alias, a directly
+Fact-typed default, and an ordinary-default negative control.
+
 ---
 
 ### Phase 1 — finish the `dump`/`scan` typed-API convergence (closes AGENTS.md "PR C")
