@@ -737,6 +737,128 @@ class TestFactEqualityMisuseSites:
         tree = ast.parse(src, filename="x.py")
         assert fact_equality_misuse_sites(tree, "x.py") == []
 
+    def test_detects_a_real_misuse_despite_a_nonlocal_redeclaration(self) -> None:
+        """A `nonlocal`-declared name is never a real local rebinding -- it
+        refers to the *same* outer variable, so it must not be excluded
+        from the outer scope's alias inheritance the way an ordinary local
+        reassignment correctly is (Codex review: the shadowing subtraction
+        previously treated `nonlocal fact` identically to `fact = ...`,
+        silently hiding the outer alias from the read that precedes the
+        reassignment)."""
+        src = (
+            "def outer(rec):\n"
+            "    fact = rec.bases_fact\n"
+            "    def inner():\n"
+            "        nonlocal fact\n"
+            "        hit = fact == other\n"
+            "        fact = 1\n"
+            "    return inner\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert fact_equality_misuse_sites(tree, "x.py") == [(5, 14)]
+
+    def test_detects_a_real_misuse_despite_a_global_redeclaration(self) -> None:
+        """The same exemption for `global` -- a module-level alias must
+        still be visible to a function that later reassigns the same name
+        under an explicit `global` declaration."""
+        src = (
+            "fact_global = registry.bases_fact\n"
+            "def use():\n"
+            "    global fact_global\n"
+            "    hit = fact_global == other\n"
+            "    fact_global = 1\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert fact_equality_misuse_sites(tree, "x.py") == [(4, 10)]
+
+    def test_ignores_a_local_reassignment_without_nonlocal_still_shadows(
+        self,
+    ) -> None:
+        """Negative control for the two tests above: an *ordinary* local
+        reassignment (no `nonlocal`/`global` declaration) must still shadow
+        the outer alias exactly as before -- the exemption is specific to a
+        declared nonlocal/global name, not a general loosening of the
+        shadowing rule."""
+        src = (
+            "def outer(rec):\n"
+            "    fact = rec.bases_fact\n"
+            "    def inner():\n"
+            "        fact = 1\n"
+            "        hit = fact == other\n"
+            "    return inner\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert fact_equality_misuse_sites(tree, "x.py") == []
+
+    def test_default_derived_alias_propagates_into_a_nested_function(
+        self,
+    ) -> None:
+        """A parameter default derived from a Fact-typed expression makes
+        the parameter itself a same-function alias -- and that alias must
+        reach a function nested *inside* the one declaring the default, not
+        just the declaring function's own body (Codex review: the old
+        single top-to-bottom resolution pass processed a nested function's
+        inheritance before its enclosing function's own default-derived
+        alias had been resolved, silently missing the propagation)."""
+        src = (
+            "def inner(rec, fact=rec.bases_fact):\n"
+            "    def nested():\n"
+            "        return fact == other\n"
+            "    return nested\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert fact_equality_misuse_sites(tree, "x.py") == [(3, 15)]
+
+    def test_class_body_inherits_a_fact_alias_from_its_enclosing_function(
+        self,
+    ) -> None:
+        """A class body's own top-level code inherits from its lexically
+        enclosing scope the same way ordinary code does -- unlike a method
+        defined inside the class, which does *not* see the class body as
+        its own parent scope for closure purposes (Codex review: the class
+        layer was skipped entirely for alias inheritance, not just for the
+        method-closure case it's correct to skip for)."""
+        src = (
+            "def outer(rec):\n"
+            "    fact = rec.bases_fact\n"
+            "    class C:\n"
+            "        result = fact == other\n"
+            "    return C\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert fact_equality_misuse_sites(tree, "x.py") == [(4, 17)]
+
+    def test_ignores_a_class_body_comparison_with_no_enclosing_fact_alias(
+        self,
+    ) -> None:
+        """Negative control: a class body at module scope, where nothing
+        named `fact` is ever Fact-typed, must not report a finding merely
+        because class-body inheritance now exists."""
+        src = "fact = 1\nclass C:\n    result = fact == other\n"
+        tree = ast.parse(src, filename="x.py")
+        assert fact_equality_misuse_sites(tree, "x.py") == []
+
+    def test_a_method_still_does_not_inherit_from_its_own_class_body(
+        self,
+    ) -> None:
+        """A method must keep skipping its class's own body as a parent
+        scope (ordinary Python LEGB), even though the class body itself now
+        inherits from its enclosing function -- a class-body-local
+        reassignment of `fact` must not leak into a method's own alias
+        resolution, which instead sees straight through to the enclosing
+        function's real alias."""
+        src = (
+            "def outer(rec):\n"
+            "    fact = rec.bases_fact\n"
+            "    class C:\n"
+            "        fact = 5\n"
+            "        def method(self):\n"
+            "            return fact == other\n"
+            "    return C\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert fact_equality_misuse_sites(tree, "x.py") == [(6, 19)]
+
 
 def test_check_reports_a_new_violation(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch

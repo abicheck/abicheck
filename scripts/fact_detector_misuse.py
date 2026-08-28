@@ -437,6 +437,30 @@ def _lexical_function_parents(tree: ast.Module) -> dict[str, str]:
                 parents[qualname] = nearest_func
                 visit(child, qualname + ".", qualname)
             elif isinstance(child, ast.ClassDef):
+                # The class body's *own* scope inherits from whatever
+                # encloses the `class` statement (ordinary Python LEGB
+                # lookup -- a class body is executed once, as ordinary
+                # code, and can read a bare name from its enclosing
+                # function/module scope exactly like any other nested
+                # block) -- but a *method* inside it must still skip past
+                # this class layer entirely when computing its own
+                # nearest enclosing function (Codex review, fresh
+                # evidence: `fact = rec.bases_fact` outer, then `class C:
+                # result = fact == other`, directly in the class body, not
+                # inside a method -- the class-body scope this module
+                # already gives its own qualname had no parent recorded
+                # at all, so it could never inherit anything). Both are
+                # true at once: record the class-body qualname's own
+                # parent as `nearest_func` (using the identical
+                # `<class-body>`-suffixed key `_enclosing_qualnames`
+                # already produces for it), while recursing into the
+                # class's own children with `nearest_func` *unchanged* --
+                # a nested method's own qualname is a different key
+                # entirely (built by the `FunctionDef` branch above), so
+                # this class-body entry is never consulted when computing
+                # a method's own parent.
+                class_qualname = f"{prefix}{child.name}#{child.lineno}<class-body>"
+                parents[class_qualname] = nearest_func
                 visit(child, f"{prefix}{child.name}.", nearest_func)
             else:
                 visit(child, prefix, nearest_func)
@@ -626,6 +650,23 @@ def _fact_aliases(tree: ast.Module, qualnames: _QualnameSpans) -> dict[str, set[
     # over-approximating-is-safe direction used everywhere else in this
     # module, just applied here to exclude a name rather than include one.
     locally_bound: dict[str, set[str]] = {}
+    # Every name a function declares `global`/`nonlocal` -- excluded from
+    # `locally_bound`'s shadowing subtraction below, since these are the
+    # one real exception to Python's own "assignment anywhere makes a
+    # name local to the whole function" rule (Codex review, fresh
+    # evidence): `nonlocal fact` (or `global fact`) explicitly says this
+    # name is *not* a new local at all, it's the identical outer/global
+    # variable -- so a reassignment to it later in the same function
+    # (`fact = 1`) does not shadow an inherited outer alias the way an
+    # ordinary local rebinding would; a use anywhere in the function
+    # (before or after that reassignment) can still genuinely see the
+    # outer Fact-typed value. Not narrowed to "only before the
+    # reassignment" -- the same over-approximating-is-safe direction this
+    # whole module already takes, just applied in the opposite direction
+    # from the shadowing fix's own (a false positive on a *later*, real
+    # reassignment to a non-Fact value is the accepted cost, matching how
+    # a shadow is never narrowed to "only after the rebinding" either).
+    nonlocal_or_global: dict[str, set[str]] = {}
     # `(qualname, arg_name, default_expr)` -- a parameter default whose
     # Fact-typedness can't be decided during this same walk, since it
     # must be checked against its *enclosing* scope's alias set (where a
@@ -750,6 +791,9 @@ def _fact_aliases(tree: ast.Module, qualnames: _QualnameSpans) -> dict[str, set[
             for case in node.cases:
                 for name in _match_pattern_names(case.pattern):
                     locally_bound.setdefault(qualname, set()).add(name)
+        elif isinstance(node, (ast.Global, ast.Nonlocal)):
+            qualname = _qualname_at((node.lineno, node.col_offset), qualnames)
+            nonlocal_or_global.setdefault(qualname, set()).update(node.names)
         elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)):
             # `ast.Lambda` shares the identical `.args: ast.arguments`
             # shape a `def` has (Codex review, fresh evidence -- see
@@ -832,6 +876,14 @@ def _fact_aliases(tree: ast.Module, qualnames: _QualnameSpans) -> dict[str, set[
                 for name in _bound_names(generator.target):
                     locally_bound.setdefault(qualname, set()).add(name)
 
+    # A `global`/`nonlocal`-declared name is never a real local rebinding
+    # -- exclude it from the shadowing subtraction now that every
+    # ordinary binding has been collected (see `nonlocal_or_global`'s own
+    # declaration above for why).
+    for qualname, declared in nonlocal_or_global.items():
+        if qualname in locally_bound:
+            locally_bound[qualname] -= declared
+
     def _scope_depth(qualname: str) -> int:
         depth = 0
         current = qualname
@@ -851,37 +903,66 @@ def _fact_aliases(tree: ast.Module, qualnames: _QualnameSpans) -> dict[str, set[
         | {q for _start, _end, q in qualnames}
         | {"<module>"}
     )
-    for qualname in sorted(all_qualnames, key=_scope_depth):
-        known = aliases.setdefault(qualname, set())
-        parent = lexical_parents.get(qualname)
-        if parent is not None:
-            shadowed = locally_bound.get(qualname, set())
-            known |= aliases.get(parent, set()) - shadowed
-        changed = True
-        while changed:
-            changed = False
-            for name, value in candidates.get(qualname, []):
-                if name in known:
-                    continue
-                if _is_fact_typed_expr(value, fact_names) or (
-                    isinstance(value, ast.Name) and value.id in known
-                ):
-                    known.add(name)
-                    changed = True
+    # Both passes below -- depth-ordered parent inheritance (plus each
+    # scope's own candidate fixed point) and pending-default resolution
+    # -- are wrapped in one further, *outer* fixed point (Codex review,
+    # fresh evidence): `def inner(fact=rec.bases_fact): def nested():
+    # return fact == other` needs `nested` to inherit `fact` from
+    # `inner`, but `inner` only gains `fact` from resolving its own
+    # *default* -- and the default-resolution pass deliberately runs
+    # *after* the depth-ordered inheritance pass (it needs each scope's
+    # alias set already final before checking a default against it), so
+    # a single top-to-bottom run processes `nested`'s inheritance before
+    # `inner`'s own default has been resolved at all, silently missing
+    # the propagation. Re-running both passes together until neither
+    # changes anything converges correctly: the second pass through
+    # inheritance sees `inner`'s now-resolved `fact` and propagates it to
+    # `nested` exactly the same way an ordinary parent alias already
+    # would. Guaranteed to terminate -- every alias set only ever grows,
+    # over a finite universe of (qualname, name) pairs.
+    outer_changed = True
+    while outer_changed:
+        outer_changed = False
+        for qualname in sorted(all_qualnames, key=_scope_depth):
+            known = aliases.setdefault(qualname, set())
+            parent = lexical_parents.get(qualname)
+            if parent is not None:
+                shadowed = locally_bound.get(qualname, set())
+                inherited = aliases.get(parent, set()) - shadowed
+                if not inherited <= known:
+                    outer_changed = True
+                known |= inherited
+            changed = True
+            while changed:
+                changed = False
+                for name, value in candidates.get(qualname, []):
+                    if name in known:
+                        continue
+                    if _is_fact_typed_expr(value, fact_names) or (
+                        isinstance(value, ast.Name) and value.id in known
+                    ):
+                        known.add(name)
+                        changed = True
+                        outer_changed = True
 
-    # Resolve every pending parameter default now that each scope's own
-    # alias set has stabilized -- a default expression is evaluated in
-    # the *enclosing* scope (Python's own binding rule for a default
-    # value, unlike the parameter itself), so a bare-name default is
-    # checked against the enclosing scope's already-final alias set, not
-    # the function's own (which excludes the parameter's name entirely,
-    # by construction -- see the collection site's own comment).
-    for qualname, arg_name, default in pending_defaults:
-        parent = lexical_parents.get(qualname, "<module>")
-        if _is_fact_typed_expr(default, fact_names) or (
-            isinstance(default, ast.Name) and default.id in aliases.get(parent, ())
-        ):
-            aliases.setdefault(qualname, set()).add(arg_name)
+        # Resolve every pending parameter default against each scope's
+        # own alias set as it stands *this* iteration -- a default
+        # expression is evaluated in the *enclosing* scope (Python's own
+        # binding rule for a default value, unlike the parameter itself),
+        # so a bare-name default is checked against the enclosing scope's
+        # alias set, not the function's own (which excludes the
+        # parameter's name entirely, by construction -- see the
+        # collection site's own comment).
+        for qualname, arg_name, default in pending_defaults:
+            parent = lexical_parents.get(qualname, "<module>")
+            default_target_aliases = aliases.setdefault(qualname, set())
+            if arg_name in default_target_aliases:
+                continue
+            if _is_fact_typed_expr(default, fact_names) or (
+                isinstance(default, ast.Name) and default.id in aliases.get(parent, ())
+            ):
+                default_target_aliases.add(arg_name)
+                outer_changed = True
     return aliases
 
 

@@ -1390,6 +1390,62 @@ through a match capture (no shadowing) is still caught. Five new tests:
 `MatchAs`/`MatchStar`/`MatchMapping` shadowing, a positive control for a
 real match-capture misuse, and the default-expression-walrus repro.
 
+**A further Codex review round found three more real gaps, all in this
+same shadowing/scope-attribution family, all fixed.** (1) **`nonlocal`/
+`global` were treated identically to an ordinary local rebinding for
+shadowing purposes -- wrong, since neither introduces a new local at
+all.** `def outer(rec): fact = rec.bases_fact; def inner(): nonlocal
+fact; hit = fact == other; fact = 1` -- the `fact = 1` reassignment inside
+`inner` correctly makes `fact` a target the existing shadowing machinery
+records in `locally_bound[inner]`, but `nonlocal fact` means this is the
+*same* variable as the outer alias, not a fresh local one -- so the read
+on the line before the reassignment should still see the outer alias and
+be flagged, and it wasn't. The identical gap applies to `global`. Fixed
+with a new `ast.Global`/`ast.Nonlocal` branch recording each declared
+name against its own qualname, followed by a post-walk pass subtracting
+every declared name from that same qualname's `locally_bound` set --
+after every ordinary binding source has already been collected, so a
+genuinely *different* local reassignment in the same function (not
+declared nonlocal/global) is unaffected. (2) **A parameter default's own
+alias never propagated to a function nested inside the one declaring the
+default.** `def inner(rec, fact=rec.bases_fact): def nested(): return
+fact == other` -- the previous round's default-value fix resolves
+`pending_defaults` in one pass *after* the depth-ordered inheritance/
+candidate fixed point has already run to completion, so `nested`'s own
+inheritance from `inner` was computed before `inner`'s own default-derived
+alias for `fact` existed at all, and `nested` never saw it. Fixed by
+wrapping both the depth-ordered inheritance/candidate pass and the
+pending-defaults resolution together in one outer fixed-point loop (`while
+outer_changed: ...`), so a second iteration through inheritance sees
+`inner`'s now-resolved `fact` and propagates it to `nested` exactly the
+way an ordinary parent alias already would -- guaranteed to terminate,
+since every alias set only ever grows over a finite universe of
+`(qualname, name)` pairs. (3) **A class body's own top-level code did not
+inherit from its lexically enclosing scope at all.** `def outer(rec):
+fact = rec.bases_fact; class C: result = fact == other` -- a class body
+is ordinary code that inherits from its enclosing scope like any other
+(it's only invisible to a *method* defined inside it, since Python's LEGB
+rule skips the class layer specifically for a nested function's own
+closure), but `_lexical_function_parents()` had no entry for a class-body
+qualname at all, so it inherited nothing and the read was missed. Fixed
+by adding a `class_qualname -> nearest_func` entry to the same parents
+dict the class-body walk already builds, without disturbing the existing,
+correct method-skips-its-class-body behavior (a method gets its own,
+independent qualname entry via the unchanged `FunctionDef` branch).
+Verified empirically: still zero existing hits in the real repository,
+and `mypy`/`ruff` both stayed clean (one incidental fix along the way --
+the new pending-defaults loop variable had to be renamed off `target`,
+since that name was already inferred as `ast.expr` from an unrelated
+`for target in node.targets:` loop earlier in the same function, and
+Python's lack of block scoping meant reusing it produced a real mypy type
+error, not just a style nit). Nine new tests: the nonlocal/global
+exemption and its negative control (an *undeclared* local reassignment
+must still shadow), the nested-function default-propagation repro, the
+class-body-inherits repro and its negative control (a class body with no
+enclosing Fact alias), and a test pinning that a method still does not
+see its own class body's local reassignment of the same name -- it sees
+straight through to the enclosing function's real alias instead.
+
 ---
 
 ### Phase 1 — finish the `dump`/`scan` typed-API convergence (closes AGENTS.md "PR C")
