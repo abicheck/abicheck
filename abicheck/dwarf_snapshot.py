@@ -54,6 +54,7 @@ from .model import (
     AccessLevel,
     EnumMember,
     EnumType,
+    Fact,
     Function,
     Param,
     ParamKind,
@@ -63,6 +64,7 @@ from .model import (
     Visibility,
     is_compiler_internal_type as _is_compiler_internal,
     is_cxx_runtime_library,
+    record_layout_facts,
     resolve_vptr_offset_bits,
 )
 
@@ -744,8 +746,9 @@ class _DwarfSnapshotBuilder:
     def _process_param(self, die: Any, CU: Any) -> Param | None:
         """Extract a parameter from DW_TAG_formal_parameter."""
         name = _attr_str(die, "DW_AT_name")
+        # DWARF carries no va_list-ness signal for either branch below -- same UNSUPPORTED stance as dumper_castxml.py's Param.
         if "DW_AT_type" not in die.attributes:
-            return Param(name=name, type="?")
+            return Param(name=name, type="?", is_va_list_fact=Fact.unsupported())
 
         type_name, _ = self._resolve_type(die, CU)
         self._referenced_type_names.add(type_name)
@@ -768,6 +771,7 @@ class _DwarfSnapshotBuilder:
             type=type_name,
             kind=kind,
             pointer_depth=ptr_depth,
+            is_va_list_fact=Fact.unsupported(),
         )
 
     # -------------------------------------------------------------------
@@ -891,17 +895,7 @@ class _DwarfSnapshotBuilder:
         is_opaque = byte_size == 0 and not fields
         source_loc = self._resolve_decl_file(die, CU)
 
-        # Real vptr offset, read from the compiler's own artificial vptr
-        # member when this class introduces one. A class that only extends
-        # or overrides an already-inherited vtable (no local vptr member,
-        # even when every one of its own declared methods is virtual) is
-        # left None here and resolved in a later pass, once every record
-        # type in this binary is known — see _finalize_vptr_offsets's
-        # docstring for why that can't be done eagerly, here, per-type.
-        # Tri-state by design: None also covers genuinely non-polymorphic
-        # and "only reachable through a virtual base" (whose offset is
-        # dynamic, never a fixed one this model can express), so the diff
-        # can tell "gained a vptr" (None → a real offset) from "vptr stayed".
+        # Real vptr offset, read from the compiler's own artificial vptr member when this class introduces one. A class that only extends or overrides an already-inherited vtable (no local vptr member, even when every one of its own declared methods is virtual) is left None here and resolved in a later pass, once every record type in this binary is known — see _finalize_vptr_offsets's docstring for why that can't be done eagerly, here, per-type. Tri-state by design: None also covers genuinely non-polymorphic and "only reachable through a virtual base" (whose offset is dynamic, never a fixed one this model can express), so the diff can tell "gained a vptr" (None → a real offset) from "vptr stayed".
         vptr_offset_bits = own_vptr_offset_bits
         # is_standard_layout / is_trivially_copyable / data_size_bits are
         # deliberately *not* derived here. "not polymorphic and no virtual bases"
@@ -928,6 +922,8 @@ class _DwarfSnapshotBuilder:
             source_location=source_loc,
             vptr_offset_bits=vptr_offset_bits,
             base_offsets=base_offsets,
+            # Stated explicitly, matching the other producers -- vptr_offset_bits may still be None pending _finalize_vptr_offsets's own later pass, which already resyncs both via resolve_vptr_offset_bits() if it resolves a real value.
+            **record_layout_facts(bases, virtual_bases, vtable, vptr_offset_bits),
         )
         self.types.append(rec)
         self._record_by_qualified_name[qualified] = rec

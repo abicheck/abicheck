@@ -18,7 +18,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import cast
+from typing import Any, cast
 
 from .fact import Fact, _Omitted, bridge_legacy_and_fact
 from .vocabulary import AccessLevel, ScopeOrigin
@@ -235,6 +235,32 @@ class EnumType:
     # type-map-key reasons documented on ``RecordType.qualified_name``. None
     # when the enum is at global scope or the dumper couldn't determine it.
     qualified_name: str | None = None
+
+
+def record_layout_facts(
+    bases: list[str],
+    virtual_bases: list[str],
+    vtable: list[str],
+    vptr_offset_bits: int | None,
+) -> dict[str, Any]:
+    """``Fact.present(...)`` for all four ``RecordType`` layout fields at once.
+
+    ADR-063 Phase 0: a header-AST producer (castxml, direct-clang) that
+    resolves these itself via real parse-time analysis states so
+    explicitly, rather than leaving the omission bridge to infer
+    ``Fact.present(...)`` from "a legacy value was supplied" — spread the
+    result into the ``RecordType(...)`` call alongside the matching legacy
+    keyword arguments, e.g. ``RecordType(bases=bases, vtable=vtable, ...,
+    **record_layout_facts(bases, virtual_bases, vtable, vptr_offset_bits))``.
+    Not used for DWARF's ``vptr_offset_bits``, which a post-construction
+    fixed-point pass may still revise — see :func:`resolve_vptr_offset_bits`.
+    """
+    return {
+        "bases_fact": Fact.present(bases),
+        "virtual_bases_fact": Fact.present(virtual_bases),
+        "vtable_fact": Fact.present(vtable),
+        "vptr_offset_bits_fact": Fact.present(vptr_offset_bits),
+    }
 
 
 def resolve_vptr_offset_bits(rec: RecordType, value: int) -> None:

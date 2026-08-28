@@ -113,6 +113,7 @@ from .model import (
     AccessLevel,
     EnumMember,
     EnumType,
+    Fact,
     Function,
     Param,
     RecordType,
@@ -1139,20 +1140,11 @@ class _ClangAstParser:
                     name=str(p.get("name", "")),
                     type=_qualtype(p),
                     pointer_depth=_pointer_depth(_qualtype(p)),
-                    # G31 Phase C: castxml was the ONLY producer of this fact
-                    # (`_resolve_cv_restrict`), so a castxml-vs-clang comparison
-                    # of unchanged headers reported PARAM_RESTRICT_CHANGED for
-                    # every restrict-qualified parameter — the detector compares
-                    # the two bools directly, with no producer gate to decline
-                    # on (unlike `deprecated`/`is_scoped` before this phase).
+                    # G31 Phase C: castxml was the ONLY producer of this fact (`_resolve_cv_restrict`), so a castxml-vs-clang comparison of unchanged headers reported PARAM_RESTRICT_CHANGED for every restrict-qualified parameter -- the detector compares the two bools directly, with no producer gate to decline on (unlike `deprecated`/`is_scoped` before this phase).
                     is_restrict=_clang_param_is_restrict(p),
-                    # G31 Phase C continued: same shape as `is_restrict` above
-                    # — castxml never populated this fact either, so a bare
-                    # comparison of the two bools needs the identical
-                    # producer-reliability gate (`param_va_list`'s registration
-                    # in diff_symbols.py). See
-                    # `dumper_clang_qualifiers._clang_param_is_va_list`.
-                    is_va_list=_clang_param_is_va_list(p),
+                    # G31 Phase C continued: same shape as `is_restrict` above -- castxml never populated this fact either. See `dumper_clang_qualifiers._clang_param_is_va_list`; is_va_list_fact states explicitly that this parse evaluated the check (target-scoping residual unchanged, per that function's own docstring).
+                    is_va_list=(_iv := _clang_param_is_va_list(p)),
+                    is_va_list_fact=Fact.present(_iv),
                     # Preserve the actual default-argument value (so a changed
                     # default fires PARAM_DEFAULT_VALUE_CHANGED); fall back to a
                     # bare presence marker when the value can't be evaluated.
@@ -1430,6 +1422,11 @@ class _ClangAstParser:
                 has_anonymous_aggregate_fields=False,
                 source_location=self._source_location(entry),
                 deprecated=deprecated,
+                # Empty lists are the parse's own answer -- matches dumper_castxml.py's opaque-record Fact stance.
+                bases_fact=Fact.present([]),
+                virtual_bases_fact=Fact.present([]),
+                vtable_fact=Fact.present([]),
+                vptr_offset_bits_fact=Fact.present(None),
             )
         fields = self._parse_fields(node)
         bases, virtual_bases, _base_access = _parse_bases(node)
@@ -1500,6 +1497,9 @@ class _ClangAstParser:
             deprecated=deprecated,
             # G31 Phase C backend audit -- see _clang_record_is_abstract.
             is_abstract=_clang_record_is_abstract(node),
+            # Stated explicitly -- this parse genuinely resolved these.
+            bases_fact=Fact.present(bases), virtual_bases_fact=Fact.present(virtual_bases),
+            vtable_fact=Fact.present(vtable), vptr_offset_bits_fact=Fact.present(0 if vtable else None),
         )
 
     def _parse_fields(self, node: dict[str, Any]) -> list[TypeField]:

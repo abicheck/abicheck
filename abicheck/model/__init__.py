@@ -59,6 +59,7 @@ from .entities import (
     EnumType as EnumType,
     RecordType as RecordType,
     TypeField as TypeField,
+    record_layout_facts as record_layout_facts,
     resolve_vptr_offset_bits as resolve_vptr_offset_bits,
 )
 from .extraction_contract import (
@@ -103,6 +104,7 @@ __all__ = [
     "is_compiler_internal_type",
     "is_cxx_runtime_library",
     "is_non_abi_surface_type",
+    "record_layout_facts",
     "replace_with_fact_sync",
     "resolve_vptr_offset_bits",
     "stdlib_namespaces_excluded",
