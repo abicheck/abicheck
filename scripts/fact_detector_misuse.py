@@ -234,6 +234,37 @@ def _is_fact_typed_expr(node: ast.expr, fact_names: frozenset[str]) -> bool:
     return False
 
 
+def _static_display_elements(node: ast.expr) -> list[ast.expr] | None:
+    """Return the element expressions a *statically known* iterable
+    display holds -- `(a, b)`/`[a, b]`'s `.elts`, `{a, b}`'s `.elts`
+    (a set display), or `{a: 1, b: 2}`'s `.keys` (iterating a dict yields
+    its keys, so a dict-keys display is Fact-typed exactly when every key
+    is) -- or `None` if *node* isn't one of these three shapes, or is a
+    dict display containing a `**expansion` (a `None` entry in
+    `ast.Dict.keys`, whose own value could be anything, so the whole
+    display can't be treated as statically enumerable).
+
+    Used by every "one loop/comprehension target bound, one iteration at
+    a time, to a statically known display" site in this module (Codex
+    review, fresh evidence): the single-target `for`/comprehension
+    branches originally recognized only `ast.Tuple`/`ast.List`, so `for
+    fact in {old.bases_fact, new.bases_fact}: fact == other` (a set
+    display) and `for fact in {old.bases_fact: 1, new.bases_fact: 2}:
+    fact == other` (a dict display, iterating its keys) were both
+    invisible -- an ordinary, unremarkable choice of container literal,
+    not a different question from the `Tuple`/`List` case already
+    handled. One shared extraction function rather than duplicating the
+    three-way shape check at each of this module's several call sites.
+    """
+    if isinstance(node, (ast.Tuple, ast.List, ast.Set)):
+        return node.elts
+    if isinstance(node, ast.Dict):
+        if any(key is None for key in node.keys):
+            return None
+        return list(node.keys)  # type: ignore[arg-type]
+    return None
+
+
 def _candidate_resolves_to_fact(
     value: ast.expr, fact_names: frozenset[str], known: set[str]
 ) -> bool:
@@ -733,17 +764,17 @@ def _fact_aliases(tree: ast.Module, qualnames: _QualnameSpans) -> dict[str, set[
             # time, below) is enough to register the whole loop; an
             # element that is neither still disqualifies it outright, the
             # identical conservative behavior as before.
+            display_elts = _static_display_elements(node.iter)
             if (
                 isinstance(node.target, ast.Name)
-                and isinstance(node.iter, (ast.Tuple, ast.List))
-                and node.iter.elts
+                and display_elts
                 and all(
                     _is_fact_typed_expr(elt, fact_names) or isinstance(elt, ast.Name)
-                    for elt in node.iter.elts
+                    for elt in display_elts
                 )
             ):
                 tuple_loop_candidates.setdefault(qualname, []).append(
-                    (node.target.id, [(elt, qualname) for elt in node.iter.elts])
+                    (node.target.id, [(elt, qualname) for elt in display_elts])
                 )
             # `for fact, tag in ((old.bases_fact, "old"), (new.bases_fact,
             # "new")): return fact == other` -- the tuple-*unpacking*
@@ -1132,20 +1163,20 @@ def _fact_aliases(tree: ast.Module, qualnames: _QualnameSpans) -> dict[str, set[
                     if gen_index == 0
                     else qualname
                 )
+                gen_display_elts = _static_display_elements(generator.iter)
                 if (
                     isinstance(generator.target, ast.Name)
-                    and isinstance(generator.iter, (ast.Tuple, ast.List))
-                    and generator.iter.elts
+                    and gen_display_elts
                     and all(
                         _is_fact_typed_expr(elt, fact_names)
                         or isinstance(elt, ast.Name)
-                        for elt in generator.iter.elts
+                        for elt in gen_display_elts
                     )
                 ):
                     tuple_loop_candidates.setdefault(qualname, []).append(
                         (
                             generator.target.id,
-                            [(elt, elt_qualname) for elt in generator.iter.elts],
+                            [(elt, elt_qualname) for elt in gen_display_elts],
                         )
                     )
                 # The tuple-*unpacking* sibling of the case just above --

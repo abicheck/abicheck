@@ -2701,6 +2701,38 @@ test_fact_detector_misuse_def_time_scope.py` (1062 lines, well under its
 own 1200-line cap -- the natural home for both, since each is a def-time/
 annotation-scope fix, not a plain alias-resolution one).
 
+**One more finding from the next review round, a bounded extension of an
+already-established mechanism.** The single-target `for`/comprehension
+loop-binding branches (`tuple_loop_candidates`'s own collection: "one loop
+target bound, one iteration at a time, to every element of a statically
+known display") recognized only `ast.Tuple`/`ast.List`, so `for fact in
+{old.bases_fact, new.bases_fact}: fact == other` (a set display) and `for
+fact in {old.bases_fact: 1, new.bases_fact: 2}: fact == other` (a dict
+display, iterated as its keys) were both invisible, as was the identical
+gap in the duplicated comprehension-generator branch -- an ordinary choice
+of container literal, not a different question from the `Tuple`/`List`
+case already handled. Fixed with one shared `_static_display_elements()`
+helper (`Tuple`/`List`/`Set` → `.elts`, `Dict` → `.keys`, `None` for
+anything else or for a dict containing a `**expansion` -- a `None` entry
+in `ast.Dict.keys`, whose own value could be anything, so the whole
+display can't be treated as statically enumerable), used at both the
+`for`-loop and comprehension single-target sites instead of duplicating
+the three-way shape check at each.
+
+Verified against both reported repros (set-display `for`, dict-keys
+`for`), the identical pair for the comprehension form, a mixed-element
+set negative control (only some elements Fact-typed -- must stay
+unflagged, mirroring the existing tuple negative control), a `**expansion`
+dict negative control, and an empty-display negative control (`{}`,
+Python's only empty-display literal -- there is no bare empty-set syntax,
+and `set()` is a call, correctly not recognized as a display at all), all
+via direct AST reproduction before writing tests. Still zero existing
+hits, `mypy`/`ruff` both stayed clean, `fact_detector_misuse.py` at 1714
+lines (well under the 2000-line hard cap). New tests:
+`TestStaticDisplayLoopTargetsRecognizeSetAndDictKeys` in `tests/
+test_fact_detector_misuse_alias_edge_cases.py` (493 lines, well under its
+own 1200-line cap).
+
 ---
 
 ### Phase 1 — finish the `dump`/`scan` typed-API convergence (closes AGENTS.md "PR C")

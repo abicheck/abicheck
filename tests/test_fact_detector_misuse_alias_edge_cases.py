@@ -408,3 +408,86 @@ class TestComprehensionWalrusResolvesItsRhsInItsOwnScope:
         )
         tree = ast.parse(src, filename="x.py")
         assert fact_equality_misuse_sites(tree, "x.py") == [(3, 11)]
+
+
+class TestStaticDisplayLoopTargetsRecognizeSetAndDictKeys:
+    """`_static_display_elements()` generalizes the single-target loop/
+    comprehension binding case beyond `Tuple`/`List` to a set display
+    (`{a, b}`) and a dict display (iterated as its keys, `{a: 1, b: 2}`)
+    -- both statically enumerable displays the original `Tuple`/`List`-
+    only check missed entirely (Codex review, fresh evidence): `for fact
+    in {old.bases_fact, new.bases_fact}: fact == other` reused the
+    identical "one loop target bound, one iteration at a time, to every
+    element" reasoning already established for a tuple, just spelled with
+    a different container literal."""
+
+    def test_detects_a_set_display_for_loop(self) -> None:
+        src = (
+            "def f(rec1, rec2, other):\n"
+            "    for fact in {rec1.bases_fact, rec2.bases_fact}:\n"
+            "        return fact == other\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert fact_equality_misuse_sites(tree, "x.py") == [(3, 15)]
+
+    def test_detects_a_set_display_comprehension(self) -> None:
+        src = (
+            "def f(rec1, rec2, other):\n"
+            "    return [fact == other for fact in "
+            "{rec1.bases_fact, rec2.bases_fact}]\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert fact_equality_misuse_sites(tree, "x.py") == [(2, 12)]
+
+    def test_detects_a_dict_keys_for_loop(self) -> None:
+        src = (
+            "def f(rec1, rec2, other):\n"
+            "    for fact in {rec1.bases_fact: 1, rec2.bases_fact: 2}:\n"
+            "        return fact == other\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert fact_equality_misuse_sites(tree, "x.py") == [(3, 15)]
+
+    def test_detects_a_dict_keys_comprehension(self) -> None:
+        src = (
+            "def f(rec1, rec2, other):\n"
+            "    return [fact == other for fact in "
+            "{rec1.bases_fact: 1, rec2.bases_fact: 2}]\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert fact_equality_misuse_sites(tree, "x.py") == [(2, 12)]
+
+    def test_ignores_a_set_display_with_one_non_fact_element(self) -> None:
+        """Negative control: only *some* elements are Fact-typed, so the
+        loop target is only sometimes a Fact -- must stay unflagged,
+        mirroring the identical tuple-display negative control."""
+        src = (
+            "def f(rec1, other, unrelated):\n"
+            "    for fact in {rec1.bases_fact, unrelated()}:\n"
+            "        return fact == other\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert fact_equality_misuse_sites(tree, "x.py") == []
+
+    def test_ignores_a_dict_display_with_a_double_star_expansion(self) -> None:
+        """Negative control: `**extra` makes the dict's own key set not
+        statically enumerable at all (an arbitrary key could come from
+        `extra`), so the whole display must be treated as unrecognized,
+        not as if the expansion silently contributed nothing."""
+        src = (
+            "def f(rec1, other, extra):\n"
+            "    for fact in {rec1.bases_fact: 1, **extra}:\n"
+            "        return fact == other\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert fact_equality_misuse_sites(tree, "x.py") == []
+
+    def test_ignores_an_empty_dict_display(self) -> None:
+        """Negative control: an empty display has no elements to be
+        Fact-typed, matching the existing empty-tuple/list guard. `{}` is
+        Python's only empty-display literal (there is no bare empty-set
+        syntax -- `set()` is a call, not a display, and correctly isn't
+        recognized as one at all by `_static_display_elements()`)."""
+        src = "def f(rec1, other):\n    for fact in {}:\n        return fact == other\n"
+        tree = ast.parse(src, filename="x.py")
+        assert fact_equality_misuse_sites(tree, "x.py") == []
