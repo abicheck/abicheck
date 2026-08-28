@@ -5863,8 +5863,11 @@ corpus specifically. That field-level parity was, however, already closed
 before this slice started (`_CONTRACT_KNOWN_DIVERGENT_FIELDS`/
 `_SCAN_KNOWN_DIVERGENT_SHAPES` were both already empty — this slice found
 no shape to flip from `xfail` to passing) — so what this slice actually
-landed is narrower: only the `render_dump_dry_run()` deletion named
-above. `render_dump_dry_run` now takes the real `ResolvedDumpRequest`
+landed is narrower: only `render_dump_dry_run()`'s own migration named
+above -- the function itself is not deleted (this section's Acceptance
+criteria's "is deleted" language describes the whole phase's eventual
+end state, not this slice), only its independent primitive-threading
+implementation is. `render_dump_dry_run` now takes the real `ResolvedDumpRequest`
 `resolve_dump_request_for_cli` already builds and reads
 `so_path`/`headers`/`sources`/`build_info`/`depth`/`collect_mode`/
 `header_backend`/`dump_manifest` off it, rather than being handed fifteen
