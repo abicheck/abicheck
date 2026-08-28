@@ -235,6 +235,44 @@ class TestFactEqualityMisuseSites:
         tree = ast.parse(src, filename="x.py")
         assert fact_equality_misuse_sites(tree, "x.py") == [(2, 11)]
 
+    def test_detects_a_comparison_through_an_aliased_fact_constructor(
+        self,
+    ) -> None:
+        """`from abicheck.model.fact import Fact as F` then
+        `F.present(a) == F.present(b)` -- the identical misuse as
+        `Fact.present(a) == Fact.present(b)` (CodeRabbit: an import alias
+        of `Fact` itself must not be invisible to constructor-call
+        recognition)."""
+        src = (
+            "from abicheck.model.fact import Fact as F\n"
+            "def f(a, b):\n"
+            "    return F.present(a) == F.present(b)\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert fact_equality_misuse_sites(tree, "x.py") == [(3, 11)]
+
+    def test_detects_a_comparison_between_aliased_fact_annotated_parameters(
+        self,
+    ) -> None:
+        """The same import alias applied to a `F[...]` parameter
+        annotation."""
+        src = (
+            "from abicheck.model.fact import Fact as F\n"
+            "def f(a: F[list[str]], b: F[bool]) -> bool:\n"
+            "    return a == b\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert fact_equality_misuse_sites(tree, "x.py") == [(3, 11)]
+
+    def test_ignores_an_unaliased_import_of_an_unrelated_name(self) -> None:
+        src = (
+            "from somewhere import Unrelated as F\n"
+            "def f(a, b):\n"
+            "    return F.present(a) == F.present(b)\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert fact_equality_misuse_sites(tree, "x.py") == []
+
     def test_alias_in_one_function_does_not_leak_into_a_sibling(self) -> None:
         """A local named `x` holding a `Fact[T]` value in `f` must not make
         an unrelated `x` in a sibling function `g` (never assigned from a

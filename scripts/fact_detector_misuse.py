@@ -103,13 +103,34 @@ def _read(p: Path) -> str:
         return ""
 
 
-def _is_fact_typed_expr(node: ast.expr) -> bool:
+def _imported_fact_aliases(tree: ast.Module) -> frozenset[str]:
+    """Return every local name *tree* binds `Fact` under -- always includes
+    the bare `"Fact"` itself, plus any `from ... import Fact as F` (Codex
+    review, fresh evidence: `from abicheck.model.fact import Fact as F`
+    then `F.present(a) == F.present(b)` is the identical misuse as `Fact.
+    present(a) == Fact.present(b)`, invisible to a check that only
+    recognizes the literal bare name `Fact`). Matched by imported name
+    alone, not by source module -- the same name-only stance
+    `_imported_class_aliases`/`_builtins_getattr_aliases` in `fact_field_
+    readers.py` already take for their own import-alias resolution.
+    """
+    names = {"Fact"}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom):
+            for alias in node.names:
+                if alias.name == "Fact" and alias.asname:
+                    names.add(alias.asname)
+    return frozenset(names)
+
+
+def _is_fact_typed_expr(node: ast.expr, fact_names: frozenset[str]) -> bool:
     """True if *node* is recognizable, by name alone, as a `Fact[T]` value.
 
     Two shapes: a `<expr>.bases_fact`-style attribute access naming one of
     the five known `Fact[T]`-bridged fields, or a constructor call --
     `Fact(...)`, `Fact.present(...)`, `Fact.not_collected(...)`, etc. (any
-    attribute call on the bare name `Fact`, matching every classmethod
+    attribute call on a name in *fact_names* -- see
+    :func:`_imported_fact_aliases` -- matching every classmethod
     `model/fact.py` defines without hard-coding each one by name -- a
     future constructor added there is covered automatically).
 
@@ -121,14 +142,16 @@ def _is_fact_typed_expr(node: ast.expr) -> bool:
         return True
     if isinstance(node, ast.Call):
         func = node.func
-        if isinstance(func, ast.Name) and func.id == "Fact":
+        if isinstance(func, ast.Name) and func.id in fact_names:
             return True
         if isinstance(func, ast.Attribute) and isinstance(func.value, ast.Name):
-            return func.value.id == "Fact"
+            return func.value.id in fact_names
     return False
 
 
-def _is_fact_typed_annotation(annotation: ast.expr | None) -> bool:
+def _is_fact_typed_annotation(
+    annotation: ast.expr | None, fact_names: frozenset[str]
+) -> bool:
     """True for a `Fact[...]` (or bare `Fact`) type annotation, by name
     alone -- `def f(old_fact: Fact[list[str]], ...)` is exactly as
     Fact-typed as `old.bases_fact` is, and a parameter carrying one is a
@@ -139,9 +162,9 @@ def _is_fact_typed_annotation(annotation: ast.expr | None) -> bool:
     if annotation is None:
         return False
     if isinstance(annotation, ast.Name):
-        return annotation.id == "Fact"
+        return annotation.id in fact_names
     if isinstance(annotation, ast.Subscript):
-        return _is_fact_typed_annotation(annotation.value)
+        return _is_fact_typed_annotation(annotation.value, fact_names)
     return False
 
 
@@ -288,6 +311,7 @@ def _fact_aliases(tree: ast.Module, qualnames: dict[int, str]) -> dict[str, set[
     the dotted-name prefix `_enclosing_qualnames` builds) instead of
     trying to reconstruct it from the qualname string.
     """
+    fact_names = _imported_fact_aliases(tree)
     aliases: dict[str, set[str]] = {}
     candidates: dict[str, list[tuple[str, ast.expr]]] = {}
     for node in ast.walk(tree):
@@ -300,7 +324,7 @@ def _fact_aliases(tree: ast.Module, qualnames: dict[int, str]) -> dict[str, set[
             candidates.setdefault(qualname, []).append((node.targets[0].id, node.value))
         elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
             qualname = qualnames.get(node.lineno, "<module>")
-            if _is_fact_typed_annotation(node.annotation):
+            if _is_fact_typed_annotation(node.annotation, fact_names):
                 aliases.setdefault(qualname, set()).add(node.target.id)
             elif node.value is not None:
                 candidates.setdefault(qualname, []).append((node.target.id, node.value))
@@ -312,7 +336,7 @@ def _fact_aliases(tree: ast.Module, qualnames: dict[int, str]) -> dict[str, set[
                 *node.args.kwonlyargs,
             )
             for arg in all_args:
-                if _is_fact_typed_annotation(arg.annotation):
+                if _is_fact_typed_annotation(arg.annotation, fact_names):
                     aliases.setdefault(qualname, set()).add(arg.arg)
 
     lexical_parents = _lexical_function_parents(tree)
@@ -344,7 +368,7 @@ def _fact_aliases(tree: ast.Module, qualnames: dict[int, str]) -> dict[str, set[
             for name, value in candidates.get(qualname, []):
                 if name in known:
                     continue
-                if _is_fact_typed_expr(value) or (
+                if _is_fact_typed_expr(value, fact_names) or (
                     isinstance(value, ast.Name) and value.id in known
                 ):
                     known.add(name)
@@ -365,9 +389,10 @@ def fact_equality_misuse_sites(tree: ast.Module, rel: str) -> list[tuple[int, in
     """
     qualnames = _enclosing_qualnames(tree)
     aliases = _fact_aliases(tree, qualnames)
+    fact_names = _imported_fact_aliases(tree)
 
     def is_fact_typed(node: ast.expr, qualname: str) -> bool:
-        if _is_fact_typed_expr(node):
+        if _is_fact_typed_expr(node, fact_names):
             return True
         return isinstance(node, ast.Name) and node.id in aliases.get(qualname, ())
 

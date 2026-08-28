@@ -1096,6 +1096,21 @@ resolved before a child consults it. Verified empirically: still zero
 existing hits. New test:
 `test_detects_a_comparison_through_a_closure_over_a_class_nested_method`.
 
+**A CodeRabbit finding on the same round: an import alias of `Fact`
+itself, not just the fields on `RecordType`/`Param`, was invisible too --
+fixed in the same PR.** `from abicheck.model.fact import Fact as F` then
+`F.present(a) == F.present(b)` is the identical misuse as `Fact.
+present(a) == Fact.present(b)`, but `_is_fact_typed_expr`/`_is_fact_
+typed_annotation` both hard-coded the literal bare name `"Fact"`. Fixed
+with `_imported_fact_aliases()` -- collects every local name bound to
+`Fact` via `from ... import Fact as F` (matched by imported name alone,
+not by source module, the same name-only stance `fact_field_readers.
+py`'s own import-alias helpers already take) -- threaded as a new
+`fact_names` parameter through both functions and every call site.
+Verified empirically: still zero existing hits. New tests: an aliased
+constructor-call comparison, an aliased annotation comparison, and a
+negative control for an unrelated import merely sharing the alias name.
+
 ---
 
 ### Phase 1 — finish the `dump`/`scan` typed-API convergence (closes AGENTS.md "PR C")
