@@ -87,10 +87,10 @@ def test_entity_from_function_stamps_compiler_generated_ownership() -> None:
 
 def test_link_source_abi_drops_unmatched_compiler_generated_declarations() -> None:
     """The actual exclusion: `link_source_abi` gives a `compiler_generated`
-    entity one export-match attempt, then drops it outright on a miss --
-    never reaching `reachable_declarations`/`source_decl_to_binary_symbol`
-    at all, unlike an ordinary unmatched declaration (which is kept and
-    recorded as unmatched)."""
+    entity one export-match attempt, then drops it outright on a confirmed
+    miss -- never reaching `reachable_declarations`/`source_decl_to_binary_
+    symbol` at all, unlike an ordinary unmatched declaration (which is kept
+    and recorded as unmatched)."""
     common = dict(
         name="Widget",
         mangled="_ZN6WidgetaSERKS_",
@@ -101,9 +101,11 @@ def test_link_source_abi_drops_unmatched_compiler_generated_declarations() -> No
     phantom = entity_from_function(Function(is_compiler_generated=True, **common))
     tu = SourceAbiTu(tu_id="cu://widget.cpp#cfg", functions=[phantom])
 
-    # No export named -- the trivial, never-emitted-out-of-line case this
-    # fix exists for.
-    surface = link_source_abi([tu], exported_symbols=[])
+    # A real, non-empty export table was consulted and genuinely doesn't
+    # name this symbol -- the trivial, never-emitted-out-of-line case this
+    # fix exists for. (An *empty* export set is "unresolved", not "confirmed
+    # absent" -- see the next test.)
+    surface = link_source_abi([tu], exported_symbols=["_Z9unrelatedv"])
     assert phantom.id not in {d.id for d in surface.reachable_declarations}
     assert phantom.identity() not in surface.mappings["source_decl_to_binary_symbol"]
 
@@ -118,6 +120,79 @@ def test_link_source_abi_drops_unmatched_compiler_generated_declarations() -> No
         surface_matched.mappings["source_decl_to_binary_symbol"][phantom.identity()]
         == "_ZN6WidgetaSERKS_"
     )
+
+
+def test_link_source_abi_keeps_compiler_generated_entities_when_exports_unresolved() -> (
+    None
+):
+    """Codex review, PR #930: a Flow-2/parallel-baseline source-only link
+    (`link_source_abi([tu], exported_symbols=[])`, the exact shape
+    `relink_surface_exports`'s own docstring describes) must not drop a
+    `compiler_generated` candidate outright -- an EMPTY export set means
+    the export table has not been resolved yet, not that a real one was
+    checked and came up empty. Dropping it here would permanently lose it
+    before `relink_surface_exports`'s later pass, against the real export
+    set, ever gets a chance to recover it."""
+    common = dict(
+        name="Widget",
+        mangled="_ZN6WidgetaSERKS_",
+        return_type="Widget&",
+        source_header="include/widget.h",
+        origin=ScopeOrigin.PUBLIC_HEADER,
+    )
+    phantom = entity_from_function(Function(is_compiler_generated=True, **common))
+    tu = SourceAbiTu(tu_id="cu://widget.cpp#cfg", functions=[phantom])
+
+    surface = link_source_abi([tu], exported_symbols=[])
+    assert phantom.id in {d.id for d in surface.reachable_declarations}
+
+    from abicheck.buildsource.source_link import relink_surface_exports
+
+    relinked = relink_surface_exports(surface, ["_ZN6WidgetaSERKS_"])
+    assert (
+        relinked.mappings["source_decl_to_binary_symbol"][phantom.identity()]
+        == "_ZN6WidgetaSERKS_"
+    )
+
+
+def test_link_source_abi_rescues_a_synthetic_ctor_key_with_a_real_export() -> None:
+    """Codex review, PR #930: a castxml synthetic constructor key (no real
+    mangled name -- see ``dumper_castxml.SYNTHETIC_CTOR_KEY_PREFIX``) can
+    never match `_match_export`'s direct name comparison, so an ODR-used
+    implicit constructor with a real Itanium export (`_ZN6WidgetC1ERKS_`/
+    `_ZN6WidgetC2ERKS_`) needs the class-level ctor/dtor owner-index rescue
+    (`ctor_export_match`) to be preserved rather than lost."""
+    from abicheck.dumper_castxml import SYNTHETIC_CTOR_KEY_PREFIX
+
+    synthetic_ctor = entity_from_function(
+        Function(
+            name="Widget",
+            mangled=f"{SYNTHETIC_CTOR_KEY_PREFIX}Widget(Widget const&)",
+            return_type="",
+            source_header="include/widget.h",
+            origin=ScopeOrigin.PUBLIC_HEADER,
+            is_compiler_generated=True,
+        )
+    )
+    tu = SourceAbiTu(tu_id="cu://widget.cpp#cfg", functions=[synthetic_ctor])
+
+    # A real export for a *different* class's constructor -- confirms this
+    # isn't a vacuous "any ctor export rescues everything" match.
+    surface_no_match = link_source_abi(
+        [tu], exported_symbols=["_ZN5OtherC1ERKS_"]
+    )
+    assert synthetic_ctor.id not in {
+        d.id for d in surface_no_match.reachable_declarations
+    }
+
+    # The real export IS for this class's constructor (a different clone --
+    # C2 vs. the synthetic key's own unspecified overload -- deliberately
+    # imprecise at the per-overload level, see ctor_export_match's own
+    # docstring): rescued.
+    surface_matched = link_source_abi(
+        [tu], exported_symbols=["_ZN6WidgetC2ERKS_"]
+    )
+    assert synthetic_ctor.id in {d.id for d in surface_matched.reachable_declarations}
 
 
 @pytest.mark.integration

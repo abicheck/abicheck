@@ -2501,6 +2501,62 @@ pipelines a fourth time.
   > `source_binary_provenance_mismatch` this entry's own repro produced,
   > without losing a genuinely-exported implicit member in the process.
   >
+  > **Two further findings on this same correction, both real, both fixed
+  > (Codex review, same PR).** (1) The export-match attempt only ever
+  > compares `entity.mangled_name` directly against the export set —
+  > correct for `operator=` (castxml always gives it a real Itanium mangled
+  > name) but not for a constructor/destructor, whose real mangled name
+  > castxml frequently omits, leaving a *synthetic* internal key
+  > (`dumper_castxml.SYNTHETIC_CTOR_KEY_PREFIX`-prefixed, or `~`-prefixed
+  > for a destructor) that can never equal a real export by direct
+  > comparison — so an ODR-used implicit constructor/destructor with a real
+  > weak export (`_ZN...C1.../_ZN...C2...`) was still silently dropped, the
+  > identical class of loss the correction above was written to close, just
+  > for a different declaration kind. Fixed with a new, narrowly-scoped
+  > module, `buildsource/ctor_export_match.py`: `itanium_scope_components`
+  > already parses a ctor/dtor mangled symbol's owning scope correctly
+  > (confirmed empirically: `_ZN6WidgetC1ERKS_` → `["Widget", "{ctor}"]`),
+  > so a class-level index (owner scope → "ctor"/"dtor"/"both") built once
+  > per link gives a synthetic key one rescue check: does its owning class
+  > have *any* matching ctor/dtor export at all. Deliberately conservative
+  > in one direction, documented rather than attempted: a templated owner
+  > (castxml's own spelling embeds `"<...>"`) is never matched, since
+  > `itanium_scope_components`'s mangled-argument spelling (`"BoxIiE"` for
+  > `Box<int>`) does not textually agree with castxml's spelled form, and
+  > this codebase's own history (this file's "linkage-blind-removal"/type-
+  > identity entries) shows that reconciling two independently-spelled
+  > identities via a partial match is exactly the class of bug that has
+  > taken multiple review rounds to find and revert elsewhere — a templated
+  > class's synthetic-keyed ctor/dtor still falls back to the original
+  > "no export visibility, drop it" behavior. (2) `_route_declaration`
+  > dropped a `compiler_generated` candidate outright whenever `exported`
+  > was empty — correct for "checked a real export table, found nothing",
+  > wrong for "the export table isn't known yet", which is exactly the
+  > Flow-2/parallel-baseline `merge` flow's own documented shape
+  > (`relink_surface_exports`'s own docstring: "the parallel-baseline
+  > `merge` flow links the source surface with no binary present"). That
+  > flow's later `relink_surface_exports()` pass only re-matches entities
+  > already in `reachable_declarations` — it never adds one back that the
+  > first link already dropped — so every compiler-generated candidate in
+  > that flow was permanently lost before the real export table was ever
+  > consulted. Fixed by never dropping when `exported` is itself empty
+  > (unresolved, not confirmed absent).
+  >
+  > A third, independent finding surfaced while testing the ctor/dtor
+  > rescue against a real fuzzed/adversarial export string (an existing
+  > regression test, `test_ctor_dtor_fold_tolerates_malformed_huge_length_
+  > fields`, which this new code path made reachable for the first time):
+  > `diff_cxx_rules._read_length_prefixed_name` computed a mangled symbol's
+  > declared length via a bare `int(s[i:j])`, which raises on a fuzzed
+  > symbol with thousands of digits (Python's integer-conversion digit
+  > limit) — a pre-existing latent bug in a shared, widely-used parser,
+  > newly reachable because this is the first caller to feed it strings
+  > read from a binary's own untrusted export table. `buildsource/
+  > source_link.py`'s own, unrelated ctor/dtor folder already carries the
+  > identical guard (`_consume_source_name`, digit-by-digit accumulation
+  > capped at the input length) for the same reason; `_read_length_
+  > prefixed_name` now does too.
+  >
   > Verified against real castxml 0.7.0 and real clang 20, not only against
   > hand-built fixtures: `tests/test_castxml_l4_phantom_members.py::
   > test_castxml_l4_extract_excludes_implicit_special_members_from_reachable_surface`

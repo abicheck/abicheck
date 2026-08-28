@@ -93,19 +93,18 @@ def _read_length_prefixed_name(s: str, i: int) -> tuple[str | None, int]:
 
     Returns ``(name, next_index)`` or ``(None, i)`` if malformed. Only ASCII
     digits count as the length prefix — Python's ``str.isdigit()`` also accepts
-    Unicode digits (e.g. ``²``) that ``int()`` then rejects, so a fuzzed symbol
-    must not be allowed to reach ``int()`` with a non-ASCII digit.
-    """
-    j = i
+    Unicode digits (e.g. ``²``) that ``int()`` then rejects. Accumulates
+    digit-by-digit, capped at ``len(s)`` (mirrors ``source_link.
+    _consume_source_name``), so an untrusted symbol can't trip Python's
+    integer-conversion digit limit (Codex review, PR #930)."""
+    j, n = i, 0
     while j < len(s) and s[j] in _ASCII_DIGITS:
+        n = n * 10 + (ord(s[j]) - ord("0"))
+        if n > len(s):
+            return None, i
         j += 1
-    if j == i:
-        return None, i
-    n = int(s[i:j])
     name = s[j : j + n]
-    if len(name) != n:
-        return None, i  # truncated / malformed
-    return name, j + n
+    return (None, i) if j == i or len(name) != n else (name, j + n)
 
 
 def _skip_template_args(s: str, i: int) -> int | None:

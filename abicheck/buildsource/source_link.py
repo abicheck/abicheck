@@ -30,6 +30,7 @@ from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 from typing import Any
 
+from . import ctor_export_match
 from .fact_set import fact_set_rollup_is_inconsistent, rollup_coverage, rollup_fact_set
 from .source_abi import SourceAbiSurface, SourceAbiTu, SourceEntity
 
@@ -1251,9 +1252,7 @@ def link_source_abi(
     surface.roots["exported_symbols"] = sorted(exported)
     surface.roots["forced_public"] = sorted(forced)
 
-    state = _LinkState()
-    state.export_index = _build_export_index(exported)
-    state.exact_index = _build_exact_index(exported)
+    state = _LinkState(export_index=_build_export_index(exported), exact_index=_build_exact_index(exported), ctor_dtor_owner_index=ctor_export_match.build_ctor_dtor_owner_index(exported))
     source_edges = _fold_tu_source_edges(tus)
     for tu in tus:
         for header in tu.public_header_roots:
@@ -1538,6 +1537,7 @@ class _LinkState:
     export_index: dict[str, list[str]] = field(default_factory=dict)
     #: Mach-O-normalized exact key -> real exported spelling (see _build_exact_index)
     exact_index: dict[str, str] = field(default_factory=dict)
+    ctor_dtor_owner_index: dict[str, str] = field(default_factory=dict)  # ctor_export_match
 
 
 def _route_entity(
@@ -1617,10 +1617,10 @@ def _route_declaration(
     keep independent mappings. The exported symbol is the mangled name for C++ or
     the plain qualified name for C / extern "C" decls whose extractor leaves
     mangled_name empty — matching on either avoids false "unmatched" evidence.
-    A ``compiler_generated`` entity (PR #930) is dropped, not unmatched, on a miss -- an ODR-used implicit member can still export."""
+    A ``compiler_generated`` entity (PR #930) is dropped on a miss unless a synthetic ctor/dtor key's owner has one anyway (`ctor_export_match`), or `exported` is empty (unresolved)."""
     export_sym = entity.mangled_name or entity.qualified_name
     primary, variants = _match_export(export_sym, exported, state.export_index, state.exact_index)
-    if not primary and entity.ownership.get("compiler_generated") == "true":
+    if not primary and exported and entity.ownership.get("compiler_generated") == "true" and not ctor_export_match.synthetic_key_owner_has_export(export_sym, state.ctor_dtor_owner_index):
         return
     surface.reachable_declarations.append(entity)
     key = entity.identity()
