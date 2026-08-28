@@ -1247,10 +1247,9 @@ class _ClangAstParser:
                     deprecated=_clang_deprecated_message(node),
                     # G31 Phase C backend audit -- see _clang_method_is_override.
                     is_override=(
-                        _clang_method_is_override(node)
-                        if kind in _OVERRIDE_ELIGIBLE_KINDS
-                        else None
+                        _clang_method_is_override(node) if kind in _OVERRIDE_ELIGIBLE_KINDS else None
                     ),
+                    is_compiler_generated=False,
                 )
             )
         return funcs

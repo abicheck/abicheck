@@ -2803,27 +2803,21 @@ pipelines a fourth time.
   > would also have meant every plain `dump --depth source` newly
   > inheriting item 3's then-still-open castxml phantom-implicit-member
   > bug, which `dump`'s current (accidental) clang default did not have.
-  > **Correction (Codex review, fresh evidence): item 3's fix has NOT
-  > landed on this tree, and this note previously overstated it as
-  > already fixed.** Item 3's own fix (`Function.is_compiler_generated`,
-  > `entity_from_function` gating `api_relevant` on it, the ctor/dtor
-  > owner-index rescue and its several follow-on findings) is real and
-  > verified, but lives on a **separate, not-yet-merged** PR
-  > (`claude/pr-c-item3-castxml-l4-compiler-generated`) — confirmed by
-  > reading this tree's own `dumper_castxml.py`/`source_extractors/base.py`
-  > directly: `_CastxmlParser._parse_function_element()` still accepts an
-  > `artificial="1"` element unconditionally, and `entity_from_function()`
-  > still derives `api_relevant` solely from `origin`/`access`, with no
-  > `is_compiler_generated` field anywhere in this tree. So until that PR
-  > merges, this specific regression risk (a naive migration of `dump`'s
-  > CLI onto `effective_frontend`/`execute_dump_request` newly inheriting
-  > the castxml phantom-implicit-member bug on every plain `dump --depth
-  > source`) remains real and open, exactly as originally stated — this
-  > note's earlier "no longer applies" wording was premature. The
-  > CLI-vs-typed-pipeline extractor divergence documented in this note is
-  > independently still open regardless of item 3's landing status, and
-  > still needs its own dedicated, verified pass rather than a byproduct
-  > of this one. (b)
+  > **Correction (Codex review, fresh evidence): item 3's fix had NOT
+  > landed on this tree at the time this note was written, and an earlier
+  > revision overstated it as already fixed.** Item 3's own fix
+  > (`Function.is_compiler_generated`, `entity_from_function` gating
+  > `api_relevant` on it, the ctor/dtor owner-index rescue and its several
+  > follow-on findings) is real and verified, and has since landed in this
+  > same tree (see this plan's own item-3 status note below, "The castxml
+  > L4 extractor bug is fixed") — so the specific regression risk this
+  > paragraph names (a naive migration of `dump`'s CLI onto
+  > `effective_frontend`/`execute_dump_request` newly inheriting the castxml
+  > phantom-implicit-member bug on every plain `dump --depth source`) is
+  > now closed. The CLI-vs-typed-pipeline extractor divergence documented
+  > in this note is independently still open regardless of item 3's landing
+  > status, and still needs its own dedicated, verified pass rather than a
+  > byproduct of this one. (b)
   > making `compare`/the typed pipeline default to clang to match `dump`'s
   > CLI would contradict `dumper._resolve_header_backend`'s established,
   > intentional castxml-first default for **L2** header-AST parsing, which
@@ -2865,18 +2859,141 @@ pipelines a fourth time.
   > silently flip this default from clang to castxml -- so "byte-identical
   > to today's output" is not actually the right acceptance bar for L4
   > facts specifically; today's output is itself one side of a pre-existing,
-  > real disagreement, not a stable target to match. (Item 3's fix is not
-  > merged on this tree -- see this plan's own item-3 status note above --
-  > so this flip still imports a live bug today; once that separate PR
-  > lands, this specific regression risk is removed, but it is still a
-  > real, user-facing default change that needs to be a deliberate
-  > decision, not a side effect discovered mid-migration -- Codex/
-  > CodeRabbit review: the previous wording here said "now that item 3 is
-  > fixed", contradicting this same section's own earlier correction.) A
-  > correct migration plan needs
+  > real disagreement, not a stable target to match. (Item 3's fix was not
+  > merged on this tree at the time this note was originally written, but
+  > has since landed in this same tree -- see this plan's own item-3 status
+  > note below, "The castxml L4 extractor bug is fixed" -- closing this
+  > specific regression risk. It is still a real, user-facing default
+  > change that needs to be a deliberate decision, not a side effect
+  > discovered mid-migration -- Codex/CodeRabbit review: an earlier
+  > revision of this wording said "now that item 3 is fixed", contradicting
+  > this same section's own earlier correction at the time it was written.)
+  > A correct migration plan needs
   > to decide this divergence's resolution *before* attempting
   > byte-identical verification, not discover it via a failing diff
   > mid-migration.
+  > **The castxml L4 extractor bug is fixed (2026-08-28).** A new field,
+  > `Function.is_compiler_generated` (schema v27), records castxml's own
+  > `artificial="1"` XML attribute — read for ANY function-like element,
+  > not just `Constructor`/`Destructor` where it was already read for
+  > `_ctor_or_dtor_visibility` — closing the exact gap this entry
+  > identified as the only reliable, general signal (the two pre-existing
+  > synthetic-mangled-name markers, `is_synthetic_ctor_key`/
+  > `is_synthetic_dtor_key`, could not catch a synthesized `operator=`,
+  > which castxml gives a real-looking Itanium mangled name). The
+  > direct-clang L2 backend stamps `is_compiler_generated=False`
+  > unconditionally, not per-node: its own `_walk` already skips
+  > `_categorize` entirely whenever a node is `isImplicit`, so a node
+  > reaching `parse_functions()`'s output is structurally guaranteed to
+  > have been written by the user — confirmed by reading `dumper_clang.py`
+  > directly, not assumed. Every existing consumer of `Function.visibility`
+  > was checked and needed no change — this fix is additive (a new field)
+  > rather than a change to `visibility`'s own HIDDEN/PUBLIC split, so
+  > nothing that already reads `visibility` observes different behavior.
+  >
+  > **Correction (Codex review, same day): the first cut of this fix
+  > unconditionally excluded every confirmed compiler-generated declaration
+  > from `api_relevant` — wrong, because an ODR-used implicit special member
+  > CAN have a real exported symbol** (e.g. a public function returning a
+  > type by value calls its implicit copy/move constructor, which the
+  > compiler still emits as a real weak export). `entity_from_function` is a
+  > per-declaration, export-table-blind mapping stage — it has no way to
+  > know whether a given implicit member is ODR-used, so excluding
+  > unconditionally there would silently drop that genuine symbol's only
+  > source declaration. Fixed by moving the decision downstream to
+  > `link_source_abi`'s `_route_declaration`, which already has the
+  > exported-symbol table: `entity_from_function` now stays additive (stamps
+  > `SourceEntity.ownership["compiler_generated"] = "true"`, `api_relevant`
+  > unchanged), and `_route_declaration` gives such an entity one export-
+  > match attempt before recording it at all — matched, it is linked like
+  > any ordinary declaration; unmatched, it is dropped outright (not counted
+  > reachable-but-unmatched), closing the identical false-positive
+  > `source_binary_provenance_mismatch` this entry's own repro produced,
+  > without losing a genuinely-exported implicit member in the process.
+  >
+  > **Two further findings on this same correction, both real, both fixed
+  > (Codex review, same PR).** (1) The export-match attempt only ever
+  > compares `entity.mangled_name` directly against the export set —
+  > correct for `operator=` (castxml always gives it a real Itanium mangled
+  > name) but not for a constructor/destructor, whose real mangled name
+  > castxml frequently omits, leaving a *synthetic* internal key
+  > (`dumper_castxml.SYNTHETIC_CTOR_KEY_PREFIX`-prefixed, or `~`-prefixed
+  > for a destructor) that can never equal a real export by direct
+  > comparison — so an ODR-used implicit constructor/destructor with a real
+  > weak export (`_ZN...C1.../_ZN...C2...`) was still silently dropped, the
+  > identical class of loss the correction above was written to close, just
+  > for a different declaration kind. Fixed with a new, narrowly-scoped
+  > module, `buildsource/ctor_export_match.py`: `itanium_scope_components`
+  > already parses a ctor/dtor mangled symbol's owning scope correctly
+  > (confirmed empirically: `_ZN6WidgetC1ERKS_` → `["Widget", "{ctor}"]`),
+  > so a class-level index (owner scope → "ctor"/"dtor"/"both") built once
+  > per link gives a synthetic key one rescue check: does its owning class
+  > have *any* matching ctor/dtor export at all. Deliberately conservative
+  > in one direction, documented rather than attempted: a templated owner
+  > (castxml's own spelling embeds `"<...>"`) is never matched, since
+  > `itanium_scope_components`'s mangled-argument spelling (`"BoxIiE"` for
+  > `Box<int>`) does not textually agree with castxml's spelled form, and
+  > this codebase's own history (this file's "linkage-blind-removal"/type-
+  > identity entries) shows that reconciling two independently-spelled
+  > identities via a partial match is exactly the class of bug that has
+  > taken multiple review rounds to find and revert elsewhere — a templated
+  > class's synthetic-keyed ctor/dtor still falls back to the original
+  > "no export visibility, drop it" behavior. (2) `_route_declaration`
+  > dropped a `compiler_generated` candidate outright whenever `exported`
+  > was empty — correct for "checked a real export table, found nothing",
+  > wrong for "the export table isn't known yet", which is exactly the
+  > Flow-2/parallel-baseline `merge` flow's own documented shape
+  > (`relink_surface_exports`'s own docstring: "the parallel-baseline
+  > `merge` flow links the source surface with no binary present"). That
+  > flow's later `relink_surface_exports()` pass only re-matches entities
+  > already in `reachable_declarations` — it never adds one back that the
+  > first link already dropped — so every compiler-generated candidate in
+  > that flow was permanently lost before the real export table was ever
+  > consulted. Fixed by never dropping when `exported` is itself empty
+  > (unresolved, not confirmed absent).
+  >
+  > A third, independent finding surfaced while testing the ctor/dtor
+  > rescue against a real fuzzed/adversarial export string (an existing
+  > regression test, `test_ctor_dtor_fold_tolerates_malformed_huge_length_
+  > fields`, which this new code path made reachable for the first time):
+  > `diff_cxx_rules._read_length_prefixed_name` computed a mangled symbol's
+  > declared length via a bare `int(s[i:j])`, which raises on a fuzzed
+  > symbol with thousands of digits (Python's integer-conversion digit
+  > limit) — a pre-existing latent bug in a shared, widely-used parser,
+  > newly reachable because this is the first caller to feed it strings
+  > read from a binary's own untrusted export table. `buildsource/
+  > source_link.py`'s own, unrelated ctor/dtor folder already carries the
+  > identical guard (`_consume_source_name`, digit-by-digit accumulation
+  > capped at the input length) for the same reason; `_read_length_
+  > prefixed_name` now does too.
+  >
+  > Verified against real castxml 0.7.0 and real clang 20, not only against
+  > hand-built fixtures: `tests/test_castxml_l4_phantom_members.py::
+  > test_castxml_l4_extract_excludes_implicit_special_members_from_reachable_surface`
+  > reproduces this entry's own exact repro end to end through the real
+  > `CastxmlSourceExtractor.extract` → `link_source_abi` pipeline (not a
+  > synthetic fixture) — confirmed to fail against the pre-fix code with
+  > the identical `7` exportable-declarations / `1` matched shape this
+  > entry's own investigation found, and to pass after it with a clean
+  > `1/1`. Further coverage: `tests/test_castxml_compiler_generated.py`
+  > (the castxml parser level, hand-built XML mirroring real castxml
+  > output element-for-element), `tests/
+  > test_dumper_clang_compiler_generated.py` (the direct-clang parser
+  > level, plus a direct pin that an `isImplicit` node never reaches
+  > `parse_functions()`'s output at all), and `tests/
+  > test_serialization_function_compiler_generated.py` (schema-v27
+  > round-trip, including a pre-v27 snapshot dict loading the field as
+  > `None`).
+  >
+  > **Deliberately not done in this same pass, per this entry's own
+  > established caution and the plan's item 2 section above**: flipping
+  > `scan_engine.py`'s `source_extractor="auto"` to follow
+  > `effective_frontend` (closing the scan-vs-dump/compare L4 extractor
+  > default divergence item 2 documents) — that remains a separate,
+  > deliberately deferred decision needing its own dedicated verification
+  > in production usage, not a byproduct of fixing the bug that blocked it.
+  > This fix removes that decision's main objection (castxml's L4 surface
+  > was unsafe to trust), but does not itself change any default.
 
 `dump --build-query` and `dump --build-compile-db` describe how the *project*
 is built, not what this snapshot is. They are already documented as CLI

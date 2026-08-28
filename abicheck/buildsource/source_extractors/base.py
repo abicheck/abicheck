@@ -162,6 +162,24 @@ def entity_from_function(fn: Function) -> SourceEntity:
         f"{p.name}={p.default}" for p in fn.params if p.default is not None
     )
     mangled = fn.mangled if fn.mangled and fn.mangled != fn.name else ""
+    # A confirmed compiler-generated declaration (fn.is_compiler_generated is
+    # True) is recorded as evidence via `ownership`, not excluded outright
+    # here: it usually has no real out-of-line symbol of its own (a trivial
+    # implicit special member), but an ODR-used one CAN -- e.g. returning a
+    # public type by value calls its (possibly user-defined-field-owning)
+    # implicit copy/move constructor, which the compiler still emits as a
+    # real weak export. Excluding it unconditionally at this per-declaration,
+    # export-table-blind stage would drop that genuine symbol's only source
+    # declaration (Codex review, PR #930). `link_source_abi`'s own
+    # `_route_declaration` is where the export table is actually known, so
+    # it -- not this pure per-TU mapping -- decides whether an unmatched
+    # compiler-generated candidate stays off the surface. `is None` (older
+    # snapshot / DWARF-only path -- "not captured") stamps no ownership hint,
+    # matching the tri-state convention this codebase's other confirmed-
+    # True-only exclusions use.
+    ownership = {}
+    if fn.is_compiler_generated is True:
+        ownership["compiler_generated"] = "true"
     return SourceEntity(
         id=_content_hash("function", mangled or fn.name, sig),
         kind="function",
@@ -171,9 +189,14 @@ def entity_from_function(fn: Function) -> SourceEntity:
         value=default_repr,
         source_location=_location(fn.source_header, fn.source_location, fn.origin),
         visibility=_visibility(fn.origin),
-        # Private/protected members of a public class are not part of the callable
-        # public surface, so keep them off it (Codex review #335, P2).
-        api_relevant=fn.origin in _PUBLIC_ORIGINS and fn.access not in _NON_PUBLIC_ACCESS,
+        ownership=ownership,
+        # Private/protected members of a public class are not part of the
+        # callable public surface, so keep them off it (Codex review #335,
+        # P2). The compiler-generated case above is handled downstream, not
+        # here -- see the comment above.
+        api_relevant=(
+            fn.origin in _PUBLIC_ORIGINS and fn.access not in _NON_PUBLIC_ACCESS
+        ),
         confidence=LayerConfidence.HIGH,
     )
 
