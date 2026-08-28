@@ -459,7 +459,7 @@ BUG_CLASSES: tuple[BugClass, ...] = (
             "highly-compressible fixture whose actual required parameters "
             "never approach the boundary being defended."
         ),
-        fixed_by=(699, 721),
+        fixed_by=(699, 721, 911),
         seed_tests=(
             "tests/test_snapshot_compression.py",
             "tests/test_snapshot_compression_public_api_scale.py",
