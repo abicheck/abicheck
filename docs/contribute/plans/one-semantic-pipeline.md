@@ -1834,6 +1834,62 @@ scoping.py` (room remained under the architecture gate's 1200-line cap).
 Verified empirically: still zero existing hits in the real repository,
 `mypy`/`ruff` both stayed clean.
 
+**A further Codex review round found two more real gaps, both fixed.**
+
+**(3) No branch recognized a mapping-based field read at all.**
+`vars(rec)["bases"]`/`rec.__dict__["bases"]` both read the exact same
+normalized legacy value `rec.bases` does, through the instance's own
+`__dict__` mapping rather than attribute-lookup machinery -- invisible
+to every existing branch (`ast.Attribute`, `getattr()`, `attrgetter()`,
+`__getattribute__()`), none of which is an `ast.Subscript`. Added as a
+new branch matching a `Subscript` in `ast.Load` context with a literal
+string key in `FACT_BRIDGED_ATTRS`, whose `.value` is either a `vars(...)`
+call (gated on `_shadowed()` for the `vars` spelling, an ordinary
+bare-name call the same shadowing guard every other dynamic form already
+gets) or a `.__dict__` attribute access (matched unconditionally -- an
+attribute access, unlike a bare name, has nothing for a local binding to
+shadow). A non-literal key (`vars(rec)[name]`) stays out of scope, the
+same "no type inference" limit every other dynamic-read form here
+already accepts. New tests: both positive forms, a shadowed-`vars`-
+parameter negative control, a non-literal-key negative control, and an
+unrelated-key negative control.
+
+**(4) `_locally_bound_names()` never visited `ast.Import`/`ast.
+ImportFrom` at all.** `from helper import getattr` then `getattr(rec,
+"bases")` -- an ordinary import of an unrelated module's own `getattr`
+symbol, reusing the builtin-looking bare name -- was still treated as
+the real builtin, since an import statement's own binding was invisible
+the same way a bare parameter/`def`/`class` name once was (findings 4-5
+above, before those were fixed). Fixed by recording each imported name
+(`alias.asname` if given, else the plain name, with the identical
+first-`.`-segment split `fact_detector_misuse.py`'s own import branch
+already applies for an unaliased dotted `import a.b.c`) against
+whichever scope directly contains the import statement -- with a
+deliberate carve-out for the specific imports this module already
+recognizes elsewhere as a genuine alias *source* for a real builtin/
+`operator` symbol: `from builtins import getattr`/`object`/`type`, `from
+operator import attrgetter`, and a bare `import builtins`/`operator`.
+Recording one of *those* as a local binding here too would have made
+`_shadowed()` see it as shadowing itself, silently breaking the very
+recognition it exists to enable -- e.g. `from operator import
+attrgetter; attrgetter("bases")(rec)` would have stopped being
+recognized at all, a real regression rather than an incomplete fix. Every
+*other* import, including an aliased `from builtins import getattr as g`
+(recognized under the alias `g`, excluded the identical way), still binds
+and shadows normally. New tests: an unrelated module-scope import shadow,
+its aliased-import variant, the identical shadow established inside a
+function body instead of at module scope, a sibling-function negative
+control (the shadow in one function must not suppress detection in an
+unrelated one), and four positive controls confirming every one of the
+five recognized-import carve-outs (`from builtins import getattr`, its
+aliased spelling, `from operator import attrgetter`, and a bare `import
+operator`) still resolves correctly.
+
+Both fixes verified empirically: still zero existing hits in the real
+repository, `mypy`/`ruff` both stayed clean. New tests in
+`TestMappingBasedFieldReads` and `TestImportedNamesShadowBuiltinRecognition`
+(`tests/test_fact_field_readers_wrapper_scoping.py`).
+
 **Still not landed**: no detector (`diff_layout.py`/`diff_types.py`/
 `diff_param_qualifiers.py`/the reader set the check above now tracks
 precisely) has actually been migrated to read `.status` — the check above

@@ -77,6 +77,29 @@ Covers six independent Codex-review findings across three review rounds:
    ``def`` statement -- so ``def f(getattr, x=getattr(rec, "bases")):
    ...`` wrongly excluded a real builtin read, since the default sits on
    the function's own signature line.
+
+7. **No branch recognized a mapping-based field read at all** --
+   ``vars(rec)["bases"]``/``rec.__dict__["bases"]`` both read the exact
+   same normalized legacy value ``rec.bases`` does, through the
+   instance's own ``__dict__`` mapping rather than attribute-lookup
+   machinery, invisible to every existing branch (``ast.Attribute``,
+   ``getattr()``, ``attrgetter()``, ``__getattribute__()``). Added as a
+   new ``ast.Subscript`` branch with a literal string key, gated on
+   ``_shadowed()`` for the ``vars`` spelling (an ordinary bare-name call)
+   and matched unconditionally for ``.__dict__`` (an attribute access,
+   nothing for a local binding to shadow).
+
+8. **``_locally_bound_names()`` never visited ``ast.Import``/``ast.
+   ImportFrom`` at all** -- ``from helper import getattr`` then
+   ``getattr(rec, "bases")`` was still treated as the real builtin, since
+   an import statement's own binding was invisible the same way a bare
+   parameter/``def``/``class`` name once was (findings 4-5 above). Fixed
+   by recording each imported name against its containing scope, carved
+   out for the specific imports this module already recognizes as a
+   genuine alias *source* (``from builtins import getattr``/``object``/
+   ``type``, ``from operator import attrgetter``, ``import builtins``/
+   ``operator``) -- recording one of those as a "shadow" of itself would
+   have broken the very recognition it exists to enable.
 """
 
 from __future__ import annotations
@@ -421,3 +444,185 @@ class TestDefaultValuesEvaluateInTheEnclosingScope:
         )
         tree = ast.parse(src, filename="x.py")
         assert unmigrated_fact_reader_sites(tree, "x.py", src) == []
+
+
+class TestMappingBasedFieldReads:
+    """``vars(rec)["bases"]``/``rec.__dict__["bases"]`` -- both read the
+    identical normalized legacy value ``rec.bases`` does, through the
+    instance's own mapping rather than attribute-lookup machinery."""
+
+    def test_detects_a_vars_call_subscripted_by_a_literal_field_name(
+        self,
+    ) -> None:
+        src = 'def f(rec):\n    return vars(rec)["bases"]\n'
+        tree = ast.parse(src, filename="x.py")
+        keys = [
+            key for key, _l, _a, _q in unmigrated_fact_reader_sites(tree, "x.py", src)
+        ]
+        assert keys == ['x.py::f::bases::vars(rec)["bases"]::vars(rec)["bases"]::1']
+
+    def test_detects_a_dunder_dict_subscripted_by_a_literal_field_name(
+        self,
+    ) -> None:
+        src = 'def f(rec):\n    return rec.__dict__["bases"]\n'
+        tree = ast.parse(src, filename="x.py")
+        keys = [
+            key for key, _l, _a, _q in unmigrated_fact_reader_sites(tree, "x.py", src)
+        ]
+        assert keys == [
+            'x.py::f::bases::rec.__dict__["bases"]::rec.__dict__["bases"]::1'
+        ]
+
+    def test_ignores_a_vars_call_shadowed_by_its_own_parameter(self) -> None:
+        """Negative control: an ordinary parameter named ``vars`` shadows
+        the builtin the same way a ``getattr``-named parameter already
+        does for the other dynamic-read forms."""
+        src = 'def f(vars, rec):\n    return vars(rec)["bases"]\n'
+        tree = ast.parse(src, filename="x.py")
+        assert unmigrated_fact_reader_sites(tree, "x.py", src) == []
+
+    def test_ignores_a_non_literal_subscript_key(self) -> None:
+        """Negative control: a computed key can't be resolved statically
+        -- the same "no type inference" limit every other dynamic-read
+        form here already accepts."""
+        src = "def f(rec, name):\n    return vars(rec)[name]\n"
+        tree = ast.parse(src, filename="x.py")
+        assert unmigrated_fact_reader_sites(tree, "x.py", src) == []
+
+    def test_ignores_a_dict_subscript_naming_an_unrelated_key(self) -> None:
+        """Negative control: an ordinary ``__dict__`` lookup for a key
+        outside the five bridged fields must not be flagged."""
+        src = 'def f(rec):\n    return rec.__dict__["unrelated"]\n'
+        tree = ast.parse(src, filename="x.py")
+        assert unmigrated_fact_reader_sites(tree, "x.py", src) == []
+
+
+class TestImportedNamesShadowBuiltinRecognition:
+    """An import statement binds its target name too -- ``from helper
+    import getattr`` then ``getattr(rec, "bases")`` must not be treated
+    as the real builtin, the same way a shadowing parameter already
+    isn't. The carve-out for this module's own recognized alias sources
+    (``from builtins import getattr``, ``from operator import
+    attrgetter``, etc.) is exercised separately below, since incorrectly
+    treating one of those as a shadow of itself would be a regression in
+    the opposite direction."""
+
+    def test_ignores_a_getattr_call_shadowed_by_an_unrelated_import(self) -> None:
+        src = (
+            "from helper import getattr\n"
+            "def f(rec):\n"
+            '    return getattr(rec, "bases")\n'
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert unmigrated_fact_reader_sites(tree, "x.py", src) == []
+
+    def test_ignores_a_getattr_call_shadowed_by_an_aliased_unrelated_import(
+        self,
+    ) -> None:
+        src = (
+            "from helper import read_attr as getattr\n"
+            "def f(rec):\n"
+            '    return getattr(rec, "bases")\n'
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert unmigrated_fact_reader_sites(tree, "x.py", src) == []
+
+    def test_ignores_a_getattr_call_shadowed_by_a_function_scoped_import(
+        self,
+    ) -> None:
+        """The identical shadow, established inside the function itself
+        rather than at module scope."""
+        src = (
+            "def f(rec):\n"
+            "    from helper import getattr\n"
+            '    return getattr(rec, "bases")\n'
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert unmigrated_fact_reader_sites(tree, "x.py", src) == []
+
+    def test_detects_a_real_getattr_call_despite_an_unrelated_sibling_import(
+        self,
+    ) -> None:
+        """Negative control: an unrelated import shadowing `getattr` in
+        one function must not suppress detection of a genuine builtin
+        read in an unrelated sibling function."""
+        src = (
+            "from helper import getattr\n"
+            "def f(rec):\n"
+            '    return getattr(rec, "bases")\n'
+            "def g(rec, other):\n"
+            '    return other(rec, "bases")\n'
+        )
+        tree = ast.parse(src, filename="x.py")
+        keys = [
+            key for key, _l, _a, _q in unmigrated_fact_reader_sites(tree, "x.py", src)
+        ]
+        assert keys == []
+
+    def test_a_bare_builtins_getattr_import_still_recognized(self) -> None:
+        """The carve-out: `from builtins import getattr` is a genuine
+        alias *source* this module already recognizes elsewhere
+        (`_builtins_getattr_aliases`) -- recording it as a local shadow
+        of itself would wrongly suppress the very recognition it exists
+        to enable."""
+        src = (
+            "from builtins import getattr\n"
+            "def f(rec):\n"
+            '    return getattr(rec, "bases")\n'
+        )
+        tree = ast.parse(src, filename="x.py")
+        keys = [
+            key for key, _l, _a, _q in unmigrated_fact_reader_sites(tree, "x.py", src)
+        ]
+        assert keys == [
+            'x.py::f::bases::getattr(rec, "bases")::getattr(rec, "bases")::1'
+        ]
+
+    def test_an_aliased_builtins_getattr_import_still_recognized(self) -> None:
+        """The identical carve-out for the aliased spelling -- the alias
+        name is the one that must stay unshadowed, not the bare
+        ``getattr`` the import statement itself never binds here."""
+        src = (
+            "from builtins import getattr as g\n"
+            "def f(rec):\n"
+            '    return g(rec, "bases")\n'
+        )
+        tree = ast.parse(src, filename="x.py")
+        keys = [
+            key for key, _l, _a, _q in unmigrated_fact_reader_sites(tree, "x.py", src)
+        ]
+        assert keys == ['x.py::f::bases::g(rec, "bases")::g(rec, "bases")::1']
+
+    def test_a_bare_operator_attrgetter_import_still_recognized(self) -> None:
+        """The identical carve-out for `from operator import
+        attrgetter` -- the import that this module's own docstring
+        requires before recognizing `attrgetter` at all must not also be
+        read as shadowing the name it introduces."""
+        src = (
+            "from operator import attrgetter\n"
+            "def f(rec):\n"
+            '    return attrgetter("bases")(rec)\n'
+        )
+        tree = ast.parse(src, filename="x.py")
+        keys = [
+            key for key, _l, _a, _q in unmigrated_fact_reader_sites(tree, "x.py", src)
+        ]
+        assert keys == [
+            'x.py::f::bases::attrgetter("bases")(rec)::attrgetter("bases")::1'
+        ]
+
+    def test_a_bare_operator_module_import_still_recognized(self) -> None:
+        """The identical carve-out for a bare `import operator` (as
+        opposed to `from operator import attrgetter`)."""
+        src = (
+            "import operator\n"
+            "def f(rec):\n"
+            '    return operator.attrgetter("bases")(rec)\n'
+        )
+        tree = ast.parse(src, filename="x.py")
+        keys = [
+            key for key, _l, _a, _q in unmigrated_fact_reader_sites(tree, "x.py", src)
+        ]
+        assert keys == [
+            'x.py::f::bases::operator.attrgetter("bases")(rec)::operator.attrgetter("bases")::1'
+        ]

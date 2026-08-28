@@ -564,12 +564,58 @@ def _locally_bound_names(tree: ast.Module) -> dict[str, set[str]]:
     function's own qualname once recursed into a function body (an
     ordinary nested function's own name genuinely does bind into its
     immediately enclosing function, unlike a method's into its class).
+
+    **An import statement binds its target name too, exactly like a
+    parameter or a `def`/`class` statement's own name (Codex review,
+    fresh evidence).** `from helper import getattr` then `getattr(rec,
+    "bases")` -- an ordinary import of an unrelated module's own
+    `getattr` symbol, reusing the builtin-looking bare name -- was
+    unconditionally treated as the real builtin, since neither `ast.
+    Import` nor `ast.ImportFrom` was ever visited here at all. Fixed by
+    recording each imported name (`alias.asname` if given, else the
+    plain name -- an unaliased dotted `import a.b.c` binds only the
+    top-level package `a`, Python's own import-binding rule, the
+    identical split `fact_detector_misuse.py`'s own import branch
+    already applies) against whichever scope directly contains the
+    import statement.
+
+    **Carved out: an import this module already recognizes as a genuine
+    alias *source* for a builtin/`operator` symbol must NOT be treated as
+    a shadow of itself.** `from builtins import getattr` (bare, no
+    `as`), `from builtins import object`/`type`, `from operator import
+    attrgetter`, and a bare `import builtins`/`import operator` are all
+    already resolved elsewhere in this module (`_builtins_getattr_
+    aliases()`, `_unbound_getattribute_receiver_aliases()`,
+    `_operator_attrgetter_aliases()`) as evidence that the bound name
+    genuinely *is* the real builtin/operator symbol -- recording that
+    same binding here too would make `_shadowed()` see it as a local
+    shadow and wrongly exclude the very call it was imported to enable
+    (e.g. `from operator import attrgetter; attrgetter("bases")(rec)`
+    would stop being recognized at all, a real regression, not merely an
+    incomplete fix). Every *other* import -- including an aliased
+    `from builtins import getattr as g` recognized under the alias `g`,
+    which is excluded the identical way -- still binds and shadows
+    normally.
     """
     bound: dict[str, set[str]] = {}
 
     def visit(node: ast.AST, prefix: str, binding_scope: str | None) -> None:
         for child in ast.iter_child_nodes(node):
-            if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            if isinstance(child, (ast.Import, ast.ImportFrom)):
+                for alias in child.names:
+                    if isinstance(child, ast.Import):
+                        bound_name = alias.asname or alias.name.split(".", 1)[0]
+                        recognized = alias.name in ("builtins", "operator")
+                    else:
+                        bound_name = alias.asname or alias.name
+                        recognized = (
+                            child.module == "builtins"
+                            and alias.name in ("getattr", "object", "type")
+                        ) or (child.module == "operator" and alias.name == "attrgetter")
+                    if recognized or binding_scope is None:
+                        continue
+                    bound.setdefault(binding_scope, set()).add(bound_name)
+            elif isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef)):
                 child_qualname = f"{prefix}{child.name}"
                 if binding_scope is not None:
                     bound.setdefault(binding_scope, set()).add(child.name)
@@ -1452,6 +1498,42 @@ def unmigrated_fact_reader_sites(
             # exclusion the getattr/attrgetter branches above already
             # apply (Codex review, fresh evidence).
             attr = node.args[1].value
+            record_node = node
+        elif (
+            isinstance(node, ast.Subscript)
+            and isinstance(node.ctx, ast.Load)
+            and isinstance(node.slice, ast.Constant)
+            and isinstance(node.slice.value, str)
+            and node.slice.value in FACT_BRIDGED_ATTRS
+            and (
+                (
+                    isinstance(node.value, ast.Call)
+                    and isinstance(node.value.func, ast.Name)
+                    and node.value.func.id == "vars"
+                    and len(node.value.args) == 1
+                    and not _shadowed(node.value, "vars")
+                )
+                or (
+                    isinstance(node.value, ast.Attribute)
+                    and node.value.attr == "__dict__"
+                )
+            )
+        ):
+            # `vars(rec)["bases"]` / `rec.__dict__["bases"]` -- both read
+            # the normalized legacy value the same way `rec.bases` does,
+            # through the instance's own `__dict__` mapping rather than
+            # attribute-lookup machinery (Codex review, fresh evidence).
+            # `vars(...)` is an ordinary bare-name call, so it's gated on
+            # `_shadowed()` the same way `getattr`/`attrgetter` already
+            # are -- a parameter named `vars` must not match. `.__dict__`
+            # is an attribute access, not a name lookup, so there's
+            # nothing for a local binding to shadow; matched unconditionally,
+            # the same way the bound `.__getattribute__()` spelling above
+            # is. Only a literal string key is in scope -- a computed key
+            # (`vars(rec)[name]`) can't be resolved statically, the
+            # identical "no type inference" limit every other dynamic form
+            # here already accepts.
+            attr = node.slice.value
             record_node = node
         else:
             continue
