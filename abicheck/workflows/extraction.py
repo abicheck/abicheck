@@ -71,6 +71,7 @@ from ..debug_resolver import DebugArtifact, resolve_debug_info
 from ..dump_manifest import DumpManifest, load_manifest
 from ..dumper_clang import resolve_source_frontend_clang_bin
 from ..dumper_scoping import dump_manifest_header_roots, resolve_dependency_scope
+from ..elf_metadata import parse_elf_metadata
 from ..header_conditionals import attach_build_context_for_parsed_headers
 from ..header_utils import (
     dedup_paths_preserve_order,
@@ -80,6 +81,10 @@ from ..header_utils import (
     resolve_inferred_header_roots,
     split_public_header_inputs,
 )
+from ..numpy_capi import extract_numpy_capi_surface
+from ..python_api import detect_python_api
+from ..python_ext import detect_python_extension
+from ..symvers_metadata import looks_like_symvers
 
 __all__ = [
     "BuildConfig",
@@ -94,9 +99,12 @@ __all__ = [
     "dedup_paths_preserve_order",
     "deferred_token_dirs",
     "detect_binary_format",
+    "detect_python_api",
+    "detect_python_extension",
     "discover_build_config",
     "dump_manifest_header_roots",
     "embed_build_source",
+    "extract_numpy_capi_surface",
     "has_explicit_std",
     "include_operand_dirs",
     "ingest_inputs_pack",
@@ -107,7 +115,9 @@ __all__ = [
     "load_build_config",
     "load_inputs_manifest",
     "load_manifest",
+    "looks_like_symvers",
     "normalize_binary_input",
+    "parse_elf_metadata",
     "resolve_debug_info",
     "resolve_dependency_scope",
     "resolve_inferred_header_roots",

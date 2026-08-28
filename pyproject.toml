@@ -269,6 +269,12 @@ include = ["abicheck*"]
 [tool.setuptools.package-data]
 "abicheck.schemas" = ["*.json"]
 "abicheck.policies" = ["*.yaml"]
+# kinds.pyi (the ChangeKind mypy stub -- see kinds.py's own docstring) needs
+# an explicit entry: automatic .pyi inclusion was only added in setuptools 69,
+# while build-system.requires above still permits setuptools>=68. Without
+# this, a wheel built with 68 would silently omit the stub, leaving every
+# ChangeKind.FOO access unresolved for anyone installing from that wheel.
+"abicheck.model.change_catalog" = ["*.pyi"]
 
 [tool.coverage.run]
 branch = true
