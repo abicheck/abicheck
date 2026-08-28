@@ -11,8 +11,11 @@
   The one real behavior change: `Param.is_va_list_fact` is now
   `Fact.unsupported()` on CastXML and DWARF (neither can ever determine
   va_list-ness, on any run) rather than the omission bridge's weaker
-  `NOT_COLLECTED`; direct-clang's `is_va_list_fact` stays
-  `Fact.present(...)`, since that backend genuinely evaluates the check
-  per parameter. No detector reads these `Fact[...]` fields yet — this
-  remains representation only, per Phase 0's own "vertical slice, not flag
-  day" discipline.
+  `NOT_COLLECTED`; direct-clang's `is_va_list_fact` is `Fact.partial(...)`,
+  since that backend genuinely evaluates the check per parameter but only
+  covers x86-64 System V. `vptr_offset_bits_fact` is `Fact.partial(...)`
+  on CastXML/direct-clang too, matching the same heuristic-derived-value
+  caveat its legacy sibling field's capability-matrix row already states.
+  No detector reads these `Fact[...]` fields yet — this remains
+  representation only, per Phase 0's own "vertical slice, not flag day"
+  discipline.
