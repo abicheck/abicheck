@@ -24,7 +24,7 @@ Split out as its own file (rather than appended to
 ``tests/test_fact_detector_misuse_def_time_scope.py`` was split out of
 ``test_fact_detector_misuse.py`` -- see that file's own docstring.
 
-Covers four independent Codex-review findings across two review rounds:
+Covers six independent Codex-review findings across three review rounds:
 
 1. **``_operator_attrgetter_aliases()`` seeded ``"attrgetter"``/``"operator"``
    unconditionally**, the same way ``_builtins_getattr_aliases()`` correctly
@@ -62,6 +62,21 @@ Covers four independent Codex-review findings across two review rounds:
    call to it was still treated as the real builtin, since only the
    builtin's own unconditional seed and the parameter-only shadow map were
    ever consulted.
+
+5. **A real regression in finding 4's own fix**: a first version tracked
+   a ``nearest_func`` parameter, skipping class layers the same way
+   ``_lexical_function_parents`` deliberately does for *closure* purposes
+   -- but a method's own name binds into its *class*, not its enclosing
+   function/module, so ``class C: def getattr(self, name): ...`` made an
+   unrelated function elsewhere in the module read as if it had a local
+   ``getattr`` binding.
+
+6. **``_enclosing_qualnames()`` attributed a parameter default value/
+   annotation to the function's own body scope**, even though it
+   evaluates at *def-time*, in whatever scope directly contains the
+   ``def`` statement -- so ``def f(getattr, x=getattr(rec, "bases")):
+   ...`` wrongly excluded a real builtin read, since the default sits on
+   the function's own signature line.
 """
 
 from __future__ import annotations
@@ -309,3 +324,100 @@ class TestLocallyBoundNamesCoversNestedDefAndClassNames:
             'x.py::g::bases::builtins.getattr(rec, "bases")::'
             'builtins.getattr(rec, "bases")::1'
         ]
+
+    def test_ignores_a_real_getattr_call_shadowed_by_a_method_of_the_same_name(
+        self,
+    ) -> None:
+        """A real regression in the first version of this fix: `class C:
+        def getattr(self, name): ...` -- a *method's* own name does not
+        bind into the enclosing function/module namespace at all (it
+        becomes a class attribute, `C.getattr`), so an unrelated
+        function's own genuine `getattr()` call must still be detected,
+        not wrongly excluded (Codex review, fresh evidence)."""
+        src = (
+            "class C:\n"
+            "    def getattr(self, name):\n"
+            "        return None\n"
+            "def g(rec):\n"
+            '    return getattr(rec, "bases")\n'
+        )
+        tree = ast.parse(src, filename="x.py")
+        keys = [
+            key for key, _l, _a, _q in unmigrated_fact_reader_sites(tree, "x.py", src)
+        ]
+        assert keys == [
+            'x.py::g::bases::getattr(rec, "bases")::getattr(rec, "bases")::1'
+        ]
+
+    def test_detects_a_real_attrgetter_call_despite_a_nested_class_sibling(
+        self,
+    ) -> None:
+        """The identical class-body-transparency rule for a nested
+        `class` (not just a nested `def`), and for the `attrgetter`
+        spelling, not just `getattr`: `class attrgetter: ...` nested
+        inside an unrelated sibling function `outer` must not leak into
+        `f`'s own genuine `attrgetter()` call."""
+        src = (
+            "from operator import attrgetter\n"
+            "def outer():\n"
+            "    class attrgetter:\n"
+            "        pass\n"
+            "def f(rec):\n"
+            '    return attrgetter("bases")(rec)\n'
+        )
+        tree = ast.parse(src, filename="x.py")
+        keys = [
+            key for key, _l, _a, _q in unmigrated_fact_reader_sites(tree, "x.py", src)
+        ]
+        assert keys == [
+            'x.py::f::bases::attrgetter("bases")(rec)::attrgetter("bases")::1'
+        ]
+
+
+class TestDefaultValuesEvaluateInTheEnclosingScope:
+    """A parameter default value/annotation evaluates at *def-time*, in
+    whatever scope directly, syntactically contains the `def` statement --
+    not the function's own body scope, even though it's textually part of
+    the function's own signature line (Codex review, fresh evidence)."""
+
+    def test_detects_a_getattr_call_in_a_default_shadowed_by_its_own_parameter(
+        self,
+    ) -> None:
+        """`def f(getattr, x=getattr(rec, "bases")): ...` -- the default
+        evaluates before `f`'s own parameter `getattr` exists, so this
+        call genuinely reads the real builtin despite `f` declaring a
+        same-named parameter."""
+        src = 'def f(getattr, x=getattr(rec, "bases")):\n    return x\n'
+        tree = ast.parse(src, filename="x.py")
+        keys = [
+            key for key, _l, _a, _q in unmigrated_fact_reader_sites(tree, "x.py", src)
+        ]
+        assert keys == [
+            'x.py::<module>::bases::getattr(rec, "bases")::getattr(rec, "bases")::1'
+        ]
+
+    def test_ignores_a_getattr_call_in_the_function_body_shadowed_by_its_own_parameter(
+        self,
+    ) -> None:
+        """Negative control: an ordinary call in the function *body* (not
+        a default) is still correctly excluded by its own same-named
+        parameter -- this fix must not widen resolution past the
+        def-time subtree it's actually about."""
+        src = 'def f(getattr, rec):\n    return getattr(rec, "bases")\n'
+        tree = ast.parse(src, filename="x.py")
+        assert unmigrated_fact_reader_sites(tree, "x.py", src) == []
+
+    def test_ignores_a_default_shadowed_by_a_real_outer_parameter(self) -> None:
+        """Negative control: a default value nested inside a function
+        that genuinely declares the shadowing parameter itself is still
+        correctly excluded -- this fix only corrects the *function's own*
+        signature line being wrongly attributed to itself, not shadowing
+        in general."""
+        src = (
+            "def outer(getattr):\n"
+            '    def f(x=getattr(rec, "bases")):\n'
+            "        return x\n"
+            "    return f\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert unmigrated_fact_reader_sites(tree, "x.py", src) == []

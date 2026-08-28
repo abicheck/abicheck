@@ -314,22 +314,63 @@ def _enclosing_qualnames(tree: ast.Module) -> dict[int, str]:
     context, and re-deriving it with a hand-rolled visitor for every call
     site would duplicate this same walk. One pass building this map,
     consulted by line number, is simpler and gives the identical answer.
+
+    **A parameter default value/annotation is textually part of the
+    function's own signature, but evaluates at *def-time*, in whatever
+    scope directly, syntactically contains the `def` statement -- not the
+    function's own body scope this map would otherwise attribute its
+    whole line range to (Codex review, fresh evidence).** `def f(getattr,
+    x=getattr(rec, "bases")): ...` -- the default `x=getattr(rec,
+    "bases")` evaluates *before* `f`'s own parameters exist, so this call
+    genuinely reads the real builtin, but the function's own `[child.
+    lineno, end]` range covers its own signature line too, so `_shadowed()`
+    saw `f`'s own (not-yet-bound) parameter `getattr` and wrongly excluded
+    a real read. A decorator does *not* need this treatment: it sits on a
+    line strictly *before* `child.lineno`, already outside the function's
+    own range by construction. Fixed by registering each default/
+    annotation's own `[lineno, end_lineno]` range under the *current*
+    (enclosing, pre-function) qualname -- narrower than the function's own
+    range in the ordinary case, so the existing smallest-range-wins
+    tie-break below lets it correctly override the function's own broader
+    range for just those lines. A default/annotation sharing a line with
+    genuine function-*body* code (a one-liner `def f(x=getattr(rec,
+    "bases")): return x`) is a real, accepted residual this line-based
+    model can't distinguish further -- the same granularity limit this
+    function's own docstring already accepts throughout.
     """
     ranges: list[tuple[int, int, str]] = []
 
-    def visit(node: ast.AST, prefix: str) -> None:
+    def visit(node: ast.AST, prefix: str, qualname: str) -> None:
         for child in ast.iter_child_nodes(node):
             if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                qualname = f"{prefix}{child.name}"
+                child_qualname = f"{prefix}{child.name}"
                 end = getattr(child, "end_lineno", child.lineno)
-                ranges.append((child.lineno, end, qualname))
-                visit(child, qualname + ".")
+                ranges.append((child.lineno, end, child_qualname))
+                all_args = (
+                    *child.args.posonlyargs,
+                    *child.args.args,
+                    *child.args.kwonlyargs,
+                    *((child.args.vararg,) if child.args.vararg else ()),
+                    *((child.args.kwarg,) if child.args.kwarg else ()),
+                )
+                def_time_subtrees = [
+                    *child.args.defaults,
+                    *(d for d in child.args.kw_defaults if d is not None),
+                    *(a.annotation for a in all_args if a.annotation is not None),
+                ]
+                returns = getattr(child, "returns", None)
+                if returns is not None:
+                    def_time_subtrees.append(returns)
+                for subtree in def_time_subtrees:
+                    sub_end = getattr(subtree, "end_lineno", subtree.lineno)
+                    ranges.append((subtree.lineno, sub_end, qualname))
+                visit(child, child_qualname + ".", child_qualname)
             elif isinstance(child, ast.ClassDef):
-                visit(child, f"{prefix}{child.name}.")
+                visit(child, f"{prefix}{child.name}.", qualname)
             else:
-                visit(child, prefix)
+                visit(child, prefix, qualname)
 
-    visit(tree, "")
+    visit(tree, "", "<module>")
     # Innermost enclosing range wins: sort by ascending span size so a
     # later, narrower match overwrites the wider one already recorded.
     ranges.sort(key=lambda r: r[1] - r[0], reverse=True)
@@ -498,22 +539,40 @@ def _locally_bound_names(tree: ast.Module) -> dict[str, set[str]]:
     statement, the identical rule `fact_detector_misuse.py`'s own
     `_def_containing_qualnames` already models) was invisible here. Fixed
     by also recording each `def`/`class`'s own `name` against whichever
-    scope directly, syntactically contains it -- tracked as a
-    `nearest_func` parameter through the walk (mirroring `_lexical_
-    function_parents`'s identical concept: class bodies stay transparent,
-    the same simplified model this whole module already uses -- a
-    class-nested `def getattr(...):` binds against the nearest enclosing
-    *function* qualname, not a separate class-body scope, since this
-    module's `_enclosing_qualnames`/`_lexical_function_parents` never
-    model one either).
+    scope directly, syntactically contains it.
+
+    **That "directly, syntactically contains it" scope is NOT simply the
+    nearest enclosing *function*, unlike the closure-parent concept
+    `_lexical_function_parents` tracks (Codex review, fresh evidence, a
+    real regression in the first version of this same fix).** A first
+    version tracked a `nearest_func` parameter, skipping class layers the
+    same way `_lexical_function_parents` deliberately does for closure
+    purposes -- but a method's own *name* does not bind into its
+    enclosing function/module namespace at all; it becomes a class
+    attribute (`C.getattr`), invisible to an ordinary bare-name lookup
+    anywhere outside the class body. Recording it against the skip-class
+    `nearest_func` anyway meant `class C: def getattr(self, name): ...`
+    made an *unrelated* function elsewhere in the same module -- one with
+    no textual relationship to `C` at all -- read as if it had a local
+    `getattr` binding, silently excluding its own, genuine
+    `getattr(rec, "bases")` call. Fixed by tracking a separate `binding_
+    scope: str | None` -- the scope a *bare name binds into*, as opposed
+    to `nearest_func`'s "scope a closure looks up through" -- `None`
+    while directly inside a class body (nothing recorded there at all,
+    matching how `_shadowed()` never queries a class-body scope either,
+    since none of this module's qualname machinery models one), and the
+    function's own qualname once recursed into a function body (an
+    ordinary nested function's own name genuinely does bind into its
+    immediately enclosing function, unlike a method's into its class).
     """
     bound: dict[str, set[str]] = {}
 
-    def visit(node: ast.AST, prefix: str, nearest_func: str) -> None:
+    def visit(node: ast.AST, prefix: str, binding_scope: str | None) -> None:
         for child in ast.iter_child_nodes(node):
             if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef)):
                 child_qualname = f"{prefix}{child.name}"
-                bound.setdefault(nearest_func, set()).add(child.name)
+                if binding_scope is not None:
+                    bound.setdefault(binding_scope, set()).add(child.name)
                 all_args = (
                     *child.args.posonlyargs,
                     *child.args.args,
@@ -525,10 +584,11 @@ def _locally_bound_names(tree: ast.Module) -> dict[str, set[str]]:
                     bound.setdefault(child_qualname, set()).add(arg.arg)
                 visit(child, child_qualname + ".", child_qualname)
             elif isinstance(child, ast.ClassDef):
-                bound.setdefault(nearest_func, set()).add(child.name)
-                visit(child, f"{prefix}{child.name}.", nearest_func)
+                if binding_scope is not None:
+                    bound.setdefault(binding_scope, set()).add(child.name)
+                visit(child, f"{prefix}{child.name}.", None)
             else:
-                visit(child, prefix, nearest_func)
+                visit(child, prefix, binding_scope)
 
     visit(tree, "", "<module>")
     return bound

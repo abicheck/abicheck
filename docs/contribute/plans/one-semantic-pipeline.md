@@ -1778,6 +1778,62 @@ zero existing hits in the real repository, `mypy`/`ruff` both stayed
 clean, and `python scripts/check_architecture.py` reports 0 errors with
 both test files under the cap.
 
+**A further Codex review round found a real regression in finding 4's own
+fix, plus one more real gap in the module's line-based qualname model,
+both fixed.**
+
+**(1) The class-body-transparency fix used the wrong scope concept.**
+Finding 4's fix threaded a `nearest_func` parameter, skipping class
+layers the same way `_lexical_function_parents` deliberately does for
+*closure* purposes -- but a method's own *name* does not bind into its
+enclosing function/module namespace at all; it becomes a class attribute
+(`C.getattr`), invisible to an ordinary bare-name lookup anywhere outside
+the class body. Recording it against the skip-class `nearest_func` meant
+`class C: def getattr(self, name): ...` made an *unrelated* function
+elsewhere in the same module -- with no textual relationship to `C` at
+all -- read as if it had a local `getattr` binding, silently excluding
+its own genuine `getattr(rec, "bases")` call. Fixed by replacing
+`nearest_func` with `binding_scope: str | None` -- the scope a bare name
+actually *binds into*, as opposed to "the scope a closure looks up
+through" -- `None` while directly inside a class body (nothing recorded
+there at all, matching how `_shadowed()` never queries a class-body scope
+either, since none of this module's qualname machinery models one), and
+the function's own qualname once recursed into a function body (an
+ordinary nested function's own name genuinely does bind into its
+immediately enclosing function, unlike a method's into its class). New
+tests: the reported case, and the identical class-body-transparency rule
+for a nested `class` (not just a nested `def`) shadowing `attrgetter`.
+
+**(2) A parameter default value/annotation was attributed to the
+function's own body scope, not the enclosing scope it actually evaluates
+in.** `def f(getattr, x=getattr(rec, "bases")): ...` -- Python evaluates
+the default *before* `f`'s own parameters exist, so this call genuinely
+reads the real builtin, but `_enclosing_qualnames()`'s `[child.lineno,
+end]` range covers the function's own signature line too, so `_shadowed()`
+saw `f`'s own (not-yet-bound) parameter `getattr` and wrongly excluded a
+real read. A decorator needs no equivalent fix -- it sits on a line
+strictly *before* `child.lineno`, already outside the function's own
+range by construction. Fixed by registering each default/annotation's own
+`[lineno, end_lineno]` range under the *current* (enclosing, pre-function)
+qualname -- narrower than the function's own range in the ordinary case,
+so the existing smallest-range-wins tie-break lets it correctly override
+the function's own broader range for just those lines. A default/
+annotation sharing a line with genuine function-*body* code (a one-liner
+`def f(x=getattr(rec, "bases")): return x`) is a real, accepted residual
+this line-based model can't distinguish further -- the same granularity
+limit this function's own docstring already accepts throughout. New
+tests: the reported case, a negative control confirming an ordinary body
+call is still correctly shadowed, and a negative control confirming a
+default nested inside a function that genuinely declares the shadowing
+parameter is still correctly excluded (this fix only corrects the
+function's own signature line being wrongly attributed to itself, not
+shadowing in general).
+
+Both fixes' new tests went into `tests/test_fact_field_readers_wrapper_
+scoping.py` (room remained under the architecture gate's 1200-line cap).
+Verified empirically: still zero existing hits in the real repository,
+`mypy`/`ruff` both stayed clean.
+
 **Still not landed**: no detector (`diff_layout.py`/`diff_types.py`/
 `diff_param_qualifiers.py`/the reader set the check above now tracks
 precisely) has actually been migrated to read `.status` — the check above
