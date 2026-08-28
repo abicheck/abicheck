@@ -1419,6 +1419,46 @@ negative control, its sibling-function negative control (shadowing in one
 function must not leak into another), and the residual-gap documentation
 test.
 
+**An eighteenth review round found one more real gap and one real test-
+suite performance problem, both fixed.** (1) **The `attrgetter`
+recognition never consulted the shadowing check the `getattr` branch
+already got.** `def f(operator, rec): return operator.attrgetter("bases")
+(rec)` -- an ordinary, unrelated parameter reusing the name `operator` --
+was unconditionally treated as the real module, the identical false
+positive the `getattr`-shadowing round fixed for that branch specifically,
+left open here since this branch was added afterward and never wired to
+`_locally_bound_names()`/`_shadowed()` at all. Fixed with a new
+`_attrgetter_matched_name()` helper (re-deriving which of `_is_attrgetter_
+constructor_call()`'s two recognized shapes actually matched, narrowly
+typed so the call site doesn't need its own unchecked `ast.Attribute`/
+`ast.Name` assumption -- mypy can't narrow `node.func.func`'s type through
+a boolean `and`-chain the way an explicit `isinstance` inside a dedicated
+function can) and a `not _shadowed(...)` guard on the same branch. (2)
+**Three of this file's own tests each independently re-parsed and
+re-scanned every `abicheck/**/*.py` file from scratch.** `test_no_
+unlisted_violation_in_real_repo`/`test_baseline_entries_are_real_sites`/
+`test_exempt_functions_are_real_sites` each ran their own full
+`PKG.rglob("*.py")` walk -- ~14s apiece on a real measurement, ~42s total,
+consuming close to this whole file's share of the documented 43-second
+fast-suite budget by itself. Fixed with a new module-scoped `_repo_
+reader_scan` pytest fixture running the walk exactly once; all three
+assertions are pure derivations of the identical underlying scan data.
+`test_no_unlisted_violation_in_real_repo`'s own derivation no longer
+calls `check_fact_field_readers()` directly, but is provably equivalent
+to it -- that function's own filtering is exactly the same two-step check
+(`EXEMPT_FUNCTIONS`, then `KNOWN_UNMIGRATED_READERS` membership) applied
+to the identical scan, confirmed by reading its source rather than
+assumed; `check_fact_field_readers()`'s own Findings/message-building glue
+stays independently, directly tested by this file's existing synthetic-
+fixture tests (`test_check_reports_a_new_violation`/`test_check_is_
+silent_for_clean_code`), so nothing lost real coverage. Verified
+empirically: still zero existing hits, baseline stays at 104, `mypy`/
+`ruff` both stayed clean, and this file's own runtime dropped from ~26s
+to ~9s for its (now 60, previously 57) tests. Three new tests: the
+shadowed-`operator`-parameter and shadowed-bare-`attrgetter`-parameter
+negative controls, and a sibling-function negative control (shadowing in
+one function must not leak into another's genuine `attrgetter()` call).
+
 **Still not landed**: no detector (`diff_layout.py`/`diff_types.py`/
 `diff_param_qualifiers.py`/the reader set the check above now tracks
 precisely) has actually been migrated to read `.status` — the check above

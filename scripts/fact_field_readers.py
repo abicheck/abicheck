@@ -748,6 +748,26 @@ def _is_attrgetter_constructor_call(
     )
 
 
+def _attrgetter_matched_name(node: ast.Call) -> str:
+    """Return the bare local name that made `_is_attrgetter_constructor_
+    call()` return `True` for *node* -- the qualifying module name for the
+    `operator.attrgetter(...)` spelling, or the callable name itself for
+    the bare `attrgetter(...)` spelling. Used to check that name against
+    `_locally_bound_names()` for shadowing (Codex review, fresh evidence:
+    an unrelated local parameter named `operator`/`attrgetter` shadows the
+    real module/callable exactly the way one named `getattr` can, but this
+    call site never consulted the shadowing check at all). The caller is
+    responsible for confirming `_is_attrgetter_constructor_call()` already
+    returned `True` for *node* -- this only re-derives which of its two
+    recognized shapes actually matched, narrowly typed so the caller
+    doesn't need its own unchecked `ast.Attribute`/`ast.Name` assumption.
+    """
+    if isinstance(node.func, ast.Attribute) and isinstance(node.func.value, ast.Name):
+        return node.func.value.id
+    assert isinstance(node.func, ast.Name)
+    return node.func.id
+
+
 def unmigrated_fact_reader_sites(
     tree: ast.Module, rel: str, source: str = ""
 ) -> list[tuple[str, int, str, str]]:
@@ -994,6 +1014,7 @@ def unmigrated_fact_reader_sites(
             and _is_attrgetter_constructor_call(
                 node.func, attrgetter_names, operator_names
             )
+            and not _shadowed(node, _attrgetter_matched_name(node.func))
         ):
             # `operator.attrgetter("bases")(rec)` (or a resolved alias of
             # either name) is a dynamic equivalent of `rec.bases` built in

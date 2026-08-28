@@ -53,64 +53,89 @@ from scripts.fact_field_readers import (  # noqa: E402
 )
 
 
-def test_no_unlisted_violation_in_real_repo() -> None:
+@pytest.fixture(scope="module")
+def _repo_reader_scan() -> list[tuple[str, str, int, str, str]]:
+    """One full-repo AST parse-and-scan, shared by the three real-repository
+    invariant tests below (Codex review, fresh evidence): each previously
+    ran its own independent `PKG.rglob("*.py")` walk, parsing and scanning
+    every `abicheck/**/*.py` file from scratch -- three redundant full
+    scans of the identical tree, ~14s apiece on a real measurement,
+    consuming close to this whole file's share of the documented
+    43-second fast-suite budget by itself. All three assertions are pure
+    derivations of the identical underlying data (`unmigrated_fact_reader_
+    sites()` over every file, un-filtered), so one scan correctly serves
+    all three -- including `test_no_unlisted_violation_in_real_repo`'s own
+    check, which is provably equivalent to `check_fact_field_readers()`'s
+    real filtering logic (`EXEMPT_FUNCTIONS`, then `KNOWN_UNMIGRATED_
+    READERS` membership) applied to this same scan, confirmed by reading
+    that function's own source rather than assumed.
+
+    Returns one `(rel, key, lineno, attr, qualname)` five-tuple per found
+    site, `rel` carried explicitly rather than re-split out of `key`.
+    """
+    import scripts.fact_field_readers as gate
+
+    scan: list[tuple[str, str, int, str, str]] = []
+    for path in sorted(gate.PKG.rglob("*.py")):
+        rel = gate._rel(path)
+        source = gate._read(path)
+        try:
+            tree = ast.parse(source, filename=rel)
+        except SyntaxError:
+            continue
+        for key, lineno, attr, qualname in unmigrated_fact_reader_sites(
+            tree, rel, source
+        ):
+            scan.append((rel, key, lineno, attr, qualname))
+    return scan
+
+
+def test_no_unlisted_violation_in_real_repo(
+    _repo_reader_scan: list[tuple[str, str, int, str, str]],
+) -> None:
     """The real repository has zero *unlisted* unmigrated readers.
 
     A pre-existing one must be named in ``KNOWN_UNMIGRATED_READERS``
     (reviewed, not silently accumulating) — this pins that the check itself
     is clean against the actual tree, not just against a synthetic fixture.
     """
-    findings = Findings()
-    check_fact_field_readers(findings)
-    errors = [m for c, m in findings.errors if c == "fact-field-readers"]
+    errors = [
+        f"{rel}:{lineno}: reads `{attr}` -- key {key!r} not in KNOWN_UNMIGRATED_READERS"
+        for rel, key, lineno, attr, qualname in _repo_reader_scan
+        if f"{rel}::{qualname}" not in EXEMPT_FUNCTIONS
+        and key not in KNOWN_UNMIGRATED_READERS
+    ]
     assert errors == [], "Unlisted Fact-bridged-field readers:\n" + "\n".join(errors)
 
 
-def test_baseline_entries_are_real_sites() -> None:
+def test_baseline_entries_are_real_sites(
+    _repo_reader_scan: list[tuple[str, str, int, str, str]],
+) -> None:
     """Every ``KNOWN_UNMIGRATED_READERS`` entry must still name a real,
     currently-existing read — an entry that no longer matches anything is
     dead weight the baseline should have shrunk (the reader was migrated,
     or the code moved/was deleted), not a permanent grandfather clause."""
-    import scripts.fact_field_readers as gate
-
-    seen: set[str] = set()
-    for path in sorted(gate.PKG.rglob("*.py")):
-        rel = gate._rel(path)
-        try:
-            tree = ast.parse(gate._read(path), filename=rel)
-        except SyntaxError:
-            continue
-        source = gate._read(path)
-        for key, _lineno, _attr, qualname in unmigrated_fact_reader_sites(
-            tree, rel, source
-        ):
-            if f"{rel}::{qualname}" in EXEMPT_FUNCTIONS:
-                continue
-            seen.add(key)
+    seen = {
+        key
+        for rel, key, _lineno, _attr, qualname in _repo_reader_scan
+        if f"{rel}::{qualname}" not in EXEMPT_FUNCTIONS
+    }
     stale = KNOWN_UNMIGRATED_READERS - seen
     assert stale == set(), f"Stale baseline entries (no longer a real read): {stale}"
 
 
-def test_exempt_functions_are_real_sites() -> None:
+def test_exempt_functions_are_real_sites(
+    _repo_reader_scan: list[tuple[str, str, int, str, str]],
+) -> None:
     """Every ``EXEMPT_FUNCTIONS`` entry must still name a function that
     actually contains a `Fact`-bridged read today — a stale entry (the
     function was deleted, renamed, or no longer touches these fields at
     all) is silently exempting nothing, which reads as coverage that isn't
     there."""
-    import scripts.fact_field_readers as gate
-
-    covering: set[str] = set()
-    for path in sorted(gate.PKG.rglob("*.py")):
-        rel = gate._rel(path)
-        try:
-            tree = ast.parse(gate._read(path), filename=rel)
-        except SyntaxError:
-            continue
-        source = gate._read(path)
-        for _key, _lineno, _attr, qualname in unmigrated_fact_reader_sites(
-            tree, rel, source
-        ):
-            covering.add(f"{rel}::{qualname}")
+    covering = {
+        f"{rel}::{qualname}"
+        for rel, _key, _lineno, _attr, qualname in _repo_reader_scan
+    }
     stale = EXEMPT_FUNCTIONS - covering
     assert stale == set(), (
         f"Stale EXEMPT_FUNCTIONS entries (cover no real read): {stale}"
@@ -385,6 +410,44 @@ class TestUnmigratedFactReaderSites:
         assert [key for key, _l, _a, _q in sites] == [
             'x.py::g::bases::getattr(rec, "bases", None)::'
             'getattr(rec, "bases", None)::1'
+        ]
+
+    def test_ignores_attrgetter_shadowed_by_an_operator_parameter(self) -> None:
+        """`def f(operator, rec): return operator.attrgetter("bases")(rec)`
+        -- an ordinary, unrelated parameter reusing the name `operator`
+        must not be treated as the real module (Codex review: the
+        `attrgetter` branch never consulted the shadowing check at all,
+        unlike the neighboring `getattr` branch)."""
+        src = 'def f(operator, rec):\n    return operator.attrgetter("bases")(rec)\n'
+        tree = ast.parse(src, filename="x.py")
+        assert unmigrated_fact_reader_sites(tree, "x.py", src) == []
+
+    def test_ignores_attrgetter_shadowed_by_a_bare_attrgetter_parameter(
+        self,
+    ) -> None:
+        """The identical shadowing for the bare `attrgetter(...)`
+        spelling."""
+        src = 'def f(attrgetter, rec):\n    return attrgetter("bases")(rec)\n'
+        tree = ast.parse(src, filename="x.py")
+        assert unmigrated_fact_reader_sites(tree, "x.py", src) == []
+
+    def test_detects_a_real_attrgetter_call_despite_shadowing_in_a_sibling(
+        self,
+    ) -> None:
+        """Negative control: shadowing in one function must not leak into
+        an unrelated sibling function's own genuine `attrgetter()` call."""
+        src = (
+            "def f(operator, rec):\n"
+            '    return operator.attrgetter("bases")(rec)\n'
+            "import operator\n"
+            "def g(rec):\n"
+            '    return operator.attrgetter("bases")(rec)\n'
+        )
+        tree = ast.parse(src, filename="x.py")
+        sites = unmigrated_fact_reader_sites(tree, "x.py", src)
+        assert [key for key, _l, _a, _q in sites] == [
+            'x.py::g::bases::operator.attrgetter("bases")(rec)::'
+            'operator.attrgetter("bases")(rec)::1'
         ]
 
     def test_detects_a_bound_getattribute_call_naming_a_bridged_attr(
