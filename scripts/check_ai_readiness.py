@@ -79,6 +79,7 @@ from adr_status_sync import (  # noqa: E402
     check_adr_status_sync,
 )
 from engine_cli_boundary import check_engine_cli_boundary  # noqa: E402
+from fact_field_readers import check_fact_field_readers  # noqa: E402
 from findings_report import Findings as _SharedFindings  # noqa: E402
 
 # The generated-skill publication trees' own generator (ADR-058 / G36 P0.3).
@@ -2254,7 +2255,7 @@ CLI_CONTRACT_ALLOWLIST: frozenset[str] = frozenset(
         # Native ELF CLI dump (P0 item 2): calls `dumper.dump()` directly
         # rather than through `service_dump_pipeline.run_dump_request` —
         # tracked as Phase 1 item 1 of the convergence plan.
-        "abicheck/cli_dump_helpers.py:1301:19:dumper.dump",
+        "abicheck/cli_dump_helpers.py:1298:19:dumper.dump",
         # Standalone application-compatibility (P0 item 6): dumps both
         # sides directly rather than through any of the other paths.
         "abicheck/appcompat.py:1604:19:dumper.dump",
@@ -2839,6 +2840,19 @@ def check_cli_contract(f: Findings) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Check: unmigrated Fact[T]-bridged legacy field readers (ADR-063 Phase 0,
+# docs/contribute/plans/one-semantic-pipeline.md)
+# ---------------------------------------------------------------------------
+#
+# Implementation lives in the sibling leaf module `fact_field_readers.py`,
+# same reason as `engine_cli_boundary.py` above -- this is the "widened,
+# non-glob AI-readiness check" that phase's own Design section named as
+# not yet written: a real repo-wide scan, not a `diff_*.py` glob, since a
+# glob is exactly what let several real readers go unnoticed across
+# multiple review rounds.
+
+
+# ---------------------------------------------------------------------------
 # Check: test assertion density (coverage-honesty guard)
 # ---------------------------------------------------------------------------
 
@@ -3003,6 +3017,7 @@ CHECKS: dict[str, Callable[[Findings], None]] = {
     "banned-imports": check_banned_imports,
     "cli-contract": check_cli_contract,
     "engine-cli-boundary": check_engine_cli_boundary,
+    "fact-field-readers": check_fact_field_readers,
     "license-header": check_license_header,
     "test-assertion-density": check_test_assertion_density,
 }

@@ -25,7 +25,8 @@
         "abicheck/elf_symbol_filter.py",
         "abicheck/evidence_depth.py",
         "abicheck/fact_provenance.py",
-        "abicheck/name_classification.py"
+        "abicheck/name_classification.py",
+        "abicheck/stable_abi_data.py"
       ]
     },
     "storage": {
@@ -34,7 +35,8 @@
         "model"
       ],
       "legacy_paths": [
-        "abicheck/buildsource/build_cache.py"
+        "abicheck/buildsource/build_cache.py",
+        "abicheck/dumper_cache.py"
       ]
     },
     "extract": {
@@ -106,6 +108,7 @@
         "abicheck/dumper_clang_attributes.py",
         "abicheck/dumper_clang_errors.py",
         "abicheck/dumper_clang_qualifiers.py",
+        "abicheck/dumper_clang_streaming.py",
         "abicheck/dumper_clang_vtable.py",
         "abicheck/dumper_debug.py",
         "abicheck/dumper_elf_fallback.py",
@@ -134,6 +137,7 @@
         "abicheck/provenance.py",
         "abicheck/python_api.py",
         "abicheck/python_ext.py",
+        "abicheck/service_metadata_attach.py",
         "abicheck/source_smoke.py",
         "abicheck/sycl_context.py",
         "abicheck/sycl_metadata.py",
@@ -197,6 +201,7 @@
         "abicheck/finding_identity_atomic.py",
         "abicheck/finding_identity_ctor_dtor.py",
         "abicheck/probe_harness.py",
+        "abicheck/type_reachability_spelling.py",
         "abicheck/versioned_symbol_scheme.py"
       ]
     },
@@ -212,7 +217,10 @@
         "abicheck/compatibility_evaluation_packs.py",
         "abicheck/contract_evaluation.py",
         "abicheck/contract_evidence_collect.py",
-        "abicheck/export_surface.py"
+        "abicheck/export_surface.py",
+        "abicheck/semver.py",
+        "abicheck/suppression_yaml.py",
+        "abicheck/surface.py"
       ]
     },
     "workflows": {
@@ -257,8 +265,10 @@
         "abicheck/service_dump_native.py",
         "abicheck/service_dump_native_pe.py",
         "abicheck/service_dump_pipeline.py",
+        "abicheck/service_header_scoped.py",
         "abicheck/service_input_resolution.py",
-        "abicheck/service_scan.py"
+        "abicheck/service_scan.py",
+        "abicheck/stack_checker.py"
       ]
     },
     "report": {
@@ -273,7 +283,10 @@
         "abicheck/annotations.py",
         "abicheck/annotations_step_summary.py",
         "abicheck/appcompat_html.py",
-        "abicheck/reporter.py"
+        "abicheck/reporter.py",
+        "abicheck/sarif.py",
+        "abicheck/stack_html.py",
+        "abicheck/stack_report.py"
       ]
     },
     "frontends": {
@@ -325,6 +338,7 @@
     "abicheck.checker_policy",
     "abicheck.contract_coverage_ledger",
     "abicheck.contract_gating",
+    "abicheck.dumper_contract",
     "abicheck.errors",
     "abicheck.reclassify"
   ],
