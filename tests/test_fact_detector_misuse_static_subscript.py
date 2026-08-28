@@ -37,6 +37,17 @@ fixed-point resolver) and `fact_equality_misuse_sites()`'s own
 instead of only ever landing back in the purely structural `_is_fact_
 typed_expr()`. `TestAliasResolutionInsideAStaticSubscript` below covers
 this round; the classes above cover the original, structural-only fix.
+
+**A further round found the dict-key resolution used a forward scan,
+returning the *first* matching key rather than the last** (Codex
+review, fresh evidence): a real Python dict literal keeps the *last*
+value for a repeated (or merely `==`-equal, e.g. `1`/`True`) key --
+ordinary dict-construction overwrite semantics -- but `{"x":
+Fact.present(1), "x": 0}["x"]` was still reported as a misuse site even
+though the value actually selected at runtime is `0`, not the `Fact`
+value. Fixed by scanning the full `zip(keys, values)` sequence and
+keeping the *last* match rather than returning on the first one.
+`TestLastMatchingKeyWins` below covers this round.
 """
 
 from __future__ import annotations
@@ -276,3 +287,44 @@ class TestAliasResolutionInsideAStaticSubscript:
         src = "def f(tag, other):\n    return (tag,)[0] == other\n"
         tree = ast.parse(src, filename="x.py")
         assert fact_equality_misuse_sites(tree, "x.py") == []
+
+
+class TestLastMatchingKeyWins:
+    """A real dict literal keeps the *last* value for a repeated key --
+    ordinary dict-construction overwrite semantics, not a forward scan
+    (Codex review, fresh evidence)."""
+
+    def test_literal_duplicate_key_selects_the_last_value(self) -> None:
+        src = 'def f(other):\n    return {"x": Fact.present(1), "x": 0}["x"] == other\n'
+        tree = ast.parse(src, filename="x.py")
+        assert fact_equality_misuse_sites(tree, "x.py") == []
+
+    def test_literal_duplicate_key_where_the_fact_value_is_last(self) -> None:
+        src = 'def f(other):\n    return {"x": 0, "x": Fact.present(1)}["x"] == other\n'
+        tree = ast.parse(src, filename="x.py")
+        assert len(fact_equality_misuse_sites(tree, "x.py")) == 1
+
+    def test_triple_duplicate_key_selects_the_last_of_three(self) -> None:
+        src = (
+            'def f(other):\n    return {"x": 0, "x": Fact.present(1), "x": '
+            '2}["x"] == other\n'
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert fact_equality_misuse_sites(tree, "x.py") == []
+
+    def test_equality_colliding_constants_true_and_one(self) -> None:
+        """`True == 1` in Python -- a real dict literal collapses these
+        two keys exactly the way a literal duplicate does."""
+        src = "def f(other):\n    return {True: Fact.present(1), 1: 0}[1] == other\n"
+        tree = ast.parse(src, filename="x.py")
+        assert fact_equality_misuse_sites(tree, "x.py") == []
+
+    def test_equality_colliding_constants_fact_value_is_last(self) -> None:
+        src = "def f(other):\n    return {1: 0, True: Fact.present(1)}[True] == other\n"
+        tree = ast.parse(src, filename="x.py")
+        assert len(fact_equality_misuse_sites(tree, "x.py")) == 1
+
+    def test_single_non_duplicate_key_is_unaffected(self) -> None:
+        src = 'def f(other):\n    return {"x": Fact.present(1)}["x"] == other\n'
+        tree = ast.parse(src, filename="x.py")
+        assert len(fact_equality_misuse_sites(tree, "x.py")) == 1

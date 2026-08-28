@@ -5353,6 +5353,70 @@ reuse of what already existed there). New tests:
 `TestAnnotationsResolveThroughTheSameShadowMachinery` (11 tests),
 appended to `tests/test_fact_detector_misuse_constructor_shadow.py`.
 
+**A further round found `_static_subscript_element()`'s own dict-key
+resolution used a forward scan, returning the *first* matching key
+rather than the last** (Codex review, fresh evidence): a real Python
+dict literal keeps the *last* value for a repeated (or merely
+`==`-equal, e.g. `1`/`True`) key -- ordinary dict-construction overwrite
+semantics -- but `{"x": Fact.present(1), "x": 0}["x"]` was still
+reported as a misuse site even though the value actually selected at
+runtime is `0`, not the `Fact` value. Reproduced directly (1 hit,
+expected 0) before designing a fix. Fixed by scanning the full
+`zip(display.keys, display.values)` sequence and keeping the *last*
+match (via a `match` accumulator) rather than returning on the first
+one -- the identical `==`-based key comparison the loop already used is
+what makes the `1`/`True` collision resolve correctly too, with no
+separate logic needed for it. Verified against 8 cases via direct AST
+reproduction before writing tests: the reported case, the reversed
+case (Fact value as the *last*, correctly flagged), both directions of
+the `True`/`1` equality collision, a triple-duplicate key, and
+regression guards (single non-duplicate key, wrong key, tuple/list
+subscript resolution all unaffected). New tests:
+`TestLastMatchingKeyWins` (6 tests), appended to
+`tests/test_fact_detector_misuse_static_subscript.py`.
+
+**This fix pushed `fact_detector_misuse.py` to 1999/2000 lines --
+genuinely out of headroom** (the previous two rounds had already
+flagged this as imminent). Rather than waiting for a *third* finding to
+force an emergency split mid-fix, this round performed the split
+proactively, per the standing instruction: `fact_detector_misuse.py`'s
+entire "does this expression/annotation/name resolve to a `Fact[T]`
+value" machinery -- `FACT_FIELD_NAMES`, `_imported_fact_aliases`,
+`_is_fact_typed_expr`, `_static_display_elements`,
+`_static_subscript_element`, `_admissible_loop_element`,
+`_candidate_resolves_to_fact`, `_annotation_head_name`, `_is_fact_typed_
+annotation`, `_fact_aliases` -- moved to a new sibling module,
+`fact_detector_misuse_aliases.py`, mirroring the exact precedent
+`fact_detector_misuse_scope.py`'s own split already established
+(mechanical extraction, unchanged function bodies, not a redesign).
+`fact_detector_misuse.py` itself now holds only the top-level scan entry
+point (`fact_equality_misuse_sites`/`check_fact_detector_misuse`) and
+the def-time default/annotation scope-override machinery
+(`_default_and_annotation_scope_overrides`/`_iter_default_subtree`'s own
+caller). One further wrinkle the split surfaced: `_iter_default_
+subtree()` (and the `_SCOPE_INTRODUCING_NODE_TYPES` constant it uses)
+turned out to be needed by *both* remaining files -- the def-time
+scope-override machinery that stayed in `fact_detector_misuse.py`, and
+`_fact_aliases()`'s own pending-default resolution that moved to the
+new module -- so it relocated a second level up, into
+`fact_detector_misuse_scope.py` (the module both siblings already
+import from), rather than either duplicating it or creating a new
+import cycle. `FACT_FIELD_NAMES`/`_imported_fact_aliases`/`_is_fact_
+typed_expr`/`_static_subscript_element`/`_fact_aliases` are re-exported
+by `fact_detector_misuse.py` via the explicit `X as X` spelling
+`checker_policy.py` already uses for `ChangeKind`, so every existing
+`from .fact_detector_misuse import FACT_FIELD_NAMES` call site
+(including this check's own test suite) is unaffected -- confirmed by
+re-running the full test suite unchanged and reloading the module
+directly. Resulting line counts: `fact_detector_misuse.py` 381 lines
+(from 1999), `fact_detector_misuse_aliases.py` 1614 lines (new),
+`fact_detector_misuse_scope.py` 1434 lines (up from 1369, absorbing
+`_iter_default_subtree`) -- all three now with ample headroom under the
+2000-line hard cap for the foreseeable next several rounds.
+`scripts/CLAUDE.md`'s inventory table updated with a new row for the
+split-out module and revised text for the two existing rows it now
+shares responsibilities with.
+
 ---
 
 ### Phase 1 — finish the `dump`/`scan` typed-API convergence (closes AGENTS.md "PR C")

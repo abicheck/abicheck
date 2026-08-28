@@ -20,13 +20,18 @@ same-named helpers -- see that module's own docstring for why the two
 checks keep independent copies rather than a shared abstraction.
 
 No public entry point of its own; imported by ``fact_detector_misuse.py``
-only. Pure stdlib, importable before ``pip install -e .``, matching every
-other AI-readiness leaf module's own constraint.
+and ``fact_detector_misuse_aliases.py`` (added once that second sibling
+module was itself split out of ``fact_detector_misuse.py`` -- both need
+``_iter_default_subtree``, so it moved here rather than staying a
+private helper only one of the two could see). Pure stdlib, importable
+before ``pip install -e .``, matching every other AI-readiness leaf
+module's own constraint.
 """
 
 from __future__ import annotations
 
 import ast
+from collections.abc import Iterator
 
 
 def _enclosing_qualnames(tree: ast.Module) -> _QualnameSpans:
@@ -1367,3 +1372,63 @@ def _constructor_method_alias_names(
                 continue
             aliases.setdefault(qualname, set()).add(target.id)
     return aliases
+
+
+_SCOPE_INTRODUCING_NODE_TYPES = (
+    ast.FunctionDef,
+    ast.AsyncFunctionDef,
+    ast.Lambda,
+    ast.ListComp,
+    ast.SetComp,
+    ast.DictComp,
+    ast.GeneratorExp,
+)
+
+
+def _iter_default_subtree(node: ast.AST) -> Iterator[ast.AST]:
+    """Yield *node* and every descendant that still evaluates in *node*'s
+    own (def-time) scope -- stopping before descending into any node that
+    introduces its own scope (a nested lambda/comprehension/def), whose
+    body evaluates later, in that nested scope, not at def-time here
+    (Codex review, fresh evidence): with an outer `fact = rec.bases_fact`,
+    `def f(cb=lambda fact: fact == other): ...` -- the lambda parameter
+    `fact` genuinely shadows the outer alias inside the lambda's own body,
+    so force-attributing everything inside that default expression
+    (including the lambda's own body) to the *enclosing* scope wrongly
+    treated the lambda's own local `fact` as the outer alias instead of
+    leaving it to ordinary position-based resolution, which already
+    handles a nested scope correctly (`_enclosing_qualnames`/`_qualname_at`
+    give the lambda its own real span and qualname). A boundary node
+    (the `Lambda`/`FunctionDef`/comprehension itself) is still yielded --
+    harmless, since only an `ast.Compare` id is ever looked up in the
+    resulting map -- just never expanded past.
+
+    **A comprehension's own *outermost* generator's iterable is the one
+    exception to that stop rule (Codex review, fresh evidence): `fact =
+    rec.bases_fact; def g(fact, cb=[x for x in (fact == other,)]): ...`
+    was silently missed.** A comprehension's outermost iterable evaluates
+    in whatever scope encloses the comprehension itself -- here, the same
+    def-time scope this whole function exists to attribute defaults to --
+    before the comprehension's own implicit function is even called
+    (`g`'s own parameter `fact` does not yet exist to shadow anything at
+    that point). Treating the comprehension as an opaque scope boundary
+    the moment it is reached (the general rule above) stopped before ever
+    descending into that iterable, so the comparison nested inside it kept
+    reading as `g`'s own body scope instead of the enclosing one -- the
+    identical "outermost iterable is not really part of the new scope"
+    exception `_enclosing_qualnames`'s and `_lexical_function_parents`'s
+    own comprehension handling already carve out, applied here too.
+    """
+    stack = [node]
+    while stack:
+        current = stack.pop()
+        yield current
+        if isinstance(
+            current, (ast.ListComp, ast.SetComp, ast.DictComp, ast.GeneratorExp)
+        ):
+            if current.generators:
+                stack.append(current.generators[0].iter)
+            continue
+        if isinstance(current, _SCOPE_INTRODUCING_NODE_TYPES):
+            continue
+        stack.extend(ast.iter_child_nodes(current))
