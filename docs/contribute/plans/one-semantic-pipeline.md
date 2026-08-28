@@ -1888,6 +1888,39 @@ regression guard, a keyword-only-default-after-a-no-default-keyword-arg
 case (pinning the `kw_defaults`-filtering fix), and the decorator
 generalization.
 
+**A further Codex review round found `_def_containing_qualnames()` had
+the identical unconditional-`visit(child, qualname + ".", qualname)` bug
+`_lexical_function_parents()` above was just fixed for, in its own
+separate walk over the same tree.** `_def_containing_qualnames()` answers
+a related but distinct question (which scope a `def`/`class` *statement*
+directly, syntactically binds into, and -- since a later slice -- which
+scope a `Lambda` is directly, syntactically created in), used by the
+pending-default alias resolution and the comparison-scope override
+elsewhere in this file, but it had its own, separate recursive walk that
+never received the `def_time_subtrees()`/`dispatch()`/`visit()` split
+above. `fact = rec.bases_fact` in `f`, then `def g(fact, cb=lambda x=
+fact: x == other): ...` -- the *inner* lambda's own `x=fact` default
+evaluates while `g` is being defined, in `f`'s own scope, before `g`'s own
+parameter `fact` even exists -- but the unconditional recursion recorded
+the lambda's containing scope as `g` instead of `f`, so `g`'s own
+same-named parameter `fact` incorrectly appeared to shadow the lambda's
+`x=fact` default and the misuse went undetected. Fixed with the identical
+split: a second `def_time_subtrees()` (duplicated rather than shared --
+this module deliberately keeps each scoping helper local to the function
+that uses it, matching this file's own existing convention of two
+independent, structurally identical copies rather than a premature shared
+abstraction) plus a `dispatch()`/`visit()` split for `_def_containing_
+qualnames()`, re-visiting a def-time subtree under the *old*
+`scope_qualname` while only the real body executes under the new one.
+Verified empirically: still zero existing hits in the real repository,
+and `mypy`/`ruff` both stayed clean. Two new tests, appended to the
+existing `tests/test_fact_detector_misuse_def_time_scope.py` (room
+remained under the architecture gate's 1200-line cap): the reported
+nested-lambda-default-inside-another-`def`'s-default case, and a negative
+control confirming a lambda genuinely created inside `g`'s own body (not
+one of `g`'s own def-time subtrees) is still correctly parented under
+`g`, so `g`'s own parameter still shadows the outer alias there.
+
 ---
 
 ### Phase 1 — finish the `dump`/`scan` typed-API convergence (closes AGENTS.md "PR C")

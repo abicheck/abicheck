@@ -146,3 +146,52 @@ class TestLexicalFunctionParentsDefTimeSubtrees:
         )
         tree = ast.parse(src, filename="x.py")
         assert fact_equality_misuse_sites(tree, "x.py") == [(3, 10)]
+
+
+class TestDefContainingQualnamesDefTimeSubtrees:
+    """`_def_containing_qualnames()` had the identical unconditional-
+    `visit(child, qualname + ".", qualname)` bug `_lexical_function_
+    parents()` above was fixed for, in its own separate walk (Codex
+    review, fresh evidence, found after the `_lexical_function_parents`
+    fix landed): a nested `def`/`lambda`'s own default values, parameter
+    annotations, return annotation, and decorators were dispatched under
+    the *new* scope instead of the scope that actually, syntactically
+    contains the `def`/`lambda` statement."""
+
+    def test_detects_a_lambda_default_nested_inside_another_defs_default(
+        self,
+    ) -> None:
+        """`fact = rec.bases_fact` in `f`, then `def g(fact, cb=lambda
+        x=fact: x == other): ...` -- the inner lambda's own `x=fact`
+        default evaluates while `g` is being *defined*, in `f`'s own
+        scope, before `g`'s own parameter `fact` even exists -- but
+        `_def_containing_qualnames()` recorded the lambda's containing
+        scope as `g` instead of `f`, so `g`'s own same-named parameter
+        `fact` incorrectly appeared to shadow the lambda's `x=fact`
+        default and the misuse went undetected."""
+        src = (
+            "def f(rec, other):\n"
+            "    fact = rec.bases_fact\n"
+            "    def g(fact, cb=lambda x=fact: x == other):\n"
+            "        return cb\n"
+            "    return g\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert fact_equality_misuse_sites(tree, "x.py") == [(3, 34)]
+
+    def test_ignores_a_lambda_default_genuinely_inside_the_body(self) -> None:
+        """Negative control: a lambda genuinely created *inside* `g`'s own
+        body (not as one of `g`'s own def-time subtrees) is correctly
+        parented under `g`, so `g`'s own parameter `fact` correctly
+        shadows the outer alias there -- this fix must not widen
+        resolution past the def-time subtree it's actually about."""
+        src = (
+            "def f(rec, other):\n"
+            "    fact = rec.bases_fact\n"
+            "    def g(fact):\n"
+            "        cb = lambda x=fact: x == other\n"
+            "        return cb\n"
+            "    return g\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert fact_equality_misuse_sites(tree, "x.py") == []

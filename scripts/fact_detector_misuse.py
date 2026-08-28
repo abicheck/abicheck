@@ -608,30 +608,88 @@ def _def_containing_qualnames(tree: ast.Module) -> dict[tuple[int, int], str]:
     resolve against without this, so both the pending-default alias
     resolution and the comparison-scope override below silently fell back
     to `"<module>"` regardless of the lambda's real containing scope.
+
+    **A nested `def`/`lambda`'s own def-time subtrees are dispatched under
+    the *old* scope, not the new one -- the identical fix
+    `_lexical_function_parents` needed for the identical reason (Codex
+    review, fresh evidence).** `fact = rec.bases_fact; def g(fact, cb=
+    lambda x=fact: x == other): ...` -- the inner lambda's own `x=fact`
+    default evaluates while `g` is being *defined*, in `f`'s own scope
+    (before `g`'s own parameter `fact` even exists to shadow anything),
+    so the lambda's real containing scope is `f`, not `g`. The previous
+    unconditional `visit(child, qualname + ".", qualname)` for a `def`/
+    `lambda` recursed into *every* child -- default values included --
+    already under the new qualname, so the lambda's own entry in
+    `containing` recorded `g` instead of `f`: `g`'s own same-named
+    parameter `fact` then incorrectly appeared to shadow the lambda's
+    `x=fact` default, silently missing the misuse. Fixed the same way
+    `_lexical_function_parents` was: split the dispatch so a def-time
+    subtree (`def_time_subtrees()`, an identical helper, duplicated here
+    rather than shared -- see this module's own docstring for why a
+    scoping helper is not shared across these two functions) is
+    re-visited with the *old* `scope_qualname`, while only the real body
+    executes under the new one.
     """
     containing: dict[tuple[int, int], str] = {}
 
+    def def_time_subtrees(
+        node: ast.FunctionDef | ast.AsyncFunctionDef | ast.Lambda,
+    ) -> list[ast.AST]:
+        args = node.args
+        # `kw_defaults` pairs positionally with `kwonlyargs`, `None` for a
+        # keyword-only parameter with no default at all -- a real,
+        # ordinary element of this list, matching `_lexical_function_
+        # parents`'s own identical filter.
+        subtrees: list[ast.AST] = [
+            *args.defaults,
+            *(d for d in args.kw_defaults if d is not None),
+        ]
+        for arg in (
+            *args.posonlyargs,
+            *args.args,
+            *args.kwonlyargs,
+            *((args.vararg,) if args.vararg else ()),
+            *((args.kwarg,) if args.kwarg else ()),
+        ):
+            if arg.annotation is not None:
+                subtrees.append(arg.annotation)
+        returns = getattr(node, "returns", None)
+        if returns is not None:
+            subtrees.append(returns)
+        decorator_list = getattr(node, "decorator_list", None)
+        if decorator_list:
+            subtrees.extend(decorator_list)
+        return subtrees
+
+    def dispatch(child: ast.AST, prefix: str, scope_qualname: str) -> None:
+        if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            qualname = f"{prefix}{child.name}#{child.lineno}"
+            containing[child.lineno, child.col_offset] = scope_qualname
+            for subtree in def_time_subtrees(child):
+                dispatch(subtree, qualname + ".", scope_qualname)
+            for stmt in child.body:
+                dispatch(stmt, qualname + ".", qualname)
+        elif isinstance(child, ast.Lambda):
+            qualname = f"{prefix}<lambda>#{child.lineno}:{child.col_offset}"
+            containing[child.lineno, child.col_offset] = scope_qualname
+            for subtree in def_time_subtrees(child):
+                dispatch(subtree, qualname + ".", scope_qualname)
+            dispatch(child.body, qualname + ".", qualname)
+        elif isinstance(
+            child, (ast.ListComp, ast.SetComp, ast.DictComp, ast.GeneratorExp)
+        ):
+            qualname = f"{prefix}<comp>#{child.lineno}:{child.col_offset}"
+            visit(child, qualname + ".", qualname)
+        elif isinstance(child, ast.ClassDef):
+            class_qualname = f"{prefix}{child.name}#{child.lineno}<class-body>"
+            containing[child.lineno, child.col_offset] = scope_qualname
+            visit(child, f"{prefix}{child.name}.", class_qualname)
+        else:
+            visit(child, prefix, scope_qualname)
+
     def visit(node: ast.AST, prefix: str, scope_qualname: str) -> None:
         for child in ast.iter_child_nodes(node):
-            if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                qualname = f"{prefix}{child.name}#{child.lineno}"
-                containing[child.lineno, child.col_offset] = scope_qualname
-                visit(child, qualname + ".", qualname)
-            elif isinstance(child, ast.Lambda):
-                qualname = f"{prefix}<lambda>#{child.lineno}:{child.col_offset}"
-                containing[child.lineno, child.col_offset] = scope_qualname
-                visit(child, qualname + ".", qualname)
-            elif isinstance(
-                child, (ast.ListComp, ast.SetComp, ast.DictComp, ast.GeneratorExp)
-            ):
-                qualname = f"{prefix}<comp>#{child.lineno}:{child.col_offset}"
-                visit(child, qualname + ".", qualname)
-            elif isinstance(child, ast.ClassDef):
-                class_qualname = f"{prefix}{child.name}#{child.lineno}<class-body>"
-                containing[child.lineno, child.col_offset] = scope_qualname
-                visit(child, f"{prefix}{child.name}.", class_qualname)
-            else:
-                visit(child, prefix, scope_qualname)
+            dispatch(child, prefix, scope_qualname)
 
     visit(tree, "", "<module>")
     return containing
