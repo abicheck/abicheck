@@ -373,6 +373,30 @@ def _outermost_containing_expr(node: ast.AST, parents: dict[int, ast.AST]) -> as
     return current
 
 
+def _imported_class_aliases(tree: ast.Module) -> dict[str, str]:
+    """Map every local name *tree* imports one of `FACT_BRIDGED_CLASS_NAMES`
+    under (via `as`) back to its real name -- `from abicheck.model import
+    RecordType as RT` maps `"RT" -> "RecordType"` (Codex review, fresh
+    evidence: a positional class pattern on such an alias, `case
+    RT(_, _, _, _, _, []):`, is invisible to a bare-name check against the
+    literal `RecordType`/`Param` spellings). An import with no `as` needs
+    no entry -- the bare name already matches directly. Whole-tree, not
+    function-scoped: an import is visible for its whole enclosing scope
+    (almost always module level) regardless of where in the file a
+    positional pattern later uses it, and scanning the whole tree is the
+    same over-approximating-is-safe stance this module already takes
+    elsewhere.
+    """
+    aliases: dict[str, str] = {}
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.Import, ast.ImportFrom)):
+            for alias in node.names:
+                local = alias.asname or alias.name
+                if alias.name in FACT_BRIDGED_CLASS_NAMES and local != alias.name:
+                    aliases[local] = alias.name
+    return aliases
+
+
 def unmigrated_fact_reader_sites(
     tree: ast.Module, rel: str, source: str = ""
 ) -> list[tuple[str, int, str, str]]:
@@ -419,12 +443,23 @@ def unmigrated_fact_reader_sites(
     same "no type inference" limit already stated below). Rather than
     silently missing this shape the way the keyword-only fix above still
     would have, ANY non-empty positional pattern on a `MatchClass` whose
-    `cls` resolves (by bare name) to `RecordType`/`Param`
-    (`FACT_BRIDGED_CLASS_NAMES`) is reported with a synthetic
-    `<positional>` attr, on the conservative-by-design principle this
-    whole module already applies: a false positive here (a positional
+    `cls` resolves (by bare name, following an import alias -- see below)
+    to `RecordType`/`Param` (`FACT_BRIDGED_CLASS_NAMES`) is reported with a
+    synthetic `<positional>` attr, on the conservative-by-design principle
+    this whole module already applies: a false positive here (a positional
     pattern that happens to touch none of the five bridged fields) costs a
     reviewed baseline entry; a false negative would be silent.
+
+    **An import alias is resolved before that name check (Codex review,
+    fresh evidence).** `from abicheck.model import RecordType as RT` then
+    `case RT(_, _, _, _, _, []):` names the identical class, but a bare
+    `node.cls.id in FACT_BRIDGED_CLASS_NAMES` check rejects `"RT"` outright
+    -- invisible to the positional-pattern fix above despite being exactly
+    the shape it exists to catch. `_imported_class_aliases()` maps every
+    such local alias back to its real name (whole-tree, since an import is
+    visible for its entire enclosing scope regardless of where a later
+    pattern uses it), and the positional-pattern check resolves through it
+    before testing membership.
 
     **The key also fingerprints the *containing expression*, not only the
     read's own bare expression (Codex review, third round, fresh
@@ -467,6 +502,7 @@ def unmigrated_fact_reader_sites(
     """
     qualnames = _enclosing_qualnames(tree)
     parents = _parent_map(tree)
+    class_aliases = _imported_class_aliases(tree)
 
     def _expr_text(node: ast.AST) -> str:
         outer = _outermost_containing_expr(node, parents)
@@ -503,16 +539,15 @@ def unmigrated_fact_reader_sites(
                         class_text,
                     )
                 )
-            if node.patterns and (
-                (
-                    isinstance(node.cls, ast.Name)
-                    and node.cls.id in FACT_BRIDGED_CLASS_NAMES
-                )
-                or (
-                    isinstance(node.cls, ast.Attribute)
-                    and node.cls.attr in FACT_BRIDGED_CLASS_NAMES
-                )
-            ):
+            cls_name: str | None = None
+            if isinstance(node.cls, ast.Name):
+                cls_name = node.cls.id
+            elif isinstance(node.cls, ast.Attribute):
+                cls_name = node.cls.attr
+            resolved_cls_name = (
+                class_aliases.get(cls_name, cls_name) if cls_name else None
+            )
+            if node.patterns and resolved_cls_name in FACT_BRIDGED_CLASS_NAMES:
                 # A positional pattern can't be resolved to a specific
                 # field name without real `__match_args__` introspection
                 # (see this function's own docstring) -- report it

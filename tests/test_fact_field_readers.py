@@ -337,6 +337,40 @@ class TestUnmigratedFactReaderSites:
         tree = ast.parse(src, filename="x.py")
         assert unmigrated_fact_reader_sites(tree, "x.py", src) == []
 
+    def test_detects_a_positional_pattern_through_an_import_alias(self) -> None:
+        """`from abicheck.model import RecordType as RT` then `case
+        RT(_, _, _, _, _, []):` names the identical class, but a bare
+        `node.cls.id in FACT_BRIDGED_CLASS_NAMES` check rejects `"RT"`
+        outright (Codex review: an import alias must not defeat the
+        positional-pattern fix)."""
+        src = (
+            "from abicheck.model import RecordType as RT\n"
+            "def f(rec):\n"
+            "    match rec:\n"
+            "        case RT(_, _, _, _, _, []):\n"
+            "            return True\n"
+            "    return False\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        keys = [
+            key for key, _l, _a, _q in unmigrated_fact_reader_sites(tree, "x.py", src)
+        ]
+        assert keys == [
+            "x.py::f::<positional>::RT(_, _, _, _, _, [])::RT(_, _, _, _, _, [])::1"
+        ]
+
+    def test_ignores_an_import_alias_of_an_unrelated_class(self) -> None:
+        src = (
+            "from somewhere import Unrelated as U\n"
+            "def f(rec):\n"
+            "    match rec:\n"
+            "        case U(_, _, []):\n"
+            "            return True\n"
+            "    return False\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert unmigrated_fact_reader_sites(tree, "x.py", src) == []
+
 
 def test_check_reports_a_new_unlisted_violation(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch

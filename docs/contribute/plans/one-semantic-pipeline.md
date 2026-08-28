@@ -1125,6 +1125,22 @@ bare text now getting distinct keys with no ordinal needed, a compound
 statement's body confirmed excluded from the key, a positional pattern on
 a bridged class detected, and one on an unrelated class ignored.
 
+**A seventh Codex review round found the positional-pattern fix itself
+was defeated by an import alias, fixed in the same PR.** `from
+abicheck.model import RecordType as RT` then `case RT(_, _, _, _, _,
+[]):` names the identical class, but a bare `node.cls.id in
+FACT_BRIDGED_CLASS_NAMES` check rejects `"RT"` outright — invisible to
+the positional-pattern fix despite being exactly the shape it exists to
+catch. Fixed with `_imported_class_aliases()`: maps every local name an
+`import`/`from ... import` statement binds one of `FACT_BRIDGED_CLASS_
+NAMES` under (via `as`) back to its real name, whole-tree rather than
+function-scoped (an import is visible for its entire enclosing scope
+regardless of where a later pattern uses it) — the positional-pattern
+check resolves through this map before testing membership. Verified
+empirically: still zero existing hits, baseline stays at 104. New tests:
+a positional pattern through an import alias detected, one on an alias
+of an unrelated class ignored.
+
 **Still not landed**: no detector (`diff_layout.py`/`diff_types.py`/
 `diff_param_qualifiers.py`/the reader set the check above now tracks
 precisely) has actually been migrated to read `.status` — the check above
