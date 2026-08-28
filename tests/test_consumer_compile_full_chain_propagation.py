@@ -981,3 +981,64 @@ def test_bundle_kind_and_no_overlay_never_leak_the_workflow_global_path() -> Non
         "a profile with no consumer_compile overlay must leave the "
         "consumer-context step disabled end to end"
     )
+
+
+def test_mutating_the_real_hop2_gate_leaks_the_workflow_global_path() -> None:
+    """Phase 6's own mutation-check requirement (bug-class-regression-
+    testing.md: "deliberately removing one forwarding edge... must make
+    the suite fail and name the missing path"), applied to the REAL
+    evaluator-based chain this file builds -- not just the substring-
+    matching `TestConsumerCompilePropagationChainMutationCheck` class in
+    test_reusable_workflows_project_evidence.py (Codex review, PR #906):
+    that class proves only that `_assert_step_input_forwards`'s own exact-
+    string comparison rejects a hand-modified `with:` dict -- a helper this
+    file's own tests never call at all. It never showed that
+    `eval_gha_expression` itself -- the primitive every test in this file
+    is built on -- produces a different, WRONG answer when a real hop-2
+    forwarding expression is mutated the way #860/#883's own root causes
+    actually broke (dropping/inverting a gate).
+
+    This constructs the identical single-character class of mutation
+    (`&&` -> `||` in the activation gate) against the REAL, unmodified
+    `consumer-gcc-path` expression text pulled live from check-project.yml
+    -- the same text every other test in this file evaluates -- and proves
+    the mutated text evaluates DIFFERENTLY from the real text for an
+    inactive, no-overlay cell paired with a nonempty workflow-global path:
+    the real expression correctly resolves empty (matching this file's own
+    `test_bundle_kind_and_no_overlay_never_leak_the_workflow_global_path`),
+    while the mutated one leaks the workflow-global value. This is the
+    proof the harness would have caught #860/#883 before merge -- not
+    merely that a hand-written comparison helper works in isolation."""
+    run_step = _run_check_step("Run check-target")
+    real_expr = run_step["with"]["consumer-gcc-path"]
+    gate = "matrix.kind != 'bundle' && matrix.consumer_compile_active"
+    assert gate in real_expr, (
+        "the real consumer-gcc-path expression no longer contains the "
+        "exact activation gate this mutation targets -- update the "
+        "mutation to match the real expression's current text"
+    )
+    mutated_expr = real_expr.replace(
+        gate, "matrix.kind != 'bundle' || matrix.consumer_compile_active", 1
+    )
+    assert mutated_expr != real_expr
+
+    # An inactive, no-overlay target cell -- the exact scenario
+    # test_bundle_kind_and_no_overlay_never_leak_the_workflow_global_path
+    # already pins the REAL expression's correct ("") answer for.
+    matrix = {"kind": "target", "consumer_compile_active": False}
+    inputs = {"gcc-path": _WORKFLOW_GLOBAL_GCC_PATH}
+
+    real_result = eval_gha_expression(real_expr, matrix=matrix, inputs=inputs)
+    mutated_result = eval_gha_expression(mutated_expr, matrix=matrix, inputs=inputs)
+
+    assert real_result == "", (
+        "sanity check: the real, unmodified expression must still resolve "
+        "empty for this inactive, no-overlay cell"
+    )
+    assert mutated_result == _WORKFLOW_GLOBAL_GCC_PATH, (
+        "the deliberately mutated expression must leak the workflow-global "
+        "path for this same inactive cell -- if it doesn't, eval_gha_"
+        "expression (and therefore every full-chain test built on it) "
+        "would NOT actually have caught this class of regression, "
+        "contradicting the mutation-check claim this test exists to prove"
+    )

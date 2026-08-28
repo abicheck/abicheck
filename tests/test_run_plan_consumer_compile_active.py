@@ -67,15 +67,24 @@ def test_consumer_compile_overlay_equal_to_producer_is_still_active() -> None:
     """An explicit ``consumer_compile:`` overlay whose fields happen to equal
     the producer ``compile:`` overlay's own values (a consumer who genuinely
     wants the same toolchain, just declared explicitly rather than by
-    omission) must still resolve as active -- bug-class-regression-
-    testing.md Phase 6's "explicit-equal-to-default" state, distinguishing
-    it from the "omitted"/"explicit empty" states above, which project the
-    same *values* but for a structurally different reason (no overlay at
-    all, vs. an overlay that happens to agree). Collapsing the two would
-    mean a workflow later distinguishing "client and producer toolchain
+    omission) must still resolve as active -- distinguishing it from the
+    "omitted"/"explicit empty" states above, which project the same
+    *values* but for a structurally different reason (no overlay at all,
+    vs. an overlay that happens to agree). Collapsing the two would mean a
+    workflow later distinguishing "client and producer toolchain
     intentionally pinned identical" from "no client toolchain declared"
     (e.g. to still run the separate consumer-context dump for audit
     purposes) loses that distinction silently.
+
+    This is its own real, worthwhile state, but is NOT bug-class-
+    regression-testing.md Phase 6's "explicit-equal-to-default" state --
+    an earlier revision of this docstring claimed it was (Codex review,
+    PR #906): "equal to the *producer's own explicit value*" and "equal to
+    the *default* (what an omitted/empty overlay would itself resolve to)"
+    are different comparisons, since the producer's `compile:` value here
+    is itself explicit, not any kind of default. See
+    `test_consumer_compile_overlay_explicit_frontend_equal_to_its_own_
+    runtime_default_is_still_active` below for the genuine fifth state.
     """
     raw = {
         "targets": _RAW["targets"],
@@ -106,3 +115,48 @@ def test_consumer_compile_overlay_equal_to_producer_is_still_active() -> None:
     assert d["consumer_compile_active"] is True
     assert "consumer_compile_gcc_path" in d
     assert "consumer_compile_gcc_options" in d
+
+
+def test_consumer_compile_overlay_explicit_frontend_equal_to_its_own_runtime_default_is_still_active() -> (
+    None
+):
+    """Phase 6's genuine "explicit-equal-to-default" state (Codex review,
+    PR #906): an explicit ``consumer_compile.frontend: auto`` -- `"auto"`
+    being the documented no-op/default `--ast-frontend` spelling
+    (`action/run.sh`'s own comment: "'auto' is the documented no-op
+    spelling of ast-frontend") -- is semantically equal to what the AST
+    frontend would resolve to anyway if `frontend` were never set at all,
+    yet the overlay's own PRESENCE must still activate
+    `consumer_compile_active`, exactly as any other non-empty field would.
+    This is different from every state already covered here: omission
+    (`test_consumer_compile_active_is_true_only_with_a_real_overlay`)
+    genuinely has no `frontend` key and is inactive; explicit empty
+    (`test_empty_consumer_compile_overlay_is_not_active`) has no non-
+    default field at all and is inactive; explicit-equal-to-*producer*
+    (the test above) compares against another explicit value, not a
+    default. Only this case compares an explicit, non-empty field value
+    against its own eventual runtime default while the field itself is
+    still genuinely present -- `ProfileCompileSpec.is_empty`'s structural
+    check (`self == ProfileCompileSpec()`) correctly treats a non-empty
+    `frontend` string as active regardless of what it happens to equal
+    downstream, since the dataclass itself has no notion of "auto" being
+    special."""
+    raw = {
+        "targets": _RAW["targets"],
+        "profiles": {
+            "explicit-auto-frontend": {
+                "contract": True,
+                "consumer_compile": {"frontend": "auto"},
+            },
+        },
+        "baseline": _RAW["baseline"],
+    }
+    config = _parsed(raw)
+    plan, report = generate_run_plan(config, {"explicit-auto-frontend": _bo("libfoo")})
+    assert report.ok
+    [check] = plan.checks
+    assert check.consumer_compile_active is True
+    assert check.consumer_compile_ast_frontend == "auto"
+    d = check.to_dict()
+    assert d["consumer_compile_active"] is True
+    assert d["consumer_compile_ast_frontend"] == "auto"
