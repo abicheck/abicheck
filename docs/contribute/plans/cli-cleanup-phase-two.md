@@ -2305,6 +2305,49 @@ pipelines a fourth time.
   > already-scoped test run. This step stays open until someone actually
   > runs it.
   >
+  > **Update (2026-08-28): the Flow-2 half is closed.** A real Flow-2 pack
+  > fixture (`write_inputs_pack`) was built and run through
+  > `_write_snapshot_output(snap, ..., inputs_pack=...)` with `snap` produced
+  > by the real `resolve_dump_request`/`execute_dump_request` split, not a
+  > hand-stubbed pack. The fold does the identical combination
+  > `_combine_packs`'s own documented per-layer priority already predicts,
+  > regardless of how `snap.build_source` was populated: it is not a
+  > per-fact merge — `bi_pack` (the resolve-time-embedded snapshot passed as
+  > `embed_inputs_pack`'s first argument) wins L3 (`build_evidence`) first,
+  > while `src_pack` (the ingested Flow-2 pack, second argument) wins
+  > L4/L5 (`source_abi`/`source_graph`) first when it supplies real facts —
+  > wholesale per layer, not unioned. Verified both directions with a
+  > fixture where the Flow-2 pack supplies a declaration (`helper`, declared
+  > in no header the resolve-time embed ever parsed) the resolve-time L4
+  > surface has no way to see: the written snapshot links `helper` (the
+  > Flow-2 replacement took effect) while the resolve-time embed's own L3
+  > compile-unit facts — the one layer Flow-2 did not supply here — survive
+  > the combination untouched, and the resolve-time embed's own L4 fact for
+  > `sum()` does *not* survive (pinning the wholesale-replacement,
+  > not-a-merge semantics itself, not just the positive case). **Correction
+  > (Codex review, PR #917): L5 is not independently preserved in this
+  > scenario** — `ingest_inputs_pack` builds `source_abi`/`source_graph`
+  > together from the same `tus` list whenever any TU is supplied, so a
+  > Flow-2 pack that replaces L4 always supplies a real, non-empty L5 graph
+  > too, and `_combine_packs` prefers `src_pack` for L5 exactly as it does
+  > for L4 — the resolve-time embed's own graph (17 nodes, including a
+  > `sum()` declaration node) is replaced wholesale by Flow-2's own graph
+  > (8 nodes, containing only `helper`), confirmed directly by asserting the
+  > `sum()` node is absent and the `helper` node present in the final graph
+  > rather than only that the graph is non-empty (an earlier revision of
+  > this test asserted only non-emptiness, which passed regardless of which
+  > pack's graph won). This is not new behavior introduced by a
+  > resolve-time embed — `_combine_packs`'s per-layer priority is
+  > unconditional on how either pack was produced — but it was genuinely
+  > unverified for this specific base-pack shape until now. Test:
+  > `tests/test_dump_write_after_resolve_time_embed.py::
+  > test_write_snapshot_output_folds_a_flow2_inputs_pack_onto_a_resolve_time_embedded_snapshot`.
+  > This closes the Flow-2 half of the reordering prerequisite in full; the
+  > still-unstarted third step above (the whole migrated pipeline's
+  > byte-identical-output verification, blocked only on castxml before this
+  > update, no longer blocked on it either) remains the sole open item in
+  > this prerequisite.
+  >
   > **Item 2 (the L4 extractor default divergence) is now locally
   > reconfirmed under real castxml — but this is a reproduction of an
   > already-established fact, not its first verification, and deliberately
