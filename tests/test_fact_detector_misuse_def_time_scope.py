@@ -631,3 +631,48 @@ class TestForLoopLiteralCollectionResolvesThroughExistingAliases:
         )
         tree = ast.parse(src, filename="x.py")
         assert fact_equality_misuse_sites(tree, "x.py") == []
+
+
+class TestWalrusInAnnotationsContainingScope:
+    """A walrus inside a parameter's own annotation or the `->` return
+    annotation evaluates at the identical def-time, in the identical
+    containing scope, as a default value does -- the walrus-collection
+    loop in `_fact_aliases()` only ever walked defaults, not annotations,
+    the binding-side counterpart of a gap this module's read-side sibling
+    (`_default_and_annotation_scope_overrides()`) already closed."""
+
+    def test_detects_a_comparison_through_a_walrus_in_a_parameter_annotation(
+        self,
+    ) -> None:
+        src = (
+            "def inner(x: (fact := rec.bases_fact)):\n"
+            "    return x\n"
+            "print(fact == other)\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert fact_equality_misuse_sites(tree, "x.py") == [(3, 6)]
+
+    def test_detects_a_comparison_through_a_walrus_in_a_return_annotation(
+        self,
+    ) -> None:
+        src = (
+            "def inner() -> (fact := rec.bases_fact):\n"
+            "    return None\n"
+            "print(fact == other)\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert fact_equality_misuse_sites(tree, "x.py") == [(3, 6)]
+
+    def test_ignores_a_walrus_in_a_nested_lambda_inside_an_annotation(self) -> None:
+        """Negative control: the identical nested-scope-boundary rule
+        `_iter_default_subtree()` already applies to defaults applies
+        here too -- a walrus inside a lambda's own body, itself sitting
+        inside an annotation, binds in the lambda's own scope when
+        called, never the enclosing one."""
+        src = (
+            "def inner(x: (lambda: (fact := rec.bases_fact))()):\n"
+            "    return x\n"
+            "print(fact == other)\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert fact_equality_misuse_sites(tree, "x.py") == []

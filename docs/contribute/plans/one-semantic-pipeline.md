@@ -2189,6 +2189,38 @@ the real repository. New tests:
 `TestForLoopLiteralCollectionResolvesThroughExistingAliases` in `tests/
 test_fact_detector_misuse_def_time_scope.py`.
 
+**A CodeRabbit review round found one more real gap: `_fact_aliases()`'s
+walrus-collection loop only ever walked `node.args.defaults`/
+`kw_defaults`, never a parameter's own annotation or the `->` return
+annotation.** `def inner(x: (fact := rec.bases_fact)): ...` -- absent
+`from __future__ import annotations`, Python evaluates a parameter
+annotation at the identical def-time, in the identical containing scope,
+a default value does -- but this loop's own construction (mirroring only
+half of `_default_and_annotation_scope_overrides()`'s already-wider
+`subtrees` list, this module's read-side sibling function) never
+included either, so a walrus there fell through to the generic,
+position-based `NamedExpr` branch and was misattributed to the
+function's own body scope, the identical failure mode every earlier
+round in this section already fixed for defaults specifically. Fixed by
+widening the loop's own subtree collection to mirror `_default_and_
+annotation_scope_overrides()`'s exactly (every parameter's own
+annotation, plus `returns` when present) -- unconditionally, regardless
+of whether the module actually has `from __future__ import annotations`
+in effect, matching that sibling function's own already-established,
+deliberately conservative choice: a walrus that in fact never executes
+under postponed evaluation registering a spurious alias is a false
+positive, the safe direction this module accepts throughout, rather than
+adding a second, narrower postponed-annotation-detection rule that would
+only complicate this loop without closing a real gap in the safe
+direction. Verified against the reported parameter-annotation repro, its
+return-annotation sibling, and a negative control confirming the
+existing nested-scope-boundary rule (`_iter_default_subtree()`, already
+relied on for defaults) applies identically to a lambda nested inside an
+annotation. Full existing suite unaffected. `mypy`/`ruff` both stayed
+clean, still zero existing hits in the real repository. New tests:
+`TestWalrusInAnnotationsContainingScope` in `tests/
+test_fact_detector_misuse_def_time_scope.py`.
+
 ---
 
 ### Phase 1 — finish the `dump`/`scan` typed-API convergence (closes AGENTS.md "PR C")

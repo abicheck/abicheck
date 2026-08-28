@@ -1440,8 +1440,39 @@ def _fact_aliases(tree: ast.Module, qualnames: _QualnameSpans) -> dict[str, set[
             # same way. An unrestricted `ast.walk(default_expr)` crossed
             # that boundary too, wrongly publishing the lambda-local walrus
             # target as an alias of the *enclosing* (here, module) scope.
+            #
+            # **A parameter annotation or return annotation is walked the
+            # identical way (CodeRabbit review, fresh evidence).** This
+            # loop only ever walked `node.args.defaults`/`kw_defaults` --
+            # but a walrus in a parameter's own annotation or the `->`
+            # return annotation binds at the identical def-time, in the
+            # identical containing scope, absent `from __future__ import
+            # annotations` (which this module's own sibling override
+            # function, `_default_and_annotation_scope_overrides()`,
+            # already treats every annotation as evaluated under
+            # regardless of postponed-evaluation status -- unconditionally
+            # walking here too matches that established, deliberately
+            # conservative choice rather than adding a second, narrower
+            # rule: a walrus that in fact never executes under postponed
+            # evaluation registering a spurious alias is a false positive,
+            # the safe direction this whole module already accepts
+            # throughout). `subtrees` mirrors that sibling function's own
+            # construction exactly, so the two can't independently drift.
             enclosing = def_containing.get((node.lineno, node.col_offset), "<module>")
-            for default_expr in (*node.args.defaults, *node.args.kw_defaults):
+            walrus_subtrees = [*node.args.defaults, *node.args.kw_defaults]
+            for arg in (
+                *node.args.posonlyargs,
+                *node.args.args,
+                *node.args.kwonlyargs,
+                *((node.args.vararg,) if node.args.vararg else ()),
+                *((node.args.kwarg,) if node.args.kwarg else ()),
+            ):
+                if arg.annotation is not None:
+                    walrus_subtrees.append(arg.annotation)
+            walrus_returns = getattr(node, "returns", None)
+            if walrus_returns is not None:
+                walrus_subtrees.append(walrus_returns)
+            for default_expr in walrus_subtrees:
                 if default_expr is None:
                     continue
                 for walrus in _iter_default_subtree(default_expr):
