@@ -209,14 +209,11 @@
         "abicheck/service.py",
         "abicheck/service_compare_evidence.py",
         "abicheck/service_compare_pipeline.py",
-        "abicheck/service_dump_cache.py",
         "abicheck/service_dump_pipeline.py",
-        "abicheck/service_header_graph_attach.py",
         "abicheck/service_header_scoped.py",
         "abicheck/service_input_resolution.py",
         "abicheck/service_metadata_attach.py",
         "abicheck/service_scan.py",
-        "abicheck/stack_binding_diff.py",
         "abicheck/stack_checker.py"
       ]
     },
