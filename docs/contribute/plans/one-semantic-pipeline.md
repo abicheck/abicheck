@@ -1043,6 +1043,38 @@ until a pass adds nothing new — bounded by construction (finitely many
 candidates, each pass adds at least one or the loop stops). New test:
 `test_detects_a_comparison_through_a_chained_alias`.
 
+**A third Codex round found two more real gaps, both fixed in the same
+PR.** (1) `old_fact: Fact[list[str]] = old.bases_fact` is an
+`ast.AnnAssign`, a distinct node type the candidate collection (`ast.
+Assign`-only) never matched at all — the ordinary annotated-assignment
+spelling bypassed the gate entirely. Fixed by collecting `AnnAssign` too:
+its own annotation is an unconditional signal on its own (mirroring the
+function-parameter case — a bare `old_fact: Fact[...]` with no value is
+still Fact-typed), and when it isn't Fact-typed but a value is present,
+the assignment still joins the ordinary fixed-point candidate pool. (2)
+`fact = rec.bases_fact` in an outer function, then `def inner(): return
+fact == other` — `inner`'s own qualname has no assignment establishing
+`fact`, but it's a real, visible closure variable there; a lookup scoped
+strictly to the exact qualname missed it. Fixed by processing qualnames
+in shallowest-first order (by dot-count — a real approximation of "outer
+scopes before inner ones", not exact Python scoping since a class body
+isn't actually a closure scope for its methods, but the same
+over-approximating-is-safe direction this whole module already takes)
+and seeding each qualname's known-alias set with its lexical parent's
+already-resolved set before running the fixed point over its own
+candidates. A real bug surfaced while implementing this: a qualname with
+no candidates or annotations of its own (like `inner` in that example)
+was never added to the `dict`, so its own lookup silently saw nothing
+rather than its parent's set — fixed by unioning in every qualname
+`_enclosing_qualnames` actually produced, not just ones with a candidate.
+Re-verified the existing sibling-non-leakage guarantee still holds (an
+alias in one function must not leak into an unrelated, non-nested sibling
+sharing a parameter name) with a dedicated test alongside the two new
+ones. Verified empirically: still zero existing hits under `abicheck/`
+today. New tests: an annotated local assignment, a bare annotated local
+with no value, a closure over an outer alias, and the sibling-leakage
+negative control restated for this fix.
+
 ---
 
 ### Phase 1 — finish the `dump`/`scan` typed-API convergence (closes AGENTS.md "PR C")

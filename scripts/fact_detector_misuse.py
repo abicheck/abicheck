@@ -215,6 +215,30 @@ def _fact_aliases(tree: ast.Module, qualnames: dict[int, str]) -> dict[str, set[
     nothing new. Bounded by construction (each pass either adds at least
     one alias or the loop stops, and there are only finitely many
     candidates), so this always terminates.
+
+    **An annotated assignment is a candidate too (Codex review, fresh
+    evidence).** `old_fact: Fact[list[str]] = old.bases_fact` is an
+    `ast.AnnAssign`, not an `ast.Assign` -- a distinct node type the
+    original candidate collection didn't match at all. Its own annotation
+    is also an unconditional signal on its own (mirroring the function-
+    parameter case): `old_fact: Fact[list[str]]` with no meaningful value
+    is Fact-typed regardless of what (if anything) resolves on the RHS.
+
+    **Aliases propagate from an enclosing function into a nested one
+    (Codex review, fresh evidence).** `fact = rec.bases_fact` in an outer
+    function, then `def inner(): return fact == other` -- `inner`'s own
+    qualname (e.g. `"f.inner"`) has no assignment of its own establishing
+    `fact`, so a lookup scoped strictly to that exact qualname misses it,
+    even though `fact` is a real, visible closure variable there. Resolved
+    by processing qualnames in shallowest-first order (by dot-count -- a
+    real approximation of "outer scopes before inner ones", not exact
+    Python scoping since a class body isn't actually a closure scope for
+    its methods, but the same over-approximating-is-safe direction this
+    whole module already takes) and seeding each qualname's known-alias
+    set with its lexical parent's *already-resolved* set before running
+    the fixed point over its own candidates -- so a nested function's own
+    reassignment of an inherited alias is caught too, not just a bare
+    read of the outer name.
     """
     aliases: dict[str, set[str]] = {}
     candidates: dict[str, list[tuple[str, ast.expr]]] = {}
@@ -226,6 +250,12 @@ def _fact_aliases(tree: ast.Module, qualnames: dict[int, str]) -> dict[str, set[
         ):
             qualname = qualnames.get(node.lineno, "<module>")
             candidates.setdefault(qualname, []).append((node.targets[0].id, node.value))
+        elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
+            qualname = qualnames.get(node.lineno, "<module>")
+            if _is_fact_typed_annotation(node.annotation):
+                aliases.setdefault(qualname, set()).add(node.target.id)
+            elif node.value is not None:
+                candidates.setdefault(qualname, []).append((node.target.id, node.value))
         elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
             qualname = qualnames.get(node.lineno, "<module>")
             all_args = (
@@ -237,12 +267,28 @@ def _fact_aliases(tree: ast.Module, qualnames: dict[int, str]) -> dict[str, set[
                 if _is_fact_typed_annotation(arg.annotation):
                     aliases.setdefault(qualname, set()).add(arg.arg)
 
-    for qualname, pending in candidates.items():
+    def _parent_qualname(qualname: str) -> str | None:
+        if qualname == "<module>" or "." not in qualname:
+            return "<module>" if qualname != "<module>" else None
+        return qualname.rsplit(".", 1)[0]
+
+    # Every scope actually in the tree, not just ones with a candidate or a
+    # directly-annotated alias of their own -- otherwise a scope with
+    # nothing but an inherited alias (e.g. `inner` in the closure example
+    # above) never gets processed at all, and its lookup below silently
+    # sees no entry rather than its parent's set.
+    all_qualnames = (
+        set(candidates) | set(aliases) | set(qualnames.values()) | {"<module>"}
+    )
+    for qualname in sorted(all_qualnames, key=lambda q: q.count(".")):
         known = aliases.setdefault(qualname, set())
+        parent = _parent_qualname(qualname)
+        if parent is not None:
+            known |= aliases.get(parent, set())
         changed = True
         while changed:
             changed = False
-            for name, value in pending:
+            for name, value in candidates.get(qualname, []):
                 if name in known:
                     continue
                 if _is_fact_typed_expr(value) or (

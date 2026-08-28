@@ -148,6 +148,64 @@ class TestFactEqualityMisuseSites:
         tree = ast.parse(src, filename="x.py")
         assert fact_equality_misuse_sites(tree, "x.py") == [(4, 11)]
 
+    def test_detects_a_comparison_through_an_annotated_local_assignment(
+        self,
+    ) -> None:
+        """`old_fact: Fact[list[str]] = old.bases_fact` is an `ast.AnnAssign`,
+        a distinct node type the original `ast.Assign`-only candidate
+        collection never matched at all (Codex review: the ordinary
+        annotated-assignment spelling must not bypass the gate)."""
+        src = (
+            "def f(old, other):\n"
+            "    old_fact: Fact[list[str]] = old.bases_fact\n"
+            "    return old_fact == other\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert fact_equality_misuse_sites(tree, "x.py") == [(3, 11)]
+
+    def test_detects_a_bare_annotated_local_with_no_value(self) -> None:
+        """The annotation alone is an unconditional signal, mirroring the
+        function-parameter case -- `old_fact: Fact[list[str]]` with no RHS
+        at all is still Fact-typed."""
+        src = "def f(other):\n    old_fact: Fact[list[str]]\n    return old_fact == other\n"
+        tree = ast.parse(src, filename="x.py")
+        assert fact_equality_misuse_sites(tree, "x.py") == [(3, 11)]
+
+    def test_detects_a_comparison_through_a_closure_over_an_outer_alias(
+        self,
+    ) -> None:
+        """`fact = rec.bases_fact` in an outer function, then `def
+        inner(): return fact == other` -- `inner`'s own qualname has no
+        assignment of its own establishing `fact`, but it's a real,
+        visible closure variable there (Codex review: a nested function
+        must inherit its enclosing scope's aliases)."""
+        src = (
+            "def f(rec, other):\n"
+            "    fact = rec.bases_fact\n"
+            "    def inner():\n"
+            "        return fact == other\n"
+            "    return inner()\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert fact_equality_misuse_sites(tree, "x.py") == [(4, 15)]
+
+    def test_inherited_alias_does_not_leak_into_an_unrelated_sibling(
+        self,
+    ) -> None:
+        """The closure-inheritance fix must not widen back into the
+        already-fixed sibling-leakage case: a name aliased in `f` still
+        must not make an unrelated same-named parameter in an unrelated,
+        non-nested sibling function `g` read as Fact-typed."""
+        src = (
+            "def f(rec):\n"
+            "    x = rec.bases_fact\n"
+            "    return x\n"
+            "def g(x, y):\n"
+            "    return x == y\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert fact_equality_misuse_sites(tree, "x.py") == []
+
     def test_detects_a_comparison_between_two_fact_annotated_parameters(
         self,
     ) -> None:
