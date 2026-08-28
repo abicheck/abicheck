@@ -1956,6 +1956,31 @@ unrelated object's own `.vars()` method). Zero existing hits, `mypy`/
 `ruff` both stayed clean. New tests in `TestVarsAliasesInMappingReads`
 (`tests/test_fact_field_readers_wrapper_scoping.py`).
 
+**A further Codex review round found one more real gap: `_operator_
+attrgetter_aliases()`'s own assignment-chain resolution never recognized
+a *qualified* RHS.** `import operator as op; ag = op.attrgetter;
+ag("bases")(rec)` was invisible, since `_add_candidate()` only ever
+matched a plain `ast.Name` value -- the identical gap `_builtins_getattr_
+aliases()`'s own `qualified_candidates` mechanism already closes for
+`read_attr = builtins.getattr`. Fixed the same way: a qualified
+`X.attrgetter` assignment is collected into a new `qualified_candidates`
+list during the same walk, resolved once the walk (and therefore
+`operator_names`) is complete -- since, unlike the plain-name chain, this
+needs the *complete* set to know whether `X` really is a resolved
+`operator` alias. The resolution order matters: `operator_names`'s own
+fixed point runs first, then the qualified resolution folds into
+`attrgetter_names`, then `attrgetter_names`'s own plain-name fixed point
+runs last -- so a name assigned from a qualified alias can itself be
+chained further (`ag = op.attrgetter; ag2 = ag`).
+
+Verified against the reported repro, a further-chained variant
+(confirming the qualified resolution feeds back into the existing
+plain-name chain), and a negative control for an unrelated object's own
+`.attrgetter` attribute. Zero existing hits, `mypy`/`ruff` both stayed
+clean, `fact_field_readers.py` at 1741 lines (well under the 2000-line
+hard cap). New tests in `TestQualifiedAttrgetterAssignmentAliases`
+(`tests/test_fact_field_readers_wrapper_scoping.py`).
+
 **Still not landed**: no detector (`diff_layout.py`/`diff_types.py`/
 `diff_param_qualifiers.py`/the reader set the check above now tracks
 precisely) has actually been migrated to read `.status` — the check above

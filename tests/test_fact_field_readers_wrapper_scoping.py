@@ -121,6 +121,16 @@ Covers six independent Codex-review findings across three review rounds:
     specific half of that same alias-resolution mechanism, taking the
     caller's already-resolved ``builtins_names`` as a parameter rather
     than re-deriving it -- applied to ``vars``.
+
+11. **``_operator_attrgetter_aliases()``'s own assignment-chain
+    resolution never recognized a *qualified* RHS** -- ``import operator
+    as op; ag = op.attrgetter; ag("bases")(rec)`` was invisible, since
+    ``_add_candidate()`` only ever matched a plain ``ast.Name`` value,
+    the identical gap ``_builtins_getattr_aliases()``'s own
+    ``qualified_candidates`` mechanism already closes for ``read_attr =
+    builtins.getattr``. Fixed the same way: a qualified ``X.attrgetter``
+    assignment is collected during the walk and resolved once the walk
+    (and therefore ``operator_names``) is complete.
 """
 
 from __future__ import annotations
@@ -783,6 +793,56 @@ class TestVarsAliasesInMappingReads:
             "def f(rec):\n"
             "    fake = Fake()\n"
             '    return fake.vars(rec).get("bases")\n'
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert unmigrated_fact_reader_sites(tree, "x.py", src) == []
+
+
+class TestQualifiedAttrgetterAssignmentAliases:
+    """``_operator_attrgetter_aliases()`` resolves a qualified assignment
+    (``ag = op.attrgetter``, given a real ``operator`` alias ``op``) too,
+    not only a plain-name assignment chain."""
+
+    def test_detects_a_qualified_attrgetter_assignment(self) -> None:
+        src = (
+            "import operator as op\n"
+            "ag = op.attrgetter\n"
+            "def f(rec):\n"
+            '    return ag("bases")(rec)\n'
+        )
+        tree = ast.parse(src, filename="x.py")
+        keys = [
+            key for key, _l, _a, _q in unmigrated_fact_reader_sites(tree, "x.py", src)
+        ]
+        assert keys == ['x.py::f::bases::ag("bases")(rec)::ag("bases")::1']
+
+    def test_detects_a_further_chained_qualified_assignment(self) -> None:
+        """The qualified-assignment resolution feeds back into the
+        existing plain-name chain, so a second alias of the qualified
+        alias resolves too."""
+        src = (
+            "import operator as op\n"
+            "ag = op.attrgetter\n"
+            "ag2 = ag\n"
+            "def f(rec):\n"
+            '    return ag2("bases")(rec)\n'
+        )
+        tree = ast.parse(src, filename="x.py")
+        keys = [
+            key for key, _l, _a, _q in unmigrated_fact_reader_sites(tree, "x.py", src)
+        ]
+        assert keys == ['x.py::f::bases::ag2("bases")(rec)::ag2("bases")::1']
+
+    def test_ignores_a_qualified_attribute_on_an_unrelated_object(self) -> None:
+        """Negative control: an unrelated object's own `.attrgetter`
+        attribute (not a real `operator` alias) must not be recognized."""
+        src = (
+            "class Fake:\n"
+            "    attrgetter = None\n"
+            "def f(rec):\n"
+            "    fake = Fake()\n"
+            "    ag = fake.attrgetter\n"
+            '    return ag("bases")(rec)\n'
         )
         tree = ast.parse(src, filename="x.py")
         assert unmigrated_fact_reader_sites(tree, "x.py", src) == []

@@ -1020,6 +1020,23 @@ def _operator_attrgetter_aliases(
     correctly out of scope, see that function's own docstring) -- not the
     module/callable references resolved here.
 
+    **A *qualified* assignment (`ag = op.attrgetter`, given a resolved
+    `operator` alias `op`) is resolved too (Codex review, fresh
+    evidence, third round on this same helper).** `import operator as
+    op; ag = op.attrgetter; ag("bases")(rec)` -- the identical dynamic
+    read as every other alias shape this function already covers -- was
+    invisible, since `_add_candidate()` only ever recognized a plain
+    `ast.Name` RHS, never an `ast.Attribute` one, mirroring the identical
+    gap `_builtins_getattr_aliases()`'s own `qualified_candidates`
+    mechanism already closes for `read_attr = builtins.getattr`. Fixed
+    the same way: a qualified `X.attrgetter` assignment is collected
+    separately (`qualified_candidates`) during the same walk, then
+    resolved once *after* the walk finishes -- since, unlike the plain-
+    name chain, this needs the *complete* `operator_names` set to know
+    whether `X` really is a resolved `operator` alias, exactly the
+    reason `_builtins_getattr_aliases()`'s own qualified resolution runs
+    after its own import-collection walk too.
+
     **Seeded only from a verified import, not unconditionally the way
     `_builtins_getattr_aliases()` seeds bare `"getattr"` (Codex review,
     fresh evidence).** `getattr` is a real Python builtin, always in
@@ -1045,10 +1062,23 @@ def _operator_attrgetter_aliases(
     attrgetter_names: set[str] = set()
     operator_names: set[str] = set()
     assign_candidates: list[tuple[str, str]] = []
+    # `local = <module-name>.attrgetter` -- resolved once, after the walk
+    # below has finished collecting every `import operator` occurrence,
+    # since (unlike the plain-name candidates) this needs the *complete*
+    # `operator_names` set to know whether `<module-name>` really is one
+    # (mirroring `_builtins_getattr_aliases()`'s own identical two-phase
+    # resolution for `read_attr = builtins.getattr`).
+    qualified_candidates: list[tuple[str, str]] = []
 
     def _add_candidate(target: str, value: ast.expr | None) -> None:
         if isinstance(value, ast.Name):
             assign_candidates.append((target, value.id))
+        elif (
+            isinstance(value, ast.Attribute)
+            and value.attr == "attrgetter"
+            and isinstance(value.value, ast.Name)
+        ):
+            qualified_candidates.append((target, value.value.id))
 
     for node in ast.walk(tree):
         if isinstance(node, ast.ImportFrom) and node.module == "operator":
@@ -1069,19 +1099,22 @@ def _operator_attrgetter_aliases(
     while changed:
         changed = False
         for local, ref in assign_candidates:
-            if local in attrgetter_names:
-                continue
-            if ref in attrgetter_names:
-                attrgetter_names.add(local)
-                changed = True
-    changed = True
-    while changed:
-        changed = False
-        for local, ref in assign_candidates:
             if local in operator_names:
                 continue
             if ref in operator_names:
                 operator_names.add(local)
+                changed = True
+    for local, base in qualified_candidates:
+        if base in operator_names:
+            attrgetter_names.add(local)
+    changed = True
+    while changed:
+        changed = False
+        for local, ref in assign_candidates:
+            if local in attrgetter_names:
+                continue
+            if ref in attrgetter_names:
+                attrgetter_names.add(local)
                 changed = True
     return frozenset(attrgetter_names), frozenset(operator_names)
 
