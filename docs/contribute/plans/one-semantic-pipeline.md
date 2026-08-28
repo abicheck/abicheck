@@ -2221,6 +2221,97 @@ clean, still zero existing hits in the real repository. New tests:
 `TestWalrusInAnnotationsContainingScope` in `tests/
 test_fact_detector_misuse_def_time_scope.py`.
 
+**A further Codex review round found two more real gaps in
+`_is_fact_typed_expr()`'s and the loop-target machinery's own coverage,
+both fixed.**
+
+**(1) `_is_fact_typed_expr()` never unwrapped a conditional expression.**
+`(old.bases_fact if condition else new.bases_fact) == other` -- and the
+equivalent `fact = old.bases_fact if condition else new.bases_fact;
+fact == other` -- both genuinely produce a Fact-typed result regardless
+of which branch actually runs, but `ast.IfExp` had no branch in this
+function at all, unlike the already-handled `ast.NamedExpr` unwrap.
+Fixed with a new `ast.IfExp` branch requiring *both* `node.body` and
+`node.orelse` to independently resolve as Fact-typed -- deliberately
+narrower than `NamedExpr`'s unconditional unwrap, since an `IfExp`
+genuinely produces one of two *different* values depending on
+`condition`, so only the case where both are guaranteed Fact-typed
+regardless of outcome is a real, unconditional Fact-typed result;
+`old.bases_fact if condition else some_other_call()` must stay
+unflagged, the identical every-branch-must-agree principle the
+loop-target literal-collection fix earlier in this section already
+applies to a tuple's own elements. Verified against both the inline and
+assigned-then-compared repros, plus a negative control with one
+non-Fact branch.
+
+**(2) The loop-target literal-collection fix only ever handled a bare
+`ast.Name` target -- a tuple-*unpacking* target was silently excluded
+entirely.** `for fact, tag in ((old.bases_fact, "old"), (new.bases_fact,
+"new")): fact == other` -- each target position genuinely has its own
+per-iteration value, but neither the single-target `elif` branch nor
+anything else in this loop matched a `Tuple`/`List` target at all. Fixed
+with a new `elif` branch reusing `_paired_unpacking_candidates()` --
+the identical elementwise pairing `ast.Assign`'s own unpacking handling
+already relies on -- once per iteration element (each iteration element
+is exactly the "one assignment's worth" of value that function already
+knows how to pair against the loop's own, unchanging target shape). Any
+single iteration element that isn't itself a literal display of matching
+length (or that trips the starred-element exclusion
+`_paired_unpacking_candidates()` already applies) disqualifies the
+*whole* loop via an `all_iterations_paired` flag, rather than silently
+pairing only some iterations -- the identical "no candidates at all over
+a partial pairing" principle that function's own docstring already
+states, extended across iterations instead of within one. Once every
+iteration pairs successfully, each target name's own per-iteration
+values are collected and registered together, subject to the identical
+every-element-Fact-typed-or-deferred-name conjunctive requirement the
+simple-target case already applies via `tuple_loop_candidates`. Verified
+against the reported repro, a negative control confirming the sibling
+unpacked position (`tag`, never Fact-typed) stays unflagged even though
+`fact` in the same loop is, a negative control where one iteration
+element fails to pair (disqualifying the whole loop, not just that
+iteration), and a negative control for a starred unpacking target.
+
+Both fixes verified empirically: still zero existing hits in the real
+repository, `mypy`/`ruff` both stayed clean. New tests:
+`TestConditionalExpressionsRecognizedWhenBothBranchesAreFactTyped` and
+`TestForLoopUnpackingTargetsResolveElementwise` in `tests/
+test_fact_detector_misuse_def_time_scope.py`.
+
+**Split into a sibling module once these fixes pushed the file past the
+AI-readiness `file-size` gate's own 2000-line hard cap.** Every review
+round in this section added real, dense docstring explaining *why* --
+the file-size check does not distinguish code from documentation, and
+the growth was entirely legitimate (each finding needed its reasoning
+recorded, per this file's own "known gaps over risky reactive patches"
+and "fix the cause, not the instance" conventions), so the fix is a
+mechanical extraction, not a diet. The eight lexical-scope-resolution
+building blocks every alias-resolution function in this module builds on
+(`_enclosing_qualnames`/`_qualname_at`/`_QualnameSpans`,
+`_lexical_function_parents`, `_def_containing_qualnames`,
+`_bound_names`, `_paired_unpacking_candidates`, `_match_pattern_names`)
+moved, unchanged, into a new sibling leaf module,
+`scripts/fact_detector_misuse_scope.py`, imported by
+`fact_detector_misuse.py` via a sys.path guard mirroring
+`check_ai_readiness.py`'s own identical one -- needed because a bare,
+non-dotted `from fact_detector_misuse_scope import ...` only resolves
+when `scripts/` itself is on `sys.path`, which is guaranteed when this
+module is run directly (Python adds its own directory automatically) or
+when `check_ai_readiness.py` was imported first in the same process (it
+already inserts its own directory before importing `fact_detector_
+misuse` the identical bare way) -- but not guaranteed for a test file
+that imports `scripts.fact_detector_misuse` on its own, as two of this
+module's own test files already do. Verified by running each of those
+two test files in isolation (not just as part of the full suite), which
+is exactly the scenario a missing guard would silently pass in a
+full-suite run and fail only in isolation. `fact_detector_misuse.py`
+dropped from 2058 to 1369 lines; the new module is 739. No behavior
+change -- every moved function is bit-for-bit identical to its original,
+confirmed by the full existing test suite passing unchanged (142 tests
+across all three test files) and a fresh `mypy`/`ruff` pass on both
+files. Registered in `scripts/CLAUDE.md`'s inventory table (the
+`script-inventory` AI-readiness check's own requirement).
+
 ---
 
 ### Phase 1 — finish the `dump`/`scan` typed-API convergence (closes AGENTS.md "PR C")

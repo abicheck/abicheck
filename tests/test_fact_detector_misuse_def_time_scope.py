@@ -676,3 +676,105 @@ class TestWalrusInAnnotationsContainingScope:
         )
         tree = ast.parse(src, filename="x.py")
         assert fact_equality_misuse_sites(tree, "x.py") == []
+
+
+class TestConditionalExpressionsRecognizedWhenBothBranchesAreFactTyped:
+    """`(old.bases_fact if condition else new.bases_fact) == other` --
+    both branches independently resolve as Fact-typed, so the whole
+    expression is guaranteed to produce one regardless of which branch
+    runs."""
+
+    def test_detects_a_comparison_against_an_inline_conditional_expression(
+        self,
+    ) -> None:
+        src = (
+            "def f(old, new, condition, other):\n"
+            "    return (old.bases_fact if condition else new.bases_fact) "
+            "== other\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert fact_equality_misuse_sites(tree, "x.py") == [(2, 11)]
+
+    def test_detects_a_comparison_against_an_assigned_conditional_expression(
+        self,
+    ) -> None:
+        src = (
+            "def f(old, new, condition, other):\n"
+            "    fact = old.bases_fact if condition else new.bases_fact\n"
+            "    return fact == other\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert fact_equality_misuse_sites(tree, "x.py") == [(3, 11)]
+
+    def test_ignores_a_conditional_expression_with_one_non_fact_branch(self) -> None:
+        """Negative control: only one branch is Fact-typed, so the
+        expression isn't reliably a Fact regardless of which branch
+        actually runs -- must stay unflagged."""
+        src = (
+            "def f(old, condition, other):\n"
+            "    def some_call():\n"
+            "        return 1\n"
+            "    return (old.bases_fact if condition else some_call()) "
+            "== other\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert fact_equality_misuse_sites(tree, "x.py") == []
+
+
+class TestForLoopUnpackingTargetsResolveElementwise:
+    """`for fact, tag in ((old.bases_fact, "old"), (new.bases_fact,
+    "new")): fact == other` -- the tuple-unpacking sibling of the
+    single-target literal-collection case: each target position is
+    checked against its own per-iteration value, reusing
+    `_paired_unpacking_candidates()`'s own elementwise pairing once per
+    iteration element."""
+
+    def test_detects_a_comparison_against_an_unpacked_loop_target(self) -> None:
+        src = (
+            "def f(old, new, other):\n"
+            '    for fact, tag in ((old.bases_fact, "old"), '
+            '(new.bases_fact, "new")):\n'
+            "        return fact == other\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert fact_equality_misuse_sites(tree, "x.py") == [(3, 15)]
+
+    def test_ignores_the_sibling_position_that_is_never_fact_typed(self) -> None:
+        """Negative control: the *other* unpacked position (`tag`) is
+        never Fact-typed across any iteration and must stay unflagged,
+        even though a sibling position in the same loop is."""
+        src = (
+            "def f(old, new, other):\n"
+            '    for fact, tag in ((old.bases_fact, "old"), '
+            '(new.bases_fact, "new")):\n'
+            "        return tag == other\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert fact_equality_misuse_sites(tree, "x.py") == []
+
+    def test_ignores_a_loop_where_one_iteration_element_does_not_pair(self) -> None:
+        """Negative control: an iteration element that isn't itself a
+        literal display of matching length disqualifies the *whole*
+        loop, not just that one iteration -- a partial pairing is never
+        attempted."""
+        src = (
+            "def f(old, other, unrelated):\n"
+            '    for fact, tag in ((old.bases_fact, "old"), unrelated):\n'
+            "        return fact == other\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert fact_equality_misuse_sites(tree, "x.py") == []
+
+    def test_ignores_a_starred_unpacking_target(self) -> None:
+        """Negative control: a starred target captures an
+        arbitrary-length slice with no single corresponding per-iteration
+        sub-expression, mirroring `_paired_unpacking_candidates()`'s own
+        starred-target exclusion for a plain assignment."""
+        src = (
+            "def f(old, new, other):\n"
+            "    for fact, *rest in ((old.bases_fact, 1, 2), "
+            "(new.bases_fact, 3, 4)):\n"
+            "        return fact == other\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert fact_equality_misuse_sites(tree, "x.py") == []
