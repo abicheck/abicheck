@@ -606,3 +606,105 @@ class TestGenericSpecializedFactConstructorsAreRecognized:
         src = "def f(a, b):\n    return Fact(a) == Fact(b)\n"
         tree = ast.parse(src, filename="x.py")
         assert fact_equality_misuse_sites(tree, "x.py") == [(2, 11)]
+
+
+class TestStructuralSequencePatternCapturesPairWithTheSubject:
+    """`_paired_match_sequence_candidates()` pairs a structural sequence
+    pattern's own captures against a statically-known `Tuple`/`List`
+    subject's elements, positionally -- the `match`/`case` sibling of
+    `_paired_unpacking_candidates()` (Codex review, fresh evidence):
+    `match (rec.bases_fact, tag): case (fact, _): return fact == other`
+    -- `fact` is definitively the subject tuple's first, Fact-typed
+    element, but only a bare whole-subject `MatchAs`/OR-of-`MatchAs` was
+    previously recognized, never a structural pattern capturing a
+    sub-part of the subject."""
+
+    def test_detects_a_sequence_pattern_subvalue_capture(self) -> None:
+        src = (
+            "def f(rec, tag, other):\n"
+            "    match (rec.bases_fact, tag):\n"
+            "        case (fact, _):\n"
+            "            return fact == other\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert fact_equality_misuse_sites(tree, "x.py") == [(4, 19)]
+
+    def test_detects_a_nested_sequence_pattern_capture(self) -> None:
+        src = (
+            "def f(rec, tag, other):\n"
+            '    match ((rec.bases_fact, "x"), tag):\n'
+            "        case ((fact, _), _):\n"
+            "            return fact == other\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert fact_equality_misuse_sites(tree, "x.py") == [(4, 19)]
+
+    def test_detects_a_trailing_capture_after_a_star_pattern(self) -> None:
+        src = (
+            "def f(rec1, rec2, other):\n"
+            '    match ("x", rec1.bases_fact, rec2.vtable_fact):\n'
+            "        case (*_rest, fact):\n"
+            "            return fact == other\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert fact_equality_misuse_sites(tree, "x.py") == [(4, 19)]
+
+    def test_detects_a_leading_capture_before_a_star_pattern(self) -> None:
+        src = (
+            "def f(rec1, rec2, other):\n"
+            '    match (rec1.bases_fact, "x", rec2.vtable_fact):\n'
+            "        case (fact, *_rest):\n"
+            "            return fact == other\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert fact_equality_misuse_sites(tree, "x.py") == [(4, 19)]
+
+    def test_a_wildcard_position_does_not_block_a_capture_elsewhere(self) -> None:
+        """Positive control: a non-capturing sub-pattern (`_`) at one
+        position must not disqualify a real capture found at another --
+        only a shape mismatch (length, multiple stars) should."""
+        src = (
+            "def f(rec, unrelated, other):\n"
+            "    match (rec.bases_fact, unrelated()):\n"
+            "        case (fact, _):\n"
+            "            return fact == other\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert fact_equality_misuse_sites(tree, "x.py") == [(4, 19)]
+
+    def test_ignores_a_captured_non_fact_element(self) -> None:
+        """Negative control: the captured element genuinely isn't
+        Fact-typed -- must stay unflagged."""
+        src = (
+            "def f(rec, unrelated, other):\n"
+            "    match (unrelated(), rec.bases_fact):\n"
+            "        case (x, _):\n"
+            "            return x == other\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert fact_equality_misuse_sites(tree, "x.py") == []
+
+    def test_ignores_a_dynamic_non_static_subject(self) -> None:
+        """Negative control: the subject isn't a literal display at all,
+        so no element can be identified -- must stay unflagged."""
+        src = (
+            "def f(pair, other):\n"
+            "    match pair:\n"
+            "        case (fact, _):\n"
+            "            return fact == other\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert fact_equality_misuse_sites(tree, "x.py") == []
+
+    def test_ignores_a_pattern_subject_length_mismatch(self) -> None:
+        """Negative control: a pattern with more elements than the
+        statically-known subject can never actually match -- no position
+        can be confidently attributed, so no candidates are registered."""
+        src = (
+            "def f(rec, other):\n"
+            "    match (rec.bases_fact,):\n"
+            "        case (fact, extra):\n"
+            "            return fact == other\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert fact_equality_misuse_sites(tree, "x.py") == []

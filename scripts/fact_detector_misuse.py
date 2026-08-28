@@ -73,6 +73,7 @@ from fact_detector_misuse_scope import (  # noqa: E402
     _enclosing_qualnames,
     _lexical_function_parents,
     _match_pattern_names,
+    _paired_match_sequence_candidates,
     _paired_unpacking_candidates,
     _qualname_at,
     _QualnameSpans,
@@ -963,6 +964,22 @@ def _fact_aliases(tree: ast.Module, qualnames: _QualnameSpans) -> dict[str, set[
                         candidates.setdefault(qualname, []).append(
                             (first_alt.name, node.subject)
                         )
+                elif isinstance(case.pattern, ast.MatchSequence):
+                    # `case (fact, _):` -- a structural sequence pattern
+                    # capturing only a *sub*-part of the subject, not the
+                    # whole thing (Codex review, fresh evidence): `match
+                    # (rec.bases_fact, tag): case (fact, _): return fact ==
+                    # other` -- `fact` is definitively the subject tuple's
+                    # first element, but neither branch above applies
+                    # (`case.pattern` is a `MatchSequence`, not a bare
+                    # `MatchAs`/`MatchOr`-of-`MatchAs`). Paired positionally
+                    # against a statically-known `Tuple`/`List` subject via
+                    # `_paired_match_sequence_candidates()`, the `match`
+                    # sibling of `_paired_unpacking_candidates()`.
+                    for name, value in _paired_match_sequence_candidates(
+                        case.pattern, node.subject
+                    ):
+                        candidates.setdefault(qualname, []).append((name, value))
         elif isinstance(node, (ast.Import, ast.ImportFrom)):
             # `import json as fact` / `from pkg import item as fact` --
             # a real local binding too, the identical shadowing shape as

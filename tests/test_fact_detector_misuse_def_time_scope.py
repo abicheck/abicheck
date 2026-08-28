@@ -917,10 +917,17 @@ class TestWholeSubjectMatchCapturesAreAliases:
     def test_ignores_a_nested_capture_inside_a_structural_pattern(self) -> None:
         """Negative control: a capture nested inside a larger structural
         pattern only captures a *sub*-part of the subject, not the whole
-        thing, and must not be treated as an alias of the subject."""
+        thing, and must not be treated as an alias of the subject itself.
+        Uses a dynamic (non-statically-known) subject -- `pair`, not a
+        literal display -- so the elementwise structural-sequence pairing
+        (`TestStructuralSequencePatternCapturesPairWithTheSubject` in
+        `tests/test_fact_detector_misuse_alias_edge_cases.py`, which
+        legitimately *does* resolve a nested capture once the subject is a
+        literal `Tuple`/`List`) doesn't independently catch this repro
+        either, isolating this test to its original, narrower purpose."""
         src = (
-            "def f(rec, other):\n"
-            "    match [rec.bases_fact, 1]:\n"
+            "def f(pair, other):\n"
+            "    match pair:\n"
             "        case [x, y]:\n"
             "            return x == other\n"
         )

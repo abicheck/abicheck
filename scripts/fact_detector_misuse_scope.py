@@ -700,6 +700,70 @@ def _paired_unpacking_candidates(
     return candidates
 
 
+def _paired_match_sequence_candidates(
+    pattern: ast.MatchSequence, subject: ast.expr
+) -> list[tuple[str, ast.expr]]:
+    """Recursively pair a structural sequence pattern's own captures
+    against a statically-known `Tuple`/`List` *subject*'s elements,
+    positionally -- the `match`/`case` sibling of
+    :func:`_paired_unpacking_candidates` (Codex review, fresh evidence):
+    `match (rec.bases_fact, tag): case (fact, _): return fact == other`
+    -- `fact` is definitively the subject tuple's first, Fact-typed
+    element, but the existing whole-subject-capture handling only ever
+    recognized `case.pattern` itself being a bare `ast.MatchAs`, never a
+    *structural* pattern capturing a sub-part of the subject.
+
+    Unlike `_paired_unpacking_candidates`'s own all-or-nothing stance (a
+    length mismatch or a starred element anywhere disqualifies the whole
+    pairing), a non-capturing sub-pattern at one position -- a wildcard
+    `_`, a literal `MatchValue`, a `MatchClass` -- does *not* disqualify
+    a real capture found at another position: a structural pattern
+    routinely mixes captures with non-capturing sub-patterns, and that is
+    completely ordinary, not a sign the pairing itself is unreliable. Only
+    a length mismatch (accounting for at most one `MatchStar`, matching
+    Python's own sequence-pattern grammar) makes the *whole* pairing
+    untrustworthy, since then no position can be confidently attributed to
+    the right subject element at all. A `MatchStar`'s own captured name
+    (`case (fact, *rest):`) binds a runtime list, not a single value, and
+    is deliberately not treated as a candidate here -- `_match_pattern_
+    names()` already records it as an ordinary local bound name (a real
+    shadow), just not as a Fact-typed alias source.
+
+    Nests through a further sequence pattern matched against a further
+    `Tuple`/`List` subject element (`case ((fact, _), tag):` against
+    `((rec.bases_fact, "x"), tag)`) the identical way `_paired_unpacking_
+    candidates()` already nests through a further tuple/list target.
+    """
+    if not isinstance(subject, (ast.Tuple, ast.List)):
+        return []
+    subject_elts = subject.elts
+    patterns = pattern.patterns
+    star_positions = [i for i, p in enumerate(patterns) if isinstance(p, ast.MatchStar)]
+    if len(star_positions) > 1:
+        return []
+    if not star_positions:
+        if len(patterns) != len(subject_elts):
+            return []
+        pairs = list(zip(patterns, subject_elts))
+    else:
+        star_index = star_positions[0]
+        before, after = patterns[:star_index], patterns[star_index + 1 :]
+        if len(before) + len(after) > len(subject_elts):
+            return []
+        pairs = list(zip(before, subject_elts[: len(before)]))
+        if after:
+            pairs += list(zip(after, subject_elts[-len(after) :]))
+    candidates: list[tuple[str, ast.expr]] = []
+    for sub_pattern, sub_subject in pairs:
+        if isinstance(sub_pattern, ast.MatchAs) and sub_pattern.name is not None:
+            candidates.append((sub_pattern.name, sub_subject))
+        elif isinstance(sub_pattern, ast.MatchSequence):
+            candidates.extend(
+                _paired_match_sequence_candidates(sub_pattern, sub_subject)
+            )
+    return candidates
+
+
 def _match_pattern_names(pattern: ast.pattern) -> list[str]:
     """Recursively collect every name a structural-pattern-matching
     `pattern` binds -- `case fact:` (a bare capture, `ast.MatchAs` with a

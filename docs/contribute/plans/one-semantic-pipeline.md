@@ -2803,6 +2803,71 @@ cap). New tests: `TestDestructuredLoopsRecognizeSetAndDictKeyDisplays`,
 `tests/test_fact_detector_misuse_alias_edge_cases.py` (608 lines, well
 under its own 1200-line cap).
 
+**One more finding from the next review round, a bounded extension of an
+established mechanism.** The `match` statement's whole-subject-capture
+handling (a bare `case fact:`/`case SomeClass() as fact:`, or a
+whole-subject `MatchOr`) only ever recognized `case.pattern` itself being
+a top-level `MatchAs` -- a structural sequence pattern capturing a
+*sub*-part of the subject, not the whole thing, was invisible: `match
+(rec.bases_fact, tag): case (fact, _): return fact == other` -- `fact` is
+definitively the subject tuple's first, Fact-typed element, but neither
+existing branch applies (`case.pattern` is an `ast.MatchSequence`, not a
+bare `MatchAs`/`MatchOr`-of-`MatchAs`). Fixed with a new
+`_paired_match_sequence_candidates()` -- the `match`/`case` sibling of
+`_paired_unpacking_candidates()` this module already uses for ordinary
+tuple-unpacking assignment -- pairing a structural sequence pattern's own
+captures against a statically-known `Tuple`/`List` subject's elements,
+positionally, recursing through a nested sequence pattern matched against
+a nested `Tuple`/`List` subject element the identical way its assignment-
+unpacking sibling already nests. Deliberately **not** all-or-nothing the
+way `_paired_unpacking_candidates()` is, though: a non-capturing
+sub-pattern at one position (a wildcard `_`, a literal, a class pattern)
+does not disqualify a real capture found at another position, since a
+structural pattern routinely mixes captures with non-capturing
+sub-patterns as completely ordinary code -- only a genuine shape mismatch
+(a pattern/subject length disagreement, more than one `MatchStar`) makes
+the whole pairing untrustworthy, since then no position can be
+confidently attributed to the right subject element at all. A
+`MatchStar`'s own captured name (`case (fact, *rest):`) binds a runtime
+list, not a single value, and is deliberately not treated as a Fact-typed
+candidate here (`_match_pattern_names()` still records it as an ordinary
+local bound name, a real shadow, just not an alias source).
+
+**Fixing this correctly required updating one existing test, not just
+adding new ones.** `test_ignores_a_nested_capture_inside_a_structural_
+pattern` (a pre-existing negative control, added for the whole-subject-
+capture fix earlier in this module's history) used `match [rec.bases_fact,
+1]: case [x, y]: return x == other` as its repro -- which its own
+docstring correctly names as "must not be treated as an alias of the
+[whole] subject," but its assertion (`== []`, no finding at all) also
+happened to encode the *narrower*, not-yet-fixed gap this same round
+closes: once elementwise pairing exists, `x` genuinely *is* `rec.
+bases_fact` (the subject's first element), so `x == other` now correctly
+IS a real misuse, and asserting `== []` there would pin the bug rather
+than guard the fix. Reproducing the pre-fix suite confirmed this test
+failed immediately, for exactly that reason, once the new branch landed.
+Fixed by changing the test's own subject to a dynamic (non-statically-
+known) one, `pair` rather than a literal display, which the elementwise
+pairing correctly still returns no candidates for (subject isn't a
+recognized static display) -- preserving the test's original, narrower
+purpose (guard against the whole-subject-alias mechanism over-eagerly
+matching a partial capture) without it silently drifting into pinning a
+now-fixed gap.
+
+Verified against the reported repro, a nested-sequence-pattern variant, a
+leading-star and a trailing-star variant (confirming a captured position
+binds to the correct, Python-semantics-accurate subject element on either
+side of a `*rest`), a wildcard-position positive control (a non-capturing
+sub-pattern elsewhere must not block a real capture), and negative
+controls (a captured but genuinely non-Fact element; a dynamic subject; a
+pattern/subject length mismatch), all via direct AST reproduction before
+writing tests. Still zero existing hits, `mypy`/`ruff` both stayed clean,
+`fact_detector_misuse.py` at 1797 lines and `fact_detector_misuse_scope.py`
+at 803 lines (both well under the 2000-line hard cap). New tests:
+`TestStructuralSequencePatternCapturesPairWithTheSubject`, appended to
+`tests/test_fact_detector_misuse_alias_edge_cases.py` (710 lines, well
+under its own 1200-line cap).
+
 ---
 
 ### Phase 1 — finish the `dump`/`scan` typed-API convergence (closes AGENTS.md "PR C")
