@@ -632,18 +632,14 @@ def _merge_record_type(
         if value != getattr(t, attr):
             updates[attr] = value
 
-    # G28 Phase 4 (optional ABICHECK_CLANG_LAYOUT_TOOL): clang_t may carry
-    # REAL ASTRecordLayout facts the companion tool already backfilled onto
-    # clang_snap BEFORE this merge (attach_clang_layout runs on clang_snap's
-    # own recursive dump). Without this, a type present on BOTH backends --
-    # the common case -- lost every one of these facts in a hybrid merge
-    # even with the layout tool enabled, while a clang-ONLY type (appended
-    # verbatim below) kept them (Codex review). Never overrides an existing
-    # castxml value -- castxml's own real layout, when present, always wins.
+    # G28 Phase 4 (optional ABICHECK_CLANG_LAYOUT_TOOL): clang_t may carry REAL ASTRecordLayout facts the companion tool already backfilled onto clang_snap BEFORE this merge (attach_clang_layout runs on clang_snap's own recursive dump). Without this, a type present on BOTH backends -- the common case -- lost every one of these facts in a hybrid merge even with the layout tool enabled, while a clang-ONLY type (appended verbatim below) kept them (Codex review). Never overrides an existing castxml value -- castxml's own real layout, when present, always wins.
     if clang_t is not None:
         for attr in _LAYOUT_SCALAR_ATTRS:
             if getattr(t, attr) is None and getattr(clang_t, attr) is not None:
                 updates[attr] = getattr(clang_t, attr)
+                # vptr_offset_bits_fact sibling: carry clang_t's own status so replace_with_fact_sync can't promote its real PARTIAL to present() (same bug class as dumper_layout_backfill.py's DWARF backfill, Codex review).
+                if hasattr(clang_t, f"{attr}_fact"):
+                    updates[f"{attr}_fact"] = getattr(clang_t, f"{attr}_fact")
         if not t.base_offsets and clang_t.base_offsets:
             updates["base_offsets"] = clang_t.base_offsets
         # G31 Phase C fact-completeness (verified against real castxml 0.6.3 +

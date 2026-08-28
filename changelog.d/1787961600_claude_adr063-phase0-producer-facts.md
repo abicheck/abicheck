@@ -18,4 +18,10 @@
   caveat its legacy sibling field's capability-matrix row already states.
   No detector reads these `Fact[...]` fields yet — this remains
   representation only, per Phase 0's own "vertical slice, not flag day"
-  discipline.
+  discipline. The DWARF-backfill and castxml/clang-hybrid-merge paths
+  (`dumper_layout_backfill.py`, `dumper_hybrid.py`) now also preserve
+  whichever side's own `vptr_offset_bits_fact` status backs the value that
+  survives the merge, rather than letting the generic merge/backfill
+  helper's default derivation silently promote a `PARTIAL` status back to
+  `PRESENT`. The whole-snapshot disk cache version is bumped (19 → 20)
+  accordingly.
