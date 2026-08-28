@@ -69,15 +69,18 @@ if str(Path(__file__).resolve().parent) not in sys.path:
     sys.path.insert(0, str(Path(__file__).resolve().parent))
 from fact_detector_misuse_scope import (  # noqa: E402
     _bound_names,
+    _constructor_alias_names,
+    _constructor_method_alias_names,
     _def_containing_qualnames,
     _enclosing_qualnames,
     _lexical_function_parents,
-    _locally_bound_parameter_names,
+    _locally_bound_constructor_shadow_names,
     _match_pattern_names,
     _paired_sub_pattern_candidates,
     _paired_unpacking_candidates,
     _qualname_at,
     _QualnameSpans,
+    _scope_chain_union,
 )
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -211,8 +214,10 @@ def _is_fact_typed_expr(node: ast.expr, fact_names: frozenset[str]) -> bool:
     bases_fact,)[0]`/`[rec.bases_fact][0]`, an `ast.Subscript` over an
     `ast.Tuple`/`ast.List`) or by a statically known literal key (`{"x":
     rec.bases_fact}["x"]`, over an `ast.Dict`) resolves to that one
-    element/value and is recognized exactly when *it* is (Codex review,
-    fresh evidence): both are real, ordinary indexing operations whose
+    element/value (via :func:`_static_subscript_element`, shared with
+    this module's own alias-aware resolvers) and is recognized exactly
+    when *it* is (Codex review, fresh evidence): both are real, ordinary
+    indexing operations whose
     result is definitively known from the display alone -- an unrelated
     element/key elsewhere in the same display doesn't matter, unlike the
     `IfExp`/`BoolOp` "every branch must agree" cases above, since
@@ -281,43 +286,9 @@ def _is_fact_typed_expr(node: ast.expr, fact_names: frozenset[str]) -> bool:
         # three values, not two nested ones).
         return all(_is_fact_typed_expr(value, fact_names) for value in node.values)
     if isinstance(node, ast.Subscript):
-        # `(rec.bases_fact,)[-1]` -- a negative literal index parses as
-        # `ast.UnaryOp(op=ast.USub(), operand=ast.Constant(value=1))`,
-        # not a bare `ast.Constant` (Python's own grammar for a unary
-        # minus applied to any literal, not just an index) -- unwrapped
-        # here so a negative index resolves the same as a positive one,
-        # rather than falling through as an unrecognized non-literal
-        # index.
-        slice_node = node.slice
-        index: object | None = None
-        if isinstance(slice_node, ast.Constant):
-            index = slice_node.value
-        elif (
-            isinstance(slice_node, ast.UnaryOp)
-            and isinstance(slice_node.op, ast.USub)
-            and isinstance(slice_node.operand, ast.Constant)
-            and isinstance(slice_node.operand.value, int)
-        ):
-            index = -slice_node.operand.value
-        display = node.value
-        if (
-            index is not None
-            and isinstance(display, (ast.Tuple, ast.List))
-            and isinstance(index, int)
-            and not any(isinstance(elt, ast.Starred) for elt in display.elts)
-        ):
-            elts = display.elts
-            if -len(elts) <= index < len(elts):
-                return _is_fact_typed_expr(elts[index], fact_names)
-            return False
-        if (
-            index is not None
-            and isinstance(display, ast.Dict)
-            and not any(key is None for key in display.keys)
-        ):
-            for key_expr, value_expr in zip(display.keys, display.values):
-                if isinstance(key_expr, ast.Constant) and key_expr.value == index:
-                    return _is_fact_typed_expr(value_expr, fact_names)
+        element = _static_subscript_element(node)
+        if element is not None:
+            return _is_fact_typed_expr(element, fact_names)
     return False
 
 
@@ -349,6 +320,67 @@ def _static_display_elements(node: ast.expr) -> list[ast.expr] | None:
         if any(key is None for key in node.keys):
             return None
         return list(node.keys)  # type: ignore[arg-type]
+    return None
+
+
+def _static_subscript_element(node: ast.Subscript) -> ast.expr | None:
+    """Return the element/value expression a *statically known* index or
+    key selects from *node*'s own display -- the raw, unresolved
+    expression at that position, not whether it is itself Fact-typed --
+    or `None` if *node* isn't one of these two resolvable shapes.
+
+    Shared by every alias-resolution path this module has (Codex review,
+    fresh evidence): the first version of static-subscript recognition
+    was wired into `_is_fact_typed_expr()` alone, so `fact = rec.
+    bases_fact; (fact,)[0] == other` -- an ordinary local-variable
+    refactor of the identical misuse the immediate-literal form already
+    caught -- went unrecognized, since `_is_fact_typed_expr()` never
+    resolves a bare `ast.Name` (that needs `known`/`aliases`, which a
+    structural predicate alone doesn't have). Extracting the resolution
+    step itself (mirroring `_static_display_elements()`'s own "one
+    extraction, several alias-aware/structural callers" shape) lets
+    `_candidate_resolves_to_fact()` (the fixed-point alias resolver) and
+    `fact_equality_misuse_sites()`'s own `is_fact_typed()` (the
+    top-level comparison-operand resolver) each recurse through their
+    *own* alias-aware machinery on the resolved element, instead of only
+    ever landing back in the purely structural `_is_fact_typed_expr()`.
+
+    Same rules as `_is_fact_typed_expr()`'s own inline resolution
+    previously stated (now here instead): a negative literal index
+    (`ast.UnaryOp(USub, Constant)`, not a bare `ast.Constant`) is
+    unwrapped; a `Tuple`/`List` display containing a `Starred` element is
+    never resolvable (its own fixed positions are no longer statically
+    known); a `Dict` display containing a `**expansion` (a `None` key) is
+    never resolvable; an out-of-range index, a non-literal index/key, or
+    an unmatched dict key all resolve to `None`.
+    """
+    slice_node = node.slice
+    index: object | None = None
+    if isinstance(slice_node, ast.Constant):
+        index = slice_node.value
+    elif (
+        isinstance(slice_node, ast.UnaryOp)
+        and isinstance(slice_node.op, ast.USub)
+        and isinstance(slice_node.operand, ast.Constant)
+        and isinstance(slice_node.operand.value, int)
+    ):
+        index = -slice_node.operand.value
+    if index is None:
+        return None
+    display = node.value
+    if (
+        isinstance(display, (ast.Tuple, ast.List))
+        and isinstance(index, int)
+        and not any(isinstance(elt, ast.Starred) for elt in display.elts)
+    ):
+        elts = display.elts
+        if -len(elts) <= index < len(elts):
+            return elts[index]
+        return None
+    if isinstance(display, ast.Dict) and not any(key is None for key in display.keys):
+        for key_expr, value_expr in zip(display.keys, display.values):
+            if isinstance(key_expr, ast.Constant) and key_expr.value == index:
+                return value_expr
     return None
 
 
@@ -432,6 +464,22 @@ def _candidate_resolves_to_fact(
             _candidate_resolves_to_fact(operand, fact_names, known)
             for operand in value.values
         )
+    if isinstance(value, ast.Subscript):
+        # `fact = rec.bases_fact; g = (fact,)[0]` -- the identical
+        # bare-alias-inside-a-static-display gap this fixed point's
+        # `IfExp`/`NamedExpr`/`BoolOp` branches above already close for
+        # their own composed shapes, now closed for a statically
+        # resolvable subscript element too (Codex review, fresh
+        # evidence): `_static_subscript_element()` resolves *which*
+        # expression the index/key selects, purely structurally, and
+        # this function is what actually decides whether *that*
+        # expression is Fact-typed -- including through `known`, which
+        # `_is_fact_typed_expr()`'s own Subscript branch (a pure
+        # structural check with no access to the fixed point's state)
+        # cannot see.
+        element = _static_subscript_element(value)
+        if element is not None:
+            return _candidate_resolves_to_fact(element, fact_names, known)
     return False
 
 
@@ -1804,47 +1852,48 @@ def fact_equality_misuse_sites(tree: ast.Module, rel: str) -> list[tuple[int, in
     def_containing = _def_containing_qualnames(tree)
     scope_overrides = _default_and_annotation_scope_overrides(tree, def_containing)
     fact_names = _imported_fact_aliases(tree)
-    locally_bound_params = _locally_bound_parameter_names(tree, qualnames)
+    locally_bound_shadows = _locally_bound_constructor_shadow_names(tree, qualnames)
     lexical_parents = _lexical_function_parents(tree)
-
-    def _shadowed_constructor_names(qualname: str) -> set[str]:
-        # A parameter shadows an outer `Fact` (or an imported alias of
-        # it) not just for that function's own body, but for every
-        # *nested* function closing over it too, the ordinary Python
-        # closure rule (Codex review, fresh evidence: `def outer(Fact):
-        # def inner(other): return Fact(1) == other` -- `inner`'s own
-        # `locally_bound_params` entry is empty, since `Fact` is
-        # `outer`'s parameter, not `inner`'s own -- but `inner` still
-        # genuinely sees `outer`'s `Fact`, not the module-level one).
-        # Walks the real lexical-function-parent chain (skipping class
-        # layers, the identical closure-scope chain `_fact_aliases()`'s
-        # own alias inheritance already walks), unioning every
-        # ancestor's own bound-parameter set rather than stopping at the
-        # first one.
-        shadowed: set[str] = set()
-        seen: set[str] = set()
-        current: str | None = qualname
-        while current is not None and current not in seen:
-            seen.add(current)
-            shadowed |= locally_bound_params.get(current, set())
-            current = lexical_parents.get(current)
-        return shadowed
+    constructor_aliases = _constructor_alias_names(
+        tree, qualnames, fact_names, locally_bound_shadows, lexical_parents
+    )
+    constructor_method_aliases = _constructor_method_alias_names(
+        tree, qualnames, fact_names, locally_bound_shadows, lexical_parents
+    )
 
     def is_fact_typed(node: ast.expr, qualname: str) -> bool:
         # `def f(Fact, other): return Fact(1) == other` -- an ordinary
         # parameter reusing the constructor's own name shadows it for
-        # the whole function (Codex review, fresh evidence):
-        # `_is_fact_typed_expr()`'s constructor-call recognition is a
-        # pure, scope-blind lookup against the single, whole-tree
-        # `fact_names` set, so a locally-shadowed `Fact` was still
-        # treated as the real constructor. Filtered per-qualname via
-        # `_shadowed_constructor_names()` -- see
-        # `_locally_bound_parameter_names()`'s own docstring for why
-        # this is scoped to parameters specifically, not every kind of
-        # local binding `_fact_aliases()`'s own shadowing already
-        # accounts for.
-        effective_fact_names = fact_names - _shadowed_constructor_names(qualname)
+        # the whole function (Codex review, fresh evidence): `_is_fact_
+        # typed_expr()`'s constructor-call recognition is a pure,
+        # scope-blind lookup against the single, whole-tree `fact_names`
+        # set, so a locally-shadowed `Fact` was still treated as the
+        # real constructor. `F = Fact` is the opposite direction of the
+        # same gap -- a real local alias of the constructor itself
+        # (`_constructor_alias_names()`), not merely a shadow -- so it's
+        # *added* into the effective set the same way a shadow is
+        # subtracted from it; both walk the real closure-scope chain via
+        # `_scope_chain_union()`, see `_locally_bound_constructor_
+        # shadow_names()`/`_constructor_alias_names()`'s own docstrings
+        # for exactly which binding forms each covers.
+        effective_fact_names = fact_names - _scope_chain_union(
+            qualname, locally_bound_shadows, lexical_parents
+        ) | _scope_chain_union(qualname, constructor_aliases, lexical_parents)
         if _is_fact_typed_expr(node, effective_fact_names):
+            return True
+        if (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Name)
+            and node.func.id
+            in _scope_chain_union(qualname, constructor_method_aliases, lexical_parents)
+        ):
+            # `make_fact = Fact.present; make_fact(1) == other` -- a
+            # direct call through a local name bound to an *unbound
+            # classmethod reference*, not the constructor name itself
+            # (`_constructor_method_alias_names()`'s own docstring: this
+            # is why it's a separate set, never folded into
+            # `effective_fact_names`, which participates in the general
+            # `Attribute`-call recognition too).
             return True
         if isinstance(node, ast.Name):
             return node.id in aliases.get(qualname, ())
@@ -1856,6 +1905,23 @@ def fact_equality_misuse_sites(tree: ast.Module, rel: str) -> list[tuple[int, in
             return is_fact_typed(node.value, qualname)
         if isinstance(node, ast.BoolOp):
             return all(is_fact_typed(operand, qualname) for operand in node.values)
+        if isinstance(node, ast.Subscript):
+            # `fact = rec.bases_fact; (fact,)[0] == other` -- the
+            # identical bare-alias-inside-a-static-display gap the
+            # `Name`/`IfExp`/`NamedExpr`/`BoolOp` branches above already
+            # close for their own composed shapes (Codex review, fresh
+            # evidence): `_is_fact_typed_expr()`'s own Subscript branch
+            # only ever recurses into itself, structurally, so a selected
+            # element that's a bare alias name was never resolved against
+            # this scope's own `aliases`. Recurses through `is_fact_
+            # typed()` itself (not `_is_fact_typed_expr()`), the
+            # identical "route through the alias-aware resolver, not the
+            # purely structural one" fix `_candidate_resolves_to_fact()`'s
+            # own new Subscript branch already applies at fixed-point
+            # time.
+            element = _static_subscript_element(node)
+            if element is not None:
+                return is_fact_typed(element, qualname)
         return False
 
     sites: list[tuple[int, int]] = []

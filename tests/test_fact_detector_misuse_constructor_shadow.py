@@ -14,9 +14,9 @@
 # limitations under the License.
 
 """`fact_equality_misuse_sites()`'s new local-shadow awareness for the
-`Fact` constructor name itself, via `_locally_bound_parameter_names()`
-(``scripts/fact_detector_misuse.py``/``scripts/fact_detector_misuse_
-scope.py``) -- ADR-063 Phase 0
+`Fact` constructor name itself, via `_locally_bound_constructor_shadow_
+names()` (``scripts/fact_detector_misuse.py``/``scripts/fact_detector_
+misuse_scope.py``) -- ADR-063 Phase 0
 (``docs/contribute/plans/one-semantic-pipeline.md``).
 
 Covers the follow-up finding that an ordinary parameter reusing the
@@ -36,6 +36,35 @@ everywhere. Reverted in favor of a narrower, parameter-only collector.
 `TestGenuineImportStillRecognizedAfterTheFix` below is the regression
 test for that self-inflicted bug specifically, not just for the
 originally reported finding.**
+
+**A follow-up round widened the collector past parameters alone**
+(`TestNonParameterShadowsSuppressRecognition` below): an ordinary
+assignment/annotated-assignment/walrus/for-loop/comprehension target
+named `Fact`, and an import that *renames* an unrelated symbol to
+`Fact`, all shadow the constructor exactly like a parameter does --
+verified this time against the exact realistic sibling case (a genuine,
+unrenamed `from abicheck.model.fact import Fact`) *before* considering
+the widening done, precisely the check the first self-inflicted
+regression above skipped.
+
+**A later round tracked assignment aliases of the constructor itself**
+(`TestConstructorAssignmentAliasesAreRecognized` below): `F = Fact` or
+`make_fact = Fact.present` followed by `F(1) == other`/`make_fact(1) ==
+other` went unrecognized, since `F`/`make_fact` is a genuine, if local,
+name for the identical constructor, not merely a shadow of it (Codex
+review, fresh evidence). Fixed via `_constructor_alias_names()`/
+`_constructor_method_alias_names()` (`scripts/fact_detector_misuse_
+scope.py`). **Proactive sibling verification for this round found its
+own real false positive before it shipped, not a reported finding**:
+`def f(Fact, other): F = Fact; return F(1) == other` has a parameter
+named `Fact` shadowing the real constructor for the whole function, so
+`F = Fact` binds `F` to that *parameter's* runtime value, not to the
+real constructor -- registering `F` as a constructor alias
+unconditionally would have fabricated a misuse site out of an unrelated
+local rebinding. Fixed by guarding both new collectors on the identical
+shadow-chain check `is_fact_typed()` already applies to a bare
+constructor reference (`TestShadowedConstructorSuppressesItsOwnAlias`
+below is the regression coverage for this specific composition).
 """
 
 from __future__ import annotations
@@ -165,3 +194,277 @@ class TestGenuineImportStillRecognizedAfterTheFix:
         )
         tree = ast.parse(src, filename="x.py")
         assert len(fact_equality_misuse_sites(tree, "x.py")) == 1
+
+
+class TestNonParameterShadowsSuppressRecognition:
+    """Every ordinary local-binding form -- not just a parameter --
+    shadows the constructor's own name the identical way (Codex review,
+    fresh evidence)."""
+
+    def test_plain_assignment_shadow(self) -> None:
+        src = "def f(other):\n    Fact = lambda x: x\n    return Fact(1) == other\n"
+        tree = ast.parse(src, filename="x.py")
+        assert fact_equality_misuse_sites(tree, "x.py") == []
+
+    def test_annotated_assignment_shadow(self) -> None:
+        src = (
+            "def f(other):\n"
+            "    Fact: object = lambda x: x\n"
+            "    return Fact(1) == other\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert fact_equality_misuse_sites(tree, "x.py") == []
+
+    def test_walrus_shadow(self) -> None:
+        src = "def f(other):\n    return (Fact := (lambda x: x))(1) == other\n"
+        tree = ast.parse(src, filename="x.py")
+        assert fact_equality_misuse_sites(tree, "x.py") == []
+
+    def test_for_loop_target_shadow(self) -> None:
+        src = (
+            "def f(factories, other):\n"
+            "    for Fact in factories:\n"
+            "        return Fact(1) == other\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert fact_equality_misuse_sites(tree, "x.py") == []
+
+    def test_comprehension_target_shadow(self) -> None:
+        src = (
+            "def f(factories, other):\n"
+            "    return [Fact(1) == other for Fact in factories]\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert fact_equality_misuse_sites(tree, "x.py") == []
+
+    def test_nested_tuple_unpacking_target_shadow(self) -> None:
+        src = (
+            "def f(pairs, other):\n"
+            "    for (a, Fact) in pairs:\n"
+            "        return Fact(1) == other\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert fact_equality_misuse_sites(tree, "x.py") == []
+
+    def test_renaming_import_shadow(self) -> None:
+        """`from unrelated import Whatever as Fact` binds `Fact` to
+        something that is *not* the real constructor -- a genuine
+        shadow, unlike `from abicheck.model.fact import Fact as F`
+        (which imports the real thing under a different local name)."""
+        src = (
+            "from unrelated import Whatever as Fact\n"
+            "def f(other):\n"
+            "    return Fact(1) == other\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert fact_equality_misuse_sites(tree, "x.py") == []
+
+    def test_bare_import_shadow(self) -> None:
+        src = (
+            "import somewhere.Fact as Fact\n"
+            "def f(other):\n"
+            "    return Fact(1) == other\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert fact_equality_misuse_sites(tree, "x.py") == []
+
+    def test_sibling_function_unaffected_by_a_local_shadow(self) -> None:
+        """Regression guard: a local shadow in one function must not
+        suppress recognition in an unrelated sibling function."""
+        src = (
+            "from abicheck.model.fact import Fact\n"
+            "def f(other):\n"
+            "    Fact = 1\n"
+            "    return Fact == other\n"
+            "def g(other):\n"
+            "    return Fact(1) == other\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        sites = fact_equality_misuse_sites(tree, "x.py")
+        assert len(sites) == 1
+        assert sites[0][0] == 6
+
+
+class TestConstructorAssignmentAliasesAreRecognized:
+    """`F = Fact`/`make_fact = Fact.present` bind a real, if local, name
+    for the identical constructor -- a later direct call through that
+    name is exactly as real a misuse as calling `Fact`/`Fact.present`
+    directly (Codex review, fresh evidence)."""
+
+    def test_bare_constructor_alias_used_directly(self) -> None:
+        src = (
+            "from abicheck.model.fact import Fact\n"
+            "def f(other):\n"
+            "    F = Fact\n"
+            "    return F(1) == other\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert len(fact_equality_misuse_sites(tree, "x.py")) == 1
+
+    def test_classmethod_bound_alias_used_directly(self) -> None:
+        src = (
+            "from abicheck.model.fact import Fact\n"
+            "def f(other):\n"
+            "    make_fact = Fact.present\n"
+            "    return make_fact(1) == other\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert len(fact_equality_misuse_sites(tree, "x.py")) == 1
+
+    def test_classmethod_bound_alias_of_a_different_classmethod(self) -> None:
+        src = (
+            "from abicheck.model.fact import Fact\n"
+            "def f(other):\n"
+            "    make_fact = Fact.not_collected\n"
+            "    return make_fact(1) == other\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert len(fact_equality_misuse_sites(tree, "x.py")) == 1
+
+    def test_bare_alias_of_an_already_aliased_import(self) -> None:
+        src = (
+            "from abicheck.model.fact import Fact as OrigFact\n"
+            "def f(other):\n"
+            "    F = OrigFact\n"
+            "    return F(1) == other\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert len(fact_equality_misuse_sites(tree, "x.py")) == 1
+
+    def test_classmethod_alias_of_an_already_aliased_import(self) -> None:
+        src = (
+            "from abicheck.model.fact import Fact as OrigFact\n"
+            "def f(other):\n"
+            "    make_fact = OrigFact.present\n"
+            "    return make_fact(1) == other\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert len(fact_equality_misuse_sites(tree, "x.py")) == 1
+
+    def test_bare_alias_composes_with_a_further_attribute_call(self) -> None:
+        """`F = Fact` makes `F` behave exactly like `Fact` itself, so a
+        further classmethod call through it (`F.present(1)`) is also
+        recognized -- not just a direct call of `F` itself."""
+        src = (
+            "from abicheck.model.fact import Fact\n"
+            "def f(other):\n"
+            "    F = Fact\n"
+            "    return F.present(1) == other\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert len(fact_equality_misuse_sites(tree, "x.py")) == 1
+
+    def test_nested_closure_inherits_a_bare_constructor_alias(self) -> None:
+        src = (
+            "from abicheck.model.fact import Fact\n"
+            "def outer(other):\n"
+            "    F = Fact\n"
+            "    def inner():\n"
+            "        return F(1) == other\n"
+            "    return inner\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert len(fact_equality_misuse_sites(tree, "x.py")) == 1
+
+    def test_nested_closure_inherits_a_classmethod_bound_alias(self) -> None:
+        src = (
+            "from abicheck.model.fact import Fact\n"
+            "def outer(other):\n"
+            "    make_fact = Fact.present\n"
+            "    def inner():\n"
+            "        return make_fact(1) == other\n"
+            "    return inner\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert len(fact_equality_misuse_sites(tree, "x.py")) == 1
+
+    def test_transitive_alias_is_not_chased_one_hop_only(self) -> None:
+        """Deliberately not a false negative to fix -- documented,
+        accepted "one hop only" limit matching this module's own
+        established alias-tracking discipline elsewhere."""
+        src = (
+            "from abicheck.model.fact import Fact\n"
+            "def f(other):\n"
+            "    F = Fact\n"
+            "    F2 = F\n"
+            "    return F2(1) == other\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert fact_equality_misuse_sites(tree, "x.py") == []
+
+    def test_bare_constructor_alias_via_tuple_unpack_is_not_recognized(self) -> None:
+        """Deliberately narrow, no type inference: only a single-target
+        assignment is recognized."""
+        src = (
+            "from abicheck.model.fact import Fact\n"
+            "def f(other):\n"
+            "    F, G = Fact, Fact\n"
+            "    return F(1) == other\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert fact_equality_misuse_sites(tree, "x.py") == []
+
+    def test_classmethod_alias_via_tuple_unpack_is_not_recognized(self) -> None:
+        src = (
+            "from abicheck.model.fact import Fact\n"
+            "def f(other):\n"
+            "    make_fact, other_thing = Fact.present, 1\n"
+            "    return make_fact(1) == other\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert fact_equality_misuse_sites(tree, "x.py") == []
+
+    def test_aliasing_an_unrelated_name_is_ignored(self) -> None:
+        src = "def f(other):\n    F = SomethingElse\n    return F(1) == other\n"
+        tree = ast.parse(src, filename="x.py")
+        assert fact_equality_misuse_sites(tree, "x.py") == []
+
+    def test_aliasing_a_non_fact_attribute_access_is_ignored(self) -> None:
+        src = (
+            "def f(rec, other):\n"
+            "    make_thing = rec.build\n"
+            "    return make_thing(1) == other\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert fact_equality_misuse_sites(tree, "x.py") == []
+
+
+class TestShadowedConstructorSuppressesItsOwnAlias:
+    """A parameter named `Fact` shadows the real constructor for the
+    whole function -- an alias assignment sourced from that shadowed
+    name must not fabricate a misuse site out of it (found during this
+    fix's own proactive sibling verification, not a reported finding)."""
+
+    def test_bare_alias_of_a_shadowed_constructor_is_not_recognized(self) -> None:
+        src = "def f(Fact, other):\n    F = Fact\n    return F(1) == other\n"
+        tree = ast.parse(src, filename="x.py")
+        assert fact_equality_misuse_sites(tree, "x.py") == []
+
+    def test_classmethod_alias_of_a_shadowed_constructor_is_not_recognized(
+        self,
+    ) -> None:
+        src = (
+            "def f(Fact, other):\n"
+            "    make_fact = Fact.present\n"
+            "    return make_fact(1) == other\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert fact_equality_misuse_sites(tree, "x.py") == []
+
+    def test_shadow_at_outer_scope_suppresses_an_alias_in_a_nested_closure(
+        self,
+    ) -> None:
+        """The alias assignment happens in `inner`, but `Fact` is
+        `outer`'s own shadowing parameter -- the closure-scope chain
+        must still catch it, the same rule
+        `TestParameterShadowOfTheConstructorSuppressesRecognition`'s own
+        nested-closure cases already establish for a bare reference."""
+        src = (
+            "def outer(Fact):\n"
+            "    def inner(other):\n"
+            "        F = Fact\n"
+            "        return F(1) == other\n"
+            "    return inner\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert fact_equality_misuse_sites(tree, "x.py") == []

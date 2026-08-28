@@ -5058,6 +5058,165 @@ misuse_as_pattern_wraps_structural.py` (10 tests),
 the self-inflicted regression the first attempt introduced, not just
 the originally reported finding).
 
+**A further Codex review round found two more real gaps in the same two
+fixes, both closed -- and this round's own instruction was explicit
+about not repeating the previous round's self-inflicted mistake: verify
+against a realistic sibling case, not just a synthetic one, before
+calling either fix done.**
+
+(1) **`_locally_bound_parameter_names()` covered only parameters, so
+every *other* local-binding form still shadowed nothing**: `Fact =
+lambda x: x`, `for Fact in factories:`, and a comprehension target named
+`Fact` were all still read as the real constructor and called, even
+though Python resolves each to the local value, not `model.fact.Fact`.
+Renamed and widened to `_locally_bound_constructor_shadow_names()`,
+covering parameters, plain/annotated-assignment/walrus/`for`-loop/
+comprehension targets (via `_bound_names()`, so nested tuple-unpacking
+targets are covered too), and imports -- with the identical carve-out
+the reverted first attempt's mistake already established, now applied
+correctly instead of blanket-excluded: an `ast.ImportFrom` only counts
+as a shadow when its own `alias.name` is *not* literally `"Fact"` -- the
+exact structural test `_imported_fact_aliases()` itself uses to decide a
+name belongs in `fact_names`, so the two functions cannot disagree.
+`from x import Fact`/`from x import Fact as F` (any source module --
+this module's own established "match by name alone" stance) are
+correctly *not* shadows regardless of `x`; `from x import SomethingElse
+as Fact` (renaming an unrelated import to the exact spelling `Fact`) *is*
+one, since `_imported_fact_aliases()` never adds a name to `fact_names`
+for that shape (it requires the *original* imported name to be `"Fact"`,
+not the local alias) -- without the exclusion, a bare `ast.Import` is
+never exempt at all, since `_imported_fact_aliases()` only ever
+recognizes `ImportFrom`. Deliberately still narrower than `_fact_
+aliases()`'s own general-binding walk in one respect, documented as an
+accepted residual rather than reused outright: `match`/`case` pattern
+captures and `with`/`except ... as` targets aren't collected, since each
+would need the identical multi-round hardening `_fact_aliases()`'s own
+history already applied to its *general* collection before it could be
+trusted for this independent purpose too -- reusing that machinery
+directly is exactly the coupling the first, reverted attempt already
+showed is dangerous.
+
+Verified against all three reported shapes, five more sibling forms
+(annotated assignment, walrus, a renaming import, a bare `import ...
+as Fact`, a nested tuple-unpacking target), and -- this time -- the
+exact realistic sibling case the previous round's instruction named
+explicitly: a genuine, unrenamed `from abicheck.model.fact import Fact`
+(and its aliased `as F` form) confirmed still detected, a classmethod
+constructor confirmed still detected, a sibling function with no local
+shadow confirmed unaffected, and a shadow correctly *not* leaking past
+its own function into an unrelated one -- all via direct AST
+reproduction before writing a single test, closing the exact gap the
+first attempt's own skipped step left open. No self-inflicted regression
+this round.
+
+(2) **The static-subscript fix's own selected element was still passed
+through the purely structural `_is_fact_typed_expr()` alone**: `fact =
+rec.bases_fact; (fact,)[0] == other` -- a bare alias inside an otherwise
+statically resolvable display -- went unrecognized, since `_is_fact_
+typed_expr()` deliberately never resolves a bare `ast.Name` (that needs
+`known`/`aliases`, which a structural predicate alone doesn't have).
+Fixed by extracting the resolution step itself into a new
+`_static_subscript_element()` (mirroring `_static_display_elements()`'s
+own "one extraction, several alias-aware/structural callers" shape,
+carrying forward the identical negative-index/`Starred`/`**expansion`
+rules the original fix already stated), then routing it through *both*
+of this module's alias-aware resolvers -- a new `Subscript` branch in
+`_candidate_resolves_to_fact()` (the fixed-point resolver, recursing
+through itself with `known` in scope) and a new `Subscript` branch in
+`fact_equality_misuse_sites()`'s own `is_fact_typed()` (the top-level
+comparison-operand resolver, recursing through itself with `qualname` in
+scope) -- instead of only ever landing back in the purely structural
+`_is_fact_typed_expr()`, whose own Subscript branch was simplified to
+call the shared extraction helper too.
+
+Verified against both reported repros (tuple and dict displays), the
+identical shape with the selected element further assigned to a new
+local before comparison (exercising the fixed-point resolver
+specifically, not just the top-level one), a chained alias inside a
+subscript (`fact2 = fact`, composing the new Subscript recursion with
+the fixed point's own existing alias-chain resolution), a negative-index
+alias, a wrong-position alias staying correctly unrecognized, and every
+pre-existing literal-display/non-literal-index/starred-display/non-alias
+regression re-verified unaffected, all via direct AST reproduction
+before writing tests.
+
+Still zero existing hits across both, `mypy`/`ruff` both stayed clean,
+`fact_detector_misuse.py` at 1959 lines (only ~41 lines of headroom left
+under the 2000-line hard cap -- the very next finding in this area will
+likely need a split into a sibling module) and `fact_detector_misuse_
+scope.py` at 1170 lines (well under its own cap). New tests appended to
+the two dedicated sibling files these two mechanisms already own (both
+had ample headroom, unlike the script file itself):
+`TestNonParameterShadowsSuppressRecognition` (9 tests) in
+`tests/test_fact_detector_misuse_constructor_shadow.py`, and
+`TestAliasResolutionInsideAStaticSubscript` (8 tests) in
+`tests/test_fact_detector_misuse_static_subscript.py`.
+
+**A further round tracked assignment aliases of the `Fact` constructor
+itself** (Codex review, fresh evidence): `F = Fact` or `make_fact =
+Fact.present`, followed by `F(1) == other`/`make_fact(1) == other`,
+went unrecognized -- `F`/`make_fact` is a genuine, if local, name for
+the identical constructor, not merely a shadow of it, but neither
+`_is_fact_typed_expr()`'s scope-blind lookup nor the shadow-tracking
+fix above had any notion of a local rebinding *extending* the
+constructor set. Reproduced both sub-cases directly (0 hits, expected
+1 each) before designing a fix.
+
+Given `fact_detector_misuse.py`'s tight headroom (1959/2000 lines),
+both new collectors -- `_constructor_alias_names()` (`F = Fact`: a
+bound name behaves exactly like `Fact` itself, in both call and
+further-attribute-access position, so it's *added* into the effective
+`fact_names` set the same way a shadow is subtracted) and
+`_constructor_method_alias_names()` (`make_fact = Fact.present`: an
+*unbound classmethod reference*, tracked as its own, separate set,
+recognized only against a direct `ast.Call` whose `func` is a bare
+`ast.Name`, never composed into the general substitution set -- a
+further attribute access off it, `make_fact.foo`, would be nonsensical)
+-- went into `fact_detector_misuse_scope.py`, which had ample room. The
+existing hand-rolled closure-scope-chain walk in `fact_detector_misuse.
+py` (`_shadowed_constructor_names()`) was also generalized into a new
+shared `_scope_chain_union()` helper (in the scope module) and reused
+for both the shadow set and the two new alias sets, netting a small
+reduction in the primary file's own line count that offset most of the
+new wiring code -- both fixed-cap files stayed within budget without a
+module split this round. Both `F = Fact` and `make_fact = Fact.present`
+are recognized only via a plain single-target `ast.Assign` (no type
+inference, "one hop only" -- a further transitive rename `G = F` is a
+documented, accepted residual, the identical limit already accepted
+elsewhere in this module's alias tracking).
+
+**Proactive sibling verification for this round found a real false
+positive of its own, before it shipped, not a reported finding**:
+`def f(Fact, other): F = Fact; return F(1) == other` has a parameter
+named `Fact` shadowing the real constructor for the whole function, so
+`F = Fact` binds `F` to that *parameter's* runtime value, not to the
+real constructor -- registering `F` as a constructor alias
+unconditionally would have fabricated a misuse site out of an unrelated
+local rebinding, and the identical hazard applies to the classmethod-
+alias form. Fixed by threading `locally_bound_shadows`/`lexical_parents`
+into both new collectors and skipping registration whenever the RHS
+name is itself shadowed anywhere in its own closure-scope chain (via
+the same `_scope_chain_union()` walk), including through a nested
+closure over the shadowing outer scope.
+
+Verified via direct AST reproduction against 20 cases before writing
+any test: both reported sub-cases, a classmethod alias of a different
+method, aliasing through an already-import-aliased name (both bare and
+classmethod forms), nested-closure inheritance of both alias kinds, a
+sibling function unaffected, a bare alias composing with a further
+attribute call, the transitive (two-hop) alias correctly *not* chased,
+both alias kinds correctly *not* recognized via tuple-unpack (not a
+single target), two negative controls (aliasing an unrelated name,
+aliasing a non-`Fact` attribute access), both pre-existing regressions
+(bare import, classmethod constructor) still recognized, the
+shadow-guard false positive fixed in both forms, and the shadow-guard
+holding through a nested closure. `mypy`/`ruff` both stayed clean;
+`fact_detector_misuse.py` at 1966 lines and `fact_detector_misuse_
+scope.py` at 1300 lines, both still under their respective caps. New
+tests: `TestConstructorAssignmentAliasesAreRecognized` (13 tests) and
+`TestShadowedConstructorSuppressesItsOwnAlias` (3 tests), both appended
+to `tests/test_fact_detector_misuse_constructor_shadow.py`.
+
 ---
 
 ### Phase 1 — finish the `dump`/`scan` typed-API convergence (closes AGENTS.md "PR C")
