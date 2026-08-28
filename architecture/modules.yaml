@@ -15,7 +15,11 @@
         "abicheck/buildsource/model.py",
         "abicheck/buildsource/pack.py",
         "abicheck/buildsource/scan_levels.py",
+        "abicheck/bundle_manifest.py",
+        "abicheck/bundle_models.py",
+        "abicheck/change_registry.py",
         "abicheck/change_registry_types.py",
+        "abicheck/checker_policy.py",
         "abicheck/checker_types.py",
         "abicheck/compile_context.py",
         "abicheck/evidence_depth.py",
@@ -85,6 +89,7 @@
         "abicheck/buildsource/toolchain_probe.py",
         "abicheck/buildsource/type_graph.py",
         "abicheck/castxml_policy.py",
+        "abicheck/cc_wrapper.py",
         "abicheck/clang_layout_tool.py",
         "abicheck/classify.py",
         "abicheck/ctf_metadata.py",
@@ -126,6 +131,7 @@
         "model"
       ],
       "legacy_paths": [
+        "abicheck/binary_fingerprint.py",
         "abicheck/buildsource/build_diff.py",
         "abicheck/buildsource/crosscheck_base.py",
         "abicheck/buildsource/crosscheck_coherence.py",
@@ -181,6 +187,8 @@
       ],
       "legacy_paths": [
         "abicheck/analysis_assurance.py",
+        "abicheck/compatibility_evaluation_config.py",
+        "abicheck/compatibility_evaluation_packs.py",
         "abicheck/contract_coverage_exit.py",
         "abicheck/exit_decision.py",
         "abicheck/severity.py"
@@ -196,9 +204,25 @@
         "policy"
       ],
       "legacy_paths": [
+        "abicheck/appcompat.py",
         "abicheck/binder.py",
         "abicheck/buildsource/baseline_publish.py",
+        "abicheck/bundle.py",
+        "abicheck/bundle_analysis.py",
+        "abicheck/bundle_facts.py",
+        "abicheck/bundle_multibuild.py",
+        "abicheck/bundle_resolution_reachability.py",
+        "abicheck/bundle_signature_evidence.py",
+        "abicheck/bundle_soname.py",
+        "abicheck/bundle_variants_config.py",
+        "abicheck/checker.py",
+        "abicheck/comparability.py",
+        "abicheck/comparability_fields.py",
+        "abicheck/comparability_json.py",
+        "abicheck/comparability_language_mode.py",
+        "abicheck/comparability_sequences.py",
         "abicheck/compatibility_evaluation_frontend.py",
+        "abicheck/compatibility_evaluation_resolver.py",
         "abicheck/resolver.py",
         "abicheck/service.py",
         "abicheck/service_compare_evidence.py",
@@ -217,6 +241,9 @@
         "workflows"
       ],
       "legacy_paths": [
+        "abicheck/annotations.py",
+        "abicheck/annotations_step_summary.py",
+        "abicheck/appcompat_html.py",
         "abicheck/reporter.py"
       ]
     },
