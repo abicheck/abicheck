@@ -1278,6 +1278,25 @@ def unmigrated_fact_reader_sites(
                 return False
             qualname = lexical_parents.get(qualname, "<module>")
 
+    def _is_mapping_receiver(value: ast.expr) -> bool:
+        """True if *value* is `vars(rec)` (an ordinary bare-name call,
+        gated on `_shadowed()` the same way `getattr`/`attrgetter` are)
+        or `rec.__dict__` (an attribute access, nothing for a local
+        binding to shadow) -- shared by both the subscript
+        (`vars(rec)["bases"]`) and `.get()` (`vars(rec).get("bases")`,
+        Codex review, fresh evidence) mapping-read forms, so the two
+        can't independently drift on what counts as "an instance's own
+        mapping"."""
+        if (
+            isinstance(value, ast.Call)
+            and isinstance(value.func, ast.Name)
+            and value.func.id == "vars"
+            and len(value.args) == 1
+            and not _shadowed(value, "vars")
+        ):
+            return True
+        return isinstance(value, ast.Attribute) and value.attr == "__dict__"
+
     def _expr_text(node: ast.AST) -> str:
         outer = _outermost_containing_expr(node, parents)
         text = ast.get_source_segment(source, outer) if source else None
@@ -1505,35 +1524,39 @@ def unmigrated_fact_reader_sites(
             and isinstance(node.slice, ast.Constant)
             and isinstance(node.slice.value, str)
             and node.slice.value in FACT_BRIDGED_ATTRS
-            and (
-                (
-                    isinstance(node.value, ast.Call)
-                    and isinstance(node.value.func, ast.Name)
-                    and node.value.func.id == "vars"
-                    and len(node.value.args) == 1
-                    and not _shadowed(node.value, "vars")
-                )
-                or (
-                    isinstance(node.value, ast.Attribute)
-                    and node.value.attr == "__dict__"
-                )
-            )
+            and _is_mapping_receiver(node.value)
         ):
             # `vars(rec)["bases"]` / `rec.__dict__["bases"]` -- both read
             # the normalized legacy value the same way `rec.bases` does,
             # through the instance's own `__dict__` mapping rather than
             # attribute-lookup machinery (Codex review, fresh evidence).
-            # `vars(...)` is an ordinary bare-name call, so it's gated on
-            # `_shadowed()` the same way `getattr`/`attrgetter` already
-            # are -- a parameter named `vars` must not match. `.__dict__`
-            # is an attribute access, not a name lookup, so there's
-            # nothing for a local binding to shadow; matched unconditionally,
-            # the same way the bound `.__getattribute__()` spelling above
-            # is. Only a literal string key is in scope -- a computed key
+            # Only a literal string key is in scope -- a computed key
             # (`vars(rec)[name]`) can't be resolved statically, the
             # identical "no type inference" limit every other dynamic form
             # here already accepts.
             attr = node.slice.value
+            record_node = node
+        elif (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and node.func.attr == "get"
+            and _is_mapping_receiver(node.func.value)
+            and len(node.args) >= 1
+            and isinstance(node.args[0], ast.Constant)
+            and isinstance(node.args[0].value, str)
+            and node.args[0].value in FACT_BRIDGED_ATTRS
+        ):
+            # `vars(rec).get("bases")` / `rec.__dict__.get("bases")` --
+            # the `dict.get()` spelling of the identical mapping read the
+            # subscript branch above already catches, with the same
+            # optional-default shape `getattr()`'s own second argument
+            # already has (Codex review, fresh evidence: reads the exact
+            # same normalized legacy value, invisible to the subscript
+            # branch since neither is an `ast.Subscript`). An optional
+            # second argument (the default) is accepted but not
+            # inspected, matching how `getattr()`'s own third argument
+            # is treated elsewhere in this module.
+            attr = node.args[0].value
             record_node = node
         else:
             continue

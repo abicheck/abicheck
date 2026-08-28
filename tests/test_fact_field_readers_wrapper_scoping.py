@@ -100,6 +100,16 @@ Covers six independent Codex-review findings across three review rounds:
    ``type``, ``from operator import attrgetter``, ``import builtins``/
    ``operator``) -- recording one of those as a "shadow" of itself would
    have broken the very recognition it exists to enable.
+
+9. **The mapping-subscript branch (finding 7) missed the ``dict.get()``
+   spelling of the identical read** -- ``vars(rec).get("bases")``/
+   ``rec.__dict__.get("bases")`` read the exact same normalized legacy
+   value, but neither is an ``ast.Subscript``, so both were invisible to
+   that branch. The shared "is this a mapping over the instance's own
+   ``__dict__``" check (``vars(...)``/``.__dict__``) was factored out
+   into ``_is_mapping_receiver()``, reused by both the subscript and the
+   new ``.get()`` branch, so the two forms can't independently drift on
+   what counts as a recognized mapping receiver.
 """
 
 from __future__ import annotations
@@ -626,3 +636,65 @@ class TestImportedNamesShadowBuiltinRecognition:
         assert keys == [
             'x.py::f::bases::operator.attrgetter("bases")(rec)::operator.attrgetter("bases")::1'
         ]
+
+
+class TestMappingGetFieldReads:
+    """``vars(rec).get("bases")``/``rec.__dict__.get("bases")`` -- the
+    `dict.get()` spelling of the identical mapping read
+    `TestMappingBasedFieldReads` already covers for the subscript form."""
+
+    def test_detects_a_vars_get_call_with_a_literal_field_name(self) -> None:
+        src = 'def f(rec):\n    return vars(rec).get("bases")\n'
+        tree = ast.parse(src, filename="x.py")
+        keys = [
+            key for key, _l, _a, _q in unmigrated_fact_reader_sites(tree, "x.py", src)
+        ]
+        assert keys == [
+            'x.py::f::bases::vars(rec).get("bases")::vars(rec).get("bases")::1'
+        ]
+
+    def test_detects_a_dunder_dict_get_call_with_a_literal_field_name(self) -> None:
+        src = 'def f(rec):\n    return rec.__dict__.get("bases")\n'
+        tree = ast.parse(src, filename="x.py")
+        keys = [
+            key for key, _l, _a, _q in unmigrated_fact_reader_sites(tree, "x.py", src)
+        ]
+        assert keys == [
+            'x.py::f::bases::rec.__dict__.get("bases")::rec.__dict__.get("bases")::1'
+        ]
+
+    def test_detects_a_get_call_with_an_explicit_default(self) -> None:
+        """A `.get()` call's optional second argument (the default) is
+        accepted but not inspected -- matching how `getattr()`'s own
+        third argument is treated elsewhere in this module."""
+        src = 'def f(rec):\n    return vars(rec).get("bases", [])\n'
+        tree = ast.parse(src, filename="x.py")
+        keys = [
+            key for key, _l, _a, _q in unmigrated_fact_reader_sites(tree, "x.py", src)
+        ]
+        assert keys == [
+            'x.py::f::bases::vars(rec).get("bases", [])::vars(rec).get("bases", [])::1'
+        ]
+
+    def test_ignores_a_get_call_shadowed_by_its_own_vars_parameter(self) -> None:
+        """Negative control: an ordinary parameter named `vars` shadows
+        the builtin, the identical guard the subscript form already
+        gets."""
+        src = 'def f(vars, rec):\n    return vars(rec).get("bases")\n'
+        tree = ast.parse(src, filename="x.py")
+        assert unmigrated_fact_reader_sites(tree, "x.py", src) == []
+
+    def test_ignores_a_get_call_naming_an_unrelated_key(self) -> None:
+        """Negative control: an ordinary `.get()` lookup for a key
+        outside the five bridged fields must not be flagged."""
+        src = 'def f(rec):\n    return rec.__dict__.get("unrelated")\n'
+        tree = ast.parse(src, filename="x.py")
+        assert unmigrated_fact_reader_sites(tree, "x.py", src) == []
+
+    def test_ignores_an_unrelated_dict_methods_get_call(self) -> None:
+        """Negative control: an ordinary `.get()` call on some unrelated
+        object (not `vars(...)`/`.__dict__`) must not be flagged, even
+        when it happens to pass a bridged field name as its argument."""
+        src = 'def f(rec, mapping):\n    return mapping.get("bases")\n'
+        tree = ast.parse(src, filename="x.py")
+        assert unmigrated_fact_reader_sites(tree, "x.py", src) == []

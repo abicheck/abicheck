@@ -1890,6 +1890,31 @@ repository, `mypy`/`ruff` both stayed clean. New tests in
 `TestMappingBasedFieldReads` and `TestImportedNamesShadowBuiltinRecognition`
 (`tests/test_fact_field_readers_wrapper_scoping.py`).
 
+**A further Codex review round found one more real gap in the mapping-
+subscript fix above.** `vars(rec).get("bases")`/`rec.__dict__.get(
+"bases")` -- the `dict.get()` spelling of the identical mapping read --
+were both still invisible, since neither is an `ast.Subscript`, the only
+shape the previous fix's branch matched. Fixed by factoring the shared
+"is this a mapping over the instance's own `__dict__`" check (`vars(
+...)`/`.__dict__`) out into a new `_is_mapping_receiver()` helper, reused
+by both the existing subscript branch and a new `.get()`-call branch --
+so the two forms can't independently drift on what counts as a
+recognized mapping receiver, the same lesson this file's own earlier
+entries (the attrgetter-vs-`__getattribute__` alias sets, the vars/
+`__dict__` shadowing rules) keep re-learning about duplicated conditions.
+An optional second `.get()` argument (the default) is accepted but not
+inspected, matching how `getattr()`'s own third argument is treated
+elsewhere in this module. New tests: both mapping-receiver forms with
+`.get()`, a call carrying an explicit default, a shadowed-`vars`-
+parameter negative control, an unrelated-key negative control, and a
+negative control confirming an ordinary `.get()` call on some unrelated
+object (not `vars(...)`/`.__dict__`) is never flagged merely because its
+argument happens to spell a bridged field name.
+
+Verified empirically: still zero existing hits in the real repository,
+`mypy`/`ruff` both stayed clean. New tests in `TestMappingGetFieldReads`
+(`tests/test_fact_field_readers_wrapper_scoping.py`).
+
 **Still not landed**: no detector (`diff_layout.py`/`diff_types.py`/
 `diff_param_qualifiers.py`/the reader set the check above now tracks
 precisely) has actually been migrated to read `.status` — the check above
