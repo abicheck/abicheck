@@ -171,6 +171,38 @@ class TestFactEqualityMisuseSites:
         tree = ast.parse(src, filename="x.py")
         assert fact_equality_misuse_sites(tree, "x.py") == [(3, 11)]
 
+    def test_detects_a_pep_604_optional_fact_annotated_parameter(self) -> None:
+        """`def f(value: Fact[int] | None, other): return value == other`
+        -- a detector helper commonly declares an optional Fact-typed
+        parameter this way, and only the outermost bare/subscript shape
+        was ever recognized (Codex review, fresh evidence)."""
+        src = "def f(value: Fact[int] | None, other):\n    return value == other\n"
+        tree = ast.parse(src, filename="x.py")
+        assert fact_equality_misuse_sites(tree, "x.py") == [(2, 11)]
+
+    def test_detects_an_optional_subscript_fact_annotated_parameter(self) -> None:
+        """The identical wrapping via `Optional[Fact[int]]`."""
+        src = "def f(value: Optional[Fact[int]], other):\n    return value == other\n"
+        tree = ast.parse(src, filename="x.py")
+        assert fact_equality_misuse_sites(tree, "x.py") == [(2, 11)]
+
+    def test_detects_a_union_subscript_fact_annotated_parameter(self) -> None:
+        """The identical wrapping via `Union[Fact[int], None]`."""
+        src = (
+            "def f(value: Union[Fact[int], None], other):\n    return value == other\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert fact_equality_misuse_sites(tree, "x.py") == [(2, 11)]
+
+    def test_ignores_an_ordinary_optional_non_fact_annotated_parameter(
+        self,
+    ) -> None:
+        """Negative control: an ordinary `int | None` parameter must not
+        be treated as Fact-typed merely because it's wrapped in a union."""
+        src = "def f(value: int | None, other):\n    return value == other\n"
+        tree = ast.parse(src, filename="x.py")
+        assert fact_equality_misuse_sites(tree, "x.py") == []
+
     def test_detects_a_comparison_through_a_closure_over_an_outer_alias(
         self,
     ) -> None:

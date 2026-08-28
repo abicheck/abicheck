@@ -995,3 +995,89 @@ class TestFactEqualityMisuseSitesScoping:
         src = "fact = rec.bases_fact\ndef inner():\n    return fact == other\n"
         tree = ast.parse(src, filename="x.py")
         assert fact_equality_misuse_sites(tree, "x.py") == [(3, 11)]
+
+    def test_ignores_a_comparison_inside_a_nested_lambda_default(self) -> None:
+        """`fact = rec.bases_fact; def g(cb=lambda fact: fact == other):
+        ...` -- the lambda's own parameter `fact` genuinely shadows the
+        outer alias *inside the lambda's own body*, so force-attributing
+        the whole default expression (lambda body included) to the
+        enclosing scope must not override that nested scope's own,
+        already-correct resolution (Codex review, fresh evidence)."""
+        src = (
+            "def f(rec, other):\n"
+            "    fact = rec.bases_fact\n"
+            "    def g(cb=lambda fact: fact == other):\n"
+            "        return cb\n"
+            "    return g\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert fact_equality_misuse_sites(tree, "x.py") == []
+
+    def test_detects_a_real_misuse_despite_a_nested_lambda_default(self) -> None:
+        """Negative control: a default expression with no lambda of its
+        own must still be attributed to the enclosing scope exactly as
+        before."""
+        src = (
+            "def f(rec, other):\n"
+            "    fact = rec.bases_fact\n"
+            "    def g(x=(fact == other)):\n"
+            "        return x\n"
+            "    return g\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert fact_equality_misuse_sites(tree, "x.py") == [(3, 13)]
+
+    def test_detects_a_comparison_inside_a_return_annotation(self) -> None:
+        """`fact = rec.bases_fact; def inner(fact) -> (fact == other): ...`
+        -- a return annotation is evaluated in the defining (enclosing)
+        scope exactly like a parameter default, but `node.returns` was
+        never included in the scope-override traversal (Codex review,
+        fresh evidence): `inner`'s own parameter `fact` shadows the outer
+        alias for the function body, but the return annotation is
+        evaluated before that parameter even exists."""
+        src = (
+            "def f(rec, other):\n"
+            "    fact = rec.bases_fact\n"
+            "    def inner(fact) -> (fact == other):\n"
+            "        return None\n"
+            "    return inner\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert fact_equality_misuse_sites(tree, "x.py") == [(3, 24)]
+
+    def test_a_method_default_inherits_its_containing_class_bodys_alias(
+        self,
+    ) -> None:
+        """`class C: fact = rec.bases_fact; def m(self, value=fact):
+        return value == other` -- a method's own default is evaluated
+        while its *containing class body* executes, ordinary class-body
+        code, not a closure lookup through `_lexical_function_parents`
+        (which intentionally skips the class layer for a method *body*'s
+        own free-variable lookup, a different question) (Codex review,
+        fresh evidence)."""
+        src = (
+            "def f(rec, other):\n"
+            "    class C:\n"
+            "        fact = rec.bases_fact\n"
+            "        def m(self, value=fact):\n"
+            "            return value == other\n"
+            "    return C\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert fact_equality_misuse_sites(tree, "x.py") == [(5, 19)]
+
+    def test_a_methods_own_parameter_still_shadows_in_its_body(self) -> None:
+        """Negative control: when the method's own parameter genuinely
+        shadows the class-body alias (`def m(self, fact): return fact ==
+        other`, no default at all), the class-body-alias fix above must
+        not widen back into a false positive for the method's own body."""
+        src = (
+            "def f(rec, other):\n"
+            "    class C:\n"
+            "        fact = rec.bases_fact\n"
+            "        def m(self, fact):\n"
+            "            return fact == other\n"
+            "    return C\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert fact_equality_misuse_sites(tree, "x.py") == []

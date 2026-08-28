@@ -53,6 +53,7 @@ grandfather; any match is a hard, unconditional ERROR.
 from __future__ import annotations
 
 import ast
+from collections.abc import Iterator
 from pathlib import Path
 from typing import Protocol
 
@@ -183,6 +184,19 @@ def _is_fact_typed_expr(node: ast.expr, fact_names: frozenset[str]) -> bool:
     return False
 
 
+def _annotation_head_name(expr: ast.expr) -> str | None:
+    """The bare identifier naming a subscript's own generic -- `Optional`
+    for both `Optional[...]` and the module-qualified `typing.
+    Optional[...]` spelling. Only used to recognize the `Optional`/`Union`
+    wrapper shapes themselves; resolving `Fact` stays keyed on
+    *fact_names*, as everywhere else in this module."""
+    if isinstance(expr, ast.Name):
+        return expr.id
+    if isinstance(expr, ast.Attribute):
+        return expr.attr
+    return None
+
+
 def _is_fact_typed_annotation(
     annotation: ast.expr | None, fact_names: frozenset[str]
 ) -> bool:
@@ -192,12 +206,37 @@ def _is_fact_typed_annotation(
     real, common alias source (Codex review, fresh evidence): the caller
     already unwrapped nothing, so comparing two such parameters directly is
     the identical misuse this whole check exists to catch.
+
+    Also recognizes `Fact[T]` wrapped in `Optional[...]`, `Union[...,
+    None]`, or the `X | None` PEP 604 union spelling -- a detector helper
+    commonly declares an optional Fact-typed parameter exactly this way,
+    and the wrapper must not hide the misuse underneath it (Codex review,
+    fresh evidence: `def f(value: Fact[int] | None, other): return value
+    == other` produced no finding at all, since only a bare `Fact` or a
+    subscript whose own value was `Fact` was ever recognized).
     """
     if annotation is None:
         return False
     if isinstance(annotation, ast.Name):
         return annotation.id in fact_names
+    if isinstance(annotation, ast.BinOp) and isinstance(annotation.op, ast.BitOr):
+        # `Fact[int] | None` -- PEP 604 union syntax.
+        return _is_fact_typed_annotation(
+            annotation.left, fact_names
+        ) or _is_fact_typed_annotation(annotation.right, fact_names)
     if isinstance(annotation, ast.Subscript):
+        head = _annotation_head_name(annotation.value)
+        if head == "Optional":
+            return _is_fact_typed_annotation(annotation.slice, fact_names)
+        if head == "Union":
+            members = (
+                annotation.slice.elts
+                if isinstance(annotation.slice, ast.Tuple)
+                else [annotation.slice]
+            )
+            return any(
+                _is_fact_typed_annotation(member, fact_names) for member in members
+            )
         return _is_fact_typed_annotation(annotation.value, fact_names)
     return False
 
@@ -752,7 +791,7 @@ def _fact_aliases(tree: ast.Module, qualnames: _QualnameSpans) -> dict[str, set[
     # itself is always in that scope's own `locally_bound`). Resolved in
     # a dedicated pass after the fixed point below has already stabilized
     # every scope's own alias set -- see that pass's own comment.
-    pending_defaults: list[tuple[str, str, ast.expr]] = []
+    pending_defaults: list[tuple[str, str, tuple[int, int], ast.expr]] = []
     # `id()` of every `ast.NamedExpr` found inside a parameter's own
     # default-value expression -- these are handled explicitly by the
     # `FunctionDef`/`AsyncFunctionDef`/`Lambda` branch below (registered
@@ -954,10 +993,19 @@ def _fact_aliases(tree: ast.Module, qualnames: _QualnameSpans) -> dict[str, set[
             positional = (*node.args.posonlyargs, *node.args.args)
             offset = len(positional) - len(node.args.defaults)
             for arg, default in zip(positional[offset:], node.args.defaults):
-                pending_defaults.append((qualname, arg.arg, default))
+                pending_defaults.append(
+                    (qualname, arg.arg, (node.lineno, node.col_offset), default)
+                )
             for arg, kw_default in zip(node.args.kwonlyargs, node.args.kw_defaults):
                 if kw_default is not None:
-                    pending_defaults.append((qualname, arg.arg, kw_default))
+                    pending_defaults.append(
+                        (
+                            qualname,
+                            arg.arg,
+                            (node.lineno, node.col_offset),
+                            kw_default,
+                        )
+                    )
             # A walrus *inside* a default expression -- `def inner(x=(fact
             # := rec.bases_fact)):` -- binds `fact` in the scope the
             # default is evaluated in too, which is the *enclosing* scope
@@ -1189,14 +1237,24 @@ def _fact_aliases(tree: ast.Module, qualnames: _QualnameSpans) -> dict[str, set[
 
         # Resolve every pending parameter default against each scope's
         # own alias set as it stands *this* iteration -- a default
-        # expression is evaluated in the *enclosing* scope (Python's own
-        # binding rule for a default value, unlike the parameter itself),
-        # so a bare-name default is checked against the enclosing scope's
-        # alias set, not the function's own (which excludes the
-        # parameter's name entirely, by construction -- see the
-        # collection site's own comment).
-        for qualname, arg_name, default in pending_defaults:
-            parent = lexical_parents.get(qualname, "<module>")
+        # expression is evaluated in the scope that directly,
+        # syntactically contains the `def`/lambda (Python's own binding
+        # rule for a default value, unlike the parameter itself), so a
+        # bare-name default is checked against *that* scope's alias set,
+        # not the function's own (which excludes the parameter's name
+        # entirely, by construction -- see the collection site's own
+        # comment). Deliberately `def_containing`, not `lexical_parents`
+        # (Codex review, fresh evidence): a method's own default is
+        # evaluated while its *containing class body* executes -- ordinary
+        # class-body code, not a closure lookup -- but `lexical_parents`
+        # intentionally skips the class layer for the (different) question
+        # of a method *body*'s own free-variable lookup. `class C: fact =
+        # rec.bases_fact; def f(self, value=fact): return value == other`
+        # needs the class body's own alias set here, exactly the way
+        # `_default_and_annotation_scope_overrides` needs it for a
+        # comparison found directly inside the default expression itself.
+        for qualname, arg_name, def_pos, default in pending_defaults:
+            parent = def_containing.get(def_pos, "<module>")
             default_target_aliases = aliases.setdefault(qualname, set())
             if arg_name in default_target_aliases:
                 continue
@@ -1208,16 +1266,57 @@ def _fact_aliases(tree: ast.Module, qualnames: _QualnameSpans) -> dict[str, set[
     return aliases
 
 
+_SCOPE_INTRODUCING_NODE_TYPES = (
+    ast.FunctionDef,
+    ast.AsyncFunctionDef,
+    ast.Lambda,
+    ast.ListComp,
+    ast.SetComp,
+    ast.DictComp,
+    ast.GeneratorExp,
+)
+
+
+def _iter_default_subtree(node: ast.AST) -> Iterator[ast.AST]:
+    """Yield *node* and every descendant that still evaluates in *node*'s
+    own (def-time) scope -- stopping before descending into any node that
+    introduces its own scope (a nested lambda/comprehension/def), whose
+    body evaluates later, in that nested scope, not at def-time here
+    (Codex review, fresh evidence): with an outer `fact = rec.bases_fact`,
+    `def f(cb=lambda fact: fact == other): ...` -- the lambda parameter
+    `fact` genuinely shadows the outer alias inside the lambda's own body,
+    so force-attributing everything inside that default expression
+    (including the lambda's own body) to the *enclosing* scope wrongly
+    treated the lambda's own local `fact` as the outer alias instead of
+    leaving it to ordinary position-based resolution, which already
+    handles a nested scope correctly (`_enclosing_qualnames`/`_qualname_at`
+    give the lambda its own real span and qualname). A boundary node
+    (the `Lambda`/`FunctionDef`/comprehension itself) is still yielded --
+    harmless, since only an `ast.Compare` id is ever looked up in the
+    resulting map -- just never expanded past.
+    """
+    stack = [node]
+    while stack:
+        current = stack.pop()
+        yield current
+        if isinstance(current, _SCOPE_INTRODUCING_NODE_TYPES):
+            continue
+        stack.extend(ast.iter_child_nodes(current))
+
+
 def _default_and_annotation_scope_overrides(
-    tree: ast.Module, qualnames: _QualnameSpans, lexical_parents: dict[str, str]
+    tree: ast.Module,
+    def_containing: dict[tuple[int, int], str],
 ) -> dict[int, str]:
     """Map `id()` of every node found inside a parameter's own default
     value or annotation expression to the qualname it actually *evaluates*
-    in -- the function's lexical parent, not the function's own body scope
-    (Codex review, fresh evidence): `fact = rec.bases_fact; def inner(fact=
-    (fact == other)): ...` -- Python evaluates a default (and, absent
-    `from __future__ import annotations`, an annotation too) at `def`-time,
-    in the *enclosing* scope, the identical binding-timing rule `_fact_
+    in -- the `def`'s own directly-enclosing syntactic scope, not the
+    function's own body scope (Codex review, fresh evidence): `fact = rec.
+    bases_fact; def inner(fact=(fact == other)): ...` -- Python evaluates a
+    default (and, absent `from __future__ import annotations`, an
+    annotation -- including a `-> ...` return annotation, evaluated the
+    identical way) at `def`-time, in the scope that directly, syntactically
+    contains the `def` statement, the identical binding-timing rule `_fact_
     aliases()`'s own default-embedded-walrus handling already relies on.
     But `fact_equality_misuse_sites()`'s own site-to-qualname resolution is
     purely position-based (`_qualname_at`), and a default/annotation
@@ -1228,6 +1327,21 @@ def _default_and_annotation_scope_overrides(
     silently missing a comparison that, at the point it actually runs,
     still reads the outer alias.
 
+    **Uses `_def_containing_qualnames`, not `_lexical_function_parents`
+    (Codex review, fresh evidence).** A method's own defaults are
+    evaluated while its *containing class body* executes -- ordinary
+    `LOAD_NAME` lookup, ordinary class-body code -- not while some
+    enclosing *function* scope executes: `class C: fact = rec.bases_fact;
+    def f(self, value=fact): return value == other` must see `fact` as the
+    class body's own alias, but `_lexical_function_parents` intentionally
+    skips the class layer entirely (it answers a method *body*'s own
+    free-variable/closure lookup, a different, narrower question -- a
+    method cannot close over its class body, but its *default value*,
+    evaluated at `def`-time as ordinary class-body code, is not a closure
+    lookup at all). `_def_containing_qualnames` answers the syntactic
+    question this needs instead: the scope that directly contains the
+    `def` statement, class layers included.
+
     Consulted by `fact_equality_misuse_sites()` only -- `_fact_aliases()`
     itself already resolves a *binding* found inside a default/annotation
     correctly (the walrus case), this is the sibling fix for a *read* (an
@@ -1237,8 +1351,7 @@ def _default_and_annotation_scope_overrides(
     for node in ast.walk(tree):
         if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)):
             continue
-        func_qualname = _qualname_at((node.lineno, node.col_offset), qualnames)
-        enclosing = lexical_parents.get(func_qualname, "<module>")
+        enclosing = def_containing.get((node.lineno, node.col_offset), "<module>")
         subtrees = [*node.args.defaults, *node.args.kw_defaults]
         for arg in (
             *node.args.posonlyargs,
@@ -1249,10 +1362,13 @@ def _default_and_annotation_scope_overrides(
         ):
             if arg.annotation is not None:
                 subtrees.append(arg.annotation)
+        returns = getattr(node, "returns", None)
+        if returns is not None:
+            subtrees.append(returns)
         for subtree in subtrees:
             if subtree is None:
                 continue
-            for descendant in ast.walk(subtree):
+            for descendant in _iter_default_subtree(subtree):
                 overrides[id(descendant)] = enclosing
     return overrides
 
@@ -1278,10 +1394,8 @@ def fact_equality_misuse_sites(tree: ast.Module, rel: str) -> list[tuple[int, in
     """
     qualnames = _enclosing_qualnames(tree)
     aliases = _fact_aliases(tree, qualnames)
-    lexical_parents = _lexical_function_parents(tree)
-    scope_overrides = _default_and_annotation_scope_overrides(
-        tree, qualnames, lexical_parents
-    )
+    def_containing = _def_containing_qualnames(tree)
+    scope_overrides = _default_and_annotation_scope_overrides(tree, def_containing)
     fact_names = _imported_fact_aliases(tree)
 
     def is_fact_typed(node: ast.expr, qualname: str) -> bool:

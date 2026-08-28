@@ -1657,6 +1657,83 @@ file at 273 lines and the new one at 997 -- both comfortably under the
 cap, with zero test behavior change (all 82 tests, the same set as
 before the split, still pass).
 
+**A further Codex review round found four more real gaps, all fixed --
+one in annotation recognition, three in scope resolution.** (1)
+**`_is_fact_typed_annotation` only ever recognized a bare `Fact` or a
+subscript whose own value was `Fact` -- an `Optional[Fact[T]]`/
+`Union[Fact[T], None]`/PEP 604 `Fact[T] | None` wrapper hid the misuse
+underneath it entirely.** `def f(value: Fact[int] | None, other): return
+value == other` produced no finding at all. Fixed by making the function
+genuinely recursive over the three wrapper shapes: an `ast.BinOp` with
+`ast.BitOr` unwraps both operands (`X | None`), an `Optional[...]`
+subscript unwraps its slice, and a `Union[...]` subscript unwraps every
+element of its slice tuple (or the bare slice, for a single-argument
+`Union[X]`) -- each via the same `fact_names`-keyed leaf check a bare
+`Fact` already used, so `Fact[int]` nested arbitrarily deep inside any
+combination of these still resolves. A new `_annotation_head_name()`
+helper recognizes the wrapper's own name whether spelled bare
+(`Optional[...]`) or module-qualified (`typing.Optional[...]`). (2)
+**A default expression containing its own nested lambda/comprehension
+scope had every one of its descendants force-attributed to the enclosing
+scope, including nodes that actually evaluate *inside* that nested
+scope.** With an outer `fact = rec.bases_fact`, `def f(cb=lambda fact:
+fact == other): ...` was rejected even though the lambda's own parameter
+`fact` genuinely shadows the outer alias for the comparison inside the
+lambda's own body -- the blanket `ast.walk(subtree)` walked straight
+through the lambda's own boundary, overriding the inner `Compare` node's
+scope to the *outer* function's, discarding the shadowing the lambda's
+own already-correct position-based resolution would have given it. Fixed
+with a new `_iter_default_subtree()` walker: it still yields every
+descendant (so the override map is unaffected for the common,
+no-nested-scope case), but stops expanding past any node that itself
+introduces a scope (`FunctionDef`/`AsyncFunctionDef`/`Lambda`/any
+comprehension) -- that boundary node is still yielded (harmless, since
+only an `ast.Compare` id is ever looked up), just never descended into,
+leaving its own body to ordinary position-based resolution, which already
+has a real span and qualname for it. (3) **`node.returns` -- a return
+annotation -- was omitted from the scope-override traversal entirely,**
+even though Python evaluates it in the defining (enclosing) scope exactly
+like a parameter default or a parameter annotation: `fact = rec.
+bases_fact; def inner(fact) -> (fact == other): ...` was missed, since
+`inner`'s own parameter `fact` shadows the outer alias for the function
+body, but the return annotation evaluates *before* that parameter even
+exists. Fixed by appending `node.returns` (when present -- `ast.Lambda`
+has no such attribute) to the same `subtrees` list defaults/parameter
+annotations already populate. (4) **A method's own parameter default is
+evaluated while its *containing class body* executes -- ordinary
+`LOAD_NAME` class-body code, not a closure lookup -- but the
+`pending_defaults` resolution pass looked up the default's evaluation
+scope via `lexical_parents`, which intentionally skips the class layer
+for the different question of a method *body*'s own free-variable
+lookup.** `class C: fact = rec.bases_fact; def m(self, value=fact):
+return value == other` produced no finding, since `value` was never
+marked as a Fact alias -- `lexical_parents.get("C.m", ...)` skips straight
+past `C`'s own class-body scope to whatever encloses the class, which
+carries no `fact` alias in this shape at all. Fixed by resolving the
+default's own evaluation scope through `_def_containing_qualnames`
+instead (already computed once per call inside `_fact_aliases`, unlike
+`_default_and_annotation_scope_overrides`'s own separate copy, since
+`_fact_aliases` needed it first for the walrus-target-hop case several
+rounds above) -- the syntactic containing scope, class layers included --
+while the method *body*'s own `fact` parameter (with no default at all)
+still correctly shadows in its body, verified by a dedicated negative
+control, since `_fact_aliases`'s shadowing-subtraction mechanism the
+class-skipping `lexical_parents` chain still governs is untouched by this
+fix. `pending_defaults` grew a fourth tuple element (the `def`'s own
+`(lineno, col_offset)`, needed since `_def_containing_qualnames` is
+position-keyed, not qualname-keyed) to carry this through; `_default_and_
+annotation_scope_overrides` itself was also switched from
+`_lexical_function_parents` to `_def_containing_qualnames` for the
+identical reason -- a comparison found *directly inside* a method's own
+default (not just an aliased parameter later read in the body) needs the
+same containing-class-scope answer. Verified empirically: still zero
+existing hits in the real repository, and `mypy`/`ruff` both stayed
+clean. Nine new tests: three annotation-wrapper positive cases plus a
+negative control (an ordinary `int | None` parameter), the nested-lambda-
+default exclusion plus its no-lambda negative control, the return-
+annotation case, and the class-body-default case plus its
+method-parameter-still-shadows negative control.
+
 ---
 
 ### Phase 1 — finish the `dump`/`scan` typed-API convergence (closes AGENTS.md "PR C")
