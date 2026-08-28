@@ -649,8 +649,12 @@ class TestCompareReleaseErrorPaths:
         new_pkg.write_bytes(b"not-a-tarball")
 
         runner = CliRunner()
-        with patch("abicheck.package.is_package", return_value=True), \
-             patch("abicheck.package.detect_extractor", return_value=None):
+        # cli_compare_release.py imports is_package/detect_extractor from the
+        # workflows.extraction facade (a fresh function-local import per call,
+        # per ADR-061), not from abicheck.package directly -- patch there,
+        # matching workflows/extraction.py's own documented gotcha.
+        with patch("abicheck.workflows.extraction.is_package", return_value=True), \
+             patch("abicheck.workflows.extraction.detect_extractor", return_value=None):
             result = runner.invoke(main, [
                 "compare", str(old_pkg), str(new_pkg),
             ])
