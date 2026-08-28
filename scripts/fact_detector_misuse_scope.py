@@ -1170,8 +1170,39 @@ def _locally_bound_constructor_shadow_names(
     return shadows
 
 
+def _global_declared_names(
+    tree: ast.Module, qualnames: _QualnameSpans
+) -> dict[str, set[str]]:
+    """Map each function's own qualname to the names it declares via a
+    direct `global` statement in its own body (not a further-nested
+    `def`'s -- that one gets its own, independent qualname entry).
+
+    Exists to let `_scope_chain_union()` route a `global`-declared name
+    straight to module scope instead of through the ordinary closure
+    chain (Codex review, fresh evidence): `def outer(Fact): def
+    inner(other): global Fact; return Fact.present(1) == other` --
+    `inner`'s own `global Fact` statement makes *every* reference to
+    `Fact` inside `inner` resolve to the module-level name, completely
+    bypassing `outer`'s own parameter, which would otherwise shadow it
+    for any ordinary (non-`global`) nested closure. A plain unconditional
+    lexical-parent walk can't tell the two cases apart, since Python's
+    `global` statement is a per-function-scope override of the normal
+    closure rule, not a binding form the rest of this module's
+    collectors have any notion of.
+    """
+    declared: dict[str, set[str]] = {}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Global):
+            qualname = _qualname_at((node.lineno, node.col_offset), qualnames)
+            declared.setdefault(qualname, set()).update(node.names)
+    return declared
+
+
 def _scope_chain_union(
-    qualname: str, per_scope: dict[str, set[str]], lexical_parents: dict[str, str]
+    qualname: str,
+    per_scope: dict[str, set[str]],
+    lexical_parents: dict[str, str],
+    global_names: dict[str, set[str]] | None = None,
 ) -> set[str]:
     """Union *per_scope*'s own entry for *qualname* with every one of its
     lexical-function ancestors' entries, walking `lexical_parents` (the
@@ -1185,13 +1216,29 @@ def _scope_chain_union(
     `Fact` is `outer`'s binding, not `inner`'s own, but `inner` still
     genuinely sees it through the closure). One shared walk instead of
     the identical loop hand-rolled once per dict.
+
+    **`global_names` (optional) carries the exception to the walk**: any
+    name *qualname* itself declares `global` (`_global_declared_names()`)
+    is excluded from every non-module ancestor's own contribution --
+    `global` routes resolution straight to module scope, so an enclosing
+    function's own shadow/alias binding of that name must not leak in
+    just because it sits between *qualname* and `"<module>"` in the
+    chain. The name still receives whatever `"<module>"`'s own entry
+    says, since the walk reaches it as the chain's terminal scope
+    regardless. Omitted (the default) reproduces the original,
+    unconditional-union behavior exactly, for a caller with no `global`
+    awareness of its own.
     """
     result: set[str] = set()
     seen: set[str] = set()
+    routed_to_module = global_names.get(qualname, set()) if global_names else set()
     current: str | None = qualname
     while current is not None and current not in seen:
         seen.add(current)
-        result |= per_scope.get(current, set())
+        contribution = per_scope.get(current, set())
+        if routed_to_module and current != "<module>":
+            contribution = contribution - routed_to_module
+        result |= contribution
         current = lexical_parents.get(current)
     return result
 
@@ -1202,6 +1249,7 @@ def _constructor_alias_names(
     fact_names: frozenset[str],
     locally_bound_shadows: dict[str, set[str]],
     lexical_parents: dict[str, str],
+    global_names: dict[str, set[str]] | None = None,
 ) -> dict[str, set[str]]:
     """Map each scope's own qualname to local names bound, via a plain
     single-target assignment, directly to the `Fact` constructor itself
@@ -1229,7 +1277,12 @@ def _constructor_alias_names(
     unrelated local rebinding. Skipped whenever the RHS name is itself
     shadowed anywhere in its own closure-scope chain
     (`_scope_chain_union`), the identical check `is_fact_typed()` already
-    applies to a bare constructor reference.
+    applies to a bare constructor reference. `global_names` is that same
+    shadow check's own `global`-bypass exception (`_global_declared_
+    names()`/`_scope_chain_union()`'s own docstrings): `def outer(Fact):
+    def inner(other): global Fact; F = Fact; return F(1) == other` must
+    still register `F` as a real alias, since `inner`'s own `global Fact`
+    routes its `Fact` reference to module scope, not `outer`'s parameter.
     """
     aliases: dict[str, set[str]] = {}
     for node in ast.walk(tree):
@@ -1244,7 +1297,7 @@ def _constructor_alias_names(
         ):
             qualname = _qualname_at((node.lineno, node.col_offset), qualnames)
             if value.id in _scope_chain_union(
-                qualname, locally_bound_shadows, lexical_parents
+                qualname, locally_bound_shadows, lexical_parents, global_names
             ):
                 continue
             aliases.setdefault(qualname, set()).add(target.id)
@@ -1257,6 +1310,7 @@ def _constructor_method_alias_names(
     fact_names: frozenset[str],
     locally_bound_shadows: dict[str, set[str]],
     lexical_parents: dict[str, str],
+    global_names: dict[str, set[str]] | None = None,
 ) -> dict[str, set[str]]:
     """Map each scope's own qualname to local names bound, via a plain
     single-target assignment, to an *unbound reference* of one of the
@@ -1278,6 +1332,8 @@ def _constructor_method_alias_names(
     describes** -- `def f(Fact, other): make_fact = Fact.present; ...`
     with `Fact` itself a shadowing parameter would otherwise fabricate a
     classmethod alias off the parameter's own runtime value.
+    `global_names` is the identical `global`-bypass exception described
+    there too.
     """
     aliases: dict[str, set[str]] = {}
     for node in ast.walk(tree):
@@ -1293,7 +1349,7 @@ def _constructor_method_alias_names(
         ):
             qualname = _qualname_at((node.lineno, node.col_offset), qualnames)
             if value.value.id in _scope_chain_union(
-                qualname, locally_bound_shadows, lexical_parents
+                qualname, locally_bound_shadows, lexical_parents, global_names
             ):
                 continue
             aliases.setdefault(qualname, set()).add(target.id)

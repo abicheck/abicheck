@@ -5217,6 +5217,57 @@ tests: `TestConstructorAssignmentAliasesAreRecognized` (13 tests) and
 `TestShadowedConstructorSuppressesItsOwnAlias` (3 tests), both appended
 to `tests/test_fact_detector_misuse_constructor_shadow.py`.
 
+**A further round found the enclosing-shadow walk itself was too blunt**
+(Codex review, fresh evidence): `def outer(Fact): def inner(other):
+global Fact; return Fact.present(1) == other` -- `inner`'s own `global
+Fact` statement is Python's ordinary override of the closure rule for
+that name: it routes *every* reference to `Fact` inside `inner` straight
+to module scope, completely bypassing `outer`'s own shadowing parameter.
+`_scope_chain_union()`'s unconditional walk had no notion of `global`
+statements at all and still unioned `outer`'s shadow in, suppressing a
+genuine misuse site of the real, unshadowed constructor. Reproduced
+directly (0 hits, expected 1) before designing a fix.
+
+Fixed with a new `_global_declared_names()` collector in
+`fact_detector_misuse_scope.py` (maps each function's own qualname to
+the names it declares via a direct `global` statement in its own body)
+and an optional `global_names` parameter on `_scope_chain_union()`
+itself: a name the *starting* qualname declares `global` is excluded
+from every non-module ancestor's own contribution to the walk, while
+still receiving whatever `"<module>"`'s own entry says, since the walk
+reaches the module scope as its terminal node regardless. Threaded
+through all three call sites that need it -- `is_fact_typed()`'s own
+shadow-subtraction, and both `_constructor_alias_names()`'s and
+`_constructor_method_alias_names()`'s own internal shadow checks (the
+identical hazard applies to an alias sourced from a `global`-declared
+name: `global Fact; F = Fact` must still register `F` as a real alias).
+The alias-*addition* half of `is_fact_typed()`'s own union (constructor
+aliases bound in an ancestor scope, reached via ordinary closure) is
+correctly left unaffected -- `global` changes what a *name* resolves to
+within the declaring scope, not whether a *different* scope's own local
+binding remains visible to its own nested closures the normal way.
+
+Verified via direct AST reproduction against 10 cases before writing
+tests: the reported case, the bare-call form, both new alias
+collectors' own shadow checks correctly bypassed too, a doubly-nested
+case where only the innermost scope declares `global` (bypassing two
+levels of shadowing parameter at once), a regression guard confirming
+the shadow still suppresses recognition with the `global` statement
+removed, a `global` declaration with no shadowing parameter left
+completely unaffected, sibling-function isolation, `global` of an
+*unrelated* name correctly not bypassing a genuine `Fact` shadow (the
+bypass is keyed by name, not merely "a global statement exists in this
+scope"), and the subtle case where the module-level `Fact` itself is
+shadowed by an ordinary module-level assignment (`global` only means
+"look at module scope" -- it doesn't mean the module-level binding is
+the real constructor, so recognition correctly stays suppressed there
+too). `mypy`/`ruff` both stayed clean; `fact_detector_misuse.py` at 1974
+lines (headroom now tight -- ~26 lines left under the 2000-line hard
+cap; the next finding in this area will very likely need a further
+split) and `fact_detector_misuse_scope.py` at 1356 lines (still ample).
+New tests: `TestGlobalDeclarationBypassesEnclosingShadow` (10 tests),
+appended to `tests/test_fact_detector_misuse_constructor_shadow.py`.
+
 ---
 
 ### Phase 1 — finish the `dump`/`scan` typed-API convergence (closes AGENTS.md "PR C")

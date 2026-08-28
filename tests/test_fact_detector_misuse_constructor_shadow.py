@@ -65,6 +65,23 @@ local rebinding. Fixed by guarding both new collectors on the identical
 shadow-chain check `is_fact_typed()` already applies to a bare
 constructor reference (`TestShadowedConstructorSuppressesItsOwnAlias`
 below is the regression coverage for this specific composition).
+
+**A later round found the enclosing-shadow walk itself was too blunt**
+(`TestGlobalDeclarationBypassesEnclosingShadow` below): `def
+outer(Fact): def inner(other): global Fact; return Fact.present(1) ==
+other` -- `inner`'s own `global Fact` statement routes *every*
+reference to `Fact` inside `inner` straight to module scope, completely
+bypassing `outer`'s parameter, the ordinary Python rule that a
+function's own `global` declaration overrides the closure chain for
+that name. The unconditional `_scope_chain_union()` walk had no notion
+of this and still unioned in `outer`'s shadow, suppressing a genuine
+misuse site (Codex review, fresh evidence). Fixed via a new
+`_global_declared_names()` collector (`scripts/fact_detector_misuse_
+scope.py`) and an optional `global_names` parameter on
+`_scope_chain_union()` that excludes a `global`-declared name from
+every non-module ancestor's own contribution -- the name still resolves
+through whatever module scope's own entry says, since the walk reaches
+`"<module>"` as the chain's terminal scope regardless.
 """
 
 from __future__ import annotations
@@ -464,6 +481,164 @@ class TestShadowedConstructorSuppressesItsOwnAlias:
             "    def inner(other):\n"
             "        F = Fact\n"
             "        return F(1) == other\n"
+            "    return inner\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert fact_equality_misuse_sites(tree, "x.py") == []
+
+
+class TestGlobalDeclarationBypassesEnclosingShadow:
+    """A nested function's own `global` statement routes resolution of
+    that name straight to module scope, completely bypassing an
+    enclosing function's own shadowing binding of the same name -- the
+    ordinary Python closure-vs-global rule (Codex review, fresh
+    evidence)."""
+
+    def test_global_bypasses_enclosing_parameter_shadow_classmethod_form(
+        self,
+    ) -> None:
+        src = (
+            "from abicheck.model.fact import Fact\n"
+            "def outer(Fact):\n"
+            "    def inner(other):\n"
+            "        global Fact\n"
+            "        return Fact.present(1) == other\n"
+            "    return inner\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert len(fact_equality_misuse_sites(tree, "x.py")) == 1
+
+    def test_global_bypasses_enclosing_parameter_shadow_bare_call_form(
+        self,
+    ) -> None:
+        src = (
+            "from abicheck.model.fact import Fact\n"
+            "def outer(Fact):\n"
+            "    def inner(other):\n"
+            "        global Fact\n"
+            "        return Fact(1) == other\n"
+            "    return inner\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert len(fact_equality_misuse_sites(tree, "x.py")) == 1
+
+    def test_global_bypasses_shadow_for_a_bare_constructor_alias(self) -> None:
+        """`_constructor_alias_names()`'s own shadow check must apply the
+        identical `global` bypass, not just `is_fact_typed()`'s."""
+        src = (
+            "from abicheck.model.fact import Fact\n"
+            "def outer(Fact):\n"
+            "    def inner(other):\n"
+            "        global Fact\n"
+            "        F = Fact\n"
+            "        return F(1) == other\n"
+            "    return inner\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert len(fact_equality_misuse_sites(tree, "x.py")) == 1
+
+    def test_global_bypasses_shadow_for_a_classmethod_bound_alias(self) -> None:
+        src = (
+            "from abicheck.model.fact import Fact\n"
+            "def outer(Fact):\n"
+            "    def inner(other):\n"
+            "        global Fact\n"
+            "        make_fact = Fact.present\n"
+            "        return make_fact(1) == other\n"
+            "    return inner\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert len(fact_equality_misuse_sites(tree, "x.py")) == 1
+
+    def test_global_bypasses_both_shadow_levels_when_doubly_nested(self) -> None:
+        """Only the innermost function declares `global`; both `outer`
+        and `middle` have their own shadowing `Fact` parameter, and the
+        bypass must still reach all the way to module scope."""
+        src = (
+            "from abicheck.model.fact import Fact\n"
+            "def outer(Fact):\n"
+            "    def middle(Fact):\n"
+            "        def inner(other):\n"
+            "            global Fact\n"
+            "            return Fact.present(1) == other\n"
+            "        return inner\n"
+            "    return middle\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert len(fact_equality_misuse_sites(tree, "x.py")) == 1
+
+    def test_regression_shadow_still_suppresses_without_global(self) -> None:
+        """Regression guard: removing the `global` statement must restore
+        the ordinary shadow-suppresses-recognition behavior."""
+        src = (
+            "from abicheck.model.fact import Fact\n"
+            "def outer(Fact):\n"
+            "    def inner(other):\n"
+            "        return Fact(1) == other\n"
+            "    return inner\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert fact_equality_misuse_sites(tree, "x.py") == []
+
+    def test_global_with_no_shadowing_parameter_is_unaffected(self) -> None:
+        """A `global` declaration with nothing shadowing it changes
+        nothing -- the real constructor is still recognized exactly as
+        it would be without the declaration."""
+        src = (
+            "from abicheck.model.fact import Fact\n"
+            "def f(other):\n"
+            "    def inner():\n"
+            "        global Fact\n"
+            "        return Fact(1) == other\n"
+            "    return inner()\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert len(fact_equality_misuse_sites(tree, "x.py")) == 1
+
+    def test_sibling_function_unaffected_by_an_unrelated_global_declaration(
+        self,
+    ) -> None:
+        src = (
+            "from abicheck.model.fact import Fact\n"
+            "def outer(Fact):\n"
+            "    def inner(other):\n"
+            "        global Fact\n"
+            "        return Fact(1) == other\n"
+            "    return inner\n"
+            "def g(Fact, other):\n"
+            "    return Fact(1) == other\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert len(fact_equality_misuse_sites(tree, "x.py")) == 1
+
+    def test_global_of_an_unrelated_name_does_not_affect_the_fact_shadow(
+        self,
+    ) -> None:
+        """`global x` (a name that has nothing to do with `Fact`) must
+        not itself bypass a genuine `Fact` shadow -- the bypass is keyed
+        by name, not merely by "a global statement exists here"."""
+        src = (
+            "from abicheck.model.fact import Fact\n"
+            "def outer(Fact):\n"
+            "    def inner(other, x):\n"
+            "        global x\n"
+            "        return Fact(1) == other\n"
+            "    return inner\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert fact_equality_misuse_sites(tree, "x.py") == []
+
+    def test_global_routes_to_a_shadowed_module_level_binding_too(self) -> None:
+        """`global` only says "look at module scope" -- it doesn't say
+        the module-level binding is the real constructor. A module-level
+        `Fact = 1` genuinely shadows the constructor there too, so
+        recognition must correctly stay suppressed."""
+        src = (
+            "Fact = 1\n"
+            "def outer(Fact):\n"
+            "    def inner(other):\n"
+            "        global Fact\n"
+            "        return Fact(1) == other\n"
             "    return inner\n"
         )
         tree = ast.parse(src, filename="x.py")

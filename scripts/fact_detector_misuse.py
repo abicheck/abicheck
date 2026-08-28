@@ -73,6 +73,7 @@ from fact_detector_misuse_scope import (  # noqa: E402
     _constructor_method_alias_names,
     _def_containing_qualnames,
     _enclosing_qualnames,
+    _global_declared_names,
     _lexical_function_parents,
     _locally_bound_constructor_shadow_names,
     _match_pattern_names,
@@ -1854,11 +1855,22 @@ def fact_equality_misuse_sites(tree: ast.Module, rel: str) -> list[tuple[int, in
     fact_names = _imported_fact_aliases(tree)
     locally_bound_shadows = _locally_bound_constructor_shadow_names(tree, qualnames)
     lexical_parents = _lexical_function_parents(tree)
+    global_names = _global_declared_names(tree, qualnames)
     constructor_aliases = _constructor_alias_names(
-        tree, qualnames, fact_names, locally_bound_shadows, lexical_parents
+        tree,
+        qualnames,
+        fact_names,
+        locally_bound_shadows,
+        lexical_parents,
+        global_names,
     )
     constructor_method_aliases = _constructor_method_alias_names(
-        tree, qualnames, fact_names, locally_bound_shadows, lexical_parents
+        tree,
+        qualnames,
+        fact_names,
+        locally_bound_shadows,
+        lexical_parents,
+        global_names,
     )
 
     def is_fact_typed(node: ast.expr, qualname: str) -> bool:
@@ -1877,7 +1889,7 @@ def fact_equality_misuse_sites(tree: ast.Module, rel: str) -> list[tuple[int, in
         # shadow_names()`/`_constructor_alias_names()`'s own docstrings
         # for exactly which binding forms each covers.
         effective_fact_names = fact_names - _scope_chain_union(
-            qualname, locally_bound_shadows, lexical_parents
+            qualname, locally_bound_shadows, lexical_parents, global_names
         ) | _scope_chain_union(qualname, constructor_aliases, lexical_parents)
         if _is_fact_typed_expr(node, effective_fact_names):
             return True
