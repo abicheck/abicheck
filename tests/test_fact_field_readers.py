@@ -297,6 +297,96 @@ class TestUnmigratedFactReaderSites:
         tree = ast.parse(src, filename="x.py")
         assert unmigrated_fact_reader_sites(tree, "x.py", src) == []
 
+    def test_detects_an_attrgetter_call_through_an_assignment_chained_alias(
+        self,
+    ) -> None:
+        """`import operator as op; op2 = op; op2.attrgetter("bases")(rec)`
+        -- a plain-assignment alias of an already-import-aliased `operator`
+        reference (Codex review: a `Call`-typed value has no simple
+        assignment shape, but `op`/`op2` themselves are ordinary module
+        references, chained exactly the way `_builtins_getattr_aliases()`
+        already resolves `getattr`/`builtins` aliases)."""
+        src = (
+            "import operator as op\n"
+            "op2 = op\n"
+            "def f(rec):\n"
+            '    return op2.attrgetter("bases")(rec)\n'
+        )
+        tree = ast.parse(src, filename="x.py")
+        sites = unmigrated_fact_reader_sites(tree, "x.py", src)
+        assert [key for key, _l, _a, _q in sites] == [
+            'x.py::f::bases::op2.attrgetter("bases")(rec)::'
+            'op2.attrgetter("bases")(rec)::1'
+        ]
+
+    def test_detects_an_attrgetter_call_through_a_chained_bare_alias(
+        self,
+    ) -> None:
+        """The same chained-assignment coverage for the bare `attrgetter`
+        spelling: `from operator import attrgetter as ag; ag2 = ag;
+        ag2("bases")(rec)`."""
+        src = (
+            "from operator import attrgetter as ag\n"
+            "ag2 = ag\n"
+            "def f(rec):\n"
+            '    return ag2("bases")(rec)\n'
+        )
+        tree = ast.parse(src, filename="x.py")
+        sites = unmigrated_fact_reader_sites(tree, "x.py", src)
+        assert [key for key, _l, _a, _q in sites] == [
+            'x.py::f::bases::ag2("bases")(rec)::ag2("bases")(rec)::1'
+        ]
+
+    def test_ignores_getattr_shadowed_by_a_function_parameter(self) -> None:
+        """`def f(getattr, rec): return getattr(rec, "bases")` -- an
+        ordinary, unrelated parameter reusing the name `getattr` must not
+        be treated as the real builtin (Codex review: the bare-name match
+        had no notion of local shadowing at all)."""
+        src = 'def f(getattr, rec):\n    return getattr(rec, "bases")\n'
+        tree = ast.parse(src, filename="x.py")
+        assert unmigrated_fact_reader_sites(tree, "x.py", src) == []
+
+    def test_documents_the_residual_ordinary_reassignment_shadow_gap(
+        self,
+    ) -> None:
+        """`getattr = some_other_thing; getattr(rec, "bases")` is an
+        ordinary local reassignment that *also* shadows the builtin, the
+        same way a parameter does -- but `_locally_bound_names()`
+        deliberately covers parameters only (see that function's own
+        docstring for why an ordinary assignment target can't be treated
+        as shadowing without conflicting with the alias-resolution
+        mechanism: `read_attr = getattr` is a real alias assignment of the
+        identical shape). This case is a documented, accepted residual
+        false positive, not a silent gap -- pinned here so a future change
+        that narrows `_locally_bound_names()` further doesn't need to
+        rediscover this trade-off from scratch."""
+        src = (
+            "def f(rec):\n"
+            "    getattr = some_other_thing\n"
+            '    return getattr(rec, "bases")\n'
+        )
+        tree = ast.parse(src, filename="x.py")
+        sites = unmigrated_fact_reader_sites(tree, "x.py", src)
+        assert [attr for _k, _l, attr, _q in sites] == ["bases"]
+
+    def test_detects_a_real_getattr_call_despite_shadowing_in_a_sibling(
+        self,
+    ) -> None:
+        """Negative control: shadowing in one function must not leak into
+        an unrelated sibling function's own genuine `getattr()` call."""
+        src = (
+            "def f(getattr, rec):\n"
+            '    return getattr(rec, "bases")\n'
+            "def g(rec):\n"
+            '    return getattr(rec, "bases", None)\n'
+        )
+        tree = ast.parse(src, filename="x.py")
+        sites = unmigrated_fact_reader_sites(tree, "x.py", src)
+        assert [key for key, _l, _a, _q in sites] == [
+            'x.py::g::bases::getattr(rec, "bases", None)::'
+            'getattr(rec, "bases", None)::1'
+        ]
+
     def test_detects_a_bound_getattribute_call_naming_a_bridged_attr(
         self,
     ) -> None:

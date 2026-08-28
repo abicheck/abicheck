@@ -1372,6 +1372,53 @@ field at all. A sixth, separate finding from the same round (a stale
 the append-only review notes once they moved past it) is fixed directly
 in that paragraph itself, not narrated as its own round here.
 
+**A seventeenth Codex review round found two more real gaps, one in the
+new `attrgetter` alias resolution and one a genuine false positive in the
+existing `getattr` recognition -- both fixed, the second with a real
+mid-fix correction.** (1) **A plain-assignment alias of `operator`/
+`attrgetter` was still out of scope.** `import operator as op; op2 = op;
+op2.attrgetter("bases")(rec)` and `from operator import attrgetter as ag;
+ag2 = ag; ag2("bases")(rec)` read the identical legacy field as the
+unaliased/singly-import-aliased spellings, but the previous round's own
+docstring claimed "a `Call`-typed value has no simple assignment shape to
+chain through" -- true, but irrelevant: `op`/`ag` are ordinary references
+(a module, a builtin callable) *before* being called, chaining through a
+plain assignment exactly the way `_builtins_getattr_aliases()`'s own
+`getattr`/`builtins` resolution already does. Fixed by giving
+`_operator_attrgetter_aliases()` the identical fixed-point assignment-
+chaining pattern that function already uses. (2) **A local binding that
+shadows the bare `getattr`/`builtins` names was never excluded from the
+builtin match at all.** `def f(getattr, rec): return getattr(rec,
+"bases")` -- an ordinary, unrelated function parameter reusing the name
+`getattr` -- was unconditionally treated as the real builtin, blocking a
+valid, unrelated change. Fixed with a new `_locally_bound_names()`,
+consulted at each `getattr`/`builtins` match site. **The first revision of
+that helper also covered ordinary `ast.Assign`/`ast.AnnAssign` targets,
+not just parameters, and immediately broke six existing tests** --
+`read_attr = getattr; read_attr(rec, "bases")` IS a genuine local
+assignment target of the identical shape, but treating that assignment as
+"shadowing" is backwards: it's *how* the existing alias-resolution
+mechanism makes `read_attr` trustworthy in the first place, not a reason
+to distrust it. Telling a real shadow (`getattr = some_unrelated_value`)
+apart from a real alias assignment (`read_attr = getattr`) needs
+per-assignment tracing of what each target's own value resolves to --
+information `_builtins_getattr_aliases()`'s own internal `assign_
+candidates` already computes but doesn't expose, and doing so scoped
+per-function is a real, separate follow-up, not attempted here. Since a
+parameter can never be an alias source in that same sense (nothing in a
+function signature assigns FROM `getattr`), `_locally_bound_names()` was
+narrowed to parameters only, closing the reported false positive with no
+risk of this conflict -- and `def f(rec): getattr = some_other_thing;
+getattr(rec, "bases")` (an ordinary reassignment shadow, not reported by
+this round) is left as a documented, accepted residual false positive
+rather than a silently reintroduced one, pinned by its own test. Verified
+empirically: still zero existing hits in the real repository, baseline
+stays at 104, and `mypy`/`ruff` both stayed clean. Five new tests: the
+two chained-alias `attrgetter`/`operator` forms, the shadowed-parameter
+negative control, its sibling-function negative control (shadowing in one
+function must not leak into another), and the residual-gap documentation
+test.
+
 **Still not landed**: no detector (`diff_layout.py`/`diff_types.py`/
 `diff_param_qualifiers.py`/the reader set the check above now tracks
 precisely) has actually been migrated to read `.status` — the check above

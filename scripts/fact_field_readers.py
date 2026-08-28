@@ -373,6 +373,80 @@ def _outermost_containing_expr(node: ast.AST, parents: dict[int, ast.AST]) -> as
     return current
 
 
+def _locally_bound_names(tree: ast.Module) -> dict[str, set[str]]:
+    """Map each function's qualname (the identical key `_enclosing_
+    qualnames` uses) to every *parameter* name it declares -- not an
+    ordinary assignment target, and not a name bound inside a *nested*
+    function's own body.
+
+    **Used to exclude a shadowed name from builtin recognition (Codex
+    review, fresh evidence).** `def f(getattr, rec): return getattr(rec,
+    "bases")` shadows the real `getattr` builtin with an ordinary,
+    unrelated local parameter of the identical name -- but the
+    builtin-recognition branch in `unmigrated_fact_reader_sites()` had no
+    notion of local shadowing at all, unconditionally treating the bare
+    name `getattr` as the real builtin regardless of what the enclosing
+    function actually bound it to. Reported call sites in an unrelated,
+    valid change would then either falsely fail the ERROR-level gate or
+    force a misleading baseline entry for a read that was never really a
+    builtin call.
+
+    **Deliberately parameters only, not an ordinary assignment target
+    (Codex review, fresh evidence: a first revision of this helper also
+    covered `ast.Assign`/`ast.AnnAssign` targets, and immediately broke six
+    existing tests).** `read_attr = getattr; read_attr(rec, "bases")` is
+    exactly `_builtins_getattr_aliases()`'s own alias-resolution mechanism
+    -- `read_attr` IS a genuine local assignment target, but treating that
+    as "shadowing" is backwards: it's *how* an alias becomes trustworthy,
+    not a reason to distrust it. Telling a real shadow (`getattr =
+    some_unrelated_value`) apart from a real alias assignment (`read_attr =
+    getattr`) needs per-assignment tracing of what each target's own value
+    resolves to (exactly what `_builtins_getattr_aliases()`'s internal
+    `assign_candidates` already does, but scoped per-function and exposed,
+    neither of which it currently is) -- a real, if narrow, follow-up this
+    revision does not attempt. A parameter can never be an alias source in
+    that same sense (nothing in a function signature assigns FROM
+    `getattr`), so restricting to parameters closes the reported false
+    positive with no risk of this same conflict.
+
+    Deliberately narrower than the exhaustive binding-form coverage
+    `fact_detector_misuse.py`'s own `locally_bound` machinery has grown
+    into over many review rounds (comprehension/lambda/match/walrus
+    scoping, closures into a *nested* function, global/nonlocal routing) --
+    only for the immediate enclosing function of the call site being
+    checked, since no evidence has reported any of those more exotic
+    shapes shadowing `getattr`/`builtins` specifically (or the identical
+    risk for `attrgetter`/`operator`, which shares this same unhandled gap
+    -- deliberately not extended there either without reported evidence).
+    Extend this the same incremental way if one is ever found, matching
+    this module's own established practice of only building the
+    generality an actual review finding demonstrates.
+    """
+    bound: dict[str, set[str]] = {}
+
+    def visit(node: ast.AST, prefix: str) -> None:
+        for child in ast.iter_child_nodes(node):
+            if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                child_qualname = f"{prefix}{child.name}"
+                all_args = (
+                    *child.args.posonlyargs,
+                    *child.args.args,
+                    *child.args.kwonlyargs,
+                    *((child.args.vararg,) if child.args.vararg else ()),
+                    *((child.args.kwarg,) if child.args.kwarg else ()),
+                )
+                for arg in all_args:
+                    bound.setdefault(child_qualname, set()).add(arg.arg)
+                visit(child, child_qualname + ".")
+            elif isinstance(child, ast.ClassDef):
+                visit(child, f"{prefix}{child.name}.")
+            else:
+                visit(child, prefix)
+
+    visit(tree, "")
+    return bound
+
+
 def _imported_class_aliases(tree: ast.Module) -> dict[str, str]:
     """Map every local name *tree* binds to one of `FACT_BRIDGED_CLASS_NAMES`
     -- either via an `import ... as` (`from abicheck.model import
@@ -571,18 +645,39 @@ def _operator_attrgetter_aliases(
     `ag("bases")(rec)` are real, unremarkable Python, and the caller's own
     exact-name matching (`"operator"`/`"attrgetter"` only) missed both --
     the identical gap `_builtins_getattr_aliases()` above closes for
-    `getattr`/`builtins`, applied to this pair instead. Deliberately no
-    assignment-chain resolution the way that function's own multi-round
-    evolution eventually added (`read_attr = getattr`, `b = builtins`,
-    `read_attr = builtins.getattr`) -- only the two `import`-form aliases
-    reported here are covered; a plain-assignment alias of either name is
-    still out of scope, matching `_is_attrgetter_constructor_call`'s own
-    "no local-alias resolution for `attrgetter`" stance (a `Call`-typed
-    value has no simple `ast.Name`-only assignment shape to chain through
-    the way a bare callable/module reference does).
+    `getattr`/`builtins`, applied to this pair instead.
+
+    **A plain-assignment alias of either name is resolved too (Codex
+    review, fresh evidence, second round on this same helper).** `import
+    operator as op; op2 = op; op2.attrgetter("bases")(rec)` and `from
+    operator import attrgetter as ag; ag2 = ag; ag2("bases")(rec)` are the
+    identical dynamic reads as the unaliased/singly-aliased spellings --
+    this function's own first revision claimed a `Call`-typed value (the
+    *result* of `attrgetter(...)`) has no simple assignment shape to chain
+    through, which is true but irrelevant: `op`/`ag`/`attrgetter` are
+    themselves ordinary references (a module object, a builtin callable)
+    *before* being called, and a plain `ast.Name`-valued assignment of
+    either chains exactly the way `_builtins_getattr_aliases()`'s own
+    `getattr`/`builtins` resolution already does. Fixed by reusing the
+    identical fixed-point assignment-chaining pattern -- every plain-`Name`
+    target of an `ast.Assign` (including every target of a chained
+    assignment, `op2 = op3 = op`) or `ast.AnnAssign` is collected as a
+    candidate, then repeatedly folded into either name set until a pass
+    adds nothing new. The `_is_attrgetter_constructor_call()`'s own
+    docstring wording about `attrgetter` getting "no local-alias
+    resolution" refers to a *different* thing -- a value ASSIGNED FROM a
+    *constructed getter* (`getter = attrgetter(...); getter(rec)`, still
+    correctly out of scope, see that function's own docstring) -- not the
+    module/callable references resolved here.
     """
     attrgetter_names = {"attrgetter"}
     operator_names = {"operator"}
+    assign_candidates: list[tuple[str, str]] = []
+
+    def _add_candidate(target: str, value: ast.expr | None) -> None:
+        if isinstance(value, ast.Name):
+            assign_candidates.append((target, value.id))
+
     for node in ast.walk(tree):
         if isinstance(node, ast.ImportFrom) and node.module == "operator":
             for alias in node.names:
@@ -592,6 +687,30 @@ def _operator_attrgetter_aliases(
             for alias in node.names:
                 if alias.name == "operator":
                     operator_names.add(alias.asname or alias.name)
+        elif isinstance(node, ast.Assign):
+            for target in node.targets:
+                if isinstance(target, ast.Name):
+                    _add_candidate(target.id, node.value)
+        elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
+            _add_candidate(node.target.id, node.value)
+    changed = True
+    while changed:
+        changed = False
+        for local, ref in assign_candidates:
+            if local in attrgetter_names:
+                continue
+            if ref in attrgetter_names:
+                attrgetter_names.add(local)
+                changed = True
+    changed = True
+    while changed:
+        changed = False
+        for local, ref in assign_candidates:
+            if local in operator_names:
+                continue
+            if ref in operator_names:
+                operator_names.add(local)
+                changed = True
     return frozenset(attrgetter_names), frozenset(operator_names)
 
 
@@ -784,12 +903,31 @@ def unmigrated_fact_reader_sites(
     default) -- see `_is_attrgetter_constructor_call()`'s own docstring for
     why a *value* assigned from a constructed getter, unlike `getattr`
     itself, gets no local-alias resolution.
+
+    **A local binding that shadows `getattr`/`builtins` is excluded from
+    the bare-name builtin match (Codex review, fresh evidence).** `def
+    f(getattr, rec): return getattr(rec, "bases")` -- an ordinary,
+    unrelated function parameter reusing the name `getattr` -- was
+    unconditionally treated as the real `getattr` builtin regardless of
+    what the enclosing function actually bound it to, blocking a valid,
+    unrelated change with a misleading error. Fixed with a new
+    `_locally_bound_names()` (this function's own parameters plus any
+    ordinary same-function assignment target, scoped narrower than
+    `fact_detector_misuse.py`'s own exhaustive shadowing machinery --
+    see that helper's own docstring for exactly what's covered and why)
+    consulted at each `getattr`/`builtins` match site: a name shadowed in
+    the call's own enclosing function is excluded from the match.
     """
     qualnames = _enclosing_qualnames(tree)
     parents = _parent_map(tree)
     class_aliases = _imported_class_aliases(tree)
     getattr_names, builtins_names = _builtins_getattr_aliases(tree)
     attrgetter_names, operator_names = _operator_attrgetter_aliases(tree)
+    locally_bound = _locally_bound_names(tree)
+
+    def _shadowed(call_node: ast.Call, name: str) -> bool:
+        qualname = qualnames.get(call_node.lineno, "<module>")
+        return name in locally_bound.get(qualname, ())
 
     def _expr_text(node: ast.AST) -> str:
         outer = _outermost_containing_expr(node, parents)
@@ -922,12 +1060,17 @@ def unmigrated_fact_reader_sites(
         elif (
             isinstance(node, ast.Call)
             and (
-                (isinstance(node.func, ast.Name) and node.func.id in getattr_names)
+                (
+                    isinstance(node.func, ast.Name)
+                    and node.func.id in getattr_names
+                    and not _shadowed(node, node.func.id)
+                )
                 or (
                     isinstance(node.func, ast.Attribute)
                     and node.func.attr == "getattr"
                     and isinstance(node.func.value, ast.Name)
                     and node.func.value.id in builtins_names
+                    and not _shadowed(node, node.func.value.id)
                 )
             )
             and len(node.args) >= 2
