@@ -1142,9 +1142,9 @@ class _ClangAstParser:
                     pointer_depth=_pointer_depth(_qualtype(p)),
                     # G31 Phase C: castxml was the ONLY producer of this fact (`_resolve_cv_restrict`), so a castxml-vs-clang comparison of unchanged headers reported PARAM_RESTRICT_CHANGED for every restrict-qualified parameter -- the detector compares the two bools directly, with no producer gate to decline on (unlike `deprecated`/`is_scoped` before this phase).
                     is_restrict=_clang_param_is_restrict(p),
-                    # G31 Phase C continued: same shape as `is_restrict` above -- castxml never populated this fact either. See `dumper_clang_qualifiers._clang_param_is_va_list`; is_va_list_fact states explicitly that this parse evaluated the check (target-scoping residual unchanged, per that function's own docstring).
+                    # G31 Phase C continued: same shape as `is_restrict` above -- castxml never populated this fact either. See `dumper_clang_qualifiers._clang_param_is_va_list`. is_va_list_fact is `partial`, not `present`: the check only covers x86-64 System V, and conservatively answers `False` -- not "confirmed no" -- on any other target (Codex review; target-scoping residual unchanged, per that function's own docstring).
                     is_va_list=(_iv := _clang_param_is_va_list(p)),
-                    is_va_list_fact=Fact.present(_iv),
+                    is_va_list_fact=Fact.partial(_iv),
                     # Preserve the actual default-argument value (so a changed
                     # default fires PARAM_DEFAULT_VALUE_CHANGED); fall back to a
                     # bare presence marker when the value can't be evaluated.
@@ -1426,7 +1426,7 @@ class _ClangAstParser:
                 bases_fact=Fact.present([]),
                 virtual_bases_fact=Fact.present([]),
                 vtable_fact=Fact.present([]),
-                vptr_offset_bits_fact=Fact.present(None),
+                vptr_offset_bits_fact=Fact.partial(None),  # heuristic field (see below), partial even here
             )
         fields = self._parse_fields(node)
         bases, virtual_bases, _base_access = _parse_bases(node)
@@ -1497,9 +1497,9 @@ class _ClangAstParser:
             deprecated=deprecated,
             # G31 Phase C backend audit -- see _clang_record_is_abstract.
             is_abstract=_clang_record_is_abstract(node),
-            # Stated explicitly -- this parse genuinely resolved these.
+            # Stated explicitly -- this parse genuinely resolved these. vptr_offset_bits_fact is `partial`, not `present`: 0-if-vtable-else-None is the Itanium primary-base heuristic, not a real offset read (matches vptr_offset_bits's own PARTIAL row).
             bases_fact=Fact.present(bases), virtual_bases_fact=Fact.present(virtual_bases),
-            vtable_fact=Fact.present(vtable), vptr_offset_bits_fact=Fact.present(0 if vtable else None),
+            vtable_fact=Fact.present(vtable), vptr_offset_bits_fact=Fact.partial(0 if vtable else None),
         )
 
     def _parse_fields(self, node: dict[str, Any]) -> list[TypeField]:

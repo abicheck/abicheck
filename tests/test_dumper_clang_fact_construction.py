@@ -17,9 +17,11 @@
 siblings explicitly at parse time, mirroring ``dumper_castxml.py``.
 
 Unlike CastXML, the direct-clang backend genuinely evaluates
-``is_va_list`` per parameter (``_clang_param_is_va_list``), so its
-``is_va_list_fact`` states ``Fact.present(...)`` with whatever the check
-returned — never ``Fact.unsupported()``, which stays CastXML-specific.
+``is_va_list`` per parameter (``_clang_param_is_va_list``) — never
+``Fact.unsupported()``, which stays CastXML-specific — but the check only
+covers x86-64 System V and conservatively answers ``False`` (not
+"confirmed no") on any other target, so ``is_va_list_fact`` states
+``Fact.partial(...)``, not ``Fact.present(...)``.
 """
 from __future__ import annotations
 
@@ -61,7 +63,7 @@ def test_polymorphic_record_facts_present_and_match_legacy_fields() -> None:
     assert rec.virtual_bases_fact.value == rec.virtual_bases == []
     assert rec.vtable_fact.status is FactStatus.PRESENT
     assert rec.vtable_fact.value == rec.vtable
-    assert rec.vptr_offset_bits_fact.status is FactStatus.PRESENT
+    assert rec.vptr_offset_bits_fact.status is FactStatus.PARTIAL
     assert rec.vptr_offset_bits_fact.value == rec.vptr_offset_bits
 
 
@@ -81,15 +83,17 @@ def test_opaque_record_facts_present_and_match_legacy_empty_values() -> None:
     assert rec.bases_fact.status is FactStatus.PRESENT
     assert rec.bases_fact.value == []
     assert rec.vtable_fact.status is FactStatus.PRESENT
-    assert rec.vptr_offset_bits_fact.status is FactStatus.PRESENT
+    assert rec.vptr_offset_bits_fact.status is FactStatus.PARTIAL
     assert rec.vptr_offset_bits_fact.value is None
 
 
-def test_param_is_va_list_fact_is_present_not_unsupported() -> None:
+def test_param_is_va_list_fact_is_partial_not_unsupported_or_present() -> None:
     # Direct-clang genuinely evaluates the va_list check per parameter --
     # UNSUPPORTED is reserved for a producer (CastXML) that structurally
-    # never can, so this must stay Fact.present(...), matching whatever
-    # the check returned.
+    # never can -- but the check only covers x86-64 System V, so this must
+    # be Fact.partial(...), not the unqualified Fact.present(...) (Codex
+    # review): a False on an unrecognized target is a conservative
+    # fallback, not a confirmed determination.
     root = _tu(
         {
             "kind": "FunctionDecl",
@@ -105,5 +109,5 @@ def test_param_is_va_list_fact_is_present_not_unsupported() -> None:
     (fn,) = _ClangAstParser(root, {"_Z1fi"}, set()).parse_functions()
     param = fn.params[0]
     assert param.is_va_list is False
-    assert param.is_va_list_fact.status is FactStatus.PRESENT
+    assert param.is_va_list_fact.status is FactStatus.PARTIAL
     assert param.is_va_list_fact.value is False
