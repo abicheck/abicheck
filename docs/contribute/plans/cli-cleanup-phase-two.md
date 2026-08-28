@@ -2922,26 +2922,39 @@ independently-drifting restatements (Codex review, PR #910, `docs/AGENTS.md`'s
 > resolves regardless (`DiffResult.policy`/`policy_file`, the resolved
 > `SeverityConfig`/`exit_code_scheme` pair). One function,
 > `effective_config_fields`, picks the tier; `compare` (via
-> `reporter_contract_blocks.add_contract_context`), the directory/package
-> release fan-out (the same call -- release reports funnel through the
-> identical function, so no separate release-side computation exists to
-> drift), and `scan --against` (`cli_scan_baseline._run_baseline_compare`,
+> `reporter_contract_blocks.add_contract_context`) and `scan --against`
+> (`cli_scan_baseline._run_baseline_compare`,
 > reusing the exact `sev_config`/`exit_scheme` pair its own `exit` block was
 > just resolved from) all call it through one shared helper,
-> `reporter_contract_blocks.add_effective_config_digest` -- so across the
-> three call sites this digest reaches, it's now literally one function,
-> not three approximations of one shape. `report_schema_version` 2.45 /
-> `scan_schema_version` 1.19 (additive keys: `effective_config_digest`/
+> `reporter_contract_blocks.add_effective_config_digest` -- so across
+> those two call sites this digest reaches, it's now literally one
+> function, not two approximations of one shape. `report_schema_version`
+> 2.45 / `scan_schema_version` 1.19 (additive keys: `effective_config_digest`/
 > `effective_config_fields`). **Scope correction (Codex review, fresh
-> evidence, two rounds — the first draft of this correction undercounted
-> the call sites and is itself corrected here): "in every report"
-> overstates this -- the digest reaches only the native JSON report
-> path.** `add_effective_config_digest` is called from exactly three
-> places: `reporter_contract_blocks.py`'s own `add_contract_context` (the
-> principal full-JSON path every ordinary `compare`/release JSON report
-> goes through, gated on `include_exit_decision`), `reporter.py`'s
-> separate `--stat` JSON summary builder, and `cli_scan_baseline.py`'s
-> `scan --against` JSON path -- the Markdown,
+> evidence, three rounds — the first draft of this correction undercounted
+> the call sites, the second overcounted them, this is the corrected
+> version): "in every report" overstates this -- the digest reaches only
+> the native JSON report path, and even there it's not one uniform digest
+> everywhere.** `add_effective_config_digest` is called from exactly
+> three places: `reporter_contract_blocks.py`'s own `add_contract_context`
+> (a per-library/single-comparison `compare` JSON report, gated on
+> `include_exit_decision`), `reporter.py`'s separate `--stat` JSON summary
+> builder, and `cli_scan_baseline.py`'s `scan --against` JSON path. **The
+> directory/package release fan-out does NOT go through this function at
+> all** -- its own release-level *summary* JSON (both the primary release
+> report, `cli_compare_release_helpers._format_release_json`, and the
+> `--output-dir` sibling, `cli_compare_release._write_release_summary_
+> file`) instead calls a separate, narrower helper,
+> `_release_summary_effective_config_block`, which computes its digest
+> from `SeverityConfig` alone -- no `CompatibilityEvaluationConfig`/
+> `PolicyFile`/suppression object exists at release-summary scope at all
+> (documented as a known, accepted gap in that helper's own docstring).
+> So two releases differing only by a policy pack or internal-namespace
+> override can share an identical release-summary digest even though
+> their *per-library* sidecar reports (which DO reach
+> `add_effective_config_digest` via `add_contract_context`) correctly
+> differ -- a real, narrower parity gap this note previously elided by
+> claiming the release fan-out reuses the identical call. The Markdown,
 > review, SARIF, JUnit, and HTML renderers (`html_report.py`, `sarif.py`,
 > `junit_report.py`, and `reporter.py`'s own non-JSON renderers) never call
 > it, so a user selecting one of those output formats gets no
