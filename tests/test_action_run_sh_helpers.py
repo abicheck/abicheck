@@ -30,7 +30,20 @@ Codex/report finding, P2.2). The fix prefers newline-separated items (a YAML
 block-scalar Action input, e.g. ``headers: |``), which preserves embedded
 spaces, and falls back to legacy whitespace-splitting only for a single-line
 value (the documented back-compat form).
+
+``TestAddFlagHostileScalarCorpus`` below closes a second, more severe
+instance of that same unquoted-expansion class (bug-class-regression-
+testing.md Phase 8, Codex review PR #919): unquoted ``for item in $value``
+performs pathname expansion (globbing) as well as word-splitting, so a
+caller-controlled single-line value of exactly ``"*"`` silently expanded to
+every file in the runner's own working directory instead of staying
+literal -- confirmed by direct execution before the fix in ``action/run.sh``
+(``_split_legacy_value``'s ``set -f``). This module's own hostile corpus is
+shared with the workflow-execution harness's (``tests/_workflow_exec.py``'s
+``HOSTILE_SCALAR_CORPUS``) rather than kept as a second, independently-
+drifting copy.
 """
+
 from __future__ import annotations
 
 import os
@@ -39,6 +52,7 @@ import tempfile
 from pathlib import Path
 
 import pytest
+from _workflow_exec import HOSTILE_SCALAR_CORPUS
 
 RUN_SH = Path(__file__).resolve().parents[1] / "action" / "run.sh"
 _MARKER = "# Build the abicheck command"
@@ -76,7 +90,7 @@ def _bash_executable() -> str:
     return "bash"
 
 
-def _run_harness(harness: str) -> str:
+def _run_harness(harness: str, *, cwd: Path | None = None) -> str:
     """Source the real helper functions + *harness*, return CMD joined by '\\x1f'.
 
     Writes the assembled script to a real file (UTF-8, explicit ``\\n`` line
@@ -85,6 +99,11 @@ def _run_harness(harness: str) -> str:
     as a subprocess argv string hits Windows console/argv-encoding mangling
     and was flaky under macOS's stock bash 3.2 (exit 127) — a file sidesteps
     both, and matches how run.sh is actually invoked in production.
+
+    ``cwd`` lets a caller control the working directory the harness runs in
+    — needed to prove a value like ``"*"`` stays literal regardless of what
+    files happen to exist there, rather than relying on whatever the pytest
+    process's own cwd contains.
     """
     script = (
         _helpers_region()
@@ -94,17 +113,24 @@ def _run_harness(harness: str) -> str:
         # stock 3.2 included — treats an empty array subscripted with [@]
         # under `set -u` as an unbound-variable error and aborts the script
         # (the same bug run.sh itself works around at its PR-comment loop).
-        + '\nprintf \'%s\\x1f\' ${CMD[@]+"${CMD[@]}"}\n'
+        + "\nprintf '%s\\x1f' ${CMD[@]+\"${CMD[@]}\"}\n"
     )
     with tempfile.NamedTemporaryFile(
-        "w", suffix=".sh", delete=False, encoding="utf-8", newline="\n",
+        "w",
+        suffix=".sh",
+        delete=False,
+        encoding="utf-8",
+        newline="\n",
     ) as f:
         f.write(script)
         script_path = f.name
     try:
         result = subprocess.run(
             [_bash_executable(), script_path],
-            capture_output=True, text=True, encoding="utf-8",
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            cwd=str(cwd) if cwd is not None else None,
         )
     finally:
         os.unlink(script_path)
@@ -121,20 +147,44 @@ def _cmd_items(stdout: str) -> list[str]:
     return [item for item in stdout.split("\x1f") if item]
 
 
+def _bash_ansi_c_quote(value: str) -> str:
+    """Render *value* as a bash ``$'...'`` (ANSI-C quoted) literal, safe for
+    any byte ``HOSTILE_SCALAR_CORPUS`` carries -- backslash and single-quote
+    are escaped, and every control character is rendered as ``\\xHH`` so the
+    resulting literal is unambiguous regardless of the corpus entry."""
+    out = []
+    for ch in value:
+        if ch == "\\":
+            out.append("\\\\")
+        elif ch == "'":
+            out.append("\\'")
+        elif ord(ch) < 0x20 or ord(ch) == 0x7F:
+            out.append(f"\\x{ord(ch):02x}")
+        else:
+            out.append(ch)
+    return "$'" + "".join(out) + "'"
+
+
 def _run_predicate(call: str) -> bool:
     """Source the real helper functions and evaluate a boolean-returning call
     (e.g. an ``_is_release_style_operand "path"`` invocation), returning
     whether it exited zero (true) or non-zero (false)."""
     script = _helpers_region() + f"\nif {call}; then exit 0; else exit 1; fi\n"
     with tempfile.NamedTemporaryFile(
-        "w", suffix=".sh", delete=False, encoding="utf-8", newline="\n",
+        "w",
+        suffix=".sh",
+        delete=False,
+        encoding="utf-8",
+        newline="\n",
     ) as f:
         f.write(script)
         script_path = f.name
     try:
         result = subprocess.run(
             [_bash_executable(), script_path],
-            capture_output=True, text=True, encoding="utf-8",
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
         )
     finally:
         os.unlink(script_path)
@@ -151,9 +201,14 @@ class TestAddFlagSplitting:
     def test_newline_separated_preserves_spaces(self) -> None:
         # A YAML block scalar (`headers: |`) input — one path per line,
         # including a path containing a space.
-        out = _run_harness('add_flag "-H" $\'inc/a\\npath with spaces/inc\\ninc/c\'')
+        out = _run_harness("add_flag \"-H\" $'inc/a\\npath with spaces/inc\\ninc/c'")
         assert _cmd_items(out) == [
-            "-H", "inc/a", "-H", "path with spaces/inc", "-H", "inc/c",
+            "-H",
+            "inc/a",
+            "-H",
+            "path with spaces/inc",
+            "-H",
+            "inc/c",
         ]
 
     def test_empty_value_adds_nothing(self) -> None:
@@ -166,11 +221,50 @@ class TestAddFlagSplitting:
 
 
 @pytest.mark.skipif(not RUN_SH.is_file(), reason="action/run.sh not found")
+class TestAddFlagHostileScalarCorpus:
+    """``add_flag``'s legacy single-line path against the shared hostile
+    corpus (bug-class-regression-testing.md Phase 8, Codex review PR #919).
+
+    Run with real decoy files present in the harness's own working
+    directory, so an unfixed regression shows up as an extra CMD entry
+    (the decoy's filename), not merely as a passing test that never
+    actually exercised the vulnerable condition.
+    """
+
+    def test_a_glob_value_stays_literal(self, tmp_path) -> None:
+        """Direct regression pin for the fix: the legacy path's unquoted
+        ``for item in $value`` performed pathname expansion as well as
+        word-splitting, so a value of exactly ``"*"`` silently expanded to
+        every file in the runner's own working directory instead of
+        staying literal -- confirmed via direct execution against this
+        exact scenario before the fix."""
+        (tmp_path / "decoy_one.txt").write_text("x")
+        (tmp_path / "decoy_two.txt").write_text("x")
+        out = _run_harness('add_flag "-H" "*"', cwd=tmp_path)
+        assert _cmd_items(out) == ["-H", "*"]
+
+    @pytest.mark.parametrize("value", HOSTILE_SCALAR_CORPUS)
+    def test_no_corpus_value_glob_expands_to_a_decoy_file(
+        self, tmp_path, value: str
+    ) -> None:
+        (tmp_path / "decoy_one.txt").write_text("x")
+        (tmp_path / "decoy_two.txt").write_text("x")
+        literal = _bash_ansi_c_quote(value)
+        out = _run_harness(f'add_flag "-H" {literal}', cwd=tmp_path)
+        items = _cmd_items(out)
+        assert "decoy_one.txt" not in items
+        assert "decoy_two.txt" not in items
+
+
+@pytest.mark.skipif(not RUN_SH.is_file(), reason="action/run.sh not found")
 class TestAddSidedFlagSplitting:
     def test_legacy_space_separated_single_line(self) -> None:
         out = _run_harness('add_sided_flag "--header" "old" "inc/a inc/b"')
         assert _cmd_items(out) == [
-            "--header", "old=inc/a", "--header", "old=inc/b",
+            "--header",
+            "old=inc/a",
+            "--header",
+            "old=inc/b",
         ]
 
     def test_newline_separated_preserves_spaces(self) -> None:
@@ -178,8 +272,35 @@ class TestAddSidedFlagSplitting:
             'add_sided_flag "--header" "new" $\'inc/a\\npath with spaces/inc\''
         )
         assert _cmd_items(out) == [
-            "--header", "new=inc/a", "--header", "new=path with spaces/inc",
+            "--header",
+            "new=inc/a",
+            "--header",
+            "new=path with spaces/inc",
         ]
+
+
+@pytest.mark.skipif(not RUN_SH.is_file(), reason="action/run.sh not found")
+class TestAddSidedFlagHostileScalarCorpus:
+    """``add_sided_flag``'s legacy single-line path against the shared
+    hostile corpus -- the sibling of ``TestAddFlagHostileScalarCorpus``
+    above, since it shares the identical unquoted-splitting helper."""
+
+    def test_a_glob_value_stays_literal(self, tmp_path) -> None:
+        (tmp_path / "decoy_one.txt").write_text("x")
+        out = _run_harness('add_sided_flag "--header" "old" "*"', cwd=tmp_path)
+        assert _cmd_items(out) == ["--header", "old=*"]
+
+    @pytest.mark.parametrize("value", HOSTILE_SCALAR_CORPUS)
+    def test_no_corpus_value_glob_expands_to_a_decoy_file(
+        self, tmp_path, value: str
+    ) -> None:
+        (tmp_path / "decoy_one.txt").write_text("x")
+        (tmp_path / "decoy_two.txt").write_text("x")
+        literal = _bash_ansi_c_quote(value)
+        out = _run_harness(f'add_sided_flag "--header" "old" {literal}', cwd=tmp_path)
+        items = _cmd_items(out)
+        assert "old=decoy_one.txt" not in items
+        assert "old=decoy_two.txt" not in items
 
 
 @pytest.mark.skipif(not RUN_SH.is_file(), reason="action/run.sh not found")
@@ -238,10 +359,21 @@ class TestIsReleaseStyleOperand:
         f.write_text("{}", encoding="utf-8")
         assert not _run_predicate(f'_is_release_style_operand "{f}"')
 
-    @pytest.mark.parametrize("suffix", [
-        ".rpm", ".deb", ".tar", ".tar.gz", ".tar.xz", ".tar.bz2", ".tar.zst",
-        ".tgz", ".conda", ".whl",
-    ])
+    @pytest.mark.parametrize(
+        "suffix",
+        [
+            ".rpm",
+            ".deb",
+            ".tar",
+            ".tar.gz",
+            ".tar.xz",
+            ".tar.bz2",
+            ".tar.zst",
+            ".tgz",
+            ".conda",
+            ".whl",
+        ],
+    )
     def test_package_extensions_are_release_style(self, tmp_path, suffix) -> None:
         f = tmp_path / f"libfoo{suffix}"
         f.write_text("", encoding="utf-8")
@@ -297,7 +429,7 @@ class TestExtraArgsHasWriteFlag:
 
     def _predicate(self, extra_args: str) -> bool:
         return _run_predicate(
-            f'INPUT_EXTRA_ARGS={extra_args!r} _extra_args_has_write_flag'
+            f"INPUT_EXTRA_ARGS={extra_args!r} _extra_args_has_write_flag"
         )
 
     def test_absent_extra_args(self) -> None:

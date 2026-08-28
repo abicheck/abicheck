@@ -53,6 +53,17 @@ CHECK_PROJECT = "check-project.yml"
 
 pytestmark = pytest.mark.skipif(not have_bash(), reason="needs a real bash")
 
+#: Shared by `TestCheckIdSanitizationIsInjective` and the cross-workflow
+#: equality check below -- both need pairs that collide under the `tr`-style
+#: sanitization but must stay distinct once the content hash is appended.
+_COLLISION_PAIRS = [
+    ("lib/a", "lib:a"),  # both sanitize to lib_a
+    ("a b", "a-b"),  # space vs dash
+    ("x!y", "x?y"),
+    ("../a", "..%a"),
+    ("lib\na", "lib\ta"),
+]
+
 
 def _sanitize(tmp_path, check_id: str):
     step = find_run_step(CHECK_PROJECT, "check", "Sanitize check-id for artifact name")
@@ -105,16 +116,7 @@ class TestCheckIdSanitizationIsInjective:
     returning a constant, which would collapse every matrix cell onto one
     uploaded artifact name."""
 
-    @pytest.mark.parametrize(
-        "left, right",
-        [
-            ("lib/a", "lib:a"),  # both sanitize to lib_a
-            ("a b", "a-b"),  # space vs dash
-            ("x!y", "x?y"),
-            ("../a", "..%a"),
-            ("lib\na", "lib\ta"),
-        ],
-    )
+    @pytest.mark.parametrize("left, right", _COLLISION_PAIRS)
     def test_distinct_ids_that_sanitize_alike_stay_distinct(
         self, tmp_path, left: str, right: str
     ) -> None:
@@ -131,7 +133,14 @@ class TestCheckIdSanitizationIsInjective:
         assert _sanitize(tmp_path, "libfoo").outputs["id"].startswith("libfoo-")
 
 
-def test_the_two_copies_of_the_sanitizer_agree(tmp_path) -> None:
+def _sanitized_id(tmp_path, workflow: str, check_id: str) -> str:
+    step = find_run_step(workflow, "check", "Sanitize check-id for artifact name")
+    return run_step(
+        step, workspace=make_workspace(tmp_path), env={"CHECK_ID": check_id}
+    ).outputs["id"]
+
+
+class TestTheTwoCopiesOfTheSanitizerAgree:
     """A direct pin that the "verbatim" claim in check-project.yml's own
     comment holds today -- not just that each copy independently behaves
     safely, which the classes above already establish, but that they
@@ -139,22 +148,28 @@ def test_the_two_copies_of_the_sanitizer_agree(tmp_path) -> None:
     mean an ADR-047 §7 check-id sanitizes to two different artifact names
     depending on which workflow ran it, which is exactly the drift risk two
     independently-maintained copies of one algorithm carry.
+
+    Parametrized over the full hostile corpus and the collision pairs
+    (Codex review, PR #919): a single fixed example does not pin this --
+    e.g. a change made to only one copy that special-cases newlines or
+    leading-dash ids could still pass every per-workflow safety/stability/
+    injectivity assertion above while producing a different artifact name
+    from the other copy, and a one-example equality check would stay green.
     """
-    check_id = "lib/name with spaces:and?more"
-    single_step = find_run_step(
-        "check-single.yml", "check", "Sanitize check-id for artifact name"
-    )
-    project_step = find_run_step(
-        CHECK_PROJECT, "check", "Sanitize check-id for artifact name"
-    )
-    single_out = run_step(
-        single_step,
-        workspace=make_workspace(tmp_path / "a"),
-        env={"CHECK_ID": check_id},
-    ).outputs["id"]
-    project_out = run_step(
-        project_step,
-        workspace=make_workspace(tmp_path / "b"),
-        env={"CHECK_ID": check_id},
-    ).outputs["id"]
-    assert single_out == project_out
+
+    @pytest.mark.parametrize("check_id", HOSTILE_SCALAR_CORPUS)
+    def test_agrees_on_every_hostile_corpus_value(
+        self, tmp_path, check_id: str
+    ) -> None:
+        single_out = _sanitized_id(tmp_path / "a", "check-single.yml", check_id)
+        project_out = _sanitized_id(tmp_path / "b", CHECK_PROJECT, check_id)
+        assert single_out == project_out
+
+    @pytest.mark.parametrize("left, right", _COLLISION_PAIRS)
+    def test_agrees_on_every_collision_pair(
+        self, tmp_path, left: str, right: str
+    ) -> None:
+        for check_id in (left, right):
+            single_out = _sanitized_id(tmp_path / "a", "check-single.yml", check_id)
+            project_out = _sanitized_id(tmp_path / "b", CHECK_PROJECT, check_id)
+            assert single_out == project_out, check_id
