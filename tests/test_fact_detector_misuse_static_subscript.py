@@ -48,6 +48,17 @@ though the value actually selected at runtime is `0`, not the `Fact`
 value. Fixed by scanning the full `zip(keys, values)` sequence and
 keeping the *last* match rather than returning on the first one.
 `TestLastMatchingKeyWins` below covers this round.
+
+**A further round found a literal `None` key was conflated with "the
+index couldn't be resolved at all"** (Codex review, fresh evidence):
+`index`, the sentinel this function's own slice-resolution used, was
+literally `None` both when the slice resolved to the constant `None`
+(`x[None]`, a perfectly ordinary dict key) and when nothing resolved at
+all -- so `{None: Fact.present(1)}[None]` silently declined to resolve,
+letting a genuine `None`-keyed lookup bypass the gate. Fixed by tracking
+whether the index was actually resolved in a separate `resolved: bool`,
+rather than overloading `index is None` for both meanings.
+`TestNoneIsAValidDictionaryKey` below covers this round.
 """
 
 from __future__ import annotations
@@ -326,5 +337,74 @@ class TestLastMatchingKeyWins:
 
     def test_single_non_duplicate_key_is_unaffected(self) -> None:
         src = 'def f(other):\n    return {"x": Fact.present(1)}["x"] == other\n'
+        tree = ast.parse(src, filename="x.py")
+        assert len(fact_equality_misuse_sites(tree, "x.py")) == 1
+
+
+class TestNoneIsAValidDictionaryKey:
+    """A literal `None` key is an ordinary, resolvable dict key -- not
+    the same thing as "the index couldn't be resolved" (Codex review,
+    fresh evidence)."""
+
+    def test_none_key_selects_the_fact_value_directly(self) -> None:
+        src = "def f(other):\n    return {None: Fact.present(1)}[None] == other\n"
+        tree = ast.parse(src, filename="x.py")
+        assert len(fact_equality_misuse_sites(tree, "x.py")) == 1
+
+    def test_none_key_selects_the_fact_value_via_an_alias(self) -> None:
+        src = (
+            "def f(other):\n"
+            "    fact = {None: Fact.present(1)}[None]\n"
+            "    return fact == other\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert len(fact_equality_misuse_sites(tree, "x.py")) == 1
+
+    def test_none_key_present_but_a_different_key_selected_is_ignored(self) -> None:
+        src = "def f(other):\n    return {None: Fact.present(1)}[1] == other\n"
+        tree = ast.parse(src, filename="x.py")
+        assert fact_equality_misuse_sites(tree, "x.py") == []
+
+    def test_none_wins_a_duplicate_key_tie_as_the_last_entry(self) -> None:
+        src = (
+            "def f(other):\n    return {None: 0, None: Fact.present(1)}[None] "
+            "== other\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert len(fact_equality_misuse_sites(tree, "x.py")) == 1
+
+    def test_regression_dict_expansion_still_unresolvable_with_a_none_key(
+        self,
+    ) -> None:
+        """`**expansion` disqualifies the whole display regardless of
+        which key is being looked up -- unrelated to this fix, but
+        verified not to interact badly with it."""
+        src = (
+            "def f(extra, other):\n"
+            "    return {**extra, None: Fact.present(1)}[None] == other\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert fact_equality_misuse_sites(tree, "x.py") == []
+
+    def test_regression_non_literal_index_on_a_dict_with_a_none_key_unresolvable(
+        self,
+    ) -> None:
+        src = "def f(k, other):\n    return {None: Fact.present(1)}[k] == other\n"
+        tree = ast.parse(src, filename="x.py")
+        assert fact_equality_misuse_sites(tree, "x.py") == []
+
+    def test_regression_tuple_indexed_by_none_stays_unresolvable(self) -> None:
+        """`None` is never a valid tuple/list index -- a real `TypeError`
+        at runtime -- so this must stay unresolved, unlike the dict
+        case this fix actually addresses."""
+        src = "def f(other):\n    return (Fact.present(1),)[None] == other\n"
+        tree = ast.parse(src, filename="x.py")
+        assert fact_equality_misuse_sites(tree, "x.py") == []
+
+    def test_regression_negative_index_zero_still_resolves(self) -> None:
+        """Regression guard for the `resolved` flag itself: a falsy but
+        genuinely resolved index (`0`) must not be mistaken for
+        "unresolved" either."""
+        src = "def f(other):\n    return (Fact.present(1),)[0] == other\n"
         tree = ast.parse(src, filename="x.py")
         assert len(fact_equality_misuse_sites(tree, "x.py")) == 1
