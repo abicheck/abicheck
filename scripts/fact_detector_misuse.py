@@ -313,19 +313,27 @@ def _enclosing_qualnames(tree: ast.Module) -> _QualnameSpans:
     wired into `_lexical_function_parents` identically below, and into
     `_fact_aliases`'s own binding collection (see that function's own
     docstring for the parameter/target-recording half of this fix).
-    Deliberately not precise about a comprehension's *outermost* iterable
-    technically still evaluating in the enclosing scope in real Python
-    (only the element expression, any `if` filters, and every non-first
-    `for`'s iterable actually run inside the comprehension's own scope) --
-    attributing the whole comprehension, outermost iterable included, to
-    its own scope is the same over-approximating-is-safe direction this
-    module already takes throughout, and doesn't change behavior in
-    practice: the comprehension's own scope always inherits its parent's
-    aliases anyway, so a bare alias reference in the outermost iterable
-    still resolves correctly either way -- only a comprehension-local
-    *shadow* of that exact name in the outermost iterable's own expression
-    (vanishingly rare, and not the shape any review round has found) could
-    read differently.
+    **The comprehension's *outermost* iterable is a documented exception,
+    resolved to the enclosing scope rather than the comprehension's own
+    (Codex review, fresh evidence -- this paragraph originally predicted
+    this exact case as "vanishingly rare, and not the shape any review
+    round has found," then a later round found it).** Only the element
+    expression, any `if` filters, and every non-first `for`'s iterable
+    actually run inside the comprehension's own scope in real Python; the
+    *first* generator's iterable evaluates before the comprehension's
+    implicit function is even called, in whatever scope directly contains
+    the comprehension. `fact = rec.bases_fact; [x for fact in (fact ==
+    other,)]` -- the comparison inside the first iterable reads the
+    *outer* `fact`, since the comprehension-local `fact` target doesn't
+    exist yet at that point, but attributing the whole comprehension
+    (outermost iterable included) to its own scope wrongly treated it as
+    already shadowed. `visit()` now registers a narrower override span for
+    just the outermost iterable's own range, tagged with the *incoming*
+    qualname (the scope active before entering the comprehension) rather
+    than the comprehension's own -- `_qualname_at`'s smallest-span-first
+    resolution picks this override for any position inside that one
+    iterable, while everything else in the comprehension still resolves to
+    the comprehension's own broader span.
 
     **Resolved by *position* (line and column), not by line alone (Codex
     review, fresh evidence).** A line-keyed map -- `dict[int, str]`, one
@@ -360,34 +368,55 @@ def _enclosing_qualnames(tree: ast.Module) -> _QualnameSpans:
         )
         return start, end
 
-    def visit(node: ast.AST, prefix: str) -> None:
+    def visit(node: ast.AST, prefix: str, qualname: str) -> None:
         for child in ast.iter_child_nodes(node):
             if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                qualname = f"{prefix}{child.name}#{child.lineno}"
+                child_qualname = f"{prefix}{child.name}#{child.lineno}"
                 start, end = _span(child)
-                spans.append((start, end, qualname))
-                visit(child, qualname + ".")
+                spans.append((start, end, child_qualname))
+                visit(child, child_qualname + ".", child_qualname)
             elif isinstance(child, ast.Lambda):
-                qualname = f"{prefix}<lambda>#{child.lineno}:{child.col_offset}"
+                child_qualname = f"{prefix}<lambda>#{child.lineno}:{child.col_offset}"
                 start, end = _span(child)
-                spans.append((start, end, qualname))
-                visit(child, qualname + ".")
+                spans.append((start, end, child_qualname))
+                visit(child, child_qualname + ".", child_qualname)
             elif isinstance(
                 child, (ast.ListComp, ast.SetComp, ast.DictComp, ast.GeneratorExp)
             ):
-                qualname = f"{prefix}<comp>#{child.lineno}:{child.col_offset}"
+                child_qualname = f"{prefix}<comp>#{child.lineno}:{child.col_offset}"
                 start, end = _span(child)
-                spans.append((start, end, qualname))
-                visit(child, qualname + ".")
+                spans.append((start, end, child_qualname))
+                # The OUTERMOST generator's own iterable evaluates in the
+                # ENCLOSING scope -- before the comprehension's implicit
+                # function is even called -- not inside the comprehension's
+                # own new scope (Codex review, fresh evidence for the exact
+                # case this function's own docstring above already named as
+                # "vanishingly rare, and not the shape any review round has
+                # found": `fact = rec.bases_fact; [x for fact in (fact ==
+                # other,)]` -- the comparison inside the first iterable
+                # reads the *outer* `fact`, not the comprehension's own
+                # shadowing target). A narrower override span for just that
+                # iterable, registered *before* the whole-node walk below,
+                # wins `_qualname_at`'s smallest-span-first tie-break for
+                # any position inside it; the whole-node walk still reaches
+                # the same nodes afterward (harmless -- same span, so the
+                # strict `<` comparison in `_qualname_at` never lets the
+                # later, wrong entry replace this one).
+                if child.generators:
+                    first_iter = child.generators[0].iter
+                    i_start, i_end = _span(first_iter)
+                    spans.append((i_start, i_end, qualname))
+                    visit(first_iter, prefix, qualname)
+                visit(child, child_qualname + ".", child_qualname)
             elif isinstance(child, ast.ClassDef):
                 class_qualname = f"{prefix}{child.name}#{child.lineno}<class-body>"
                 start, end = _span(child)
                 spans.append((start, end, class_qualname))
-                visit(child, f"{prefix}{child.name}.")
+                visit(child, f"{prefix}{child.name}.", class_qualname)
             else:
-                visit(child, prefix)
+                visit(child, prefix, qualname)
 
-    visit(tree, "")
+    visit(tree, "", "<module>")
     return spans
 
 
@@ -532,10 +561,19 @@ def _lexical_function_parents(tree: ast.Module) -> dict[str, str]:
             # A comprehension is a real closure scope too, in Python 3
             # -- same reasoning and same treatment as a lambda. Unlike a
             # def/lambda, a comprehension has no default-value/annotation
-            # concept of its own, so no def-time-subtree split applies
-            # here.
+            # concept of its own -- but its *outermost* generator's own
+            # iterable is a real exception, evaluating in the enclosing
+            # scope before the comprehension's implicit function is even
+            # called (Codex review, fresh evidence -- mirroring
+            # `_enclosing_qualnames`'s own identical fix and docstring for
+            # the exact reasoning): re-dispatched with the *old*
+            # `nearest_func` so a closure found there (not merely a bare
+            # read, which `_enclosing_qualnames`'s own span override
+            # already handles) still resolves against the outer scope.
             qualname = f"{prefix}<comp>#{child.lineno}:{child.col_offset}"
             parents[qualname] = nearest_func
+            if child.generators:
+                dispatch(child.generators[0].iter, prefix, nearest_func)
             visit(child, qualname + ".", qualname)
         elif isinstance(child, ast.ClassDef):
             # The class body's *own* scope inherits from whatever
@@ -679,11 +717,34 @@ def _def_containing_qualnames(tree: ast.Module) -> dict[tuple[int, int], str]:
             child, (ast.ListComp, ast.SetComp, ast.DictComp, ast.GeneratorExp)
         ):
             qualname = f"{prefix}<comp>#{child.lineno}:{child.col_offset}"
+            # The outermost generator's own iterable evaluates in the
+            # enclosing scope, before the comprehension's implicit
+            # function is even called (Codex review, fresh evidence --
+            # mirroring `_lexical_function_parents`'s/`_enclosing_
+            # qualnames`'s own identical fix): a `def`/`lambda`/`class`
+            # found there is still contained by *this* scope
+            # (`scope_qualname`), not the comprehension's own.
+            if child.generators:
+                dispatch(child.generators[0].iter, prefix, scope_qualname)
             visit(child, qualname + ".", qualname)
         elif isinstance(child, ast.ClassDef):
             class_qualname = f"{prefix}{child.name}#{child.lineno}<class-body>"
             containing[child.lineno, child.col_offset] = scope_qualname
-            visit(child, f"{prefix}{child.name}.", class_qualname)
+            # A base class, a keyword argument (e.g. a metaclass), and a
+            # decorator all evaluate while the `class` *statement itself*
+            # executes -- in whatever scope directly, syntactically
+            # contains that statement -- never inside the new class's own
+            # body (Codex review, fresh evidence): only the body's own
+            # statements are actually contained by `class_qualname`.
+            for base_or_keyword in (
+                *child.bases,
+                *(kw.value for kw in child.keywords),
+            ):
+                dispatch(base_or_keyword, f"{prefix}{child.name}.", scope_qualname)
+            for deco in child.decorator_list:
+                dispatch(deco, f"{prefix}{child.name}.", scope_qualname)
+            for stmt in child.body:
+                dispatch(stmt, f"{prefix}{child.name}.", class_qualname)
         else:
             visit(child, prefix, scope_qualname)
 

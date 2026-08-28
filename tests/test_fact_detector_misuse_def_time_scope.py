@@ -148,6 +148,130 @@ class TestLexicalFunctionParentsDefTimeSubtrees:
         assert fact_equality_misuse_sites(tree, "x.py") == [(3, 10)]
 
 
+class TestComprehensionOutermostIterableParentScope:
+    """A comprehension's own *outermost* generator's iterable evaluates in
+    the enclosing scope, before the comprehension's implicit function is
+    even called -- a real Python semantic exception to "the comprehension
+    introduces its own scope," which `_enclosing_qualnames`/`_lexical_
+    function_parents`/`_def_containing_qualnames` all now account for
+    (Codex review, fresh evidence)."""
+
+    def test_detects_a_comparison_in_the_outermost_iterable_shadowed_by_its_own_target(
+        self,
+    ) -> None:
+        """`fact = rec.bases_fact`, then `[x for fact in (fact == other,)
+        for x in fact]` -- the comparison sits inside the *outermost*
+        iterable, which evaluates before the comprehension's own `fact`
+        target even exists to shadow anything, so it still reads the
+        outer alias."""
+        src = (
+            "def f(rec, other):\n"
+            "    fact = rec.bases_fact\n"
+            "    return [x for fact in (fact == other,) for x in fact]\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert fact_equality_misuse_sites(tree, "x.py") == [(3, 27)]
+
+    def test_ignores_a_comparison_in_a_non_outermost_iterable_genuinely_shadowed(
+        self,
+    ) -> None:
+        """Negative control: only the *first* generator's iterable is
+        special -- a *second* generator's own iterable genuinely runs
+        inside the comprehension's own scope, after the first target has
+        already bound, so a real shadow there is still correctly
+        excluded."""
+        src = (
+            "def f(rec, other):\n"
+            "    fact = rec.bases_fact\n"
+            "    return [y for fact in range(3) for y in (fact == other,)]\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert fact_equality_misuse_sites(tree, "x.py") == []
+
+    def test_detects_a_lambda_closing_over_the_outer_alias_from_the_outermost_iterable(
+        self,
+    ) -> None:
+        """The fix must correctly resolve a real *closure* found in the
+        outermost iterable too, not just a bare comparison -- `_lexical_
+        function_parents`'s own dispatch is exercised here, not only
+        `_enclosing_qualnames`'s span override."""
+        src = (
+            "def f(rec, other):\n"
+            "    fact = rec.bases_fact\n"
+            "    return [x for fact in [(lambda: fact == other)()] for x in fact]\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert fact_equality_misuse_sites(tree, "x.py") == [(3, 36)]
+
+
+class TestClassHeaderContainingScope:
+    """A class's own base classes, keyword arguments (e.g. a metaclass),
+    and decorators all evaluate while the `class` statement itself
+    executes -- in whatever scope directly, syntactically contains that
+    statement -- never inside the new class's own body (Codex review,
+    fresh evidence, beyond the direct-base-expression case an earlier
+    round already fixed)."""
+
+    def test_detects_a_comparison_inside_a_lambda_default_in_a_base_expression(
+        self,
+    ) -> None:
+        """`class Inner((lambda x=fact: make_base(x == other))()): ...`
+        -- the lambda default `x=fact` evaluates in `Outer`'s own
+        namespace, not `Inner`'s, so `x` must resolve as the outer
+        `fact` alias despite `Inner` never itself declaring a
+        conflicting name."""
+        src = (
+            "def make_base(v):\n"
+            "    return object\n"
+            "def f(rec, other):\n"
+            "    fact = rec.bases_fact\n"
+            "    class Outer:\n"
+            "        class Inner((lambda x=fact: make_base(x == other))()):\n"
+            "            pass\n"
+            "    return Outer\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert fact_equality_misuse_sites(tree, "x.py") == [(6, 46)]
+
+    def test_detects_a_comparison_in_a_metaclass_keyword(self) -> None:
+        """The identical containing-scope rule for a class keyword
+        argument (e.g. `metaclass=`), not just a positional base."""
+        src = (
+            "def make_meta(v):\n"
+            "    return type\n"
+            "def f(rec, other):\n"
+            "    fact = rec.bases_fact\n"
+            "    class Outer:\n"
+            "        class Inner(metaclass=make_meta(fact == other)):\n"
+            "            pass\n"
+            "    return Outer\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert fact_equality_misuse_sites(tree, "x.py") == [(6, 40)]
+
+    def test_ignores_a_comparison_genuinely_inside_the_class_body(self) -> None:
+        """Negative control: a comparison genuinely inside the class's
+        own *body* (not its header) is still correctly attributed to the
+        class body's own scope -- this fix must not widen resolution
+        past the header it's actually about. Shadowed via a nested
+        method's own parameter (a mechanism already known to work),
+        rather than a class-body reassignment (a separate, pre-existing,
+        unrelated gap -- class-body-level reassignment shadowing is not
+        tracked by this module at all, confirmed unaffected by this
+        fix)."""
+        src = (
+            "def f(rec, other):\n"
+            "    fact = rec.bases_fact\n"
+            "    class Outer:\n"
+            "        class Inner:\n"
+            "            def method(fact, other):\n"
+            "                return fact == other\n"
+            "    return Outer\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert fact_equality_misuse_sites(tree, "x.py") == []
+
+
 class TestDefContainingQualnamesDefTimeSubtrees:
     """`_def_containing_qualnames()` had the identical unconditional-
     `visit(child, qualname + ".", qualname)` bug `_lexical_function_

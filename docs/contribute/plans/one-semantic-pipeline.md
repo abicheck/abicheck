@@ -1921,6 +1921,96 @@ control confirming a lambda genuinely created inside `g`'s own body (not
 one of `g`'s own def-time subtrees) is still correctly parented under
 `g`, so `g`'s own parameter still shadows the outer alias there.
 
+**Two further Codex review rounds found two more real gaps in the same
+area, both real Python scoping exceptions this scoping machinery had
+never modeled, both fixed.**
+
+**(1) A comprehension's own *outermost* generator's iterable evaluates in
+the enclosing scope, not the comprehension's own.** This is a genuine
+CPython semantic: a comprehension compiles to an implicit generator
+function, and only the *first* `for`'s iterable is evaluated *before*
+that function is even called (passed to it as an argument) -- the
+element expression, every `if` filter, and every non-first `for`'s
+iterable all run *inside* the comprehension's own new scope, after its
+own target(s) have already bound. `fact = rec.bases_fact; [x for fact in
+(fact == other,) for x in fact]` -- the comparison sits inside the first
+generator's own iterable, which runs before `fact` (the comprehension's
+own target) exists to shadow anything, so it still reads the *outer*
+alias. All three scoping functions (`_enclosing_qualnames`,
+`_lexical_function_parents`, `_def_containing_qualnames`) previously
+attributed the *whole* comprehension -- outermost iterable included -- to
+its own new scope uniformly, missing this. Notably, `_enclosing_
+qualnames`'s own docstring had already predicted and explicitly accepted
+this exact gap as "vanishingly rare, and not the shape any review round
+has found" -- a review round then found it.
+
+Fixed with the identical technique in all three functions, each adapted
+to its own return shape: `_enclosing_qualnames` (which threads a
+`qualname` string through its walk, not just a `prefix`, so it can name
+what "the enclosing scope" actually *is*) registers a narrower,
+independent span for the outermost iterable's own source range, tagged
+with the *incoming* qualname rather than the comprehension's own new
+one -- `_qualname_at`'s existing smallest-span-first resolution then
+picks this override for any position inside that one iterable, while the
+comprehension's own broader span still covers everything else. The
+whole-node walk still revisits the same iterable afterward (a real,
+accepted small waste, not a bug -- since it's the *identical* span, the
+strict `<` comparison `_qualname_at` already uses never lets a
+same-size, later-registered entry displace the correct, earlier one).
+`_lexical_function_parents`/`_def_containing_qualnames` (which don't
+build spans at all, only qualname-keyed maps) instead re-dispatch the
+outermost iterable directly under the *old* `nearest_func`/
+`scope_qualname`, mirroring exactly how each already re-dispatches a
+`def`/`lambda`'s own def-time subtrees under the old scope. Verified
+empirically: still zero existing hits in the real repository, and
+`mypy`/`ruff` both stayed clean. New tests, in `tests/test_fact_detector_
+misuse_def_time_scope.py`: the reported case, a negative control
+confirming only the *first* generator is special (a genuine shadow in a
+*second* generator's own iterable is still correctly excluded), and a
+case confirming a real *closure* (not just a bare comparison) found in
+the outermost iterable resolves correctly too.
+
+**(2) A class's own base classes, keyword arguments, and decorators all
+evaluate while the `class` statement itself executes, in whatever scope
+directly contains it -- never inside the new class's own body -- and
+`_def_containing_qualnames`'s `ClassDef` branch dispatched all of them
+(bases, keywords, decorators, *and* body) uniformly under the new
+class-body qualname.** An earlier round had already fixed the *direct*-
+read case for `_default_and_annotation_scope_overrides`'s own separate
+override map (`class Inner(make_base(fact == other)): ...`), but that fix
+only widens which *qualname* a bare read resolves to when the read sits
+*directly* in the header text -- it says nothing about a *nested closure*
+(a `def`/`lambda`/comprehension/another `class`) found there, whose own
+containing-scope entry is a completely different lookup, owned by
+`_def_containing_qualnames` itself. `class Inner((lambda x=fact:
+make_base(x == other))()): ...` -- the lambda's own default `x=fact`
+evaluates in `Outer`'s namespace (wherever the `class Inner(...):`
+statement itself lives), not `Inner`'s, but the unconditional dispatch
+recorded the lambda's containing scope as `Inner<class-body>` instead,
+so `x` was never recognized as the outer alias. Fixed by splitting the
+`ClassDef` branch's dispatch the same way the `FunctionDef`/`Lambda`
+branches already are: every base expression and keyword value (plus,
+generalizing to a shape the reported repro didn't name but the identical
+timing rule covers, every decorator) is re-dispatched under the
+*incoming* `scope_qualname`, while only the class's own body statements
+dispatch under the new `class_qualname`. This closes the gap for both a
+direct read *and* a nested closure automatically, since a nested `def`/
+`lambda` dispatched under `scope_qualname` now correctly records its own
+`containing[]` entry against that same outer scope -- no separate change
+to `_default_and_annotation_scope_overrides` was needed, since that
+function already reads `def_containing` (this fix's own output) for every
+`def`/`lambda`'s own position, whether inside a class header or not.
+Verified empirically: still zero existing hits, `mypy`/`ruff` both stayed
+clean. New tests: the reported base-expression case, a metaclass-keyword
+case (generalizing beyond the one reported shape), and a negative control
+confirming a comparison genuinely inside the class *body* is still
+correctly attributed there -- shadowed via a nested method's own
+parameter (a mechanism already known to work) rather than a class-body
+*reassignment*, since class-body-level reassignment shadowing is a
+separate, pre-existing, unrelated gap this module doesn't track at all
+(confirmed unaffected by this fix, before and after, by direct
+comparison against the pre-fix code).
+
 ---
 
 ### Phase 1 — finish the `dump`/`scan` typed-API convergence (closes AGENTS.md "PR C")
