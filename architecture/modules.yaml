@@ -20,7 +20,6 @@
         "abicheck/change_registry_types.py",
         "abicheck/checker_types.py",
         "abicheck/compile_context.py",
-        "abicheck/contract_evidence.py",
         "abicheck/contract_relevance_types.py",
         "abicheck/detectors.py",
         "abicheck/evidence_depth.py",
