@@ -1140,6 +1140,29 @@ latter pinning that the shadowing rule applies to a plain reassignment,
 not just a parameter, and that it covers the whole function body, not
 only the lines after the reassignment).
 
+**Review convergence reached on this PR; two further findings documented
+as known gaps rather than fixed (Codex review, both after the above
+fix).** Posted as a PR comment: six review rounds on this file have each
+closed a real, bounded gap in the same "name-only, no type inference"
+alias/closure-resolution machinery; going forward, a further round
+finding yet another indirection on the same "is this expression
+Fact-typed" question is the same inherent no-type-inference residual
+`fact_field_readers.py`'s own docstring already accepts, not a specific
+miss worth chasing indefinitely -- documented in the module rather than
+fixed, per this repo's own review-convergence guidance. Two findings
+landed exactly in that category and are recorded in
+`_imported_fact_aliases`'s own docstring rather than fixed here: (1) the
+import-alias set this function builds is module-wide rather than scoped
+to the function the `ImportFrom` sits inside, so a (highly unusual)
+per-function `from ... import Fact as F` could leak its alias name into
+an unrelated sibling binding of the same short name; (2) only a bare `from
+... import Fact as F` is recognized -- a module-qualified constructor call
+(`fact_model.Fact.present(...)`) is invisible, since the constructor-call
+match assumes `func.value` is a bare `ast.Name`, not an arbitrary
+`ast.Attribute` chain. Both would need real per-scope import tracking or
+arbitrary-attribute-chain resolution respectively -- their own scoped
+redesigns, not follow-ups to the fixes already in this file.
+
 ---
 
 ### Phase 1 — finish the `dump`/`scan` typed-API convergence (closes AGENTS.md "PR C")

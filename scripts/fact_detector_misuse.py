@@ -113,6 +113,27 @@ def _imported_fact_aliases(tree: ast.Module) -> frozenset[str]:
     alone, not by source module -- the same name-only stance
     `_imported_class_aliases`/`_builtins_getattr_aliases` in `fact_field_
     readers.py` already take for their own import-alias resolution.
+
+    **Two known, documented gaps, both accepted rather than chased further
+    (Codex review, fresh evidence, both after this project's own stated
+    review-convergence point on this PR was reached -- see PR #929's
+    convergence comment).** (1) This collects an alias *module-wide*
+    regardless of which function the `ImportFrom` sits inside, so a
+    (highly unusual) per-function `from ... import Fact as F` leaks its
+    alias name into every other function in the module -- an unrelated
+    sibling binding that happens to reuse the same short name with its own
+    `.present()`-returning value, compared via `==`, would misfire. Fixing
+    this needs `_imported_fact_aliases` threaded through the same
+    per-scope machinery `_fact_aliases`/`_lexical_function_parents`
+    already build for ordinary aliases, not a follow-up to this function.
+    (2) This only ever recognizes `from ... import Fact as F` -- a
+    module-qualified constructor call (`import abicheck.model.fact as
+    fact_model; fact_model.Fact.present(...)`) is invisible, since
+    `_is_fact_typed_expr`'s constructor-call branch assumes `func.value`
+    is a bare `ast.Name`, not an arbitrary `ast.Attribute` chain. Both are
+    the same "no type inference, match by import spelling" residual this
+    module's own module docstring already accepts as inherent to a
+    pure-AST heuristic, not a specific miss worth chasing indefinitely.
     """
     names = {"Fact"}
     for node in ast.walk(tree):
