@@ -1,6 +1,6 @@
 ### Changed
 
-- **ADR-061 continuation**: 18 of the 23 `dumper*.py` header-AST/DWARF
+- **ADR-061 continuation**: 15 of the 23 `dumper*.py` header-AST/DWARF
   parsing-engine modules are now classified into the `extract`
   responsibility layer in `architecture/modules.yaml`:
   `dumper_ast_config.py`, `dumper_ast_config_cpp20.py`,
@@ -8,9 +8,9 @@
   `dumper_castxml_probe.py`, `dumper_castxml_typedefs.py`,
   `dumper_clang_attributes.py`, `dumper_clang_errors.py`,
   `dumper_clang_qualifiers.py`, `dumper_clang_streaming.py`,
-  `dumper_clang_vtable.py`, `dumper_contract.py`, `dumper_debug.py`,
+  `dumper_debug.py`,
   `dumper_elf_fallback.py`, `dumper_elf_symbols.py`,
-  `dumper_layout_backfill.py`, `dumper_manifest.py`, `dumper_sysinc.py`,
+  `dumper_layout_backfill.py`, `dumper_sysinc.py`,
   `dumper_toolchain.py` (`dumper_clang.py`/`dumper_scoping.py` were
   already classified by an earlier PR). Every one of these is genuine
   fact-extraction/config-resolution code (parses castxml XML or clang AST
@@ -43,7 +43,7 @@
   re-exports for all three names, and each call site now imports through
   it instead of the origin module.
 
-  **Five files deliberately left unclassified, each for a real,
+  **Seven files deliberately left unclassified, each for a real,
   structural reason rather than an oversight:**
 
   - `dumper.py` itself — the module the whole cluster builds toward
@@ -97,6 +97,43 @@
     on this same PR and confirmed by reading the import directly. Fixed
     by removing `dumper_clang_vtable.py` from `extract`'s classification
     too, matching its unclassified neighbor's own reasoning above.
+  - `dumper_manifest.py` — imports `tu_merge.merge_fragments`; the
+    still-unclassified `tu_merge.py` imports `_is_cc_attribute` from
+    `compare`-classified `diff_symbols.py` (`from .diff_symbols import
+    _is_cc_attribute as _is_cc_attribute`). The identical transitive-edge
+    blind spot as `dumper_clang_vtable.py` above, caught by the same
+    Codex review round and confirmed the same way (reading the import
+    directly, then confirming `tu_merge.py` stays unclassified in
+    `architecture/modules.yaml`). Fixed by removing `dumper_manifest.py`
+    from `extract`'s classification too — no downstream consumer of
+    `dumper_manifest.py` sits inside a physically-migrated package
+    directory, so this removal alone needed no further plumbing.
+  - `dumper_contract.py` — its `_attach_extraction_contract` function
+    carries a lazy, function-local `from .comparability import (...,
+    compute_extraction_contract, ...)` (only reached when a snapshot's
+    profile fields are actually attached), and `comparability.py` is
+    itself unclassified while owning `compare`-shaped extraction-contract
+    comparison logic — the identical transitive `extract -> compare`
+    blind spot as the two entries above, caught by the same Codex review
+    round. Unclassifying it needed one more step the other two didn't:
+    `abicheck/workflows/extraction.py` (already a physically-migrated
+    `workflows`-layer module) directly imports
+    `dumper_contract._manifest_declared_includes` as part of its own
+    documented CLI-to-extract-engine facade role — once
+    `dumper_contract.py` stopped being classified, that direct import
+    tripped `check_architecture.py`'s separate `unclassified-import`
+    check (a *migrated* source directory importing an unclassified flat
+    module is itself an error, distinct from the transitive-edge blind
+    spot this whole entry is about). Resolved by adding
+    `abicheck.dumper_contract` to `architecture/modules.yaml`'s
+    `public_root_surfaces` list — the mechanism
+    `docs/contribute/adr/061-responsibility-package-architecture.md`
+    already documents as the explicit, designed exemption for exactly
+    this shape ("a migrated package legitimately needs to import this one
+    specific unclassified flat module"), previously used only for
+    `api_types.py`/`errors.py`. `check_architecture.py` stays 0 errors
+    with this combination (`dumper_contract.py` unclassified,
+    `abicheck.dumper_contract` allowlisted as a public root surface).
 
   Verified via `scripts/check_architecture.py` (0 errors, repo-wide),
   `scripts/check_ai_readiness.py` (0 errors, 146 warnings — unchanged

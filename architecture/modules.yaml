@@ -101,12 +101,10 @@
         "abicheck/dumper_clang_errors.py",
         "abicheck/dumper_clang_qualifiers.py",
         "abicheck/dumper_clang_streaming.py",
-        "abicheck/dumper_contract.py",
         "abicheck/dumper_debug.py",
         "abicheck/dumper_elf_fallback.py",
         "abicheck/dumper_elf_symbols.py",
         "abicheck/dumper_layout_backfill.py",
-        "abicheck/dumper_manifest.py",
         "abicheck/dumper_scoping.py",
         "abicheck/dumper_sysinc.py",
         "abicheck/dumper_toolchain.py",
@@ -284,6 +282,7 @@
   },
   "public_root_surfaces": [
     "abicheck.api_types",
+    "abicheck.dumper_contract",
     "abicheck.errors"
   ],
   "facades": [
