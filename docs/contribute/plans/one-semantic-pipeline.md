@@ -2014,6 +2014,36 @@ this area should reassess whether a sibling module split is due before
 adding more). New tests in `TestUnboundGetattributeMethodAliases`
 (`tests/test_fact_field_readers_wrapper_scoping.py`).
 
+**One more finding, from the next review round: the mapping-subscript
+branch's `ast.Load`-only restriction missed the augmented-assignment
+shape entirely, the identical gap the dedicated `ast.Attribute`-target
+`AugAssign` branch already exists to close for the plain-attribute
+form.** `rec.__dict__["bases"] += values` / `vars(rec)["bases"] += values`
+both read the field's existing value before combining it with the
+right-hand side, but Python marks an `AugAssign` target `ast.Store`
+regardless of its shape -- the target `Subscript` node is still visited
+independently by `ast.walk` (it's a child of the `AugAssign`), but its
+`Store` context skips the ordinary, `Load`-only Subscript branch too, so
+nothing caught it. Fixed with a new `ast.AugAssign` branch matching a
+`Subscript` target with a literal string key naming a bridged attribute,
+gated on `_is_mapping_receiver(node.target.value)` -- mirroring the
+existing attribute-target `AugAssign` branch exactly, including keying
+the finding on the target `Subscript` node itself (not the whole
+`AugAssign` statement) so its site/text line up with an ordinary
+subscript read at the same position.
+
+Verified against both mapping spellings (`rec.__dict__[...]`/
+`vars(rec)[...]`) and three negative controls (a non-bridged key; a
+plain, non-augmented overwrite, which genuinely never reads and correctly
+stays unflagged; a non-mapping receiver) via direct AST reproduction
+before writing tests. Zero existing hits, `mypy`/`ruff` both stayed clean,
+`fact_field_readers.py` at 1845 lines -- still under the 2000-line hard
+cap, but headroom has narrowed enough (155 lines) that the next finding
+in this area should split a sibling module before adding more, per the
+prior round's own note. New tests in
+`TestAugmentedAssignmentThroughMappingReceivers` (`tests/
+test_fact_field_readers_wrapper_scoping.py`).
+
 **Still not landed**: no detector (`diff_layout.py`/`diff_types.py`/
 `diff_param_qualifiers.py`/the reader set the check above now tracks
 precisely) has actually been migrated to read `.status` — the check above

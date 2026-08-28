@@ -1732,6 +1732,30 @@ def unmigrated_fact_reader_sites(
             attr = node.slice.value
             record_node = node
         elif (
+            isinstance(node, ast.AugAssign)
+            and isinstance(node.target, ast.Subscript)
+            and isinstance(node.target.slice, ast.Constant)
+            and isinstance(node.target.slice.value, str)
+            and node.target.slice.value in FACT_BRIDGED_ATTRS
+            and _is_mapping_receiver(node.target.value)
+        ):
+            # `rec.__dict__["bases"] += values` / `vars(rec)["bases"] +=
+            # values` -- the identical implicit-read shape the dedicated
+            # `ast.Attribute`-target `AugAssign` branch above already
+            # covers for `rec.bases += inherited`, applied to the mapping
+            # forms instead (Codex review, fresh evidence). Python marks
+            # an `AugAssign` target `ast.Store` regardless of shape, so
+            # the ordinary Subscript branch above (which requires `ast.
+            # Load`) never matches this target either, even though the
+            # operation reads the field's existing value first. Keyed on
+            # the target Subscript node itself, not the whole `AugAssign`
+            # statement, so its site/text line up with an ordinary
+            # subscript read at the same position -- mirroring the
+            # attribute-target branch's own `record_node = node.target`
+            # choice exactly.
+            attr = node.target.slice.value
+            record_node = node.target
+        elif (
             isinstance(node, ast.Call)
             and isinstance(node.func, ast.Attribute)
             and node.func.attr == "get"

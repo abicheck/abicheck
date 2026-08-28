@@ -934,3 +934,54 @@ class TestUnboundGetattributeMethodAliases:
         )
         tree = ast.parse(src, filename="x.py")
         assert unmigrated_fact_reader_sites(tree, "x.py", src) == []
+
+
+class TestAugmentedAssignmentThroughMappingReceivers:
+    """Python marks an `AugAssign` target `ast.Store` regardless of its
+    shape, even though the operation reads the target's existing value
+    first -- the identical implicit-read gap the dedicated `ast.Attribute`-
+    target `AugAssign` branch already covers for `rec.bases += inherited`,
+    applied here to the mapping-subscript forms (`rec.__dict__["bases"]`/
+    `vars(rec)["bases"]`) instead."""
+
+    def test_detects_an_augmented_assignment_through_dunder_dict(self) -> None:
+        src = 'def f(rec, values):\n    rec.__dict__["bases"] += values\n'
+        tree = ast.parse(src, filename="x.py")
+        keys = [
+            key for key, _l, _a, _q in unmigrated_fact_reader_sites(tree, "x.py", src)
+        ]
+        assert keys == [
+            'x.py::f::bases::rec.__dict__["bases"]::rec.__dict__["bases"]::1'
+        ]
+
+    def test_detects_an_augmented_assignment_through_vars(self) -> None:
+        src = 'def f(rec, values):\n    vars(rec)["bases"] += values\n'
+        tree = ast.parse(src, filename="x.py")
+        keys = [
+            key for key, _l, _a, _q in unmigrated_fact_reader_sites(tree, "x.py", src)
+        ]
+        assert keys == ['x.py::f::bases::vars(rec)["bases"]::vars(rec)["bases"]::1']
+
+    def test_ignores_an_augmented_assignment_with_a_non_matching_key(self) -> None:
+        """Negative control: the subscript key must still name a bridged
+        attribute."""
+        src = 'def f(rec, values):\n    rec.__dict__["unrelated"] += values\n'
+        tree = ast.parse(src, filename="x.py")
+        assert unmigrated_fact_reader_sites(tree, "x.py", src) == []
+
+    def test_ignores_a_plain_overwrite_through_dunder_dict(self) -> None:
+        """Negative control: an ordinary (non-augmented) subscript
+        overwrite genuinely never reads the existing value, matching the
+        established rule for the plain-attribute case -- and its `Store`
+        context correctly disqualifies it from the ordinary, `Load`-only
+        Subscript branch too."""
+        src = 'def f(rec, values):\n    rec.__dict__["bases"] = values\n'
+        tree = ast.parse(src, filename="x.py")
+        assert unmigrated_fact_reader_sites(tree, "x.py", src) == []
+
+    def test_ignores_an_augmented_assignment_on_a_non_mapping_receiver(self) -> None:
+        """Negative control: an ordinary dict (not `vars(rec)`/
+        `rec.__dict__`) must not be treated as an instance's own mapping."""
+        src = 'def f(d, values):\n    d["bases"] += values\n'
+        tree = ast.parse(src, filename="x.py")
+        assert unmigrated_fact_reader_sites(tree, "x.py", src) == []
