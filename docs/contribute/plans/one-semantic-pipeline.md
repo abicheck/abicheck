@@ -2464,6 +2464,90 @@ not flag day" discipline: each slice is a primitive the rest of Phase 0
 builds on, landed and tested on its own rather than held until every
 consumer migrates too.
 
+**Three more `fact-field-readers` findings (same review round), all
+bounded extensions of already-shipped alias/constructor-recognition
+mechanisms — fixed, one after chasing a real self-inflicted regression
+this same class of bug had already produced twice.** (1) `dict.get(vars
+(rec), "bases")` — the unbound-method spelling of the already-recognized
+bound `vars(rec).get("bases")` form, the identical relationship the
+already-shipped unbound `dict.__getitem__` branch has to its own bound
+sibling. A straightforward mirror of that branch, reusing `dict_names`
+unchanged. (2) `operator.attrgetter("bases.foo")` — a dotted attrgetter
+path. The existing docstring's blanket "no type inference" framing for a
+dotted argument was overbroad: the *first* dotted component is read
+directly off the literal string (`field.partition(".")`), no inference
+needed, while a *later* component genuinely would need to know the
+runtime type of what the first component reads — so only the first
+component is matched, keeping the "no type inference" limit exactly
+where it actually applies. Verified a multi-argument call
+(`attrgetter("size_bits", "bases.foo")`) still reports only the real
+`FACT_BRIDGED_ATTRS` hit, and that a bridged name appearing in a
+*non-first* component (`attrgetter("foo.bases")`) stays correctly out of
+scope. (3) `operator.itemgetter("bases")(vars(rec))` — the `attrgetter`-
+shaped constructor spelling of a subscript read, previously entirely
+untracked (no `itemgetter_names` alias family existed at all). Added by
+widening `_operator_attrgetter_aliases()`'s return to a 4-tuple
+(`itemgetter_names` resolved the identical import-seeded/chained/
+qualified way `attrgetter_names`/`getitem_names` already are) and a new
+`_is_itemgetter_constructor_call()`/`_itemgetter_matched_name()` pair
+mirroring the attrgetter versions — but with one deliberate difference:
+unlike `attrgetter`'s "match wherever constructed, regardless of how the
+getter is later used" stance, `itemgetter` is matched only at the
+*outer*, immediate call, gated on `_is_mapping_receiver()` the same way
+every other subscript-reading form here already is. The reason the two
+forms can't share one stance: `attrgetter("bases")(x)` reads `x.bases`
+for *any* `x`, so there's no narrower receiver shape to require, while
+`itemgetter("bases")(x)` reads `x["bases"]`, exactly as legitimate for an
+arbitrary unrelated mapping as for an instance's own `vars()`/
+`__dict__` — an ungated constructor-wide match would have been far
+noisier than its `dict.get`/`operator.getitem` siblings.
+
+**A real self-inflicted regression, caught by proactively verifying every
+sibling alias form before writing tests rather than only the one repro —
+the third instance of this exact bug class this session (a new alias
+family missing its own entry in `_locally_bound_names()`'s recognized-
+import carve-out tuple, `fact_field_readers_scope.py`).** The bare-name
+forms (`from operator import itemgetter`, and its own `as` alias) both
+returned `[]` — a genuine false negative, not merely an incomplete
+positive check — because the carve-out tuple gating which imports are
+treated as a real alias *source* rather than an ordinary shadowable local
+binding still only listed `("attrgetter", "getitem")` for the `operator`
+module; `itemgetter` was never added alongside them. Without the
+carve-out entry, `_locally_bound_names()` recorded the bare `itemgetter`
+import as an ordinary local binding, and `_shadowed()` then read it back
+as shadowing itself — every bare-name itemgetter call was wrongly
+excluded. Root-caused (not guessed) by adding temporary trace prints at
+each condition in the new matching branch, isolating the exact point
+where `_shadowed(...)` returned `True` for an unshadowed name, rather
+than assuming which of the several new conditions was at fault. Fixed by
+adding `itemgetter` to the tuple (now `("attrgetter", "getitem",
+"itemgetter")`) and updating the docstring paragraph that enumerates the
+carved-out spellings to match. Re-verified every sibling form afterward
+(bare, aliased, `operator`-qualified, an aliased `operator` module, a
+plain-assignment alias of the `operator` module, a qualified-assignment
+alias) rather than stopping at the one repro that first surfaced the gap.
+
+**A file-size consequence, handled the established way rather than
+reactively.** Adding the itemgetter machinery pushed `fact_field_
+readers.py` to 2019 lines — over the AI-readiness gate's 2000-line hard
+cap. Rather than trim content, the `_operator_attrgetter_aliases()`/
+`_is_attrgetter_constructor_call()`/`_attrgetter_matched_name()`/
+`_is_itemgetter_constructor_call()`/`_itemgetter_matched_name()` block
+(self-contained — no dependency on anything else in the module besides
+bare `ast`) was moved to `fact_field_readers_scope.py` as a second,
+later block, exactly mirroring how that sibling module's *first* block
+was split out originally; the module's own docstring was extended to
+record the second move. `fact_field_readers.py` dropped to 1701 lines,
+`fact_field_readers_scope.py` grew to 896 — both comfortably under the
+cap. Verified with the full existing 176-test suite plus 33 new
+positive/negative-control tests (three new classes —
+`TestUnboundDictGetMappingReaders`, `TestAttrgetterDottedPaths`,
+`TestItemgetterMappingReaders` — appended to `tests/test_fact_field_
+readers_later_fixes.py`, 974 lines, well under its own 1200-line cap),
+`mypy`/`ruff format`/`ruff check` all clean on both touched scripts,
+`check_architecture.py` and `check_ai_readiness.py` both at 0 errors, and
+`check_docs_contract.py` unchanged at its two pre-existing warnings.
+
 ---
 
 ### Phase 1 — finish the `dump`/`scan` typed-API convergence (closes AGENTS.md "PR C")

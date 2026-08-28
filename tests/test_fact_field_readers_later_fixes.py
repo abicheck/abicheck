@@ -725,3 +725,246 @@ class TestUnboundDictGetitemMappingReaders:
         sites = unmigrated_fact_reader_sites(tree, "x.py", src)
         assert len(sites) == 1
         assert sites[0][2] == "bases"
+
+
+class TestUnboundDictGetMappingReaders:
+    """`dict.get(vars(rec), "bases")` -- the *unbound*-method spelling of
+    the bound `vars(rec).get("bases")` form, the identical relationship
+    `TestUnboundDictGetitemMappingReaders` above already has to its own
+    bound sibling (Codex review, fresh evidence)."""
+
+    def test_detects_the_unbound_bare_form(self) -> None:
+        src = 'def f(rec):\n    return dict.get(vars(rec), "bases")\n'
+        tree = ast.parse(src, filename="x.py")
+        sites = unmigrated_fact_reader_sites(tree, "x.py", src)
+        assert len(sites) == 1
+        assert sites[0][2] == "bases"
+
+    def test_detects_an_optional_default_argument(self) -> None:
+        """A third positional argument (the default) is accepted but not
+        inspected, matching the bound `.get()` form's own treatment."""
+        src = 'def f(rec):\n    return dict.get(vars(rec), "bases", None)\n'
+        tree = ast.parse(src, filename="x.py")
+        sites = unmigrated_fact_reader_sites(tree, "x.py", src)
+        assert len(sites) == 1
+        assert sites[0][2] == "bases"
+
+    def test_detects_an_aliased_import_form(self) -> None:
+        src = (
+            "from builtins import dict as D\n"
+            'def f(rec):\n    return D.get(vars(rec), "bases")\n'
+        )
+        tree = ast.parse(src, filename="x.py")
+        sites = unmigrated_fact_reader_sites(tree, "x.py", src)
+        assert len(sites) == 1
+        assert sites[0][2] == "bases"
+
+    def test_ignores_a_dict_parameter_shadow(self) -> None:
+        src = 'def f(dict, rec):\n    return dict.get(vars(rec), "bases")\n'
+        tree = ast.parse(src, filename="x.py")
+        assert unmigrated_fact_reader_sites(tree, "x.py", src) == []
+
+    def test_ignores_an_unrelated_mapping_receiver_argument(self) -> None:
+        src = 'def f(rec):\n    other = {"x": 1}\n    return dict.get(other, "bases")\n'
+        tree = ast.parse(src, filename="x.py")
+        assert unmigrated_fact_reader_sites(tree, "x.py", src) == []
+
+    def test_still_detects_the_bound_form(self) -> None:
+        src = 'def f(rec):\n    return vars(rec).get("bases")\n'
+        tree = ast.parse(src, filename="x.py")
+        sites = unmigrated_fact_reader_sites(tree, "x.py", src)
+        assert len(sites) == 1
+        assert sites[0][2] == "bases"
+
+
+class TestAttrgetterDottedPaths:
+    """`operator.attrgetter("bases.foo")` chains a second `getattr()` off
+    whatever the first component reads. Unlike a *second* component,
+    which would need type inference to resolve, the first component is
+    read directly off the literal string argument -- so it is recognized,
+    while a later component stays out of scope (Codex review, fresh
+    evidence)."""
+
+    def test_detects_the_first_dotted_component(self) -> None:
+        src = (
+            "import operator\n"
+            'def f(rec):\n    return operator.attrgetter("bases.foo")(rec)\n'
+        )
+        tree = ast.parse(src, filename="x.py")
+        sites = unmigrated_fact_reader_sites(tree, "x.py", src)
+        assert len(sites) == 1
+        assert sites[0][2] == "bases"
+
+    def test_detects_the_bare_spelling_dotted(self) -> None:
+        src = (
+            "from operator import attrgetter\n"
+            'def f(rec):\n    return attrgetter("bases.foo")(rec)\n'
+        )
+        tree = ast.parse(src, filename="x.py")
+        sites = unmigrated_fact_reader_sites(tree, "x.py", src)
+        assert len(sites) == 1
+        assert sites[0][2] == "bases"
+
+    def test_still_detects_the_non_dotted_form(self) -> None:
+        """Regression guard: the fix must not disturb the existing
+        non-dotted recognition."""
+        src = (
+            "import operator\n"
+            'def f(rec):\n    return operator.attrgetter("bases")(rec)\n'
+        )
+        tree = ast.parse(src, filename="x.py")
+        sites = unmigrated_fact_reader_sites(tree, "x.py", src)
+        assert len(sites) == 1
+        assert sites[0][2] == "bases"
+
+    def test_reports_each_argument_independently_when_one_is_dotted(self) -> None:
+        src = (
+            "import operator\n"
+            "def f(rec):\n"
+            '    return operator.attrgetter("size_bits", "bases.foo")(rec)\n'
+        )
+        tree = ast.parse(src, filename="x.py")
+        sites = unmigrated_fact_reader_sites(tree, "x.py", src)
+        assert [s[2] for s in sites] == ["bases"]
+
+    def test_ignores_a_bridged_name_in_a_non_first_component(self) -> None:
+        """A later dotted component would need type inference to
+        resolve, so it stays out of scope even when its own spelling
+        matches a bridged field name."""
+        src = (
+            "import operator\n"
+            'def f(rec):\n    return operator.attrgetter("foo.bases")(rec)\n'
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert unmigrated_fact_reader_sites(tree, "x.py", src) == []
+
+    def test_ignores_a_non_bridged_first_component(self) -> None:
+        src = (
+            "import operator\n"
+            "def f(rec):\n"
+            '    return operator.attrgetter("not_a_field.bases")(rec)\n'
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert unmigrated_fact_reader_sites(tree, "x.py", src) == []
+
+
+class TestItemgetterMappingReaders:
+    """`operator.itemgetter("bases")(vars(rec))` -- the `attrgetter`-
+    shaped constructor spelling of a subscript read, for the *bare* or
+    `operator`-qualified `itemgetter` (Codex review, fresh evidence).
+    Unlike `attrgetter`'s own wider "match wherever constructed" stance,
+    this form requires the constructed getter to be called immediately on
+    a real mapping receiver -- the same `_is_mapping_receiver()` gate
+    every other subscript-reading form in this module already applies."""
+
+    def test_detects_the_qualified_form(self) -> None:
+        src = (
+            "import operator\n"
+            'def f(rec):\n    return operator.itemgetter("bases")(vars(rec))\n'
+        )
+        tree = ast.parse(src, filename="x.py")
+        sites = unmigrated_fact_reader_sites(tree, "x.py", src)
+        assert len(sites) == 1
+        assert sites[0][2] == "bases"
+
+    def test_detects_the_bare_spelling(self) -> None:
+        src = (
+            "from operator import itemgetter\n"
+            'def f(rec):\n    return itemgetter("bases")(vars(rec))\n'
+        )
+        tree = ast.parse(src, filename="x.py")
+        sites = unmigrated_fact_reader_sites(tree, "x.py", src)
+        assert len(sites) == 1
+        assert sites[0][2] == "bases"
+
+    def test_detects_an_aliased_operator_module(self) -> None:
+        src = (
+            "import operator as op\n"
+            'def f(rec):\n    return op.itemgetter("bases")(vars(rec))\n'
+        )
+        tree = ast.parse(src, filename="x.py")
+        sites = unmigrated_fact_reader_sites(tree, "x.py", src)
+        assert len(sites) == 1
+        assert sites[0][2] == "bases"
+
+    def test_detects_a_plain_assignment_alias_of_the_operator_module(self) -> None:
+        src = (
+            "import operator\n"
+            "op2 = operator\n"
+            'def f(rec):\n    return op2.itemgetter("bases")(vars(rec))\n'
+        )
+        tree = ast.parse(src, filename="x.py")
+        sites = unmigrated_fact_reader_sites(tree, "x.py", src)
+        assert len(sites) == 1
+        assert sites[0][2] == "bases"
+
+    def test_ignores_a_non_mapping_receiver(self) -> None:
+        """Negative control: an ordinary sequence is not a mapping
+        receiver, even though `itemgetter` would work on it at runtime
+        too -- kept out of scope the same way `dict.get`/`operator.
+        getitem` already require a real mapping receiver."""
+        src = (
+            "import operator\n"
+            "def f(rec):\n"
+            '    other = ["a", "b"]\n'
+            '    return operator.itemgetter("bases")(other)\n'
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert unmigrated_fact_reader_sites(tree, "x.py", src) == []
+
+    def test_ignores_a_shadowed_operator_parameter(self) -> None:
+        src = (
+            "def f(operator, rec):\n"
+            '    return operator.itemgetter("bases")(vars(rec))\n'
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert unmigrated_fact_reader_sites(tree, "x.py", src) == []
+
+    def test_ignores_a_non_bridged_field(self) -> None:
+        src = (
+            "import operator\n"
+            "def f(rec):\n"
+            '    return operator.itemgetter("not_a_field")(vars(rec))\n'
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert unmigrated_fact_reader_sites(tree, "x.py", src) == []
+
+    def test_does_not_match_a_getter_constructed_but_not_immediately_called(
+        self,
+    ) -> None:
+        """Deliberately narrower than `attrgetter`'s own constructor-wide
+        matching stance (see `_is_itemgetter_constructor_call()`'s own
+        docstring for why): a getter assigned to an intermediate variable
+        before being called is out of scope for this form."""
+        src = (
+            "import operator\n"
+            "def f(rec):\n"
+            '    getter = operator.itemgetter("bases")\n'
+            "    return getter(vars(rec))\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert unmigrated_fact_reader_sites(tree, "x.py", src) == []
+
+    def test_does_not_disturb_the_existing_attrgetter_recognition(self) -> None:
+        """Regression guard: `attrgetter`'s own constructor-matching
+        stays unaffected by the new `itemgetter`-specific gating."""
+        src = (
+            "import operator\n"
+            'def f(rec):\n    return operator.attrgetter("bases")(rec)\n'
+        )
+        tree = ast.parse(src, filename="x.py")
+        sites = unmigrated_fact_reader_sites(tree, "x.py", src)
+        assert len(sites) == 1
+        assert sites[0][2] == "bases"
+
+    def test_does_not_disturb_the_existing_operator_getitem_recognition(self) -> None:
+        """Regression guard: the existing `operator.getitem(vars(rec),
+        "bases")` call-form stays unaffected."""
+        src = (
+            "import operator\n"
+            'def f(rec):\n    return operator.getitem(vars(rec), "bases")\n'
+        )
+        tree = ast.parse(src, filename="x.py")
+        sites = unmigrated_fact_reader_sites(tree, "x.py", src)
+        assert len(sites) == 1
+        assert sites[0][2] == "bases"
