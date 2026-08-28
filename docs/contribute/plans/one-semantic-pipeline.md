@@ -1224,6 +1224,21 @@ hits, baseline stays at 104. New tests: an annotated class alias detected
 through a positional pattern, and a qualified assignment to the
 `getattr` builtin detected.
 
+**An eleventh Codex review round found one more real gap, the same
+small, bounded shape as round ten's fix (1) -- fixed.** `read_attr:
+Callable[..., object] = getattr` then `read_attr(rec, "bases")` -- the
+annotated-assignment spelling of the `getattr`-alias assignment, an
+`ast.AnnAssign` the candidate collector never matched (it only ever
+walked `ast.Assign`). The same gap round ten's fix (1) already closed
+for `_imported_class_aliases()`, now closed for `_builtins_getattr_
+aliases()` too, for both the plain-name and qualified-attribute value
+shapes -- factored into one shared `_add_candidate()` helper so the
+`ast.Assign` and `ast.AnnAssign` branches can't independently drift on
+which value shapes each recognizes. Verified empirically: still zero
+existing hits, baseline stays at 104. New tests: an annotated `getattr`
+alias detected, and the annotated form of the qualified spelling
+(`read_attr: object = builtins.getattr`) detected too.
+
 **Still not landed**: no detector (`diff_layout.py`/`diff_types.py`/
 `diff_param_qualifiers.py`/the reader set the check above now tracks
 precisely) has actually been migrated to read `.status` — the check above

@@ -519,6 +519,45 @@ class TestUnmigratedFactReaderSites:
             'x.py::f::bases::read_attr(rec, "bases")::read_attr(rec, "bases")::1'
         ]
 
+    def test_detects_an_annotated_assignment_to_the_getattr_builtin(self) -> None:
+        """`read_attr: Callable[..., object] = getattr; read_attr(rec,
+        "bases")` -- an ordinary annotated assignment, not the `ast.
+        Assign` the getattr-alias collector already matched (Codex
+        review, fresh evidence: adding a type annotation to an
+        already-recognized alias assignment must not bypass the reader
+        gate, the identical gap the tenth round's fix already closed for
+        the class-alias resolver)."""
+        src = (
+            "from typing import Callable\n"
+            "def f(rec):\n"
+            "    read_attr: Callable[..., object] = getattr\n"
+            '    return read_attr(rec, "bases")\n'
+        )
+        tree = ast.parse(src, filename="x.py")
+        keys = [
+            key for key, _l, _a, _q in unmigrated_fact_reader_sites(tree, "x.py", src)
+        ]
+        assert keys == [
+            'x.py::f::bases::read_attr(rec, "bases")::read_attr(rec, "bases")::1'
+        ]
+
+    def test_detects_an_annotated_qualified_assignment_to_getattr(self) -> None:
+        """The annotated form of the *qualified* spelling too: `read_attr:
+        object = builtins.getattr`."""
+        src = (
+            "import builtins\n"
+            "def f(rec):\n"
+            "    read_attr: object = builtins.getattr\n"
+            '    return read_attr(rec, "vtable")\n'
+        )
+        tree = ast.parse(src, filename="x.py")
+        keys = [
+            key for key, _l, _a, _q in unmigrated_fact_reader_sites(tree, "x.py", src)
+        ]
+        assert keys == [
+            'x.py::f::vtable::read_attr(rec, "vtable")::read_attr(rec, "vtable")::1'
+        ]
+
     def test_detects_an_augmented_assignment_to_a_bridged_attr(self) -> None:
         """`rec.bases += inherited` -- Python marks the target `Store`, but
         the operation reads the field's existing value first (Codex

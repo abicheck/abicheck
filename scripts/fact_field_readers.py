@@ -439,21 +439,25 @@ def _builtins_getattr_aliases(
     `"getattr"` itself, plus any `from builtins import getattr as X`, plus
     a plain assignment chain such as `read_attr = getattr` --
     `read_attr2 = read_attr` chains too, resolved to a fixed point --
-    plus a *qualified* assignment such as `read_attr = builtins.getattr`),
-    and every local name bound to the `builtins` module itself (`import
-    builtins`, `import builtins as b`) -- used to recognize `builtins.
-    getattr(...)`/`b.getattr(...)` alongside a bare call. All are real
-    (Codex review, fresh evidence, two rounds: `import builtins;
-    builtins.getattr(rec, "bases")`, `from builtins import getattr as
-    read_attr`, `read_attr = getattr; read_attr(rec, "bases")`, and --
-    combining the qualified-call recognition with the plain-assignment
-    chaining -- `read_attr = builtins.getattr; read_attr(rec, "bases")`
-    are all invisible to a scan that only matches the literal bare callee
+    plus a *qualified* assignment such as `read_attr = builtins.getattr`,
+    plus an *annotated* assignment of either shape, e.g. `read_attr:
+    Callable[..., object] = getattr`), and every local name bound to the
+    `builtins` module itself (`import builtins`, `import builtins as b`)
+    -- used to recognize `builtins.getattr(...)`/`b.getattr(...)`
+    alongside a bare call. All are real (Codex review, fresh evidence,
+    three rounds: `import builtins; builtins.getattr(rec, "bases")`,
+    `from builtins import getattr as read_attr`, `read_attr = getattr;
+    read_attr(rec, "bases")`, combining the qualified-call recognition
+    with the plain-assignment chaining as `read_attr = builtins.getattr;
+    read_attr(rec, "bases")`, and -- the annotated-assignment spelling of
+    either -- `read_attr: Callable[..., object] = getattr` -- are all
+    invisible to a scan that only matches the literal bare callee
     `getattr`). Whole-tree, matching `_imported_class_aliases`'s own scope
     for the identical reason -- and the plain-assignment chaining mirrors
     that function's own fixed-point resolution of `RT = RecordType`/
     `RT2 = RT` exactly, just for the builtin callable instead of a class
-    name.
+    name; the annotated-assignment branch mirrors that same function's own
+    `ast.AnnAssign` handling.
     """
     getattr_names = {"getattr"}
     builtins_names: set[str] = set()
@@ -463,6 +467,17 @@ def _builtins_getattr_aliases(
     # since (unlike the plain-name candidates) this needs the *complete*
     # `builtins_names` set to know whether `<module-name>` really is one.
     qualified_candidates: list[tuple[str, str]] = []
+
+    def _add_candidate(target: str, value: ast.expr | None) -> None:
+        if isinstance(value, ast.Name):
+            assign_candidates.append((target, value.id))
+        elif (
+            isinstance(value, ast.Attribute)
+            and value.attr == "getattr"
+            and isinstance(value.value, ast.Name)
+        ):
+            qualified_candidates.append((target, value.value.id))
+
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
             for alias in node.names:
@@ -477,14 +492,9 @@ def _builtins_getattr_aliases(
             and len(node.targets) == 1
             and isinstance(node.targets[0], ast.Name)
         ):
-            if isinstance(node.value, ast.Name):
-                assign_candidates.append((node.targets[0].id, node.value.id))
-            elif (
-                isinstance(node.value, ast.Attribute)
-                and node.value.attr == "getattr"
-                and isinstance(node.value.value, ast.Name)
-            ):
-                qualified_candidates.append((node.targets[0].id, node.value.value.id))
+            _add_candidate(node.targets[0].id, node.value)
+        elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
+            _add_candidate(node.target.id, node.value)
     for local, base in qualified_candidates:
         if base in builtins_names:
             getattr_names.add(local)
