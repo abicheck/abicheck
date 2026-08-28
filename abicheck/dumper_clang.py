@@ -1426,7 +1426,7 @@ class _ClangAstParser:
                 bases_fact=Fact.present([]),
                 virtual_bases_fact=Fact.present([]),
                 vtable_fact=Fact.present([]),
-                vptr_offset_bits_fact=Fact.present(None),
+                vptr_offset_bits_fact=Fact.partial(None),  # heuristic field (see below), partial even here
             )
         fields = self._parse_fields(node)
         bases, virtual_bases, _base_access = _parse_bases(node)
@@ -1497,9 +1497,9 @@ class _ClangAstParser:
             deprecated=deprecated,
             # G31 Phase C backend audit -- see _clang_record_is_abstract.
             is_abstract=_clang_record_is_abstract(node),
-            # Stated explicitly -- this parse genuinely resolved these.
+            # Stated explicitly -- this parse genuinely resolved these. vptr_offset_bits_fact is `partial`, not `present`: 0-if-vtable-else-None is the Itanium primary-base heuristic, not a real offset read (matches vptr_offset_bits's own PARTIAL row).
             bases_fact=Fact.present(bases), virtual_bases_fact=Fact.present(virtual_bases),
-            vtable_fact=Fact.present(vtable), vptr_offset_bits_fact=Fact.present(0 if vtable else None),
+            vtable_fact=Fact.present(vtable), vptr_offset_bits_fact=Fact.partial(0 if vtable else None),
         )
 
     def _parse_fields(self, node: dict[str, Any]) -> list[TypeField]:

@@ -61,7 +61,7 @@ def test_polymorphic_record_facts_present_and_match_legacy_fields() -> None:
     assert rec.virtual_bases_fact.value == rec.virtual_bases == []
     assert rec.vtable_fact.status is FactStatus.PRESENT
     assert rec.vtable_fact.value == rec.vtable
-    assert rec.vptr_offset_bits_fact.status is FactStatus.PRESENT
+    assert rec.vptr_offset_bits_fact.status is FactStatus.PARTIAL
     assert rec.vptr_offset_bits_fact.value == rec.vptr_offset_bits
 
 
@@ -81,7 +81,7 @@ def test_opaque_record_facts_present_and_match_legacy_empty_values() -> None:
     assert rec.bases_fact.status is FactStatus.PRESENT
     assert rec.bases_fact.value == []
     assert rec.vtable_fact.status is FactStatus.PRESENT
-    assert rec.vptr_offset_bits_fact.status is FactStatus.PRESENT
+    assert rec.vptr_offset_bits_fact.status is FactStatus.PARTIAL
     assert rec.vptr_offset_bits_fact.value is None
 
 
