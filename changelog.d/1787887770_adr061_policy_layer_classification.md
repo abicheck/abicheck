@@ -82,13 +82,13 @@
   architecture gate would otherwise catch, and `pattern_verdicts.py` is a
   role mismatch as explained above:
 
-  - **`frontends -> policy` (all 8 of the remaining candidates).** The 11
+  - **`frontends -> policy` (all 8 of the remaining candidates).** The 10
     files named next are the `frontends`-side *importers* hitting this
     edge, not the excluded candidates themselves: `cli_params.py`,
     `cli_compare_helpers.py`, `cli_compare_receipt.py`,
     `cli_compare_release.py`, `cli_compare_release_helpers.py`,
     `cli_helpers_compare.py`, `cli_buildsource_helpers.py`, `cli_scan.py`,
-    `cli_scan_baseline.py`, `cli_scan_receipt.py`, and `cli_compare_fold.py`
+    `cli_scan_baseline.py`, and `cli_compare_fold.py`
     each still import one or more of `policy_file`, `suppression`,
     `compatibility_evaluation_resolver`, `pack_application`,
     `contract_coverage_ledger`, `contract_gating`, `reclassify`, and
