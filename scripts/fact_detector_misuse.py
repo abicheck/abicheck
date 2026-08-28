@@ -158,6 +158,17 @@ def _is_fact_typed_expr(node: ast.expr, fact_names: frozenset[str]) -> bool:
     Does **not** resolve a bare `ast.Name` -- that is :func:`_fact_aliases`'
     job, since answering it needs scope (which function a name belongs to),
     which a single node can't supply on its own.
+
+    An assignment expression (`(fact := rec.bases_fact) == other`,
+    `ast.NamedExpr`) unwraps to its own `.value` -- the walrus expression
+    itself evaluates to whatever its RHS does, so it is exactly as
+    Fact-typed as that RHS, the same as unwrapping isn't needed for a
+    plain `Attribute`/`Call` reaching this function directly (Codex
+    review, fresh evidence: `_fact_aliases`'s own alias tracking is what
+    used to be the only way this misuse was caught, and only when the
+    walrus assignment was a full statement on its own -- an *inline*
+    walrus used directly as a comparison operand had no assignment
+    statement for that tracking to see at all).
     """
     if isinstance(node, ast.Attribute) and node.attr in FACT_FIELD_NAMES:
         return True
@@ -167,6 +178,8 @@ def _is_fact_typed_expr(node: ast.expr, fact_names: frozenset[str]) -> bool:
             return True
         if isinstance(func, ast.Attribute) and isinstance(func.value, ast.Name):
             return func.value.id in fact_names
+    if isinstance(node, ast.NamedExpr):
+        return _is_fact_typed_expr(node.value, fact_names)
     return False
 
 
@@ -189,10 +202,11 @@ def _is_fact_typed_annotation(
     return False
 
 
-def _enclosing_qualnames(tree: ast.Module) -> dict[int, str]:
-    """Map every line number in *tree* to its innermost enclosing
-    function's qualified name (``Class.method`` for a method), or
-    ``"<module>"`` for a line outside any function.
+def _enclosing_qualnames(tree: ast.Module) -> _QualnameSpans:
+    """Return every named scope's exact `((start_line, start_col),
+    (end_line, end_col), qualname)` span in *tree* -- resolve a query
+    position to its innermost enclosing scope's qualname via
+    :func:`_qualname_at`, not by indexing this list directly.
 
     Deliberately a standalone copy of `fact_field_readers.py`'s identical
     helper rather than a shared import -- see `FACT_FIELD_NAMES`'s own
@@ -273,43 +287,99 @@ def _enclosing_qualnames(tree: ast.Module) -> dict[int, str]:
     *shadow* of that exact name in the outermost iterable's own expression
     (vanishingly rare, and not the shape any review round has found) could
     read differently.
+
+    **Resolved by *position* (line and column), not by line alone (Codex
+    review, fresh evidence).** A line-keyed map -- `dict[int, str]`, one
+    qualname per physical line -- was fine while only a `def`/`class`
+    (each normally its own multi-line block) introduced a scope, but a
+    lambda or comprehension is routinely a small piece of a much larger
+    expression sharing its line with code that is NOT part of it at all:
+    `fact = rec.bases_fact` outer, then `(lambda fact: fact == other)(1);
+    return fact == other` -- both statements sit on the very next line,
+    so the line-keyed map could only record ONE qualname for that whole
+    line, and the lambda's own (later-processed, narrower-in-line-count)
+    range unconditionally won, silently reattributing the *second*,
+    unrelated `fact == other` to the lambda's shadowing scope too --
+    hiding a real misuse, not merely producing a spurious one. Fixed by
+    returning a `list` of exact `((start_line, start_col), (end_line,
+    end_col), qualname)` spans instead of a `dict[int, str]`, resolved by
+    :func:`_qualname_at` -- the smallest span whose `(start, end)`
+    lexicographically brackets a query `(lineno, col_offset)` position,
+    not merely the smallest span sharing its *line*. Every caller that
+    previously did `qualnames.get(node.lineno, "<module>")` now does
+    `_qualname_at((node.lineno, node.col_offset), qualnames)`.
     """
-    ranges: list[tuple[int, int, str]] = []
+    spans: list[tuple[tuple[int, int], tuple[int, int], str]] = []
+
+    def _span(child: ast.stmt | ast.expr) -> tuple[tuple[int, int], tuple[int, int]]:
+        start = (child.lineno, child.col_offset)
+        end = (
+            child.end_lineno if child.end_lineno is not None else child.lineno,
+            child.end_col_offset
+            if child.end_col_offset is not None
+            else child.col_offset,
+        )
+        return start, end
 
     def visit(node: ast.AST, prefix: str) -> None:
         for child in ast.iter_child_nodes(node):
             if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef)):
                 qualname = f"{prefix}{child.name}#{child.lineno}"
-                end = getattr(child, "end_lineno", child.lineno)
-                ranges.append((child.lineno, end, qualname))
+                start, end = _span(child)
+                spans.append((start, end, qualname))
                 visit(child, qualname + ".")
             elif isinstance(child, ast.Lambda):
                 qualname = f"{prefix}<lambda>#{child.lineno}:{child.col_offset}"
-                end = getattr(child, "end_lineno", child.lineno)
-                ranges.append((child.lineno, end, qualname))
+                start, end = _span(child)
+                spans.append((start, end, qualname))
                 visit(child, qualname + ".")
             elif isinstance(
                 child, (ast.ListComp, ast.SetComp, ast.DictComp, ast.GeneratorExp)
             ):
                 qualname = f"{prefix}<comp>#{child.lineno}:{child.col_offset}"
-                end = getattr(child, "end_lineno", child.lineno)
-                ranges.append((child.lineno, end, qualname))
+                start, end = _span(child)
+                spans.append((start, end, qualname))
                 visit(child, qualname + ".")
             elif isinstance(child, ast.ClassDef):
                 class_qualname = f"{prefix}{child.name}#{child.lineno}<class-body>"
-                end = getattr(child, "end_lineno", child.lineno)
-                ranges.append((child.lineno, end, class_qualname))
+                start, end = _span(child)
+                spans.append((start, end, class_qualname))
                 visit(child, f"{prefix}{child.name}.")
             else:
                 visit(child, prefix)
 
     visit(tree, "")
-    ranges.sort(key=lambda r: r[1] - r[0], reverse=True)
-    by_line: dict[int, str] = {}
-    for start, end, qualname in ranges:
-        for lineno in range(start, end + 1):
-            by_line[lineno] = qualname
-    return by_line
+    return spans
+
+
+#: A parsed source span, as returned by :func:`_enclosing_qualnames` and
+#: consumed by :func:`_qualname_at`: `(start, end, qualname)`, each of
+#: `start`/`end` a `(line, col)` position.
+_QualnameSpans = list[tuple[tuple[int, int], tuple[int, int], str]]
+
+
+def _qualname_at(pos: tuple[int, int], spans: _QualnameSpans) -> str:
+    """Return the innermost scope's qualname whose span contains *pos*
+    (a `(lineno, col_offset)` position), or `"<module>"` if none does.
+
+    "Innermost" means the smallest containing span, not merely the first
+    one found -- every span this module ever produces nests strictly
+    inside its lexical parent's own span (a laminar family, since each is
+    built from `ast.iter_child_nodes`'s own parent/child structure), so
+    comparing by `(end_line - start_line, end_col - start_col)` -- line
+    span first, column span only as a tiebreaker for two spans starting
+    and ending on the same lines -- always picks the correctly-nested one
+    among every span that contains *pos*.
+    """
+    best: str | None = None
+    best_size: tuple[int, int] | None = None
+    for start, end, qualname in spans:
+        if start <= pos <= end:
+            size = (end[0] - start[0], end[1] - start[1])
+            if best_size is None or size < best_size:
+                best = qualname
+                best_size = size
+    return best if best is not None else "<module>"
 
 
 def _lexical_function_parents(tree: ast.Module) -> dict[str, str]:
@@ -400,7 +470,7 @@ def _bound_names(target: ast.expr) -> list[str]:
     return names
 
 
-def _fact_aliases(tree: ast.Module, qualnames: dict[int, str]) -> dict[str, set[str]]:
+def _fact_aliases(tree: ast.Module, qualnames: _QualnameSpans) -> dict[str, set[str]]:
     """Map each function's qualname to the local names, within that
     function, known to hold a `Fact[T]` value (Codex review, fresh
     evidence): `old_fact = old.bases_fact` followed by `old_fact ==
@@ -514,39 +584,69 @@ def _fact_aliases(tree: ast.Module, qualnames: dict[int, str]) -> dict[str, set[
     locally_bound: dict[str, set[str]] = {}
     for node in ast.walk(tree):
         if isinstance(node, ast.Assign):
-            qualname = qualnames.get(node.lineno, "<module>")
+            qualname = _qualname_at((node.lineno, node.col_offset), qualnames)
             for target in node.targets:
                 for name in _bound_names(target):
                     locally_bound.setdefault(qualname, set()).add(name)
             # The alias-*candidate* pool (a specific value attributed to a
-            # specific name, fed through the fixed point below) stays
-            # restricted to the simple single-`Name`-target shape -- a
-            # tuple-unpacking target (`a, b = pair`) has no single value
-            # to attribute to `a` alone, so it can only ever widen
-            # `locally_bound` (correct: it's still a real binding), never
-            # `candidates`.
-            if len(node.targets) == 1 and isinstance(node.targets[0], ast.Name):
-                candidates.setdefault(qualname, []).append(
-                    (node.targets[0].id, node.value)
-                )
+            # specific name, fed through the fixed point below) covers
+            # every plain-`Name` target, not only a lone one -- a chained
+            # assignment (`first = second = rec.bases_fact`) gives every
+            # target the identical RHS value, unlike a tuple-unpacking
+            # target (`a, b = pair`), which has no single value to
+            # attribute to `a` alone (Codex review, fresh evidence: the
+            # single-target restriction wrongly excluded this ordinary,
+            # unrelated shape too, letting `first == other`/`second ==
+            # other` both bypass the gate). A tuple/list target among
+            # `node.targets` still contributes nothing here -- only
+            # `locally_bound`, via `_bound_names` above -- since it has no
+            # single value of its own either.
+            for target in node.targets:
+                if isinstance(target, ast.Name):
+                    candidates.setdefault(qualname, []).append((target.id, node.value))
         elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
-            qualname = qualnames.get(node.lineno, "<module>")
+            qualname = _qualname_at((node.lineno, node.col_offset), qualnames)
             locally_bound.setdefault(qualname, set()).add(node.target.id)
             if _is_fact_typed_annotation(node.annotation, fact_names):
                 aliases.setdefault(qualname, set()).add(node.target.id)
             elif node.value is not None:
                 candidates.setdefault(qualname, []).append((node.target.id, node.value))
+        elif isinstance(node, ast.NamedExpr) and isinstance(node.target, ast.Name):
+            # `(fact := rec.bases_fact)` -- a real alias binding too, not
+            # merely an inline-recognizable expression (see `_is_fact_
+            # typed_expr`'s own NamedExpr branch for that half): `fact`
+            # itself becomes usable later in the same scope, e.g. `if
+            # (fact := rec.bases_fact) is not None: return fact == other`
+            # (Codex review, fresh evidence). Registered as an ordinary
+            # candidate, feeding the identical fixed-point resolution
+            # every other alias source already does -- not added to
+            # `locally_bound`, since a walrus target is deliberately
+            # exempt from Python's own "assignment anywhere makes a name
+            # local to the whole function" rule (PEP 572): unlike every
+            # other binding form handled here, it explicitly binds into
+            # the nearest *containing* scope, hopping out of a
+            # comprehension's own scope entirely when used inside one --
+            # so treating it as function-local here (and risking an
+            # incorrect shadow of a genuine outer alias) would be wrong in
+            # the specific case this module already added a real scope
+            # for. `qualnames` has no notion of that scope-hopping rule,
+            # so this alias is deliberately still keyed to whatever scope
+            # `_qualname_at` reports for its own position -- correct
+            # outside a comprehension (the overwhelmingly common case),
+            # an accepted narrow residual inside one.
+            qualname = _qualname_at((node.lineno, node.col_offset), qualnames)
+            candidates.setdefault(qualname, []).append((node.target.id, node.value))
         elif isinstance(node, (ast.For, ast.AsyncFor)):
             # `for fact, other in pairs:` -- the same tuple-unpacking
             # binding as `ast.Assign`, just via a loop target instead
             # (Codex review, fresh evidence: "the other Python binding
             # forms" alongside unpacking).
-            qualname = qualnames.get(node.lineno, "<module>")
+            qualname = _qualname_at((node.lineno, node.col_offset), qualnames)
             for name in _bound_names(node.target):
                 locally_bound.setdefault(qualname, set()).add(name)
         elif isinstance(node, (ast.With, ast.AsyncWith)):
             # `with ctx() as fact:` -- likewise a real local binding.
-            qualname = qualnames.get(node.lineno, "<module>")
+            qualname = _qualname_at((node.lineno, node.col_offset), qualnames)
             for item in node.items:
                 if item.optional_vars is not None:
                     for name in _bound_names(item.optional_vars):
@@ -556,7 +656,7 @@ def _fact_aliases(tree: ast.Module, qualnames: dict[int, str]) -> dict[str, set[
             # not an `ast.Name` (Python's own grammar for this one binding
             # form), so it doesn't go through `_bound_names`.
             if node.name is not None:
-                qualname = qualnames.get(node.lineno, "<module>")
+                qualname = _qualname_at((node.lineno, node.col_offset), qualnames)
                 locally_bound.setdefault(qualname, set()).add(node.name)
         elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)):
             # `ast.Lambda` shares the identical `.args: ast.arguments`
@@ -567,7 +667,7 @@ def _fact_aliases(tree: ast.Module, qualnames: dict[int, str]) -> dict[str, set[
             # matches one -- only the `locally_bound` recording actually
             # matters for a lambda, but sharing this branch rather than
             # duplicating it costs nothing.
-            qualname = qualnames.get(node.lineno, "<module>")
+            qualname = _qualname_at((node.lineno, node.col_offset), qualnames)
             all_args = (
                 *node.args.posonlyargs,
                 *node.args.args,
@@ -587,7 +687,7 @@ def _fact_aliases(tree: ast.Module, qualnames: dict[int, str]) -> dict[str, set[
             # `for` loop's own target already gets above (Codex review,
             # fresh evidence -- see `_enclosing_qualnames`'s own
             # docstring).
-            qualname = qualnames.get(node.lineno, "<module>")
+            qualname = _qualname_at((node.lineno, node.col_offset), qualnames)
             for generator in node.generators:
                 for name in _bound_names(generator.target):
                     locally_bound.setdefault(qualname, set()).add(name)
@@ -608,7 +708,10 @@ def _fact_aliases(tree: ast.Module, qualnames: dict[int, str]) -> dict[str, set[
     # above) never gets processed at all, and its lookup below silently
     # sees no entry rather than its parent's set.
     all_qualnames = (
-        set(candidates) | set(aliases) | set(qualnames.values()) | {"<module>"}
+        set(candidates)
+        | set(aliases)
+        | {q for _start, _end, q in qualnames}
+        | {"<module>"}
     )
     for qualname in sorted(all_qualnames, key=_scope_depth):
         known = aliases.setdefault(qualname, set())
@@ -654,7 +757,7 @@ def fact_equality_misuse_sites(tree: ast.Module, rel: str) -> list[tuple[int, in
     for node in ast.walk(tree):
         if not isinstance(node, ast.Compare):
             continue
-        qualname = qualnames.get(node.lineno, "<module>")
+        qualname = _qualname_at((node.lineno, node.col_offset), qualnames)
         operands = [node.left, *node.comparators]
         for op, left, right in zip(node.ops, operands, operands[1:]):
             if not isinstance(op, (ast.Eq, ast.NotEq)):

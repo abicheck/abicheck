@@ -445,6 +445,69 @@ class TestFactEqualityMisuseSites:
         tree = ast.parse(src, filename="x.py")
         assert fact_equality_misuse_sites(tree, "x.py") == [(2, 12)]
 
+    def test_resolves_expression_scopes_by_position_not_by_line(self) -> None:
+        """Fresh evidence after the lambda/comprehension scope fix (Codex
+        review): a lambda sharing its *line* with unrelated code must not
+        swallow that other code into its own scope. `fact = rec.
+        bases_fact` outer, then `(lambda fact: fact == other)(1); return
+        fact == other` on one line -- the first `fact == other` (inside
+        the lambda, shadowed by its own parameter) must NOT be flagged,
+        but the second (the real outer alias, textually on the same line
+        but not part of the lambda at all) MUST be. A line-keyed lookup
+        can only pick one winner for the whole line; only a
+        position-keyed one gets both halves right at once."""
+        src = (
+            "def f(rec, other):\n"
+            "    fact = rec.bases_fact\n"
+            "    (lambda fact: fact == other)(1); return fact == other\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        sites = fact_equality_misuse_sites(tree, "x.py")
+        assert len(sites) == 1
+        lineno, col_offset = sites[0]
+        assert lineno == 3
+        # The reported site is the second `fact == other` (after the
+        # lambda's own closing `)(1); return `), not the first.
+        line = "    (lambda fact: fact == other)(1); return fact == other"
+        assert line[col_offset : col_offset + len("fact == other")] == "fact == other"
+        assert col_offset > line.index(")(1)")
+
+    def test_detects_a_comparison_through_a_chained_assignment(self) -> None:
+        """`first = second = rec.bases_fact` -- a chained assignment gives
+        every plain-name target the identical RHS value (Codex review,
+        fresh evidence: unlike tuple-unpacking, this is not ambiguous at
+        all, but the single-target restriction excluded it too)."""
+        src = (
+            "def f(rec, other):\n"
+            "    first = second = rec.bases_fact\n"
+            "    return first == other or second == other\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert fact_equality_misuse_sites(tree, "x.py") == [(3, 11), (3, 29)]
+
+    def test_detects_an_inline_walrus_comparison(self) -> None:
+        """`(fact := rec.bases_fact) == other` -- the assignment
+        expression's own value is exactly as Fact-typed as its RHS
+        (Codex review, fresh evidence)."""
+        src = "def f(rec, other):\n    return (fact := rec.bases_fact) == other\n"
+        tree = ast.parse(src, filename="x.py")
+        assert fact_equality_misuse_sites(tree, "x.py") == [(2, 11)]
+
+    def test_detects_a_comparison_through_a_walrus_alias_reused_later(
+        self,
+    ) -> None:
+        """`if (fact := rec.bases_fact) is not None: return fact ==
+        other` -- the walrus binds `fact` for later use in the same
+        scope, not just at the assignment expression's own site."""
+        src = (
+            "def f(rec, other):\n"
+            "    if (fact := rec.bases_fact) is not None:\n"
+            "        return fact == other\n"
+            "    return False\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert fact_equality_misuse_sites(tree, "x.py") == [(3, 15)]
+
     def test_detects_a_comparison_between_two_fact_annotated_parameters(
         self,
     ) -> None:

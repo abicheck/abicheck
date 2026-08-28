@@ -1248,6 +1248,65 @@ Six new tests: the class-body leak and its positive-control counterpart,
 the lambda shadow and its positive control, the comprehension shadow and
 its positive control.
 
+**A further Codex review round found three more real gaps -- one a
+structural correctness bug in the lambda/comprehension fix itself (a
+false *negative*, not the false positives every round so far had been),
+the other two small, bounded extensions -- all fixed.** (1) **Resolving a
+scope by *line* alone, not by exact position, could hide a genuine
+misuse, not merely flag a spurious one.** `fact = rec.bases_fact` outer,
+then `(lambda fact: fact == other)(1); return fact == other` on one
+line: the SECOND `fact == other` (the real outer alias, textually
+sharing the lambda's line but not part of it at all) was silently
+misattributed to the lambda's own shadowing scope, since the previous
+fix's scope map was still keyed `dict[int, str]` -- one qualname per
+physical *line* -- so whichever scope happened to be inserted last for
+that line (the lambda) won for the *entire* line, including code that
+was never part of the lambda's body. This is more serious than the
+false positives every prior round in this section fixed: those rejected
+valid code (a review cost); this one let a real `Fact[T]` misuse pass
+silently, the exact failure this whole check exists to prevent. Fixed by
+switching `_enclosing_qualnames` from a line-keyed `dict[int, str]` to a
+list of exact `((start_line, start_col), (end_line, end_col), qualname)`
+spans, resolved by a new `_qualname_at()` -- the smallest span whose
+`(start, end)` lexicographically brackets a query `(lineno, col_offset)`
+position, not merely the smallest span sharing its line (correct because
+every span this module produces nests strictly inside its lexical
+parent's own span, a laminar family, so comparing by `(end_line -
+start_line, end_col - start_col)` -- line span first, column span only
+as a same-line tiebreaker -- always picks the correctly-nested one).
+Every one of the eight call sites that previously did `qualnames.get(node.
+lineno, "<module>")` now does `_qualname_at((node.lineno, node.
+col_offset), qualnames)`. Verified against the review's own exact repro:
+the shadowed `fact == other` inside the lambda is correctly NOT flagged,
+while the real outer `fact == other` on the same line now IS. (2) `first
+= second = rec.bases_fact` -- a chained assignment gives every plain-name
+target the identical RHS value, unlike a tuple-unpacking target, but the
+candidate collector was restricted to exactly one target. Fixed by
+looping over every target and registering a candidate for each
+plain-`Name` one, all sharing the same RHS -- a tuple/list target among
+the same chain still contributes nothing here (only `locally_bound`, via
+the pre-existing `_bound_names()` path), since it still has no single
+value of its own. (3) `(fact := rec.bases_fact) == other` -- an inline
+assignment expression (`ast.NamedExpr`), invisible to `_is_fact_typed_
+expr` (which never unwrapped it) and to the alias tracking (which only
+ever walked plain assignment statements, never an expression embedded
+inside a larger one). Fixed with two changes: `_is_fact_typed_expr` now
+unwraps a `NamedExpr` to its own `.value`, exactly as Fact-typed as its
+RHS; and `_fact_aliases`'s binding-collection walk registers the
+walrus's target as an ordinary alias candidate too, so a later reuse of
+the bound name (`if (fact := rec.bases_fact) is not None: return fact ==
+other`) is also caught, not just an inline use at the assignment
+expression's own site. Deliberately not chasing PEP 572's own
+scope-hopping rule for a walrus used *inside* a comprehension (which
+binds into the comprehension's *enclosing* scope, not its own) -- an
+accepted, narrow residual, since `qualnames` has no notion of that rule
+and the walrus alias is registered under whatever scope its own position
+resolves to. Verified empirically: still zero existing hits in the real
+repository. Four new tests: the exact same-line lambda/outer-alias repro
+(with an explicit column check pinning which of the two identical-text
+`fact == other` occurrences was reported), a chained assignment, an
+inline walrus comparison, and a walrus alias reused on a later line.
+
 ---
 
 ### Phase 1 — finish the `dump`/`scan` typed-API convergence (closes AGENTS.md "PR C")
