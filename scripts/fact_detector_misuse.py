@@ -1704,19 +1704,47 @@ def _default_and_annotation_scope_overrides(
     `Outer<class-body>`'s (a class body's own locals give no visibility to
     a *nested* class the way an enclosing function's would -- `_lexical_
     function_parents` never produces a class-body-derived key at all).
+
+    **Also overrides a `def`/`class`'s own decorator expressions to their
+    containing scope, the identical way defaults/annotations/bases already
+    are (Codex review, fresh evidence).** A decorator (`@deco(fact ==
+    other)`) is evaluated while the decorated statement itself executes --
+    before the function/class it decorates even exists -- in whatever
+    scope directly, syntactically contains that statement, never inside
+    the new function's/class's own body. `_lexical_function_parents`'s and
+    `_def_containing_qualnames`'s own `def_time_subtrees()`/`dispatch()`
+    helpers already dispatch a `def`'s or `class`'s `decorator_list` under
+    the *incoming* (enclosing) qualname, exactly the def-time treatment
+    this function already gives every other def-time subtree -- but this
+    function's own subtree collection had no `decorator_list` entry at
+    all, so `fact = rec.bases_fact; @deco([x for x in (fact == other,)])
+    def f(fact): ...` was silently missed: `_enclosing_qualnames` assigns
+    the whole `FunctionDef`'s decorator-adjacent lines to `f`'s own body
+    scope, where the parameter `fact` has already shadowed the alias.
+    Fixed by adding `decorator_list` to both the function/lambda branch's
+    `subtrees` (via `getattr`, since `ast.Lambda` has none) and the
+    `ClassDef` branch's own base/keyword loop.
     """
     overrides: dict[int, str] = {}
     for node in ast.walk(tree):
         if isinstance(node, ast.ClassDef):
             enclosing = def_containing.get((node.lineno, node.col_offset), "<module>")
-            for base_or_keyword in (*node.bases, *(kw.value for kw in node.keywords)):
-                for descendant in _iter_default_subtree(base_or_keyword):
+            for base_keyword_or_deco in (
+                *node.bases,
+                *(kw.value for kw in node.keywords),
+                *node.decorator_list,
+            ):
+                for descendant in _iter_default_subtree(base_keyword_or_deco):
                     overrides[id(descendant)] = enclosing
             continue
         if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)):
             continue
         enclosing = def_containing.get((node.lineno, node.col_offset), "<module>")
-        subtrees = [*node.args.defaults, *node.args.kw_defaults]
+        subtrees = [
+            *node.args.defaults,
+            *node.args.kw_defaults,
+            *getattr(node, "decorator_list", ()),
+        ]
         for arg in (
             *node.args.posonlyargs,
             *node.args.args,

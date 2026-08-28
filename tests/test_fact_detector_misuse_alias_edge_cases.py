@@ -849,3 +849,94 @@ class TestStructuralMappingPatternCapturesPairWithTheSubject:
         )
         tree = ast.parse(src, filename="x.py")
         assert fact_equality_misuse_sites(tree, "x.py") == [(4, 19)]
+
+
+class TestDecoratorExpressionsResolveAgainstTheContainingScope:
+    """A decorator (`@deco(fact == other)`) evaluates while the decorated
+    statement itself executes -- before the function/class it decorates
+    even exists -- in whatever scope directly, syntactically contains
+    that statement, the identical def-time treatment
+    `_default_and_annotation_scope_overrides()` already gives a
+    default/annotation/`ClassDef` base or keyword (Codex review, fresh
+    evidence: the previous subtree collection had no `decorator_list`
+    entry at all)."""
+
+    def test_detects_a_comparison_inside_a_function_decorator(self) -> None:
+        src = (
+            "def deco(x):\n"
+            "    return lambda f: f\n"
+            "fact = rec.bases_fact\n"
+            "@deco([x for x in (fact == other,)])\n"
+            "def f(fact):\n"
+            "    return fact == other\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert fact_equality_misuse_sites(tree, "x.py") == [(4, 19)]
+
+    def test_detects_a_comparison_inside_a_class_decorator(self) -> None:
+        src = (
+            "def deco(x):\n"
+            "    return lambda c: c\n"
+            "fact = rec.bases_fact\n"
+            "@deco(fact == other)\n"
+            "class C:\n"
+            "    pass\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert fact_equality_misuse_sites(tree, "x.py") == [(4, 6)]
+
+    def test_a_decorator_shadow_does_not_leak_into_the_function_body(self) -> None:
+        """Regression guard: the decorator override must not disturb the
+        existing rule that a real parameter shadows an outer alias for
+        the function's own body -- only the decorator's own comparison
+        resolves against the enclosing scope."""
+        src = (
+            "def deco(x):\n"
+            "    return lambda f: f\n"
+            "fact = rec.bases_fact\n"
+            "@deco(fact == other)\n"
+            "def f(fact, other2):\n"
+            "    return fact == other2\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert fact_equality_misuse_sites(tree, "x.py") == [(4, 6)]
+
+    def test_ignores_a_non_fact_decorator_expression(self) -> None:
+        src = (
+            "def deco(x):\n    return lambda f: f\n@deco(1 == 2)\ndef f():\n    pass\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert fact_equality_misuse_sites(tree, "x.py") == []
+
+    def test_detects_a_nested_function_decorator_against_its_own_enclosing_function(
+        self,
+    ) -> None:
+        src = (
+            "def deco(x):\n"
+            "    return lambda f: f\n"
+            "def outer(rec, other):\n"
+            "    fact = rec.bases_fact\n"
+            "    @deco(fact == other)\n"
+            "    def inner(fact):\n"
+            "        return fact\n"
+            "    return inner\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert fact_equality_misuse_sites(tree, "x.py") == [(5, 10)]
+
+    def test_detects_a_method_decorator_against_its_own_class_body(self) -> None:
+        """A method's decorator is evaluated while its *containing class
+        body* executes -- ordinary class-body code, not a closure lookup
+        -- the same distinction `_default_and_annotation_scope_
+        overrides()`'s own method-default handling already draws."""
+        src = (
+            "def deco(x):\n"
+            "    return lambda f: f\n"
+            "class C:\n"
+            "    fact = rec.bases_fact\n"
+            "    @deco(fact == other)\n"
+            "    def m(self, fact):\n"
+            "        return fact\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert fact_equality_misuse_sites(tree, "x.py") == [(5, 10)]

@@ -2936,6 +2936,46 @@ at 917 lines (both well under the 2000-line hard cap). New tests:
 `tests/test_fact_detector_misuse_alias_edge_cases.py` (851 lines, well
 under its own 1200-line cap).
 
+**One more finding on the def-time scope-resolution machinery (8th review
+round): decorator expressions were never given the def-time treatment
+their siblings already have.** `_default_and_annotation_scope_overrides()`
+already resolves a parameter default/annotation and a `ClassDef`'s own
+base/keyword expression against the scope that directly, syntactically
+contains the `def`/`class` statement, since Python evaluates each of
+those *before* the function/class exists — but a decorator
+(`@deco(fact == other)`) is evaluated the identical way, at the identical
+time, and this function's own subtree collection had no `decorator_list`
+entry for either shape at all. `fact = rec.bases_fact; @deco([x for x in
+(fact == other,)]) def f(fact): ...` was silently missed:
+`_enclosing_qualnames` assigns the whole `FunctionDef`'s decorator-
+adjacent lines to `f`'s own body scope, where the parameter `fact` has
+already shadowed the alias. Confirmed as a genuine asymmetry, not a fresh
+question: `_lexical_function_parents`'s and `_def_containing_qualnames`'s
+own `def_time_subtrees()`/`dispatch()` helpers *already* dispatch a
+`def`'s or `class`'s `decorator_list` under the incoming (enclosing)
+qualname — this function alone had never been extended to match. Fixed
+by adding `decorator_list` to both the function/lambda branch's
+`subtrees` (via `getattr`, since `ast.Lambda` carries none) and the
+`ClassDef` branch's own base/keyword loop — the identical fix, applied to
+the one remaining site that needed it.
+
+Verified against the reported repro, its class-decorator sibling, a
+regression control confirming the fix doesn't leak the decorator's own
+resolution into the function's real body scope (a genuine parameter
+still correctly shadows there), a non-Fact decorator negative control,
+and both a nested-function and a method decorator (resolving against
+their own real enclosing function/class-body scope respectively,
+mirroring the identical class-body-vs-function distinction the existing
+method-default handling already draws), all via direct AST reproduction
+before writing tests. Still zero existing hits, `mypy`/`ruff` both stayed
+clean, `fact_detector_misuse.py` at 1843 lines (well under the 2000-line
+hard cap). New tests:
+`TestDecoratorExpressionsResolveAgainstTheContainingScope`, appended to
+`tests/test_fact_detector_misuse_alias_edge_cases.py` (946 lines, well
+under its own 1200-line cap) rather than the more thematically obvious
+`test_fact_detector_misuse_def_time_scope.py`, which had only ~105 lines
+of headroom left under its own cap.
+
 ---
 
 ### Phase 1 — finish the `dump`/`scan` typed-API convergence (closes AGENTS.md "PR C")
