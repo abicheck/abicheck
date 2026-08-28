@@ -214,6 +214,65 @@ def _enclosing_qualnames(tree: ast.Module) -> dict[int, str]:
     each `def` costs nothing outside this module and gives every function
     definition its own real scope identity while `_lexical_function_
     parents` (below) keeps the identical lineage relationship.
+
+    **A class body's own top-level statements now get their own scope
+    range too, distinct from whatever function encloses the class (Codex
+    review, fresh evidence).** Previously a `ClassDef` contributed no
+    range of its own -- only a nested `FunctionDef`/method did -- so a
+    class-body-level assignment (`fact = rec.bases_fact` written directly
+    in the class body, a real, if unusual, pattern) fell through to
+    whichever *function* range happened to enclose the class and was
+    treated as if it were that function's own local, when a class body is
+    actually its own separate namespace (an ordinary name assigned there
+    is a class attribute, visible only as `self.x`/`Class.x`, never as a
+    bare name to a method the way a real enclosing function's local would
+    be -- the same rule `_lexical_function_parents` already encodes for
+    the opposite direction). Fixed by adding one range per `ClassDef`
+    (`f"{prefix}{child.name}#{child.lineno}<class-body>"`) the identical
+    way a `FunctionDef` already gets one -- a nested method's own,
+    narrower range still overrides it for the method's own lines (the
+    same size-sorted-ranges mechanism that already lets a nested `def`
+    override its enclosing one), so only genuinely class-body-level code
+    (not inside any method) lands on this new scope. Nothing ever looks
+    this qualname up as a lexical *parent* (`_lexical_function_parents`
+    only ever produces function-def-derived keys), so a class-body
+    scope's own aliases simply go unused by anything else -- exactly the
+    outcome wanted, since real Python gives them no visibility outside
+    the class body itself either.
+
+    **A lambda and a comprehension (`list`/`set`/`dict`/generator) each
+    get their own scope range too, the identical way a `def` already does
+    (Codex review, fresh evidence).** Both are real Python closures over
+    their enclosing scope, with their own local bindings (a lambda's
+    parameters; a comprehension's `for` targets) -- `fact = rec.
+    bases_fact` outer, then `(lambda fact: fact == other)(1)` or
+    `[fact == other for fact in values]`, each shadow the outer alias
+    with an unrelated local exactly the way a nested `def`'s own parameter
+    or `for`-loop target already does, but previously neither introduced
+    a scope of its own at all: every line inside either was silently
+    attributed to whatever *function* enclosed it, so the lambda
+    parameter/comprehension target was never recorded as a local
+    binding there, and the outer alias leaked straight through. Fixed the
+    same way as a `def` -- a dedicated range (keyed
+    `f"{prefix}<lambda>#{child.lineno}:{child.col_offset}"`/
+    `f"{prefix}<comp>#{child.lineno}:{child.col_offset}"`, disambiguating
+    by column too since several could otherwise share one line) --
+    wired into `_lexical_function_parents` identically below, and into
+    `_fact_aliases`'s own binding collection (see that function's own
+    docstring for the parameter/target-recording half of this fix).
+    Deliberately not precise about a comprehension's *outermost* iterable
+    technically still evaluating in the enclosing scope in real Python
+    (only the element expression, any `if` filters, and every non-first
+    `for`'s iterable actually run inside the comprehension's own scope) --
+    attributing the whole comprehension, outermost iterable included, to
+    its own scope is the same over-approximating-is-safe direction this
+    module already takes throughout, and doesn't change behavior in
+    practice: the comprehension's own scope always inherits its parent's
+    aliases anyway, so a bare alias reference in the outermost iterable
+    still resolves correctly either way -- only a comprehension-local
+    *shadow* of that exact name in the outermost iterable's own expression
+    (vanishingly rare, and not the shape any review round has found) could
+    read differently.
     """
     ranges: list[tuple[int, int, str]] = []
 
@@ -224,7 +283,22 @@ def _enclosing_qualnames(tree: ast.Module) -> dict[int, str]:
                 end = getattr(child, "end_lineno", child.lineno)
                 ranges.append((child.lineno, end, qualname))
                 visit(child, qualname + ".")
+            elif isinstance(child, ast.Lambda):
+                qualname = f"{prefix}<lambda>#{child.lineno}:{child.col_offset}"
+                end = getattr(child, "end_lineno", child.lineno)
+                ranges.append((child.lineno, end, qualname))
+                visit(child, qualname + ".")
+            elif isinstance(
+                child, (ast.ListComp, ast.SetComp, ast.DictComp, ast.GeneratorExp)
+            ):
+                qualname = f"{prefix}<comp>#{child.lineno}:{child.col_offset}"
+                end = getattr(child, "end_lineno", child.lineno)
+                ranges.append((child.lineno, end, qualname))
+                visit(child, qualname + ".")
             elif isinstance(child, ast.ClassDef):
+                class_qualname = f"{prefix}{child.name}#{child.lineno}<class-body>"
+                end = getattr(child, "end_lineno", child.lineno)
+                ranges.append((child.lineno, end, class_qualname))
                 visit(child, f"{prefix}{child.name}.")
             else:
                 visit(child, prefix)
@@ -271,6 +345,25 @@ def _lexical_function_parents(tree: ast.Module) -> dict[str, str]:
                 # own `parents` dict would still let one collapse onto the
                 # other's already-processed entry.
                 qualname = f"{prefix}{child.name}#{child.lineno}"
+                parents[qualname] = nearest_func
+                visit(child, qualname + ".", qualname)
+            elif isinstance(child, ast.Lambda):
+                # A lambda is a real closure scope too, the identical
+                # shape as a `def` (Codex review, fresh evidence -- see
+                # `_enclosing_qualnames`'s own docstring): it both closes
+                # over its enclosing function's locals *and* can itself be
+                # closed over by anything nested inside it, so it becomes
+                # the new `nearest_func` for its own body exactly like a
+                # named function does.
+                qualname = f"{prefix}<lambda>#{child.lineno}:{child.col_offset}"
+                parents[qualname] = nearest_func
+                visit(child, qualname + ".", qualname)
+            elif isinstance(
+                child, (ast.ListComp, ast.SetComp, ast.DictComp, ast.GeneratorExp)
+            ):
+                # A comprehension is a real closure scope too, in Python 3
+                # -- same reasoning and same treatment as a lambda.
+                qualname = f"{prefix}<comp>#{child.lineno}:{child.col_offset}"
                 parents[qualname] = nearest_func
                 visit(child, qualname + ".", qualname)
             elif isinstance(child, ast.ClassDef):
@@ -465,7 +558,15 @@ def _fact_aliases(tree: ast.Module, qualnames: dict[int, str]) -> dict[str, set[
             if node.name is not None:
                 qualname = qualnames.get(node.lineno, "<module>")
                 locally_bound.setdefault(qualname, set()).add(node.name)
-        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)):
+            # `ast.Lambda` shares the identical `.args: ast.arguments`
+            # shape a `def` has (Codex review, fresh evidence -- see
+            # `_enclosing_qualnames`'s own docstring): a lambda parameter
+            # can never carry an annotation (`arg.annotation` is always
+            # `None`), so `_is_fact_typed_annotation` correctly never
+            # matches one -- only the `locally_bound` recording actually
+            # matters for a lambda, but sharing this branch rather than
+            # duplicating it costs nothing.
             qualname = qualnames.get(node.lineno, "<module>")
             all_args = (
                 *node.args.posonlyargs,
@@ -478,6 +579,18 @@ def _fact_aliases(tree: ast.Module, qualnames: dict[int, str]) -> dict[str, set[
                 locally_bound.setdefault(qualname, set()).add(arg.arg)
                 if _is_fact_typed_annotation(arg.annotation, fact_names):
                     aliases.setdefault(qualname, set()).add(arg.arg)
+        elif isinstance(
+            node, (ast.ListComp, ast.SetComp, ast.DictComp, ast.GeneratorExp)
+        ):
+            # A comprehension's own `for` target(s) -- real local bindings
+            # scoped to the comprehension itself, the identical shape a
+            # `for` loop's own target already gets above (Codex review,
+            # fresh evidence -- see `_enclosing_qualnames`'s own
+            # docstring).
+            qualname = qualnames.get(node.lineno, "<module>")
+            for generator in node.generators:
+                for name in _bound_names(generator.target):
+                    locally_bound.setdefault(qualname, set()).add(name)
 
     lexical_parents = _lexical_function_parents(tree)
 

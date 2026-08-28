@@ -370,6 +370,81 @@ class TestFactEqualityMisuseSites:
         tree = ast.parse(src, filename="x.py")
         assert fact_equality_misuse_sites(tree, "x.py") == []
 
+    def test_ignores_a_class_body_alias_leaking_into_the_enclosing_function(
+        self,
+    ) -> None:
+        """A class body is its own namespace, not a local of the function
+        it's nested in (Codex review, fresh evidence): `fact = rec.
+        bases_fact` written directly in a class body is a class attribute,
+        never visible to the enclosing function as a bare name -- an
+        unrelated, later `fact == 1` in that same function (here, a real
+        module-global `fact`) must not be flagged."""
+        src = (
+            "fact = 12345\n"
+            "def outer(rec):\n"
+            "    class C:\n"
+            "        fact = rec.bases_fact\n"
+            "    return fact == 1\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert fact_equality_misuse_sites(tree, "x.py") == []
+
+    def test_detects_a_real_misuse_within_the_same_class_body(self) -> None:
+        """A genuine misuse *within* the class body itself -- `fact =
+        rec.bases_fact` immediately followed by `y = fact == other`, both
+        directly in the class body -- must still be caught: the class
+        body is a real scope of its own, not a black hole."""
+        src = (
+            "def outer(rec, other):\n"
+            "    class C:\n"
+            "        fact = rec.bases_fact\n"
+            "        y = fact == other\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert fact_equality_misuse_sites(tree, "x.py") == [(4, 12)]
+
+    def test_ignores_a_lambda_parameter_that_shadows_an_outer_fact_alias(
+        self,
+    ) -> None:
+        """`fact = rec.bases_fact` outer, then `(lambda fact: fact ==
+        other)(1)` -- the lambda's own parameter shadows the outer alias,
+        the same as a nested `def`'s parameter already does (Codex
+        review, fresh evidence: a lambda introduced no scope of its own
+        before this fix, so the shadow went unrecognized)."""
+        src = "def f(rec, other):\n    fact = rec.bases_fact\n    return (lambda fact: fact == other)(1)\n"
+        tree = ast.parse(src, filename="x.py")
+        assert fact_equality_misuse_sites(tree, "x.py") == []
+
+    def test_detects_a_real_misuse_inside_a_lambda(self) -> None:
+        """A lambda closing over a real Fact-typed value, with no
+        shadowing, is exactly the same misuse as anywhere else."""
+        src = "def f(rec, other):\n    return (lambda: rec.bases_fact == other)()\n"
+        tree = ast.parse(src, filename="x.py")
+        assert fact_equality_misuse_sites(tree, "x.py") == [(2, 20)]
+
+    def test_ignores_a_comprehension_target_that_shadows_an_outer_fact_alias(
+        self,
+    ) -> None:
+        """`fact = rec.bases_fact` outer, then `[fact == other for fact in
+        values]` -- the comprehension's own `for` target shadows the
+        outer alias (Codex review, fresh evidence: a comprehension
+        introduced no scope of its own before this fix either)."""
+        src = (
+            "def f(rec, values, other):\n"
+            "    fact = rec.bases_fact\n"
+            "    return [fact == other for fact in values]\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert fact_equality_misuse_sites(tree, "x.py") == []
+
+    def test_detects_a_real_misuse_inside_a_comprehension(self) -> None:
+        """A comprehension closing over a real Fact-typed value per
+        element, with no shadowing, is exactly the same misuse as
+        anywhere else."""
+        src = "def f(recs, other):\n    return [rec.bases_fact == other for rec in recs]\n"
+        tree = ast.parse(src, filename="x.py")
+        assert fact_equality_misuse_sites(tree, "x.py") == [(2, 12)]
+
     def test_detects_a_comparison_between_two_fact_annotated_parameters(
         self,
     ) -> None:

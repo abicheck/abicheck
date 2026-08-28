@@ -1198,6 +1198,56 @@ Six new tests: tuple-unpacking, `for`, `with`, and `except-as` shadowing,
 plus a two-independent-same-name-functions-both-flagged positive control
 and the `@overload`-shaped negative control itself.
 
+**A further Codex review round found two more real false positives, both
+fixed -- neither a lambda nor a comprehension, nor a class body,
+introduced a scope of its own before this fix, so each leaked whatever
+alias happened to be in scope around it straight through.** (1) A
+class-body-level assignment (`fact = rec.bases_fact` written directly in
+a class body, not inside a method) was attributed to whatever *function*
+enclosed the class, since only a nested `FunctionDef` contributed a scope
+range of its own -- a `ClassDef` contributed none. A class body is
+actually its own namespace (an ordinary name assigned there is a class
+attribute, visible only as `self.x`/`Class.x`, never as a bare name to
+the enclosing function), so this let a class-body assignment masquerade
+as a real local of the enclosing function, and an unrelated, later
+`fact == 1` elsewhere in that function (a genuine module-global `fact`)
+was flagged as misuse. Fixed by giving each `ClassDef` its own scope
+range in `_enclosing_qualnames` (`f"{prefix}{child.name}#{child.lineno}
+<class-body>"`), the identical mechanism a `FunctionDef` already gets --
+a nested method's own, narrower range still overrides it for the
+method's own lines. Nothing ever looks this qualname up as a lexical
+*parent* (`_lexical_function_parents` only ever produces function-def-
+derived keys), so it correctly has no effect on anything outside the
+class body -- while a genuine misuse *within* the class body itself is
+still caught, since the class body is now a real scope of its own rather
+than a black hole. (2) A lambda parameter and a comprehension's own
+`for` target were likewise never recorded as local bindings, since
+neither introduced a scope of its own either -- `fact = rec.bases_fact`
+outer, then `(lambda fact: fact == other)(1)` or `[fact == other for
+fact in values]`, each shadow the outer alias with an unrelated local
+exactly the way a nested `def`'s parameter or a `for`-loop's own target
+already does, but the shadow went unrecognized. Fixed the identical way
+a `def` already is: both `ast.Lambda` and each comprehension kind
+(`ListComp`/`SetComp`/`DictComp`/`GeneratorExp`) now get their own scope
+range in `_enclosing_qualnames` (disambiguated by line *and* column,
+since several could share one line) and their own entry in
+`_lexical_function_parents` -- a lambda/comprehension is a real Python
+closure over its enclosing scope, exactly like a nested `def`, so it
+becomes the new `nearest_func` for anything nested inside it too, not
+just a leaf scope. `_fact_aliases`'s own binding-collection walk now
+records a lambda's parameters (reusing the identical `FunctionDef`/
+`AsyncFunctionDef` branch, since `ast.Lambda.args` shares the same
+`ast.arguments` shape -- a lambda parameter can never carry an
+annotation, so the Fact-typed-annotation check on it is always a
+harmless no-op) and a comprehension's own `for` target(s) (via the
+already-existing `_bound_names()` recursive-unpacking helper). Verified
+empirically: still zero existing hits in the real repository, and three
+positive controls confirm a genuine misuse inside a lambda, inside a
+comprehension, and directly inside a class body are each still caught.
+Six new tests: the class-body leak and its positive-control counterpart,
+the lambda shadow and its positive control, the comprehension shadow and
+its positive control.
+
 ---
 
 ### Phase 1 — finish the `dump`/`scan` typed-API convergence (closes AGENTS.md "PR C")
