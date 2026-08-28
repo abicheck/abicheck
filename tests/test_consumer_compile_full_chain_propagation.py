@@ -551,6 +551,115 @@ def test_partial_overlay_falls_back_to_workflow_global_per_field() -> None:
     )
 
 
+def test_partial_overlay_without_frontend_falls_back_to_workflow_global_frontend() -> (
+    None
+):
+    """Codex review (PR #906): the sibling test above only omits `frontend:`
+    from the overlay, so its own `matrix.consumer_compile_ast_frontend ||
+    inputs.ast-frontend` fallback is never reached -- every scenario in
+    this file up to now either sets the overlay's own `frontend` or pairs
+    an empty overlay with an empty workflow-global. This exercises the
+    fallback in the OTHER direction: an active overlay setting `binding`/
+    `standard` (so gcc-path/gcc-options resolve from the overlay itself)
+    but no `frontend`, paired with a nonempty workflow-global `ast-
+    frontend` -- the consumer-ast-frontend expression's own `||
+    inputs.ast-frontend` arm must carry it through, while gcc-path/
+    gcc-options keep the overlay's own values rather than a distinct
+    workflow-global that must NOT leak through for those two fields."""
+    raw = {
+        "targets": TestConsumerCompileOverlayProjection._RAW["targets"],
+        "profiles": {
+            "partial-overlay-no-frontend": {
+                "contract": True,
+                "consumer_compile": {"binding": "clang20", "standard": "gnu++20"},
+            },
+        },
+        "baseline": TestConsumerCompileOverlayProjection._RAW["baseline"],
+    }
+    config = _parsed(raw)
+    plan, report = generate_run_plan(
+        config,
+        {"partial-overlay-no-frontend": _bo("libfoo")},
+        resolved_bindings={"clang20": _SENTINEL_CONSUMER_GCC_PATH},
+    )
+    assert report.ok
+    [check] = plan.checks
+    matrix = check.to_dict()
+    assert matrix["consumer_compile_active"] is True
+    assert matrix["consumer_compile_gcc_path"] == _SENTINEL_CONSUMER_GCC_PATH
+    assert "consumer_compile_ast_frontend" not in matrix
+
+    run_step = _run_check_step("Run check-target")
+    _assert_run_check_target_step_guard_fires(run_step)
+    # gcc-path/gcc-options globals here are the "must NOT leak" sentinels
+    # (the overlay already set its own); ast-frontend is the "must fall
+    # back" sentinel (the overlay set no frontend of its own).
+    workflow_inputs = {
+        "gcc-path": _WORKFLOW_GLOBAL_GCC_PATH,
+        "gcc-options": _WORKFLOW_GLOBAL_GCC_OPTIONS,
+        "ast-frontend": _WORKFLOW_GLOBAL_AST_FRONTEND,
+    }
+    consumer_gcc_path = eval_gha_expression(
+        run_step["with"]["consumer-gcc-path"], matrix=matrix, inputs=workflow_inputs
+    )
+    consumer_gcc_options = eval_gha_expression(
+        run_step["with"]["consumer-gcc-options"], matrix=matrix, inputs=workflow_inputs
+    )
+    consumer_ast_frontend = eval_gha_expression(
+        run_step["with"]["consumer-ast-frontend"], matrix=matrix, inputs=workflow_inputs
+    )
+    consumer_compile_active = eval_gha_expression(
+        run_step["with"]["consumer-compile-active"], matrix=matrix, inputs={}
+    )
+    kind = eval_gha_expression(run_step["with"]["kind"], matrix=matrix)
+    baseline_channel = eval_gha_expression(
+        run_step["with"]["baseline-channel"], matrix=matrix
+    )
+    # The overlay's own gcc-path/gcc-options survive, unaffected by the
+    # distinct workflow-globals supplied for them...
+    assert consumer_gcc_path == _SENTINEL_CONSUMER_GCC_PATH
+    assert consumer_gcc_options == "-std=gnu++20"
+    # ...while the field the overlay left unset falls back to the
+    # workflow-global.
+    assert consumer_ast_frontend == _WORKFLOW_GLOBAL_AST_FRONTEND
+
+    consumer_step = _consumer_context_step()
+    hop3_inputs = _hop3_inputs_from(
+        kind=kind,
+        baseline_channel=baseline_channel,
+        consumer_compile_active=consumer_compile_active,
+        consumer_ast_frontend=consumer_ast_frontend,
+        consumer_gcc_path=consumer_gcc_path,
+        consumer_gcc_options=consumer_gcc_options,
+    )
+    steps_context = {
+        "resolve.outputs.outcome": "resolved",
+        "collect_verify.outcome": "success",
+        "collect_replay.outcome": "success",
+    }
+    guard = eval_gha_expression(
+        consumer_step["if"], inputs=hop3_inputs, steps=steps_context
+    )
+    assert guard is True
+
+    final_gcc_path = eval_gha_expression(
+        consumer_step["with"]["gcc-path"], inputs=hop3_inputs
+    )
+    final_gcc_options = eval_gha_expression(
+        consumer_step["with"]["gcc-options"], inputs=hop3_inputs
+    )
+    final_ast_frontend = eval_gha_expression(
+        consumer_step["with"]["ast-frontend"], inputs=hop3_inputs
+    )
+    assert final_gcc_path == _SENTINEL_CONSUMER_GCC_PATH
+    assert final_gcc_options == "-std=gnu++20"
+    assert final_ast_frontend == _WORKFLOW_GLOBAL_AST_FRONTEND
+
+    _assert_reaches_real_dump_cli_invocation(
+        final_gcc_path, final_gcc_options, final_ast_frontend
+    )
+
+
 def test_no_baseline_channel_activates_the_consumer_step_via_its_own_arm() -> None:
     """Codex review (PR #906): every scenario above supplies `baseline-
     channel: release` alongside `steps.resolve.outputs.outcome: 'resolved'`
@@ -746,11 +855,23 @@ def test_bundle_kind_and_no_overlay_never_leak_the_workflow_global_path() -> Non
     its own expression has the identical `matrix.consumer_compile_active
     && ... || inputs.gcc-options || ''` shape -- a regression there could
     have let an inactive/bundle cell's workflow-global option leak through
-    while every other assertion in this test stayed green."""
+    while every other assertion in this test stayed green.
+
+    A further Codex review round found this test also never evaluated
+    `consumer-compile-active` itself for either inactive case -- only the
+    three compiler-field expressions. Changing that expression's own
+    `matrix.kind != 'bundle' && matrix.consumer_compile_active` gate to
+    `||` would preserve every substring this test (and the mutation-check
+    test) assert against while forwarding `"true"` for a bundle/no-overlay
+    cell, activating the child step's separate consumer dump with an
+    empty/default compiler context -- exactly the failure mode this test
+    exists to rule out, just one hop earlier than the three fields it was
+    already checking."""
     run_step = _run_check_step("Run check-target")
     gcc_path_expr = run_step["with"]["consumer-gcc-path"]
     gcc_options_expr = run_step["with"]["consumer-gcc-options"]
     ast_frontend_expr = run_step["with"]["consumer-ast-frontend"]
+    active_expr = run_step["with"]["consumer-compile-active"]
 
     bundle_matrix = {
         "kind": "bundle",
@@ -780,6 +901,13 @@ def test_bundle_kind_and_no_overlay_never_leak_the_workflow_global_path() -> Non
         )
         == ""
     )
+    assert (
+        eval_gha_expression(active_expr, matrix=bundle_matrix, inputs={}) == "false"
+    ), (
+        "a bundle-kind cell must never report consumer-compile-active as "
+        "true, regardless of what the (unused for bundles) consumer_"
+        "compile_active matrix field says"
+    )
 
     no_overlay_matrix = {"kind": "target", "consumer_compile_active": False}
     no_overlay_inputs = {
@@ -804,4 +932,10 @@ def test_bundle_kind_and_no_overlay_never_leak_the_workflow_global_path() -> Non
             ast_frontend_expr, matrix=no_overlay_matrix, inputs=no_overlay_inputs
         )
         == ""
+    )
+    assert (
+        eval_gha_expression(active_expr, matrix=no_overlay_matrix, inputs={}) == "false"
+    ), (
+        "a profile with no consumer_compile overlay must never report "
+        "consumer-compile-active as true"
     )
