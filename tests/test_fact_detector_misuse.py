@@ -859,6 +859,104 @@ class TestFactEqualityMisuseSites:
         tree = ast.parse(src, filename="x.py")
         assert fact_equality_misuse_sites(tree, "x.py") == [(6, 19)]
 
+    def test_detects_a_class_body_read_before_a_later_reassignment(
+        self,
+    ) -> None:
+        """A class body's own top-level statements use `LOAD_NAME`, not
+        `LOAD_FAST` -- a read that occurs *before* a later local
+        reassignment still resolves to the outer alias in real Python, even
+        though the exact same reassignment would make the name local for
+        the *whole* scope in an ordinary function (Codex review: `hit =
+        fact == other` genuinely sees the outer alias here, since the class
+        namespace has nothing under `fact` yet at that point)."""
+        src = "fact = rec.bases_fact\nclass C:\n    hit = fact == other\n    fact = 1\n"
+        tree = ast.parse(src, filename="x.py")
+        assert fact_equality_misuse_sites(tree, "x.py") == [(3, 10)]
+
+    def test_ignores_a_nested_def_that_shadows_an_outer_fact_alias(
+        self,
+    ) -> None:
+        """`def fact(): ...` binds the name `fact` in its *containing*
+        scope to the function object just defined -- an ordinary local,
+        not the outer Fact alias (Codex review: only the nested function's
+        own new scope was previously recorded, never its name in the scope
+        that contains it)."""
+        src = (
+            "fact = rec.bases_fact\n"
+            "def outer():\n"
+            "    def fact():\n"
+            "        pass\n"
+            "    return fact == other\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert fact_equality_misuse_sites(tree, "x.py") == []
+
+    def test_ignores_a_nested_class_that_shadows_an_outer_fact_alias(
+        self,
+    ) -> None:
+        """The identical shadowing for a nested `class fact: ...` statement,
+        not just a nested `def`."""
+        src = (
+            "fact = rec.bases_fact\n"
+            "def outer():\n"
+            "    class fact:\n"
+            "        pass\n"
+            "    return fact == other\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert fact_equality_misuse_sites(tree, "x.py") == []
+
+    def test_a_real_misuse_is_still_caught_with_no_nested_definition(
+        self,
+    ) -> None:
+        """Negative control for the two tests above: with no nested `def`/
+        `class` shadowing `fact`, the outer alias must still be visible and
+        a real misuse still reported."""
+        src = "fact = rec.bases_fact\ndef outer():\n    return fact == other\n"
+        tree = ast.parse(src, filename="x.py")
+        assert fact_equality_misuse_sites(tree, "x.py") == [(3, 11)]
+
+    def test_detects_a_global_read_through_an_unrelated_intervening_local(
+        self,
+    ) -> None:
+        """`global fact` inside a nested function must resolve directly
+        against *module*-scope `fact`, bypassing every intervening
+        function's own inheritance entirely -- even one with its own
+        unrelated, non-Fact-typed local of the identical bare name (Codex
+        review: routing `global` through ordinary `lexical_parents`
+        inheritance missed this case, since `middle`'s own plain `fact = 5`
+        local has nothing to do with `inner`'s `global fact`)."""
+        src = (
+            "fact = rec.bases_fact\n"
+            "def middle():\n"
+            "    fact = 5\n"
+            "    def inner():\n"
+            "        global fact\n"
+            "        return fact == other\n"
+            "    return inner\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert fact_equality_misuse_sites(tree, "x.py") == [(6, 15)]
+
+    def test_ignores_an_intervening_functions_own_fact_alias_for_a_global_read(
+        self,
+    ) -> None:
+        """Negative control, the reversed values: an intervening function's
+        own genuinely Fact-typed local `fact` must not be wrongly
+        attributed to an unrelated, non-Fact module-level `fact` just
+        because a nested function declares `global fact`."""
+        src = (
+            "fact = 5\n"
+            "def middle():\n"
+            "    fact = rec.bases_fact\n"
+            "    def inner():\n"
+            "        global fact\n"
+            "        return fact == other\n"
+            "    return inner\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert fact_equality_misuse_sites(tree, "x.py") == []
+
 
 def test_check_reports_a_new_violation(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch

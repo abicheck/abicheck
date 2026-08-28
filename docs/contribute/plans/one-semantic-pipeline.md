@@ -1446,6 +1446,75 @@ enclosing Fact alias), and a test pinning that a method still does not
 see its own class body's local reassignment of the same name -- it sees
 straight through to the enclosing function's real alias instead.
 
+**A further Codex review round found three more real gaps in this same
+family, all fixed.** (1) **A class body's own `LOAD_NAME` lookup is
+statement-order-aware, unlike every other scope's `LOAD_FAST`, and the
+previous round's shadowing fix didn't account for it.** `fact = rec.
+bases_fact` outer, then `class C: hit = fact == other; fact = 1` --
+Python resolves `fact` dynamically at each class-body statement against
+whatever the class namespace holds *so far*, not statically pre-determined
+by "is this name assigned anywhere in this class body" the way a
+function's `LOAD_FAST` is -- so `hit`'s read, occurring *before* the
+later `fact = 1` reassignment, genuinely sees the outer alias in real
+Python, but the existing shadowing subtraction (whole-scope, position-
+blind, correct for every other scope) excluded it entirely, missing a
+real misuse. This module has no statement-order-aware lookup of its own
+(building one would mean turning `_fact_aliases`'s per-scope answer into
+a per-position one, a materially larger change), so the fix takes the
+same over-approximating-is-safe direction the module already argues for
+the opposite case (nonlocal/global): a class body's own local rebinding
+now never shadows what it inherits at all, gated on the `<class-body>`
+qualname suffix `_enclosing_qualnames` already produces. The accepted
+cost is symmetric to the finding this closes: a class body that
+reassigns `fact` to something ordinary *before* using it now reads as a
+false positive -- the same "false positive is far cheaper than the false
+negative it closes" trade-off this module states throughout, just landing
+on the opposite scope this time. (2) **A nested `def`/`class` statement's
+own *name* was never recorded as a local binding in the scope that
+contains it.** `def fact(): ...` then `fact == other` in the same
+containing scope -- Python's `LOAD_FAST`/`LOAD_NAME` resolves `fact` to
+the function object just defined, an ordinary local, but the existing
+branch only ever recorded the *nested* scope's own parameters, never the
+definition's name in its *container* -- so an outer Fact alias of the
+identical bare name was never shadowed, flagging valid code. Fixing this
+correctly needed a new, dedicated helper rather than reusing the
+position-based `_qualname_at` lookup every other binding site already
+uses: a scope-introducing node's own span always starts at its own
+`(lineno, col_offset)`, so querying that exact position resolves to the
+node's *own* smallest containing span, not its parent's -- the wrong
+answer for "what scope contains this definition." `_def_containing_
+qualnames()` is a small, standalone recursive walk (mirroring `_lexical_
+function_parents`'s own shape, deliberately *not* skipping a class
+layer the way that function does, since a def/class statement's binding
+target is a different question from the closure-scope chain), keyed by
+position rather than qualname string, consulted only by this one new
+`FunctionDef`/`AsyncFunctionDef`/`ClassDef` branch. (3) **`global fact`
+was still routed through ordinary `lexical_parents` inheritance, which is
+wrong for `global` specifically even though it's exactly right for
+`nonlocal`.** `nonlocal fact` genuinely means "the nearest enclosing
+*function's* own `fact`" -- precisely what `lexical_parents[qualname]`
+already gives every other inherited name, so the previous round's fix was
+correct for that half. `global fact` means "*module*-scope `fact`, full
+stop" -- it must bypass every intervening function layer's own
+inheritance entirely, even one with its own unrelated, non-Fact-typed
+local of the identical bare name. Routing it through ordinary inheritance
+was wrong in both directions at once: an intervening function's own
+unrelated local could shadow (hide) a genuinely Fact-typed module-level
+name, and, symmetrically, an intervening function's own genuinely
+Fact-typed local of the same bare name could be wrongly attributed to an
+unrelated module-level one. Fixed by tracking `global`-declared names in
+a separate `global_declared` dict (alongside the existing, still-shared
+`nonlocal_or_global` shadowing-exemption set) and adding a dedicated step
+to the outer fixed-point loop: a `global`-declared name is excluded from
+the ordinary parent-inheritance step entirely and instead resolved
+directly against `aliases["<module>"]`. Verified empirically: still zero
+existing hits in the real repository, and `mypy`/`ruff` both stayed clean.
+Seven new tests: the class-body read-before-reassignment repro, the
+nested-def and nested-class shadowing repros and their shared negative
+control (a real misuse still caught with no nested definition present),
+and the global-through-an-intervening-local repro with its reversed-
+values negative control.
+
 ---
 
 ### Phase 1 — finish the `dump`/`scan` typed-API convergence (closes AGENTS.md "PR C")

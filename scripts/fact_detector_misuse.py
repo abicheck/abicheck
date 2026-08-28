@@ -469,6 +469,57 @@ def _lexical_function_parents(tree: ast.Module) -> dict[str, str]:
     return parents
 
 
+def _def_containing_qualnames(tree: ast.Module) -> dict[tuple[int, int], str]:
+    """Map each `def`/`class` statement's own `(lineno, col_offset)` to the
+    qualname of the scope that *directly, syntactically* contains it --
+    unlike `_lexical_function_parents` above, this does NOT skip an
+    intervening class layer (Codex review, fresh evidence): a `def`/`class`
+    statement's own *name* binds into whatever namespace textually
+    contains it, class body included -- Python's own `STORE_NAME`/
+    `STORE_FAST` rule for a def/class statement, a different question from
+    the closure-scope chain `_lexical_function_parents` answers (which
+    intentionally treats a class body as invisible to a nested method's own
+    free-variable lookup, but a `def`/`class` statement's binding target is
+    never about free-variable lookup at all).
+
+    Keyed by position rather than qualname string (unlike `_lexical_
+    function_parents`'s `dict[str, str]`): the caller already has the
+    node's own `(lineno, col_offset)` in hand at the point it needs this
+    answer, and `_qualname_at((node.lineno, node.col_offset), qualnames)`
+    is the wrong tool for this specific question -- a scope-introducing
+    node's own span always starts at that exact position, so it is always
+    that node's *own* smallest containing span, not its parent's; this
+    dedicated walk tracks the containing scope explicitly instead of
+    relying on span containment for a position that is, by construction,
+    inside the very span whose *container* is being asked for.
+    """
+    containing: dict[tuple[int, int], str] = {}
+
+    def visit(node: ast.AST, prefix: str, scope_qualname: str) -> None:
+        for child in ast.iter_child_nodes(node):
+            if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                qualname = f"{prefix}{child.name}#{child.lineno}"
+                containing[child.lineno, child.col_offset] = scope_qualname
+                visit(child, qualname + ".", qualname)
+            elif isinstance(child, ast.Lambda):
+                qualname = f"{prefix}<lambda>#{child.lineno}:{child.col_offset}"
+                visit(child, qualname + ".", qualname)
+            elif isinstance(
+                child, (ast.ListComp, ast.SetComp, ast.DictComp, ast.GeneratorExp)
+            ):
+                qualname = f"{prefix}<comp>#{child.lineno}:{child.col_offset}"
+                visit(child, qualname + ".", qualname)
+            elif isinstance(child, ast.ClassDef):
+                class_qualname = f"{prefix}{child.name}#{child.lineno}<class-body>"
+                containing[child.lineno, child.col_offset] = scope_qualname
+                visit(child, f"{prefix}{child.name}.", class_qualname)
+            else:
+                visit(child, prefix, scope_qualname)
+
+    visit(tree, "", "<module>")
+    return containing
+
+
 def _bound_names(target: ast.expr) -> list[str]:
     """Yield every plain name a single assignment/binding *target* binds,
     recursively unpacking `ast.Tuple`/`ast.List`/`ast.Starred` targets
@@ -633,6 +684,11 @@ def _fact_aliases(tree: ast.Module, qualnames: _QualnameSpans) -> dict[str, set[
     # already use it to hop a comprehension-scoped walrus target out to
     # its real PEP 572 binding scope -- see that branch's own comment.
     lexical_parents = _lexical_function_parents(tree)
+    # Position-keyed, not qualname-keyed -- see `_def_containing_qualnames`'s
+    # own docstring for why a def/class statement's own start position can't
+    # be resolved via `_qualname_at` the way every other binding site below
+    # is (that position is always inside the node's *own* span first).
+    def_containing = _def_containing_qualnames(tree)
     aliases: dict[str, set[str]] = {}
     candidates: dict[str, list[tuple[str, ast.expr]]] = {}
     # Every name *this* function binds on its own -- every parameter
@@ -667,6 +723,26 @@ def _fact_aliases(tree: ast.Module, qualnames: _QualnameSpans) -> dict[str, set[
     # reassignment to a non-Fact value is the accepted cost, matching how
     # a shadow is never narrowed to "only after the rebinding" either).
     nonlocal_or_global: dict[str, set[str]] = {}
+    # The `global`-declared subset of the above, tracked separately
+    # (Codex review, fresh evidence): `nonlocal` and `global` both exempt a
+    # name from ordinary shadowing (the set above), but they resolve
+    # through completely different scope chains once exempted. `nonlocal
+    # fact` genuinely means "the nearest *enclosing function's* own `fact`"
+    # -- exactly what `lexical_parents[qualname]` already gives every other
+    # inherited name, so ordinary inheritance is already correct for it.
+    # `global fact` means "*module*-scope `fact`, full stop" -- it must
+    # bypass every intervening function layer's own inheritance entirely,
+    # even one that happens to have an unrelated alias of the identical
+    # bare name (a first version of this fix routed `global` through the
+    # same ordinary-inheritance path `nonlocal` uses, which is wrong in
+    # both directions: a genuinely Fact-typed module-level `fact` shadowed
+    # by an intervening function's own unrelated, non-Fact `fact` local
+    # would be silently missed, and the reverse -- an intervening
+    # function's own genuinely Fact-typed `fact` -- would be wrongly
+    # attributed to an unrelated module-level name). Resolved directly
+    # against `aliases["<module>"]` in the outer fixed-point loop below,
+    # independent of `lexical_parents` altogether.
+    global_declared: dict[str, set[str]] = {}
     # `(qualname, arg_name, default_expr)` -- a parameter default whose
     # Fact-typedness can't be decided during this same walk, since it
     # must be checked against its *enclosing* scope's alias set (where a
@@ -794,7 +870,28 @@ def _fact_aliases(tree: ast.Module, qualnames: _QualnameSpans) -> dict[str, set[
         elif isinstance(node, (ast.Global, ast.Nonlocal)):
             qualname = _qualname_at((node.lineno, node.col_offset), qualnames)
             nonlocal_or_global.setdefault(qualname, set()).update(node.names)
-        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)):
+            if isinstance(node, ast.Global):
+                global_declared.setdefault(qualname, set()).update(node.names)
+        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            # A `def`/`class` statement binds its own *name* in the
+            # containing scope, exactly like an ordinary assignment target
+            # (Codex review, fresh evidence): `def fact(): ...` then `fact
+            # == other` in the same scope resolves `fact` to the function
+            # object just defined, an ordinary local -- Python's own
+            # `LOAD_FAST`/`LOAD_NAME` semantics, not the outer Fact alias.
+            # The branch below already records this node's own *nested*
+            # scope (its parameters, in `qualname`'s own `locally_bound`
+            # entry) -- but never the definition's *name* in the scope
+            # that contains it, so an outer alias of the same name was
+            # never shadowed, a real false positive. A lambda has no name
+            # of its own to bind (it's an expression, not a statement), so
+            # it's excluded from this specific registration -- unlike the
+            # branch below, which still applies to it identically.
+            containing_qualname = def_containing.get(
+                (node.lineno, node.col_offset), "<module>"
+            )
+            locally_bound.setdefault(containing_qualname, set()).add(node.name)
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)):
             # `ast.Lambda` shares the identical `.args: ast.arguments`
             # shape a `def` has (Codex review, fresh evidence -- see
             # `_enclosing_qualnames`'s own docstring): a lambda parameter
@@ -926,12 +1023,51 @@ def _fact_aliases(tree: ast.Module, qualnames: _QualnameSpans) -> dict[str, set[
         for qualname in sorted(all_qualnames, key=_scope_depth):
             known = aliases.setdefault(qualname, set())
             parent = lexical_parents.get(qualname)
+            global_names = global_declared.get(qualname, set())
             if parent is not None:
-                shadowed = locally_bound.get(qualname, set())
-                inherited = aliases.get(parent, set()) - shadowed
+                # A class body's own top-level statements use `LOAD_NAME`/
+                # `STORE_NAME`, not `LOAD_FAST` -- resolved dynamically at
+                # each statement against whatever the class namespace holds
+                # *so far*, not statically pre-determined by "is this name
+                # assigned anywhere in this class body" the way a function
+                # body's `LOAD_FAST` is (Codex review, fresh evidence):
+                # `fact = rec.bases_fact` outer, then `class C: hit = fact
+                # == other; fact = 1` -- the later `fact = 1` reassignment
+                # is a real class-body-local rebinding, but the READ on the
+                # line before it still resolves to the outer alias in real
+                # Python, since the class namespace has nothing under
+                # `fact` yet at that point. This module has no statement-
+                # order-aware lookup (every other scope's shadowing is
+                # correctly whole-scope, per `locally_bound`'s own
+                # docstring -- only a class body's `LOAD_NAME` genuinely
+                # differs), so the conservative, over-approximating-is-safe
+                # answer here is to never let a class body's own local
+                # rebinding shadow what it inherits at all -- the identical
+                # direction `locally_bound`'s own docstring already argues
+                # for the opposite case (nonlocal/global): a false positive
+                # on a class body that reassigns `fact` to something
+                # ordinary *before* using it is the accepted cost, exactly
+                # matching how a shadow is never narrowed to "only after
+                # the rebinding" for a function either.
+                shadowed = (
+                    set()
+                    if qualname.endswith("<class-body>")
+                    else locally_bound.get(qualname, set())
+                )
+                inherited = (aliases.get(parent, set()) - shadowed) - global_names
                 if not inherited <= known:
                     outer_changed = True
                 known |= inherited
+            if global_names:
+                # `global fact` bypasses `lexical_parents` entirely --
+                # Python's own rule is "the identical module-scope `fact`,
+                # regardless of what any enclosing function does with the
+                # same bare name" (see `global_declared`'s own declaration
+                # comment for the two-directional bug this closes).
+                module_inherited = aliases.get("<module>", set()) & global_names
+                if not module_inherited <= known:
+                    outer_changed = True
+                known |= module_inherited
             changed = True
             while changed:
                 changed = False
