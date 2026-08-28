@@ -222,6 +222,42 @@ def _is_fact_typed_expr(node: ast.expr, fact_names: frozenset[str]) -> bool:
     return False
 
 
+def _candidate_resolves_to_fact(
+    value: ast.expr, fact_names: frozenset[str], known: set[str]
+) -> bool:
+    """True if *value* is provably Fact-typed given *known* -- the
+    already-resolved aliases for the scope this candidate belongs to.
+
+    The scope-independent structural check alone
+    (:func:`_is_fact_typed_expr`) can't answer this on its own for a
+    conditional expression whose branches are themselves bare aliases
+    (Codex review, fresh evidence): `old_fact = old.bases_fact; new_fact
+    = new.bases_fact; fact = old_fact if cond else new_fact; fact ==
+    other` is a real misuse -- both branches are aliases already
+    confirmed Fact-typed by the surrounding fixed point -- but
+    `_is_fact_typed_expr`'s own `IfExp` branch recurses only through
+    itself, and it deliberately never resolves a bare `ast.Name` (that
+    needs `known`, which it has no access to). This is the fixed-point-
+    aware sibling every ordinary `candidates` entry already gets via its
+    own inline `isinstance(value, ast.Name) and value.id in known` check
+    -- generalized to recurse through an `IfExp`'s own two branches too,
+    each independently required to resolve (structurally, or as an
+    already-known alias, or itself another nested `IfExp`) before the
+    conditional expression as a whole is trusted -- the identical
+    every-branch-must-agree principle `tuple_loop_candidates`'s own
+    conjunctive resolution already applies to a tuple's elements.
+    """
+    if _is_fact_typed_expr(value, fact_names):
+        return True
+    if isinstance(value, ast.Name):
+        return value.id in known
+    if isinstance(value, ast.IfExp):
+        return _candidate_resolves_to_fact(
+            value.body, fact_names, known
+        ) and _candidate_resolves_to_fact(value.orelse, fact_names, known)
+    return False
+
+
 def _annotation_head_name(expr: ast.expr) -> str | None:
     """The bare identifier naming a subscript's own generic -- `Optional`
     for both `Optional[...]` and the module-qualified `typing.
@@ -398,7 +434,21 @@ def _fact_aliases(tree: ast.Module, qualnames: _QualnameSpans) -> dict[str, set[
     # the very `known` set this fixed point builds (Codex review, fresh
     # evidence) -- so each such loop is recorded here, elements and all,
     # and re-checked every fixed-point pass alongside `candidates` below.
-    tuple_loop_candidates: dict[str, list[tuple[str, list[ast.expr]]]] = {}
+    #
+    # **Each element carries its own resolution qualname, not just the
+    # entry's (Codex review, fresh evidence).** For a plain `for` loop
+    # this is always the same as the entry's own qualname (a `for`
+    # statement introduces no scope of its own) -- but a comprehension's
+    # *first* generator iterable evaluates in the *parent* scope, while
+    # the resolved target name must still become known in the
+    # *comprehension's own* scope (where the actual read happens). One
+    # shared qualname per entry can't express both at once: `fact = rec.
+    # bases_fact; [fact == other for fact in (fact,)]` needs the tuple
+    # element `fact` checked against the *parent's* known aliases, but
+    # the comprehension's own target `fact` becomes known in the
+    # *comprehension's* own scope -- see the comprehension collection
+    # branch's own docstring for the full reasoning.
+    tuple_loop_candidates: dict[str, list[tuple[str, list[tuple[ast.expr, str]]]]] = {}
     # Every name *this* function binds on its own -- every parameter
     # (Fact-typed or not) and every simple assignment target -- used below
     # to stop an inherited alias from shadowing a genuine local rebinding
@@ -612,7 +662,7 @@ def _fact_aliases(tree: ast.Module, qualnames: _QualnameSpans) -> dict[str, set[
                 )
             ):
                 tuple_loop_candidates.setdefault(qualname, []).append(
-                    (node.target.id, list(node.iter.elts))
+                    (node.target.id, [(elt, qualname) for elt in node.iter.elts])
                 )
             # `for fact, tag in ((old.bases_fact, "old"), (new.bases_fact,
             # "new")): return fact == other` -- the tuple-*unpacking*
@@ -653,14 +703,14 @@ def _fact_aliases(tree: ast.Module, qualnames: _QualnameSpans) -> dict[str, set[
                     for name, value in pairs:
                         per_name_elements.setdefault(name, []).append(value)
                 if all_iterations_paired:
-                    for name, elts in per_name_elements.items():
+                    for name, raw_elts in per_name_elements.items():
                         if all(
                             _is_fact_typed_expr(elt, fact_names)
                             or isinstance(elt, ast.Name)
-                            for elt in elts
+                            for elt in raw_elts
                         ):
                             tuple_loop_candidates.setdefault(qualname, []).append(
-                                (name, elts)
+                                (name, [(elt, qualname) for elt in raw_elts])
                             )
         elif isinstance(node, (ast.With, ast.AsyncWith)):
             # `with ctx() as fact:` -- likewise a real local binding.
@@ -686,6 +736,29 @@ def _fact_aliases(tree: ast.Module, qualnames: _QualnameSpans) -> dict[str, set[
             for case in node.cases:
                 for name in _match_pattern_names(case.pattern):
                     locally_bound.setdefault(qualname, set()).add(name)
+                # `case fact:` (a bare capture, matching -- and binding --
+                # the *entire* subject unconditionally) and `case
+                # SomeClass() as fact:` (an `as`-pattern, binding the
+                # entire subject whenever its own sub-pattern matches)
+                # both make `fact` a real alias of `node.subject` itself,
+                # not merely an arbitrary local shadow (Codex review,
+                # fresh evidence): `match rec.bases_fact: case fact:
+                # return fact == other` is a real misuse. Both shapes are
+                # exactly `case.pattern` itself being an `ast.MatchAs`
+                # with a real `name` -- Python's own grammar for a
+                # top-level capture/`as`-pattern -- as opposed to a
+                # *nested* capture inside a larger structural pattern
+                # (`case [x, y as fact]:`), which only captures a
+                # *sub*-part of the subject, not the whole thing, and is
+                # deliberately not treated as an alias of `node.subject`
+                # here.
+                if (
+                    isinstance(case.pattern, ast.MatchAs)
+                    and case.pattern.name is not None
+                ):
+                    candidates.setdefault(qualname, []).append(
+                        (case.pattern.name, node.subject)
+                    )
         elif isinstance(node, (ast.Import, ast.ImportFrom)):
             # `import json as fact` / `from pkg import item as fact` --
             # a real local binding too, the identical shadowing shape as
@@ -903,7 +976,7 @@ def _fact_aliases(tree: ast.Module, qualnames: _QualnameSpans) -> dict[str, set[
             # fresh evidence -- see `_enclosing_qualnames`'s own
             # docstring).
             qualname = _qualname_at((node.lineno, node.col_offset), qualnames)
-            for generator in node.generators:
+            for gen_index, generator in enumerate(node.generators):
                 for name in _bound_names(generator.target):
                     locally_bound.setdefault(qualname, set()).add(name)
                 # The comprehension equivalent of the `for`-loop literal-
@@ -911,12 +984,44 @@ def _fact_aliases(tree: ast.Module, qualnames: _QualnameSpans) -> dict[str, set[
                 # (old.bases_fact, new.bases_fact)]` -- the identical
                 # every-element-Fact-typed-or-a-deferred-alias requirement
                 # (see the `for`/`AsyncFor` branch's own docstring for the
-                # bare-`Name`-element reasoning), attributed to the
-                # comprehension's own scope (`qualname`, already resolved
-                # above), which is where the target itself is bound
-                # regardless of which scope the iterable expression's own
-                # free names would resolve in (Codex review, fresh
-                # evidence).
+                # bare-`Name`-element reasoning).
+                #
+                # **Each element resolves against the scope the iterable
+                # actually evaluates in, distinct from the scope the
+                # resolved target name itself becomes known in (Codex
+                # review, fresh evidence).** The target always becomes
+                # known in the comprehension's own scope (`qualname`) --
+                # that's where the actual read happens -- but only the
+                # *first* generator's own iterable evaluates in the scope
+                # directly containing the comprehension; every other
+                # generator's iterable, like the element expression, runs
+                # inside the comprehension's own new scope, where the
+                # target(s) from every earlier generator are already
+                # locally bound (see `_enclosing_qualnames`'s own
+                # docstring for the identical distinction). `fact = rec.
+                # bases_fact; [fact == other for fact in (fact,)]` -- the
+                # tuple element `fact` names the *outer* alias, but the
+                # comprehension's own target is *also* `fact`, shadowing
+                # it in the comprehension's own scope -- checking that
+                # element against the comprehension's own (shadowed)
+                # scope would check the name against itself and never
+                # resolve, while registering the *entry* under the
+                # parent instead would make the target known in the wrong
+                # scope for the actual read to see. `tuple_loop_
+                # candidates`' own per-element `(expr, qualname)` pairing
+                # (see its own declaration comment) exists for exactly
+                # this split. `_qualname_at()` on the first generator's
+                # own iterable position picks up the narrower override
+                # span `_enclosing_qualnames()` already registers for
+                # exactly this iterable, tagged with the comprehension's
+                # own *incoming* (parent) qualname.
+                elt_qualname = (
+                    _qualname_at(
+                        (generator.iter.lineno, generator.iter.col_offset), qualnames
+                    )
+                    if gen_index == 0
+                    else qualname
+                )
                 if (
                     isinstance(generator.target, ast.Name)
                     and isinstance(generator.iter, (ast.Tuple, ast.List))
@@ -928,8 +1033,45 @@ def _fact_aliases(tree: ast.Module, qualnames: _QualnameSpans) -> dict[str, set[
                     )
                 ):
                     tuple_loop_candidates.setdefault(qualname, []).append(
-                        (generator.target.id, list(generator.iter.elts))
+                        (
+                            generator.target.id,
+                            [(elt, elt_qualname) for elt in generator.iter.elts],
+                        )
                     )
+                # The tuple-*unpacking* sibling of the case just above --
+                # the identical shape the `for`/`AsyncFor` branch already
+                # handles for a plain `for` loop, applied to a
+                # comprehension's own generator (Codex review, fresh
+                # evidence): `[fact == other for fact, tag in
+                # ((old.bases_fact, "old"),)]` was invisible, since this
+                # branch only ever matched a bare `ast.Name` target.
+                elif isinstance(generator.target, (ast.Tuple, ast.List)) and isinstance(
+                    generator.iter, (ast.Tuple, ast.List)
+                ):
+                    comp_per_name_elements: dict[str, list[ast.expr]] = {}
+                    all_iterations_paired = bool(generator.iter.elts)
+                    for iteration_elt in generator.iter.elts:
+                        pairs = _paired_unpacking_candidates(
+                            generator.target, iteration_elt
+                        )
+                        if not pairs:
+                            all_iterations_paired = False
+                            break
+                        for pname, pvalue in pairs:
+                            comp_per_name_elements.setdefault(pname, []).append(pvalue)
+                    if all_iterations_paired:
+                        for pname, pelts in comp_per_name_elements.items():
+                            if all(
+                                _is_fact_typed_expr(pelt, fact_names)
+                                or isinstance(pelt, ast.Name)
+                                for pelt in pelts
+                            ):
+                                tuple_loop_candidates.setdefault(qualname, []).append(
+                                    (
+                                        pname,
+                                        [(pelt, elt_qualname) for pelt in pelts],
+                                    )
+                                )
 
     # A `global`/`nonlocal`-declared name is never a real local rebinding
     # -- exclude it from the shadowing subtraction now that every
@@ -1078,9 +1220,7 @@ def _fact_aliases(tree: ast.Module, qualnames: _QualnameSpans) -> dict[str, set[
                 for name, value in candidates.get(qualname, []):
                     if name in known:
                         continue
-                    if _is_fact_typed_expr(value, fact_names) or (
-                        isinstance(value, ast.Name) and value.id in known
-                    ):
+                    if _candidate_resolves_to_fact(value, fact_names, known):
                         known.add(name)
                         changed = True
                         outer_changed = True
@@ -1089,20 +1229,34 @@ def _fact_aliases(tree: ast.Module, qualnames: _QualnameSpans) -> dict[str, set[
                 # recorded value resolves), a loop-target entry here needs
                 # EVERY element to resolve before the target itself does
                 # (Codex review, fresh evidence -- see the `for`/`AsyncFor`
-                # collection branch's own docstring). A bare `ast.Name`
-                # element resolves through this same `known` set, exactly
-                # like `candidates`' own `isinstance(value, ast.Name) and
-                # value.id in known` check -- so this loop naturally
-                # participates in the surrounding `while changed:` fixed
-                # point, converging once every element (structural or
-                # alias) is confirmed.
+                # collection branch's own docstring). Each element
+                # resolves through `_candidate_resolves_to_fact()` --
+                # the identical per-value check `candidates` above uses,
+                # so a nested `IfExp` element is covered here too --
+                # against *its own* recorded qualname's `known` set
+                # (`aliases.get(elt_qualname, set())`), not necessarily
+                # the current `qualname`: a comprehension's first-
+                # generator element resolves against the parent scope's
+                # aliases while the target itself still becomes known in
+                # `qualname` (see the comprehension collection branch's
+                # own docstring for why the two differ). `aliases` is
+                # this same fixed point's own accumulator, read live --
+                # scopes are visited in `_scope_depth` order each outer
+                # pass, so a parent's aliases are already available by
+                # the time its child is processed, and any later addition
+                # still converges on a subsequent `outer_changed` pass.
+                # This loop naturally participates in the surrounding
+                # `while changed:` fixed point either way, converging
+                # once every element (structural, alias, or nested
+                # conditional) is confirmed.
                 for name, elts in tuple_loop_candidates.get(qualname, []):
                     if name in known:
                         continue
                     if all(
-                        _is_fact_typed_expr(elt, fact_names)
-                        or (isinstance(elt, ast.Name) and elt.id in known)
-                        for elt in elts
+                        _candidate_resolves_to_fact(
+                            elt, fact_names, aliases.get(elt_qualname, set())
+                        )
+                        for elt, elt_qualname in elts
                     ):
                         known.add(name)
                         changed = True

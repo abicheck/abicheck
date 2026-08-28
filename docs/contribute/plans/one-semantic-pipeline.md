@@ -2312,6 +2312,88 @@ across all three test files) and a fresh `mypy`/`ruff` pass on both
 files. Registered in `scripts/CLAUDE.md`'s inventory table (the
 `script-inventory` AI-readiness check's own requirement).
 
+**A further Codex review round found four more real gaps, all fixed.**
+
+**(1) `_is_fact_typed_expr()`'s own `IfExp` branch can't resolve a
+bare-`Name` alias, since it has no access to a scope's `known` set.**
+`old_fact = old.bases_fact; new_fact = new.bases_fact; fact = old_fact if
+cond else new_fact; fact == other` is a real misuse -- both branches are
+aliases the surrounding fixed point already confirmed Fact-typed -- but
+the structural, scope-independent `_is_fact_typed_expr()` deliberately
+never resolves a bare name at all. Fixed with a new
+`_candidate_resolves_to_fact(value, fact_names, known)`: the
+fixed-point-aware sibling every ordinary `candidates` entry already got
+via its own inline `isinstance(value, ast.Name) and value.id in known`
+check, generalized to recurse through an `IfExp`'s own two branches too
+(each independently required to resolve -- structurally, as an
+already-known alias, or itself another nested `IfExp` -- before the
+conditional as a whole is trusted). Both the ordinary `candidates` loop
+and `tuple_loop_candidates`' own per-element check now go through this
+one function instead of duplicating the same inline check twice.
+
+**(2) A comprehension's tuple-loop-target candidate always registered
+every element against the comprehension's own scope, even the first
+generator's own iterable, which actually evaluates in the *parent*
+scope.** `fact = rec.bases_fact; [fact == other for fact in (fact,)]` --
+the tuple element `fact` names the *outer* alias, but the comprehension's
+own target is *also* `fact`, shadowing it in the comprehension's own
+scope; checking the element there checks the shadowed name against
+itself and never resolves. This needed a genuine data-model change, not
+just a smarter check: `tuple_loop_candidates` now pairs each element with
+its *own* resolution qualname (`list[tuple[ast.expr, str]]`, not a flat
+`list[ast.expr]`) -- the resolved target name still becomes known in the
+comprehension's own scope (where the actual read happens), but each
+element is checked against `aliases.get(elt_qualname, set())`, which for
+the first generator is the position `_qualname_at()` resolves via the
+narrower override span `_enclosing_qualnames()` already registers for
+that exact iterable, tagged with the comprehension's own incoming
+(parent) qualname. A plain `for` loop and every generator after the
+first pair every element with their own (unchanged) qualname, so this is
+a strict widening, not a behavior change for the already-fixed cases.
+
+**(3) The comprehension's own tuple-loop-target branch only ever matched
+a bare `ast.Name` generator target -- the comprehension counterpart of
+finding (2) two Codex rounds ago, applied to a plain `for` loop, was
+never extended to a comprehension's own generator.** `[fact == other for
+fact, tag in ((old.bases_fact, "old"),)]` was invisible. Fixed with the
+identical `_paired_unpacking_candidates()`-per-iteration-element
+machinery the `for`/`AsyncFor` branch already uses, applied per
+generator -- paired with each element's own resolution qualname from
+finding (2), and registered under the comprehension's own scope the
+same way finding (2)'s fix already does.
+
+**(4) A whole-subject `match` capture was recorded only as an ordinary
+local binding, never as an alias of the match subject.** `match
+rec.bases_fact: case fact: return fact == other` -- `case fact:` (a bare
+capture) and `case SomeClass() as fact:` (an `as`-pattern) both bind the
+*entire* subject unconditionally whenever that case matches, making the
+captured name a real alias of `node.subject`, not merely an arbitrary
+shadow the way a *nested* capture inside a larger structural pattern
+(`case [x, y as fact]:`, capturing only a sub-part) correctly still is.
+Both shapes are exactly `case.pattern` itself being an `ast.MatchAs` with
+a real `name` -- Python's own grammar for a top-level capture/`as`-
+pattern. Fixed by registering `(case.pattern.name, node.subject)` as an
+ordinary candidate whenever `isinstance(case.pattern, ast.MatchAs) and
+case.pattern.name is not None`, reusing the existing `candidates`
+fixed point rather than adding a new mechanism.
+
+Verified against each finding's own reported repro plus negative
+controls (an unresolved conditional branch; an unrelated first-iterable
+name; the sibling unpacked position staying unflagged; a nested
+structural capture; a non-Fact match subject) and the full existing
+suite, confirming every previously-fixed shape in this section is
+unaffected. `mypy` caught two real variable-redefinition/type-narrowing
+issues in the same pass (a same-named local reused with a different type
+across the `for`-loop and comprehension branches) -- fixed by renaming,
+not by suppressing. `ruff`/`mypy` both stayed clean, still zero existing
+hits in the real repository, `fact_detector_misuse.py` at 1523 lines
+(well under the 2000-line hard cap). New tests:
+`TestConditionalExpressionResolvesThroughAliasBranches`,
+`TestComprehensionFirstIterableResolvesAgainstTheParentScope`,
+`TestComprehensionUnpackingTargetsResolveElementwise`, and
+`TestWholeSubjectMatchCapturesAreAliases` in `tests/
+test_fact_detector_misuse_def_time_scope.py`.
+
 ---
 
 ### Phase 1 — finish the `dump`/`scan` typed-API convergence (closes AGENTS.md "PR C")

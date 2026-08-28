@@ -778,3 +778,163 @@ class TestForLoopUnpackingTargetsResolveElementwise:
         )
         tree = ast.parse(src, filename="x.py")
         assert fact_equality_misuse_sites(tree, "x.py") == []
+
+
+class TestConditionalExpressionResolvesThroughAliasBranches:
+    """`_candidate_resolves_to_fact()` -- the fixed-point-aware sibling of
+    `_is_fact_typed_expr()`'s own `IfExp` branch -- recognizes a
+    conditional expression whose branches are themselves bare aliases
+    already confirmed Fact-typed, not only structurally Fact-typed
+    expressions."""
+
+    def test_detects_a_comparison_against_a_conditional_of_two_aliases(
+        self,
+    ) -> None:
+        src = (
+            "def f(old, new, cond, other):\n"
+            "    old_fact = old.bases_fact\n"
+            "    new_fact = new.bases_fact\n"
+            "    fact = old_fact if cond else new_fact\n"
+            "    return fact == other\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert fact_equality_misuse_sites(tree, "x.py") == [(5, 11)]
+
+    def test_ignores_a_conditional_where_one_alias_never_resolves(self) -> None:
+        """Negative control: only one branch resolves to a known Fact
+        alias -- the conditional as a whole isn't reliably a Fact
+        regardless of which branch runs."""
+        src = (
+            "def f(old, cond, other):\n"
+            "    old_fact = old.bases_fact\n"
+            "    other_val = 5\n"
+            "    fact = old_fact if cond else other_val\n"
+            "    return fact == other\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert fact_equality_misuse_sites(tree, "x.py") == []
+
+
+class TestComprehensionFirstIterableResolvesAgainstTheParentScope:
+    """A comprehension's tuple-loop-target candidate resolves each
+    element against the scope the element's own iterable actually
+    evaluates in -- only the first generator's iterable evaluates in the
+    parent scope -- while the resolved target name still becomes known in
+    the comprehension's own scope, where the actual read happens."""
+
+    def test_detects_a_comparison_where_the_first_iterable_names_a_parent_alias(
+        self,
+    ) -> None:
+        """`fact = rec.bases_fact; [fact == other for fact in (fact,)]`
+        -- the tuple element `fact` names the *outer* alias, evaluated
+        before the comprehension's own (shadowing) target exists."""
+        src = (
+            "def f(rec, other):\n"
+            "    fact = rec.bases_fact\n"
+            "    return [fact == other for fact in (fact,)]\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert fact_equality_misuse_sites(tree, "x.py") == [(3, 12)]
+
+    def test_ignores_an_unrelated_name_in_the_first_iterable(self) -> None:
+        """Negative control: the tuple element is a bare name that never
+        resolves to a known Fact alias in the parent scope."""
+        src = (
+            "def f(other, unrelated):\n    return [x == other for x in (unrelated,)]\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert fact_equality_misuse_sites(tree, "x.py") == []
+
+    def test_still_detects_a_comparison_over_two_direct_reads(self) -> None:
+        """Regression guard: the original, already-fixed shape (both
+        elements structurally Fact-typed, no alias indirection) must
+        still work after this fix."""
+        src = (
+            "def f(old, new, other):\n"
+            "    return [fact == other for fact in "
+            "(old.bases_fact, new.bases_fact)]\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert fact_equality_misuse_sites(tree, "x.py") == [(2, 12)]
+
+
+class TestComprehensionUnpackingTargetsResolveElementwise:
+    """The comprehension equivalent of `TestForLoopUnpackingTargetsResolveElementwise`
+    above -- a comprehension generator's own target can be a
+    `Tuple`/`List` unpacking display too, not only a bare `Name`."""
+
+    def test_detects_a_comparison_against_an_unpacked_comprehension_target(
+        self,
+    ) -> None:
+        src = (
+            "def f(old, other):\n"
+            "    return [fact == other for fact, tag in "
+            '((old.bases_fact, "old"),)]\n'
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert fact_equality_misuse_sites(tree, "x.py") == [(2, 12)]
+
+    def test_ignores_the_sibling_position_in_an_unpacked_comprehension_target(
+        self,
+    ) -> None:
+        """Negative control: the *other* unpacked position (`tag`) is
+        never Fact-typed and must stay unflagged."""
+        src = (
+            "def f(old, other):\n"
+            "    return [tag == other for fact, tag in "
+            '((old.bases_fact, "old"),)]\n'
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert fact_equality_misuse_sites(tree, "x.py") == []
+
+
+class TestWholeSubjectMatchCapturesAreAliases:
+    """`case fact:` (a bare capture) and `case SomeClass() as fact:` (an
+    `as`-pattern) both bind the *entire* match subject unconditionally,
+    making the captured name a real alias of `node.subject` -- not merely
+    an arbitrary local shadow."""
+
+    def test_detects_a_comparison_through_a_bare_capture(self) -> None:
+        src = (
+            "def f(rec, other):\n"
+            "    match rec.bases_fact:\n"
+            "        case fact:\n"
+            "            return fact == other\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert fact_equality_misuse_sites(tree, "x.py") == [(4, 19)]
+
+    def test_detects_a_comparison_through_an_as_pattern(self) -> None:
+        src = (
+            "def f(rec, other):\n"
+            "    match rec.bases_fact:\n"
+            "        case object() as fact:\n"
+            "            return fact == other\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert fact_equality_misuse_sites(tree, "x.py") == [(4, 19)]
+
+    def test_ignores_a_nested_capture_inside_a_structural_pattern(self) -> None:
+        """Negative control: a capture nested inside a larger structural
+        pattern only captures a *sub*-part of the subject, not the whole
+        thing, and must not be treated as an alias of the subject."""
+        src = (
+            "def f(rec, other):\n"
+            "    match [rec.bases_fact, 1]:\n"
+            "        case [x, y]:\n"
+            "            return x == other\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert fact_equality_misuse_sites(tree, "x.py") == []
+
+    def test_ignores_a_capture_of_a_non_fact_subject(self) -> None:
+        """Negative control: the match subject itself isn't Fact-typed,
+        so the capture is an ordinary local, not an alias."""
+        src = (
+            "def f(rec, other):\n"
+            "    match rec.name:\n"
+            "        case fact:\n"
+            "            return fact == other\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert fact_equality_misuse_sites(tree, "x.py") == []
