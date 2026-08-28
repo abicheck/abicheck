@@ -1057,53 +1057,114 @@ def _match_pattern_names(pattern: ast.pattern) -> list[str]:
     return names
 
 
-def _locally_bound_parameter_names(
+def _locally_bound_constructor_shadow_names(
     tree: ast.Module, qualnames: _QualnameSpans
 ) -> dict[str, set[str]]:
-    """Map each function's own qualname to *only* the parameter names it
-    binds -- `def f(Fact, other): ...` records `{"Fact", "other"}` under
-    `f`'s own qualname (Codex review, fresh evidence): `def f(Fact,
-    other): return Fact(1) == other` -- an ordinary parameter reusing
-    the model `Fact` constructor's own name -- shadows it for the whole
-    function, the identical shadowing rule this module's own alias
-    tracking (`_fact_aliases()`) already applies to an *alias* name, but
-    nothing applied it to the constructor's own name resolution, which is
-    a pure, scope-blind lookup against a single whole-tree name set.
+    """Map each scope's own qualname to the names bound *within* it that
+    shadow a `Fact[T]` constructor spelling (`Fact`, or an imported
+    alias of it) -- a function parameter (Codex review, fresh evidence:
+    `def f(Fact, other): return Fact(1) == other`), an ordinary
+    assignment/annotated-assignment/walrus target, a `for`/comprehension
+    loop target, or an import that binds the name to something *other*
+    than the real constructor -- since `_is_fact_typed_expr()`'s
+    constructor-call recognition is a pure, scope-blind lookup against a
+    single whole-tree name set with no notion of shadowing at all.
 
-    **Deliberately narrower than `_fact_aliases()`'s own internal
-    `locally_bound` set, which this module could otherwise have reused
-    directly instead of adding a second collector.** That set also
-    records every `ast.Import`/`ast.ImportFrom`/assignment-target
-    binding, not just parameters -- and a `from abicheck.model.fact
-    import Fact` (the ordinary, correct way to bring the real constructor
-    into scope at all) is *itself* one such binding. Subtracting that
-    broader set from the constructor-name set would have treated the
-    legitimate import that establishes `Fact` as though it *shadowed*
-    `Fact` -- self-defeating, and confirmed by direct reproduction before
-    this narrower collector was written. A function parameter, by
-    contrast, is never a legitimate way to bind the real `Fact` class (a
-    parameter is always a runtime value the function receives, never an
-    import), so collecting parameters alone carries no equivalent risk.
-    An ordinary assignment-based shadow (`Fact = SomethingElse` inside a
-    function body) is a real, if narrower, sibling case left uncollected
-    here -- correctly distinguishing "assigned to the real constructor"
-    from "assigned to something else" needs the same resolution machinery
-    `_fact_aliases()`'s own alias tracking already builds for a
-    *value*, and reusing it for the *constructor name* question is a
-    genuinely separate, larger change than this fix's own scope.
+    **A first version of this collector covered only parameters,
+    deliberately, because reusing `_fact_aliases()`'s own broader
+    internal `locally_bound` set (which also records every `ast.Import`/
+    `ast.ImportFrom` binding) treated a genuine `from abicheck.model.fact
+    import Fact` -- the ordinary, correct way to bring the real
+    constructor into scope at all -- as though it shadowed `Fact`,
+    confirmed by direct reproduction before that mistake was reverted.
+    This version closes the gap that narrowing left open (Codex review,
+    fresh evidence: `Fact = lambda x: x`, `for Fact in factories:`, and a
+    comprehension target named `Fact` were all still read as the real
+    constructor) by widening to every binding form *except* the one that
+    genuinely introduces it.** For `ast.ImportFrom`, a name is recorded
+    as a shadow unless the import's own `alias.name` is literally
+    `"Fact"` -- the identical structural test `_imported_fact_aliases()`
+    itself uses to decide a name belongs in `fact_names` in the first
+    place, so the two functions cannot disagree about which import
+    establishes the real constructor. This means `from x import Fact`/
+    `from x import Fact as F` are correctly *not* shadows (whatever `x`
+    is -- this module's own established "match by name alone, not by
+    source module" stance), while `from x import SomethingElse as Fact`
+    (renaming an unrelated import to the exact spelling `Fact`) *is* a
+    real shadow, the same as any other rebinding: `_imported_fact_
+    aliases()` never adds a name to `fact_names` for that shape (its own
+    `alias.name == "Fact"` check requires the *original* imported name to
+    be `"Fact"`, not the local alias), so without this exclusion a bare
+    module-level `fact_names` lookup would still treat the shadowed name
+    as the real constructor. `ast.Import` (`import x.y.z as Fact`) has no
+    such carve-out at all -- `_imported_fact_aliases()` only ever
+    recognizes `ImportFrom`, so a bare `Import` binding can never
+    legitimately be the real constructor.
+
+    **Deliberately narrower than `_fact_aliases()`'s own general-binding
+    walk in one respect: `match`/`case` pattern captures, `with`/`except
+    ... as` targets, and a walrus used inside a comprehension's own
+    scope-hopping position are not collected here.** Each of those needs
+    the identical hardening `_fact_aliases()`'s own multi-round history
+    already applied to its *general* binding collection (this module's
+    own several "Codex review, N rounds" notes throughout that function)
+    before it could be trusted for this purpose too -- reusing that
+    already-hardened logic outright risks re-coupling this narrower,
+    independent collector to `_fact_aliases()`'s own alias-tracking
+    semantics the way the reverted first attempt already showed is
+    dangerous. Left as an accepted, narrower residual matching the
+    reported finding's own three shapes (assignment, `for`-loop target,
+    comprehension target) plus parameters, rather than a same-round
+    reimplementation of that entire hardened machinery for a second,
+    independent purpose.
     """
-    params: dict[str, set[str]] = {}
+    shadows: dict[str, set[str]] = {}
+
+    def _add(qualname: str, name: str) -> None:
+        shadows.setdefault(qualname, set()).add(name)
+
     for node in ast.walk(tree):
-        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)):
-            continue
-        qualname = _qualname_at((node.lineno, node.col_offset), qualnames)
-        all_args = (
-            *node.args.posonlyargs,
-            *node.args.args,
-            *node.args.kwonlyargs,
-            *((node.args.vararg,) if node.args.vararg else ()),
-            *((node.args.kwarg,) if node.args.kwarg else ()),
-        )
-        for arg in all_args:
-            params.setdefault(qualname, set()).add(arg.arg)
-    return params
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)):
+            qualname = _qualname_at((node.lineno, node.col_offset), qualnames)
+            all_args = (
+                *node.args.posonlyargs,
+                *node.args.args,
+                *node.args.kwonlyargs,
+                *((node.args.vararg,) if node.args.vararg else ()),
+                *((node.args.kwarg,) if node.args.kwarg else ()),
+            )
+            for arg in all_args:
+                _add(qualname, arg.arg)
+        elif isinstance(node, ast.Assign):
+            qualname = _qualname_at((node.lineno, node.col_offset), qualnames)
+            for target in node.targets:
+                for name in _bound_names(target):
+                    _add(qualname, name)
+        elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
+            qualname = _qualname_at((node.lineno, node.col_offset), qualnames)
+            _add(qualname, node.target.id)
+        elif isinstance(node, ast.NamedExpr) and isinstance(node.target, ast.Name):
+            qualname = _qualname_at((node.lineno, node.col_offset), qualnames)
+            _add(qualname, node.target.id)
+        elif isinstance(node, (ast.For, ast.AsyncFor)):
+            qualname = _qualname_at((node.lineno, node.col_offset), qualnames)
+            for name in _bound_names(node.target):
+                _add(qualname, name)
+        elif isinstance(
+            node, (ast.ListComp, ast.SetComp, ast.DictComp, ast.GeneratorExp)
+        ):
+            qualname = _qualname_at((node.lineno, node.col_offset), qualnames)
+            for generator in node.generators:
+                for name in _bound_names(generator.target):
+                    _add(qualname, name)
+        elif isinstance(node, ast.ImportFrom):
+            qualname = _qualname_at((node.lineno, node.col_offset), qualnames)
+            for alias in node.names:
+                if alias.name == "Fact":
+                    continue
+                _add(qualname, alias.asname or alias.name)
+        elif isinstance(node, ast.Import):
+            qualname = _qualname_at((node.lineno, node.col_offset), qualnames)
+            for alias in node.names:
+                _add(qualname, alias.asname or alias.name.split(".", 1)[0])
+    return shadows
