@@ -3074,6 +3074,18 @@ clean, `fact_detector_misuse_scope.py` at 996 lines (well under the
 appended to `tests/test_fact_detector_misuse_alias_edge_cases.py` (1140
 lines, still under its own 1200-line cap).
 
+**Separately, this same round brought PR #929's branch up to date with
+`main`, closing a CI `architecture` step failure (`abicheck/contract_
+evidence.py:86: model -> policy is forbidden`, a `compare -> model ->
+policy -> compare` dependency cycle) that this PR had already documented
+as a pre-existing, unrelated base-branch regression (PR comments
+5453660592/5453762855).** `main` had since merged a fix for the identical
+cycle (PR #931, `fix/contract-evidence-model-policy-cycle`); the branch
+was 48 commits behind, so merging `main` in (a clean merge, no conflicts)
+was sufficient -- no independent architecture fix was needed on this
+branch. Verified with `python scripts/check_architecture.py` reporting
+`0 error(s)` on the merge commit.
+
 ---
 
 ### Phase 1 — finish the `dump`/`scan` typed-API convergence (closes AGENTS.md "PR C")
