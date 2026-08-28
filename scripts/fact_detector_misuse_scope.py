@@ -1322,6 +1322,31 @@ def _constructor_alias_names(
     return aliases
 
 
+#: The `Fact` classmethods that actually construct and return a new
+#: `Fact[T]` -- `abicheck/model/fact.py`'s own six `@classmethod`s, each
+#: literally returning `cls(...)`. Deliberately excludes `Fact`'s other
+#: two public members: `value_or` (an *instance* method that unwraps and
+#: returns the bare `T`, never a `Fact`) and `is_present` (a `@property`
+#: returning `bool`) -- treating either as a constructor was a real false
+#: positive (Codex review, fresh evidence: `Fact.value_or(fact, 0) ==
+#: expected` is an ordinary, correct unwrap-then-compare, and has nothing
+#: to do with the misuse this whole check exists to catch, since neither
+#: operand is `Fact`-typed after the call). No type inference, the
+#: identical "match by name alone" stance `FACT_FIELD_NAMES` already
+#: takes -- a name outside this set is never treated as a constructor,
+#: including a future classmethod this list hasn't been updated for yet.
+_FACT_CONSTRUCTOR_METHOD_NAMES = frozenset(
+    {
+        "present",
+        "partial",
+        "not_collected",
+        "unsupported",
+        "failed",
+        "not_applicable",
+    }
+)
+
+
 def _constructor_method_alias_names(
     tree: ast.Module,
     qualnames: _QualnameSpans,
@@ -1362,6 +1387,7 @@ def _constructor_method_alias_names(
         if (
             isinstance(target, ast.Name)
             and isinstance(value, ast.Attribute)
+            and value.attr in _FACT_CONSTRUCTOR_METHOD_NAMES
             and isinstance(value.value, ast.Name)
             and value.value.id in fact_names
         ):

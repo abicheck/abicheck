@@ -45,6 +45,7 @@ from pathlib import Path
 if str(Path(__file__).resolve().parent) not in sys.path:
     sys.path.insert(0, str(Path(__file__).resolve().parent))
 from fact_detector_misuse_scope import (  # noqa: E402
+    _FACT_CONSTRUCTOR_METHOD_NAMES,
     _bound_names,
     _def_containing_qualnames,
     _global_declared_names,
@@ -201,7 +202,10 @@ def _is_fact_typed_expr(node: ast.expr, fact_names: frozenset[str]) -> bool:
             func = func.value
         if isinstance(func, ast.Name) and func.id in fact_names:
             return True
-        if isinstance(func, ast.Attribute):
+        if (
+            isinstance(func, ast.Attribute)
+            and func.attr in _FACT_CONSTRUCTOR_METHOD_NAMES
+        ):
             value = func.value
             if isinstance(value, ast.Subscript):
                 value = value.value

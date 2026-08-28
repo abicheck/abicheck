@@ -117,6 +117,25 @@ form). `fact_detector_misuse.py` had almost no headroom left by this
 point (1974/2000 lines going in); the fix landed at 1993/2000 --
 confirming the earlier round's own prediction that the file would need
 a further split very soon.
+
+**A further round found the constructor-call/alias recognition treated
+*any* `Fact.<attr>(...)` call as a constructor call, regardless of
+which attribute** (`TestOnlyRealConstructorMethodsAreRecognized`
+below): `Fact.value_or(fact, 0) == expected` is an ordinary, correct
+unwrap-then-compare -- `value_or` is an *instance* method that returns
+the bare `T`, never a `Fact` -- but was still flagged as a misuse, and
+`_constructor_method_alias_names()`'s own `get = Fact.value_or` alias
+tracking repeated the identical mistake (Codex review, fresh evidence).
+Fixed by adding `_FACT_CONSTRUCTOR_METHOD_NAMES`
+(`fact_detector_misuse_scope.py`) -- the real `Fact` class's own six
+`@classmethod`s that actually return `cls(...)` (`present`, `partial`,
+`not_collected`, `unsupported`, `failed`, `not_applicable`), explicitly
+excluding `value_or` (unwraps to `T`) and `is_present` (a `@property`
+returning `bool`) -- and checking the called/aliased attribute's own
+name against it at both call sites (`_is_fact_typed_expr()`'s Attribute
+branch, `_constructor_method_alias_names()`'s own check), the identical
+"no type inference, match by name alone" stance `FACT_FIELD_NAMES`
+already takes.
 """
 
 from __future__ import annotations
@@ -935,6 +954,96 @@ class TestAnnotationsResolveThroughTheSameShadowMachinery:
             "from abicheck.model.fact import Fact\n"
             "def f(value: int, other):\n"
             "    return value == other\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert fact_equality_misuse_sites(tree, "x.py") == []
+
+
+class TestOnlyRealConstructorMethodsAreRecognized:
+    """`Fact.<attr>(...)` is a real constructor call only when `<attr>`
+    is one of the six classmethods that actually return `cls(...)` --
+    `value_or` (an instance method unwrapping to the bare `T`) and
+    `is_present` (a `@property` returning `bool`) are not (Codex
+    review, fresh evidence)."""
+
+    def test_value_or_direct_call_is_not_a_false_positive(self) -> None:
+        src = (
+            "from abicheck.model.fact import Fact\n"
+            "def f(fact, expected):\n"
+            "    return Fact.value_or(fact, 0) == expected\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert fact_equality_misuse_sites(tree, "x.py") == []
+
+    def test_value_or_aliased_call_is_not_a_false_positive(self) -> None:
+        src = (
+            "from abicheck.model.fact import Fact\n"
+            "def f(fact, expected):\n"
+            "    get = Fact.value_or\n"
+            "    return get(fact, 0) == expected\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert fact_equality_misuse_sites(tree, "x.py") == []
+
+    def test_is_present_attribute_access_is_unaffected(self) -> None:
+        src = (
+            "from abicheck.model.fact import Fact\n"
+            "def f(fact, other):\n"
+            "    return fact.is_present == other\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert fact_equality_misuse_sites(tree, "x.py") == []
+
+    def test_an_unrecognized_future_method_is_not_a_false_positive(self) -> None:
+        src = (
+            "from abicheck.model.fact import Fact\n"
+            "def f(fact, expected):\n"
+            "    return Fact.some_future_method(fact) == expected\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert fact_equality_misuse_sites(tree, "x.py") == []
+
+    def test_all_six_real_constructor_classmethods_still_recognized(self) -> None:
+        for method, args in [
+            ("present", "1"),
+            ("partial", "1"),
+            ("not_collected", ""),
+            ("unsupported", ""),
+            ("failed", '"x"'),
+            ("not_applicable", ""),
+        ]:
+            src = (
+                "from abicheck.model.fact import Fact\n"
+                "def f(other):\n"
+                f"    return Fact.{method}({args}) == other\n"
+            )
+            tree = ast.parse(src, filename="x.py")
+            assert len(fact_equality_misuse_sites(tree, "x.py")) == 1, method
+
+    def test_a_real_constructor_classmethod_alias_still_recognized(self) -> None:
+        src = (
+            "from abicheck.model.fact import Fact\n"
+            "def f(other):\n"
+            "    make_fact = Fact.present\n"
+            "    return make_fact(1) == other\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert len(fact_equality_misuse_sites(tree, "x.py")) == 1
+
+    def test_generic_specialized_real_constructor_still_recognized(self) -> None:
+        src = (
+            "from abicheck.model.fact import Fact\n"
+            "def f(other):\n"
+            "    return Fact[int].present(1) == other\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert len(fact_equality_misuse_sites(tree, "x.py")) == 1
+
+    def test_generic_specialized_value_or_still_not_a_false_positive(self) -> None:
+        src = (
+            "from abicheck.model.fact import Fact\n"
+            "def f(fact, expected):\n"
+            "    return Fact[int].value_or(fact, 0) == expected\n"
         )
         tree = ast.parse(src, filename="x.py")
         assert fact_equality_misuse_sites(tree, "x.py") == []

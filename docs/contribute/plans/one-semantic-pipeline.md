@@ -5417,6 +5417,79 @@ directly. Resulting line counts: `fact_detector_misuse.py` 381 lines
 split-out module and revised text for the two existing rows it now
 shares responsibilities with.
 
+**A further round raised two findings against the same commit; one was
+fixed, one was recorded as an accepted known gap rather than chased.**
+
+(1) **Fixed: constructor-call/alias recognition treated *any*
+`Fact.<attr>(...)` call as a constructor, regardless of which attribute**
+(Codex review, fresh evidence): `Fact.value_or(fact, 0) == expected` is
+an ordinary, correct unwrap-then-compare -- `value_or` is an *instance*
+method returning the bare `T`, never a `Fact` -- but was flagged as a
+misuse, and `_constructor_method_alias_names()`'s own `get =
+Fact.value_or` alias tracking repeated the identical mistake.
+Reproduced directly (1 hit, expected 0) before designing a fix. Fixed
+by adding `_FACT_CONSTRUCTOR_METHOD_NAMES` (`fact_detector_misuse_
+scope.py`) -- the real `Fact` class's own six `@classmethod`s that
+literally return `cls(...)` (`present`, `partial`, `not_collected`,
+`unsupported`, `failed`, `not_applicable`), explicitly excluding
+`value_or` and `is_present` (a `@property` returning `bool`) -- and
+checking the called/aliased attribute's own name against it at both
+call sites (`_is_fact_typed_expr()`'s Attribute branch,
+`_constructor_method_alias_names()`'s own check), the identical "no
+type inference, match by name alone" stance `FACT_FIELD_NAMES` already
+takes. Placed in the scope module (not the aliases module) because
+`_constructor_method_alias_names()` -- which also needs it -- already
+lives there and importing it from the aliases module would have
+created a new import cycle (aliases already imports *from* scope, never
+the reverse); `_locally_bound_constructor_shadow_names()`'s own existing
+`alias.name == "Fact"` literal-string check already established that
+this "generic lexical-scope module" isn't actually Fact-name-agnostic
+at the code level, so this is consistent with that existing precedent,
+not a new exception. Verified via direct AST reproduction against 10
+cases before writing tests: the reported case, the aliased form, all
+six real constructors still recognized (individually, by name, not just
+as a count), a real constructor alias still recognized, `is_present`
+(a non-call attribute access) correctly unaffected either way, an
+unrecognized *future* method name correctly not a false positive
+either, and both the constructor and non-constructor forms composing
+correctly with the existing `Fact[int]` generic-specialization
+resolution. New tests: `TestOnlyRealConstructorMethodsAreRecognized` (8
+tests), appended to `tests/test_fact_detector_misuse_constructor_
+shadow.py`.
+
+(2) **Recorded as a known gap, not fixed: a class body's own execution
+order is not modeled.** `class C: hit = Fact.present(1) == other; Fact
+= factory` -- Python populates a class namespace statement by
+statement, so `hit`'s own `Fact.present(1)` genuinely resolves to the
+real, imported constructor (the `Fact = factory` rebinding hasn't
+executed yet at that point) -- but the whole-class-body shadow
+subtraction this module already applies (matching ordinary function
+scoping, where a name bound *anywhere* in the function is local to the
+*whole* function regardless of line order) treats the entire class body
+as shadowed the moment *any* rebinding appears in it anywhere,
+including textually *after* a genuine early use. Reproduced directly
+(confirmed: no hit, though a real misuse is present) before deciding
+not to chase this. **Deliberately left unfixed**, for three compounding
+reasons: (a) it requires genuine statement-order/execution-order
+tracking scoped specifically to class bodies (which execute top-to-
+bottom like a script, unlike a function body's real order-independent
+static scoping) -- a new analytical capability this module has nowhere
+else; (b) it directly contradicts the "no control-flow analysis" design
+stance this module's own docstrings state repeatedly and explicitly
+(e.g. `_fact_aliases()`'s own "this check has no control-flow analysis,
+and a false positive here is far cheaper than the false negative it
+prevents"); (c) the failure direction is a false *negative* only (a
+missed detection, never a blocked legitimate PR) -- the strictly safer
+of the two failure modes per this module's own stated philosophy, and
+the described pattern itself (a class reassigning the literal name
+`Fact` mid-body to an unrelated factory function) is sufficiently
+exotic that the risk of a rushed, under-tested order-sensitive
+implementation introducing a *new* false positive elsewhere outweighs
+closing this one narrow miss. If a genuine instance of this pattern is
+ever found in the real codebase (this scan still has zero baseline
+hits), revisit then with a concrete case in hand rather than a
+synthetic one.
+
 ---
 
 ### Phase 1 — finish the `dump`/`scan` typed-API convergence (closes AGENTS.md "PR C")
