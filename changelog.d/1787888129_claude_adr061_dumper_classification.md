@@ -1,6 +1,6 @@
 ### Changed
 
-- **ADR-061 continuation**: 20 of the 23 `dumper*.py` header-AST/DWARF
+- **ADR-061 continuation**: 19 of the 23 `dumper*.py` header-AST/DWARF
   parsing-engine modules are now classified into the `extract`
   responsibility layer in `architecture/modules.yaml`:
   `dumper_ast_config.py`, `dumper_ast_config_cpp20.py`,
@@ -28,7 +28,7 @@
   re-exports for all three names, and each call site now imports through
   it instead of the origin module.
 
-  **Three files deliberately left unclassified, each for a real,
+  **Four files deliberately left unclassified, each for a real,
   structural reason rather than an oversight:**
 
   - `dumper.py` itself — the module the whole cluster builds toward
@@ -60,6 +60,14 @@
     somewhere `compare` may import from (`model`), which is a real,
     separate data-model change to `dumper_castxml.py`'s own public
     surface, not a facade-routing fix.
+  - `dumper_clang_expr.py` — imports `diff_cxx_rules.
+    itanium_scope_components` directly, already classified `compare`. The
+    identical structural `compare -> extract` block as `dumper_hybrid.py`
+    and `dumper_castxml.py` above, not an oversight: confirmed via
+    `scripts/check_architecture.py` that it stays correctly unclassified
+    in `architecture/modules.yaml` (a Codex review finding on this same
+    PR caught this changelog's own file count originally omitting it as
+    the fourth exclusion, counting only three).
 
   Verified via `scripts/check_architecture.py` (0 errors, repo-wide),
   `scripts/check_ai_readiness.py` (0 errors, 146 warnings — unchanged
