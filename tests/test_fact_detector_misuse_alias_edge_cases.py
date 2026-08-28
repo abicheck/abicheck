@@ -708,3 +708,144 @@ class TestStructuralSequencePatternCapturesPairWithTheSubject:
         )
         tree = ast.parse(src, filename="x.py")
         assert fact_equality_misuse_sites(tree, "x.py") == []
+
+
+class TestStarredUnpackingTargetsStillPairFixedPositions:
+    """`fact, *rest = old.bases_fact, new.bases_fact, extra` -- a single
+    `Starred` *target* element used to disqualify the whole pairing
+    outright, the same blanket rule a starred *value* element still
+    correctly triggers. Fixed-position elements before and after the star
+    now pair against the value display's own (starless) elements the
+    identical way a starless unpacking already does (Codex review, fresh
+    evidence)."""
+
+    def test_detects_a_fixed_position_before_the_star(self) -> None:
+        src = (
+            "def f(old, new, extra, other):\n"
+            "    fact, *rest = old.bases_fact, new.bases_fact, extra\n"
+            "    return fact == other\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert fact_equality_misuse_sites(tree, "x.py") == [(3, 11)]
+
+    def test_detects_a_fixed_position_after_the_star(self) -> None:
+        src = (
+            "def f(old, new, extra, other):\n"
+            "    *rest, fact = extra, old.bases_fact, new.bases_fact\n"
+            "    return fact == other\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert fact_equality_misuse_sites(tree, "x.py") == [(3, 11)]
+
+    def test_ignores_the_starred_capture_itself(self) -> None:
+        """Negative control: `rest` captures a runtime-length slice, not
+        a single Fact-typed value -- must stay unflagged even though a
+        fixed sibling position in the same unpacking is Fact-typed."""
+        src = (
+            "def f(old, new, extra, other):\n"
+            "    fact, *rest = old.bases_fact, new.bases_fact, extra\n"
+            "    return rest == other\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert fact_equality_misuse_sites(tree, "x.py") == []
+
+    def test_still_ignores_a_starred_value_element(self) -> None:
+        """Regression guard: a starred *value* element (a genuine
+        dynamic expansion of unknown length) must still disqualify the
+        whole pairing, regardless of the target's own shape."""
+        src = (
+            "def f(old, new, extras, other):\n"
+            "    fact, tag = (*extras, old.bases_fact)\n"
+            "    return fact == other\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert fact_equality_misuse_sites(tree, "x.py") == []
+
+    def test_detects_a_starred_target_in_a_for_loop(self) -> None:
+        """The identical fix reached through `ast.For`'s own reuse of
+        `_paired_unpacking_candidates()` per iteration element."""
+        src = (
+            "def f(old, new, other):\n"
+            "    for fact, *rest in ((old.bases_fact, 1, 2), "
+            "(new.bases_fact, 3, 4)):\n"
+            "        return fact == other\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert fact_equality_misuse_sites(tree, "x.py") == [(3, 15)]
+
+
+class TestStructuralMappingPatternCapturesPairWithTheSubject:
+    """`case {"fact": fact}:` -- a structural mapping pattern capturing a
+    sub-part of a statically-known `Dict` subject, the `MatchMapping`
+    sibling of `TestStructuralSequencePatternCapturesPairWithTheSubject`
+    above (Codex review, fresh evidence)."""
+
+    def test_detects_a_capture_by_literal_key(self) -> None:
+        src = (
+            "def f(rec, other):\n"
+            '    match {"fact": rec.bases_fact}:\n'
+            '        case {"fact": fact}:\n'
+            "            return fact == other\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert fact_equality_misuse_sites(tree, "x.py") == [(4, 19)]
+
+    def test_a_rest_capture_does_not_block_a_capture_elsewhere(self) -> None:
+        """Positive control: `**rest` at one key must not disqualify a
+        real capture at another key."""
+        src = (
+            "def f(rec, other):\n"
+            '    match {"fact": rec.bases_fact, "tag": 1}:\n'
+            '        case {"fact": fact, **rest}:\n'
+            "            return fact == other\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert fact_equality_misuse_sites(tree, "x.py") == [(4, 19)]
+
+    def test_ignores_a_key_absent_from_the_subject(self) -> None:
+        """Negative control: a pattern key with no matching literal key
+        in the subject contributes no candidate for that key."""
+        src = (
+            "def f(rec, other):\n"
+            '    match {"other_key": rec.bases_fact}:\n'
+            '        case {"fact": fact}:\n'
+            "            return fact == other\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert fact_equality_misuse_sites(tree, "x.py") == []
+
+    def test_ignores_a_dynamic_non_dict_subject(self) -> None:
+        """Negative control: the subject isn't a literal `Dict` display
+        at all, so no key can be identified -- must stay unflagged."""
+        src = (
+            "def f(pair, other):\n"
+            "    match pair:\n"
+            '        case {"fact": fact}:\n'
+            "            return fact == other\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert fact_equality_misuse_sites(tree, "x.py") == []
+
+    def test_ignores_a_non_literal_subject_key(self) -> None:
+        """Negative control: a non-literal subject key can't be matched
+        against a pattern's own literal key without runtime evaluation."""
+        src = (
+            "def f(rec, other, k):\n"
+            "    match {k: rec.bases_fact}:\n"
+            '        case {"fact": fact}:\n'
+            "            return fact == other\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert fact_equality_misuse_sites(tree, "x.py") == []
+
+    def test_detects_a_nested_sequence_pattern_inside_a_mapping(self) -> None:
+        """Nesting: a further sequence pattern matched against a further
+        literal subject entry, reached from inside a mapping pattern."""
+        src = (
+            "def f(rec, other):\n"
+            '    match {"pair": (rec.bases_fact, 1)}:\n'
+            '        case {"pair": (fact, _)}:\n'
+            "            return fact == other\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert fact_equality_misuse_sites(tree, "x.py") == [(4, 19)]

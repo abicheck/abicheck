@@ -411,18 +411,31 @@ class TestElementwiseTupleUnpackingAliases:
         tree = ast.parse(src, filename="x.py")
         assert fact_equality_misuse_sites(tree, "x.py") == []
 
-    def test_ignores_a_starred_target_pairing(self) -> None:
-        """Negative control: a starred target captures an arbitrary-length
-        slice with no single corresponding RHS sub-expression, so no
-        candidate is derived for it -- and this must not spuriously flag
-        the *other*, ordinary comparison in the same function either."""
+    def test_ignores_the_starred_capture_itself_but_still_pairs_fixed_positions(
+        self,
+    ) -> None:
+        """A starred target (`*rest`) captures an arbitrary-length slice
+        with no single corresponding RHS sub-expression, so no candidate
+        is derived for `rest` itself -- confirmed here by a comparison
+        involving `rest` staying unflagged. `old_fact`, the *fixed*-
+        position element before the star, still pairs against its own
+        real `old.bases_fact` sub-expression the identical way a starless
+        unpacking already does (Codex review, fresh evidence: the
+        previous blanket "any Starred anywhere disqualifies the whole
+        pairing" rule wrongly discarded this fixed-position pairing too,
+        which is what made `old_fact == rest` read as *not* spurious --
+        it wrongly looked that way only because `old_fact` wasn't yet
+        recognized as Fact-typed either; now that it correctly is, the
+        comparison is a genuine finding, not a false positive)."""
         src = (
-            "def f(old, new, extra):\n"
+            "def f(old, new, extra, other):\n"
             "    old_fact, *rest = old.bases_fact, new.bases_fact, extra\n"
-            "    return old_fact == rest\n"
+            "    unrelated = rest == other\n"
+            "    return old_fact == other\n"
         )
         tree = ast.parse(src, filename="x.py")
-        assert fact_equality_misuse_sites(tree, "x.py") == []
+        sites = fact_equality_misuse_sites(tree, "x.py")
+        assert sites == [(4, 11)]
 
 
 class TestClassHeaderWalrusContainingScope:
@@ -765,19 +778,32 @@ class TestForLoopUnpackingTargetsResolveElementwise:
         tree = ast.parse(src, filename="x.py")
         assert fact_equality_misuse_sites(tree, "x.py") == []
 
-    def test_ignores_a_starred_unpacking_target(self) -> None:
-        """Negative control: a starred target captures an
-        arbitrary-length slice with no single corresponding per-iteration
-        sub-expression, mirroring `_paired_unpacking_candidates()`'s own
-        starred-target exclusion for a plain assignment."""
+    def test_ignores_the_starred_capture_but_still_pairs_the_fixed_position(
+        self,
+    ) -> None:
+        """A starred loop target (`*rest`) captures an arbitrary-length,
+        per-iteration slice with no single corresponding sub-expression,
+        so no candidate is derived for `rest` itself -- confirmed by a
+        comparison involving `rest` staying unflagged, mirroring the
+        identical starred-target treatment
+        `TestElementwiseTupleUnpackingAliases`'s own plain-assignment
+        sibling test now pins. `fact`, the *fixed*-position element
+        before the star, still pairs against its own real per-iteration
+        `bases_fact` sub-expression on every iteration (Codex review,
+        fresh evidence: the previous blanket "any Starred anywhere
+        disqualifies the whole pairing" rule, propagated here from
+        `_paired_unpacking_candidates()`, wrongly discarded this
+        fixed-position pairing too)."""
         src = (
             "def f(old, new, other):\n"
             "    for fact, *rest in ((old.bases_fact, 1, 2), "
             "(new.bases_fact, 3, 4)):\n"
+            "        unrelated = rest == other\n"
             "        return fact == other\n"
         )
         tree = ast.parse(src, filename="x.py")
-        assert fact_equality_misuse_sites(tree, "x.py") == []
+        sites = fact_equality_misuse_sites(tree, "x.py")
+        assert sites == [(4, 15)]
 
 
 class TestConditionalExpressionResolvesThroughAliasBranches:

@@ -73,6 +73,7 @@ from fact_detector_misuse_scope import (  # noqa: E402
     _enclosing_qualnames,
     _lexical_function_parents,
     _match_pattern_names,
+    _paired_match_mapping_candidates,
     _paired_match_sequence_candidates,
     _paired_unpacking_candidates,
     _qualname_at,
@@ -977,6 +978,23 @@ def _fact_aliases(tree: ast.Module, qualnames: _QualnameSpans) -> dict[str, set[
                     # `_paired_match_sequence_candidates()`, the `match`
                     # sibling of `_paired_unpacking_candidates()`.
                     for name, value in _paired_match_sequence_candidates(
+                        case.pattern, node.subject
+                    ):
+                        candidates.setdefault(qualname, []).append((name, value))
+                elif isinstance(case.pattern, ast.MatchMapping):
+                    # `case {"fact": fact}:` -- the identical gap as the
+                    # `MatchSequence` branch above, for a structural
+                    # mapping pattern instead (Codex review, fresh
+                    # evidence): `match {"fact": rec.bases_fact}: case
+                    # {"fact": fact}: return fact == other` -- `fact` is
+                    # definitively the subject dict's own `"fact"` entry,
+                    # but a `MatchMapping` pattern was left to the
+                    # whole-subject-capture handling too, which never
+                    # applies to a structural, sub-part-capturing pattern.
+                    # Paired by literal key against a statically-known
+                    # `Dict` subject via `_paired_match_mapping_
+                    # candidates()`.
+                    for name, value in _paired_match_mapping_candidates(
                         case.pattern, node.subject
                     ):
                         candidates.setdefault(qualname, []).append((name, value))

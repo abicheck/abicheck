@@ -2868,6 +2868,74 @@ at 803 lines (both well under the 2000-line hard cap). New tests:
 `tests/test_fact_detector_misuse_alias_edge_cases.py` (710 lines, well
 under its own 1200-line cap).
 
+**Two more findings on the same pairing machinery (7th review round),
+both real, both bounded extensions of the mechanism already built for
+the sequence-pattern fix above.** (1) `_paired_unpacking_candidates()`'s
+own blanket "any `Starred` element anywhere disqualifies the whole
+pairing" rule was one rule too many: a starred *target* element (`fact,
+*rest = old.bases_fact, new.bases_fact, extra`) captures a runtime-length
+slice with no single corresponding value, but the *fixed*-position
+elements before and after it still line up unambiguously against the
+value display's own (starless, so fixed-length) elements — the identical
+before/after-the-star split `_paired_match_sequence_candidates()` already
+uses for a `MatchStar`. A starred *value* element (`x = (*a, b)`) stays a
+genuine disqualifier throughout, since a dynamic expansion's own length
+isn't statically known. Fixed by splitting the target's own `Starred`
+position (at most one, matching Python's own grammar) into before/after
+slices and pairing each against the value's own front/back elements by
+position, mirroring the sequence-pattern helper's shape exactly; the star
+element itself never produces a candidate, matching that helper's
+identical treatment of `MatchStar`'s own captured name. This reaches both
+a plain assignment and a `for` loop's own unpacking target, since the
+latter already reuses this same helper per iteration element. (2) The
+sequence-pattern fix's own docstring explicitly scoped itself to
+`MatchSequence` and left every `MatchMapping` pattern to the
+whole-subject-capture handling, which never applies to a structural,
+sub-part-capturing pattern — so `case {"fact": fact}:` against a literal
+`{"fact": rec.bases_fact}` subject stayed an unrecognized capture. Fixed
+with a new `_paired_match_mapping_candidates()`, the `MatchMapping`
+sibling of `_paired_match_sequence_candidates()`: pairs a pattern's own
+literal keys against a literal `Dict` subject's own literal keys
+independently per key (unlike sequence pairing's positional,
+whole-pairing-disqualifying shape, one key missing or unresolvable in the
+subject contributes no candidate for *that* key without disqualifying
+the others), requires every subject key to be a literal `ast.Constant`
+with no `**expansion` entry, and recurses into a further sequence or
+mapping sub-pattern the identical way the sequence helper already
+recurses into a further sequence. `**rest` is deliberately not treated
+as a candidate here either, mirroring `MatchStar`'s identical treatment.
+
+**Two pre-existing tests pinned the exact gap fix (1) closes, and were
+corrected rather than left pinning a now-fixed bug** (the same discipline
+the sequence-pattern round's own `test_ignores_a_nested_capture_inside_a_
+structural_pattern` correction already established): both
+`TestElementwiseTupleUnpackingAliases::test_ignores_a_starred_target_
+pairing` and `TestForLoopUnpackingTargetsResolveElementwise::test_ignores_
+a_starred_unpacking_target` asserted `== []` for a starred-target
+unpacking whose *fixed* position is now correctly Fact-typed — reproducing
+the pre-fix suite confirmed both failed immediately once the new
+before/after-the-star pairing landed, for exactly that reason. Each was
+rewritten to isolate its own original, narrower purpose (confirming the
+starred capture itself is never treated as a Fact alias — now checked via
+a comparison involving the *starred* name specifically) from the new,
+correctly-detected fixed-position finding, rather than asserting `== []`
+against a case that is now a genuine, non-spurious hit.
+
+Verified against the reported starred-target repro (leading and trailing
+star, plain assignment and `for`-loop unpacking), a starred-*value*
+regression control (still correctly excluded), and the mapping-pattern
+repro plus its own negative controls (`**rest` not blocking a sibling
+capture, a key absent from the subject, a dynamic non-`Dict` subject, a
+non-literal subject key, a nested sequence pattern inside a mapping
+pattern), all via direct AST reproduction before writing tests. Still
+zero existing hits, `mypy`/`ruff` both stayed clean,
+`fact_detector_misuse.py` at 1815 lines and `fact_detector_misuse_scope.py`
+at 917 lines (both well under the 2000-line hard cap). New tests:
+`TestStarredUnpackingTargetsStillPairFixedPositions` and
+`TestStructuralMappingPatternCapturesPairWithTheSubject`, appended to
+`tests/test_fact_detector_misuse_alias_edge_cases.py` (851 lines, well
+under its own 1200-line cap).
+
 ---
 
 ### Phase 1 — finish the `dump`/`scan` typed-API convergence (closes AGENTS.md "PR C")

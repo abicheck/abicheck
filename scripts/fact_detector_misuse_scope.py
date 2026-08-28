@@ -672,17 +672,33 @@ def _paired_unpacking_candidates(
     where `pair` is one opaque value with no per-element sub-expression at
     all) has no such value to attribute, which is why the ordinary
     candidate-collection loop above deliberately skips every tuple/list
-    target. This handles only the *provably* elementwise case: both sides
-    are literal `Tuple`/`List` displays of the identical length, with no
-    `Starred` element on either side (a starred target captures an
-    arbitrary-length slice, which has no single corresponding RHS
-    sub-expression to pair it with; a starred *value* is symmetric evidence
-    the RHS was never actually laid out element-by-element to begin with).
-    Nests through a further tuple/list target (`(a, (b, c)) = (x, (y, z))`)
-    the identical way `_bound_names` already does. Returns no candidates
-    at all -- rather than a partial, best-effort pairing -- the moment
-    either side fails to match this shape, since a partial pairing risks
-    attributing the wrong sub-expression to the wrong name.
+    target. Requires both sides to be literal `Tuple`/`List` displays, with
+    no `Starred` element anywhere in *value* -- a starred value element
+    (`x = (*a, b)`) is a genuine dynamic expansion of unknown length, so
+    there is no way to know which value ends up at which target position,
+    and the whole pairing stays untrustworthy regardless of the target's
+    own shape.
+
+    **A single `Starred` *target* element is handled, not rejected
+    outright (Codex review, fresh evidence).** `fact, *rest = old.
+    bases_fact, tag` still leaves `fact` definitively paired with `old.
+    bases_fact` -- a starred target captures a runtime-length slice with
+    no single corresponding value of its own, but the *fixed*-position
+    elements before and after it still line up unambiguously against the
+    value display's own (starless, so fixed-length) elements. Split via
+    the identical before/after-the-star positional pairing
+    :func:`_paired_match_sequence_candidates` already uses for a
+    structural sequence pattern's own `MatchStar`, with the star element
+    itself never producing a candidate (mirroring that function's
+    identical treatment of `MatchStar`'s own captured name) -- only ever
+    an ordinary local shadow via `_bound_names`, not a Fact-typed alias
+    source. More than one `Starred` target element (invalid Python
+    regardless) still returns no candidates at all, matching the
+    length-mismatch/no-value-side-star cases: a partial pairing anywhere
+    it can't be established risks attributing the wrong sub-expression to
+    the wrong name. Nests through a further tuple/list target (`(a, (b,
+    c)) = (x, (y, z))`, or a further-nested star, `(a, (b, *c)) = (x, (y,
+    z, w))`) the identical way `_bound_names` already does.
     """
     if isinstance(target, ast.Name):
         return [(target.id, value)]
@@ -690,12 +706,43 @@ def _paired_unpacking_candidates(
         value, (ast.Tuple, ast.List)
     ):
         return []
-    if len(target.elts) != len(value.elts):
+    if any(isinstance(elt, ast.Starred) for elt in value.elts):
+        # A starred *value* element (`x = (*a, b)`) is a genuine dynamic
+        # expansion of unknown length -- there is no way to know, from the
+        # display alone, which value ends up at which target position, so
+        # the whole pairing stays untrustworthy regardless of the target's
+        # own shape.
         return []
-    if any(isinstance(elt, ast.Starred) for elt in (*target.elts, *value.elts)):
+    star_positions = [
+        i for i, elt in enumerate(target.elts) if isinstance(elt, ast.Starred)
+    ]
+    if len(star_positions) > 1:
         return []
+    if not star_positions:
+        if len(target.elts) != len(value.elts):
+            return []
+        pairs = list(zip(target.elts, value.elts))
+    else:
+        # `fact, *rest = rec.bases_fact, tag` -- a starred *target*
+        # element captures a runtime-length slice with no single
+        # corresponding value, but the *fixed*-position elements before
+        # and after it still line up unambiguously against the value
+        # display's own (starless, so fixed-length) elements, the
+        # identical before/after-the-star split
+        # `_paired_match_sequence_candidates()` already uses for a
+        # structural sequence pattern (Codex review, fresh evidence: the
+        # previous blanket "any Starred anywhere disqualifies everything"
+        # rule discarded the `fact, *rest = old.bases_fact, tag` shape
+        # entirely, even though `fact` is still definitively Fact-typed).
+        star_index = star_positions[0]
+        before, after = target.elts[:star_index], target.elts[star_index + 1 :]
+        if len(before) + len(after) > len(value.elts):
+            return []
+        pairs = list(zip(before, value.elts[: len(before)]))
+        if after:
+            pairs += list(zip(after, value.elts[-len(after) :]))
     candidates: list[tuple[str, ast.expr]] = []
-    for target_elt, value_elt in zip(target.elts, value.elts):
+    for target_elt, value_elt in pairs:
         candidates.extend(_paired_unpacking_candidates(target_elt, value_elt))
     return candidates
 
@@ -760,6 +807,73 @@ def _paired_match_sequence_candidates(
         elif isinstance(sub_pattern, ast.MatchSequence):
             candidates.extend(
                 _paired_match_sequence_candidates(sub_pattern, sub_subject)
+            )
+        elif isinstance(sub_pattern, ast.MatchMapping):
+            candidates.extend(
+                _paired_match_mapping_candidates(sub_pattern, sub_subject)
+            )
+    return candidates
+
+
+def _paired_match_mapping_candidates(
+    pattern: ast.MatchMapping, subject: ast.expr
+) -> list[tuple[str, ast.expr]]:
+    """Pair a structural mapping pattern's own captures against a
+    statically-known `Dict` *subject*'s entries, by literal key -- the
+    `MatchMapping` sibling of :func:`_paired_match_sequence_candidates`
+    (Codex review, fresh evidence): `match {"fact": rec.bases_fact}: case
+    {"fact": fact}: return fact == other` -- `fact` is definitively the
+    subject dict's `"fact"` entry, but the sequence-only pairing above
+    left every mapping pattern to the whole-subject-capture handling,
+    which only ever recognizes `case.pattern` itself being a bare
+    `MatchAs`/`MatchOr`-of-`MatchAs`, never a *structural* pattern
+    capturing a sub-part of the subject.
+
+    Unlike sequence pairing (positional, so a length/star mismatch can
+    make the *whole* pairing untrustworthy), mapping pairing is by literal
+    key: each of *pattern*'s own `keys` is looked up directly against
+    *subject*'s own literal keys, independently of every other key, so a
+    key present in the pattern but absent from (or unresolvable in) the
+    subject simply contributes no candidate for that one key rather than
+    disqualifying the others. Requires `subject` to be a literal `Dict`
+    with every key a literal `ast.Constant` and no `**expansion` entry (a
+    `None` key) -- a non-literal or dynamically-expanded subject key
+    cannot be matched against a pattern's own literal key without runtime
+    evaluation. A pattern's own non-literal key (Python's grammar allows
+    only a literal or a dotted `value` pattern here) is symmetrically
+    skipped rather than disqualifying the rest, for the same
+    independent-per-key reason. `pattern.rest` (`case {**rest}:`) captures
+    an arbitrary sub-mapping, not a single value, and -- mirroring
+    `_paired_match_sequence_candidates()`'s identical treatment of
+    `MatchStar`'s own captured name -- is deliberately not treated as a
+    candidate here; `_match_pattern_names()` already records it as an
+    ordinary local bound name. Nests through a further sequence/mapping
+    pattern matched against a further literal subject entry the identical
+    way sequence pairing already does.
+    """
+    if not isinstance(subject, ast.Dict) or any(k is None for k in subject.keys):
+        return []
+    subject_by_key: dict[object, ast.expr] = {}
+    for key_expr, value_expr in zip(subject.keys, subject.values):
+        if not isinstance(key_expr, ast.Constant):
+            return []
+        subject_by_key[key_expr.value] = value_expr
+    candidates: list[tuple[str, ast.expr]] = []
+    for key_expr, sub_pattern in zip(pattern.keys, pattern.patterns):
+        if not isinstance(key_expr, ast.Constant):
+            continue
+        sub_subject = subject_by_key.get(key_expr.value)
+        if sub_subject is None:
+            continue
+        if isinstance(sub_pattern, ast.MatchAs) and sub_pattern.name is not None:
+            candidates.append((sub_pattern.name, sub_subject))
+        elif isinstance(sub_pattern, ast.MatchSequence):
+            candidates.extend(
+                _paired_match_sequence_candidates(sub_pattern, sub_subject)
+            )
+        elif isinstance(sub_pattern, ast.MatchMapping):
+            candidates.extend(
+                _paired_match_mapping_candidates(sub_pattern, sub_subject)
             )
     return candidates
 
