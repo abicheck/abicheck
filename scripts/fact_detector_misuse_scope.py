@@ -878,6 +878,34 @@ def _paired_match_mapping_candidates(
     return candidates
 
 
+def _matchas_chain_names(pattern: ast.pattern) -> list[str]:
+    """Collect every name along a chain of nested `MatchAs` nodes, each
+    binding the *identical* value -- whatever the chain's own innermost
+    wrapped sub-pattern matches -- since Python's `as`-pattern binds its
+    own name to the same subject its wrapped pattern was matched against
+    (Codex review, fresh evidence): `case fact as alias:` parses as
+    `MatchAs(pattern=MatchAs(name="fact"), name="alias")` -- a *nested*
+    `MatchAs`, not a structural sub-pattern -- so both `alias` (the outer
+    capture) and `fact` (the inner one) are equally real whole-subject
+    aliases, but the caller previously only ever registered the outer
+    `case.pattern.name`, leaving `fact` to `_match_pattern_names()`'s own
+    ordinary-local-shadow treatment.
+
+    Returns `[]` once the chain bottoms out -- at a bare wildcard capture
+    (`pattern=None`), or at a non-`MatchAs` sub-pattern (a real structural
+    pattern, e.g. `case SomeClass() as fact:`'s own wrapped `MatchClass`,
+    whose *own* captures are correctly left to their existing, separate
+    sub-part-capture handling, not treated as whole-subject aliases here)
+    -- so a plain single-level `case fact:`/`case SomeClass() as fact:`
+    still returns exactly the one name it always did, and this helper is
+    a strict generalization, not a behavior change for either.
+    """
+    if not isinstance(pattern, ast.MatchAs):
+        return []
+    inner = _matchas_chain_names(pattern.pattern) if pattern.pattern else []
+    return [pattern.name, *inner] if pattern.name is not None else inner
+
+
 def _match_pattern_names(pattern: ast.pattern) -> list[str]:
     """Recursively collect every name a structural-pattern-matching
     `pattern` binds -- `case fact:` (a bare capture, `ast.MatchAs` with a

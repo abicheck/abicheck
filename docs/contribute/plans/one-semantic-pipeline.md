@@ -2976,6 +2976,48 @@ under its own 1200-line cap) rather than the more thematically obvious
 `test_fact_detector_misuse_def_time_scope.py`, which had only ~105 lines
 of headroom left under its own cap.
 
+**One more finding on the whole-subject `match`-capture machinery (9th
+review round): a `MatchAs` node can itself nest a *further* `MatchAs`,
+not just a structural sub-pattern.** `case fact as alias:` parses as
+`MatchAs(pattern=MatchAs(name="fact"), name="alias")` — a genuinely
+*nested* `MatchAs`, distinct from `case SomeClass() as fact:`'s own
+wrapped `MatchClass` (a real structural sub-pattern, correctly left
+alone) — but the existing top-level-capture branch only ever registered
+`case.pattern.name` (the outer `alias`), leaving the inner `fact` to
+`_match_pattern_names()`'s ordinary local-shadow treatment even though
+it is equally a real alias of the whole subject. Fixed with a new
+`_matchas_chain_names()`, walking the chain of nested `MatchAs` nodes and
+collecting every name along it — for the ordinary, non-chained case it
+still returns exactly the single outer name, so this is a strict
+generalization, not a behavior change for either existing shape. The
+sibling `MatchOr` branch (added in an earlier round for `case (C() as
+fact) | (D() as fact):`) had the identical gap one level up: its own
+per-alternative check only compared the *outer* name across
+alternatives, not the full nested chain, so a mismatched inner name
+(`case (fact as alias) | (other_fact as alias):`, where only the
+outer name `alias` is actually guaranteed identical by Python's own
+same-name-set-across-alternatives grammar rule) could have been
+trusted as safe when it isn't. Fixed by requiring every alternative's
+*full* `_matchas_chain_names()` result to match the first alternative's,
+term for term — the identical "only trust when every alternative is
+structured identically" principle that branch's own docstring already
+states, now applied at the right granularity.
+
+Verified against the reported repro, the inner-name-alone and outer-
+name-alone cases independently, both together in one comparison, the
+existing single-level `as`-pattern regression control, an OR pattern
+with identical nested chains (still trusted) and one with mismatched
+inner names (correctly not trusted), and a negative control confirming
+a nested capture inside a genuine structural sub-pattern (`case [x, y as
+fact]:`) stays a sub-part capture, not a whole-subject one, via direct
+AST reproduction before writing tests. Still zero existing hits,
+`mypy`/`ruff` both stayed clean, `fact_detector_misuse.py` at 1862 lines
+and `fact_detector_misuse_scope.py` at 945 lines (both well under the
+2000-line hard cap). New tests:
+`TestNestedMatchAsChainsPropagateWholeSubjectCaptures` (7 tests),
+appended to `tests/test_fact_detector_misuse_alias_edge_cases.py` (1035
+lines, still under its own 1200-line cap).
+
 ---
 
 ### Phase 1 — finish the `dump`/`scan` typed-API convergence (closes AGENTS.md "PR C")

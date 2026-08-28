@@ -940,3 +940,96 @@ class TestDecoratorExpressionsResolveAgainstTheContainingScope:
         )
         tree = ast.parse(src, filename="x.py")
         assert fact_equality_misuse_sites(tree, "x.py") == [(5, 10)]
+
+
+class TestNestedMatchAsChainsPropagateWholeSubjectCaptures:
+    """`case fact as alias:` parses as a *nested* `MatchAs`
+    (`MatchAs(pattern=MatchAs(name="fact"), name="alias")`), not a
+    structural sub-pattern -- both `alias` (the outer capture) and `fact`
+    (the inner one) are equally real whole-subject aliases (Codex review,
+    fresh evidence: the previous fix only ever registered the outer
+    `case.pattern.name`)."""
+
+    def test_detects_a_comparison_through_the_inner_name(self) -> None:
+        src = (
+            "def f(rec, other):\n"
+            "    match rec.bases_fact:\n"
+            "        case fact as alias:\n"
+            "            return fact == other\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert fact_equality_misuse_sites(tree, "x.py") == [(4, 19)]
+
+    def test_still_detects_a_comparison_through_the_outer_name(self) -> None:
+        """Regression guard: the outer name is still recognized, the
+        same as before this fix."""
+        src = (
+            "def f(rec, other):\n"
+            "    match rec.bases_fact:\n"
+            "        case fact as alias:\n"
+            "            return alias == other\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert fact_equality_misuse_sites(tree, "x.py") == [(4, 19)]
+
+    def test_detects_a_comparison_through_both_names_independently(self) -> None:
+        src = (
+            "def f(rec, other):\n"
+            "    match rec.bases_fact:\n"
+            "        case fact as alias:\n"
+            "            return fact == other and alias == other\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        sites = fact_equality_misuse_sites(tree, "x.py")
+        assert len(sites) == 2
+
+    def test_a_single_level_as_pattern_still_works_unchanged(self) -> None:
+        """Regression guard: `case SomeClass() as fact:` wraps a real
+        structural sub-pattern, not a further `MatchAs` -- still exactly
+        the one name it always registered."""
+        src = (
+            "def f(rec, other):\n"
+            "    match rec.bases_fact:\n"
+            "        case object() as alias:\n"
+            "            return alias == other\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert fact_equality_misuse_sites(tree, "x.py") == [(4, 19)]
+
+    def test_or_pattern_with_identical_nested_chains_is_trusted(self) -> None:
+        src = (
+            "def f(rec, other):\n"
+            "    match rec.bases_fact:\n"
+            "        case (fact as alias) | (fact as alias):\n"
+            "            return fact == other\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert fact_equality_misuse_sites(tree, "x.py") == [(4, 19)]
+
+    def test_or_pattern_with_mismatched_nested_chains_is_not_trusted(self) -> None:
+        """Negative control: only the *outer* name (`alias`) is
+        guaranteed to be the same set of names Python's own grammar
+        requires -- the inner names differ, so neither is safe to trust
+        as the raw subject regardless of which alternative matched."""
+        src = (
+            "def f(rec, other):\n"
+            "    match rec.bases_fact:\n"
+            "        case (fact as alias) | (other_fact as alias):\n"
+            "            return fact == other\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert fact_equality_misuse_sites(tree, "x.py") == []
+
+    def test_ignores_a_nested_capture_inside_a_structural_sub_pattern(self) -> None:
+        """Negative control: `y as fact` inside a sequence pattern
+        captures only a *sub*-part of the subject -- must stay unflagged,
+        confirming this fix doesn't widen `_matchas_chain_names()` beyond
+        genuine whole-subject `MatchAs` nesting."""
+        src = (
+            "def f(rec, other):\n"
+            "    match (rec.bases_fact, 1):\n"
+            "        case [x, y as fact]:\n"
+            "            return fact == other\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert fact_equality_misuse_sites(tree, "x.py") == []

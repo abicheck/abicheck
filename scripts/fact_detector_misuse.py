@@ -73,6 +73,7 @@ from fact_detector_misuse_scope import (  # noqa: E402
     _enclosing_qualnames,
     _lexical_function_parents,
     _match_pattern_names,
+    _matchas_chain_names,
     _paired_match_mapping_candidates,
     _paired_match_sequence_candidates,
     _paired_unpacking_candidates,
@@ -929,13 +930,22 @@ def _fact_aliases(tree: ast.Module, qualnames: _QualnameSpans) -> dict[str, set[
                 # *sub*-part of the subject, not the whole thing, and is
                 # deliberately not treated as an alias of `node.subject`
                 # here.
+                #
+                # **A `MatchAs` can itself nest a *further* `MatchAs`,
+                # not just a structural sub-pattern -- `case fact as
+                # alias:` binds *both* names to the whole subject, not
+                # only the outer one (Codex review, fresh evidence).**
+                # `_matchas_chain_names()` walks the whole chain of
+                # nested `MatchAs` nodes; for the ordinary, non-chained
+                # case it still returns exactly the single outer name.
                 if (
                     isinstance(case.pattern, ast.MatchAs)
                     and case.pattern.name is not None
                 ):
-                    candidates.setdefault(qualname, []).append(
-                        (case.pattern.name, node.subject)
-                    )
+                    for chain_name in _matchas_chain_names(case.pattern):
+                        candidates.setdefault(qualname, []).append(
+                            (chain_name, node.subject)
+                        )
                 elif isinstance(case.pattern, ast.MatchOr) and case.pattern.patterns:
                     # `case (C() as fact) | (D() as fact): fact == other`
                     # -- an OR pattern where *every* alternative is itself
@@ -949,22 +959,31 @@ def _fact_aliases(tree: ast.Module, qualnames: _QualnameSpans) -> dict[str, set[
                     # only the second branch binds it to the *whole*
                     # subject, so this alone is not safe to trust as an
                     # alias. Only when every single alternative is itself
-                    # exactly `MatchAs` with the same name is `fact`
-                    # guaranteed to be the raw subject regardless of which
-                    # alternative matched.
+                    # exactly `MatchAs` with the *identical full nested
+                    # chain* of names (Codex review, fresh evidence: a
+                    # bare per-alternative name check missed a nested
+                    # `MatchAs` chain the identical way the top-level
+                    # branch above originally did) is every one of those
+                    # names guaranteed to be the raw subject regardless of
+                    # which alternative matched.
                     alternatives = case.pattern.patterns
                     first_alt = alternatives[0]
-                    if (
-                        isinstance(first_alt, ast.MatchAs)
+                    first_chain = (
+                        _matchas_chain_names(first_alt)
+                        if isinstance(first_alt, ast.MatchAs)
                         and first_alt.name is not None
-                        and all(
-                            isinstance(alt, ast.MatchAs) and alt.name == first_alt.name
-                            for alt in alternatives
-                        )
+                        else []
+                    )
+                    if first_chain and all(
+                        isinstance(alt, ast.MatchAs)
+                        and alt.name is not None
+                        and _matchas_chain_names(alt) == first_chain
+                        for alt in alternatives
                     ):
-                        candidates.setdefault(qualname, []).append(
-                            (first_alt.name, node.subject)
-                        )
+                        for chain_name in first_chain:
+                            candidates.setdefault(qualname, []).append(
+                                (chain_name, node.subject)
+                            )
                 elif isinstance(case.pattern, ast.MatchSequence):
                     # `case (fact, _):` -- a structural sequence pattern
                     # capturing only a *sub*-part of the subject, not the
