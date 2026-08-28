@@ -3402,6 +3402,20 @@ looked like the obvious fix and wasn't.
   floor), with the static allowlist demoted to a fallback for a project
   that doesn't opt into a declared environment. Route any work on this to
   that plan rather than reinventing a provider-classes registry here.
+  **This gap is bundle-wide, not just `compare_bundle()`'s.** `audit_bundle()`
+  (`scan --artifact-set`'s one-sided entry point) unions the identical
+  `set(DEFAULT_SYSTEM_PROVIDERS) | set(bundle_system_providers)` allow-list
+  and feeds it to its own predicate, `_detect_unresolved_intra_dependency()`
+  -- not a call into `_detect_intra_dep_removed()`, since an audit has no old
+  side to diff against. That predicate's own docstring documents three real
+  differences from the diff-driven one (version-aware and reachability-
+  constrained provider matching, a suppression path that additionally
+  requires the consumer have zero intra-bundle `DT_NEEDED` edges, and a
+  `COMPATIBLE_WITH_RISK`-not-`BREAKING` verdict), so a G42 fix landing only
+  on the `compare_bundle()` path would leave `scan --artifact-set` audit-mode
+  classification on the static allow-list with its own, differently-shaped
+  false-positive exposure (Codex review, PR #910, fresh evidence). Any work
+  on this gap needs both call sites in scope.
 
 - **PR C (typed `dump`/`scan` convergence, CLI cleanup phase two's PR 3A) —
   investigated in depth; one real, scoped, verified slice landed; the full
