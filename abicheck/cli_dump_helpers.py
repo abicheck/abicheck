@@ -607,7 +607,7 @@ def _add_dump_data_layers(
         dwarf_meta = None
         if binary_fmt == "elf":
             from .dwarf_unified import parse_dwarf
-            from .elf_metadata import parse_elf_metadata
+            from .workflows.extraction import parse_elf_metadata
 
             elf_meta = parse_elf_metadata(normalized_path)
             dwarf_meta, _ = parse_dwarf(normalized_path)
@@ -1456,7 +1456,7 @@ def perform_elf_dump(
         # cycle) and a no-op for ordinary libraries. `compare` also derives it on
         # load as a backstop for snapshots written without it.
         if snap.python_ext is None:
-            from .python_ext import detect_python_extension
+            from .workflows.extraction import detect_python_extension
 
             snap.python_ext = detect_python_extension(snap)
 
@@ -1465,7 +1465,7 @@ def perform_elf_dump(
         # `import`s — the surface the C-ABI export view cannot see. A no-op when no
         # stub is found alongside the binary.
         if snap.python_api is None:
-            from .python_api import detect_python_api
+            from .workflows.extraction import detect_python_api
 
             snap.python_api = detect_python_api(snap)
 
@@ -1477,7 +1477,7 @@ def perform_elf_dump(
         # later `compare` on the written JSON stays silently disabled (Codex
         # review).
         if snap.numpy_capi is None:
-            from .numpy_capi import extract_numpy_capi_surface
+            from .workflows.extraction import extract_numpy_capi_surface
 
             snap.numpy_capi = extract_numpy_capi_surface(so_path)
 

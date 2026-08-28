@@ -13,6 +13,7 @@
       "legacy_paths": [
         "abicheck/buildsource/model.py",
         "abicheck/buildsource/pack.py",
+        "abicheck/buildsource/scan_levels.py",
         "abicheck/change_registry_types.py",
         "abicheck/checker_types.py",
         "abicheck/compile_context.py",
@@ -35,6 +36,7 @@
       "legacy_paths": [
         "abicheck/_compiler_options.py",
         "abicheck/binary_utils.py",
+        "abicheck/build_mode.py",
         "abicheck/buildsource/embed.py",
         "abicheck/buildsource/inline.py",
         "abicheck/buildsource/inputs_pack.py",
@@ -44,8 +46,18 @@
         "abicheck/dump_manifest.py",
         "abicheck/dumper_clang.py",
         "abicheck/dumper_scoping.py",
+        "abicheck/dwarf_advanced.py",
+        "abicheck/dwarf_metadata.py",
+        "abicheck/elf_metadata.py",
         "abicheck/header_conditionals.py",
-        "abicheck/header_utils.py"
+        "abicheck/header_utils.py",
+        "abicheck/macho_metadata.py",
+        "abicheck/numpy_capi.py",
+        "abicheck/pe_metadata.py",
+        "abicheck/python_api.py",
+        "abicheck/python_ext.py",
+        "abicheck/symvers_metadata.py",
+        "abicheck/sycl_metadata.py"
       ]
     },
     "compare": {

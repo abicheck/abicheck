@@ -127,7 +127,7 @@ def _sniff_text_format(path: Path) -> str:
         return "perl"
     if head.startswith("{"):
         return "json"
-    from .symvers_metadata import looks_like_symvers
+    from .workflows.extraction import looks_like_symvers
 
     return "symvers" if looks_like_symvers(head) else "unknown"
 

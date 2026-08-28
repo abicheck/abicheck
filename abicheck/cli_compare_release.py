@@ -1664,8 +1664,7 @@ def compare_release_cmd(
                 # Resolved here, not in the leaf write_bundle_facts_out() (see its docstring).
                 def _resolve_stranded_library(old_path: Path) -> AbiSnapshot:
                     from .cli_resolve import _resolve_input
-                    from .elf_metadata import parse_elf_metadata
-                    from .workflows.extraction import split_public_header_inputs
+                    from .workflows import extraction
 
                     old_dbg = (
                         resolve_debug_info(old_path, old_debug_dir)
@@ -1674,7 +1673,7 @@ def compare_release_cmd(
                     )
                     # old_h doubles as the public-header set, matching the
                     # normal compare path (else origin=UNKNOWN; Codex review).
-                    pub_headers, pub_dirs = split_public_header_inputs(old_h)
+                    pub_headers, pub_dirs = extraction.split_public_header_inputs(old_h)
                     try:
                         return _resolve_input(
                             old_path,
@@ -1694,7 +1693,7 @@ def compare_release_cmd(
                         return AbiSnapshot(
                             library=old_path.name,
                             version="",
-                            elf=parse_elf_metadata(old_path),
+                            elf=extraction.parse_elf_metadata(old_path),
                         )
 
                 write_bundle_facts_out(
