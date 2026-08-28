@@ -414,20 +414,20 @@ FACT_ROWS: tuple[FactRow, ...] = (
     FactRow(
         "RecordType",
         "bases_fact",
-        _NONE,
-        _NONE,
+        _FULL,
+        _FULL,
         note=(
-            "ADR-063 Phase 0: `Fact[list[str]]` sibling of `bases`. Same "
-            "coverage as `bases` — no producer constructs this directly yet, "
-            "so it is `Fact.present(raw)` on a fresh dump."
+            "ADR-063 Phase 0: `Fact[list[str]]` sibling of `bases`. Both "
+            "backends construct it directly (`model.record_layout_facts()`) "
+            "alongside `bases` itself, opaque records included."
         ),
     ),
     FactRow("RecordType", "virtual_bases", _FULL, _FULL),
     FactRow(
         "RecordType",
         "virtual_bases_fact",
-        _NONE,
-        _NONE,
+        _FULL,
+        _FULL,
         note="ADR-063 Phase 0: `Fact[list[str]]` sibling of `virtual_bases` — see `bases_fact`.",
     ),
     FactRow(
@@ -445,8 +445,8 @@ FACT_ROWS: tuple[FactRow, ...] = (
     FactRow(
         "RecordType",
         "vtable_fact",
-        _NONE,
-        _NONE,
+        _FULL,
+        _FULL,
         note="ADR-063 Phase 0: `Fact[list[str]]` sibling of `vtable` — see `bases_fact`.",
     ),
     FactRow("RecordType", "source_location", _FULL, _FULL),
@@ -560,8 +560,8 @@ FACT_ROWS: tuple[FactRow, ...] = (
     FactRow(
         "RecordType",
         "vptr_offset_bits_fact",
-        _NONE,
-        _NONE,
+        _FULL,
+        _FULL,
         note="ADR-063 Phase 0: `Fact[int | None]` sibling of `vptr_offset_bits` — see `bases_fact`.",
     ),
     FactRow(
@@ -702,13 +702,18 @@ FACT_ROWS: tuple[FactRow, ...] = (
     FactRow(
         "Param",
         "is_va_list_fact",
-        _NONE,
-        _NONE,
+        _PARTIAL,
+        _FULL,
         note=(
-            "ADR-063 Phase 0: `Fact[bool]` sibling of `is_va_list` — unlike "
-            "the scalar it derives from, no producer constructs this field "
-            "directly yet (the __post_init__ bridge backfills it from "
-            "whichever side actually populates `is_va_list`)."
+            "ADR-063 Phase 0: `Fact[bool]` sibling of `is_va_list`, now "
+            "constructed directly by both backends. castxml is `PARTIAL`: "
+            "it explicitly states `Fact.unsupported()` (a real, deliberate "
+            "expression, not a hardcoded default) rather than a boolean "
+            "determination, since it can never determine va_list-ness at "
+            "all. clang is `FULL`: every parameter gets a real "
+            "`Fact.present(bool)` — the target-scoping caveat on `is_va_list`"
+            " above is about the wrapped *value*'s accuracy, not whether "
+            "this field itself is populated."
         ),
     ),
 )

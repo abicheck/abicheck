@@ -906,26 +906,52 @@ real and tested (`tests/test_model_fact.py`,
 existing `clang_vtable_facts_reliable`/`clang_va_list_facts_reliable`
 flags (split into `storage/fact_codec.py`/`storage/enum_codec.py` — both
 ADR-061 `storage`-layer leaf modules, depending on nothing beyond `model` —
-to stay under the 2000-line file-size cap). **Not landed in this slice**:
-no producer (`dumper_castxml.py`/`dumper_clang.py`/`dwarf_snapshot.py`)
-constructs a `Fact[...]` value directly yet — every fresh extraction still
-only populates the legacy field, so the bridge derives each `*_fact`
-sibling purely from whether that legacy argument was supplied at all: a
-producer that omits it (CastXML's own `Param(...)` never passes
-`is_va_list=`, for instance) already yields `NOT_COLLECTED`, while one
-that passes a raw value yields `Fact.present(raw)` regardless of whether
-that value is actually trustworthy. Producers do not yet construct
-`Fact[...]` explicitly to state a real reliability signal (`PARTIAL`/
-`UNSUPPORTED`/`FAILED`) — that is what a producer migration still needs
-to add. No detector (`diff_layout.py`/`diff_types.py`/
-`diff_param_qualifiers.py`/the nine-reader table above) has been
-migrated to read `.status`, and the widened, non-glob AI-readiness check
-this Design section describes has not been written. Migrating a detector
-now would add real complexity for zero behavior change until producer-
-side `Fact` construction lands first — deferred deliberately, not
-silently, per this plan's own "vertical slice, not flag day" discipline:
-this slice is the primitive the rest of Phase 0 builds on, landed and
-tested on its own rather than held until every consumer migrates too.
+to stay under the 2000-line file-size cap).
+
+**Producer-side `Fact[...]` construction (second slice) — landed.**
+`dumper_castxml.py`, `dumper_clang.py`, and `dwarf_snapshot.py` now each
+construct `RecordType.bases_fact`/`virtual_bases_fact`/`vtable_fact`/
+`vptr_offset_bits_fact` explicitly at parse time via a new shared helper,
+`model.entities.record_layout_facts()` (spread into the `RecordType(...)`
+call alongside the matching legacy keyword arguments) — every one of these
+three producers genuinely resolves bases/virtual_bases/vtable/
+vptr_offset_bits itself (real semantic analysis for castxml, an AST walk
+for direct-clang, DWARF DIE traversal for the binary backend), opaque
+records included, so this is a pure "state what was already true
+explicitly" change with zero observable behavior difference on its own —
+the omission bridge already derived the identical `Fact.present(...)` from
+the always-supplied legacy value. DWARF's `vptr_offset_bits` is the one
+field that may still be `None` pending `_finalize_vptr_offsets`'s own
+later fixed-point pass; that pass already resyncs both representations via
+`resolve_vptr_offset_bits()` from the prior slice, untouched here.
+
+The one *real*, deliberate behavior change: `Param.is_va_list_fact` is now
+`Fact.unsupported()` on both `dumper_castxml.py` and `dwarf_snapshot.py` —
+neither producer can ever determine va_list-ness, on any run, which
+`UNSUPPORTED` states plainly where the omission bridge's own
+`NOT_COLLECTED` ("not collected this time") could not. `dumper_clang.py`'s
+`is_va_list_fact` stays `Fact.present(...)`, since that backend genuinely
+evaluates `_clang_param_is_va_list()` per parameter (the function's own
+documented target-scoping residual — no per-snapshot record of which
+target ABI a clang parse actually ran against — is unchanged; closing it
+still needs the toolchain-identity probe named elsewhere in this repo's
+AGENTS.md). New tests: `tests/test_castxml_fact_construction.py`,
+`tests/test_dumper_clang_fact_construction.py`,
+`tests/test_dwarf_fact_construction.py` — the `is_va_list_fact` change is
+confirmed to fail against the pre-change code (`git stash`); the
+representational-only assertions pass either way, since they pin
+already-correct, now-explicit behavior rather than a regression.
+
+**Still not landed**: no detector (`diff_layout.py`/`diff_types.py`/
+`diff_param_qualifiers.py`/the nine-reader table above) has been migrated
+to read `.status`, and the widened, non-glob AI-readiness check this
+Design section describes has not been written. Migrating a detector now
+would add real complexity for zero behavior change until every producer's
+own construction is at least this explicit — landed as of this slice for
+the five fields this phase scoped — deferred deliberately, not silently,
+per this plan's own "vertical slice, not flag day" discipline: each slice
+is a primitive the rest of Phase 0 builds on, landed and tested on its own
+rather than held until every consumer migrates too.
 
 ---
 
