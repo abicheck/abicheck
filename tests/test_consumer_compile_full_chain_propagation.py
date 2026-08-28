@@ -37,13 +37,31 @@ from `check-project.yml`/`check-target/action.yml`, chained:
     .abicheck.yml config
       -> generate_run_plan() [real Python call]
       -> check-project.yml's "Run check-target" step [real expression, evaluated]
-      -> check-target/action.yml's "Extract candidate consumer context" step
-         [real expression, evaluated]
+      -> check-target/action.yml's "Extract candidate consumer context" step's
+         own SCHEDULING GUARD (its `if:`, not just its `with:`) [real
+         expression, evaluated]
+      -> that same step's `with:` [real expression, evaluated]
+      -> root action.yml's own declared `gcc-path`/`gcc-options` inputs,
+         resolved to their real INPUT_* env var names via the real
+         "Run abicheck" step's own env block (test_action_run_contract.py's
+         `_action_yml_env_mapping`) -- never a hardcoded `INPUT_GCC_PATH`
+         guess
       -> root action.yml's run.sh [real bash execution, via the existing
          test_action_compile_context_parity.py harness]
 
 with one sentinel binding path/options string surviving, unaltered, end
 to end.
+
+Two further Codex review rounds on this same file, both fixed here: (1)
+the first cut evaluated only the consumer-context step's `with:` values,
+never its own `if:` scheduling guard -- a `||`-to-`&&` regression in that
+guard would still leave every `with:`-level assertion green while the
+step (and therefore the whole consumer-context dump) silently never runs
+at all. (2) the first cut also hardcoded `INPUT_GCC_PATH`/`INPUT_GCC_
+OPTIONS` as the env var names fed to `run.sh`, disconnecting hop 3 (the
+resolved `inputs.gcc-path`/`inputs.gcc-options` values) from hop 4 (which
+env vars `run.sh` actually reads) -- a swap of those two mappings in root
+action.yml's own env block would have gone undetected.
 """
 
 from __future__ import annotations
@@ -52,6 +70,7 @@ from typing import Any
 
 from _gha_expr import eval_gha_expression
 from test_action_compile_context_parity import _DUMP_MODE_MARKER, _run_region
+from test_action_run_contract import _action_yml_env_mapping
 from test_reusable_workflows_project_evidence import (
     CHECK_PROJECT,
     CHECK_TARGET,
@@ -91,7 +110,8 @@ def _consumer_context_step() -> dict[str, Any]:
 
 def test_sentinel_consumer_gcc_path_survives_config_to_check_target_input() -> None:
     """Hops 1-3: config -> generate_run_plan() -> check-project.yml ->
-    check-target/action.yml, evaluated for real at each of the latter two."""
+    check-target/action.yml's scheduling guard AND its `with:`, evaluated
+    for real at each of the latter two."""
     config = _parsed(TestConsumerCompileOverlayProjection._RAW)
     plan, report = generate_run_plan(
         config,
@@ -131,14 +151,48 @@ def test_sentinel_consumer_gcc_path_survives_config_to_check_target_input() -> N
     consumer_gcc_options = eval_gha_expression(
         run_step["with"]["consumer-gcc-options"], matrix=matrix, inputs=workflow_inputs
     )
+    consumer_ast_frontend = eval_gha_expression(
+        run_step["with"]["consumer-ast-frontend"], matrix=matrix, inputs=workflow_inputs
+    )
+    consumer_compile_active = eval_gha_expression(
+        run_step["with"]["consumer-compile-active"], matrix=matrix, inputs={}
+    )
+    kind = eval_gha_expression(run_step["with"]["kind"], matrix=matrix)
+    baseline_channel = eval_gha_expression(
+        run_step["with"]["baseline-channel"], matrix=matrix
+    )
     assert consumer_gcc_path == _SENTINEL_CONSUMER_GCC_PATH
     assert consumer_gcc_options == "-std=gnu++20 -stdlib=libc++"
 
     consumer_step = _consumer_context_step()
     hop3_inputs = {
+        "kind": kind,
+        "baseline-channel": baseline_channel,
+        "consumer-compile-active": "true" if consumer_compile_active else "false",
+        "consumer-ast-frontend": consumer_ast_frontend or "",
         "consumer-gcc-path": consumer_gcc_path,
         "consumer-gcc-options": consumer_gcc_options,
     }
+    # Every real `steps.*` reference the guard makes, standing in for a
+    # baseline that already resolved and preceding collect-facts steps that
+    # both succeeded -- the ordinary "everything's fine" path this cell
+    # takes in practice, which is exactly the path a dropped forwarding
+    # edge would silently skip.
+    steps_context = {
+        "resolve.outputs.outcome": "resolved",
+        "collect_verify.outcome": "success",
+        "collect_replay.outcome": "success",
+    }
+    guard = eval_gha_expression(
+        consumer_step["if"], inputs=hop3_inputs, steps=steps_context
+    )
+    assert guard is True, (
+        "the consumer-context step's own scheduling guard (`if:`) does not "
+        "evaluate truthy for this scenario -- the step would never run in "
+        "a real workflow, silently skipping the consumer dump regardless "
+        "of what its `with:` values resolve to"
+    )
+
     final_gcc_path = eval_gha_expression(
         consumer_step["with"]["gcc-path"], inputs=hop3_inputs
     )
@@ -148,28 +202,40 @@ def test_sentinel_consumer_gcc_path_survives_config_to_check_target_input() -> N
     assert final_gcc_path == _SENTINEL_CONSUMER_GCC_PATH
     assert final_gcc_options == "-std=gnu++20 -stdlib=libc++"
 
+    _assert_reaches_real_dump_cli_invocation(final_gcc_path, final_gcc_options)
 
-def test_sentinel_reaches_the_real_dump_cli_invocation() -> None:
-    """Hop 4: the value resolved at the end of the previous test's chain,
-    fed as real INPUT_* env vars into run.sh's own real dump-mode region
-    (the existing test_action_compile_context_parity.py harness -- no new
-    execution machinery, just this test's own sentinel instead of that
-    module's hand-picked constants), produces the real --compiler/
-    --compiler-option CLI flags."""
+
+def _assert_reaches_real_dump_cli_invocation(gcc_path: str, gcc_options: str) -> None:
+    """Hop 4: the value resolved at the end of hops 1-3, mapped to its REAL
+    INPUT_* env var name via root action.yml's own "Run abicheck" step env
+    block (`_action_yml_env_mapping`, from test_action_run_contract.py --
+    never a hardcoded `INPUT_GCC_PATH` guess, so a swap of that env
+    block's own gcc-path/gcc-options mappings would be caught here), fed
+    into run.sh's own real dump-mode region (the existing
+    test_action_compile_context_parity.py harness -- no new execution
+    machinery), producing the real --compiler/--compiler-option CLI
+    flags."""
+    env_by_input = {inp: var for var, inp in _action_yml_env_mapping().items()}
+    for name in ("gcc-path", "gcc-options", "ast-frontend", "gcc-prefix", "sysroot"):
+        assert name in env_by_input, (
+            f"root action.yml's env block no longer maps input {name!r} to "
+            f"an INPUT_* var -- test_action_run_contract.py's own contract "
+            f"tests should already have failed"
+        )
     env = {
-        "INPUT_AST_FRONTEND": "",
-        "INPUT_GCC_PATH": _SENTINEL_CONSUMER_GCC_PATH,
-        "INPUT_GCC_PREFIX": "",
-        "INPUT_GCC_OPTIONS": "-std=gnu++20 -stdlib=libc++",
-        "INPUT_SYSROOT": "",
+        env_by_input["ast-frontend"]: "",
+        env_by_input["gcc-path"]: gcc_path,
+        env_by_input["gcc-prefix"]: "",
+        env_by_input["gcc-options"]: gcc_options,
+        env_by_input["sysroot"]: "",
         "INPUT_NOSTDINC": "false",
     }
     cmd, _ = _run_region(_DUMP_MODE_MARKER, env)
     assert "--compiler" in cmd
-    assert cmd[cmd.index("--compiler") + 1] == _SENTINEL_CONSUMER_GCC_PATH
+    assert cmd[cmd.index("--compiler") + 1] == gcc_path
     assert "--compiler-option" in cmd
     options = [cmd[i + 1] for i, tok in enumerate(cmd) if tok == "--compiler-option"]
-    assert options == ["-std=gnu++20", "-stdlib=libc++"]
+    assert options == gcc_options.split()
 
 
 def test_bundle_kind_and_no_overlay_never_leak_the_workflow_global_path() -> None:
