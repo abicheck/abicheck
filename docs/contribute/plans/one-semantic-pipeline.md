@@ -1651,6 +1651,71 @@ regeneration's own 104-in/104-out count is the check), `mypy`/`ruff` both
 stayed clean, and `python scripts/check_architecture.py` reports 0 errors
 with both test files under the cap.
 
+**A further Codex review round found a fresh repro for a residual this
+module's own docstring had already named, explicitly, as an accepted,
+narrow gap -- attempted a fix, and reverted it after the fix's own blast
+radius and residual coverage didn't justify it.** `unmigrated_fact_reader_
+sites`'s docstring already states: "A genuinely duplicated expression (the
+identical containing expression appearing twice, with identical bare-read
+text, in one function) still falls back to the ordinal, an accepted,
+narrow residual." Codex's repro sharpens *why* that's a real risk, not
+just a curiosity: `decide(rec.bases)` under `if cond:` and, separately,
+under `else:` gets two baseline entries differing only by occurrence rank
+(`...::1`, `...::2`); deleting the `if` branch's call and adding a
+*different*, genuinely new `decide(rec.bases)` call somewhere else in the
+function re-numbers the survivors from scratch, so the new call can land
+on the vacated rank and silently inherit an unrelated site's approval.
+
+Attempted a fix: `_branch_path()`, walking a read's ancestors up to its
+enclosing function and recording which alternative of each `if`/`try`/
+`match`/loop-`else` it sits in, added as a new key segment. A first cut
+used a bare structural label (`"if"`/`"else"`) -- verified against the
+exact repro and found **insufficient**: two separate, sibling `if`
+statements in the same function both mark as plain `"if"` regardless of
+which one, so Codex's own repro (the read moving from a deleted `else:`
+to a *different* `if` statement elsewhere) still collided. Revised to
+carry the branch's own *governing* text (`f"if:{test text}"`,
+`f"except:{i}:{type text}"`, `f"case:{i}:{pattern text}"`) rather than a
+bare label -- deliberately still not the *body* text
+`_outermost_containing_expr`'s own docstring already rejected including
+(a change anywhere inside the branch's own body would then reshape the
+key for no reason); only the governing condition/type/pattern, which
+changes only when the branch's own identity does. This version correctly
+closed Codex's exact repro and a hand-built adversarial variant reusing
+the identical condition-variable name across separate `if` statements,
+verified empirically both ways.
+
+**Reverted anyway, after actually running the full existing suite --
+not because the mechanism was wrong, but because its true cost wasn't
+visible until measured.** The new key segment is a real structural
+change to the key *shape* for every entry, not just branching ones: a
+non-branching read's `branch_marker` is `""`, but the key is still built
+by `"::"`-joining a fixed number of components, so every one of the 40+
+existing hand-written key-literal tests in this file failed --  not
+because their logic was wrong, but because every expected key string now
+needs an inserted empty `"::"` segment before the occurrence rank, and
+the 104-entry `KNOWN_UNMIGRATED_READERS` baseline needs a full
+regeneration for the same reason. That is a large, mechanical, but
+genuinely invasive change for a gap this module's own docstring had
+*already* scoped and accepted as narrow -- and even after paying that
+cost, a residual remains (two sibling branches with byte-identical
+governing text, e.g. two separately-written `if cond:` blocks with the
+identical condition spelling and an identical duplicated call inside
+each) still falls back to the ordinal, unchanged from before the
+attempt. Weighed against this module's own established discipline
+(documented elsewhere in this same file and in AGENTS.md's "attempted
+twice, reverted twice" pattern): a fix that trades a large, invasive
+change and a full baseline regeneration for a *narrower*, not
+*eliminated*, version of an already-accepted, already-documented residual
+is not a clear improvement, so it was reverted rather than shipped.
+`git diff` after the revert is clean (`scripts/fact_field_readers.py`
+byte-identical to before the attempt); the full existing test suite
+(73 tests across this file and its wrapper-scoping sibling) passes
+unchanged. The residual stays exactly as this module's own docstring
+already described it before this round: an accepted, narrow gap, now
+with a concretely verified (not merely hypothetical) repro on record here
+and in the PR's own review thread.
+
 **Still not landed**: no detector (`diff_layout.py`/`diff_types.py`/
 `diff_param_qualifiers.py`/the reader set the check above now tracks
 precisely) has actually been migrated to read `.status` — the check above
