@@ -2482,6 +2482,28 @@ pipelines a fourth time.
   > (`header_backend` captured as the literal `"auto"` at the
   > `perform_elf_dump` call site).
   >
+  > **Third qualification (Codex review, fresh evidence): this reproduction
+  > additionally depends on there being no config-selected frontend.** The
+  > native `dump` CLI (`frontends/cli/commands/dump.py`) does not pass its
+  > raw, un-resolved `header_backend` straight to `perform_elf_dump` — it
+  > first calls `resolve_dump_compile_context()`
+  > (`cli_dump_helpers.py`/`cli_options.resolve_compile_context`) and
+  > reassigns `header_backend = _cc.frontend` from the result. That
+  > resolver's own CLI-over-config rule (`cli_options.py`) inherits the
+  > discovered `.abicheck.yml`'s `compile.frontend` whenever the CLI value
+  > is the un-given default `"auto"` — so a project whose config pins
+  > `compile.frontend: castxml` forwards the literal string `"castxml"`
+  > here, not `"auto"`, and does not exhibit the clang-vs-castxml
+  > divergence described above even with `ABICHECK_AST_FRONTEND` unset. A
+  > project pinning `compile.frontend: clang` forwards `"clang"`, which
+  > aligns with (not diverges from) `compare`'s own `effective_frontend`
+  > castxml default just as `ABICHECK_AST_FRONTEND=clang` does above — a
+  > second way for the two sides to coincidentally agree. The reproduction
+  > above therefore holds only when *both* no `ABICHECK_AST_FRONTEND`
+  > override selects a frontend *and* no discovered project config's
+  > `compile.frontend` does either (unset, or itself `"auto"`) — the
+  > no-config, no-env-override case this plan's own fixture used.
+  >
   > `compare`'s implicit-dump operand and `execute_dump_request` both reach
   > L4 replay through the *same* shared primitive,
   > `workflows.artifact.execute.embed_side_build_source`, whose
