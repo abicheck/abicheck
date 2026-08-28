@@ -907,8 +907,10 @@ def _itemgetter_matched_name(node: ast.Call) -> str:
 def _itemgetter_alias_keys(
     tree: ast.Module, itemgetter_names: frozenset[str], operator_names: frozenset[str]
 ) -> dict[str, list[str]]:
-    """Return every local name *tree* binds, via a plain `ast.Assign`, to
-    the *result* of constructing an `operator.itemgetter(...)` getter --
+    """Return every local name *tree* binds, via a plain `ast.Assign`, an
+    `ast.AnnAssign`, or an `ast.NamedExpr` (the same three binding forms
+    `_mapping_receiver_aliases()` already treats uniformly), to the
+    *result* of constructing an `operator.itemgetter(...)` getter --
     mapped to that constructor call's own literal, string-constant
     positional arguments (Codex review, fresh evidence). `get = operator.
     itemgetter("bases"); get(vars(rec))` reads the identical subscript
@@ -918,7 +920,11 @@ def _itemgetter_alias_keys(
     common Python -- unlike a constructed-but-never-called getter with no
     assignment at all, which `_is_itemgetter_constructor_call()`'s own
     docstring already accepts as out of scope for the *unassigned* case
-    only.
+    only. The identical getter can also be bound via `get: object =
+    operator.itemgetter("bases")` (an annotated assignment) or
+    `(get := operator.itemgetter("bases"))(vars(rec))` (a named
+    expression/walrus) -- both are covered here too (Codex review, fresh
+    evidence), not just the plain `ast.Assign` form.
 
     Deliberately narrower than `_operator_attrgetter_aliases()`'s own
     name-only alias tracking: a bare `Name`-valued alias of `itemgetter`
@@ -948,22 +954,36 @@ def _itemgetter_alias_keys(
     """
     assign_counts: dict[str, int] = {}
     candidate_keys: dict[str, list[str]] = {}
+
+    def _record(target: str, value: ast.expr | None) -> None:
+        if value is None:
+            return
+        assign_counts[target] = assign_counts.get(target, 0) + 1
+        if _is_itemgetter_constructor_call(value, itemgetter_names, operator_names):
+            assert isinstance(value, ast.Call)
+            candidate_keys[target] = [
+                arg.value
+                for arg in value.args
+                if isinstance(arg, ast.Constant) and isinstance(arg.value, str)
+            ]
+
     for node in ast.walk(tree):
-        if not isinstance(node, ast.Assign):
-            continue
-        for target in node.targets:
-            if not isinstance(target, ast.Name):
-                continue
-            assign_counts[target.id] = assign_counts.get(target.id, 0) + 1
-            if _is_itemgetter_constructor_call(
-                node.value, itemgetter_names, operator_names
-            ):
-                assert isinstance(node.value, ast.Call)
-                candidate_keys[target.id] = [
-                    arg.value
-                    for arg in node.value.args
-                    if isinstance(arg, ast.Constant) and isinstance(arg.value, str)
-                ]
+        # Every plain-name binding form this module's other alias
+        # collectors already treat uniformly (`_mapping_receiver_
+        # aliases()`'s own identical three-branch walk), not just
+        # `ast.Assign` (Codex review, fresh evidence): `get: object =
+        # operator.itemgetter("bases")` (an annotated assignment) and
+        # `(get := operator.itemgetter("bases"))(vars(rec))` (a named
+        # expression) construct and bind the identical getter, just
+        # through a different Python binding statement.
+        if isinstance(node, ast.Assign):
+            for target in node.targets:
+                if isinstance(target, ast.Name):
+                    _record(target.id, node.value)
+        elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
+            _record(node.target.id, node.value)
+        elif isinstance(node, ast.NamedExpr) and isinstance(node.target, ast.Name):
+            _record(node.target.id, node.value)
     return {
         name: keys for name, keys in candidate_keys.items() if assign_counts[name] == 1
     }

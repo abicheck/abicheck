@@ -2649,6 +2649,45 @@ tests. Still zero existing hits, `mypy`/`ruff` both stayed clean,
 `TestItemgetterMappingReaders`, all in `tests/test_fact_field_readers_
 later_fixes.py` (1113 lines, still under its own 1200-line cap).
 
+A follow-up Codex review on the same commit found `_itemgetter_alias_keys()`
+walked only `ast.Assign` -- `get: object = operator.itemgetter("bases")`
+(an annotated assignment) and `(get := operator.itemgetter("bases"))`
+(a named expression/walrus, bound and referenced later, not the immediate-
+self-call shape) construct and bind the identical getter through a
+different Python binding statement, and both were silently missed:
+`unmigrated_fact_reader_sites()` returned no site for either form, so the
+ERROR-level gate could be bypassed by simply spelling the same alias
+through `AnnAssign`/`NamedExpr` instead of `Assign`. Fixed by generalizing
+`_itemgetter_alias_keys()`'s walk to the identical three-branch shape
+`_mapping_receiver_aliases()` (`fact_field_readers.py`) already uses for
+this exact purpose -- a shared `_record(target, value)` helper called from
+`ast.Assign`, `ast.AnnAssign`, and `ast.NamedExpr` branches, preserving the
+existing ambiguity rule (a name assigned more than once anywhere in the
+tree is dropped entirely, regardless of which binding forms produced the
+multiple assignments).
+
+Verified against both reported repros (AnnAssign, NamedExpr-then-later-call),
+a multi-key variant of each, the bare (non-qualified) `itemgetter` spelling
+combined with each, the original plain-`ast.Assign` case as a regression
+check, and the reassigned-variable and non-mapping-receiver negative
+controls for both new forms -- all via direct AST reproduction before
+writing tests. One further shape was checked and found out of scope for
+this finding: `(get := operator.itemgetter("bases"))(vars(rec))`, an
+immediate self-call on the walrus expression itself (no later reference to
+`get` at all), stays undetected -- distinct from the reported "store then
+call later" pattern the review actually named, and from the already-handled
+`operator.itemgetter("bases")(vars(rec))` immediate-construction-and-call
+form (whose `func` is the `Call` node itself, not a `NamedExpr` wrapping
+one); left as an unreported, narrower residual rather than folded into this
+fix's scope. Still zero existing hits, `mypy`/`ruff` both stayed clean,
+`fact_field_readers_scope.py` at 989 lines (well under the 2000-line hard
+cap). New tests split into a dedicated sibling file,
+`tests/test_fact_field_readers_itemgetter_binding_forms.py` (9 tests, two
+classes: `TestItemgetterConstructorAliasedThroughAnnAssign`/
+`TestItemgetterConstructorAliasedThroughNamedExpr`), rather than appended to
+`test_fact_field_readers_later_fixes.py`, which had only ~87 lines of
+headroom left under its own 1200-line cap.
+
 ---
 
 ### Phase 1 — finish the `dump`/`scan` typed-API convergence (closes AGENTS.md "PR C")
