@@ -2361,6 +2361,37 @@ pipelines a fourth time.
   > update, no longer blocked on it either) remains the sole open item in
   > this prerequisite.
   >
+  > **Re-audited (2026-08-28, later session), no code change, no drift
+  > found.** Re-checked this section's live claims directly against current
+  > `main` rather than trusting the prior notes' status cells: `dump_cmd`'s
+  > real ELF/PE/Mach-O execution still goes through `perform_elf_dump`/
+  > `handle_non_elf_dump`, not `execute_dump_request` (the migration itself
+  > is still unstarted); `scan_engine.py` still hardcodes
+  > `source_extractor="auto"`; `--build-query`/`--build-compile-db`/
+  > `--exit-code-scheme` are all still live CLI options. Nothing in this
+  > section had gone stale.
+  >
+  > This session's own environment reconfirms the castxml-availability
+  > problem independently rather than resolving it, adding one new negative
+  > data point: `apt-get install castxml` on this container's Ubuntu base
+  > resolves to `0.6.3-1build2` — still below `castxml_policy.py`'s
+  > `>=0.6.11` floor, so the system package manager is not a viable source
+  > either, on top of pip's already-documented `0.4.5` ceiling. A
+  > conda-forge `castxml-0.7.0-hde8d07d_0.conda` package (the same
+  > version/channel the 2026-08-27 note below obtained a working build
+  > from) is fetchable through this session's proxy and extracts cleanly,
+  > but its `bin/castxml` links against `libclang-cpp.so.20.1`, and the
+  > obvious conda-forge counterpart package
+  > (`libclang-cpp-20.1.8-root_*.conda`) ships only a broken symlink to that
+  > filename, not the real payload — the actual shared object lives in a
+  > different, non-obviously-named package in conda-forge's split LLVM/clang
+  > stack. Assembling the full dependency chain by hand was not completed in
+  > this session; the 2026-08-27 note's own successful install is the
+  > existing record of a route that works, and an implementer resuming this
+  > item should follow that note's recipe rather than re-discover the
+  > package split from scratch. The byte-identical migration verification
+  > itself remains open, unchanged from the note above.
+  >
   > **Item 2 (the L4 extractor default divergence) is now locally
   > reconfirmed under real castxml — but this is a reproduction of an
   > already-established fact, not its first verification, and deliberately
