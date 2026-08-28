@@ -40,7 +40,6 @@ from .buildsource.model import (
     LayerCoverage,
 )
 from .buildsource.pack import BuildSourcePack
-from .buildsource.redaction import DEFAULT_REDACTION
 from .cli_buildsource_merge import (
     _exported_symbols_from_snapshot as _exported_symbols_from_snapshot,
     _ingest_inputs_pack_snapshot as _ingest_inputs_pack_snapshot,
@@ -52,6 +51,7 @@ from .cli_buildsource_merge import (
     _merge_print_summary as _merge_print_summary,
 )
 from .errors import SnapshotError
+from .workflows.extraction import DEFAULT_REDACTION
 
 if TYPE_CHECKING:
     from .buildsource.build_evidence import BuildEvidence
@@ -221,7 +221,7 @@ def _load_pack_or_raise(evidence_dir: Path) -> BuildSourcePack:
     (**exit 1** -- operational, not a usage error: the command line was
     well-formed and the pack was not). Message unchanged.
     """
-    from .buildsource.pack_load import load_pack_or_raise
+    from .workflows.extraction import load_pack_or_raise
 
     try:
         return load_pack_or_raise(evidence_dir)
@@ -246,7 +246,7 @@ def _load_inputs_pack_or_raise(
     sink for the loader's non-fatal findings -- the engine returns those
     through a callback rather than owning a stream.
     """
-    from .buildsource.pack_load import load_inputs_pack_or_raise
+    from .workflows.extraction import load_inputs_pack_or_raise
 
     try:
         return load_inputs_pack_or_raise(
@@ -458,7 +458,7 @@ def _collect_source_graph(
     # graph carries the public-reachability + source↔binary slices.
     graph = build_source_graph(merged, source_abi=surface)
     if surface is not None:
-        from .buildsource.inline_graph_fold import (
+        from .workflows.extraction import (
             fold_call_graph,
             fold_callback_graph,
             fold_include_graph,
@@ -508,7 +508,7 @@ def _collect_source_graph(
     # never called it at all, so a collected pack's static_library nodes
     # never got archive-member/symbol-definition edges or a coverage stamp,
     # regardless of whether --source-abi was given).
-    from .buildsource.inline_graph_fold import fold_archive_graph
+    from .workflows.extraction import fold_archive_graph
 
     fold_archive_graph(graph, merged, extractors)
     if kythe_entries or codeql_results or codeql_extends_results:
@@ -785,7 +785,7 @@ def _run_adapters(
     if read_compiler_record:
         if binary is None:
             raise click.UsageError("--read-compiler-record requires --binary.")
-        from .buildsource.compiler_record import extract_compiler_record
+        from .workflows.extraction import extract_compiler_record
 
         ev = extract_compiler_record(binary)
         merged.merge(ev)
@@ -824,12 +824,10 @@ def _run_external_extractors(
     captured as extractor rows so the collection-mode policy (D9) can act on them.
     """
     from .buildsource.build_evidence import BuildEvidence as _BuildEvidence
-    from .buildsource.extractor import (
+    from .workflows.extraction import (
         CollectionAction,
         CollectionContext,
         CollectionMode,
-    )
-    from .buildsource.extractor_manifest import (
         ManifestError,
         load_extractor_manifest,
         run_external_extractor,
@@ -983,7 +981,7 @@ def _ingest_graph_backends(
     """
     import json as _json
 
-    from .buildsource.graph_backends import (
+    from .workflows.extraction import (
         ingest_codeql_call_results,
         ingest_codeql_extends_results,
         ingest_kythe_entries,

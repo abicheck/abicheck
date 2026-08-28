@@ -335,13 +335,12 @@ def _pack_dir_build_evidence(path: Path) -> BuildEvidence | None:
     narrow except), so this function's existing load call already matches
     it exactly.
     """
-    from .workflows.extraction import is_pack_dir
+    from .workflows.extraction import is_pack_dir, validate_inputs_pack
 
     if is_pack_dir(path):
         from .buildsource.pack import BuildSourcePack
 
         return BuildSourcePack.load(path).build_evidence
-    from .buildsource.inputs_validate import validate_inputs_pack
     from .workflows.extraction import _load_build_evidence, load_inputs_manifest
 
     report = validate_inputs_pack(path)

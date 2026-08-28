@@ -62,15 +62,15 @@ from .buildsource.project_targets import (
     validate_project_targets,
 )
 from .buildsource.run_plan import generate_run_plan
-from .buildsource.toolchain_bindings import (
+from .cli import _safe_write_output, _setup_verbosity, main
+from .cli_options import output_options, verbose_option
+from .workflows.extraction import (
     BindingsFile,
     BindingsFileError,
     check_profile_bindings_resolve,
+    check_profile_toolchain_identity,
     load_bindings_file,
 )
-from .buildsource.toolchain_probe import check_profile_toolchain_identity
-from .cli import _safe_write_output, _setup_verbosity, main
-from .cli_options import output_options, verbose_option
 
 
 @main.group("project")

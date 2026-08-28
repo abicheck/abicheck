@@ -263,7 +263,7 @@ def _missing_requested_evidence_layers(
     if pack is None:
         return []
     from .buildsource.model import CoverageStatus
-    from .buildsource.source_replay import collection_for_ci_mode
+    from .workflows.extraction import collection_for_ci_mode
 
     _layer_for = {
         "L3": DataLayer.L3_BUILD,

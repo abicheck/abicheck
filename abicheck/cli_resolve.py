@@ -35,10 +35,9 @@ from typing import TYPE_CHECKING, Any
 
 import click
 
-from .buildsource.build_query import PRUNED_HEADER_DIR_SEGMENTS
 from .compat.abicc_dump_import import looks_like_perl_dump
 from .errors import SnapshotError
-from .workflows.extraction import iter_directory_headers
+from .workflows.extraction import PRUNED_HEADER_DIR_SEGMENTS, iter_directory_headers
 
 if TYPE_CHECKING:
     from pathlib import Path

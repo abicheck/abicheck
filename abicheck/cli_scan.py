@@ -62,14 +62,6 @@ from .buildsource.crosscheck import (  # noqa: F401 - CrosscheckConfig/run_cross
     CrosscheckConfig,
     run_crosschecks,
 )
-from .buildsource.pattern_scan import scan_files  # noqa: F401 - re-export for tests
-from .buildsource.poi import (  # noqa: F401 - re-export for tests
-    build_points_of_interest,
-    resolve_symbol_tus,
-)
-from .buildsource.preprocessor_scan import (
-    run_preprocessor_scan,  # noqa: F401 - re-export for tests
-)
 from .buildsource.scan_levels import (
     EvidenceDepth,
     ScanMode,
@@ -148,6 +140,12 @@ from .scan_engine import (  # noqa: F401 - several re-exported for tests/service
     _EvidenceContractError,
     _load_exports_for_poi,
     run_scan_core,
+)
+from .workflows.extraction import (  # noqa: F401 - re-exported for tests
+    build_points_of_interest,
+    resolve_symbol_tus,
+    run_preprocessor_scan,
+    scan_files,
 )
 from .workflows.scan_config import RiskScore, score_changed_paths
 
@@ -1123,7 +1121,7 @@ def _discover_scan_project_config(
     _project_sha256: str | None = None
     if cfg_path is not None:
         try:
-            from .buildsource.build_config_io import load_build_config_with_digest
+            from .workflows.extraction import load_build_config_with_digest
 
             project_cfg, _project_sha256 = load_build_config_with_digest(cfg_path)
         except ValueError as exc:
@@ -1979,7 +1977,7 @@ def scan_cmd(
         # Remove the inferred cmake build dir(s) now that every build-dir-dependent
         # phase has run (or the scan aborted). Best-effort (each thunk is suppressed)
         # so a removal/unlock error never aborts the rest nor masks the real outcome.
-        from .buildsource.build_query import drain_build_dir_cleanups
+        from .workflows.extraction import drain_build_dir_cleanups
 
         drain_build_dir_cleanups(build_dir_cleanups)
 
