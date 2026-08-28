@@ -866,12 +866,25 @@ def test_bundle_kind_and_no_overlay_never_leak_the_workflow_global_path() -> Non
     cell, activating the child step's separate consumer dump with an
     empty/default compiler context -- exactly the failure mode this test
     exists to rule out, just one hop earlier than the three fields it was
-    already checking."""
+    already checking. The same review round also asked that the evaluated
+    marker be carried through the child step's own scheduling guard (hop
+    3) for these inactive cases, confirming the step actually stays
+    disabled end to end, not just that hop 2's own marker resolves
+    falsy."""
     run_step = _run_check_step("Run check-target")
+    _assert_run_check_target_step_guard_fires(run_step)
     gcc_path_expr = run_step["with"]["consumer-gcc-path"]
     gcc_options_expr = run_step["with"]["consumer-gcc-options"]
     ast_frontend_expr = run_step["with"]["consumer-ast-frontend"]
     active_expr = run_step["with"]["consumer-compile-active"]
+    kind_expr = run_step["with"]["kind"]
+    baseline_channel_expr = run_step["with"]["baseline-channel"]
+    consumer_step = _consumer_context_step()
+    steps_context = {
+        "resolve.outputs.outcome": "resolved",
+        "collect_verify.outcome": "success",
+        "collect_replay.outcome": "success",
+    }
 
     bundle_matrix = {
         "kind": "bundle",
@@ -901,13 +914,25 @@ def test_bundle_kind_and_no_overlay_never_leak_the_workflow_global_path() -> Non
         )
         == ""
     )
-    assert (
-        eval_gha_expression(active_expr, matrix=bundle_matrix, inputs={}) == "false"
-    ), (
+    bundle_active = eval_gha_expression(active_expr, matrix=bundle_matrix, inputs={})
+    assert bundle_active == "false", (
         "a bundle-kind cell must never report consumer-compile-active as "
         "true, regardless of what the (unused for bundles) consumer_"
         "compile_active matrix field says"
     )
+    bundle_hop3_inputs = _hop3_inputs_from(
+        kind=eval_gha_expression(kind_expr, matrix=bundle_matrix),
+        baseline_channel=eval_gha_expression(
+            baseline_channel_expr, matrix=bundle_matrix
+        ),
+        consumer_compile_active=bundle_active,
+        consumer_ast_frontend="",
+        consumer_gcc_path="",
+        consumer_gcc_options="",
+    )
+    assert not eval_gha_expression(
+        consumer_step["if"], inputs=bundle_hop3_inputs, steps=steps_context
+    ), "a bundle-kind cell must leave the consumer-context step disabled end to end"
 
     no_overlay_matrix = {"kind": "target", "consumer_compile_active": False}
     no_overlay_inputs = {
@@ -933,9 +958,26 @@ def test_bundle_kind_and_no_overlay_never_leak_the_workflow_global_path() -> Non
         )
         == ""
     )
-    assert (
-        eval_gha_expression(active_expr, matrix=no_overlay_matrix, inputs={}) == "false"
-    ), (
+    no_overlay_active = eval_gha_expression(
+        active_expr, matrix=no_overlay_matrix, inputs={}
+    )
+    assert no_overlay_active == "false", (
         "a profile with no consumer_compile overlay must never report "
         "consumer-compile-active as true"
+    )
+    no_overlay_hop3_inputs = _hop3_inputs_from(
+        kind=eval_gha_expression(kind_expr, matrix=no_overlay_matrix),
+        baseline_channel=eval_gha_expression(
+            baseline_channel_expr, matrix=no_overlay_matrix
+        ),
+        consumer_compile_active=no_overlay_active,
+        consumer_ast_frontend="",
+        consumer_gcc_path="",
+        consumer_gcc_options="",
+    )
+    assert not eval_gha_expression(
+        consumer_step["if"], inputs=no_overlay_hop3_inputs, steps=steps_context
+    ), (
+        "a profile with no consumer_compile overlay must leave the "
+        "consumer-context step disabled end to end"
     )
