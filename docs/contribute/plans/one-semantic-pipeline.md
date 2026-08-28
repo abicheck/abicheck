@@ -983,16 +983,29 @@ The check's baseline (`KNOWN_UNMIGRATED_READERS`, allowlist-and-shrink,
 `IMPORT_CYCLE_ALLOWLIST`'s own convention) therefore records 99 currently-
 known reader sites across the nine-plus-fourteen-plus-three modules named
 above and throughout this Design section, keyed
-`"<rel>::<qualname>::<attr>::<occurrence>"` -- `qualname` the enclosing
-function (`<module>` for module-level code, `Class.method` for a method),
-`occurrence` scoped to that same function (not merely the file). A first
-draft keyed only `"<rel>::<attr>::<occurrence>"`; a Codex review round
-caught the real gap in that: an existing read migrated or deleted and a
-different, unrelated read of the same attribute later added to the same
-file would silently inherit the vacated occurrence number and read as an
-already-reviewed site — scoping the counter to `(qualname, attr)` needs
-the new read to land in the exact same function at the exact same rank to
-collide, a real coincidence rather than a routine edit's side effect.
+`"<rel>::<qualname>::<attr>::<expr-text>::<occurrence>"` -- `qualname` the
+enclosing function (`<module>` for module-level code, `Class.method` for a
+method), `expr-text` the read's own exact source text
+(`ast.get_source_segment`), `occurrence` a rank among reads sharing all
+three of those. A first draft keyed only `"<rel>::<attr>::<occurrence>"`; a
+Codex review round caught the real gap in that: an existing read migrated
+or deleted and a different, unrelated read of the same attribute later
+added to the same file would silently inherit the vacated occurrence
+number and read as an already-reviewed site — scoping the counter to
+`(qualname, attr)` needs the new read to land in the exact same function at
+the exact same rank to collide, a real coincidence rather than a routine
+edit's side effect.
+
+**A second Codex round found the function-scoped key still collides.**
+`diff_param_qualifiers.py`'s `if not p_old.is_va_list and p_new.is_va_list:`
+has two DIFFERENT reads (`p_old.is_va_list`, `p_new.is_va_list`) on one
+line, in the same function — a purely positional rank can't tell them
+apart, or protect a future, unrelated third read from inheriting one's
+rank once it's migrated away. Fixed by folding the read's own source text
+into the key (`ast.get_source_segment`, scoping the occurrence counter to
+`(qualname, attr, text)`) — a collision now needs the new read to be the
+*textually identical* expression, not merely occupy the same rank in the
+same function. Every key in the baseline below carries this shape.
 
 `EXEMPT_FUNCTIONS` is the separate, non-shrinking set of specific
 functions this check never flags: `RecordType.__post_init__`/

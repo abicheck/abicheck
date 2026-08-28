@@ -80,7 +80,10 @@ def test_baseline_entries_are_real_sites() -> None:
             tree = ast.parse(gate._read(path), filename=rel)
         except SyntaxError:
             continue
-        for key, _lineno, _attr, qualname in unmigrated_fact_reader_sites(tree, rel):
+        source = gate._read(path)
+        for key, _lineno, _attr, qualname in unmigrated_fact_reader_sites(
+            tree, rel, source
+        ):
             if f"{rel}::{qualname}" in EXEMPT_FUNCTIONS:
                 continue
             seen.add(key)
@@ -103,7 +106,10 @@ def test_exempt_functions_are_real_sites() -> None:
             tree = ast.parse(gate._read(path), filename=rel)
         except SyntaxError:
             continue
-        for _key, _lineno, _attr, qualname in unmigrated_fact_reader_sites(tree, rel):
+        source = gate._read(path)
+        for _key, _lineno, _attr, qualname in unmigrated_fact_reader_sites(
+            tree, rel, source
+        ):
             covering.add(f"{rel}::{qualname}")
     stale = EXEMPT_FUNCTIONS - covering
     assert stale == set(), (
@@ -137,8 +143,10 @@ class TestUnmigratedFactReaderSites:
         reads `vtable` exactly this way)."""
         src = 'def f(rec):\n    return getattr(rec, "vtable", None) or []\n'
         tree = ast.parse(src, filename="x.py")
-        sites = unmigrated_fact_reader_sites(tree, "x.py")
-        assert [key for key, _l, _a, _q in sites] == ["x.py::f::vtable::1"]
+        sites = unmigrated_fact_reader_sites(tree, "x.py", src)
+        assert [key for key, _l, _a, _q in sites] == [
+            'x.py::f::vtable::getattr(rec, "vtable", None)::1'
+        ]
 
     def test_ignores_a_getattr_call_with_a_non_matching_or_dynamic_name(self) -> None:
         src = (
@@ -192,14 +200,43 @@ class TestUnmigratedFactReaderSites:
             "    c = rec.bases\n"
         )
         tree = ast.parse(src, filename="x.py")
-        keys = [key for key, _l, _a, _q in unmigrated_fact_reader_sites(tree, "x.py")]
-        assert keys == ["x.py::f::bases::1", "x.py::f::bases::2", "x.py::g::bases::1"]
+        keys = [
+            key for key, _l, _a, _q in unmigrated_fact_reader_sites(tree, "x.py", src)
+        ]
+        assert keys == [
+            "x.py::f::bases::rec.bases::1",
+            "x.py::f::bases::rec.bases::2",
+            "x.py::g::bases::rec.bases::1",
+        ]
 
     def test_two_different_attrs_on_the_same_line_each_get_their_own_key(self) -> None:
         src = "def f(rec):\n    return rec.bases, rec.vtable\n"
         tree = ast.parse(src, filename="x.py")
-        keys = {key for key, _l, _a, _q in unmigrated_fact_reader_sites(tree, "x.py")}
-        assert keys == {"x.py::f::bases::1", "x.py::f::vtable::1"}
+        keys = {
+            key for key, _l, _a, _q in unmigrated_fact_reader_sites(tree, "x.py", src)
+        }
+        assert keys == {
+            "x.py::f::bases::rec.bases::1",
+            "x.py::f::vtable::rec.vtable::1",
+        }
+
+    def test_two_different_reads_on_the_same_line_get_distinct_keys(self) -> None:
+        """`if not p_old.is_va_list and p_new.is_va_list:` -- two textually
+        different reads of the same attribute, same line, same function
+        (the exact `diff_param_qualifiers.py` shape from the Codex review
+        that motivated including source text in the key at all)."""
+        src = (
+            "def f(p_old, p_new):\n"
+            "    return not p_old.is_va_list and p_new.is_va_list\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        keys = [
+            key for key, _l, _a, _q in unmigrated_fact_reader_sites(tree, "x.py", src)
+        ]
+        assert keys == [
+            "x.py::f::is_va_list::p_old.is_va_list::1",
+            "x.py::f::is_va_list::p_new.is_va_list::1",
+        ]
 
 
 def test_check_reports_a_new_unlisted_violation(
@@ -243,7 +280,7 @@ def test_check_is_silent_for_a_baselined_violation(
     monkeypatch.setattr(
         gate,
         "KNOWN_UNMIGRATED_READERS",
-        frozenset({"abicheck/a_new_reader.py::f::bases::1"}),
+        frozenset({"abicheck/a_new_reader.py::f::bases::rec.bases::1"}),
     )
 
     findings = Findings()
