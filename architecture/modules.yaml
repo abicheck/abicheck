@@ -104,11 +104,13 @@
         "abicheck/macho_metadata.py",
         "abicheck/numpy_capi.py",
         "abicheck/package.py",
+        "abicheck/parallel_probe.py",
         "abicheck/pdb_metadata.py",
         "abicheck/pdb_model.py",
         "abicheck/pdb_parser.py",
         "abicheck/pdb_utils.py",
         "abicheck/pe_metadata.py",
+        "abicheck/process_resources.py",
         "abicheck/provenance.py",
         "abicheck/python_api.py",
         "abicheck/python_ext.py",
@@ -170,7 +172,8 @@
         "abicheck/diff_unnamed_types.py",
         "abicheck/diff_vtable_layout.py",
         "abicheck/finding_identity.py",
-        "abicheck/probe_harness.py"
+        "abicheck/probe_harness.py",
+        "abicheck/qualified_name_segments.py"
       ]
     },
     "policy": {
@@ -183,6 +186,11 @@
         "abicheck/analysis_assurance.py",
         "abicheck/contract_coverage_exit.py",
         "abicheck/exit_decision.py",
+        "abicheck/idioms.py",
+        "abicheck/pattern_verdicts.py",
+        "abicheck/post_processing.py",
+        "abicheck/post_processing_context.py",
+        "abicheck/post_processing_reachability.py",
         "abicheck/severity.py"
       ]
     },
@@ -199,6 +207,9 @@
         "abicheck/binder.py",
         "abicheck/buildsource/baseline_publish.py",
         "abicheck/compatibility_evaluation_frontend.py",
+        "abicheck/l0_export_delta.py",
+        "abicheck/post_manifest.py",
+        "abicheck/product_baseline.py",
         "abicheck/resolver.py",
         "abicheck/service.py",
         "abicheck/service_compare_evidence.py",
@@ -217,7 +228,21 @@
         "workflows"
       ],
       "legacy_paths": [
-        "abicheck/reporter.py"
+        "abicheck/html_report.py",
+        "abicheck/html_template.py",
+        "abicheck/junit_coverage_warnings.py",
+        "abicheck/junit_report.py",
+        "abicheck/pr_comment.py",
+        "abicheck/pr_comment_base.py",
+        "abicheck/pr_comment_scan.py",
+        "abicheck/report_classifications.py",
+        "abicheck/report_correlation.py",
+        "abicheck/report_model.py",
+        "abicheck/report_summary.py",
+        "abicheck/reporter.py",
+        "abicheck/reporter_contract_blocks.py",
+        "abicheck/reporter_markdown.py",
+        "abicheck/root_cause_evidence.py"
       ]
     },
     "frontends": {
