@@ -361,8 +361,24 @@ def test_write_snapshot_output_folds_a_flow2_inputs_pack_onto_a_resolve_time_emb
     surface has no way to see (it is declared in no header at all): the
     written snapshot must link ``helper`` (the Flow-2 replacement took
     effect) while still carrying the resolve-time embed's own real L3
-    compile-unit facts and L5 graph (the layers Flow-2 did not supply, so
-    ``bi_pack`` -- the resolve-time embed -- must still win them).
+    compile-unit facts (the one layer Flow-2 did not supply here, so
+    ``bi_pack`` -- the resolve-time embed -- must still win it).
+
+    L5 is **not** independently preserved in this scenario, and the test
+    below proves that directly rather than assuming it (Codex review,
+    PR #917: an earlier revision asserted only that the combined graph was
+    non-empty, which passed regardless of which pack's graph won).
+    ``ingest_inputs_pack`` builds ``source_abi``/``source_graph`` together
+    from the same ``tus`` list whenever any TU is supplied -- a Flow-2 pack
+    that replaces L4 (the whole point of this fixture) therefore always
+    supplies a real, non-empty L5 graph too, and ``_combine_packs`` prefers
+    ``src_pack`` for L5 exactly as it does for L4. So the resolve-time
+    embed's own graph (17 nodes here, including a ``sum()`` declaration
+    node) is replaced wholesale by Flow-2's own graph (built purely from
+    ``tu``, containing only ``helper``), the same way its L4 surface is --
+    confirmed below by asserting the ``sum()`` node is absent and the
+    ``helper`` node is present in the final graph, not merely that the
+    graph is non-empty.
     """
     from abicheck.api_types import DumpRequest, InputSpec
     from abicheck.buildsource import SourceAbiTu, SourceEntity, SourceLocation
@@ -400,6 +416,22 @@ def test_write_snapshot_output_folds_a_flow2_inputs_pack_onto_a_resolve_time_emb
         "source_decl_to_binary_symbol", {}
     )
     assert "helper" not in pre_mapping
+
+    # Ground truth for the L5 check below: the resolve-time embed's own
+    # real source graph, captured *before* the Flow-2 fold, so the later
+    # assertion proves a specific node from *this* graph is gone rather
+    # than merely asserting a property that would hold for any non-empty
+    # graph. Derived from the graph itself (not a hardcoded mangled name)
+    # so this stays robust to a differing Itanium mangling; asserting its
+    # own presence here pins that the fixture still produces a `sum()`
+    # declaration node to look for at all.
+    assert snap.build_source.source_graph is not None
+    pre_sum_node_ids = {
+        n.id
+        for n in snap.build_source.source_graph.nodes
+        if n.kind == "source_decl" and "sum" in n.id
+    }
+    assert pre_sum_node_ids, "fixture no longer produces a sum() decl node"
 
     flow2_root = tmp_path / "abicheck_inputs"
     tu = SourceAbiTu(
@@ -455,9 +487,17 @@ def test_write_snapshot_output_folds_a_flow2_inputs_pack_onto_a_resolve_time_emb
     assert len(compile_units) == 1
     assert compile_units[0]["standard"] == "c++17"
 
-    # L5: Flow-2 supplied no graph either, so the resolve-time embed's own
-    # real source graph must also survive.
-    assert len(build_source["source_graph"]["nodes"]) > 0
+    # L5: Flow-2's own graph (built alongside its L4 surface from the same
+    # `tus`, per `ingest_inputs_pack`) wins this layer too -- confirmed
+    # directly rather than by a non-empty check alone (Codex review,
+    # PR #917: a Flow-2 pack that supplies any TU always supplies a
+    # non-empty graph too, so `len(nodes) > 0` would pass whichever pack's
+    # graph won). The resolve-time embed's own `sum()` decl node(s),
+    # captured as ground truth above, must be gone; the Flow-2-only
+    # `helper` decl node must be present.
+    graph_node_ids = {n["id"] for n in build_source["source_graph"]["nodes"]}
+    assert graph_node_ids.isdisjoint(pre_sum_node_ids)
+    assert "decl://helper" in graph_node_ids
 
 
 @pytest.mark.skipif(not (_HAVE_GXX and _HAVE_CLANG), reason=_SKIP_REASON)

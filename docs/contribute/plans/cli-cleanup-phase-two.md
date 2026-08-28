@@ -2304,14 +2304,25 @@ pipelines a fourth time.
   > in no header the resolve-time embed ever parsed) the resolve-time L4
   > surface has no way to see: the written snapshot links `helper` (the
   > Flow-2 replacement took effect) while the resolve-time embed's own L3
-  > compile-unit facts and L5 graph — the layers Flow-2 did not supply —
-  > survive the combination untouched, and the resolve-time embed's own L4
-  > fact for `sum()` does *not* survive (pinning the wholesale-replacement,
-  > not-a-merge semantics itself, not just the positive case). This is not
-  > new behavior introduced by a resolve-time embed — `_combine_packs`'s
-  > per-layer priority is unconditional on how either pack was
-  > produced — but it was genuinely unverified for this specific base-pack
-  > shape until now. Test:
+  > compile-unit facts — the one layer Flow-2 did not supply here — survive
+  > the combination untouched, and the resolve-time embed's own L4 fact for
+  > `sum()` does *not* survive (pinning the wholesale-replacement,
+  > not-a-merge semantics itself, not just the positive case). **Correction
+  > (Codex review, PR #917): L5 is not independently preserved in this
+  > scenario** — `ingest_inputs_pack` builds `source_abi`/`source_graph`
+  > together from the same `tus` list whenever any TU is supplied, so a
+  > Flow-2 pack that replaces L4 always supplies a real, non-empty L5 graph
+  > too, and `_combine_packs` prefers `src_pack` for L5 exactly as it does
+  > for L4 — the resolve-time embed's own graph (17 nodes, including a
+  > `sum()` declaration node) is replaced wholesale by Flow-2's own graph
+  > (8 nodes, containing only `helper`), confirmed directly by asserting the
+  > `sum()` node is absent and the `helper` node present in the final graph
+  > rather than only that the graph is non-empty (an earlier revision of
+  > this test asserted only non-emptiness, which passed regardless of which
+  > pack's graph won). This is not new behavior introduced by a
+  > resolve-time embed — `_combine_packs`'s per-layer priority is
+  > unconditional on how either pack was produced — but it was genuinely
+  > unverified for this specific base-pack shape until now. Test:
   > `tests/test_dump_write_after_resolve_time_embed.py::
   > test_write_snapshot_output_folds_a_flow2_inputs_pack_onto_a_resolve_time_embedded_snapshot`.
   > This closes the Flow-2 half of the reordering prerequisite in full; the
