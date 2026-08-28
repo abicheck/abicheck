@@ -470,6 +470,45 @@ def _bound_names(target: ast.expr) -> list[str]:
     return names
 
 
+def _match_pattern_names(pattern: ast.pattern) -> list[str]:
+    """Recursively collect every name a structural-pattern-matching
+    `pattern` binds -- `case fact:` (a bare capture, `ast.MatchAs` with a
+    `name`), `case [*rest]:` (`ast.MatchStar`), `case {**rest}:`
+    (`ast.MatchMapping`'s own `rest`), and any of these nested inside a
+    `MatchSequence`/`MatchMapping`/`MatchClass`/`MatchOr` (Codex review,
+    fresh evidence): each is a real local binding, exactly like a `for`
+    loop target or an `except ... as name:` handler, but nothing recorded
+    it as one -- a nested function's own `case fact:` failed to shadow an
+    outer `fact = rec.bases_fact` alias, flagging a valid `fact == other`
+    against the captured (arbitrary) matched value. `MatchValue`/
+    `MatchSingleton` bind nothing and are correctly ignored.
+    """
+    names: list[str] = []
+    if isinstance(pattern, ast.MatchAs):
+        if pattern.name is not None:
+            names.append(pattern.name)
+        if pattern.pattern is not None:
+            names.extend(_match_pattern_names(pattern.pattern))
+    elif isinstance(pattern, ast.MatchStar):
+        if pattern.name is not None:
+            names.append(pattern.name)
+    elif isinstance(pattern, ast.MatchMapping):
+        if pattern.rest is not None:
+            names.append(pattern.rest)
+        for sub in pattern.patterns:
+            names.extend(_match_pattern_names(sub))
+    elif isinstance(pattern, ast.MatchSequence):
+        for sub in pattern.patterns:
+            names.extend(_match_pattern_names(sub))
+    elif isinstance(pattern, ast.MatchClass):
+        for sub in (*pattern.patterns, *pattern.kwd_patterns):
+            names.extend(_match_pattern_names(sub))
+    elif isinstance(pattern, ast.MatchOr):
+        for sub in pattern.patterns:
+            names.extend(_match_pattern_names(sub))
+    return names
+
+
 def _fact_aliases(tree: ast.Module, qualnames: _QualnameSpans) -> dict[str, set[str]]:
     """Map each function's qualname to the local names, within that
     function, known to hold a `Fact[T]` value (Codex review, fresh
@@ -597,6 +636,14 @@ def _fact_aliases(tree: ast.Module, qualnames: _QualnameSpans) -> dict[str, set[
     # a dedicated pass after the fixed point below has already stabilized
     # every scope's own alias set -- see that pass's own comment.
     pending_defaults: list[tuple[str, str, ast.expr]] = []
+    # `id()` of every `ast.NamedExpr` found inside a parameter's own
+    # default-value expression -- these are handled explicitly by the
+    # `FunctionDef`/`AsyncFunctionDef`/`Lambda` branch below (registered
+    # in the *enclosing* scope, matching Python's real default-evaluation
+    # rule) and must be skipped by the generic, position-based `NamedExpr`
+    # branch, which would otherwise misattribute one to the function being
+    # *defined* -- see both branches' own comments for why.
+    default_walrus_ids: set[int] = set()
     for node in ast.walk(tree):
         if isinstance(node, ast.Assign):
             qualname = _qualname_at((node.lineno, node.col_offset), qualnames)
@@ -627,6 +674,13 @@ def _fact_aliases(tree: ast.Module, qualnames: _QualnameSpans) -> dict[str, set[
             elif node.value is not None:
                 candidates.setdefault(qualname, []).append((node.target.id, node.value))
         elif isinstance(node, ast.NamedExpr) and isinstance(node.target, ast.Name):
+            if id(node) in default_walrus_ids:
+                # Already handled by the `FunctionDef`/`AsyncFunctionDef`/
+                # `Lambda` branch below, registered in the *enclosing*
+                # scope -- this generic, position-based path would
+                # otherwise misattribute it to the function being defined
+                # (see that branch's own comment for why).
+                continue
             # `(fact := rec.bases_fact)` -- a real alias binding too, not
             # merely an inline-recognizable expression (see `_is_fact_
             # typed_expr`'s own NamedExpr branch for that half): `fact`
@@ -686,6 +740,16 @@ def _fact_aliases(tree: ast.Module, qualnames: _QualnameSpans) -> dict[str, set[
             if node.name is not None:
                 qualname = _qualname_at((node.lineno, node.col_offset), qualnames)
                 locally_bound.setdefault(qualname, set()).add(node.name)
+        elif isinstance(node, ast.Match):
+            # `case fact:`/`case [*rest]:`/`case {**rest}:` -- a real
+            # local binding too, the same as any other capture form above
+            # (Codex review, fresh evidence). `match`/`case` introduces no
+            # scope of its own in Python, so every case's own captures are
+            # attributed to the `match` statement's own position.
+            qualname = _qualname_at((node.lineno, node.col_offset), qualnames)
+            for case in node.cases:
+                for name in _match_pattern_names(case.pattern):
+                    locally_bound.setdefault(qualname, set()).add(name)
         elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)):
             # `ast.Lambda` shares the identical `.args: ast.arguments`
             # shape a `def` has (Codex review, fresh evidence -- see
@@ -726,6 +790,35 @@ def _fact_aliases(tree: ast.Module, qualnames: _QualnameSpans) -> dict[str, set[
             for arg, kw_default in zip(node.args.kwonlyargs, node.args.kw_defaults):
                 if kw_default is not None:
                     pending_defaults.append((qualname, arg.arg, kw_default))
+            # A walrus *inside* a default expression -- `def inner(x=(fact
+            # := rec.bases_fact)):` -- binds `fact` in the scope the
+            # default is evaluated in too, which is the *enclosing* scope
+            # (Python's own default-evaluation rule, the same one the
+            # pending-defaults handling above already relies on), not
+            # `inner`'s own body scope (Codex review, fresh evidence): the
+            # generic, position-based `NamedExpr` branch would otherwise
+            # attribute it to `inner` -- the smallest span containing the
+            # walrus's own position, since a default expression is
+            # textually part of the `def`/lambda's own span -- silently
+            # losing an alias a later, genuinely outer `fact == other`
+            # needs. Registered directly in the enclosing scope
+            # (`lexical_parents[qualname]`, computed once up front for
+            # exactly this kind of use) as an ordinary local binding, and
+            # excluded from the generic branch via `default_walrus_ids` so
+            # it isn't also (mis)processed there.
+            enclosing = lexical_parents.get(qualname, "<module>")
+            for default_expr in (*node.args.defaults, *node.args.kw_defaults):
+                if default_expr is None:
+                    continue
+                for walrus in ast.walk(default_expr):
+                    if isinstance(walrus, ast.NamedExpr) and isinstance(
+                        walrus.target, ast.Name
+                    ):
+                        default_walrus_ids.add(id(walrus))
+                        locally_bound.setdefault(enclosing, set()).add(walrus.target.id)
+                        candidates.setdefault(enclosing, []).append(
+                            (walrus.target.id, walrus.value)
+                        )
         elif isinstance(
             node, (ast.ListComp, ast.SetComp, ast.DictComp, ast.GeneratorExp)
         ):

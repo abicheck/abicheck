@@ -1349,6 +1349,47 @@ Five new tests: the walrus-shadow false positive and its walrus-hops-out
 positive control, a default referencing an outer alias, a directly
 Fact-typed default, and an ordinary-default negative control.
 
+**A further Codex review round found two more real gaps -- one a false
+positive in the same shadowing family as the class-body/lambda/
+comprehension fixes above, the other a false negative in the same
+"attributed to the wrong scope" family as the default-value fix just
+above -- both fixed.** (1) **Structural pattern matching's own capture
+forms were never recorded as local bindings.** `case fact:` (a bare
+`ast.MatchAs` capture), `case [*fact]:` (`ast.MatchStar`), and `case
+{**fact}:` (`ast.MatchMapping`'s own `rest`) are all real local bindings,
+exactly like a `for` loop target or an `except ... as name:` handler, but
+nothing collected any of them -- a nested function's own `case fact:`
+failed to shadow an outer `fact = rec.bases_fact` alias, flagging a valid
+`fact == other` comparison against the captured (arbitrary) matched
+value. Fixed with a new `_match_pattern_names()`, recursively collecting
+every bound name from a `pattern` (also descending into `MatchSequence`/
+`MatchMapping`/`MatchClass`/`MatchOr`, since a capture can nest inside
+any of them), wired into a new `ast.Match` branch in the binding-
+collection walk -- `match`/`case` introduces no scope of its own in
+Python, so every case's captures are attributed to the `match`
+statement's own position. (2) **A walrus inside a parameter's own
+default expression was attributed to the wrong scope.** `def inner(x=
+(fact := rec.bases_fact)):` -- Python evaluates a default expression in
+the *enclosing* scope (the same rule the previous round's default-value
+fix already relies on), but the generic, position-based `NamedExpr`
+handling resolves a query position to the *smallest* span containing it
+-- and a default expression is textually part of the `def`/lambda's own
+span, so the walrus was misattributed to `inner`'s own body scope, not
+the scope its value is actually usable in. A later, genuinely outer
+`fact == other` therefore saw no alias for `fact` at all. Fixed by
+explicitly walking each default expression (`args.defaults`/
+`kw_defaults`) inside the `FunctionDef`/`AsyncFunctionDef`/`Lambda`
+branch that already handles defaults, registering any embedded
+`NamedExpr` directly in the *enclosing* scope (`lexical_parents[
+qualname]`) as an ordinary local binding -- and recording each one's
+`id()` in a new `default_walrus_ids` set so the generic, position-based
+`NamedExpr` branch skips it rather than also (mis)processing it a second
+time. Verified empirically: still zero existing hits in the real
+repository, and positive controls confirm a genuine misuse reached
+through a match capture (no shadowing) is still caught. Five new tests:
+`MatchAs`/`MatchStar`/`MatchMapping` shadowing, a positive control for a
+real match-capture misuse, and the default-expression-walrus repro.
+
 ---
 
 ### Phase 1 — finish the `dump`/`scan` typed-API convergence (closes AGENTS.md "PR C")

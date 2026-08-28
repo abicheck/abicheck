@@ -332,6 +332,69 @@ class TestFactEqualityMisuseSites:
         tree = ast.parse(src, filename="x.py")
         assert fact_equality_misuse_sites(tree, "x.py") == []
 
+    def test_ignores_a_match_capture_that_shadows_an_outer_fact_alias(
+        self,
+    ) -> None:
+        """`case fact:` (a bare `ast.MatchAs` capture) binds `fact`
+        locally too, the same as any other capture form (Codex review,
+        fresh evidence)."""
+        src = (
+            "def f(rec, other):\n"
+            "    fact = rec.bases_fact\n"
+            "    def inner(x, other):\n"
+            "        match x:\n"
+            "            case fact:\n"
+            "                return fact == other\n"
+            "    return inner(rec, other)\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert fact_equality_misuse_sites(tree, "x.py") == []
+
+    def test_ignores_a_match_star_capture_that_shadows_an_outer_fact_alias(
+        self,
+    ) -> None:
+        """`case [*fact]:` (`ast.MatchStar`) binds `fact` locally too."""
+        src = (
+            "def f(rec, other):\n"
+            "    fact = rec.bases_fact\n"
+            "    def inner(items, other):\n"
+            "        match items:\n"
+            "            case [*fact]:\n"
+            "                return fact == other\n"
+            "    return inner(rec, other)\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert fact_equality_misuse_sites(tree, "x.py") == []
+
+    def test_ignores_a_match_mapping_rest_that_shadows_an_outer_fact_alias(
+        self,
+    ) -> None:
+        """`case {**fact}:` (`ast.MatchMapping`'s own `rest`) binds
+        `fact` locally too."""
+        src = (
+            "def f(rec, other):\n"
+            "    fact = rec.bases_fact\n"
+            "    def inner(mapping, other):\n"
+            "        match mapping:\n"
+            "            case {**fact}:\n"
+            "                return fact == other\n"
+            "    return inner(rec, other)\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert fact_equality_misuse_sites(tree, "x.py") == []
+
+    def test_detects_a_real_misuse_through_a_match_capture(self) -> None:
+        """A genuine misuse reached through a match capture, with no
+        shadowing, is exactly the same misuse as anywhere else."""
+        src = (
+            "def f(rec, other):\n"
+            "    match rec:\n"
+            "        case fact:\n"
+            "            return fact.bases_fact == other\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert fact_equality_misuse_sites(tree, "x.py") == [(4, 19)]
+
     def test_detects_a_real_misuse_after_two_functions_share_a_bare_name(
         self,
     ) -> None:
@@ -587,6 +650,23 @@ class TestFactEqualityMisuseSites:
         )
         tree = ast.parse(src, filename="x.py")
         assert fact_equality_misuse_sites(tree, "x.py") == []
+
+    def test_detects_a_walrus_inside_a_parameter_default_binding_outward(
+        self,
+    ) -> None:
+        """`def inner(x=(fact := rec.bases_fact)): ...` -- a walrus inside
+        a parameter's own default expression binds in the *enclosing*
+        scope, since a default is evaluated there, not inside `inner`'s
+        own body (Codex review, fresh evidence): a later `fact == other`
+        in the outer function must still resolve it."""
+        src = (
+            "def f(rec, other):\n"
+            "    def inner(x=(fact := rec.bases_fact)):\n"
+            "        return x\n"
+            "    return fact == other\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert fact_equality_misuse_sites(tree, "x.py") == [(4, 11)]
 
     def test_detects_a_comparison_between_two_fact_annotated_parameters(
         self,
