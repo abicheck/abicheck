@@ -1,7 +1,7 @@
 # ADR-061: Responsibility-Package Architecture and Flat-Namespace Migration
 
 **Date:** 2026-08-24
-**Status:** Accepted — partially implemented (Phases 0-1 implemented; Phases 2-4 in progress; Phase 5 begun — the `model` package and the `*_metadata.py` dataclass/parser split have landed; D9's change-catalog work (item 3) is fully done — all 4 registry-validation properties (unique identifiers, valid references, non-contradictory defaults, complete metadata) are enforced, and the 397 entries have been repartitioned into `model/change_catalog/{symbols,types,platform,build,source}.py` by taxonomy; the CastXML/Clang parser split and source-graph separation (Phase 5 items 1-2) and the bulk of item 4's cycle-exception cleanup remain — and otherwise incremental).
+**Status:** Accepted — partially implemented (Phases 0-1 implemented; Phases 2-4 in progress; Phase 5 begun — the `model` package and the `*_metadata.py` dataclass/parser split have landed; D9's change-catalog work (item 3) is fully done — all 4 registry-validation properties (unique identifiers, valid references, non-contradictory defaults, complete metadata) are enforced, and the 397 entries have been repartitioned into `model/change_catalog/{symbols,types,platform,build,source}.py` by taxonomy; the CastXML/Clang parser split (item 1) has only started — the `extract` package now exists with one stateless-helper module moved out of `dumper_castxml.py`, but the stateful entity-by-entity split is unstarted — source-graph separation (item 2) and the bulk of item 4's cycle-exception cleanup also remain — and otherwise incremental).
 **Decision maker:** abicheck maintainers
 
 ## Context
@@ -2054,7 +2054,25 @@ the text promised something the detector doesn't check. Rewritten to
 describe the attribute's real effect (folding permission, not linkage)
 without promising a new export.
 
-1. split CastXML and Clang parsing by entity and shared parser context;
+1. split CastXML and Clang parsing by entity and shared parser context.
+   **Started, not done.** `abicheck.extract` now exists (see `abicheck/
+   extract/AGENTS.md`) with its first tenant, `extract/headers/castxml/
+   names.py`: the vtable-index/mangled-name/synthetic-key helpers that sat
+   as module-level functions above `_CastxmlParser` in `dumper_castxml.py`
+   — `_parse_vtable_index`, `_vt_sort_key`, `_ref_qualifier_from_mangled`,
+   `_mangled_name_is_local_linkage`, `is_synthetic_ctor_key`/`is_synthetic_
+   dtor_key`, `_virtual_method_mangled_name`, and their two prefix
+   constants. Each is a pure function over a string or a single XML
+   element — none of them read `_CastxmlParser`'s id map or any other
+   instance state, which is exactly why this was the piece that could move
+   without first designing the shared parser context (`context.py`) the
+   rest of the split needs. `dumper_castxml.py` imports and re-exports all
+   of them unchanged (1934 → 1822 lines). The stateful part — splitting
+   `_CastxmlParser`'s ~60 methods into `functions.py`/`records.py`/
+   `enums.py`/`templates.py` entity modules sharing one `context.py`, and
+   the equivalent split for `dumper_clang.py` — has not started; it needs
+   the shared-context design this ADR's D9 describes before any entity
+   module can move, which is a larger, separately-scoped slice;
 2. separate source-graph values, construction, and comparison;
 3. **Done.** Repartitioned the change catalog into D9's `model/change_catalog/
    {symbols,types,platform,build,source}.py` taxonomy — all four
