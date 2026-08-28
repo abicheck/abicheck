@@ -20,6 +20,9 @@
         "abicheck/change_registry_types.py",
         "abicheck/checker_types.py",
         "abicheck/compile_context.py",
+        "abicheck/contract_evidence.py",
+        "abicheck/contract_relevance_types.py",
+        "abicheck/detectors.py",
         "abicheck/evidence_depth.py",
         "abicheck/name_classification.py"
       ]
@@ -136,6 +139,7 @@
         "abicheck/buildsource/graph_reconcile.py",
         "abicheck/buildsource/source_diff.py",
         "abicheck/confidence.py",
+        "abicheck/detector_registry.py",
         "abicheck/diff_abi_tags.py",
         "abicheck/diff_atomic.py",
         "abicheck/diff_bit_int.py",
@@ -188,6 +192,8 @@
         "abicheck/compatibility_evaluation_config.py",
         "abicheck/compatibility_evaluation_packs.py",
         "abicheck/contract_coverage_exit.py",
+        "abicheck/contract_evaluation.py",
+        "abicheck/contract_evidence_collect.py",
         "abicheck/exit_decision.py",
         "abicheck/severity.py"
       ]
@@ -216,6 +222,14 @@
         "abicheck/bundle_variants_config.py",
         "abicheck/checker.py",
         "abicheck/compatibility_evaluation_frontend.py",
+        "abicheck/compatibility_evaluation_wiring.py",
+        "abicheck/contract_context.py",
+        "abicheck/contract_context_io.py",
+        "abicheck/contract_pipeline.py",
+        "abicheck/contract_replay.py",
+        "abicheck/contract_scoped_promotion.py",
+        "abicheck/debian_symbols.py",
+        "abicheck/dependency_info.py",
         "abicheck/resolver.py",
         "abicheck/service.py",
         "abicheck/service_compare_evidence.py",
