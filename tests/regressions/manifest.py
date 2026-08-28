@@ -415,31 +415,37 @@ BUG_CLASSES: tuple[BugClass, ...] = (
             "relevant consumer with identical semantics, or is rejected "
             "at the public boundary — no third state."
         ),
-        fixed_by=(860, 883, 886),
+        fixed_by=(860, 883, 886, 906),
         seed_tests=(
             "tests/test_run_plan.py",
+            "tests/test_run_plan_consumer_compile_active.py",
             "tests/test_project_targets_consumer_compile.py",
             "tests/test_cli_compare_release_bundle_signature_wiring.py",
+            "tests/test_reusable_workflows_project_evidence.py",
+            "tests/test_action_compile_context_parity.py",
+            "tests/test_gha_expr.py",
+            "tests/test_consumer_compile_full_chain_propagation.py",
         ),
         known_gaps=(
             KnownGap(
                 description=(
-                    "No generalized sentinel-propagation matrix exists yet "
-                    "covering every public entry point named in "
-                    "bug-class-regression-testing.md's Phase 6. Of the two "
-                    "seed tests, only `test_run_plan.py`'s "
-                    "`TestConsumerCompileOverlayProjection` covers the "
-                    "'reaches every consumer' half of this class's own "
-                    "invariant (`profiles.<id>.consumer_compile` reaching "
-                    "the generated run-plan cell, via `generate_run_plan` "
-                    "directly — no CLI, no python-api); "
-                    "`test_project_targets_consumer_compile.py` only "
-                    "exercises the 'rejected at the public boundary' half "
-                    "(schema parsing/round-tripping) and on its own would "
-                    "leave a dropped forwarding edge undetected — it was "
-                    "the sole seed here until this was found to be a real "
-                    "gap (Codex review, PR #885). Neither reaches every "
-                    "config path Phase 6 names, only this one."
+                    "Still open: (a) this closed chain reaches config -> "
+                    "generate_run_plan() -> the composite-Action/reusable-"
+                    "workflow path only — no seed test drives the same "
+                    "consumer_compile value through the native Python API "
+                    "or a `project`/`aggregate` CLI invocation end to end; "
+                    "(b) Phase 6 names eight other configurable concerns "
+                    "(policy/policy-file, frontend/compiler as a general "
+                    "per-entry-point concern beyond this one profile field, "
+                    "include roots, evidence-pack/target attribution, "
+                    "safety budgets, suppression/filtering, per-library "
+                    "override, output/report options) — none has yet had "
+                    "this same five-state/full-chain/mutation-check "
+                    "treatment; consumer_compile was chosen as the first "
+                    "worked example specifically because #860/#883's own "
+                    "history and this class's pre-existing seed tests "
+                    "already pointed at it, not because it's necessarily "
+                    "representative of the others' own chain shapes."
                 ),
                 reference="docs/contribute/plans/bug-class-regression-testing.md#phase-6",
             ),
