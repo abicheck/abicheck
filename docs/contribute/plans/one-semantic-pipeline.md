@@ -5620,6 +5620,54 @@ WARN threshold). New tests: `TestAlternateBindingShapesAreRecognized`
 (10 tests), appended to `tests/test_fact_detector_misuse_nearest_scope_
 alias.py` (still well under its own 1200-line cap).
 
+**A further round found a comparison embedded inside a *deferred*
+annotation was still flagged as a real misuse site** (Codex review,
+fresh evidence): `def f(x: Annotated[int, Fact.present(1) ==
+sentinel]): ...` under `from __future__ import annotations` (PEP 563)
+-- the repository-mandated convention `AGENTS.md` requires throughout
+`abicheck/`, this check's own real scan target -- stores every
+annotation as source text, never evaluating it at runtime, so that
+embedded comparison never actually executes. The unconditional
+`ast.Compare` walk in `fact_equality_misuse_sites()` had no notion of
+this and flagged that dead code as if it were live. Reproduced directly
+(1 hit, expected 0) before designing a fix.
+
+Fixed with two small, module-local helpers in `fact_detector_misuse.py`
+itself (not the scope or aliases module -- this is neither a lexical-
+scope-resolution concern nor a Fact-typedness-resolution concern, just
+"which `Compare` nodes are dead code here"): `_module_has_deferred_
+annotations()` (checks for a module-level `from __future__ import
+annotations`) and `_deferred_annotation_compare_ids()` (collects the
+`id()` of every `ast.Compare` found inside a parameter, return, or
+variable annotation's own subtree, gated on the future import actually
+being present -- empty otherwise, so a module *without* PEP 563
+deferral keeps every embedded comparison as a genuine site, since it
+really does execute at def-time there). Deliberately independent of
+`_default_and_annotation_scope_overrides()`'s own similarly-shaped
+subtree walk just above it in the file, even though both visit the
+identical parameter-annotation/`returns` shape: that function's own
+`overrides` dict conflates default-value, decorator, and class-base/
+keyword subtrees together with annotation subtrees into one id set, and
+only annotations are ever deferred by PEP 563 -- a default value,
+decorator, or class base always evaluates eagerly regardless of the
+future import, so reusing that dict's keys would have wrongly excluded
+a genuine comparison inside one of those other subtrees too.
+
+Verified via direct AST reproduction against 8 cases before writing
+tests: the reported case, the equivalent return-annotation and
+variable-annotation (`AnnAssign`) forms, a nested function's own
+annotation, the negative control confirming the identical comparison
+stays flagged *without* the future import, a real body-level comparison
+still flagged, a default-value comparison (never deferred, regardless
+of the future import) still flagged, ordinary `Fact`-typed annotation
+*type* recognition (a separate mechanism entirely) left unaffected, and
+an `AnnAssign`'s own *value* (as opposed to its annotation) confirmed
+never deferred either. `mypy`/`ruff` both stayed clean;
+`fact_detector_misuse.py` at 469 lines (still ample headroom). New
+tests: a new dedicated file, `tests/test_fact_detector_misuse_
+deferred_annotations.py` (9 tests,
+`TestDeferredAnnotationsExcludeEmbeddedComparisons`).
+
 ---
 
 ### Phase 1 — finish the `dump`/`scan` typed-API convergence (closes AGENTS.md "PR C")

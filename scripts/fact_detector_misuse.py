@@ -232,6 +232,71 @@ def _default_and_annotation_scope_overrides(
     return overrides
 
 
+def _module_has_deferred_annotations(tree: ast.Module) -> bool:
+    """True if *tree* has `from __future__ import annotations` (PEP 563)
+    at module level -- under it every annotation (parameter, return, or
+    variable) is stored as source text and never evaluated at runtime,
+    the repository-mandated convention this module's own scan target
+    (`abicheck/`) follows throughout (AGENTS.md: "Python: 3.10+ syntax,
+    type annotations, `from __future__ import annotations`")."""
+    return any(
+        isinstance(node, ast.ImportFrom)
+        and node.module == "__future__"
+        and any(alias.name == "annotations" for alias in node.names)
+        for node in tree.body
+    )
+
+
+def _deferred_annotation_compare_ids(tree: ast.Module) -> frozenset[int]:
+    """`id()` of every `ast.Compare` node embedded inside a parameter,
+    return, or variable annotation's own subtree, when *tree*'s module
+    defers annotations (Codex review, fresh evidence): `def f(x:
+    Annotated[int, Fact.present(1) == sentinel]): ...` stores that
+    comparison as inert annotation *text*, never actually executed, so
+    the unconditional `ast.Compare` walk below was flagging dead code as
+    a live misuse. Empty when the future import is absent -- an
+    annotation without it genuinely does evaluate at def-time, in which
+    case the embedded comparison is a real site, not a false one.
+
+    Deliberately independent of `_default_and_annotation_scope_
+    overrides()`'s own subtree collection just above, even though both
+    walk the identical `FunctionDef`/`AsyncFunctionDef`/`Lambda`
+    parameter-annotation/`returns` shape: that function's own `overrides`
+    dict conflates default-value, decorator, and class-base/keyword
+    subtrees together with annotation subtrees into one undifferentiated
+    id set, and only annotations are ever deferred -- a default value,
+    decorator, or class base always evaluates eagerly at def/class-time
+    regardless of this future import, so reusing that dict's keys here
+    would wrongly exclude a genuine comparison inside one of those other
+    subtrees too.
+    """
+    if not _module_has_deferred_annotations(tree):
+        return frozenset()
+    ids: set[int] = set()
+    for node in ast.walk(tree):
+        annotations: list[ast.expr] = []
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)):
+            for arg in (
+                *node.args.posonlyargs,
+                *node.args.args,
+                *node.args.kwonlyargs,
+                *((node.args.vararg,) if node.args.vararg else ()),
+                *((node.args.kwarg,) if node.args.kwarg else ()),
+            ):
+                if arg.annotation is not None:
+                    annotations.append(arg.annotation)
+            returns = getattr(node, "returns", None)
+            if returns is not None:
+                annotations.append(returns)
+        elif isinstance(node, ast.AnnAssign) and node.annotation is not None:
+            annotations.append(node.annotation)
+        for annotation in annotations:
+            for descendant in ast.walk(annotation):
+                if isinstance(descendant, ast.Compare):
+                    ids.add(id(descendant))
+    return frozenset(ids)
+
+
 def fact_equality_misuse_sites(tree: ast.Module, rel: str) -> list[tuple[int, int]]:
     """Return one ``(lineno, col_offset)`` per `==`/`!=` comparison in *tree*
     where at least one side is recognizably `Fact[T]`-typed (see
@@ -255,6 +320,7 @@ def fact_equality_misuse_sites(tree: ast.Module, rel: str) -> list[tuple[int, in
     aliases = _fact_aliases(tree, qualnames)
     def_containing = _def_containing_qualnames(tree)
     scope_overrides = _default_and_annotation_scope_overrides(tree, def_containing)
+    deferred_annotation_compare_ids = _deferred_annotation_compare_ids(tree)
     fact_names = _imported_fact_aliases(tree)
     locally_bound_shadows = _locally_bound_constructor_shadow_names(tree, qualnames)
     lexical_parents = _lexical_function_parents(tree)
@@ -366,6 +432,8 @@ def fact_equality_misuse_sites(tree: ast.Module, rel: str) -> list[tuple[int, in
     sites: list[tuple[int, int]] = []
     for node in ast.walk(tree):
         if not isinstance(node, ast.Compare):
+            continue
+        if id(node) in deferred_annotation_compare_ids:
             continue
         qualname = scope_overrides.get(
             id(node), _qualname_at((node.lineno, node.col_offset), qualnames)
