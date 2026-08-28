@@ -2475,10 +2475,12 @@ pipelines a fourth time.
   > `_write_snapshot_output` → `embed_build_source` → `collect_inline_pack`
   > to `buildsource.inline._make_source_extractor`, which (per its own,
   > already-documented behavior) treats anything but the literal string
-  > `"castxml"` as clang. So a plain `dump --depth source` with no explicit
-  > `--ast-frontend` resolves its L4 source-ABI replay to **clang**.
-  > Confirmed with a debug spy on the real CLI invocation (`header_backend`
-  > captured as the literal `"auto"` at the `perform_elf_dump` call site).
+  > `"castxml"` as clang -- **unconditionally**, with no `ABICHECK_AST_
+  > FRONTEND` consultation of its own. So a plain `dump --depth source`
+  > with no explicit `--ast-frontend` resolves its L4 source-ABI replay to
+  > **clang**. Confirmed with a debug spy on the real CLI invocation
+  > (`header_backend` captured as the literal `"auto"` at the
+  > `perform_elf_dump` call site).
   >
   > `compare`'s implicit-dump operand and `execute_dump_request` both reach
   > L4 replay through the *same* shared primitive,
@@ -2486,10 +2488,21 @@ pipelines a fourth time.
   > `source_extractor: str | None = None` parameter's own docstring already
   > states the contract: `None` keeps that function's own
   > `service_compare_evidence.effective_frontend` resolution, which resolves
-  > `"auto"` to **castxml** unconditionally (the identical resolution this
-  > plan's item 2 notes above already established for the L2 header-AST
-  > pass). Neither caller passes an override, so both correctly resolve to
-  > castxml. Confirmed directly: a `dump`-CLI-written baseline's
+  > `"auto"` to **castxml** (the identical resolution this plan's item 2
+  > notes above already established for the L2 header-AST pass) *unless*
+  > `ABICHECK_AST_FRONTEND` is set in the environment, in which case
+  > `dumper._resolve_header_backend` (the function `effective_frontend`
+  > delegates to) honors it instead. **Qualification (Codex review, fresh
+  > evidence): the divergence described below is therefore conditional on
+  > that environment variable, not universal.** With `ABICHECK_AST_
+  > FRONTEND` unset (the common case) or explicitly set to `castxml`, the
+  > two sides disagree exactly as described (clang vs. castxml). With it
+  > set to `clang`, both sides resolve to clang -- `_make_source_extractor`
+  > has no env-var awareness to override, but `effective_frontend` picks up
+  > the override too, so they land on the same backend by coincidence, not
+  > because the underlying resolution logic agrees. Neither caller passes
+  > an override; with the environment variable unset, both correctly
+  > resolve to castxml. Confirmed directly: a `dump`-CLI-written baseline's
   > `build_source.source_abi.coverage.fact_set.producer` reads
   > `"abicheck-cc-clang-extractor"`; the identical input run through
   > `resolve_dump_request`/`execute_dump_request` reads `"castxml-source"`.
@@ -2508,10 +2521,21 @@ pipelines a fourth time.
   > `NOT_COMPARABLE`) — but `compare oldbaseline.json new.so` (`dump`'s own
   > CLI baseline against `compare`'s own implicit-dump resolution of the
   > live binary) pairs a clang-derived old side against a castxml-derived
-  > new side, and neither the `profile_fingerprint`/`scope_fingerprint`
-  > comparability gate nor the extractor choice itself is recorded anywhere
-  > a consumer can see, so this does **not** surface as `NOT_COMPARABLE` —
-  > it silently produces two different sets of L4-derived facts for the
+  > new side, and the `profile_fingerprint`/`scope_fingerprint`
+  > comparability gate does not consult the extractor choice, so this does
+  > **not** surface as `NOT_COMPARABLE`. **Correction (Codex review, fresh
+  > evidence): the extractor choice is not *unrecorded* -- it already reads
+  > straight off `build_source.source_abi.coverage.fact_set.producer`, as
+  > this same paragraph's own confirmation above demonstrates
+  > (`"abicheck-cc-clang-extractor"` vs. `"castxml-source"`).** The actual
+  > gap is narrower than "nowhere a consumer can see": that already-recorded
+  > identity is simply never folded into the comparability fingerprints, so
+  > the existing `NOT_COMPARABLE` gate -- which exists precisely to catch a
+  > disagreement between two sides' extraction facts -- has no way to act on
+  > a signal it already has sitting right next to it. A fix belongs there
+  > (enforcing the existing `producer` field through the gate), not in
+  > adding new snapshot metadata that already exists. It silently produces
+  > two different sets of L4-derived facts for the
   > "same" comparison, real only when the two extractors actually disagree
   > about a declaration (item 3's own castxml phantom-implicit-member bug
   > is exactly such a disagreement: clang does not have it, so a clang-L4
@@ -2525,27 +2549,49 @@ pipelines a fourth time.
   > both "obvious" fixes are each their own real behavior change:** (a)
   > making `dump`'s CLI resolve `header_backend` through
   > `effective_frontend` before forwarding it as `extractor=` would align it
-  > with `compare`/the typed pipeline — but it would also mean every plain
-  > `dump --depth source` newly inherits item 3's still-open castxml
-  > phantom-implicit-member bug, which `dump`'s current (accidental) clang
-  > default does not have; that is a real regression for real users unless
-  > item 3 is fixed first. (b) making `compare`/the typed pipeline default
-  > to clang to match `dump`'s CLI would contradict the established,
-  > intentional "castxml is the canonical L2/L4 default" architecture this
-  > whole codebase is built around (`dumper._resolve_header_backend`), for
-  > reasons that have nothing to do with this one CLI code path. Either
-  > direction is a real, user-facing behavior change needing its own
-  > dedicated, verified pass — not a byproduct of characterizing item 2's
-  > migration risk. What this finding *does* change is item 2's own risk
-  > calculus: a naive migration of `dump`'s CLI onto `execute_dump_request`
-  > would, as a side effect, silently flip this default from clang to
-  > castxml (fixing this divergence but importing item 3's bug at the same
-  > time) — so "byte-identical to today's output" is not actually the right
-  > acceptance bar for L4 facts specifically; today's output is itself one
-  > side of a pre-existing, real disagreement, not a stable target to match.
-  > A correct migration plan needs to decide this divergence's resolution
-  > *before* attempting byte-identical verification, not discover it via a
-  > failing diff mid-migration.
+  > with `compare`/the typed pipeline — but at the time this was written it
+  > would also have meant every plain `dump --depth source` newly
+  > inheriting item 3's then-still-open castxml phantom-implicit-member
+  > bug, which `dump`'s current (accidental) clang default did not have.
+  > **Update: item 3 is now fixed** (see that item's own section — the
+  > castxml L4 extractor no longer treats a compiler-synthesized implicit
+  > special member as public API), so this specific regression risk no
+  > longer applies; the CLI-vs-typed-pipeline extractor divergence
+  > documented in this note is still open regardless, and still needs its
+  > own dedicated, verified pass rather than a byproduct of this one. (b)
+  > making `compare`/the typed pipeline default to clang to match `dump`'s
+  > CLI would contradict `dumper._resolve_header_backend`'s established,
+  > intentional castxml-first default for **L2** header-AST parsing, which
+  > the typed dump/compare pipeline deliberately couples its own L4 choice
+  > to via `effective_frontend` (this plan's item 2 elsewhere). **Correction
+  > (Codex review, fresh evidence): this is not a repository-wide "castxml
+  > is the canonical L2/L4 default" architecture, and the original wording
+  > overstated it.** A separate, dedicated L4-only resolver exists
+  > (`buildsource.source_extractors.resolver.resolve_source_extractor`,
+  > `AUTO_PREFERENCE = (CLANG, CASTXML)` — clang preferred first, on
+  > capability grounds, "most capable first") with the *opposite* default
+  > direction — though it has no production caller anywhere in the
+  > codebase today (confirmed by grep: only its own test module calls it),
+  > so it does not itself contradict `dump`'s CLI default either. What
+  > actually constrains direction (b) is narrower and real: the *typed*
+  > `dump`/`compare` pipeline's specific, deliberate choice to couple L4 to
+  > L2 through one shared resolution (`effective_frontend`), for reasons
+  > that have nothing to do with this one CLI code path — not a
+  > codebase-wide L4 convention. Either direction is a real, user-facing
+  > behavior change needing its own dedicated, verified pass — not a
+  > byproduct of characterizing item 2's migration risk. What this finding
+  > *does* change is item 2's own risk calculus: a naive migration of
+  > `dump`'s CLI onto `execute_dump_request` would, as a side effect,
+  > silently flip this default from clang to castxml -- so "byte-identical
+  > to today's output" is not actually the right acceptance bar for L4
+  > facts specifically; today's output is itself one side of a pre-existing,
+  > real disagreement, not a stable target to match. (Now that item 3 is
+  > fixed, this flip no longer imports a live bug -- but it is still a real,
+  > user-facing default change that needs to be a deliberate decision, not
+  > a side effect discovered mid-migration.) A correct migration plan needs
+  > to decide this divergence's resolution *before* attempting
+  > byte-identical verification, not discover it via a failing diff
+  > mid-migration.
 
 `dump --build-query` and `dump --build-compile-db` describe how the *project*
 is built, not what this snapshot is. They are already documented as CLI
