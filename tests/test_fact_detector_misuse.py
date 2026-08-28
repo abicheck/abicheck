@@ -119,6 +119,51 @@ class TestFactEqualityMisuseSites:
         tree = ast.parse(src, filename="x.py")
         assert fact_equality_misuse_sites(tree, "x.py") == []
 
+    def test_detects_a_comparison_through_a_local_alias(self) -> None:
+        """`old_fact = old.bases_fact` then `old_fact == new_fact` -- both
+        operands are bare `ast.Name`s, invisible to attribute/call matching
+        alone (Codex review: an ordinary local-variable refactor must not
+        launder this misuse past the gate)."""
+        src = (
+            "def f(old, new_fact):\n"
+            "    old_fact = old.bases_fact\n"
+            "    return old_fact == new_fact\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        sites = fact_equality_misuse_sites(tree, "x.py")
+        assert sites == [(3, 11)]
+
+    def test_detects_a_comparison_between_two_fact_annotated_parameters(
+        self,
+    ) -> None:
+        """`def f(a: Fact[list[str]], b: Fact[bool])` then `a == b` -- a
+        parameter explicitly typed `Fact[...]` is exactly as Fact-typed as
+        an attribute access, with no assignment to trigger the alias
+        tracking above."""
+        src = "def f(a: Fact[list[str]], b: Fact[bool]) -> bool:\n    return a == b\n"
+        tree = ast.parse(src, filename="x.py")
+        assert fact_equality_misuse_sites(tree, "x.py") == [(2, 11)]
+
+    def test_alias_in_one_function_does_not_leak_into_a_sibling(self) -> None:
+        """A local named `x` holding a `Fact[T]` value in `f` must not make
+        an unrelated `x` in a sibling function `g` (never assigned from a
+        Fact-typed expression there) read as Fact-typed too -- aliasing is
+        scoped per function, not global."""
+        src = (
+            "def f(rec):\n"
+            "    x = rec.bases_fact\n"
+            "    return x\n"
+            "def g(x, y):\n"
+            "    return x == y\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert fact_equality_misuse_sites(tree, "x.py") == []
+
+    def test_ignores_an_ordinary_variable_never_assigned_from_a_fact(self) -> None:
+        src = "def f(rec):\n    x = rec.size_bits\n    return x == 64\n"
+        tree = ast.parse(src, filename="x.py")
+        assert fact_equality_misuse_sites(tree, "x.py") == []
+
 
 def test_check_reports_a_new_violation(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch

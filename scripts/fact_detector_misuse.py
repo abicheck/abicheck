@@ -112,6 +112,10 @@ def _is_fact_typed_expr(node: ast.expr) -> bool:
     attribute call on the bare name `Fact`, matching every classmethod
     `model/fact.py` defines without hard-coding each one by name -- a
     future constructor added there is covered automatically).
+
+    Does **not** resolve a bare `ast.Name` -- that is :func:`_fact_aliases`'
+    job, since answering it needs scope (which function a name belongs to),
+    which a single node can't supply on its own.
     """
     if isinstance(node, ast.Attribute) and node.attr in FACT_FIELD_NAMES:
         return True
@@ -124,25 +128,131 @@ def _is_fact_typed_expr(node: ast.expr) -> bool:
     return False
 
 
+def _is_fact_typed_annotation(annotation: ast.expr | None) -> bool:
+    """True for a `Fact[...]` (or bare `Fact`) type annotation, by name
+    alone -- `def f(old_fact: Fact[list[str]], ...)` is exactly as
+    Fact-typed as `old.bases_fact` is, and a parameter carrying one is a
+    real, common alias source (Codex review, fresh evidence): the caller
+    already unwrapped nothing, so comparing two such parameters directly is
+    the identical misuse this whole check exists to catch.
+    """
+    if annotation is None:
+        return False
+    if isinstance(annotation, ast.Name):
+        return annotation.id == "Fact"
+    if isinstance(annotation, ast.Subscript):
+        return _is_fact_typed_annotation(annotation.value)
+    return False
+
+
+def _enclosing_qualnames(tree: ast.Module) -> dict[int, str]:
+    """Map every line number in *tree* to its innermost enclosing
+    function's qualified name (``Class.method`` for a method), or
+    ``"<module>"`` for a line outside any function.
+
+    Deliberately a standalone copy of `fact_field_readers.py`'s identical
+    helper rather than a shared import -- see `FACT_FIELD_NAMES`'s own
+    docstring for why these two leaf modules stay decoupled.
+    """
+    ranges: list[tuple[int, int, str]] = []
+
+    def visit(node: ast.AST, prefix: str) -> None:
+        for child in ast.iter_child_nodes(node):
+            if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                qualname = f"{prefix}{child.name}"
+                end = getattr(child, "end_lineno", child.lineno)
+                ranges.append((child.lineno, end, qualname))
+                visit(child, qualname + ".")
+            elif isinstance(child, ast.ClassDef):
+                visit(child, f"{prefix}{child.name}.")
+            else:
+                visit(child, prefix)
+
+    visit(tree, "")
+    ranges.sort(key=lambda r: r[1] - r[0], reverse=True)
+    by_line: dict[int, str] = {}
+    for start, end, qualname in ranges:
+        for lineno in range(start, end + 1):
+            by_line[lineno] = qualname
+    return by_line
+
+
+def _fact_aliases(tree: ast.Module, qualnames: dict[int, str]) -> dict[str, set[str]]:
+    """Map each function's qualname to the local names, within that
+    function, known to hold a `Fact[T]` value (Codex review, fresh
+    evidence): `old_fact = old.bases_fact` followed by `old_fact ==
+    new_fact` has two bare `ast.Name` operands, invisible to
+    :func:`_is_fact_typed_expr` alone -- the exact misuse this check
+    exists to catch, laundered through an ordinary local-variable
+    refactor.
+
+    Two sources, both name-only (no type inference, same stance as the
+    rest of this module): a simple single-target assignment (`name =
+    <fact-typed-expr>`) scoped to its own enclosing function, and a
+    function parameter whose own annotation is `Fact[...]`/bare `Fact`
+    (see :func:`_is_fact_typed_annotation`), scoped to *that* function
+    (its own qualname, not its enclosing one -- a parameter belongs to the
+    function it's declared on). Deliberately conservative in the
+    over-approximating direction: an aliased name is trusted for the
+    *whole* function once assigned anywhere in it, not narrowed to the
+    lines after the assignment -- this check has no control-flow analysis,
+    and a false positive here (flagging a comparison that happens to occur
+    before the alias is actually set) is far cheaper than the false
+    negative it prevents (missing the aliased comparison this exists to
+    catch at all).
+    """
+    aliases: dict[str, set[str]] = {}
+    for node in ast.walk(tree):
+        if (
+            isinstance(node, ast.Assign)
+            and len(node.targets) == 1
+            and isinstance(node.targets[0], ast.Name)
+            and _is_fact_typed_expr(node.value)
+        ):
+            qualname = qualnames.get(node.lineno, "<module>")
+            aliases.setdefault(qualname, set()).add(node.targets[0].id)
+        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            qualname = qualnames.get(node.lineno, "<module>")
+            all_args = (
+                *node.args.posonlyargs,
+                *node.args.args,
+                *node.args.kwonlyargs,
+            )
+            for arg in all_args:
+                if _is_fact_typed_annotation(arg.annotation):
+                    aliases.setdefault(qualname, set()).add(arg.arg)
+    return aliases
+
+
 def fact_equality_misuse_sites(tree: ast.Module, rel: str) -> list[tuple[int, int]]:
     """Return one ``(lineno, col_offset)`` per `==`/`!=` comparison in *tree*
     where at least one side is recognizably `Fact[T]`-typed (see
-    :func:`_is_fact_typed_expr`).
+    :func:`_is_fact_typed_expr`), including through a same-function local
+    alias or an annotated parameter (see :func:`_fact_aliases`).
 
     A chained comparison (`a == b == c`) is walked pairwise -- `ast.Compare`
     stores `left`, `ops`, and `comparators` separately, not as a flat list
     of operands, so each adjacent pair is checked independently and a
     single chain can report more than one site.
     """
+    qualnames = _enclosing_qualnames(tree)
+    aliases = _fact_aliases(tree, qualnames)
+
+    def is_fact_typed(node: ast.expr, qualname: str) -> bool:
+        if _is_fact_typed_expr(node):
+            return True
+        return isinstance(node, ast.Name) and node.id in aliases.get(qualname, ())
+
     sites: list[tuple[int, int]] = []
     for node in ast.walk(tree):
         if not isinstance(node, ast.Compare):
             continue
+        qualname = qualnames.get(node.lineno, "<module>")
         operands = [node.left, *node.comparators]
         for op, left, right in zip(node.ops, operands, operands[1:]):
             if not isinstance(op, (ast.Eq, ast.NotEq)):
                 continue
-            if _is_fact_typed_expr(left) or _is_fact_typed_expr(right):
+            if is_fact_typed(left, qualname) or is_fact_typed(right, qualname):
                 sites.append((node.lineno, node.col_offset))
     return sites
 

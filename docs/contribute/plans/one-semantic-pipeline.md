@@ -1005,6 +1005,29 @@ attribute/method name ignored; and end-to-end cases confirming the check
 function fires on a new violation and stays silent on `.status`-based
 unwrapping).
 
+**A Codex review round found a real gap in the name-only matching, fixed
+in the same PR.** The scan recognized `x.bases_fact == y.bases_fact`
+directly but not the same misuse laundered through an ordinary local
+variable: `old_fact = old.bases_fact` followed by `old_fact == new_fact`
+has two bare `ast.Name` operands, and a single node can't answer whether
+a name is Fact-typed without knowing which function it belongs to — the
+identical scope question `fact_field_readers.py`'s own `qualname`-keyed
+baseline already had to solve. Fixed with `_fact_aliases()`: a
+per-function `dict[qualname, set[name]]` built from two name-only
+sources, a simple single-target assignment from a recognized Fact-typed
+expression, and a function parameter whose own annotation is `Fact[...]`
+(or bare `Fact`) — both scoped to their own enclosing function so an
+alias in one function can't leak into an unrelated same-named local in a
+sibling. Deliberately conservative in the *over*-approximating direction
+(an aliased name is trusted for the whole function, not narrowed to the
+lines after its assignment) — a false positive here is far cheaper than
+the false negative it closes, and this check has no control-flow
+analysis to narrow it correctly anyway. Verified empirically to have zero
+existing hits, so the check still has no baseline. New tests: aliasing
+through a local assignment, two `Fact[...]`-annotated parameters compared
+directly, an alias not leaking across sibling functions, and an ordinary
+non-Fact local left alone.
+
 ---
 
 ### Phase 1 — finish the `dump`/`scan` typed-API convergence (closes AGENTS.md "PR C")
