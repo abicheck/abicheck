@@ -200,17 +200,32 @@ def _fact_aliases(tree: ast.Module, qualnames: dict[int, str]) -> dict[str, set[
     before the alias is actually set) is far cheaper than the false
     negative it prevents (missing the aliased comparison this exists to
     catch at all).
+
+    **Chained aliases are resolved to a fixed point (Codex review, fresh
+    evidence).** `first = rec.bases_fact; second = first; second == other`
+    launders the misuse through a *second* ordinary assignment: `second`'s
+    own RHS is the bare `ast.Name` `first`, which `_is_fact_typed_expr`
+    doesn't recognize (it only recognizes an attribute access or a
+    constructor call), so a single pass over assignments alone stops at
+    `first` and never learns that `second` is an alias too. Fixed by
+    collecting every simple single-target assignment as a `(name, value)`
+    candidate per function first, then repeatedly resolving any candidate
+    whose value is either directly Fact-typed *or* is itself a `Name`
+    already known as an alias in that same function -- until a pass adds
+    nothing new. Bounded by construction (each pass either adds at least
+    one alias or the loop stops, and there are only finitely many
+    candidates), so this always terminates.
     """
     aliases: dict[str, set[str]] = {}
+    candidates: dict[str, list[tuple[str, ast.expr]]] = {}
     for node in ast.walk(tree):
         if (
             isinstance(node, ast.Assign)
             and len(node.targets) == 1
             and isinstance(node.targets[0], ast.Name)
-            and _is_fact_typed_expr(node.value)
         ):
             qualname = qualnames.get(node.lineno, "<module>")
-            aliases.setdefault(qualname, set()).add(node.targets[0].id)
+            candidates.setdefault(qualname, []).append((node.targets[0].id, node.value))
         elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
             qualname = qualnames.get(node.lineno, "<module>")
             all_args = (
@@ -221,6 +236,20 @@ def _fact_aliases(tree: ast.Module, qualnames: dict[int, str]) -> dict[str, set[
             for arg in all_args:
                 if _is_fact_typed_annotation(arg.annotation):
                     aliases.setdefault(qualname, set()).add(arg.arg)
+
+    for qualname, pending in candidates.items():
+        known = aliases.setdefault(qualname, set())
+        changed = True
+        while changed:
+            changed = False
+            for name, value in pending:
+                if name in known:
+                    continue
+                if _is_fact_typed_expr(value) or (
+                    isinstance(value, ast.Name) and value.id in known
+                ):
+                    known.add(name)
+                    changed = True
     return aliases
 
 

@@ -133,6 +133,21 @@ class TestFactEqualityMisuseSites:
         sites = fact_equality_misuse_sites(tree, "x.py")
         assert sites == [(3, 11)]
 
+    def test_detects_a_comparison_through_a_chained_alias(self) -> None:
+        """`first = rec.bases_fact; second = first; second == other` --
+        `second`'s own RHS is a bare `ast.Name` (`first`), not directly
+        Fact-typed, so a single pass over assignments alone would stop at
+        `first` (Codex review: a second ordinary local-variable refactor
+        must not launder past the alias-tracking fix either)."""
+        src = (
+            "def f(rec, other):\n"
+            "    first = rec.bases_fact\n"
+            "    second = first\n"
+            "    return second == other\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert fact_equality_misuse_sites(tree, "x.py") == [(4, 11)]
+
     def test_detects_a_comparison_between_two_fact_annotated_parameters(
         self,
     ) -> None:

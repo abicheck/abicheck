@@ -1028,6 +1028,21 @@ through a local assignment, two `Fact[...]`-annotated parameters compared
 directly, an alias not leaking across sibling functions, and an ordinary
 non-Fact local left alone.
 
+**A second Codex round found the alias tracking itself stopped one hop
+too early, fixed in the same PR.** `first = rec.bases_fact; second =
+first; second == other` launders the misuse through a *second* ordinary
+assignment: `second`'s own RHS is the bare `ast.Name` `first`, which
+`_is_fact_typed_expr` doesn't recognize (only an attribute access or a
+constructor call), so a single pass over assignments stopped at `first`
+and never learned `second` was an alias too. Fixed by resolving the
+per-function alias set to a fixed point: collect every simple
+single-target assignment as a `(name, value)` candidate first, then
+repeatedly add any candidate whose value is either directly Fact-typed
+*or* is itself a `Name` already known as an alias in that same function,
+until a pass adds nothing new — bounded by construction (finitely many
+candidates, each pass adds at least one or the loop stops). New test:
+`test_detects_a_comparison_through_a_chained_alias`.
+
 ---
 
 ### Phase 1 — finish the `dump`/`scan` typed-API convergence (closes AGENTS.md "PR C")
