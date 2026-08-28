@@ -2634,12 +2634,27 @@ pipelines a fourth time.
   > would also have meant every plain `dump --depth source` newly
   > inheriting item 3's then-still-open castxml phantom-implicit-member
   > bug, which `dump`'s current (accidental) clang default did not have.
-  > **Update: item 3 is now fixed** (see that item's own section — the
-  > castxml L4 extractor no longer treats a compiler-synthesized implicit
-  > special member as public API), so this specific regression risk no
-  > longer applies; the CLI-vs-typed-pipeline extractor divergence
-  > documented in this note is still open regardless, and still needs its
-  > own dedicated, verified pass rather than a byproduct of this one. (b)
+  > **Correction (Codex review, fresh evidence): item 3's fix has NOT
+  > landed on this tree, and this note previously overstated it as
+  > already fixed.** Item 3's own fix (`Function.is_compiler_generated`,
+  > `entity_from_function` gating `api_relevant` on it, the ctor/dtor
+  > owner-index rescue and its several follow-on findings) is real and
+  > verified, but lives on a **separate, not-yet-merged** PR
+  > (`claude/pr-c-item3-castxml-l4-compiler-generated`) — confirmed by
+  > reading this tree's own `dumper_castxml.py`/`source_extractors/base.py`
+  > directly: `_CastxmlParser._parse_function_element()` still accepts an
+  > `artificial="1"` element unconditionally, and `entity_from_function()`
+  > still derives `api_relevant` solely from `origin`/`access`, with no
+  > `is_compiler_generated` field anywhere in this tree. So until that PR
+  > merges, this specific regression risk (a naive migration of `dump`'s
+  > CLI onto `effective_frontend`/`execute_dump_request` newly inheriting
+  > the castxml phantom-implicit-member bug on every plain `dump --depth
+  > source`) remains real and open, exactly as originally stated — this
+  > note's earlier "no longer applies" wording was premature. The
+  > CLI-vs-typed-pipeline extractor divergence documented in this note is
+  > independently still open regardless of item 3's landing status, and
+  > still needs its own dedicated, verified pass rather than a byproduct
+  > of this one. (b)
   > making `compare`/the typed pipeline default to clang to match `dump`'s
   > CLI would contradict `dumper._resolve_header_backend`'s established,
   > intentional castxml-first default for **L2** header-AST parsing, which
