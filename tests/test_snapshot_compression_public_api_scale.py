@@ -121,8 +121,17 @@ def test_save_load_snapshot_round_trips_at_production_scale(tmp_path, suffix):
     3.5) -- exactly how a real caller picks compression, by filename, not by
     passing an explicit ``SnapshotCompression`` the way the sibling
     module's lower-level tests do.
+
+    ``zstandard`` is only ever imported for the zstd case -- the gzip case
+    must not be skipped just because that optional dependency is absent
+    (CodeRabbit review, PR #911).
     """
-    zstandard = pytest.importorskip("zstandard")
+    expected_compression = _compression_for_suffix(suffix)
+    zstandard = (
+        pytest.importorskip("zstandard")
+        if expected_compression is SnapshotCompression.ZSTD
+        else None
+    )
 
     original = _graph_heavy_snapshot(n=8600)
     _production_scale_bytes(original)
@@ -130,9 +139,8 @@ def test_save_load_snapshot_round_trips_at_production_scale(tmp_path, suffix):
     p = tmp_path / f"production_scale{suffix}"
     save_snapshot(original, p)
 
-    expected_compression = _compression_for_suffix(suffix)
     assert detect_snapshot_compression(p) is expected_compression
-    if expected_compression is SnapshotCompression.ZSTD:
+    if zstandard is not None:
         _assert_realistic_zstd_window(zstandard, p)
 
     reloaded = load_snapshot(p)
@@ -158,8 +166,13 @@ def test_service_resolve_input_round_trips_a_compressed_snapshot_at_production_s
     losslessly, via its JSON-format dispatch branch (``sniff_text_format``
     detects the compression from a bounded decoded prefix, then delegates
     to ``load_snapshot``).
+
+    ``zstandard`` is only ever imported for the zstd case -- the gzip case
+    must not be skipped just because that optional dependency is absent
+    (CodeRabbit review, PR #911).
     """
-    zstandard = pytest.importorskip("zstandard")
+    is_zstd = _compression_for_suffix(suffix) is SnapshotCompression.ZSTD
+    zstandard = pytest.importorskip("zstandard") if is_zstd else None
 
     original = _graph_heavy_snapshot(n=8600)
     _production_scale_bytes(original)
@@ -167,7 +180,7 @@ def test_service_resolve_input_round_trips_a_compressed_snapshot_at_production_s
     p = tmp_path / f"production_scale{suffix}"
     save_snapshot(original, p)
 
-    if _compression_for_suffix(suffix) is SnapshotCompression.ZSTD:
+    if zstandard is not None:
         _assert_realistic_zstd_window(zstandard, p)
 
     reloaded = resolve_input(p)
@@ -201,8 +214,13 @@ def test_compare_cli_diffs_compressed_snapshots_at_production_scale(tmp_path, su
     CLI's own JSON output must name that one finding and no other, which
     only holds if the full, real (not truncated/replaced) content of both
     multi-megabyte compressed operands was decoded and diffed correctly.
+
+    ``zstandard`` is only ever required for the zstd case -- the gzip case
+    must not be skipped just because that optional dependency is absent
+    (CodeRabbit review, PR #911).
     """
-    pytest.importorskip("zstandard")
+    if _compression_for_suffix(suffix) is SnapshotCompression.ZSTD:
+        pytest.importorskip("zstandard")
 
     old_snap = _graph_heavy_snapshot(n=8600)
     _production_scale_bytes(old_snap)
