@@ -152,7 +152,6 @@
         "abicheck/diff_vtable_layout.py",
         "abicheck/finding_identity.py",
         "abicheck/finding_identity_atomic.py",
-        "abicheck/finding_identity_ctor_dtor.py",
         "abicheck/probe_harness.py",
         "abicheck/versioned_symbol_scheme.py"
       ]

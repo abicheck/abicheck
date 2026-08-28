@@ -1,12 +1,11 @@
 ### Changed
 
-- **ADR-061 continuation**: 3 more root-level `abicheck/*.py` modules are
+- **ADR-061 continuation**: 2 more root-level `abicheck/*.py` modules are
   now classified into the `compare` responsibility layer in
-  `architecture/modules.yaml` (48 of the layer's `legacy_paths` total, up
-  from the pre-existing 45): `finding_identity_atomic.py`,
-  `finding_identity_ctor_dtor.py` (both split-out siblings of the
-  already-classified `finding_identity.py` -- old/new symbol-identity
-  canonicalization, importing only `model`), and
+  `architecture/modules.yaml` (47 of the layer's `legacy_paths` total, up
+  from the pre-existing 45): `finding_identity_atomic.py` (a split-out
+  sibling of the already-classified `finding_identity.py` -- old/new
+  symbol-identity canonicalization, importing only `model`), and
   `versioned_symbol_scheme.py` (the ICU-style versioned-symbol-name
   matcher that folds `foo_75`/`foo_78` into one identity across old/new --
   no local imports at all). Verified via `scripts/check_architecture.py`
@@ -14,6 +13,25 @@
   errors), `mypy abicheck/` (17 errors, unchanged from the documented
   yaml-stub-only baseline), `scripts/adr_status_sync.py` (clean), and the
   full fast unit suite.
+
+  **`finding_identity_ctor_dtor.py` was also initially classified
+  `compare` in this batch and reverted after a second Codex review
+  finding, real and confirmed by reading the file directly.** It imports
+  `SYNTHETIC_CTOR_KEY_PREFIX`/`_SYNTHETIC_DTOR_KEY_PREFIX`/
+  `is_synthetic_ctor_key`/`is_synthetic_dtor_key` from `.dumper_castxml`
+  directly -- unclassified at the time this PR opened, so no violation
+  fired, but the *parallel* dumper-cluster PR in this same ADR-061 batch
+  was actively classifying `dumper_castxml.py` as `extract` at the same
+  time. Landing both would have created the identical cross-PR
+  `compare -> extract` collision the `type_metadata.py` revert below
+  already describes -- confirmed by reading the import directly rather
+  than trusting the original "importing only `model`" claim, which was
+  wrong for this file (right only for its sibling,
+  `finding_identity_atomic.py`, which genuinely imports only
+  `name_classification.py`, itself `model`-classified). Reverted to
+  unclassified; the shared synthetic-ctor/dtor-key primitives belong with
+  `dumper_castxml.py`'s own eventual `extract` classification (or `model`,
+  if split out) in a follow-up.
 
   **`type_metadata.py` was initially classified `compare` in this same
   batch and reverted after a Codex review finding, real and confirmed by
