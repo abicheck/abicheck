@@ -53,15 +53,15 @@ from ..analysis_assurance import (
     fold_analysis_assurance_exit,
 )
 from ..confidence import note_if_same_binary_compared
-from ..contract_coverage_exit import (
+from ..policy.contract_coverage_exit import (
     announce_coverage_floor,
     coverage_diagnostic_from_summary,
     coverage_exit_floor,
     coverage_exit_for_context,
     fold_coverage_exit,
 )
-from ..exit_decision import resolve_compare_exit_decision
-from ..severity import (
+from ..policy.exit_decision import resolve_compare_exit_decision
+from ..policy.severity import (
     PRESET_DEFAULT,
     IssueCategory,
     SeverityConfig,

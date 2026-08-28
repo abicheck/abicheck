@@ -211,12 +211,9 @@
         "abicheck/analysis_assurance.py",
         "abicheck/compatibility_evaluation_config.py",
         "abicheck/compatibility_evaluation_packs.py",
-        "abicheck/contract_coverage_exit.py",
         "abicheck/contract_evaluation.py",
         "abicheck/contract_evidence_collect.py",
-        "abicheck/exit_decision.py",
-        "abicheck/export_surface.py",
-        "abicheck/severity.py"
+        "abicheck/export_surface.py"
       ]
     },
     "workflows": {
@@ -326,7 +323,11 @@
   },
   "public_root_surfaces": [
     "abicheck.api_types",
-    "abicheck.errors"
+    "abicheck.checker_policy",
+    "abicheck.contract_coverage_ledger",
+    "abicheck.contract_gating",
+    "abicheck.errors",
+    "abicheck.reclassify"
   ],
   "facades": [
     "abicheck.aggregate",

@@ -57,6 +57,40 @@ _is_path_already_qualified() {
 # is portable to macOS's stock (GPLv2-frozen) bash 3.2 and behaves
 # consistently under Windows Git Bash.
 # ---------------------------------------------------------------------------
+# Helper shared by add_flag()/add_sided_flag(): splits a single-line legacy
+# value on IFS whitespace into the global _SPLIT_ITEMS array, with pathname
+# expansion (globbing) disabled for the split.
+#
+# Plain `for item in $value` (unquoted) performs BOTH word-splitting AND
+# pathname expansion on the result -- add_flag_shlex_split()'s own fallback
+# path already documents this exact risk for itself ("this naive fallback
+# ... letting untrusted checkout content influence the compile context") and
+# refuses to fall back rather than risk it, but add_flag()/add_sided_flag()
+# had the identical unquoted pattern with no such guard: a caller-controlled
+# single-line value of exactly "*" (or any string that happens to match a
+# real path in the runner's own working directory) silently expanded to
+# every file the glob matched instead of being passed through as the
+# literal string (confirmed by direct execution; Codex review, PR #919).
+# `set -f` (POSIX noglob) suppresses that expansion while leaving
+# word-splitting intact, which is exactly what the legacy single-line form
+# is documented to do. The prior glob setting is restored afterward rather
+# than unconditionally re-enabled, in case the caller already had `set -f`
+# in effect for its own reasons.
+_split_legacy_value() {
+  local value="$1"
+  local restore_glob=0
+  case $- in *f*) ;; *) restore_glob=1 ;; esac
+  set -f
+  _SPLIT_ITEMS=()
+  local item
+  for item in $value; do
+    _SPLIT_ITEMS+=("$item")
+  done
+  if [[ "$restore_glob" -eq 1 ]]; then
+    set +f
+  fi
+}
+
 add_flag() {
   local flag="$1"
   local value="$2"
@@ -69,7 +103,8 @@ add_flag() {
       [[ -n "$item" ]] && CMD+=("$flag" "$item")
     done <<< "$value"
   else
-    for item in $value; do
+    _split_legacy_value "$value"
+    for item in ${_SPLIT_ITEMS[@]+"${_SPLIT_ITEMS[@]}"}; do
       CMD+=("$flag" "$item")
     done
   fi
@@ -219,7 +254,8 @@ add_sided_flag() {
       [[ -n "$item" ]] && CMD+=("$flag" "${side}=${item}")
     done <<< "$value"
   else
-    for item in $value; do
+    _split_legacy_value "$value"
+    for item in ${_SPLIT_ITEMS[@]+"${_SPLIT_ITEMS[@]}"}; do
       CMD+=("$flag" "${side}=${item}")
     done
   fi
