@@ -97,20 +97,24 @@ def test_equality() -> None:
 
 
 def test_parentheses_change_grouping() -> None:
+    """Codex review (PR #906): the original ctx (``a=""``) made both
+    groupings resolve to the same value (`""`), so a precedence or
+    parenthesis-handling regression could have kept this test green. A
+    truthy `a` alongside a falsy `c` is what actually distinguishes the two
+    groupings -- without parens, `&&` binds tighter, so `a || b && c` is
+    `a || (b && c)`, and `a`'s own short-circuit on `||` means `b && c` is
+    never even reached; with parens it's `(a || b) && c`, which reaches
+    `&& c` and returns `c`'s falsy value instead."""
     # Without parens, && binds tighter than ||, so this would be
     # `a || (b && c)`; with parens it's `(a || b) && c`.
-    ctx = {"a": "", "b": "x", "c": ""}
+    ctx = {"a": "A", "b": "", "c": ""}
     assert (
-        eval_gha_expression("${{ matrix.a || matrix.b && matrix.c }}", matrix=ctx) == ""
+        eval_gha_expression("${{ matrix.a || matrix.b && matrix.c }}", matrix=ctx)
+        == "A"
     )
     assert (
         eval_gha_expression("${{ (matrix.a || matrix.b) && matrix.c }}", matrix=ctx)
         == ""
-    )
-    ctx2 = {"a": "", "b": "x", "c": "y"}
-    assert (
-        eval_gha_expression("${{ (matrix.a || matrix.b) && matrix.c }}", matrix=ctx2)
-        == "y"
     )
 
 

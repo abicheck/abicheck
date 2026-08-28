@@ -523,7 +523,34 @@ BUG_CLASSES: tuple[BugClass, ...] = (
                     "the real, validated `auto`/`castxml`/`clang`/`hybrid` "
                     "values) through the identical hops, including hop 4's "
                     "`--ast-frontend` CLI flag and the same "
-                    "`_action_yml_env_mapping`-derived env var lookup."
+                    "`_action_yml_env_mapping`-derived env var lookup. A "
+                    "fourth review round found two more real gaps, both "
+                    "fixed: (i) the harness rebuilt `hop3_inputs["
+                    '"consumer-compile-active"]` as `"true" if '
+                    'consumer_compile_active else "false"` from the '
+                    "already-evaluated hop-2 result — but that result is "
+                    "already the literal string `'true'`/`'false'` (the "
+                    "real expression's own trailing `&& 'true' || 'false'`), "
+                    "and both strings are Python-truthy, so the re-coercion "
+                    'silently collapsed every possible result to `"true"` '
+                    "regardless of what the real expression actually "
+                    "resolved to — a regression changing that expression's "
+                    "own truthy branch (e.g. to `'yes'`) would have gone "
+                    "undetected. Fixed by forwarding the evaluated string "
+                    "verbatim (`_hop3_inputs_from`), and added a dedicated "
+                    "marker-only chain case (`test_marker_only_overlay_"
+                    "activates_the_consumer_step_without_any_field`, "
+                    "evaluating the guard end to end where the pre-existing "
+                    "`test_consumer_dump_activates_from_the_overlay_marker_"
+                    "alone` only text-matched) so the fix is itself exercised "
+                    "against the scenario it targets. (ii) `test_gha_expr."
+                    "py`'s own `test_parentheses_change_grouping` used `a="
+                    '""`, under which both `a || b && c` and `(a || b) && '
+                    "c` resolved to the same value — a real precedence/"
+                    "parenthesis-handling regression in the evaluator itself "
+                    "could have passed unnoticed. Fixed by using a truthy "
+                    "`a` alongside a falsy `c`, which makes the two "
+                    'groupings genuinely diverge (`"A"` vs `""`).'
                 ),
                 reference="docs/contribute/plans/bug-class-regression-testing.md#phase-6",
             ),

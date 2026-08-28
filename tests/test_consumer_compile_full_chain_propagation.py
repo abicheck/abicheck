@@ -130,6 +130,35 @@ def _consumer_context_step() -> dict[str, Any]:
     )
 
 
+def _hop3_inputs_from(
+    *,
+    kind: Any,
+    baseline_channel: Any,
+    consumer_compile_active: Any,
+    consumer_ast_frontend: Any,
+    consumer_gcc_path: Any,
+    consumer_gcc_options: Any,
+) -> dict[str, Any]:
+    """Hop-3 `inputs.*` context, built from hop-2's own evaluated values
+    verbatim -- no Python-truthiness re-coercion of `consumer-compile-
+    active` (Codex review, PR #906). The real expression (`... &&
+    'true' || 'false'`) always resolves to the literal string `'true'` or
+    `'false'`, exactly what GHA itself would forward as an action input --
+    but re-wrapping it in `"true" if consumer_compile_active else "false"`
+    was a real bug: both strings are non-empty and therefore Python-truthy,
+    so that re-coercion silently collapsed EVERY evaluated result to
+    `"true"`, masking a regression that made the real expression resolve
+    to anything else (a bare boolean, or a typo like `"yes"`)."""
+    return {
+        "kind": kind,
+        "baseline-channel": baseline_channel,
+        "consumer-compile-active": consumer_compile_active,
+        "consumer-ast-frontend": consumer_ast_frontend,
+        "consumer-gcc-path": consumer_gcc_path,
+        "consumer-gcc-options": consumer_gcc_options,
+    }
+
+
 def test_sentinel_consumer_gcc_path_survives_config_to_check_target_input() -> None:
     """Hops 1-3: config -> generate_run_plan() -> check-project.yml ->
     check-target/action.yml's scheduling guard AND its `with:`, evaluated
@@ -194,14 +223,14 @@ def test_sentinel_consumer_gcc_path_survives_config_to_check_target_input() -> N
     assert consumer_ast_frontend == _SENTINEL_CONSUMER_AST_FRONTEND
 
     consumer_step = _consumer_context_step()
-    hop3_inputs = {
-        "kind": kind,
-        "baseline-channel": baseline_channel,
-        "consumer-compile-active": "true" if consumer_compile_active else "false",
-        "consumer-ast-frontend": consumer_ast_frontend or "",
-        "consumer-gcc-path": consumer_gcc_path,
-        "consumer-gcc-options": consumer_gcc_options,
-    }
+    hop3_inputs = _hop3_inputs_from(
+        kind=kind,
+        baseline_channel=baseline_channel,
+        consumer_compile_active=consumer_compile_active,
+        consumer_ast_frontend=consumer_ast_frontend,
+        consumer_gcc_path=consumer_gcc_path,
+        consumer_gcc_options=consumer_gcc_options,
+    )
     # Every real `steps.*` reference the guard makes, standing in for a
     # baseline that already resolved and preceding collect-facts steps that
     # both succeeded -- the ordinary "everything's fine" path this cell
@@ -237,6 +266,94 @@ def test_sentinel_consumer_gcc_path_survives_config_to_check_target_input() -> N
 
     _assert_reaches_real_dump_cli_invocation(
         final_gcc_path, final_gcc_options, final_ast_frontend
+    )
+
+
+def test_marker_only_overlay_activates_the_consumer_step_without_any_field() -> None:
+    """Codex review (PR #906): the pre-existing coverage for 'an overlay
+    declaring only a presence marker, with every field unresolvable' was
+    text-only (test_consumer_dump_activates_from_the_overlay_marker_alone,
+    a substring match against the real hop-2 expression). This proves the
+    same invariant by actually evaluating the chain: the consumer-context
+    step's own scheduling `if:` guard must still fire from the overlay's
+    presence alone, with `consumer-ast-frontend`/`consumer-gcc-path`/
+    `consumer-gcc-options` all genuinely empty -- exactly the scenario
+    `_hop3_inputs_from`'s fix above targets, since a `"true" if ... else
+    "false"` re-coercion bug would have masked a real regression here too
+    (every string is Python-truthy, so it could never actually observe
+    `consumer-compile-active` resolving to anything but the always-true
+    branch)."""
+    raw = {
+        "targets": TestConsumerCompileOverlayProjection._RAW["targets"],
+        "profiles": {
+            "marker-only": {
+                "contract": True,
+                # A `binding:` naming nothing in `resolved_bindings` (there
+                # is none here) -- the overlay is genuinely declared, not
+                # empty/omitted, but every one of its fields resolves to "".
+                "consumer_compile": {"binding": "unresolvable-binding"},
+            },
+        },
+        "baseline": TestConsumerCompileOverlayProjection._RAW["baseline"],
+    }
+    config = _parsed(raw)
+    plan, report = generate_run_plan(config, {"marker-only": _bo("libfoo")})
+    assert report.ok
+    [check] = plan.checks
+    matrix = check.to_dict()
+    assert matrix["consumer_compile_active"] is True
+    assert "consumer_compile_gcc_path" not in matrix
+    assert "consumer_compile_gcc_options" not in matrix
+    assert "consumer_compile_ast_frontend" not in matrix
+
+    run_step = _run_check_step("Run check-target")
+    workflow_inputs = {"gcc-path": "", "gcc-options": "", "ast-frontend": ""}
+    consumer_gcc_path = eval_gha_expression(
+        run_step["with"]["consumer-gcc-path"], matrix=matrix, inputs=workflow_inputs
+    )
+    consumer_gcc_options = eval_gha_expression(
+        run_step["with"]["consumer-gcc-options"], matrix=matrix, inputs=workflow_inputs
+    )
+    consumer_ast_frontend = eval_gha_expression(
+        run_step["with"]["consumer-ast-frontend"], matrix=matrix, inputs=workflow_inputs
+    )
+    consumer_compile_active = eval_gha_expression(
+        run_step["with"]["consumer-compile-active"], matrix=matrix, inputs={}
+    )
+    kind = eval_gha_expression(run_step["with"]["kind"], matrix=matrix)
+    baseline_channel = eval_gha_expression(
+        run_step["with"]["baseline-channel"], matrix=matrix
+    )
+    assert consumer_gcc_path == ""
+    assert consumer_gcc_options == ""
+    assert consumer_ast_frontend == ""
+    assert consumer_compile_active == "true", (
+        "the real hop-2 consumer-compile-active expression must resolve "
+        "the literal string 'true' from the overlay's own presence marker "
+        "alone, with no resolvable field behind it"
+    )
+
+    consumer_step = _consumer_context_step()
+    hop3_inputs = _hop3_inputs_from(
+        kind=kind,
+        baseline_channel=baseline_channel,
+        consumer_compile_active=consumer_compile_active,
+        consumer_ast_frontend=consumer_ast_frontend,
+        consumer_gcc_path=consumer_gcc_path,
+        consumer_gcc_options=consumer_gcc_options,
+    )
+    steps_context = {
+        "resolve.outputs.outcome": "resolved",
+        "collect_verify.outcome": "success",
+        "collect_replay.outcome": "success",
+    }
+    guard = eval_gha_expression(
+        consumer_step["if"], inputs=hop3_inputs, steps=steps_context
+    )
+    assert guard is True, (
+        "a marker-only overlay (no resolvable ast-frontend/gcc-path/"
+        "gcc-options) must still activate the consumer-context step's own "
+        "scheduling guard from its presence marker alone"
     )
 
 
