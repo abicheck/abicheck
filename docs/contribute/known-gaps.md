@@ -3374,12 +3374,18 @@ looked like the obvious fix and wasn't.
   union -- it suppresses a consumer's finding only when that consumer's
   remaining non-intra `DT_NEEDED` edges are all non-empty AND every one of
   them matches `set(DEFAULT_SYSTEM_PROVIDERS) | set(bundle_system_providers)`
-  (or the `_looks_system` heuristic), AND EITHER no in-bundle sibling ever
-  version-compatibly provided the symbol OR the user explicitly named one of
-  the remaining sonames via `explicit_providers` -- a consumer with a mixed
-  intra-bundle/external dependency set can still produce the finding, and
-  a match against the allow-list alone is not sufficient (Codex review,
-  PR #910, fresh evidence). Correct for the ordinary libc/libstdc++/libpthread
+  (or the `_looks_system` heuristic), AND EITHER no in-bundle sibling
+  version-compatibly provided the symbol and was reachable from *this*
+  consumer OR the user explicitly named one of the remaining sonames via
+  `explicit_providers` -- `ever_provided_in_bundle` is `compatible_old &
+  _old_reachable(consumer.library)`, scoped to what this specific consumer
+  could reach, not "any" in-bundle sibling regardless of reachability; an
+  unreachable sibling exporting the symbol does not, by itself, block the
+  allow-list suppression (Codex review, PR #910, fresh evidence, correcting
+  this exact paragraph's own prior "no in-bundle sibling ever" wording). A
+  consumer with a mixed intra-bundle/external dependency set can still
+  produce the finding, and a match against the allow-list alone is not
+  sufficient. Correct for the ordinary libc/libstdc++/libpthread
   runtime set the
   constant started from, but each addition since (oneTBB's `libtbb.so.*`
   and its allocator-proxy libs, oneMKL/Intel-runtime and Level Zero
