@@ -33,7 +33,7 @@ def print_data_sources(
 
     if binary_fmt == "elf":
         from .dwarf_unified import parse_dwarf
-        from .elf_metadata import parse_elf_metadata
+        from .workflows.extraction import parse_elf_metadata
 
         elf_meta = parse_elf_metadata(normalized_path)
         dwarf_meta, _ = parse_dwarf(normalized_path)

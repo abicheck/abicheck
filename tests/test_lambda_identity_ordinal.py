@@ -42,6 +42,9 @@ from __future__ import annotations
 from dataclasses import replace
 from pathlib import Path
 
+from abicheck.buildsource.graph_facts import GraphEdge, GraphNode
+from abicheck.buildsource.pack import BuildSourcePack
+from abicheck.buildsource.source_graph import SourceGraphSummary
 from abicheck.checker import compare
 from abicheck.checker_policy import ChangeKind
 from abicheck.model import AbiSnapshot, Function, Param, RecordType, Visibility
@@ -905,3 +908,101 @@ class TestFactProvenanceKeysAreRenumberedToo:
         assert renamed_owner is not None
         key = type_fact_key(renamed_owner, "is_abstract")
         assert fact_producer(snap, key) == "castxml"
+
+
+class TestL5SourceGraphIdentitiesAreNotRenumbered:
+    """Phase 4 of ``docs/contribute/plans/bug-class-regression-testing.md``
+    (the ``identity.environment_taint`` bug class): a dedicated canary for
+    the residual AGENTS.md already documents under "A named follow-on" --
+    "The L5 source graph's own node identities are not renumbered
+    alongside the flat snapshot's closure markers" (PR #868's own
+    follow-up note).
+
+    ``_LAMBDA_IDENTITY_FIELDS`` (``qualified_name_segments.py``) lists
+    exactly ``functions``/``variables``/``types``/``enums``/``typedefs``/
+    ``typedefs_qualified``/``fact_provenance`` -- ``build_source`` (which
+    carries L5's own ``source_graph``) is absent from that list, so a
+    closure-parameterized node label there is invisible to the rewrite
+    walk entirely, regardless of content. This asserts the residual's OWN
+    bound per ``KnownGap``'s docstring rule (not the eventually-correct
+    behavior): the SAME marker renumbers on the flat side and is left
+    completely untouched on the L5 side, in one snapshot, so a future fix
+    that starts renumbering ``source_graph`` node labels too breaks this
+    test loudly (and a regression that also stops renumbering the flat
+    side breaks it the same way) -- either direction of drift is caught.
+    """
+
+    def test_flat_side_renumbers_while_l5_node_label_does_not(self) -> None:
+        """Uses production-shaped identity-bearing node/edge ids (the real
+        ``decl://``/``type://`` scheme :func:`~abicheck.buildsource.
+        graph_facts._decl_node_id`/``_type_node_id`` mint, embedding the
+        raw identity string verbatim), not an unrelated opaque id -- and a
+        real edge referencing that node -- so a future fix that renumbers
+        node ids/edge endpoints (not just human-readable labels) is caught
+        too, not only one that starts renumbering labels (Codex review,
+        PR #898)."""
+        owner = f"Foo<{_closure('widget.h', 522, 26)}>"
+        node_label = "(lambda at /src/x/widget.h:522:26)"
+        node_id = f"decl://{owner}"
+        edge_dst_id = "type://Other"
+        snap = AbiSnapshot(
+            library="lib.so",
+            version="1",
+            types=[_record(owner, qualified=owner)],
+            build_source=BuildSourcePack(
+                root=Path("/src/x"),
+                source_graph=SourceGraphSummary(
+                    nodes=[GraphNode(id=node_id, kind="source_decl", label=node_label)],
+                    edges=[
+                        GraphEdge(src=node_id, dst=edge_dst_id, kind="DECL_HAS_TYPE")
+                    ],
+                ),
+            ),
+        )
+        # SourceGraphSummary.__post_init__ (via add_node -> ensure_facts_and_
+        # resolve) already normalizes a decl/type node's id AND label at
+        # *construction* time -- but that is the pre-existing, unrelated
+        # checkout-PATH-taint normalization (graph_facts._normalize_graph_
+        # identity), not this fix's ORDINAL renumbering. It still leaves the
+        # raw :line:col intact (only the surrounding path/spelling changes),
+        # which is exactly the residual this test targets -- so capture the
+        # already-normalized-but-still-:line:col-bearing label/id/edge AFTER
+        # construction, as the true "before renumber_anonymous_closure_
+        # identities" baseline, rather than asserting against the literal
+        # strings passed into the constructor.
+        graph = snap.build_source.source_graph  # type: ignore[union-attr]
+        assert graph is not None
+        pre_renumber_id = graph.nodes[0].id
+        pre_renumber_label = graph.nodes[0].label
+        pre_renumber_edge_src = graph.edges[0].src
+        assert "522" in pre_renumber_label and "26" in pre_renumber_label
+
+        renumber_anonymous_closure_identities(snap)
+
+        # The flat side did its job: the raw :line:col marker is gone.
+        renamed = snap.types[0].qualified_name
+        assert renamed is not None
+        assert "522" not in renamed and "26" not in renamed
+
+        # The L5 side is untouched by THIS pass -- still exactly the
+        # pre-renumber spelling, in the node's identity-bearing id, its
+        # label, AND the edge endpoint referencing it. This is the
+        # documented gap's own bound, not a desired outcome. Re-fetches
+        # ``source_graph`` from ``snap`` AFTER the call rather than reusing
+        # the ``graph`` reference captured before it (Codex review, PR
+        # #898): a future fix that closes this gap by constructing a
+        # rewritten ``SourceGraphSummary``/``BuildSourcePack`` and
+        # reassigning it onto ``snap.build_source`` -- rather than mutating
+        # the existing objects in place -- would leave the stale ``graph``
+        # reference showing the old, unrenumbered values forever, making
+        # this canary pass for the wrong reason even after the gap closed.
+        assert snap.build_source is not None
+        post_renumber_graph = snap.build_source.source_graph
+        assert post_renumber_graph is not None
+        assert post_renumber_graph.nodes[0].id == pre_renumber_id
+        assert post_renumber_graph.nodes[0].label == pre_renumber_label
+        assert (
+            "522" in post_renumber_graph.nodes[0].label
+            and "26" in post_renumber_graph.nodes[0].label
+        )
+        assert post_renumber_graph.edges[0].src == pre_renumber_edge_src
