@@ -79,6 +79,18 @@ class DwarfMetadata:
     # under -mlong-double-64/-mabi=ibmlongdouble (G23 D2, same-mangling case).
     base_types: dict[str, int] = field(default_factory=dict)
     has_dwarf: bool = False  # False = binary had no DWARF info
+    # Provenance for assurance receipts.  ``has_dwarf`` alone deliberately
+    # cannot say whether this is a full type parse or binary-depth's cheap
+    # section-presence probe, nor whether BTF/CTF was adapted into this
+    # DWARF-shaped compatibility model.
+    evidence_source: str = "dwarf"  # dwarf | btf | ctf | pdb | unknown
+    evidence_state: str = (
+        "not_available"  # parsed | partial | presence_only | failed | not_available
+    )
+    # Extraction accounting.  These remain zero for formats/producers which
+    # cannot expose CU-level progress (and for old serialized snapshots).
+    cu_total: int = 0
+    cu_failed: int = 0
 
     # TypeMetadataSource protocol methods
     @property
@@ -113,6 +125,14 @@ class AdvancedDwarfMetadata:
     """Sprint 4 metadata extracted from a single .so."""
 
     has_dwarf: bool = False
+    # See DwarfMetadata.evidence_state.  BTF/CTF explicitly use
+    # ``not_supported``: their basic layouts must never be represented as
+    # DWARF calling-convention/value-ABI evidence.
+    evidence_state: str = "not_available"  # parsed | partial | presence_only | failed | not_supported | not_available
+    # See DwarfMetadata.cu_total/cu_failed.  Advanced and basic walks can
+    # fail independently, so each channel owns its accounting.
+    cu_total: int = 0
+    cu_failed: int = 0
     # Normalized target architecture (_normalize_arch): "x86_64", "aarch64",
     # "i386", … Empty string when unknown (e.g. arch-less mock snapshots).
     # Gates the SysV-AMD64-specific aggregate-return-convention classification.
