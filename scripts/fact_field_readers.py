@@ -977,6 +977,63 @@ def _unbound_getattribute_receiver_aliases(tree: ast.Module) -> frozenset[str]:
     return frozenset(names)
 
 
+def _unbound_getattribute_method_aliases(
+    tree: ast.Module, object_type_names: frozenset[str]
+) -> frozenset[str]:
+    """Return every local name *tree* binds to the unbound method itself
+    -- `object.__getattribute__`/`type.__getattribute__` (or an alias of
+    `object`/`type` from *object_type_names*) assigned to a plain name,
+    plus any further plain-assignment chain from there, resolved to a
+    fixed point (mirroring `_builtins_symbol_aliases()`'s own qualified-
+    candidate mechanism).
+
+    Used by the unbound `__getattribute__` recognition branch (Codex
+    review, fresh evidence): `read_attr = object.__getattribute__;
+    read_attr(rec, "bases")` performs the identical unbound-method read as
+    `object.__getattribute__(rec, "bases")`, but the call-matching branch
+    there requires the callee itself to still be an `ast.Attribute` (`X.
+    __getattribute__(...)`) -- it has no notion of the method having been
+    lifted out to a bare name first, which `_unbound_getattribute_
+    receiver_aliases()` (this function's sibling, tracking aliases of the
+    *receiver* `object`/`type` themselves) does not cover either, since
+    the alias here is of the *method*, not of `object`/`type`.
+    """
+    names: set[str] = set()
+    assign_candidates: list[tuple[str, str]] = []
+    qualified_candidates: list[tuple[str, str]] = []
+
+    def _add_candidate(target: str, value: ast.expr | None) -> None:
+        if isinstance(value, ast.Name):
+            assign_candidates.append((target, value.id))
+        elif (
+            isinstance(value, ast.Attribute)
+            and value.attr == "__getattribute__"
+            and isinstance(value.value, ast.Name)
+        ):
+            qualified_candidates.append((target, value.value.id))
+
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Assign):
+            for target in node.targets:
+                if isinstance(target, ast.Name):
+                    _add_candidate(target.id, node.value)
+        elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
+            _add_candidate(node.target.id, node.value)
+    for local, base in qualified_candidates:
+        if base in object_type_names:
+            names.add(local)
+    changed = True
+    while changed:
+        changed = False
+        for local, ref in assign_candidates:
+            if local in names:
+                continue
+            if ref in names:
+                names.add(local)
+                changed = True
+    return frozenset(names)
+
+
 def _operator_attrgetter_aliases(
     tree: ast.Module,
 ) -> tuple[frozenset[str], frozenset[str]]:
@@ -1362,6 +1419,9 @@ def unmigrated_fact_reader_sites(
     getattr_names, builtins_names = _builtins_getattr_aliases(tree)
     vars_names = _builtins_symbol_aliases(tree, "vars", builtins_names)
     object_type_names = _unbound_getattribute_receiver_aliases(tree)
+    unbound_getattribute_names = _unbound_getattribute_method_aliases(
+        tree, object_type_names
+    )
     attrgetter_names, operator_names = _operator_attrgetter_aliases(tree)
     locally_bound = _locally_bound_names(tree)
     lexical_parents = _lexical_function_parents(tree)
@@ -1631,6 +1691,26 @@ def unmigrated_fact_reader_sites(
             # __getattribute__(rec, "bases")`) must not match -- the same
             # exclusion the getattr/attrgetter branches above already
             # apply (Codex review, fresh evidence).
+            attr = node.args[1].value
+            record_node = node
+        elif (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Name)
+            and node.func.id in unbound_getattribute_names
+            and not _shadowed(node, node.func.id)
+            and len(node.args) == 2
+            and isinstance(node.args[1], ast.Constant)
+            and isinstance(node.args[1].value, str)
+            and node.args[1].value in FACT_BRIDGED_ATTRS
+        ):
+            # `read_attr = object.__getattribute__; read_attr(rec,
+            # "bases")` -- the unbound method itself lifted out to a
+            # plain local (or a chain from there) before being called,
+            # rather than called directly off `object`/`type`/an alias of
+            # either the way the branch just above matches (Codex review,
+            # fresh evidence). Reads `rec.bases` exactly the same way; a
+            # local shadowing the alias name is excluded the same way
+            # every other dynamic-read branch here already is.
             attr = node.args[1].value
             record_node = node
         elif (

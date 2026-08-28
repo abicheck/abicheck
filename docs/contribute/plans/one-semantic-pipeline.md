@@ -1981,6 +1981,39 @@ clean, `fact_field_readers.py` at 1741 lines (well under the 2000-line
 hard cap). New tests in `TestQualifiedAttrgetterAssignmentAliases`
 (`tests/test_fact_field_readers_wrapper_scoping.py`).
 
+**One more finding, from the next review round: the unbound-method
+`object.__getattribute__(rec, "bases")` call branch only ever matched a
+call made directly off `object`/`type`/an alias of either receiver -- it
+had no notion of the *method itself* being lifted out to a plain name
+first.** `read_attr = object.__getattribute__; read_attr(rec, "bases")`
+performs the identical unbound-method read, but the call-matching branch
+requires `node.func` to still be an `ast.Attribute` (`X.__getattribute__
+(...)`) -- once the method is assigned to `read_attr`, `node.func` is an
+`ast.Name`, and neither this branch nor `_unbound_getattribute_receiver_
+aliases()` (which tracks aliases of the *receiver* `object`/`type`, not of
+the method) had anything to recognize it. Fixed with a new
+`_unbound_getattribute_method_aliases(tree, object_type_names)`, mirroring
+`_builtins_symbol_aliases()`'s own qualified-candidate mechanism: a plain
+assignment whose RHS is `X.__getattribute__` for some `X` already in the
+caller's resolved `object_type_names` seeds the set, then an ordinary
+plain-name chain resolves further aliases of that alias to a fixed point
+-- so a receiver alias (`from builtins import object as O`) and a method
+alias (`read_attr = O.__getattribute__`) compose correctly together. A new
+call-matching branch was added alongside the existing unbound-receiver
+branch, requiring the same `not _shadowed(...)`/two-args/literal-string-
+argument/`FACT_BRIDGED_ATTRS` shape the existing branches already enforce.
+
+Verified against the reported repro, a chained-alias variant, a
+receiver-alias-composed-with-method-alias variant, the `type.
+__getattribute__` sibling spelling, and two negative controls (a
+shadowing parameter; a non-bridged attribute argument) via direct AST
+reproduction before writing tests. Zero existing hits, `mypy`/`ruff` both
+stayed clean, `fact_field_readers.py` at 1821 lines (well under the
+2000-line hard cap, though headroom is narrowing -- the next finding in
+this area should reassess whether a sibling module split is due before
+adding more). New tests in `TestUnboundGetattributeMethodAliases`
+(`tests/test_fact_field_readers_wrapper_scoping.py`).
+
 **Still not landed**: no detector (`diff_layout.py`/`diff_types.py`/
 `diff_param_qualifiers.py`/the reader set the check above now tracks
 precisely) has actually been migrated to read `.status` — the check above

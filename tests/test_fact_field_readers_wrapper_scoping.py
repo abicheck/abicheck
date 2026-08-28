@@ -846,3 +846,91 @@ class TestQualifiedAttrgetterAssignmentAliases:
         )
         tree = ast.parse(src, filename="x.py")
         assert unmigrated_fact_reader_sites(tree, "x.py", src) == []
+
+
+class TestUnboundGetattributeMethodAliases:
+    """``_unbound_getattribute_method_aliases()`` resolves a plain-name
+    alias of the unbound method itself (``read_attr = object.
+    __getattribute__``), not only a call made directly off `object`/
+    `type`/an alias of either receiver."""
+
+    def test_detects_a_call_through_an_aliased_method(self) -> None:
+        src = (
+            "def f(rec):\n"
+            "    read_attr = object.__getattribute__\n"
+            '    return read_attr(rec, "bases")\n'
+        )
+        tree = ast.parse(src, filename="x.py")
+        keys = [
+            key for key, _l, _a, _q in unmigrated_fact_reader_sites(tree, "x.py", src)
+        ]
+        assert keys == [
+            'x.py::f::bases::read_attr(rec, "bases")::read_attr(rec, "bases")::1'
+        ]
+
+    def test_detects_a_chained_alias_of_the_method(self) -> None:
+        """The method alias resolves to a fixed point, so a second alias
+        of the first also resolves."""
+        src = (
+            "def f(rec):\n"
+            "    a = object.__getattribute__\n"
+            "    b = a\n"
+            '    return b(rec, "bases")\n'
+        )
+        tree = ast.parse(src, filename="x.py")
+        keys = [
+            key for key, _l, _a, _q in unmigrated_fact_reader_sites(tree, "x.py", src)
+        ]
+        assert keys == ['x.py::f::bases::b(rec, "bases")::b(rec, "bases")::1']
+
+    def test_detects_a_method_alias_through_an_aliased_receiver(self) -> None:
+        """The method-alias resolution composes with an already-aliased
+        receiver (`from builtins import object as O`), not just the bare
+        `object`/`type` spellings."""
+        src = (
+            "from builtins import object as O\n"
+            "def f(rec):\n"
+            "    read_attr = O.__getattribute__\n"
+            '    return read_attr(rec, "bases")\n'
+        )
+        tree = ast.parse(src, filename="x.py")
+        keys = [
+            key for key, _l, _a, _q in unmigrated_fact_reader_sites(tree, "x.py", src)
+        ]
+        assert keys == [
+            'x.py::f::bases::read_attr(rec, "bases")::read_attr(rec, "bases")::1'
+        ]
+
+    def test_detects_a_method_alias_via_the_type_receiver(self) -> None:
+        """The identical alias resolution for the `type.__getattribute__`
+        spelling."""
+        src = (
+            "def f(rec):\n"
+            "    read_attr = type.__getattribute__\n"
+            '    return read_attr(rec, "bases")\n'
+        )
+        tree = ast.parse(src, filename="x.py")
+        keys = [
+            key for key, _l, _a, _q in unmigrated_fact_reader_sites(tree, "x.py", src)
+        ]
+        assert keys == [
+            'x.py::f::bases::read_attr(rec, "bases")::read_attr(rec, "bases")::1'
+        ]
+
+    def test_ignores_a_method_alias_shadowed_by_a_parameter(self) -> None:
+        """Negative control: an unrelated parameter reusing the alias name
+        must not be treated as the resolved unbound-method alias."""
+        src = 'def f(read_attr, rec):\n    return read_attr(rec, "bases")\n'
+        tree = ast.parse(src, filename="x.py")
+        assert unmigrated_fact_reader_sites(tree, "x.py", src) == []
+
+    def test_ignores_a_call_with_a_non_matching_argument(self) -> None:
+        """Negative control: the attribute name argument must still name a
+        bridged attribute."""
+        src = (
+            "def f(rec):\n"
+            "    read_attr = object.__getattribute__\n"
+            '    return read_attr(rec, "unrelated_field")\n'
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert unmigrated_fact_reader_sites(tree, "x.py", src) == []
