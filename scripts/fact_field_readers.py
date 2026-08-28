@@ -377,18 +377,23 @@ def _imported_class_aliases(tree: ast.Module) -> dict[str, str]:
     """Map every local name *tree* binds to one of `FACT_BRIDGED_CLASS_NAMES`
     -- either via an `import ... as` (`from abicheck.model import
     RecordType as RT` maps `"RT" -> "RecordType"`) or a simple whole-tree
-    name assignment (`RT = RecordType` maps the same way; a further
+    name assignment (`RT = RecordType` maps the same way; an annotated
+    assignment `RT: type = RecordType` maps identically; a further
     `RT2 = RT` chains to `"RecordType"` too, resolved to a fixed point the
     same way `fact_detector_misuse._fact_aliases` chains local aliases) --
-    back to its real name. Both are real, found by Codex review with fresh
+    back to its real name. All are real, found by Codex review with fresh
     evidence: a positional class pattern on such an alias, `case
     RT(_, _, _, _, _, []):`, is invisible to a bare-name check against the
     literal `RecordType`/`Param` spellings, whichever way the alias was
-    established. An import/assignment with no local rename needs no entry
-    -- the bare name already matches directly. Whole-tree, not
-    function-scoped: both mechanisms are almost always module level, and
-    scanning the whole tree is the same over-approximating-is-safe stance
-    this module already takes elsewhere.
+    established -- the annotated-assignment shape is the same gap the
+    plain-`ast.Assign` fix already closed, just reached through a
+    differently-typed AST node (`ast.AnnAssign`, not `ast.Assign`) that a
+    check keyed on the latter alone never visits. An import/assignment
+    with no local rename needs no entry -- the bare name already matches
+    directly. Whole-tree, not function-scoped: all three mechanisms are
+    almost always module level, and scanning the whole tree is the same
+    over-approximating-is-safe stance this module already takes
+    elsewhere.
     """
     aliases: dict[str, str] = {}
     assign_candidates: list[tuple[str, str]] = []
@@ -405,6 +410,12 @@ def _imported_class_aliases(tree: ast.Module) -> dict[str, str]:
             and isinstance(node.value, ast.Name)
         ):
             assign_candidates.append((node.targets[0].id, node.value.id))
+        elif (
+            isinstance(node, ast.AnnAssign)
+            and isinstance(node.target, ast.Name)
+            and isinstance(node.value, ast.Name)
+        ):
+            assign_candidates.append((node.target.id, node.value.id))
     changed = True
     while changed:
         changed = False
@@ -427,14 +438,17 @@ def _builtins_getattr_aliases(
     *tree* binds to the real `getattr` builtin (always includes the bare
     `"getattr"` itself, plus any `from builtins import getattr as X`, plus
     a plain assignment chain such as `read_attr = getattr` --
-    `read_attr2 = read_attr` chains too, resolved to a fixed point), and
-    every local name bound to the `builtins` module itself (`import
+    `read_attr2 = read_attr` chains too, resolved to a fixed point --
+    plus a *qualified* assignment such as `read_attr = builtins.getattr`),
+    and every local name bound to the `builtins` module itself (`import
     builtins`, `import builtins as b`) -- used to recognize `builtins.
     getattr(...)`/`b.getattr(...)` alongside a bare call. All are real
-    (Codex review, fresh evidence: `import builtins;
+    (Codex review, fresh evidence, two rounds: `import builtins;
     builtins.getattr(rec, "bases")`, `from builtins import getattr as
-    read_attr`, and `read_attr = getattr; read_attr(rec, "bases")` are all
-    invisible to a scan that only matches the literal bare callee
+    read_attr`, `read_attr = getattr; read_attr(rec, "bases")`, and --
+    combining the qualified-call recognition with the plain-assignment
+    chaining -- `read_attr = builtins.getattr; read_attr(rec, "bases")`
+    are all invisible to a scan that only matches the literal bare callee
     `getattr`). Whole-tree, matching `_imported_class_aliases`'s own scope
     for the identical reason -- and the plain-assignment chaining mirrors
     that function's own fixed-point resolution of `RT = RecordType`/
@@ -444,6 +458,11 @@ def _builtins_getattr_aliases(
     getattr_names = {"getattr"}
     builtins_names: set[str] = set()
     assign_candidates: list[tuple[str, str]] = []
+    # `local = <module-name>.getattr` -- resolved once, after the walk
+    # below has finished collecting every `import builtins` occurrence,
+    # since (unlike the plain-name candidates) this needs the *complete*
+    # `builtins_names` set to know whether `<module-name>` really is one.
+    qualified_candidates: list[tuple[str, str]] = []
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
             for alias in node.names:
@@ -457,9 +476,18 @@ def _builtins_getattr_aliases(
             isinstance(node, ast.Assign)
             and len(node.targets) == 1
             and isinstance(node.targets[0], ast.Name)
-            and isinstance(node.value, ast.Name)
         ):
-            assign_candidates.append((node.targets[0].id, node.value.id))
+            if isinstance(node.value, ast.Name):
+                assign_candidates.append((node.targets[0].id, node.value.id))
+            elif (
+                isinstance(node.value, ast.Attribute)
+                and node.value.attr == "getattr"
+                and isinstance(node.value.value, ast.Name)
+            ):
+                qualified_candidates.append((node.targets[0].id, node.value.value.id))
+    for local, base in qualified_candidates:
+        if base in builtins_names:
+            getattr_names.add(local)
     changed = True
     while changed:
         changed = False

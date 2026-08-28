@@ -403,6 +403,29 @@ class TestUnmigratedFactReaderSites:
         tree = ast.parse(src, filename="x.py")
         assert unmigrated_fact_reader_sites(tree, "x.py", src) == []
 
+    def test_detects_a_positional_pattern_through_an_annotated_local_alias(
+        self,
+    ) -> None:
+        """`RT: type = RecordType` then `case RT(_, _, _, _, _, []):` -- an
+        ordinary annotated assignment, not a bare `ast.Assign` (Codex
+        review, fresh evidence: adding a type annotation to an already-
+        recognized alias assignment must not bypass the reader gate)."""
+        src = (
+            "RT: type = RecordType\n"
+            "def f(rec):\n"
+            "    match rec:\n"
+            "        case RT(_, _, _, _, _, []):\n"
+            "            return True\n"
+            "    return False\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        keys = [
+            key for key, _l, _a, _q in unmigrated_fact_reader_sites(tree, "x.py", src)
+        ]
+        assert keys == [
+            "x.py::f::<positional>::RT(_, _, _, _, _, [])::RT(_, _, _, _, _, [])::1"
+        ]
+
     def test_detects_a_qualified_builtins_getattr_call(self) -> None:
         """`import builtins; builtins.getattr(rec, "bases")` is the
         identical read as bare `getattr(rec, "bases")` (Codex review:
@@ -473,6 +496,27 @@ class TestUnmigratedFactReaderSites:
         ]
         assert keys == [
             'x.py::f::vtable::read_attr2(rec, "vtable")::read_attr2(rec, "vtable")::1'
+        ]
+
+    def test_detects_a_qualified_assignment_to_the_getattr_builtin(self) -> None:
+        """`read_attr = builtins.getattr; read_attr(rec, "bases")` --
+        combining the qualified-call recognition with plain-assignment
+        chaining (Codex review, fresh evidence): the assignment's own
+        value is `builtins.getattr`, not a bare `ast.Name`, so it was
+        invisible to a candidate collector that only ever matched an
+        `ast.Name` value."""
+        src = (
+            "import builtins\n"
+            "def f(rec):\n"
+            "    read_attr = builtins.getattr\n"
+            '    return read_attr(rec, "bases")\n'
+        )
+        tree = ast.parse(src, filename="x.py")
+        keys = [
+            key for key, _l, _a, _q in unmigrated_fact_reader_sites(tree, "x.py", src)
+        ]
+        assert keys == [
+            'x.py::f::bases::read_attr(rec, "bases")::read_attr(rec, "bases")::1'
         ]
 
     def test_detects_an_augmented_assignment_to_a_bridged_attr(self) -> None:

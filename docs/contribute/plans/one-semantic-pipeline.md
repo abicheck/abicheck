@@ -1197,6 +1197,33 @@ local `getattr` alias detected, a chained `getattr` alias detected, an
 augmented assignment detected, and a negative control confirming an
 ordinary `Store` overwrite is still not flagged.
 
+**A tenth Codex review round found two more real gaps, both small,
+bounded extensions of already-built mechanisms -- fixed, matching the
+review-convergence status already posted on this PR (further exotic
+indirection is documented as a known gap; a bounded combination of two
+already-supported mechanisms is not).** (1) `RT: type = RecordType` then
+`case RT(_, _, _, _, _, []):` -- an ordinary annotated assignment
+(`ast.AnnAssign`), not the `ast.Assign` the class-alias collector already
+matched. The same gap the eighth round's fix (1) closed for a plain
+`RT = RecordType`, reached through a differently-typed AST node the
+collector never visited. Fixed by adding an `ast.AnnAssign` branch to
+`_imported_class_aliases()` alongside the existing `ast.Assign` one,
+feeding the identical fixed-point chain. (2) `read_attr = builtins.
+getattr` then `read_attr(rec, "bases")` -- combining two mechanisms this
+file already supports independently (the qualified-call recognition from
+round eight and the plain-assignment chaining from round nine) in a way
+neither alone catches: the assignment's own value is `builtins.getattr`
+(an `ast.Attribute`), not a bare `ast.Name`, so the existing candidate
+collector -- which only ever matched an `ast.Name` value -- never added
+it. Fixed with a second candidate list resolved once, after the walk
+finishes collecting every `import builtins` occurrence (needed since,
+unlike the plain-name candidates, this resolution needs the *complete*
+`builtins_names` set before it can tell whether the qualifying name is
+really the `builtins` module). Verified empirically: still zero existing
+hits, baseline stays at 104. New tests: an annotated class alias detected
+through a positional pattern, and a qualified assignment to the
+`getattr` builtin detected.
+
 **Still not landed**: no detector (`diff_layout.py`/`diff_types.py`/
 `diff_param_qualifiers.py`/the reader set the check above now tracks
 precisely) has actually been migrated to read `.status` — the check above
