@@ -509,7 +509,21 @@ BUG_CLASSES: tuple[BugClass, ...] = (
                     "own real env mapping "
                     "(`test_action_run_contract.py`'s "
                     "`_action_yml_env_mapping`), so a swap of that mapping "
-                    "would be caught here too."
+                    "would be caught here too. A third review round found "
+                    "the sentinel chain still covered only "
+                    "`consumer_compile`'s `binding`/`standard`/`stdlib` "
+                    "fields (the compiler path/options) — the fixture never "
+                    "set `consumer_compile.frontend` at all, so "
+                    "`consumer-ast-frontend` was only ever evaluated as an "
+                    "empty string and never carried to hop 4's "
+                    "`--ast-frontend` argument, even though `frontend` is "
+                    "part of the same concern the registry now declares "
+                    "closed. Fixed by threading a second, distinct "
+                    "sentinel/workflow-global pair for `frontend` (one of "
+                    "the real, validated `auto`/`castxml`/`clang`/`hybrid` "
+                    "values) through the identical hops, including hop 4's "
+                    "`--ast-frontend` CLI flag and the same "
+                    "`_action_yml_env_mapping`-derived env var lookup."
                 ),
                 reference="docs/contribute/plans/bug-class-regression-testing.md#phase-6",
             ),

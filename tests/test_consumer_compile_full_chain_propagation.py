@@ -18,6 +18,19 @@
 Phase 6) -- not just a substring/exact-text assertion at each hop in
 isolation.
 
+A third Codex review round (PR #906) found the sentinel chain covered only
+``consumer_compile``'s ``binding``/``standard``/``stdlib`` fields (the
+compiler path/options), never its ``frontend`` field -- even though the
+fixture never set ``consumer_compile.frontend`` at all, so
+``consumer-ast-frontend`` was only ever evaluated as an empty string and
+never carried to hop 4's ``--ast-frontend`` argument or checked against the
+root-action env mapping. A regression in ``consumer-ast-frontend``'s own
+expression, or a swap of ``INPUT_AST_FRONTEND`` with another declared
+input, could therefore have gone undetected by this file even though
+``frontend`` is part of the concern the registry now declares closed. Fixed
+by threading a second, distinct sentinel for ``frontend`` through the
+identical hops the gcc-path/gcc-options sentinel already traverses.
+
 Codex review (PR #906) on the sibling tests in `test_reusable_workflows_
 project_evidence.py`/`test_run_plan_consumer_compile_active.py`/
 `test_project_targets_consumer_compile.py`: those prove each hop's
@@ -66,6 +79,7 @@ action.yml's own env block would have gone undetected.
 
 from __future__ import annotations
 
+from copy import deepcopy
 from typing import Any
 
 from _gha_expr import eval_gha_expression
@@ -91,6 +105,14 @@ _SENTINEL_PRODUCER_GCC_PATH = "/opt/SENTINEL-producer-toolchain/bin/g++"
 # matching.
 _WORKFLOW_GLOBAL_GCC_PATH = "/opt/SENTINEL-workflow-global/bin/gcc"
 
+# The `frontend` field of the same `consumer_compile` concern, threaded
+# through the identical hops via its own sentinel/fallback pair -- must be
+# one of the real, validated `ast-frontend` values (auto/castxml/clang/
+# hybrid; action/run.sh's own validate-inputs guard), so "clang" and
+# "hybrid" stand in for the sentinel/workflow-global roles respectively.
+_SENTINEL_CONSUMER_AST_FRONTEND = "clang"
+_WORKFLOW_GLOBAL_AST_FRONTEND = "hybrid"
+
 
 def _run_check_step(name: str) -> dict[str, Any]:
     project = _load(CHECK_PROJECT)
@@ -112,7 +134,11 @@ def test_sentinel_consumer_gcc_path_survives_config_to_check_target_input() -> N
     """Hops 1-3: config -> generate_run_plan() -> check-project.yml ->
     check-target/action.yml's scheduling guard AND its `with:`, evaluated
     for real at each of the latter two."""
-    config = _parsed(TestConsumerCompileOverlayProjection._RAW)
+    raw: dict[str, Any] = deepcopy(TestConsumerCompileOverlayProjection._RAW)
+    raw["profiles"]["gcc14-build-clang20-client"]["consumer_compile"]["frontend"] = (
+        _SENTINEL_CONSUMER_AST_FRONTEND
+    )
+    config = _parsed(raw)
     plan, report = generate_run_plan(
         config,
         {
@@ -133,17 +159,19 @@ def test_sentinel_consumer_gcc_path_survives_config_to_check_target_input() -> N
     assert matrix["consumer_compile_gcc_path"] == _SENTINEL_CONSUMER_GCC_PATH
     assert matrix["compile_gcc_path"] == _SENTINEL_PRODUCER_GCC_PATH
     assert matrix["consumer_compile_gcc_path"] != matrix["compile_gcc_path"]
+    assert matrix["consumer_compile_ast_frontend"] == _SENTINEL_CONSUMER_AST_FRONTEND
 
     run_step = _run_check_step("Run check-target")
     # Workflow-global inputs deliberately set to a THIRD, distinct
     # sentinel: if the real expression's own `matrix.consumer_compile_
     # active` gate were dropped, this would leak through instead of the
     # real consumer_compile_gcc_path, and the assertion below would catch
-    # it (this sentinel, not the expected one, would appear).
+    # it (this sentinel, not the expected one, would appear). Same for
+    # `ast-frontend`, with its own distinct workflow-global value.
     workflow_inputs = {
         "gcc-path": _WORKFLOW_GLOBAL_GCC_PATH,
         "gcc-options": "",
-        "ast-frontend": "",
+        "ast-frontend": _WORKFLOW_GLOBAL_AST_FRONTEND,
     }
     consumer_gcc_path = eval_gha_expression(
         run_step["with"]["consumer-gcc-path"], matrix=matrix, inputs=workflow_inputs
@@ -163,6 +191,7 @@ def test_sentinel_consumer_gcc_path_survives_config_to_check_target_input() -> N
     )
     assert consumer_gcc_path == _SENTINEL_CONSUMER_GCC_PATH
     assert consumer_gcc_options == "-std=gnu++20 -stdlib=libc++"
+    assert consumer_ast_frontend == _SENTINEL_CONSUMER_AST_FRONTEND
 
     consumer_step = _consumer_context_step()
     hop3_inputs = {
@@ -199,22 +228,30 @@ def test_sentinel_consumer_gcc_path_survives_config_to_check_target_input() -> N
     final_gcc_options = eval_gha_expression(
         consumer_step["with"]["gcc-options"], inputs=hop3_inputs
     )
+    final_ast_frontend = eval_gha_expression(
+        consumer_step["with"]["ast-frontend"], inputs=hop3_inputs
+    )
     assert final_gcc_path == _SENTINEL_CONSUMER_GCC_PATH
     assert final_gcc_options == "-std=gnu++20 -stdlib=libc++"
+    assert final_ast_frontend == _SENTINEL_CONSUMER_AST_FRONTEND
 
-    _assert_reaches_real_dump_cli_invocation(final_gcc_path, final_gcc_options)
+    _assert_reaches_real_dump_cli_invocation(
+        final_gcc_path, final_gcc_options, final_ast_frontend
+    )
 
 
-def _assert_reaches_real_dump_cli_invocation(gcc_path: str, gcc_options: str) -> None:
-    """Hop 4: the value resolved at the end of hops 1-3, mapped to its REAL
-    INPUT_* env var name via root action.yml's own "Run abicheck" step env
+def _assert_reaches_real_dump_cli_invocation(
+    gcc_path: str, gcc_options: str, ast_frontend: str
+) -> None:
+    """Hop 4: the values resolved at the end of hops 1-3, mapped to their REAL
+    INPUT_* env var names via root action.yml's own "Run abicheck" step env
     block (`_action_yml_env_mapping`, from test_action_run_contract.py --
-    never a hardcoded `INPUT_GCC_PATH` guess, so a swap of that env
-    block's own gcc-path/gcc-options mappings would be caught here), fed
-    into run.sh's own real dump-mode region (the existing
+    never a hardcoded `INPUT_GCC_PATH`/`INPUT_AST_FRONTEND` guess, so a swap
+    of that env block's own mappings would be caught here), fed into
+    run.sh's own real dump-mode region (the existing
     test_action_compile_context_parity.py harness -- no new execution
-    machinery), producing the real --compiler/--compiler-option CLI
-    flags."""
+    machinery), producing the real --ast-frontend/--compiler/
+    --compiler-option CLI flags."""
     env_by_input = {inp: var for var, inp in _action_yml_env_mapping().items()}
     for name in ("gcc-path", "gcc-options", "ast-frontend", "gcc-prefix", "sysroot"):
         assert name in env_by_input, (
@@ -223,7 +260,7 @@ def _assert_reaches_real_dump_cli_invocation(gcc_path: str, gcc_options: str) ->
             f"tests should already have failed"
         )
     env = {
-        env_by_input["ast-frontend"]: "",
+        env_by_input["ast-frontend"]: ast_frontend,
         env_by_input["gcc-path"]: gcc_path,
         env_by_input["gcc-prefix"]: "",
         env_by_input["gcc-options"]: gcc_options,
@@ -231,6 +268,8 @@ def _assert_reaches_real_dump_cli_invocation(gcc_path: str, gcc_options: str) ->
         "INPUT_NOSTDINC": "false",
     }
     cmd, _ = _run_region(_DUMP_MODE_MARKER, env)
+    assert "--ast-frontend" in cmd
+    assert cmd[cmd.index("--ast-frontend") + 1] == ast_frontend
     assert "--compiler" in cmd
     assert cmd[cmd.index("--compiler") + 1] == gcc_path
     assert "--compiler-option" in cmd
@@ -240,31 +279,50 @@ def _assert_reaches_real_dump_cli_invocation(gcc_path: str, gcc_options: str) ->
 
 def test_bundle_kind_and_no_overlay_never_leak_the_workflow_global_path() -> None:
     """A companion to the first test's "distinct sentinel" trick, checked
-    directly against the real hop-2 expression for the two cases that must
-    resolve empty regardless of what the workflow-global input carries:
-    a bundle-kind cell (never gets consumer fields at all), and a
+    directly against the real hop-2 expressions -- gcc-path and, since the
+    third Codex review round, ast-frontend too -- for the two cases that
+    must resolve empty regardless of what the workflow-global input
+    carries: a bundle-kind cell (never gets consumer fields at all), and a
     non-overlay profile (`consumer_compile_active` false)."""
     run_step = _run_check_step("Run check-target")
-    expr = run_step["with"]["consumer-gcc-path"]
+    gcc_path_expr = run_step["with"]["consumer-gcc-path"]
+    ast_frontend_expr = run_step["with"]["consumer-ast-frontend"]
 
     bundle_matrix = {
         "kind": "bundle",
         "consumer_compile_active": True,
         "consumer_compile_gcc_path": _SENTINEL_CONSUMER_GCC_PATH,
+        "consumer_compile_ast_frontend": _SENTINEL_CONSUMER_AST_FRONTEND,
+    }
+    bundle_inputs = {
+        "gcc-path": _WORKFLOW_GLOBAL_GCC_PATH,
+        "ast-frontend": _WORKFLOW_GLOBAL_AST_FRONTEND,
     }
     assert (
+        eval_gha_expression(gcc_path_expr, matrix=bundle_matrix, inputs=bundle_inputs)
+        == ""
+    )
+    assert (
         eval_gha_expression(
-            expr, matrix=bundle_matrix, inputs={"gcc-path": _WORKFLOW_GLOBAL_GCC_PATH}
+            ast_frontend_expr, matrix=bundle_matrix, inputs=bundle_inputs
         )
         == ""
     )
 
     no_overlay_matrix = {"kind": "target", "consumer_compile_active": False}
+    no_overlay_inputs = {
+        "gcc-path": _WORKFLOW_GLOBAL_GCC_PATH,
+        "ast-frontend": _WORKFLOW_GLOBAL_AST_FRONTEND,
+    }
     assert (
         eval_gha_expression(
-            expr,
-            matrix=no_overlay_matrix,
-            inputs={"gcc-path": _WORKFLOW_GLOBAL_GCC_PATH},
+            gcc_path_expr, matrix=no_overlay_matrix, inputs=no_overlay_inputs
+        )
+        == ""
+    )
+    assert (
+        eval_gha_expression(
+            ast_frontend_expr, matrix=no_overlay_matrix, inputs=no_overlay_inputs
         )
         == ""
     )
