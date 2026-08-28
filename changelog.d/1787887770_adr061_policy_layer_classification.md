@@ -39,7 +39,10 @@
   describes), but because classifying them surfaces real, pre-existing
   forbidden edges the architecture gate would otherwise catch:
 
-  - **`frontends -> policy` (11 of the 14 excluded files).** `cli_params.py`,
+  - **`frontends -> policy` (12 of the 14 excluded candidates — all except
+    `contract_relevance_types.py` and `contract_replay.py`).** The 11 files
+    named next are the `frontends`-side *importers* hitting this edge, not
+    the excluded candidates themselves: `cli_params.py`,
     `cli_compare_helpers.py`, `cli_compare_receipt.py`,
     `cli_compare_release.py`, `cli_compare_release_helpers.py`,
     `cli_helpers_compare.py`, `cli_buildsource_helpers.py`, `cli_scan.py`,
@@ -51,7 +54,7 @@
     `contract_gating`, `reclassify`, and `checker_policy` **directly**
     (function-local imports, not routed through `workflows`), and
     `frontends`'s `may_import` is `[model, workflows, report]` — `policy`
-    is not in it. Classifying any of those 11 modules would turn an
+    is not in it. Classifying any of those 12 candidates would turn an
     invisible (both sides currently unclassified) relationship into a
     real `dependency-direction` error, since `frontends` genuinely cannot
     reach `policy` without an intermediate `workflows` facade that does
@@ -72,7 +75,7 @@
     `ChangeKind`/`HasKind` from `model.change_catalog` rather than owning
     policy logic — so both the import-graph evidence and the role
     ambiguity point the same direction: leave it unclassified.
-  - **`workflows -> policy` via `compatibility_evaluation_frontend.py`
+  - **`policy -> workflows` via `compatibility_evaluation_frontend.py`
     (`pack_application.py`, `contract_context.py`).** Both import from
     `compatibility_evaluation_frontend.py`, which is already classified
     `workflows` — and `policy`'s `may_import` doesn't include `workflows`
