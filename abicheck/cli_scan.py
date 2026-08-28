@@ -655,17 +655,13 @@ def _resolve_artifact_set_paths(spec: tuple[str, ...]) -> tuple[list[Path], bool
 
     ``spec`` is the tuple Click's repeatable ``--artifact-set`` collects (CLI
     cleanup phase two, PR 5 -- the comma-separated single-string form this
-    replaced is gone with no alias, same as every other removal in that
-    plan). A single value naming an existing directory is expanded to every
-    discoverable shared library in it (``explicit=False`` — an unsupported
-    file found this way is silently skipped, mirroring
-    ``build_bundle_snapshot``'s directory-scan behavior). Anything else --
-    one value that is not a directory, or two or more values -- is read as
-    an explicit path list, one member per ``--artifact-set`` occurrence
-    (``explicit=True`` — every named member must resolve and must look like
-    a real library, enforced by :func:`bundle.discover_artifact_set`).
-    ``reject_incoherent_scan_operands`` has already rejected an empty or
-    blank member by the time this runs.
+    replaced is gone, no alias). A single value naming a directory expands
+    to every discoverable shared library in it (``explicit=False`` -- an
+    unsupported file found this way is silently skipped, mirroring
+    ``build_bundle_snapshot``'s directory-scan behavior); anything else is
+    an explicit path list, one member per occurrence (``explicit=True`` --
+    every member must resolve, enforced by :func:`bundle.discover_artifact_set`).
+    ``reject_incoherent_scan_operands`` has already rejected an empty member.
     """
     from .workflows.extraction import discover_shared_libraries
 
