@@ -734,6 +734,24 @@ already documented as a leaf by construction, and `checker_types.py`'s
 `_evaluated_changes`/`not_evaluated` depend on it exactly as `severity.py`'s
 gate functions do.
 
+A third module joined this treatment later, once `compatibility_evaluation_
+config.py` was separately classified `policy`: `contract_evidence.py` (ADR-049
+Phase 4's persisted contract-relevance evidence/decision shape) had been
+classified `model`, but it imports `CompatibilityEvaluationConfig` from that
+now-`policy` module as a real dataclass field type on `EvaluationContextBlock`
+— not a type-only reference — which `model`'s `may_import: []` can never
+satisfy. `model` was always the wrong classification for it, not a fixable
+import direction: it genuinely depends on the resolved policy configuration
+it records. Reclassifying it into `policy` instead was considered and
+rejected — several `frontends`-layer files (`cli_compare_receipt.py`,
+`cli_scan_receipt.py`) import it directly, and `frontends.may_import`
+excludes `policy`, so `policy` would just relocate the identical class of
+violation. `contract_evidence.py` stays **unclassified** until that
+`frontends -> contract_evidence.py` coupling is routed through the
+`workflows` facade (or the shared logic moved to a leaf module) — the same
+"not yet actionable, treatment not destination" status this section already
+records for `policy_file.py` below.
+
 What this does **not** resolve: `DiffResult` still exposes policy-resolved
 verdict buckets from a `compare`-classified type, which is the underlying
 design tension rather than the import edge. Moving those properties off
