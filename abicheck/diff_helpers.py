@@ -491,11 +491,7 @@ def fact_known_qualified(
     *name* alone) since a matched pair's two sides can carry different
     qualified identities."""
     return both_known_backed_fact_qualified(
-        old,
-        new,
-        old_qualified_key,
-        new_qualified_key,
-        bare_key,
+        old, new, old_qualified_key, new_qualified_key, bare_key,
         old_bare_unambiguous=old_map.bare_name_is_unambiguous(name),
         new_bare_unambiguous=new_map.bare_name_is_unambiguous(name),
     )
@@ -520,11 +516,7 @@ def fact_same_producer_qualified(
     why the two need different answers.
     """
     return same_producer_backed_fact_qualified(
-        old,
-        new,
-        old_qualified_key,
-        new_qualified_key,
-        bare_key,
+        old, new, old_qualified_key, new_qualified_key, bare_key,
         old_bare_unambiguous=old_map.bare_name_is_unambiguous(name),
         new_bare_unambiguous=new_map.bare_name_is_unambiguous(name),
     )
@@ -766,40 +758,10 @@ def _bits_str_from_bytes_str(value: str | None) -> str | None:
         return value
 
 
-def _both_str_or_none(old: object, new: object) -> bool:
-    """Whether both slots hold the plain-string shape the byte-value/
-    type-spelling conversions below are written for.
-
-    Neither conversion tolerates anything else: `_bits_str_from_bytes_str`
-    only catches `ValueError` (not the `TypeError` `int(a_list)` raises),
-    and `_normalize_type_spelling` calls `.strip()` unconditionally (an
-    `AttributeError` on anything without one). Both crashed, unhandled, the
-    moment a list-valued slot reached one of these kinds (Codex review,
-    PR #905, reproduced directly) -- exactly the class of crash this
-    module's `hashable_value` import exists to prevent, just reached
-    through a special-cased branch that bypassed it entirely.
-    """
-    return (old is None or isinstance(old, str)) and (
-        new is None or isinstance(new, str)
-    )
-
-
-def _malformed_transition(
-    kind: ChangeKind, old: object, new: object
-) -> tuple[object, object]:
-    """A hashable-safe transition for a byte-value/type-spelling kind whose
-    slot isn't the plain string shape those conversions require.
-
-    Deliberately tagged with *kind*, not a bare ``hashable_value`` pair: a
-    malformed ``STRUCT_SIZE_CHANGED`` (DWARF, bytes) and a malformed
-    ``TYPE_SIZE_CHANGED`` (AST, bits) carrying the identical raw value must
-    never agree, since one denotes bytes and the other bits -- the byte
-    conversion this fallback bypasses is exactly what would normally keep
-    them apart. Embedding the kind cannot suppress a genuine cross-tier
-    match: it only applies here, once the conversion itself was skipped,
-    so it never touches the well-formed path above.
-    """
-    return (kind, hashable_value(old)), (kind, hashable_value(new))
+def _malformed_unit_typed_transition(kind: ChangeKind, old: object, new: object) -> tuple[object, object] | None:
+    """None for the plain str|None shape byte/spelling conversions require, else a kind-tagged fallback so malformed bytes/bits transitions never wrongly compare equal."""
+    ok = (old is None or isinstance(old, str)) and (new is None or isinstance(new, str))
+    return None if ok else ((kind, hashable_value(old)), (kind, hashable_value(new)))
 
 
 def cross_tier_transition(c: Change) -> tuple[object, object] | None:
@@ -816,35 +778,23 @@ def cross_tier_transition(c: Change) -> tuple[object, object] | None:
     The caller keys on this result through a ``set``, so a value slot
     returned unchanged goes through :func:`~abicheck.compare.dedup_key.
     hashable_value` -- the annotation on those slots is not enforced and
-    real detectors do store lists in them. The byte-value/type-spelling
-    branches below are written for a plain ``str | None`` shape and neither
-    tolerates anything else, so a slot that isn't that shape (a list,
-    still) falls back to a hashable-safe encoding rather than crashing
-    inside either conversion -- see :func:`_both_str_or_none`. That
-    fallback is tagged with the kind itself (:func:`_malformed_transition`),
-    not the bare ``hashable_value`` pair the final branch below returns:
-    a malformed ``STRUCT_SIZE_CHANGED`` (DWARF, bytes) and a malformed
-    ``TYPE_SIZE_CHANGED`` (AST, bits) carrying the identical raw list would
-    otherwise compare equal despite denoting different units -- exactly the
-    kind of cross-tier agreement this whole gate exists to get right, not
-    merely avoid crashing on (Codex review, PR #905).
+    real detectors do store lists in them.
     """
     if c.kind in (ChangeKind.STRUCT_FIELD_REMOVED, ChangeKind.TYPE_FIELD_REMOVED):
         return None
     old, new = c.old_value, c.new_value
+    if c.kind in _DWARF_BYTE_VALUE_KINDS or c.kind in _TYPE_SPELLING_VALUE_KINDS:
+        if (m := _malformed_unit_typed_transition(c.kind, old, new)) is not None:
+            return m
     if c.kind in _DWARF_BYTE_VALUE_KINDS:
-        if _both_str_or_none(old, new):
-            return _bits_str_from_bytes_str(old), _bits_str_from_bytes_str(new)
-        return _malformed_transition(c.kind, old, new)
+        return _bits_str_from_bytes_str(old), _bits_str_from_bytes_str(new)
     if c.kind in _TYPE_SPELLING_VALUE_KINDS:
-        if _both_str_or_none(old, new):
-            return (
-                _normalize_type_spelling(old, strip_indirection=False)
-                if old is not None
-                else None,
-                _normalize_type_spelling(new, strip_indirection=False)
-                if new is not None
-                else None,
-            )
-        return _malformed_transition(c.kind, old, new)
+        return (
+            _normalize_type_spelling(old, strip_indirection=False)
+            if old is not None
+            else None,
+            _normalize_type_spelling(new, strip_indirection=False)
+            if new is not None
+            else None,
+        )
     return hashable_value(old), hashable_value(new)
