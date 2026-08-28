@@ -3047,12 +3047,21 @@ independently-drifting restatements (Codex review, PR #910, `docs/AGENTS.md`'s
 > landed for every CLI command path: pack parity across `compare`, the
 > release fan-out, and `scan --against`, both `policy.overrides`/`surface.
 > internal_namespaces` *and* `gate.*` fields — slices 1-3 — plus the
-> effective-config digest recorded in every native JSON report (slice 4;
-> **narrower than "every report"**, Codex review, fresh evidence — see
-> slice 4's own section below for the exact scope: only the JSON report
-> path calls `add_effective_config_digest`, the Markdown/review/SARIF/
+> effective-config digest reaching every native JSON report path in some
+> form (slice 4; **narrower than "every report", and narrower still than
+> "one uniform digest"**, Codex review, fresh evidence — see slice 4's own
+> section above for the exact scope: only the JSON report path calls
+> `add_effective_config_digest` at all — the Markdown/review/SARIF/
 > JUnit/HTML renderers don't, and `compat check --report-format json`
-> deliberately omits the field too). **Narrower again once the typed
+> deliberately omits the field too — and even within JSON, the
+> directory/package release-summary report does not go through
+> `add_effective_config_digest`: its own `_release_summary_effective_
+> config_block` hashes `SeverityConfig` alone, so two releases differing
+> only by a policy pack or internal-namespace override can share an
+> identical release-summary digest even though their per-library sidecar
+> reports correctly differ — a real, open parity gap this status note does
+> not claim closed, kept open alongside the `GateOptions` item below).
+> **Narrower again once the typed
 > Python API is included**: `--pack`
 > is a CLI selector today (ADR-049 D8), and neither `ScanRequest` nor
 > `CompareRequest` carries a pack field a typed caller can set — `ScanRequest`
