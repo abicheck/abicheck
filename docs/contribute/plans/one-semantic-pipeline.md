@@ -1288,6 +1288,38 @@ is recognized through the now-expanded `builtins_names` as well.
 Verified empirically: still zero existing hits, baseline stays at 104.
 New test: a call through an assigned alias of the `builtins` module.
 
+**A fifteenth Codex review round found the scan still missed two more
+standard dynamic-attribute-reading forms, distinct from `getattr`'s own
+alias family the previous several rounds closed -- both fixed.**
+`operator.attrgetter("bases")(rec)` and `object.__getattribute__(rec,
+"bases")`/`rec.__getattribute__("bases")` read the identical legacy value
+through different standard-library entry points -- `getattr()` is itself
+defined in terms of `__getattribute__`, and `attrgetter` is the
+callable-returning equivalent -- so unavailable evidence could again read
+as confirmed-empty while the required gate passed. Fixed with a new
+`_is_attrgetter_constructor_call()` helper (recognizing both the
+qualified `operator.attrgetter(...)` spelling and the bare one reached
+via `from operator import attrgetter`) plus two new branches matching a
+`__getattribute__` call in both its bound (`rec.__getattribute__
+("bases")`) and unbound (`object.__getattribute__(rec, "bases")`/`type.
+__getattribute__(rec, "bases")`) forms. Both stay scoped to the same "no
+type inference" limit as every other branch here: only a single,
+literal-string field name is recognized -- `attrgetter("a.b")`'s dotted
+chain, and a two-step `getter = attrgetter(...); getter(rec)` indirection
+through an intermediate variable, are both out of scope, the identical
+limit a non-literal `getattr()` default already accepts. Deliberately no
+local-alias resolution for `attrgetter` itself, unlike `getattr`'s own
+now-elaborate alias-chain tracking -- `attrgetter` returns a *callable*
+assigned once and invoked later, which is exactly the two-step
+indirection this scan already excludes for every other form, so building
+the same machinery for it would recognize a shape this scan otherwise
+deliberately doesn't. Verified empirically: still zero existing hits in
+the real repository, baseline stays at 104. Eight new tests: the
+qualified and bare `attrgetter` forms, a dotted-name negative control, the
+variable-indirection negative control, the bound and unbound
+`__getattribute__` forms, and a non-matching-name negative control for
+the latter.
+
 **Still not landed**: no detector (`diff_layout.py`/`diff_types.py`/
 `diff_param_qualifiers.py`/the reader set the check above now tracks
 precisely) has actually been migrated to read `.status` — the check above

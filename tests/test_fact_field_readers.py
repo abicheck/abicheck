@@ -178,6 +178,95 @@ class TestUnmigratedFactReaderSites:
         tree = ast.parse(src, filename="x.py")
         assert unmigrated_fact_reader_sites(tree, "x.py") == []
 
+    def test_detects_an_operator_attrgetter_call_naming_a_bridged_attr(
+        self,
+    ) -> None:
+        """`operator.attrgetter("bases")(rec)` reads `rec.bases` in two
+        calls -- an inner one constructing the getter, an outer one
+        applying it -- invisible to the plain `getattr()` recognition above
+        (Codex review: unavailable evidence could read as confirmed-empty
+        through this standard-library equivalent too)."""
+        src = 'import operator\ndef f(rec):\n    return operator.attrgetter("bases")(rec)\n'
+        tree = ast.parse(src, filename="x.py")
+        sites = unmigrated_fact_reader_sites(tree, "x.py", src)
+        assert [key for key, _l, _a, _q in sites] == [
+            'x.py::f::bases::operator.attrgetter("bases")(rec)::'
+            'operator.attrgetter("bases")(rec)::1'
+        ]
+
+    def test_detects_a_bare_attrgetter_call_via_a_from_import(self) -> None:
+        """The bare `attrgetter(...)` spelling reached via `from operator
+        import attrgetter` is the same constructor, unqualified."""
+        src = 'from operator import attrgetter\ndef f(rec):\n    return attrgetter("bases")(rec)\n'
+        tree = ast.parse(src, filename="x.py")
+        sites = unmigrated_fact_reader_sites(tree, "x.py", src)
+        assert [key for key, _l, _a, _q in sites] == [
+            'x.py::f::bases::attrgetter("bases")(rec)::attrgetter("bases")(rec)::1'
+        ]
+
+    def test_ignores_an_attrgetter_call_with_a_dotted_name(self) -> None:
+        """`attrgetter("meta.bases")` chains a *second* attribute access
+        this scan can't resolve statically -- the same "no type inference"
+        limit a non-literal `getattr()` default already accepts."""
+        src = (
+            "import operator\n"
+            "def f(rec):\n"
+            '    return operator.attrgetter("meta.bases")(rec)\n'
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert unmigrated_fact_reader_sites(tree, "x.py", src) == []
+
+    def test_ignores_an_attrgetter_indirected_through_a_local_variable(
+        self,
+    ) -> None:
+        """`getter = operator.attrgetter("bases"); getter(rec)` splits the
+        constructor call and the application call across two statements --
+        out of scope, the same "no type inference" limit `attrgetter`
+        deliberately gets no local-alias resolution for (unlike `getattr`
+        itself, which does)."""
+        src = (
+            "import operator\n"
+            "def f(rec):\n"
+            '    getter = operator.attrgetter("bases")\n'
+            "    return getter(rec)\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert unmigrated_fact_reader_sites(tree, "x.py", src) == []
+
+    def test_detects_a_bound_getattribute_call_naming_a_bridged_attr(
+        self,
+    ) -> None:
+        """`rec.__getattribute__("bases")` is the bound-method spelling of
+        the same dynamic read `getattr()` is itself defined in terms of."""
+        src = 'def f(rec):\n    return rec.__getattribute__("bases")\n'
+        tree = ast.parse(src, filename="x.py")
+        sites = unmigrated_fact_reader_sites(tree, "x.py", src)
+        assert [key for key, _l, _a, _q in sites] == [
+            'x.py::f::bases::rec.__getattribute__("bases")::'
+            'rec.__getattribute__("bases")::1'
+        ]
+
+    def test_detects_an_unbound_object_getattribute_call(self) -> None:
+        """`object.__getattribute__(rec, "bases")` -- the unbound-method
+        spelling used to bypass an instance's own overridden
+        `__getattribute__`, reading `rec.bases` exactly the same way."""
+        src = 'def f(rec):\n    return object.__getattribute__(rec, "bases")\n'
+        tree = ast.parse(src, filename="x.py")
+        sites = unmigrated_fact_reader_sites(tree, "x.py", src)
+        assert [key for key, _l, _a, _q in sites] == [
+            'x.py::f::bases::object.__getattribute__(rec, "bases")::'
+            'object.__getattribute__(rec, "bases")::1'
+        ]
+
+    def test_ignores_a_getattribute_call_with_a_non_matching_name(self) -> None:
+        src = (
+            "def f(rec):\n"
+            '    a = rec.__getattribute__("size_bits")\n'
+            '    b = object.__getattribute__(rec, "size_bits")\n'
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert unmigrated_fact_reader_sites(tree, "x.py", src) == []
+
     def test_ignores_an_assignment_target(self) -> None:
         """A `Store` context (`rec.vtable = []`, the legacy-schema backfill
         shape `storage/fact_codec.py` uses) is writing the field, not
