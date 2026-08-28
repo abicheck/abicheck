@@ -5668,6 +5668,51 @@ tests: a new dedicated file, `tests/test_fact_detector_misuse_
 deferred_annotations.py` (9 tests,
 `TestDeferredAnnotationsExcludeEmbeddedComparisons`).
 
+**A further round found two more findings against the same commit: one
+a real bug, one a documentation-completeness gap.**
+
+(E) **A literal `None` dictionary key was conflated with "the index
+couldn't be resolved at all"** (Codex review, fresh evidence):
+`_static_subscript_element()`'s own slice-resolution used a single
+`index: object | None` sentinel for both "resolved to the constant
+value `None`" and "nothing resolved" -- so `{None: Fact.present(1)}
+[None]`, a perfectly ordinary `None`-keyed dict lookup that genuinely
+selects the `Fact` value, silently declined to resolve at all,
+bypassing the gate. Reproduced directly (0 hits, expected 1) before
+designing a fix. Fixed by tracking whether the index was actually
+resolved in a separate `resolved: bool`, rather than overloading
+`index is None` for both meanings -- `if not resolved: return None`
+replaces the old `if index is None: return None`. Verified via direct
+AST reproduction against 10 cases before writing tests: the reported
+case, the identical lookup via an intermediate alias, a `None` key
+present but a *different* key selected (still correctly ignored), a
+`None` key winning a duplicate-key tie as the last entry (composing
+correctly with the earlier "last matching key wins" fix), and five
+regressions -- `**expansion` still disqualifying the whole display even
+with a `None` key present, a non-literal index still unresolvable, a
+tuple/list indexed by `None` correctly staying unresolvable (a real
+`TypeError` at runtime, unlike the dict case this fix addresses), and a
+falsy-but-genuinely-resolved index (`0`) not mistaken for "unresolved"
+either (the `resolved` flag's own regression guard). New tests:
+`TestNoneIsAValidDictionaryKey` (7 tests), appended to
+`tests/test_fact_detector_misuse_static_subscript.py`.
+
+(F) **The `fact-detector-misuse` gate was registered in `scripts/
+CLAUDE.md`'s inventory table but never added to the root `AGENTS.md`'s
+own canonical AI-readiness gate table** (Codex review, fresh evidence)
+-- the two tables serve different audiences (`scripts/CLAUDE.md`
+documents *what the script does and who imports it*; `AGENTS.md`'s
+table is the canonical, single-page enumeration of every enforced
+AI-readiness check), and this PR's original commit updated only the
+former. Fixed by adding a `fact-detector-misuse` row to `AGENTS.md`'s
+table, alphabetically ordered immediately before the existing
+`fact-field-readers` row (matching `CHECKS` dict's own ordering in
+`scripts/check_ai_readiness.py`), summarizing the check's rule, its
+three-file implementation, and its no-baseline/unconditional-error
+posture. `python scripts/check_docs_contract.py` and `python scripts/
+check_ai_readiness.py` both re-run clean at their existing baselines
+(0 errors, 2/148 warnings respectively) after the addition.
+
 ---
 
 ### Phase 1 — finish the `dump`/`scan` typed-API convergence (closes AGENTS.md "PR C")

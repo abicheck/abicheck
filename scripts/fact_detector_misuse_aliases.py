@@ -300,9 +300,18 @@ def _static_subscript_element(node: ast.Subscript) -> ast.expr | None:
     an unmatched dict key all resolve to `None`.
     """
     slice_node = node.slice
-    index: object | None = None
+    # `index` and whether it was actually *resolved* are tracked
+    # separately (Codex review, fresh evidence): a literal `None` key is
+    # a perfectly ordinary dict key (`{None: Fact.present(1)}[None]`),
+    # but collapsing "resolved to the value `None`" and "couldn't
+    # resolve the index at all" onto the same `index is None` check
+    # made the former read as the latter, silently declining to resolve
+    # a genuine `None`-keyed lookup at all.
+    index: object = None
+    resolved = False
     if isinstance(slice_node, ast.Constant):
         index = slice_node.value
+        resolved = True
     elif (
         isinstance(slice_node, ast.UnaryOp)
         and isinstance(slice_node.op, ast.USub)
@@ -310,7 +319,8 @@ def _static_subscript_element(node: ast.Subscript) -> ast.expr | None:
         and isinstance(slice_node.operand.value, int)
     ):
         index = -slice_node.operand.value
-    if index is None:
+        resolved = True
+    if not resolved:
         return None
     display = node.value
     if (
