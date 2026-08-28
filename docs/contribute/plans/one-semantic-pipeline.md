@@ -1810,6 +1810,84 @@ nested-class-header case, the method-default-walrus-binds-in-class-
 namespace case and its positive control (the same walrus target visible
 elsewhere in that class body).
 
+**A further Codex review round found a structural bug in `_lexical_
+function_parents()` itself, distinct from every containing-scope fix
+above.** All of those rounds fixed *which primitive* (`lexical_parents`
+vs. `def_containing`) a caller consults; this one is a bug in `lexical_
+parents`'s own construction. `_lexical_function_parents()`'s recursive
+descent switched to a `def`/`lambda`'s *new* qualname before visiting
+*any* of its own children -- including its default values, parameter
+annotations, return annotation, and decorators, all of which evaluate at
+def/lambda-*creation* time, in whatever scope was active *before* that
+new qualname takes over (the identical binding-timing rule `_fact_
+aliases()`'s/`_default_and_annotation_scope_overrides()`'s own default/
+annotation handling already relies on). `fact = rec.bases_fact` in `f`,
+then `def g(fact, cb=[fact == other for _ in xs]): ...` -- the
+comprehension executes while `g` is being *defined* (in `f`'s own scope,
+before `g`'s own parameter `fact` even exists to shadow anything) and
+genuinely closes over `f`'s alias, but was wrongly parented under `g`
+itself, where `g`'s own same-named parameter incorrectly shadowed it.
+
+Fixed by splitting the single recursive `visit()` into two cooperating
+functions: `dispatch()` does the actual scope-introducing-node matching
+(the original `visit()`'s `if isinstance(...)` chain, unchanged in
+substance), while a new, thinner `visit()` just applies `dispatch()` to
+every direct child of a node. This split matters because a `def`'s own
+default/annotation/decorator expressions now need to be *re-dispatched*
+(via a new `def_time_subtrees()` helper, mirroring `_default_and_
+annotation_scope_overrides()`'s own `subtrees` construction almost
+exactly) with the *old* `nearest_func`, while only the real function body
+executes with the new one -- and a subtree re-dispatch needs the full
+`dispatch()` match logic (in case the subtree is itself a bare `Lambda`/
+comprehension), not a plain `visit()` that would skip straight into its
+children. Generalized to `Lambda`'s own defaults too, not just `def`
+(the identical Codex-reported repro reproduces for `g = lambda fact,
+cb=[fact == other for _ in xs]: cb`), and to decorators (a decorator's
+own arguments evaluate at def-time in the enclosing scope by the
+identical rule, even though the reported finding didn't name that
+shape) -- matching this repo's own "fix the cause, not the instance"
+convention rather than patching only the literal reported repro.
+
+**A real regression was caught and fixed while implementing this, not by
+a separate review round: the first version of the split reused `visit()`
+(not `dispatch()`) for a function's own body statements and a lambda's
+own body expression, silently breaking the plain-closure case with no
+default at all.** `visit(stmt, qualname + ".", qualname)` for each body
+statement treats `stmt` as the node whose *children* get dispatched, not
+as a dispatch candidate itself -- so a nested `def`/`class`/`Lambda`/
+comprehension directly in the body (the ordinary, common shape every
+closure-inheritance test in this whole file already exercises) was never
+matched by `dispatch()` at all, and its own `parents[]` entry was never
+recorded. Caught immediately by re-running the existing test suite before
+adding new tests for this fix (`test_a_plain_closure_with_no_default_is_
+still_caught` pins this exact regression), not by a fresh review round --
+worth recording as the same "verify against the existing suite before
+trusting a refactor, not just the new repro it was written for" discipline
+this plan's own earlier rounds have needed more than once. Fixed by
+calling `dispatch()`, not `visit()`, for both the `FunctionDef`/
+`AsyncFunctionDef` body-statement loop and the `Lambda` body expression.
+A second, smaller version of the same class of bug (`kw_defaults`
+carrying a `None` element -- an ordinary "this keyword-only parameter has
+no default" marker, not a bug -- reaching `dispatch()` unfiltered and
+crashing on `ast.iter_child_nodes(None)`) was caught the same way, before
+it ever reached CI, and fixed by filtering `None` out of `def_time_
+subtrees()`'s own `kw_defaults` half, matching `_default_and_annotation_
+scope_overrides()`'s own pre-existing `if subtree is None: continue`
+guard for the identical list.
+
+Verified empirically: still zero existing hits in the real repository,
+and `mypy`/`ruff` both stayed clean. Six new tests, in a new sibling file
+(`tests/test_fact_detector_misuse_def_time_scope.py` -- `test_fact_
+detector_misuse_scoping.py` was already at the architecture gate's
+1200-line cap, the same reason that file was split out of `test_fact_
+detector_misuse.py` in the first place): the reported comprehension-
+default-on-a-`def` case, the identical case on a `lambda`, a negative
+control (a comprehension shadow genuinely inside the body, not a
+default, must still be caught by the parameter), the plain-closure
+regression guard, a keyword-only-default-after-a-no-default-keyword-arg
+case (pinning the `kw_defaults`-filtering fix), and the decorator
+generalization.
+
 ---
 
 ### Phase 1 — finish the `dump`/`scan` typed-API convergence (closes AGENTS.md "PR C")

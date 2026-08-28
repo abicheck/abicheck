@@ -439,70 +439,136 @@ def _lexical_function_parents(tree: ast.Module) -> dict[str, str]:
     it never gets processed or seeded and the chain silently breaks
     there. This walks the tree itself instead, tracking the *nearest
     enclosing function* separately from the dotted-name prefix.
+
+    **A `def`/`lambda`'s own default values, parameter annotations, return
+    annotation, and decorators are visited with the *old* `nearest_func`,
+    not the new one (Codex review, fresh evidence).** All of these
+    evaluate at def/lambda-creation time, in whatever scope was active
+    *before* the def/lambda's own qualname takes over -- the identical
+    binding-timing rule `_fact_aliases()`'s/`_default_and_annotation_
+    scope_overrides()`'s own default/annotation handling already relies
+    on. But the blanket `visit(child, qualname + ".", qualname)` this
+    function used for a `FunctionDef`/`Lambda` recursed into *every* one
+    of its children -- default values included -- with the *new* qualname
+    already in effect, so a lambda or comprehension found inside a
+    default was wrongly parented under the function it's a default *of*,
+    not the scope that actually surrounds the `def`/`lambda` statement:
+    `fact = rec.bases_fact` in `f`, then `def g(fact, cb=[fact == other
+    for _ in xs]): ...` -- the comprehension executes while `g` is being
+    *defined* (i.e. in `f`'s own scope, before `g`'s own parameter `fact`
+    even exists to shadow anything) and genuinely closes over `f`'s alias,
+    but was parented under `g` instead, where `g`'s own same-named
+    parameter incorrectly shadowed it. Fixed by splitting the dispatch: a
+    def-time subtree (`def_time_subtrees()`, mirroring `_default_and_
+    annotation_scope_overrides()`'s own `subtrees` construction) is
+    re-dispatched with the *old* `nearest_func`, while only the function's
+    real body executes with the new one.
     """
     parents: dict[str, str] = {}
 
+    def def_time_subtrees(
+        node: ast.FunctionDef | ast.AsyncFunctionDef | ast.Lambda,
+    ) -> list[ast.AST]:
+        args = node.args
+        # `kw_defaults` pairs positionally with `kwonlyargs`, `None` for a
+        # keyword-only parameter with no default at all -- a real,
+        # ordinary element of this list, not a bug, so it must be filtered
+        # before re-dispatching (matching `_default_and_annotation_scope_
+        # overrides()`'s own identical `if subtree is None: continue`).
+        subtrees: list[ast.AST] = [
+            *args.defaults,
+            *(d for d in args.kw_defaults if d is not None),
+        ]
+        for arg in (
+            *args.posonlyargs,
+            *args.args,
+            *args.kwonlyargs,
+            *((args.vararg,) if args.vararg else ()),
+            *((args.kwarg,) if args.kwarg else ()),
+        ):
+            if arg.annotation is not None:
+                subtrees.append(arg.annotation)
+        returns = getattr(node, "returns", None)
+        if returns is not None:
+            subtrees.append(returns)
+        decorator_list = getattr(node, "decorator_list", None)
+        if decorator_list:
+            subtrees.extend(decorator_list)
+        return subtrees
+
+    def dispatch(child: ast.AST, prefix: str, nearest_func: str) -> None:
+        if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            # `#<lineno>` disambiguator, matching `_enclosing_
+            # qualnames`'s own scheme exactly (Codex review, fresh
+            # evidence -- see that function's own docstring): two
+            # same-named `def`s (e.g. an `@overload` stub and its real
+            # implementation) must resolve to two distinct scopes here
+            # too, not just in the line-number map, or this function's
+            # own `parents` dict would still let one collapse onto the
+            # other's already-processed entry.
+            qualname = f"{prefix}{child.name}#{child.lineno}"
+            parents[qualname] = nearest_func
+            for subtree in def_time_subtrees(child):
+                dispatch(subtree, qualname + ".", nearest_func)
+            for stmt in child.body:
+                dispatch(stmt, qualname + ".", qualname)
+        elif isinstance(child, ast.Lambda):
+            # A lambda is a real closure scope too, the identical
+            # shape as a `def` (Codex review, fresh evidence -- see
+            # `_enclosing_qualnames`'s own docstring): it both closes
+            # over its enclosing function's locals *and* can itself be
+            # closed over by anything nested inside it, so it becomes
+            # the new `nearest_func` for its own body exactly like a
+            # named function does -- but (see this function's own
+            # docstring) not for its own default values.
+            qualname = f"{prefix}<lambda>#{child.lineno}:{child.col_offset}"
+            parents[qualname] = nearest_func
+            for subtree in def_time_subtrees(child):
+                dispatch(subtree, qualname + ".", nearest_func)
+            dispatch(child.body, qualname + ".", qualname)
+        elif isinstance(
+            child, (ast.ListComp, ast.SetComp, ast.DictComp, ast.GeneratorExp)
+        ):
+            # A comprehension is a real closure scope too, in Python 3
+            # -- same reasoning and same treatment as a lambda. Unlike a
+            # def/lambda, a comprehension has no default-value/annotation
+            # concept of its own, so no def-time-subtree split applies
+            # here.
+            qualname = f"{prefix}<comp>#{child.lineno}:{child.col_offset}"
+            parents[qualname] = nearest_func
+            visit(child, qualname + ".", qualname)
+        elif isinstance(child, ast.ClassDef):
+            # The class body's *own* scope inherits from whatever
+            # encloses the `class` statement (ordinary Python LEGB
+            # lookup -- a class body is executed once, as ordinary
+            # code, and can read a bare name from its enclosing
+            # function/module scope exactly like any other nested
+            # block) -- but a *method* inside it must still skip past
+            # this class layer entirely when computing its own
+            # nearest enclosing function (Codex review, fresh
+            # evidence: `fact = rec.bases_fact` outer, then `class C:
+            # result = fact == other`, directly in the class body, not
+            # inside a method -- the class-body scope this module
+            # already gives its own qualname had no parent recorded
+            # at all, so it could never inherit anything). Both are
+            # true at once: record the class-body qualname's own
+            # parent as `nearest_func` (using the identical
+            # `<class-body>`-suffixed key `_enclosing_qualnames`
+            # already produces for it), while recursing into the
+            # class's own children with `nearest_func` *unchanged* --
+            # a nested method's own qualname is a different key
+            # entirely (built by the `FunctionDef` branch above), so
+            # this class-body entry is never consulted when computing
+            # a method's own parent.
+            class_qualname = f"{prefix}{child.name}#{child.lineno}<class-body>"
+            parents[class_qualname] = nearest_func
+            visit(child, f"{prefix}{child.name}.", nearest_func)
+        else:
+            visit(child, prefix, nearest_func)
+
     def visit(node: ast.AST, prefix: str, nearest_func: str) -> None:
         for child in ast.iter_child_nodes(node):
-            if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                # `#<lineno>` disambiguator, matching `_enclosing_
-                # qualnames`'s own scheme exactly (Codex review, fresh
-                # evidence -- see that function's own docstring): two
-                # same-named `def`s (e.g. an `@overload` stub and its real
-                # implementation) must resolve to two distinct scopes here
-                # too, not just in the line-number map, or this function's
-                # own `parents` dict would still let one collapse onto the
-                # other's already-processed entry.
-                qualname = f"{prefix}{child.name}#{child.lineno}"
-                parents[qualname] = nearest_func
-                visit(child, qualname + ".", qualname)
-            elif isinstance(child, ast.Lambda):
-                # A lambda is a real closure scope too, the identical
-                # shape as a `def` (Codex review, fresh evidence -- see
-                # `_enclosing_qualnames`'s own docstring): it both closes
-                # over its enclosing function's locals *and* can itself be
-                # closed over by anything nested inside it, so it becomes
-                # the new `nearest_func` for its own body exactly like a
-                # named function does.
-                qualname = f"{prefix}<lambda>#{child.lineno}:{child.col_offset}"
-                parents[qualname] = nearest_func
-                visit(child, qualname + ".", qualname)
-            elif isinstance(
-                child, (ast.ListComp, ast.SetComp, ast.DictComp, ast.GeneratorExp)
-            ):
-                # A comprehension is a real closure scope too, in Python 3
-                # -- same reasoning and same treatment as a lambda.
-                qualname = f"{prefix}<comp>#{child.lineno}:{child.col_offset}"
-                parents[qualname] = nearest_func
-                visit(child, qualname + ".", qualname)
-            elif isinstance(child, ast.ClassDef):
-                # The class body's *own* scope inherits from whatever
-                # encloses the `class` statement (ordinary Python LEGB
-                # lookup -- a class body is executed once, as ordinary
-                # code, and can read a bare name from its enclosing
-                # function/module scope exactly like any other nested
-                # block) -- but a *method* inside it must still skip past
-                # this class layer entirely when computing its own
-                # nearest enclosing function (Codex review, fresh
-                # evidence: `fact = rec.bases_fact` outer, then `class C:
-                # result = fact == other`, directly in the class body, not
-                # inside a method -- the class-body scope this module
-                # already gives its own qualname had no parent recorded
-                # at all, so it could never inherit anything). Both are
-                # true at once: record the class-body qualname's own
-                # parent as `nearest_func` (using the identical
-                # `<class-body>`-suffixed key `_enclosing_qualnames`
-                # already produces for it), while recursing into the
-                # class's own children with `nearest_func` *unchanged* --
-                # a nested method's own qualname is a different key
-                # entirely (built by the `FunctionDef` branch above), so
-                # this class-body entry is never consulted when computing
-                # a method's own parent.
-                class_qualname = f"{prefix}{child.name}#{child.lineno}<class-body>"
-                parents[class_qualname] = nearest_func
-                visit(child, f"{prefix}{child.name}.", nearest_func)
-            else:
-                visit(child, prefix, nearest_func)
+            dispatch(child, prefix, nearest_func)
 
     visit(tree, "", "<module>")
     return parents
