@@ -101,6 +101,7 @@ from fact_field_readers_scope import (  # noqa: E402
     _enclosing_qualnames,
     _is_attrgetter_constructor_call,
     _is_itemgetter_constructor_call,
+    _itemgetter_alias_keys,
     _itemgetter_matched_name,
     _lexical_function_parents,
     _locally_bound_names,
@@ -963,6 +964,9 @@ def unmigrated_fact_reader_sites(
     attrgetter_names, operator_names, getitem_names, itemgetter_names = (
         _operator_attrgetter_aliases(tree)
     )
+    itemgetter_alias_keys = _itemgetter_alias_keys(
+        tree, itemgetter_names, operator_names
+    )
     locally_bound, recognized_alias_scopes = _locally_bound_names(tree)
     lexical_parents = _lexical_function_parents(tree)
 
@@ -993,18 +997,33 @@ def unmigrated_fact_reader_sites(
         # `.lineno` and walks `parents`, both common to any expression, so
         # the narrower `ast.Call` annotation was never load-bearing.
         node: ast.AST = call_node
-        # Set only while ascending through the *outermost* generator
-        # clause's own `.iter` subtree -- carried forward across the next
-        # hop (from the `ast.comprehension` clause object up to its owning
-        # `ListComp`/etc.) since that clause object, not `.iter` itself, is
-        # what a comprehension's own `generators[0]` actually holds; see
-        # the comprehension branch below for why this matters.
-        outermost_iter_clause: ast.comprehension | None = None
+        # Set only while ascending through a generator clause's own
+        # subtree -- carried forward across the next hop (from the
+        # `ast.comprehension` clause object up to its owning `ListComp`/
+        # etc.) since that clause object, not `.iter`/`.ifs` themselves,
+        # is what a comprehension's own `generators[k]` actually holds.
+        # `comprehension_gen_clause` identifies *which* generator the
+        # call originates from (`None` when it's reached directly through
+        # the comprehension's own `elt`/`key`/`value`, i.e. after every
+        # generator's target is bound); `comprehension_via_iter`
+        # distinguishes that generator's own `.iter` (evaluates before
+        # *that* generator's own target is bound) from its `.ifs` (runs
+        # after). See the comprehension branch below for how these two
+        # combine into the exact binding-order rule.
+        comprehension_gen_clause: ast.comprehension | None = None
+        comprehension_via_iter = False
         while id(node) in parents:
             child = node
             node = parents[id(node)]
             if isinstance(node, ast.comprehension):
-                outermost_iter_clause = node if child is node.iter else None
+                if child is node.iter:
+                    comprehension_gen_clause = node
+                    comprehension_via_iter = True
+                elif child in node.ifs:
+                    comprehension_gen_clause = node
+                    comprehension_via_iter = False
+                else:
+                    comprehension_gen_clause = None
                 continue
             if isinstance(node, ast.Lambda):
                 # Only a call reached from the lambda's own *body* is
@@ -1048,23 +1067,44 @@ def unmigrated_fact_reader_sites(
                 # enclosing function*, not just calls genuinely inside the
                 # comprehension -- `[x for getattr in funcs]` followed by
                 # an unrelated, later `getattr(rec, "bases")` in the same
-                # function must still be flagged. The one exception is the
-                # *outermost* generator's own iterable, which evaluates in
-                # whatever scope encloses the comprehension itself, before
-                # the comprehension's own targets exist (the identical
-                # exception `fact_detector_misuse_scope.py`'s own
-                # comprehension handling already carves out for the same
-                # construct). `outermost_iter_clause` (set on the previous
-                # hop, through the `ast.comprehension` clause object
-                # itself -- not `.iter` directly, since that clause object
-                # is what `node.generators[0]` actually holds) identifies
-                # exactly that one excluded child, however deeply the call
-                # is nested inside the iterable expression.
-                if node.generators and outermost_iter_clause is node.generators[0]:
-                    pass
-                elif any(
+                # function must still be flagged.
+                #
+                # **Binding order across *multiple* generators matters
+                # too, not just the outermost one (Codex review, fresh
+                # evidence): a blanket check over every generator's own
+                # target wrongly shadowed a call in a *later* generator's
+                # own iterable by that same generator's not-yet-bound
+                # target.** `[x for x in xs for getattr in getattr(rec,
+                # "bases")]` -- the second generator's own iterable
+                # (`getattr(rec, "bases")`) evaluates *before* that same
+                # generator's own target exists, exactly the way the
+                # first generator's iterable evaluates before ANY target
+                # exists -- so only the *earlier* generators' targets
+                # (index strictly less than the one whose iterable the
+                # call is reached through) may shadow it. A generator's
+                # own `.ifs` filter, by contrast, runs *after* that
+                # generator's own target is bound, so a filter shadows
+                # against every generator up to and including its own.
+                # And the comprehension's own final `elt`/`key`/`value`
+                # (reached with no intervening generator clause at all,
+                # `comprehension_gen_clause is None`) runs after every
+                # generator's target is bound, so it shadows against all
+                # of them. Determined via `node.generators.index(...)`
+                # rather than tracking an index during the ascent itself,
+                # since the clause object identifies its own position
+                # unambiguously and this keeps the ascent loop's own
+                # state (`comprehension_gen_clause`/`comprehension_
+                # via_iter`) uniform across every comprehension kind.
+                if comprehension_gen_clause is None:
+                    shadowing_generators = node.generators
+                else:
+                    gen_index = node.generators.index(comprehension_gen_clause)
+                    shadowing_generators = node.generators[
+                        : gen_index if comprehension_via_iter else gen_index + 1
+                    ]
+                if any(
                     bound_name == name
-                    for generator in node.generators
+                    for generator in shadowing_generators
                     for bound_name in _target_bound_names(generator.target)
                 ):
                     return True
@@ -1363,6 +1403,42 @@ def unmigrated_fact_reader_sites(
                         node.lineno,
                         node.col_offset,
                         call_arg.value,
+                        qualname,
+                        outer_text,
+                        text,
+                    )
+                )
+            continue
+        if (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Name)
+            and node.func.id in itemgetter_alias_keys
+            and not _shadowed(node, node.func.id)
+            and len(node.args) == 1
+            and _is_mapping_receiver(node.args[0])
+        ):
+            # `get = operator.itemgetter("bases"); get(vars(rec))` -- the
+            # constructed getter stored in a variable before being called,
+            # rather than called immediately at the point of construction
+            # (Codex review, fresh evidence). `itemgetter_alias_keys`
+            # (`_itemgetter_alias_keys()`) already resolved which
+            # variables hold such a getter and what literal keys it was
+            # built with; every one of those keys is checked here the
+            # identical way the immediate-call branch above checks the
+            # constructor's own arguments directly.
+            text = (
+                ast.get_source_segment(source, node) if source else None
+            ) or "<unavailable>"
+            outer_text = _expr_text(node)
+            qualname = qualnames.get(node.lineno, "<module>")
+            for alias_key in itemgetter_alias_keys[node.func.id]:
+                if alias_key not in FACT_BRIDGED_ATTRS:
+                    continue
+                matches.append(
+                    (
+                        node.lineno,
+                        node.col_offset,
+                        alias_key,
                         qualname,
                         outer_text,
                         text,

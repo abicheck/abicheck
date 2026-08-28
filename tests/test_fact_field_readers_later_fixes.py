@@ -601,14 +601,22 @@ class TestComprehensionTargetShadowsOnlyWithinTheComprehension:
         tree = ast.parse(src, filename="x.py")
         assert unmigrated_fact_reader_sites(tree, "x.py", src) == []
 
-    def test_still_shadows_within_a_non_outermost_generators_iterable(self) -> None:
-        """Positive control: only the *outermost* generator's own
-        iterable evaluates outside the comprehension's scope -- a second
-        generator's iterable is still inside it."""
+    def test_still_shadows_within_a_non_outermost_generators_iterable_by_an_earlier_target(
+        self,
+    ) -> None:
+        """Positive control: a *non*-outermost generator's own iterable
+        is still inside the comprehension's scope, shadowed by any
+        *earlier* generator's own (already-bound-by-then) target -- unlike
+        that same generator's own target, which is not yet bound at that
+        point (Codex review, fresh evidence: an earlier revision of this
+        test used a repro where the shadowing target was the *same*
+        generator's own, self-referencing one -- see
+        `TestComprehensionGeneratorBindingOrder` below for that corrected,
+        narrower case)."""
         src = (
             "def f(rec, funcs):\n"
-            "    return [x for y in funcs "
-            'for getattr in getattr(rec, "bases")]\n'
+            "    return [x for getattr in funcs "
+            'for x in getattr(rec, "bases")]\n'
         )
         tree = ast.parse(src, filename="x.py")
         assert unmigrated_fact_reader_sites(tree, "x.py", src) == []
@@ -628,6 +636,61 @@ class TestComprehensionTargetShadowsOnlyWithinTheComprehension:
         sites = unmigrated_fact_reader_sites(tree, "x.py", src)
         assert len(sites) == 1
         assert sites[0][2] == "bases"
+
+
+class TestComprehensionGeneratorBindingOrder:
+    """A *non*-outermost generator's own iterable evaluates before *that
+    same* generator's own target is bound -- the identical binding-order
+    rule the outermost generator's iterable already gets, just one level
+    less special-cased (Codex review, fresh evidence: the previous fix
+    blanket-checked every generator's target regardless of position,
+    wrongly shadowing a later generator's own iterable by its own
+    not-yet-bound target). A generator's own `if` filter, by contrast,
+    runs *after* that generator's own target is bound, and the
+    comprehension's final `elt`/`key`/`value` runs after every
+    generator's target is bound."""
+
+    def test_a_generators_own_iterable_is_not_shadowed_by_its_own_target(self) -> None:
+        src = (
+            "def f(rec, xs):\n"
+            "    return [x for x in xs "
+            'for getattr in getattr(rec, "bases")]\n'
+        )
+        tree = ast.parse(src, filename="x.py")
+        sites = unmigrated_fact_reader_sites(tree, "x.py", src)
+        assert len(sites) == 1
+        assert sites[0][2] == "bases"
+
+    def test_a_generators_own_filter_is_still_shadowed_by_its_own_target(self) -> None:
+        src = (
+            "def f(rec, xs):\n"
+            '    return [x for getattr in xs if getattr(rec, "bases")]\n'
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert unmigrated_fact_reader_sites(tree, "x.py", src) == []
+
+    def test_the_element_expression_is_shadowed_by_every_generators_target(
+        self,
+    ) -> None:
+        src = (
+            "def f(rec, xs, ys):\n"
+            '    return [getattr(rec, "bases") for x in xs for getattr in ys]\n'
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert unmigrated_fact_reader_sites(tree, "x.py", src) == []
+
+    def test_a_third_generators_iterable_is_shadowed_by_the_first_two_targets(
+        self,
+    ) -> None:
+        """Generalizes past two generators: the third generator's own
+        iterable is shadowed by both earlier targets but not its own."""
+        src = (
+            "def f(rec, xs, ys):\n"
+            "    return [x for getattr in xs for y in ys "
+            'for x in getattr(rec, "bases")]\n'
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert unmigrated_fact_reader_sites(tree, "x.py", src) == []
 
 
 class TestLambdaDefaultsEvaluateBeforeParameterShadows:
@@ -929,17 +992,53 @@ class TestItemgetterMappingReaders:
         tree = ast.parse(src, filename="x.py")
         assert unmigrated_fact_reader_sites(tree, "x.py", src) == []
 
-    def test_does_not_match_a_getter_constructed_but_not_immediately_called(
+    def test_detects_a_getter_assigned_to_a_variable_before_being_called(
         self,
     ) -> None:
-        """Deliberately narrower than `attrgetter`'s own constructor-wide
-        matching stance (see `_is_itemgetter_constructor_call()`'s own
-        docstring for why): a getter assigned to an intermediate variable
-        before being called is out of scope for this form."""
+        """A getter stored in an intermediate variable before being
+        called is ordinary, common Python -- `_itemgetter_alias_keys()`
+        tracks which variables hold a constructed getter and what keys
+        it was built with (Codex review, fresh evidence: this repro was
+        previously, deliberately out of scope; see the module-docstring
+        entry in `docs/contribute/plans/one-semantic-pipeline.md`
+        recording that this narrower gap has since been closed)."""
         src = (
             "import operator\n"
             "def f(rec):\n"
             '    getter = operator.itemgetter("bases")\n'
+            "    return getter(vars(rec))\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        sites = unmigrated_fact_reader_sites(tree, "x.py", src)
+        assert len(sites) == 1
+        assert sites[0][2] == "bases"
+
+    def test_does_not_chase_an_aliased_getter_through_a_second_name(self) -> None:
+        """Deliberately narrower than the single-variable case above: a
+        getter re-bound to a *second* name before being called is not
+        chased through that further hop, the same "no type inference
+        beyond one hop" limit `_itemgetter_alias_keys()`'s own docstring
+        already accepts."""
+        src = (
+            "import operator\n"
+            "def f(rec):\n"
+            '    getter = operator.itemgetter("bases")\n'
+            "    getter2 = getter\n"
+            "    return getter2(vars(rec))\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert unmigrated_fact_reader_sites(tree, "x.py", src) == []
+
+    def test_ignores_a_reassigned_getter_variable(self) -> None:
+        """Negative control: a variable assigned more than once is
+        ambiguous by the second assignment -- guessing which one a later
+        call actually used would risk fabricating a false positive."""
+        src = (
+            "import operator\n"
+            "def f(rec, cond, fallback):\n"
+            '    getter = operator.itemgetter("bases")\n'
+            "    if cond:\n"
+            "        getter = fallback\n"
             "    return getter(vars(rec))\n"
         )
         tree = ast.parse(src, filename="x.py")

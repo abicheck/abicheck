@@ -853,19 +853,22 @@ def _is_itemgetter_constructor_call(
     attribute access (Codex review, fresh evidence). Unlike the attrgetter
     case, this predicate alone is not treated as a match at the point of
     *construction* -- `unmigrated_fact_reader_sites()`'s own itemgetter
-    branch requires the constructed getter to be called immediately, on a
-    real mapping receiver (`operator.itemgetter("bases")(vars(rec))`),
-    mirroring the `_is_mapping_receiver()`-gated shape every other
-    subscript-reading form in this module already uses (`dict.get`,
-    `operator.getitem`, ...) rather than the attrgetter branch's own wider
-    "match wherever constructed, regardless of how the getter is later
-    used" stance. The two behave differently for a structural reason:
-    `attrgetter("bases")(x)` reads `x.bases` for *any* `x` -- there's no
-    narrower receiver shape to require -- while `itemgetter("bases")(x)`
-    reads `x["bases"]`, which is exactly as legitimate for an ordinary,
-    unrelated mapping as for an instance's own `vars()`/`__dict__`, so
-    requiring a real mapping receiver keeps this form no noisier than its
-    already-shipped `dict.get`/`operator.getitem` siblings.
+    branch (for this *unassigned* shape specifically -- a getter assigned
+    to a variable first is tracked separately, by `_itemgetter_alias_
+    keys()`, and does not go through this same call site again) requires
+    the constructed getter to be called immediately, on a real mapping
+    receiver (`operator.itemgetter("bases")(vars(rec))`), mirroring the
+    `_is_mapping_receiver()`-gated shape every other subscript-reading
+    form in this module already uses (`dict.get`, `operator.getitem`,
+    ...) rather than the attrgetter branch's own wider "match wherever
+    constructed, regardless of how the getter is later used" stance. The
+    two behave differently for a structural reason: `attrgetter("bases")
+    (x)` reads `x.bases` for *any* `x` -- there's no narrower receiver
+    shape to require -- while `itemgetter("bases")(x)` reads `x["bases"]`,
+    which is exactly as legitimate for an ordinary, unrelated mapping as
+    for an instance's own `vars()`/`__dict__`, so requiring a real
+    mapping receiver keeps this form no noisier than its already-shipped
+    `dict.get`/`operator.getitem` siblings.
 
     At least one positional argument, not exactly one (Codex review, fresh
     evidence, second round): `operator.itemgetter("foo", "bases")(x)`
@@ -899,3 +902,68 @@ def _itemgetter_matched_name(node: ast.Call) -> str:
         return node.func.value.id
     assert isinstance(node.func, ast.Name)
     return node.func.id
+
+
+def _itemgetter_alias_keys(
+    tree: ast.Module, itemgetter_names: frozenset[str], operator_names: frozenset[str]
+) -> dict[str, list[str]]:
+    """Return every local name *tree* binds, via a plain `ast.Assign`, to
+    the *result* of constructing an `operator.itemgetter(...)` getter --
+    mapped to that constructor call's own literal, string-constant
+    positional arguments (Codex review, fresh evidence). `get = operator.
+    itemgetter("bases"); get(vars(rec))` reads the identical subscript
+    value as the already-recognized immediate-call spelling
+    (`operator.itemgetter("bases")(vars(rec))`), but storing the
+    constructed getter in a variable before calling it is ordinary,
+    common Python -- unlike a constructed-but-never-called getter with no
+    assignment at all, which `_is_itemgetter_constructor_call()`'s own
+    docstring already accepts as out of scope for the *unassigned* case
+    only.
+
+    Deliberately narrower than `_operator_attrgetter_aliases()`'s own
+    name-only alias tracking: a bare `Name`-valued alias of `itemgetter`
+    itself (`ig = itemgetter; ig("bases")(...)`) is already covered by
+    `itemgetter_names` resolving `ig` the ordinary way -- what's tracked
+    *here* is specifically the *result* of calling that (already-
+    resolved) constructor, so the RHS must itself satisfy
+    `_is_itemgetter_constructor_call()`, not merely reference a name in
+    `itemgetter_names`.
+
+    **Not chased through a further plain-name alias
+    (`get = operator.itemgetter("bases"); get2 = get; get2(vars(rec))`)
+    -- the identical "no type inference beyond one hop" limit this
+    module already accepts for a comparable case.** A getter constructed
+    but assigned to a *second* name before being called is a real gap,
+    left open here rather than adding a second fixed-point chain for a
+    narrower and rarer pattern than the one this fix targets.
+
+    A name assigned more than once anywhere in *tree* (any RHS shape, not
+    just a repeated itemgetter-constructor assignment) is dropped
+    entirely rather than keeping either assignment's own key list -- the
+    alias is ambiguous by the second assignment, and guessing which one a
+    later call actually used would risk fabricating a false positive, the
+    same "no partial/best-effort attribution" principle
+    `_paired_unpacking_candidates()`'s own docstring already states for a
+    structurally different reason.
+    """
+    assign_counts: dict[str, int] = {}
+    candidate_keys: dict[str, list[str]] = {}
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Assign):
+            continue
+        for target in node.targets:
+            if not isinstance(target, ast.Name):
+                continue
+            assign_counts[target.id] = assign_counts.get(target.id, 0) + 1
+            if _is_itemgetter_constructor_call(
+                node.value, itemgetter_names, operator_names
+            ):
+                assert isinstance(node.value, ast.Call)
+                candidate_keys[target.id] = [
+                    arg.value
+                    for arg in node.value.args
+                    if isinstance(arg, ast.Constant) and isinstance(arg.value, str)
+                ]
+    return {
+        name: keys for name, keys in candidate_keys.items() if assign_counts[name] == 1
+    }

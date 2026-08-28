@@ -2582,6 +2582,73 @@ under the 2000-line hard cap). New tests:
 `TestItemgetterMappingReaders` in `tests/test_fact_field_readers_later_
 fixes.py` (1014 lines, well under its own 1200-line cap).
 
+**Two more `fact-field-readers` findings (next review round), both real,
+both bounded extensions of already-shipped mechanisms.** (1) `_shadowed()`'s
+comprehension-generator handling blanket-checked *every* generator's own
+target against a call reached through any generator's iterable -- correct
+for the outermost generator (already excluded entirely, since it evaluates
+before any target exists) but wrong for a *non*-outermost one: `[x for x in
+xs for getattr in getattr(rec, "bases")]` -- the second generator's own
+iterable evaluates *before that same generator's own target* is bound, the
+identical binding-order rule the outermost generator's iterable already
+gets, just one level less special-cased. Fixed by generalizing the single
+`outermost_iter_clause` tracked during the ascent into
+`comprehension_gen_clause`/`comprehension_via_iter`, identifying *which*
+generator (by index, via `node.generators.index(...)`) and *which part* of
+it (`.iter`, evaluating before that generator's own target; `.ifs`,
+evaluating after) the call was reached through, then shadowing only
+against the generators that are actually already bound at that point: none
+for the outermost iterable, generators strictly before the current one for
+a non-outermost iterable, the current generator inclusive for a filter, and
+every generator for the comprehension's own final `elt`/`key`/`value`
+(reached with no intervening generator clause at all). (2) `operator.
+itemgetter("bases")(vars(rec))` was recognized only at the point of
+immediate construction-and-call -- `get = operator.itemgetter("bases");
+get(vars(rec))`, storing the constructed getter in a variable first before
+calling it, is ordinary, common Python that was silently missed. Fixed
+with a new `_itemgetter_alias_keys()`, tracking every local name bound via
+a plain `ast.Assign` to the *result* of an itemgetter-constructor call,
+mapped to that call's own literal keys -- deliberately not chased through
+a *further* plain-name alias (`get2 = get`, the same "no type inference
+beyond one hop" limit already accepted elsewhere in this module) and
+dropped entirely for a name assigned more than once anywhere in the file
+(ambiguous by the second assignment, so guessing which one a later call
+used would risk fabricating a false positive rather than merely missing a
+true one).
+
+Both pre-existing tests that pinned the exact gaps these fixes close were
+corrected rather than left pinning a now-fixed bug -- the fourth and fifth
+instances of this exact pattern this plan has now recorded.
+`test_still_shadows_within_a_non_outermost_generators_iterable` used a
+repro where the shadowing target was the call's *own* generator's target
+(self-shadowing, the bug), not an *earlier* generator's target (the
+positive control its own docstring actually claimed to be testing) --
+corrected to the earlier-target repro, with a new sibling test class,
+`TestComprehensionGeneratorBindingOrder`, exhaustively covering all four
+binding-order cases (a generator's own iterable, its own filter, the final
+element expression, and a third generator confirming the rule generalizes
+past two). `test_does_not_match_a_getter_constructed_but_not_immediately_
+called` asserted `== []` for exactly the aliased-itemgetter repro this
+round's second fix now correctly detects -- renamed and rewritten to
+assert the real, single hit, with a new sibling test pinning the
+one-hop-only chased-no-further limit explicitly rather than leaving it
+implicit.
+
+Verified against both reported repros, every binding-order permutation
+listed above, the reassigned-variable and chained-second-name negative
+controls for the itemgetter alias case, and every existing sibling form
+(dict.get, dotted attrgetter, direct-call itemgetter, multi-key itemgetter)
+re-verified unaffected, all via direct AST reproduction before writing
+tests. Still zero existing hits, `mypy`/`ruff` both stayed clean,
+`fact_field_readers.py` at 1809 lines and `fact_field_readers_scope.py` at
+966 lines (both well under the 2000-line hard cap). New tests:
+`TestComprehensionGeneratorBindingOrder` (4 tests) and
+`test_detects_a_getter_assigned_to_a_variable_before_being_called`/
+`test_does_not_chase_an_aliased_getter_through_a_second_name`/
+`test_ignores_a_reassigned_getter_variable` in
+`TestItemgetterMappingReaders`, all in `tests/test_fact_field_readers_
+later_fixes.py` (1113 lines, still under its own 1200-line cap).
+
 ---
 
 ### Phase 1 — finish the `dump`/`scan` typed-API convergence (closes AGENTS.md "PR C")
