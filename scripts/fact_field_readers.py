@@ -582,14 +582,15 @@ def _locally_bound_names(tree: ast.Module) -> dict[str, set[str]]:
     **Carved out: an import this module already recognizes as a genuine
     alias *source* for a builtin/`operator` symbol must NOT be treated as
     a shadow of itself.** `from builtins import getattr` (bare, no
-    `as`), `from builtins import object`/`type`, `from operator import
-    attrgetter`, and a bare `import builtins`/`import operator` are all
-    already resolved elsewhere in this module (`_builtins_getattr_
-    aliases()`, `_unbound_getattribute_receiver_aliases()`,
-    `_operator_attrgetter_aliases()`) as evidence that the bound name
-    genuinely *is* the real builtin/operator symbol -- recording that
-    same binding here too would make `_shadowed()` see it as a local
-    shadow and wrongly exclude the very call it was imported to enable
+    `as`), `from builtins import object`/`type`/`vars`, `from operator
+    import attrgetter`, and a bare `import builtins`/`import operator`
+    are all already resolved elsewhere in this module (`_builtins_
+    getattr_aliases()`, `_unbound_getattribute_receiver_aliases()`,
+    `_builtins_symbol_aliases()`, `_operator_attrgetter_aliases()`) as
+    evidence that the bound name genuinely *is* the real builtin/operator
+    symbol -- recording that same binding here too would make
+    `_shadowed()` see it as a local shadow and wrongly exclude the very
+    call it was imported to enable
     (e.g. `from operator import attrgetter; attrgetter("bases")(rec)`
     would stop being recognized at all, a real regression, not merely an
     incomplete fix). Every *other* import -- including an aliased
@@ -610,7 +611,7 @@ def _locally_bound_names(tree: ast.Module) -> dict[str, set[str]]:
                         bound_name = alias.asname or alias.name
                         recognized = (
                             child.module == "builtins"
-                            and alias.name in ("getattr", "object", "type")
+                            and alias.name in ("getattr", "object", "type", "vars")
                         ) or (child.module == "operator" and alias.name == "attrgetter")
                     if recognized or binding_scope is None:
                         continue
@@ -860,6 +861,74 @@ def _builtins_getattr_aliases(
                 getattr_names.add(local)
                 changed = True
     return frozenset(getattr_names), frozenset(builtins_names)
+
+
+def _builtins_symbol_aliases(
+    tree: ast.Module, symbol: str, builtins_names: frozenset[str]
+) -> frozenset[str]:
+    """Return every local name *tree* binds to the real *symbol* builtin
+    (e.g. `"vars"`) -- always includes the bare *symbol* itself, plus any
+    `from builtins import <symbol> as X`, plus a plain assignment chain
+    (`read_map = vars; read_map2 = read_map` chains too, resolved to a
+    fixed point), plus a *qualified* assignment such as `read_map =
+    builtins.vars` given the caller's already-resolved *builtins_names*
+    (Codex review, fresh evidence: `import builtins; builtins.vars(rec)
+    ["bases"]` and `read_map = vars; read_map(rec).get("bases")` were
+    both invisible to `_is_mapping_receiver()`'s bare `"vars"` check).
+
+    A generalized sibling of `_builtins_getattr_aliases()`'s own
+    identical alias-resolution mechanism for `getattr` specifically --
+    taking *builtins_names* as a parameter rather than re-deriving it
+    (the caller already computed it via that function, and `vars`'s own
+    aliasing needs no second, independent `import builtins` collection)
+    keeps this to the *symbol*-specific half of that mechanism only,
+    without a third hand-duplicated copy of the shared `import
+    builtins`/module-alias machinery `_builtins_getattr_aliases()` itself
+    already owns. `_builtins_getattr_aliases()` is deliberately left
+    unchanged rather than refactored to share this helper -- it is
+    already hardened across five review rounds (see its own docstring),
+    and generalizing it risks reopening one of them for no benefit,
+    since it already returns exactly the `builtins_names` this function
+    needs as an input.
+    """
+    symbol_names = {symbol}
+    assign_candidates: list[tuple[str, str]] = []
+    qualified_candidates: list[tuple[str, str]] = []
+
+    def _add_candidate(target: str, value: ast.expr | None) -> None:
+        if isinstance(value, ast.Name):
+            assign_candidates.append((target, value.id))
+        elif (
+            isinstance(value, ast.Attribute)
+            and value.attr == symbol
+            and isinstance(value.value, ast.Name)
+        ):
+            qualified_candidates.append((target, value.value.id))
+
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom) and node.module == "builtins":
+            for alias in node.names:
+                if alias.name == symbol:
+                    symbol_names.add(alias.asname or alias.name)
+        elif isinstance(node, ast.Assign):
+            for target in node.targets:
+                if isinstance(target, ast.Name):
+                    _add_candidate(target.id, node.value)
+        elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
+            _add_candidate(node.target.id, node.value)
+    for local, base in qualified_candidates:
+        if base in builtins_names:
+            symbol_names.add(local)
+    changed = True
+    while changed:
+        changed = False
+        for local, ref in assign_candidates:
+            if local in symbol_names:
+                continue
+            if ref in symbol_names:
+                symbol_names.add(local)
+                changed = True
+    return frozenset(symbol_names)
 
 
 def _unbound_getattribute_receiver_aliases(tree: ast.Module) -> frozenset[str]:
@@ -1258,6 +1327,7 @@ def unmigrated_fact_reader_sites(
     parents = _parent_map(tree)
     class_aliases = _imported_class_aliases(tree)
     getattr_names, builtins_names = _builtins_getattr_aliases(tree)
+    vars_names = _builtins_symbol_aliases(tree, "vars", builtins_names)
     object_type_names = _unbound_getattribute_receiver_aliases(tree)
     attrgetter_names, operator_names = _operator_attrgetter_aliases(tree)
     locally_bound = _locally_bound_names(tree)
@@ -1279,22 +1349,34 @@ def unmigrated_fact_reader_sites(
             qualname = lexical_parents.get(qualname, "<module>")
 
     def _is_mapping_receiver(value: ast.expr) -> bool:
-        """True if *value* is `vars(rec)` (an ordinary bare-name call,
-        gated on `_shadowed()` the same way `getattr`/`attrgetter` are)
+        """True if *value* is `vars(rec)` (a bare-name call resolved
+        through `vars_names` -- covers a real `vars` alias too, e.g.
+        `read_map = vars; read_map(rec)`, not just the literal spelling,
+        gated on `_shadowed()` for whichever name actually matched),
+        `builtins.vars(rec)` (a qualified call through a real `builtins`
+        alias, Codex review, fresh evidence: `import builtins; builtins.
+        vars(rec)["bases"]` was invisible to the bare-name check alone),
         or `rec.__dict__` (an attribute access, nothing for a local
         binding to shadow) -- shared by both the subscript
         (`vars(rec)["bases"]`) and `.get()` (`vars(rec).get("bases")`,
         Codex review, fresh evidence) mapping-read forms, so the two
         can't independently drift on what counts as "an instance's own
         mapping"."""
-        if (
-            isinstance(value, ast.Call)
-            and isinstance(value.func, ast.Name)
-            and value.func.id == "vars"
-            and len(value.args) == 1
-            and not _shadowed(value, "vars")
-        ):
-            return True
+        if isinstance(value, ast.Call) and len(value.args) == 1:
+            if (
+                isinstance(value.func, ast.Name)
+                and value.func.id in vars_names
+                and not _shadowed(value, value.func.id)
+            ):
+                return True
+            if (
+                isinstance(value.func, ast.Attribute)
+                and value.func.attr == "vars"
+                and isinstance(value.func.value, ast.Name)
+                and value.func.value.id in builtins_names
+                and not _shadowed(value, value.func.value.id)
+            ):
+                return True
         return isinstance(value, ast.Attribute) and value.attr == "__dict__"
 
     def _expr_text(node: ast.AST) -> str:

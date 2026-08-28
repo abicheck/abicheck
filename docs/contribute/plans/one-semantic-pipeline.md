@@ -1915,6 +1915,47 @@ Verified empirically: still zero existing hits in the real repository,
 `mypy`/`ruff` both stayed clean. New tests in `TestMappingGetFieldReads`
 (`tests/test_fact_field_readers_wrapper_scoping.py`).
 
+**A further Codex review round found one more real gap: `_is_mapping_
+receiver()` only ever matched the bare literal spelling `vars`, not a
+real alias of it.** `import builtins; builtins.vars(rec)["bases"]` (a
+qualified call through a real `builtins` alias) and `read_map = vars;
+read_map(rec).get("bases")` (a plain assignment alias) were both
+invisible -- the identical gap `_builtins_getattr_aliases()` already
+closed for `getattr` specifically, never extended to `vars`. Fixed with
+a new, generalized `_builtins_symbol_aliases(tree, symbol,
+builtins_names)`: the *symbol*-specific half of that same alias-
+resolution mechanism (import-from, a plain-assignment chain resolved to
+a fixed point, a qualified `X.symbol` chain), taking the caller's
+already-resolved `builtins_names` as a parameter rather than re-deriving
+it, so `vars` doesn't need a third hand-duplicated copy of the shared
+`import builtins`/module-alias collection `_builtins_getattr_aliases()`
+itself already owns. `_builtins_getattr_aliases()` itself was left
+unchanged rather than refactored to share this helper -- it is already
+hardened across five prior review rounds (see its own docstring), and
+generalizing it risks reopening one of them for no benefit, since it
+already returns exactly the `builtins_names` this function needs.
+
+**A real regression caught before the tests even ran, by the tests
+themselves rather than a fresh review round: an aliased import of `vars`
+(`from builtins import vars as V`) was still wrongly excluded, for a
+different reason than the one this fix targets.** `_locally_bound_names`'s
+own recognized-import carve-out (added two rounds earlier for `getattr`/
+`object`/`type`/`attrgetter`) had no entry for `vars` at all, so `from
+builtins import vars as V` was itself recorded as an ordinary local
+binding of `V` at module scope — making `_shadowed()` see `V` as shadowed
+by its *own* import statement, the exact inversion the carve-out exists
+to prevent. Fixed by adding `"vars"` to that carve-out's recognized-name
+set, alongside the new alias-resolution fix above (not a separate,
+unrelated bug — the same "this import is a recognized alias *source*,
+not a shadow" principle, just missing one more entry).
+
+Verified against the reported qualified-call and assigned-alias repros,
+an imported-alias positive control, and three negative controls (a
+`builtins`-shadowing parameter, an aliased-import self-shadow, and an
+unrelated object's own `.vars()` method). Zero existing hits, `mypy`/
+`ruff` both stayed clean. New tests in `TestVarsAliasesInMappingReads`
+(`tests/test_fact_field_readers_wrapper_scoping.py`).
+
 **Still not landed**: no detector (`diff_layout.py`/`diff_types.py`/
 `diff_param_qualifiers.py`/the reader set the check above now tracks
 precisely) has actually been migrated to read `.status` — the check above

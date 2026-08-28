@@ -110,6 +110,17 @@ Covers six independent Codex-review findings across three review rounds:
    into ``_is_mapping_receiver()``, reused by both the subscript and the
    new ``.get()`` branch, so the two forms can't independently drift on
    what counts as a recognized mapping receiver.
+
+10. **``_is_mapping_receiver()`` only ever matched the bare literal
+    spelling ``vars``** -- ``import builtins; builtins.vars(rec)
+    ["bases"]`` (a qualified call through a real ``builtins`` alias) and
+    ``read_map = vars; read_map(rec).get("bases")`` (a real ``vars``
+    alias) were both invisible, the identical gap ``_builtins_getattr_
+    aliases()`` already closed for ``getattr`` specifically. Fixed with a
+    new, generalized ``_builtins_symbol_aliases()`` -- the *symbol*-
+    specific half of that same alias-resolution mechanism, taking the
+    caller's already-resolved ``builtins_names`` as a parameter rather
+    than re-deriving it -- applied to ``vars``.
 """
 
 from __future__ import annotations
@@ -696,5 +707,82 @@ class TestMappingGetFieldReads:
         object (not `vars(...)`/`.__dict__`) must not be flagged, even
         when it happens to pass a bridged field name as its argument."""
         src = 'def f(rec, mapping):\n    return mapping.get("bases")\n'
+        tree = ast.parse(src, filename="x.py")
+        assert unmigrated_fact_reader_sites(tree, "x.py", src) == []
+
+
+class TestVarsAliasesInMappingReads:
+    """`_is_mapping_receiver()` resolves a real `vars` alias too, not
+    just the bare literal spelling -- both a qualified `builtins.vars(...)`
+    call through a real `builtins` alias and a plain assignment alias of
+    `vars` itself."""
+
+    def test_detects_a_qualified_builtins_vars_subscript(self) -> None:
+        src = 'import builtins\ndef f(rec):\n    return builtins.vars(rec)["bases"]\n'
+        tree = ast.parse(src, filename="x.py")
+        keys = [
+            key for key, _l, _a, _q in unmigrated_fact_reader_sites(tree, "x.py", src)
+        ]
+        assert keys == [
+            'x.py::f::bases::builtins.vars(rec)["bases"]::builtins.vars(rec)["bases"]::1'
+        ]
+
+    def test_detects_an_assigned_vars_alias_get_call(self) -> None:
+        src = 'read_map = vars\ndef f(rec):\n    return read_map(rec).get("bases")\n'
+        tree = ast.parse(src, filename="x.py")
+        keys = [
+            key for key, _l, _a, _q in unmigrated_fact_reader_sites(tree, "x.py", src)
+        ]
+        assert keys == [
+            'x.py::f::bases::read_map(rec).get("bases")::read_map(rec).get("bases")::1'
+        ]
+
+    def test_detects_an_imported_vars_alias(self) -> None:
+        src = (
+            'from builtins import vars as V\ndef f(rec):\n    return V(rec)["bases"]\n'
+        )
+        tree = ast.parse(src, filename="x.py")
+        keys = [
+            key for key, _l, _a, _q in unmigrated_fact_reader_sites(tree, "x.py", src)
+        ]
+        assert keys == ['x.py::f::bases::V(rec)["bases"]::V(rec)["bases"]::1']
+
+    def test_ignores_a_qualified_call_shadowed_by_a_builtins_parameter(self) -> None:
+        """Negative control: a parameter named `builtins` shadows the
+        real module, the identical guard the bare-`vars` form already
+        gets."""
+        src = (
+            "import builtins\n"
+            "def f(builtins, rec):\n"
+            '    return builtins.vars(rec)["bases"]\n'
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert unmigrated_fact_reader_sites(tree, "x.py", src) == []
+
+    def test_ignores_an_imported_vars_alias_shadowed_by_its_own_parameter(
+        self,
+    ) -> None:
+        """Negative control: the aliased spelling is shadowed the
+        identical way the bare spelling already is."""
+        src = (
+            "from builtins import vars as V\n"
+            "def f(V, rec):\n"
+            '    return V(rec)["bases"]\n'
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert unmigrated_fact_reader_sites(tree, "x.py", src) == []
+
+    def test_ignores_an_unrelated_objects_vars_named_method(self) -> None:
+        """Negative control: an unrelated object's own `.vars()` method
+        (not `builtins.vars`) must not be flagged, even when it happens
+        to pass a bridged field name as its argument."""
+        src = (
+            "class Fake:\n"
+            "    def vars(self, rec):\n"
+            "        return {}\n"
+            "def f(rec):\n"
+            "    fake = Fake()\n"
+            '    return fake.vars(rec).get("bases")\n'
+        )
         tree = ast.parse(src, filename="x.py")
         assert unmigrated_fact_reader_sites(tree, "x.py", src) == []
