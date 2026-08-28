@@ -74,8 +74,11 @@ from .workflows.extraction import (
     _manifest_declared_includes,
     ast_memoize_scope,
     attach_build_context_for_parsed_headers,
+    detect_binary_format,
     dump_manifest_header_roots as _dump_manifest_header_roots,
     include_operand_dirs,
+    normalize_binary_input,
+    show_data_sources,
     suppress_streaming_prune,
 )
 
@@ -596,17 +599,13 @@ def _add_dump_data_layers(
     warning rather than failing the dry run.
     """
     try:
-        from .dwarf_snapshot import show_data_sources
-        from .workflows.extraction import detect_binary_format, normalize_binary_input
-
         normalized_path, binary_fmt = normalize_binary_input(so_path)
         if binary_fmt is None:
             binary_fmt = detect_binary_format(normalized_path)
         elf_meta = None
         dwarf_meta = None
         if binary_fmt == "elf":
-            from .dwarf_unified import parse_dwarf
-            from .workflows.extraction import parse_elf_metadata
+            from .workflows.extraction import parse_dwarf, parse_elf_metadata
 
             elf_meta = parse_elf_metadata(normalized_path)
             dwarf_meta, _ = parse_dwarf(normalized_path)
@@ -1563,7 +1562,7 @@ def perform_elf_dump(
         # never carried the tool's size/offset/base/vptr facts even though
         # `compare`'s implicit-dump path (service.run_dump) already got them
         # (Codex review).
-        from .clang_layout_tool import attach_clang_layout
+        from .workflows.extraction import attach_clang_layout
 
         snap = attach_clang_layout(
             snap,

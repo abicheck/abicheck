@@ -111,6 +111,8 @@ from ..buildsource.toolchain_bindings import (
     load_bindings_file,
 )
 from ..buildsource.toolchain_probe import check_profile_toolchain_identity
+from ..clang_layout_tool import attach_clang_layout
+from ..classify import is_supported_compare_input
 from ..debug_resolver import DebugArtifact, resolve_debug_info
 from ..dump_manifest import DumpManifest, load_manifest
 from ..dumper_cache import ast_memoize_scope
@@ -118,6 +120,8 @@ from ..dumper_clang import resolve_source_frontend_clang_bin
 from ..dumper_clang_streaming import suppress_streaming_prune
 from ..dumper_contract import _manifest_declared_includes
 from ..dumper_scoping import dump_manifest_header_roots, resolve_dependency_scope
+from ..dwarf_snapshot import show_data_sources
+from ..dwarf_unified import parse_dwarf
 from ..elf_metadata import parse_elf_metadata
 from ..header_conditionals import attach_build_context_for_parsed_headers
 from ..header_utils import (
@@ -129,6 +133,19 @@ from ..header_utils import (
     split_public_header_inputs,
 )
 from ..numpy_capi import extract_numpy_capi_surface
+from ..package import (
+    _ELF_MAGIC,
+    _ET_DYN,
+    PackageExtractor,
+    _has_interp_segment,
+    _has_shared_object_name,
+    _is_elf_shared_object,
+    detect_extractor,
+    discover_shared_libraries,
+    is_package,
+    resolve_debug_info as resolve_package_debug_info,
+)
+from ..provenance import apply_provenance
 from ..python_api import detect_python_api
 from ..python_ext import detect_python_extension
 from ..symvers_metadata import looks_like_symvers
@@ -145,13 +162,21 @@ __all__ = [
     "DumpManifest",
     "ManifestError",
     "PRUNED_HEADER_DIR_SEGMENTS",
+    "PackageExtractor",
+    "_ELF_MAGIC",
+    "_ET_DYN",
     "_autodiscover_compile_db",
     "_canonical_library_key",
     "_compile_db_at",
+    "_has_interp_segment",
+    "_has_shared_object_name",
+    "_is_elf_shared_object",
     "_load_build_evidence",
     "_manifest_declared_includes",
+    "apply_provenance",
     "ast_memoize_scope",
     "attach_build_context_for_parsed_headers",
+    "attach_clang_layout",
     "build_inline_coverage",
     "build_points_of_interest",
     "check_profile_bindings_resolve",
@@ -160,9 +185,11 @@ __all__ = [
     "dedup_paths_preserve_order",
     "deferred_token_dirs",
     "detect_binary_format",
+    "detect_extractor",
     "detect_python_api",
     "detect_python_extension",
     "discover_build_config",
+    "discover_shared_libraries",
     "drain_build_dir_cleanups",
     "dump_manifest_header_roots",
     "embed_build_source",
@@ -187,6 +214,8 @@ __all__ = [
     "is_inputs_pack",
     "is_inputs_pack_dir",
     "is_pack_dir",
+    "is_package",
+    "is_supported_compare_input",
     "iter_directory_headers",
     "load_bindings_file",
     "load_build_config",
@@ -198,6 +227,7 @@ __all__ = [
     "load_pack_or_raise",
     "looks_like_symvers",
     "normalize_binary_input",
+    "parse_dwarf",
     "parse_elf_metadata",
     "relink_surface_exports",
     "resolve_debug_info",
@@ -205,12 +235,14 @@ __all__ = [
     "resolve_inferred_header_roots",
     "resolve_linker_script",
     "resolve_linker_script_chain",
+    "resolve_package_debug_info",
     "resolve_source_frontend_clang_bin",
     "resolve_symbol_tus",
     "run_external_extractor",
     "run_preprocessor_scan",
     "scan_files",
     "seed_includes_and_fold_compile_context",
+    "show_data_sources",
     "sniff_build_info_format",
     "split_public_header_inputs",
     "strip_vendor_hash",

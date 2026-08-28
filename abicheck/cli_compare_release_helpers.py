@@ -41,8 +41,8 @@ from .model import AbiSnapshot
 
 if TYPE_CHECKING:
     from .pack_application import PackApplication
-    from .package import PackageExtractor
     from .policy_file import PolicyFile
+    from .workflows.extraction import PackageExtractor
     from .workflows.gate import SeverityConfig
 
 

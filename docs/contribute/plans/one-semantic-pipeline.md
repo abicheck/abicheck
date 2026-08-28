@@ -930,12 +930,26 @@ The one *real*, deliberate behavior change: `Param.is_va_list_fact` is now
 neither producer can ever determine va_list-ness, on any run, which
 `UNSUPPORTED` states plainly where the omission bridge's own
 `NOT_COLLECTED` ("not collected this time") could not. `dumper_clang.py`'s
-`is_va_list_fact` stays `Fact.present(...)`, since that backend genuinely
-evaluates `_clang_param_is_va_list()` per parameter (the function's own
-documented target-scoping residual — no per-snapshot record of which
-target ABI a clang parse actually ran against — is unchanged; closing it
-still needs the toolchain-identity probe named elsewhere in this repo's
-AGENTS.md). New tests: `tests/test_castxml_fact_construction.py`,
+`is_va_list_fact` is `Fact.partial(...)`, not `Fact.present(...)` (Codex
+review, second round): that backend genuinely evaluates
+`_clang_param_is_va_list()` per parameter, but the check only covers
+x86-64 System V and conservatively answers `False` — not a confirmed
+negative — on any other target (the function's own documented
+target-scoping residual — no per-snapshot record of which target ABI a
+clang parse actually ran against — is unchanged; closing it still needs
+the toolchain-identity probe named elsewhere in this repo's AGENTS.md).
+`vptr_offset_bits_fact` is `Fact.partial(...)` on castxml/clang too (a
+third finding, same review): both backends derive it from the same
+`0`-if-polymorphic Itanium primary-base heuristic that the legacy
+`vptr_offset_bits` field's own capability-matrix row already documents as
+`PARTIAL` — it does not track a secondary vtable's placement under
+multiple inheritance, so the `Fact[...]` sibling must not overclaim `FULL`
+either. `scripts/backend_capabilities.py`'s `FACT_ROWS` (and its
+`_is_placeholder_literal` scanner, taught to recognize a
+`Fact.unsupported()`/`not_collected()`/`not_applicable()`/`failed()` call
+as a placeholder rather than extraction, and to recurse into
+`Fact.present()`/`partial()`'s own wrapped argument) were corrected to
+match. New tests: `tests/test_castxml_fact_construction.py`,
 `tests/test_dumper_clang_fact_construction.py`,
 `tests/test_dwarf_fact_construction.py` — the `is_va_list_fact` change is
 confirmed to fail against the pre-change code (`git stash`); the
