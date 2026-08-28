@@ -2926,15 +2926,29 @@ independently-drifting restatements (Codex review, PR #910, `docs/AGENTS.md`'s
 > drift), and `scan --against` (`cli_scan_baseline._run_baseline_compare`,
 > reusing the exact `sev_config`/`exit_scheme` pair its own `exit` block was
 > just resolved from) all call it through one shared helper,
-> `reporter_contract_blocks.add_effective_config_digest` -- so "the same
-> effective-config digest recorded in every report" is now literally one
-> function, not three approximations of one shape. `report_schema_version`
-> 2.45 / `scan_schema_version` 1.19 (additive keys:
-> `effective_config_digest`/`effective_config_fields`). Tests:
-> `tests/test_effective_config_digest.py` (both tiers directly, plus
-> cross-report parity: two reports resolving the identical configuration
-> produce the identical digest regardless of findings/library name, and a
-> policy override changes it).
+> `reporter_contract_blocks.add_effective_config_digest` -- so across the
+> three call sites this digest reaches, it's now literally one function,
+> not three approximations of one shape. `report_schema_version` 2.45 /
+> `scan_schema_version` 1.19 (additive keys: `effective_config_digest`/
+> `effective_config_fields`). **Scope correction (Codex review, fresh
+> evidence): "in every report" overstates this -- the digest reaches only
+> the native JSON report path.** `add_effective_config_digest` is called
+> from exactly two places (`reporter.py`'s JSON summary builder and
+> `cli_scan_baseline.py`'s `scan --against` JSON path) -- the Markdown,
+> review, SARIF, JUnit, and HTML renderers (`html_report.py`, `sarif.py`,
+> `junit_report.py`, and `reporter.py`'s own non-JSON renderers) never call
+> it, so a user selecting one of those output formats gets no
+> effective-configuration fingerprint at all. `compat check
+> --report-format json` also intentionally omits it: `compat/cli.py`
+> reuses `reporter.to_json` with `include_exit_decision=False` (its real
+> process exit follows the ABICC-style 0/1/2 scheme, not the native
+> gate/severity axes this digest describes), which
+> `TestCompatReportOmitsTheDigest` in `tests/test_effective_config_
+> digest.py` pins directly. Tests: `tests/test_effective_config_digest.py`
+> (both tiers directly, plus cross-report parity: two reports resolving
+> the identical configuration produce the identical digest regardless of
+> findings/library name, a policy override changes it, and the compat
+> exception above).
 >
 > **What remains open, deliberately not attempted in this slice, and why:**
 > the *first* still-open goal from the note above -- one shared
@@ -3012,8 +3026,13 @@ independently-drifting restatements (Codex review, PR #910, `docs/AGENTS.md`'s
 > landed for every CLI command path: pack parity across `compare`, the
 > release fan-out, and `scan --against`, both `policy.overrides`/`surface.
 > internal_namespaces` *and* `gate.*` fields — slices 1-3 — plus the
-> effective-config digest recorded in every report (slice 4). **Narrower
-> than "every front end" once the typed Python API is included**: `--pack`
+> effective-config digest recorded in every native JSON report (slice 4;
+> **narrower than "every report"**, Codex review, fresh evidence — see
+> slice 4's own section below for the exact scope: only the JSON report
+> path calls `add_effective_config_digest`, the Markdown/review/SARIF/
+> JUnit/HTML renderers don't, and `compat check --report-format json`
+> deliberately omits the field too). **Narrower again once the typed
+> Python API is included**: `--pack`
 > is a CLI selector today (ADR-049 D8), and neither `ScanRequest` nor
 > `CompareRequest` carries a pack field a typed caller can set — `ScanRequest`
 > has none at all (`service_scan._resolve_api_evaluation_config` explicitly
@@ -3279,7 +3298,9 @@ PR B  effective configuration parity  — packs resolved once into one
                                        path (typed-API parity is separate,
                                        outstanding work), and an
                                        effective-config digest in every
-                                       report; the release fan-out's own
+                                       native JSON report (see PR B's own
+                                       section for the non-JSON/compat
+                                       exception); the release fan-out's own
                                        typed GateOptions object is
                                        deliberately reassigned to PR G2,
                                        see PR B's own section for why
