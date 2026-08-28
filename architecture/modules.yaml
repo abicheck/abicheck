@@ -161,10 +161,7 @@
         "compare"
       ],
       "legacy_paths": [
-        "abicheck/analysis_assurance.py",
-        "abicheck/contract_coverage_exit.py",
-        "abicheck/exit_decision.py",
-        "abicheck/severity.py"
+        "abicheck/analysis_assurance.py"
       ]
     },
     "workflows": {
@@ -245,7 +242,11 @@
   },
   "public_root_surfaces": [
     "abicheck.api_types",
-    "abicheck.errors"
+    "abicheck.checker_policy",
+    "abicheck.contract_coverage_ledger",
+    "abicheck.contract_gating",
+    "abicheck.errors",
+    "abicheck.reclassify"
   ],
   "facades": [
     "abicheck.aggregate",
