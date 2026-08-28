@@ -1617,7 +1617,11 @@ def _route_declaration(
     keep independent mappings. The exported symbol is the mangled name for C++ or
     the plain qualified name for C / extern "C" decls whose extractor leaves
     mangled_name empty — matching on either avoids false "unmatched" evidence.
-    """
+    A ``compiler_generated`` entity (PR #930) is dropped, not unmatched, on a miss -- an ODR-used implicit member can still export."""
+    export_sym = entity.mangled_name or entity.qualified_name
+    primary, variants = _match_export(export_sym, exported, state.export_index, state.exact_index)
+    if not primary and entity.ownership.get("compiler_generated") == "true":
+        return
     surface.reachable_declarations.append(entity)
     key = entity.identity()
     if not key:
@@ -1641,10 +1645,6 @@ def _route_declaration(
     if usr:
         state.identity_to_usr[key] = usr
     state.identity_to_qname[key] = entity.qualified_name or key
-    export_sym = entity.mangled_name or entity.qualified_name
-    primary, variants = _match_export(
-        export_sym, exported, state.export_index, state.exact_index
-    )
     if primary:
         state.decl_to_symbol[key] = primary
         state.matched_symbols.update(variants)

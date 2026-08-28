@@ -31,7 +31,9 @@ from pathlib import Path
 import pytest
 
 from abicheck.buildsource.build_evidence import CompileUnit
+from abicheck.buildsource.source_abi import SourceAbiTu
 from abicheck.buildsource.source_extractors.base import entity_from_function
+from abicheck.buildsource.source_link import link_source_abi
 from abicheck.model import Function, ScopeOrigin
 
 
@@ -46,10 +48,14 @@ def _cu(**kw: object) -> CompileUnit:
     return CompileUnit(**base)  # type: ignore[arg-type]
 
 
-def test_entity_from_function_excludes_confirmed_compiler_generated() -> None:
+def test_entity_from_function_stamps_compiler_generated_ownership() -> None:
     # A confirmed compiler-generated declaration (is_compiler_generated is
-    # True) must never be api_relevant, regardless of origin/access -- see
-    # this module's own docstring for the false-positive it prevents.
+    # True) stays api_relevant -- the export-table-blind, per-TU mapping
+    # stage cannot know whether it is an ODR-used implicit member with a
+    # real weak export (Codex review, PR #930) -- but records the fact as
+    # `ownership` evidence for link_source_abi's own `_route_declaration` to
+    # act on downstream, once the export table is actually known. See the
+    # test below for that gated exclusion.
     common = dict(
         name="Widget",
         mangled="_ZN6WidgetaSERKS_",
@@ -58,22 +64,60 @@ def test_entity_from_function_excludes_confirmed_compiler_generated() -> None:
         origin=ScopeOrigin.PUBLIC_HEADER,
     )
     synthesized = entity_from_function(Function(is_compiler_generated=True, **common))
-    assert synthesized.api_relevant is False
+    assert synthesized.api_relevant is True
+    assert synthesized.ownership.get("compiler_generated") == "true"
 
     # The positive control: an identical, genuinely user-written declaration
-    # (is_compiler_generated False) is unaffected.
+    # (is_compiler_generated False) carries no such hint.
     user_written = entity_from_function(
         Function(is_compiler_generated=False, **common)
     )
     assert user_written.api_relevant is True
+    assert "compiler_generated" not in user_written.ownership
 
     # An older snapshot / DWARF-only path that never captured the fact
     # (is_compiler_generated is None -- "not captured", not "confirmed
-    # user-written") must not be excluded either -- only a confirmed True
-    # excludes, matching every other tri-state confirmed-only exclusion in
-    # this codebase.
+    # user-written") carries no hint either -- only a confirmed True stamps
+    # one, matching every other tri-state confirmed-only marker in this
+    # codebase.
     unknown = entity_from_function(Function(is_compiler_generated=None, **common))
     assert unknown.api_relevant is True
+    assert "compiler_generated" not in unknown.ownership
+
+
+def test_link_source_abi_drops_unmatched_compiler_generated_declarations() -> None:
+    """The actual exclusion: `link_source_abi` gives a `compiler_generated`
+    entity one export-match attempt, then drops it outright on a miss --
+    never reaching `reachable_declarations`/`source_decl_to_binary_symbol`
+    at all, unlike an ordinary unmatched declaration (which is kept and
+    recorded as unmatched)."""
+    common = dict(
+        name="Widget",
+        mangled="_ZN6WidgetaSERKS_",
+        return_type="Widget&",
+        source_header="include/widget.h",
+        origin=ScopeOrigin.PUBLIC_HEADER,
+    )
+    phantom = entity_from_function(Function(is_compiler_generated=True, **common))
+    tu = SourceAbiTu(tu_id="cu://widget.cpp#cfg", functions=[phantom])
+
+    # No export named -- the trivial, never-emitted-out-of-line case this
+    # fix exists for.
+    surface = link_source_abi([tu], exported_symbols=[])
+    assert phantom.id not in {d.id for d in surface.reachable_declarations}
+    assert phantom.identity() not in surface.mappings["source_decl_to_binary_symbol"]
+
+    # A real export IS present -- the ODR-used case (e.g. a public function
+    # returning Widget by value calls this implicit copy assignment). It
+    # must be linked like any ordinary declaration, not dropped.
+    surface_matched = link_source_abi(
+        [tu], exported_symbols=["_ZN6WidgetaSERKS_"]
+    )
+    assert phantom.id in {d.id for d in surface_matched.reachable_declarations}
+    assert (
+        surface_matched.mappings["source_decl_to_binary_symbol"][phantom.identity()]
+        == "_ZN6WidgetaSERKS_"
+    )
 
 
 @pytest.mark.integration
@@ -138,11 +182,15 @@ def test_castxml_l4_extract_excludes_implicit_special_members_from_reachable_sur
     # than the one real user-written method.
     assert len(tu.functions) > 1
 
-    # The fix itself: exactly one function entity is api_relevant (`sum`);
-    # every phantom compiler-synthesized entry is excluded.
-    relevant = [f for f in tu.functions if f.api_relevant]
-    assert len(relevant) == 1
-    assert relevant[0].mangled_name == "_ZNK6Widget3sumEv"
+    # Every phantom entry is stamped with the ownership hint that lets
+    # `link_source_abi` (below) give it one export-match chance rather than
+    # excluding it outright at this per-TU stage -- an ODR-used implicit
+    # member can have a real weak export the extractor cannot know about in
+    # isolation (Codex review, PR #930).
+    phantom_count = sum(
+        1 for f in tu.functions if f.ownership.get("compiler_generated") == "true"
+    )
+    assert phantom_count == len(tu.functions) - 1
 
     surface = link_source_abi(
         [tu], exported_symbols=["_ZNK6Widget3sumEv"], library="libwidget.so"

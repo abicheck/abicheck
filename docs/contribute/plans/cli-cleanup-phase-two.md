@@ -2476,15 +2476,30 @@ pipelines a fourth time.
   > `_categorize` entirely whenever a node is `isImplicit`, so a node
   > reaching `parse_functions()`'s output is structurally guaranteed to
   > have been written by the user — confirmed by reading `dumper_clang.py`
-  > directly, not assumed. `entity_from_function`'s `api_relevant`
-  > computation now excludes a confirmed `is_compiler_generated is True`
-  > declaration regardless of origin/access, closing the false-positive
-  > `source_binary_provenance_mismatch` this entry's own repro produced.
-  > Every existing consumer of `Function.visibility` was checked and needed
-  > no change — this fix is additive (a new field, a new exclusion
-  > condition gated on a confirmed `True`) rather than a change to
-  > `visibility`'s own HIDDEN/PUBLIC split, so nothing that already reads
-  > `visibility` observes different behavior.
+  > directly, not assumed. Every existing consumer of `Function.visibility`
+  > was checked and needed no change — this fix is additive (a new field)
+  > rather than a change to `visibility`'s own HIDDEN/PUBLIC split, so
+  > nothing that already reads `visibility` observes different behavior.
+  >
+  > **Correction (Codex review, same day): the first cut of this fix
+  > unconditionally excluded every confirmed compiler-generated declaration
+  > from `api_relevant` — wrong, because an ODR-used implicit special member
+  > CAN have a real exported symbol** (e.g. a public function returning a
+  > type by value calls its implicit copy/move constructor, which the
+  > compiler still emits as a real weak export). `entity_from_function` is a
+  > per-declaration, export-table-blind mapping stage — it has no way to
+  > know whether a given implicit member is ODR-used, so excluding
+  > unconditionally there would silently drop that genuine symbol's only
+  > source declaration. Fixed by moving the decision downstream to
+  > `link_source_abi`'s `_route_declaration`, which already has the
+  > exported-symbol table: `entity_from_function` now stays additive (stamps
+  > `SourceEntity.ownership["compiler_generated"] = "true"`, `api_relevant`
+  > unchanged), and `_route_declaration` gives such an entity one export-
+  > match attempt before recording it at all — matched, it is linked like
+  > any ordinary declaration; unmatched, it is dropped outright (not counted
+  > reachable-but-unmatched), closing the identical false-positive
+  > `source_binary_provenance_mismatch` this entry's own repro produced,
+  > without losing a genuinely-exported implicit member in the process.
   >
   > Verified against real castxml 0.7.0 and real clang 20, not only against
   > hand-built fixtures: `tests/test_castxml_l4_phantom_members.py::
