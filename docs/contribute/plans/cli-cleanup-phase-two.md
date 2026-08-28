@@ -2500,10 +2500,23 @@ pipelines a fourth time.
   > the un-given default `"auto"` (env-var-blind) and `_make_source_
   > extractor` still treats that as clang, while `compare`'s/`execute_
   > dump_request`'s `effective_frontend` honors the env var and resolves
-  > castxml — the two sides still disagree. Only `ABICHECK_AST_
-  > FRONTEND=clang` closes this specific gap, and only by coincidence:
-  > `_make_source_extractor` was already going to pick clang by default,
-  > and the env var pushes `effective_frontend` to the identical choice.
+  > castxml — the two sides still disagree. `ABICHECK_AST_FRONTEND=clang`
+  > closes this specific gap by coincidence: `_make_source_extractor` was
+  > already going to pick clang by default, and the env var pushes
+  > `effective_frontend` to the identical choice. **`ABICHECK_AST_
+  > FRONTEND=hybrid` closes it too, for the same coincidental reason
+  > (Codex review, fresh evidence: an earlier version of this note said
+  > "only ... clang", omitting this case)** -- `dumper._resolve_header_
+  > backend("auto")` recognizes `"hybrid"` as a legal literal value the
+  > same way it recognizes `"castxml"`/`"clang"`, so `effective_frontend`
+  > resolves to `"hybrid"` for the typed/compare path, and
+  > `_make_source_extractor("hybrid", ...)` selects clang regardless --
+  > its own branch only special-cases the literal string `"castxml"`,
+  > treating every other value (including `"hybrid"`) as clang. The
+  > native `dump` CLI's own env-var-blind `"auto"` also resolves to clang
+  > independently, so both sides again converge by coincidence. `castxml`
+  > is therefore the only `ABICHECK_AST_FRONTEND` value that does *not*
+  > close this gap.
   >
   > The config half of the original qualification does hold, but only for
   > the **CLI-vs-CLI** pairing, not the CLI-vs-typed-API one: a project
@@ -2568,10 +2581,14 @@ pipelines a fourth time.
   > that environment variable, not universal.** With `ABICHECK_AST_
   > FRONTEND` unset (the common case) or explicitly set to `castxml`, the
   > two sides disagree exactly as described (clang vs. castxml). With it
-  > set to `clang`, both sides resolve to clang -- `_make_source_extractor`
-  > has no env-var awareness to override, but `effective_frontend` picks up
-  > the override too, so they land on the same backend by coincidence, not
-  > because the underlying resolution logic agrees. Neither caller passes
+  > set to `clang` **or `hybrid`** (Codex review, fresh evidence: an
+  > earlier version of this note omitted the `hybrid` case), both sides
+  > resolve to clang -- `_make_source_extractor` has no env-var awareness
+  > to override and treats anything but the literal `"castxml"` as clang,
+  > but `effective_frontend` picks up the override too (`hybrid` is a
+  > recognized literal value, same as `clang`), so they land on the same
+  > backend by coincidence, not because the underlying resolution logic
+  > agrees. Neither caller passes
   > an override; with the environment variable unset, native `dump`
   > routes unresolved `"auto"` to clang while `compare`/`execute_dump_
   > request` resolve it to castxml (Codex/CodeRabbit review: the previous
