@@ -1,10 +1,15 @@
 # ADR-063: One Semantic Pipeline — Unifying Application, Fact, Identity, and Outcome Models
 
 **Date:** 2026-08-27
-**Status:** Proposed — roadmap ADR, not implemented. Several of its decisions
-are already partially satisfied by work this ADR consolidates rather than
-replaces (see "Relationship to existing ADRs" below); none of its new
-primitives exist yet.
+**Status:** Proposed — roadmap ADR, partially implemented. Phase 0
+(`Fact[T]`/`FactStatus` in `abicheck/model/`, the five converted
+`RecordType`/`Param` fields, and the `fact-detector-misuse`/
+`fact-field-readers` AI-readiness gates) has landed; Phases 1-10 are still
+unimplemented design text — see the [implementation
+plan](../plans/one-semantic-pipeline.md) for the phase-by-phase state.
+Several of the still-unimplemented phases' decisions are already partially
+satisfied by work this ADR consolidates rather than replaces (see
+"Relationship to existing ADRs" below).
 **Decision maker:** abicheck maintainers
 **Relates to / builds on:** [ADR-024](024-public-abi-surface-resolution.md),
 [ADR-031](031-source-implementation-graph-augmentation.md),
