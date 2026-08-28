@@ -20,7 +20,6 @@
         "abicheck/change_registry_types.py",
         "abicheck/checker_types.py",
         "abicheck/compile_context.py",
-        "abicheck/contract_evidence.py",
         "abicheck/contract_relevance_types.py",
         "abicheck/detectors.py",
         "abicheck/evidence_depth.py",
@@ -196,16 +195,13 @@
         "abicheck/analysis_assurance.py",
         "abicheck/compatibility_evaluation_config.py",
         "abicheck/compatibility_evaluation_packs.py",
-        "abicheck/contract_coverage_exit.py",
         "abicheck/contract_evaluation.py",
         "abicheck/contract_evidence_collect.py",
-        "abicheck/exit_decision.py",
         "abicheck/idioms.py",
         "abicheck/pattern_verdicts.py",
         "abicheck/post_processing.py",
         "abicheck/post_processing_context.py",
-        "abicheck/post_processing_reachability.py",
-        "abicheck/severity.py"
+        "abicheck/post_processing_reachability.py"
       ]
     },
     "workflows": {
@@ -328,7 +324,11 @@
   },
   "public_root_surfaces": [
     "abicheck.api_types",
-    "abicheck.errors"
+    "abicheck.checker_policy",
+    "abicheck.contract_coverage_ledger",
+    "abicheck.contract_gating",
+    "abicheck.errors",
+    "abicheck.reclassify"
   ],
   "facades": [
     "abicheck.aggregate",
