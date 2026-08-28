@@ -95,15 +95,20 @@
   and having the renderer consume the resolved decision), not a ledger
   reshuffle in either direction — this PR does not attempt that split.
 
-  **Important limitation of this PR's fix: it affects only this branch,
-  not `main`.** Since the sibling PR (`764ebe4a2`) is already merged, `main`
-  itself carries the six role-mismatched modules in `report.legacy_paths`
-  permanently, independent of anything this PR does — a plain re-merge of
-  `main` into this branch after this PR merges would silently reintroduce
-  them again. A separate follow-up PR against `main` is needed to apply the
-  same six-module revert there. Flagged on this PR for a human's attention
-  (see PR comment) rather than attempted here, since this PR's own scope is
-  this branch.
+  **This commit's diff against `main` is itself the fix, and merging this
+  PR applies it directly.** This branch is based on `main` commit
+  `c18d24415`, and its net diff removes the same six modules from
+  `report.legacy_paths` that the sibling PR (`764ebe4a2`) reintroduced —
+  merging this PR into `main` therefore reverts them on `main` itself, with
+  no separate follow-up PR needed for this overlap. Note there is also a
+  separate, independently-created PR (#934) that reverts the same six
+  modules plus `pattern_verdicts.py`/`policy.legacy_paths` as part of a
+  broader fix bundling both the report- and policy-layer regressions
+  against `main` directly — it was opened before this PR's own revert was
+  known to reach `main` on merge, not because this PR's fix couldn't reach
+  `main` without it. Whichever of the two merges first, the other becomes a
+  no-op for the six overlapping modules; #934's extra `pattern_verdicts.py`/
+  `policy.legacy_paths` changes are outside this PR's scope either way.
 
   `sarif.py` (already `report`-classified on `main` before this PR, not
   touched by this diff) has the identical shape (`classify_effective_
