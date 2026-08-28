@@ -1604,6 +1604,59 @@ indirection repro for both `global` and `nonlocal`, the default-
 comparison repro, and a negative control (a default comparison against
 an unrelated, non-Fact value must not be flagged).
 
+**A further Codex review round found two more real gaps, both fixed --
+plus a file-size split this round's own new tests triggered.** (1) **The
+`nonlocal` write-side routing fix always targeted the immediate lexical
+parent, but `nonlocal` can skip *multiple* enclosing functions.** Python
+resolves `nonlocal fact` to the nearest enclosing function scope that
+actually binds the name itself, not merely the one right above -- `outer`
+binds `fact`, `middle` (nested in `outer`) never touches it at all,
+`setter` (nested in `middle`) does `nonlocal fact; fact = rec.bases_fact`
+-- this genuinely writes `outer`'s `fact`, skipping `middle` entirely,
+but the previous, immediate-parent-only routing published the write to
+`middle` instead, where nothing reads it (a sibling of `middle`,
+`reader`, never saw it). Fixed by walking outward from the immediate
+parent, at each step checking whether that ancestor's own `locally_
+bound` set actually contains the declared name -- `locally_bound` is
+already exactly the right test, since it already excludes a name an
+ancestor only holds via its *own* `nonlocal`/`global` declaration (the
+shadowing-exemption subtraction from several rounds above), so the walk
+naturally continues past an ancestor whose own binding is itself
+borrowed from further out, the identical case Python's own resolution
+skips. (2) **An import statement was never recorded as a local
+binding at all.** `import json as fact` or `from pkg import item as fact`
+inside a nested function shadows an inherited Fact alias exactly like any
+other assignment form, but the binding collector had no `ast.Import`/
+`ast.ImportFrom` branch, so a nested function's own import-bound `fact`
+never shadowed an outer alias. Fixed with a new branch mirroring every
+other binding-form branch's own shape, splitting an unaliased dotted
+import (`import a.b.c`) on its first `.` to match Python's own
+import-binding rule (only the top-level package name binds in the
+importing scope without an explicit `as`). Verified empirically: still
+zero existing hits in the real repository, and `mypy`/`ruff` both stayed
+clean. Four new tests: the multi-level `nonlocal`-skip repro, both import
+forms' shadowing repros, and a negative control (a real misuse still
+caught with no import shadowing present).
+
+**The four new tests above pushed `tests/test_fact_detector_misuse.py`
+past the architecture gate's 1200-line test-file cap (1224 lines) --
+split the same way `test_mutation_run_scoping.py` already did for an
+identical reason (see `tests/CLAUDE.md`'s own note on that split).** The
+whole `TestFactEqualityMisuseSites` class had grown into two genuinely
+distinct halves: the core misuse-detection contract (direct attribute
+reads, `getattr`/constructor-call recognition, alias chains, annotated
+assignments) and, by far the larger half after fourteen-plus rounds of
+scope-attribution findings, every shadowing/scope-resolution test
+(parameter/local/comprehension/lambda/walrus/match-capture shadowing,
+closure inheritance through nested functions and class bodies,
+`nonlocal`/`global` read- and write-side routing, parameter-default/
+annotation scope resolution, import-based shadowing). Split the second
+half out into a new sibling file, `tests/test_fact_detector_misuse_
+scoping.py` (`TestFactEqualityMisuseSitesScoping`), leaving the original
+file at 273 lines and the new one at 997 -- both comfortably under the
+cap, with zero test behavior change (all 82 tests, the same set as
+before the split, still pass).
+
 ---
 
 ### Phase 1 — finish the `dump`/`scan` typed-API convergence (closes AGENTS.md "PR C")

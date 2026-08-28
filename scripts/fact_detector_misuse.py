@@ -879,6 +879,21 @@ def _fact_aliases(tree: ast.Module, qualnames: _QualnameSpans) -> dict[str, set[
             for case in node.cases:
                 for name in _match_pattern_names(case.pattern):
                     locally_bound.setdefault(qualname, set()).add(name)
+        elif isinstance(node, (ast.Import, ast.ImportFrom)):
+            # `import json as fact` / `from pkg import item as fact` --
+            # a real local binding too, the identical shadowing shape as
+            # any other assignment form above (Codex review, fresh
+            # evidence: this collector had no branch for either import
+            # statement at all, so a nested function's own import-bound
+            # `fact` never shadowed an outer Fact alias). A bare `import
+            # a.b.c` (no `as`) binds only the top-level package name `a`
+            # in the importing scope -- Python's own import-binding rule
+            # -- so an unaliased dotted name is split on its first `.`
+            # rather than used whole.
+            qualname = _qualname_at((node.lineno, node.col_offset), qualnames)
+            for alias in node.names:
+                bound_name = alias.asname or alias.name.split(".", 1)[0]
+                locally_bound.setdefault(qualname, set()).add(bound_name)
         elif isinstance(node, (ast.Global, ast.Nonlocal)):
             qualname = _qualname_at((node.lineno, node.col_offset), qualnames)
             nonlocal_or_global.setdefault(qualname, set()).update(node.names)
@@ -1013,7 +1028,30 @@ def _fact_aliases(tree: ast.Module, qualnames: _QualnameSpans) -> dict[str, set[
         if name in global_declared.get(qualname, ()):
             return "<module>"
         if name in nonlocal_or_global.get(qualname, ()):
-            return lexical_parents.get(qualname, "<module>")
+            # `nonlocal` can skip *multiple* enclosing functions, not just
+            # the immediate lexical parent (Codex review, fresh evidence):
+            # Python resolves it to the nearest enclosing function scope
+            # that actually binds the name itself, walking outward past
+            # any intervening function that doesn't -- `outer` binds
+            # `fact`, `middle` (nested in `outer`) never touches it at
+            # all, `setter` (nested in `middle`) does `nonlocal fact;
+            # fact = rec.bases_fact` -- this genuinely writes `outer`'s
+            # `fact`, skipping `middle` entirely, but the previous,
+            # immediate-parent-only routing published the write to
+            # `middle` instead, where nothing reads it. `locally_bound`
+            # is exactly the right test at each step: it already excludes
+            # a name an ancestor itself only holds via its *own*
+            # `nonlocal`/`global` declaration (the shadowing-exemption
+            # subtraction above), so this walk naturally continues past
+            # an ancestor whose own binding of the name is itself
+            # borrowed from further out, the identical case Python's own
+            # resolution skips.
+            candidate = lexical_parents.get(qualname, "<module>")
+            while candidate != "<module>" and name not in locally_bound.get(
+                candidate, ()
+            ):
+                candidate = lexical_parents.get(candidate, "<module>")
+            return candidate
         return qualname
 
     def _scope_depth(qualname: str) -> int:
