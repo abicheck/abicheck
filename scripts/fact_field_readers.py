@@ -376,27 +376,43 @@ def _outermost_containing_expr(node: ast.AST, parents: dict[int, ast.AST]) -> as
 def _imported_class_aliases(tree: ast.Module) -> dict[str, str]:
     """Map every local name *tree* binds to one of `FACT_BRIDGED_CLASS_NAMES`
     -- either via an `import ... as` (`from abicheck.model import
-    RecordType as RT` maps `"RT" -> "RecordType"`) or a simple whole-tree
+    RecordType as RT` maps `"RT" -> "RecordType"`), a simple whole-tree
     name assignment (`RT = RecordType` maps the same way; an annotated
     assignment `RT: type = RecordType` maps identically; a further
     `RT2 = RT` chains to `"RecordType"` too, resolved to a fixed point the
-    same way `fact_detector_misuse._fact_aliases` chains local aliases) --
-    back to its real name. All are real, found by Codex review with fresh
+    same way `fact_detector_misuse._fact_aliases` chains local aliases),
+    or a *qualified* class reference (`import abicheck.model as model; RT
+    = model.RecordType` -- resolved immediately by attribute name alone,
+    matching the identical name-only stance the `import ... as` branch
+    above already takes for *its* qualifying source module) -- back to
+    its real name. All are real, found by Codex review with fresh
     evidence: a positional class pattern on such an alias, `case
     RT(_, _, _, _, _, []):`, is invisible to a bare-name check against the
     literal `RecordType`/`Param` spellings, whichever way the alias was
-    established -- the annotated-assignment shape is the same gap the
-    plain-`ast.Assign` fix already closed, just reached through a
-    differently-typed AST node (`ast.AnnAssign`, not `ast.Assign`) that a
-    check keyed on the latter alone never visits. An import/assignment
-    with no local rename needs no entry -- the bare name already matches
-    directly. Whole-tree, not function-scoped: all three mechanisms are
-    almost always module level, and scanning the whole tree is the same
-    over-approximating-is-safe stance this module already takes
-    elsewhere.
+    established -- the annotated-assignment and qualified-reference
+    shapes are the same gap the plain-`ast.Assign` fix already closed,
+    just reached through a differently-shaped RHS (or a differently-typed
+    AST node) that a check keyed on the original shape alone never
+    visits. An import/assignment with no local rename needs no entry --
+    the bare name already matches directly. Whole-tree, not
+    function-scoped: every mechanism here is almost always module level,
+    and scanning the whole tree is the same over-approximating-is-safe
+    stance this module already takes elsewhere.
     """
     aliases: dict[str, str] = {}
     assign_candidates: list[tuple[str, str]] = []
+
+    def _register_assign(target: str, value: ast.expr | None) -> None:
+        if isinstance(value, ast.Name):
+            assign_candidates.append((target, value.id))
+        elif (
+            isinstance(value, ast.Attribute) and value.attr in FACT_BRIDGED_CLASS_NAMES
+        ):
+            # `RT = model.RecordType` -- resolves immediately, the same
+            # way an `import ... as` alias does, since the qualifying
+            # module name is never checked either way.
+            aliases[target] = value.attr
+
     for node in ast.walk(tree):
         if isinstance(node, (ast.Import, ast.ImportFrom)):
             for alias in node.names:
@@ -407,15 +423,10 @@ def _imported_class_aliases(tree: ast.Module) -> dict[str, str]:
             isinstance(node, ast.Assign)
             and len(node.targets) == 1
             and isinstance(node.targets[0], ast.Name)
-            and isinstance(node.value, ast.Name)
         ):
-            assign_candidates.append((node.targets[0].id, node.value.id))
-        elif (
-            isinstance(node, ast.AnnAssign)
-            and isinstance(node.target, ast.Name)
-            and isinstance(node.value, ast.Name)
-        ):
-            assign_candidates.append((node.target.id, node.value.id))
+            _register_assign(node.targets[0].id, node.value)
+        elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
+            _register_assign(node.target.id, node.value)
     changed = True
     while changed:
         changed = False

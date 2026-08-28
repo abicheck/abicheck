@@ -426,6 +426,32 @@ class TestUnmigratedFactReaderSites:
             "x.py::f::<positional>::RT(_, _, _, _, _, [])::RT(_, _, _, _, _, [])::1"
         ]
 
+    def test_detects_a_positional_pattern_through_a_qualified_class_alias(
+        self,
+    ) -> None:
+        """`import abicheck.model as model; RT = model.RecordType` then
+        `case RT(_, _, _, _, _, []):` -- combining two already-supported
+        forms (a qualified class reference and an assignment alias) in a
+        way neither alone catches (Codex review, fresh evidence): the
+        assignment's own value is `model.RecordType`, an `ast.Attribute`,
+        not a bare `ast.Name`."""
+        src = (
+            "import abicheck.model as model\n"
+            "RT = model.RecordType\n"
+            "def f(rec):\n"
+            "    match rec:\n"
+            "        case RT(_, _, _, _, _, []):\n"
+            "            return True\n"
+            "    return False\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        keys = [
+            key for key, _l, _a, _q in unmigrated_fact_reader_sites(tree, "x.py", src)
+        ]
+        assert keys == [
+            "x.py::f::<positional>::RT(_, _, _, _, _, [])::RT(_, _, _, _, _, [])::1"
+        ]
+
     def test_detects_a_qualified_builtins_getattr_call(self) -> None:
         """`import builtins; builtins.getattr(rec, "bases")` is the
         identical read as bare `getattr(rec, "bases")` (Codex review:

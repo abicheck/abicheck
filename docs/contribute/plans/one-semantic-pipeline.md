@@ -1239,6 +1239,26 @@ existing hits, baseline stays at 104. New tests: an annotated `getattr`
 alias detected, and the annotated form of the qualified spelling
 (`read_attr: object = builtins.getattr`) detected too.
 
+**A twelfth Codex review round found one more real gap, the class-alias
+mirror of round eleven's `getattr` fix -- fixed.** `import abicheck.model
+as model; RT = model.RecordType` then `case RT(_, _, _, _, _, []):` --
+combining two already-supported forms (a qualified class reference,
+already recognized when used directly as `model.RecordType(...)`-shaped
+construction elsewhere in this file's own reasoning, and an assignment
+alias) in a way neither alone catches: the assignment's own value is
+`model.RecordType`, an `ast.Attribute`, not a bare `ast.Name`, so
+`_imported_class_aliases()`'s candidate collector never resolved it.
+Fixed by resolving a qualified-attribute RHS immediately whenever its own
+`.attr` is one of `FACT_BRIDGED_CLASS_NAMES` -- matching the identical
+name-only stance the `import ... as` branch already takes for its own
+qualifying source module (never checked either way) -- factored into one
+shared `_register_assign()` helper (mirroring round eleven's
+`_add_candidate()` for `_builtins_getattr_aliases()`) so the `ast.Assign`
+and `ast.AnnAssign` branches can't independently drift on which RHS
+shapes each recognizes. Verified empirically: still zero existing hits,
+baseline stays at 104. New test: a qualified class alias detected through
+a positional pattern.
+
 **Still not landed**: no detector (`diff_layout.py`/`diff_types.py`/
 `diff_param_qualifiers.py`/the reader set the check above now tracks
 precisely) has actually been migrated to read `.status` — the check above
