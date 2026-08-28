@@ -101,7 +101,6 @@
         "abicheck/dumper_clang_errors.py",
         "abicheck/dumper_clang_qualifiers.py",
         "abicheck/dumper_clang_streaming.py",
-        "abicheck/dumper_clang_vtable.py",
         "abicheck/dumper_contract.py",
         "abicheck/dumper_debug.py",
         "abicheck/dumper_elf_fallback.py",

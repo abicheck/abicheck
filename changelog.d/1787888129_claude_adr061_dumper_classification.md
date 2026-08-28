@@ -43,7 +43,7 @@
   re-exports for all three names, and each call site now imports through
   it instead of the origin module.
 
-  **Four files deliberately left unclassified, each for a real,
+  **Five files deliberately left unclassified, each for a real,
   structural reason rather than an oversight:**
 
   - `dumper.py` itself — the module the whole cluster builds toward
@@ -83,6 +83,20 @@
     in `architecture/modules.yaml` (a Codex review finding on this same
     PR caught this changelog's own file count originally omitting it as
     the fourth exclusion, counting only three).
+  - `dumper_clang_vtable.py` — imports `_SCOPE_NODE_KINDS` from the
+    already-unclassified `dumper_clang_expr.py` above (`from
+    .dumper_clang_expr import _SCOPE_NODE_KINDS`) — not a direct
+    `compare`-classified import itself, but a real transitive
+    `extract -> compare` dependency through `dumper_clang_expr.py`'s own
+    `diff_cxx_rules` import. `scripts/check_architecture.py`'s
+    dependency-direction check only flags an edge to a *classified*
+    target, so it stayed silent on this one even while this file was
+    classified `extract` — a genuine blind spot in the static checker
+    (it never walks *through* an unclassified intermediary to see what
+    that intermediary itself imports), caught by a Codex review finding
+    on this same PR and confirmed by reading the import directly. Fixed
+    by removing `dumper_clang_vtable.py` from `extract`'s classification
+    too, matching its unclassified neighbor's own reasoning above.
 
   Verified via `scripts/check_architecture.py` (0 errors, repo-wide),
   `scripts/check_ai_readiness.py` (0 errors, 146 warnings — unchanged
