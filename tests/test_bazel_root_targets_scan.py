@@ -171,7 +171,9 @@ def test_scan_cli_artifact_set_build_target_reaches_embed_build_source(
         [
             "scan",
             "--artifact-set",
-            f"{a},{b}",
+            str(a),
+            "--artifact-set",
+            str(b),
             "--sources",
             str(_sources(tmp_path)),
             "--build-target",

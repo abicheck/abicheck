@@ -1413,7 +1413,30 @@ elif [[ "$MODE" == "scan" ]]; then
       echo "::error::mode: scan with new-library-set does not support against/abi-baseline — new-library-set is audit-only (no old side to compare a set against, ADR-056). Remove against/abi-baseline, or use new-library (a single artifact) for a baseline comparison instead."
       exit 1
     fi
-    CMD+=(--artifact-set "$SCAN_ARTIFACT_SET")
+    # `new-library-set`'s own input contract stays a directory or a
+    # comma-separated path list (action.yml) -- CLI cleanup phase two, PR 5
+    # changed only the native `scan --artifact-set` *CLI* value syntax to a
+    # repeatable option, and the Action's own input is a separate, already
+    # decoupled front end this plan's front-end-parity rule requires stay
+    # working, not re-broken to match. A bare directory (no comma) is passed
+    # through as the one CLI value unchanged; a comma-separated list is
+    # split into one `--artifact-set` occurrence per member here, so the
+    # Action's callers never see the CLI's syntax change. Blank members
+    # (from a stray leading/trailing/double comma) are skipped, mirroring
+    # the old CLI parser's own `if p.strip()` filter rather than forwarding
+    # them to a per-member CLI empty-string rejection.
+    if [[ "$SCAN_ARTIFACT_SET" == *,* ]]; then
+      IFS=',' read -ra _scan_artifact_set_members <<< "$SCAN_ARTIFACT_SET"
+      for _scan_artifact_set_member in "${_scan_artifact_set_members[@]}"; do
+        # Trim surrounding whitespace (xargs-free, no subshell/echo pitfalls).
+        _scan_artifact_set_member="${_scan_artifact_set_member#"${_scan_artifact_set_member%%[![:space:]]*}"}"
+        _scan_artifact_set_member="${_scan_artifact_set_member%"${_scan_artifact_set_member##*[![:space:]]}"}"
+        [[ -n "$_scan_artifact_set_member" ]] || continue
+        CMD+=(--artifact-set "$_scan_artifact_set_member")
+      done
+    else
+      CMD+=(--artifact-set "$SCAN_ARTIFACT_SET")
+    fi
     add_single_flag "--bundle-system-providers" "${INPUT_BUNDLE_SYSTEM_PROVIDERS:-}"
   else
     SCAN_ARTIFACT="${INPUT_NEW_LIBRARY:?new-library (the scanned binary or .abi.json) is required for scan mode, unless new-library-set is given}"

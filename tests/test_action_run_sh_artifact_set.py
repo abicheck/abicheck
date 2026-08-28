@@ -114,14 +114,45 @@ def _run_raw(env_extra: dict[str, str]) -> subprocess.CompletedProcess[str]:
 @pytest.mark.skipif(not RUN_SH.is_file(), reason="action/run.sh not found")
 class TestScanArtifactSetForwarding:
     def test_new_library_set_maps_to_artifact_set_flag(self) -> None:
+        # CLI cleanup phase two, PR 5: the native `scan --artifact-set` CLI
+        # flag is now repeatable-only, but the Action's own `new-library-set`
+        # input keeps its comma-separated contract (action.yml) -- run.sh
+        # splits it into one `--artifact-set` occurrence per member so
+        # Action callers never see the CLI's syntax change.
         cmd = _run_cmd(
             {"INPUT_MODE": "scan", "INPUT_NEW_LIBRARY_SET": "a.so,b.so"}
         )
         assert "scan" in cmd
+        assert cmd.count("--artifact-set") == 2
         i = cmd.index("--artifact-set")
-        assert cmd[i + 1] == "a.so,b.so"
-        # The positional single-artifact form must NOT also be present.
-        assert "a.so,b.so" not in cmd[:i]
+        assert cmd[i + 1] == "a.so"
+        j = cmd.index("--artifact-set", i + 1)
+        assert cmd[j + 1] == "b.so"
+        # The literal comma-joined value must NOT be forwarded verbatim, and
+        # the positional single-artifact form must NOT also be present.
+        assert "a.so,b.so" not in cmd
+
+    def test_new_library_set_single_directory_passes_through_unsplit(self) -> None:
+        # A bare directory (ADR-056's other --artifact-set form) has no
+        # comma to split on and must reach the CLI as one value, unchanged.
+        cmd = _run_cmd(
+            {"INPUT_MODE": "scan", "INPUT_NEW_LIBRARY_SET": "libs/"}
+        )
+        assert cmd.count("--artifact-set") == 1
+        i = cmd.index("--artifact-set")
+        assert cmd[i + 1] == "libs/"
+
+    def test_new_library_set_skips_blank_members(self) -> None:
+        # A stray leading/trailing/double comma must not forward an empty
+        # --artifact-set member (which the CLI now rejects outright).
+        cmd = _run_cmd(
+            {"INPUT_MODE": "scan", "INPUT_NEW_LIBRARY_SET": " a.so ,, b.so "}
+        )
+        assert cmd.count("--artifact-set") == 2
+        i = cmd.index("--artifact-set")
+        assert cmd[i + 1] == "a.so"
+        j = cmd.index("--artifact-set", i + 1)
+        assert cmd[j + 1] == "b.so"
 
     def test_new_library_set_forwards_bundle_system_providers(self) -> None:
         cmd = _run_cmd(

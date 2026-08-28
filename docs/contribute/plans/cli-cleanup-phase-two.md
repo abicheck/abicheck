@@ -3792,6 +3792,42 @@ mechanical PRs so a bisect over a red CI job lands on this PR unambiguously.
 
 ## PR 5 — `scan --artifact-set` refinement (not removal)
 
+**Status: the repeatable-option syntax slice is implemented (2026-08-28).**
+`--artifact-set` is now `multiple=True` (`cli_options.py`); a single
+directory value is unchanged, and multiple explicit paths are given as one
+`--artifact-set` per member (`--artifact-set a.so --artifact-set b.so`), not
+a comma-separated string. The comma-separated form is gone with no alias,
+same "hard cleanup" stance as every other removal in this plan — passing
+the old `a.so,b.so` spelling as a single value is now read as one literal
+(nonexistent) path and errors `--artifact-set member not found`, not
+silently parsed. `_resolve_artifact_set_paths` (`cli_scan.py`),
+`reject_incoherent_scan_operands`/`reject_incoherent_scan_secondary_output`
+(`cli_scan_helpers.py`), and `_run_artifact_set`/`scan_cmd`'s own type all
+moved from `str | None` to `tuple[str, ...]` together — "supplied" is now
+exactly `bool(artifact_set)`, which closes the CodeRabbit-caught
+truthiness/`is not None` mismatch class the comma-string form needed a
+special-cased comment to avoid (a tuple has no falsy-but-present state the
+way an empty string did). The composite Action's own `new-library-set`
+input (`action.yml`) deliberately keeps its comma-separated contract
+unchanged — that is a separate, already-decoupled front end, and front-end
+parity here means *staying working*, not re-breaking to match the CLI's new
+syntax — so `action/run.sh` now splits a comma-separated `new-library-set`
+value into one `--artifact-set` occurrence per member (a bare directory,
+having no comma, passes through as the single unsplit value it always was).
+Docs regenerated (`gen_cli_reference.py`); tests updated across
+`test_scan_artifact_set.py`, `test_bazel_root_targets_scan.py`, and
+`test_action_run_sh_artifact_set.py` (the latter gained two new cases
+pinning the Action-side comma-split and blank-member-skipping behavior
+directly against the real `action/run.sh` text, not a paraphrase of it).
+
+**Still open, per the sequencing note below, unchanged by this slice:**
+`--artifact-set-manifest` (no real domain contract proposed for it yet) and
+every set-mode *semantics* item (expected provider DSO, a symbol moved
+between sibling libraries, duplicated providers, L4 symbol reconciliation,
+cost estimation, a machine-readable dry-run) — this slice touched only the
+value syntax the review itself called "the only part of this section worth
+doing on its own."
+
 The draft proposed dispatching on the operand type:
 
 ```text
@@ -3809,16 +3845,16 @@ What is actually worth changing is the *value syntax*. The comma-separated form
 (`_resolve_artifact_set_paths` in `cli_scan.py`) is the weak part:
 
 ```bash
-# today
+# before this slice (removed, no alias — now errors, see the status note above)
 abicheck scan --artifact-set a.so,b.so,c.so
 
-# proposed: repeatable option
+# landed: repeatable option
 abicheck scan --artifact-set a.so --artifact-set b.so --artifact-set c.so
 
 # unchanged
 abicheck scan --artifact-set directory/
 
-# optional, for bundles needing stable IDs / expected-provider ownership
+# still just a proposal, not implemented — see "Still open" in the status note above
 abicheck scan --artifact-set-manifest set.json
 ```
 
@@ -3929,8 +3965,9 @@ PR G2 canonical exit decision, part 2 = PR 4 — one automatic gate algorithm,
                                        schema / report / Action parity
       └─ then DELETE --exit-code-scheme
 PR H  artifact-set semantics          = PR 5 — provider ownership, moved and
-                                       duplicated symbols, cost and dry-run;
-                                       syntax refinement last
+      (syntax slice DONE)               duplicated symbols, cost and dry-run;
+                                       syntax refinement (DONE) was the one
+                                       piece independent of the semantics work
 ```
 
 Independent of the chain, unblocked at any time: PR 1 (**done**), PR 2

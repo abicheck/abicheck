@@ -650,26 +650,31 @@ def _emit_scan_report(
         sys.exit(outcome.exit_code)
 
 
-def _resolve_artifact_set_paths(spec: str) -> tuple[list[Path], bool]:
-    """``--artifact-set`` value → ``(paths, explicit)`` (ADR-056).
+def _resolve_artifact_set_paths(spec: tuple[str, ...]) -> tuple[list[Path], bool]:
+    """``--artifact-set`` values → ``(paths, explicit)`` (ADR-056).
 
-    A single existing directory is expanded to every discoverable shared
-    library in it (``explicit=False`` — an unsupported file found this way is
-    silently skipped, mirroring ``build_bundle_snapshot``'s directory-scan
-    behavior); anything else is read as a comma-separated explicit path list
-    (``explicit=True`` — every named member must resolve and must look like a
-    real library, enforced by :func:`bundle.discover_artifact_set`).
+    ``spec`` is the tuple Click's repeatable ``--artifact-set`` collects (CLI
+    cleanup phase two, PR 5 -- the comma-separated single-string form this
+    replaced is gone with no alias, same as every other removal in that
+    plan). A single value naming an existing directory is expanded to every
+    discoverable shared library in it (``explicit=False`` — an unsupported
+    file found this way is silently skipped, mirroring
+    ``build_bundle_snapshot``'s directory-scan behavior). Anything else --
+    one value that is not a directory, or two or more values -- is read as
+    an explicit path list, one member per ``--artifact-set`` occurrence
+    (``explicit=True`` — every named member must resolve and must look like
+    a real library, enforced by :func:`bundle.discover_artifact_set`).
+    ``reject_incoherent_scan_operands`` has already rejected an empty or
+    blank member by the time this runs.
     """
     from .workflows.extraction import discover_shared_libraries
 
-    candidate = Path(spec)
-    if "," not in spec and candidate.is_dir():
-        return discover_shared_libraries(candidate), False
-    parts = [p.strip() for p in spec.split(",") if p.strip()]
-    if not parts:
-        raise click.UsageError("--artifact-set must not be empty.")
+    if len(spec) == 1:
+        candidate = Path(spec[0])
+        if candidate.is_dir():
+            return discover_shared_libraries(candidate), False
     paths: list[Path] = []
-    for part in parts:
+    for part in spec:
         p = Path(part)
         if not p.exists():
             raise click.UsageError(f"--artifact-set member not found: {part}")
@@ -805,7 +810,7 @@ def _reject_comparison_only_flags(*, no_baseline_reason: str) -> None:
 
 def _run_artifact_set(
     *,
-    artifact_set: str,
+    artifact_set: tuple[str, ...],
     bundle_system_providers: str,
     header_pairs: tuple[tuple[str, Path], ...],
     include_pairs: tuple[tuple[str, Path], ...],
@@ -1406,7 +1411,7 @@ def _discover_scan_project_config(
 @compile_context_options()  # dump↔scan L2 compile-context parity (ADR-037 D3)
 def scan_cmd(
     artifact: Path | None,
-    artifact_set: str | None,
+    artifact_set: tuple[str, ...],
     bundle_system_providers: str,
     header_pairs: tuple[tuple[str, Path], ...],
     include_pairs: tuple[tuple[str, Path], ...],
@@ -1508,14 +1513,21 @@ def scan_cmd(
     # ARTIFACT, with --against (audit-only -- no old side for a set), and
     # --bundle-system-providers is meaningless without --artifact-set.
     #
-    # An empty ``--artifact-set ""`` must count as *supplied* (and be
-    # rejected outright), not as "not set": the exclusivity check below
-    # used to test truthiness (`bool(artifact_set)`, False for "") while
-    # the branch just after it tested `is not None` (True for "") -- with
-    # ARTIFACT also given, that mismatch let both pass the exclusivity
-    # check and then silently ignored ARTIFACT, resolving the empty string
-    # to Path("") == Path(".") and auditing the whole CWD instead of
-    # erroring (CodeRabbit review).
+    # --artifact-set is a repeatable option (CLI cleanup phase two, PR 5),
+    # so `artifact_set` here is the tuple Click collects -- empty when the
+    # flag was never given. "Supplied" is exactly `bool(artifact_set)`, with
+    # no separate `is not None` reading to disagree with it: a bare
+    # ``--artifact-set ""`` still yields the one-element tuple `("",)`,
+    # which is truthy (correctly "supplied", rejected outright by the
+    # empty-member check inside `reject_incoherent_scan_operands`), not
+    # silently "not set". The comma-separated single-string form this
+    # replaced needed the truthiness/`is not None` distinction documented
+    # here because an empty *string* is falsy but not `None` -- that
+    # mismatch is what let ARTIFACT and an empty --artifact-set both pass
+    # the exclusivity check and silently resolve to `Path("") ==
+    # Path(".")`, auditing the whole CWD instead of erroring (CodeRabbit
+    # review, historical). A tuple has no equivalent falsy-but-present
+    # state, so that class of bug cannot recur here.
     _reject_incoherent_scan_operands(
         artifact=artifact, artifact_set=artifact_set, against=against,
         dry_run=dry_run, bundle_system_providers=bundle_system_providers,
@@ -1524,7 +1536,7 @@ def scan_cmd(
         dry_run=dry_run, output=output, secondary_fmt=secondary_fmt,
         secondary_output=secondary_output, artifact_set=artifact_set,
     )
-    if artifact_set is not None:
+    if artifact_set:
         _reject_comparison_only_flags(no_baseline_reason="drop --artifact-set")
         _run_artifact_set(
             artifact_set=artifact_set,
