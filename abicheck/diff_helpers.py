@@ -686,8 +686,7 @@ _ANON_TYPE_RE = re.compile(
 
 
 def _normalize_type_name(name: str) -> str:
-    """Normalize a C/C++ type name for stable DWARF↔castxml comparison: strips whitespace, CV-qualifiers, pointer/reference decorations, and 'struct'/'class'/'union' tag keywords ("struct Foo" -> "Foo", "const struct Foo *" -> "Foo"). Lossy by design, for comparison only -- Change.old_value/new_value keep the original spelling. Moved here from diff_platform.py (Codex review): cross_tier_transition below needs a sibling of it, and diff_platform.py already imports from this module, so importing back from there would grow the import-cycle-growth gate's tracked SCC.
-    """
+    """Normalize a C/C++ type name for stable DWARF↔castxml comparison: strips whitespace, CV-qualifiers, pointer/reference decorations, and 'struct'/'class'/'union' tag keywords ("struct Foo" -> "Foo", "const struct Foo *" -> "Foo"). Lossy by design, for comparison only -- Change.old_value/new_value keep the original spelling. Moved here from diff_platform.py (Codex review): cross_tier_transition below needs a sibling of it, and diff_platform.py already imports from this module, so importing back from there would grow the import-cycle-growth gate's tracked SCC."""
     return _normalize_type_spelling(name, strip_indirection=True)
 
 
@@ -759,6 +758,12 @@ def _bits_str_from_bytes_str(value: str | None) -> str | None:
         return value
 
 
+def _malformed_unit_typed_transition(kind: ChangeKind, old: object, new: object) -> tuple[object, object] | None:
+    """None for the plain str|None shape byte/spelling conversions require, else a kind-tagged fallback so malformed bytes/bits transitions never wrongly compare equal."""
+    ok = (old is None or isinstance(old, str)) and (new is None or isinstance(new, str))
+    return None if ok else ((kind, hashable_value(old)), (kind, hashable_value(new)))
+
+
 def cross_tier_transition(c: Change) -> tuple[object, object] | None:
     """The (old_value, new_value) pair to require agreement on across tiers.
 
@@ -778,6 +783,9 @@ def cross_tier_transition(c: Change) -> tuple[object, object] | None:
     if c.kind in (ChangeKind.STRUCT_FIELD_REMOVED, ChangeKind.TYPE_FIELD_REMOVED):
         return None
     old, new = c.old_value, c.new_value
+    if c.kind in _DWARF_BYTE_VALUE_KINDS or c.kind in _TYPE_SPELLING_VALUE_KINDS:
+        if (m := _malformed_unit_typed_transition(c.kind, old, new)) is not None:
+            return m
     if c.kind in _DWARF_BYTE_VALUE_KINDS:
         return _bits_str_from_bytes_str(old), _bits_str_from_bytes_str(new)
     if c.kind in _TYPE_SPELLING_VALUE_KINDS:

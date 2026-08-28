@@ -340,36 +340,69 @@ BUG_CLASSES: tuple[BugClass, ...] = (
             "TestBatchShapedChangeIgnoresTheSample), and order-invariance "
             "for unordered inputs."
         ),
-        fixed_by=(753, 759, 879),
+        fixed_by=(753, 759, 879, 905),
         seed_tests=(
             "tests/test_cross_tier_dedup_unhashable_value.py",
             "tests/test_finding_identity_properties.py",
+            "tests/unit/compare/test_dedup_key.py",
+            "tests/test_diff_namespaces.py",
         ),
+        # Phase 5's own two originally-tracked gaps here (a compare()-level
+        # collision test, and an adversarial generator over the shapes
+        # #879's post-mortem named) are now closed -- see PR #905 for the
+        # full account, including the real `cross_tier_transition` crash
+        # that building the compare()-level test's proper engine-level
+        # counterpart surfaced and fixed. `KnownGap` records a residual the
+        # current tests deliberately do NOT close (see its own docstring),
+        # so closed work does not get an entry here -- it lives in `fixed_by`
+        # and the PR/commit history instead (Codex review, PR #905: an
+        # earlier revision kept "what got closed" narratives in this tuple,
+        # which made the registry read as if genuinely open work remained
+        # where none did).
         known_gaps=(
             KnownGap(
                 description=(
-                    "Both seed tests call internal matching/dedup "
-                    "primitives directly (`diff_filtering`/"
-                    "`finding_identity`) — no CLI, no python-api call — so "
-                    "there is no public-surface-level test that a real "
-                    "dedup-key collision actually reaches `compare()`'s "
-                    "output."
+                    "No seed test for this class reaches a real public "
+                    "surface (a Click invocation or a call through "
+                    "`abicheck.service`, per `BugClass.public_surfaces`'s "
+                    "own contract) with a value-slot collision shape — "
+                    "every one of this entry's `seed_tests` calls "
+                    "`abicheck.checker`/`abicheck.compare.dedup_key`/"
+                    "`abicheck.diff_helpers`/`abicheck.diff_filtering`/"
+                    "`abicheck.diff_namespaces` directly, which this "
+                    "registry treats as internal regardless of how "
+                    "thorough the coverage is at that layer. Not attempted "
+                    "in Phase 5: a CLI (`CliRunner`) or `abicheck.service` "
+                    "-level test proving the same list-valued "
+                    "`PYTHON_STABLE_ABI_VIOLATION` collision case survives "
+                    "into a real `compare`/`scan` invocation's reported "
+                    "output, not just `checker.compare()`'s return value "
+                    "(Codex review, PR #905)."
                 ),
                 reference="docs/contribute/plans/bug-class-regression-testing.md#phase-5",
             ),
             KnownGap(
                 description=(
-                    "Neither seed test's generator covers the specific "
-                    "shapes Phase 5's own '#879's own history' section "
-                    "names as previously missing (sets, varied mapping "
-                    "insertion order, NaN/signed-zero/infinities, "
-                    "structurally-equal copies, objects sharing a `repr()` "
-                    "but not an identity) — the seeds exercise fixed list/"
-                    "dict values and function/variable identities, not a "
-                    "generated adversarial corpus over those shapes, so "
-                    "the invariant's totality/injectivity/order-invariance "
-                    "claims are untested for exactly the inputs that "
-                    "caused #879 in the first place."
+                    "Phase 5's own text also asks for the 'constant/type "
+                    "identity fallbacks' AGENTS.md's 'Primitive-level "
+                    "property tests' section names — constants' value-"
+                    "equality identity and types' structural-fingerprint-"
+                    "then-source_location identity — to have their pairs "
+                    "promoted into a fixed corpus the same way "
+                    "`_paired_stable_indices`'s were. Deliberately NOT "
+                    "attempted: both are already-documented, twice-"
+                    "falsified-and-accepted heuristics (see "
+                    "`_type_index_items`'s and `_diff_constants`'s own "
+                    "docstrings, and this repo's own "
+                    "'attempted twice, reverted twice' rule) with no "
+                    "single correct behavior to state as an invariant — a "
+                    "property test for either would have to pin the "
+                    "CURRENT accepted collision shape as its own bound "
+                    "(the same design `TestL5SourceGraphIdentitiesAreNot"
+                    "Renumbered` in `tests/test_lambda_identity_ordinal.py` "
+                    "uses for a different residual), which is a real, "
+                    "separate design task rather than a follow-up to this "
+                    "PR's registry/generator-registration work."
                 ),
                 reference="docs/contribute/plans/bug-class-regression-testing.md#phase-5",
             ),

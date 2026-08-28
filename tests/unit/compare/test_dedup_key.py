@@ -15,6 +15,20 @@ mappings, so it never saw two unequal `{"v": nan}` dicts, which the `repr`
 fallback also collapsed. Neither property was wrong; both were starved of
 the input that falsifies them, which reads exactly like coverage.
 
+A third round found the same starvation for sets specifically (Codex
+review, PR #905): the recursive strategy generated lists, tuples, and
+dicts at every level but no sets/frozensets at all -- only a single,
+fixed top-level `{"a", "b"}` example in `_UNHASHABLE`, which checks
+totality and nothing else. Nested sets, structurally-equal set copies,
+and set-order invariance were therefore untested. Fixed by giving the
+recursive step its own frozenset branch (frozensets, not plain sets, so a
+generated set can itself legally nest inside an outer set/list/tuple/dict
+the way the other three container kinds already do); `_ensure_hashable`
+converts a drawn child to something Python can actually put in a
+`frozenset` before doing so, which is a generation-time constraint of
+`hypothesis`/`set` itself, not a statement about what `hashable_value`
+accepts.
+
 The strategy below therefore mixes container *types* at every nesting
 level and includes `nan` among its leaves -- the one value whose
 inequality with itself makes structural encoding observable. Opaque
@@ -46,17 +60,46 @@ _LEAVES = (
     | st.floats(allow_nan=True)
 )
 
+
+def _ensure_hashable(value: object) -> object:
+    """Make a drawn child safe to put in a `frozenset`.
+
+    A generation-time constraint of Python's own `set`/`frozenset` (their
+    elements must be hashable), not a statement about what `hashable_value`
+    itself accepts -- it accepts anything. Recurses the same way
+    `hashable_value` does, so the *shape* of what ends up inside the
+    frozenset is still a real, recursively-unhashable-until-converted
+    value, not a leaf-only stand-in.
+    """
+    if isinstance(value, list):
+        return tuple(_ensure_hashable(item) for item in value)
+    if isinstance(value, tuple):
+        return tuple(_ensure_hashable(item) for item in value)
+    if isinstance(value, dict):
+        return frozenset((k, _ensure_hashable(v)) for k, v in value.items())
+    if isinstance(value, (set, frozenset)):
+        return frozenset(_ensure_hashable(item) for item in value)
+    return value
+
+
 # Containers whose *own* equality is exact, so both directions of the
-# equal/unequal invariants hold. Deliberately mixes list and tuple at every
-# level: a strategy drawing only one of them cannot express the collision
-# that the tagging in `hashable_value` exists to prevent.
+# equal/unequal invariants hold. Deliberately mixes list, tuple, dict, and
+# frozenset at every level: a strategy drawing only some of them cannot
+# express the collision that the tagging in `hashable_value` exists to
+# prevent.
 _EXACT = st.recursive(
     _LEAVES,
-    lambda children: st.lists(children, max_size=3)
-    | st.lists(children, max_size=3).map(tuple)
-    | st.dictionaries(st.text(max_size=3), children, max_size=3),
+    lambda children: (
+        st.lists(children, max_size=3)
+        | st.lists(children, max_size=3).map(tuple)
+        | st.dictionaries(st.text(max_size=3), children, max_size=3)
+        | st.lists(children, max_size=3).map(
+            lambda xs: frozenset(_ensure_hashable(x) for x in xs)
+        )
+    ),
     max_leaves=8,
 )
+
 
 class _OpaqueFixture:
     """Unhashable, with no structure to encode: equal to any sibling and
@@ -165,6 +208,27 @@ class TestConvertedFormsCannotCollide:
         """Mappings encode as frozensets, so insertion order never reaches
         the key -- these are equal inputs and must merge."""
         assert hashable_value({"a": 1, "b": 2}) == hashable_value({"b": 2, "a": 1})
+
+    def test_a_set_keys_independently_of_construction_order(self) -> None:
+        """Sets are already order-blind by their own equality, but the
+        *encoding* must not smuggle insertion order back in regardless."""
+        left = set()
+        left.add("a")
+        left.add("b")
+        right = set()
+        right.add("b")
+        right.add("a")
+        assert hashable_value(left) == hashable_value(right)
+
+    def test_a_set_does_not_collide_with_the_equivalent_list(self) -> None:
+        assert hashable_value({"a", "b"}) != hashable_value(["a", "b"])
+
+    def test_nesting_preserves_the_set_distinction(self) -> None:
+        """A set does not collide with a list/tuple holding the same
+        (frozenset-wrapped) elements, one level of nesting down."""
+        inner = frozenset({"a"})
+        assert hashable_value([inner]) != hashable_value((inner,))
+        assert hashable_value({inner}) != hashable_value([inner])
 
 
 class TestOpaqueValuesKeyByIdentity:
