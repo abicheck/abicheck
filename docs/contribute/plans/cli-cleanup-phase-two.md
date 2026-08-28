@@ -2532,9 +2532,30 @@ pipelines a fourth time.
   > identity is simply never folded into the comparability fingerprints, so
   > the existing `NOT_COMPARABLE` gate -- which exists precisely to catch a
   > disagreement between two sides' extraction facts -- has no way to act on
-  > a signal it already has sitting right next to it. A fix belongs there
-  > (enforcing the existing `producer` field through the gate), not in
-  > adding new snapshot metadata that already exists. It silently produces
+  > a signal it already has sitting right next to it.
+  >
+  > **Second correction (Codex review, fresh evidence): folding `producer`
+  > into `profile_fingerprint`/`scope_fingerprint` is NOT the right fix
+  > direction, and this note should not have named that gate as "where the
+  > fix belongs."** `buildsource.source_diff.diff_source_abi()` already
+  > passes both sides' `fact_set`s through `fact_set.check_fact_
+  > compatibility()`, which explicitly handles a `producer`/`producer_
+  > version`/`compiler_version` mismatch as one of its own named
+  > invalidating conditions (see that function's own docstring) -- it
+  > selectively suppresses only the specific evidence categories a producer
+  > mismatch actually invalidates (structured-content, opaque-hash,
+  > source-edge comparisons) while retaining compiler-neutral structured
+  > facts, and emits `SOURCE_FACT_COVERAGE_INCOMPLETE` to record why. This
+  > is a deliberate, already-built, category-specific degradation
+  > mechanism -- folding `producer` into the coarse, all-or-nothing
+  > `profile_fingerprint`/`scope_fingerprint` gate would hard-fail the
+  > *entire* comparison as `NOT_COMPARABLE` the moment two sides picked
+  > different (but individually valid) default extractors, discarding every
+  > compiler-neutral fact `check_fact_compatibility` would have correctly
+  > kept comparable. Whatever the real fix for this divergence turns out to
+  > be (see the "Deliberately not fixed here" note below), it needs to
+  > reconcile with this existing mechanism first, not bypass it with a
+  > blunter one. It silently produces
   > two different sets of L4-derived facts for the
   > "same" comparison, real only when the two extractors actually disagree
   > about a declaration (item 3's own castxml phantom-implicit-member bug
