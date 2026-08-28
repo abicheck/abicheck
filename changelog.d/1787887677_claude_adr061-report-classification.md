@@ -1,26 +1,26 @@
 ### Changed
 
-- **Six root-level report-formatting modules are now classified `report`**
+- **Four root-level report-formatting modules are now classified `report`**
   (ADR-061): `html_template.py`, `junit_coverage_warnings.py`,
-  `report_classifications.py`, `report_correlation.py`, `report_model.py`,
-  `report_summary.py`. (Fourteen candidates were reviewed in total; four
-  were classified `report` and then reverted after Codex review found they
-  compute policy/gate decisions rather than only rendering an
-  already-computed result — see below. `appcompat_html.py`, `sarif.py`,
-  `stack_html.py`, `stack_report.py` were already `report`-classified on
-  `main` by other, already-merged ADR-061 PRs by the time this one was
-  rebased, so they are not new entries from this diff even though they were
-  part of the original fourteen-candidate review pass.) Pure data-only
-  ledger change to `architecture/modules.yaml` — 0 architecture errors both
-  before and after; none of these six import anything outside `report`'s
-  allowed targets (`model`, `compare`, `policy`, `workflows`) once their own
-  unclassified-but-harmless dependencies (`checker.py`, `checker_policy.py`,
-  `demangle.py`, `contract_gating.py`, `semver.py`, `impact/`, `binder.py`,
-  `resolver.py`, `stack_checker.py`) — all still unclassified themselves, so
-  `_layer_for` returns `None` for them and the architecture gate's
-  `dependency-direction` check does not apply — are skipped by that check.
+  `report_classifications.py`, `report_correlation.py`. (Fourteen
+  candidates were reviewed in total; six were classified `report` and then
+  reverted after Codex review found they compute policy/gate decisions
+  rather than only rendering an already-computed result — see below.
+  `appcompat_html.py`, `sarif.py`, `stack_html.py`, `stack_report.py` were
+  already `report`-classified on `main` by other, already-merged ADR-061
+  PRs by the time this one was rebased, so they are not new entries from
+  this diff even though they were part of the original fourteen-candidate
+  review pass.) Pure data-only ledger change to `architecture/modules.yaml`
+  — 0 architecture errors both before and after; none of these four import
+  anything outside `report`'s allowed targets (`model`, `compare`, `policy`,
+  `workflows`) once their own unclassified-but-harmless dependencies
+  (`checker.py`, `checker_policy.py`, `demangle.py`, `contract_gating.py`,
+  `semver.py`, `impact/`, `binder.py`, `resolver.py`, `stack_checker.py`) —
+  all still unclassified themselves, so `_layer_for` returns `None` for
+  them and the architecture gate's `dependency-direction` check does not
+  apply — are skipped by that check.
 
-  **Four candidates were reverted after Codex review, each for the same
+  **Six candidates were reverted after Codex review, each for the same
   reason: the module computes a policy/severity/gate decision itself rather
   than only formatting an already-computed one, which the routing table in
   `AGENTS.md` ("Decide relevance, suppression, classification, severity, or
@@ -44,8 +44,31 @@
     policy config; `ShowOnlyFilter._check_severity()` calls
     `severity.effective_verdict_for_change()` to re-derive an effective
     verdict for filtering.
+  - `report_model.py`: `ReportModel.classify()` and `verdict_of()` both
+    call `result._effective_verdict_for_change(c)`
+    (`checker_types.DiffResult`'s own method), which is a thin wrapper —
+    `from .reclassify import effective_verdict_for_change; return
+    effective_verdict_for_change(change, policy=self.policy,
+    kind_sets=self._effective_kind_sets(), policy_file=self.policy_file)`
+    — around the exact same `reclassify.effective_verdict_for_change`
+    policy resolver `severity.effective_verdict_for_change` re-exports and
+    `reporter_markdown.py`'s already-reverted `ShowOnlyFilter._check_
+    severity()` calls directly. Reaching the decision through `DiffResult`'s
+    own bound method rather than importing `severity`/`reclassify` directly
+    is a different code path to the same live, policy-file-aware
+    recomputation, not a read of an already-resolved, cached value — it is
+    re-invoked, unmemoized, on every call.
+  - `report_summary.py`: `compatibility_metrics()` directly imports and
+    calls `severity.effective_verdict_for_change()` per change when
+    `policy`/`kind_sets`/`policy_file` is given (its own docstring: "Passing
+    *kind_sets*... and/or *policy_file* makes this metric agree with the
+    verdict by counting each change's effective verdict instead of its raw
+    kind"), and `build_summary()` always calls it this way, via
+    `result._effective_kind_sets()`/`result.policy`/`result.policy_file` —
+    the identical decision function `report_model.py` above reaches one hop
+    removed.
 
-  These four are left unclassified rather than force-classified either way
+  These six are left unclassified rather than force-classified either way
   — a correct fix would split the gate/severity computation out into
   `policy`/`workflows` and have the renderer consume the resolved decision,
   which is a real code change, not a ledger edit, and out of scope for this
@@ -55,6 +78,23 @@
   directly) and is likely a pre-existing instance of the same issue —
   flagged here for visibility, not reclassified, since it isn't part of
   this PR's own diff.
+
+  `report_classifications.py` was *also* named in the same Codex finding
+  that flagged `report_model.py`/`report_summary.py` above, but reading it
+  directly does not support the same conclusion: `is_breaking()`,
+  `category()`, `severity()`, and their backing frozensets
+  (`BREAKING_KINDS`, `HIGH_SEVERITY_KINDS`, `MEDIUM_SEVERITY_KINDS`,
+  `CATEGORY_PREFIXES`, ...) are all static, module-level lookup tables —
+  none consult a `PolicyFile`/`policy_file` override, none call
+  `severity.py`/`reclassify.py`/`exit_decision.py`, and none feed the
+  compatibility verdict or process exit code (confirmed by tracing every
+  import site: `html_report.py`'s section grouping, `reporter_markdown.
+  py`'s `ENVIRONMENT_DRIFT_KINDS` bucketing, and `compat/xml_report.py`'s
+  ABICC-style High/Medium/Low severity column are all display-only). This
+  is the same shape as the `VERDICT_PRESENTATION` table `report_model.py`
+  itself keeps for verdict-axis labels — a fixed, non-policy-file-aware
+  presentation mapping, not a live per-run decision — so it stays
+  classified `report`.
 
   Two further candidates were deliberately left unclassified from the
   original review pass, both for a role mismatch rather than an import
