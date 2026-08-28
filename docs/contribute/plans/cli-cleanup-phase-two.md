@@ -2128,7 +2128,13 @@ pipelines a fourth time.
   >    received), which resolves to clang; `compare`'s implicit-dump operand
   >    and the typed `execute_dump_request` pipeline reach
   >    `effective_frontend`, which resolves an unflagged `"auto"` to castxml
-  >    unconditionally. **The native `dump` CLI is neither of those — it
+  >    by default -- **not unconditionally: an `ABICHECK_AST_FRONTEND`
+  >    override changes this (`clang` resolves clang instead; `hybrid`
+  >    resolves `"hybrid"`, which rejects a raw-source `depth="source"`
+  >    request outright rather than resolving to any extractor at all --
+  >    see the dated note's own environment-resolution matrix below for the
+  >    full per-value account, Codex review, fresh evidence).** The native
+  >    `dump` CLI is neither of those — it
   >    resolves its own `header_backend` from the explicit `--ast-frontend`
   >    flag or a `compile.frontend` config value only, never through
   >    `effective_frontend`, and defaults an unflagged invocation to clang
@@ -2652,16 +2658,27 @@ pipelines a fourth time.
   > *typed* pipeline `resolve_compare_request`/`resolve_side_snapshot`
   > share with `execute_dump_request` (`header_conditionals.py`'s own
   > module-header comment) -- reached only when `compare` resolves a side
-  > with no CLI-level raw `--sources`/`--build-info` flag at all (an
-  > `.abicheck.yml`-discovered `sources:`/`build:` config, or a direct typed
-  > `CompareRequest` call). A bare `compare oldbaseline.json new.so` with no
-  > `sources`/`build_info` input anywhere (CLI flag or config) has nothing
+  > with no CLI-level raw `--sources`/`--build-info` flag at all (a direct
+  > typed `CompareRequest` call). **A project-level `.abicheck.yml`'s
+  > `sources:`/`build:` blocks are NOT an alternative route to this here
+  > (Codex review, fresh evidence, correcting this exact paragraph's own
+  > prior claim to the contrary): `_resolve_side_snapshot_impl()`
+  > (`workflows/artifact/execute.py`) only embeds L3-L5 evidence when `if
+  > side.sources or side.build_info:` -- a per-side `InputSpec` field the
+  > typed pipeline never populates from a discovered config file (the typed
+  > pipeline doesn't discover `.abicheck.yml` at all, established earlier in
+  > this same note); those config keys are collection settings the *CLI*
+  > resolvers consult, not an `InputSpec` source.** A bare `compare
+  > oldbaseline.json new.so` with no
+  > `sources`/`build_info` input anywhere (CLI flag or a typed `InputSpec`
+  > field) has nothing
   > for `embed_build_source` to call `collect_inline_pack()` against, so it
   > produces no new-side L4 evidence to diverge on at all -- the actual
   > reproduction needs a typed `CompareRequest(old=..., new=InputSpec(path=
-  > new_so, ...))` call (or an `.abicheck.yml` pinning `sources:`/`build:`
-  > for the new side, discovered automatically rather than passed as a raw
-  > CLI flag) so `resolve_side_snapshot` reaches `effective_frontend`
+  > new_so, sources=<the same tree the baseline was dumped from>,
+  > depth="source", ...))` call, with a real, raw (non-pack) `sources` value
+  > on the `InputSpec` itself, so `resolve_side_snapshot` reaches
+  > `effective_frontend`
   > directly, pairing a clang-derived old side against a castxml-derived new
   > side as originally intended -- and the `profile_fingerprint`/
   > `scope_fingerprint`
