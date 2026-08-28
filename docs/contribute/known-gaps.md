@@ -1,3 +1,12 @@
+---
+doc_type: contributor
+audience:
+  - contributor
+level: advanced
+lifecycle: active
+generated: false
+---
+
 # Known gaps — acknowledged remaining work
 
 This page is the full, unabridged history of every investigated-but-unfixed
