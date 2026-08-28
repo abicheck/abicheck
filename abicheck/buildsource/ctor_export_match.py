@@ -89,28 +89,70 @@ _DTOR_MARKER = "{dtor}"
 #: not name a different class castxml would have spelled differently.
 _ABI_TAG_RE = re.compile(r"\[abi:[^\]]*\]")
 
+#: MSVC's operator codes for a plain (non-clone) constructor/destructor
+#: (``??0Widget@@...`` / ``??1Widget@@...``). ``msvc_scope_components``
+#: deliberately excludes these -- its own docstring notes the "name" slot
+#: for a special member is an operator code, not a plain identifier, so its
+#: generic leaf/scope split does not apply -- so this module parses them
+#: directly rather than reusing that function. Vector/scalar deleting
+#: destructors (``??_E``/``??_G``) and other clone forms are left
+#: unrecognized, the same conservative-miss bias this module already takes
+#: for a templated Itanium owner (see below).
+_MSVC_CTOR_OP = "??0"
+_MSVC_DTOR_OP = "??1"
+
+
+def _msvc_owner(mangled: str, op: str) -> str | None:
+    """Owner scope (``"::"``-joined) of an MSVC-mangled plain ctor/dtor, or
+    ``None`` if *mangled* isn't one -- mirrors ``msvc_scope_components``'s
+    own component-validity checks (reject a template/anonymous-namespace/
+    backreference component) for the class-name chain after *op*."""
+    if not mangled.startswith(op):
+        return None
+    rest = mangled[len(op) :]
+    idx = rest.find("@@")
+    if idx == -1:
+        return None
+    head = rest[:idx]
+    if not head:
+        return None
+    parts = head.split("@")
+    if any(not p or p.startswith("?") or p.isdigit() for p in parts):
+        return None
+    return "::".join(reversed(parts))
+
 
 def build_ctor_dtor_owner_index(exported: set[str]) -> dict[str, str]:
-    """Owner scope (Itanium-demangled, ``"::"``-joined, ABI tags stripped) ->
-    ``"ctor"``/``"dtor"``/``"both"``, for every export a ctor/dtor marker
-    was found in.
+    """Owner scope (demangled, ``"::"``-joined, ABI tags stripped) ->
+    ``"ctor"``/``"dtor"``/``"both"``, for every export an Itanium or MSVC
+    ctor/dtor marker was found in.
 
     Built once per link, mirroring how :func:`~.source_link._build_export_index`
     already indexes ``exported`` up front rather than re-scanning it per entity.
     """
     index: dict[str, str] = {}
     for sym in exported:
+        owner: str | None
         comps = itanium_scope_components(sym)
-        if not comps or len(comps) < 2:
-            continue
-        marker = comps[-1]
-        if marker == _CTOR_MARKER:
-            kind = "ctor"
-        elif marker == _DTOR_MARKER:
-            kind = "dtor"
+        if comps and len(comps) >= 2:
+            marker = comps[-1]
+            if marker == _CTOR_MARKER:
+                kind = "ctor"
+            elif marker == _DTOR_MARKER:
+                kind = "dtor"
+            else:
+                continue
+            owner = _ABI_TAG_RE.sub("", "::".join(comps[:-1]))
         else:
-            continue
-        owner = _ABI_TAG_RE.sub("", "::".join(comps[:-1]))
+            owner = _msvc_owner(sym, _MSVC_CTOR_OP)
+            if owner is not None:
+                kind = "ctor"
+            else:
+                owner = _msvc_owner(sym, _MSVC_DTOR_OP)
+                if owner is not None:
+                    kind = "dtor"
+                else:
+                    continue
         existing = index.get(owner)
         index[owner] = "both" if existing and existing != kind else kind
     return index

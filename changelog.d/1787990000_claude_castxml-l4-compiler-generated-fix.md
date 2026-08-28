@@ -62,6 +62,16 @@
   count kept reporting the removed phantom declarations as still present
   on the surface even after the relink correctly dropped them (Codex
   review).
+- **The ctor/dtor owner-index rescue now also recognizes MSVC-mangled
+  plain constructor/destructor exports (`??0Widget@@...`/`??1Widget@@...`),
+  not just Itanium.** On a Windows/MSVC L4 run (castxml's own
+  `--castxml-cc-msvc` emulation mode), an ODR-used implicit special
+  member's real export is Microsoft-mangled -- `itanium_scope_components`
+  alone never recognizes it, so the rescue previously dropped the
+  candidate and left the genuine export unmatched in `symbols_without_decl`
+  on that platform. Vector/scalar deleting destructors (`??_E`/`??_G`) and
+  other clone forms remain unrecognized, the same conservative-miss bias
+  already documented for a templated Itanium owner (Codex review).
 - **Known, accepted residual on the ctor/dtor rescue above**: the rescue is
   class-level, not per-overload — it asks "does this class have *any*
   matching ctor/dtor export at all", not "does *this specific* candidate

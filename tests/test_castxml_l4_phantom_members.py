@@ -280,6 +280,43 @@ def test_link_source_abi_rescues_a_synthetic_ctor_key_for_an_abi_tagged_owner() 
     assert synthetic_ctor.id in {d.id for d in surface.reachable_declarations}
 
 
+def test_link_source_abi_rescues_a_synthetic_ctor_key_via_msvc_export() -> None:
+    """Codex review, PR #930: on a Windows/MSVC L4 run (castxml's own
+    ``--castxml-cc-msvc`` emulation mode), an ODR-used implicit
+    constructor/destructor's real export is MSVC-mangled
+    (``??0Widget@@QEAA@XZ``), not Itanium -- `itanium_scope_components`
+    alone never recognizes it, so the owner-index rescue must also
+    recognize the MSVC plain-ctor/dtor operator codes (`??0`/`??1`)."""
+    from abicheck.dumper_castxml import SYNTHETIC_CTOR_KEY_PREFIX
+
+    synthetic_ctor = entity_from_function(
+        Function(
+            name="Widget",
+            mangled=f"{SYNTHETIC_CTOR_KEY_PREFIX}Widget(Widget const&)",
+            return_type="",
+            source_header="include/widget.h",
+            origin=ScopeOrigin.PUBLIC_HEADER,
+            is_compiler_generated=True,
+        )
+    )
+    tu = SourceAbiTu(tu_id="cu://widget.cpp#cfg", functions=[synthetic_ctor])
+
+    # A real export for a *different* class's MSVC-mangled constructor --
+    # confirms this isn't a vacuous "any MSVC ctor export rescues everything".
+    surface_no_match = link_source_abi(
+        [tu], exported_symbols=["??0Other@@QEAA@XZ"]
+    )
+    assert synthetic_ctor.id not in {
+        d.id for d in surface_no_match.reachable_declarations
+    }
+
+    # The real, MSVC-mangled export IS for this class's constructor: rescued.
+    surface_matched = link_source_abi(
+        [tu], exported_symbols=["??0Widget@@QEAA@XZ"]
+    )
+    assert synthetic_ctor.id in {d.id for d in surface_matched.reachable_declarations}
+
+
 @needs_demangler
 def test_link_source_abi_rescues_a_generated_operator_via_demangled_rematch() -> None:
     """Codex review, PR #930: a `compiler_generated` entity must reach
