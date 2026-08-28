@@ -830,8 +830,20 @@ def _fact_aliases(tree: ast.Module, qualnames: _QualnameSpans) -> dict[str, set[
             binding_qualname = walrus_qualname
             while binding_qualname.rsplit(".", 1)[-1].startswith("<comp>#"):
                 binding_qualname = lexical_parents.get(binding_qualname, "<module>")
-            if binding_qualname == walrus_qualname:
-                locally_bound.setdefault(binding_qualname, set()).add(node.target.id)
+            # A genuine local binding at `binding_qualname` either way --
+            # whether that's the walrus's own lexical scope (no hop) or the
+            # scope PEP 572 actually hopped it out to (Codex review, fresh
+            # evidence: the `binding_qualname == walrus_qualname` guard here
+            # wrongly skipped this mark whenever a real hop occurred, even
+            # though this branch's own comment above already states the
+            # intent -- "every other case" gets the identical `locally_
+            # bound` treatment. `[(fact := x) for x in values]` directly
+            # inside `inner` binds `fact` as an ordinary local *of `inner`*
+            # under PEP 572, shadowing an outer `fact` alias for a later,
+            # real `fact == other` read in `inner` -- but with the mark
+            # skipped, `inner`'s own inheritance step never learned this,
+            # and the outer alias leaked straight through instead).
+            locally_bound.setdefault(binding_qualname, set()).add(node.target.id)
             candidates.setdefault(binding_qualname, []).append(
                 (node.target.id, node.value)
             )
@@ -980,6 +992,61 @@ def _fact_aliases(tree: ast.Module, qualnames: _QualnameSpans) -> dict[str, set[
     for qualname, declared in nonlocal_or_global.items():
         if qualname in locally_bound:
             locally_bound[qualname] -= declared
+
+    def _declared_target_scope(qualname: str, name: str) -> str:
+        """Where an *assignment* to `name`, written inside `qualname`,
+        actually writes -- `<module>` for a `global`-declared name, the
+        nearest enclosing function for a `nonlocal`-declared one, or
+        `qualname` itself for an ordinary local (Codex review, fresh
+        evidence): a function that declares `global fact` and then
+        assigns `fact = rec.bases_fact` genuinely writes *module*-scope
+        `fact`, not a local of its own -- symmetric to the read-side fix
+        the two `global`/`nonlocal` findings above already made (a
+        declared name's own *read* correctly resolves through module/
+        enclosing-function scope now), but the *write* side was still
+        missing: every candidate/alias this assignment produces was still
+        being recorded under the writer's own qualname, so a sibling
+        function reading the identical module/enclosing-function name
+        (through ordinary inheritance, not its own `global`/`nonlocal`
+        declaration) never saw it as Fact-typed at all.
+        """
+        if name in global_declared.get(qualname, ()):
+            return "<module>"
+        if name in nonlocal_or_global.get(qualname, ()):
+            return lexical_parents.get(qualname, "<module>")
+        return qualname
+
+    # Redirect every candidate/direct-alias this walk recorded under a
+    # `global`/`nonlocal`-declaring function's own qualname to the scope
+    # the assignment actually writes to (see `_declared_target_scope`'s
+    # own docstring). Done once, after the whole walk (and the shadowing
+    # subtraction above) has finished -- a `global`/`nonlocal` statement
+    # can appear anywhere in its function's body, even textually after
+    # the assignment it governs, so this can't be decided candidate-by-
+    # candidate during the single forward walk that collected them.
+    for qualname in list(candidates):
+        declared_names = nonlocal_or_global.get(qualname)
+        if not declared_names:
+            continue
+        kept: list[tuple[str, ast.expr]] = []
+        for name, value in candidates[qualname]:
+            target_scope = _declared_target_scope(qualname, name)
+            if target_scope == qualname:
+                kept.append((name, value))
+            else:
+                candidates.setdefault(target_scope, []).append((name, value))
+        candidates[qualname] = kept
+    for qualname in list(aliases):
+        declared_names = nonlocal_or_global.get(qualname)
+        if not declared_names:
+            continue
+        moved: set[str] = set()
+        for name in list(aliases[qualname]):
+            target_scope = _declared_target_scope(qualname, name)
+            if target_scope != qualname:
+                aliases.setdefault(target_scope, set()).add(name)
+                moved.add(name)
+        aliases[qualname] -= moved
 
     def _scope_depth(qualname: str) -> int:
         depth = 0

@@ -957,6 +957,101 @@ class TestFactEqualityMisuseSites:
         tree = ast.parse(src, filename="x.py")
         assert fact_equality_misuse_sites(tree, "x.py") == []
 
+    def test_a_comprehension_walrus_shadows_an_outer_alias_in_its_target_scope(
+        self,
+    ) -> None:
+        """`[(fact := x) for x in values]` directly inside `inner` binds
+        `fact` as an ordinary local *of `inner`* under PEP 572 -- shadowing
+        an outer `fact` alias for a later, real `fact == other` read in
+        `inner` (Codex review: the scope-hop fix marked `locally_bound`
+        only when NO hop occurred, silently skipping the mark whenever a
+        real hop happened, even though it's the hopped-to scope that
+        actually needs it)."""
+        src = (
+            "def outer():\n"
+            "    fact = rec.bases_fact\n"
+            "    def inner():\n"
+            "        result = [(fact := x) for x in values]\n"
+            "        return fact == other\n"
+            "    return inner\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert fact_equality_misuse_sites(tree, "x.py") == []
+
+    def test_a_real_misuse_is_still_caught_with_no_comprehension_walrus(
+        self,
+    ) -> None:
+        """Negative control for the test above: with no comprehension
+        walrus shadowing `fact`, the outer alias must still be visible and
+        a real misuse still reported."""
+        src = (
+            "def outer():\n"
+            "    fact = rec.bases_fact\n"
+            "    def inner():\n"
+            "        return fact == other\n"
+            "    return inner\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert fact_equality_misuse_sites(tree, "x.py") == [(4, 15)]
+
+    def test_a_global_declared_assignment_is_visible_to_an_ordinary_sibling_read(
+        self,
+    ) -> None:
+        """A function that declares `global fact` and assigns `fact = rec.
+        bases_fact` genuinely writes *module*-scope `fact`, visible to any
+        other function reading the module-level name through ordinary
+        inheritance -- not just to the declaring function itself (Codex
+        review: the read-side global routing fix was symmetric only for
+        reads, not writes -- the assignment's own candidate stayed
+        attached to the writer's own qualname, so a sibling function never
+        saw it)."""
+        src = (
+            "def seed(rec):\n"
+            "    global fact\n"
+            "    fact = rec.bases_fact\n"
+            "def use(other):\n"
+            "    return fact == other\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert fact_equality_misuse_sites(tree, "x.py") == [(5, 11)]
+
+    def test_ignores_an_ordinary_local_assignment_with_no_global_declaration(
+        self,
+    ) -> None:
+        """Negative control: without a `global` declaration, an ordinary
+        local `fact = rec.bases_fact` must stay attached to its own
+        function -- it must not leak into the module's own alias set and
+        be wrongly attributed to an unrelated sibling `fact`."""
+        src = (
+            "def seed(rec):\n"
+            "    fact = rec.bases_fact\n"
+            "def use(other):\n"
+            "    return fact == other\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert fact_equality_misuse_sites(tree, "x.py") == []
+
+    def test_a_nonlocal_declared_assignment_is_visible_to_a_sibling_reader(
+        self,
+    ) -> None:
+        """The identical write-side routing for `nonlocal`: a setter
+        function's `nonlocal fact; fact = rec.bases_fact` writes the
+        enclosing function's own `fact`, visible to a sibling function
+        (also nested in that same enclosing function) reading it through
+        ordinary inheritance."""
+        src = (
+            "def outer():\n"
+            "    fact = None\n"
+            "    def setter(rec):\n"
+            "        nonlocal fact\n"
+            "        fact = rec.bases_fact\n"
+            "    def reader(other):\n"
+            "        return fact == other\n"
+            "    return setter, reader\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert fact_equality_misuse_sites(tree, "x.py") == [(7, 15)]
+
 
 def test_check_reports_a_new_violation(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch

@@ -1515,6 +1515,52 @@ control (a real misuse still caught with no nested definition present),
 and the global-through-an-intervening-local repro with its reversed-
 values negative control.
 
+**A further Codex review round found two more real gaps, both fixed.**
+(1) **A comprehension walrus was never actually marked as a local binding
+in the scope PEP 572 hops it out to.** The scope-hop fix (several rounds
+above) computes `binding_qualname` -- the walrus's real PEP 572 target
+scope, hopping out of every enclosing comprehension layer -- correctly,
+but the `locally_bound` mark itself was gated on `binding_qualname ==
+walrus_qualname`, i.e. only when NO hop occurred. That's backwards
+relative to that same fix's own stated intent ("every other case" gets
+the identical `locally_bound` treatment): `[(fact := x) for x in values]`
+sitting directly inside `inner`, with an outer `fact = rec.bases_fact`
+alias, hops `fact`'s real binding out to `inner` itself under PEP 572 --
+a genuine local of `inner` -- but with the mark skipped whenever a hop
+happens, `inner`'s own inheritance step never learned this, and a later,
+real `fact == other` in `inner` (reading the comprehension's own ordinary
+int, not the outer Fact alias) was wrongly flagged. Fixed by marking
+`locally_bound[binding_qualname]` unconditionally, regardless of whether
+a hop occurred -- `binding_qualname` is already the correct target scope
+either way, so the conditional never needed to exist. (2) **A `global`/
+`nonlocal`-declared name's own *write* side was still attached to the
+declaring function's own qualname, even though the read side (two rounds
+above) was already correctly routed.** `def seed(rec): global fact; fact
+= rec.bases_fact` genuinely writes *module*-scope `fact` -- but the
+candidate this assignment produces was recorded under `seed`'s own
+qualname regardless, so a sibling function reading the identical
+module-level `fact` through ordinary inheritance (not its own `global`
+declaration) never saw it as Fact-typed at all, missing a real misuse.
+The identical gap applies to `nonlocal`. Fixed with a new
+`_declared_target_scope()` helper and a dedicated post-walk pass
+(alongside the existing shadowing-subtraction pass, for the identical
+reason: a `global`/`nonlocal` statement can appear anywhere in its
+function's body, even after the assignment it governs, so this can't be
+decided candidate-by-candidate during the single forward walk) that
+redirects every candidate *and* every direct alias recorded under a
+declaring qualname to the scope the assignment actually writes to --
+`<module>` for `global`, the nearest enclosing function for `nonlocal`.
+Verified empirically: still zero existing hits in the real repository,
+and `mypy`/`ruff` both stayed clean (the same "variable name already
+inferred as a different type elsewhere in this function" mypy trap this
+file's history has hit twice before required renaming two local variables
+away from `target`/`declared`). Six new tests: the comprehension-walrus
+shadowing repro and its negative control (a real misuse still caught with
+no comprehension walrus present), the global-write-visible-to-a-sibling
+repro and its negative control (an ordinary, undeclared local assignment
+must not leak into the module's own alias set), and the identical
+write-side routing test for `nonlocal`.
+
 ---
 
 ### Phase 1 — finish the `dump`/`scan` typed-API convergence (closes AGENTS.md "PR C")
