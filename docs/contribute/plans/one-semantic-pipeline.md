@@ -2394,6 +2394,47 @@ hits in the real repository, `fact_detector_misuse.py` at 1523 lines
 `TestWholeSubjectMatchCapturesAreAliases` in `tests/
 test_fact_detector_misuse_def_time_scope.py`.
 
+**A fifth finding, from the next review round: a direct conditional
+comparison operand -- never assigned to an intermediate variable at all --
+still bypassed alias resolution, even after finding (1) above fixed the
+*assignment-candidate* half of the identical `IfExp` shape.**
+`old_fact = rec.bases_fact; new_fact = rec.bases_fact; (old_fact if cond
+else new_fact) == other` returned no misuse site. The two `IfExp` checks
+already in the module are not the same check: `_is_fact_typed_expr()`'s own
+`IfExp` branch (used by `_fact_aliases()`'s fixed point when *registering* a
+candidate) requires both branches to be *structurally* Fact-typed on their
+own -- it never resolves an alias `Name` in either branch, since alias
+resolution is the fixed point's job, not this structural predicate's.
+`fact_equality_misuse_sites()`'s own *terminal* `is_fact_typed()` closure --
+the one that actually decides whether a raw `==`/`!=` operand counts,
+applied after the whole fixed point has already converged -- had no `IfExp`
+branch of its own at all: it fell through to `isinstance(node, ast.Name)`,
+which a conditional expression never satisfies, so a direct conditional
+operand could not be recognized regardless of what either branch resolved
+to. Fixed by giving `is_fact_typed()` its own recursive `IfExp` branch,
+mirroring `_candidate_resolves_to_fact()`'s reasoning but adapted to this
+call site's available state: it checks each branch via `is_fact_typed()`
+itself (so a nested conditional operand resolves too) against the
+comparison's own `qualname`, reading the *final*, already-converged
+`aliases` mapping rather than an in-progress fixed-point `known` set, since
+by the time this terminal check runs `_fact_aliases()` has already finished.
+Kept the same AND semantics every other `IfExp` handling in this module
+already uses (`_is_fact_typed_expr`, `_candidate_resolves_to_fact`): both
+branches must resolve, since a single-branch match cannot be told apart
+from an ordinary conditional expression that merely happens to read one
+Fact attribute among other unrelated locals -- a real, if narrow, accepted
+false-negative direction, not new to this fix.
+
+Verified against the reported repro, a nested-conditional variant, and two
+negative controls (neither branch resolves; only one branch resolves) via
+direct `python3 -c` reproduction before writing tests, plus the full
+existing suite confirming every previously-fixed shape stays unaffected.
+`ruff`/`mypy` both clean, still zero existing hits in the real repository,
+`fact_detector_misuse.py` at 1529 lines (well under the 2000-line hard cap).
+New tests:
+`TestDirectConditionalOperandsResolveThroughAliasBranches` in `tests/
+test_fact_detector_misuse_def_time_scope.py`.
+
 ---
 
 ### Phase 1 — finish the `dump`/`scan` typed-API convergence (closes AGENTS.md "PR C")

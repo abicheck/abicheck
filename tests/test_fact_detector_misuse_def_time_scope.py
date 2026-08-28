@@ -938,3 +938,73 @@ class TestWholeSubjectMatchCapturesAreAliases:
         )
         tree = ast.parse(src, filename="x.py")
         assert fact_equality_misuse_sites(tree, "x.py") == []
+
+
+class TestDirectConditionalOperandsResolveThroughAliasBranches:
+    """`fact_equality_misuse_sites()`'s own terminal `is_fact_typed()`
+    predicate (distinct from `_is_fact_typed_expr()`'s purely-structural
+    `IfExp` branch used by `_fact_aliases()`'s fixed point) must resolve an
+    alias `Name` inside *either* branch of a conditional expression that is
+    itself a direct comparison operand -- `(old_fact if cond else
+    new_fact) == other`, never assigned to an intermediate variable at all,
+    so there is no candidate for the fixed point to register in the first
+    place. Mirrors `TestConditionalExpressionResolvesThroughAliasBranches`
+    above, but for the terminal comparison-operand check rather than the
+    alias-collection fixed point."""
+
+    def test_detects_a_direct_conditional_operand_through_both_alias_branches(
+        self,
+    ) -> None:
+        src = (
+            "def f(rec, other, cond):\n"
+            "    old_fact = rec.bases_fact\n"
+            "    new_fact = rec.bases_fact\n"
+            "    return (old_fact if cond else new_fact) == other\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert fact_equality_misuse_sites(tree, "x.py") == [(4, 11)]
+
+    def test_detects_a_nested_direct_conditional_operand(self) -> None:
+        """A conditional nested inside a conditional operand -- both levels
+        must resolve, not just the outermost one."""
+        src = (
+            "def f(rec, other, cond, cond2):\n"
+            "    old_fact = rec.bases_fact\n"
+            "    new_fact = rec.bases_fact\n"
+            "    third_fact = rec.bases_fact\n"
+            "    return (old_fact if cond else "
+            "(new_fact if cond2 else third_fact)) == other\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert fact_equality_misuse_sites(tree, "x.py") == [(5, 11)]
+
+    def test_ignores_a_direct_conditional_operand_of_non_fact_aliases(self) -> None:
+        """Negative control: neither branch resolves to a Fact-typed
+        value, so the comparison must stay unflagged."""
+        src = (
+            "def f(rec, other, cond):\n"
+            "    old_x = rec.plain\n"
+            "    new_x = rec.plain\n"
+            "    return (old_x if cond else new_x) == other\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert fact_equality_misuse_sites(tree, "x.py") == []
+
+    def test_ignores_a_direct_conditional_operand_with_only_one_fact_branch(
+        self,
+    ) -> None:
+        """Negative control pinning the established AND semantics (shared
+        with `_is_fact_typed_expr()`'s own `IfExp` branch and with
+        `_candidate_resolves_to_fact()`): a conditional operand is treated
+        as Fact-typed only when *both* branches resolve, since a
+        single-branch match cannot be told apart from an ordinary
+        conditional expression that merely happens to read one Fact
+        attribute among other unrelated locals."""
+        src = (
+            "def f(rec, other, cond):\n"
+            "    old_fact = rec.bases_fact\n"
+            "    new_x = rec.plain\n"
+            "    return (old_fact if cond else new_x) == other\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert fact_equality_misuse_sites(tree, "x.py") == []

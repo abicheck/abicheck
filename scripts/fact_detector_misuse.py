@@ -1483,7 +1483,13 @@ def fact_equality_misuse_sites(tree: ast.Module, rel: str) -> list[tuple[int, in
     def is_fact_typed(node: ast.expr, qualname: str) -> bool:
         if _is_fact_typed_expr(node, fact_names):
             return True
-        return isinstance(node, ast.Name) and node.id in aliases.get(qualname, ())
+        if isinstance(node, ast.Name):
+            return node.id in aliases.get(qualname, ())
+        if isinstance(node, ast.IfExp):
+            return is_fact_typed(node.body, qualname) and is_fact_typed(
+                node.orelse, qualname
+            )
+        return False
 
     sites: list[tuple[int, int]] = []
     for node in ast.walk(tree):
