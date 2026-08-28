@@ -1140,9 +1140,9 @@ def unmigrated_fact_reader_sites(
 
 def check_fact_field_readers(f: Findings) -> None:
     """ERROR if a function outside `EXEMPT_FUNCTIONS` reads a `Fact`-bridged
-    legacy field (`RecordType.bases`/`virtual_bases`/`vtable`,
-    `Param.is_va_list`) directly, without the read being a previously
-    reviewed, `KNOWN_UNMIGRATED_READERS`-baselined site.
+    legacy field (`RecordType.bases`/`virtual_bases`/`vtable`/
+    `vptr_offset_bits`, `Param.is_va_list`) directly, without the read
+    being a previously reviewed, `KNOWN_UNMIGRATED_READERS`-baselined site.
 
     Real, repo-wide AST scan, not a `diff_*.py` glob -- see this module's
     own docstring for why a glob (or any other hand-maintained scope) is

@@ -960,8 +960,8 @@ already-correct, now-explicit behavior rather than a regression.
 `scripts/fact_field_readers.py` (registered by `check_ai_readiness.py` as
 `fact-field-readers`) is the real, repo-wide static scan this Design
 section names: an AST walk for a direct attribute *read* (`ast.Load`) of
-`bases`/`virtual_bases`/`vtable`/`is_va_list` anywhere under `abicheck/`,
-not a `diff_*.py` glob — because a glob is exactly what let this section's
+`bases`/`virtual_bases`/`vtable`/`vptr_offset_bits`/`is_va_list` anywhere
+under `abicheck/`, not a `diff_*.py` glob — because a glob is exactly what let this section's
 own hand-enumeration repeatedly miss a real reader across several review
 rounds (the fifth, then the tenth call site each surfaced only in a later
 pass). Auditing the real tree while building this check (rather than
