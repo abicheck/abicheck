@@ -423,6 +423,8 @@ BUG_CLASSES: tuple[BugClass, ...] = (
             "tests/test_cli_compare_release_bundle_signature_wiring.py",
             "tests/test_reusable_workflows_project_evidence.py",
             "tests/test_action_compile_context_parity.py",
+            "tests/test_gha_expr.py",
+            "tests/test_consumer_compile_full_chain_propagation.py",
         ),
         known_gaps=(
             KnownGap(
@@ -468,7 +470,29 @@ BUG_CLASSES: tuple[BugClass, ...] = (
                     "dropped from `with:` entirely) — the Phase 6 "
                     "requirement that a harness be shown to catch #860/"
                     "#883's own class before merge, not just assert "
-                    "today's wiring is correct."
+                    "today's wiring is correct. (4) Codex review, PR #906: "
+                    "every hop-2/hop-3 assertion above is still per-hop "
+                    "text/exact-match, which proves an expression *names* "
+                    "the right upstream field but not that its *semantics* "
+                    "are still correct — a `&&`/`||` swap or an inverted "
+                    "guard could keep every matched substring while "
+                    "silently changing which value reaches the next hop. "
+                    "Closed with `_gha_expr.py` (a small, real recursive-"
+                    "descent evaluator for the exact `${{ ... }}` grammar "
+                    "this repo's own workflow/action `with:` values use — "
+                    "dotted refs, string literals, `!=`/`==`, `&&`/`||` "
+                    "with real short-circuit/truthiness semantics, parens) "
+                    "and `test_consumer_compile_full_chain_propagation.py`, "
+                    "which threads one real sentinel value through the "
+                    "REAL, unmodified expression text pulled live from both "
+                    "YAML files in sequence — config → `generate_run_plan()` "
+                    "→ evaluated hop-2 expression → evaluated hop-3 "
+                    "expression → the real `run.sh` execution (reusing "
+                    "`test_action_compile_context_parity.py`'s own harness) "
+                    "— confirming the same value survives every hop, with "
+                    "a second, distinct sentinel standing in for the "
+                    "workflow-global fallback to prove it does NOT leak "
+                    "through when the overlay is active/bundle-kind/absent."
                 ),
                 reference="docs/contribute/plans/bug-class-regression-testing.md#phase-6",
             ),
