@@ -19,7 +19,9 @@
         "abicheck/checker_types.py",
         "abicheck/compile_context.py",
         "abicheck/evidence_depth.py",
-        "abicheck/name_classification.py"
+        "abicheck/name_classification.py",
+        "abicheck/stable_abi.py",
+        "abicheck/stable_abi_data.py"
       ]
     },
     "storage": {
@@ -112,6 +114,7 @@
         "abicheck/provenance.py",
         "abicheck/python_api.py",
         "abicheck/python_ext.py",
+        "abicheck/snapshot_cache.py",
         "abicheck/source_smoke.py",
         "abicheck/sycl_context.py",
         "abicheck/sycl_metadata.py",
@@ -170,7 +173,11 @@
         "abicheck/diff_unnamed_types.py",
         "abicheck/diff_vtable_layout.py",
         "abicheck/finding_identity.py",
-        "abicheck/probe_harness.py"
+        "abicheck/probe_harness.py",
+        "abicheck/surface.py",
+        "abicheck/surface_graph.py",
+        "abicheck/type_reachability_spelling.py",
+        "abicheck/versioned_symbol_scheme.py"
       ]
     },
     "policy": {
@@ -183,6 +190,7 @@
         "abicheck/analysis_assurance.py",
         "abicheck/contract_coverage_exit.py",
         "abicheck/exit_decision.py",
+        "abicheck/semver.py",
         "abicheck/severity.py"
       ]
     },
@@ -203,9 +211,18 @@
         "abicheck/service.py",
         "abicheck/service_compare_evidence.py",
         "abicheck/service_compare_pipeline.py",
+        "abicheck/service_dump_cache.py",
         "abicheck/service_dump_pipeline.py",
+        "abicheck/service_header_graph_attach.py",
+        "abicheck/service_header_scoped.py",
         "abicheck/service_input_resolution.py",
-        "abicheck/service_scan.py"
+        "abicheck/service_metadata_attach.py",
+        "abicheck/service_scan.py",
+        "abicheck/stack_binding_diff.py",
+        "abicheck/stack_checker.py",
+        "abicheck/suppression.py",
+        "abicheck/suppression_yaml.py",
+        "abicheck/tu_merge.py"
       ]
     },
     "report": {
@@ -217,7 +234,10 @@
         "workflows"
       ],
       "legacy_paths": [
-        "abicheck/reporter.py"
+        "abicheck/reporter.py",
+        "abicheck/sarif.py",
+        "abicheck/stack_html.py",
+        "abicheck/stack_report.py"
       ]
     },
     "frontends": {
