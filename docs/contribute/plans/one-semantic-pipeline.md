@@ -956,16 +956,69 @@ confirmed to fail against the pre-change code (`git stash`); the
 representational-only assertions pass either way, since they pin
 already-correct, now-explicit behavior rather than a regression.
 
+**The widened, non-glob AI-readiness check — landed (third slice).**
+`scripts/fact_field_readers.py` (registered by `check_ai_readiness.py` as
+`fact-field-readers`) is the real, repo-wide static scan this Design
+section names: an AST walk for a direct attribute *read* (`ast.Load`) of
+`bases`/`virtual_bases`/`vtable`/`is_va_list` anywhere under `abicheck/`,
+not a `diff_*.py` glob — because a glob is exactly what let this section's
+own hand-enumeration repeatedly miss a real reader across several review
+rounds (the fifth, then the tenth call site each surfaced only in a later
+pass). Auditing the real tree while building this check (rather than
+trusting that hand list) found **three more genuine semantic readers the
+plan's own nine-reader table doesn't name**:
+`buildsource/header_graph.py`'s inheritance-edge emitter (walks `rt.bases`
+to build the L5 source graph's `INHERITS` edges), `buildsource/
+source_extractors/base.py`'s `entity_from_record()` (folds `rec.bases`/
+`rec.vtable` into the L4/L5 source-ABI-replay entity-identity fingerprint),
+and `idioms.py`'s factory/non-virtual-destructor anti-pattern detectors
+(`_recognise_factory`/`_is_virtual_dtor_present`/`_collect_base_targets`/
+`_detect_non_virtual_dtor`, all reading `rec.vtable`/`rec.bases` directly)
+— confirming this Design section's own conclusion in the most direct way
+possible: a hand-maintained list is not the same invariant as "every known
+reader is checked," and it takes exactly this kind of real scan to find
+the readers a hand audit keeps missing.
+
+The check's baseline (`KNOWN_UNMIGRATED_READERS`, allowlist-and-shrink,
+`IMPORT_CYCLE_ALLOWLIST`'s own convention) therefore records 91 currently-
+known reader sites across the nine-plus-fourteen-plus-three modules named
+above and throughout this Design section, keyed
+`"<rel>::<attr>::<occurrence>"` (stable across an unrelated edit
+elsewhere in the file, matching `ENGINE_CLI_BOUNDARY_ALLOWLIST`'s own
+keying rationale) — generated directly from the real AST scan, not
+hand-counted, so the baseline itself cannot silently drift from what the
+scan actually finds. `EXEMPT_MODULES` is the separate, non-shrinking set
+this check never even scans: `model/entities.py`/`model/declarations.py`
+(the fields' own dataclass definition and `__post_init__` omission-bridge
+implementation) and `dwarf_snapshot.py`/`dumper_layout_backfill.py` (the
+DWARF producer and DWARF-backfill merge, which compute or combine the raw
+legacy value itself rather than making a compatibility decision from it —
+the same role `RecordType(bases=...)`'s own keyword construction plays at
+every producer, which this attribute-*read* scan can't see at all since it
+only looks at reads on an existing instance). No type inference is
+attempted — verified empirically, by running the scan against the whole
+package before writing the baseline, that all 91 hits are genuinely
+`RecordType`/`Param` accesses with zero cross-class collisions. Tests:
+`tests/test_fact_field_readers.py` (the real repository has zero unlisted
+violations; every baseline/exempt entry still names something real; the
+AST primitive's own contract — attrs detected, `Store` ignored, occurrence
+numbering — pinned directly; and two end-to-end cases against a throwaway
+`abicheck/`-shaped tree confirming the check function itself, not only the
+primitive, both fires on a new violation and stays silent on a baselined
+one).
+
 **Still not landed**: no detector (`diff_layout.py`/`diff_types.py`/
-`diff_param_qualifiers.py`/the nine-reader table above) has been migrated
-to read `.status`, and the widened, non-glob AI-readiness check this
-Design section describes has not been written. Migrating a detector now
-would add real complexity for zero behavior change until every producer's
-own construction is at least this explicit — landed as of this slice for
-the five fields this phase scoped — deferred deliberately, not silently,
-per this plan's own "vertical slice, not flag day" discipline: each slice
-is a primitive the rest of Phase 0 builds on, landed and tested on its own
-rather than held until every consumer migrates too.
+`diff_param_qualifiers.py`/the fourteen-plus-three-reader set the check
+above now tracks precisely) has actually been migrated to read `.status`
+— the check above only *guards* the 91 existing sites against a new,
+unreviewed one joining them; it does not change what any of them do.
+Migrating a detector now would add real complexity for zero behavior
+change until every producer's own construction is at least this explicit
+— landed as of the second slice for the five fields this phase scoped —
+deferred deliberately, not silently, per this plan's own "vertical slice,
+not flag day" discipline: each slice is a primitive the rest of Phase 0
+builds on, landed and tested on its own rather than held until every
+consumer migrates too.
 
 ---
 
