@@ -45,9 +45,27 @@ took multiple review rounds to find and revert elsewhere. Left as a
 documented, accepted residual rather than attempted reactively here -- a
 templated class's synthetic-keyed ctor/dtor still falls back to the original
 "no export table visibility, drop it" behavior.
+
+A second, accepted residual (Codex review): the rescue is class-level, not
+per-overload -- ``synthetic_key_owner_has_export`` asks "does this owner have
+*any* matching ctor/dtor export at all", not "does *this specific* candidate
+have one". A class whose only real export is (say) its implicit copy
+constructor still keeps its default/move-constructor candidates too, each
+recorded reachable-but-unmatched rather than dropped, and the real export
+itself stays unmatched in ``symbols_without_decl``. Resolving the actual
+overload-to-export mapping needs decoding an Itanium ctor/dtor's mangled
+parameter types structurally and comparing them against castxml's own
+spelled parameter list -- a materially larger parser than this module's
+owner-scope matching, not attempted here. Keeping an unresolved candidate
+visible (rather than silently dropping it) is still the safer of the two
+failure modes per ADR-028 D3's "never silently delete a genuine
+declaration" rule.
 """
 
 from __future__ import annotations
+
+from collections.abc import Callable
+from typing import TYPE_CHECKING
 
 from ..diff_cxx_rules import itanium_scope_components
 from ..dumper_castxml import (
@@ -55,6 +73,9 @@ from ..dumper_castxml import (
     is_synthetic_ctor_key,
     is_synthetic_dtor_key,
 )
+
+if TYPE_CHECKING:
+    from .source_abi import SourceEntity
 
 _CTOR_MARKER = "{ctor}"
 _DTOR_MARKER = "{dtor}"
@@ -105,3 +126,62 @@ def synthetic_key_owner_has_export(key: str, owner_index: dict[str, str]) -> boo
         return False
     found = owner_index.get(owner)
     return found in (want, "both")
+
+
+def should_drop_generated_candidate(
+    export_sym: str, primary: str, exported: set[str], owner_index: dict[str, str]
+) -> bool:
+    """Whether a ``compiler_generated`` entity with no direct export match
+
+    should be dropped, given a real (non-empty) export set. Shared by
+    ``source_link._route_declaration`` (first link) and
+    ``source_link.relink_surface_exports`` (the parallel-baseline/Flow-2
+    relink, once the export table becomes known) so the two apply the
+    identical rule rather than the relink path silently keeping a candidate
+    the first link would have dropped (Codex review, PR #930).
+    """
+    return (
+        not primary
+        and bool(exported)
+        and not synthetic_key_owner_has_export(export_sym, owner_index)
+    )
+
+
+def rematch_declarations(
+    declarations: list[SourceEntity],
+    exported: set[str],
+    export_index: dict[str, list[str]],
+    exact_index: dict[str, str],
+    owner_index: dict[str, str],
+    match_export: Callable[[str, set[str], dict[str, list[str]], dict[str, str]], tuple[str, list[str]]],
+) -> tuple[list[SourceEntity], dict[str, str], set[str], dict[str, str]]:
+    """Re-derive decl -> export mapping for a relink, dropping a generated
+    candidate :func:`should_drop_generated_candidate` says has no real export.
+
+    Split out of ``source_link.relink_surface_exports`` (that file's own
+    no-growth line budget) rather than duplicated -- see this module's
+    docstring for why the relink path needs the identical drop rule
+    ``_route_declaration`` already applies at first link.
+
+    Returns ``(kept_declarations, mapping, matched_symbols, identity_to_qname)``.
+    """
+    kept: list[SourceEntity] = []
+    mapping: dict[str, str] = {}
+    matched: set[str] = set()
+    identity_to_qname: dict[str, str] = {}
+    for entity in declarations:
+        export_sym = entity.mangled_name or entity.qualified_name
+        primary, variants = match_export(export_sym, exported, export_index, exact_index)
+        if entity.ownership.get("compiler_generated") == "true" and should_drop_generated_candidate(
+            export_sym, primary, exported, owner_index
+        ):
+            continue
+        kept.append(entity)
+        key = entity.identity()
+        if not key:
+            continue
+        identity_to_qname[key] = entity.qualified_name or key
+        mapping[key] = primary if primary else mapping.get(key, "")
+        if primary:
+            matched.update(variants)
+    return kept, mapping, matched, identity_to_qname

@@ -1397,27 +1397,15 @@ def relink_surface_exports(
     """
     exported = set(exported_symbols)
     surface.roots["exported_symbols"] = sorted(exported)
-    export_index = _build_export_index(exported)
-    exact_index = _build_exact_index(exported)
-    mapping: dict[str, str] = {}
-    matched: set[str] = set()
-    # identity -> display name, so the recomputed decls_without_symbol carries the
-    # same qualified-name labels the original link produced rather than raw keys.
-    identity_to_qname: dict[str, str] = {}
-    for entity in surface.reachable_declarations:
-        key = entity.identity()
-        if not key:
-            continue
-        identity_to_qname[key] = entity.qualified_name or key
-        export_sym = entity.mangled_name or entity.qualified_name
-        primary, variants = _match_export(
-            export_sym, exported, export_index, exact_index
-        )
-        if primary:
-            mapping[key] = primary
-            matched.update(variants)
-        else:
-            mapping.setdefault(key, "")
+    export_index, exact_index = _build_export_index(exported), _build_exact_index(exported)
+    ctor_dtor_owner_index = ctor_export_match.build_ctor_dtor_owner_index(exported)
+    # A source-only relink (the parallel-baseline `merge` flow) links against an empty export set first, so
+    # `_route_declaration`'s own compiler_generated miss-drop never fires there. `rematch_declarations` applies
+    # that identical drop rule now that a real export set is known (Codex review, PR #930).
+    kept, mapping, matched, identity_to_qname = ctor_export_match.rematch_declarations(
+        surface.reachable_declarations, exported, export_index, exact_index, ctor_dtor_owner_index, _match_export
+    )
+    surface.reachable_declarations = kept
     # Second-tier demangled-identity rematch (ABI-tag / substitution drift).
     _demangled_rematch(surface.reachable_declarations, mapping, matched, exported)
     surface.mappings["source_decl_to_binary_symbol"] = dict(sorted(mapping.items()))
@@ -1620,7 +1608,7 @@ def _route_declaration(
     A ``compiler_generated`` entity (PR #930) is dropped on a miss unless a synthetic ctor/dtor key's owner has one anyway (`ctor_export_match`), or `exported` is empty (unresolved)."""
     export_sym = entity.mangled_name or entity.qualified_name
     primary, variants = _match_export(export_sym, exported, state.export_index, state.exact_index)
-    if not primary and exported and entity.ownership.get("compiler_generated") == "true" and not ctor_export_match.synthetic_key_owner_has_export(export_sym, state.ctor_dtor_owner_index):
+    if entity.ownership.get("compiler_generated") == "true" and ctor_export_match.should_drop_generated_candidate(export_sym, primary, exported, state.ctor_dtor_owner_index):
         return
     surface.reachable_declarations.append(entity)
     key = entity.identity()

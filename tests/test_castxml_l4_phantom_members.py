@@ -155,6 +155,41 @@ def test_link_source_abi_keeps_compiler_generated_entities_when_exports_unresolv
     )
 
 
+def test_relink_surface_exports_drops_a_generated_candidate_confirmed_unmatched() -> (
+    None
+):
+    """Codex review, PR #930: `relink_surface_exports()` (the parallel-
+    baseline/Flow-2 relink, run once the real export set finally becomes
+    known) must apply the identical `compiler_generated`-miss drop rule
+    `_route_declaration` applies at first link -- not merely recompute the
+    mapping for whatever survived the empty-export-set first link. A
+    candidate first linked with `exported_symbols=[]` (kept, per the
+    "unresolved, not confirmed-miss" rule) must be dropped from
+    `reachable_declarations`/`decls_without_symbol` once relinked against a
+    real export set that genuinely never mentions it -- the same outcome
+    linking directly against that binary would have produced."""
+    common = dict(
+        name="Widget",
+        mangled="_ZN6WidgetaSERKS_",
+        return_type="Widget&",
+        source_header="include/widget.h",
+        origin=ScopeOrigin.PUBLIC_HEADER,
+    )
+    phantom = entity_from_function(Function(is_compiler_generated=True, **common))
+    tu = SourceAbiTu(tu_id="cu://widget.cpp#cfg", functions=[phantom])
+
+    surface = link_source_abi([tu], exported_symbols=[])
+    assert phantom.id in {d.id for d in surface.reachable_declarations}
+
+    from abicheck.buildsource.source_link import relink_surface_exports
+
+    # A real, non-empty export set that never mentions this symbol at all.
+    relinked = relink_surface_exports(surface, ["_ZN5UnrelatedC1Ev"])
+    assert phantom.id not in {d.id for d in relinked.reachable_declarations}
+    assert phantom.identity() not in relinked.mappings["source_decl_to_binary_symbol"]
+    assert phantom.qualified_name not in relinked.unmatched["decls_without_symbol"]
+
+
 def test_link_source_abi_rescues_a_synthetic_ctor_key_with_a_real_export() -> None:
     """Codex review, PR #930: a castxml synthetic constructor key (no real
     mangled name -- see ``dumper_castxml.SYNTHETIC_CTOR_KEY_PREFIX``) can

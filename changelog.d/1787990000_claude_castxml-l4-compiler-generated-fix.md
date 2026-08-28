@@ -30,7 +30,31 @@
   Flow-2/parallel-baseline `merge` flow) no longer drops these declarations
   either — an empty export set means "not resolved yet", not "confirmed
   absent", so `relink_surface_exports`'s later pass against the real export
-  table can still recover them (Codex review).
+  table can still recover them (Codex review). That later relink pass now
+  also applies the identical `compiler_generated`-miss drop rule
+  `_route_declaration` applies at first link (`ctor_export_match.
+  rematch_declarations`, shared by both call sites) — previously a
+  candidate kept by the empty-export first link stayed in
+  `reachable_declarations`/`decls_without_symbol` forever, even once
+  relinked against a real export set that genuinely never mentions it
+  (Codex review).
+- **Known, accepted residual on the ctor/dtor rescue above**: the rescue is
+  class-level, not per-overload — it asks "does this class have *any*
+  matching ctor/dtor export at all", not "does *this specific* candidate
+  (default/copy/move) have one". So a class whose only real export is its
+  implicit copy constructor still keeps its default- and move-constructor
+  candidates too, each recorded as reachable-but-unmatched rather than
+  dropped, and the real export itself stays unmatched in
+  `symbols_without_decl` (Codex review). Resolving the actual overload-to-
+  export mapping needs decoding an Itanium ctor/dtor's mangled parameter
+  types structurally and comparing them against castxml's own spelled
+  parameter list — a materially larger parser than this fix's owner-scope
+  matching, not attempted here. The chosen direction (keep, unmatched) is
+  the safer of the two failure modes available: per this package's own
+  ADR-028 D3 rule ("L3/L4/L5 evidence must never silently delete a
+  genuine declaration"), a visible-but-unmatched candidate is preferable
+  to the pre-fix behavior of silently vanishing it from the surface
+  entirely.
 - **`diff_cxx_rules._read_length_prefixed_name` no longer trips Python's
   integer-conversion digit limit on an untrusted mangled symbol with
   thousands of digits in its length field.** The above ctor/dtor rescue is
