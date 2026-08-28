@@ -48,15 +48,28 @@ its own section below), PR 4 changes what a CI job's exit code means.
 > assignments and `gate.*` fields (PR B's scope is wider than the 2026-08-16
 > update above states — see that section for the current breakdown); the
 > PR 3B build-context-completeness gaps (forced pre-includes, matched-unit
-> include scoping) are closed. #883 itself fixed a real bundle-facts gap
-> this plan's PR B/bundle sections should account for: `PolicyFile` now
-> reaches both per-library *and* bundle-level verdicts (it previously
-> reached only per-library), the JSON resource budget is now applied
-> uniformly to archive and plain-JSON bundle-facts input, and
+> include scoping) are closed. #883 itself fixed a real bundle-facts gap:
+> `PolicyFile` now reaches both per-library *and* bundle-level verdicts (it
+> previously reached only per-library), the JSON resource budget is now
+> applied uniformly to archive and plain-JSON bundle-facts input, and
 > `DEFAULT_SYSTEM_PROVIDERS` grew several more vendor runtimes (oneTBB,
 > oneMKL, Intel runtime, Level Zero) — the latter is explicitly a tactical
-> fix, not the topology model PR B's bundle section still needs (see that
-> section for why a growing global allow-list isn't the end state).
+> fix, not a real topology model for bundle-level system-provider
+> classification. **Correction (2026-08-28): this was never actually PR B's
+> own scope** — PR B's two stated goals (pack parity, effective-config
+> digest) are about *configuration* reaching every relevant CLI command
+> path (typed-API pack parity is separate, outstanding work — see PR B's
+> own "finalized" note below), not about bundle *verdict topology*; the
+> growing-allow-list gap is recorded in the
+> root `AGENTS.md`'s "Known gaps" section, pointing at `g42-check-identity-
+> environments-and-provider-resolution.md`'s own "Environment-aware
+> system-provider resolution" design rather than sketching a competing fix
+> (Codex review, PR #910, fresh evidence: an earlier revision of this note
+> also pointed at a since-removed AGENTS.md entry for a *second*, "sibling"
+> policy-override gap that #883 -- named two sentences above -- had already
+> fixed; that stale entry is gone, this note no longer claims it) — see PR
+> B's own "finalized" note below for why the remaining topology gap doesn't
+> block PR B closing.
 > **PR 0B/P0 is still the single outstanding item with no code-side gap
 > left** — see its status note below for the ready-to-apply Ruleset
 > artifact this pass added. PR C (typed dump/scan convergence) remains the
@@ -3285,6 +3298,14 @@ immutable effective configuration (one `CompatibilityEvaluationConfig`, one
 and the Action, with the same effective-config digest recorded in every
 report.
 
+**Scope correction (2026-08-28): the `GateOptions` half of "land first"
+above was reassigned to PR G2, not landed as part of PR B — see PR B's own
+"finalized" note below for the complete, canonical status (what landed,
+the typed-API pack-parity exception, and why `GateOptions` was
+reassigned). Consolidated here to one pointer rather than three
+independently-drifting restatements (Codex review, PR #910, `docs/AGENTS.md`'s
+"one fact, one canonical page" rule).**
+
 > **Slice 1 landed (2026-08-16):** the directory/package release fan-out no
 > longer rejects `--pack` outright. `CompareRequest` gained `pack_policy_
 > overrides`/`pack_internal_namespaces` (additive, `None` by default — see the
@@ -3421,21 +3442,54 @@ report.
 > resolves regardless (`DiffResult.policy`/`policy_file`, the resolved
 > `SeverityConfig`/`exit_code_scheme` pair). One function,
 > `effective_config_fields`, picks the tier; `compare` (via
-> `reporter_contract_blocks.add_contract_context`), the directory/package
-> release fan-out (the same call -- release reports funnel through the
-> identical function, so no separate release-side computation exists to
-> drift), and `scan --against` (`cli_scan_baseline._run_baseline_compare`,
+> `reporter_contract_blocks.add_contract_context`), `reporter.py`'s
+> `--stat` JSON summary builder, and `scan --against`
+> (`cli_scan_baseline._run_baseline_compare`,
 > reusing the exact `sev_config`/`exit_scheme` pair its own `exit` block was
 > just resolved from) all call it through one shared helper,
-> `reporter_contract_blocks.add_effective_config_digest` -- so "the same
-> effective-config digest recorded in every report" is now literally one
-> function, not three approximations of one shape. `report_schema_version`
-> 2.45 / `scan_schema_version` 1.19 (additive keys:
-> `effective_config_digest`/`effective_config_fields`). Tests:
-> `tests/test_effective_config_digest.py` (both tiers directly, plus
-> cross-report parity: two reports resolving the identical configuration
-> produce the identical digest regardless of findings/library name, and a
-> policy override changes it).
+> `reporter_contract_blocks.add_effective_config_digest` -- so across
+> those call sites this digest reaches, it's now literally one
+> function, not several approximations of one shape. `report_schema_version`
+> 2.45 / `scan_schema_version` 1.19 (additive keys: `effective_config_digest`/
+> `effective_config_fields`). **Scope correction (Codex review, fresh
+> evidence, three rounds — the first draft of this correction undercounted
+> the call sites, the second overcounted them, this is the corrected
+> version): "in every report" overstates this -- the digest reaches only
+> the native JSON report path, and even there it's not one uniform digest
+> everywhere.** `add_effective_config_digest` is called from exactly
+> three places: `reporter_contract_blocks.py`'s own `add_contract_context`
+> (a per-library/single-comparison `compare` JSON report, gated on
+> `include_exit_decision`), `reporter.py`'s separate `--stat` JSON summary
+> builder, and `cli_scan_baseline.py`'s `scan --against` JSON path. **The
+> directory/package release fan-out does NOT go through this function at
+> all** -- its own release-level *summary* JSON (both the primary release
+> report, `cli_compare_release_helpers._format_release_json`, and the
+> `--output-dir` sibling, `cli_compare_release._write_release_summary_
+> file`) instead calls a separate, narrower helper,
+> `_release_summary_effective_config_block`, which computes its digest
+> from `SeverityConfig` alone -- no `CompatibilityEvaluationConfig`/
+> `PolicyFile`/suppression object exists at release-summary scope at all
+> (documented as a known, accepted gap in that helper's own docstring).
+> So two releases differing only by a policy pack or internal-namespace
+> override can share an identical release-summary digest even though
+> their *per-library* sidecar reports (which DO reach
+> `add_effective_config_digest` via `add_contract_context`) correctly
+> differ -- a real, narrower parity gap this note previously elided by
+> claiming the release fan-out reuses the identical call. The Markdown,
+> review, SARIF, JUnit, and HTML renderers (`html_report.py`, `sarif.py`,
+> `junit_report.py`, and `reporter.py`'s own non-JSON renderers) never call
+> it, so a user selecting one of those output formats gets no
+> effective-configuration fingerprint at all. `compat check
+> --report-format json` also intentionally omits it: `compat/cli.py`
+> reuses `reporter.to_json` with `include_exit_decision=False` (its real
+> process exit follows the ABICC-style 0/1/2 scheme, not the native
+> gate/severity axes this digest describes), which
+> `TestCompatReportOmitsTheDigest` in `tests/test_effective_config_
+> digest.py` pins directly. Tests: `tests/test_effective_config_digest.py`
+> (both tiers directly, plus cross-report parity: two reports resolving
+> the identical configuration produce the identical digest regardless of
+> findings/library name, a policy override changes it, and the compat
+> exception above).
 >
 > **What remains open, deliberately not attempted in this slice, and why:**
 > the *first* still-open goal from the note above -- one shared
@@ -3509,10 +3563,65 @@ report.
 > from `TestGateBlanking` to assert the new, accurate provenance instead of
 > the old blanked-to-default one.
 
+> **PR B finalized (2026-08-28).** Both of PR B's own stated goals are fully
+> landed for every CLI command path: pack parity across `compare`, the
+> release fan-out, and `scan --against`, both `policy.overrides`/`surface.
+> internal_namespaces` *and* `gate.*` fields — slices 1-3 — plus the
+> effective-config digest reaching every native JSON report path in some
+> form (slice 4; **narrower than "every report", and narrower still than
+> "one uniform digest"**, Codex review, fresh evidence — see slice 4's own
+> section above for the exact scope: only the JSON report path calls
+> `add_effective_config_digest` at all — the Markdown/review/SARIF/
+> JUnit/HTML renderers don't, and `compat check --report-format json`
+> deliberately omits the field too — and even within JSON, the
+> directory/package release-summary report does not go through
+> `add_effective_config_digest`: its own `_release_summary_effective_
+> config_block` hashes `SeverityConfig` alone, so two releases differing
+> only by a policy pack or internal-namespace override can share an
+> identical release-summary digest even though their per-library sidecar
+> reports correctly differ — a real, open parity gap this status note does
+> not claim closed, kept open alongside the `GateOptions` item below).
+> **Narrower again once the typed
+> Python API is included**: `--pack`
+> is a CLI selector today (ADR-049 D8), and neither `ScanRequest` nor
+> `CompareRequest` carries a pack field a typed caller can set — `ScanRequest`
+> has none at all (`service_scan._resolve_api_evaluation_config` explicitly
+> resolves `pack_paths=()`, documented at that call site as "a `ScanRequest`
+> has no pack field"), and `CompareRequest` accepts only pre-resolved
+> `pack_policy_overrides`/`pack_internal_namespaces` (the `policy.overrides`/
+> `surface.internal_namespaces` halves), with no `gate.*` equivalent — so a
+> typed-API caller cannot reproduce a CLI `gate`-pack's severity/exit-code
+> configuration today (Codex review, PR #910, fresh evidence). Landing that
+> is its own, separate slice — a `pack_paths`/gate-pack field on both typed
+> requests, threaded through `PackApplication` the way the CLI receipts
+> already are — not implied by anything closed here. The one
+> remaining loose end named above — a typed `GateOptions` object the
+> release fan-out's own severity/exit-code-scheme resolution is built from,
+> replacing its six-raw-string threading — is deliberately **not** PR B's
+> to close. It was investigated in slice 4's own pass and found to need a
+> genuine rewrite of the release fan-out's internal representation, in the
+> single most reviewed area of this plan, immediately ahead of PR G2's own
+> not-yet-designed rewrite of the identical logic (the ADR-gated one-gate-
+> algorithm unification `--exit-code-scheme` removal needs) — building it
+> now risks colliding with a design that doesn't exist yet, rather than
+> simplifying ahead of it. Reassigned explicitly to PR G2 as one of *its*
+> prerequisites (see that section's own "(1) Pack parity" and "(2) One
+> canonical `ExitDecision`" pair below — the `GateOptions` unification
+> belongs with (2), since it's the same rewrite), not tracked as
+> outstanding PR B work. See the "Ordering" table at the bottom, which now
+> marks PR B **(DONE)** on this basis.
+
 This is also PR 1b/E's prerequisite, which is why it sits early in the
 reviewed ordering rather than inside PR 4.
 
-**(2) One canonical `ExitDecision` — the review's PR G proper.** Since #780
+**(2) One canonical `ExitDecision` — the review's PR G proper.** This
+prerequisite also inherits PR B's one deliberately-deferred item (see PR B's
+"finalized" note above): the release fan-out's own severity/exit-code-scheme
+resolution still threads six raw strings through four functions instead of
+one typed `GateOptions` object the way `compare`/`scan` already share via
+`ResolvedCompareConfig`. That rewrite belongs here, not as separate PR B
+follow-up, since it touches the identical exit-code-computation logic this
+`ExitDecision` unification is already rewriting. Since #780
 this is no longer two axes but a set of them, and a flat `max()` is not the
 whole rule: scan budget overflow (`5`) is scan-only, and so is a pinned depth
 whose evidence can't be collected (`_EvidenceContractError`, exit `1`); usage
@@ -3733,11 +3842,18 @@ slice that made it safe.
 ```text
 PR A  repository governance          = PR 0B — required checks / Ruleset,
                                        exact-merge-SHA verification
-PR B  effective configuration parity — packs resolved once into one
-                                       CompatibilityEvaluationConfig +
-                                       GateOptions, shared by compare /
-                                       release / scan / Action, digest in
-                                       every report
+PR B  effective configuration parity  — packs resolved once into one
+      (DONE)                           CompatibilityEvaluationConfig, pack
+                                       parity across every CLI command
+                                       path (typed-API parity is separate,
+                                       outstanding work), and an
+                                       effective-config digest in every
+                                       native JSON report (see PR B's own
+                                       section for the non-JSON/compat
+                                       exception); the release fan-out's own
+                                       typed GateOptions object is
+                                       deliberately reassigned to PR G2,
+                                       see PR B's own section for why
 PR C  typed dump+scan convergence     = PR 3A — DumpRequest →
                                        ResolvedDumpRequest → DumpResult, one
                                        resolver for dump CLI/Python/Action
