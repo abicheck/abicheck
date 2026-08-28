@@ -96,7 +96,17 @@ def _is_release_style_operand_source() -> str:
 # bash word-splitting broke a quoted gcc-options value into malformed
 # tokens) -- is defined immediately after add_flag() and is extracted in
 # the same slice, since it falls back to calling add_flag() itself.
-_ADD_FLAG_START = "add_flag() {"
+# _split_legacy_value() -- add_flag()'s own shared legacy-split helper
+# (Phase 8, PR #919: disables pathname/glob expansion for the unquoted
+# `for item in $value` split) -- is defined immediately *before* add_flag()
+# and must be captured in the same slice too: add_flag() calls it, and
+# starting the extraction at "add_flag() {" itself silently excluded it,
+# leaving the extracted region call an undefined function under `set -u`
+# (no error, since the script has no `set -e` -- it just silently produced
+# zero CMD entries instead of the real split, which is exactly how this
+# extraction bug was caught: two tests in this file that assert a non-empty
+# result started failing the moment _split_legacy_value existed).
+_ADD_FLAG_START = "_split_legacy_value() {"
 _ADD_FLAG_SHLEX_SPLIT_END = "\nadd_flag_shlex_split() {"
 _ADD_FLAG_END = "\n}\n"
 
@@ -487,14 +497,24 @@ class TestCompileContextForwardingParity:
     def test_gcc_options_glob_metacharacters_fail_loud_without_real_parser(
         self, tmp_path: Path
     ) -> None:
-        """Codex review, fresh evidence, third round: add_flag()'s own
-        unquoted `for item in $value` performs pathname (glob) EXPANSION,
-        not just whitespace splitting -- a value like `-DPATTERN=*` would
-        silently rewrite to whatever filenames exist in the current
-        directory (the analyzed, potentially PR-controlled checkout) at
-        the time this fallback runs. A value containing a glob
-        metacharacter must fail loud the same way a quoted/escaped one
-        does, not be treated as safe to fall back on."""
+        """Codex review, fresh evidence, third round: at the time this test
+        was written, add_flag()'s own unquoted `for item in $value`
+        performed pathname (glob) EXPANSION, not just whitespace splitting
+        -- a value like `-DPATTERN=*` would silently rewrite to whatever
+        filenames exist in the current directory (the analyzed, potentially
+        PR-controlled checkout) at the time this fallback runs, so a value
+        containing a glob metacharacter had to fail loud rather than be
+        treated as safe to fall back on.
+
+        add_flag() itself no longer glob-expands (Phase 8, PR #919 --
+        `_split_legacy_value`'s `set -f`; see
+        `test_add_flag_no_longer_glob_expands_after_the_fix` below for the
+        direct proof), but this refusal is kept as-is: `--compiler-option`
+        values have compiler-flag quoting semantics add_flag() was never
+        meant to interpret (that's the whole reason the real shlex-aware
+        parser exists), so refusing to guess here remains the conservative,
+        correct choice independent of whether the specific glob-expansion
+        vector is also closed one layer down."""
         env = {
             **_FULL_ENV,
             **self._env_with_unusable_python(tmp_path),
@@ -505,18 +525,24 @@ class TestCompileContextForwardingParity:
         assert "::error::" in result.stdout
         assert "glob metacharacters" in result.stdout
 
-    def test_without_the_fix_glob_expansion_actually_reproduces(
+    def test_add_flag_no_longer_glob_expands_after_the_fix(
         self, tmp_path: Path
     ) -> None:
-        """Proves the test above isn't vacuously passing -- add_flag()'s own
-        unquoted `for item in $value`, with no glob-metacharacter guard at
-        all, really does expand a glob pattern against files present in the
-        current directory rather than treating it as a literal value. The
-        whole token is the glob pattern (bash word-splits on whitespace
-        first, then glob-expands each resulting word), so the planted file
-        must match the *entire* value, matching the original finding's own
-        reproduction shape (a configured `-DPATTERN=*` rewritten by a
-        checked-out `-DPATTERN=x`)."""
+        """Direct regression pin for the Phase 8 fix (PR #919,
+        `_split_legacy_value`'s `set -f` in `action/run.sh`).
+
+        Until that fix, this same scenario -- a real file planted with the
+        exact glob pattern as its name, in add_flag()'s own working
+        directory -- demonstrated the opposite of what's asserted below:
+        add_flag()'s unquoted `for item in $value`, with no glob-
+        metacharacter guard of its own, really did expand the pattern
+        against a file present in the current directory rather than
+        treating it as a literal value (bash word-splits on whitespace
+        first, then glob-expands each resulting word, so the whole token is
+        the glob pattern here). That was the reproduction this test file's
+        sibling test above exists to defend a *different* code path
+        (`add_flag_shlex_split`'s fallback) against; this one exercises
+        add_flag() itself, which had no equivalent guard until this fix."""
         (tmp_path / "-DPATTERN=PLANTED_FILE").write_text("")
         script = (
             "CMD=()\n"
@@ -526,8 +552,8 @@ class TestCompileContextForwardingParity:
         )
         result = _run_bash_script(script, check=False, cwd=tmp_path, timeout=30)
         assert result.returncode == 0, result.stderr
-        assert "-DPATTERN=PLANTED_FILE" in result.stdout.splitlines()
-        assert "-DPATTERN=*" not in result.stdout.splitlines()
+        assert "-DPATTERN=PLANTED_FILE" not in result.stdout.splitlines()
+        assert "-DPATTERN=*" in result.stdout.splitlines()
 
     def test_gcc_options_malformed_quoting_fails_loud(self) -> None:
         """Codex review, fresh evidence, second round: split_gcc_options()
