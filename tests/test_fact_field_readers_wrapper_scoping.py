@@ -24,7 +24,8 @@ Split out as its own file (rather than appended to
 ``tests/test_fact_detector_misuse_def_time_scope.py`` was split out of
 ``test_fact_detector_misuse.py`` -- see that file's own docstring.
 
-Covers six independent Codex-review findings across three review rounds:
+Covers eleven independent Codex-review findings across several review
+rounds:
 
 1. **``_operator_attrgetter_aliases()`` seeded ``"attrgetter"``/``"operator"``
    unconditionally**, the same way ``_builtins_getattr_aliases()`` correctly
@@ -576,19 +577,28 @@ class TestImportedNamesShadowBuiltinRecognition:
     ) -> None:
         """Negative control: an unrelated import shadowing `getattr` in
         one function must not suppress detection of a genuine builtin
-        read in an unrelated sibling function."""
+        read in an unrelated sibling function. `g`'s own read goes
+        through `builtins.getattr` -- itself a recognized reader form --
+        rather than a bare, unrecognized call, so this test actually
+        exercises whether `f`'s own shadowing import incorrectly bleeds
+        into `g`'s scope, instead of trivially passing regardless of
+        scoping because neither function's call is recognized at all
+        (Codex review, fresh evidence)."""
         src = (
             "from helper import getattr\n"
             "def f(rec):\n"
             '    return getattr(rec, "bases")\n'
-            "def g(rec, other):\n"
-            '    return other(rec, "bases")\n'
+            "def g(rec):\n"
+            "    import builtins\n"
+            '    return builtins.getattr(rec, "bases")\n'
         )
         tree = ast.parse(src, filename="x.py")
         keys = [
             key for key, _l, _a, _q in unmigrated_fact_reader_sites(tree, "x.py", src)
         ]
-        assert keys == []
+        assert keys == [
+            'x.py::g::bases::builtins.getattr(rec, "bases")::builtins.getattr(rec, "bases")::1'
+        ]
 
     def test_a_bare_builtins_getattr_import_still_recognized(self) -> None:
         """The carve-out: `from builtins import getattr` is a genuine
