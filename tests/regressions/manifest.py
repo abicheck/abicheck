@@ -489,7 +489,7 @@ BUG_CLASSES: tuple[BugClass, ...] = (
             "bytes, and untrusted data cannot create additional commands, "
             "$GITHUB_OUTPUT records, paths, or side effects."
         ),
-        fixed_by=(705, 758, 836),
+        fixed_by=(705, 758, 836, 919),
         seed_tests=(
             "tests/test_reusable_workflow_execution.py",
             "tests/test_check_project_workflow_execution.py",
