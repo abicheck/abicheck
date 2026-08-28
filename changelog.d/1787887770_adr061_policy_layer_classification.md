@@ -3,9 +3,13 @@
 - **ADR-061 continuation: classified `export_surface.py` into the `policy`
   responsibility layer** in `architecture/modules.yaml`
   (`policy.legacy_paths` now holds 13 entries on the merged tree).
-  `export_surface.py`'s own imports resolve only to `model`/`compare`
-  (already-classified) — the exact set `policy`'s `may_import: [model,
-  compare]` allows. Nine further candidate modules
+  `export_surface.py`'s own cross-layer imports resolve only to `model`/
+  `compare` (already-classified) — the exact set `policy`'s
+  `may_import: [model, compare]` allows. It also imports `surface.py`
+  directly, but that's a same-layer (`policy` -> `policy`) import — `surface.py`
+  is itself already in `policy.legacy_paths` — which `may_import` doesn't
+  need to name explicitly, so it doesn't change the dependency set this
+  classification relies on. Nine further candidate modules
   (`policy_file.py`, `suppression.py`, `compatibility_evaluation_resolver.py`,
   `pack_application.py`, `contract_coverage_ledger.py`, `contract_gating.py`,
   `reclassify.py`, `checker_policy.py`, `pattern_verdicts.py`) were
