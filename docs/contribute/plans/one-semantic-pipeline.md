@@ -2644,6 +2644,63 @@ cap). New tests: `TestBoolOpResolvesWhenEveryOperandIsFactTyped` and
 test_fact_detector_misuse_alias_edge_cases.py` (410 lines, well under its
 own 1200-line cap).
 
+**Two more findings from the next review round, both bounded extensions of
+already-established mechanisms.** (1) `_iter_default_subtree()` -- the
+helper `_default_and_annotation_scope_overrides()` uses to attribute
+everything inside a `def`/`lambda`'s own default value or annotation to
+its def-time (enclosing) scope -- stops descending the moment it reaches
+any scope-introducing node, comprehensions included, since a comprehension
+genuinely creates its own new scope for its `elt`/later generators. But a
+comprehension's own *outermost* generator's iterable is the one
+established exception to that rule (the identical carve-out
+`_enclosing_qualnames`'s and `_lexical_function_parents`'s own
+comprehension handling already give the same construct, documented in
+their own docstrings): it evaluates in the scope enclosing the
+comprehension, before the comprehension's own implicit function is even
+called. `_iter_default_subtree()` never carried the same exception, so
+`fact = rec.bases_fact; def g(fact, cb=[x for x in (fact == other,)]):
+...` was silently missed -- the comparison sits inside exactly that
+exempt iterable, but the walk stopped at the `ListComp` boundary before
+ever reaching it. Fixed by giving `_iter_default_subtree()` the identical
+one-generator carve-out: on reaching a comprehension, its outermost
+iterable is pushed back onto the walk (still under the def-time scope this
+whole function exists to attribute), and everything else in the
+comprehension is left correctly opaque. The exception recurses through the
+walk's own stack the same way it already does in the two sibling
+functions, so a doubly-nested comprehension's own outermost iterable
+(itself nested two hops from the `def`) resolves correctly too, with no
+extra logic needed. (2) `_is_fact_typed_annotation()` had no case for a
+*stringized* (quoted) annotation -- `def f(old_fact: "Fact[list[str]]",
+other): return old_fact == other` -- a real, common spelling (required
+under `from __future__ import annotations` for anything evaluated lazily,
+and used ad hoc even without it to break an import cycle or reference a
+not-yet-defined name), invisible to every existing shape check since it
+parses as a bare `ast.Constant` string rather than any of the `Name`/
+`Subscript`/`BinOp` shapes the function already recognized. Fixed by
+parsing the string as an expression (`ast.parse(..., mode="eval")`) and
+recursing into the parsed body through the same function -- so the fix
+composes for free with every wrapper the function already handles
+(`Optional[...]`, `Union[...]`, the `X | None` PEP 604 spelling,
+`Annotated[...]`), rather than needing its own copy of that logic. A
+string that isn't valid Python at all (unrelated malformed input, not a
+forward-reference annotation) degrades to `False` rather than propagating
+a `SyntaxError`, matching every other best-effort parse in this module.
+
+Verified against both reported repros -- a doubly-nested comprehension
+variant and a lambda-default-body negative control (a genuine, ordinary
+scope boundary, unlike a comprehension's outermost iterable) for finding
+(1); a stringized annotation wrapped in `Optional[...]`, one using the
+PEP 604 `X | None` spelling, a malformed-string negative control, and an
+unrelated non-Fact stringized-annotation negative control for finding
+(2) -- all via direct AST reproduction before writing tests. Zero existing
+hits, `mypy`/`ruff` both stayed clean, `fact_detector_misuse.py` at 1683
+lines (well under the 2000-line hard cap). New tests:
+`TestDefaultComprehensionOutermostIterableStaysDefTimeScoped` and
+`TestStringizedFactAnnotationsAreRecognized`, both appended to `tests/
+test_fact_detector_misuse_def_time_scope.py` (1062 lines, well under its
+own 1200-line cap -- the natural home for both, since each is a def-time/
+annotation-scope fix, not a plain alias-resolution one).
+
 ---
 
 ### Phase 1 — finish the `dump`/`scan` typed-API convergence (closes AGENTS.md "PR C")

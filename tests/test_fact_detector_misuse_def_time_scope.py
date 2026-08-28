@@ -938,3 +938,125 @@ class TestWholeSubjectMatchCapturesAreAliases:
         )
         tree = ast.parse(src, filename="x.py")
         assert fact_equality_misuse_sites(tree, "x.py") == []
+
+
+class TestDefaultComprehensionOutermostIterableStaysDefTimeScoped:
+    """`_iter_default_subtree()`'s own stop-at-any-scope-boundary rule has
+    one exception, mirroring `_enclosing_qualnames`'s/
+    `_lexical_function_parents`'s identical carve-out for the same
+    construct: a comprehension's *outermost* generator's iterable
+    evaluates in the def-time scope, not the comprehension's own new one
+    -- `fact = rec.bases_fact; def g(fact, cb=[x for x in (fact ==
+    other,)]): ...` was silently missed because the comprehension itself
+    was treated as an opaque boundary the moment it was reached, before
+    ever descending into that one exempt iterable."""
+
+    def test_detects_a_comparison_in_the_outermost_iterable_of_a_default_comprehension(
+        self,
+    ) -> None:
+        src = (
+            "def f(rec, other):\n"
+            "    fact = rec.bases_fact\n"
+            "    def g(fact, cb=[x for x in (fact == other,)]):\n"
+            "        return cb\n"
+            "    return g\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert fact_equality_misuse_sites(tree, "x.py") == [(3, 32)]
+
+    def test_detects_a_comparison_through_a_double_hopped_nested_comprehension(
+        self,
+    ) -> None:
+        """The exception recurses: the *inner* comprehension's own
+        outermost iterable is itself the outer comprehension's outermost
+        iterable, so it too evaluates at def-time, two hops out."""
+        src = (
+            "def f(rec, other):\n"
+            "    fact = rec.bases_fact\n"
+            "    def g(fact, cb=[x for x in [y for y in (fact == other,)]]):\n"
+            "        return cb\n"
+            "    return g\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert fact_equality_misuse_sites(tree, "x.py") == [(3, 44)]
+
+    def test_still_detects_a_comparison_in_the_comprehension_elt_via_closure(
+        self,
+    ) -> None:
+        """Positive control, not a regression case: unlike the outermost
+        iterable, the `elt` genuinely runs in the comprehension's own new
+        scope -- but since that scope is itself created at def-time (while
+        `g` is still being defined) and declares no `fact` of its own, it
+        closes over the *def-time* scope's alias by ordinary lexical
+        scoping, so this must still be detected, just via the general
+        closure mechanism rather than this fix's own carve-out."""
+        src = (
+            "def f(rec, other):\n"
+            "    fact = rec.bases_fact\n"
+            "    def g(fact, cb=[fact == other for x in range(3)]):\n"
+            "        return cb\n"
+            "    return g\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert fact_equality_misuse_sites(tree, "x.py") == [(3, 20)]
+
+    def test_ignores_a_comparison_in_a_default_lambdas_own_body(self) -> None:
+        """Negative control: a `lambda` nested inside a default (unlike a
+        comprehension's outermost iterable) is a genuine, ordinary scope
+        boundary -- its own parameter legitimately shadows the outer
+        alias for its whole body, and must stay unflagged."""
+        src = (
+            "def f(rec, other):\n"
+            "    fact = rec.bases_fact\n"
+            "    def g(fact, cb=lambda fact: fact == other):\n"
+            "        return cb\n"
+            "    return g\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert fact_equality_misuse_sites(tree, "x.py") == []
+
+
+class TestStringizedFactAnnotationsAreRecognized:
+    """`_is_fact_typed_annotation()` recognizes a quoted/stringized
+    forward-reference annotation (`def f(old_fact: "Fact[list[str]]",
+    other): return old_fact == other`) by parsing the string literal as an
+    expression and recursing into it -- a real, common spelling (required
+    under `from __future__ import annotations` for anything evaluated
+    lazily, and used ad hoc even without it), invisible to every prior
+    shape check since it parses as a bare `ast.Constant` string."""
+
+    def test_detects_a_bare_stringized_fact_annotation(self) -> None:
+        src = (
+            'def f(old_fact: "Fact[list[str]]", other):\n    return old_fact == other\n'
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert fact_equality_misuse_sites(tree, "x.py") == [(2, 11)]
+
+    def test_detects_a_stringized_fact_annotation_wrapped_in_optional(
+        self,
+    ) -> None:
+        src = 'def f(old_fact: "Optional[Fact[int]]", other):\n    return old_fact == other\n'
+        tree = ast.parse(src, filename="x.py")
+        assert fact_equality_misuse_sites(tree, "x.py") == [(2, 11)]
+
+    def test_detects_a_stringized_fact_annotation_with_pep604_union(self) -> None:
+        src = 'def f(old_fact: "Fact[int] | None", other):\n    return old_fact == other\n'
+        tree = ast.parse(src, filename="x.py")
+        assert fact_equality_misuse_sites(tree, "x.py") == [(2, 11)]
+
+    def test_a_malformed_stringized_annotation_does_not_raise(self) -> None:
+        """Negative control: an annotation string that isn't valid Python
+        at all degrades to "not Fact-typed" rather than propagating a
+        `SyntaxError`, matching every other best-effort parse in this
+        module."""
+        src = 'def f(old_fact: "not: valid ( python", other):\n    return old_fact == other\n'
+        tree = ast.parse(src, filename="x.py")
+        assert fact_equality_misuse_sites(tree, "x.py") == []
+
+    def test_an_unrelated_stringized_annotation_does_not_misfire(self) -> None:
+        """Negative control: an ordinary stringized non-Fact annotation
+        (`"int"`) must not be treated as Fact-typed just because it's a
+        string."""
+        src = 'def f(x: "int", other):\n    return x == other\n'
+        tree = ast.parse(src, filename="x.py")
+        assert fact_equality_misuse_sites(tree, "x.py") == []

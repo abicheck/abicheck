@@ -307,9 +307,28 @@ def _is_fact_typed_annotation(
     fresh evidence: `def f(value: Fact[int] | None, other): return value
     == other` produced no finding at all, since only a bare `Fact` or a
     subscript whose own value was `Fact` was ever recognized).
+
+    Also recognizes a *stringized* (quoted) annotation -- `def f(old_fact:
+    "Fact[list[str]]", other): return old_fact == other` (Codex review,
+    fresh evidence). A forward-reference annotation written as a string
+    literal is a real, common spelling -- required under `from __future__
+    import annotations` for anything evaluated lazily, and used ad hoc
+    even without it to break an import cycle or reference a not-yet-defined
+    name -- and it parses as a bare `ast.Constant` string, invisible to
+    every shape check above. Parsed once via `ast.parse(..., mode="eval")`
+    and recursed into on success; a string that isn't a valid expression at
+    all (ordinary prose docstring-shaped text mistakenly typed as an
+    annotation, unrelated malformed input) degrades to `False` rather than
+    raising, matching every other best-effort parse in this module.
     """
     if annotation is None:
         return False
+    if isinstance(annotation, ast.Constant) and isinstance(annotation.value, str):
+        try:
+            parsed = ast.parse(annotation.value, mode="eval")
+        except SyntaxError:
+            return False
+        return _is_fact_typed_annotation(parsed.body, fact_names)
     if isinstance(annotation, ast.Name):
         return annotation.id in fact_names
     if isinstance(annotation, ast.BinOp) and isinstance(annotation.op, ast.BitOr):
@@ -1463,11 +1482,33 @@ def _iter_default_subtree(node: ast.AST) -> Iterator[ast.AST]:
     (the `Lambda`/`FunctionDef`/comprehension itself) is still yielded --
     harmless, since only an `ast.Compare` id is ever looked up in the
     resulting map -- just never expanded past.
+
+    **A comprehension's own *outermost* generator's iterable is the one
+    exception to that stop rule (Codex review, fresh evidence): `fact =
+    rec.bases_fact; def g(fact, cb=[x for x in (fact == other,)]): ...`
+    was silently missed.** A comprehension's outermost iterable evaluates
+    in whatever scope encloses the comprehension itself -- here, the same
+    def-time scope this whole function exists to attribute defaults to --
+    before the comprehension's own implicit function is even called
+    (`g`'s own parameter `fact` does not yet exist to shadow anything at
+    that point). Treating the comprehension as an opaque scope boundary
+    the moment it is reached (the general rule above) stopped before ever
+    descending into that iterable, so the comparison nested inside it kept
+    reading as `g`'s own body scope instead of the enclosing one -- the
+    identical "outermost iterable is not really part of the new scope"
+    exception `_enclosing_qualnames`'s and `_lexical_function_parents`'s
+    own comprehension handling already carve out, applied here too.
     """
     stack = [node]
     while stack:
         current = stack.pop()
         yield current
+        if isinstance(
+            current, (ast.ListComp, ast.SetComp, ast.DictComp, ast.GeneratorExp)
+        ):
+            if current.generators:
+                stack.append(current.generators[0].iter)
+            continue
         if isinstance(current, _SCOPE_INTRODUCING_NODE_TYPES):
             continue
         stack.extend(ast.iter_child_nodes(current))
