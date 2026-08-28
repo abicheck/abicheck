@@ -1261,6 +1261,66 @@ def _scope_chain_union(
     return result
 
 
+def _resolve_effective_fact_names(
+    qualname: str,
+    fact_names: frozenset[str],
+    locally_bound_shadows: dict[str, set[str]],
+    constructor_aliases: dict[str, set[str]],
+    lexical_parents: dict[str, str],
+    global_names: dict[str, set[str]] | None = None,
+) -> frozenset[str]:
+    """The combined "what does the bare identifier `Fact` (or a
+    constructor alias of it) mean at *qualname*" resolution both the
+    constructor-call path and the annotation-recognition path need --
+    replaces treating the shadow subtraction and the alias addition as
+    two *independent* `_scope_chain_union()` walks, which was itself a
+    real bug (Codex review, fresh evidence): `F = Fact; def f(F, other):
+    return F(1) == other` -- `f`'s own parameter `F` is recorded as a
+    shadow at `f`'s own scope, but the old alias-union walk unioned in
+    *every* ancestor's own `constructor_aliases` unconditionally,
+    re-adding `outer`'s `F` alias regardless of `f`'s own nearer shadow,
+    so a call through the unrelated local parameter was still flagged.
+
+    A single combined walk, nearest-scope-wins *per name*: starting at
+    *qualname* and climbing `lexical_parents`, the *first* scope that
+    mentions a given name -- as either a shadow or a constructor alias
+    -- decides what that name means for every scope in between (a
+    farther ancestor's mention of the same name is never consulted).
+    Within one scope, a constructor-alias mention is checked before a
+    shadow mention, so `F = Fact` (which the shadow collector also
+    records as an ordinary local binding, since it collects *every*
+    assignment target unconditionally) still resolves to "alias" at its
+    *own* defining scope, not "shadow" -- the more specific answer wins
+    the same-scope tie. `global_names` is the identical bypass exception
+    `_scope_chain_union()` already documents: a name declared `global`
+    routes straight to module scope, skipping every intervening
+    ancestor's shadow *and* alias mentions alike.
+    """
+    routed_to_module = global_names.get(qualname, set()) if global_names else set()
+    decided: dict[str, bool] = {}
+    seen: set[str] = set()
+    current: str | None = qualname
+    while current is not None and current not in seen:
+        seen.add(current)
+        is_module = current == "<module>"
+        for name in constructor_aliases.get(current, set()):
+            if not is_module and name in routed_to_module:
+                continue
+            decided.setdefault(name, True)
+        for name in locally_bound_shadows.get(current, set()):
+            if not is_module and name in routed_to_module:
+                continue
+            decided.setdefault(name, False)
+        current = lexical_parents.get(current)
+    result = set(fact_names)
+    for name, is_alias in decided.items():
+        if is_alias:
+            result.add(name)
+        else:
+            result.discard(name)
+    return frozenset(result)
+
+
 def _constructor_alias_names(
     tree: ast.Module,
     qualnames: _QualnameSpans,

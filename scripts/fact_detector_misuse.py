@@ -83,7 +83,7 @@ from fact_detector_misuse_scope import (  # noqa: E402
     _lexical_function_parents,
     _locally_bound_constructor_shadow_names,
     _qualname_at,
-    _scope_chain_union,
+    _resolve_effective_fact_names,
 )
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -287,20 +287,35 @@ def fact_equality_misuse_sites(tree: ast.Module, rel: str) -> list[tuple[int, in
         # same gap -- a real local alias of the constructor itself
         # (`_constructor_alias_names()`), not merely a shadow -- so it's
         # *added* into the effective set the same way a shadow is
-        # subtracted from it; both walk the real closure-scope chain via
-        # `_scope_chain_union()`, see `_locally_bound_constructor_
-        # shadow_names()`/`_constructor_alias_names()`'s own docstrings
-        # for exactly which binding forms each covers.
-        effective_fact_names = fact_names - _scope_chain_union(
-            qualname, locally_bound_shadows, lexical_parents, global_names
-        ) | _scope_chain_union(qualname, constructor_aliases, lexical_parents)
+        # subtracted from it. `_resolve_effective_fact_names()` resolves
+        # both in one combined, nearest-scope-wins walk rather than two
+        # independent `_scope_chain_union()` calls -- a real bug the
+        # independent-walk version had (Codex review, fresh evidence):
+        # `F = Fact; def f(F, other): return F(1) == other` -- `f`'s own
+        # parameter `F` shadows the outer alias, but an unconditional
+        # alias-union re-added it from the ancestor scope regardless.
+        effective_fact_names = _resolve_effective_fact_names(
+            qualname,
+            fact_names,
+            locally_bound_shadows,
+            constructor_aliases,
+            lexical_parents,
+            global_names,
+        )
         if _is_fact_typed_expr(node, effective_fact_names):
             return True
         if (
             isinstance(node, ast.Call)
             and isinstance(node.func, ast.Name)
             and node.func.id
-            in _scope_chain_union(qualname, constructor_method_aliases, lexical_parents)
+            in _resolve_effective_fact_names(
+                qualname,
+                frozenset(),
+                locally_bound_shadows,
+                constructor_method_aliases,
+                lexical_parents,
+                global_names,
+            )
         ):
             # `make_fact = Fact.present; make_fact(1) == other` -- a
             # direct call through a local name bound to an *unbound
@@ -308,7 +323,16 @@ def fact_equality_misuse_sites(tree: ast.Module, rel: str) -> list[tuple[int, in
             # (`_constructor_method_alias_names()`'s own docstring: this
             # is why it's a separate set, never folded into
             # `effective_fact_names`, which participates in the general
-            # `Attribute`-call recognition too).
+            # `Attribute`-call recognition too). Resolved through the
+            # identical nearest-scope-wins machinery as the bare-alias
+            # case above -- an unconditional union had the same bug here
+            # (Codex review, fresh evidence, verified as a sibling of the
+            # reported finding): `make_fact = Fact.present; def f(make_
+            # fact, other): return make_fact(1) == other` -- `f`'s own
+            # parameter shadows the outer classmethod alias too. `frozenset()`
+            # as the base set, since there's no separate "fact_names"
+            # concept here -- only ever asking "is this exact name a live
+            # classmethod alias at this scope."
             return True
         if isinstance(node, ast.Name):
             return node.id in aliases.get(qualname, ())

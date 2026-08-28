@@ -5490,6 +5490,90 @@ ever found in the real codebase (this scan still has zero baseline
 hits), revisit then with a concrete case in hand rather than a
 synthetic one.
 
+**A further round found two Codex findings against the same commit that
+both traced back to one root cause**: the constructor-alias-addition
+step (`F = Fact`) was folded into the effective `fact_names` set via an
+*independent* `_scope_chain_union()` walk from the shadow-subtraction
+step, rather than one combined, nearest-scope-wins resolution.
+
+(A) **Annotation recognition never consulted constructor aliases at
+all** (Codex review, fresh evidence): `F = Fact; def f(value: F,
+other): return value == other` -- `value`'s annotation names `F`, a
+genuine constructor alias, but `_fact_aliases()`'s own `_effective_
+fact_names()` closure only ever subtracted shadows from the raw,
+whole-tree `fact_names` set; it never added constructor aliases the
+constructor-*call* path already folds in. Reproduced directly (0 hits,
+expected 1) before designing a fix.
+
+(B) **An unconditional alias union re-added an alias a nearer scope
+shadows** (Codex review, fresh evidence): `F = Fact; def f(F, other):
+return F(1) == other` -- `f`'s own parameter `F` is an ordinary,
+unrelated local reusing the outer alias's name, but the old
+`_scope_chain_union(qualname, constructor_aliases, lexical_parents)`
+walk unioned in *every* ancestor's own aliases unconditionally,
+re-adding `outer`'s `F` alias regardless of `f`'s own nearer shadow --
+a real false positive. Reproduced directly (1 hit, expected 0) before
+designing a fix. **Proactive sibling verification (per this repo's
+established discipline) found an identical, unreported bug in
+`_constructor_method_alias_names()`**: `make_fact = Fact.present; def
+f(make_fact, other): return make_fact(1) == other` had the exact same
+symptom, since that check was also a separate, unconditional
+`_scope_chain_union()` walk with no shadow awareness.
+
+Both findings share the identical fix: a new shared primitive,
+`_resolve_effective_fact_names()` (`fact_detector_misuse_scope.py`,
+right after `_scope_chain_union()`), that folds shadow-subtraction and
+alias-addition into ONE combined walk from a starting qualname up
+through `lexical_parents` -- the *first* (nearest) scope that mentions
+a given name, either as a shadow or as a constructor alias, decides
+what that name means for every scope between it and the starting
+qualname; a farther ancestor's mention of the same name is never
+consulted (`dict.setdefault`-based, so the first write per name wins).
+Within one scope, a constructor-alias mention is checked *before* a
+shadow mention -- necessary because the shadow collector records every
+assignment target unconditionally (including `F` in `F = Fact` itself),
+so without this ordering the alias's own defining scope would
+incorrectly read as "shadowed" rather than "aliased." The identical
+`global_names` bypass `_scope_chain_union()` already established
+composes unchanged: a globally-declared name still routes straight to
+module scope, skipping every intervening scope's shadow *and* alias
+mentions alike.
+
+Wired into three call sites: `is_fact_typed()`'s own `effective_fact_
+names` (replacing the two independent `_scope_chain_union()` calls),
+the classmethod-alias direct-call check (previously its own separate
+`_scope_chain_union()` membership test -- now `_resolve_effective_fact_
+names()` called with an empty `fact_names` base, since that check needs
+no base set, only "is this exact name a live classmethod alias here"),
+and `_fact_aliases()`'s own `_effective_fact_names()` closure (which now
+also computes `_constructor_alias_names()` internally, since annotation
+resolution has its own independent `qualnames`/`lexical_parents` and
+needed the same alias data the constructor-call path already had).
+`_scope_chain_union()` itself is now unused in `fact_detector_misuse.py`
+and `fact_detector_misuse_aliases.py` (both imports removed) but remains
+in active use elsewhere in the scope module.
+
+Verified via direct AST reproduction against 15 cases before writing
+tests: both reported findings, the classmethod-alias sibling, both
+alias forms still recognized without a shadow present, the alias still
+recognized at its *own* defining scope (the same-scope tie-break),
+an alias-annotation shadowed by a sibling nested parameter, a nested
+closure inheriting an alias into its own annotation, the `AnnAssign`
+annotation form, generic-specialized (`F[int]`) annotations, and five
+pre-existing regressions (real `Fact` annotation, renaming-import
+shadow in annotation, global bypass composing with annotations, bare
+constructor, parameter-shadow-of-`Fact`-itself). `mypy`/`ruff` both
+stayed clean; `fact_detector_misuse.py` at 401 lines,
+`fact_detector_misuse_aliases.py` at 1645 lines,
+`fact_detector_misuse_scope.py` at 1520 lines (newly past the 1500-line
+*soft* limit -- a WARN, not an ERROR, with ample headroom left under
+the 2000-line hard cap). New tests: a new dedicated file,
+`tests/test_fact_detector_misuse_nearest_scope_alias.py` (15 tests,
+`TestAnnotationRecognitionConsultsConstructorAliases` +
+`TestNearestScopeWinsForConstructorAliases`) -- a new file rather than
+appending to `test_fact_detector_misuse_constructor_shadow.py`, which
+had grown to 1049/1200 lines and was getting tight.
+
 ---
 
 ### Phase 1 — finish the `dump`/`scan` typed-API convergence (closes AGENTS.md "PR C")

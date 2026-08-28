@@ -47,6 +47,7 @@ if str(Path(__file__).resolve().parent) not in sys.path:
 from fact_detector_misuse_scope import (  # noqa: E402
     _FACT_CONSTRUCTOR_METHOD_NAMES,
     _bound_names,
+    _constructor_alias_names,
     _def_containing_qualnames,
     _global_declared_names,
     _iter_default_subtree,
@@ -57,7 +58,7 @@ from fact_detector_misuse_scope import (  # noqa: E402
     _paired_unpacking_candidates,
     _qualname_at,
     _QualnameSpans,
-    _scope_chain_union,
+    _resolve_effective_fact_names,
 )
 
 FACT_FIELD_NAMES: frozenset[str] = frozenset(
@@ -633,10 +634,36 @@ def _fact_aliases(tree: ast.Module, qualnames: _QualnameSpans) -> dict[str, set[
     # Reused here rather than duplicated for the annotation checks.
     _annotation_shadows = _locally_bound_constructor_shadow_names(tree, qualnames)
     _annotation_globals = _global_declared_names(tree, qualnames)
+    # `F = Fact; def f(value: F[int], other): return value == other`
+    # (Codex review, fresh evidence): a constructor *alias* is exactly as
+    # Fact-typed in annotation position as the real `Fact` name itself,
+    # but this closure previously only ever subtracted shadows -- it
+    # never added constructor aliases the way the constructor-*call*
+    # path already does. Computed here (rather than reusing a value
+    # threaded in from `fact_equality_misuse_sites()`) since this
+    # function has its own independent `qualnames`/`lexical_parents`
+    # already in scope, and `_resolve_effective_fact_names()` folds the
+    # shadow-subtraction and alias-addition into one combined,
+    # nearest-scope-wins walk -- the identical primitive the
+    # constructor-call path uses, so the two paths cannot silently
+    # disagree about what a given name means at a given scope.
+    _annotation_constructor_aliases = _constructor_alias_names(
+        tree,
+        qualnames,
+        fact_names,
+        _annotation_shadows,
+        lexical_parents,
+        _annotation_globals,
+    )
 
     def _effective_fact_names(qualname: str) -> frozenset[str]:
-        return fact_names - _scope_chain_union(
-            qualname, _annotation_shadows, lexical_parents, _annotation_globals
+        return _resolve_effective_fact_names(
+            qualname,
+            fact_names,
+            _annotation_shadows,
+            _annotation_constructor_aliases,
+            lexical_parents,
+            _annotation_globals,
         )
 
     aliases: dict[str, set[str]] = {}
