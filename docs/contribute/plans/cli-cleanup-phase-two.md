@@ -2385,9 +2385,17 @@ pipelines a fourth time.
   > required, and `castxml_policy.evaluate_castxml_version()` confirms
   > `supported=True` against its real `--version` output. **Any future note
   > in this section needing a policy-compliant castxml should run
-  > `action/install-castxml.sh` first, not reach for `apt`/`pip`/conda-forge
-  > by hand** — those three all genuinely fail the way the replaced
-  > paragraph described, but the working answer was already checked in.
+  > `action/install-castxml.sh` first, rather than reassembling one from
+  > `apt`/`pip`/conda-forge by hand** — `apt`'s own package genuinely fails
+  > the version floor, and `pip`'s only wheel is far below it too, but
+  > conda-forge itself is not unusable: the 2026-08-27 note below this one
+  > records a working conda-forge 0.7.0 install (`supported=True`), and the
+  > CI `integration` lane's own Windows leg installs castxml from
+  > conda-forge. What actually failed in *this* session was one manual
+  > dependency-assembly attempt (a missing `libclang-cpp.so.20.1` payload
+  > from the obvious conda-forge counterpart package) — not conda-forge as a
+  > source. Either route can work; the pinned installer is just faster and
+  > doesn't require re-solving that dependency split by hand.
   >
   > With that installer's castxml on `PATH`, `tests/
   > test_dump_write_after_resolve_time_embed.py`'s three cases — previously
