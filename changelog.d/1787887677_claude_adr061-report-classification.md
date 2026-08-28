@@ -1,16 +1,19 @@
 ### Changed
 
-- **Four root-level report-formatting modules are now classified `report`**
-  (ADR-061): `html_template.py`, `junit_coverage_warnings.py`,
-  `report_classifications.py`, `report_correlation.py`. (Fourteen
-  candidates were reviewed in total; six were classified `report` and then
-  reverted after Codex review found they compute policy/gate decisions
-  rather than only rendering an already-computed result — see below.
-  `appcompat_html.py`, `sarif.py`, `stack_html.py`, `stack_report.py` were
-  already `report`-classified on `main` by other, already-merged ADR-061
-  PRs by the time this one was rebased, so they are not new entries from
-  this diff even though they were part of the original fourteen-candidate
-  review pass.) Pure data-only ledger change to `architecture/modules.yaml`
+- **Four root-level report-formatting modules are now classified `report`
+  by this PR's own diff** (ADR-061): `html_template.py`,
+  `junit_coverage_warnings.py`, `report_classifications.py`,
+  `report_correlation.py`. (Fourteen candidates were reviewed in total; six
+  were classified `report` and then reverted after Codex review found they
+  compute policy/gate decisions rather than only rendering an
+  already-computed result — see below, and see further below for why the
+  merged state on `main` carries all six of them anyway, via a sibling
+  PR. `appcompat_html.py`, `sarif.py`, `stack_html.py`, `stack_report.py`
+  were already `report`-classified on `main` by other, already-merged
+  ADR-061 PRs by the time this one was first rebased, so they are not new
+  entries from this diff even though they were part of the original
+  fourteen-candidate review pass.) Pure data-only ledger change to
+  `architecture/modules.yaml`
   — 0 architecture errors both before and after; none of these four import
   anything outside `report`'s allowed targets (`model`, `compare`, `policy`,
   `workflows`) once their own unclassified-but-harmless dependencies
@@ -68,16 +71,33 @@
     the identical decision function `report_model.py` above reaches one hop
     removed.
 
-  These six are left unclassified rather than force-classified either way
-  — a correct fix would split the gate/severity computation out into
-  `policy`/`workflows` and have the renderer consume the resolved decision,
-  which is a real code change, not a ledger edit, and out of scope for this
-  PR. `sarif.py` (already `report`-classified on `main`, not touched by
-  this diff) has the identical shape (`classify_effective_change`,
-  `gate_contribution_for_change`, `compute_gate_decision` all called
-  directly) and is likely a pre-existing instance of the same issue —
-  flagged here for visibility, not reclassified, since it isn't part of
-  this PR's own diff.
+  This PR itself left these six unclassified rather than force-classifying
+  them either way — a correct fix would split the gate/severity computation
+  out into `policy`/`workflows` and have the renderer consume the resolved
+  decision, which is a real code change, not a ledger edit, and out of scope
+  for this PR. **They are classified `report` in the merged state anyway**:
+  a sibling ADR-061 PR (`764ebe4a2`, "classify 22 more flat modules") landed
+  on `main` first and swept all fourteen of the original candidates into
+  `report` — including these same six, plus `pr_comment.py`/
+  `pr_comment_base.py`/`pr_comment_scan.py`/`root_cause_evidence.py` — using
+  only `check_architecture.py`'s import-direction check as its verification,
+  which cannot see this role-mismatch concern (`report`'s `may_import`
+  already includes `policy`, so a report module calling straight into
+  `severity.py`/`reclassify.py`/`exit_decision.py` produces no forbidden
+  edge either way). Rebasing this PR onto that state via a plain merge
+  therefore carries all six back in through `architecture/modules.yaml`'s
+  `report.legacy_paths`, unioned with this PR's own four — resolved that
+  way per this session's own instructions (union on conflict, remove only
+  on a genuine new `check_architecture.py` error, which this merge does not
+  produce). The role-mismatch finding above stands as documented reasoning
+  either way; closing it for real still needs the same policy/workflows
+  split this paragraph already describes, not a ledger reshuffle in either
+  direction. `sarif.py` (already `report`-classified on `main` before this
+  PR, not touched by this diff) has the identical shape
+  (`classify_effective_change`, `gate_contribution_for_change`,
+  `compute_gate_decision` all called directly) and is likely a further
+  pre-existing instance of the same issue — flagged here for visibility,
+  not reclassified, since it isn't part of this PR's own diff.
 
   `report_classifications.py` was *also* named in the same Codex finding
   that flagged `report_model.py`/`report_summary.py` above, but reading it
