@@ -555,17 +555,62 @@ def _builtins_getattr_aliases(
     return frozenset(getattr_names), frozenset(builtins_names)
 
 
-def _is_attrgetter_constructor_call(node: ast.expr) -> bool:
+def _operator_attrgetter_aliases(
+    tree: ast.Module,
+) -> tuple[frozenset[str], frozenset[str]]:
+    """Return `(attrgetter_names, operator_module_names)`: every local name
+    *tree* binds to the real `operator.attrgetter` callable (always
+    includes the bare `"attrgetter"` itself, plus any `from operator import
+    attrgetter as X`), and every local name bound to the `operator` module
+    itself (always includes the bare `"operator"`, plus any `import
+    operator as X`).
+
+    An ordinary `import operator as op` or `from operator import attrgetter
+    as ag` reads the identical legacy field as the unaliased spellings
+    (Codex review, fresh evidence): `op.attrgetter("bases")(rec)`/
+    `ag("bases")(rec)` are real, unremarkable Python, and the caller's own
+    exact-name matching (`"operator"`/`"attrgetter"` only) missed both --
+    the identical gap `_builtins_getattr_aliases()` above closes for
+    `getattr`/`builtins`, applied to this pair instead. Deliberately no
+    assignment-chain resolution the way that function's own multi-round
+    evolution eventually added (`read_attr = getattr`, `b = builtins`,
+    `read_attr = builtins.getattr`) -- only the two `import`-form aliases
+    reported here are covered; a plain-assignment alias of either name is
+    still out of scope, matching `_is_attrgetter_constructor_call`'s own
+    "no local-alias resolution for `attrgetter`" stance (a `Call`-typed
+    value has no simple `ast.Name`-only assignment shape to chain through
+    the way a bare callable/module reference does).
+    """
+    attrgetter_names = {"attrgetter"}
+    operator_names = {"operator"}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom) and node.module == "operator":
+            for alias in node.names:
+                if alias.name == "attrgetter":
+                    attrgetter_names.add(alias.asname or alias.name)
+        elif isinstance(node, ast.Import):
+            for alias in node.names:
+                if alias.name == "operator":
+                    operator_names.add(alias.asname or alias.name)
+    return frozenset(attrgetter_names), frozenset(operator_names)
+
+
+def _is_attrgetter_constructor_call(
+    node: ast.expr, attrgetter_names: frozenset[str], operator_names: frozenset[str]
+) -> bool:
     """True for a `Call` node constructing an `operator.attrgetter(...)`
-    getter -- either the qualified spelling (`operator.attrgetter(...)`) or
-    the bare one reachable via `from operator import attrgetter`, with at
-    least one positional argument (the attribute name(s) to read). The
-    caller is responsible for checking that the first argument is a
-    literal, single-name string matching a recognized field -- this helper
-    only recognizes the *constructor*, not the field it will read. Deliber-
-    ately no alias tracking for `attrgetter` itself (no `x = attrgetter`
-    equivalent of `_builtins_getattr_aliases()` above) -- a two-step
-    `getter = attrgetter(...); getter(rec)` indirection through an
+    getter -- the qualified spelling through any resolved alias of the
+    `operator` module (`operator_names`), or the bare spelling through any
+    resolved alias of `attrgetter` itself (`attrgetter_names`, always
+    covering `from operator import attrgetter` and its own `as` alias, see
+    `_operator_attrgetter_aliases`) -- with at least one positional
+    argument (the attribute name(s) to read). The caller is responsible for
+    checking that the requested arguments are literal, single-name strings
+    matching a recognized field -- this helper only recognizes the
+    *constructor*, not the field(s) it will read. Deliberately no alias
+    tracking for a *value* assigned from a constructed getter (no `x =
+    attrgetter` equivalent of `_builtins_getattr_aliases()` above) -- a
+    two-step `getter = attrgetter(...); getter(rec)` indirection through an
     intermediate variable is out of scope, the same "no type inference"
     limit this whole scan already accepts elsewhere.
     """
@@ -576,9 +621,9 @@ def _is_attrgetter_constructor_call(node: ast.expr) -> bool:
                 isinstance(node.func, ast.Attribute)
                 and node.func.attr == "attrgetter"
                 and isinstance(node.func.value, ast.Name)
-                and node.func.value.id == "operator"
+                and node.func.value.id in operator_names
             )
-            or (isinstance(node.func, ast.Name) and node.func.id == "attrgetter")
+            or (isinstance(node.func, ast.Name) and node.func.id in attrgetter_names)
         )
         and len(node.args) >= 1
     )
@@ -718,22 +763,33 @@ def unmigrated_fact_reader_sites(
     **Two more standard dynamic-attribute-reading forms are detected too
     (Codex review, fresh evidence).** `operator.attrgetter("bases")(rec)`
     (or the bare `attrgetter(...)` spelling reached via `from operator
-    import attrgetter`) and `rec.__getattribute__("bases")`/`object.
-    __getattribute__(rec, "bases")` both read `rec.bases` exactly as much
-    as the attribute/`getattr()` forms above do -- `getattr()` is itself
-    defined in terms of `__getattribute__`, and `attrgetter` is the
-    standard-library callable-returning equivalent. Both stay scoped to
-    the same "no type inference" limit as the rest of this scan: only a
-    single, literal-string field name is recognized (`attrgetter("a.b")`,
-    which chains a *second* attribute access, is out of scope, same as a
-    non-literal `getattr()` default) -- see `_is_attrgetter_constructor_
-    call()`'s own docstring for why `attrgetter` itself, unlike `getattr`,
-    gets no local-alias resolution.
+    import attrgetter`, or an `import operator as op`/`from operator import
+    attrgetter as ag` alias of either -- resolved via `_operator_attrgetter_
+    aliases()`, the identical import-alias mechanism `_builtins_getattr_
+    aliases()` already provides for `getattr`/`builtins`) and `rec.
+    __getattribute__("bases")`/`object.__getattribute__(rec, "bases")` both
+    read `rec.bases` exactly as much as the attribute/`getattr()` forms
+    above do -- `getattr()` is itself defined in terms of `__getattribute__`,
+    and `attrgetter` is the standard-library callable-returning equivalent.
+    `attrgetter` additionally accepts *any number* of positional field
+    names and reads every one of it -- `attrgetter("size_bits", "bases")
+    (rec)` reads `bases` too, not only the first argument (Codex review,
+    fresh evidence) -- so every literal, string-constant argument matching
+    a bridged name is inspected and reported independently, handled as its
+    own top-level case rather than folded into the single-attribute chain
+    below. Both dynamic forms stay scoped to the same "no type inference"
+    limit as the rest of this scan: only a literal-string field name is
+    recognized per argument (`attrgetter("a.b")`, which chains a *second*
+    attribute access, is out of scope, same as a non-literal `getattr()`
+    default) -- see `_is_attrgetter_constructor_call()`'s own docstring for
+    why a *value* assigned from a constructed getter, unlike `getattr`
+    itself, gets no local-alias resolution.
     """
     qualnames = _enclosing_qualnames(tree)
     parents = _parent_map(tree)
     class_aliases = _imported_class_aliases(tree)
     getattr_names, builtins_names = _builtins_getattr_aliases(tree)
+    attrgetter_names, operator_names = _operator_attrgetter_aliases(tree)
 
     def _expr_text(node: ast.AST) -> str:
         outer = _outermost_containing_expr(node, parents)
@@ -794,6 +850,49 @@ def unmigrated_fact_reader_sites(
                     )
                 )
             continue
+        if (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Call)
+            and _is_attrgetter_constructor_call(
+                node.func, attrgetter_names, operator_names
+            )
+        ):
+            # `operator.attrgetter("bases")(rec)` (or a resolved alias of
+            # either name) is a dynamic equivalent of `rec.bases` built in
+            # two calls: the inner one constructs the getter, the outer
+            # one applies it. Handled as its own top-level case (like
+            # `MatchClass` above), not folded into the single-attribute
+            # chain below, since `attrgetter` accepts *any number* of
+            # positional field names and reads every one of them (Codex
+            # review, fresh evidence: `attrgetter("size_bits", "bases")
+            # (rec)` reads `bases` too, not only the first argument) --
+            # each literal, string-constant argument matching a bridged
+            # name is its own real read, reported independently. A
+            # non-literal or dotted-name argument (`attrgetter("a.b")`,
+            # chaining a *second* attribute access) stays out of scope,
+            # the same "no type inference" limit the plain `getattr` case
+            # already accepts for a non-literal default.
+            outer_text = (
+                ast.get_source_segment(source, node) if source else None
+            ) or "<unavailable>"
+            qualname = qualnames.get(node.lineno, "<module>")
+            for call_arg in node.func.args:
+                if (
+                    isinstance(call_arg, ast.Constant)
+                    and isinstance(call_arg.value, str)
+                    and call_arg.value in FACT_BRIDGED_ATTRS
+                ):
+                    matches.append(
+                        (
+                            node.lineno,
+                            node.col_offset,
+                            call_arg.value,
+                            qualname,
+                            outer_text,
+                            outer_text,
+                        )
+                    )
+            continue
         record_node: ast.expr
         if (
             isinstance(node, ast.Attribute)
@@ -837,26 +936,6 @@ def unmigrated_fact_reader_sites(
             and node.args[1].value in FACT_BRIDGED_ATTRS
         ):
             attr = node.args[1].value
-            record_node = node
-        elif (
-            isinstance(node, ast.Call)
-            and isinstance(node.func, ast.Call)
-            and _is_attrgetter_constructor_call(node.func)
-            and isinstance(node.func.args[0], ast.Constant)
-            and isinstance(node.func.args[0].value, str)
-            and node.func.args[0].value in FACT_BRIDGED_ATTRS
-        ):
-            # `operator.attrgetter("bases")(rec)` (or the bare `attrgetter
-            # (...)` spelling reached via `from operator import
-            # attrgetter`) is a dynamic equivalent of `rec.bases` built in
-            # two calls: the inner one constructs the getter, the outer
-            # one applies it (Codex review, fresh evidence). Only the
-            # single-name-argument form is recognized -- `attrgetter
-            # ("a.b")` chains a *second* attribute access this scan can't
-            # resolve statically, the same "no type inference" limit the
-            # plain `getattr` case already accepts for a non-literal
-            # default.
-            attr = node.func.args[0].value
             record_node = node
         elif (
             isinstance(node, ast.Call)

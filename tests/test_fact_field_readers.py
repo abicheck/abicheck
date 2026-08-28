@@ -233,6 +233,70 @@ class TestUnmigratedFactReaderSites:
         tree = ast.parse(src, filename="x.py")
         assert unmigrated_fact_reader_sites(tree, "x.py", src) == []
 
+    def test_detects_an_attrgetter_call_through_an_operator_import_alias(
+        self,
+    ) -> None:
+        """`import operator as op` then `op.attrgetter("bases")(rec)` is
+        the identical dynamic read as the unaliased spelling -- an ordinary
+        import alias must not bypass the gate (Codex review)."""
+        src = 'import operator as op\ndef f(rec):\n    return op.attrgetter("bases")(rec)\n'
+        tree = ast.parse(src, filename="x.py")
+        sites = unmigrated_fact_reader_sites(tree, "x.py", src)
+        assert [key for key, _l, _a, _q in sites] == [
+            'x.py::f::bases::op.attrgetter("bases")(rec)::'
+            'op.attrgetter("bases")(rec)::1'
+        ]
+
+    def test_detects_an_attrgetter_call_through_a_from_import_alias(
+        self,
+    ) -> None:
+        """`from operator import attrgetter as ag` then `ag("bases")(rec)`
+        -- the same alias coverage for the bare spelling."""
+        src = 'from operator import attrgetter as ag\ndef f(rec):\n    return ag("bases")(rec)\n'
+        tree = ast.parse(src, filename="x.py")
+        sites = unmigrated_fact_reader_sites(tree, "x.py", src)
+        assert [key for key, _l, _a, _q in sites] == [
+            'x.py::f::bases::ag("bases")(rec)::ag("bases")(rec)::1'
+        ]
+
+    def test_detects_every_bridged_attr_requested_from_a_multi_arg_attrgetter(
+        self,
+    ) -> None:
+        """`attrgetter("size_bits", "bases")(rec)` reads `bases` too, not
+        only the first argument -- every literal, string-constant argument
+        is inspected independently (Codex review)."""
+        src = (
+            "import operator\n"
+            "def f(rec):\n"
+            '    return operator.attrgetter("size_bits", "bases")(rec)\n'
+        )
+        tree = ast.parse(src, filename="x.py")
+        sites = unmigrated_fact_reader_sites(tree, "x.py", src)
+        assert [attr for _k, _l, attr, _q in sites] == ["bases"]
+
+    def test_detects_two_bridged_attrs_from_one_multi_arg_attrgetter(
+        self,
+    ) -> None:
+        """Both arguments can independently match a bridged field -- both
+        must be reported."""
+        src = (
+            "import operator\n"
+            "def f(rec):\n"
+            '    return operator.attrgetter("bases", "vtable")(rec)\n'
+        )
+        tree = ast.parse(src, filename="x.py")
+        sites = unmigrated_fact_reader_sites(tree, "x.py", src)
+        assert sorted(attr for _k, _l, attr, _q in sites) == ["bases", "vtable"]
+
+    def test_ignores_an_attrgetter_call_naming_no_bridged_attrs(self) -> None:
+        src = (
+            "import operator\n"
+            "def f(rec):\n"
+            '    return operator.attrgetter("size_bits", "name")(rec)\n'
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert unmigrated_fact_reader_sites(tree, "x.py", src) == []
+
     def test_detects_a_bound_getattribute_call_naming_a_bridged_attr(
         self,
     ) -> None:

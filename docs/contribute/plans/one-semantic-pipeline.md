@@ -980,14 +980,27 @@ reader is checked," and it takes exactly this kind of real scan to find
 the readers a hand audit keeps missing.
 
 The check's baseline (`KNOWN_UNMIGRATED_READERS`, allowlist-and-shrink,
-`IMPORT_CYCLE_ALLOWLIST`'s own convention) therefore records 99 currently-
-known reader sites across the nine-plus-fourteen-plus-three modules named
-above and throughout this Design section, keyed
-`"<rel>::<qualname>::<attr>::<expr-text>::<occurrence>"` -- `qualname` the
-enclosing function (`<module>` for module-level code, `Class.method` for a
-method), `expr-text` the read's own exact source text
-(`ast.get_source_segment`), `occurrence` a rank among reads sharing all
-three of those. A first draft keyed only `"<rel>::<attr>::<occurrence>"`; a
+`IMPORT_CYCLE_ALLOWLIST`'s own convention) currently records 104 known
+reader sites across the modules named above and throughout this Design
+section (including `vptr_offset_bits` and every dynamic-read form later
+review rounds added -- `getattr`/its aliases, `operator.attrgetter`,
+`__getattribute__`, `MatchClass` keyword and positional patterns -- each
+described in its own round below), keyed `"<rel>::<qualname>::<attr>::
+<outer-expr-text>::<expr-text>::<occurrence>"` -- `qualname` the enclosing
+function (`<module>` for module-level code, `Class.method` for a method),
+`outer-expr-text` the read's own outermost containing expression
+(`_outermost_containing_expr`, climbing every enclosing `ast.expr` up to
+the first statement boundary), `expr-text` the read's own exact bare
+source text (`ast.get_source_segment`), `occurrence` a rank among reads
+sharing all four of those. This is the *final* key shape, landed by the
+"fingerprint the containing expression" round further below -- the count
+and key shape in this paragraph previously described only the check's
+*first* landed slice, silently contradicting the append-only review notes
+below it once those notes moved past it (Codex review, fresh evidence);
+readers auditing the gate should treat the review notes' own final state
+as authoritative, and this paragraph is now kept in sync with it rather
+than left as a stale first draft. That first draft keyed only
+`"<rel>::<attr>::<occurrence>"`; a
 Codex review round caught the real gap in that: an existing read migrated
 or deleted and a different, unrelated read of the same attribute later
 added to the same file would silently inherit the vacated occurrence
@@ -1319,6 +1332,45 @@ qualified and bare `attrgetter` forms, a dotted-name negative control, the
 variable-indirection negative control, the bound and unbound
 `__getattribute__` forms, and a non-matching-name negative control for
 the latter.
+
+**A sixteenth Codex review round found two more real gaps in the new
+`attrgetter` recognition itself, both fixed.** (1) **An ordinary import
+alias of either `operator` or `attrgetter` bypassed the gate.** `import
+operator as op; op.attrgetter("bases")(rec)` and `from operator import
+attrgetter as ag; ag("bases")(rec)` both read the identical legacy field
+as the unaliased spellings, but the fifteenth round's matching checked
+only the exact literal names `"operator"`/`"attrgetter"`. Fixed with a
+new `_operator_attrgetter_aliases()` -- the identical import-alias
+mechanism `_builtins_getattr_aliases()` already provides for `getattr`/
+`builtins`, applied to this pair -- resolving `import operator as X` and
+`from operator import attrgetter as X` into the two name sets `_is_
+attrgetter_constructor_call()` now checks against, instead of two hard-
+coded literals. Deliberately narrower than `_builtins_getattr_aliases()`'s
+own multi-round evolution: no assignment-chain resolution (`op2 = op`,
+`ag2 = ag`) was added, since neither finding asked for it and this stays
+consistent with `attrgetter`'s own existing "no local-alias resolution"
+stance for a *constructed getter value* -- only the two `import`-form
+aliases this finding named are covered. (2) **Only the first argument to
+`attrgetter` was inspected.** `attrgetter` accepts any number of
+positional field names and reads every one of them --
+`attrgetter("size_bits", "bases")(rec)` reads `bases` too, but the
+fifteenth round's own code checked only `node.func.args[0]`, so a bridged
+field named anywhere but first was invisible. Fixed by moving the whole
+`attrgetter` case out of the single-attribute `elif` chain into its own
+top-level handler (mirroring how `MatchClass` is already handled
+separately, since it too can produce more than one match per node),
+inspecting every literal, string-constant positional argument
+independently and reporting each bridged one as its own site. Verified
+empirically: still zero existing hits in the real repository, baseline
+stays at 104. Five new tests: the `import ... as`/`from ... import ... as`
+alias forms, a multi-argument call with the bridged field in the second
+position, a multi-argument call with two independently-bridged fields
+(both reported), and a multi-argument negative control naming no bridged
+field at all. A sixth, separate finding from the same round (a stale
+"landed" paragraph in this Design section still describing the check's
+*first* slice -- 99 sites, the pre-fingerprint key shape -- contradicting
+the append-only review notes once they moved past it) is fixed directly
+in that paragraph itself, not narrated as its own round here.
 
 **Still not landed**: no detector (`diff_layout.py`/`diff_types.py`/
 `diff_param_qualifiers.py`/the reader set the check above now tracks
