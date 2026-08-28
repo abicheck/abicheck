@@ -178,7 +178,9 @@
         "abicheck/diff_unnamed_types.py",
         "abicheck/diff_vtable_layout.py",
         "abicheck/finding_identity.py",
-        "abicheck/probe_harness.py"
+        "abicheck/finding_identity_atomic.py",
+        "abicheck/probe_harness.py",
+        "abicheck/versioned_symbol_scheme.py"
       ]
     },
     "policy": {
