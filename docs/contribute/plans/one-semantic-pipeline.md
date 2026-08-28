@@ -5309,6 +5309,50 @@ don't interfere with each other. `mypy`/`ruff` both stayed clean;
 New tests: `TestNestedDefinitionsShadowTheConstructorName` (10 tests),
 appended to `tests/test_fact_detector_misuse_constructor_shadow.py`.
 
+**A further round found `_fact_aliases()`'s own annotation recognition
+had no shadow awareness at all** (Codex review, fresh evidence): `from
+other_model import Value as Fact; def f(value: Fact, other): return
+value == other` -- the identical renaming import the constructor-*call*
+path already recognizes as a shadow -- still marked `value` as
+Fact-typed, since `_is_fact_typed_annotation()` (used for both a
+parameter's own annotation and an `AnnAssign`'s annotation) was called
+with the raw, whole-tree `fact_names` set directly, with no per-scope
+subtraction at all. Reproduced directly (1 hit, expected 0) before
+designing a fix.
+
+Fixed by reusing the exact same shadow machinery the constructor-call
+path already built (`_locally_bound_constructor_shadow_names()`,
+`_global_declared_names()`, `_scope_chain_union()`) rather than
+building a second, parallel mechanism: computed once inside
+`_fact_aliases()` itself (a small `_effective_fact_names(qualname)`
+closure) and applied at both annotation call sites. Deliberately reused
+rather than duplicated -- the two paths (constructor-call recognition
+in `fact_equality_misuse_sites()`, and annotation recognition in
+`_fact_aliases()`) answer the identical underlying question ("does the
+bare identifier `Fact` at this scope refer to the real constructor, or
+something else"), so a second independent implementation would risk the
+two silently disagreeing the way the very first self-inflicted
+regression in this saga already showed is dangerous.
+
+Verified via direct AST reproduction against 11 cases before writing
+tests: the reported parameter-annotation case, the equivalent
+`AnnAssign` form, a parameter literally named `Fact` correctly
+suppressing a *sibling* parameter's own annotation in the same function,
+nested-closure inheritance of an annotation shadow, sibling-function
+isolation (an unrelated function's own local shadow not leaking into a
+different function's real annotation), the `global` bypass composing
+correctly with annotation resolution too, four pre-existing regressions
+(bare, subscripted, `Optional`-wrapped, and stringized annotations all
+still recognized), and a negative control (an annotation naming an
+unrelated type, unaffected either way). `mypy`/`ruff` both stayed
+clean; `fact_detector_misuse.py` at **1993/2000 lines -- only ~7 lines
+of headroom left**, confirming the previous round's own prediction that
+this file would need a further split very soon; `fact_detector_misuse_
+scope.py` unchanged (this fix needed no new scope-module code, only
+reuse of what already existed there). New tests:
+`TestAnnotationsResolveThroughTheSameShadowMachinery` (11 tests),
+appended to `tests/test_fact_detector_misuse_constructor_shadow.py`.
+
 ---
 
 ### Phase 1 — finish the `dump`/`scan` typed-API convergence (closes AGENTS.md "PR C")

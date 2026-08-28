@@ -675,6 +675,21 @@ def _fact_aliases(tree: ast.Module, qualnames: _QualnameSpans) -> dict[str, set[
     # be resolved via `_qualname_at` the way every other binding site below
     # is (that position is always inside the node's *own* span first).
     def_containing = _def_containing_qualnames(tree)
+    # Scope-aware annotation resolution (Codex review, fresh evidence):
+    # `from other_model import Value as Fact; def f(value: Fact, other):
+    # return value == other` -- the bare identifier `Fact` in this
+    # annotation is a genuine shadow of the real constructor, the exact
+    # concept `_locally_bound_constructor_shadow_names()` already
+    # computes for the constructor-*call* path (`is_fact_typed()` below).
+    # Reused here rather than duplicated for the annotation checks.
+    _annotation_shadows = _locally_bound_constructor_shadow_names(tree, qualnames)
+    _annotation_globals = _global_declared_names(tree, qualnames)
+
+    def _effective_fact_names(qualname: str) -> frozenset[str]:
+        return fact_names - _scope_chain_union(
+            qualname, _annotation_shadows, lexical_parents, _annotation_globals
+        )
+
     aliases: dict[str, set[str]] = {}
     candidates: dict[str, list[tuple[str, ast.expr]]] = {}
     # A `for`/comprehension loop target bound to every element of a
@@ -828,7 +843,9 @@ def _fact_aliases(tree: ast.Module, qualnames: _QualnameSpans) -> dict[str, set[
         elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
             qualname = _qualname_at((node.lineno, node.col_offset), qualnames)
             locally_bound.setdefault(qualname, set()).add(node.target.id)
-            if _is_fact_typed_annotation(node.annotation, fact_names):
+            if _is_fact_typed_annotation(
+                node.annotation, _effective_fact_names(qualname)
+            ):
                 aliases.setdefault(qualname, set()).add(node.target.id)
             elif node.value is not None:
                 candidates.setdefault(qualname, []).append((node.target.id, node.value))
@@ -1120,7 +1137,9 @@ def _fact_aliases(tree: ast.Module, qualnames: _QualnameSpans) -> dict[str, set[
             )
             for arg in all_args:
                 locally_bound.setdefault(qualname, set()).add(arg.arg)
-                if _is_fact_typed_annotation(arg.annotation, fact_names):
+                if _is_fact_typed_annotation(
+                    arg.annotation, _effective_fact_names(qualname)
+                ):
                     aliases.setdefault(qualname, set()).add(arg.arg)
             # A parameter's own *default value* -- evaluated once, in the
             # enclosing scope, at `def`/lambda time -- can itself be

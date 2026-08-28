@@ -99,6 +99,24 @@ definition's own `.name` there, entirely inside `fact_detector_misuse_
 scope.py` -- no change to `fact_detector_misuse.py` itself was needed,
 which mattered given its own tight remaining headroom under the
 2000-line hard cap.
+
+**A further round found `_fact_aliases()`'s own parameter/`AnnAssign`
+annotation recognition had no shadow awareness at all**
+(`TestAnnotationsResolveThroughTheSameShadowMachinery` below): `from
+other_model import Value as Fact; def f(value: Fact, other): return
+value == other` -- the identical import the constructor-*call* path
+already recognizes as a shadow -- still marked `value` as Fact-typed,
+since `_is_fact_typed_annotation()` was called with the raw, whole-tree
+`fact_names` set directly, with no per-scope subtraction at all (Codex
+review, fresh evidence). Fixed by reusing the exact same
+`_locally_bound_constructor_shadow_names()`/`_global_declared_names()`/
+`_scope_chain_union()` machinery the constructor-call path already
+built, computed once inside `_fact_aliases()` itself and applied at
+both annotation call sites (the parameter form and the `AnnAssign`
+form). `fact_detector_misuse.py` had almost no headroom left by this
+point (1974/2000 lines going in); the fix landed at 1993/2000 --
+confirming the earlier round's own prediction that the file would need
+a further split very soon.
 """
 
 from __future__ import annotations
@@ -795,3 +813,128 @@ class TestNestedDefinitionsShadowTheConstructorName:
         )
         tree2 = ast.parse(src2, filename="x.py")
         assert len(fact_equality_misuse_sites(tree2, "x.py")) == 1
+
+
+class TestAnnotationsResolveThroughTheSameShadowMachinery:
+    """`_fact_aliases()`'s own parameter/`AnnAssign` annotation
+    recognition previously used the raw, whole-tree `fact_names` set
+    directly, with no shadow awareness at all -- the same shadow concept
+    the constructor-*call* path already resolves through
+    `_locally_bound_constructor_shadow_names()` (Codex review, fresh
+    evidence): `from other_model import Value as Fact; def f(value:
+    Fact, other): return value == other` marked `value` as Fact-typed
+    even though the identical import is correctly recognized as a
+    shadow by the constructor-call path."""
+
+    def test_parameter_annotation_with_a_renaming_import_shadow(self) -> None:
+        src = (
+            "from other_model import Value as Fact\n"
+            "def f(value: Fact, other):\n"
+            "    return value == other\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert fact_equality_misuse_sites(tree, "x.py") == []
+
+    def test_annassign_annotation_with_a_renaming_import_shadow(self) -> None:
+        src = (
+            "from other_model import Value as Fact\n"
+            "def f(other):\n"
+            "    value: Fact = None\n"
+            "    return value == other\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert fact_equality_misuse_sites(tree, "x.py") == []
+
+    def test_a_parameter_named_fact_suppresses_a_sibling_annotation_too(self) -> None:
+        src = "def f(Fact, value: Fact, other):\n    return value == other\n"
+        tree = ast.parse(src, filename="x.py")
+        assert fact_equality_misuse_sites(tree, "x.py") == []
+
+    def test_nested_closure_inherits_an_annotation_shadow(self) -> None:
+        src = (
+            "from other_model import Value as Fact\n"
+            "def outer(other):\n"
+            "    def inner(value: Fact):\n"
+            "        return value == other\n"
+            "    return inner\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert fact_equality_misuse_sites(tree, "x.py") == []
+
+    def test_sibling_function_unaffected_by_an_unrelated_local_shadow(self) -> None:
+        src = (
+            "from abicheck.model.fact import Fact\n"
+            "def shadowed(value):\n"
+            "    Fact = 1\n"
+            "    return value\n"
+            "def real(value: Fact, other):\n"
+            "    return value == other\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        sites = fact_equality_misuse_sites(tree, "x.py")
+        assert len(sites) == 1
+        assert sites[0][0] == 6
+
+    def test_global_bypasses_an_annotation_shadow_too(self) -> None:
+        """The identical `global` bypass this module's own
+        `TestGlobalDeclarationBypassesEnclosingShadow` covers for
+        constructor calls composes correctly with annotation
+        resolution too."""
+        src = (
+            "from abicheck.model.fact import Fact\n"
+            "def outer(Fact):\n"
+            "    def inner(value: Fact, other):\n"
+            "        global Fact\n"
+            "        return value == other\n"
+            "    return inner\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert len(fact_equality_misuse_sites(tree, "x.py")) == 1
+
+    def test_regression_bare_annotation_still_recognized(self) -> None:
+        src = (
+            "from abicheck.model.fact import Fact\n"
+            "def f(value: Fact, other):\n"
+            "    return value == other\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert len(fact_equality_misuse_sites(tree, "x.py")) == 1
+
+    def test_regression_subscripted_annotation_still_recognized(self) -> None:
+        src = (
+            "from abicheck.model.fact import Fact\n"
+            "def f(value: Fact[int], other):\n"
+            "    return value == other\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert len(fact_equality_misuse_sites(tree, "x.py")) == 1
+
+    def test_regression_optional_wrapped_annotation_still_recognized(self) -> None:
+        src = (
+            "from abicheck.model.fact import Fact\n"
+            "def f(value: Fact[int] | None, other):\n"
+            "    return value == other\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert len(fact_equality_misuse_sites(tree, "x.py")) == 1
+
+    def test_regression_stringized_annassign_annotation_still_recognized(
+        self,
+    ) -> None:
+        src = (
+            "from abicheck.model.fact import Fact\n"
+            "def f(other):\n"
+            '    value: "Fact[list[str]]" = None\n'
+            "    return value == other\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert len(fact_equality_misuse_sites(tree, "x.py")) == 1
+
+    def test_negative_unrelated_annotation_is_unaffected(self) -> None:
+        src = (
+            "from abicheck.model.fact import Fact\n"
+            "def f(value: int, other):\n"
+            "    return value == other\n"
+        )
+        tree = ast.parse(src, filename="x.py")
+        assert fact_equality_misuse_sites(tree, "x.py") == []
