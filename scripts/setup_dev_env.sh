@@ -17,16 +17,19 @@
 #      packages to conflict with in the first place, so nothing needs
 #      ignoring.
 #   2. castxml, from conda-forge via a throwaway micromamba (castxml has
-#      no apt/pip package) -- pinned to the exact linux-64 build
-#      `pixi.lock` already commits to (see CASTXML_BUILD below), so this
-#      never resolves a different CastXML/bundled-Clang version than the
-#      one this repo has actually reviewed. Bump both together. The
-#      micromamba bootstrap binary itself is pinned by version + verified
-#      sha256 (MICROMAMBA_VERSION/MICROMAMBA_SHA256 below), the same
-#      download-then-verify shape `action/install-castxml.sh` uses for its
-#      own archive -- it is code that runs before any of the above, so an
-#      unpinned "latest" fetch would be exactly the unverified-supply-chain
-#      gap this pin closes for castxml itself.
+#      no apt/pip package) -- pinned to the exact linux-64 build `pixi.lock`
+#      already commits to (CASTXML_BUILD, scripts/castxml_pin.env), *and*
+#      its complete transitive runtime closure pinned exactly too
+#      (CASTXML_LOCKED_SPECS -- castxml's own conda `depends:` only bounds
+#      those to ranges, so a direct-matchspec-only install can still drift
+#      on when/where it runs even with CASTXML_BUILD fixed). Bump both
+#      together with pixi.lock. The micromamba bootstrap binary itself is
+#      pinned by version + verified sha256 (MICROMAMBA_VERSION/
+#      MICROMAMBA_SHA256 below), the same download-then-verify shape
+#      `action/install-castxml.sh` uses for its own archive -- it is code
+#      that runs before any of the above, so an unpinned "latest" fetch
+#      would be exactly the unverified-supply-chain gap this pin closes
+#      for castxml itself.
 #
 # This is the canonical, tool-agnostic setup logic (AGENTS.md's adapter
 # principle: a command lives in one place, adapters call it rather than
@@ -51,9 +54,18 @@ cd "${REPO_ROOT}"
 # shellcheck source=dev_venv_pin.env
 source "${REPO_ROOT}/scripts/dev_venv_pin.env"
 
-if [ ! -x "${DEV_VENV_DIR}/bin/python3" ]; then
+# Require a real, working pip, not just the python3 executable: `venv`
+# installs pip via ensurepip as a separate step after creating the
+# interpreter, so a session interrupted between the two would otherwise
+# leave a venv this check calls "done" but that has no pip -- the later
+# bare `pip install` would then silently fall through PATH to whatever
+# pip comes next (the system interpreter this venv exists to avoid), and
+# no future run would ever repair it since the python3 executable alone
+# already looks complete.
+if [ ! -x "${DEV_VENV_DIR}/bin/python3" ] || ! "${DEV_VENV_DIR}/bin/python3" -m pip --version >/dev/null 2>&1; then
   echo "==> Creating dev venv at ${DEV_VENV_DIR}"
-  python3 -m venv "${DEV_VENV_DIR}"
+  rm -rf "${DEV_VENV_DIR}"
+  "$(dev_venv_python)" -m venv "${DEV_VENV_DIR}"
 fi
 # Ahead of the rest of PATH for the remainder of this script: every
 # `python3`/`pip` call below (and the castxml_policy import further down)
@@ -61,7 +73,11 @@ fi
 export PATH="${DEV_VENV_DIR}/bin:${PATH}"
 
 echo "==> Installing abicheck (editable) + dev/docs/dist extras"
-pip install -q -e ".[dev,docs,dist]"
+# Explicit venv path, not a bare `pip`: PATH was just changed in this same
+# process, and a subshell/later refactor that runs this before the export
+# takes effect should still install into the venv, never fall through to
+# whatever pip happens to be on the pre-existing PATH.
+"${DEV_VENV_DIR}/bin/pip" install -q -e ".[dev,docs,dist]"
 
 echo "==> Checking native toolchain (gcc/g++/cmake)"
 for tool in gcc g++ cmake; do
@@ -110,11 +126,11 @@ else
   echo "${MICROMAMBA_SHA256}  ${WORK_DIR}/micromamba" | sha256sum -c -
   chmod +x "${WORK_DIR}/micromamba"
 
-  echo "==> Installing ${CASTXML_BUILD} from conda-forge via micromamba"
+  echo "==> Installing ${CASTXML_BUILD} (full locked closure) from conda-forge via micromamba"
   "${WORK_DIR}/micromamba" create -y \
     -p "${CASTXML_PREFIX}" \
     -c conda-forge \
-    "${CASTXML_BUILD}"
+    "${CASTXML_LOCKED_SPECS[@]}"
   rm -rf "${WORK_DIR}"
   trap - EXIT
 fi
