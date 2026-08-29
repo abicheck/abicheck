@@ -43,7 +43,7 @@ from .checker_types import Change
 from .detector_registry import registry
 from .diff_helpers import make_change
 from .model import AbiSnapshot
-from .python_api import (
+from .model.python_facts import (
     KEYWORD_ONLY,
     POSITIONAL_ONLY,
     POSITIONAL_OR_KEYWORD,

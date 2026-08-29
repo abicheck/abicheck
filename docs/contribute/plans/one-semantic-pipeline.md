@@ -6,9 +6,12 @@ lifecycle: active
 
 # One Semantic Pipeline — unifying application, fact, identity, and outcome models
 
-**ADR:** [ADR-063](../adr/063-one-semantic-pipeline.md) · Proposed; nothing in
-this plan implemented yet. **Effort:** XL, multi-quarter, phased — do not
-attempt as one PR. **Depends on / sequences with:** ADR-055, ADR-061,
+**ADR:** [ADR-063](../adr/063-one-semantic-pipeline.md) · Proposed — roadmap
+ADR, partially implemented. Phase 0's `Fact[T]`/`FactStatus` infrastructure
+and AI-readiness gates have landed, and a narrow Phase 1 slice has too; see
+ADR-063's own Status line for the authoritative, per-slice detail — this
+plan document does not restate it, to avoid the two drifting apart again.
+**Effort:** XL, multi-quarter, phased — do not attempt as one PR. **Depends on / sequences with:** ADR-055, ADR-061,
 ADR-062, ADR-042, ADR-046/048, ADR-049, ADR-050 (each partially implemented
 already; see "Sequencing against in-flight ADRs" below).
 
