@@ -273,12 +273,12 @@
     },
     {
       "path": "abicheck/buildsource/source_graph.py",
-      "baseline_lines": 2000,
+      "baseline_lines": 1352,
       "target": "extract/build-or-source",
       "rule": "no_growth",
       "category": "legacy_extraction_monolith",
       "owner": "abicheck maintainers",
-      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice.",
+      "rationale": "ADR-061 Phase 5 item 2's \"values\" slice moved SourceGraphSummary/GraphSummaryDiff/node-id constructors/schema vocabulary to abicheck/model/source_graph.py (2000 -> 1352 lines); the remaining construction (build_source_graph) and comparison (diff_source_graph) halves predate ADR-061 and cannot move safely without their own behavior-preserving vertical slice.",
       "review_by": "2026-11-30"
     },
     {

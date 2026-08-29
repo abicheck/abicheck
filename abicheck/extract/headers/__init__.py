@@ -12,17 +12,11 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Back-compat facade: ``EntityResolver`` lives in
-``abicheck.model.entity_resolver`` now, for the same reason
-``graph_facts.py`` moved (see that module's own docstring) —
-``abicheck.model.source_graph``'s ``SourceGraphSummary.entity_resolver``
-field needs it, and importing it through ``abicheck.buildsource`` would
-re-enter this package's eager ``__init__.py`` cascade.
+"""Header-AST parser backends (castxml, clang) under ``extract``.
+
+Each backend is its own sub-package, split by parsed entity and shared
+parser context per ADR-061 D9. This ``__init__.py`` stays inert — it holds
+no shared logic of its own.
 """
 
 from __future__ import annotations
-
-from ..model.entity_resolver import (
-    EntityConflict as EntityConflict,
-    EntityResolver as EntityResolver,
-)

@@ -11,7 +11,6 @@
       "path": "abicheck/model",
       "may_import": [],
       "legacy_paths": [
-        "abicheck/buildsource/graph_facts.py",
         "abicheck/buildsource/model.py",
         "abicheck/buildsource/pack.py",
         "abicheck/buildsource/scan_levels.py",
@@ -21,6 +20,7 @@
         "abicheck/checker_types.py",
         "abicheck/compile_context.py",
         "abicheck/contract_relevance_types.py",
+        "abicheck/demangle.py",
         "abicheck/detectors.py",
         "abicheck/elf_symbol_filter.py",
         "abicheck/evidence_depth.py",

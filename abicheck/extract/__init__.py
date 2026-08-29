@@ -12,17 +12,12 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Back-compat facade: ``EntityResolver`` lives in
-``abicheck.model.entity_resolver`` now, for the same reason
-``graph_facts.py`` moved (see that module's own docstring) —
-``abicheck.model.source_graph``'s ``SourceGraphSummary.entity_resolver``
-field needs it, and importing it through ``abicheck.buildsource`` would
-re-enter this package's eager ``__init__.py`` cascade.
+"""ADR-061 ``extract`` responsibility package.
+
+Reads binary, debug, header, build, and source evidence into facts owned by
+``abicheck.model``. Small and inert per ADR-061 D6 — no plugin registration,
+no environment inspection, no product logic. See ``AGENTS.md`` in this
+directory for the package contract.
 """
 
 from __future__ import annotations
-
-from ..model.entity_resolver import (
-    EntityConflict as EntityConflict,
-    EntityResolver as EntityResolver,
-)

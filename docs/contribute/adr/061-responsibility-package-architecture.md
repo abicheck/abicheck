@@ -1,7 +1,7 @@
 # ADR-061: Responsibility-Package Architecture and Flat-Namespace Migration
 
 **Date:** 2026-08-24
-**Status:** Accepted — partially implemented (Phases 0-1 implemented; Phases 2-4 in progress; Phase 5 begun — the `model` package and the `*_metadata.py` dataclass/parser split have landed; D9's change-catalog work (item 3) is fully done — all 4 registry-validation properties (unique identifiers, valid references, non-contradictory defaults, complete metadata) are enforced, and the 397 entries have been repartitioned into `model/change_catalog/{symbols,types,platform,build,source}.py` by taxonomy; the CastXML/Clang parser split and source-graph separation (Phase 5 items 1-2) and the bulk of item 4's cycle-exception cleanup remain — and otherwise incremental).
+**Status:** Accepted — partially implemented (Phases 0-1 implemented; Phases 2-4 in progress; Phase 5 begun — the `model` package and the `*_metadata.py` dataclass/parser split have landed; D9's change-catalog work (item 3) is fully done — all 4 registry-validation properties (unique identifiers, valid references, non-contradictory defaults, complete metadata) are enforced, and the 397 entries have been repartitioned into `model/change_catalog/{symbols,types,platform,build,source}.py` by taxonomy; the CastXML/Clang parser split (item 1) has only started — the `extract` package now exists with one stateless-helper module moved out of `dumper_castxml.py`, but the stateful entity-by-entity split is unstarted — source-graph separation (item 2) has also only started — its values third moved to `abicheck/model/source_graph.py`, construction and comparison remain in `buildsource/source_graph.py` — and the bulk of item 4's cycle-exception cleanup also remains — and otherwise incremental).
 **Decision maker:** abicheck maintainers
 
 ## Context
@@ -2054,8 +2054,81 @@ the text promised something the detector doesn't check. Rewritten to
 describe the attribute's real effect (folding permission, not linkage)
 without promising a new export.
 
-1. split CastXML and Clang parsing by entity and shared parser context;
-2. separate source-graph values, construction, and comparison;
+1. split CastXML and Clang parsing by entity and shared parser context.
+   **Started, not done.** `abicheck.extract` now exists (see `abicheck/
+   extract/AGENTS.md`) with its first tenant, `extract/headers/castxml/
+   names.py`: the vtable-index/mangled-name/synthetic-key helpers that sat
+   as module-level functions above `_CastxmlParser` in `dumper_castxml.py`
+   — `_parse_vtable_index`, `_vt_sort_key`, `_ref_qualifier_from_mangled`,
+   `_mangled_name_is_local_linkage`, `is_synthetic_ctor_key`/`is_synthetic_
+   dtor_key`, `_virtual_method_mangled_name`, and their two prefix
+   constants. Each is a pure function over a string or a single XML
+   element — none of them read `_CastxmlParser`'s id map or any other
+   instance state, which is exactly why this was the piece that could move
+   without first designing the shared parser context (`context.py`) the
+   rest of the split needs. `dumper_castxml.py` imports and re-exports all
+   of them unchanged (1934 → 1822 lines). The stateful part — splitting
+   `_CastxmlParser`'s ~60 methods into `functions.py`/`records.py`/
+   `enums.py`/`templates.py` entity modules sharing one `context.py`, and
+   the equivalent split for `dumper_clang.py` — has not started; it needs
+   the shared-context design this ADR's D9 describes before any entity
+   module can move, which is a larger, separately-scoped slice;
+2. separate source-graph values, construction, and comparison. **Started,
+   not done.** The values third moved: `abicheck/model/source_graph.py`
+   now owns `SourceGraphSummary` (the ADR-031 D7 compact graph container
+   and all its methods), `GraphSummaryDiff` (the structural-diff result
+   shape), the node-id constructors (`_source_node_id` and its ten
+   siblings, `function_decl_identity`), and the schema vocabulary
+   (`NODE_KINDS`/`EDGE_KINDS`/`DEPENDENCY_EDGE_KINDS`/
+   `SOURCE_GRAPH_VERSION`/`EVIDENCE_TIER_L5`). `buildsource/source_graph.py`
+   re-exports every moved name (`X as X`, the same convention its own
+   pre-existing `graph_facts.py` re-export block already used), so all 77
+   existing callers keep resolving; it drops from 2000 to 1352 lines.
+   `entity_resolver.py` — needed as `SourceGraphSummary.entity_resolver`'s
+   field type — was initially classified `model` in
+   `architecture/modules.yaml` while staying physically flat (virtual
+   classification, the same pattern this ADR's Phase 3/4 sections already
+   used elsewhere). **That virtual classification alone was not enough,
+   and a Codex review on the PR proved it**: importing
+   `abicheck.model.source_graph` directly (not through the legacy facade
+   first) raised a real `ImportError` — a circular-import failure, not a
+   check-architecture violation, so the earlier check-clean state didn't
+   catch it. Importing any submodule of `abicheck.buildsource` (including
+   `entity_resolver.py`, still physically there) first runs
+   `buildsource/__init__.py`, which eagerly imports `call_graph.py`,
+   which imports the legacy `buildsource/source_graph.py` facade, which
+   imports back from `abicheck.model.source_graph` — still
+   mid-initialization at that point. Fixed by physically relocating
+   `graph_facts.py` and `entity_resolver.py`/`entity_identity.py` into
+   `abicheck/model/` for real (none of them depend on anything in
+   `buildsource`, only `abicheck.name_classification`/`abicheck.demangle`),
+   so `model/source_graph.py`'s own imports of them are same-package
+   relative and never touch the `abicheck.buildsource` namespace at all.
+   `buildsource/graph_facts.py`/`entity_resolver.py`/`entity_identity.py`
+   became thin `X as X` re-export facades so every existing import —
+   same-package relative within `buildsource/`, and absolute
+   (`abicheck.buildsource.graph_facts` etc., used directly by several
+   tests) — keeps resolving. Moving `graph_facts.py` (1123 lines, unchanged
+   content) past the new-file 800-line cap required splitting it three
+   ways in the same pass: `graph_vocabulary.py` (confidence labels +
+   node/edge-kind vocabulary, no internal dependents), `graph_identity.py`
+   (the decl/type id-normalization functions — already split out of
+   `source_graph.py` once before for the identical line-cap reason, per
+   that section's own pre-existing comment), and `graph_facts.py` itself
+   (the `GraphFact`/`GraphNode`/`GraphEdge`/merge machinery). `demangle.py`
+   joined `model`'s `legacy_paths` alongside this (needed once
+   `entity_identity.py` became real `migrated_source`); `_conf_from_build`
+   deliberately did **not** move with the rest, because it needs
+   `build_evidence.py`'s `Confidence` enum and `build_evidence.py`
+   transitively imports `comdat_groups.py` (`extract`-classified) —
+   classifying `build_evidence.py` `model` to satisfy that one function
+   would have created a real `model -> extract` cycle, caught by
+   `check_architecture.py` before this landed rather than assumed. The
+   construction half (`build_source_graph` and its `_fold_*`/`_augment_*`
+   helpers — these still need `BuildEvidence`/`SourceAbiSurface`, so
+   moving them means resolving the same `build_evidence.py`/`extract`
+   coupling for real rather than routing around it) and the comparison
+   half (`diff_source_graph`, `localize_symbol`) have not started;
 3. **Done.** Repartitioned the change catalog into D9's `model/change_catalog/
    {symbols,types,platform,build,source}.py` taxonomy — all four
    registry-validation properties (global uniqueness, valid references,

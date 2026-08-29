@@ -12,17 +12,13 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Back-compat facade: ``EntityResolver`` lives in
-``abicheck.model.entity_resolver`` now, for the same reason
-``graph_facts.py`` moved (see that module's own docstring) —
-``abicheck.model.source_graph``'s ``SourceGraphSummary.entity_resolver``
-field needs it, and importing it through ``abicheck.buildsource`` would
-re-enter this package's eager ``__init__.py`` cascade.
+"""castxml XML → ABI model parser, split by parsed entity (ADR-061 D9).
+
+``abicheck.dumper_castxml`` remains the coordinating module (the ADR's
+``backend.py`` role: it opens the castxml document, builds the shared id
+map, and drives per-entity parsing) until its own migration lands. Entity
+modules that have already moved out of it live here, one class of node per
+module, importing shared state rather than re-deriving it.
 """
 
 from __future__ import annotations
-
-from ..model.entity_resolver import (
-    EntityConflict as EntityConflict,
-    EntityResolver as EntityResolver,
-)
