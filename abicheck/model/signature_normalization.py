@@ -22,11 +22,19 @@ module's own contents are otherwise identity.py's, not a separate design
 decision. See ``docs/contribute/plans/one-semantic-pipeline.md``'s Phase 2
 section for the full history of the several review rounds (Codex, PR #941)
 that grew this from a single ``canonicalize_type_name`` call into the
-dedicated cv/array-decay logic here.
+dedicated cv/array-decay logic here. A second sibling leaf module,
+``declarator_qualifiers.py``, was split out of THIS module in turn once it
+hit the same 800-line cap (fifteenth round) -- it holds the declarator-
+grouping/pointer-to-member/trailing-qualifier machinery that has no
+recursive dependency back into this module's own
+``canonicalize_function_signature_param_type``; see that module's own
+docstring for why the import direction is one-way.
 
 Leaf module: imports only ``name_classification.canonicalize_type_name``
-(a dependency-free sibling), nothing above ``model``, per ADR-063 D10 --
-the same leaf-module contract ``model/identity.py`` itself states.
+(a dependency-free sibling) and its own sibling ``declarator_qualifiers``
+(also a leaf, importing nothing back here), nothing above ``model``, per
+ADR-063 D10 -- the same leaf-module contract ``model/identity.py`` itself
+states.
 """
 
 from __future__ import annotations
@@ -34,92 +42,16 @@ from __future__ import annotations
 import re
 
 from ..name_classification import canonicalize_type_name
+from .declarator_qualifiers import (
+    _canonicalize_member_qualifiers,
+    _find_member_pointer_qualifier,
+    _is_declarator_group,
+    _split_at_trailing_param_list,
+)
 
 __all__ = ["canonicalize_function_signature_param_type"]
 
 _CV_WORD_RE = re.compile(r"\b(?:const|volatile)\b")
-
-# A declarator-grouping paren's content, up to its own sigil: an optional
-# MSVC calling-convention keyword, then either a bare pointer/reference
-# (`*`, `&`) or a pointer-to-member's qualified-name prefix (`C::*`,
-# `ns::C::*`, `C<int>::*` -- one or more `identifier[<template-args>]::`
-# segments) then the sigil. Used to tell a declarator-grouping paren
-# (transparent, not a real nesting level) from a genuine parameter-list
-# paren (opaque): a parameter list's first token is always a type, which
-# can itself start with an identifier, but is never a calling-convention
-# keyword and never immediately followed by `::` then only a bare sigil --
-# both shapes are unique to a declarator (Codex review, PR #941: the
-# ninth round added the qualified-name-prefix form, so `void (C::*
-# const)(int)` -- cv on a pointer-to-member's own outermost sigil -- was
-# found at depth 0; the tenth round added the calling-convention keyword,
-# since a real MSVC/PE calling-convention decoration -- e.g. `void
-# (__cdecl * const)(int)` -- otherwise defeated the same transparency
-# test the identical way; the eleventh round added the template-argument
-# list, since a real nested-name-specifier's segment can itself be a
-# template-id, e.g. `void (C<int>::* const)(int)`, which a plain
-# `identifier::` match can't recognize -- checked with a manual scanner,
-# not a single regex, since a template-argument list can nest arbitrarily
-# deep, `Box<Pair<int, int>>::`, which `re`'s non-recursive matching
-# cannot balance). The convention keyword and any template-argument list
-# are matched, not consumed/erased -- they stay in the returned prefix
-# verbatim, genuine parts of the type, same as the plain qualified-name
-# prefix already does.
-_CALLING_CONVENTIONS = (
-    "__cdecl",
-    "__stdcall",
-    "__fastcall",
-    "__thiscall",
-    "__vectorcall",
-)
-_IDENTIFIER_RE = re.compile(r"[A-Za-z_]\w*")
-
-
-def _is_declarator_group(s: str, start: int) -> bool:
-    """Whether ``s[start:]`` is a declarator-grouping paren's own content
-    (see :data:`_CALLING_CONVENTIONS`'s module-level comment for the full
-    shape) -- called with *start* right after the paren's own ``(``.
-    """
-    n = len(s)
-    i = start
-    while i < n and s[i] == " ":
-        i += 1
-    for conv in _CALLING_CONVENTIONS:
-        if s.startswith(conv, i):
-            i += len(conv)
-            while i < n and s[i] == " ":
-                i += 1
-            break
-    while True:
-        j = i
-        while j < n and s[j] == " ":
-            j += 1
-        m = _IDENTIFIER_RE.match(s, j)
-        if not m:
-            break
-        k = m.end()
-        if k < n and s[k] == "<":
-            depth = 0
-            p = k
-            while p < n:
-                if s[p] == "<":
-                    depth += 1
-                elif s[p] == ">":
-                    depth -= 1
-                    if depth == 0:
-                        p += 1
-                        break
-                p += 1
-            else:
-                return False  # unmatched '<' -- malformed, bail out
-            k = p
-        while k < n and s[k] == " ":
-            k += 1
-        if not s.startswith("::", k):
-            break
-        i = k + 2
-    while i < n and s[i] == " ":
-        i += 1
-    return i < n and s[i] in "*&"
 
 
 def _strip_cv_tokens_outside_nesting(s: str) -> str:
@@ -152,49 +84,6 @@ def _strip_cv_tokens_outside_nesting(s: str) -> str:
             out.append(ch)
             i += 1
     return re.sub(r"\s+", " ", "".join(out)).strip()
-
-
-def _extract_top_level_cv(s: str) -> tuple[bool, bool, str]:
-    """Depth-aware sibling of :func:`_strip_cv_tokens_outside_nesting`:
-    finds ``const``/``volatile`` tokens at nesting depth 0 only (outside
-    any ``<...>``/``(...)``/``[...]``), reports which were found, and
-    returns *s* with those depth-0 tokens removed -- a cv-looking word
-    sitting INSIDE a parenthesized region (a ``noexcept(expr)``
-    argument's own text, a template argument) is untouched, since it
-    belongs to that expression, not to this declarator's own trailing
-    qualifier sequence (Codex review, PR #941, thirteenth round: an
-    earlier revision used a plain, depth-blind ``re.search``/``re.sub``
-    over the whole trailing region, which wrongly reached inside a
-    non-literal ``noexcept(expr)``'s own argument, e.g.
-    ``noexcept(Foo<const int>)``).
-    """
-    depth = 0
-    has_const = False
-    has_volatile = False
-    out: list[str] = []
-    i = 0
-    n = len(s)
-    while i < n:
-        ch = s[i]
-        if ch in "<([":
-            depth += 1
-            out.append(ch)
-            i += 1
-        elif ch in ">)]":
-            depth = max(0, depth - 1)
-            out.append(ch)
-            i += 1
-        elif depth == 0 and (m := _CV_WORD_RE.match(s, i)):
-            if m.group() == "const":
-                has_const = True
-            else:
-                has_volatile = True
-            i = m.end()
-        else:
-            out.append(ch)
-            i += 1
-    rest = re.sub(r"\s+", " ", "".join(out)).strip()
-    return has_const, has_volatile, rest
 
 
 def _decay_top_level_array(canonical_type: str) -> str:
@@ -339,124 +228,6 @@ def _normalize_nested_param_lists(s: str) -> str:
     strings).
     """
     return "(" + _normalize_param_list_contents(s[1:-1]) + ")"
-
-
-def _split_at_trailing_param_list(suffix: str) -> tuple[str, str] | None:
-    """If *suffix* (the text after a declarator's own outermost sigil)
-    contains a top-level ``(...)`` group -- the declarator's own trailing
-    parameter list, e.g. the ``(int)`` in ``void (*)(int)`` -- return
-    ``(head, params_and_after)`` split so ``params_and_after`` starts
-    exactly at that paren's ``(``. Returns ``None`` when *suffix* has no
-    top-level ``(`` at all (a bare pointer, with no trailing declarator to
-    split off).
-    """
-    depth = 0
-    for i, ch in enumerate(suffix):
-        if ch == "(" and depth == 0:
-            return suffix[:i], suffix[i:]
-        if ch in "<([":
-            depth += 1
-        elif ch in ">)]":
-            depth = max(0, depth - 1)
-    return None
-
-
-def _canonicalize_member_qualifiers(s: str) -> str:
-    """Canonicalize a pointer-to-member-function's own trailing
-    specifiers -- the cv-qualifiers, ref-qualifier, and (post-C++17)
-    ``noexcept``-specifier that can follow its parameter list, e.g. the
-    ``const`` in ``void (C::*)(int) const`` or the ``noexcept`` in
-    ``void (*)(int) noexcept``. These qualify the POINTED-TO member
-    function itself: genuine, standard-mandated overload/type
-    discriminators (``void (C::*)(int) const`` and ``void (C::*)(int)``
-    are two different, non-interchangeable pointer-to-member types; since
-    C++17 a ``noexcept``/non-``noexcept`` function is likewise a distinct
-    type), unlike the pointer's own by-value qualifier already stripped
-    separately -- so this function only ever REORDERS ``const``/
-    ``volatile`` relative to each other (the same "eliminate ordering by
-    construction" treatment ``entity_id_for_function``'s own
-    ``is_const``/``is_volatile`` booleans already give the outer
-    function's member-cv), while every other specifier -- ref-qualifier,
-    ``noexcept``, and anything else this function does not need to
-    individually name -- passes through verbatim, in its original
-    relative order (Codex review, PR #941, tenth round: an earlier
-    revision blanket-stripped every depth-0 cv token found anywhere after
-    the sigil, which wrongly erased this genuinely-distinguishing trailing
-    region entirely; eleventh round: the fix for that then reconstructed
-    the trailing region from ONLY cv/ref, which silently dropped
-    ``noexcept`` instead -- a second, different over-merge of the same
-    class, `void (*)(int) noexcept` and `void (*)(int)` wrongly collapsing
-    to one identity. `dcl.fct`'s own grammar already fixes cv-qualifier-
-    seq first among these trailing specifiers, so a real producer's
-    placement never needs inferring -- only cv needs reordering relative
-    to itself; everything else keeps whatever order it was already
-    spelled in; twelfth round: preserving ``noexcept`` verbatim was
-    necessary but not sufficient -- since C++17, a function type's
-    exception specification collapses to exactly two kinds for TYPE
-    purposes, "non-throwing" (bare ``noexcept``/``noexcept(true)``) and
-    "potentially-throwing" (no specifier at all, or ``noexcept(false)``),
-    so those pairs are the SAME type and must canonicalize identically,
-    the same "verbatim preservation isn't canonicalization" gap the
-    by-value cv/array-decay fixes each already closed for their own
-    shape. Only the two literal, constant-expression spellings are
-    normalized; any other, non-literal ``noexcept(expr)`` is left
-    completely untouched -- evaluating an arbitrary constant expression is
-    out of scope, the same "don't solve the fully general grammar" limit
-    this module already draws elsewhere; thirteenth round: extracting
-    ``const``/``volatile`` via a plain, depth-blind ``re.search`` over the
-    WHOLE trailing region wrongly reached inside a non-literal
-    ``noexcept(expr)``'s own argument too -- a ``const``/``volatile``
-    token that is part of THAT expression's own text, e.g.
-    ``noexcept(Foo<const int>)``, is not this declarator's own
-    cv-qualifier at all, and extracting it both corrupted the expression
-    (mutating text this function has no business touching, since it
-    cannot evaluate it) and could merge two genuinely different overloads
-    that happen to share a nested "const" by coincidence. Fixed with a
-    depth-aware scan, :func:`_extract_top_level_cv`, mirroring
-    :func:`_strip_cv_tokens_outside_nesting`'s own outside-nesting
-    discipline: only a cv word sitting at depth 0 -- outside any
-    ``(...)``/``<...>``/``[...]`` -- is ever this declarator's own
-    trailing qualifier).
-    """
-    stripped = s.strip()
-    if not stripped:
-        return ""
-    has_const, has_volatile, rest = _extract_top_level_cv(stripped)
-    rest = _canonicalize_noexcept(rest)
-    parts = [
-        p
-        for p, present in (("const", has_const), ("volatile", has_volatile))
-        if present
-    ]
-    if rest:
-        parts.append(rest)
-    return " ".join(parts)
-
-
-_NOEXCEPT_RE = re.compile(r"\bnoexcept\b(?:\s*\(\s*([^()]*)\s*\))?")
-
-
-def _canonicalize_noexcept(s: str) -> str:
-    """Normalize the two constant ``noexcept`` spellings this trailing
-    region can carry: bare ``noexcept``/``noexcept(true)`` (the
-    "non-throwing" type) collapse to the single canonical spelling
-    ``"noexcept"``; ``noexcept(false)`` (equivalent, for type purposes, to
-    no exception-specification at all) is dropped entirely, same as an
-    already-absent specifier. Any other ``noexcept(expr)`` -- a non-
-    literal constant expression this function cannot evaluate -- is left
-    untouched, verbatim.
-    """
-    m = _NOEXCEPT_RE.search(s)
-    if not m:
-        return s
-    arg = m.group(1)
-    if arg is None or arg.strip() == "true":
-        replacement = "noexcept"
-    elif arg.strip() == "false":
-        replacement = ""
-    else:
-        return s
-    return re.sub(r"\s+", " ", s[: m.start()] + replacement + s[m.end() :]).strip()
 
 
 def canonicalize_function_signature_param_type(name: str) -> str:
@@ -697,6 +468,24 @@ def canonicalize_function_signature_param_type(name: str) -> str:
     '(anonymous namespace)::Foo const *'
     >>> canonicalize_function_signature_param_type("(anonymous namespace)::Foo *")
     '(anonymous namespace)::Foo *'
+
+    A bare (non-parenthesized) data-member-pointer parameter, e.g.
+    ``int C::*`` (pointer to an ``int`` member of ``C``), has a pointee
+    cv-qualifier that must canonicalize the same regardless of whether it
+    was spelled before or after the base type -- unlike the ordinary
+    pointee case above, ``canonicalize_type_name`` MISPLACES a leading
+    ``const`` across the ``C::`` infix rather than leaving it be, so this
+    needs its own correction (only ``const``/``volatile`` positioning
+    relative to the base type is fixed; if either was already reordered
+    relative to the OTHER, e.g. ``volatile`` vs. ``const volatile``, that
+    residual gap is the same, pre-existing, `canonicalize_type_name`-wide
+    limitation ordinary non-member pointee cv already has -- out of scope
+    here).
+
+    >>> canonicalize_function_signature_param_type("const int C::*")
+    'int const C:: *'
+    >>> canonicalize_function_signature_param_type("int const C::*")
+    'int const C:: *'
     """
     canonical = canonicalize_type_name(
         _decay_top_level_array(canonicalize_type_name(name))
@@ -764,6 +553,27 @@ def canonicalize_function_signature_param_type(name: str) -> str:
             else _strip_cv_tokens_outside_nesting(canonical)
         )
     prefix = canonical[: last_top_level_sigil + 1]
+    # A bare (non-parenthesized) data-member-pointer's pointee cv needs
+    # its own independent re-canonicalization -- see
+    # _find_member_pointer_qualifier's own docstring for why. Only applies
+    # when the split-off "base" has no unmatched open paren: a
+    # parenthesized member-function-pointer/-array declarator group
+    # (`(C::*)`) hits this same code path (`(`/`)` don't affect depth,
+    # since they're transparent), and its own "base" (a return type
+    # fragment like `void (`) is not a real standalone type to
+    # re-canonicalize.
+    qualifier_span = _find_member_pointer_qualifier(prefix)
+    if qualifier_span is not None:
+        qualifier_start, qualifier_end = qualifier_span
+        base = prefix[:qualifier_start].rstrip()
+        if base.count("(") == base.count(")"):
+            tail_cv = " ".join(re.findall(r"const|volatile", prefix[qualifier_end:]))
+            combined_base = f"{base} {tail_cv}".strip() if tail_cv else base
+            qualifier_text = prefix[qualifier_start:qualifier_end]
+            sigil_char = prefix[-1]
+            prefix = (
+                f"{canonicalize_type_name(combined_base)} {qualifier_text} {sigil_char}"
+            )
     raw_suffix = canonical[last_top_level_sigil + 1 :]
     split = _split_at_trailing_param_list(raw_suffix)
     if split is None:

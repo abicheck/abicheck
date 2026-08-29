@@ -173,3 +173,24 @@
   `(anonymous namespace)::Foo const *`) -- wrongly merging pointer-to-const
   and pointer-to-non-const into one identity. Now only arms once the
   declarator's own sigil has already been found.
+  A bare (non-parenthesized) data-member-pointer parameter's pointee
+  cv-qualifier (`int C::*`, pointer to an `int` member of `C`) now also
+  canonicalizes the same regardless of whether the source spelled it
+  before or after the base type: `canonicalize_type_name` MISPLACES a
+  leading `const` across the `C::` infix rather than leaving it be
+  (`"const int C::*"` becomes `"int C:: const *"`, the cv-word landing
+  where it looks like -- but is not -- the pointer's own by-value
+  qualifier), which this module now corrects. Only `const`/`volatile`
+  positioning relative to the base type is fixed; `canonicalize_type_name`
+  never reorders `volatile` at all, a pre-existing, broader gap affecting
+  every pointee-volatile position in this module (not specific to member
+  pointers), left as an accepted, documented, out-of-scope limitation.
+  This fix's own line-count growth pushed `signature_normalization.py`
+  past the AI-readiness gate's 800-line production maximum a second time,
+  so its declarator-grouping/pointer-to-member/trailing-qualifier
+  machinery -- everything with no recursive dependency back into
+  `canonicalize_function_signature_param_type` itself -- was split into a
+  new sibling leaf module, `abicheck/model/declarator_qualifiers.py`
+  (import is strictly one-way, `signature_normalization ->
+  declarator_qualifiers`, to avoid a cycle between the two), with its own
+  dedicated test file, `tests/test_declarator_qualifiers.py`.

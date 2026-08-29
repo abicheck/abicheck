@@ -182,6 +182,44 @@ class TestPointerToMemberOwnCvIsDropped:
         assert "(int)" in canon("void (C::* const)(int)")
 
 
+class TestBareDataMemberPointerPointeeCvIsCanonicalized:
+    """A bare (non-parenthesized) data-member-pointer parameter, e.g.
+    ``int C::*`` (pointer to an int member of C), has a pointee
+    cv-qualifier that must canonicalize consistently regardless of
+    whether the source spelled it before or after the base type --
+    ``canonicalize_type_name`` itself mishandles this across the
+    ``C::`` infix, misplacing (not merely leaving unmoved) a leading
+    ``const``."""
+
+    def test_leading_and_trailing_const_spellings_unify(self) -> None:
+        assert canon("int const C::*") == canon("const int C::*")
+
+    def test_leading_and_trailing_const_still_distinguish_from_unqualified(
+        self,
+    ) -> None:
+        assert canon("int const C::*") != canon("int C::*")
+
+    def test_nested_namespace_qualifier_handled(self) -> None:
+        assert canon("int const ns::C::*") == canon("const int ns::C::*")
+
+    def test_class_qualifier_preserved(self) -> None:
+        assert "C::" in canon("int const C::*")
+
+    def test_ordinary_namespace_qualified_pointer_unaffected(self) -> None:
+        # A plain pointer whose pointee is namespace-qualified must not
+        # be mistaken for a member pointer -- the "::" there is nowhere
+        # near the sigil, unlike a member pointer's own qualifier.
+        assert canon("ns::Foo *") == "ns::Foo *"
+        assert canon("ns::Foo *") != canon("const ns::Foo *")
+
+    def test_parenthesized_member_function_pointer_unaffected(self) -> None:
+        # The parenthesized case (a member-FUNCTION-pointer's own
+        # trailing parameter list) is a structurally different shape,
+        # already handled by TestPointerToMemberOwnCvIsDropped -- this
+        # bare-pointee-cv fix must not interfere with it.
+        assert canon("void (C::* const)(int)") == canon("void (C::*)(int)")
+
+
 class TestTemplateQualifiedMemberPointerOwnCvIsDropped:
     """A nested-name-specifier's own segment can itself be a template-id
     (``C<int>::``), not only a plain identifier -- the declarator-group
@@ -468,6 +506,10 @@ class TestIdempotence:
 
     def test_idempotent_on_anonymous_namespace_qualified_pointer(self) -> None:
         once = canon("(anonymous namespace)::Foo const *")
+        assert canon(once) == once
+
+    def test_idempotent_on_bare_data_member_pointer(self) -> None:
+        once = canon("const int C::*")
         assert canon(once) == once
 
 

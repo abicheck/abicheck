@@ -7116,6 +7116,73 @@ code (evaluating an arbitrary constant expression remains out of scope).
 Two new tests in `tests/test_signature_normalization.py` pin the
 anonymous-namespace fix, including idempotence.
 
+**Correction (2026-08-29, same day, fifteenth Codex review round on PR
+#941): a bare data-member-pointer's pointee cv-qualifier was misplaced
+across the `ClassName::` infix, plus the fix's own line-count growth
+forced a second module split.** `canonicalize_type_name`'s own east-const
+regex -- unmodifiable, since `name_classification.py` is a frozen,
+no-growth legacy file -- does not know how to normalize a leading
+cv-qualifier across a bare (non-parenthesized) data-member-pointer's own
+`ClassName::` infix, and MISPLACES it depending on which side it started
+on: `"int const C::*"` stays `"int const C:: *"` (matching this
+primitive's own canonical output), but `"const int C::*"` becomes
+`"int C:: const *"` -- the cv-word shoved in between the qualifier and
+the sigil, indistinguishable in that position from the pointer's own
+by-value qualifier. Both spell the identical pointer-to-const-int-member
+type and must canonicalize identically; a first, narrower fix attempt
+(scanning only immediately before the sigil) caught the first
+manifestation but not the second, discovered via direct testing. Fixed
+with a more robust "reliable marker" strategy in the new
+`_find_member_pointer_qualifier`: a member pointer's own qualifier is
+always followed by a single space before whatever comes next
+(`"C:: *"`), unlike ordinary namespace qualification within a type's own
+spelling, which never has a space after `::` (`"ns::Foo"`) -- so the LAST
+`"::` "` marks the qualifier's end reliably, and the caller re-collects
+any cv word found on either side of the qualifier (base-side and
+tail-side) before re-canonicalizing the combined base. A related,
+broader limitation was found and deliberately left out of scope:
+`canonicalize_type_name` never reorders `volatile` at all (only
+`const`), a pre-existing gap affecting every pointee-volatile position in
+this module, not specific to member pointers -- fixing it is a
+substantially larger undertaking than this round's actual Codex finding
+(which named `const` specifically), so it is documented directly in
+`_find_member_pointer_qualifier`'s own docstring and the corresponding
+doctest as an accepted, out-of-scope residual gap rather than silently
+patched over.
+
+Implementing this pushed `signature_normalization.py` to 908 lines, over
+the AI-readiness gate's 800-line production maximum (which has no
+debt-ledger workaround for a file this new) -- the identical situation
+the seventh round's own `identity.py` -> `signature_normalization.py`
+split addressed one level up. Resolved the same way: a second sibling
+leaf module, `abicheck/model/declarator_qualifiers.py`, now holds every
+piece of this module's own machinery that has no *recursive* dependency
+back into `canonicalize_function_signature_param_type` itself --
+`_is_declarator_group` (+ its `_CALLING_CONVENTIONS`/`_IDENTIFIER_RE`
+supporting constants), `_extract_top_level_cv`, the new
+`_find_member_pointer_qualifier` (+ `_MEMBER_POINTER_TAIL_RE`),
+`_split_at_trailing_param_list`, `_canonicalize_member_qualifiers`, and
+`_canonicalize_noexcept` (+ `_NOEXCEPT_RE`). What stays behind in
+`signature_normalization.py` is exactly the machinery that DOES recurse
+back into `canonicalize_function_signature_param_type`
+(`_normalize_param_list_contents`/`_normalize_nested_param_lists`, for a
+callback/member-function-pointer's own nested parameter list) plus the
+top-level by-value cv/array-decay logic and the main function itself --
+so the import is strictly one-way (`signature_normalization ->
+declarator_qualifiers`, never the reverse), avoiding a cycle between the
+two sibling leaf modules. `_CV_WORD_RE` (a trivial one-line regex
+constant) is duplicated in both modules rather than shared, since sharing
+it would need an import in the direction that would create that cycle.
+Both files stay comfortably under the cap after the split (~600 and ~370
+lines respectively). The new module gets its own dedicated
+primitive-level test file, `tests/test_declarator_qualifiers.py`
+(mirroring `test_signature_normalization.py`'s own rationale and
+including its own leaf-module-contract test), alongside new tests in
+`tests/test_signature_normalization.py` pinning the member-pointer fix
+itself (both cv-spelling orderings unifying, an ordinary namespace-
+qualified pointer staying unaffected, the parenthesized member-function-
+pointer case staying unaffected, and idempotence).
+
 ---
 
 ### Phase 3 — public surface as a graph query over one evidence graph (D5)
