@@ -7026,6 +7026,35 @@ leftover text through verbatim is already consistent). Eight new tests in
 new idempotence cases) pin both fixes, including a nested template
 argument and `noexcept` combined with order-independent cv.
 
+**Correction (2026-08-29, same day, twelfth Codex review round on PR #941,
+commit 509e3f3): the eleventh round's `noexcept` fix preserved the
+specifier verbatim, which was necessary but not sufficient -- preserving
+its exact SPELLING is not the same as canonicalizing it.** Since C++17, a
+function type's exception specification collapses to exactly two kinds
+for TYPE purposes: "non-throwing" (bare `noexcept` or `noexcept(true)`)
+and "potentially-throwing" (no specifier at all, or `noexcept(false)`).
+Those pairs are the SAME type and must canonicalize identically, but the
+eleventh round's fix passed the raw text through unchanged, so
+`void (*)(int) noexcept` and `void (*)(int) noexcept(true)` -- one
+identical adjusted type -- canonicalized to two different strings (an
+under-merge this time, the milder sibling of the over-merges every
+earlier round fixed, but the same underlying principle: "verbatim
+preservation" is not "canonicalization"). Fixed with a new
+`_canonicalize_noexcept`: only the two literal, constant-expression
+spellings (`true`/`false`) are recognized and normalized -- bare
+`noexcept`/`noexcept(true)` collapse to the single canonical spelling
+`"noexcept"`, `noexcept(false)` is dropped entirely (equivalent, for type
+purposes, to an already-absent specifier) -- while any other,
+non-literal `noexcept(expr)` is left completely untouched, since
+evaluating an arbitrary constant expression is out of scope, the same
+"don't solve the fully general grammar" limit this module already draws
+for multi-dimensional arrays and non-literal declarator shapes elsewhere.
+Nine new tests in `tests/test_signature_normalization.py`
+(`TestNoexceptSpellingsCanonicalized`, plus two new idempotence cases)
+pin this, including that a non-literal expression stays genuinely
+distinguishing rather than being silently (and wrongly) folded into
+either canonical form.
+
 ---
 
 ### Phase 3 — public surface as a graph query over one evidence graph (D5)

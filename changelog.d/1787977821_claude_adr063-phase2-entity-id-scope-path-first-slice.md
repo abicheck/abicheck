@@ -144,3 +144,9 @@
   specifier it doesn't individually name -- a `noexcept`-specifier (part
   of a C++17 function's type, and previously silently discarded) now
   survives verbatim alongside order-independent `const`/`volatile`.
+  A `noexcept`-specifier's two constant spellings are now also
+  canonicalized rather than merely preserved: bare `noexcept` and
+  `noexcept(true)` collapse to one canonical form, and `noexcept(false)`
+  is dropped entirely (equivalent, for type purposes, to no specifier at
+  all) -- matching C++17's own function-type rule -- while any other,
+  non-literal `noexcept(expr)` is left genuinely distinguishing.

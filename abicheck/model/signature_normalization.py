@@ -341,7 +341,19 @@ def _canonicalize_member_qualifiers(s: str) -> str:
     seq first among these trailing specifiers, so a real producer's
     placement never needs inferring -- only cv needs reordering relative
     to itself; everything else keeps whatever order it was already
-    spelled in).
+    spelled in; twelfth round: preserving ``noexcept`` verbatim was
+    necessary but not sufficient -- since C++17, a function type's
+    exception specification collapses to exactly two kinds for TYPE
+    purposes, "non-throwing" (bare ``noexcept``/``noexcept(true)``) and
+    "potentially-throwing" (no specifier at all, or ``noexcept(false)``),
+    so those pairs are the SAME type and must canonicalize identically,
+    the same "verbatim preservation isn't canonicalization" gap the
+    by-value cv/array-decay fixes each already closed for their own
+    shape. Only the two literal, constant-expression spellings are
+    normalized; any other, non-literal ``noexcept(expr)`` is left
+    completely untouched -- evaluating an arbitrary constant expression is
+    out of scope, the same "don't solve the fully general grammar" limit
+    this module already draws elsewhere).
     """
     stripped = s.strip()
     if not stripped:
@@ -349,6 +361,7 @@ def _canonicalize_member_qualifiers(s: str) -> str:
     has_const = re.search(r"\bconst\b", stripped) is not None
     has_volatile = re.search(r"\bvolatile\b", stripped) is not None
     rest = re.sub(r"\s+", " ", _CV_WORD_RE.sub("", stripped)).strip()
+    rest = _canonicalize_noexcept(rest)
     parts = [
         p
         for p, present in (("const", has_const), ("volatile", has_volatile))
@@ -357,6 +370,32 @@ def _canonicalize_member_qualifiers(s: str) -> str:
     if rest:
         parts.append(rest)
     return " ".join(parts)
+
+
+_NOEXCEPT_RE = re.compile(r"\bnoexcept\b(?:\s*\(\s*([^()]*)\s*\))?")
+
+
+def _canonicalize_noexcept(s: str) -> str:
+    """Normalize the two constant ``noexcept`` spellings this trailing
+    region can carry: bare ``noexcept``/``noexcept(true)`` (the
+    "non-throwing" type) collapse to the single canonical spelling
+    ``"noexcept"``; ``noexcept(false)`` (equivalent, for type purposes, to
+    no exception-specification at all) is dropped entirely, same as an
+    already-absent specifier. Any other ``noexcept(expr)`` -- a non-
+    literal constant expression this function cannot evaluate -- is left
+    untouched, verbatim.
+    """
+    m = _NOEXCEPT_RE.search(s)
+    if not m:
+        return s
+    arg = m.group(1)
+    if arg is None or arg.strip() == "true":
+        replacement = "noexcept"
+    elif arg.strip() == "false":
+        replacement = ""
+    else:
+        return s
+    return re.sub(r"\s+", " ", s[: m.start()] + replacement + s[m.end() :]).strip()
 
 
 def canonicalize_function_signature_param_type(name: str) -> str:
@@ -559,6 +598,21 @@ def canonicalize_function_signature_param_type(name: str) -> str:
     'void ( * )(int) noexcept'
     >>> canonicalize_function_signature_param_type("void (C::*)(int) noexcept const")
     'void (C:: * )(int) const noexcept'
+
+    Preserving ``noexcept`` verbatim is necessary but not sufficient: since
+    C++17 a function type's exception specification is exactly one of two
+    kinds for TYPE purposes -- "non-throwing" (bare ``noexcept`` or
+    ``noexcept(true)``) and "potentially-throwing" (no specifier at all,
+    or ``noexcept(false)``) -- so those pairs canonicalize identically,
+    not merely both survive. Only the two literal spellings are
+    recognized; any other, non-literal ``noexcept(expr)`` is left
+    untouched (evaluating an arbitrary constant expression is out of
+    scope).
+
+    >>> canonicalize_function_signature_param_type("void (*)(int) noexcept(true)")
+    'void ( * )(int) noexcept'
+    >>> canonicalize_function_signature_param_type("void (*)(int) noexcept(false)")
+    'void ( * )(int)'
     """
     canonical = canonicalize_type_name(
         _decay_top_level_array(canonicalize_type_name(name))

@@ -282,6 +282,42 @@ class TestPointerToMemberTrailingQualifiersPreserved:
         )
 
 
+class TestNoexceptSpellingsCanonicalized:
+    """Since C++17, a function type's exception specification collapses
+    to exactly two kinds for TYPE purposes: "non-throwing" (bare
+    ``noexcept``/``noexcept(true)``) and "potentially-throwing" (no
+    specifier at all, or ``noexcept(false)``) -- those pairs are the SAME
+    type and must canonicalize identically, not merely both survive."""
+
+    def test_bare_noexcept_equals_noexcept_true(self) -> None:
+        assert canon("void (*)(int) noexcept") == canon("void (*)(int) noexcept(true)")
+
+    def test_noexcept_false_equals_no_specifier(self) -> None:
+        assert canon("void (*)(int) noexcept(false)") == canon("void (*)(int)")
+
+    def test_noexcept_still_distinguishes_from_no_specifier(self) -> None:
+        assert canon("void (*)(int) noexcept") != canon("void (*)(int)")
+        assert canon("void (*)(int) noexcept(true)") != canon("void (*)(int)")
+
+    def test_non_literal_noexcept_expression_left_untouched(self) -> None:
+        # Evaluating an arbitrary constant expression is out of scope --
+        # this must not be silently (and wrongly) treated as equivalent
+        # to either canonical form.
+        assert "SOME_CONSTANT" in canon("void (*)(int) noexcept(SOME_CONSTANT)")
+        assert canon("void (*)(int) noexcept(SOME_CONSTANT)") != canon(
+            "void (*)(int) noexcept"
+        )
+        assert canon("void (*)(int) noexcept(SOME_CONSTANT)") != canon("void (*)(int)")
+
+    def test_noexcept_normalization_combines_with_trailing_cv(self) -> None:
+        assert canon("void (C::*)(int) const noexcept(true)") == canon(
+            "void (C::*)(int) noexcept const"
+        )
+        assert canon("void (C::*)(int) const noexcept(false)") == canon(
+            "void (C::*)(int) const"
+        )
+
+
 class TestNestedCallbackParametersAreNormalizedRecursively:
     """A declarator's own trailing parameter list (a callback or
     member-function-pointer's parameters) is exactly as much a function's
@@ -358,6 +394,14 @@ class TestIdempotence:
 
     def test_idempotent_on_noexcept(self) -> None:
         once = canon("void (C::*)(int) noexcept const")
+        assert canon(once) == once
+
+    def test_idempotent_on_noexcept_true_spelling(self) -> None:
+        once = canon("void (*)(int) noexcept(true)")
+        assert canon(once) == once
+
+    def test_idempotent_on_non_literal_noexcept(self) -> None:
+        once = canon("void (*)(int) noexcept(SOME_CONSTANT)")
         assert canon(once) == once
 
 
