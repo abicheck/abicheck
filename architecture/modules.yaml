@@ -208,7 +208,6 @@
         "abicheck/diff_types_field_facts.py",
         "abicheck/diff_types_surface.py",
         "abicheck/diff_unnamed_types.py",
-        "abicheck/diff_versioning.py",
         "abicheck/diff_vtable_layout.py",
         "abicheck/diff_wheel_deployment.py",
         "abicheck/finding_identity.py",
