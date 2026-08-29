@@ -8610,6 +8610,37 @@ rather than the previous fix's excised `"typename T::x (*())(T)"`, since
 the new rule no longer excises the nested parameter list at all) still
 passes.
 
+**Correction (2026-08-29, same day, real Windows CI failures on PR
+#943): two more real Windows-only failures in the `EntityId` carrier
+test suite itself, this time in the test infrastructure rather than the
+production code.** (1) `TestResolverIsOnlyCalledByAProducer`/
+`TestMangledRewritesKeepTheCarrierInSync` (both new AST-scanning tests
+this phase's own second slice added) read every `abicheck/**/*.py` file
+via `Path.read_text()` with no explicit encoding -- `str.decode`/
+`open()`'s platform default on Windows is the host codepage, not UTF-8,
+so this raised `UnicodeDecodeError` on the first source file containing
+a byte sequence the codepage can't decode; a real Windows CI run failed
+both scanner test classes this way. Fixed by passing
+`encoding="utf-8"` explicitly at both call sites. (2)
+`test_live_castxml_populates_every_kind` failed for the identical
+root-cause class the earlier castxml-mangling-prefix correction fixed in
+production code, but here in the test's OWN castxml invocation:
+`_castxml_parser` (unlike its `_clang_parser` sibling, which already
+pins `--target=x86_64-unknown-linux-gnu` for exactly this reason) passed
+no target at all, so on Windows CI the underlying castxml install
+targeted the host by default and mangled the probe header's `gVar` as
+MSVC's `"?gVar@ns@@3HA"` instead of the Itanium `"_ZN2ns4gVarE"` the
+test's assertion is hardcoded against -- confirmed by a real Windows CI
+failure log. Fixed by pinning the identical `--target=...` flag on the
+castxml invocation too (castxml forwards an unrecognized flag straight
+to its internal clang compiler, so it is the same flag reached a
+different way). Both fixes verified by re-running the affected tests
+locally (Linux, where the bug was invisible either way -- UTF-8 is
+already the default codepage there, and this sandbox's castxml already
+targets Itanium by default) and by confirming this repository's own
+mypy/ruff/architecture gates and the full `clang`/`castxml`-marked test
+subset stay green.
+
 ---
 
 ### Phase 3 — public surface as a graph query over one evidence graph (D5)

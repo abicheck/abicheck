@@ -163,6 +163,19 @@ def _castxml_parser(header_text: str, tmp_path: Path, name: str) -> _CastxmlPars
             "-std=c++17",
             "-x",
             "c++",
+            # Pinned for the identical reason `_clang_parser` above pins
+            # its own `--target` -- castxml forwards an unrecognized flag
+            # straight to its internal clang compiler, so this is the same
+            # flag, just reached a different way. Confirmed by a real
+            # Windows CI failure: an unpinned castxml targets the runner's
+            # own host by default, mangling `gVar` as MSVC's
+            # `"?gVar@ns@@3HA"` instead of the Itanium `"_ZN2ns4gVarE"`
+            # every assertion in this file is written against -- this
+            # module tests entity-identity logic, not host-mangling-scheme
+            # accidents, so every live-castxml probe here targets the same
+            # fixed platform `_clang_parser` already does, regardless of
+            # which OS runs the test.
+            "--target=x86_64-unknown-linux-gnu",
             str(header),
             "-o",
             str(xml_out),
@@ -355,7 +368,7 @@ def _resolver_call_sites() -> list[str]:
     """
     sites: list[str] = []
     for path in sorted(_ABICHECK_ROOT.rglob("*.py")):
-        tree = ast.parse(path.read_text(), filename=str(path))
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
         for node in ast.walk(tree):
             if not isinstance(node, ast.Call):
                 continue
@@ -795,7 +808,7 @@ def _mangled_rewrite_sites() -> list[tuple[str, int, bool]]:
     """
     sites: list[tuple[str, int, bool]] = []
     for path in sorted(_ABICHECK_ROOT.rglob("*.py")):
-        tree = ast.parse(path.read_text(), filename=str(path))
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
         for node in ast.walk(tree):
             if not isinstance(node, ast.Call):
                 continue
