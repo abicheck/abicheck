@@ -586,19 +586,18 @@ class _ClangAstParser:
         self._target_triple = target_triple
         self._exported_dynamic = exported_dynamic
         self._exported_static = exported_static
-        # Per-*entity* (not per-walk-frame) anonymous-ordinal state, keyed by
-        # the merged identity `_clang_scope.anonymous_scope_key` computes for
-        # the node whose children are about to be numbered (`container_key`
-        # below) -- see that key's own docstring for why a reopened
-        # namespace's two blocks must share one entry. A frame-local dict
-        # (this module's first cut) resets every time `_walk` re-enters a
-        # reopened namespace's second block, handing an anonymous sibling in
-        # the second block the SAME ordinal as one already assigned in the
-        # first -- confirmed by direct compilation (Codex review, fresh
-        # evidence). Persisting this on `self`, across every `_walk` call for
-        # the whole AST, is what lets two blocks of the same namespace share
-        # one counter instead of each starting over at 0.
-        self._anonymous_ordinal_state: dict[str, dict[str, Any]] = {}
+        # Per-*logical-scope* (not per-walk-frame, and not per-AST-node
+        # either) anonymous-ordinal state, keyed by `child_scope_path` --
+        # the typed `ScopePath` a `_walk` call's children actually enter --
+        # at the point in `_walk` below where it is used. See that site's
+        # own comment for why this must be keyed by the resulting scope
+        # path rather than by a per-call local (a reopened named namespace
+        # is walked as two separate `_walk` calls) or by the walked node's
+        # own identity (a transparent AST wrapper like `LinkageSpecDecl`
+        # contributes no segment of its own, so its anonymous children must
+        # share the counter of whatever real scope contains it) -- both
+        # confirmed by direct compilation, two separate Codex review rounds.
+        self._anonymous_ordinal_state: dict[ScopePath, dict[str, Any]] = {}
         (
             self._pub_header_segs,
             self._pub_dir_segs,
@@ -846,26 +845,48 @@ class _ClangAstParser:
         # blocks would split one real scope into two identities (see
         # `_clang_scope.anonymous_scope_key`).
         #
-        # The counter/seen-set pair itself must be keyed by *this node's own*
-        # merged identity, not held as a plain per-call local, for the same
-        # reopening reason one level up: a NAMED namespace reopened in two
-        # blocks (`namespace N { ... } ... namespace N { ... }`) is walked as
-        # two SEPARATE `_walk` calls, one per block -- confirmed identical
-        # `originalNamespace`/`previousDecl` linkage to the anonymous case via
-        # direct compilation (Codex review, fresh evidence). A call-local
-        # dict resets between those two calls, so an anonymous struct that is
-        # the first anonymous child of block two collides with the ordinal
-        # already given to block one's first anonymous child. Persisting the
-        # state on `self`, keyed by `_clang_scope.anonymous_scope_key(node)`
-        # (falling back to this node's own object identity when no id is
-        # available at all -- the root call, or a hand-built test AST -- so
-        # two such calls never accidentally share state), lets both blocks of
-        # one reopened namespace share the same running counter.
-        container_key = _clang_scope.anonymous_scope_key(node)
-        if container_key is None:
-            container_key = f"objid:{id(node)}"
+        # The counter/seen-set pair itself must be keyed by the *logical C++
+        # scope this node's children are actually entering* -- `child_scope_
+        # path` itself -- not held as a plain per-call local, and not keyed
+        # by `node`'s own identity either (an earlier version of this fix
+        # tried that and was itself wrong, see below). Two real cases prove
+        # this, both confirmed by direct compilation (Codex review, fresh
+        # evidence, two separate rounds):
+        #
+        # (1) A NAMED namespace reopened in two blocks (`namespace N { ... }
+        # ... namespace N { ... }`) is walked as two SEPARATE `_walk` calls,
+        # one per block. A call-local dict resets between those two calls,
+        # so an anonymous struct that is the first anonymous child of block
+        # two collides with the ordinal already given to block one's first
+        # anonymous child.
+        #
+        # (2) A TRANSPARENT AST wrapper -- `LinkageSpecDecl` (`extern "C"
+        # { ... }`) is the confirmed real case, and any future node kind
+        # `scope_segment_for` maps to `None` would be another -- contributes
+        # NO segment of its own (`child_scope_path` for its children is
+        # exactly `scope_path`, unchanged), yet it IS a separate `_walk`
+        # call/node. Keying by `node`'s own identity (this fix's first
+        # attempt) gave the wrapper's anonymous children their own counter,
+        # separate from a sibling anonymous scope declared directly in the
+        # SAME enclosing namespace right next to the `extern "C"` block --
+        # two scopes that are, from `ScopePath`'s own perspective, both
+        # direct children of the identical logical scope.
+        #
+        # `child_scope_path` closes both at once with one rule, since it IS
+        # the value that answers "which logical scope are these children
+        # actually in": two reopened blocks of namespace `N` compute the
+        # identical `(..., Namespace("N"))` tuple (segment construction
+        # depends only on the name/`isInline` flag, never on `node` identity
+        # or which block produced it), and a transparent wrapper's
+        # `child_scope_path` is *by definition* identical to its own
+        # `scope_path` (no segment appended), so its anonymous children
+        # share the counter of whatever real scope contains the wrapper.
+        # `ScopeSegment`s are frozen/hashable, so the tuple itself is a valid
+        # dict key -- no string-identity/objid fallback needed at all, and
+        # none of the "no id available" edge cases the node-identity version
+        # had to account for can arise here.
         ordinal_state = self._anonymous_ordinal_state.setdefault(
-            container_key, {"next": 0, "seen": {}}
+            child_scope_path, {"next": 0, "seen": {}}
         )
         for child in node.get("inner", []) or []:
             if not isinstance(child, dict):

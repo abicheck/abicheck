@@ -567,6 +567,10 @@ _LIVE_HEADER = textwrap.dedent(
     struct Holder { union { int u1; float u2; }; union { int u3; }; };
     namespace Reopened { struct { struct RFirst {}; } r1; }
     namespace Reopened { struct { struct RSecond {}; } r2; }
+    namespace Transparent {
+        extern "C" { struct { struct TFirst {}; } t1; }
+        struct { struct TSecond {}; } t2;
+    }
     """
 )
 
@@ -628,6 +632,24 @@ def test_live_clang_typed_scope_paths(tmp_path: Path) -> None:
     assert r_first.scope_path[0] == r_second.scope_path[0] == Namespace("Reopened")
     assert r_first.scope_path[1] != r_second.scope_path[1]
     assert {r_first.scope_path[1], r_second.scope_path[1]} == {
+        Anonymous("struct", 0),
+        Anonymous("struct", 1),
+    }
+
+    # A TRANSPARENT AST wrapper (`extern "C" { ... }`, a `LinkageSpecDecl`)
+    # contributes no `ScopePath` segment of its own, so an anonymous scope
+    # declared inside it and one declared directly in the SAME enclosing
+    # namespace are, from `ScopePath`'s own perspective, both direct
+    # children of the identical logical scope -- they must share one
+    # ordinal counter, not each get their own because they were walked as
+    # separate AST nodes (Codex review, fresh evidence: confirmed the
+    # `LinkageSpecDecl` node sits directly between the two in real clang
+    # output).
+    t_first = next(d for d in parser._records if d.node.get("name") == "TFirst")
+    t_second = next(d for d in parser._records if d.node.get("name") == "TSecond")
+    assert t_first.scope_path[0] == t_second.scope_path[0] == Namespace("Transparent")
+    assert t_first.scope_path[1] != t_second.scope_path[1]
+    assert {t_first.scope_path[1], t_second.scope_path[1]} == {
         Anonymous("struct", 0),
         Anonymous("struct", 1),
     }
