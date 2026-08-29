@@ -8529,6 +8529,42 @@ existing template-template-parameter discriminator test in that module
 (kind/packness/nested-arity collisions, the `TT`/`UU` rename case) still
 passes unchanged.
 
+**Correction (2026-08-29, same day, Codex review on PR #943): two
+templates differing only in the DECLARATOR SHAPE of a dependent return
+type still collapsed onto one identity, after the trailing-return-type
+fix above.** `template<class T> typename T::x f(T);` and `template<class
+T> typename T::x (*f(T))(T);` both compile with no redefinition error
+(confirmed by direct compilation) -- the second returns a pointer to a
+function, and clang spells this as a SPIRAL declarator, `typename T::x
+(*(T))(T)`: the first top-level parenthesized group (`(*(T))`) is not
+itself the function's parameter list -- it wraps a pointer declarator
+around the real one, `(T)`, nested one level deeper; the trailing `(T)`
+belongs to the RETURNED function type, not to the outer function. The
+fixed `_return_type` (from the trailing-return-type correction above)
+still treated the first top-level group as the parameter list
+unconditionally, so both overloads' return type -- and, for an
+uninstantiated template, `EntityId` -- collapsed onto the identical
+`"typename T::x"`. Fixed by detecting when a function's `qualType` has
+MORE than one top-level parenthesized group (the ordinary,
+single-group case is left byte-for-byte unchanged): in that case the
+real parameter list is located by recursing into the first group's own
+interior until a nesting level is reached with no further top-level
+group following it (the recursion bottoms out there, generalizing to
+arbitrarily deep pointer/reference-to-function nesting, not just one
+level), and its contents are excised (parens kept, as an empty marker)
+so the remaining text -- including the `*`/`&` and any further wrapping
+groups -- becomes the return-type discriminator. Verified the pointer
+and reference forms stay distinct from each other and from the ordinary
+case: `typename T::x (*f(T))(T)` -> `"typename T::x (*())(T)"`,
+`typename T::x (&f(T))(T)` -> `"typename T::x (&())(T)"`, `typename T::x
+f(T)` -> `"typename T::x"` (unchanged). Regression test in
+`tests/test_entity_id_template_discriminators.py`
+(`test_live_clang_function_pointer_return_declarator_discriminates_overloaded_templates`),
+confirmed to fail pre-fix via `git stash` on just the source file; every
+existing return-type/trailing-return-type discriminator test in that
+module still passes unchanged, and no other clang-backend test in the
+unit suite regressed.
+
 ---
 
 ### Phase 3 — public surface as a graph query over one evidence graph (D5)

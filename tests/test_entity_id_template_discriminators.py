@@ -586,3 +586,41 @@ def test_live_clang_nested_template_template_param_sees_enclosing_names(
     )
     assert a.entity_id is not None and a.entity_id == b.entity_id
     assert a.entity_id.extra[-1] == "template(nontype:type-param-0)"
+
+
+@pytest.mark.integration
+@pytest.mark.skipif(shutil.which("clang") is None, reason="clang not installed")
+def test_live_clang_function_pointer_return_declarator_discriminates_overloaded_templates(
+    tmp_path: Path,
+) -> None:
+    """Two templates differing ONLY in the DECLARATOR SHAPE of a dependent
+    return type are legal, coexisting overloads: `template<class T>
+    typename T::x f(T);` and `template<class T> typename T::x (*f(T))(T);`
+    both compile with no redefinition error (confirmed by direct
+    compilation) -- the second returns a pointer to a function, spelled by
+    clang as the SPIRAL declarator `typename T::x (*(T))(T)`, whose first
+    top-level group (`(*(T))`) is not itself the parameter list -- it
+    wraps the real one one level deeper. `_return_type` used to treat that
+    first group as the parameter list outright, discarding everything
+    after it, so both overloads' return type collapsed onto the identical
+    `typename T::x` (Codex review, PR #943)."""
+    a = _one(
+        _clang_parser(
+            "struct S { using x = int; }; template<class T> typename T::x f(T);",
+            tmp_path,
+            "fpreta",
+        ).parse_functions(),
+        name="f",
+    )
+    b = _one(
+        _clang_parser(
+            "struct S { using x = int; }; template<class T> typename T::x (*f(T))(T);",
+            tmp_path,
+            "fpretb",
+        ).parse_functions(),
+        name="f",
+    )
+    assert a.entity_id is not None and b.entity_id is not None
+    assert a.entity_id != b.entity_id
+    assert a.return_type == "typename T::x"
+    assert b.return_type == "typename T::x (*())(T)"
