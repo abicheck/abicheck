@@ -7897,6 +7897,34 @@ it a display fallback that happens to be true? The second slice's own
 `is_extern_c` field had been an inert inaccuracy for as long as it
 existed; only the carrier made it load-bearing.
 
+**Correction (2026-08-29, same day, Codex review on PR #943): the carrier
+also stopped being inert for a second, unrelated reason -- `dumper_
+hybrid.py` rewrites a declaration's `mangled` field in two places AFTER a
+producer already resolved its `entity_id` from the ORIGINAL spelling, and
+neither rewrite touched the carrier.** Reconciling a castxml ctor/dtor
+synthetic placeholder key to clang's real mangled name (`_merge_functions`)
+left the reconciled declaration's own `mangled` field correct while its
+`entity_id` still carried the synthetic, no-such-symbol-exists placeholder
+inside its own `"mangled"` tag; normalizing a Mach-O linker symbol's
+leading underscore (`merge_snapshots`) had the identical shape, just for a
+real-not-synthetic spelling. Before this slice, the same rewrite site
+already existed but touched an inert field -- nothing kept it in sync with
+anything, because nothing downstream read it as an identity. Fixed two
+ways, matching which side of the rewrite has a matching declaration to
+adopt: the ctor/dtor case adopts `match`'s entire, already-correctly-
+resolved `entity_id` wholesale (the clang-side declaration for the SAME
+real symbol); the Mach-O case has no "other side" to borrow from, so it
+rebuilds only the `"mangled"` tag's spelling via a new, general
+`model.identity.with_mangled_name(entity_id, new_mangled_name)` helper,
+which is a no-op on an `extern_c`/`sig`-tagged identity (or `None`) since
+neither was derived from the mangled spelling in the first place. Regression
+tests for both live in `tests/test_entity_id_carrier.py` (not `tests/
+test_dumper_hybrid.py`, despite testing that module's own merge logic --
+they're pinning THIS module's identity-carrier contract, the same reasoning
+the file's own module docstring already states for keeping every carrier
+test in one place), and both were confirmed to fail against the pre-fix
+`dumper_hybrid.py` before landing this correction.
+
 Next slice, in order (superseding the second slice's list, whose item (a)
 that slice landed and whose item (b) this slice's own finding above
 re-sequences): (c1) the storage v2 wire bridge -- `storage/entity_ids.py`'s
