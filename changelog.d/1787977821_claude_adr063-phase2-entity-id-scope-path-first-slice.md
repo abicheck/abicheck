@@ -144,9 +144,32 @@
   specifier it doesn't individually name -- a `noexcept`-specifier (part
   of a C++17 function's type, and previously silently discarded) now
   survives verbatim alongside order-independent `const`/`volatile`.
-  A `noexcept`-specifier's two constant spellings are now also
+  A `noexcept`-specifier's two literal spellings are now also
   canonicalized rather than merely preserved: bare `noexcept` and
   `noexcept(true)` collapse to one canonical form, and `noexcept(false)`
   is dropped entirely (equivalent, for type purposes, to no specifier at
-  all) -- matching C++17's own function-type rule -- while any other,
-  non-literal `noexcept(expr)` is left genuinely distinguishing.
+  all) -- matching C++17's own function-type rule. This is deliberately
+  conservative: only the two literal `true`/`false` spellings are
+  recognized, not the constant expression's actual boolean *value* (C++
+  itself evaluates that value, so e.g. `noexcept(sizeof(int))` is
+  type-equivalent to `noexcept(true)` and `noexcept(1 == 0)` to no
+  specifier at all) -- any other `noexcept(expr)` is left untouched and
+  stays genuinely distinguishing from both canonical forms, which can
+  over-distinguish two constant-expression spellings that a real compiler
+  would treat as the identical type. Evaluating an arbitrary constant
+  expression is out of scope for this primitive.
+  An empty parameter list and a bare `void` (`void (*)()` vs.
+  `void (*)(void)`) now unify to the same canonical form. A
+  `const`/`volatile` token appearing INSIDE a non-literal
+  `noexcept(expr)`'s own argument (e.g. `noexcept(Foo<const int>)`) is no
+  longer mistaken for -- and no longer mutates -- this declarator's own
+  trailing cv-qualifier; extraction is now depth-aware, matching the
+  existing outside-nesting cv-stripping discipline elsewhere in this
+  module.
+  The sigil-lock flag introduced for the trailing-ref-qualifier fix above
+  was itself over-eager: it locked out the parameter's own actual pointer
+  sigil whenever ANY top-level opaque paren appeared, even one preceding
+  that sigil entirely (a real producer spelling,
+  `(anonymous namespace)::Foo const *`) -- wrongly merging pointer-to-const
+  and pointer-to-non-const into one identity. Now only arms once the
+  declarator's own sigil has already been found.

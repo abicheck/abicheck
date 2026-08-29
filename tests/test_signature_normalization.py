@@ -79,6 +79,23 @@ class TestPointeeCvIsPreserved:
         # different type -- Box<const int> vs. Box<int>.
         assert canon("Box<const int>") != canon("Box<int>")
 
+    def test_anonymous_namespace_qualified_pointee_cv_differs(self) -> None:
+        # Regression pin: a real, observed producer spelling for a type
+        # in an anonymous namespace, "(anonymous namespace)::Foo", starts
+        # with an opaque paren that precedes the parameter's own actual
+        # pointer sigil entirely -- this must not be mistaken for the
+        # declarator's own trailing parameter list (which would wrongly
+        # lock out that later sigil and merge two genuinely different
+        # pointer-to-const-vs-non-const types).
+        assert canon("(anonymous namespace)::Foo const *") != canon(
+            "(anonymous namespace)::Foo *"
+        )
+
+    def test_anonymous_namespace_qualifier_preserved(self) -> None:
+        assert "(anonymous namespace)::Foo" in canon(
+            "(anonymous namespace)::Foo const *"
+        )
+
 
 class TestPointersOwnTopLevelCvIsDropped:
     """A cv-qualifier trailing the pointer's own outermost sigil qualifies
@@ -252,7 +269,8 @@ class TestPointerToMemberTrailingQualifiersPreserved:
         # briefly mistaken for a NEW top-level sigil, overriding the
         # declarator's own already-found "*" and corrupting the
         # prefix/suffix split entirely.
-        assert canon("void (C::*)(int) &&") == canon("void (C::*)(int) &&")
+        once = canon("void (C::*)(int) &&")
+        assert canon(once) == once
         assert "(int)" in canon("void (C::*)(int) &&")
         assert "C" in canon("void (C::*)(int) &&")
 
@@ -318,6 +336,40 @@ class TestNoexceptSpellingsCanonicalized:
         )
 
 
+class TestCvInsideNoexceptExpressionIsNotExtracted:
+    """A ``const``/``volatile`` token appearing INSIDE a non-literal
+    ``noexcept(expr)``'s own argument belongs to that expression, not to
+    this declarator's own trailing cv-qualifier sequence -- it must not
+    be extracted, reordered, or otherwise mutated."""
+
+    def test_const_inside_noexcept_expression_not_extracted(self) -> None:
+        assert canon("void (C::*)(int) noexcept(Foo<const int>)") == canon(
+            "void (C::*)(int) noexcept(Foo<const int>)"
+        )
+
+    def test_const_inside_noexcept_expression_preserved_verbatim(self) -> None:
+        result = canon("void (C::*)(int) noexcept(Foo<const int>)")
+        assert "Foo<const int>" in result
+
+    def test_nested_const_does_not_merge_with_real_leading_const(self) -> None:
+        # Regression pin: a plain, depth-blind search for "const" over
+        # the whole trailing region wrongly found this nested one and
+        # moved it to the front, producing the SAME string as a
+        # genuinely different declaration with a real leading const.
+        assert canon("void (C::*)(int) noexcept(Foo<const int>)") != canon(
+            "void (C::*)(int) const noexcept(Foo<int>)"
+        )
+
+    def test_nested_const_does_not_distinguish_two_genuinely_equal_specs(self) -> None:
+        # The nested const must not itself become a spurious real-cv
+        # signal: two declarations differing only in an irrelevant
+        # detail outside the nested expression should still compare via
+        # their own real qualifiers, not get contaminated by it.
+        assert canon("void (C::*)(int) const noexcept(Foo<const int>)") == canon(
+            "void (C::*)(int) noexcept(Foo<const int>) const"
+        )
+
+
 class TestNestedCallbackParametersAreNormalizedRecursively:
     """A declarator's own trailing parameter list (a callback or
     member-function-pointer's parameters) is exactly as much a function's
@@ -340,9 +392,11 @@ class TestNestedCallbackParametersAreNormalizedRecursively:
         assert canon("void (*)(int, ...)") == canon("void (*)(const int, ...)")
         assert "..." in canon("void (*)(int, ...)")
 
-    def test_empty_and_void_param_lists_untouched(self) -> None:
-        assert canon("void (*)()") == "void ( * )()"
-        assert canon("void (*)(void)") == "void ( * )(void)"
+    def test_empty_and_void_param_lists_unify(self) -> None:
+        # An empty parameter list and a bare "void" are the identical
+        # "no parameters" adjusted type -- must canonicalize identically,
+        # not merely both survive unchanged.
+        assert canon("void (*)()") == canon("void (*)(void)") == "void ( * )()"
 
     def test_doubly_nested_callback_normalized(self) -> None:
         # A callback parameter that itself takes a callback parameter --
@@ -402,6 +456,18 @@ class TestIdempotence:
 
     def test_idempotent_on_non_literal_noexcept(self) -> None:
         once = canon("void (*)(int) noexcept(SOME_CONSTANT)")
+        assert canon(once) == once
+
+    def test_idempotent_on_void_param_list(self) -> None:
+        once = canon("void (*)(void)")
+        assert canon(once) == once
+
+    def test_idempotent_on_const_inside_noexcept_expression(self) -> None:
+        once = canon("void (C::*)(int) noexcept(Foo<const int>)")
+        assert canon(once) == once
+
+    def test_idempotent_on_anonymous_namespace_qualified_pointer(self) -> None:
+        once = canon("(anonymous namespace)::Foo const *")
         assert canon(once) == once
 
 

@@ -154,6 +154,49 @@ def _strip_cv_tokens_outside_nesting(s: str) -> str:
     return re.sub(r"\s+", " ", "".join(out)).strip()
 
 
+def _extract_top_level_cv(s: str) -> tuple[bool, bool, str]:
+    """Depth-aware sibling of :func:`_strip_cv_tokens_outside_nesting`:
+    finds ``const``/``volatile`` tokens at nesting depth 0 only (outside
+    any ``<...>``/``(...)``/``[...]``), reports which were found, and
+    returns *s* with those depth-0 tokens removed -- a cv-looking word
+    sitting INSIDE a parenthesized region (a ``noexcept(expr)``
+    argument's own text, a template argument) is untouched, since it
+    belongs to that expression, not to this declarator's own trailing
+    qualifier sequence (Codex review, PR #941, thirteenth round: an
+    earlier revision used a plain, depth-blind ``re.search``/``re.sub``
+    over the whole trailing region, which wrongly reached inside a
+    non-literal ``noexcept(expr)``'s own argument, e.g.
+    ``noexcept(Foo<const int>)``).
+    """
+    depth = 0
+    has_const = False
+    has_volatile = False
+    out: list[str] = []
+    i = 0
+    n = len(s)
+    while i < n:
+        ch = s[i]
+        if ch in "<([":
+            depth += 1
+            out.append(ch)
+            i += 1
+        elif ch in ">)]":
+            depth = max(0, depth - 1)
+            out.append(ch)
+            i += 1
+        elif depth == 0 and (m := _CV_WORD_RE.match(s, i)):
+            if m.group() == "const":
+                has_const = True
+            else:
+                has_volatile = True
+            i = m.end()
+        else:
+            out.append(ch)
+            i += 1
+    rest = re.sub(r"\s+", " ", "".join(out)).strip()
+    return has_const, has_volatile, rest
+
+
 def _decay_top_level_array(canonical_type: str) -> str:
     """Best-effort single-dimension array-to-pointer decay for a function
     *parameter* type: ``T[]``/``T[N]`` -> ``T *`` (the bound is dropped --
@@ -252,11 +295,17 @@ def _normalize_param_list_contents(inner: str) -> str:
     callback or member-function-pointer parameter's OWN parameters are
     exactly as much "a function's parameter list" as the outer one is, and
     C++ drops their top-level by-value cv from the function type the same
-    way. An empty list, a bare ``void``, and a variadic ``...`` marker
-    (which is not itself a parameter type at all) are left untouched.
+    way. An empty list and a bare ``void`` are the identical "no
+    parameters" adjusted type (Codex review, PR #941, thirteenth round:
+    an earlier revision returned each spelling unchanged instead of
+    unifying them, so ``void (*)()`` and ``void (*)(void)`` -- one
+    identical adjusted callback type -- canonicalized to two different
+    strings), so both collapse to the same canonical empty form. A
+    variadic ``...`` marker (which is not itself a parameter type at all)
+    is left untouched.
     """
     if inner.strip() == "" or inner.strip().lower() == "void":
-        return inner
+        return ""
     normalized = []
     for part in _split_top_level_commas(inner):
         p = part.strip()
@@ -353,14 +402,26 @@ def _canonicalize_member_qualifiers(s: str) -> str:
     normalized; any other, non-literal ``noexcept(expr)`` is left
     completely untouched -- evaluating an arbitrary constant expression is
     out of scope, the same "don't solve the fully general grammar" limit
-    this module already draws elsewhere).
+    this module already draws elsewhere; thirteenth round: extracting
+    ``const``/``volatile`` via a plain, depth-blind ``re.search`` over the
+    WHOLE trailing region wrongly reached inside a non-literal
+    ``noexcept(expr)``'s own argument too -- a ``const``/``volatile``
+    token that is part of THAT expression's own text, e.g.
+    ``noexcept(Foo<const int>)``, is not this declarator's own
+    cv-qualifier at all, and extracting it both corrupted the expression
+    (mutating text this function has no business touching, since it
+    cannot evaluate it) and could merge two genuinely different overloads
+    that happen to share a nested "const" by coincidence. Fixed with a
+    depth-aware scan, :func:`_extract_top_level_cv`, mirroring
+    :func:`_strip_cv_tokens_outside_nesting`'s own outside-nesting
+    discipline: only a cv word sitting at depth 0 -- outside any
+    ``(...)``/``<...>``/``[...]`` -- is ever this declarator's own
+    trailing qualifier).
     """
     stripped = s.strip()
     if not stripped:
         return ""
-    has_const = re.search(r"\bconst\b", stripped) is not None
-    has_volatile = re.search(r"\bvolatile\b", stripped) is not None
-    rest = re.sub(r"\s+", " ", _CV_WORD_RE.sub("", stripped)).strip()
+    has_const, has_volatile, rest = _extract_top_level_cv(stripped)
     rest = _canonicalize_noexcept(rest)
     parts = [
         p
@@ -613,6 +674,29 @@ def canonicalize_function_signature_param_type(name: str) -> str:
     'void ( * )(int) noexcept'
     >>> canonicalize_function_signature_param_type("void (*)(int) noexcept(false)")
     'void ( * )(int)'
+
+    An empty parameter list and a bare ``void`` are the identical "no
+    parameters" adjusted type. And a ``const``/``volatile`` token that
+    sits INSIDE a non-literal ``noexcept(expr)``'s own argument -- e.g.
+    ``Foo<const int>`` below -- is that expression's own content, not
+    this declarator's own trailing qualifier, and is never extracted.
+
+    >>> canonicalize_function_signature_param_type("void (*)(void)")
+    'void ( * )()'
+    >>> canonicalize_function_signature_param_type("void (C::*)(int) noexcept(Foo<const int>)")
+    'void (C:: * )(int) noexcept(Foo<const int>)'
+
+    An opaque (non-declarator-group) paren can also appear BEFORE the
+    parameter's own actual pointer sigil, not only after it -- a real
+    producer spelling for a type in an anonymous namespace,
+    ``(anonymous namespace)::Foo``. That paren must not be mistaken for a
+    declarator's trailing parameter list; a genuine pointee cv-qualifier
+    on the sigil that follows it still distinguishes.
+
+    >>> canonicalize_function_signature_param_type("(anonymous namespace)::Foo const *")
+    '(anonymous namespace)::Foo const *'
+    >>> canonicalize_function_signature_param_type("(anonymous namespace)::Foo *")
+    '(anonymous namespace)::Foo *'
     """
     canonical = canonicalize_type_name(
         _decay_top_level_array(canonicalize_type_name(name))
@@ -624,22 +708,34 @@ def canonicalize_function_signature_param_type(name: str) -> str:
     transparent_parens: list[bool] = []
     last_top_level_sigil = -1
     has_top_level_bracket = False
-    # Once a genuine (opaque) top-level paren has been seen -- the
-    # declarator's own trailing parameter list -- nothing after it is
-    # eligible to become a new "last top-level sigil". Without this, a
-    # trailing ref-qualifier on a pointer-to-member-function
-    # (`void (C::*)(int) &&`) -- itself a `*`/`&`-shaped token sitting at
-    # depth 0, textually after the parameter list closes -- would wrongly
-    # override the declarator's own already-found sigil and corrupt the
-    # prefix/suffix split (Codex review, PR #941, tenth round: caught by
-    # this round's own new ref-qualifier test, not by a reviewer finding).
+    # Once the declarator's own sigil has ALREADY been found and a
+    # genuine (opaque) top-level paren is then seen -- its trailing
+    # parameter list -- nothing after that paren is eligible to become a
+    # NEW "last top-level sigil". Without this, a trailing ref-qualifier
+    # on a pointer-to-member-function (`void (C::*)(int) &&`) -- itself a
+    # `*`/`&`-shaped token sitting at depth 0, textually after the
+    # parameter list closes -- would wrongly override the declarator's
+    # own already-found sigil and corrupt the prefix/suffix split (Codex
+    # review, PR #941, tenth round). The `last_top_level_sigil != -1`
+    # guard matters: an opaque paren can also appear BEFORE any
+    # declarator sigil has been found at all -- a real, observed
+    # producer spelling for an anonymous-namespace-qualified type,
+    # `(anonymous namespace)::Foo const *` -- and that paren is not a
+    # declarator's parameter list at all, just qualifier text preceding
+    # the parameter's actual pointer sigil; arming the flag on ANY
+    # top-level opaque paren, sigil-found or not, wrongly locked out that
+    # later real `*` entirely, falling through to the by-value branch and
+    # merging `Foo const *` with `Foo *` (CodeRabbit review, PR #941,
+    # fourteenth round: caught with the codebase's own real
+    # `"(anonymous namespace)::T"` spelling convention, not a hypothetical
+    # one).
     seen_top_level_opaque_paren = False
     for i, ch in enumerate(canonical):
         if ch == "(":
             transparent = _is_declarator_group(canonical, i + 1)
             transparent_parens.append(transparent)
             if not transparent:
-                if depth == 0:
+                if depth == 0 and last_top_level_sigil != -1:
                     seen_top_level_opaque_paren = True
                 depth += 1
             continue

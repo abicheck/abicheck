@@ -7055,6 +7055,67 @@ pin this, including that a non-literal expression stays genuinely
 distinguishing rather than being silently (and wrongly) folded into
 either canonical form.
 
+**Correction (2026-08-29, same day, thirteenth Codex review round on PR
+#941, commit 45fd050): one more real under-merge, plus one more real
+over-merge -- this time an actively corrupting one -- in the trailing-
+qualifier and nested-parameter-list handling.** (1)
+`_normalize_param_list_contents` returned an empty parameter list and a
+bare `void` unchanged rather than unifying them, so `void (*)()` and
+`void (*)(void)` -- the identical "no parameters" adjusted type --
+canonicalized to two different strings. Fixed by collapsing both to the
+same canonical empty form. (2) `_canonicalize_member_qualifiers`'s
+`const`/`volatile` extraction used a plain, depth-blind `re.search`/
+`re.sub` over the WHOLE trailing region, which wrongly reached inside a
+non-literal `noexcept(expr)`'s own argument too -- a `const`/`volatile`
+token that is part of THAT expression's own text (e.g.
+`noexcept(Foo<const int>)`) is not this declarator's own cv-qualifier at
+all. This was worse than the earlier over-merges: it didn't just misjudge
+which type two spellings belonged to, it actively MUTATED the nested
+expression's own text (moving the found "const" out to the front,
+leaving the argument reading `Foo< int>`), and could merge two genuinely
+different overloads that happen to share a nested "const" by coincidence.
+Fixed with a depth-aware scan, `_extract_top_level_cv`, mirroring
+`_strip_cv_tokens_outside_nesting`'s own outside-nesting discipline: only
+a cv word sitting at nesting depth 0 -- outside any `(...)`/`<...>`/
+`[...]` -- is ever this declarator's own trailing qualifier. Thirteen new
+tests in `tests/test_signature_normalization.py`
+(`TestCvInsideNoexceptExpressionIsNotExtracted`, a corrected
+`test_empty_and_void_param_lists_unify`, plus two new idempotence cases)
+pin both fixes, including that the nested `const` neither merges with nor
+is corrupted by a real leading `const`.
+
+**Correction (2026-08-29, same day, fourteenth CodeRabbit review round on
+PR #941, commit 45fd050): one more real, serious over-merge in the
+tenth round's `seen_top_level_opaque_paren` flag itself, plus two
+minor cleanups.** (1) That flag was armed on ANY top-level opaque paren,
+regardless of whether the declarator's own sigil had already been found.
+This is wrong for a real, observed producer spelling this codebase
+already handles elsewhere (`tests/test_diff_templates.py`'s own
+`"(anonymous namespace)::T"`): `(anonymous namespace)::Foo const *`
+starts with an opaque paren (`_is_declarator_group` correctly rejects it
+-- it's not a declarator group) that precedes the parameter's own actual
+pointer sigil entirely, not a trailing parameter list. Arming the flag
+there locked out that LATER real sigil, so the whole type fell through to
+the by-value-strip branch and wrongly merged `Foo const *` with `Foo *`
+-- pointer-to-const vs. pointer-to-non-const, two genuinely
+non-interchangeable types. Fixed by only arming the flag once
+`last_top_level_sigil != -1` -- an opaque paren before the declarator's
+own sigil is never its trailing parameter list, so it must never lock
+sigil detection out. (2) A tautological test assertion
+(`canon(x) == canon(x)`, which cannot fail for a pure function and pinned
+nothing) was replaced with a real idempotence check. (3) The twelfth
+round's own changelog wording claimed a non-literal `noexcept(expr)`
+"stays genuinely distinguishing", which overclaims: C++ evaluates a
+constant expression's actual boolean VALUE, not its literal spelling, so
+e.g. `noexcept(sizeof(int))` is genuinely type-equivalent to
+`noexcept(true)` while this primitive (which only recognizes the two
+literal `true`/`false` spellings, per its own docstring's already-correct
+hedge) treats them as different -- a real, documented over-splitting
+limitation, corrected in the changelog fragment's wording rather than the
+code (evaluating an arbitrary constant expression remains out of scope).
+Two new tests in `tests/test_signature_normalization.py` pin the
+anonymous-namespace fix, including idempotence.
+
 ---
 
 ### Phase 3 — public surface as a graph query over one evidence graph (D5)
