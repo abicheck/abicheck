@@ -147,84 +147,84 @@ def _top_level_paren_spans(s: str) -> list[tuple[int, int]]:
     return spans
 
 
-def _excise_own_param_list(s: str) -> str:
-    """Recursive helper for :func:`_return_type`'s SPIRAL-declarator case.
-
-    A function-pointer (or function-reference) return type is itself
-    spelled as a function-type declarator wrapping the ORIGINAL function's
-    own parameter list one level deeper -- e.g. ``typename T::x (*(T))(T)``
-    for ``template<class T> typename T::x (*f(T))(T);`` (confirmed by
-    direct compilation): the FIRST top-level group, ``(*(T))``, is not
-    itself the parameter list -- it wraps a pointer declarator around the
-    real one, ``(T)``, nested one level inside; the trailing ``(T)``
-    belongs to the RETURNED function type, not to ``f`` itself. Whichever
-    top-level group in *s* has no further top-level group following it is
-    the actual parameter list at that nesting depth (the recursion bottoms
-    out there); its contents are excised (parens kept, as an empty marker)
-    so the return-type discriminator captures the declarator SHAPE (the
-    ``*``/``&`` and the surrounding groups) without also duplicating
-    ``f``'s own ordinary parameter list, which ``entity_id_for_function``
-    already discriminates on separately via `param_types`. Recurses one
-    level for each further layer of pointer/reference-to-function nesting,
-    so an arbitrarily deep spiral (pointer to function returning pointer
-    to function returning ...) still bottoms out correctly.
-    """
-    spans = _top_level_paren_spans(s)
-    if not spans:
-        return s
-    first_start, first_end = spans[0]
-    if len(spans) == 1:
-        return s[:first_start] + "()" + s[first_end:]
-    inner = _excise_own_param_list(s[first_start + 1 : first_end - 1])
-    return s[:first_start] + "(" + inner + ")" + s[first_end:]
+_EXCEPTION_SPEC_KEYWORD_RE = re.compile(r"\b(?:noexcept|throw)\s*$")
 
 
 def _return_type(qualtype: str) -> str:
     """The return type spelling of a function ``qualType`` (``ret (params)…``).
 
-    The common case scans for the first top-level ``(`` -- the start of the
-    parameter list -- and returns everything before it.
+    The function's own real, top-level parameter list is the LAST
+    top-level parenthesized group in *qualtype* that is not itself an
+    exception-specification's own group (a ``noexcept(...)``/``throw(...)``
+    immediately preceding it -- checked via :data:`_EXCEPTION_SPEC_KEYWORD_RE`
+    against the text just before the candidate group). Everything before
+    that group (verbatim, no further parsing needed) is the return type;
+    a top-level ``->`` after it is a TRAILING return type (see below).
 
-    A TRAILING return type (``auto f(T) -> typename T::x``) is one
-    exception: clang's ``qualType`` spells the leading part as the bare
-    placeholder ``auto``, which is not the actual return type and collapses
-    two legal overloads differing only in their trailing return
-    (``-> typename T::x`` vs. ``-> typename T::y``) onto the identical
-    spelling -- confirmed by direct compilation
-    (``clang -Xclang -ast-dump=json``: both overloads' ``qualType`` leads
-    with the literal string ``"auto"``, the real type appearing only after
-    ``->``). So once the parameter list's matching ``)`` is found, a
-    top-level ``->`` anywhere after it means the real return type is
-    everything after that arrow, not the leading ``auto`` placeholder
-    (Codex review, PR #943).
+    Scanning from the END, not assuming the FIRST top-level group is
+    always the parameter list, is what makes this correct for THREE
+    confirmed cases together, not just one at a time (Codex review, PR
+    #943, across several rounds):
 
-    A function-pointer/reference return type (``typename T::x (*f(T))(T)``)
-    is the other, SPIRAL-declarator exception: the first top-level group is
-    NOT the parameter list here, it wraps the real one one level deeper (see
-    :func:`_excise_own_param_list`'s own docstring) -- confirmed by direct
-    compilation that this and an ordinary same-signature overload
-    (``typename T::x f(T)``) both had ``_return_type`` collapse onto the
-    identical ``"typename T::x"`` spelling before this fix, fingerprinting
-    two legal, coexisting overloads (Codex review, PR #943, on a later
-    round: fresh evidence beyond the earlier leading/trailing-return-type
-    cases is that the declarator SHAPE itself, not just the named type, can
-    be the only thing distinguishing two overloads). Detected by there
-    being MORE than one top-level parenthesized group with no top-level
-    ``->`` -- the ordinary, single-group case is left byte-for-byte
-    unchanged by this branch.
+    - **A dependent return type containing its OWN parenthesized
+      sub-expression** (``decltype((T::x)) f(T)``): the first top-level
+      group here (``((T::x))``) is part of the return type, not a
+      parameter-list wrapper at all -- confirmed by direct compilation
+      that two overloads differing only in this dependent operand
+      (``T::x`` vs. ``T::y``) both compile with no redefinition error.
+      Treating the first group as "the" parameter list (an earlier
+      version of this function) discarded the operand entirely,
+      collapsing both onto the identical return type.
+    - **A function-pointer/reference return type**
+      (``typename T::x (*f(T))(T)``): clang spells this as a SPIRAL
+      declarator, ``typename T::x (*(T))(T)``, where the first top-level
+      group (``(*(T))``) wraps ``f``'s own parameter list one level
+      deeper and a SECOND, trailing group belongs to the RETURNED
+      function type -- confirmed by direct compilation that this and the
+      ordinary same-signature overload (``typename T::x f(T)``) both
+      compile with no redefinition error. Scanning from the end finds
+      this trailing group as "the" parameter list and keeps everything
+      before it (the whole ``(*(T))`` wrapper, ``f``'s own nested
+      parameter list included) as return-type text -- distinguishing the
+      declarator SHAPE (``*``/``&``, and any further nesting) without
+      needing to recurse into or excise anything: ``f``'s own ordinary
+      parameter list is already discriminated on separately via
+      ``entity_id_for_function``'s `param_types`, so its harmless
+      duplication here costs nothing.
+    - **An ordinary function with a `noexcept(expr)`/`throw(...)`
+      exception specification** (``int () noexcept(cond())``): its OWN
+      trailing group must not be mistaken for a second parameter list
+      wrapper -- confirmed by direct compilation that this qualType is
+      real and common. Excluding a group immediately preceded by the
+      literal keyword is what keeps this case landing on the correct
+      (here, first and only remaining) group instead of the exception
+      spec's own.
+
+    A TRAILING return type (``auto f(T) -> typename T::x``) is handled
+    once the real parameter-list group is found: clang's ``qualType``
+    spells the leading part as the bare placeholder ``auto``, which is
+    not the actual return type and collapses two legal overloads
+    differing only in their trailing return (``-> typename T::x`` vs.
+    ``-> typename T::y``) onto the identical spelling -- confirmed by
+    direct compilation (both overloads' ``qualType`` leads with the
+    literal string ``"auto"``, the real type appearing only after
+    ``->``). So a top-level ``->`` anywhere after the real group means
+    the real return type is everything after that arrow, not the leading
+    ``auto`` placeholder.
     """
     spans = _top_level_paren_spans(qualtype)
     if not spans:
         return qualtype.strip()
-    first_start, first_end = spans[0]
-    leading = qualtype[:first_start].strip()
-    if len(spans) == 1:
-        arrow = re.search(r"->\s*(.+)$", qualtype[first_end:])
-        if arrow:
-            return arrow.group(1).strip()
-        return leading
-    inner = _excise_own_param_list(qualtype[first_start + 1 : first_end - 1])
-    return (leading + " (" + inner + ")" + qualtype[first_end:]).strip()
+    real_start, real_end = spans[-1]
+    for start, end in reversed(spans):
+        if not _EXCEPTION_SPEC_KEYWORD_RE.search(qualtype[:start]):
+            real_start, real_end = start, end
+            break
+    leading = qualtype[:real_start].strip()
+    arrow = re.search(r"->\s*(.+)$", qualtype[real_end:])
+    if arrow:
+        return arrow.group(1).strip()
+    return leading
 
 
 def _is_noexcept_qualifier(quals: str) -> bool:

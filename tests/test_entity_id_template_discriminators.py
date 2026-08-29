@@ -598,12 +598,15 @@ def test_live_clang_function_pointer_return_declarator_discriminates_overloaded_
     typename T::x f(T);` and `template<class T> typename T::x (*f(T))(T);`
     both compile with no redefinition error (confirmed by direct
     compilation) -- the second returns a pointer to a function, spelled by
-    clang as the SPIRAL declarator `typename T::x (*(T))(T)`, whose first
-    top-level group (`(*(T))`) is not itself the parameter list -- it
-    wraps the real one one level deeper. `_return_type` used to treat that
-    first group as the parameter list outright, discarding everything
-    after it, so both overloads' return type collapsed onto the identical
-    `typename T::x` (Codex review, PR #943)."""
+    clang as the SPIRAL declarator `typename T::x (*(T))(T)`. `_return_type`
+    used to treat the FIRST top-level group as the parameter list
+    outright, discarding everything after it, so both overloads' return
+    type collapsed onto the identical `typename T::x` (Codex review, PR
+    #943). Fixed by scanning from the END for the real parameter-list
+    group instead -- see that function's own docstring for the two other
+    confirmed cases (a dependent return type with its own parenthesized
+    sub-expression, and an ordinary `noexcept(expr)`) this same fix had to
+    keep correct at once."""
     a = _one(
         _clang_parser(
             "struct S { using x = int; }; template<class T> typename T::x f(T);",
@@ -623,4 +626,69 @@ def test_live_clang_function_pointer_return_declarator_discriminates_overloaded_
     assert a.entity_id is not None and b.entity_id is not None
     assert a.entity_id != b.entity_id
     assert a.return_type == "typename T::x"
-    assert b.return_type == "typename T::x (*())(T)"
+    assert b.return_type == "typename T::x (*(T))"
+
+
+@pytest.mark.integration
+@pytest.mark.skipif(shutil.which("clang") is None, reason="clang not installed")
+def test_live_clang_dependent_return_type_own_parens_discriminates_overloaded_templates(
+    tmp_path: Path,
+) -> None:
+    """A dependent return type containing its OWN parenthesized
+    sub-expression (`decltype((T::x))`) must not have that group mistaken
+    for a parameter-list wrapper: `template<class T> decltype((T::x))
+    f(T);` and the `T::y` sibling both compile with no redefinition error
+    (confirmed by direct compilation), but scanning FORWARD for the first
+    top-level group (an earlier version of the fix above) treated
+    `((T::x))` as if it wrapped the real parameter list, discarding the
+    dependent operand entirely and collapsing both overloads onto the
+    identical `EntityId` (Codex review, PR #943, on a later round)."""
+    a = _one(
+        _clang_parser(
+            "struct S { using x = int; using y = double; };"
+            " template<class T> decltype((T::x)) f(T);",
+            tmp_path,
+            "decltypeparena",
+        ).parse_functions(),
+        name="f",
+    )
+    b = _one(
+        _clang_parser(
+            "struct S { using x = int; using y = double; };"
+            " template<class T> decltype((T::y)) f(T);",
+            tmp_path,
+            "decltypeparenb",
+        ).parse_functions(),
+        name="f",
+    )
+    assert a.entity_id is not None and b.entity_id is not None
+    assert a.entity_id != b.entity_id
+    assert a.return_type == "decltype((T::x))"
+    assert b.return_type == "decltype((T::y))"
+
+
+@pytest.mark.integration
+@pytest.mark.skipif(shutil.which("clang") is None, reason="clang not installed")
+def test_live_clang_noexcept_expression_group_is_not_mistaken_for_return_type(
+    tmp_path: Path,
+) -> None:
+    """An ordinary function's `noexcept(expr)` group must not be mistaken
+    for a second parameter-list wrapper: `int f() noexcept(cond());`'s
+    `qualType` is `"int () noexcept(cond())"`, a genuine two-top-level-
+    group spelling (confirmed by direct compilation) that a naive
+    scan-from-the-end rule (an earlier version of the fix above, before
+    excluding a group preceded by `noexcept`/`throw`) would append onto
+    `return_type` wholesale, polluting it with exception-specification
+    text -- risking a spurious return-type-changed finding whenever only
+    the `noexcept` condition changes (Codex review, PR #943, on a later
+    round)."""
+    fn = _one(
+        _clang_parser(
+            "constexpr bool cond() { return true; } int f() noexcept(cond());",
+            tmp_path,
+            "noexceptgroup",
+        ).parse_functions(),
+        name="f",
+    )
+    assert fn.return_type == "int"
+    assert fn.is_noexcept is True

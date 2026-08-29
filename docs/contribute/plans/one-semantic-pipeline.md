@@ -8565,6 +8565,51 @@ existing return-type/trailing-return-type discriminator test in that
 module still passes unchanged, and no other clang-backend test in the
 unit suite regressed.
 
+**Correction (2026-08-29, same day, Codex review on PR #943): the
+spiral-declarator fix directly above was itself too general -- assuming
+EVERY function `qualType` with more than one top-level parenthesized
+group was a function-pointer/reference-returning spiral broke two other
+real, confirmed cases.** (1) A dependent return type containing its OWN
+parenthesized sub-expression, `decltype((T::x))`: `template<class T>
+decltype((T::x)) f(T);` and the `T::y` sibling both compile with no
+redefinition error, but the fix's first-group recursion treated
+`((T::x))` as a spiral wrapper and excised its interior, discarding the
+operand entirely and collapsing both overloads onto one `EntityId`. (2)
+An ordinary function's exception specification, `noexcept(expr)`: `int
+f() noexcept(cond());`'s `qualType` is genuinely
+`"int () noexcept(cond())"` -- a real two-top-level-group spelling -- and
+the fix appended the whole `noexcept(cond())` group onto `return_type`
+as if it were return-type text, which would fabricate a spurious
+return-type-changed finding whenever only the exception-specification
+condition changes. Both confirmed by direct compilation. Root cause: the
+FIRST top-level group is not reliably identifiable as "the parameter
+list" or "not the parameter list" from local shape alone (a leading `*`/
+`&` sigil test was considered and rejected -- it would have fixed the
+`noexcept` case but not the `decltype` one, since neither of that case's
+groups starts with a sigil). Replaced with a simpler, more general rule:
+the function's own real top-level parameter list is the LAST top-level
+parenthesized group that is not itself an exception-specification group
+(checked via a `noexcept`/`throw` keyword immediately preceding it) --
+everything before that group, verbatim, is the return type; the earlier
+recursive `_excise_own_param_list` helper is no longer needed at all and
+was deleted. Verified this single rule now resolves all four cases
+together: ordinary (`int (int)` -> `"int"`), trailing-return-type
+(`auto (T) -> typename T::x` -> `"typename T::x"`), spiral pointer/
+reference (`typename T::x (*(T))(T)` -> `"typename T::x (*(T))"`, the
+`(&...` form distinctly `"typename T::x (&(T))"`), dependent-parens
+(`decltype((T::x)) (T)` -> `"decltype((T::x))"`), and `noexcept`
+(`int () noexcept(cond())` -> `"int"`). Regression tests added in
+`tests/test_entity_id_template_discriminators.py`
+(`test_live_clang_dependent_return_type_own_parens_discriminates_overloaded_templates`,
+`test_live_clang_noexcept_expression_group_is_not_mistaken_for_return_type`),
+both confirmed to fail against the prior commit's code via `git stash`
+and pass post-fix; every existing return-type discriminator test in that
+module (including the spiral-declarator one directly above, whose exact
+expected string this correction also updates -- `"typename T::x (*(T))"`
+rather than the previous fix's excised `"typename T::x (*())(T)"`, since
+the new rule no longer excises the nested parameter list at all) still
+passes.
+
 ---
 
 ### Phase 3 — public surface as a graph query over one evidence graph (D5)
