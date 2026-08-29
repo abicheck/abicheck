@@ -220,6 +220,48 @@ class TestBareDataMemberPointerPointeeCvIsCanonicalized:
         assert canon("void (C::* const)(int)") == canon("void (C::*)(int)")
 
 
+class TestRestrictQualifierIsAlwaysStripped:
+    """``restrict``/``__restrict``/``__restrict__`` never affects the
+    Itanium C++ ABI's mangling, at ANY position -- unlike a genuine
+    by-value cv-qualifier, which is only by-value (and so only safe to
+    strip) on the parameter's own outermost pointer. This repository
+    already tracks the fact separately (``Param.is_restrict``); collapsing
+    it into an unmangled fallback signature's identity would turn that
+    dedicated compatible parameter-qualifier change into a spurious
+    removal/addition pair instead."""
+
+    def test_bare_pointer_restrict_stripped(self) -> None:
+        assert canon("int *restrict") == canon("int *")
+
+    def test_double_underscore_spelling_stripped(self) -> None:
+        assert canon("int *__restrict") == canon("int *")
+
+    def test_double_underscore_trailing_spelling_stripped(self) -> None:
+        assert canon("int *__restrict__") == canon("int *")
+
+    def test_restrict_still_distinguishes_nothing_from_a_genuine_cv_change(
+        self,
+    ) -> None:
+        # Sanity check that this doesn't accidentally strip a REAL,
+        # distinguishing pointee cv-qualifier too.
+        assert canon("int *restrict") != canon("const int *")
+
+    def test_restrict_on_non_outermost_pointer_also_stripped(self) -> None:
+        # Restrict's absence from mangling holds regardless of WHERE in
+        # the declarator it sits -- not only the parameter's own
+        # outermost pointer, unlike a genuine by-value cv-qualifier.
+        assert canon("int * restrict *") == canon("int * *")
+
+    def test_restrict_inside_callback_parameter_stripped(self) -> None:
+        # The recursive nested-parameter-list normalization must also
+        # apply this rule to each of a callback's own parameters.
+        assert canon("void (*)(int *restrict)") == canon("void (*)(int *)")
+
+    def test_idempotent(self) -> None:
+        once = canon("int *restrict")
+        assert canon(once) == once
+
+
 class TestTemplateQualifiedMemberPointerOwnCvIsDropped:
     """A nested-name-specifier's own segment can itself be a template-id
     (``C<int>::``), not only a plain identifier -- the declarator-group

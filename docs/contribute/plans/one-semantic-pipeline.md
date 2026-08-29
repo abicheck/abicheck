@@ -7183,6 +7183,37 @@ itself (both cv-spelling orderings unifying, an ordinary namespace-
 qualified pointer staying unaffected, the parenthesized member-function-
 pointer case staying unaffected, and idempotence).
 
+**Correction (2026-08-29, same day, sixteenth Codex review round on PR
+#941, commit 932814b): `restrict`/`__restrict`/`__restrict__` was left
+completely unstripped, fragmenting identity across a compatible
+parameter-qualifier change.** `int *` and `int *restrict` canonicalized
+to two different strings, even though restrict has NO effect on the
+Itanium C++ ABI's mangling at all -- this repository already tracks the
+fact separately (`Param.is_restrict`; `dumper_castxml.py`'s own
+extraction comments state the identical thing), so treating a restrict
+addition/removal as an `EntityId` change turned that dedicated compatible
+change into a spurious removal/addition pair instead. The finding as
+reported scoped a fix to only the parameter's own outermost pointer,
+mirroring how a genuine BY-VALUE cv-qualifier is scoped (per this
+primitive's own established, deliberately narrow-scoped-to-review-
+evidence discipline) -- but unlike cv, restrict's absence from mangling
+does not depend on WHERE in the declarator it sits (the C/C++ grammar
+only ever allows it directly after the `*` it qualifies, at any nesting
+depth), so a fix scoped to "outermost only" would leave e.g.
+`int * restrict *` and `int * *` still wrongly distinguishing. Fixed more
+generally than the reported scope: a new `_RESTRICT_WORD_RE` strips every
+`restrict`/`__restrict`/`__restrict__` token from the canonical type
+string unconditionally, before any of the position-sensitive cv/pointer
+logic runs -- so a nested callback parameter's own restrict-qualified
+pointer is covered too, through this function's existing recursion into
+itself for a trailing parameter list's own parameters, with no special-
+casing needed for that case. New tests:
+`TestRestrictQualifierIsAlwaysStripped` in
+`tests/test_signature_normalization.py` (all three spellings, a
+non-outermost-pointer restrict, a callback parameter's own restrict, a
+sanity check that a genuine pointee cv-qualifier still distinguishes, and
+idempotence).
+
 ---
 
 ### Phase 3 — public surface as a graph query over one evidence graph (D5)

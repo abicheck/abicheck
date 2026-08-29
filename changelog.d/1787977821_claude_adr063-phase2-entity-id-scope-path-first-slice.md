@@ -194,3 +194,14 @@
   (import is strictly one-way, `signature_normalization ->
   declarator_qualifiers`, to avoid a cycle between the two), with its own
   dedicated test file, `tests/test_declarator_qualifiers.py`.
+  `restrict`/`__restrict`/`__restrict__` (a pointer-qualifier with NO
+  effect on the Itanium C++ ABI's mangling at all, unlike `const`/
+  `volatile`) is now stripped from a parameter's type unconditionally, at
+  any position and nesting depth -- not only the parameter's own outermost
+  pointer, unlike a genuine by-value cv-qualifier -- so `int *` and
+  `int *restrict` (in any of its three spellings) now canonicalize
+  identically, including inside a nested callback parameter. This
+  repository already tracks the fact separately on `Param.is_restrict`;
+  without this fix, a restrict addition/removal produced a spurious
+  removal/addition pair here instead of the dedicated compatible
+  parameter-qualifier change it should be.
