@@ -46,8 +46,14 @@ the first entity module split out of each: `headers/castxml/context.py`
 (the full type-graph walk — spelling, pointer depth, alignment, cv/restrict
 qualification); `headers/clang/context.py` (the `_Decl` categorized-node
 type plus built-in-file/qualtype/location/deprecation helpers). Every
-function in these modules takes its context object as an explicit
-parameter rather than reading `self`. `dumper_castxml.py`/`dumper_clang.py`
+castxml function in these modules takes its `CastxmlParserContext` object
+as an explicit parameter rather than reading `self`; clang's `context.py`
+helpers are the same shape, but clang's `enums.py::parse_enums` takes the
+pre-categorized `_typedefs`/`_enums` decl lists and a constant-expression
+evaluator as separate explicit parameters instead of one wrapping context
+object — `_ClangAstParser._walk` already produces those lists once, so
+there is no per-parser state left for a context type to hold beyond what
+`context.py` itself covers. `dumper_castxml.py`/`dumper_clang.py`
 keep every migrated method/module-level name as a thin delegating wrapper,
 so every existing caller (including tests reading a parser's private
 attributes) is unaffected. `functions.py`/`records.py`/`templates.py` on

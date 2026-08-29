@@ -11,8 +11,12 @@
   `abicheck.extract.headers.clang` gained the matching `context.py` (the
   `_Decl` categorized-node type, built-in-file/qualtype/location/deprecation
   helpers) for the clang backend. `enums.py` is the first entity module on
-  each side, both now calling through their package's shared context instead
-  of `self`. `dumper_castxml.py`/`dumper_clang.py` keep every existing
+  each side: castxml's `parse_enums` takes the shared
+  `CastxmlParserContext` explicitly, while clang's takes the
+  pre-categorized decl lists and constant-expression evaluator
+  `_ClangAstParser._walk` already produces, as separate explicit
+  parameters — both calling through explicit state instead of `self`.
+  `dumper_castxml.py`/`dumper_clang.py` keep every existing
   method/module-level name as a thin delegating wrapper, so no public or
   private import path changed and no snapshot output changed. Records/
   functions/templates are not split out yet — see the ADR's own Phase 5
