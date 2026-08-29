@@ -96,7 +96,6 @@ def _top_level_paren_spans(s: str) -> list[tuple[int, int]]:
 
 _EXCEPTION_SPEC_KEYWORD_RE = re.compile(r"\b(?:noexcept|throw|__attribute__)\s*$")
 _LEADING_EXCEPTION_SPEC_RE = re.compile(r"^\s*\b(?:noexcept|throw)\b")
-_TRAILING_ATTRIBUTE_KEYWORD_RE = re.compile(r"\b__attribute__\s*$")
 
 
 def _find_top_level_arrow(s: str) -> int | None:
@@ -257,39 +256,6 @@ def _excise_own_param_list(s: str) -> str:
     return s[:first_start] + "()" + remainder
 
 
-def _strip_trailing_gnu_attribute(s: str) -> str:
-    """Remove one or more trailing GNU ``__attribute__((...))`` clauses
-    from *s*, if present at the very end.
-
-    Unlike an exception specification (part of the function's TYPE since
-    C++17, and real distinguishing return-type content -- see
-    :func:`return_type`'s own docstring), a GNU attribute is never part of
-    the type: it doesn't affect overload resolution or type identity, so
-    it must not leak into the reported return type at all -- confirmed by
-    direct compilation that ``template<class T> int (*f(T))(int)
-    __attribute__((sysv_abi));``'s ``qualType`` is ``"int (*(T))(int)
-    __attribute__((sysv_abi))"``, which the SPIRAL branch's tail
-    (everything after the wrapper's own trailing group, kept verbatim
-    otherwise) would otherwise carry straight into ``return_type``
-    (Codex review, PR #943, on a later round -- the sibling hazard to the
-    fallback branch's own attribute-vs-parameter-list confusion, which
-    :data:`_EXCEPTION_SPEC_KEYWORD_RE` closes separately by also excluding
-    an attribute's own argument-clause group from being mistaken for the
-    real parameter list).
-    """
-    while True:
-        spans = _top_level_paren_spans(s)
-        if not spans:
-            return s
-        last_start, last_end = spans[-1]
-        if last_end != len(s.rstrip()):
-            return s
-        keyword = _TRAILING_ATTRIBUTE_KEYWORD_RE.search(s[:last_start])
-        if not keyword:
-            return s
-        s = s[: keyword.start()].rstrip()
-
-
 def return_type(qualtype: str) -> str:
     """The return type spelling of a function ``qualType`` (``ret (params)…``).
 
@@ -324,8 +290,9 @@ def return_type(qualtype: str) -> str:
        type's own parameter list is real, distinguishing content that
        must be preserved, not discarded. Everything after the first
        group (``tail``, below) is kept VERBATIM, including any trailing
-       exception specification: confirmed by direct compilation that a
-       trailing ``noexcept`` here binds to the RETURNED function type,
+       exception specification OR GNU ``__attribute__((...))`` clause
+       (e.g. a calling convention): confirmed by direct compilation that
+       a trailing ``noexcept`` here binds to the RETURNED function type,
        not to the original function itself (``int (*a())() noexcept;``
        -- ``a()`` itself is not noexcept, but calling through the
        returned function pointer is), so it is real return-type content,
@@ -333,14 +300,43 @@ def return_type(qualtype: str) -> str:
        specification, if any, is discarded separately, inside
        :func:`_excise_own_param_list`'s base case (Codex review, PR #943,
        across two rounds -- the first round wrongly stripped this
-       trailing spec as if it were always the outer function's own).
+       trailing spec as if it were always the outer function's own). A
+       trailing GNU attribute at this position is kept for the identical
+       reason and is NOT stripped, despite an attribute never being part
+       of an ORDINARY function's type (see branch 3 below): confirmed by
+       direct compilation, on an ``i386`` target where the distinction is
+       observable, that ``int (__attribute__((stdcall)) *h())();`` and
+       the calling-convention-attribute-free ``int (*h())();`` produce
+       DIFFERENT qualTypes (``"int (*())() __attribute__((stdcall))"``
+       vs. ``"int (*())()"``) for a real ABI difference (stdcall vs.
+       cdecl) -- and that writing the identical attribute at the very
+       END of the whole declaration instead (``int (*h())()
+       __attribute__((stdcall));``) produces the BYTE-IDENTICAL qualType,
+       meaning clang's own printer cannot be used to tell whether such an
+       attribute binds to the outer function or the returned one. Given
+       that ambiguity, silently stripping it (an earlier version of this
+       branch did, Codex review, PR #943, on a still later round) risked
+       erasing a genuine, ABI-breaking calling-convention difference,
+       which is a strictly worse failure mode for an ABI checker than
+       reporting one that turns out to be the outer function's own.
     3. Otherwise, the function's own real top-level parameter list is the
        LAST top-level parenthesized group that is not itself an
-       exception-specification's own group (a ``noexcept(...)``/
-       ``throw(...)`` immediately preceding it) -- everything before that
-       group, verbatim, is the return type. Scanning from the END, not
-       assuming the FIRST group is always the parameter list, is what
-       keeps this branch correct for two more real, confirmed cases: a
+       exception-specification's or GNU attribute's own argument-clause
+       group (a ``noexcept(...)``/``throw(...)``/``__attribute__((...))``
+       immediately preceding it) -- everything before that group,
+       verbatim, is the return type. An ordinary (non-spiral) function's
+       OWN trailing attribute is therefore naturally excluded here (it
+       sits in the group's own SUFFIX, never the prefix that becomes
+       ``return_type``) without needing branch 2's "ambiguous, so keep it"
+       treatment -- confirmed by direct compilation that ``int f(int)
+       __attribute__((sysv_abi));``'s qualType is ``"int (int)
+       __attribute__((sysv_abi))"``, whose attribute clause's own
+       argument group is a SECOND top-level span that a naive
+       scan-from-end mistook for the parameter list, swallowing the real
+       ``(int)`` group into the reported return type (Codex review, PR
+       #943, on a later round). Scanning from the END, not assuming the
+       FIRST group is always the parameter list, is what keeps this
+       branch correct for two more real, confirmed cases: a
        dependent return type containing its OWN parenthesized
        sub-expression (``decltype((T::x)) f(T)``, where that first group
        is return-type text, not a parameter-list wrapper at all), and an
@@ -361,7 +357,7 @@ def return_type(qualtype: str) -> str:
     if _is_spiral_wrapper_prefix(first_interior):
         leading = qualtype[:first_start].strip()
         inner = _excise_own_param_list(first_interior)
-        tail = _strip_trailing_gnu_attribute(qualtype[first_end:])
+        tail = qualtype[first_end:]
         return (leading + " (" + inner + ")" + tail).strip()
 
     real_start = spans[-1][0]

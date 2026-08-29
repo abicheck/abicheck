@@ -8973,6 +8973,52 @@ pass post-fix; every existing return-type discriminator test in that
 module still passes unchanged. `mypy abicheck/` clean, `ruff check`/
 `ruff format --check` clean, `check_architecture.py` 0 errors.
 
+**Correction (2026-08-29, same day, Codex review on PR #943): the
+previous correction's own "strip every trailing attribute" rule was
+itself wrong -- it can silently erase a real, ABI-breaking
+calling-convention difference on the RETURNED function of a spiral
+declarator.** Confirmed by direct compilation on an `i386` target
+(where the distinction is observable; both collapse to the platform
+default on x86-64, which is why the previous correction's own
+`sysv_abi` probe never caught this): `int (__attribute__((stdcall))
+*h())();` and `int (*hc())();` produce DIFFERENT qualTypes --
+`"int (*())() __attribute__((stdcall))"` vs. `"int (*())()"` -- for a
+genuine ABI difference (stdcall vs. cdecl disagree on stack-cleanup
+responsibility), which the previous correction's
+`_strip_trailing_gnu_attribute`, applied unconditionally to the spiral
+branch's tail, silently erased. Worse, direct compilation also confirms
+this attribute CANNOT be reliably attributed to "the outer function" by
+position alone: writing the identical attribute at the very END of the
+whole declaration instead of on the returned pointer explicitly
+(`int (*h())() __attribute__((stdcall));`) produces the BYTE-IDENTICAL
+qualType, so clang's own printer offers no textual way to tell which
+function a trailing spiral attribute binds to. Given that ambiguity,
+fixed by reverting the spiral branch's tail to being kept fully
+verbatim again (no attribute stripping at all) -- the same treatment
+exception specifications already get there, and for the same reason:
+erring toward reporting a difference that turns out to be the outer
+function's own is a strictly safer failure mode for an ABI checker than
+silently erasing a real one. The FALLBACK (scan-from-end) branch's own
+fix -- excluding an attribute-preceded group from being mistaken for
+the real parameter list -- remains correct and unchanged; an ordinary
+(non-spiral) function's own trailing attribute was never ambiguous (it
+sits in the group's own suffix, never the prefix that becomes
+`return_type`) and continues to be excluded naturally, with no special
+stripping needed. `_strip_trailing_gnu_attribute` and its
+`_TRAILING_ATTRIBUTE_KEYWORD_RE` are removed entirely as dead code.
+Regression tests in `tests/test_entity_id_template_discriminators.py`:
+the previous single test is split into
+`test_live_clang_ordinary_functions_own_trailing_attribute_does_not_leak_into_return_type`
+(unchanged behavior, kept as its own regression) and
+`test_live_clang_spiral_returns_own_calling_convention_attribute_is_preserved`
+(new, using a local `_clang_i386_parser` helper since the distinction
+needs a 32-bit x86 target), the latter confirmed to fail against the
+previous (over-eager stripping) commit via `git stash` on just the
+source file and pass post-fix; every existing return-type discriminator
+test in that module still passes unchanged. `mypy abicheck/` clean,
+`ruff check`/`ruff format --check` clean, `check_architecture.py` 0
+errors.
+
 ---
 
 ### Phase 3 — public surface as a graph query over one evidence graph (D5)

@@ -1088,24 +1088,18 @@ def test_live_clang_decltype_dereferenced_cast_is_not_mistaken_for_spiral_declar
 
 @pytest.mark.integration
 @pytest.mark.skipif(shutil.which("clang") is None, reason="clang not installed")
-def test_live_clang_trailing_gnu_attribute_does_not_leak_into_return_type(
+def test_live_clang_ordinary_functions_own_trailing_attribute_does_not_leak_into_return_type(
     tmp_path: Path,
 ) -> None:
-    """A trailing GNU `__attribute__((...))` clause is never part of a
-    function's TYPE (unlike an exception specification, part of the type
-    since C++17) and must not leak into `return_type` in either the
-    ordinary (scan-from-end) or SPIRAL-declarator branch: `int (int)
+    """A trailing GNU `__attribute__((...))` clause on an ORDINARY
+    (non-pointer-returning) function describes the function itself, not
+    its return type, and must not leak into `return_type`: `int f(int)
     __attribute__((sysv_abi));`'s `qualType` is `"int (int)
-    __attribute__((sysv_abi))"` (confirmed by direct compilation) --
-    the scan-from-end branch mistook the attribute's own argument-clause
+    __attribute__((sysv_abi))"` (confirmed by direct compilation) -- the
+    scan-from-end fallback mistook the attribute's own argument-clause
     group for the real parameter list, reducing `return_type` to `"int
-    (int) __attribute__"` instead of `"int"`. A spiral (function-pointer-
-    returning) function with the identical trailing attribute leaked it
-    into the tail kept verbatim otherwise: `template<class T> int
-    (*f(T))(int) __attribute__((sysv_abi));`'s `qualType` is `"int
-    (*(T))(int) __attribute__((sysv_abi))"`, previously reduced to `"int
-    (*())(int) __attribute__((sysv_abi))"` instead of `"int (*())(int)"`
-    (Codex review, PR #943, on a later round)."""
+    (int) __attribute__"` instead of `"int"` (Codex review, PR #943, on
+    a later round)."""
     ordinary = _one(
         _clang_parser(
             "int f(int) __attribute__((sysv_abi));",
@@ -1116,12 +1110,72 @@ def test_live_clang_trailing_gnu_attribute_does_not_leak_into_return_type(
     )
     assert ordinary.return_type == "int"
 
-    spiral = _one(
-        _clang_parser(
-            "template<class T> int (*f(T))(int) __attribute__((sysv_abi));",
-            tmp_path,
-            "attrspiral",
-        ).parse_functions(),
-        name="f",
+
+def _clang_i386_parser(header_text: str, tmp_path: Path, name: str) -> _ClangAstParser:
+    """Like `test_entity_id_carrier._clang_parser`, but targeting
+    ``i386-unknown-linux-gnu`` -- needed only for the calling-convention
+    case below, where ``stdcall`` vs. ``cdecl`` is observable in clang's
+    own `qualType` output only on a 32-bit x86 target (both collapse to
+    the platform default on x86-64)."""
+    header = tmp_path / f"{name}.hpp"
+    header.write_text(header_text)
+    out = subprocess.run(
+        [
+            "clang",
+            "-x",
+            "c++",
+            "-std=c++17",
+            "--target=i386-unknown-linux-gnu",
+            "-Xclang",
+            "-ast-dump=json",
+            "-fsyntax-only",
+            str(header),
+        ],
+        capture_output=True,
+        text=True,
+        check=True,
     )
-    assert spiral.return_type == "int (*())(int)"
+    return _ClangAstParser(json.loads(out.stdout), {"c_fn", "c_var"}, set())
+
+
+@pytest.mark.integration
+@pytest.mark.skipif(shutil.which("clang") is None, reason="clang not installed")
+def test_live_clang_spiral_returns_own_calling_convention_attribute_is_preserved(
+    tmp_path: Path,
+) -> None:
+    """A spiral (function-pointer-returning) declarator's trailing GNU
+    attribute must be PRESERVED, not stripped, since it can be a real,
+    ABI-affecting calling-convention difference on the RETURNED function
+    type: on an ``i386`` target (where the distinction is observable),
+    `int (__attribute__((stdcall)) *h())();` (returning a pointer to a
+    stdcall function) and `int (*hc())();` (returning a pointer to an
+    ordinary/cdecl function) produce DIFFERENT `qualType`s (confirmed by
+    direct compilation: `"int (*())() __attribute__((stdcall))"` vs.
+    `"int (*())()"`) for a genuine ABI difference -- stdcall and cdecl
+    disagree on stack-cleanup responsibility, so erasing this would hide
+    a real breaking change. Writing the identical attribute at the very
+    END of the whole declaration instead produces the BYTE-IDENTICAL
+    qualType (also confirmed by direct compilation), so clang's own
+    printer cannot be used to tell whether such an attribute binds to the
+    outer function or the returned one -- an earlier version of this
+    function stripped it unconditionally, silently erasing this class of
+    ABI difference (Codex review, PR #943, on a still later round)."""
+    stdcall = _one(
+        _clang_i386_parser(
+            "int (__attribute__((stdcall)) *h())();",
+            tmp_path,
+            "callconvstdcall",
+        ).parse_functions(),
+        name="h",
+    )
+    cdecl = _one(
+        _clang_i386_parser(
+            "int (*hc())();",
+            tmp_path,
+            "callconvcdecl",
+        ).parse_functions(),
+        name="hc",
+    )
+    assert stdcall.return_type == "int (*())() __attribute__((stdcall))"
+    assert cdecl.return_type == "int (*())()"
+    assert stdcall.return_type != cdecl.return_type
