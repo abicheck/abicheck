@@ -83,6 +83,28 @@ def optional_int_attr(el: Any, attr: str) -> int | None:
     return int(raw) if raw and raw.isdigit() else None
 
 
+def deprecation_marker(el: Element) -> str | None:
+    """Deprecation message for *el*, or ``None`` if not deprecated.
+
+    castxml's ``GetDeclAttributes`` (``Output.cxx``) always adds a bare
+    ``"deprecated"`` token to the compound ``attributes`` string when
+    ``DeprecatedAttr`` is present, but only emits the dedicated
+    ``deprecation="..."`` XML attribute when the attribute carries a
+    non-empty message. A BARE ``[[deprecated]]``/
+    ``__attribute__((deprecated))`` (no message) therefore has NO
+    ``deprecation`` attribute at all — reading only ``el.get("deprecation")``
+    missed every messageless deprecation (Codex review, PR #582, confirmed
+    against castxml's own source). Falls back to ``""`` (deprecated, no
+    message) when the bare token is present in ``attributes`` instead.
+    """
+    msg = el.get("deprecation")
+    if msg is not None:
+        return msg
+    if re.search(r"\bdeprecated\b", el.get("attributes", "")):
+        return ""
+    return None
+
+
 def source_line_has_explicit(
     ctx: CastxmlParserContext,
     loc_el: Element | None,

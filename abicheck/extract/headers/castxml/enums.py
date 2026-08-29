@@ -25,11 +25,14 @@ owns opening the castxml document and driving ``build_id_map()``.
 
 from __future__ import annotations
 
-from ....dumper_castxml_typedefs import _deprecation_marker
 from ....model import EnumMember, EnumType
 from ....name_classification import strip_anonymous_type_location
 from .context import CastxmlParserContext
-from .location import is_builtin_element, source_location
+from .location import (
+    deprecation_marker as _deprecation_marker,
+    is_builtin_element,
+    source_location,
+)
 from .type_resolution import (
     qualified_type_name,
     underlying_type_name as _underlying_type_name,

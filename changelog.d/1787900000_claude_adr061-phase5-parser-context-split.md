@@ -17,3 +17,16 @@
   private import path changed and no snapshot output changed. Records/
   functions/templates are not split out yet — see the ADR's own Phase 5
   status for what's still coupled and why.
+- **Two review findings on the above fixed before merge.** `enums.py` had
+  reached back into a private helper (`_deprecation_marker`) of the still-flat
+  `dumper_castxml_typedefs.py` sibling — the exact "don't reach into a flat
+  legacy module's private helpers" case `abicheck/extract/AGENTS.md` warns
+  against — so the primitive moved to
+  `extract.headers.castxml.location.deprecation_marker`, with the flat
+  module keeping a delegating `_deprecation_marker` alias. Separately,
+  `scripts/backend_capabilities.py`'s AST-based capability scanner only read
+  `dumper_castxml.py`/`dumper_clang.py`, so it stopped seeing the `EnumType`
+  fields the split moved into the new entity modules; it now also scans each
+  backend's `extract/headers/*` entity modules. Neither changes the
+  published capability matrix's content — `gen_backend_capability_matrix.py
+  --check` confirms it's unchanged.
