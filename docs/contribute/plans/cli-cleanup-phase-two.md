@@ -3897,8 +3897,9 @@ the surrounding text already shows as a usage example.
 **Sequencing note:** the syntax cleanup is lower value than finishing set-mode
 *semantics* — expected provider DSO, a symbol moved between sibling libraries,
 duplicated providers, and L4 symbol reconciliation (cost estimation and the
-machine-readable dry-run shipped in the second slice above). Do the remaining
-semantics first if they compete with anything else. The
+dry-run/cost preview shipped in the second slice above -- text-only, like
+every other `abicheck` dry-run, ADR-054). Do the remaining semantics first
+if they compete with anything else. The
 review reaffirms this and sharpens it: the *only* part of this section that is
 worth doing on its own is replacing the comma-separated value with a repeatable
 option. `--artifact-set-manifest` is worth adding only when it carries a real

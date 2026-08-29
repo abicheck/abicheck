@@ -29,40 +29,17 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-
-def _resolve_level(req: Any) -> tuple[Any, Any]:
-    """Resolve the ``(SourceMethod, EvidenceDepth)`` level *req* would use
-    for a real run, honoring ``req.risk_rules_path`` (``ValueError`` on a
-    malformed profile) the same way ``service_scan.run_scan``/
-    ``_run_scan_one_member`` do -- inlined here rather than factored into
-    ``service_scan.py`` itself (also ``no_growth``-debt-tracked, at its own
-    line-count baseline) since this is the one caller needing the level
-    resolved *ahead of* :func:`~abicheck.service_scan.estimate_scan`,
-    instead of that function's own ``RiskRules.default()`` fallback.
-    """
-    from ..buildsource.risk import RiskRules, score_changed_paths
-    from ..buildsource.scan_levels import (
-        ScanMode,
-        SourceMethod,
-        parse_user_depth,
-        resolve_level,
-    )
-    from ..service_scan import _load_risk_rules_for_service
-
-    sm = SourceMethod(req.source_method) if req.source_method else None
-    dp = parse_user_depth(req.depth)
-    changed = [p for p in req.changed_paths if p]
-    seeded = req.seeded or bool(changed)
-    risk_rules = (
-        _load_risk_rules_for_service(req.risk_rules_path)
-        if req.risk_rules_path is not None
-        else RiskRules.default()
-    )
-    risk = score_changed_paths(changed, risk_rules)
-    auto_method = risk.recommended_method if (sm is SourceMethod.AUTO and seeded) else None
-    return resolve_level(
-        mode=ScanMode(req.mode), source_method=sm, depth=dp, auto_method=auto_method
-    )
+#: Coarse per-member cost anchor (seconds) for the cross-library bundle-audit
+#: pass (``bundle.audit_bundle`` -> ``build_bundle_snapshot`` + SONAME/export
+#: resolution): the same order of magnitude as ``service_scan``'s own
+#: ``L0_binary`` "binary export table parse" row (0.1s/binary), since both
+#: are ELF/dynsym-only, no-compiler-invocation passes over the same file. Not
+#: read from ``service_scan`` itself (that module is ``no_growth``-debt-
+#: tracked, at its own line-count baseline) -- a duplicated *magnitude*, not
+#: duplicated *logic*, so it carries none of the drift risk a second resolved
+#: -level computation would (Codex review: the projected total previously
+#: excluded this pass entirely, understating --budget planning for large sets).
+_COST_PER_MEMBER_BUNDLE_AUDIT = 0.1
 
 
 def estimate_artifact_set(
@@ -80,26 +57,31 @@ def estimate_artifact_set(
     the total by roughly N×).
 
     The risk-driven ``(SourceMethod, EvidenceDepth)`` level is resolved
-    **once**, via :func:`_resolve_level` -- honoring *req*'s own
-    ``risk_rules_path`` -- rather than left to each per-member
-    ``estimate_scan()`` call to re-derive it from ``RiskRules.default()``,
-    which would silently ignore a caller's ``--risk-rules`` profile and can
-    project a different layer/cost than the real run. ``changed_paths`` (and
-    so the risk score) is shared across the whole set, not per-member, so
-    resolving it once is correct, not just cheaper. Raises ``ValueError`` on
-    a malformed ``--risk-rules`` profile -- the same failure the real run
-    surfaces -- so the preview fails the same way the run would, rather than
-    silently reporting success.
+    **once**, via ``service_scan._resolve_member_scan_level`` -- the same
+    function ``_run_scan_one_member`` (the real per-member execution path)
+    calls, per ``workflows/AGENTS.md``'s "Dry-run and execution must consume
+    the same resolved plan" rule -- rather than an independent copy of that
+    precedence that could silently drift from it. This also means a
+    malformed ``--risk-rules`` profile raises the identical ``ValueError``
+    the real run raises, so the preview fails the same way rather than
+    silently reporting success. ``changed_paths`` (and so the risk score) is
+    shared across the whole set, not per-member, so resolving it once here
+    is correct, not just cheaper.
 
     Returns ``(totals, notes)``: *totals* maps each touched layer name to
-    its summed ``(tus, est_seconds)`` across every member; *notes* is the
+    its summed ``(tus, est_seconds)`` across every member, plus one
+    ``"bundle_audit"`` entry pricing the cross-library bundle-audit pass
+    ``run_scan_set`` performs once over the whole set; *notes* is the
     deduplicated set of every per-estimate caveat (e.g. an ``--build-target``
     TU-count scoping warning) any member's estimate carried, so an aggregated
     preview doesn't silently drop a caveat a maintainer needs to see.
     """
-    from ..service_scan import ScanRequest, estimate_scan
+    from ..service_scan import ScanRequest, _resolve_member_scan_level, estimate_scan
 
-    resolved_level = _resolve_level(req)
+    _sm, _dp, _changed, _seeded, _risk, resolved, eff_depth, _collect_mode = (
+        _resolve_member_scan_level(req)
+    )
+    resolved_level = (resolved, eff_depth)
     totals: dict[str, tuple[int, float]] = {}
     notes: list[str] = []
     seen_notes: set[str] = set()
@@ -125,4 +107,10 @@ def estimate_artifact_set(
             if e.note and e.note not in seen_notes:
                 seen_notes.add(e.note)
                 notes.append(e.note)
+    # The cross-library bundle-audit pass (run once over the whole set, not
+    # per member) is real, budgeted work `run_scan_set` performs -- price it
+    # too, rather than silently excluding it from the projected total.
+    totals["bundle_audit"] = (
+        len(member_paths), _COST_PER_MEMBER_BUNDLE_AUDIT * len(member_paths),
+    )
     return totals, notes

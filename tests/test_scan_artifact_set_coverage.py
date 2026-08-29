@@ -88,10 +88,11 @@ class TestArtifactSetRepeatableOptionBranches:
         self, runner: CliRunner, tmp_path: Path
     ) -> None:
         # Codex review: the per-member estimate must resolve --risk-rules
-        # itself (workflows.scan_estimate._resolve_level), not silently fall
-        # back to RiskRules.default() -- a malformed profile must fail the
-        # dry-run exactly like it fails the real run (click.UsageError, not
-        # a "successful" preview of a run that would actually error out).
+        # itself (service_scan._resolve_member_scan_level, shared with the
+        # real run), not silently fall back to RiskRules.default() -- a
+        # malformed profile must fail the dry-run exactly like it fails the
+        # real run (click.UsageError, not a "successful" preview of a run
+        # that would actually error out).
         p1, p2 = tmp_path / "liba.so", tmp_path / "libb.so"
         _write_elf_shared_object_stub(p1)
         _write_elf_shared_object_stub(p2)
@@ -134,6 +135,23 @@ class TestArtifactSetRepeatableOptionBranches:
         )
         assert result.exit_code == 0, result.output
         assert "UNSCOPED" in result.output
+
+    def test_dry_run_prices_the_cross_library_bundle_audit_pass(
+        self, runner: CliRunner, tmp_path: Path
+    ) -> None:
+        # Codex review: the projected total previously excluded run_scan_set's
+        # own cross-library bundle-audit pass entirely, understating a
+        # --budget plan for a large set. It must now appear as its own line
+        # and be folded into the total.
+        p1, p2 = tmp_path / "liba.so", tmp_path / "libb.so"
+        _write_elf_shared_object_stub(p1)
+        _write_elf_shared_object_stub(p2)
+        result = runner.invoke(
+            main,
+            ["scan", "--artifact-set", str(p1), "--artifact-set", str(p2), "--dry-run"],
+        )
+        assert result.exit_code == 0, result.output
+        assert "bundle_audit:" in result.output
 
     def test_rejects_dry_run_with_artifact_set_and_output(
         self, runner: CliRunner, tmp_path: Path

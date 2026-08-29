@@ -121,9 +121,9 @@ def render_artifact_set_dry_run(
                 for layer, (tus, seconds) in totals.items()
             ),
             f"projected total: {total_seconds:.2f}s",
-            "note: each member is estimated independently and summed; this "
-            "does not price the cross-library bundle-audit pass itself "
-            "(cheap ELF/dynsym-only, no compiler invocation)",
+            "note: each member is estimated independently and summed; "
+            "'bundle_audit' prices the one cross-library pass run once over "
+            "the whole set (ELF/dynsym-only, no compiler invocation)",
             *notes,
         )
     return result

@@ -1060,6 +1060,37 @@ def _load_risk_rules_for_service(risk_rules_path: Path) -> Any:
         raise ValueError(str(msg)) from exc
 
 
+def _resolve_member_scan_level(
+    req: ScanRequest,
+) -> tuple[Any, Any, list[str], bool, Any, Any, Any, str]:
+    """Resolve ``(sm, dp, changed, seeded, risk, resolved, eff_depth,
+    collect_mode)`` for one member -- shared by :func:`_run_scan_one_member`
+    and ``workflows.scan_estimate.estimate_artifact_set`` (``--artifact-set
+    --dry-run``), per ``workflows/AGENTS.md``'s "dry-run and execution must
+    consume the same resolved plan" rule.
+    """
+    (
+        RiskRules, score_changed_paths, _EvidenceDepth, ScanMode, SourceMethod,
+        level_to_collect_mode, resolve_level, parse_user_depth, SourceScope,
+    ) = _scan_imports()
+    sm = SourceMethod(req.source_method) if req.source_method else None
+    dp = parse_user_depth(req.depth)
+    changed = [p for p in req.changed_paths if p]
+    seeded = req.seeded or bool(changed)
+    risk_rules = (
+        _load_risk_rules_for_service(req.risk_rules_path)
+        if req.risk_rules_path is not None else RiskRules.default()
+    )
+    risk = score_changed_paths(changed, risk_rules)
+    auto_method = risk.recommended_method if (sm is SourceMethod.AUTO and seeded) else None
+    resolved, eff_depth = resolve_level(
+        mode=ScanMode(req.mode), source_method=sm, depth=dp, auto_method=auto_method
+    )
+    scope = SourceScope.CHANGED if seeded else SourceScope.TARGET
+    collect_mode = level_to_collect_mode(resolved, eff_depth, source_scope=scope)
+    return sm, dp, changed, seeded, risk, resolved, eff_depth, collect_mode
+
+
 #: Every ``ScanRequest`` field meaningful only for a baseline comparison,
 #: keyed to a predicate that's ``True`` when *req* carries a caller-set,
 #: non-default value. A plain dict (not logic buried in
@@ -1598,48 +1629,24 @@ def _run_scan_one_member(
     a refactor of `run_scan` itself, so `run_scan`'s existing behavior/tests
     stay byte-for-byte unchanged) with three differences:
 
-    - Accepts an externally-supplied ``start``/``budget_s`` instead of
-      calling ``_time.monotonic()`` itself. `run_scan_set` passes the *same*
-      ``start`` and the *original, unreduced* total ``budget_s`` to every
-      member — `run_scan_core`'s own ``_remaining_budget_s(start, budget_s)``
-      already computes ``budget_s - (now - start)`` internally, so this
-      alone produces the correct shrinking remaining budget across members.
-      Passing an already-reduced ``budget_s`` here instead would double-subtract elapsed time.
+    - Accepts an externally-supplied ``start``/``budget_s`` instead of calling
+      ``_time.monotonic()`` itself. `run_scan_set` passes the *same* ``start``
+      and the *original, unreduced* total ``budget_s`` to every member --
+      `run_scan_core`'s own ``_remaining_budget_s`` already computes the
+      shrinking remaining budget from these; an already-reduced ``budget_s``
+      here would double-subtract elapsed time.
     - Forwards `req.abi3_floor`/`enabled_checks`/`severities`/`build_config`/`allow_build_query`/
       `risk_rules_path`/`build_targets` -- must not silently drop what single-binary `scan` honors.
-    - Accepts ``sibling_exported_symbols`` (G35): a sibling's export also
-      satisfies this member's own `public_not_exported` check.
+    - Accepts ``sibling_exported_symbols`` (G35): a sibling's export also satisfies `public_not_exported`.
     """
-    (
-        RiskRules,
-        score_changed_paths,
-        EvidenceDepth,
-        ScanMode,
-        SourceMethod,
-        level_to_collect_mode,
-        resolve_level,
-        parse_user_depth,
-        SourceScope,
-    ) = _scan_imports()
     from .buildsource.crosscheck import ALL_CHECKS
-    from .scan_engine import (
-        _BudgetOverflow,
-        _EvidenceContractError,
-        run_scan_core,
-    )
+    from .buildsource.scan_levels import EvidenceDepth, ScanMode, SourceMethod
+    from .scan_engine import _BudgetOverflow, _EvidenceContractError, run_scan_core
     from .workflows.scan_config import public_provenance_set as _public_provenance_set
 
-    sm = SourceMethod(req.source_method) if req.source_method else None
-    dp = parse_user_depth(req.depth)
-
-    changed = [p for p in req.changed_paths if p]
-    seeded = req.seeded or bool(changed)
-    risk_rules = (
-        _load_risk_rules_for_service(req.risk_rules_path)
-        if req.risk_rules_path is not None
-        else RiskRules.default()
-    )
-    risk = score_changed_paths(changed, risk_rules)
+    # Shared with the --artifact-set --dry-run preview (workflows.scan_estimate) -- workflows/AGENTS.md's
+    # "dry-run and execution must consume the same resolved plan" rule.
+    sm, dp, changed, seeded, risk, resolved, eff_depth, collect_mode = _resolve_member_scan_level(req)
 
     scan_mode = ScanMode(req.mode)
     sm_pin = sm is not None and sm is not SourceMethod.AUTO
@@ -1650,15 +1657,6 @@ def _run_scan_one_member(
     # review).
     level_explicit = sm_pin or (sm is None and dp is not None)
     is_auto = sm is SourceMethod.AUTO
-    auto_method = risk.recommended_method if (is_auto and seeded) else None
-    resolved, eff_depth = resolve_level(
-        mode=scan_mode, source_method=sm, depth=dp, auto_method=auto_method
-    )
-    collect_mode = level_to_collect_mode(
-        resolved,
-        eff_depth,
-        source_scope=SourceScope.CHANGED if seeded else SourceScope.TARGET,
-    )
     eff_headers = [] if eff_depth is EvidenceDepth.BINARY else list(req.headers)
     prov_headers, prov_dirs = _public_provenance_set(
         eff_headers, list(req.public_header_dirs)
