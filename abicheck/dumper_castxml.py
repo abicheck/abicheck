@@ -27,10 +27,14 @@ memoization caches) now lives on a shared ``CastxmlParserContext``
 (``extract.headers.castxml.context``), with location resolution
 (``location.py``), the type-graph walk (``type_resolution.py``), and enum
 parsing (``enums.py``) built on top of it as free functions taking that
-context explicitly. Every method below that has a counterpart in one of
-those modules is a thin delegating wrapper, kept for every existing
-internal and external caller (tests included) that still reads
-``_CastxmlParser``'s private surface directly.
+context explicitly. Function-entity parsing (``functions.py``) is the
+second entity module built the same way; ``qualified_name``/
+``decl_is_public``/``visibility``/``access_level`` moved into
+``location.py`` rather than ``functions.py`` since typedef/variable/
+constant parsing (still here) reads them too. Every method below that has
+a counterpart in one of those modules is a thin delegating wrapper, kept
+for every existing internal and external caller (tests included) that
+still reads ``_CastxmlParser``'s private surface directly.
 """
 
 from __future__ import annotations
@@ -49,6 +53,7 @@ from .dumper_castxml_typedefs import (
 from .extract.headers.castxml import (
     context as _castxml_context,
     enums as _castxml_enums,
+    functions as _castxml_functions,
     location as _castxml_location,
     type_resolution as _castxml_type_resolution,
 )
@@ -70,13 +75,12 @@ from .model import (
     Function,
     Param,
     RecordType,
-    ScopeOrigin,
     TypeField,
     Variable,
     Visibility,
 )
 from .name_classification import strip_anonymous_type_location
-from .provenance import classify_origin, header_from_location
+from .provenance import header_from_location
 
 
 class _CastxmlParser:
@@ -228,12 +232,7 @@ class _CastxmlParser:
     @staticmethod
     def _access_level(el: Element) -> AccessLevel:
         """Map castxml 'access' attribute to AccessLevel enum."""
-        raw = el.get("access", "public")
-        if raw == "protected":
-            return AccessLevel.PROTECTED
-        if raw == "private":
-            return AccessLevel.PRIVATE
-        return AccessLevel.PUBLIC
+        return _castxml_location.access_level(el)
 
     def _variable_value_eligible(self, el: Element) -> bool:
         """``init`` eligible for ``Variable.value``? Mirrors
@@ -250,17 +249,7 @@ class _CastxmlParser:
 
     def _visibility(self, mangled: str, name: str = "") -> Visibility:
         """Determine visibility based on ELF symbol tables."""
-        # Check dynamic symbols (.dynsym) — truly exported
-        if mangled and mangled in self._exported_dynamic:
-            return Visibility.PUBLIC
-        if name and name in self._exported_dynamic:
-            return Visibility.PUBLIC
-        # Check all symbols (.symtab) — present in ELF but not exported
-        if mangled and mangled in self._exported_static:
-            return Visibility.ELF_ONLY
-        if name and name in self._exported_static:
-            return Visibility.ELF_ONLY
-        return Visibility.HIDDEN
+        return _castxml_location.visibility(self._ctx, mangled, name)
 
     def _ctor_or_dtor_visibility(
         self,
@@ -312,14 +301,9 @@ class _CastxmlParser:
         "removed" API surface instead of staying silent like the clang
         header backend already does for them.
         """
-        resolved = self._visibility(raw_mangled, name)
-        if raw_mangled:
-            return resolved  # a real name was checked — trust a negative too
-        if resolved is not Visibility.HIDDEN:
-            return resolved  # matched via the bare name (e.g. C linkage)
-        if access == AccessLevel.PUBLIC and not is_deleted and not is_artificial:
-            return Visibility.PUBLIC
-        return Visibility.HIDDEN
+        return _castxml_functions.ctor_or_dtor_visibility(
+            self._ctx, raw_mangled, name, access, is_deleted, is_artificial
+        )
 
     def _variable_visibility(self, el: Element, mangled: str, name: str) -> Visibility:
         """Visibility for a namespace-scope Variable element, with a
@@ -360,45 +344,11 @@ class _CastxmlParser:
     def _build_hidden_friend_ids(self) -> dict[str, str]:
         """Map function ids to the qualified name of their befriending class.
 
-        castxml emits an in-class ``friend`` declaration as a separate
-        ``Function`` / ``Method`` / ``OperatorFunction`` element at namespace
-        scope, and records the link from the class via a ``befriending``
-        attribute on the ``Class`` / ``Struct`` element — a whitespace-
-        separated list of ids. We resolve those ids so we can mark the
-        corresponding ``Function`` objects as hidden friends downstream, and
-        also record *which class* befriended each one (``hidden_friend_owner``)
-        so surface classification can key demotion off the owner's header
-        origin instead of unconditionally retaining every hidden-friend finding
-        regardless of whether the owner lives in a system/private header.
-
-        The same free function can legitimately be befriended by more than
-        one class (e.g. one comparison operator declared as a friend inside
-        two distinct types). ``Function.hidden_friend_owner`` holds only a
-        single owner, so when ids collide, a public owner always wins and,
-        once recorded, is never displaced by a later private/system one —
-        never let a public ADL function look privately-owned only because a
-        different, non-public befriending class happened to be visited last
-        (Codex review).
+        See :func:`abicheck.extract.headers.castxml.functions.
+        build_hidden_friend_ids` (this method's real home since ADR-061
+        Phase 5 item 1) for the full account.
         """
-        owner_by_id: dict[str, str] = {}
-        owner_is_public_by_id: dict[str, bool] = {}
-        for el in self._record_els:
-            if el.tag not in ("Class", "Struct", "Union"):
-                continue
-            befriending = el.get("befriending", "")
-            if not befriending:
-                continue
-            owner_name = self._qualified_name(el)
-            is_public = self._decl_is_public(el)
-            for fid in befriending.split():
-                if not fid:
-                    continue
-                if fid not in owner_by_id or (
-                    is_public and not owner_is_public_by_id[fid]
-                ):
-                    owner_by_id[fid] = owner_name
-                    owner_is_public_by_id[fid] = is_public
-        return owner_by_id
+        return _castxml_functions.build_hidden_friend_ids(self._ctx)
 
     # castxml emits non-member operator overloads as <OperatorFunction>
     # (e.g. `bool operator==(const Foo&, const Foo&)` at namespace scope,
@@ -409,134 +359,29 @@ class _CastxmlParser:
     _FUNCTION_TAGS: tuple[str, ...] = _castxml_context.FUNCTION_TAGS
 
     def parse_functions(self) -> list[Function]:
-        funcs: list[Function] = []
-        hidden_friend_owner_by_id = self._build_hidden_friend_ids()
-        for el in self._function_els:
-            func = self._parse_function_element(el, hidden_friend_owner_by_id)
-            if func is not None:
-                funcs.append(func)
-        return funcs
+        return _castxml_functions.parse_functions(self._ctx)
 
     def _function_display_name(self, el: Element) -> str:
         """Resolve a function element's display name, synthesizing/normalizing operator forms."""
-        # castxml emits user-defined conversion operators as <Converter>
-        # rather than <Method>. They carry mangled names (unlike
-        # constructors), `const`/`virtual`/`explicit` qualifiers, and an
-        # implicit empty name (which we synthesize as `operator <T>`).
-        name = el.get("name", "")
-        if not name and el.tag == "Converter":
-            # Synthesize a stable display name for conversion operators.
-            ret_id = el.get("returns", "")
-            ret_type_for_name = self._type_name(ret_id) if ret_id else "?"
-            name = f"operator {ret_type_for_name}"
-        if name and el.tag == "Destructor":
-            # castxml's <Destructor name="..."> is the bare CLASS name (e.g.
-            # "Base1"), identical to its own Constructor's — unlike clang's
-            # `-ast-dump=json`, which already names a CXXDestructorDecl
-            # "~Base1" (confirmed against a live clang 18 dump; Phase 2
-            # parity gate, PR #582). Synthesizing the same "~ClassName" form
-            # here both matches clang's convention and gives
-            # _function_mangled_name's no-mangled-name fallback (`return
-            # name`) a key that can never collide with the class's own
-            # constructor/type entries.
-            name = f"~{name}"
-        # castxml emits operator name as the bare symbol (e.g. "==", "+").
-        # Normalize to the canonical "operator==" form for readability and
-        # to match how the rest of the pipeline (and human reports)
-        # refer to operator overloads.
-        if (
-            name
-            and el.tag in ("OperatorFunction", "OperatorMethod")
-            and not name.startswith("operator")
-        ):
-            name = f"operator{name}"
-        return name
+        return _castxml_functions.function_display_name(self._ctx, el)
 
     def _ctor_param_identity_type(self, type_id: str) -> str:
-        """Type spelling for a synthesized constructor identity key: like
-        ``_type_name``, but with at most one OUTERMOST ``CvQualifiedType``
-        layer removed.
-
-        A top-level cv-qualifier — one directly wrapping the parameter's own
-        type, whether that type is by-value (``volatile int``) or a pointer
-        VALUE itself (``int * volatile``, i.e. ``CvQualifiedType`` directly
-        wrapping ``PointerType``) — participates in neither real Itanium
-        mangling nor overload identity, so it must not change the
-        synthesized key either (Codex review, PR #582). A POINTEE-position
-        qualifier (``const int *`` — ``PointerType`` wrapping
-        ``CvQualifiedType``) is NOT touched: that one genuinely does
-        distinguish two overloads and would mangle differently, so it must
-        keep contributing to the key. This can't be done by pattern-matching
-        the rendered ``_type_name`` string (both cases can render
-        identically, e.g. ``"volatile int*"`` for either a volatile pointer
-        VALUE or a pointer to volatile int) — only the real XML structure
-        tells them apart: only strip when the type id itself resolves
-        directly to a ``CvQualifiedType`` element.
-        """
-        el = self._resolve(type_id)
-        if el is not None and el.tag == "CvQualifiedType":
-            return self._type_name(el.get("type", ""))
-        return self._type_name(type_id)
+        """Type spelling for a synthesized constructor identity key. See
+        :func:`~.extract.headers.castxml.functions.ctor_param_identity_type`."""
+        return _castxml_functions.ctor_param_identity_type(self._ctx, type_id)
 
     def _parse_function_params(
         self, el: Element
     ) -> tuple[list[Param], bool, list[str]]:
-        """Collect a function element's parameters, whether it is
-        C-variadic, and each parameter's ctor-identity-key type spelling
-        (mirrors ``params`` positionally; see ``_ctor_param_identity_type``).
-        """
-        params: list[Param] = []
-        ctor_identity_types: list[str] = []
-        is_variadic = False
-        for arg in el:
-            if arg.tag == "Argument":
-                p_name = arg.get("name", "")
-                p_type_id = arg.get("type", "")
-                p_type = self._type_name(p_type_id)
-                p_depth = self._pointer_depth(p_type_id)
-                _, _, p_restrict = self._resolve_cv_restrict(p_type_id)
-                # castxml emits default="<expr>" on Arguments that carry a
-                # default value. Removing/changing a default is a source-API
-                # (and silent-behaviour) concern even though the mangled name
-                # is unchanged; capture it so the param_defaults detector can
-                # fire. Absent attribute → None (no default).
-                params.append(
-                    Param(
-                        name=p_name,
-                        type=p_type,
-                        pointer_depth=p_depth,
-                        default=arg.get("default"),
-                        # restrict has no ABI/mangling effect (unlike
-                        # const/volatile) — tracked as its own compatible-
-                        # classified fact via the dedicated param_restrict
-                        # detector rather than folded into `type` (see
-                        # _type_name's CvQualifiedType handling above).
-                        is_restrict=p_restrict,
-                        # CastXML never determines va_list-ness at all -- UNSUPPORTED says so plainly, stronger than the omission bridge's NOT_COLLECTED ("not this time" vs. "never from this producer").
-                        is_va_list_fact=Fact.unsupported(),
-                    )
-                )
-                ctor_identity_types.append(self._ctor_param_identity_type(p_type_id))
-            elif arg.tag == "Ellipsis":
-                # Trailing C ellipsis (...) — the function is variadic.
-                is_variadic = True
-        return params, is_variadic, ctor_identity_types
+        """Collect a function element's parameters. See
+        :func:`~.extract.headers.castxml.functions.parse_function_params`."""
+        return _castxml_functions.parse_function_params(self._ctx, el)
 
     def _enclosing_class_qualified_name(self, el: Element) -> str:
-        """Fully-qualified (``ns::Outer::Class``) name of the class/struct/
-        union enclosing a Constructor/Destructor element *el*.
-
-        Distinct from calling ``_qualified_name(el)`` directly on *el*: a
-        Constructor/Destructor's own bare ``name`` attribute already equals
-        the class's own leaf name, so walking from *el* itself would count
-        that leaf twice (``Foo::Foo`` instead of ``ns::Foo``). Walking from
-        *el*'s ``context`` (the class element) instead starts one level up,
-        at the class's own name.
-        """
-        class_el = self._resolve(el.get("context", ""))
-        if class_el is None:
-            return el.get("name", "")
-        return self._qualified_name(class_el)
+        """Fully-qualified name of the class/struct/union enclosing a
+        Constructor/Destructor element *el*. See
+        :func:`~.extract.headers.castxml.functions.enclosing_class_qualified_name`."""
+        return _castxml_functions.enclosing_class_qualified_name(self._ctx, el)
 
     @staticmethod
     def _function_mangled_name(
@@ -546,251 +391,46 @@ class _CastxmlParser:
         raw_mangled: str,
         qualified_scope: str = "",
     ) -> str:
-        """Pick the snapshot key for a function: mangled name, ctor synthesis, or plain name."""
-        if raw_mangled:
-            return raw_mangled
-        if el.tag == "Constructor":
-            # CastXML may omit constructor mangled names even for public
-            # user-declared overloaded constructors.  Using the bare class
-            # name would collapse all overloads in AbiSnapshot.function_map,
-            # hiding constructor additions such as case111.  Synthesize a
-            # deterministic internal identity from the display name and
-            # normalized parameter types; it is intentionally not an ABI
-            # symbol, only a stable snapshot key for source-level overloads.
-            # ctor_identity_types (not the raw Param.type strings) drops a
-            # TOP-LEVEL cv qualifier the same way real Itanium mangling
-            # would — see _ctor_param_identity_type's docstring: without it,
-            # a layout-neutral declaration change like ``Widget(int)`` ->
-            # ``Widget(volatile int)`` (by-value) or ``Widget(int*)`` ->
-            # ``Widget(int* volatile)`` (the pointer VALUE itself, not its
-            # pointee) produced two different synthetic keys, so the diff
-            # engine saw a removed + added constructor instead of the same
-            # overload reaching the cv-neutral param comparison (Codex
-            # review, PR #582).
-            #
-            # Use the fully-qualified enclosing class name (falling back to
-            # the bare *name* only if it couldn't be resolved), not just the
-            # bare class name: two public classes with the same leaf name in
-            # different namespaces (``ns1::Foo``/``ns2::Foo``) would
-            # otherwise synthesize the identical key, silently colliding in
-            # ``AbiSnapshot.function_map`` — one class's constructor
-            # additions/removals then went undetected, "first-wins" (Codex
-            # review, PR #582). A non-namespaced class's qualified name is
-            # just its bare name, so this is a no-op for the common case.
-            scope = qualified_scope or name
-            param_sig = ",".join(ctor_identity_types)
-            return f"{SYNTHETIC_CTOR_KEY_PREFIX}{scope}({param_sig})"
-        if el.tag == "Destructor" and qualified_scope:
-            # Same namespace-collision reasoning as above, applied to the
-            # destructor's synthesized "~ClassName" key: qualify it as
-            # "~ns::Class" instead of bare "~Class". The leading "~" is
-            # preserved (is_synthetic_dtor_key() checks for it), and a
-            # non-namespaced class again collapses to the pre-existing
-            # "~Class" form.
-            return f"~{qualified_scope}"
-        return name  # C functions: use plain name
+        """Pick the snapshot key for a function. See
+        :func:`~.extract.headers.castxml.functions.function_mangled_name`."""
+        return _castxml_functions.function_mangled_name(
+            el, name, ctor_identity_types, raw_mangled, qualified_scope
+        )
 
     def _function_source_location(
         self, el: Element
     ) -> tuple[str | None, Element | None]:
-        """Resolve a function element's ``file:line`` source location and Location element."""
-        # CastXML may store source location two ways:
-        #   1. Directly as ``file``/``line`` attributes on the declaration
-        #      element (modern compound-attribute form).
-        #   2. As ``location="loc1"`` referencing a separate ``Location``
-        #      element in the id map (legacy form).
-        # Try direct attrs first, then fall back to the id-map lookup so
-        # both formats are supported without losing source_location info.
-        file_id = el.get("file", "")
-        line = el.get("line", "")
-        loc_el: Element | None = None
-        if not (file_id and line):
-            loc_id = el.get("location", "")
-            loc_el = self._id_map.get(loc_id) if loc_id else None
-            if loc_el is not None:
-                file_id = loc_el.get("file", "")
-                line = loc_el.get("line", "")
-        file_el = self._id_map.get(file_id) if file_id else None
-        fname = file_el.get("name", "") if file_el is not None else ""
-        source_loc = f"{fname}:{line}" if fname and line else None
-        return source_loc, loc_el
+        """Resolve a function element's ``file:line`` source location and
+        Location element. See
+        :func:`~.extract.headers.castxml.functions.function_source_location`."""
+        return _castxml_functions.function_source_location(self._ctx, el)
 
     def _function_is_explicit(self, el: Element, loc_el: Element | None) -> bool | None:
-        """Determine the tri-state `explicit` specifier for a function element."""
-        # castxml emits explicit="1" on Constructor / Method elements that
-        # carry the `explicit` specifier. Tri-state: only Constructor /
-        # Method tags can be explicit; for plain Function / Destructor the
-        # attribute is conceptually N/A and we leave is_explicit=None so
-        # the diff does not produce spurious findings.
-        if el.tag in ("Constructor", "Method"):
-            return el.get("explicit") == "1"
-        if el.tag == "Converter":
-            return (
-                el.get("explicit") == "1"
-                if el.get("explicit") is not None
-                else self._source_line_has_explicit(loc_el, el)
-            )
-        return None
+        """Determine the tri-state `explicit` specifier for a function
+        element. See
+        :func:`~.extract.headers.castxml.functions.function_is_explicit`."""
+        return _castxml_functions.function_is_explicit(self._ctx, el, loc_el)
 
     @staticmethod
     def _function_ref_qualifier(el: Element, mangled: str) -> str:
-        """Derive the &/&& ref-qualifier from the refqual attribute or the mangling."""
-        # C++ ref-qualifier: newer castxml emits refqual="lvalue"/"rvalue",
-        # but released versions (≤0.6.x) omit the attribute entirely, so
-        # fall back to the Itanium mangling — the qualifier is encoded as
-        # R (&) / O (&&) right after the CV-qualifiers in <nested-name>.
-        refqual_raw = el.get("refqual", "")
-        return {"lvalue": "&", "rvalue": "&&"}.get(
-            refqual_raw, ""
-        ) or _ref_qualifier_from_mangled(mangled)
+        """Derive the &/&& ref-qualifier. See
+        :func:`~.extract.headers.castxml.functions.function_ref_qualifier`."""
+        return _castxml_functions.function_ref_qualifier(el, mangled)
 
     def _function_exception_spec(self, el: Element) -> str:
-        """Render a function element's dynamic exception specification, if any."""
-        # Dynamic exception specification: castxml emits throw="" for
-        # `throw()` and a space-separated type-id list for `throw(T...)`.
-        # Absent attribute = no dynamic spec (captured as ""), keeping the
-        # tri-state None for dumpers that cannot know.
-        throw_attr = el.get("throw")
-        if throw_attr is None:
-            return ""
-        if not throw_attr.strip():
-            return "throw()"
-        thrown = ", ".join(self._type_name(tid) for tid in throw_attr.split())
-        return f"throw({thrown})"
+        """Render a function element's dynamic exception specification, if
+        any. See
+        :func:`~.extract.headers.castxml.functions.function_exception_spec`."""
+        return _castxml_functions.function_exception_spec(self._ctx, el)
 
     def _parse_function_element(
         self, el: Element, hidden_friend_owner_by_id: dict[str, str]
     ) -> Function | None:
-        """Build a Function from a castxml function-like element, or None if filtered."""
-        name = self._function_display_name(el)
-        if not name:
-            return None
-        # Skip compiler built-ins and command-line synthetic declarations
-        if self._is_builtin_element(el):
-            return None
-        raw_mangled = el.get("mangled", "")
-        ret_id = el.get("returns", "")
-        ret_type = self._type_name(ret_id) if ret_id else "void"
-        ret_ptr_depth = self._pointer_depth(ret_id) if ret_id else 0
-
-        params, is_variadic, ctor_identity_types = self._parse_function_params(el)
-        qualified_scope = (
-            self._enclosing_class_qualified_name(el)
-            if el.tag in ("Constructor", "Destructor")
-            else ""
-        )
-        mangled = self._function_mangled_name(
-            el, name, ctor_identity_types, raw_mangled, qualified_scope
-        )
-
-        # Real ELF export evidence overrides castxml's language-mode guess:
-        # castxml ALWAYS emits a pseudo-Itanium `mangled` attribute, even for
-        # a plain C function parsed in ambiguous/C++ mode (confirmed
-        # empirically — the "C functions: use plain name" fallback in
-        # _function_mangled_name is otherwise dead code, since raw_mangled is
-        # never actually empty). When that guessed mangling matches no real
-        # exported symbol at all while the function's bare declared name
-        # *is* a real export, that's strong, low-false-positive-risk
-        # evidence the function actually has C linkage — a genuine C++
-        # function's real compiled export would essentially never coincide
-        # with its bare unqualified name. Use the bare name as the
-        # canonical symbol identity instead (case141).
-        #
-        # Restricted to global-scope functions (context is the root ``::``
-        # namespace): ``name`` is always castxml's bare leaf identifier —
-        # for a *namespaced* C++ function (``ns::foo``), the same bare
-        # leaf could coincidentally match an unrelated, genuinely-exported
-        # plain C ``foo``, which would wrongly rewrite the namespaced
-        # function's identity onto that unrelated export instead. A real
-        # (possibly extern "C") function this override is meant to recover
-        # is always declared at global scope.
-        if (
-            el.tag == "Function"
-            and mangled.startswith("_Z")
-            and mangled not in self._exported_dynamic
-            and name in self._exported_dynamic
-            and self._is_global_scope(el)
-        ):
-            mangled = name
-            is_extern_c_override = True
-        else:
-            is_extern_c_override = False
-
-        is_virtual = el.get("virtual") == "1"
-        noexcept_re = re.search(r"noexcept", el.get("attributes", ""))
-        vtable_index = (
-            _parse_vtable_index(el.get("vtable_index")) if is_virtual else None
-        )
-
-        # Detect extern "C": explicit extern attribute OR no mangled name (C linkage)
-        is_extern_c = (
-            el.get("extern") == "1"
-            or (
-                not raw_mangled and el.tag == "Function"
-            )  # C functions have no mangled name
-            or is_extern_c_override
-        )
-
-        source_loc, loc_el = self._function_source_location(el)
-        access = self._access_level(el)
-        is_deleted = el.get("deleted") == "1"
-        visibility = (
-            self._ctor_or_dtor_visibility(
-                raw_mangled, name, access, is_deleted, el.get("artificial") == "1"
-            )
-            if el.tag in ("Constructor", "Destructor")
-            else self._visibility(raw_mangled, name)
-        )
-
-        return Function(
-            name=name,
-            mangled=mangled,
-            return_type=ret_type,
-            params=params,
-            visibility=visibility,
-            is_virtual=is_virtual,
-            is_noexcept=bool(noexcept_re),
-            is_extern_c=is_extern_c,
-            vtable_index=vtable_index,
-            source_location=source_loc,
-            is_static=el.get("static") == "1",
-            is_const=el.get("const") == "1",
-            is_volatile=el.get("volatile") == "1",
-            is_pure_virtual=el.get("pure_virtual") == "1",
-            is_deleted=is_deleted,
-            # castxml emits inline="1" for inline functions/methods
-            is_inline=el.get("inline") == "1",
-            access=access,
-            return_pointer_depth=ret_ptr_depth,
-            ref_qualifier=self._function_ref_qualifier(el, mangled),
-            is_explicit=self._function_is_explicit(el, loc_el),
-            # Hidden-friend marker: castxml records the link via the
-            # ``befriending`` attribute on the class element. We resolved
-            # the referenced ids upfront and check membership here.
-            is_hidden_friend=el.get("id", "") in hidden_friend_owner_by_id,
-            hidden_friend_owner=hidden_friend_owner_by_id.get(el.get("id", "")),
-            is_variadic=is_variadic,
-            # Semantic contract / calling-convention attributes, filtered from
-            # the compound ``attributes`` string (same channel as noexcept).
-            contract_attributes=_extract_contract_attributes(el.get("attributes", "")),
-            exception_spec=self._function_exception_spec(el),
-            # See _deprecation_marker for why this isn't a plain
-            # el.get("deprecation") read.
-            deprecated=_deprecation_marker(el),
-            # Explicit C++11 `override` specifier: castxml has no dedicated
-            # boolean for it (distinct from `overrides`, the id-reference
-            # list used for vtable-slot dedup) — the `override` token is
-            # embedded in the same compound `attributes` string as
-            # `noexcept`/`final`. Only member-function forms that can
-            # actually be virtual may carry it; a free function/operator or
-            # a constructor never can, so those stay None (not merely
-            # False) rather than asserting a fact that's not applicable.
-            is_override=(
-                bool(re.search(r"\boverride\b", el.get("attributes", "")))
-                if el.tag in ("Method", "Destructor", "Converter", "OperatorMethod")
-                else None
-            ),
-            is_compiler_generated=el.get("artificial") == "1",
+        """Build a Function from a castxml function-like element, or None if
+        filtered. See
+        :func:`~.extract.headers.castxml.functions.parse_function_element`."""
+        return _castxml_functions.parse_function_element(
+            self._ctx, el, hidden_friend_owner_by_id
         )
 
     def parse_variables(self) -> list[Variable]:
@@ -942,41 +582,17 @@ class _CastxmlParser:
 
     def _qualified_name(self, el: Any) -> str:
         """Namespace/class-qualified name by walking ``context`` (bare name
-        for a global; stops at ``"::"``). Segments are stripped via
-        `strip_anonymous_type_location`, matching `_qualified_type_name`."""
-        parts = [strip_anonymous_type_location(el.get("name", ""))]
-        ctx_id = el.get("context", "")
-        seen: set[str] = set()
-        while ctx_id and ctx_id not in seen:
-            seen.add(ctx_id)
-            ctx = self._id_map.get(ctx_id)
-            if ctx is None:
-                break
-            cname = strip_anonymous_type_location(ctx.get("name", ""))
-            if cname and cname != "::":
-                parts.append(cname)
-            ctx_id = ctx.get("context", "")
-        return "::".join(reversed(parts))
+        for a global; stops at ``"::"``). See
+        :func:`~.extract.headers.castxml.location.qualified_name`, this
+        primitive's real home since ADR-061 Phase 5 item 1 — read by more
+        than one entity kind's parsing, same as ``is_builtin_element``/
+        ``source_location``."""
+        return _castxml_location.qualified_name(self._ctx, el)
 
     def _decl_is_public(self, el: Any) -> bool:
         """True if *el*'s declaring header classifies as a public header.
-
-        Uses the shared provenance segment matcher (suffix/basename/public-dir
-        containment), so build-prefixed paths and umbrella-included public
-        headers match while system/private headers do not.
-        """
-        sh = header_from_location(self._source_location(el))
-        if not sh:
-            return False
-        return (
-            classify_origin(
-                sh,
-                self._pub_header_segs,
-                self._pub_dir_segs,
-                have_public_set=self._have_public_set,
-            )
-            == ScopeOrigin.PUBLIC_HEADER
-        )
+        See :func:`~.extract.headers.castxml.location.decl_is_public`."""
+        return _castxml_location.decl_is_public(self._ctx, el)
 
     def parse_types(self) -> list[RecordType]:
         # Build reverse mapping: struct/union ID → typedef name for anonymous types.
