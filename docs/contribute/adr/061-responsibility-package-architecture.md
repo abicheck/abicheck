@@ -2085,9 +2085,39 @@ without promising a new export.
    pre-existing `graph_facts.py` re-export block already used), so all 77
    existing callers keep resolving; it drops from 2000 to 1352 lines.
    `entity_resolver.py` — needed as `SourceGraphSummary.entity_resolver`'s
-   field type — is now classified `model` in `architecture/modules.yaml`
-   (virtual classification, still physically flat, the same pattern this
-   ADR's Phase 3/4 sections already used elsewhere); `_conf_from_build`
+   field type — was initially classified `model` in
+   `architecture/modules.yaml` while staying physically flat (virtual
+   classification, the same pattern this ADR's Phase 3/4 sections already
+   used elsewhere). **That virtual classification alone was not enough,
+   and a Codex review on the PR proved it**: importing
+   `abicheck.model.source_graph` directly (not through the legacy facade
+   first) raised a real `ImportError` — a circular-import failure, not a
+   check-architecture violation, so the earlier check-clean state didn't
+   catch it. Importing any submodule of `abicheck.buildsource` (including
+   `entity_resolver.py`, still physically there) first runs
+   `buildsource/__init__.py`, which eagerly imports `call_graph.py`,
+   which imports the legacy `buildsource/source_graph.py` facade, which
+   imports back from `abicheck.model.source_graph` — still
+   mid-initialization at that point. Fixed by physically relocating
+   `graph_facts.py` and `entity_resolver.py`/`entity_identity.py` into
+   `abicheck/model/` for real (none of them depend on anything in
+   `buildsource`, only `abicheck.name_classification`/`abicheck.demangle`),
+   so `model/source_graph.py`'s own imports of them are same-package
+   relative and never touch the `abicheck.buildsource` namespace at all.
+   `buildsource/graph_facts.py`/`entity_resolver.py`/`entity_identity.py`
+   became thin `X as X` re-export facades so every existing import —
+   same-package relative within `buildsource/`, and absolute
+   (`abicheck.buildsource.graph_facts` etc., used directly by several
+   tests) — keeps resolving. Moving `graph_facts.py` (1123 lines, unchanged
+   content) past the new-file 800-line cap required splitting it three
+   ways in the same pass: `graph_vocabulary.py` (confidence labels +
+   node/edge-kind vocabulary, no internal dependents), `graph_identity.py`
+   (the decl/type id-normalization functions — already split out of
+   `source_graph.py` once before for the identical line-cap reason, per
+   that section's own pre-existing comment), and `graph_facts.py` itself
+   (the `GraphFact`/`GraphNode`/`GraphEdge`/merge machinery). `demangle.py`
+   joined `model`'s `legacy_paths` alongside this (needed once
+   `entity_identity.py` became real `migrated_source`); `_conf_from_build`
    deliberately did **not** move with the rest, because it needs
    `build_evidence.py`'s `Confidence` enum and `build_evidence.py`
    transitively imports `comdat_groups.py` (`extract`-classified) —

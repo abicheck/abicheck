@@ -34,8 +34,8 @@ import json
 from dataclasses import dataclass, field
 from typing import Any
 
-from ..buildsource.entity_resolver import EntityResolver
-from ..buildsource.graph_facts import (
+from .entity_resolver import EntityResolver
+from .graph_facts import (
     CALLBACK_EDGE_KINDS,
     CONSUMER_EDGE_KINDS,
     CONSUMER_NODE_KINDS,
