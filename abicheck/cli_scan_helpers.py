@@ -52,7 +52,6 @@ def reject_incoherent_scan_operands(
     artifact: Path | None,
     artifact_set: tuple[str, ...],
     against: Path | None,
-    dry_run: bool,
     bundle_system_providers: str,
 ) -> None:
     """Reject operand/flag combinations ``scan`` cannot serve.
@@ -69,7 +68,10 @@ def reject_incoherent_scan_operands(
     ``Path("") == Path(".")`` and audit the whole CWD (CodeRabbit review,
     preserved from the comma-separated form's own fix). ``--artifact-set``
     is audit-only -- there is no old side for a set -- so ``--against`` is
-    rejected with it, and ``--dry-run`` is not wired for it yet.
+    rejected with it. ``--dry-run`` *is* supported (CLI cleanup phase two,
+    PR 5's set-mode-semantics slice) -- see
+    :func:`abicheck.frontends.cli.artifact_set_dry_run.render_artifact_set_dry_run`
+    -- so it is no longer rejected here.
     ``--bundle-system-providers`` is the mirror case: it only means
     something *for* a set.
     """
@@ -85,10 +87,6 @@ def reject_incoherent_scan_operands(
             raise click.UsageError(
                 "--against is not supported with --artifact-set "
                 "(audit-only -- no old side for a set)."
-            )
-        if dry_run:
-            raise click.UsageError(
-                "--dry-run is not yet supported with --artifact-set."
             )
     elif bundle_system_providers:
         raise click.UsageError("--bundle-system-providers requires --artifact-set.")

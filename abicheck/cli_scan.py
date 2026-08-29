@@ -806,6 +806,7 @@ def _reject_comparison_only_flags(*, no_baseline_reason: str) -> None:
 def _run_artifact_set(
     *,
     artifact_set: tuple[str, ...],
+    dry_run: bool,
     bundle_system_providers: str,
     header_pairs: tuple[tuple[str, Path], ...],
     include_pairs: tuple[tuple[str, Path], ...],
@@ -839,8 +840,8 @@ def _run_artifact_set(
     No old side (no ``--against``): discovers the declared set, scans each
     member (the same always-on tier + pinned level every single-binary scan
     runs), and adds one cross-library bundle-audit pass over the whole set.
-    Deliberately does not thread ``--dry-run`` through yet — see G34's
-    status for what's still deferred from this first slice.
+    ``--dry-run`` previews it -- see
+    :func:`~abicheck.frontends.cli.artifact_set_dry_run.render_artifact_set_dry_run`.
     """
     from .bundle import ArtifactSetError, discover_artifact_set
     from .service import Budget, ScanRequest
@@ -906,11 +907,9 @@ def _run_artifact_set(
         build_info=build_info,
         baseline=None,
         mode="audit",
-        # The unset dial means 'auto' (ADR-037 D5), same as the single-binary
-        # path: only when --depth was omitted entirely does a member opt into
-        # risk-driven method selection -- a pinned --depth stays deterministic
-        # (Codex review: this was hard-coded to None, silently disabling
-        # --since/--changed-path risk-driven selection for every member).
+        # Unset means 'auto' (ADR-037 D5): only an omitted --depth opts a
+        # member into risk-driven method selection; a pinned --depth stays
+        # deterministic (Codex review: was hard-coded to None).
         source_method=SourceMethod.AUTO.value if depth is None else None,
         depth=depth,
         changed_paths=changed,
@@ -928,25 +927,22 @@ def _run_artifact_set(
         changed_src=changed_src,
         build_targets=build_targets,
     )
+    if dry_run:
+        from .dry_run import emit_dry_run
+        from .frontends.cli.artifact_set_dry_run import render_artifact_set_dry_run
+        emit_dry_run(render_artifact_set_dry_run(req, discovered=discovered, explicit=explicit, header_backend=header_backend, fmt=fmt))
     try:
         # run_scan_set()'s own audit_bundle() call can raise ArtifactSetError
         # too (e.g. an ambiguous duplicate-SONAME set, only detectable after
         # parsing every member's ELF metadata) -- propagated rather than
-        # degraded to a "successful" bundle_incomplete result (Codex
-        # review), surfaced here the same way discover_artifact_set's own
-        # ArtifactSetError already is above.
+        # degraded to a "successful" bundle_incomplete result (Codex review).
         #
-        # ValueError: run_scan_set() loads --risk-rules via
-        # _load_risk_rules_for_service(), which is deliberately click-free
-        # (service_scan.py has no click dependency -- it's also reachable
-        # from the MCP server/Python API) and converts the single-binary
-        # path's own click.ClickException into ValueError instead. The
-        # single-binary path never needs a try/except for this because it
-        # calls the click-raising _load_risk_rules() directly, letting
-        # Click's own top-level handler render it; this service-layer call
-        # must translate that ValueError back into a usage error itself, or
-        # a malformed/unreadable --risk-rules file surfaces as an
-        # unhandled Python traceback and exit 1 instead (Codex review).
+        # ValueError: --risk-rules loading is deliberately click-free in
+        # service_scan.py (also reachable from the Python API) and converts
+        # the single-binary path's click.ClickException into ValueError
+        # instead; this service-layer call translates it back to a usage
+        # error itself, or a malformed --risk-rules file would surface as an
+        # unhandled traceback and exit 1 instead (Codex review).
         result = run_scan_set(req)
     except (ArtifactSetError, ValueError) as exc:
         raise click.UsageError(str(exc)) from exc
@@ -1520,16 +1516,18 @@ def scan_cmd(
     # historical) -- a tuple has no such falsy-but-present state.
     _reject_incoherent_scan_operands(
         artifact=artifact, artifact_set=artifact_set, against=against,
-        dry_run=dry_run, bundle_system_providers=bundle_system_providers,
+        bundle_system_providers=bundle_system_providers,
     )
     _reject_incoherent_secondary_output(
         dry_run=dry_run, output=output, secondary_fmt=secondary_fmt,
         secondary_output=secondary_output, artifact_set=artifact_set,
     )
     if artifact_set:
+        reject_dry_run_with_output(dry_run, output)
         _reject_comparison_only_flags(no_baseline_reason="drop --artifact-set")
         _run_artifact_set(
             artifact_set=artifact_set,
+            dry_run=dry_run,
             bundle_system_providers=bundle_system_providers,
             header_pairs=header_pairs,
             include_pairs=include_pairs,

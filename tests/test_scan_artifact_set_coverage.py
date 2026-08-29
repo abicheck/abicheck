@@ -18,7 +18,7 @@ PR 5), split out of ``tests/test_scan_artifact_set.py`` rather than added
 there: that module is a ``no_growth``-debt-tracked file
 (``architecture/debt.yaml``), so new coverage for the repeatable-option
 refactor's own branches -- the directory-discovery return, the
-member-not-found rejection, and the ``--dry-run``-with-``--artifact-set``
+member-not-found rejection, and the ``--dry-run`` preview/``--output``
 rejection -- lives here instead of raising that file's line-count baseline.
 """
 from __future__ import annotations
@@ -52,12 +52,24 @@ def runner() -> CliRunner:
 
 
 class TestArtifactSetRepeatableOptionBranches:
-    def test_rejects_dry_run_with_artifact_set(
-        self, runner: CliRunner, tmp_path: Path
+    def test_dry_run_with_artifact_set_previews_without_scanning(
+        self, runner: CliRunner, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
+        # CLI cleanup phase two, PR 5: --dry-run used to be hard-rejected
+        # with --artifact-set; it is now a real preview (member list, shared
+        # inputs, and a per-member-summed cost projection) that never calls
+        # run_scan_set() at all.
+        import abicheck.service_scan as service_scan_mod
+
         p1, p2 = tmp_path / "liba.so", tmp_path / "libb.so"
         _write_elf_shared_object_stub(p1)
         _write_elf_shared_object_stub(p2)
+
+        def _fail_if_called(req):
+            raise AssertionError("--dry-run must not run the real scan")
+
+        monkeypatch.setattr(service_scan_mod, "run_scan_set", _fail_if_called)
+
         result = runner.invoke(
             main,
             [
@@ -65,8 +77,30 @@ class TestArtifactSetRepeatableOptionBranches:
                 "--dry-run",
             ],
         )
+        assert result.exit_code == 0, result.output
+        assert "liba.so" in result.output
+        assert "libb.so" in result.output
+        assert "members (2)" in result.output
+        assert "projected total:" in result.output
+        assert "Dry run only" in result.output
+
+    def test_rejects_dry_run_with_artifact_set_and_output(
+        self, runner: CliRunner, tmp_path: Path
+    ) -> None:
+        # --dry-run + --output is rejected the same way it is for every
+        # other scan/compare/dump variant (reject_dry_run_with_output) --
+        # a dry-run report has nowhere useful to be written to disk.
+        p1, p2 = tmp_path / "liba.so", tmp_path / "libb.so"
+        _write_elf_shared_object_stub(p1)
+        _write_elf_shared_object_stub(p2)
+        result = runner.invoke(
+            main,
+            [
+                "scan", "--artifact-set", str(p1), "--artifact-set", str(p2),
+                "--dry-run", "--output", str(tmp_path / "out.json"),
+            ],
+        )
         assert result.exit_code != 0
-        assert "--dry-run is not yet supported with --artifact-set" in result.output
 
     def test_rejects_explicit_member_that_does_not_exist(
         self, runner: CliRunner, tmp_path: Path

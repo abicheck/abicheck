@@ -3828,13 +3828,32 @@ Docs regenerated (`gen_cli_reference.py`); tests updated across
 pinning the Action-side comma-split and blank-member-skipping behavior
 directly against the real `action/run.sh` text, not a paraphrase of it).
 
-**Still open, per the sequencing note below, unchanged by this slice:**
-`--artifact-set-manifest` (no real domain contract proposed for it yet) and
-every set-mode *semantics* item (expected provider DSO, a symbol moved
-between sibling libraries, duplicated providers, L4 symbol reconciliation,
-cost estimation, a machine-readable dry-run) — this slice touched only the
-value syntax the review itself called "the only part of this section worth
-doing on its own."
+**A second slice (2026-08-29) shipped the dry-run/cost-estimation item.**
+`scan --artifact-set --dry-run` is a real preview now, not a hard rejection
+(`reject_incoherent_scan_operands`'s own `--dry-run` check was removed;
+`render_artifact_set_dry_run`, `abicheck/frontends/cli/
+artifact_set_dry_run.py`, builds the report). The cost projection is
+genuinely per-member-scaled: one single-binary `ScanRequest` is built per
+discovered member from the real request's shared fields, each run through
+`service.estimate_scan()` independently, and the per-layer TU/time results
+summed across members — rather than reusing the shared estimator's
+single-request shape, which only scales its `L0_binary` row by
+`len(binaries)` (see `docs/contribute/plans/g35-multi-artifact-scan.md`'s
+own estimator bullet for that general, still-open gap for other
+`estimate_scan()` callers). Lives in a new `frontends/cli/` leaf module
+rather than `cli_scan.py` (`no_growth`-debt-tracked, at its line-count
+baseline) or `cli_scan_helpers.py` (which cannot import `.service` without
+closing an import cycle back through `service -> service_scan ->
+scan_engine -> cli_scan_helpers`). Tests in
+`tests/test_scan_artifact_set_coverage.py`.
+
+**Still open, per the sequencing note below:** `--artifact-set-manifest`
+(no real domain contract proposed for it yet) and the remaining set-mode
+*semantics* items (expected provider DSO, a symbol moved between sibling
+libraries, duplicated providers, L4 symbol reconciliation) — the first
+slice touched only the value syntax and the second only the dry-run/cost
+item; the review itself called the syntax change "the only part of this
+section worth doing on its own."
 
 The draft proposed dispatching on the operand type:
 
@@ -3877,8 +3896,9 @@ the surrounding text already shows as a usage example.
 
 **Sequencing note:** the syntax cleanup is lower value than finishing set-mode
 *semantics* — expected provider DSO, a symbol moved between sibling libraries,
-duplicated providers, L4 symbol reconciliation, cost estimation, and a
-machine-readable dry-run. Do the semantics first if the two compete. The
+duplicated providers, and L4 symbol reconciliation (cost estimation and the
+machine-readable dry-run shipped in the second slice above). Do the remaining
+semantics first if they compete with anything else. The
 review reaffirms this and sharpens it: the *only* part of this section that is
 worth doing on its own is replacing the comma-separated value with a repeatable
 option. `--artifact-set-manifest` is worth adding only when it carries a real
