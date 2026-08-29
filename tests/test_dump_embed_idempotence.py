@@ -260,23 +260,42 @@ def test_cli_dump_depth_source_embeds_exactly_once(
 ) -> None:
     """One real ``dump --depth source`` run performs one L3-L5 embed.
 
-    Counted at ``cli_buildsource.embed_build_source`` -- the one function that
-    drives L4 source-ABI replay for this command -- through the actual CLI, so
-    a future migration that adds a resolve-time embed alongside the write-time
-    one fails here rather than silently doubling every L4 replay.
+    Counted at both places L4 source-ABI replay can be driven from for this
+    command: ``cli_buildsource.embed_build_source`` (the write-time
+    fallback, still live for the case ``build_source_already_satisfies``
+    finds the resolve-time embed insufficient) and
+    ``workflows.artifact.execute.embed_side_build_source`` (the resolve-time
+    embed CLI cleanup phase two, PR C's real-run migration onto
+    ``execute_dump_request`` now drives). Before that migration only the
+    former ever ran for this command; now only the latter does for the
+    common case exercised here, and ``build_source_already_satisfies``
+    is what makes the write-time step a no-op rather than a second embed --
+    counting only one of the two would not have caught the write-time step
+    silently doubling this if that guard ever regressed.
     """
     from abicheck import cli_buildsource
     from abicheck.cli import main
+    from abicheck.workflows.artifact import execute as _artifact_execute
 
     so_path, header, compile_db = _build_library(tmp_path)
-    real_embed = cli_buildsource.embed_build_source
-    calls: list[int] = []
+    real_write_time_embed = cli_buildsource.embed_build_source
+    real_resolve_time_embed = _artifact_execute.embed_side_build_source
+    calls: list[str] = []
 
-    def _counting_embed(*args: Any, **kwargs: Any) -> Any:
-        calls.append(1)
-        return real_embed(*args, **kwargs)
+    def _counting_write_time_embed(*args: Any, **kwargs: Any) -> Any:
+        calls.append("write_time")
+        return real_write_time_embed(*args, **kwargs)
 
-    monkeypatch.setattr(cli_buildsource, "embed_build_source", _counting_embed)
+    def _counting_resolve_time_embed(*args: Any, **kwargs: Any) -> Any:
+        calls.append("resolve_time")
+        return real_resolve_time_embed(*args, **kwargs)
+
+    monkeypatch.setattr(
+        cli_buildsource, "embed_build_source", _counting_write_time_embed
+    )
+    monkeypatch.setattr(
+        _artifact_execute, "embed_side_build_source", _counting_resolve_time_embed
+    )
 
     out = tmp_path / "snap.json"
     result = CliRunner().invoke(

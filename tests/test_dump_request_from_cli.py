@@ -337,18 +337,44 @@ class TestExecutionConsumesTheResolvedPlan:
     """
 
     def _spy(self, monkeypatch):
-        # ADR-061 Phase 4: patch the implementation owner. `abicheck.cli` is a
-        # registration facade now; a `setattr` there rebinds nothing the
-        # caller reads -- and `raising=False` below would have hidden that.
-        from abicheck.frontends.cli.commands import dump as cli_mod
+        # CLI cleanup phase two, PR C: the real ELF run now executes through
+        # `execute_dump_request` (imported fresh, module-attribute lookup, at
+        # each `dump_cmd` invocation), not `perform_elf_dump` -- patch the
+        # module attribute the same way, so the local import inside
+        # `dump_cmd` picks up the fake.
+        from abicheck import service_dump_pipeline
 
         seen: dict[str, object] = {}
 
-        def _fake_perform_elf_dump(**kwargs):
+        def _fake_execute_dump_request(resolved, **kwargs):
+            seen["resolved"] = resolved
             seen.update(kwargs)
+            from abicheck.model import AbiSnapshot
+            from abicheck.service_dump_pipeline import DumpResult
+
+            side = resolved.request.input
+            snap = AbiSnapshot(
+                library=side.path.name if side.path is not None else "lib",
+                version=resolved.request.input.version,
+            )
+            return DumpResult(resolved=resolved, snapshot=snap, effective_depth="binary")
 
         monkeypatch.setattr(
-            cli_mod, "perform_elf_dump", _fake_perform_elf_dump, raising=False
+            service_dump_pipeline, "execute_dump_request", _fake_execute_dump_request
+        )
+        # `perform_elf_dump` used to do extraction AND writing in one call
+        # (via its own `write_snapshot_output` DI parameter), so faking it
+        # alone intercepted everything downstream. Now the two are separate
+        # steps at the `dump_cmd` level -- fake the write step too, so this
+        # resolution-only test doesn't also exercise a real embed/write
+        # against the fake snapshot above.
+        from abicheck import cli_buildsource
+
+        def _fake_write_snapshot_output(*_args, **kwargs):
+            seen["write_depth"] = kwargs.get("depth")
+
+        monkeypatch.setattr(
+            cli_buildsource, "_write_snapshot_output", _fake_write_snapshot_output
         )
         return seen
 
@@ -389,23 +415,47 @@ class TestExecutionConsumesTheResolvedPlan:
             ],
         )
         assert result.exit_code == 0, result.output
-        assert seen, "perform_elf_dump was never reached"
+        assert seen, "execute_dump_request was never reached"
 
         resolved = captured["resolved"]
+        exec_resolved = seen["resolved"]
         # Each of these is a field the resolved plan owns. Reading them off
-        # `resolved` is the whole point: if `dump_cmd` went back to passing its
-        # own local, these would still *pass* whenever the two agree -- so the
+        # `exec_resolved` (the object `execute_dump_request` itself received)
+        # is the whole point: if `dump_cmd` went back to passing its own
+        # local, these would still *pass* whenever the two agree -- so the
         # value is only half the assertion. The other half is that
         # `dump_cmd` no longer computes a second copy at all, which
         # `test_no_parallel_public_header_derivation` below checks directly.
-        assert seen["headers"] == resolved.headers
-        assert seen["lang"] == resolved.lang
-        assert seen["lang_explicit"] == resolved.lang_explicit
-        assert seen["header_backend"] == resolved.header_backend
-        assert seen["collect_mode"] == resolved.collect_mode
-        assert seen["depth"] == resolved.requested_depth
-        assert seen["public_headers"] == resolved.public_headers
-        assert seen["public_header_dirs"] == resolved.public_header_dirs
+        assert exec_resolved.headers == resolved.headers
+        assert exec_resolved.lang == resolved.lang
+        assert exec_resolved.lang_explicit == resolved.lang_explicit
+        assert exec_resolved.header_backend == resolved.header_backend
+        assert exec_resolved.collect_mode == resolved.collect_mode
+        assert exec_resolved.public_headers == resolved.public_headers
+        assert exec_resolved.public_header_dirs == resolved.public_header_dirs
+        # `requested_depth` is the one field the execution-only copy
+        # deliberately does *not* carry through to `execute_dump_request`
+        # (see the real call site's own comment): its own depth gate would
+        # otherwise raise a differently-worded error than
+        # `DumpDepthNotSatisfiedError` for the identical condition. The
+        # dry-run-resolved plan's own `requested_depth` still reaches the
+        # real run -- just at the `_write_snapshot_output` call instead,
+        # which is the sole enforcement point for this case.
+        assert exec_resolved.requested_depth is None
+        assert seen["write_depth"] == resolved.requested_depth
+        # Codex review (two real regressions the initial ELF migration
+        # introduced, both plain dropped kwargs -- `execute_dump_request`
+        # already had `seed_collect_mode`/`source_frontend_from_folded_
+        # context` parameters for `scan`'s own candidate resolution, but
+        # `dump_cmd`'s call site never passed either): `perform_elf_dump`
+        # always forwarded its own resolved collect mode to the L2 seed
+        # (unconditionally running a zero-config inferred build query for a
+        # `--sources` tree with no compile database) and always replayed L4
+        # source through the L3 fold's own compiler once it applied. Both
+        # must reach `execute_dump_request` unchanged, or the seed silently
+        # pins to "off" and L4 replay silently uses the pre-fold compiler.
+        assert seen["seed_collect_mode"] == resolved.collect_mode
+        assert seen["source_frontend_from_folded_context"] is True
 
     def test_no_parallel_public_header_derivation(self) -> None:
         """``dump_cmd`` must not re-derive the public-header split itself.
