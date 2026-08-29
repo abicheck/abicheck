@@ -460,6 +460,22 @@ class TestFunctionOverloadDiscrimination:
         assert namespaced == no_scope
         assert namespaced.scope == ()
 
+    def test_mangled_name_identity_is_independent_of_leaf_name(self) -> None:
+        # The confirmed Codex-flagged gap: dumper_elf_fallback.py's
+        # ELF-only path constructs Function(name=sym, mangled=sym) --
+        # the raw exported symbol reused for *both* fields -- while a
+        # header/DWARF observation of the identical symbol supplies the
+        # real demangled short name for `name`. A header observation
+        # (leaf_name="f") and an export-only observation
+        # (leaf_name="_Z1fv", matching that fallback's real behavior)
+        # of the same genuinely mangled symbol must produce one EntityId.
+        demangled_leaf = entity_id_for_function((), "f", mangled_name="_Z1fv")
+        raw_symbol_reused_as_leaf = entity_id_for_function(
+            (), "_Z1fv", mangled_name="_Z1fv"
+        )
+        assert demangled_leaf == raw_symbol_reused_as_leaf
+        assert demangled_leaf.leaf_name == ""
+
     def test_sig_branch_keeps_caller_supplied_scope(self) -> None:
         # Contrast with the mangled/extern-C branches above: a DWARF-only,
         # mangling-free, non-extern-"C" function has no authoritative,
@@ -511,6 +527,18 @@ class TestVariableMangledDiscriminator:
         no_scope = entity_id_for_variable((), "v", mangled_name="_Zv")
         assert namespaced == no_scope
         assert namespaced.scope == ()
+
+    def test_mangled_name_identity_is_independent_of_leaf_name(self) -> None:
+        # Same confirmed Codex-flagged gap as entity_id_for_function's
+        # mangled branch, for the same reason: dumper_elf_fallback.py's
+        # ELF-only path reuses the raw exported symbol for both
+        # Variable.name and Variable.mangled.
+        demangled_leaf = entity_id_for_variable((), "v", mangled_name="_Zv")
+        raw_symbol_reused_as_leaf = entity_id_for_variable(
+            (), "_Zv", mangled_name="_Zv"
+        )
+        assert demangled_leaf == raw_symbol_reused_as_leaf
+        assert demangled_leaf.leaf_name == ""
 
     def test_extern_c_variable_ignores_param_evidence_free_signature(self) -> None:
         # The other Codex-flagged gap: an extern "C" variable caller

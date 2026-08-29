@@ -348,20 +348,36 @@ def entity_id_for_variable(
     every name-based -- as opposed to signature-based -- discriminator,
     mangled included). Only the genuinely mangling-free, non-``extern
     "C"`` degenerate case keeps *scope* as given.
+
+    When *mangled_name* is present, *leaf_name* is likewise ignored, for
+    a confirmed, not merely hypothetical, reason: the ELF-only fallback
+    path (``dumper_elf_fallback.py``) constructs an export-only
+    ``Variable``/``Function`` with ``name=sym, mangled=sym`` -- the raw
+    exported symbol reused for *both* fields -- while a header/DWARF
+    observation of the identical symbol supplies the real demangled short
+    name for ``name``. Keying the mangled branch on *leaf_name* too would
+    therefore fail to merge the two observations of one symbol precisely
+    when the mangled evidence agrees they are the same declaration (Codex
+    review, PR #941). The mangled spelling alone already disambiguates
+    every declaration in ``extra``, so nothing is lost by dropping
+    *leaf_name* here.
     """
     if mangled_name:
         extra: tuple[str, ...] = ("mangled", mangled_name)
         resolved_scope: ScopePath = ()
+        resolved_leaf_name = ""
     elif is_extern_c:
         extra = ("extern_c",)
         resolved_scope = ()
+        resolved_leaf_name = leaf_name
     else:
         extra = ()
         resolved_scope = _scope_path(scope)
+        resolved_leaf_name = leaf_name
     return EntityId(
         scope=resolved_scope,
         kind=EntityKind.VARIABLE,
-        leaf_name=leaf_name,
+        leaf_name=resolved_leaf_name,
         extra=extra,
     )
 
@@ -469,13 +485,24 @@ def entity_id_for_function(
     header-AST backends the same way an uncanonicalized qualified name
     would. Mirrors ``resolve_function_identity``'s own canonicalization of
     ``func.params`` for the identical reason (Codex review, PR #941).
+
+    When *mangled_name* is present, *leaf_name* is likewise ignored -- see
+    :func:`entity_id_for_variable`'s docstring for the confirmed reason
+    (the ELF-only fallback path reuses the raw exported symbol for both
+    ``Function.name`` and ``Function.mangled``, so a header/DWARF
+    observation's demangled ``name`` and an export-only observation's raw
+    name would otherwise disagree despite an identical, genuine mangling;
+    Codex review, PR #941). The mangled spelling alone already
+    disambiguates every declaration in ``extra``.
     """
     if mangled_name:
         extra: tuple[str, ...] = ("mangled", mangled_name)
         resolved_scope: ScopePath = ()
+        resolved_leaf_name = ""
     elif is_extern_c:
         extra = ("extern_c",)
         resolved_scope = ()
+        resolved_leaf_name = leaf_name
     else:
         extra = (
             "sig",
@@ -485,9 +512,10 @@ def entity_id_for_function(
             str(is_variadic),
         )
         resolved_scope = _scope_path(scope)
+        resolved_leaf_name = leaf_name
     return EntityId(
         scope=resolved_scope,
         kind=EntityKind.FUNCTION,
-        leaf_name=leaf_name,
+        leaf_name=resolved_leaf_name,
         extra=extra,
     )

@@ -6656,6 +6656,28 @@ own tag-disjointness from the pre-existing mangling-free degenerate case,
 and mangled-name-wins-over-`is_extern_c` precedence for variables
 (mirroring the function constructor's own precedence, already tested).
 
+**Correction (2026-08-29, same day, fourth Codex review round on PR #941,
+commit f22ecf7): a fourth, *confirmed* (not merely hypothetical) gap in
+the mangled branch, found by reading the real producer code.** The
+previous correction made the mangled branch's `EntityId.scope` always
+`()`, but left `leaf_name` folded in unchanged. Codex's finding named a
+concrete, real code path proving this still fragments identity:
+`dumper_elf_fallback.py`'s ELF-only (export-table-only) path constructs
+`Function(name=sym, mangled=sym, ...)` and `Variable(name=sym,
+mangled=sym, ...)` -- the raw exported symbol reused for *both* fields,
+confirmed by reading that module directly rather than assumed. A header/
+DWARF observation of the identical symbol supplies the real demangled
+short name for `name` (e.g. `"f"`), while the export-only observation's
+`name` is the raw mangled spelling itself (e.g. `"_Z1fv"`). Since
+`leaf_name` was still part of the mangled branch's `EntityId`, these two
+observations of the *same* symbol -- agreeing on the mangled evidence --
+would not merge. Fixed by ignoring the caller-supplied `leaf_name`
+entirely in the mangled branch (both constructors), using `""` instead:
+the mangled spelling in `extra` already disambiguates every declaration
+losslessly, so nothing is lost. Four new tests (two per constructor) pin
+that a demangled-short-name observation and a raw-symbol-reused-as-name
+observation of the identical mangled symbol now produce one `EntityId`.
+
 ---
 
 ### Phase 3 — public surface as a graph query over one evidence graph (D5)

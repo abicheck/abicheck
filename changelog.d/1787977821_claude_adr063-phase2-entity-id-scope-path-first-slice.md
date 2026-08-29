@@ -51,4 +51,10 @@
   same `is_extern_c` parameter `entity_id_for_function` has, and its
   `mangled`/`is_extern_c` branches get the identical `scope=()` treatment
   -- closing the same gap for variables that had no linkage signal at all
-  before this fix.
+  before this fix. Both constructors' `mangled` branch now also ignores
+  `leaf_name` (using `""` instead of the caller-supplied value): a
+  confirmed real code path, `dumper_elf_fallback.py`'s ELF-only fallback,
+  constructs `Function`/`Variable` with `name=sym, mangled=sym` -- the raw
+  exported symbol reused for both fields -- so a header/DWARF
+  observation's demangled `name` and that export-only observation's raw
+  name would otherwise disagree despite an identical, genuine mangling.
