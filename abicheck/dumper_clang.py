@@ -150,7 +150,7 @@ from .model import (
     Variable,
     Visibility,
 )
-from .model.identity import ScopePath
+from .model.identity import ScopePath, entity_id_for_variable
 from .provenance import build_public_set
 
 
@@ -1079,6 +1079,7 @@ class _ClangAstParser:
             if not mangled:
                 continue
             type_name = _qualtype(node)
+            is_extern_c = entry.extern_c or mangled == name
             variables.append(
                 Variable(
                     name=name,
@@ -1090,6 +1091,17 @@ class _ClangAstParser:
                     source_location=self._source_location(entry),
                     alignment_bits=_clang_var_alignment_bits(node),
                     deprecated=_clang_deprecated_message(node),
+                    # ADR-063 Phase 2, same routing as parse_functions:
+                    # `mangled` falls back to the bare `name` when clang
+                    # emits no `mangledName`, which is exactly the "not a
+                    # genuine mangling" case the constructor documents, so
+                    # that case goes through `is_extern_c` instead.
+                    entity_id=entity_id_for_variable(
+                        entry.scope_path,
+                        name,
+                        mangled_name=None if is_extern_c else mangled,
+                        is_extern_c=is_extern_c,
+                    ),
                 )
             )
         return variables

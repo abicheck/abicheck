@@ -7622,6 +7622,226 @@ convention/global-scope corrections on this same plan established --
 two review rounds in a row found the previous round's fix real but
 incomplete, which is exactly what direct-compilation verification is for.
 
+**Decision (2026-08-29, PR #943): the carrier-field question is CLOSED as
+option (a) -- `EntityId` is computed once, at parse time, and carried on
+the model object.** The Design section above deliberately left this open
+("this plan does not pick one under continued review pressure a third
+time") and stated the consequences of each branch; this entry records the
+choice its implementation PR made, and why, so no later slice has to
+re-litigate it. Three reasons, each checked against this plan's own text
+rather than asserted:
+
+1. *Option (b) leaves two live representations of one concept standing
+   indefinitely.* Its own premise is that `diff_filtering.py`/
+   `type_reachability.py` keep their bespoke string-based ambiguity
+   trackers until Phase 6's `SemanticIR` assembly -- a phase with no
+   scheduled start, several phases out. This plan's Governing Invariant is
+   "one concept, one representation, everywhere it is used, never two,"
+   with an explicit "delete after consolidating -- same PR or the very next
+   one, never eventually" rule. An unscheduled deferral is precisely the
+   "eventually" that rule names.
+2. *Option (b) blocks Phase 3 as sequenced.* The "not contained to Phase 2"
+   paragraph above already establishes this: Phase 3's public-surface graph
+   keys `declaration`/`type` nodes by `EntityId`, and its graph builder is a
+   post-parse consumer by construction. Under option (b) Phase 3 must move
+   to land with or after Phase 6, cascading the deferral into Phases 3/4/5.
+   Option (a) keeps the stated phase ordering intact.
+3. *Option (a) is the only branch where "computed once" is literally true.*
+   The typed `ScopePath` exists only during the AST walk (the second slice's
+   own finding). Recomputing identity later is not merely inconvenient, it
+   is structurally impossible from an already-parsed model object -- so a
+   carrier is not a cache of something re-derivable, it is the only place
+   the answer can live at all.
+
+Consequently, the conditionals this plan deliberately wrote in both
+branches now resolve to their option-(a) halves: the "Tests" section's
+carrier-vs-no-carrier pair resolves to the *first* shape (the field is
+populated for every declaration kind immediately after parsing, and a
+static check confirms the resolver is never called on an already-parsed
+`RecordType`/`Function` outside the parser); the "Acceptance criteria"
+section's deletion of `diff_filtering.py`/`type_reachability.py`'s
+string-based helpers is in scope for this phase rather than moving to
+Phase 6; and Phase 6's own conditional paragraph ("If Phase 2's
+implementation PR resolves ... as option (b)") is now unreachable and
+carries no work for that phase. **One clause of the option-(a) test shape
+is NOT satisfied by this slice and is not claimed to be** -- "round-trips
+through `serialization.py` unchanged"; see the finding immediately below.
+
+**Finding (2026-08-29, same day, found while implementing the decision
+above): option (a) is necessary but NOT sufficient for the consumer
+migration, and this plan's Phase 2 sequencing assumed it was.** The
+Acceptance-criteria text above reads as though choosing option (a) makes
+`diff_filtering.py`'s migration land in the same slice. Reading the three
+actual call sites, it does not -- three independent blockers, none of them
+about the carrier field itself:
+
+1. *A carrier that is not persisted is not available to a post-parse
+   consumer either.* `compare old.json new.json` is a first-class,
+   documented invocation; those two snapshots come back through
+   `snapshot_from_dict`, which cannot reconstruct an `EntityId` without the
+   `ScopePath`-preserving storage v2 wire DTO this phase's own Design
+   section specifies (and which the second slice's "Next slice" list
+   already scopes as slice (c)). A consumer keyed on `entity_id` would
+   therefore answer one way for two live binaries and another for two
+   dumped snapshots OF those same binaries -- a worse defect than the
+   bare-name collision it set out to close, and one that no amount of
+   care inside `diff_filtering.py` can prevent. Encoding it with a
+   stopgap flattening is not an option: this section's own
+   "Flattening `ScopePath`/`extra` into the existing bare
+   `qualified_name`/`discriminator` strings is not a lossless bridge"
+   paragraph already rejected exactly that, by name.
+2. *`_root_type_name` does not operate on a model object at all.* It takes
+   a `Change` (`checker_types`) and slices its `symbol` STRING; the set
+   `_find_opaque_types` returns is matched against that string in
+   `_downgrade_opaque_type_changes`. Keying the set on `EntityId` therefore
+   requires `Change` itself to carry one -- which is the `finding_identity.
+   py` algorithm migration this phase already scopes as slice (c), not part
+   of slice (b).
+3. *`_find_by_value_types` is not a name-keyed index; it is a substring
+   scan.* It asks whether an opaque type's spelling occurs inside a
+   parameter's or return value's own type text (`tname in rt`). An
+   `EntityId` cannot be substring-matched inside a type spelling: turning
+   that into an identity join requires resolving a type REFERENCE to a
+   declaration, which is `type_reachability.py`'s job -- the module this
+   phase's own text (and this slice's task) explicitly defers on the
+   strength of its eleven-plus-finding regression history.
+
+So the correct sequencing, recorded here rather than discovered again
+mid-slice: option (a)'s carrier lands first (this slice), persistence via
+the storage v2 wire bridge second, and the post-parse consumer migrations
+-- with the string-based helper deletion the Acceptance criteria require --
+only after BOTH, since neither is optional for a correct migration. The
+Acceptance criteria's "deleted, not kept alongside" therefore still holds
+for this phase; it does not hold for this phase's *third* slice, which has
+no working replacement to switch those consumers onto yet. Deleting them
+now would leave the same "neither the old mechanism nor a usable
+replacement" hole the criteria themselves already reject for option (b).
+
+**Landed (third slice, 2026-08-29): the carrier field, populated by both
+header-AST backends. No consumer migration -- see the finding above for
+why that is a separate slice, not an omission.**
+`RecordType`/`EnumType` (`model/entities.py`) and `Function`/`Variable`
+(`model/declarations.py`) each gained one field, `entity_id: EntityId |
+None = field(default=None, kw_only=True, compare=False)`. Each property is
+deliberate: `None` is the honest answer for the direct constructor call an
+external consumer of these public dataclasses makes (never a fabricated
+identity reconstructed from `qualified_name`, which this section already
+established is structurally insufficient); `kw_only=True`, appended last,
+means no existing positional argument's slot moves (the same reasoning
+`Function.hidden_friend_owner` already records); and `compare=False` keeps
+`__eq__` bit-for-bit what it was, since identity is derived from the
+declaration and folding it into equality would make two otherwise-identical
+model objects differ purely on whether a producer wired it -- the same
+identity-vs-payload split `identity.Record.access` applies one level down.
+**`typedefs`/`constants` get no carrier, and this is a real limitation
+rather than an oversight**: both are `dict[str, str]` on `AbiSnapshot`, not
+dataclasses, so `entity_id_for_typedef`/`entity_id_for_constant` have
+nowhere to write to. Giving them one means giving each a model dataclass
+first, which is its own change to a persisted snapshot shape.
+
+*Populated at every construction site of the four carriers, in both
+backends*: `extract/headers/clang/records.py` (both the opaque and the
+complete branch), `clang/enums.py`, `clang/functions.py`,
+`dumper_clang.py`'s `parse_variables`, and the four castxml counterparts
+(`castxml/records.py`, `castxml/enums.py`, `castxml/functions.py`,
+`dumper_castxml.py`'s `parse_variables`) -- each reading the typed
+`scope_path` the second slice threaded, never re-deriving one. Two
+supporting changes were needed and are worth not rediscovering: both
+function builders now hoist `is_extern_c`/`is_const`/`is_volatile`/
+`ref_qualifier`/`is_variadic` into locals shared by the model object and
+the identity constructor, so the two cannot form independently-computed
+opinions about the same fact; and the clang function builder keeps the
+declaration's own unqualified `leaf_name` separately from `name`, which
+that builder requalifies for a template specialization's member (a
+display/owner-matching spelling, not a leaf identity).
+
+*The mangled-vs-`extern "C"` routing is producer-local, by design.*
+`entity_id_for_function`/`_variable` require the caller to have already
+established that `mangled_name` is a GENUINE mangling; that determination
+lives in `finding_identity.is_real_mangled_name`, which `model`/`extract`
+may not import (a `compare`-layer module; ADR-061/ADR-063 D10). Both
+backends already answer the same question locally for the model's own
+`is_extern_c` field, so the identity call reuses exactly that answer:
+`mangled_name=None if is_extern_c else mangled`, `is_extern_c=is_extern_c`
+-- the same order `resolve_function_identity` itself applies (linkage
+first, mangling second). Verified end-to-end against BOTH real producers on
+one probe header rather than inferred: `clang -Xclang -ast-dump=json` and
+`castxml --castxml-output=1` agree exactly on every kind -- `ns::Outer`,
+`ns::Outer::Inner` (whose scope is `(Namespace("ns"), Record("Outer"))`,
+the Record-vs-Namespace distinction a flat spelling cannot carry),
+`ns::Color`, the `f(int)`/`f(double)` overload pair (two distinct
+`("mangled", ...)` ids), `c_fn`/`c_var` (both `("extern_c",)`), and
+`ns::gVar` (`("mangled", "_ZN2ns4gVarE")`).
+
+**One real cross-backend divergence found by that verification, confirmed
+PRE-EXISTING and left as-is rather than papered over in this primitive.**
+For `extern "C" int c_var;` with no export evidence supplied, castxml emits
+a bogus pseudo-Itanium `mangled="_Z5c_var"` (confirmed by reading the raw
+XML) while clang emits the bare `c_var`, so the two backends' `EntityId`s
+disagree -- but they disagree because the two backends' own
+`Variable.mangled` fields already disagree, before this slice and
+independently of it. castxml offers no local signal for a C-linkage
+variable at all (its `extern="1"` attribute marks the `extern` storage
+class: the C++ `ns::gVar` carries it and the `extern "C"` `c_var` does
+not, verified directly), which is why the pre-existing real-ELF-export
+override is the mitigation -- and with real export evidence supplied, the
+normal dump path, both backends produce the identical
+`((), VARIABLE, "c_var", ("extern_c",))`, confirmed by re-running the same
+parse with the symbol present. Inventing a castxml-only C-linkage
+heuristic inside an identity constructor would be exactly the "solve a
+shape the producer never gave us" overreach the eighth round's PE-
+decoration finding already declined, one layer lower.
+
+**Not persisted, deliberately, and this is the one clause of the Design
+section's option-(a) test shape this slice does not satisfy.**
+`serialization.snapshot_to_dict` drops the field
+(`storage/entity_id_codec.py`, a new `storage`-owned leaf module mirroring
+`fact_codec.py`/`enum_codec.py`'s role), `SCHEMA_VERSION` does not move,
+and a reloaded snapshot carries `entity_id=None` for every declaration.
+The alternative was a stopgap flattening this section already rejected by
+name as a silently-collapsing round trip; the real encoding is the storage
+v2 wire DTO, still slice (c). Three tests pin the drop as a deliberate
+property rather than an accident -- including that the snapshot stays
+`json.dumps`-able at all, which is the concrete regression at stake:
+`EntityId.kind` is a plain `Enum` (not a `(str, Enum)`) and `scope` is a
+tuple of dataclasses, so an `asdict()`-ed carrier reaching `json.dumps`
+raises `TypeError` outright. **Until persistence lands, no diff/report
+consumer may read this field**: it is present on an in-memory dump and
+absent from a reloaded one, so a consumer keyed on it would answer
+differently for the same two libraries depending only on whether a
+snapshot was written to disk in between.
+
+*Tests.* `tests/test_entity_id_carrier.py` (new): the dataclass contract
+(default `None`, `kw_only`, excluded from equality -- parameterized over
+all four carriers rather than asserted for one); the non-persistence
+properties above; the live-backend population tests for every declaration
+kind on clang and castxml, sharing one assertion helper so the two
+producers must AGREE rather than each merely be self-consistent; the
+record-vs-namespace collision closed by construction (`struct B { struct C
+{}; };` and `namespace B { struct C {}; }` parsed as two separate headers
+-- the real shape of the bug, one spelling on each side of a comparison --
+producing the identical `qualified_name` `"B::C"` and two different
+`EntityId`s, on both backends); and the static check the Design section's
+option-(a) branch asks for, as a real AST scan for `entity_id_for_*` CALL
+nodes across all of `abicheck/` (attribute-style calls included, docstring
+mentions excluded), asserting every call site is a header-AST producer.
+That check carries its own guard -- an assertion that the scan actually
+finds the four real producer modules -- since an emptiness assertion alone
+passes just as happily against a broken scanner.
+
+Next slice, in order (superseding the second slice's list, whose item (a)
+that slice landed and whose item (b) this slice's own finding above
+re-sequences): (c1) the storage v2 wire bridge -- `storage/entity_ids.py`'s
+`ScopePath`-preserving `to_dto()`/`from_dto()` plus the v1 migration
+adapter -- and, on top of it, real persistence of the `entity_id` carrier
+with a schema bump and the round-trip test the Design section names; then
+(c2) the `finding_identity.py` algorithm migration, which is also what
+gives `Change` an `EntityId` to be keyed on; then (b) the post-parse
+consumer migrations, now unblocked: `diff_filtering.py`'s
+`_find_opaque_types`/`_find_by_value_types`/`_root_type_name` and
+`type_reachability.py`'s eleven-plus-case ambiguity machinery, with their
+string-based helpers deleted in the same PR per the Acceptance criteria.
+
 ---
 
 ### Phase 3 — public surface as a graph query over one evidence graph (D5)
@@ -9918,6 +10138,15 @@ expected `FactStatus` for the facts only one of them can produce (e.g.
 `dumper_castxml.py` genuinely reporting `Fact.unsupported()` for a fact
 only the clang backend extracts) — stated as one parameterized test with
 two assertions per fixture, not one assertion claiming full equality.
+
+**RESOLVED (2026-08-29, PR #943): Phase 2's implementation PR chose option
+(a), so everything this paragraph and the next conditionally assign to
+Phase 6 stays in Phase 2 and is NOT this phase's work.** The two
+paragraphs are kept verbatim below rather than deleted, because they still
+record why the dependency exists and what it would have cost; read them as
+the branch that did not happen. (Phase 2's own third-slice finding does
+re-sequence the consumer migration *within* Phase 2 -- behind persistence
+and the `finding_identity.py` move -- but nowhere near Phase 6.)
 
 **If Phase 2's implementation PR resolves its own open option-(a)-vs-(b)
 question (above) as option (b), this phase's Files/Tests/Acceptance

@@ -71,6 +71,7 @@ from ....dumper_clang_qualifiers import (
     clang_param_is_va_list as _clang_param_is_va_list,
 )
 from ....model import Fact, Function, Param
+from ....model.identity import entity_id_for_function
 from .context import (
     _Decl,
     access_level as _access_level,
@@ -219,6 +220,11 @@ def parse_functions(
         name = str(node.get("name", ""))
         if not name:
             continue
+        # The declaration's own, always-unqualified leaf name. `name` itself
+        # may be requalified below for a template specialization's member,
+        # which is a *display*/owner-matching spelling, not this
+        # declaration's leaf identity (ADR-063 Phase 2).
+        leaf_name = name
         if entry.scope and "<" in entry.scope[-1]:
             # A method of a concrete class-template specialization
             # (`A<int>::f`) -- unlike an ordinary member, whose name
@@ -281,6 +287,14 @@ def parse_functions(
             ref_qualifier = "&"
         else:
             ref_qualifier = ""
+        # Hoisted from the ``Function(...)`` call below so the identity
+        # constructor is handed the identical values the model object
+        # records, rather than a second, independently-recomputed opinion
+        # about the same facts (ADR-063 Phase 2).
+        is_extern_c = entry.extern_c or mangled == name
+        is_const = bool(re.search(r"\bconst\b", quals))
+        is_volatile = bool(re.search(r"\bvolatile\b", quals))
+        is_variadic = bool(node.get("variadic")) or "..." in qualtype
         funcs.append(
             Function(
                 name=name,
@@ -328,12 +342,12 @@ def parse_functions(
                 # An ``extern "C"`` linkage spec is authoritative; fall back
                 # to the mangled==name heuristic for a plain C-mode parse
                 # (no LinkageSpecDecl, but C-linkage names equal their symbol).
-                is_extern_c=entry.extern_c or mangled == name,
+                is_extern_c=is_extern_c,
                 vtable_index=None,
                 source_location=_source_location(entry),
                 is_static=node.get("storageClass") == "static",
-                is_const=bool(re.search(r"\bconst\b", quals)),
-                is_volatile=bool(re.search(r"\bvolatile\b", quals)),
+                is_const=is_const,
+                is_volatile=is_volatile,
                 is_pure_virtual=bool(node.get("pure")),
                 is_deleted=bool(node.get("explicitlyDeleted")),
                 is_inline=bool(node.get("inline")),
@@ -352,7 +366,7 @@ def parse_functions(
                 ),
                 # clang stamps "variadic": true on FunctionDecl; the
                 # qualtype spelling ("void (int, ...)") is the fallback.
-                is_variadic=bool(node.get("variadic")) or "..." in qualtype,
+                is_variadic=is_variadic,
                 contract_attributes=_clang_contract_attributes(
                     node, target_triple=target_triple
                 ),
@@ -365,6 +379,24 @@ def parse_functions(
                     else None
                 ),
                 is_compiler_generated=False,
+                # ADR-063 Phase 2. `mangled` above falls back to the bare
+                # `name` when clang emits no `mangledName`, which is exactly
+                # the "not a genuine mangling" case `entity_id_for_function`
+                # documents -- so the mangled name is only offered when it
+                # is genuinely one, and the C-linkage case is routed through
+                # `is_extern_c` instead (the same order
+                # `finding_identity.resolve_function_identity` applies).
+                entity_id=entity_id_for_function(
+                    entry.scope_path,
+                    leaf_name,
+                    mangled_name=None if is_extern_c else mangled,
+                    is_extern_c=is_extern_c,
+                    param_types=tuple(p.type for p in params),
+                    is_const=is_const,
+                    is_volatile=is_volatile,
+                    ref_qualifier=ref_qualifier,
+                    is_variadic=is_variadic,
+                ),
             )
         )
     return funcs

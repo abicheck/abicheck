@@ -46,6 +46,7 @@ from .model import (
     Variable,
     Visibility,
 )
+from .storage.entity_id_codec import drop_entity_ids
 from .storage.enum_codec import encode_platform_enums
 from .storage.fact_codec import (
     apply_legacy_fact_backfill,
@@ -409,9 +410,8 @@ def snapshot_to_dict(snap: AbiSnapshot) -> dict[str, Any]:
     # ADR-063 Phase 0 (schema v26): see storage/fact_codec.py.
     encode_fact_fields(d)
 
-    # Convert all sets → sorted lists (needed for AdvancedDwarfMetadata.packed_structs
-    # and ToolchainInfo.abi_flags; json.dumps raises TypeError on set objects)
-    converted: dict[str, Any] = _sets_to_lists(d)
+    # Convert all sets → sorted lists (needed for AdvancedDwarfMetadata.packed_structs and ToolchainInfo.abi_flags; json.dumps raises TypeError on set objects), having first dropped the runtime-only ADR-063 Phase 2 `entity_id` carrier -- it is never encoded, so SCHEMA_VERSION does not move; see storage/entity_id_codec.py for why a stopgap encoding is refused rather than invented here.
+    converted: dict[str, Any] = _sets_to_lists(drop_entity_ids(d))
 
     # BuildMode enums are (str, Enum), so dataclasses.asdict() carries
     # them through as Enum instances rather than plain strings; normalize

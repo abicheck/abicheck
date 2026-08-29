@@ -292,6 +292,19 @@ FACT_ROWS: tuple[FactRow, ...] = (
             "structurally guaranteed to have been written by the user."
         ),
     ),
+    FactRow(
+        "Function",
+        "entity_id",
+        _FULL,
+        _FULL,
+        note=(
+            "ADR-063 Phase 2: the parse-time `model.identity.EntityId` carrier. "
+            "Both backends resolve one from the typed scope path they record "
+            "during their own walk. Runtime-only -- never serialized, so a "
+            "reloaded snapshot carries None; a hybrid merge does not backfill "
+            "it, so a hybrid snapshot keeps castxml's."
+        ),
+    ),
     # ── Variable ───────────────────────────────────────────────────────────
     FactRow("Variable", "name", _FULL, _FULL),
     FactRow("Variable", "mangled", _FULL, _FULL),
@@ -361,6 +374,19 @@ FACT_ROWS: tuple[FactRow, ...] = (
         note="clang side wired in G31 Phase C (schema v19).",
     ),
     FactRow("Variable", "elf_binding", _OTHER, _OTHER, note=_DYNSYM),
+    FactRow(
+        "Variable",
+        "entity_id",
+        _FULL,
+        _FULL,
+        note=(
+            "ADR-063 Phase 2: the parse-time `model.identity.EntityId` carrier. "
+            "Both backends resolve one from the typed scope path they record "
+            "during their own walk. Runtime-only -- never serialized, so a "
+            "reloaded snapshot carries None; a hybrid merge does not backfill "
+            "it, so a hybrid snapshot keeps castxml's."
+        ),
+    ),
     # ── TypeField ──────────────────────────────────────────────────────────
     FactRow("TypeField", "name", _FULL, _FULL),
     FactRow("TypeField", "type", _FULL, _FULL),
@@ -623,6 +649,19 @@ FACT_ROWS: tuple[FactRow, ...] = (
         hybrid_backfilled=True,
         note="clang side wired in G31 Phase C (schema v19).",
     ),
+    FactRow(
+        "RecordType",
+        "entity_id",
+        _FULL,
+        _FULL,
+        note=(
+            "ADR-063 Phase 2: the parse-time `model.identity.EntityId` carrier. "
+            "Both backends resolve one from the typed scope path they record "
+            "during their own walk. Runtime-only -- never serialized, so a "
+            "reloaded snapshot carries None; a hybrid merge does not backfill "
+            "it, so a hybrid snapshot keeps castxml's."
+        ),
+    ),
     # ── EnumType ───────────────────────────────────────────────────────────
     FactRow("EnumType", "name", _FULL, _FULL),
     FactRow("EnumType", "members", _FULL, _FULL),
@@ -670,6 +709,19 @@ FACT_ROWS: tuple[FactRow, ...] = (
         note="clang side wired in G31 Phase C (schema v19).",
     ),
     FactRow("EnumType", "qualified_name", _FULL, _FULL),
+    FactRow(
+        "EnumType",
+        "entity_id",
+        _FULL,
+        _FULL,
+        note=(
+            "ADR-063 Phase 2: the parse-time `model.identity.EntityId` carrier. "
+            "Both backends resolve one from the typed scope path they record "
+            "during their own walk. Runtime-only -- never serialized, so a "
+            "reloaded snapshot carries None; a hybrid merge does not backfill "
+            "it, so a hybrid snapshot keeps castxml's."
+        ),
+    ),
     # ── Param ──────────────────────────────────────────────────────────────
     FactRow("Param", "name", _FULL, _FULL),
     FactRow("Param", "type", _FULL, _FULL),

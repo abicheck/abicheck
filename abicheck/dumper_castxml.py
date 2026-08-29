@@ -103,7 +103,7 @@ from .model import (
     Variable,
     Visibility,
 )
-from .model.identity import ScopePath
+from .model.identity import ScopePath, entity_id_for_variable
 from .provenance import header_from_location
 
 
@@ -498,6 +498,17 @@ class _CastxmlParser:
                 re.search(r"\bconst\b", type_name)
             )
             vis = self._variable_visibility(el, mangled, name)
+            # ADR-063 Phase 2: whether `mangled` is a genuine mangling at
+            # all. castxml emits a pseudo-Itanium `mangled` attribute even
+            # for a C-linkage variable, and the ELF-export override above
+            # rewrites it back to the bare name -- in both cases the symbol
+            # IS its bare name at the ABI level, which is exactly what
+            # `entity_id_for_variable`'s `is_extern_c` branch encodes.
+            # (A genuine C++ variable at *namespace* scope always mangles
+            # to a distinct `_ZN...` spelling, and the override above is
+            # itself restricted to global scope, so this cannot silently
+            # drop a real namespace from a namespaced variable's identity.)
+            symbol_is_bare_name = mangled == name
             variables.append(
                 Variable(
                     name=name,
@@ -521,6 +532,13 @@ class _CastxmlParser:
                     or self._type_alignment_bits(el.get("type", "")),
                     # See RecordType.deprecated for the message-text convention.
                     deprecated=_deprecation_marker(el),
+                    # ADR-063 Phase 2 -- see symbol_is_bare_name above.
+                    entity_id=entity_id_for_variable(
+                        self._scope_path(el),
+                        name,
+                        mangled_name=None if symbol_is_bare_name else mangled,
+                        is_extern_c=symbol_is_bare_name,
+                    ),
                 )
             )
         return variables

@@ -36,6 +36,7 @@ from collections.abc import Callable
 from typing import Any
 
 from ....model import EnumMember, EnumType
+from ....model.identity import entity_id_for_enum
 from .context import (
     _Decl,
     clang_deprecated_message,
@@ -111,6 +112,11 @@ def parse_enums(
                 # this is a concrete bool, never None, on this backend.
                 is_scoped="scopedEnumTag" in node,
                 deprecated=clang_deprecated_message(node),
+                # ADR-063 Phase 2: resolved from the walk's own typed scope
+                # path. `name` may be the owning typedef's name for an
+                # otherwise-unnamed enum, which is deliberately the same
+                # spelling every other field here already uses.
+                entity_id=entity_id_for_enum(entry.scope_path, name),
             )
         )
     return result
