@@ -1,7 +1,7 @@
 # ADR-061: Responsibility-Package Architecture and Flat-Namespace Migration
 
 **Date:** 2026-08-24
-**Status:** Accepted — partially implemented (Phases 0-1 implemented; Phases 2-4 in progress; Phase 5 begun — the `model` package and the `*_metadata.py` dataclass/parser split have landed; D9's change-catalog work (item 3) is fully done — all 4 registry-validation properties (unique identifiers, valid references, non-contradictory defaults, complete metadata) are enforced, and the 397 entries have been repartitioned into `model/change_catalog/{symbols,types,platform,build,source}.py` by taxonomy; the CastXML/Clang parser split (item 1) has only started — the `extract` package now exists with one stateless-helper module moved out of `dumper_castxml.py`, but the stateful entity-by-entity split is unstarted — source-graph separation (item 2) has also only started — its values third moved to `abicheck/model/source_graph.py`, construction and comparison remain in `buildsource/source_graph.py` — and the bulk of item 4's cycle-exception cleanup also remains — and otherwise incremental).
+**Status:** Accepted — partially implemented (Phases 0-1 implemented; Phases 2-4 in progress; Phase 5 begun — the `model` package and the `*_metadata.py` dataclass/parser split have landed; D9's change-catalog work (item 3) is fully done — all 4 registry-validation properties (unique identifiers, valid references, non-contradictory defaults, complete metadata) are enforced, and the 397 entries have been repartitioned into `model/change_catalog/{symbols,types,platform,build,source}.py` by taxonomy; the CastXML/Clang parser split (item 1) has only started — the `extract` package now exists with one stateless-helper module moved out of `dumper_castxml.py`, but the stateful entity-by-entity split is unstarted — source-graph separation (item 2) is now split three ways: its values third moved to `abicheck/model/source_graph.py`; construction (`build_source_graph` and its private folding helpers) moved into `buildsource/source_graph_build.py` (classified `extract`) and `buildsource/source_graph_build_source_abi.py` (classified `extract`); comparison (`diff_source_graph`, `localize_symbol`) moved into `buildsource/source_graph_compare.py` (classified `compare`); a shared node/edge-classification predicate module neither half owns exclusively (`buildsource/source_graph_query.py`) stays unclassified, same as several of its own callers; `buildsource/source_graph.py` itself is now a 140-line re-export facade — and the bulk of item 4's cycle-exception cleanup also remains — and otherwise incremental).
 **Decision maker:** abicheck maintainers
 
 ## Context
@@ -2124,11 +2124,91 @@ without promising a new export.
    classifying `build_evidence.py` `model` to satisfy that one function
    would have created a real `model -> extract` cycle, caught by
    `check_architecture.py` before this landed rather than assumed. The
-   construction half (`build_source_graph` and its `_fold_*`/`_augment_*`
-   helpers — these still need `BuildEvidence`/`SourceAbiSurface`, so
-   moving them means resolving the same `build_evidence.py`/`extract`
-   coupling for real rather than routing around it) and the comparison
-   half (`diff_source_graph`, `localize_symbol`) have not started;
+   construction and comparison halves have now moved too. **Re-measured
+   before moving, per this section's own earlier finding that a recorded
+   blocker can be stale or smaller than described**: the
+   `build_evidence.py`/`comdat_groups.py` coupling above only blocked
+   *physically relocating* `graph_facts.py`/`entity_resolver.py` into
+   `abicheck/model/` proper (`_conf_from_build`'s need for `build_evidence.
+   Confidence`, transitively pulling in the `extract`-classified
+   `comdat_groups.py`, would have made that a real `model -> extract`
+   cycle). It does not apply to construction/comparison themselves:
+   `check_architecture.py`'s `unclassified-import`/`dependency-direction`
+   checks fire only for a module *physically* under a layer's own
+   directory (`migrated_source` in that script) — a `legacy_paths` entry
+   naming a module that stays flat in `buildsource/` is classified for
+   ownership bookkeeping without ever triggering either check, exactly the
+   pattern this ADR's Phase 3/4 sections already used for other flat
+   modules (e.g. `crosscheck_base.py`/`crosscheck_coherence.py`, classified
+   `compare` while physically flat). So `build_source_graph` and
+   `diff_source_graph` could move without resolving the `build_evidence.py`
+   coupling at all — confirmed, not assumed: `python
+   scripts/check_architecture.py` reports 0 errors both before and after.
+   Construction split into **two** new flat modules (again purely for the
+   new-file 800-line cap, the same reason `graph_facts.py` split three ways
+   above): `buildsource/source_graph_build.py` (454 lines — `_conf_from_build`,
+   `_STATIC_LIBRARY_SUFFIXES`, `project_source_files`, `build_source_graph`,
+   `_link_options_to_symbols`, `_fold_link_provenance`; ADR-031 Phase 2) and
+   `buildsource/source_graph_build_source_abi.py` (567 lines —
+   `_file_in_project`, `_augment_with_source_abi`,
+   `_source_edge_endpoint_ids`, `fold_source_edges`,
+   `mark_source_edges_extractor_coverage`; ADR-031 Phases 3-4 + the ADR-038
+   C.9 `source_edges` fold), both classified `extract` in
+   `architecture/modules.yaml`. Comparison moved into
+   `buildsource/source_graph_compare.py` (134 lines — `_label_map`,
+   `_kind_map`, `localize_symbol`, `diff_source_graph`), classified
+   `compare`. A **third slice the original two-way split didn't name**
+   surfaced on inspection: `is_public_dependency_node`/
+   `is_internal_dependency_node`/`is_consumer_compiled_node`/
+   `is_consumer_compiled_public_entry`/`looks_like_system_name`/
+   `decl_declaring_files` and their `PUBLIC_VISIBILITIES`/`DECL_NODE_KINDS`-
+   family constants are read-only classification predicates over an
+   *already-built* graph — they construct nothing and diff nothing, and are
+   shared well beyond either half (`crosscheck.py`, `graph_reconcile.py`,
+   `internal_leak.py`, `impact/use_cases.py`/`impact/consumer_graph.py`,
+   `surface.py`, `post_processing_reachability.py`, `scan_engine.py`).
+   Moved into `buildsource/source_graph_query.py` (267 lines), left
+   **unclassified** in `architecture/modules.yaml` — the same state several
+   of its own callers (`crosscheck.py`, `source_abi.py`,
+   `source_graph_findings.py`) are already in, since no single ADR-061
+   responsibility package owns this cross-cutting vocabulary yet and
+   forcing a classification decision wasn't asked for by this slice.
+   `buildsource/source_graph.py` itself is now a pure re-export facade
+   (1352 → 140 lines, under the 150-line facade cap), re-exporting every
+   name from all four new modules plus the two `model` modules, via the
+   same `X as X` convention its own pre-existing blocks already used, and
+   keeping its existing lazy `__getattr__` shim for
+   `diff_source_graph_findings`. That shim's own target,
+   `source_graph_findings.py`, needed a real fix rather than a pure move:
+   it previously imported `_TYPE_ENTITY_KINDS`/`_kind_map`/`_label_map`/
+   `PUBLIC_VISIBILITIES`/etc. from `.source_graph` (the facade) — a reverse-
+   facade import D6 prohibits, and one that broke for real the moment those
+   names left the facade's own module body (an `ImportError` on the lazy
+   `__getattr__`'s own import, not merely a lint violation) — so it now
+   imports each name from its real new home
+   (`..model.graph_facts`/`..model.source_graph`/`.source_graph_compare`/
+   `.source_graph_query`) directly. No other pre-existing internal caller
+   was rewritten in this pass (`call_graph.py`, `header_graph.py`,
+   `poi.py`, and the ~15 other flat `buildsource/` modules importing
+   `build_source_graph`/`diff_source_graph`/the predicates keep importing
+   through the facade) — matching the "values" slice's own precedent of
+   not rewriting all 77 existing callers in one PR; migrating them
+   incrementally is exactly what the facade exists to allow. Tests moved
+   with their implementation (D10): `tests/test_source_graph.py` (1996
+   lines) split three ways — the Phase 2/3-4 construction tests
+   (`build_source_graph`/`fold_source_edges`/
+   `mark_source_edges_extractor_coverage`) into
+   `tests/test_source_graph_build.py` (885 lines); the two `localize_symbol`
+   tests and two `diff_source_graph` tests into
+   `tests/test_source_graph_compare.py` (143 lines); the graph-derived risk
+   findings (`source_graph_findings.py`), schema round-trip, and pack/CLI
+   wiring tests stayed in `tests/test_source_graph.py` (now 1175 lines,
+   under the 1200-line test cap). All 105 tests across the three files
+   still pass, unchanged in behavior. `architecture/debt.yaml`'s
+   `abicheck/buildsource/source_graph.py` no-growth entry was removed (its
+   rationale no longer applies at 140 lines) along with
+   `tests/test_source_graph.py`'s own entry (1175 lines is now under the
+   1200-line cap, needing no debt tracking);
 3. **Done.** Repartitioned the change catalog into D9's `model/change_catalog/
    {symbols,types,platform,build,source}.py` taxonomy — all four
    registry-validation properties (global uniqueness, valid references,
