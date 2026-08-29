@@ -20,11 +20,16 @@ Lives under :mod:`abicheck.frontends.cli` (ADR-061: CLI-owned rendering is
 ``frontends/`` responsibility) rather than in :mod:`abicheck.cli_scan` (the
 ``no_growth``-debt-tracked, near-2000-line-cap module its single-binary
 sibling ``render_scan_dry_run`` lives in) or :mod:`abicheck.cli_scan_helpers`
-(which deliberately never imports :mod:`abicheck.service` -- that would
-close an import cycle back through ``service -> service_scan -> scan_engine
--> cli_scan_helpers``, see that module's own docstring). Nothing imports
-this module back, so it can depend on :mod:`abicheck.service` directly the
-same way ``cli_scan.py`` itself does.
+(which deliberately never imports :mod:`abicheck.service_scan` -- that would
+close an import cycle back through ``service_scan -> scan_engine ->
+cli_scan_helpers``, see that module's own docstring).
+
+Imports :mod:`abicheck.service_scan` directly rather than through the
+:mod:`abicheck.service` root facade -- ``frontends/`` may never import back
+through ``cli.py``/``compat/cli.py``/``service.py`` (see
+``abicheck/frontends/AGENTS.md``'s "Public compatibility" section) --
+the same way ``cli_scan.py`` itself already does for ``ScanRequest``'s
+sibling imports (e.g. ``run_scan_set``, ``CompileContext``).
 """
 
 from __future__ import annotations
@@ -43,8 +48,8 @@ def render_artifact_set_dry_run(
 ) -> Any:
     """Build the report. Takes the already-assembled set-wide
     ``ScanRequest`` (``req``) the real run would submit to
-    :func:`~abicheck.service.run_scan_set`, rather than its fields spelled
-    out one by one, to keep the call site short; ``discovered``/
+    :func:`~abicheck.service_scan.run_scan_set`, rather than its fields
+    spelled out one by one, to keep the call site short; ``discovered``/
     ``explicit``/``header_backend``/``fmt`` aren't ``ScanRequest`` fields,
     so those four stay explicit. ``discovered``/``explicit`` are already
     resolved and ELF-validated by the time this runs
@@ -53,17 +58,18 @@ def render_artifact_set_dry_run(
     malformed member fails loud before any dry-run text is printed.
 
     The cost projection is summed **per member**, not read off one shared
-    :func:`~abicheck.service.estimate_scan` call the way a naive port of
-    the single-binary preview would: only its L0_binary row scales by
+    :func:`~abicheck.service_scan.estimate_scan` call the way a naive port
+    of the single-binary preview would: only its L0_binary row scales by
     ``len(binaries)`` (a known, still-open gap in the shared estimator for
     other callers). Building one single-binary ``ScanRequest`` per
     discovered member (reusing ``req``'s own shared fields) and summing
-    each member's own :func:`~abicheck.service.estimate_scan` result gives
-    a genuinely per-member-scaled total for this preview specifically,
-    without changing ``estimate_scan``'s own single-request contract.
+    each member's own :func:`~abicheck.service_scan.estimate_scan` result
+    gives a genuinely per-member-scaled total for this preview
+    specifically, without changing ``estimate_scan``'s own single-request
+    contract.
     """
     from ...dry_run import DryRunResult, tool_status
-    from ...service import ScanRequest, estimate_scan
+    from ...service_scan import ScanRequest, estimate_scan
 
     result = DryRunResult(command="scan")
     members = sorted(discovered.items())
