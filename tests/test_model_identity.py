@@ -300,13 +300,22 @@ class TestFunctionOverloadDiscrimination:
         assert mangled != sig
 
     def test_mangled_name_present_ignores_param_types(self) -> None:
-        # extern "C": a changed parameter list is a modification of the one
-        # function, not a different overload, once a genuine mangled name is
-        # known.
+        # A changed parameter list is a modification of the one function,
+        # not a different overload, once a genuine mangled name is known --
+        # the mangled name already disambiguates the declaration losslessly.
+        # Uses a mangled-shaped name ("_Z1fv"), not a bare name equal to
+        # leaf_name -- that degenerate case is exactly what a real
+        # extern "C" producer reports (mangled == name is *not* a genuine
+        # mangling per this module's own contract) and is covered
+        # separately by TestFunctionOverloadDiscrimination's own
+        # test_extern_c_ignores_param_types via is_extern_c, not by
+        # mangled_name (CodeRabbit review, PR #941).
         scope = (Namespace("ns"),)
-        a = entity_id_for_function(scope, "f", mangled_name="f", param_types=("int",))
+        a = entity_id_for_function(
+            scope, "f", mangled_name="_Z1fv", param_types=("int",)
+        )
         b = entity_id_for_function(
-            scope, "f", mangled_name="f", param_types=("double", "int")
+            scope, "f", mangled_name="_Z1fv", param_types=("double", "int")
         )
         assert a == b
 
