@@ -8305,6 +8305,29 @@ still constructs a genuinely new instance. Regression test in
 after the rewrite, confirmed to fail pre-fix via `git stash` on just the
 source file.
 
+**Correction (2026-08-29, same day, Codex review on PR #943): the
+return-type canonicalization the previous correction added dropped a
+top-level by-value cv-qualifier that is a real overload discriminator for
+a function TEMPLATE.** `entity_id_for_function`'s new `return_type`
+handling reused `canonicalize_function_signature_param_type`, which
+deliberately drops a top-level by-value cv-qualifier because that
+qualifier is dropped from an ORDINARY function's own type (confirmed:
+`int f(int); const int f(int);` is a redefinition error). But confirmed
+by direct compilation that `template<class T> T f(T);` and `template
+<class T> const T f(T);` are two more real, legally-coexisting
+`FunctionTemplateDecl`s (`T (T)` vs. `const T (T)`) -- the opposite rule
+for a template's return type, so the reused function collapsed both onto
+`type-param-0`. Fixed by canonicalizing the return type through
+`canonicalize_type_name` instead (cross-producer spelling normalization
+only, keeps every cv-qualifier) before the same
+`canonicalize_type_param_references` rename-blind substitution.
+Regression test in `tests/test_entity_id_carrier.py`
+(`test_live_clang_return_type_top_level_cv_discriminates_overloaded_templates`),
+confirmed to fail pre-fix via `git stash` on just the source file; the
+prior dependent-return-type test
+(`test_live_clang_dependent_return_type_discriminates_overloaded_templates`)
+and its rename-invariance case both still pass unchanged.
+
 ---
 
 ### Phase 3 — public surface as a graph query over one evidence graph (D5)

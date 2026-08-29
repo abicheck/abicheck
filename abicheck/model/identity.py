@@ -61,6 +61,7 @@ import enum
 import re
 from dataclasses import dataclass, field, replace
 
+from ..name_classification import canonicalize_type_name
 from .signature_normalization import canonicalize_function_signature_param_type
 
 __all__ = [
@@ -647,11 +648,18 @@ def entity_id_for_function(
     distinct, legally-coexisting declarations (Codex review, PR #943;
     confirmed by direct compilation that clang accepts both that
     declaration and its ``typename T::y`` sibling with no redefinition
-    error). Canonicalized identically to a dependent ordinary parameter
-    type -- ``canonicalize_function_signature_param_type`` then
-    ``canonicalize_type_param_references`` -- so a pure template-parameter
-    rename that only the return type's own dependent spelling reflects
-    still resolves to the same ``EntityId``.
+    error). Canonicalized via ``canonicalize_type_name`` (cross-producer
+    spelling normalization only) then ``canonicalize_type_param_references``
+    -- deliberately NOT ``canonicalize_function_signature_param_type``,
+    unlike a dependent ordinary parameter: a top-level by-value
+    cv-qualifier on the return type is a genuine, standard-permitted
+    overload discriminator for a function TEMPLATE (confirmed by direct
+    compilation, fresh Codex review: ``template<class T> T f(T);`` and
+    ``template<class T> const T f(T);`` are two more real, coexisting
+    templates), the opposite of an ordinary function/parameter, where that
+    same qualifier is dropped and two such declarations are a redefinition
+    error. A pure template-parameter rename that only the return type's
+    own dependent spelling reflects still resolves to the same ``EntityId``.
 
     When *mangled_name* is present, *leaf_name* is likewise ignored -- see
     :func:`entity_id_for_variable`'s docstring for the confirmed reason
@@ -703,14 +711,28 @@ def entity_id_for_function(
             # ``"tmpl"`` block (not appended at the very end) so this
             # doesn't shift the fixed `extra[-1]`/`extra[-2]` positions
             # every existing `template_param_kinds` consumer already reads
-            # off the tail of `extra`. Canonicalized identically to an
-            # ordinary parameter's dependent type (cross-producer spelling
-            # normalization, then the same rename-blind substitution).
+            # off the tail of `extra`. Canonicalized via
+            # ``canonicalize_type_name`` -- NOT
+            # ``canonicalize_function_signature_param_type``, unlike an
+            # ordinary parameter -- deliberately KEEPING a top-level
+            # by-value cv-qualifier: confirmed by direct compilation
+            # (fresh Codex review, PR #943) that `template<class T> T
+            # f(T);` and `template<class T> const T f(T);` are two more
+            # real, legally-coexisting `FunctionTemplateDecl`s (clang
+            # accepts both, `T (T)` vs. `const T (T)`), distinguished ONLY
+            # by that top-level cv on the return type -- the opposite of
+            # an ORDINARY function/parameter, where the standard drops
+            # exactly that qualifier and two such declarations are a
+            # redefinition error (confirmed: `int f(int); const int
+            # f(int);` fails to compile). Still run through
+            # ``canonicalize_type_param_references`` afterwards for the
+            # identical rename-blind substitution as every other dependent
+            # spelling here.
             *(
                 (
                     "ret",
                     canonicalize_type_param_references(
-                        canonicalize_function_signature_param_type(return_type),
+                        canonicalize_type_name(return_type),
                         type_param_names,
                     ),
                 )

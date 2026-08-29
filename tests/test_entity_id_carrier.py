@@ -192,12 +192,10 @@ _TEMPLATE_TEMPLATE_PARAM_DEPENDENT_RENAME_B = textwrap.dedent(
     """
 )
 
-#: A pure template-parameter RENAME affecting an ORDINARY parameter, not
-#: a non-type template parameter's own declared type: ``template<class
-#: T> void f(T);`` and the same declaration with ``T`` renamed to ``U``
-#: are the identical declaration, but clang's own ordinary-parameter
-#: spelling names the template parameter literally (``"T"``/``"U"``) --
-#: confirmed by direct compilation (Codex review, PR #943).
+#: A pure RENAME affecting an ORDINARY parameter, not a non-type
+#: parameter's own type: ``template<class T> void f(T);`` renamed to
+#: ``U`` is identical, but clang's spelling names ``T`` literally
+#: (Codex review, PR #943).
 _TEMPLATE_PARAM_ORDINARY_PARAM_RENAME_A = textwrap.dedent(
     """
     namespace ns {
@@ -214,8 +212,7 @@ _TEMPLATE_PARAM_ORDINARY_PARAM_RENAME_B = textwrap.dedent(
 )
 
 #: A pure RENAME of a non-type parameter referenced by a LATER non-type
-#: parameter's own dependent type (``decltype(N)``) -- confirmed by
-#: direct compilation (Codex review, PR #943).
+#: parameter's dependent type (``decltype(N)``) (Codex review, PR #943).
 _TEMPLATE_NONTYPE_PARAM_DEPENDENT_RENAME_A = textwrap.dedent(
     """
     namespace ns {
@@ -231,10 +228,8 @@ _TEMPLATE_NONTYPE_PARAM_DEPENDENT_RENAME_B = textwrap.dedent(
     """
 )
 
-#: A rename of an unused parameter named ``type`` -- a legal identifier
-#: that collides with the generated ``"type-param-N"`` marker prefix. A
-#: naive sequential substitution pass rewrites a PRIOR parameter's own
-#: marker, corrupting an unrelated discriminator (Codex review, PR #943).
+#: A rename of an unused parameter named ``type``, colliding with the
+#: generated ``"type-param-N"`` marker prefix (Codex review, PR #943).
 _TEMPLATE_PARAM_RENAME_COLLIDES_WITH_GENERATED_MARKER_A = textwrap.dedent(
     """
     namespace ns {
@@ -797,9 +792,8 @@ def test_live_clang_template_param_kind_discriminates_overloaded_templates(
     tmp_path: Path,
 ) -> None:
     """``template<class T> void f()`` vs ``template<int N> void f()``
-    share scope/leaf name/params, and neither is mangled, so the ``sig``
-    fallback had nothing to distinguish them by -- `distinct: 1` of 2
-    before this fix (Codex review, PR #943)."""
+    share scope/leaf/params, and neither is mangled, so ``sig`` had
+    nothing to distinguish them by (Codex review, PR #943)."""
     parser = _clang_parser(_TEMPLATE_PARAM_KIND_COLLISION, tmp_path, "tmplkind")
     pair = [fn for fn in parser.parse_functions() if fn.name == "f"]
     assert len(pair) == 2 and all(fn.entity_id is not None for fn in pair)
@@ -817,9 +811,8 @@ def test_live_clang_template_param_packness_discriminates_overloaded_templates(
     tmp_path: Path,
 ) -> None:
     """``template<class T> void f()`` vs ``template<class... T> void f()``
-    are legal overloads sharing every other discriminator; the kind-only
-    fix above still reduced both to `("type",)` -- `distinct: 1` of 2
-    before this fix (Codex review, PR #943)."""
+    are legal overloads; the kind-only fix above still reduced both to
+    `("type",)` (Codex review, PR #943)."""
     parser = _clang_parser(_TEMPLATE_PARAM_PACKNESS_COLLISION, tmp_path, "tmplpack")
     pair = [fn for fn in parser.parse_functions() if fn.name == "f"]
     assert len(pair) == 2 and all(fn.entity_id is not None for fn in pair)
@@ -838,11 +831,8 @@ def test_live_clang_template_param_rename_does_not_change_identity(
 ) -> None:
     """A pure template-parameter RENAME must NOT change the ``EntityId``.
     ``template<class T, T N> void f();``/``template<class U, U N> void
-    f();`` are identical, but clang's ``qualType`` for ``N`` spells the
-    dependent type literally as the type parameter's own name
-    (``"T"``/``"U"``) -- unequal ``EntityId``s before this fix, which would
-    fingerprint a non-semantic rename as a remove+add (Codex review, PR
-    #943)."""
+    f();`` are identical, but clang's ``qualType`` for ``N`` spells ``T``
+    literally (Codex review, PR #943)."""
     a = _one(
         _clang_parser(
             _TEMPLATE_PARAM_DEPENDENT_RENAME_A, tmp_path, "depa"
@@ -866,9 +856,8 @@ def test_live_clang_template_template_param_nested_arity_discriminates(
     tmp_path: Path,
 ) -> None:
     """``template<template<class> class TT>`` vs ``template<template<class,
-    class> class TT>`` share every other discriminator; the earlier,
-    non-recursive version reduced both to the bare ``"template"`` tag --
-    `distinct: 1` of 2 before this fix (Codex review, PR #943)."""
+    class> class TT>``; the earlier, non-recursive version reduced both to
+    the bare ``"template"`` tag (Codex review, PR #943)."""
     parser = _clang_parser(
         _TEMPLATE_TEMPLATE_PARAM_NESTED_ARITY_COLLISION, tmp_path, "tmpltt"
     )
@@ -891,10 +880,8 @@ def test_live_clang_template_template_param_rename_does_not_change_identity(
 ) -> None:
     """A pure RENAME of a template-TEMPLATE parameter must NOT change the
     ``EntityId``. ``template<template<class> class TT, TT<int>* N> void
-    f();`` renamed ``TT`` to ``UU`` is identical, but clang's ``qualType``
-    for ``N`` spells the dependent type literally (``"TT<int> *"``/
-    ``"UU<int> *"``) -- unequal ``EntityId``s before this fix (Codex
-    review, PR #943)."""
+    f();`` renamed ``TT``->``UU`` is identical, but clang spells ``N``'s
+    type literally (Codex review, PR #943)."""
     a = _one(
         _clang_parser(
             _TEMPLATE_TEMPLATE_PARAM_DEPENDENT_RENAME_A, tmp_path, "ttdepa"
@@ -917,12 +904,11 @@ def test_live_clang_template_template_param_rename_does_not_change_identity(
 def test_live_clang_template_param_rename_in_ordinary_param_does_not_change_identity(
     tmp_path: Path,
 ) -> None:
-    """A pure template-parameter RENAME must NOT change identity when it
-    affects an ORDINARY parameter, not a non-type parameter's own type.
-    ``template<class T> void f(T);``/``template<class U> void f(U);`` are
-    identical, but clang's ordinary-parameter spelling names the template
-    parameter literally (``"T"``/``"U"``) -- unequal ``EntityId``s before
-    this fix (Codex review, PR #943)."""
+    """A rename affecting an ORDINARY parameter, not a non-type
+    parameter's own type, must not change identity: ``template<class T>
+    void f(T);``/``template<class U> void f(U);`` are identical, but
+    clang's spelling names the parameter literally (Codex review, PR
+    #943)."""
     a = _one(
         _clang_parser(
             _TEMPLATE_PARAM_ORDINARY_PARAM_RENAME_A, tmp_path, "ordpa"
@@ -946,9 +932,8 @@ def test_live_clang_nontype_param_dependent_rename_does_not_change_identity(
     tmp_path: Path,
 ) -> None:
     """A rename of a non-type parameter referenced by a LATER non-type
-    parameter's own dependent type must NOT change identity --
-    ``decltype(N)`` spells ``N``'s name literally, so a rename to ``M``
-    changes it too unless canonicalized (Codex review, PR #943)."""
+    parameter's dependent type must NOT change identity -- ``decltype(N)``
+    spells ``N`` literally (Codex review, PR #943)."""
     a = _one(
         _clang_parser(
             _TEMPLATE_NONTYPE_PARAM_DEPENDENT_RENAME_A, tmp_path, "ntdepa"
@@ -971,10 +956,8 @@ def test_live_clang_nontype_param_dependent_rename_does_not_change_identity(
 def test_live_clang_rename_of_param_named_type_does_not_corrupt_a_prior_marker(
     tmp_path: Path,
 ) -> None:
-    """Renaming an unused parameter named ``type`` must NOT corrupt an
-    unrelated parameter's marker -- a naive sequential substitution pass
-    rewrote a PRIOR parameter's own generated token (Codex review, PR
-    #943)."""
+    """Renaming an unused parameter named ``type`` must NOT corrupt a
+    PRIOR parameter's generated marker (Codex review, PR #943)."""
     a = _one(
         _clang_parser(
             _TEMPLATE_PARAM_RENAME_COLLIDES_WITH_GENERATED_MARKER_A, tmp_path, "gena"
@@ -1030,6 +1013,21 @@ def test_live_clang_dependent_return_type_discriminates_overloaded_templates(
         name="f",
     )
     assert a.entity_id is not None and a.entity_id == b.entity_id
+
+
+@pytest.mark.integration
+@pytest.mark.skipif(shutil.which("clang") is None, reason="clang not installed")
+def test_live_clang_return_type_top_level_cv_discriminates_overloaded_templates(
+    tmp_path: Path,
+) -> None:
+    """A top-level by-value cv on a TEMPLATE's return type is a real
+    discriminator, unlike an ordinary function (`const int f(int);` is a
+    redefinition there). `template<class T> T f(T);` vs `const T f(T);`
+    coexist (Codex review)."""
+    header = "template<class T> T f(T); template<class T> const T f(T);"
+    parser = _clang_parser(header, tmp_path, "retcv")
+    pair = [fn for fn in parser.parse_functions() if fn.name == "f"]
+    assert len(pair) == 2 and pair[0].entity_id != pair[1].entity_id
 
 
 # ── hybrid dumper: entity_id must stay in sync across post-parse rewrites ────
