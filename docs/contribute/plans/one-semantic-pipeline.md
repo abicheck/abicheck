@@ -6868,6 +6868,45 @@ layer, where the platform's decoration convention is already known, not
 this identity primitive) and out of scope for this "purely additive,
 mirrors the existing resolver" first slice.
 
+**Correction (2026-08-29, same day, ninth Codex review round on PR #941,
+commit 0b7a80a): two more real gaps in the same paren-transparency logic,
+both fixed with a general recursive treatment rather than another one-off
+patch.** (1) A *pointer-to-member-function* declarator (`void (C::*
+const)(int)`) has its own outermost sigil preceded by the member's
+qualified-name prefix (`C::`) rather than a bare sigil -- the eighth
+round's transparency check ("next non-space character after `(` is
+`*`/`&`") never recognized this shape, so its own trailing cv-qualifier
+stayed unstripped. Fixed by generalizing the transparency test to a regex
+(`_DECLARATOR_GROUP_RE`) matching one or more `identifier::` segments
+before the sigil, not only a bare one. (2) A declarator's own trailing
+parameter list (the `(int)` in `void (*)(int)`) is itself exactly as much
+"a function's parameters" as this function's own top-level parameter --
+C++ drops a nested callback parameter's top-level by-value cv from the
+callback's own function type too, so `void (*)(int)` and
+`void (*)(const int)` name the identical adjusted callback type, not two.
+The eighth round's fix left every trailing parameter-list paren entirely
+opaque, so this nested by-value cv was never stripped. Fixed with a real,
+general recursive treatment rather than a narrow special case: every
+top-level `(...)` group found after the declarator's own sigil is now
+comma-split (`_split_top_level_commas`, depth-aware) and each of its own
+parameters is recursively run back through
+`canonicalize_function_signature_param_type` itself
+(`_normalize_nested_param_lists`/`_normalize_param_list_contents`) --
+unlike the array-decay limitations, this is not "unbounded C declarator
+grammar": it is one already-correct function applied to a strictly
+shorter substring at each level, which is what terminates it, and it
+reaches a callback-of-a-callback automatically since each recursive call
+performs the identical treatment on its own nested parameter lists. An
+empty parameter list, a bare `void`, and a variadic `...` marker are left
+untouched (none is itself a parameter type). Ten new tests in
+`tests/test_signature_normalization.py`
+(`TestPointerToMemberOwnCvIsDropped`,
+`TestNestedCallbackParametersAreNormalizedRecursively`, plus two new
+idempotence cases) pin both fixes, including that a nested parameter's
+genuine *pointee* cv still distinguishes, a doubly-nested callback
+normalizes at its innermost level too, and the variadic/void/empty
+special cases pass through unchanged.
+
 ---
 
 ### Phase 3 — public surface as a graph query over one evidence graph (D5)

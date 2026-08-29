@@ -39,6 +39,19 @@ __all__ = ["canonicalize_function_signature_param_type"]
 
 _CV_WORD_RE = re.compile(r"\b(?:const|volatile)\b")
 
+# A declarator-grouping paren's content, up to its own sigil: either a bare
+# pointer/reference (`*`, `&`), or a pointer-to-member's qualified-name
+# prefix (`C::*`, `ns::C::*`) -- one or more `identifier::` segments then
+# the sigil. Used to tell a declarator-grouping paren (transparent, not a
+# real nesting level) from a genuine parameter-list paren (opaque): a
+# parameter list's first token is always a type, which can itself start
+# with an identifier, but is never immediately followed by `::` then only
+# a bare sigil -- that specific shape is unique to a member-pointer
+# declarator (Codex review, PR #941, ninth round: an earlier revision here
+# recognized only the bare-sigil form, so `void (C::* const)(int)` -- cv on
+# a pointer-to-member's own outermost sigil -- was never found at depth 0).
+_DECLARATOR_GROUP_RE = re.compile(r"\s*(?:[A-Za-z_]\w*\s*::\s*)*[*&]")
+
 
 def _strip_cv_tokens_outside_nesting(s: str) -> str:
     """Blank out every ``const``/``volatile`` token in *s* that sits at
@@ -118,6 +131,112 @@ def _decay_top_level_array(canonical_type: str) -> str:
         return canonical_type
     prefix = canonical_type[: bracket_positions[0]].rstrip()
     return f"{prefix} *"
+
+
+def _split_top_level_commas(s: str) -> list[str]:
+    """Split *s* on commas that sit at nesting depth 0 (outside any
+    ``<...>``/``(...)``/``[...]``) -- the boundaries between a parameter
+    list's own individual parameters, as opposed to a comma nested inside
+    one parameter's own type (a template-argument list, a nested callback's
+    own parameter list).
+    """
+    depth = 0
+    parts: list[str] = []
+    current: list[str] = []
+    for ch in s:
+        if ch in "<([":
+            depth += 1
+            current.append(ch)
+        elif ch in ">)]":
+            depth = max(0, depth - 1)
+            current.append(ch)
+        elif ch == "," and depth == 0:
+            parts.append("".join(current))
+            current = []
+        else:
+            current.append(ch)
+    parts.append("".join(current))
+    return parts
+
+
+def _find_matching_paren(s: str, open_idx: int) -> int:
+    """Index of the ``)`` matching the ``(`` at *open_idx* (which must
+    itself be ``"("``), tracking only paren nesting -- ``s[open_idx]`` is
+    always ``(`` at every call site. Defensively returns ``len(s)`` for a
+    malformed, unmatched string rather than raising.
+    """
+    depth = 0
+    for i in range(open_idx, len(s)):
+        if s[i] == "(":
+            depth += 1
+        elif s[i] == ")":
+            depth -= 1
+            if depth == 0:
+                return i
+    return len(s)
+
+
+def _normalize_param_list_contents(inner: str) -> str:
+    """Canonicalize each individual parameter inside one parameter list's
+    raw ``(...)`` content -- the by-value cv rule this whole module exists
+    to apply is not unique to this function's own top-level parameter; a
+    callback or member-function-pointer parameter's OWN parameters are
+    exactly as much "a function's parameter list" as the outer one is, and
+    C++ drops their top-level by-value cv from the function type the same
+    way. An empty list, a bare ``void``, and a variadic ``...`` marker
+    (which is not itself a parameter type at all) are left untouched.
+    """
+    if inner.strip() == "" or inner.strip().lower() == "void":
+        return inner
+    normalized = []
+    for part in _split_top_level_commas(inner):
+        p = part.strip()
+        normalized.append(
+            p
+            if (p == "" or p == "...")
+            else canonicalize_function_signature_param_type(p)
+        )
+    return ", ".join(normalized)
+
+
+def _normalize_nested_param_lists(s: str) -> str:
+    """Recursively canonicalize the contents of every top-level ``(...)``
+    parameter list appearing in *s* -- a declarator's own trailing
+    parameter list, e.g. the ``(int)`` in ``void (*)(int)`` or
+    ``void (C::*)(int)``, to any nesting depth (a callback parameter that
+    itself takes a callback parameter). Depth-tracks ``<([``/``>)]``
+    generally so a paren nested inside a template argument or array bound
+    is not mistaken for a top-level parameter list; recursion through
+    :func:`canonicalize_function_signature_param_type` (via
+    :func:`_normalize_param_list_contents`) applies this same nested
+    treatment at every level, so it needs no explicit depth limit -- each
+    recursive call operates on a strictly shorter substring, which is what
+    guarantees termination (Codex review, PR #941, ninth round: an earlier
+    revision left a callback parameter's own parameter list entirely
+    opaque, so ``void (*)(int)`` and ``void (*)(const int)`` -- the
+    identical adjusted callback type -- canonicalized to two different
+    strings).
+    """
+    out: list[str] = []
+    i = 0
+    n = len(s)
+    depth = 0
+    while i < n:
+        ch = s[i]
+        if ch == "(" and depth == 0:
+            close = _find_matching_paren(s, i)
+            out.append("(")
+            out.append(_normalize_param_list_contents(s[i + 1 : close]))
+            out.append(")")
+            i = close + 1
+            continue
+        if ch in "<([":
+            depth += 1
+        elif ch in ">)]":
+            depth = max(0, depth - 1)
+        out.append(ch)
+        i += 1
+    return "".join(out)
 
 
 def canonicalize_function_signature_param_type(name: str) -> str:
@@ -259,6 +378,30 @@ def canonicalize_function_signature_param_type(name: str) -> str:
     'int ( * )[3]'
     >>> canonicalize_function_signature_param_type("int (* const)[3]")
     'int ( * )[3]'
+
+    A *pointer-to-member-function* declarator (``void (C::* const)(int)``)
+    has the identical shape one level deeper: its own outermost sigil is
+    ``*``, preceded by the member's qualified-name prefix (``C::``) inside
+    the same declarator-grouping parens, rather than a bare sigil. That
+    qualified-name prefix is recognized too, so its own trailing
+    cv-qualifier is by-value and dropped the same way. And a declarator's
+    trailing parameter list (the ``(int)`` above) is itself exactly as much
+    "a function's parameters" as this function's own top-level one -- so
+    each of ITS parameters gets this identical by-value treatment too,
+    recursively, to any nesting depth (a callback parameter that itself
+    takes a callback parameter): ``void (*)(int)`` and
+    ``void (*)(const int)`` are the same adjusted callback type, not two.
+
+    >>> canonicalize_function_signature_param_type("void (C::*)(int)")
+    'void (C:: * )(int)'
+    >>> canonicalize_function_signature_param_type("void (C::* const)(int)")
+    'void (C:: * )(int)'
+    >>> canonicalize_function_signature_param_type("void (*)(const int)")
+    'void ( * )(int)'
+    >>> canonicalize_function_signature_param_type("void (*)(char *)")
+    'void ( * )(char *)'
+    >>> canonicalize_function_signature_param_type("void (*)(const char *)")
+    'void ( * )(char const *)'
     """
     canonical = canonicalize_type_name(
         _decay_top_level_array(canonicalize_type_name(name))
@@ -270,13 +413,9 @@ def canonicalize_function_signature_param_type(name: str) -> str:
     transparent_parens: list[bool] = []
     last_top_level_sigil = -1
     has_top_level_bracket = False
-    n = len(canonical)
     for i, ch in enumerate(canonical):
         if ch == "(":
-            j = i + 1
-            while j < n and canonical[j] == " ":
-                j += 1
-            transparent = j < n and canonical[j] in "*&"
+            transparent = _DECLARATOR_GROUP_RE.match(canonical, i + 1) is not None
             transparent_parens.append(transparent)
             if not transparent:
                 depth += 1
@@ -307,4 +446,5 @@ def canonicalize_function_signature_param_type(name: str) -> str:
         )
     prefix = canonical[: last_top_level_sigil + 1]
     suffix = _strip_cv_tokens_outside_nesting(canonical[last_top_level_sigil + 1 :])
+    suffix = _normalize_nested_param_lists(suffix)
     return f"{prefix} {suffix}".rstrip() if suffix else prefix

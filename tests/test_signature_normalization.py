@@ -148,6 +148,57 @@ class TestParenthesizedDeclaratorOwnCvIsDropped:
         assert "[3]" in canon("int (* const)[3]")
 
 
+class TestPointerToMemberOwnCvIsDropped:
+    """A pointer-to-member-function declarator's own outermost sigil is
+    preceded by the member's qualified-name prefix (``C::``) inside the
+    same declarator-grouping parens -- its own trailing cv-qualifier is
+    by-value and dropped exactly like a plain function-pointer's."""
+
+    def test_member_pointer_own_const_dropped(self) -> None:
+        assert canon("void (C::* const)(int)") == canon("void (C::*)(int)")
+
+    def test_nested_namespace_member_pointer_own_const_dropped(self) -> None:
+        assert canon("void (ns::C::* const)(int)") == canon("void (ns::C::*)(int)")
+
+    def test_member_pointer_param_list_untouched(self) -> None:
+        assert "(int)" in canon("void (C::*)(int)")
+        assert "(int)" in canon("void (C::* const)(int)")
+
+
+class TestNestedCallbackParametersAreNormalizedRecursively:
+    """A declarator's own trailing parameter list (a callback or
+    member-function-pointer's parameters) is exactly as much a function's
+    parameter list as this function's own top-level one -- the identical
+    by-value cv rule applies to each of ITS parameters too, recursively to
+    any nesting depth."""
+
+    def test_single_nested_param_by_value_cv_dropped(self) -> None:
+        assert canon("void (*)(const int)") == canon("void (*)(int)")
+
+    def test_multiple_nested_params_by_value_cv_dropped(self) -> None:
+        assert canon("void (*)(const int, int)") == canon("void (*)(int, const int)")
+
+    def test_nested_pointee_cv_still_distinguishes(self) -> None:
+        # A nested parameter's POINTEE cv is a genuine, standard-mandated
+        # discriminator, same as at the top level -- must not be dropped.
+        assert canon("void (*)(char *)") != canon("void (*)(const char *)")
+
+    def test_variadic_marker_untouched(self) -> None:
+        assert canon("void (*)(int, ...)") == canon("void (*)(const int, ...)")
+        assert "..." in canon("void (*)(int, ...)")
+
+    def test_empty_and_void_param_lists_untouched(self) -> None:
+        assert canon("void (*)()") == "void ( * )()"
+        assert canon("void (*)(void)") == "void ( * )(void)"
+
+    def test_doubly_nested_callback_normalized(self) -> None:
+        # A callback parameter that itself takes a callback parameter --
+        # the recursion must reach the innermost level too.
+        assert canon("void (*)(void (*)(const int))") == canon(
+            "void (*)(void (*)(int))"
+        )
+
+
 class TestIdempotence:
     """Canonicalizing an already-canonical form is a no-op -- a basic
     sanity property any normalization function should hold."""
@@ -166,6 +217,14 @@ class TestIdempotence:
 
     def test_idempotent_on_function_pointer_type(self) -> None:
         once = canon("void (* const)(int)")
+        assert canon(once) == once
+
+    def test_idempotent_on_member_pointer_type(self) -> None:
+        once = canon("void (C::* const)(int)")
+        assert canon(once) == once
+
+    def test_idempotent_on_nested_callback_type(self) -> None:
+        once = canon("void (*)(const int, void (*)(char *))")
         assert canon(once) == once
 
 

@@ -110,3 +110,10 @@
   callback's own parameter types and a pointer-to-array's own trailing
   bound stay untouched. An unused, dead leftover private helper,
   `_has_top_level_ptr_or_ref`, was removed from this module.
+  The same primitive now also recognizes a pointer-to-member-function
+  declarator's qualified-name prefix (`void (C::* const)(int)`) as
+  transparent the identical way, and recursively canonicalizes each
+  parameter of a declarator's own trailing parameter list (a callback or
+  member-function-pointer's parameters, to any nesting depth) -- so
+  `void (*)(int)` and `void (*)(const int)` canonicalize identically,
+  while a nested parameter's genuine pointee cv still distinguishes.
