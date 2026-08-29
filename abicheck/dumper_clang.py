@@ -132,6 +132,7 @@ from .extract.headers.clang import (
     enums as _clang_enums,
     functions as _clang_functions,
     records as _clang_records,
+    scope as _clang_scope,
 )
 from .extract.headers.clang.templates import (
     _index_template_param_defaults,
@@ -139,6 +140,7 @@ from .extract.headers.clang.templates import (
     _index_template_param_names,
     _specialization_spelling,
 )
+from .extract.headers.scope_segments import record_segment as _record_scope_segment
 from .model import (
     AccessLevel,
     EnumType,
@@ -148,6 +150,7 @@ from .model import (
     Variable,
     Visibility,
 )
+from .model.identity import ScopePath
 from .provenance import build_public_set
 
 
@@ -628,6 +631,7 @@ class _ClangAstParser:
         self._walk(
             root,
             scope=(),
+            scope_path=(),
             lookup_scope=(),
             current_file="",
             access="public",
@@ -648,6 +652,8 @@ class _ClangAstParser:
         extern_c: bool,
         in_friend: bool,
         in_template: bool = False,
+        scope_path: ScopePath = (),
+        anonymous_ordinal: int | None = None,
     ) -> str:
         """Pre-order walk that categorizes public decls, threading the sticky file.
 
@@ -672,6 +678,24 @@ class _ClangAstParser:
         such entry, degrading a nested specialization's own member back to
         the SAME owner-mismatch false positive the `ClassTemplateSpecial
         izationDecl` branch below was originally built to fix).
+
+        *scope_path* is a THIRD scope representation, running exactly
+        alongside *scope* rather than replacing it (ADR-063 Phase 2, second
+        slice): the same containing scopes, as typed
+        `model.identity.ScopeSegment`s instead of bare names, recorded at
+        the exact point each scope is entered -- which is the only point the
+        node kind (`NamespaceDecl` vs. `CXXRecordDecl`), its `isInline`
+        flag, and its access specifier are still in hand. *scope* itself is
+        untouched, so every `qualified_name` this walk feeds is byte-for-
+        byte what it was; `extract.headers.scope_segments.flat_names` maps
+        the typed path back onto *scope*, which is what pins that parity.
+        Parser-internal state only for now: it is threaded onto `_Decl` for
+        a future slice's resolver to read, and no `EntityId` is built from
+        it yet (the plan's carrier-field question stays open).
+
+        *anonymous_ordinal* is assigned by the PARENT frame's own child
+        loop, not derived here, because the ordinal is a per-parent
+        sequence: a node cannot know its own position among its siblings.
         """
         if not isinstance(node, dict):
             return current_file
@@ -681,7 +705,16 @@ class _ClangAstParser:
 
         if not node.get("isImplicit"):
             self._categorize(
-                node, kind, name, scope, file, access, extern_c, in_friend, in_template
+                node,
+                kind,
+                name,
+                scope,
+                file,
+                access,
+                extern_c,
+                in_friend,
+                in_template,
+                scope_path,
             )
 
         # A function/method body is not an ABI declaration surface: its
@@ -696,6 +729,20 @@ class _ClangAstParser:
         # AccessSpecDecl switches it; namespaces/linkage-specs impose none.
         child_extern_c = extern_c or (
             kind == "LinkageSpecDecl" and node.get("language") == "C"
+        )
+        # The typed counterpart of the flat `child_scope` computed below,
+        # built from the node itself (kind/`isInline`/`tagUsed`/access) and
+        # never reconstructed from the flattened spelling. A `None` segment
+        # means "this node introduces no typed scope", which matches every
+        # branch below that leaves `child_scope` unchanged -- EXCEPT a named
+        # `LinkageSpecDecl`: real clang never emits one (a linkage
+        # specification is spelled with a string literal, never an
+        # identifier), and mapping that unreachable case onto some segment
+        # kind would manufacture exactly the two-node-kinds-one-segment
+        # ambiguity `ScopePath` exists to prevent. See
+        # `extract.headers.clang.scope.scope_segment_for`.
+        segment = _clang_scope.scope_segment_for(
+            node, access=access, anonymous_ordinal=anonymous_ordinal
         )
         if kind in _SCOPE_NODE_KINDS and name:
             child_scope = (*scope, name)
@@ -741,9 +788,16 @@ class _ClangAstParser:
             )
             child_scope = (*scope, spelling) if spelling else scope
             child_lookup_scope = lookup_scope
+            # A specialization's scope spelling is this branch's own
+            # reconstruction; `scope_segment_for` returns None for this node
+            # kind precisely so it cannot form a second, differently-trimmed
+            # opinion about it.
+            if spelling:
+                segment = _record_scope_segment(spelling, access=access)
         else:
             child_scope = scope
             child_lookup_scope = lookup_scope
+        child_scope_path = (*scope_path, segment) if segment is not None else scope_path
         running = (
             _default_record_access(node)
             if kind in ("CXXRecordDecl", "RecordDecl")
@@ -769,16 +823,44 @@ class _ClangAstParser:
             "ClassTemplateDecl",
             "ClassTemplatePartialSpecializationDecl",
         )
+        # Per-parent (not global) anonymous-scope counter, assigned here
+        # because an ordinal is a position among THIS node's own children: a
+        # global counter would make one anonymous struct's identity depend on
+        # how many unrelated anonymous scopes happened to be walked before it
+        # anywhere in the translation unit. Counted per *entity*, not per
+        # block: two `namespace { }` blocks reopen ONE unnamed namespace, and
+        # clang links them via `originalNamespace`/`previousDecl` -- numbering
+        # blocks would split one real scope into two identities (see
+        # `_clang_scope.anonymous_scope_key`).
+        next_anonymous_ordinal = 0
+        anonymous_ordinals: dict[str, int] = {}
         for child in node.get("inner", []) or []:
             if not isinstance(child, dict):
                 continue
             if child.get("kind") == "AccessSpecDecl":
                 running = child.get("access", running)
                 continue
+            child_anonymous_ordinal: int | None = None
+            if _clang_scope.anonymous_scope_kind(child) is not None:
+                entity_key = _clang_scope.anonymous_scope_key(child)
+                already = (
+                    anonymous_ordinals.get(entity_key)
+                    if entity_key is not None
+                    else None
+                )
+                if already is not None:
+                    child_anonymous_ordinal = already
+                else:
+                    child_anonymous_ordinal = next_anonymous_ordinal
+                    next_anonymous_ordinal += 1
+                    if entity_key is not None:
+                        anonymous_ordinals[entity_key] = child_anonymous_ordinal
             file = self._walk(
                 child,
                 scope=child_scope,
                 lookup_scope=child_lookup_scope,
+                scope_path=child_scope_path,
+                anonymous_ordinal=child_anonymous_ordinal,
                 current_file=file,
                 access=child.get("access", running),
                 extern_c=child_extern_c,
@@ -798,6 +880,7 @@ class _ClangAstParser:
         extern_c: bool,
         in_friend: bool,
         in_template: bool = False,
+        scope_path: ScopePath = (),
     ) -> None:
         entry = _Decl(
             node=node,
@@ -807,6 +890,7 @@ class _ClangAstParser:
             extern_c=extern_c,
             in_friend=in_friend,
             in_template=in_template,
+            scope_path=scope_path,
         )
         if kind in _FUNCTION_NODE_KINDS and name:
             self._functions.append(entry)

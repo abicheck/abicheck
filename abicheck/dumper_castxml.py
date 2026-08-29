@@ -79,6 +79,7 @@ from .extract.headers.castxml import (
     functions as _castxml_functions,
     location as _castxml_location,
     records as _castxml_records,
+    scope as _castxml_scope,
     type_resolution as _castxml_type_resolution,
 )
 from .extract.headers.castxml.names import (
@@ -102,6 +103,7 @@ from .model import (
     Variable,
     Visibility,
 )
+from .model.identity import ScopePath
 from .provenance import header_from_location
 
 
@@ -610,6 +612,19 @@ class _CastxmlParser:
         than one entity kind's parsing, same as ``is_builtin_element``/
         ``source_location``."""
         return _castxml_location.qualified_name(self._ctx, el)
+
+    def _scope_path(self, el: Any) -> ScopePath:
+        """*el*'s containing scope as typed ``model.identity`` segments.
+
+        The structural counterpart of :meth:`_qualified_name` (ADR-063
+        Phase 2): the identical ``context``-chain walk, keeping each parent's
+        own XML tag and ``access`` attribute instead of discarding them into
+        a flat ``"::"``-joined string. Purely additive --
+        :meth:`_qualified_name` is unchanged and still what every existing
+        consumer reads, and nothing builds an ``EntityId`` from this yet. See
+        :func:`~.extract.headers.castxml.scope.scope_path`.
+        """
+        return _castxml_scope.scope_path(self._ctx, el)
 
     def _decl_is_public(self, el: Any) -> bool:
         """True if *el*'s declaring header classifies as a public header.

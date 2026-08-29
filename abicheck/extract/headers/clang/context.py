@@ -51,6 +51,7 @@ from typing import Any
 
 from ....dumper_clang_vtable import build_vtable, is_record_definition
 from ....model import AccessLevel, ScopeOrigin, Visibility
+from ....model.identity import ScopePath
 from ....name_classification import strip_anonymous_type_location
 from ....provenance import classify_origin, header_from_location
 from .templates import build_specialization_index
@@ -75,6 +76,7 @@ class _Decl:
         "in_template",
         "node",
         "scope",
+        "scope_path",
     )
 
     def __init__(
@@ -86,9 +88,19 @@ class _Decl:
         extern_c: bool = False,
         in_friend: bool = False,
         in_template: bool = False,
+        scope_path: ScopePath = (),
     ) -> None:
         self.node = node
         self.scope = scope
+        # The same containing scopes as ``scope``, as typed
+        # ``model.identity`` segments recorded at the point each scope was
+        # entered (ADR-063 Phase 2). Purely additive parser-internal state:
+        # ``scope`` remains what every existing consumer reads and what every
+        # ``qualified_name`` is built from, and nothing constructs an
+        # ``EntityId`` from this yet. Defaults to ``()`` so the call sites
+        # that build a ``_Decl`` directly (tests, sibling entity modules)
+        # need no change.
+        self.scope_path = scope_path
         self.file = file
         self.access = access
         # True when the decl sits inside an ``extern "C"`` linkage spec — an

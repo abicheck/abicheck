@@ -7406,6 +7406,126 @@ what two spellings "mean the same thing" on this primitive gets checked
 against real compiler/AST-dumper output before implementing, not merely
 re-derived from C++ semantics on paper.
 
+**Landed (second slice, 2026-08-29): the first slice's own "Next slice"
+item (a) -- both dumper modules now track scope as typed segments.** The
+parser-internal scope state in `dumper_clang.py` and `dumper_castxml.py` is
+no longer only a bare `tuple[str, ...]`/`context`-chain-of-names: each
+containing scope is now ALSO recorded as a `model.identity.ScopeSegment`,
+built at the exact point that scope is determined, which is the only point
+the AST node kind and its kind-specific payload are still in hand (the
+Design section's own reasoning for why a later reconstruction from the
+flattened string cannot work). Three new leaf modules under `extract/`
+(`extract -> model`, ADR-061): `extract/headers/scope_segments.py` -- the
+ONE construction primitive both backends share, so two producers cannot
+independently spell the same construct two ways, plus `flat_names()`, the
+parity helper that renders a typed path back to exactly the flat spelling
+each backend already built; `extract/headers/clang/scope.py` -- clang JSON
+node inspection (`scope_segment_for`/`anonymous_scope_kind`/
+`anonymous_scope_key`); and `extract/headers/castxml/scope.py` --
+`scope_path(ctx, el)`, the structural counterpart of
+`location.qualified_name`'s own `context`-chain walk. On the clang side
+`_walk` threads a `scope_path` alongside the untouched `scope`, and
+`_Decl` grew an optional `scope_path` field (defaulted, so every direct
+`_Decl` construction elsewhere is unaffected); on the castxml side
+`_CastxmlParser._scope_path` sits beside the untouched `_qualified_name`.
+Backward compatibility is structural, not merely tested: the flat
+representation is not derived from the typed one and is not modified at
+all, and `flat_names(typed) == flat` is asserted over every categorized
+declaration in both backends' tests (`tests/test_typed_scope_paths.py`),
+with `qualified_name` reconstructed end-to-end from the typed path plus
+the element's own name as the castxml oracle rather than a re-implemented
+parent walk.
+
+*Verified against the real producers, per this section's own
+direct-verification standard -- not inferred from plausible AST semantics.*
+Running `clang -Xclang -ast-dump=json` and `castxml --castxml-output=1`
+over the same headers established: an inline namespace is a
+`NamespaceDecl` with `isInline: true` (clang) and **does not exist as an
+element at all** in castxml output (a declaration inside `inline namespace
+v1` is attributed directly to the enclosing named namespace, confirmed on
+both a hand-written header and libstdc++'s own `std::__cxx11`), so
+`InlineNamespace` is structurally unproducible from castxml -- a backend
+capability gap the flat spelling already had, now documented rather than
+papered over; an anonymous namespace/record carries no `name` at all in
+either producer; a class-scope castxml record carries an explicit `access`
+attribute while a namespace-scope one carries none (mapped to the one
+shared `"public"` spelling `_walk` already threads, and non-identity
+payload regardless); and only `<Namespace>`/`<Struct>`/`<Class>`/`<Union>`
+are ever referenced as another element's castxml `context` (checked across
+a full `<string>`/`<vector>`-including dump), so no other tag needs a
+guessed segment kind.
+
+**One real over-split was found this way and fixed before it shipped**,
+which is exactly what the direct-verification standard is for. Two
+`namespace { ... }` blocks in one translation unit REOPEN the same unnamed
+namespace -- C++ merges them -- but clang's JSON AST emits one
+`NamespaceDecl` node per *block*, so a naive positional counter handed
+declarations in the first and second blocks different `Anonymous.ordinal`s
+and split one real scope into two identities. That is the mirror image of
+the sibling collision `ordinal` exists to prevent, and it was also a
+cross-backend divergence: castxml emits a single merged `<Namespace>`
+element for both blocks (verified directly). Fixed by keying the per-parent
+ordinal on the *entity* rather than the block, via clang's own
+`originalNamespace`/`previousDecl` link (`anonymous_scope_key`), with the
+"no id at all" case (a hand-built test AST) deliberately reported as
+"cannot be merged" rather than "same as the last one that also had no id".
+Ordinals are counted per parent scope and across all anonymous kinds at
+once, so two siblings never share one ordinal even before `kind` is
+consulted; a named `LinkageSpecDecl` and a `ClassTemplateSpecializationDecl`
+each deliberately produce NO segment from the shared node inspector (the
+former is unreachable in real clang output and would need a guessed segment
+kind; the latter's trimmed `A<double>`-style spelling is owned by `_walk`'s
+own specialization branch, which must not be given a second opinion).
+
+**One architectural constraint found mid-implementation, recorded rather
+than worked around.** `InlineNamespace.version_tag` is left empty by both
+producers. This repository has exactly one definition of "what an
+inline-namespace version tag is" -- `qualified_name_segments.version_suffix`,
+the signal ADR-025's own versioned-inline-namespace-alias handling already
+keys on -- and that module belongs to the `compare` layer, which `extract`
+may not import under ADR-061's dependency direction (`scripts/
+check_architecture.py` failed on exactly that edge, which is how this was
+caught, before push). Re-deriving the rule inside `extract` would create a
+second, independently-drifting notion of a version tag -- the precise
+duplication this plan's own Governing Invariant forbids -- and relocating
+the existing one into `model` is a real `compare`-layer migration of its
+own, not a drive-by inside this slice. Left empty and documented in the
+constructor's own docstring and pinned by a test, so a later slice
+populating it has to do so consciously. Nothing is lost meanwhile:
+`InlineNamespace` is identity on `name` too, so `v1` and `v2` are already
+distinct segments and the tag is a convenience payload, not a
+discriminator, at this point in the phase.
+
+**What this slice deliberately still does not do.** (1) *The carrier-field
+question (option (a) vs. (b)) remains open, and this slice did not force
+it.* The typed path is parser-internal state only -- a `_walk` recursion
+parameter and a `_Decl` field, both alive only during and immediately after
+the walk -- attached to no persisted `AbiSnapshot`/`RecordType`/`Function`,
+with no schema bump and no serialization change. (2) *No
+`model.identity.EntityId` is constructed from real parser output anywhere.*
+Neither dumper calls any `entity_id_for_*` constructor; this slice produces
+the typed scope data and stops there. (3) `diff_filtering.py`,
+`type_reachability.py` and `finding_identity.py` are untouched, and their
+existing string-based ambiguity machinery is still the one working
+implementation, exactly as the first slice left it. (4) No storage v2 wire
+bridge. Two smaller, producer-specific limitations are recorded in the new
+modules' own docstrings rather than left implicit: `InlineNamespace` is
+unproducible from castxml (above), and `LocalToFunction` is unproducible
+from EITHER backend today -- clang's `_walk` stops at a function node by
+design (a body is not an ABI declaration surface) and castxml emits no
+function-local declarations at all (verified: a `struct` declared inside a
+function body is absent from its output entirely) -- which also means this
+slice never had to construct a `LocalToFunction.owner`, i.e. an `EntityId`,
+which would itself have forced the carrier question.
+
+Next slice, in order (superseding the first slice's own list above, whose
+item (a) is what this slice landed): (b) migrate `diff_filtering.py`/
+`type_reachability.py` -- which still requires answering the carrier-field
+question first, since both are post-parse consumers and the typed data this
+slice produces does not outlive the parse; then (c) the
+`finding_identity.py` algorithm migration and the storage v2 wire bridge,
+each as their own reviewable slice.
+
 ---
 
 ### Phase 3 — public surface as a graph query over one evidence graph (D5)
