@@ -61,6 +61,7 @@ from ..policy.contract_coverage_exit import (
     fold_coverage_exit,
 )
 from ..policy.exit_decision import resolve_compare_exit_decision
+from ..policy.gate_decision import gate_decision_for_result
 from ..policy.severity import (
     PRESET_DEFAULT,
     IssueCategory,
@@ -94,6 +95,7 @@ __all__ = [
     "coverage_exit_for_context",
     "fold_analysis_assurance_exit",
     "fold_coverage_exit",
+    "gate_decision_for_result",
     "legacy_exit_code",
     "missing_contract_exit_code",
     "note_if_same_binary_compared",

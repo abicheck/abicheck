@@ -1,7 +1,7 @@
 # ADR-061: Responsibility-Package Architecture and Flat-Namespace Migration
 
 **Date:** 2026-08-24
-**Status:** Accepted — partially implemented (Phases 0-1 implemented; Phases 2-4 in progress; Phase 5 begun — the `model` package and the `*_metadata.py` dataclass/parser split have landed; D9's change-catalog work (item 3) is fully done — all 4 registry-validation properties (unique identifiers, valid references, non-contradictory defaults, complete metadata) are enforced, and the 397 entries have been repartitioned into `model/change_catalog/{symbols,types,platform,build,source}.py` by taxonomy; the CastXML/Clang parser split (item 1) is now underway with a real shared-context design proven on both backends — `extract/headers/{castxml,clang}/context.py` (plus castxml's own `location.py`/`type_resolution.py`) hold the parser state/node-inspection primitives an entity module needs, and `enums.py` is the first entity split out of each backend, both calling through their context object rather than `self` — but `functions.py`/`records.py`/`templates.py` on either side have not moved yet — source-graph separation (item 2) is now split three ways: its values third moved to `abicheck/model/source_graph.py`; construction (`build_source_graph` and its private folding helpers) moved into `buildsource/source_graph_build.py` (classified `extract`) and `buildsource/source_graph_build_source_abi.py` (classified `extract`); comparison (`diff_source_graph`, `localize_symbol`) moved into `buildsource/source_graph_compare.py` (classified `compare`); a shared node/edge-classification predicate module neither half owns exclusively (`buildsource/source_graph_query.py`) stays unclassified, same as several of its own callers; `buildsource/source_graph.py` itself is now a 140-line re-export facade — and the bulk of item 4's cycle-exception cleanup also remains — and otherwise incremental).
+**Status:** Accepted — partially implemented (Phases 0-1 implemented; Phases 2-4 in progress; Phase 5 begun — the `model` package and the `*_metadata.py` dataclass/parser split have landed; Phase 2's D9 item 4 gate-decision half is now closed via `policy/gate_decision.py`'s `gate_decision_for_result`, read by every JSON/SARIF/HTML/scan call site instead of each independently recomputing it (Markdown/HTML prose rewrite and per-finding verdict consolidation remain open, see Phase 2's own section); D9's change-catalog work (item 3) is fully done — all 4 registry-validation properties (unique identifiers, valid references, non-contradictory defaults, complete metadata) are enforced, and the 397 entries have been repartitioned into `model/change_catalog/{symbols,types,platform,build,source}.py` by taxonomy; the CastXML/Clang parser split (item 1) is now underway with a real shared-context design proven on both backends — `extract/headers/{castxml,clang}/context.py` (plus castxml's own `location.py`/`type_resolution.py`) hold the parser state/node-inspection primitives an entity module needs, and `enums.py` is the first entity split out of each backend, both calling through their context object rather than `self` — but `functions.py`/`records.py`/`templates.py` on either side have not moved yet — source-graph separation (item 2) is now split three ways: its values third moved to `abicheck/model/source_graph.py`; construction (`build_source_graph` and its private folding helpers) moved into `buildsource/source_graph_build.py` (classified `extract`) and `buildsource/source_graph_build_source_abi.py` (classified `extract`); comparison (`diff_source_graph`, `localize_symbol`) moved into `buildsource/source_graph_compare.py` (classified `compare`); a shared node/edge-classification predicate module neither half owns exclusively (`buildsource/source_graph_query.py`) stays unclassified, same as several of its own callers; `buildsource/source_graph.py` itself is now a 140-line re-export facade — and the bulk of item 4's cycle-exception cleanup also remains — and otherwise incremental).
 **Decision maker:** abicheck maintainers
 
 ## Context
@@ -672,25 +672,65 @@ sizes:
    both modules against their golden output, i.e. its own vertical slice
    (plausibly one per format), not a follow-on edit to a serialization
    change.
-2. *Items 4 and 5 — decisions and post-render mutation.* Every renderer
-   still reaches into policy itself: `sarif._severity_gate_properties`,
-   `html_report`'s gate card, and `reporter._build_severity_json` each call
-   `severity.compute_gate_decision`, and `junit_report`/`html_report`/
-   `reporter_markdown` each resolve a per-finding verdict through
-   `effective_verdict_for_change`. These are calls to *the single canonical*
-   resolver rather than drifting reimplementations, so the risk today is
-   ownership rather than disagreement — but D9 says a projection consumes
-   decisions, it does not make them, so closing this needs one
-   decisions-computed-once value carried into document construction and read
-   by every format. Separately, `cli_compare_fold.py`'s
+2. *Items 4 and 5 — decisions and post-render mutation.* Item 4's **gate
+   decision** half is now closed: `abicheck.policy.gate_decision.
+   gate_decision_for_result(result, severity_config)` is the one call site
+   that turns a `DiffResult` + optional `SeverityConfig` into a
+   `GateDecision`, and `sarif._severity_gate_properties`, `html_report`'s
+   gate card, `reporter._build_severity_json` (all four of its call sites),
+   `cli_scan_baseline.py`'s severity-scheme scan summary, and
+   `cli_compare_release.py`'s per-library gating buckets all read the
+   already-computed value instead of independently importing
+   `severity.compute_gate_decision` and reassembling its arguments
+   (`result.changes`/`result.policy`/`result._effective_kind_sets()`/
+   `result.policy_file`) themselves. `frontends`-classified callers
+   (`cli_scan_baseline.py`, `cli_compare_release.py`) reach it through
+   `workflows.gate`'s existing re-export facade rather than importing
+   `policy` directly, matching that facade's own stated purpose.
+   `tests/test_gate_decision_shared.py` is the property test D9 asks for:
+   it sweeps several finding combinations across four severity
+   configurations and asserts JSON's `severity` block, SARIF's
+   `properties.severityGate`, and HTML's CI-gate card all equal the one
+   `GateDecision` `gate_decision_for_result` returns — a test that fails if
+   any renderer could ever compute its own, independently-drifting answer,
+   not merely a golden-output pin. One related call site is deliberately
+   **not** folded in: `cli_helpers_compare.py`'s scoped-gate categorization
+   (`--used-by`/`--required-symbol`) computes `compute_gate_decision` over a
+   *scoped* subset of changes, not `result.changes` — a genuinely different
+   decision, not an instance of the same one, so forcing it through
+   `gate_decision_for_result`'s unfiltered-changes contract would be the
+   wrong abstraction rather than closing a gap.
+
+   The **per-finding verdict** half of item 4 remains open:
+   `junit_report`/`html_report`/`reporter_markdown` each still resolve a
+   per-change verdict through `effective_verdict_for_change`/
+   `DiffResult._effective_verdict_for_change` at their own call sites
+   (`junit_report.py` alone calls it independently from both `_is_failure`
+   and `_failure_type` for the same change). Unlike the gate decision, this
+   is not a single value with one shape: it is resolved once per `Change`,
+   already threads a caller-precomputed `kind_sets` through several of
+   these call sites specifically to avoid rebuilding *that* per finding, and
+   sits directly upstream of `DiffResult`'s own public `breaking`/
+   `source_breaks`/`compatible`/`risk` properties — which this ADR has
+   already ruled out moving, as a breaking change to the documented public
+   Python API (see above). Consolidating it correctly needs a real design
+   decision (a per-change decision cache keyed off `Change` identity, most
+   plausibly on `DiffResult` itself, given `Change` is not hashable) that
+   affects heavily-reviewed, scar-tissue-dense logic in three format
+   modules at once; attempting it as a drive-by inside this gate-decision
+   slice would risk exactly the "wrong abstraction, forced through" failure
+   mode this ADR warns against elsewhere. It remains its own follow-up
+   slice.
+
+   Item 5 (post-render mutation) is untouched by this slice, for the
+   original reason: `cli_compare_fold.py`'s
    `_fold_scoped_compat_into_text`/`_fold_suppression_audit_into_text`/
    `_fold_use_case_impact_into_text` and `cli_compare_helpers.
-   _fold_evidence_depth_into_json` are exactly the "post-render mutation"
-   item 5 names: they re-parse rendered JSON (or append to rendered
-   Markdown) to add facts the workflow result should have carried in the
-   first place. Both are behavior-visible changes across every format at
-   once, so neither belongs in a slice whose parity argument is
-   byte-identical output.
+   _fold_evidence_depth_into_json` re-parse rendered JSON (or append to
+   rendered Markdown) to add facts the workflow result should have carried
+   in the first place. That is a behavior-visible change across every
+   format at once, so it does not belong in a slice whose parity argument
+   is byte-identical output.
 
 **The `compare -> policy` blocker this section previously recorded is
 closed**, and how it was re-measured is worth keeping: the earlier note

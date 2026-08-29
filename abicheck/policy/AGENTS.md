@@ -52,6 +52,12 @@ or a CLI flag directly is in the wrong layer.
 - `contract_coverage_exit.py` — ADR-049 Phase 7's contract-coverage exit
   contribution. Moved from `abicheck/contract_coverage_exit.py`; same shim
   treatment.
+- `gate_decision.py` — ADR-061 Phase 2's `gate_decision_for_result`: the one
+  call site that turns a `DiffResult` + optional `SeverityConfig` into a
+  `GateDecision`, so `reporter.py`/`sarif.py`/`html_report.py` each call one
+  shared function instead of independently re-assembling
+  `compute_gate_decision`'s arguments from the result. New module, not a
+  moved one — no flat shim exists or is needed.
 
 ## Conventions
 
