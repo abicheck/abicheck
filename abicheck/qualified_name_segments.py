@@ -590,9 +590,20 @@ def _walk_rewrite_strings(value: object, rewrite: _Callable[[str], str]) -> obje
     carrier keyed on the raw ``:line:col`` spelling this whole function
     exists to remove, i.e. path/line-tainted identity next to a normalized
     one. Only ``init=True`` fields can be handed to ``replace``; a changed
-    ``init=False`` field on a frozen dataclass is unreachable by
-    construction and left as-is rather than silently dropped from a
-    half-applied rebuild.
+    ``init=False`` field on a frozen dataclass is instead applied via
+    ``object.__setattr__`` -- the same escape hatch a frozen dataclass's
+    own ``__post_init__`` uses to set a derived field, and the established
+    convention elsewhere in this codebase for the identical need (see
+    ``compatibility_evaluation_config.py``) -- applied AFTER ``replace``
+    rebuilds the ``init=True`` fields, onto the freshly-rebuilt object
+    rather than the original, so a rewrite touching both kinds of field in
+    one dataclass lands on the object this function actually returns
+    (Codex review, PR #943): a reachable ``init=False`` field can itself
+    hold a closure marker (e.g. one populated from a rewritten ``init=True``
+    field inside ``__post_init__``), and silently discarding its rewrite
+    would leave that field pointing at stale, path/line-tainted content
+    even though the dataclass it belongs to was otherwise correctly
+    rebuilt.
     """
     if isinstance(value, str):
         return rewrite(value)
@@ -600,6 +611,7 @@ def _walk_rewrite_strings(value: object, rewrite: _Callable[[str], str]) -> obje
         params = getattr(value, "__dataclass_params__", None)
         is_frozen = bool(getattr(params, "frozen", False))
         replacements: dict[str, object] = {}
+        frozen_field_updates: dict[str, object] = {}
         for f in _dataclasses.fields(value):
             if f.name in _PAYLOAD_FIELD_EXCLUSIONS:
                 continue
@@ -611,8 +623,12 @@ def _walk_rewrite_strings(value: object, rewrite: _Callable[[str], str]) -> obje
                 setattr(value, f.name, new)
             elif f.init:
                 replacements[f.name] = new
+            else:
+                frozen_field_updates[f.name] = new
         if replacements:
-            return _dataclasses.replace(value, **replacements)
+            value = _dataclasses.replace(value, **replacements)
+        for name, new in frozen_field_updates.items():
+            object.__setattr__(value, name, new)
         return value
     if isinstance(value, list):
         for i, item in enumerate(value):

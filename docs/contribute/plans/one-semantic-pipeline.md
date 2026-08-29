@@ -8067,6 +8067,48 @@ file's helpers share -- this module tests entity-identity logic, not
 host-linker-convention accidents, so every live-clang probe here now
 compiles for one fixed target regardless of which OS runs the test.
 
+**Correction (2026-08-29, same day, Codex review on PR #943): the
+dependent-rename canonicalization from two corrections ago missed a
+sibling case -- a non-type parameter dependent on a preceding
+template-TEMPLATE parameter, not just a type parameter.**
+`template<template<class> class TT, TT<int>* N> void f();` renamed to
+`UU` are the identical declaration, but a bare reference to a
+template-template parameter is not itself legal C++ (confirmed by direct
+compilation: it fails to parse) -- a real non-type parameter dependent on
+one always names a concrete instantiation like `TT<int>`, and clang's own
+`qualType` for `N` spells that instantiation using the template-template
+parameter's own name literally (`"TT<int> *"`/`"UU<int> *"`). The
+canonicalization loop tracked only `TemplateTypeParmDecl` names, so a
+template-template parameter's own name was never added to the
+substitution map -- reproduced end to end: the two renamed revisions
+produced unequal `EntityId`s. Fixed by appending a `TemplateTemplateParmDecl`'s
+own name to the same substitution list its type-parameter siblings use,
+so either kind at a given declaration position resolves to the identical
+`"type-param-N"` token. Regression test in `tests/test_entity_id_carrier.py`
+(`test_live_clang_template_template_param_rename_does_not_change_identity`).
+
+**Correction (2026-08-29, same day, CodeRabbit review on PR #943): an
+unrelated, pre-existing primitive bug in `qualified_name_segments.
+_walk_rewrite_strings` (the general closure-marker rewrite walk, not
+this phase's own discriminator work) -- a changed `init=False` field on
+a frozen dataclass was computed but then silently discarded.** Only
+`init=True` fields can be handed to `dataclasses.replace`, so a changed
+`init=False` field's rewritten value was dropped on the floor -- most
+visibly when it was the ONLY field on that dataclass to change (`replace`
+is then never even called, since the `replacements` dict stays empty),
+leaving that field holding stale, un-normalized `:line:col` content
+indefinitely. Fixed by applying a changed `init=False` field via
+`object.__setattr__` -- the same escape hatch a frozen dataclass's own
+`__post_init__` uses to set a derived field, and an established
+convention elsewhere in this codebase (`compatibility_evaluation_
+config.py`) for the identical need -- applied AFTER `replace` rebuilds
+the `init=True` fields, so a rewrite touching both kinds of field in one
+dataclass lands on the object this function actually returns. Regression
+test in `tests/test_lambda_identity_ordinal.py`
+(`test_a_changed_non_init_field_is_itself_rewritten`), confirmed to fail
+against the pre-fix walk (verified via `git stash` on just the source
+file).
+
 ---
 
 ### Phase 3 — public surface as a graph query over one evidence graph (D5)

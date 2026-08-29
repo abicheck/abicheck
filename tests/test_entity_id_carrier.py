@@ -185,6 +185,34 @@ _TEMPLATE_TEMPLATE_PARAM_NESTED_ARITY_COLLISION = textwrap.dedent(
     """
 )
 
+#: A pure RENAME of a template-TEMPLATE parameter, not a collision to
+#: close but the opposite hazard (the sibling of
+#: ``_TEMPLATE_PARAM_DEPENDENT_RENAME_A``/``B`` above, this time for a
+#: dependent reference to a template-template parameter rather than a
+#: type parameter): ``template<template<class> class TT, TT<int>* N>``
+#: and the same declaration with ``TT`` renamed to ``UU`` are the
+#: identical declaration, but clang's own ``qualType`` for ``N`` spells
+#: the dependent type literally as the template-template parameter's own
+#: name (``"TT<int> *"``/``"UU<int> *"``) -- confirmed by direct
+#: compilation, including that a bare (uninstantiated) reference to a
+#: template-template parameter is not itself legal C++, so a real
+#: non-type parameter dependent on one always names a concrete
+#: instantiation like ``TT<int>`` (Codex review, PR #943).
+_TEMPLATE_TEMPLATE_PARAM_DEPENDENT_RENAME_A = textwrap.dedent(
+    """
+    namespace ns {
+    template <template<class> class TT, TT<int>* N> void f();
+    }
+    """
+)
+_TEMPLATE_TEMPLATE_PARAM_DEPENDENT_RENAME_B = textwrap.dedent(
+    """
+    namespace ns {
+    template <template<class> class UU, UU<int>* N> void f();
+    }
+    """
+)
+
 #: The two halves of the collision this phase exists to close: a record
 #: nested in a **record** and the same bare names nested in a **namespace**.
 #: Both render to the identical ``"B::C"`` qualified name, which is exactly
@@ -773,6 +801,39 @@ def test_live_clang_template_template_param_nested_arity_discriminates(
     assert pair[0].entity_id != pair[1].entity_id
     kinds = {fn.entity_id.extra[-1] for fn in pair if fn.entity_id is not None}
     assert kinds == {"template(type)", "template(type,type)"}
+
+
+@pytest.mark.integration
+@pytest.mark.skipif(shutil.which("clang") is None, reason="clang not installed")
+def test_live_clang_template_template_param_rename_does_not_change_identity(
+    tmp_path: Path,
+) -> None:
+    """A pure RENAME of a template-TEMPLATE parameter must NOT change
+    the ``EntityId``.
+
+    ``template<template<class> class TT, TT<int>* N> void f();`` and the
+    same declaration with ``TT`` renamed to ``UU`` are the identical
+    declaration, but clang's own ``qualType`` for ``N`` spells the
+    dependent type literally as the template-template parameter's own
+    name (``"TT<int> *"``/``"UU<int> *"``) -- reproduced end to end
+    before this fix: the two revisions produced unequal ``EntityId``s
+    (Codex review, PR #943).
+    """
+    a = _one(
+        _clang_parser(
+            _TEMPLATE_TEMPLATE_PARAM_DEPENDENT_RENAME_A, tmp_path, "ttdepa"
+        ).parse_functions(),
+        name="f",
+    )
+    b = _one(
+        _clang_parser(
+            _TEMPLATE_TEMPLATE_PARAM_DEPENDENT_RENAME_B, tmp_path, "ttdepb"
+        ).parse_functions(),
+        name="f",
+    )
+    assert a.entity_id is not None and b.entity_id is not None
+    assert a.entity_id == b.entity_id
+    assert a.entity_id.extra[-1] == "nontype:type-param-0<int> *"
 
 
 # ── hybrid dumper: entity_id must stay in sync across post-parse rewrites ────

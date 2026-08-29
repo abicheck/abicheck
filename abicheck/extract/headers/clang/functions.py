@@ -244,19 +244,30 @@ def function_template_param_kinds(
     the pattern's own body in ``inner`` order.
 
     A non-type parameter's own declared type is canonicalized against the
-    PRECEDING type parameters' names before joining into a ``"nontype:"``
-    entry: ``template<class T, T N> void f();`` and ``template<class U, U
-    N> void f();`` are the identical declaration under a pure parameter
-    rename, but clang's own ``qualType`` for ``N`` spells the dependent
-    type literally as ``"T"``/``"U"`` (confirmed by direct compilation),
-    which would otherwise fingerprint a non-semantic rename as two
-    different overloads (Codex review, PR #943, on the second version of
-    this function). Each earlier ``TemplateTypeParmDecl``'s own name is
-    replaced by its 0-based position (``"type-param-0"``, ...) via a
-    whole-word substitution -- safe against one name being a substring of
-    another (``T`` inside ``TT``) since a word-boundary match never fires
-    mid-identifier, and against a compound spelling like ``"T *"``, which
-    still resolves to ``"type-param-0 *"``.
+    PRECEDING type-like (type OR template-template) parameters' names
+    before joining into a ``"nontype:"`` entry: ``template<class T, T N>
+    void f();`` and ``template<class U, U N> void f();`` are the
+    identical declaration under a pure parameter rename, but clang's own
+    ``qualType`` for ``N`` spells the dependent type literally as
+    ``"T"``/``"U"`` (confirmed by direct compilation), which would
+    otherwise fingerprint a non-semantic rename as two different
+    overloads (Codex review, PR #943, on the second version of this
+    function). A template-TEMPLATE parameter's own name is canonicalized
+    the identical way: ``template<template<class> class TT, TT<int>* N>
+    void f();`` renamed to ``UU`` produces ``qualType`` ``"TT<int> *"``/
+    ``"UU<int> *"`` (confirmed by direct compilation -- a real,
+    syntactically valid non-type parameter can depend on a preceding
+    template-template parameter's own instantiation, unlike a bare
+    reference to the template-template parameter itself, which is not
+    legal C++), so the same fix applies to it too (Codex review, PR #943,
+    on the fourth version of this function). Each earlier type-like
+    parameter's own name -- whichever of the two kinds it is -- is
+    replaced by its 0-based position among ALL type-like parameters seen
+    so far (``"type-param-0"``, ...) via a whole-word substitution --
+    safe against one name being a substring of another (``T`` inside
+    ``TT``) since a word-boundary match never fires mid-identifier, and
+    against a compound spelling like ``"T *"``, which still resolves to
+    ``"type-param-0 *"``.
 
     A ``TemplateTemplateParmDecl``'s own entry additionally encodes ITS
     parameter list recursively, e.g. ``"template(type,type)"`` for
@@ -299,6 +310,7 @@ def _template_param_kinds_from_node(node: dict[str, Any]) -> tuple[str, ...]:
         elif kind == "TemplateTemplateParmDecl":
             nested = _template_param_kinds_from_node(child)
             kinds.append(f"template{pack}({','.join(nested)})")
+            type_param_names.append(str(child.get("name") or ""))
         elif kind == "NonTypeTemplateParmDecl":
             type_obj = child.get("type")
             spelling = (
