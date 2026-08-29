@@ -55,11 +55,6 @@ done
 
 # shellcheck source=castxml_pin.env
 source "${REPO_ROOT}/scripts/castxml_pin.env"
-# CASTXML_BUILD is "castxml=<version>=<conda build string>"; the version
-# field is the only part `castxml --version` can actually report back, so
-# it's the only part a castxml found via PATH (not this script's own
-# pinned install) can be checked against below.
-IFS='=' read -r _ CASTXML_EXPECTED_VERSION _ <<<"${CASTXML_BUILD}"
 
 # Pinned micromamba release (mamba-org/micromamba-releases), verified
 # against its published sha256 before it is ever executed -- this
@@ -122,24 +117,33 @@ if ! CASTXML_FULL_OUTPUT="$(castxml --version 2>&1)"; then
   echo "${CASTXML_FULL_OUTPUT}" >&2
   exit 1
 fi
-CASTXML_VERSION_LINE="${CASTXML_FULL_OUTPUT%%$'\n'*}"
-echo "==> castxml version: ${CASTXML_VERSION_LINE}"
-case "${CASTXML_VERSION_LINE}" in
-*" ${CASTXML_EXPECTED_VERSION}"*) ;; # matches the pin -- silent
-*)
-  # A castxml resolved via the "already on PATH" branch above is never
-  # installed or version-checked by this script -- only its own pinned
-  # cache prefix is. `castxml --version` can't report the exact conda
-  # build string either way, only the CastXML version number, so this is
-  # the one signal available to warn (not fail: a deliberately different
-  # system/pixi castxml is this branch's whole point) that what's
-  # actually on PATH diverges from the build this repo has reviewed
-  # (CASTXML_BUILD above).
-  echo "WARNING: castxml reports version '${CASTXML_VERSION_LINE}', not the" >&2
-  echo "pinned ${CASTXML_EXPECTED_VERSION} (${CASTXML_BUILD}) -- header dumps and" >&2
-  echo "integration tests may see different results than CI/pixi.lock." >&2
-  ;;
-esac
+echo "==> castxml version: ${CASTXML_FULL_OUTPUT%%$'\n'*}"
+
+# Defer to abicheck's own authoritative CastXML/bundled-Clang policy gate
+# (abicheck/castxml_policy.py's evaluate_castxml_version) instead of a
+# hand-rolled version-substring check: it's the exact same check abicheck
+# itself runs before an authoritative L2 scan (a CastXML version range
+# *and* a minimum bundled-Clang major -- a version-only check would pass
+# e.g. CastXML 0.7.0 linked against Clang 17, which this policy still
+# rejects), so "setup succeeded" and "abicheck will actually accept this
+# toolchain" can't silently disagree. Importable here because pip install
+# above already put abicheck on this interpreter's path. A castxml
+# resolved via the "already on PATH" branch above is the one case this
+# can actually trip -- this script's own pinned conda-forge install is
+# always in range. Warn, don't fail: a deliberately different system/pixi
+# castxml on PATH is that branch's whole reason to exist.
+if ! python3 -c '
+import sys
+from abicheck.castxml_policy import evaluate_castxml_version
+
+result = evaluate_castxml_version(sys.stdin.read())
+if not result.supported:
+    sys.stderr.write(result.message() + "\n")
+    sys.exit(1)
+' <<<"${CASTXML_FULL_OUTPUT}"; then
+  echo "WARNING: the castxml on PATH does not meet abicheck's own CastXML/Clang" >&2
+  echo "policy (above) -- an authoritative L2 scan will reject it at run time." >&2
+fi
 echo "==> setup_dev_env.sh complete."
 
 # Callers that need castxml on PATH beyond this process (e.g. a
