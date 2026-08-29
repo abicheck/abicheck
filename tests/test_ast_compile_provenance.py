@@ -93,6 +93,31 @@ class TestExtractExplicitStdValue:
     def test_double_dash_long_form(self):
         assert _extract_explicit_std_value(None, ("--std=c++14",)) == "c++14"
 
+    def test_gcc_option_tokens_std_wins_over_gcc_options_std(self):
+        """Codex review, fresh evidence: the real command line built by
+        dumper_ast_config.py's builders emits gcc_options first, then
+        gcc_option_tokens -- so gcc_option_tokens' own -std= must win,
+        matching real "last flag wins" compiler semantics, regardless of
+        which field it lives in."""
+        assert _extract_explicit_std_value("-std=c++17", ("-std=c++20",)) == "c++20"
+
+    def test_last_wins_holds_even_when_both_stds_land_in_gcc_option_tokens(self):
+        """The same precedence must hold when a caller has already merged
+        what would have been the `gcc_options` string's own content into
+        `gcc_option_tokens` itself (ADR-063 Phase 1's legacy compile-db
+        token fold, `workflows/artifact/resolve.py`'s
+        `_fold_legacy_compile_db_tokens`, does exactly this) -- the old
+        `_combined_option_tokens`-plus-first-match implementation depended
+        on the two fields staying separate to get this right; a caller that
+        has already collapsed them into one ordered tuple broke that
+        assumption and silently recorded the superseded value instead."""
+        assert (
+            _extract_explicit_std_value(
+                None, ("-DLEGACY=1", "-std=c++17", "-std=c++20")
+            )
+            == "c++20"
+        )
+
 
 class TestResolveStandardProvenance:
     def test_explicit_std_wins_even_with_cpp20_headers(self, tmp_path: Path):
