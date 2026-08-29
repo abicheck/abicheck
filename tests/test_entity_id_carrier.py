@@ -234,6 +234,43 @@ _TEMPLATE_PARAM_ORDINARY_PARAM_RENAME_B = textwrap.dedent(
     """
 )
 
+#: A pure RENAME of a non-type parameter referenced by a LATER non-type
+#: parameter's own dependent type (``decltype(N)``) -- confirmed by
+#: direct compilation (Codex review, PR #943).
+_TEMPLATE_NONTYPE_PARAM_DEPENDENT_RENAME_A = textwrap.dedent(
+    """
+    namespace ns {
+    template <int N, decltype(N) K> void f();
+    }
+    """
+)
+_TEMPLATE_NONTYPE_PARAM_DEPENDENT_RENAME_B = textwrap.dedent(
+    """
+    namespace ns {
+    template <int M, decltype(M) K> void f();
+    }
+    """
+)
+
+#: A rename of an unused parameter named ``type`` -- a legal identifier
+#: that collides with the generated ``"type-param-N"`` marker prefix. A
+#: naive sequential substitution pass rewrites a PRIOR parameter's own
+#: marker, corrupting an unrelated discriminator (Codex review, PR #943).
+_TEMPLATE_PARAM_RENAME_COLLIDES_WITH_GENERATED_MARKER_A = textwrap.dedent(
+    """
+    namespace ns {
+    template <class T, class type, T x> void f();
+    }
+    """
+)
+_TEMPLATE_PARAM_RENAME_COLLIDES_WITH_GENERATED_MARKER_B = textwrap.dedent(
+    """
+    namespace ns {
+    template <class T, class U, T x> void f();
+    }
+    """
+)
+
 #: The two halves of the collision this phase exists to close: a record
 #: nested in a **record** and the same bare names nested in a **namespace**.
 #: Both render to the identical ``"B::C"`` qualified name, which is exactly
@@ -934,6 +971,58 @@ def test_live_clang_template_param_rename_in_ordinary_param_does_not_change_iden
     assert a.entity_id is not None and b.entity_id is not None
     assert a.entity_id == b.entity_id
     assert a.entity_id.extra[1] == "type-param-0"
+
+
+@pytest.mark.integration
+@pytest.mark.skipif(shutil.which("clang") is None, reason="clang not installed")
+def test_live_clang_nontype_param_dependent_rename_does_not_change_identity(
+    tmp_path: Path,
+) -> None:
+    """A rename of a non-type parameter referenced by a LATER non-type
+    parameter's own dependent type must NOT change identity --
+    ``decltype(N)`` spells ``N``'s name literally, so a rename to ``M``
+    changes it too unless canonicalized (Codex review, PR #943)."""
+    a = _one(
+        _clang_parser(
+            _TEMPLATE_NONTYPE_PARAM_DEPENDENT_RENAME_A, tmp_path, "ntdepa"
+        ).parse_functions(),
+        name="f",
+    )
+    b = _one(
+        _clang_parser(
+            _TEMPLATE_NONTYPE_PARAM_DEPENDENT_RENAME_B, tmp_path, "ntdepb"
+        ).parse_functions(),
+        name="f",
+    )
+    assert a.entity_id is not None and b.entity_id is not None
+    assert a.entity_id == b.entity_id
+    assert a.entity_id.extra[-1] == "nontype:decltype(type-param-0)"
+
+
+@pytest.mark.integration
+@pytest.mark.skipif(shutil.which("clang") is None, reason="clang not installed")
+def test_live_clang_rename_of_param_named_type_does_not_corrupt_a_prior_marker(
+    tmp_path: Path,
+) -> None:
+    """Renaming an unused parameter named ``type`` must NOT corrupt an
+    unrelated parameter's marker -- a naive sequential substitution pass
+    rewrote a PRIOR parameter's own generated token (Codex review, PR
+    #943)."""
+    a = _one(
+        _clang_parser(
+            _TEMPLATE_PARAM_RENAME_COLLIDES_WITH_GENERATED_MARKER_A, tmp_path, "gena"
+        ).parse_functions(),
+        name="f",
+    )
+    b = _one(
+        _clang_parser(
+            _TEMPLATE_PARAM_RENAME_COLLIDES_WITH_GENERATED_MARKER_B, tmp_path, "genb"
+        ).parse_functions(),
+        name="f",
+    )
+    assert a.entity_id is not None and b.entity_id is not None
+    assert a.entity_id == b.entity_id
+    assert a.entity_id.extra[-1] == "nontype:type-param-0"
 
 
 # ── hybrid dumper: entity_id must stay in sync across post-parse rewrites ────

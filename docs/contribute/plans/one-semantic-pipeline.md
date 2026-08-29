@@ -8151,6 +8151,45 @@ identical union. Regression test in `tests/test_entity_id_carrier.py`
 confirmed to fail against the pre-fix override via `git stash` on just
 the source file.
 
+**Correction (2026-08-29, same day, Codex review on PR #943): two more
+sibling collisions in the SAME rename-canonicalization mechanism.**
+
+First: a non-type parameter's own NAME had never been added to the
+substitution list, so a later non-type parameter referencing an earlier
+one (``decltype(N)`` for a preceding ``int N``) was left uncanonicalized
+-- confirmed by direct compilation and reproduced end to end: renaming
+`N` to `M` changed the `EntityId`. Fixed by appending a non-type
+parameter's own name to the shared substitution list too, once its own
+spelling is canonicalized (so its name is visible to LATER parameters,
+never to itself).
+
+Second, and more fundamental: the sequential (one name, one `re.sub`
+call, applied to the progressively-mutated string) substitution scheme
+itself had a self-inflicted collision -- if an earlier name substitution
+produces `"type-param-0"`, and a LATER parameter happens to be named
+literally `type` (a legal, unremarkable C++ identifier that just happens
+to match this function's own generated marker's prefix), that later
+substitution's `\btype\b` pattern matches the `"type"` INSIDE the
+already-generated token, corrupting it into `"type-param-1-param-0"` --
+so renaming an entirely unrelated, unused parameter changed the
+`EntityId` too. Reproduced end to end
+(`template<class T, class type, T x>` vs. the unused second parameter
+renamed to `U`). Fixed by replacing the sequential per-name scheme with
+ONE combined-alternation regex pass: Python's `re.sub` resumes scanning
+immediately after each match in the ORIGINAL string, never inside what
+it just substituted, so this class of collision cannot occur regardless
+of what any parameter happens to be named. The helper (renamed
+`canonicalize_type_param_references`, already relocated to
+`model/identity.py` in the correction above) now builds one
+`name -> index` dict and one compiled alternation pattern per call,
+rather than looping `re.sub` once per name.
+
+Regression tests for both in `tests/test_entity_id_carrier.py`
+(`test_live_clang_nontype_param_dependent_rename_does_not_change_identity`,
+`test_live_clang_rename_of_param_named_type_does_not_corrupt_a_prior_marker`),
+both confirmed to fail against the pre-fix (sequential, non-type-name-
+excluding) canonicalization via `git stash` on just the source files.
+
 ---
 
 ### Phase 3 — public surface as a graph query over one evidence graph (D5)

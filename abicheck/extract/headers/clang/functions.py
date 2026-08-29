@@ -263,10 +263,18 @@ def function_template_param_kinds(
     template-template parameter's own instantiation, unlike a bare
     reference to the template-template parameter itself, which is not
     legal C++), so the same fix applies to it too (Codex review, PR #943,
-    on the fourth version of this function). Each earlier type-like
-    parameter's own name -- whichever of the two kinds it is -- is
-    replaced by its 0-based position among ALL type-like parameters seen
-    so far (``"type-param-0"``, ...) via a whole-word substitution --
+    on the fourth version of this function). A NON-TYPE parameter's own
+    NAME also joins the same substitution list, once its own spelling is
+    canonicalized: a later parameter's dependent spelling can reference an
+    earlier non-type parameter too (``decltype(N)`` for a preceding
+    ``int N``, confirmed by direct compilation -- Codex review, PR #943,
+    on the fifth version of this function). Each earlier parameter's own
+    name -- whichever of the three kinds it is -- is replaced by its
+    0-based position among all parameters seen so far
+    (``"type-param-0"``, ...), via :func:`~abicheck.model.identity.
+    canonicalize_type_param_references`'s single combined-alternation
+    pass (see that function's own docstring for why a naive per-name
+    sequential pass has its own self-inflicted collision this avoids) --
     safe against one name being a substring of another (``T`` inside
     ``TT``) since a word-boundary match never fires mid-identifier, and
     against a compound spelling like ``"T *"``, which still resolves to
@@ -294,8 +302,9 @@ def function_template_param_kinds(
 def function_template_type_param_names(
     function_template_decl: dict[str, Any],
 ) -> tuple[str, ...]:
-    """The TOP-LEVEL type/template-template parameter names of a
-    ``FunctionTemplateDecl``'s own parameter list, in declaration order.
+    """The TOP-LEVEL parameter names (all three kinds -- type,
+    template-template, and non-type) of a ``FunctionTemplateDecl``'s own
+    parameter list, in declaration order.
 
     Companion to :func:`function_template_param_kinds`, sharing its exact
     walk (:func:`_template_param_kinds_from_node`) -- but for a different
@@ -303,8 +312,9 @@ def function_template_type_param_names(
     identical dependent-rename hazard a non-type template parameter's own
     declared type already gets canonicalized against (see that function's
     own docstring), since an ordinary parameter can equally be typed
-    ``T``/``U`` after a pure template-parameter rename (Codex review, PR
-    #943). Only the top-level names are returned -- never a nested
+    ``T``/``U``, or even ``decltype(N)`` for a non-type parameter ``N``,
+    after a pure template-parameter rename (Codex review, PR #943). Only
+    the top-level names are returned -- never a nested
     ``TemplateTemplateParmDecl``'s own inner ones, which are invisible
     outside that parameter's own signature and so can never appear in the
     enclosing function's ordinary parameter list.
@@ -348,6 +358,11 @@ def _template_param_kinds_from_node(
                 spelling, tuple(type_param_names)
             )
             kinds.append(f"nontype{pack}:{spelling}")
+            # A LATER parameter's own dependent spelling can reference this
+            # one's name too (e.g. `decltype(N)` for a preceding non-type
+            # parameter `N`), so it joins the same substitution list --
+            # confirmed by direct compilation (Codex review, PR #943).
+            type_param_names.append(str(child.get("name") or ""))
         else:
             break
     return tuple(kinds), tuple(type_param_names)

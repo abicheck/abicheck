@@ -444,15 +444,38 @@ def canonicalize_type_param_references(
     Shared by :func:`entity_id_for_function` (for the ordinary parameter
     list) and ``extract.headers.clang.functions.
     function_template_param_kinds`` (for a non-type template parameter's
-    own declared type) -- both are the identical hazard, just for two
-    different sources of a "type spelling that can reference a template
-    parameter" (Codex review, PR #943).
+    own declared type, referencing either a preceding type/template-
+    template parameter OR a preceding NON-TYPE one, e.g.
+    ``decltype(N)`` -- Codex review, PR #943, on a later round: both are
+    the identical hazard, just for two different sources of a "type
+    spelling that can reference a template parameter").
+
+    All substitutions happen in ONE combined regex pass, rather than one
+    ``re.sub`` call per name applied sequentially to the same string --
+    confirmed by direct compilation that the sequential form has its own
+    self-inflicted collision: if an EARLIER name (e.g. ``T``) is replaced
+    first, producing ``"type-param-0"``, and a LATER parameter happens to
+    be named literally ``type`` (a legal, unremarkable C++ identifier),
+    that later substitution's own ``\\btype\\b`` pattern matches the
+    ``"type"`` INSIDE the already-generated ``"type-param-0"`` token,
+    corrupting it into ``"type-param-1-param-0"`` -- and since this
+    corruption only fires when a later name happens to collide with the
+    generated marker's own prefix, renaming an entirely unrelated,
+    unused parameter changed the ``EntityId`` too (Codex review, PR #943,
+    on the version of this function that had that sequential form). A
+    single combined-alternation pass never re-scans replacement text at
+    all (Python's ``re.sub`` resumes scanning immediately after each
+    match, in the ORIGINAL string, never inside what it just substituted),
+    so this class of collision cannot occur regardless of what any
+    parameter happens to be named.
     """
-    for index, name in enumerate(type_param_names):
-        if not name:
-            continue
-        spelling = re.sub(rf"\b{re.escape(name)}\b", f"type-param-{index}", spelling)
-    return spelling
+    index_by_name = {name: index for index, name in enumerate(type_param_names) if name}
+    if not index_by_name:
+        return spelling
+    pattern = re.compile(
+        r"\b(" + "|".join(re.escape(name) for name in index_by_name) + r")\b"
+    )
+    return pattern.sub(lambda m: f"type-param-{index_by_name[m.group(1)]}", spelling)
 
 
 def entity_id_for_function(
