@@ -110,6 +110,21 @@ _UNINSTANTIATED_TEMPLATES = textwrap.dedent(
     """
 )
 
+#: Two uninstantiated function templates sharing scope, leaf name, and an
+#: identical (empty) ordinary parameter list, differing only in
+#: template-parameter KIND (type vs. non-type). Confirmed by direct
+#: compilation that clang emits no ``mangledName`` for either, so nothing but
+#: the template-parameter-kind discriminator tells them apart (Codex review,
+#: PR #943).
+_TEMPLATE_PARAM_KIND_COLLISION = textwrap.dedent(
+    """
+    namespace ns {
+    template <class T> void f();
+    template <int N> void f();
+    }
+    """
+)
+
 #: The two halves of the collision this phase exists to close: a record
 #: nested in a **record** and the same bare names nested in a **namespace**.
 #: Both render to the identical ``"B::C"`` qualified name, which is exactly
@@ -566,6 +581,34 @@ def test_live_clang_real_c_linkage_still_takes_the_extern_c_branch(
     c_var = _one(parser.parse_variables(), name="c_var")
     assert c_fn.entity_id is not None and c_fn.entity_id.extra == ("extern_c",)
     assert c_var.entity_id is not None and c_var.entity_id.extra == ("extern_c",)
+
+
+@pytest.mark.integration
+@pytest.mark.skipif(shutil.which("clang") is None, reason="clang not installed")
+def test_live_clang_template_param_kind_discriminates_overloaded_templates(
+    tmp_path: Path,
+) -> None:
+    """Two uninstantiated templates differing only by parameter KIND.
+
+    ``template<class T> void f()`` and ``template<int N> void f()`` share
+    scope, leaf name, and an identical (empty) ordinary parameter list, and
+    neither gets a real ``mangledName`` from clang (uninstantiated templates
+    aren't mangled) -- so after the extern-C fix above, the ``sig`` fallback
+    tuple still had nothing to distinguish them by, and they collapsed onto
+    one ``EntityId`` (reproduced end to end before this fix: `distinct: 1` of
+    2 declarations; Codex review, PR #943).
+    """
+    parser = _clang_parser(_TEMPLATE_PARAM_KIND_COLLISION, tmp_path, "tmplkind")
+    pair = [fn for fn in parser.parse_functions() if fn.name == "f"]
+    assert len(pair) == 2
+    assert all(fn.entity_id is not None for fn in pair)
+    for fn in pair:
+        assert fn.entity_id is not None
+        assert fn.entity_id.extra[0] == "sig", fn.entity_id
+        assert fn.entity_id.extra[-2] == "tmpl", fn.entity_id
+    assert pair[0].entity_id != pair[1].entity_id
+    kinds = {fn.entity_id.extra[-1] for fn in pair if fn.entity_id is not None}
+    assert kinds == {"type", "nontype:int"}
 
 
 # ── hybrid dumper: entity_id must stay in sync across post-parse rewrites ────

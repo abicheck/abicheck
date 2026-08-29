@@ -77,6 +77,7 @@ class _Decl:
         "node",
         "scope",
         "scope_path",
+        "template_param_kinds",
     )
 
     def __init__(
@@ -89,6 +90,7 @@ class _Decl:
         in_friend: bool = False,
         in_template: bool = False,
         scope_path: ScopePath = (),
+        template_param_kinds: tuple[str, ...] = (),
     ) -> None:
         self.node = node
         self.scope = scope
@@ -119,6 +121,14 @@ class _Decl:
         # but flagged so a name-based match (e.g. DWARF layout backfill)
         # never treats it as an ordinary concrete type (Codex review).
         self.in_template = in_template
+        # The immediate enclosing FunctionTemplateDecl's own parameter-KIND
+        # signature (ADR-063 Phase 2; see
+        # extract.headers.clang.templates.function_template_param_kinds),
+        # or () for a non-template declaration. Set only on the direct
+        # FunctionDecl/CXXMethodDecl child of a FunctionTemplateDecl -- never
+        # inherited further down -- since only that one declaration needs a
+        # discriminator no ordinary parameter list or mangled name provides.
+        self.template_param_kinds = template_param_kinds
 
 
 def is_builtin_file(file: str) -> bool:

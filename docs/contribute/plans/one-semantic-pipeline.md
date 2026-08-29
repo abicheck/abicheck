@@ -7938,6 +7938,37 @@ consumer migrations, now unblocked: `diff_filtering.py`'s
 `type_reachability.py`'s eleven-plus-case ambiguity machinery, with their
 string-based helpers deleted in the same PR per the Acceptance criteria.
 
+**Correction (2026-08-29, same day, Codex review on PR #943): the
+over-broad-extern-C fix above closed one collision but left a sibling one
+open -- two uninstantiated function/method templates that share scope, leaf
+name, and an identical (possibly empty) ordinary parameter list, differing
+ONLY in template-parameter *kind*.** `template<class T> void f();` and
+`template<int N> void f();` are two distinct, legally-overloaded
+declarations (real C++ disambiguates them via explicit template arguments,
+e.g. `f<5>()`), but neither is `is_extern_c` (both are genuinely mangled by
+any real instantiation) nor do they differ in `param_types`/qualifiers --
+so `entity_id_for_function`'s `"sig"` fallback tuple, built only from the
+ordinary parameter list, still collapsed them (confirmed by direct
+compilation: `distinct: 1` of 2 declarations before this fix). Fixed by
+extracting each `FunctionTemplateDecl`'s own per-position
+parameter-KIND signature (`function_template_param_kinds` in
+`extract/headers/clang/functions.py` -- `"type"`/`"template"`/
+`"nontype:<type-spelling>"` per position, stopping at the first
+non-parameter child) at parse time (threaded through `_Decl`/`_walk`/
+`_categorize` in `dumper_clang.py`, set only on the direct `FunctionDecl`
+child of a `FunctionTemplateDecl`, never inherited further down) and
+folding it into `entity_id_for_function`'s new `template_param_kinds`
+parameter -- tagged (`"tmpl", *template_param_kinds`) and appended only
+when non-empty, so an ordinary non-template function's `extra` tuple is
+unchanged byte-for-byte. castxml needs no counterpart: it does not emit
+uninstantiated function/method template declarations as parseable
+snapshot entries at all (a different, pre-existing asymmetry between the
+two backends, not one this fix introduces or has to reconcile). Regression
+test in `tests/test_entity_id_carrier.py`
+(`test_live_clang_template_param_kind_discriminates_overloaded_templates`),
+confirmed to fail (collapsing to one `EntityId`) against the pre-fix
+`entity_id_for_function`.
+
 ---
 
 ### Phase 3 — public surface as a graph query over one evidence graph (D5)

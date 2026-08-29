@@ -435,6 +435,7 @@ def entity_id_for_function(
     is_volatile: bool = False,
     ref_qualifier: str = "",
     is_variadic: bool | None = None,
+    template_param_kinds: tuple[str, ...] = (),
 ) -> EntityId:
     """``EntityId`` for a function.
 
@@ -498,9 +499,23 @@ def entity_id_for_function(
     through to the signature-based fallback the way a caller relying on
     ``mangled_name`` alone would. When *mangled_name* is genuinely present,
     it wins outright and *is_extern_c*/*param_types*/*is_const*/
-    *is_volatile*/*ref_qualifier*/*is_variadic* are all ignored -- there is
-    nothing left for a signature-free tag to add once the mangled name
-    already disambiguates the declaration.
+    *is_volatile*/*ref_qualifier*/*is_variadic*/*template_param_kinds* are
+    all ignored -- there is nothing left for a signature-free tag to add
+    once the mangled name already disambiguates the declaration.
+
+    *template_param_kinds* is the per-position parameter-KIND signature
+    (``"type"``, ``"template"``, ``"nontype:<type-spelling>"``) of an
+    uninstantiated function/method template's own template parameter list,
+    in declaration order -- e.g. ``("type",)`` for
+    ``template<class T> void f()`` vs. ``("nontype:int",)`` for
+    ``template<int N> void f()``. Two such templates can share scope, leaf
+    name, and an identical (possibly empty) ordinary parameter list while
+    still being genuinely distinct overloads, and neither gets a real
+    mangled name from an AST-only producer (uninstantiated templates aren't
+    mangled), so without this the *sig* fallback tuple would collide them
+    (Codex review, PR #943). Folded in only when non-empty and tagged
+    (``"tmpl", *template_param_kinds``) so an ordinary, non-template
+    function's ``extra`` tuple is unchanged byte-for-byte.
 
     Both the *mangled* and *is_extern_c* branches' resulting
     ``EntityId.scope`` are always ``()``, regardless of *scope*.
@@ -576,6 +591,7 @@ def entity_id_for_function(
             f"volatile:{is_volatile}",
             ref_qualifier,
             str(is_variadic),
+            *(("tmpl", *template_param_kinds) if template_param_kinds else ()),
         )
         resolved_scope = _scope_path(scope)
         resolved_leaf_name = leaf_name

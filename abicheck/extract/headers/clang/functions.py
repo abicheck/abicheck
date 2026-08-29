@@ -203,6 +203,56 @@ def _param_has_default(param: dict[str, Any]) -> bool:
     )
 
 
+def function_template_param_kinds(
+    function_template_decl: dict[str, Any],
+) -> tuple[str, ...]:
+    """The per-position parameter-KIND signature of a ``FunctionTemplateDecl``'s
+    own (uninstantiated) template parameter list, in declaration order.
+
+    Distinguishes ``template<class T> void f();`` from ``template<int N>
+    void f();`` -- two distinct, legally-overloaded declarations (real C++:
+    explicit-template-argument calls like ``f<5>()`` disambiguate them) that
+    otherwise share the identical scope, leaf name, and (empty) ordinary
+    parameter list. Neither ever gets a real ``mangledName`` from clang
+    (confirmed by direct compilation: the key is absent entirely, not merely
+    empty, for an uninstantiated template), so ``entity_id_for_function``'s
+    "sig" signature-fallback tuple -- built only from ordinary
+    `param_types`/qualifiers -- could not tell them apart either, collapsing
+    two real declarations onto one ``EntityId`` (Codex review, PR #943).
+
+    Each entry is ``"type"`` (a ``TemplateTypeParmDecl``), ``"template"`` (a
+    ``TemplateTemplateParmDecl``), or ``"nontype:<type-spelling>"`` (a
+    ``NonTypeTemplateParmDecl``, keyed on its own declared type so
+    ``template<int N>`` and ``template<bool B>`` stay distinguishable too --
+    deliberately NOT restricted to
+    ``templates._SAFE_NONTYPE_INT_TYPES`` the way
+    ``templates._template_param_kinds`` is, since this function only needs a
+    stable per-parse discriminator string, never a real evaluated argument
+    value the way a specialization match does). Stops at the first
+    non-parameter child, mirroring ``templates._template_param_kinds``'s
+    identical convention for a ``ClassTemplateDecl``'s own list -- the
+    parameter list always precedes the pattern's own body in ``inner`` order.
+    """
+    kinds: list[str] = []
+    for child in function_template_decl.get("inner", []) or []:
+        if not isinstance(child, dict):
+            continue
+        kind = child.get("kind")
+        if kind == "TemplateTypeParmDecl":
+            kinds.append("type")
+        elif kind == "TemplateTemplateParmDecl":
+            kinds.append("template")
+        elif kind == "NonTypeTemplateParmDecl":
+            type_obj = child.get("type")
+            spelling = (
+                str(type_obj.get("qualType", "")) if isinstance(type_obj, dict) else ""
+            )
+            kinds.append(f"nontype:{spelling}")
+        else:
+            break
+    return tuple(kinds)
+
+
 def parse_functions(
     functions: list[_Decl],
     *,
@@ -420,7 +470,9 @@ def parse_functions(
                     entry.scope_path,
                     leaf_name,
                     mangled_name=(
-                        raw_mangled if (raw_mangled is not None and not is_extern_c) else None
+                        raw_mangled
+                        if (raw_mangled is not None and not is_extern_c)
+                        else None
                     ),
                     is_extern_c=is_extern_c,
                     param_types=tuple(p.type for p in params),
@@ -428,6 +480,13 @@ def parse_functions(
                     is_volatile=is_volatile,
                     ref_qualifier=ref_qualifier,
                     is_variadic=is_variadic,
+                    # Distinguishes two uninstantiated function templates
+                    # overloaded only by template-parameter KIND (e.g.
+                    # `template<class T> void f()` vs. `template<int N> void
+                    # f()`) -- both share scope/leaf_name/param_types/
+                    # mangled_name=None, so without this the "sig" fallback
+                    # tuple would collide them too (Codex review, PR #943).
+                    template_param_kinds=entry.template_param_kinds,
                 ),
             )
         )
