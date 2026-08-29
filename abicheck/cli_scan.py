@@ -840,8 +840,7 @@ def _run_artifact_set(
     No old side (no ``--against``): discovers the declared set, scans each
     member (the same always-on tier + pinned level every single-binary scan
     runs), and adds one cross-library bundle-audit pass over the whole set.
-    ``--dry-run`` previews it -- see
-    :func:`~abicheck.frontends.cli.artifact_set_dry_run.render_artifact_set_dry_run`.
+    ``--dry-run`` previews it -- see ``frontends.cli.artifact_set_dry_run``.
     """
     from .bundle import ArtifactSetError, discover_artifact_set
     from .service import Budget, ScanRequest
@@ -930,19 +929,22 @@ def _run_artifact_set(
     if dry_run:
         from .dry_run import emit_dry_run
         from .frontends.cli.artifact_set_dry_run import render_artifact_set_dry_run
-        emit_dry_run(render_artifact_set_dry_run(req, discovered=discovered, explicit=explicit, header_backend=header_backend, fmt=fmt))
+        from .service_scan import estimate_artifact_set
+        try:
+            totals, notes = estimate_artifact_set(req, list(discovered.values()))
+        except ValueError as exc:
+            # A malformed --risk-rules profile fails the real run the same way
+            # (below, via _load_risk_rules_for_service) -- fail loud here too.
+            raise click.UsageError(str(exc)) from exc
+        emit_dry_run(render_artifact_set_dry_run(
+            req, discovered=discovered, explicit=explicit,
+            header_backend=header_backend, fmt=fmt, totals=totals, notes=notes))
     try:
         # run_scan_set()'s own audit_bundle() call can raise ArtifactSetError
-        # too (e.g. an ambiguous duplicate-SONAME set, only detectable after
-        # parsing every member's ELF metadata) -- propagated rather than
-        # degraded to a "successful" bundle_incomplete result (Codex review).
-        #
-        # ValueError: --risk-rules loading is deliberately click-free in
-        # service_scan.py (also reachable from the Python API) and converts
-        # the single-binary path's click.ClickException into ValueError
-        # instead; this service-layer call translates it back to a usage
-        # error itself, or a malformed --risk-rules file would surface as an
-        # unhandled traceback and exit 1 instead (Codex review).
+        # too (ambiguous duplicate-SONAME set) -- propagated, not degraded to
+        # a "successful" bundle_incomplete result. ValueError: malformed
+        # --risk-rules (service_scan.py is click-free) translated to a usage
+        # error here rather than an unhandled traceback and exit 1.
         result = run_scan_set(req)
     except (ArtifactSetError, ValueError) as exc:
         raise click.UsageError(str(exc)) from exc

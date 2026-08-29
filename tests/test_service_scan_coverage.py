@@ -889,11 +889,11 @@ def test_run_scan_set_subprocess_propagates_unexpected_error_as_runtime_error(
 
 class TestResolveMemberScanLevel:
     """``_resolve_member_scan_level`` is the one resolution
-    ``_run_scan_one_member`` and ``workflows.scan_estimate.
-    estimate_artifact_set`` (``scan --artifact-set --dry-run``) both consume
-    (Codex review, ``workflows/AGENTS.md``'s "dry-run and execution must
-    consume the same resolved plan" rule) -- test it directly rather than
-    only through those two callers.
+    ``_run_scan_one_member`` and ``estimate_artifact_set`` (``scan
+    --artifact-set --dry-run``) both consume (Codex review, ``workflows/
+    AGENTS.md``'s "dry-run and execution must consume the same resolved
+    plan" rule) -- test it directly rather than only through those two
+    callers.
     """
 
     def test_raises_on_malformed_risk_rules(self, tmp_path: Path) -> None:

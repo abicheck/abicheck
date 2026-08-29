@@ -19,17 +19,21 @@ PR 5 / G35's own "dry-run/estimator" gap).
 Lives under :mod:`abicheck.frontends.cli` (ADR-061: CLI-owned rendering is
 ``frontends/`` responsibility) rather than in :mod:`abicheck.cli_scan` (the
 ``no_growth``-debt-tracked, near-2000-line-cap module its single-binary
-sibling ``render_scan_dry_run`` lives in) or :mod:`abicheck.cli_scan_helpers`
-(which deliberately never imports :mod:`abicheck.service_scan` -- that would
-close an import cycle back through ``service_scan -> scan_engine ->
-cli_scan_helpers``, see that module's own docstring).
+sibling ``render_scan_dry_run`` lives in).
 
-The cost projection itself lives in
-:func:`abicheck.workflows.scan_estimate.estimate_artifact_set`, not here:
-``frontends/`` may import only ``abicheck.model``, ``abicheck.workflows``,
-and ``abicheck.report`` (``abicheck/frontends/AGENTS.md``'s "Permitted
-imports") -- it must not reach into the flat ``abicheck.service_scan``
-implementation module directly the way that estimation needs to.
+Takes the per-layer cost ``totals``/``notes`` as already-computed data
+(``cli_scan._run_artifact_set`` calls ``service_scan.estimate_artifact_set``
+and passes the result in) rather than computing them itself: a module in
+between ``cli_scan`` and ``service_scan`` that imported the latter directly
+or transitively (via a ``workflows`` seam) would join the large, already-
+accepted CLI-registration import cycle those two modules both already sit
+in (``cli -> cli_scan -> ... -> service_scan -> scan_engine ->
+cli_scan_baseline -> cli_buildsource -> cli``) -- growing that cycle's
+membership, which the AI-readiness ``import-cycle-growth`` gate rejects.
+Taking already-computed data instead means this module needs no import of
+``service_scan``/``workflows`` at all, which also happens to be the purest
+reading of ``frontends/AGENTS.md``'s "Permitted imports" (it translates a
+result into a process response; it does not compute the result itself).
 """
 
 from __future__ import annotations
@@ -45,19 +49,17 @@ def render_artifact_set_dry_run(
     explicit: bool,
     header_backend: str,
     fmt: str,
+    totals: dict[str, tuple[int, float]],
+    notes: list[str],
 ) -> Any:
-    """Build the report. Takes the already-assembled set-wide
-    ``ScanRequest`` (``req``) the real run would submit to
-    ``service_scan.run_scan_set``, rather than its fields spelled out one by
-    one, to keep the call site short; ``discovered``/``explicit``/
-    ``header_backend``/``fmt`` aren't ``ScanRequest`` fields, so those four
-    stay explicit. ``discovered``/``explicit`` are already resolved and
-    ELF-validated by the time this runs (``cli_scan._resolve_artifact_set_
-    paths`` + ``bundle.discover_artifact_set``), the same as the real run --
-    a malformed member fails loud before any dry-run text is printed.
+    """Build the report from *req* (the set-wide ``ScanRequest``) and the
+    already-computed ``(totals, notes)`` (``service_scan.
+    estimate_artifact_set``'s return value). ``discovered``/``explicit`` are
+    already resolved and ELF-validated by the time this runs
+    (``cli_scan._resolve_artifact_set_paths`` + ``bundle.
+    discover_artifact_set``), the same as the real run.
     """
     from ...dry_run import DryRunResult, tool_status
-    from ...workflows.scan_estimate import estimate_artifact_set
 
     result = DryRunResult(command="scan")
     members = sorted(discovered.items())
@@ -74,6 +76,16 @@ def render_artifact_set_dry_run(
         "Resolved depth and source scope",
         f"requested depth: {req.depth or '(auto per member)'}",
         f"changed paths ({req.changed_src}): {len(req.changed_paths)}",
+        *(
+            f"{layer}: {tus} TU(s) total, ~{seconds:.2f}s -- summed over "
+            f"{len(members)} member(s)"
+            for layer, (tus, seconds) in totals.items()
+        ),
+        f"projected total: {sum(seconds for _tus, seconds in totals.values()):.2f}s",
+        "note: each member is estimated independently and summed; "
+        "'bundle_audit' prices the one cross-library pass run once over "
+        "the whole set (ELF/dynsym-only, no compiler invocation)",
+        *notes,
     )
     result.add("Headers and compile context", f"ast-frontend: {header_backend}")
     result.add(
@@ -96,34 +108,4 @@ def render_artifact_set_dry_run(
         "audit-only, no old side)",
     )
     result.add("Output and exit-code behavior", f"format: {fmt}")
-    member_paths = [path for _name, path in members]
-    try:
-        totals, notes = estimate_artifact_set(req, member_paths)
-    except ValueError as exc:
-        # A malformed --risk-rules profile: the real run fails the same way
-        # (service_scan._load_risk_rules_for_service raises ValueError,
-        # which _run_artifact_set converts to this same click.UsageError) --
-        # a dry-run must fail loud here too, not silently report a
-        # successful preview for a run that would actually error out
-        # (Codex review).
-        import click
-
-        raise click.UsageError(str(exc)) from exc
-    except Exception as exc:  # pragma: no cover - best-effort probe
-        result.warn(f"could not project per-layer cost: {exc}")
-    else:
-        total_seconds = sum(seconds for _tus, seconds in totals.values())
-        result.add(
-            "Resolved depth and source scope",
-            *(
-                f"{layer}: {tus} TU(s) total, ~{seconds:.2f}s -- summed over "
-                f"{len(members)} member(s)"
-                for layer, (tus, seconds) in totals.items()
-            ),
-            f"projected total: {total_seconds:.2f}s",
-            "note: each member is estimated independently and summed; "
-            "'bundle_audit' prices the one cross-library pass run once over "
-            "the whole set (ELF/dynsym-only, no compiler invocation)",
-            *notes,
-        )
     return result
