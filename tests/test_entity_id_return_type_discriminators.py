@@ -637,38 +637,53 @@ def test_live_clang_relational_operator_in_template_argument_does_not_corrupt_br
     """A dependent return type containing a paren-wrapped relational
     operator inside a template argument list must not corrupt the
     bracket-depth tracking used to locate the real parameter list (or a
-    trailing return arrow): `template<class T> std::enable_if_t<(sizeof(T)
-    < 4), int> f(T);`'s `qualType` is `"std::enable_if_t<(sizeof(T) < 4),
-    int> (T)"` (confirmed by direct compilation) -- an earlier version of
-    the bracket-depth scan treated every `<`/`>` as a template bracket
+    trailing return arrow): `template<class T> enable_if_t<(sizeof(T) <
+    4), int> f(T);`'s `qualType` is `"enable_if_t<(sizeof(T) < 4), int>
+    (T)"` (confirmed by direct compilation) -- an earlier version of the
+    bracket-depth scan treated every `<`/`>` as a template bracket
     regardless of paren context, so the relational `<` (reached with
     bracket already 1 from `enable_if_t<`'s own opening) left the counter
     permanently stuck above zero, and the real trailing `(T)` was never
     recognized as a parameter list at all -- `return_type` retained the
-    whole `"std::enable_if_t<(sizeof(T) < 4), int> (T)"` verbatim instead
-    of stripping `(T)`, and additionally leaked a trailing `noexcept` on
-    an otherwise-identical sibling declaration, corrupting both
-    functions' identity (CodeRabbit review, PR #943, on a later round).
-    The identical corruption affected the trailing-return-type arrow
-    search when the relational operator appeared in a PARAMETER instead:
-    `auto f(std::enable_if_t<(sizeof(T) < 4), int>) -> T;`'s qualType
-    `"auto (std::enable_if_t<(sizeof(T) < 4), int>) -> T"` left the arrow
-    search unable to find the real trailing `-> T` at all, falling back
-    to the bare placeholder `"auto"`."""
-    s = "#include <type_traits>\n"
+    whole `"enable_if_t<(sizeof(T) < 4), int> (T)"` verbatim instead of
+    stripping `(T)`, and additionally leaked a trailing `noexcept` on an
+    otherwise-identical sibling declaration, corrupting both functions'
+    identity (CodeRabbit review, PR #943, on a later round). The
+    identical corruption affected the trailing-return-type arrow search
+    when the relational operator appeared in a PARAMETER instead: `auto
+    f(enable_if_t<(sizeof(T) < 4), int>) -> T;`'s qualType `"auto
+    (enable_if_t<(sizeof(T) < 4), int>) -> T"` left the arrow search
+    unable to find the real trailing `-> T` at all, falling back to the
+    bare placeholder `"auto"`.
+
+    A hand-rolled `enable_if`/`enable_if_t`, not `#include <type_traits>`,
+    supplies the relational-operator-in-parens shape: a cross-target
+    `--target=x86_64-unknown-linux-gnu` compile (this module's own
+    convention, for host-independent `mangledName` spellings) has no
+    guaranteed access to a full libstdc++/libc++ sysroot for that target
+    on every CI runner OS, confirmed by a real failure on this exact test
+    when it still used the system header (macOS CI: clang exited
+    non-zero resolving `<type_traits>` for the foreign target)."""
+    enable_if_prelude = (
+        "template<bool B, class T = void> struct enable_if {};"
+        " template<class T> struct enable_if<true, T> { using type = T; };"
+        " template<bool B, class T = void>"
+        " using enable_if_t = typename enable_if<B, T>::type;\n"
+    )
     f = _one(
         _clang_parser(
-            s + "template<class T> std::enable_if_t<(sizeof(T) < 4), int> f(T);",
+            enable_if_prelude
+            + "template<class T> enable_if_t<(sizeof(T) < 4), int> f(T);",
             tmp_path,
             "relopreturn",
         ).parse_functions(),
         name="f",
     )
-    assert f.return_type == "std::enable_if_t<(sizeof(T) < 4), int>"
+    assert f.return_type == "enable_if_t<(sizeof(T) < 4), int>"
 
     arrow = _one(
         _clang_parser(
-            s + "template<class T> auto g(std::enable_if_t<(sizeof(T) < 4), "
+            enable_if_prelude + "template<class T> auto g(enable_if_t<(sizeof(T) < 4), "
             "int>) -> T;",
             tmp_path,
             "relopparam",
