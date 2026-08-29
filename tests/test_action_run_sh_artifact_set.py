@@ -142,6 +142,19 @@ class TestScanArtifactSetForwarding:
         i = cmd.index("--artifact-set")
         assert cmd[i + 1] == "libs/"
 
+    def test_new_library_set_trims_directory_form_trailing_newline(self) -> None:
+        # CodeRabbit review: a YAML block-scalar directory value commonly
+        # carries a trailing newline even with no comma at all (e.g.
+        # "libs/\n"); the no-comma branch must trim it too, or the CLI
+        # treats it as a nonexistent explicit member instead of discovering
+        # "libs/".
+        cmd = _run_cmd(
+            {"INPUT_MODE": "scan", "INPUT_NEW_LIBRARY_SET": "libs/\n"}
+        )
+        assert cmd.count("--artifact-set") == 1
+        i = cmd.index("--artifact-set")
+        assert cmd[i + 1] == "libs/"
+
     def test_new_library_set_skips_blank_members(self) -> None:
         # A stray leading/trailing/double comma must not forward an empty
         # --artifact-set member (which the CLI now rejects outright).

@@ -156,6 +156,35 @@ class TestArtifactSetRepeatableOptionBranches:
         assert result.exit_code == 0, result.output
         assert "EVIDENCE_CONTRACT_ERROR" in result.output
 
+    def test_dry_run_rejects_ambiguous_duplicate_soname(
+        self, runner: CliRunner, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # Codex review: run_scan_set() rejects an ambiguous duplicate-
+        # DT_SONAME set up front (exit 64); the dry-run must fail the same
+        # way, not report a successful preview of a request that was always
+        # going to be rejected.
+        import abicheck.bundle as bundle_mod
+        from abicheck.bundle import ArtifactSetError
+
+        p1, p2 = tmp_path / "liba.so", tmp_path / "libb.so"
+        _write_elf_shared_object_stub(p1)
+        _write_elf_shared_object_stub(p2)
+
+        def _fake_check(libraries):
+            raise ArtifactSetError(
+                "--artifact-set has ambiguous duplicate SONAME provider(s): ..."
+            )
+
+        monkeypatch.setattr(
+            bundle_mod, "check_artifact_set_soname_collisions", _fake_check
+        )
+        result = runner.invoke(
+            main,
+            ["scan", "--artifact-set", str(p1), "--artifact-set", str(p2), "--dry-run"],
+        )
+        assert result.exit_code != 0
+        assert "ambiguous duplicate SONAME" in result.output
+
     def test_dry_run_does_not_warn_when_sources_are_given(
         self, runner: CliRunner, tmp_path: Path
     ) -> None:

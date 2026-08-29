@@ -1457,7 +1457,18 @@ elif [[ "$MODE" == "scan" ]]; then
         CMD+=(--artifact-set "$_scan_artifact_set_member")
       done
     else
-      CMD+=(--artifact-set "$SCAN_ARTIFACT_SET")
+      # A YAML block-scalar directory value commonly carries a trailing
+      # newline even with no comma at all (e.g. "libs/\n") -- trim it the
+      # same way the per-member branch above does, so it isn't forwarded as
+      # a literal, nonexistent path (CodeRabbit review; the old Python
+      # parser stripped every part unconditionally).
+      _scan_artifact_set_dir="${SCAN_ARTIFACT_SET#"${SCAN_ARTIFACT_SET%%[![:space:]]*}"}"
+      _scan_artifact_set_dir="${_scan_artifact_set_dir%"${_scan_artifact_set_dir##*[![:space:]]}"}"
+      if [[ -z "$_scan_artifact_set_dir" ]]; then
+        echo "::error::new-library-set must not be empty." >&2
+        exit 1
+      fi
+      CMD+=(--artifact-set "$_scan_artifact_set_dir")
     fi
     add_single_flag "--bundle-system-providers" "${INPUT_BUNDLE_SYSTEM_PROVIDERS:-}"
   else

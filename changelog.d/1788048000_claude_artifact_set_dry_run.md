@@ -25,4 +25,8 @@
   preview also warns when a pinned `--depth` has no `--sources`/
   `--build-info`/`--build-config` at all -- a combination the real run
   fails with `EVIDENCE_CONTRACT_ERROR` (exit 1) rather than running as
-  priced.
+  priced -- and now rejects an ambiguous duplicate-`DT_SONAME` set the
+  same way `run_scan_set` does, rather than previewing a request that
+  was always going to be rejected. The Action's single-directory
+  `new-library-set` form (no comma) also trims a trailing newline now,
+  matching the multi-member form.

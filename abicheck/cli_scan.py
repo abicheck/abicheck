@@ -835,12 +835,11 @@ def _run_artifact_set(
     compiler_prefix: str | None = None,
     compiler_option_tokens: tuple[str, ...] = (),
 ) -> None:
-    """``scan --artifact-set`` (ADR-056/G34): audit a set of libraries as one.
-
-    No old side (no ``--against``): discovers the declared set, scans each
-    member (the same always-on tier + pinned level every single-binary scan
-    runs), and adds one cross-library bundle-audit pass over the whole set.
-    ``--dry-run`` previews it -- see ``frontends.cli.artifact_set_dry_run``.
+    """``scan --artifact-set`` (ADR-056/G34): audit a set of libraries as one,
+    no old side. Discovers the set, scans each member (the same tier +
+    pinned level a single-binary scan runs), adds one cross-library
+    bundle-audit pass. ``--dry-run`` previews it (``frontends.cli.
+    artifact_set_dry_run``).
     """
     from .bundle import ArtifactSetError, discover_artifact_set
     from .service import Budget, ScanRequest
@@ -927,24 +926,25 @@ def _run_artifact_set(
         build_targets=build_targets,
     )
     if dry_run:
+        from .bundle import check_artifact_set_soname_collisions
         from .dry_run import emit_dry_run
         from .frontends.cli.artifact_set_dry_run import render_artifact_set_dry_run
         from .service_scan import estimate_artifact_set
         try:
+            # run_scan_set() rejects an ambiguous duplicate-DT_SONAME set (exit
+            # 64) and a malformed --risk-rules profile the same way -- fail
+            # loud here too, not a "successful" preview of a rejected request.
+            check_artifact_set_soname_collisions(discovered)
             totals, notes = estimate_artifact_set(req, list(discovered.values()))
-        except ValueError as exc:
-            # A malformed --risk-rules profile fails the real run the same way
-            # (below, via _load_risk_rules_for_service) -- fail loud here too.
+        except (ArtifactSetError, ValueError) as exc:
             raise click.UsageError(str(exc)) from exc
         emit_dry_run(render_artifact_set_dry_run(
             req, discovered=discovered, explicit=explicit,
             header_backend=header_backend, fmt=fmt, totals=totals, notes=notes))
     try:
-        # run_scan_set()'s own audit_bundle() call can raise ArtifactSetError
-        # too (ambiguous duplicate-SONAME set) -- propagated, not degraded to
-        # a "successful" bundle_incomplete result. ValueError: malformed
-        # --risk-rules (service_scan.py is click-free) translated to a usage
-        # error here rather than an unhandled traceback and exit 1.
+        # ArtifactSetError (ambiguous duplicate-SONAME set) and ValueError
+        # (malformed --risk-rules, service_scan.py is click-free) both
+        # translate to a usage error here, not an unhandled traceback.
         result = run_scan_set(req)
     except (ArtifactSetError, ValueError) as exc:
         raise click.UsageError(str(exc)) from exc
