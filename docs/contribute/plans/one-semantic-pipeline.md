@@ -8362,6 +8362,36 @@ under it -- no test content or behavior changed by the split itself)
 (`test_live_clang_enclosing_class_template_param_rename_does_not_change_identity`),
 confirmed to fail pre-fix via `git stash` on just the source files.
 
+**Known gap raised (2026-08-29, same day, Codex review on PR #943, NOT
+fixed): an out-of-line member (function or static data member) template
+definition gets a different `EntityId` scope than its in-class
+declaration, colliding one entity into two.** Confirmed by direct
+compilation that clang emits two `FunctionTemplateDecl` nodes for
+`struct A { template<class T> void f(T); }; template<class T> void
+A::f(T) {}` -- one lexically nested inside `A`, one at the enclosing
+namespace's own lexical level carrying a `parentDeclContextId` pointing
+back at `A`'s node id, clang's own signal for the out-of-line
+definition's real semantic owner. `_walk` computes `scope`/`scope_path`
+purely from lexical nesting, with no `parentDeclContextId` handling
+anywhere in this codebase, so the two nodes get `scope=()` and
+`scope=(Record("A"),)` respectively for what is one entity;
+`parse_variables` has the analogous gap for an out-of-line class-template
+static data member. Unlike every other correction in this phase (each a
+small, local addition to one already-threaded parameter), this needs a
+NEW general-purpose facility: a typed, `ScopePath`-valued sibling of the
+existing `dumper_clang_expr._index_decl_id_qualified_names` (which
+already indexes every decl id to a flat qualified-name STRING for a
+different consumer -- a flat string cannot be losslessly converted back
+into a typed `ScopePath`, exactly the ambiguity `ScopePath` exists to
+prevent), threaded through both `parse_functions` and `parse_variables`,
+with further edge cases (an out-of-line member of a nested class, of a
+class-template specialization, and whether castxml has the identical
+gap) needing their own verification before landing. Recorded as a known
+gap in `docs/contribute/known-gaps.md` rather than attempted as a
+narrow, risky patch under this PR's own scope; the corresponding review
+thread was left open by design, the same as the `requires`-clause gap
+above.
+
 ---
 
 ### Phase 3 — public surface as a graph query over one evidence graph (D5)
