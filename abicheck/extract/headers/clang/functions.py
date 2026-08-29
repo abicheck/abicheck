@@ -220,34 +220,45 @@ def function_template_param_kinds(
     `param_types`/qualifiers -- could not tell them apart either, collapsing
     two real declarations onto one ``EntityId`` (Codex review, PR #943).
 
-    Each entry is ``"type"`` (a ``TemplateTypeParmDecl``), ``"template"`` (a
-    ``TemplateTemplateParmDecl``), or ``"nontype:<type-spelling>"`` (a
+    Each entry is ``"type"``/``"type..."`` (a ``TemplateTypeParmDecl``),
+    ``"template"``/``"template..."`` (a ``TemplateTemplateParmDecl``), or
+    ``"nontype:<type-spelling>"``/``"nontype...:<type-spelling>"`` (a
     ``NonTypeTemplateParmDecl``, keyed on its own declared type so
     ``template<int N>`` and ``template<bool B>`` stay distinguishable too --
     deliberately NOT restricted to
     ``templates._SAFE_NONTYPE_INT_TYPES`` the way
     ``templates._template_param_kinds`` is, since this function only needs a
     stable per-parse discriminator string, never a real evaluated argument
-    value the way a specialization match does). Stops at the first
-    non-parameter child, mirroring ``templates._template_param_kinds``'s
-    identical convention for a ``ClassTemplateDecl``'s own list -- the
-    parameter list always precedes the pattern's own body in ``inner`` order.
+    value the way a specialization match does). The trailing ``"..."``
+    reflects the node's own ``isParameterPack`` flag (confirmed by direct
+    compilation: clang sets ``isParameterPack: true`` on all three parameter
+    node kinds for ``template<class... T>``/``template<int... N>``/
+    ``template<template<class> class... TT>``, and omits the key entirely
+    otherwise) -- without it, ``template<class T> void f();`` and
+    ``template<class... T> void f();`` are two more legal overloads that
+    share every other discriminator this function produces and would
+    otherwise still collide (Codex review, PR #943, on the first version of
+    this function). Stops at the first non-parameter child, mirroring
+    ``templates._template_param_kinds``'s identical convention for a
+    ``ClassTemplateDecl``'s own list -- the parameter list always precedes
+    the pattern's own body in ``inner`` order.
     """
     kinds: list[str] = []
     for child in function_template_decl.get("inner", []) or []:
         if not isinstance(child, dict):
             continue
         kind = child.get("kind")
+        pack = "..." if child.get("isParameterPack") else ""
         if kind == "TemplateTypeParmDecl":
-            kinds.append("type")
+            kinds.append(f"type{pack}")
         elif kind == "TemplateTemplateParmDecl":
-            kinds.append("template")
+            kinds.append(f"template{pack}")
         elif kind == "NonTypeTemplateParmDecl":
             type_obj = child.get("type")
             spelling = (
                 str(type_obj.get("qualType", "")) if isinstance(type_obj, dict) else ""
             )
-            kinds.append(f"nontype:{spelling}")
+            kinds.append(f"nontype{pack}:{spelling}")
         else:
             break
     return tuple(kinds)

@@ -125,6 +125,25 @@ _TEMPLATE_PARAM_KIND_COLLISION = textwrap.dedent(
     """
 )
 
+#: Two more legal overloads sharing scope, leaf name, and an identical
+#: (empty) ordinary parameter list -- this time differing only in
+#: template-parameter *packness*, not kind: ``template<class T>`` vs.
+#: ``template<class... T>``. Confirmed by direct compilation that clang
+#: tags a pack parameter with ``isParameterPack: true`` (omitting the key
+#: entirely for a non-pack parameter of the same kind), and that the first
+#: version of ``function_template_param_kinds`` -- which only recorded
+#: ``"type"``/``"template"``/``"nontype:..."`` -- still reduced both to
+#: the identical ``("type",)``, missing this second collision entirely
+#: (Codex review, PR #943).
+_TEMPLATE_PARAM_PACKNESS_COLLISION = textwrap.dedent(
+    """
+    namespace ns {
+    template <class T> void f();
+    template <class... T> void f();
+    }
+    """
+)
+
 #: The two halves of the collision this phase exists to close: a record
 #: nested in a **record** and the same bare names nested in a **namespace**.
 #: Both render to the identical ``"B::C"`` qualified name, which is exactly
@@ -609,6 +628,34 @@ def test_live_clang_template_param_kind_discriminates_overloaded_templates(
     assert pair[0].entity_id != pair[1].entity_id
     kinds = {fn.entity_id.extra[-1] for fn in pair if fn.entity_id is not None}
     assert kinds == {"type", "nontype:int"}
+
+
+@pytest.mark.integration
+@pytest.mark.skipif(shutil.which("clang") is None, reason="clang not installed")
+def test_live_clang_template_param_packness_discriminates_overloaded_templates(
+    tmp_path: Path,
+) -> None:
+    """Two uninstantiated templates differing only by parameter PACKNESS.
+
+    ``template<class T> void f()`` and ``template<class... T> void f()`` are
+    two more legal overloads sharing scope, leaf name, and an identical
+    (empty) ordinary parameter list -- and the first version of the fix
+    above, which only recorded parameter *kind* (``"type"``), still reduced
+    both to the identical discriminator, missing this second collision
+    entirely (reproduced end to end before this fix: `distinct: 1` of 2
+    declarations; Codex review, PR #943).
+    """
+    parser = _clang_parser(_TEMPLATE_PARAM_PACKNESS_COLLISION, tmp_path, "tmplpack")
+    pair = [fn for fn in parser.parse_functions() if fn.name == "f"]
+    assert len(pair) == 2
+    assert all(fn.entity_id is not None for fn in pair)
+    for fn in pair:
+        assert fn.entity_id is not None
+        assert fn.entity_id.extra[0] == "sig", fn.entity_id
+        assert fn.entity_id.extra[-2] == "tmpl", fn.entity_id
+    assert pair[0].entity_id != pair[1].entity_id
+    kinds = {fn.entity_id.extra[-1] for fn in pair if fn.entity_id is not None}
+    assert kinds == {"type", "type..."}
 
 
 # ── hybrid dumper: entity_id must stay in sync across post-parse rewrites ────
