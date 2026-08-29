@@ -56,10 +56,38 @@ def _top_level_paren_spans(s: str) -> list[tuple[int, int]]:
     inside ``<...>``/``[...]`` or inside a quoted string/char literal.
     Shared by :func:`return_type` and its own spiral-declarator recursion
     below.
+
+    Bracket depth (for ``<...>``/``[...]``) and paren depth are tracked
+    TOGETHER, in one pass, rather than paren-tracking only kicking in once
+    bracket depth is already zero: a bare ``<``/``>`` is only ever counted
+    as a bracket while paren depth is ALSO zero (i.e. we are not currently
+    inside any already-open parenthesized group). This matters because a
+    non-type template argument containing a relational/shift operator
+    must, per the grammar, be wrapped in its own parens to disambiguate it
+    from the closing ``>`` -- so once such a paren group has opened, any
+    ``<``/``>`` inside it can only be that operator, never a genuine
+    template bracket, regardless of what unrelated ``<...>`` surrounds the
+    whole expression. Confirmed by direct compilation that clang spells
+    ``template<class T> std::enable_if_t<(sizeof(T) < 4), int> f(T);``'s
+    qualType as ``"std::enable_if_t<(sizeof(T) < 4), int> (T)"`` -- an
+    earlier version of this function tracked bracket depth only at the
+    OUTER scanning level (switching to a paren-only inner loop once a "("
+    was seen with bracket already 0, and never touching bracket state
+    again until that inner loop's own parens closed): the relational
+    ``<`` here was reached with bracket already at 1 (from
+    ``enable_if_t<``'s own opening), so it never entered that inner loop
+    at all and instead incremented the SAME bracket counter to 2, which
+    the qualType's one remaining ``>`` could only ever bring back down to
+    1 -- permanently stuck above zero, so the real trailing ``(T)`` was
+    never recognized as a top-level group at all (CodeRabbit review, PR
+    #943, on a later round).
     """
     literal_spans = quoted_literal_spans(s)
     spans: list[tuple[int, int]] = []
     bracket = 0
+    paren = 0
+    span_start = 0
+    is_top_level_span = False
     i = 0
     n = len(s)
     while i < n:
@@ -68,29 +96,26 @@ def _top_level_paren_spans(s: str) -> list[tuple[int, int]]:
             i = literal_end
             continue
         ch = s[i]
-        if ch in "<[":
-            bracket += 1
-            i += 1
-        elif ch in ">]":
-            bracket = max(0, bracket - 1)
-            i += 1
-        elif ch == "(" and bracket == 0:
-            depth = 1
-            j = i + 1
-            while j < n and depth:
-                inner_literal_end = _literal_end_at(literal_spans, j)
-                if inner_literal_end is not None:
-                    j = inner_literal_end
-                    continue
-                if s[j] == "(":
-                    depth += 1
-                elif s[j] == ")":
-                    depth -= 1
-                j += 1
-            spans.append((i, j))
-            i = j
-        else:
-            i += 1
+        if ch == "(":
+            if paren == 0:
+                span_start = i
+                is_top_level_span = bracket == 0
+            paren += 1
+        elif ch == ")":
+            if paren > 0:
+                paren -= 1
+                if paren == 0 and is_top_level_span:
+                    spans.append((span_start, i + 1))
+        elif paren == 0:
+            if ch in "<[":
+                bracket += 1
+            elif ch in ">]":
+                bracket = max(0, bracket - 1)
+        # else (paren > 0 and ch is one of <[>]): ignore entirely -- inside
+        # an already-open paren group, a bare </>/[/] cannot be a genuine
+        # template/array bracket relevant to closing THIS group, whose own
+        # balance only ever depends on matching "(" and ")".
+        i += 1
     return spans
 
 
@@ -106,6 +131,20 @@ def _find_top_level_arrow(s: str) -> int | None:
     unrelated ``->`` a nested type alias might spell (there is no
     realistic construct where a *second*, nested trailing-return arrow
     could appear at this same depth).
+
+    Bracket depth is only ever tracked while paren depth is ALSO zero, for
+    the identical reason :func:`_top_level_paren_spans` tracks the two
+    together -- confirmed by direct compilation that a parameter whose
+    dependent type contains a paren-wrapped relational operator, e.g.
+    ``auto f(std::enable_if_t<(sizeof(T) < 4), int>) -> T;``'s qualType
+    ``"auto (std::enable_if_t<(sizeof(T) < 4), int>) -> T"``, left the
+    OLD version's bracket counter stuck above zero for the rest of the
+    string (the relational ``<`` reached with bracket already 1 from
+    ``enable_if_t<``, with only one real ``>`` left to close it), so the
+    real trailing ``-> T`` was never found at all -- the identical
+    corruption CodeRabbit's review found in the sibling paren-span
+    scanner, here for the arrow search instead (PR #943, on a later
+    round).
     """
     literal_spans = quoted_literal_spans(s)
     bracket = 0
@@ -118,18 +157,17 @@ def _find_top_level_arrow(s: str) -> int | None:
             i = literal_end
             continue
         ch = s[i]
-        if ch in "<[":
-            bracket += 1
-        elif ch in ">]":
-            bracket = max(0, bracket - 1)
-        elif ch == "(":
+        if ch == "(":
             paren += 1
         elif ch == ")":
             paren = max(0, paren - 1)
-        elif (
-            ch == "-" and i + 1 < n and s[i + 1] == ">" and bracket == 0 and paren == 0
-        ):
-            return i + 2
+        elif paren == 0:
+            if ch in "<[":
+                bracket += 1
+            elif ch in ">]":
+                bracket = max(0, bracket - 1)
+            elif ch == "-" and i + 1 < n and s[i + 1] == ">" and bracket == 0:
+                return i + 2
         i += 1
     return None
 

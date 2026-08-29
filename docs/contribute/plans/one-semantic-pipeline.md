@@ -9019,6 +9019,51 @@ test in that module still passes unchanged. `mypy abicheck/` clean,
 `ruff check`/`ruff format --check` clean, `check_architecture.py` 0
 errors.
 
+**Correction (2026-08-29, same day, CodeRabbit review on PR #943): a
+relational/shift operator inside a paren-wrapped non-type template
+argument permanently corrupted the bracket-depth counter both scanners
+share.** Confirmed by direct compilation: `template<class T>
+std::enable_if_t<(sizeof(T) < 4), int> f(T);`'s qualType is
+`"std::enable_if_t<(sizeof(T) < 4), int> (T)"` -- the OLD
+`_top_level_paren_spans` tracked bracket depth only at the outer
+scanning level (switching to a paren-only inner loop once a "(" was
+seen with bracket already 0, never touching bracket state again until
+that inner loop's own parens closed): the relational `<` here was
+reached with bracket already at 1 (from `enable_if_t<`'s own opening),
+so it never entered that inner loop at all and instead incremented the
+SAME bracket counter to 2, which the qualType's one remaining `>` could
+only ever bring back down to 1 -- permanently stuck above zero, so the
+real trailing `(T)` was never recognized as a top-level group at all,
+and `return_type` retained the whole string verbatim (including a
+sibling declaration's trailing `noexcept`), corrupting both functions'
+identity. The identical corruption affected `_find_top_level_arrow` when
+the relational operator appeared in a PARAMETER instead: `auto
+f(std::enable_if_t<(sizeof(T) < 4), int>) -> T;`'s arrow was never
+found, falling back to the bare placeholder `"auto"`. Fixed by
+unifying bracket-depth and paren-depth tracking into ONE pass in both
+scanners: a bare `<`/`>` is only ever counted as a bracket while paren
+depth is ALSO zero (i.e. not currently inside any already-open
+parenthesized group) -- this matters because a non-type template
+argument containing a relational/shift operator must, per the grammar,
+be wrapped in its own parens to disambiguate it from the closing `>`,
+so once such a paren group has opened, any `<`/`>` inside it can only be
+that operator, never a genuine template bracket, regardless of what
+unrelated `<...>` surrounds the whole expression -- while a paren group
+already open for an UNRELATED reason (e.g. the relational operator's own
+wrapping parens) still correctly tracks its OWN "(" and ")" balance via
+paren depth, independent of bracket state, so it closes correctly and
+returns bracket-tracking control to the outer scan afterward. Regression
+test in the new `tests/test_entity_id_return_type_discriminators.py`
+(split out of `tests/test_entity_id_template_discriminators.py`, which
+had grown past the architecture gate's 1200-line test-file cap -- no
+test content changed by the split itself) --
+`test_live_clang_relational_operator_in_template_argument_does_not_corrupt_bracket_depth`,
+covering both the paren-scan and arrow-scan cases, confirmed to fail
+against the pre-fix code via `git stash` on just the source file and
+pass post-fix; every existing return-type discriminator test still
+passes unchanged. `mypy abicheck/` clean, `ruff check`/`ruff format
+--check` clean, `check_architecture.py` 0 errors.
+
 ---
 
 ### Phase 3 — public surface as a graph query over one evidence graph (D5)
