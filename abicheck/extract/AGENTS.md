@@ -45,22 +45,40 @@ the first entity module split out of each: `headers/castxml/context.py`
 (built-in-origin/source-location resolution), and `type_resolution.py`
 (the full type-graph walk — spelling, pointer depth, alignment, cv/restrict
 qualification); `headers/clang/context.py` (the `_Decl` categorized-node
-type plus built-in-file/qualtype/location/deprecation helpers). Every
+type, built-in-file/qualtype/location/deprecation helpers, the
+`access_level`/`visibility`/`qualified_name` node-inspection primitives
+promoted alongside `functions.py` below, and `RecordVtableIndex` — the
+lazily-built, memoized record/specialization/base-lookup/vtable indices
+that back clang's own recovery of a keyword-less virtual override). Every
 castxml function in these modules takes its `CastxmlParserContext` object
 as an explicit parameter rather than reading `self`; clang's `context.py`
 helpers are the same shape, but clang's `enums.py::parse_enums` takes the
 pre-categorized `_typedefs`/`_enums` decl lists and a constant-expression
 evaluator as separate explicit parameters instead of one wrapping context
-object — `_ClangAstParser._walk` already produces those lists once, so
-there is no per-parser state left for a context type to hold beyond what
-`context.py` itself covers. `dumper_castxml.py`/`dumper_clang.py`
-keep every migrated method/module-level name as a thin delegating wrapper,
-so every existing caller (including tests reading a parser's private
-attributes) is unaffected. castxml's own `functions.py` has since moved too
-(second entity module after `enums.py`); clang's `functions.py`, and
-`records.py`/`templates.py` on both backends, have not moved yet — see
-ADR-061's own "Phase 5" section for exactly what's still on the monolithic
-parser classes and why.
+object, and clang's `functions.py::parse_functions` similarly takes its
+categorized `_Decl` list plus a `default_value` evaluator, the exported-
+symbol sets, a precomputed `virtual_mangled_names` frozenset, and the
+target triple as separate explicit parameters (not a wrapping "parser"
+context) — `_ClangAstParser._walk`/`__init__` already produce or compute
+each of those once, so there is no per-parser state left for a *second*
+context type to hold beyond what `context.py` itself already covers.
+`dumper_castxml.py`/`dumper_clang.py` keep every migrated method/
+module-level name as a thin delegating wrapper, so every existing caller
+(including tests reading a parser's private attributes/methods directly,
+e.g. `p._visibility(...)`, `_ClangAstParser._symbol_candidates(...)`, or
+importing a module-level name like `_clang_exception_spec` straight off
+`dumper_clang`) is unaffected. Both backends' `functions.py` are now the
+second entity module split out (after `enums.py`): castxml's moved first;
+clang's followed once investigating its three pieces of extra instance
+state (`_virtual_mangled_names()`, `_id_index`, `_target_triple`) showed
+none of them needed a second, competing context shape — the vtable index
+fit `context.py`'s existing "read by more than one entity kind" charter
+(record-entity parsing needs the same index), the id-index evaluator took
+the same explicit-parameter treatment `enums.py` already established for
+its own excluded evaluator, and the target triple turned out to be a
+stateless pass-through. `records.py`/`templates.py` on both backends have
+not moved yet — see ADR-061's own "Phase 5" section for exactly what's
+still on the monolithic parser classes and why.
 
 ## Rules that are easy to get wrong
 

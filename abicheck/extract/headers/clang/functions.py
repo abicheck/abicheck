@@ -1,0 +1,355 @@
+# Copyright 2026 Nikolay Petrov
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+"""Function-entity parsing for the clang backend (ADR-061 D9).
+
+Second entity module split out of ``_ClangAstParser`` proper, after
+``enums.py``. Reads the ``_Decl`` list ``dumper_clang._ClangAstParser._walk``
+already categorized (no traversal of its own) and produces ``Function``
+model objects, using ``context.py`` for everything below the function-entity
+level — including ``RecordVtableIndex.virtual_mangled_names()``, needed here
+to recover a signature-matched virtual override that carries neither a
+``virtual`` nor an ``override`` keyword (clang's JSON gives no other signal
+for it; see that method's own docstring).
+
+``access_level``/``visibility``/``source_location``/``clang_deprecated_message``
+are NOT *implemented* here even though ``parse_functions`` needs all four:
+each is also read by variable/constant/typedef/record-field parsing (still
+in ``dumper_clang.py``), so per this package's own "shared across entity
+kinds" rule (see ``context.py``'s docstring) they live there instead — the
+role castxml's separate ``location.py`` plays, folded into ``context.py``
+here since clang's cross-entity node-inspection surface is small enough not
+to need its own module yet.
+
+``parse_functions`` takes its own default-value evaluator as an explicit
+parameter rather than importing one: the real evaluator
+(``dumper_clang._initializer_value``, itself built on ``dumper_clang._id_index``)
+depends on ``dumper_clang_expr.py``, which imports ``diff_cxx_rules``
+(classified ``compare``) for ``itanium_scope_components`` — importing either
+from here would give this ``extract``-classified package a real
+``extract -> compare`` edge, the identical reasoning ``enums.py`` already
+documents for its own ``evaluate_int`` parameter.
+"""
+
+from __future__ import annotations
+
+import re
+from collections.abc import Callable
+from typing import Any
+
+from ....dumper_clang_attributes import _clang_contract_attributes
+from ....dumper_clang_qualifiers import (
+    _OVERRIDE_ELIGIBLE_KINDS,
+    _clang_method_is_override,
+    _clang_param_is_restrict,
+    _clang_param_is_va_list,
+)
+from ....model import Fact, Function, Param
+from .context import (
+    _Decl,
+    access_level as _access_level,
+    clang_deprecated_message as _clang_deprecated_message,
+    is_builtin_file,
+    qualtype as _qualtype,
+    source_location as _source_location,
+    visibility as _visibility,
+)
+
+#: Evaluates a param's default-argument initializer to its snapshot value
+#: (or ``None`` for an unevaluable one). Matches
+#: ``dumper_clang._initializer_value``'s signature (bound to that parser's
+#: own ``_id_index`` memoized id-lookup) exactly.
+DefaultValueEvaluator = Callable[[dict[str, Any]], "str | None"]
+
+
+def _pointer_depth(type_str: str) -> int:
+    """Best-effort pointer nesting depth from a written type spelling.
+
+    castxml computes this from the type graph; on the clang path we count
+    top-level ``*`` tokens in the ``qualType`` spelling (``const char *`` → 1,
+    ``int **`` → 2), ignoring any inside template/array brackets. Stable for the
+    pointer-depth-change detector even though it is a spelling heuristic.
+    """
+    depth = 0
+    bracket = 0
+    for ch in type_str:
+        if ch in "<[(":
+            bracket += 1
+        elif ch in ">])":
+            bracket = max(0, bracket - 1)
+        elif ch == "*" and bracket == 0:
+            depth += 1
+    return depth
+
+
+def _return_type(qualtype: str) -> str:
+    """The return type spelling of a function ``qualType`` (``ret (params)…``).
+
+    Scans for the first ``(`` at bracket depth 0 — the start of the parameter
+    list — and returns everything before it. Function-pointer return types (rare)
+    degrade to the whole spelling; ordinary returns are exact.
+    """
+    bracket = 0
+    for idx, ch in enumerate(qualtype):
+        if ch in "<[":
+            bracket += 1
+        elif ch in ">]":
+            bracket = max(0, bracket - 1)
+        elif ch == "(" and bracket == 0:
+            return qualtype[:idx].strip()
+    return qualtype.strip()
+
+
+def _is_noexcept_qualifier(quals: str) -> bool:
+    """Whether a function's trailing qualifiers denote a *non-throwing* spec.
+
+    A bare ``noexcept`` (and ``noexcept(true)`` / ``noexcept(1)``) is
+    non-throwing; ``noexcept(false)`` / ``noexcept(0)`` is *throwing* and must
+    not be treated as ``noexcept`` — since C++17 the exception specification is
+    part of the function type, so conflating the two would hide a real ABI break
+    (CodeRabbit review). A dependent ``noexcept(expr)`` keeps its conservative
+    "non-throwing" reading (the spelling is all the header AST exposes).
+    """
+    m = re.search(r"\bnoexcept(?:\s*\(([^)]*)\))?", quals)
+    if m is None:
+        return False
+    expr = m.group(1)
+    if expr is None:
+        return True
+    return expr.strip() not in ("false", "0")
+
+
+def _clang_exception_spec(quals: str) -> str:
+    """The dynamic exception-specification spelling from trailing qualifiers.
+
+    ``""`` when the function has no ``throw(...)`` spec (noexcept is handled
+    separately by :func:`_is_noexcept_qualifier`).
+    """
+    m = re.search(r"\bthrow\s*\(([^)]*)\)", quals)
+    if m is None:
+        return ""
+    inner = ", ".join(p.strip() for p in m.group(1).split(",") if p.strip())
+    return f"throw({inner})"
+
+
+def _function_qualifiers(qualtype: str) -> str:
+    """The trailing cv/ref/exception qualifiers after a function's parameter list.
+
+    Returns the substring after the matching ``)`` of the top-level parameter
+    list — e.g. ``" const noexcept"`` for ``int (int) const noexcept`` — so the
+    caller can detect ``const``/``volatile``/``noexcept`` and the ref-qualifier.
+    """
+    bracket = 0
+    start = -1
+    for idx, ch in enumerate(qualtype):
+        if ch in "<[":
+            bracket += 1
+        elif ch in ">]":
+            bracket = max(0, bracket - 1)
+        elif ch == "(" and bracket == 0 and start == -1:
+            start = idx
+            bracket += 1
+            # consume the parameter-list parentheses
+            depth = 1
+            j = idx + 1
+            while j < len(qualtype) and depth:
+                if qualtype[j] == "(":
+                    depth += 1
+                elif qualtype[j] == ")":
+                    depth -= 1
+                j += 1
+            return qualtype[j:]
+    return ""
+
+
+def _param_has_default(param: dict[str, Any]) -> bool:
+    """Whether a ``ParmVarDecl`` carries a default argument.
+
+    clang flags it either with ``"init": "c"`` or by nesting the default-value
+    expression as the parameter's lone ``inner`` child.
+    """
+    if param.get("init"):
+        return True
+    return any(
+        isinstance(c, dict) and not str(c.get("kind", "")).endswith(("Attr", "Comment"))
+        for c in param.get("inner", []) or []
+    )
+
+
+def parse_functions(
+    functions: list[_Decl],
+    *,
+    exported_dynamic: set[str],
+    exported_static: set[str],
+    virtual_mangled_names: frozenset[str],
+    target_triple: str | None,
+    default_value: DefaultValueEvaluator,
+) -> list[Function]:
+    funcs: list[Function] = []
+    for entry in functions:
+        node = entry.node
+        if is_builtin_file(entry.file):
+            continue
+        name = str(node.get("name", ""))
+        if not name:
+            continue
+        if entry.scope and "<" in entry.scope[-1]:
+            # A method of a concrete class-template specialization
+            # (`A<int>::f`) -- unlike an ordinary member, whose name
+            # this backend deliberately leaves bare everywhere else
+            # (`owner_class_of` recovers its owner from the MANGLED
+            # name instead, which works fine there since a plain
+            # class's mangled scope component already IS its matching
+            # spelling). A specialization's own mangled scope component
+            # is the RAW, un-spelled Itanium template-argument encoding
+            # (`"AIiE"`, confirmed with a real clang build) -- which
+            # never matches `RecordType.bases`'s spelled form
+            # (`"A<int>"`, built from clang's own type printer) at all,
+            # so `owner_class_of`'s mangled fallback silently failed to
+            # recognize an inherited-slot override whose base is a
+            # template specialization, producing a false
+            # `TYPE_VTABLE_CHANGED` (Codex review, fresh evidence: found
+            # while verifying the base-lookup fix end to end -- the
+            # vtable itself now resolves correctly, but this SEPARATE
+            # owner-matching gap was still reachable once it did).
+            # Qualifying the name here lets `owner_class_of`'s
+            # PREFERRED (already-qualified-name) branch resolve the
+            # SAME spelling `RecordType.bases` records, sidestepping
+            # the mismatched mangled fallback entirely -- mirroring
+            # what DWARF already does for every member unconditionally
+            # (`owner_class_of`'s own docstring).
+            name = "::".join((*entry.scope, name))
+        qualtype = _qualtype(node)
+        mangled = str(node.get("mangledName", "")) or name
+        quals = _function_qualifiers(qualtype)
+        ret_type = _return_type(qualtype) or "void"
+        params = [
+            Param(
+                name=str(p.get("name", "")),
+                type=_qualtype(p),
+                pointer_depth=_pointer_depth(_qualtype(p)),
+                # G31 Phase C: castxml was the ONLY producer of this fact (`_resolve_cv_restrict`), so a castxml-vs-clang comparison of unchanged headers reported PARAM_RESTRICT_CHANGED for every restrict-qualified parameter -- the detector compares the two bools directly, with no producer gate to decline on (unlike `deprecated`/`is_scoped` before this phase).
+                is_restrict=_clang_param_is_restrict(p),
+                # G31 Phase C continued: same shape as `is_restrict` above -- castxml never populated this fact either. See `dumper_clang_qualifiers._clang_param_is_va_list`. is_va_list_fact is `partial`, not `present`: the check only covers x86-64 System V, and conservatively answers `False` -- not "confirmed no" -- on any other target (Codex review; target-scoping residual unchanged, per that function's own docstring).
+                is_va_list=(_iv := _clang_param_is_va_list(p)),
+                is_va_list_fact=Fact.partial(_iv),
+                # Preserve the actual default-argument value (so a changed
+                # default fires PARAM_DEFAULT_VALUE_CHANGED); fall back to a
+                # bare presence marker when the value can't be evaluated.
+                default=(default_value(p) or "default")
+                if _param_has_default(p)
+                else None,
+            )
+            for p in node.get("inner", []) or []
+            if isinstance(p, dict) and p.get("kind") == "ParmVarDecl"
+        ]
+        kind = node.get("kind")
+        is_explicit: bool | None
+        if kind in ("CXXConstructorDecl", "CXXConversionDecl"):
+            is_explicit = bool(node.get("explicit"))
+        else:
+            is_explicit = None
+        if "&&" in quals:
+            ref_qualifier = "&&"
+        elif re.search(r"(?<!&)&(?!&)", quals):
+            ref_qualifier = "&"
+        else:
+            ref_qualifier = ""
+        funcs.append(
+            Function(
+                name=name,
+                mangled=mangled,
+                return_type=ret_type,
+                params=params,
+                visibility=_visibility(
+                    exported_dynamic,
+                    exported_static,
+                    str(node.get("mangledName", "")),
+                    name,
+                ),
+                # bool(node.get("virtual")) alone misses a signature-
+                # matched override with neither `virtual` nor `override`
+                # written -- clang's JSON gives no direct signal for that
+                # case at all (see dumper_clang_vtable.py's own
+                # docstring). `virtual_mangled_names` recovers it from
+                # the reconstructed vtables, which already do this
+                # matching; only ever widens False -> True.
+                #
+                # Restricted to actual member-function kinds (Codex
+                # review, fresh evidence): an uninstantiated template
+                # method carries no `mangledName` at all, so
+                # `_collect_virtual_slots` falls back to its bare,
+                # unmangled `name` as the slot's "mangled" identity (e.g.
+                # `"f"`). A free `extern "C"` function sharing that same
+                # bare name mangles to the identical string by design (C
+                # linkage), so the plain `mangled in
+                # virtual_mangled_names` membership test above matched an
+                # unrelated global FunctionDecl purely by name collision --
+                # confirmed with a real clang dump of `template<class T>
+                # struct A { virtual void f(); }; extern "C" void f();`,
+                # where both `f`s share the identical unmangled fallback
+                # string. Only a CXXMethodDecl/CXXConstructorDecl/
+                # CXXDestructorDecl/CXXConversionDecl can be virtual at all
+                # in C++, and `_collect_virtual_slots` only ever walks
+                # those same member kinds when building
+                # `virtual_mangled_names` -- a bare `FunctionDecl` (never a
+                # class member) can never legitimately appear in that set,
+                # so excluding it here closes the collision without
+                # narrowing any real member-override case.
+                is_virtual=bool(node.get("virtual"))
+                or (kind != "FunctionDecl" and mangled in virtual_mangled_names),
+                is_noexcept=_is_noexcept_qualifier(quals),
+                # An ``extern "C"`` linkage spec is authoritative; fall back
+                # to the mangled==name heuristic for a plain C-mode parse
+                # (no LinkageSpecDecl, but C-linkage names equal their symbol).
+                is_extern_c=entry.extern_c or mangled == name,
+                vtable_index=None,
+                source_location=_source_location(entry),
+                is_static=node.get("storageClass") == "static",
+                is_const=bool(re.search(r"\bconst\b", quals)),
+                is_volatile=bool(re.search(r"\bvolatile\b", quals)),
+                is_pure_virtual=bool(node.get("pure")),
+                is_deleted=bool(node.get("explicitlyDeleted")),
+                is_inline=bool(node.get("inline")),
+                access=_access_level(entry.access),
+                return_pointer_depth=_pointer_depth(ret_type),
+                ref_qualifier=ref_qualifier,
+                is_explicit=is_explicit,
+                is_hidden_friend=entry.in_friend,
+                # ``entry.scope`` is the enclosing-class scope path at the
+                # point ``in_friend`` first became True (the FriendDecl's
+                # own scope, since FriendDecl never pushes a scope level) —
+                # i.e. exactly the befriending class, mirroring castxml's
+                # ``befriending`` attribute resolution.
+                hidden_friend_owner=(
+                    "::".join(entry.scope) if entry.in_friend and entry.scope else None
+                ),
+                # clang stamps "variadic": true on FunctionDecl; the
+                # qualtype spelling ("void (int, ...)") is the fallback.
+                is_variadic=bool(node.get("variadic")) or "..." in qualtype,
+                contract_attributes=_clang_contract_attributes(
+                    node, target_triple=target_triple
+                ),
+                exception_spec=_clang_exception_spec(quals),
+                deprecated=_clang_deprecated_message(node),
+                # G31 Phase C backend audit -- see _clang_method_is_override.
+                is_override=(
+                    _clang_method_is_override(node)
+                    if kind in _OVERRIDE_ELIGIBLE_KINDS
+                    else None
+                ),
+                is_compiler_generated=False,
+            )
+        )
+    return funcs

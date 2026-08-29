@@ -1,7 +1,7 @@
 # ADR-061: Responsibility-Package Architecture and Flat-Namespace Migration
 
 **Date:** 2026-08-24
-**Status:** Accepted — partially implemented (Phases 0-1 implemented; Phases 2-4 in progress; Phase 5 begun — the `model` package and the `*_metadata.py` dataclass/parser split have landed; Phase 2's D9 item 4 gate-decision half is now closed via `policy/gate_decision.py`'s `gate_decision_for_result`, read by every JSON/SARIF/HTML/scan call site instead of each independently recomputing it (Markdown/HTML prose rewrite and per-finding verdict consolidation remain open, see Phase 2's own section); D9's change-catalog work (item 3) is fully done — all 4 registry-validation properties (unique identifiers, valid references, non-contradictory defaults, complete metadata) are enforced, and the 397 entries have been repartitioned into `model/change_catalog/{symbols,types,platform,build,source}.py` by taxonomy; the CastXML/Clang parser split (item 1) is now underway with a real shared-context design proven on both backends — `extract/headers/{castxml,clang}/context.py` (plus castxml's own `location.py`/`type_resolution.py`) hold the parser state/node-inspection primitives an entity module needs, and `enums.py` is the first entity split out of each backend, both calling through their context object rather than `self`; castxml's `functions.py` is now the second entity module (plus `qualified_name`/`decl_is_public`/`visibility`/`access_level` promoted into `location.py` alongside it, since typedef/variable/constant parsing reads them too) — but clang's `functions.py` (blocked on `_virtual_mangled_names()`/`_id_index`/`_target_triple` instance state with no shared home yet) and `records.py`/`templates.py` on either side have not moved yet — source-graph separation (item 2) is now split three ways: its values third moved to `abicheck/model/source_graph.py`; construction (`build_source_graph` and its private folding helpers) moved into `buildsource/source_graph_build.py` (classified `extract`) and `buildsource/source_graph_build_source_abi.py` (classified `extract`); comparison (`diff_source_graph`, `localize_symbol`) moved into `buildsource/source_graph_compare.py` (classified `compare`); a shared node/edge-classification predicate module neither half owns exclusively (`buildsource/source_graph_query.py`) stays unclassified, same as several of its own callers; `buildsource/source_graph.py` itself is now a 140-line re-export facade — and the bulk of item 4's cycle-exception cleanup also remains — and otherwise incremental).
+**Status:** Accepted — partially implemented (Phases 0-1 implemented; Phases 2-4 in progress; Phase 5 begun — the `model` package and the `*_metadata.py` dataclass/parser split have landed; Phase 2's D9 item 4 gate-decision half is now closed via `policy/gate_decision.py`'s `gate_decision_for_result`, read by every JSON/SARIF/HTML/scan call site instead of each independently recomputing it (Markdown/HTML prose rewrite and per-finding verdict consolidation remain open, see Phase 2's own section); D9's change-catalog work (item 3) is fully done — all 4 registry-validation properties (unique identifiers, valid references, non-contradictory defaults, complete metadata) are enforced, and the 397 entries have been repartitioned into `model/change_catalog/{symbols,types,platform,build,source}.py` by taxonomy; the CastXML/Clang parser split (item 1) is now underway with a real shared-context design proven on both backends — `extract/headers/{castxml,clang}/context.py` (plus castxml's own `location.py`/`type_resolution.py`) hold the parser state/node-inspection primitives an entity module needs, and `enums.py` is the first entity split out of each backend, both calling through their context object rather than `self`; `functions.py` is now the second entity module split out on BOTH backends — castxml's (plus `qualified_name`/`decl_is_public`/`visibility`/`access_level` promoted into `location.py` alongside it, since typedef/variable/constant parsing reads them too) and clang's (its `_virtual_mangled_names()`/`_record_index()`/`_specialization_record_index()`/`_base_lookup_index()` instance state moved into a new `RecordVtableIndex` class in `context.py` itself, since record-entity parsing reads it too, not a functions-only concern despite the name; `_id_index` taken as an explicit `default_value` parameter the same way `enums.py` already takes `evaluate_int`; `_target_triple` turned out to be a stateless pass-through needing no shared home at all) — `records.py`/`templates.py` on both backends have not moved yet — source-graph separation (item 2) is now split three ways: its values third moved to `abicheck/model/source_graph.py`; construction (`build_source_graph` and its private folding helpers) moved into `buildsource/source_graph_build.py` (classified `extract`) and `buildsource/source_graph_build_source_abi.py` (classified `extract`); comparison (`diff_source_graph`, `localize_symbol`) moved into `buildsource/source_graph_compare.py` (classified `compare`); a shared node/edge-classification predicate module neither half owns exclusively (`buildsource/source_graph_query.py`) stays unclassified, same as several of its own callers; `buildsource/source_graph.py` itself is now a 140-line re-export facade — and the bulk of item 4's cycle-exception cleanup also remains — and otherwise incremental).
 **Decision maker:** abicheck maintainers
 
 ## Context
@@ -2317,10 +2317,13 @@ without promising a new export.
    implementations while `functions.py` called new duplicates, two copies
    of "is this declaration public" free to drift apart.
 
-   **Deliberately not done in this pass: the clang backend's own
-   `parse_functions`.** Read in full before deciding — it is one ~160-line
-   method (not `_CastxmlParser`'s method-per-concern shape), and beyond the
-   already-shared `context.py` primitives it reads three pieces of
+   **Clang's own `parse_functions` has since moved too** (a later slice,
+   after the "deliberately not done in this pass" note below was first
+   written — kept verbatim as the record of why it didn't move immediately,
+   since the reasoning it names is exactly what the eventual design had to
+   resolve). Read in full before it moved: it is one ~160-line method (not
+   `_CastxmlParser`'s method-per-concern shape), and beyond the
+   already-shared `context.py` primitives it read three pieces of
    `_ClangAstParser` instance state `enums.py` never had to touch:
    `self._virtual_mangled_names()` (vtable reconstruction — the exact
    "records touch vtable/RTTI state" entanglement this section already
@@ -2328,31 +2331,84 @@ without promising a new export.
    `is_virtual` needs it to recover an override with neither `virtual` nor
    `override` written), `self._id_index` (default-argument-value
    evaluation), and `self._target_triple` (contract-attribute target
-   scoping). None of these have a shared-context or entity-module home yet
-   on the clang side, and inventing one for three unrelated pieces of
-   parser state just to unblock this one method would be exactly the
-   "second, competing context shape" this section warns against, not a
-   generalization of `context.py`'s existing design — `context.py` was
-   sized against what `enums.py` (and now castxml's `functions.py`)
-   actually needed, not against every remaining consumer of `self` state.
-   The right sequencing is to let `records.py`'s vtable-state move settle
-   what `_virtual_mangled_names()`'s shared home should look like on the
-   clang side first (it needs one regardless of which entity module moves
-   next), then bring clang's `functions.py` in against that, rather than
-   solve it ad hoc here.
+   scoping). None of these had a shared-context or entity-module home on
+   the clang side at the time, and the concern recorded then was that
+   inventing one for three unrelated pieces of parser state just to unblock
+   this one method would be exactly the "second, competing context shape"
+   this section warns against.
 
-   Still open for the next slice: clang's `functions.py`, and
-   `records.py`/`templates.py` on both backends. Records are the fullest
-   test of the design so far, since `_CastxmlParser._build_record_type`
-   and friends touch vtable/RTTI state (`vtable_slot_root`,
-   `virtual_methods_by_class`) that `enums.py` never had to; clang's
-   `parse_functions` (above) turns out to touch a *different* piece of
-   vtable state (`_virtual_mangled_names()`) for the same underlying
-   reason. Whichever moves next should reuse
+   Investigating each of the three closed that concern rather than
+   confirming it: `self._target_triple` turned out to be a plain, stateless
+   pass-through (no memoization, no cross-entity read) — not "instance
+   state" needing a home at all, just a value to thread through as an
+   ordinary parameter. `self._id_index` is the real `enums.py._evaluated_
+   int_value` case again: its real implementation
+   (`dumper_clang_expr._initializer_value`, built on `dumper_clang_expr.
+   _index_decl_id_qualified_names`) lives in `dumper_clang_expr.py`, which
+   imports `diff_cxx_rules` — so `functions.py::parse_functions` takes a
+   `default_value` evaluator as an explicit parameter, the identical
+   solution `enums.py` already established for `evaluate_int`, supplied by
+   `dumper_clang.py`'s own delegating `parse_functions()` as a bound-method
+   reference (`lambda p: _initializer_value(p, self._id_index)`) rather
+   than a new import. `self._virtual_mangled_names()` — the one genuine
+   "vtable/RTTI state" piece — turned out to fit `context.py`'s own charter
+   after all: it (and the three caches under it —
+   `_record_index`/`_specialization_record_index`/`_base_lookup_index`) is
+   read by BOTH `functions.py` (`is_virtual` override recovery) AND
+   record-entity parsing (`dumper_clang.py`'s still-unmigrated
+   `_build_record`, via `_base_lookup_index()` directly) — exactly the
+   "read by more than one entity kind" rule `context.py` already applies to
+   `access_level`/`visibility`/`source_location`, not a functions-only
+   concern despite the name of the method that first surfaces it.
+   `context.py` gained one new class, `RecordVtableIndex` (root +
+   categorized records list + the three eagerly-built template-param
+   indices in, four lazily-built memoized indices out — `record_index`,
+   `specialization_record_index`, `base_lookup_index`,
+   `virtual_mangled_names` — moved verbatim from the four `_ClangAstParser`
+   methods of the near-identical names, which are now one-line
+   delegations), plus three small pure free functions promoted the same way
+   castxml's `location.py` promotion went: `access_level`, `visibility`
+   (+ its `symbol_candidates` helper), and `qualified_name` — each read by
+   `functions.py` but also by variable/constant/typedef/record-field
+   parsing still in `dumper_clang.py` (`parse_variables`'s/`parse_
+   constants`'s own `_visibility`/`_qualified` calls, `_parse_fields`'s
+   `_access_level` call), the identical "shared across entity kinds"
+   discovery castxml's `functions.py` slice made for its own four
+   promotions. `RecordVtableIndex` is constructed once in
+   `_ClangAstParser.__init__` (referencing `self._records`, still empty at
+   that point — the same before-`_walk`/read-after-`_walk` timing the four
+   caches already relied on when they lived directly on `self`), so
+   `_build_record`'s calls into it are unaffected. `extract/headers/clang/
+   functions.py` holds `parse_functions` and the private call graph unique
+   to it (`_pointer_depth`, `_return_type`, `_is_noexcept_qualifier`,
+   `_clang_exception_spec`, `_function_qualifiers`, `_param_has_default` —
+   none read outside `parse_functions`, unlike the three promoted above);
+   `dumper_clang.py`'s matching methods/module-level functions (six of the
+   latter, plus `_visibility`/`_symbol_candidates`/`_access_level`/
+   `_qualified`/`_record_index`/`_specialization_record_index`/
+   `_base_lookup_index`/`_virtual_mangled_names`) are now one-line
+   delegations, so every existing internal and external caller — including
+   `test_dumper_clang.py`'s direct `p._visibility(...)`/`_ClangAstParser.
+   _symbol_candidates(...)` calls and `test_coverage_extension_lang.py`'s
+   `from abicheck.dumper_clang import _clang_exception_spec`/
+   `_clang_contract_attributes` — keeps resolving unchanged. Zero output/
+   snapshot change: the full non-integration suite (`castxml or clang or
+   dumper`-scoped, 2927 tests, plus the whole fast suite) and the real
+   `integration`-marker clang-backend suite all pass unchanged.
+
+   Still open for the next slice: `records.py`/`templates.py` on both
+   backends. Records are the fullest remaining test of the design, since
+   `_CastxmlParser._build_record_type`/`dumper_clang.py`'s `_build_record`
+   and friends touch vtable/RTTI state (`vtable_slot_root`/
+   `virtual_methods_by_class` on castxml, `RecordVtableIndex` on clang —
+   now already-migrated context state on the clang side, unlike castxml's
+   own vtable fields, which are still raw dict slots on
+   `CastxmlParserContext` awaiting their own builder function's move) that
+   `enums.py` never had to. Whichever moves next should reuse
    `context.py`/`location.py`/`type_resolution.py` as-is rather than
-   growing a second, competing context shape — and, per the castxml
-   `functions.py` slice above, should read every helper's *other* callers
-   before assuming an entity-shaped name means an entity-only helper;
+   growing a second, competing context shape — and, per both `functions.py`
+   slices above, should read every helper's *other* callers before
+   assuming an entity-shaped name means an entity-only helper;
 2. separate source-graph values, construction, and comparison. **Started,
    not done.** The values third moved: `abicheck/model/source_graph.py`
    now owns `SourceGraphSummary` (the ADR-031 D7 compact graph container

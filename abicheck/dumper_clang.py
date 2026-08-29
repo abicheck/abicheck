@@ -78,7 +78,12 @@ from pathlib import Path
 from typing import Any
 
 from ._compiler_options import split_gcc_options
-from .dumper_clang_attributes import _clang_contract_attributes
+
+# Re-exported (not just referenced) so the historical
+# ``dumper_clang._clang_contract_attributes`` import path tests use keeps
+# resolving, even though the real call site moved to
+# ``extract.headers.clang.functions``.
+from .dumper_clang_attributes import _clang_contract_attributes  # noqa: F401
 from .dumper_clang_expr import (  # noqa: F401  (some re-exported for tests)
     _SCOPE_NODE_KINDS,
     _WRAPPER_EXPR_KINDS,
@@ -115,17 +120,19 @@ from .dumper_clang_vtable import (
     _index_template_param_names,
     _is_record_definition,
     _specialization_spelling,
-    build_specialization_index as _build_specialization_index,
     build_vtable as _build_clang_vtable,
 )
 from .errors import AstContextMissingError, SnapshotError
-from .extract.headers.clang import context as _clang_context, enums as _clang_enums
+from .extract.headers.clang import (
+    context as _clang_context,
+    enums as _clang_enums,
+    functions as _clang_functions,
+)
 from .model import (
     AccessLevel,
     EnumType,
     Fact,
     Function,
-    Param,
     RecordType,
     ScopeOrigin,
     TypeField,
@@ -470,73 +477,27 @@ _BUILTIN_FILES = _clang_context.BUILTIN_FILES
 
 
 def _pointer_depth(type_str: str) -> int:
-    """Best-effort pointer nesting depth from a written type spelling.
-
-    castxml computes this from the type graph; on the clang path we count
-    top-level ``*`` tokens in the ``qualType`` spelling (``const char *`` → 1,
-    ``int **`` → 2), ignoring any inside template/array brackets. Stable for the
-    pointer-depth-change detector even though it is a spelling heuristic.
-    """
-    depth = 0
-    bracket = 0
-    for ch in type_str:
-        if ch in "<[(":
-            bracket += 1
-        elif ch in ">])":
-            bracket = max(0, bracket - 1)
-        elif ch == "*" and bracket == 0:
-            depth += 1
-    return depth
+    """See ``extract.headers.clang.functions._pointer_depth`` (the canonical
+    implementation this delegates to) for the full contract."""
+    return _clang_functions._pointer_depth(type_str)
 
 
 def _return_type(qualtype: str) -> str:
-    """The return type spelling of a function ``qualType`` (``ret (params)…``).
-
-    Scans for the first ``(`` at bracket depth 0 — the start of the parameter
-    list — and returns everything before it. Function-pointer return types (rare)
-    degrade to the whole spelling; ordinary returns are exact.
-    """
-    bracket = 0
-    for idx, ch in enumerate(qualtype):
-        if ch in "<[":
-            bracket += 1
-        elif ch in ">]":
-            bracket = max(0, bracket - 1)
-        elif ch == "(" and bracket == 0:
-            return qualtype[:idx].strip()
-    return qualtype.strip()
+    """See ``extract.headers.clang.functions._return_type`` (the canonical
+    implementation this delegates to) for the full contract."""
+    return _clang_functions._return_type(qualtype)
 
 
 def _is_noexcept_qualifier(quals: str) -> bool:
-    """Whether a function's trailing qualifiers denote a *non-throwing* spec.
-
-    A bare ``noexcept`` (and ``noexcept(true)`` / ``noexcept(1)``) is
-    non-throwing; ``noexcept(false)`` / ``noexcept(0)`` is *throwing* and must
-    not be treated as ``noexcept`` — since C++17 the exception specification is
-    part of the function type, so conflating the two would hide a real ABI break
-    (CodeRabbit review). A dependent ``noexcept(expr)`` keeps its conservative
-    "non-throwing" reading (the spelling is all the header AST exposes).
-    """
-    m = re.search(r"\bnoexcept(?:\s*\(([^)]*)\))?", quals)
-    if m is None:
-        return False
-    expr = m.group(1)
-    if expr is None:
-        return True
-    return expr.strip() not in ("false", "0")
+    """See ``extract.headers.clang.functions._is_noexcept_qualifier`` (the
+    canonical implementation this delegates to) for the full contract."""
+    return _clang_functions._is_noexcept_qualifier(quals)
 
 
 def _clang_exception_spec(quals: str) -> str:
-    """The dynamic exception-specification spelling from trailing qualifiers.
-
-    ``""`` when the function has no ``throw(...)`` spec (noexcept is handled
-    separately by :func:`_is_noexcept_qualifier`).
-    """
-    m = re.search(r"\bthrow\s*\(([^)]*)\)", quals)
-    if m is None:
-        return ""
-    inner = ", ".join(p.strip() for p in m.group(1).split(",") if p.strip())
-    return f"throw({inner})"
+    """See ``extract.headers.clang.functions._clang_exception_spec`` (the
+    canonical implementation this delegates to) for the full contract."""
+    return _clang_functions._clang_exception_spec(quals)
 
 
 def _clang_record_is_final(node: dict[str, Any]) -> bool:
@@ -594,33 +555,9 @@ def _clang_var_alignment_bits(node: dict[str, Any]) -> int | None:
 
 
 def _function_qualifiers(qualtype: str) -> str:
-    """The trailing cv/ref/exception qualifiers after a function's parameter list.
-
-    Returns the substring after the matching ``)`` of the top-level parameter
-    list — e.g. ``" const noexcept"`` for ``int (int) const noexcept`` — so the
-    caller can detect ``const``/``volatile``/``noexcept`` and the ref-qualifier.
-    """
-    bracket = 0
-    start = -1
-    for idx, ch in enumerate(qualtype):
-        if ch in "<[":
-            bracket += 1
-        elif ch in ">]":
-            bracket = max(0, bracket - 1)
-        elif ch == "(" and bracket == 0 and start == -1:
-            start = idx
-            bracket += 1
-            # consume the parameter-list parentheses
-            depth = 1
-            j = idx + 1
-            while j < len(qualtype) and depth:
-                if qualtype[j] == "(":
-                    depth += 1
-                elif qualtype[j] == ")":
-                    depth -= 1
-                j += 1
-            return qualtype[j:]
-    return ""
+    """See ``extract.headers.clang.functions._function_qualifiers`` (the
+    canonical implementation this delegates to) for the full contract."""
+    return _clang_functions._function_qualifiers(qualtype)
 
 
 class _ClangAstParser:
@@ -666,42 +603,31 @@ class _ClangAstParser:
         # paying on every dump when nothing in this TU has a referenced-decl
         # initializer to fingerprint.
         self._decl_id_qualified_names: dict[str, str] | None = None
-        # Built lazily (on first vtable reconstruction, via _record_index())
-        # -- "::".join(scope + [name]) -> node for every CXXRecordDecl/
-        # RecordDecl in this TU, keyed the same way RecordType.qualified_name
-        # itself is built in _build_record. Only needed by
-        # dumper_clang_vtable.build_vtable's base-lookup recursion.
-        self._record_by_qualname: dict[str, dict[str, Any]] | None = None
-        # Built lazily (on first vtable reconstruction, via
-        # _specialization_record_index()) -- the SAME kind of index as
-        # _record_by_qualname above, but over concrete
-        # ClassTemplateSpecializationDecl nodes (`struct D : A<int> {...};`),
-        # a different clang node kind self._records never collects at all.
-        # See _specialization_record_index()'s own docstring.
-        self._specialization_by_qualname: dict[str, dict[str, Any]] | None = None
-        # Built lazily (on first vtable reconstruction, via
-        # _base_lookup_index()) -- the merged _record_index() +
-        # _specialization_record_index() dict (CodeRabbit review: previously
-        # rebuilt on every _base_lookup_index() call, an O(records) cost
-        # since _build_record calls it once per record).
-        self._base_lookup: dict[str, dict[str, Any]] | None = None
-        # Built lazily (on first parse_functions() call, via
-        # _virtual_mangled_names()) -- every mangled name appearing in ANY
-        # record's reconstructed vtable, across the whole TU. Lets
-        # parse_functions() recognize a method as virtual even when clang's
-        # JSON gives it no direct signal at all (no `virtual` keyword, no
-        # `OverrideAttr`) -- see _virtual_mangled_names()'s own docstring.
-        self._virtual_mangled: frozenset[str] | None = None
-        # Computed eagerly (not lazily like the caches above) because
-        # `_walk` itself -- run immediately below, during __init__ -- needs
-        # these to correctly scope a specialization's own members (see the
-        # `ClassTemplateSpecializationDecl` branch below); a per-call lazy
-        # build wouldn't help since the first call IS during this walk.
-        # Cheap: one extra whole-AST pass each, the same shape
+        # Computed eagerly (not lazily like the id-qualified-names cache
+        # above) because `_walk` itself -- run immediately below, during
+        # __init__ -- needs these to correctly scope a specialization's own
+        # members (see the `ClassTemplateSpecializationDecl` branch below);
+        # a per-call lazy build wouldn't help since the first call IS during
+        # this walk. Cheap: one extra whole-AST pass each, the same shape
         # `_id_index()` already pays lazily for a different purpose.
         self._template_param_kinds_by_qualname = _index_template_param_kinds(root)
         self._template_param_defaults_by_qualname = _index_template_param_defaults(root)
         self._template_param_names_by_qualname = _index_template_param_names(root)
+        # Lazily-built, memoized record/specialization/vtable indices shared
+        # between record-entity parsing (_build_record's base-lookup, still
+        # in this module) and function-entity parsing
+        # (extract.headers.clang.functions.parse_functions's is_virtual
+        # override recovery). Constructed here (referencing self._records,
+        # still empty) so its first real read -- after _walk below populates
+        # self._records -- sees the fully-categorized list; see
+        # RecordVtableIndex's own docstring for the full "why" of each cache.
+        self._record_vtable_index = _clang_context.RecordVtableIndex(
+            root,
+            self._records,
+            self._template_param_kinds_by_qualname,
+            self._template_param_defaults_by_qualname,
+            self._template_param_names_by_qualname,
+        )
         self._walk(
             root,
             scope=(),
@@ -906,45 +832,22 @@ class _ClangAstParser:
     def _visibility(self, mangled: str, name: str = "") -> Visibility:
         """Resolve API visibility from the binary's exported-symbol tables.
 
-        Identical policy to the castxml parser so a clang- and a castxml-derived
-        snapshot classify the same declaration the same way.
-
-        Mach-O quirk: clang's ``mangledName`` carries the platform global-symbol
-        prefix (``__ZN3lib3addEii`` on macOS), but ``_dump_macho`` strips the
-        single leading underscore off the export set to match castxml's
-        prefix-free names. So each mangled candidate is matched both as-is (ELF)
-        **and** with one leading underscore removed (Mach-O), trying the as-is
-        form first so an ELF Itanium ``_Z…`` name never spuriously matches the
-        stripped variant.
+        See ``extract.headers.clang.context.visibility`` (the canonical
+        implementation this delegates to) for the full contract.
         """
-        for cand in self._symbol_candidates(mangled):
-            if cand in self._exported_dynamic:
-                return Visibility.PUBLIC
-        if name and name in self._exported_dynamic:
-            return Visibility.PUBLIC
-        for cand in self._symbol_candidates(mangled):
-            if cand in self._exported_static:
-                return Visibility.ELF_ONLY
-        if name and name in self._exported_static:
-            return Visibility.ELF_ONLY
-        return Visibility.HIDDEN
+        return _clang_context.visibility(
+            self._exported_dynamic, self._exported_static, mangled, name
+        )
 
     @staticmethod
     def _symbol_candidates(mangled: str) -> tuple[str, ...]:
-        """The mangled name plus, on a leading underscore, its de-prefixed form."""
-        if not mangled:
-            return ()
-        if mangled.startswith("_"):
-            return (mangled, mangled[1:])
-        return (mangled,)
+        """See ``extract.headers.clang.context.symbol_candidates``."""
+        return _clang_context.symbol_candidates(mangled)
 
     @staticmethod
     def _access_level(access: str) -> AccessLevel:
-        if access == "protected":
-            return AccessLevel.PROTECTED
-        if access == "private":
-            return AccessLevel.PRIVATE
-        return AccessLevel.PUBLIC
+        """See ``extract.headers.clang.context.access_level``."""
+        return _clang_context.access_level(access)
 
     @staticmethod
     def _source_location(entry: _Decl) -> str | None:
@@ -956,8 +859,8 @@ class _ClangAstParser:
         return _clang_context.source_location(entry)
 
     def _qualified(self, entry: _Decl) -> str:
-        name = entry.node.get("name", "")
-        return "::".join([*entry.scope, name]) if entry.scope else name
+        """See ``extract.headers.clang.context.qualified_name``."""
+        return _clang_context.qualified_name(entry)
 
     def _id_index(self) -> dict[str, str]:
         """Lazily-built, memoized :func:`_index_decl_id_qualified_names`
@@ -967,8 +870,9 @@ class _ClangAstParser:
         return self._decl_id_qualified_names
 
     def _record_index(self) -> dict[str, dict[str, Any]]:
-        """Lazily-built ``qualified name -> node`` index over every parsed
-        record, for ``dumper_clang_vtable.build_vtable``'s base-lookup
+        """See ``extract.headers.clang.context.RecordVtableIndex.record_index``
+        (the canonical implementation this delegates to) for the full
+        contract, and ``dumper_clang_vtable.build_vtable``'s base-lookup
         recursion.
 
         A forward declaration (``struct A;``) and its later complete
@@ -976,270 +880,54 @@ class _ClangAstParser:
         land in ``self._records`` -- confirmed with a real clang build that
         clang emits BOTH `CXXRecordDecl` nodes for exactly this shape, the
         forward one carrying neither `completeDefinition` nor any member
-        children. A plain first-registration-wins policy silently kept
-        whichever was encountered first, which is the forward decl whenever
-        one precedes the definition in source order -- the common style --
-        losing every virtual method the real definition carries (Codex
-        review, fresh evidence: `struct A; struct A { virtual void f(); };`
-        resolved to an empty `vtable` for A and any of its derived classes).
-        A complete definition always wins over a forward-declaration stub
-        for the same qualname, regardless of which one was walked first;
-        ties among non-definitions (there's at most one real forward decl
-        in practice, but this stays defensive) keep the first seen.
+        children. See ``RecordVtableIndex.record_index`` (that canonical
+        implementation's own docstring) for the full forward-decl-vs-
+        definition tiebreak this delegates to.
         """
-        if self._record_by_qualname is None:
-            idx: dict[str, dict[str, Any]] = {}
-            for entry in self._records:
-                name = str(entry.node.get("name") or "")
-                if not name:
-                    continue
-                qualname = self._qualified(entry)
-                existing = idx.get(qualname)
-                if existing is None or (
-                    not _is_record_definition(existing)
-                    and _is_record_definition(entry.node)
-                ):
-                    idx[qualname] = entry.node
-            self._record_by_qualname = idx
-        return self._record_by_qualname
+        return self._record_vtable_index.record_index()
 
     def _specialization_record_index(self) -> dict[str, dict[str, Any]]:
-        """Lazily-built, memoized :func:`build_specialization_index` over
-        this parser's own AST root -- see that function's docstring
-        (``dumper_clang_vtable.py``) for the full "why". Passes through the
-        param-kinds/param-defaults indices already computed eagerly in
-        ``__init__`` (for ``_walk``'s own specialization-scoping use)
-        instead of paying for a second whole-AST pass over each.
+        """See ``extract.headers.clang.context.RecordVtableIndex.
+        specialization_record_index`` (the canonical implementation this
+        delegates to) for the full contract.
         """
-        if self._specialization_by_qualname is None:
-            self._specialization_by_qualname = _build_specialization_index(
-                self._root,
-                self._template_param_kinds_by_qualname,
-                self._template_param_defaults_by_qualname,
-                self._template_param_names_by_qualname,
-            )
-        return self._specialization_by_qualname
+        return self._record_vtable_index.specialization_record_index()
 
     def _base_lookup_index(self) -> dict[str, dict[str, Any]]:
-        """Lazily-built, memoized merge of ``_record_index()`` +
-        ``_specialization_record_index()``, for
-        ``dumper_clang_vtable.build_vtable``'s base-lookup recursion.
-
-        Safe to merge into one dict: an ordinary record's qualname never
-        contains ``"<"``, so the two key spaces never collide. An ordinary
-        record wins on the rare case both indexes somehow produced the same
-        key (shouldn't occur given the above, but a plain record is always
-        the more trustworthy of the two if it ever did).
-
-        Memoized (CodeRabbit review, fresh evidence): ``_build_record`` calls
-        this once per record, so leaving it unmemoized meant ``parse_types()``
-        rebuilt the whole merged dict -- and ``_virtual_mangled_names()``
-        separately re-ran ``build_vtable`` over every qualname in it -- once
-        per record in the TU, an O(records × index size) cost for what
-        should be a one-time merge.
+        """See ``extract.headers.clang.context.RecordVtableIndex.
+        base_lookup_index`` (the canonical implementation this delegates to)
+        for the full contract.
         """
-        if self._base_lookup is None:
-            merged = dict(self._specialization_record_index())
-            merged.update(self._record_index())
-            self._base_lookup = merged
-        return self._base_lookup
+        return self._record_vtable_index.base_lookup_index()
 
     def _virtual_mangled_names(self) -> frozenset[str]:
-        """Every mangled name occupying a slot in ANY record's reconstructed
-        vtable, across the whole TU.
-
-        The gap this closes (Codex review, fresh evidence, real end-to-end
-        repro): ``dumper_clang_vtable.build_vtable`` correctly recognizes a
-        signature-matched override with no `virtual`/`override` keyword and
-        replaces the inherited slot with the derived method's own mangled
-        name -- but that knowledge lived only inside the vtable list itself.
-        `parse_functions()`'s own `Function.is_virtual` still read clang's
-        raw, keyword-only `node.get("virtual")` -- the exact signal this
-        whole module exists to work around -- so `diff_cxx_rules.
-        vtable_slot_is_override_reuse()` (which requires both sides'
-        `Function.is_virtual` to be `True` before recognizing a slot as
-        reused rather than changed) rejected the reuse and
-        `diff_types._diff_type_vtable` emitted a spurious
-        `TYPE_VTABLE_CHANGED` BREAKING finding for exactly the no-keyword
-        override case this module was built to recognize. Confirmed
-        end-to-end through the live `dump()`/`compare()` pipeline: adding a
-        keyword-less override in a derived class (with no other change)
-        produced `type_vtable_changed` before this fix.
-
-        Only ever WIDENS `is_virtual` from `False` to `True` (parse_functions
-        still ORs this in, never overrides an already-`True` reading) --
-        purely additive, so it cannot suppress a real virtuality signal, only
-        recover one clang's JSON otherwise drops silently.
+        """See ``extract.headers.clang.context.RecordVtableIndex.
+        virtual_mangled_names`` (the canonical implementation this delegates
+        to) for the full contract.
         """
-        if self._virtual_mangled is None:
-            idx = self._base_lookup_index()
-            names: set[str] = set()
-            for qualname in idx:
-                names.update(_build_clang_vtable(qualname, idx))
-            self._virtual_mangled = frozenset(names)
-        return self._virtual_mangled
+        return self._record_vtable_index.virtual_mangled_names()
 
     # ── parse_* (mirror _CastxmlParser's public surface) ─────────────────────
 
     def parse_functions(self) -> list[Function]:
-        funcs: list[Function] = []
-        for entry in self._functions:
-            node = entry.node
-            if _is_builtin_file(entry.file):
-                continue
-            name = str(node.get("name", ""))
-            if not name:
-                continue
-            if entry.scope and "<" in entry.scope[-1]:
-                # A method of a concrete class-template specialization
-                # (`A<int>::f`) -- unlike an ordinary member, whose name
-                # this backend deliberately leaves bare everywhere else
-                # (`owner_class_of` recovers its owner from the MANGLED
-                # name instead, which works fine there since a plain
-                # class's mangled scope component already IS its matching
-                # spelling). A specialization's own mangled scope component
-                # is the RAW, un-spelled Itanium template-argument encoding
-                # (`"AIiE"`, confirmed with a real clang build) -- which
-                # never matches `RecordType.bases`'s spelled form
-                # (`"A<int>"`, built from clang's own type printer) at all,
-                # so `owner_class_of`'s mangled fallback silently failed to
-                # recognize an inherited-slot override whose base is a
-                # template specialization, producing a false
-                # `TYPE_VTABLE_CHANGED` (Codex review, fresh evidence: found
-                # while verifying the base-lookup fix end to end -- the
-                # vtable itself now resolves correctly, but this SEPARATE
-                # owner-matching gap was still reachable once it did).
-                # Qualifying the name here lets `owner_class_of`'s
-                # PREFERRED (already-qualified-name) branch resolve the
-                # SAME spelling `RecordType.bases` records, sidestepping
-                # the mismatched mangled fallback entirely -- mirroring
-                # what DWARF already does for every member unconditionally
-                # (`owner_class_of`'s own docstring).
-                name = "::".join((*entry.scope, name))
-            qualtype = _qualtype(node)
-            mangled = str(node.get("mangledName", "")) or name
-            quals = _function_qualifiers(qualtype)
-            ret_type = _return_type(qualtype) or "void"
-            params = [
-                Param(
-                    name=str(p.get("name", "")),
-                    type=_qualtype(p),
-                    pointer_depth=_pointer_depth(_qualtype(p)),
-                    # G31 Phase C: castxml was the ONLY producer of this fact (`_resolve_cv_restrict`), so a castxml-vs-clang comparison of unchanged headers reported PARAM_RESTRICT_CHANGED for every restrict-qualified parameter -- the detector compares the two bools directly, with no producer gate to decline on (unlike `deprecated`/`is_scoped` before this phase).
-                    is_restrict=_clang_param_is_restrict(p),
-                    # G31 Phase C continued: same shape as `is_restrict` above -- castxml never populated this fact either. See `dumper_clang_qualifiers._clang_param_is_va_list`. is_va_list_fact is `partial`, not `present`: the check only covers x86-64 System V, and conservatively answers `False` -- not "confirmed no" -- on any other target (Codex review; target-scoping residual unchanged, per that function's own docstring).
-                    is_va_list=(_iv := _clang_param_is_va_list(p)),
-                    is_va_list_fact=Fact.partial(_iv),
-                    # Preserve the actual default-argument value (so a changed
-                    # default fires PARAM_DEFAULT_VALUE_CHANGED); fall back to a
-                    # bare presence marker when the value can't be evaluated.
-                    default=(_initializer_value(p, self._id_index) or "default")
-                    if _param_has_default(p)
-                    else None,
-                )
-                for p in node.get("inner", []) or []
-                if isinstance(p, dict) and p.get("kind") == "ParmVarDecl"
-            ]
-            kind = node.get("kind")
-            is_explicit: bool | None
-            if kind in ("CXXConstructorDecl", "CXXConversionDecl"):
-                is_explicit = bool(node.get("explicit"))
-            else:
-                is_explicit = None
-            if "&&" in quals:
-                ref_qualifier = "&&"
-            elif re.search(r"(?<!&)&(?!&)", quals):
-                ref_qualifier = "&"
-            else:
-                ref_qualifier = ""
-            funcs.append(
-                Function(
-                    name=name,
-                    mangled=mangled,
-                    return_type=ret_type,
-                    params=params,
-                    visibility=self._visibility(str(node.get("mangledName", "")), name),
-                    # bool(node.get("virtual")) alone misses a signature-
-                    # matched override with neither `virtual` nor `override`
-                    # written -- clang's JSON gives no direct signal for that
-                    # case at all (see dumper_clang_vtable.py's own
-                    # docstring). _virtual_mangled_names() recovers it from
-                    # the reconstructed vtables, which already do this
-                    # matching; only ever widens False -> True.
-                    #
-                    # Restricted to actual member-function kinds (Codex
-                    # review, fresh evidence): an uninstantiated template
-                    # method carries no `mangledName` at all, so
-                    # `_collect_virtual_slots` falls back to its bare,
-                    # unmangled `name` as the slot's "mangled" identity (e.g.
-                    # `"f"`). A free `extern "C"` function sharing that same
-                    # bare name mangles to the identical string by design (C
-                    # linkage), so the plain `mangled in
-                    # self._virtual_mangled_names()` membership test above
-                    # matched an unrelated global FunctionDecl purely by
-                    # name collision -- confirmed with a real clang dump of
-                    # `template<class T> struct A { virtual void f(); };
-                    # extern "C" void f();`, where both `f`s share the
-                    # identical unmangled fallback string. Only a
-                    # CXXMethodDecl/CXXConstructorDecl/CXXDestructorDecl/
-                    # CXXConversionDecl can be virtual at all in C++, and
-                    # `_collect_virtual_slots` only ever walks those same
-                    # member kinds when building `_virtual_mangled_names()`
-                    # -- a bare `FunctionDecl` (never a class member) can
-                    # never legitimately appear in that set, so excluding it
-                    # here closes the collision without narrowing any real
-                    # member-override case.
-                    is_virtual=bool(node.get("virtual"))
-                    or (
-                        kind != "FunctionDecl"
-                        and mangled in self._virtual_mangled_names()
-                    ),
-                    is_noexcept=_is_noexcept_qualifier(quals),
-                    # An ``extern "C"`` linkage spec is authoritative; fall back
-                    # to the mangled==name heuristic for a plain C-mode parse
-                    # (no LinkageSpecDecl, but C-linkage names equal their symbol).
-                    is_extern_c=entry.extern_c or mangled == name,
-                    vtable_index=None,
-                    source_location=self._source_location(entry),
-                    is_static=node.get("storageClass") == "static",
-                    is_const=bool(re.search(r"\bconst\b", quals)),
-                    is_volatile=bool(re.search(r"\bvolatile\b", quals)),
-                    is_pure_virtual=bool(node.get("pure")),
-                    is_deleted=bool(node.get("explicitlyDeleted")),
-                    is_inline=bool(node.get("inline")),
-                    access=self._access_level(entry.access),
-                    return_pointer_depth=_pointer_depth(ret_type),
-                    ref_qualifier=ref_qualifier,
-                    is_explicit=is_explicit,
-                    is_hidden_friend=entry.in_friend,
-                    # ``entry.scope`` is the enclosing-class scope path at the
-                    # point ``in_friend`` first became True (the FriendDecl's
-                    # own scope, since FriendDecl never pushes a scope level) —
-                    # i.e. exactly the befriending class, mirroring castxml's
-                    # ``befriending`` attribute resolution.
-                    hidden_friend_owner=(
-                        "::".join(entry.scope)
-                        if entry.in_friend and entry.scope
-                        else None
-                    ),
-                    # clang stamps "variadic": true on FunctionDecl; the
-                    # qualtype spelling ("void (int, ...)") is the fallback.
-                    is_variadic=bool(node.get("variadic")) or "..." in qualtype,
-                    contract_attributes=_clang_contract_attributes(
-                        node, target_triple=self._target_triple
-                    ),
-                    exception_spec=_clang_exception_spec(quals),
-                    deprecated=_clang_deprecated_message(node),
-                    # G31 Phase C backend audit -- see _clang_method_is_override.
-                    is_override=(
-                        _clang_method_is_override(node)
-                        if kind in _OVERRIDE_ELIGIBLE_KINDS
-                        else None
-                    ),
-                    is_compiler_generated=False,
-                )
-            )
-        return funcs
+        """See ``extract.headers.clang.functions.parse_functions`` (the
+        canonical implementation this delegates to) for the full contract.
+
+        ``default_value`` is passed as a bound-method reference (matching
+        the ``self._id_index`` bound-method-reference convention already
+        used for param/field-default extraction elsewhere in this class):
+        the real evaluator lives in ``dumper_clang_expr.py``, which imports
+        ``diff_cxx_rules`` and so cannot be imported from the
+        ``extract``-classified ``functions.py`` module directly.
+        """
+        return _clang_functions.parse_functions(
+            self._functions,
+            exported_dynamic=self._exported_dynamic,
+            exported_static=self._exported_static,
+            virtual_mangled_names=self._virtual_mangled_names(),
+            target_triple=self._target_triple,
+            default_value=lambda p: _initializer_value(p, self._id_index),
+        )
 
     def parse_variables(self) -> list[Variable]:
         variables: list[Variable] = []
@@ -1661,17 +1349,9 @@ def _default_record_access(node: dict[str, Any]) -> str:
 
 
 def _param_has_default(param: dict[str, Any]) -> bool:
-    """Whether a ``ParmVarDecl`` carries a default argument.
-
-    clang flags it either with ``"init": "c"`` or by nesting the default-value
-    expression as the parameter's lone ``inner`` child.
-    """
-    if param.get("init"):
-        return True
-    return any(
-        isinstance(c, dict) and not str(c.get("kind", "")).endswith(("Attr", "Comment"))
-        for c in param.get("inner", []) or []
-    )
+    """See ``extract.headers.clang.functions._param_has_default`` (the
+    canonical implementation this delegates to) for the full contract."""
+    return _clang_functions._param_has_default(param)
 
 
 def _evaluated_int_value(node: dict[str, Any]) -> int | None:

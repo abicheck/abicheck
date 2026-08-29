@@ -19,20 +19,42 @@ Owns the one type every entity-parsing module in this package receives —
 access, extern-C/friend/template flags) — and the small set of
 node-inspection primitives more than one entity kind's parsing reads:
 built-in-origin filtering, a declaration's own type spelling, its source
-location, and its deprecation message. None of these open the AST document
-or drive traversal themselves; ``dumper_clang.py``'s ``_walk`` still does
-that, populating the categorized ``_Decl`` lists this package's entity
-modules (``enums.py`` today) read.
+location, its deprecation message, member access level, exported-symbol
+visibility, and a decl's own qualified-name spelling. None of these open the
+AST document or drive traversal themselves; ``dumper_clang.py``'s ``_walk``
+still does that, populating the categorized ``_Decl`` lists this package's
+entity modules (``enums.py``, ``functions.py``) read.
 
-Deliberately excludes ``dumper_clang._evaluated_int_value`` — see the
-comment above where it would otherwise live for why moving it here would
-recreate a real ``extract -> compare`` layering violation.
+Also owns :class:`RecordVtableIndex` — the lazily-built, memoized record/
+specialization/vtable indices ``dumper_clang.py`` used to carry as four
+separate ``self._*`` caches. Read by BOTH function-entity parsing
+(``functions.py``'s ``is_virtual`` override recovery, via
+``virtual_mangled_names()``) and record-entity parsing (base-class vtable
+lookup in ``dumper_clang.py``'s still-unmigrated ``_build_record``, via
+``base_lookup_index()`` directly) — exactly the "read by more than one
+entity kind" rule this module states above, so it lives here rather than in
+``functions.py``.
+
+Deliberately excludes ``dumper_clang._evaluated_int_value`` and
+``dumper_clang_expr._initializer_value`` — see the comment above where the
+former would otherwise live for why moving either here would recreate a
+real ``extract -> compare`` layering violation (both live in
+``dumper_clang_expr.py``, which imports ``diff_cxx_rules`` for
+``itanium_scope_components``). ``functions.py::parse_functions`` takes its
+own default-value evaluator as an explicit parameter for the same reason
+``enums.py::parse_enums`` takes ``evaluate_int``.
 """
 
 from __future__ import annotations
 
 from typing import Any
 
+from ....dumper_clang_vtable import (
+    _is_record_definition,
+    build_specialization_index,
+    build_vtable,
+)
+from ....model import AccessLevel, Visibility
 from ....name_classification import strip_anonymous_type_location
 
 #: Pseudo-files clang attributes builtin / command-line declarations to.
@@ -181,6 +203,237 @@ def clang_deprecated_message(node: dict[str, Any]) -> str | None:
         if isinstance(child, dict) and child.get("kind") == "DeprecatedAttr":
             return str(child.get("message", ""))
     return None
+
+
+def access_level(access: str) -> AccessLevel:
+    """Tri-state member access from a decl's own walk-context access string.
+
+    Read by function-entity parsing (``functions.py``) and record-entity
+    field parsing (``dumper_clang.py``'s still-unmigrated ``_parse_fields``)
+    alike — a "more than one entity kind" helper per this module's own rule.
+    """
+    if access == "protected":
+        return AccessLevel.PROTECTED
+    if access == "private":
+        return AccessLevel.PRIVATE
+    return AccessLevel.PUBLIC
+
+
+def symbol_candidates(mangled: str) -> tuple[str, ...]:
+    """The mangled name plus, on a leading underscore, its de-prefixed form.
+
+    See :func:`visibility`'s docstring for the Mach-O prefix-stripping
+    reasoning this supports.
+    """
+    if not mangled:
+        return ()
+    if mangled.startswith("_"):
+        return (mangled, mangled[1:])
+    return (mangled,)
+
+
+def visibility(
+    exported_dynamic: set[str],
+    exported_static: set[str],
+    mangled: str,
+    name: str = "",
+) -> Visibility:
+    """Resolve API visibility from the binary's exported-symbol tables.
+
+    Identical policy to the castxml parser (``castxml.location.visibility``)
+    so a clang- and a castxml-derived snapshot classify the same declaration
+    the same way.
+
+    Mach-O quirk: clang's ``mangledName`` carries the platform global-symbol
+    prefix (``__ZN3lib3addEii`` on macOS), but ``_dump_macho`` strips the
+    single leading underscore off the export set to match castxml's
+    prefix-free names. So each mangled candidate is matched both as-is (ELF)
+    **and** with one leading underscore removed (Mach-O), trying the as-is
+    form first so an ELF Itanium ``_Z…`` name never spuriously matches the
+    stripped variant.
+
+    Read by function-entity parsing (``functions.py``) and variable/constant
+    parsing (``dumper_clang.py``'s still-unmigrated ``parse_variables``/
+    ``parse_constants``) alike.
+    """
+    for cand in symbol_candidates(mangled):
+        if cand in exported_dynamic:
+            return Visibility.PUBLIC
+    if name and name in exported_dynamic:
+        return Visibility.PUBLIC
+    for cand in symbol_candidates(mangled):
+        if cand in exported_static:
+            return Visibility.ELF_ONLY
+    if name and name in exported_static:
+        return Visibility.ELF_ONLY
+    return Visibility.HIDDEN
+
+
+def qualified_name(entry: _Decl) -> str:
+    """``"::".join(scope + [name])`` for a decl — the same spelling
+    ``RecordType.qualified_name``/vtable-lookup keys are built from.
+
+    Read by function-entity parsing (specialization-method qualification),
+    record-entity parsing (``RecordVtableIndex.record_index`` below), and
+    constant/typedef parsing (``dumper_clang.py``'s still-unmigrated
+    ``parse_constants``/``parse_typedefs_qualified``) alike.
+    """
+    name = entry.node.get("name", "")
+    return "::".join([*entry.scope, name]) if entry.scope else name
+
+
+class RecordVtableIndex:
+    """Lazily-built, memoized record/specialization/vtable indices shared
+    across the clang backend's entity-parsing modules.
+
+    Four caches, each built at most once per parser instance and each
+    depending only on the one before it: ``record_index()`` (ordinary
+    ``CXXRecordDecl``/``RecordDecl`` nodes, keyed by qualified name, a
+    complete definition always winning over a forward-declaration stub for
+    the same key — see the method's own docstring for why),
+    ``specialization_record_index()`` (the same shape over concrete
+    ``ClassTemplateSpecializationDecl`` nodes, a different clang node kind
+    ``record_index()`` never collects), ``base_lookup_index()`` (their
+    merge, for :func:`dumper_clang_vtable.build_vtable`'s base-lookup
+    recursion), and ``virtual_mangled_names()`` (every mangled name
+    occupying a slot in ANY record's reconstructed vtable across the whole
+    TU — recovers a signature-matched override with neither a `virtual` nor
+    an `override` keyword, which clang's JSON gives no other signal for).
+
+    Memoized rather than recomputed per call: ``dumper_clang.py``'s
+    ``_build_record`` calls ``base_lookup_index()`` once per record, and
+    ``virtual_mangled_names()`` needs the SAME merged index for the whole
+    translation unit — an unmemoized version paid an O(records × index
+    size) cost that rebuilding this class fixed once (CodeRabbit review,
+    fresh evidence, from when this state lived directly on
+    ``_ClangAstParser``).
+    """
+
+    def __init__(
+        self,
+        root: dict[str, Any],
+        records: list[_Decl],
+        template_param_kinds_by_qualname: dict[str, list[str | None]],
+        template_param_defaults_by_qualname: dict[str, list[str | None]],
+        template_param_names_by_qualname: dict[str, list[str | None]],
+    ) -> None:
+        self._root = root
+        # Same list object `dumper_clang.py`'s `_walk` populates in place —
+        # constructed before the walk runs, read only lazily afterward, the
+        # same timing the four caches below already relied on when this
+        # state lived directly on `_ClangAstParser`.
+        self._records = records
+        self._template_param_kinds_by_qualname = template_param_kinds_by_qualname
+        self._template_param_defaults_by_qualname = template_param_defaults_by_qualname
+        self._template_param_names_by_qualname = template_param_names_by_qualname
+        self._record_by_qualname: dict[str, dict[str, Any]] | None = None
+        self._specialization_by_qualname: dict[str, dict[str, Any]] | None = None
+        self._base_lookup: dict[str, dict[str, Any]] | None = None
+        self._virtual_mangled: frozenset[str] | None = None
+
+    def record_index(self) -> dict[str, dict[str, Any]]:
+        """Lazily-built ``qualified name -> node`` index over every parsed
+        record, for :func:`dumper_clang_vtable.build_vtable`'s base-lookup
+        recursion.
+
+        A forward declaration (``struct A;``) and its later complete
+        definition (``struct A { ... };``) share the same qualname and both
+        land in ``self._records`` -- confirmed with a real clang build that
+        clang emits BOTH `CXXRecordDecl` nodes for exactly this shape, the
+        forward one carrying neither `completeDefinition` nor any member
+        children. A plain first-registration-wins policy silently kept
+        whichever was encountered first, which is the forward decl whenever
+        one precedes the definition in source order -- the common style --
+        losing every virtual method the real definition carries (Codex
+        review, fresh evidence: `struct A; struct A { virtual void f(); };`
+        resolved to an empty `vtable` for A and any of its derived classes).
+        A complete definition always wins over a forward-declaration stub
+        for the same qualname, regardless of which one was walked first;
+        ties among non-definitions (there's at most one real forward decl
+        in practice, but this stays defensive) keep the first seen.
+        """
+        if self._record_by_qualname is None:
+            idx: dict[str, dict[str, Any]] = {}
+            for entry in self._records:
+                name = str(entry.node.get("name") or "")
+                if not name:
+                    continue
+                qualname = qualified_name(entry)
+                existing = idx.get(qualname)
+                if existing is None or (
+                    not _is_record_definition(existing)
+                    and _is_record_definition(entry.node)
+                ):
+                    idx[qualname] = entry.node
+            self._record_by_qualname = idx
+        return self._record_by_qualname
+
+    def specialization_record_index(self) -> dict[str, dict[str, Any]]:
+        """Lazily-built, memoized :func:`dumper_clang_vtable.
+        build_specialization_index` over this parser's own AST root -- see
+        that function's docstring for the full "why". Passes through the
+        param-kinds/param-defaults indices already computed eagerly by
+        ``dumper_clang.py``'s ``__init__`` (for ``_walk``'s own
+        specialization-scoping use) instead of paying for a second
+        whole-AST pass over each.
+        """
+        if self._specialization_by_qualname is None:
+            self._specialization_by_qualname = build_specialization_index(
+                self._root,
+                self._template_param_kinds_by_qualname,
+                self._template_param_defaults_by_qualname,
+                self._template_param_names_by_qualname,
+            )
+        return self._specialization_by_qualname
+
+    def base_lookup_index(self) -> dict[str, dict[str, Any]]:
+        """Lazily-built, memoized merge of ``record_index()`` +
+        ``specialization_record_index()``, for :func:`dumper_clang_vtable.
+        build_vtable`'s base-lookup recursion.
+
+        Safe to merge into one dict: an ordinary record's qualname never
+        contains ``"<"``, so the two key spaces never collide. An ordinary
+        record wins on the rare case both indexes somehow produced the same
+        key (shouldn't occur given the above, but a plain record is always
+        the more trustworthy of the two if it ever did).
+        """
+        if self._base_lookup is None:
+            merged = dict(self.specialization_record_index())
+            merged.update(self.record_index())
+            self._base_lookup = merged
+        return self._base_lookup
+
+    def virtual_mangled_names(self) -> frozenset[str]:
+        """Every mangled name occupying a slot in ANY record's reconstructed
+        vtable, across the whole TU.
+
+        The gap this closes (Codex review, fresh evidence, real end-to-end
+        repro): :func:`dumper_clang_vtable.build_vtable` correctly
+        recognizes a signature-matched override with no `virtual`/`override`
+        keyword and replaces the inherited slot with the derived method's
+        own mangled name -- but that knowledge lived only inside the vtable
+        list itself. ``functions.py::parse_functions``'s own
+        ``Function.is_virtual`` still reads clang's raw, keyword-only
+        ``node.get("virtual")`` -- the exact signal this class exists to
+        work around -- so ``diff_cxx_rules.vtable_slot_is_override_reuse()``
+        (which requires both sides' ``Function.is_virtual`` to be ``True``
+        before recognizing a slot as reused rather than changed) rejected
+        the reuse and ``diff_types._diff_type_vtable`` emitted a spurious
+        ``TYPE_VTABLE_CHANGED`` BREAKING finding for exactly the
+        no-keyword-override case this class was built to recognize.
+
+        Only ever WIDENS ``is_virtual`` from ``False`` to ``True`` (the
+        caller still ORs this in, never overrides an already-``True``
+        reading) -- purely additive, so it cannot suppress a real virtuality
+        signal, only recover one clang's JSON otherwise drops silently.
+        """
+        if self._virtual_mangled is None:
+            idx = self.base_lookup_index()
+            names: set[str] = set()
+            for qualname in idx:
+                names.update(build_vtable(qualname, idx))
+            self._virtual_mangled = frozenset(names)
+        return self._virtual_mangled
 
 
 # Deliberately NOT here: `dumper_clang._evaluated_int_value`. It walks
