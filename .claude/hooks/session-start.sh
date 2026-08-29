@@ -31,7 +31,8 @@ bash scripts/setup_dev_env.sh
 # shadow described above.
 echo "export PATH=\"/usr/local/bin:\$PATH\"" >> "${CLAUDE_ENV_FILE}"
 
-CASTXML_PREFIX="${HOME}/.cache/abicheck-castxml-conda"
+# shellcheck source=../../scripts/castxml_pin.env
+source scripts/castxml_pin.env
 if [ -x "${CASTXML_PREFIX}/bin/castxml" ] && ! command -v castxml >/dev/null 2>&1; then
   echo "export PATH=\"${CASTXML_PREFIX}/bin:\$PATH\"" >> "${CLAUDE_ENV_FILE}"
 fi

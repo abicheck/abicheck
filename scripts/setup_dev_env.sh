@@ -9,7 +9,13 @@
 #      no apt/pip package) -- pinned to the exact linux-64 build
 #      `pixi.lock` already commits to (see CASTXML_BUILD below), so this
 #      never resolves a different CastXML/bundled-Clang version than the
-#      one this repo has actually reviewed. Bump both together.
+#      one this repo has actually reviewed. Bump both together. The
+#      micromamba bootstrap binary itself is pinned by version + verified
+#      sha256 (MICROMAMBA_VERSION/MICROMAMBA_SHA256 below), the same
+#      download-then-verify shape `action/install-castxml.sh` uses for its
+#      own archive -- it is code that runs before any of the above, so an
+#      unpinned "latest" fetch would be exactly the unverified-supply-chain
+#      gap this pin closes for castxml itself.
 #
 # This is the canonical, tool-agnostic setup logic (AGENTS.md's adapter
 # principle: a command lives in one place, adapters call it rather than
@@ -47,25 +53,37 @@ for tool in gcc g++ cmake; do
   fi
 done
 
-# Pinned to match pixi.lock's committed linux-64 solve exactly (`grep
-# castxml pixi.lock`) -- keep these two in lockstep on a version bump.
-readonly CASTXML_BUILD="castxml=0.7.0=hde8d07d_0"
-CASTXML_PREFIX="${HOME}/.cache/abicheck-castxml-conda"
+# shellcheck source=castxml_pin.env
+source "${REPO_ROOT}/scripts/castxml_pin.env"
+
+# Pinned micromamba release (mamba-org/micromamba-releases), verified
+# against its published sha256 before it is ever executed -- this
+# bootstrap binary itself runs unsandboxed, so "latest" + no verification
+# would be an unpinned, unverified code-execution step ahead of castxml's
+# own pin.
+readonly MICROMAMBA_VERSION="2.9.0-0"
+readonly MICROMAMBA_SHA256="366cd9cd8be14df1ab8ed50352a82111082a36686b2d389fdb79a92c3fafb3e3"
 
 if command -v castxml >/dev/null 2>&1; then
   echo "==> castxml already on PATH: $(command -v castxml)"
 elif [ -x "${CASTXML_PREFIX}/bin/castxml" ]; then
-  echo "==> castxml already installed at ${CASTXML_PREFIX} (cached)"
+  echo "==> castxml already installed at ${CASTXML_PREFIX} (cached, pinned build)"
 else
+  echo "==> Fetching micromamba ${MICROMAMBA_VERSION} (verifying sha256)"
+  WORK_DIR="$(mktemp -d)"
+  trap 'rm -rf "${WORK_DIR}"' EXIT
+  curl -Ls -o "${WORK_DIR}/micromamba" \
+    "https://github.com/mamba-org/micromamba-releases/releases/download/${MICROMAMBA_VERSION}/micromamba-linux-64"
+  echo "${MICROMAMBA_SHA256}  ${WORK_DIR}/micromamba" | sha256sum -c -
+  chmod +x "${WORK_DIR}/micromamba"
+
   echo "==> Installing ${CASTXML_BUILD} from conda-forge via micromamba"
-  MICROMAMBA_BIN_DIR="$(mktemp -d)"
-  curl -Ls https://micro.mamba.pm/api/micromamba/linux-64/latest \
-    | tar -xj -C "${MICROMAMBA_BIN_DIR}" bin/micromamba
-  "${MICROMAMBA_BIN_DIR}/bin/micromamba" create -y \
+  "${WORK_DIR}/micromamba" create -y \
     -p "${CASTXML_PREFIX}" \
     -c conda-forge \
     "${CASTXML_BUILD}"
-  rm -rf "${MICROMAMBA_BIN_DIR}"
+  rm -rf "${WORK_DIR}"
+  trap - EXIT
 fi
 
 if [ -x "${CASTXML_PREFIX}/bin/castxml" ] && ! command -v castxml >/dev/null 2>&1; then
@@ -77,5 +95,6 @@ echo "==> setup_dev_env.sh complete."
 
 # Callers that need castxml on PATH beyond this process (e.g. a
 # SessionStart hook persisting env for the rest of the session) should
-# add "${HOME}/.cache/abicheck-castxml-conda/bin" to PATH themselves --
-# this script only guarantees it's on PATH for its own remaining steps.
+# source scripts/castxml_pin.env themselves and add "${CASTXML_PREFIX}/bin"
+# to PATH -- this script only guarantees it's on PATH for its own
+# remaining steps.
