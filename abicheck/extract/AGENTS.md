@@ -56,9 +56,11 @@ there is no per-parser state left for a context type to hold beyond what
 `context.py` itself covers. `dumper_castxml.py`/`dumper_clang.py`
 keep every migrated method/module-level name as a thin delegating wrapper,
 so every existing caller (including tests reading a parser's private
-attributes) is unaffected. `functions.py`/`records.py`/`templates.py` on
-both backends have not moved yet — see ADR-061's own "Phase 5" section for
-exactly what's still on the monolithic parser classes and why.
+attributes) is unaffected. castxml's own `functions.py` has since moved too
+(second entity module after `enums.py`); clang's `functions.py`, and
+`records.py`/`templates.py` on both backends, have not moved yet — see
+ADR-061's own "Phase 5" section for exactly what's still on the monolithic
+parser classes and why.
 
 ## Rules that are easy to get wrong
 

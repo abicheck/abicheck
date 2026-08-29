@@ -37,14 +37,11 @@ from __future__ import annotations
 import re
 from xml.etree.ElementTree import Element
 
-#: Contract-attribute extraction is still owned by
-#: ``dumper_castxml_typedefs.py`` (shared with typedef/record parsing, not
-#: yet split out); imported here rather than duplicated.
-from ....dumper_castxml_typedefs import _extract_contract_attributes
 from ....model import AccessLevel, Fact, Function, Param, Visibility
 from .context import CastxmlParserContext
 from .location import (
     access_level,
+    contract_attributes as _extract_contract_attributes,
     decl_is_public,
     deprecation_marker as _deprecation_marker,
     is_builtin_element,

@@ -108,6 +108,59 @@ def deprecation_marker(el: Element) -> str | None:
     return None
 
 
+_CONTRACT_ATTRIBUTE_BASES = frozenset(
+    {
+        "noreturn",
+        "nonnull",
+        "returns_nonnull",
+        "malloc",
+        "format",
+        "format_arg",
+        "alloc_size",
+        "alloc_align",
+        "warn_unused_result",
+        "sentinel",
+        # calling-convention selections — a flip is an ABI change on the
+        # affected targets, reported via the contract-attribute kinds.
+        "cdecl",
+        "stdcall",
+        "fastcall",
+        "thiscall",
+        "regparm",
+        "ms_abi",
+        "sysv_abi",
+        "vectorcall",
+    }
+)
+
+
+def contract_attributes(attributes: str) -> list[str]:
+    """Filter a castxml ``attributes`` string down to contract attributes.
+
+    Returns normalized, sorted tokens with any ``gnu:``/``gnu::`` namespace
+    prefix stripped and argument lists preserved (``nonnull(1)``). Tokens not
+    in the known contract set (``noexcept``, ``final``, …) are ignored.
+
+    Read by function and typedef parsing alike (Codex review, PR #940) —
+    the same "shared across entity kinds" rule as ``deprecation_marker``
+    above, moved here rather than duplicated or left importable only from
+    the still-flat, unmigrated ``dumper_castxml_typedefs.py`` sibling
+    module ``abicheck/extract/AGENTS.md`` says a migrated entity module
+    must not reach into.
+    """
+    tokens: set[str] = set()
+    for raw in attributes.split():
+        token = raw
+        for prefix in ("gnu::", "gnu:", "__"):
+            if token.startswith(prefix):
+                token = token[len(prefix) :]
+        token = token.strip("_")
+        base = token.split("(", 1)[0]
+        if base in _CONTRACT_ATTRIBUTE_BASES:
+            tokens.add(token)
+    return sorted(tokens)
+
+
 def source_line_has_explicit(
     ctx: CastxmlParserContext,
     loc_el: Element | None,
