@@ -299,26 +299,61 @@ def _fold_legacy_compile_db_tokens(
     A no-op (*ctx* returned unchanged, ``None`` included) when *tokens* is
     empty -- the overwhelmingly common case, since a caller passes a
     non-empty tuple only when the CLI's own legacy ``-p``/``--compile-db``
-    auto-match genuinely derived something. Prepends *tokens* ahead of any
-    existing ``gcc_options``, mirroring
-    ``cli_helpers_compare._merge_gcc_options``'s own ordering exactly (that
-    function cannot be imported here: it lives in a ``cli_*`` module, and
-    this file is under ``workflows/artifact/`` -- an engine-layer tree
+    auto-match genuinely derived something.
+
+    *tokens* are already-split argv entries (``build_context.to_castxml_
+    flags()``'s own return -- e.g. ``("-I", "/opt/SDK Files/include")``, one
+    element per argv position, never pre-joined), so they ride verbatim in
+    :attr:`CompileContext.gcc_option_tokens` rather than being ``" ".join``-ed
+    into the :attr:`~CompileContext.gcc_options` free-form string and later
+    re-split by :func:`~abicheck._compiler_options.split_gcc_options`
+    (Codex review, fresh evidence on ``8f2c22d``): a token containing
+    embedded whitespace -- a Windows SDK path with a space, or a compile-db
+    ``-DNAME=a b`` define -- would otherwise silently split back into the
+    wrong number of tokens, corrupting the derived include path or macro
+    value the moment it reached the real parse.
+
+    Precedence is preserved exactly: this function's caller already
+    guarantees *ctx*'s own ``gcc_options``/``gcc_option_tokens`` are never a
+    legacy-derived value (see ``_seeded_includes_and_compile_context``'s own
+    docstring, "Precedence" paragraph) -- an explicit, caller-supplied value
+    must still win over the legacy match for a conflicting flag. Since
+    :func:`~abicheck._compiler_options.split_gcc_options`'s combined-token
+    order always places ``gcc_options`` ahead of ``gcc_option_tokens``
+    (later wins), *ctx*'s own ``gcc_options`` string is split *here* -- with
+    the identical splitter every consumer already applies to it downstream,
+    so this changes no token list, only where the split happens -- and
+    interleaved as ``(*tokens, *split(ctx.gcc_options), *ctx.gcc_option_
+    tokens)``: the legacy tokens first (lowest precedence), then whatever
+    *ctx* already carried, in the same relative order it always had.
+    Mirrors ``cli_helpers_compare._merge_gcc_options``'s own ordering intent
+    (that function cannot be imported here: it lives in a ``cli_*`` module,
+    and this file is under ``workflows/artifact/`` -- an engine-layer tree
     ``scripts/check_ai_readiness.py``'s ``engine-cli-boundary`` check
-    forbids importing a CLI sibling from) -- so the merged
-    ``gcc_options`` a real ``-p compile_commands.json`` run would produce is
-    identical byte-for-byte regardless of which path computed it.
+    forbids importing a CLI sibling from) -- the combined *effective* token
+    sequence a real ``-p compile_commands.json`` run would produce is
+    identical to what ``_merge_gcc_options``'s own string-join path
+    produces for any token *without* embedded whitespace (every existing
+    precedence test's fixture shape); it is *this* function that is now
+    correct where ``_merge_gcc_options`` still is not, for a token that
+    does carry embedded whitespace.
     """
     if not tokens:
         return ctx
-    base = ctx.gcc_options if ctx is not None else None
-    merged = " ".join(tokens)
-    gcc_options = f"{merged} {base}" if base else merged
+    from ..._compiler_options import split_gcc_options
+
+    base_tokens: tuple[str, ...] = ()
+    existing_tokens: tuple[str, ...] = ()
+    if ctx is not None:
+        if ctx.gcc_options:
+            base_tokens = tuple(split_gcc_options(ctx.gcc_options))
+        existing_tokens = ctx.gcc_option_tokens
+    combined = tuple(tokens) + base_tokens + existing_tokens
     if ctx is None:
         from ...compile_context import CompileContext
 
-        return CompileContext(gcc_options=gcc_options)
-    return dataclasses.replace(ctx, gcc_options=gcc_options)
+        return CompileContext(gcc_option_tokens=combined)
+    return dataclasses.replace(ctx, gcc_options=None, gcc_option_tokens=combined)
 
 
 def _legacy_compile_db_achieved(matched: bool, tokens: tuple[str, ...]) -> bool:

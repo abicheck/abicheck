@@ -4742,6 +4742,78 @@ looked like the obvious fix and wasn't.
   Full fast unit suite re-run clean (33836 passed, 129 skipped, 4 xfailed,
   0 failed) after this second correction.
 
+  **Third correction (2026-08-29, same day, third Codex review round on PR
+  #935): a distinct, real correctness bug in the same function, found by
+  reading the actual token shapes involved rather than assumed.**
+  `_fold_legacy_compile_db_tokens` used to merge *tokens* into
+  `CompileContext.gcc_options` via `" ".join(tokens)` — but *tokens* are
+  already-split argv entries (`build_context.to_castxml_flags()`'s own
+  return, e.g. `("-I", "/opt/SDK Files/include")`, one element per argv
+  position, never pre-joined), and every consumer of `gcc_options`
+  re-splits it via `_compiler_options.split_gcc_options` before handing it
+  to the real castxml/clang subprocess. A token containing embedded
+  whitespace — a Windows SDK include path with a space, or a compile-db
+  `-DNAME=a b` define — silently split back into the wrong number of
+  tokens on that second pass, corrupting the derived include path or macro
+  value the moment a typed dump relying on the legacy match actually
+  reached the real parse. Confirmed real, not theoretical: `to_castxml_
+  flags()` genuinely emits `-I`/`<path>` as two separate list elements
+  (`flags.extend(["-I", str(inc)])`), so any compile-database include path
+  with a space reaches this function in exactly the corrupting shape.
+
+  **Also confirmed to be pre-existing, shared debt, not novel to this
+  PR**: `cli_helpers_compare._merge_gcc_options` — the real CLI's own
+  legacy-match merge path, which `_fold_legacy_compile_db_tokens`'s own
+  docstring already documented as byte-for-byte mirroring — has the
+  identical `" ".join(build_context_flags)` pattern feeding the identical
+  `CompileContext(gcc_options=...)` field, so the real, unconditional
+  `dump -p compile_commands.json` CLI path carries this same corruption
+  today for a compile-database entry whose derived flags include
+  whitespace. **Not fixed here** — this correction's scope is the typed
+  pipeline this session's own work introduced; `_merge_gcc_options` is
+  pre-existing, live, widely-exercised code with its own blast radius, and
+  changing it needs its own dedicated review pass rather than riding along
+  inside an unrelated correction. Recorded here as a known, real,
+  reproducible gap: an include path or define value containing a space in
+  a compile database used with `dump -p`/`--compile-db` (no `--dry-run`
+  involved — this is the real-execution path) can silently corrupt the
+  derived castxml flags.
+
+  Fixed in the typed pipeline by routing *tokens* through
+  `CompileContext.gcc_option_tokens` (verbatim argv entries, a field that
+  is never re-parsed by `split_gcc_options`) instead of the `gcc_options`
+  string. Precedence preserved exactly: since the combined-token order
+  always places `gcc_options` ahead of `gcc_option_tokens` (later wins),
+  and the legacy match must still lose to an explicit, caller-supplied
+  value, *ctx*'s own `gcc_options` string is split once here — with the
+  identical `split_gcc_options` splitter every consumer already applies to
+  it downstream, so this changes no token list, only where the split
+  happens — and the combined tuple built as `(*tokens, *split(ctx.
+  gcc_options), *ctx.gcc_option_tokens)`: legacy first (lowest
+  precedence), then whatever *ctx* already carried, in its original
+  relative order.
+
+  Verified with five new fast unit tests
+  (`TestWhitespaceBearingTokensSurviveTheFold` in
+  `tests/test_legacy_compile_db_matched_signal.py`): a whitespace-bearing
+  include path and a whitespace-bearing define value both survive intact;
+  an explicit `ctx.gcc_options` still outranks a conflicting legacy token;
+  an explicit `ctx.gcc_option_tokens` still outranks a conflicting legacy
+  token; an empty token tuple remains a true no-op (`ctx` returned
+  unchanged by identity, not merely by value). Three of the five confirmed
+  to fail against the pre-fix code via `git stash` (the two whitespace
+  tests, and the `gcc_option_tokens`-precedence test — the `gcc_options`-
+  precedence test and the no-op test already held under both versions).
+  The three pre-existing tests this correction's field change touched
+  (`test_matched_with_tokens_folds_flags_and_marks_applied`,
+  `test_tokens_alone_without_explicit_matched_flag_still_marks_applied`,
+  `test_early_return_path_also_honors_tokens_alone`) were updated to
+  assert `gcc_option_tokens` instead of the now-unused `gcc_options`
+  string; `tests/test_legacy_compile_db_typed_threading.py`'s own
+  precedence test (`test_fold_wins_over_legacy_tokens_when_it_applies`)
+  needed no change, since it already read the *combined* effective token
+  sequence across both fields rather than pinning `gcc_options` alone.
+
 - **Lambda-closure churn survives at the *function* level after the type-level
   fix — investigated, deliberately not patched (oneTBB flow-graph report,
   fresh evidence).** `name_classification._ANONYMOUS_TYPE_MARKERS` did not
