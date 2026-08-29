@@ -443,6 +443,19 @@ class TestExecutionConsumesTheResolvedPlan:
         # which is the sole enforcement point for this case.
         assert exec_resolved.requested_depth is None
         assert seen["write_depth"] == resolved.requested_depth
+        # Codex review (two real regressions the initial ELF migration
+        # introduced, both plain dropped kwargs -- `execute_dump_request`
+        # already had `seed_collect_mode`/`source_frontend_from_folded_
+        # context` parameters for `scan`'s own candidate resolution, but
+        # `dump_cmd`'s call site never passed either): `perform_elf_dump`
+        # always forwarded its own resolved collect mode to the L2 seed
+        # (unconditionally running a zero-config inferred build query for a
+        # `--sources` tree with no compile database) and always replayed L4
+        # source through the L3 fold's own compiler once it applied. Both
+        # must reach `execute_dump_request` unchanged, or the seed silently
+        # pins to "off" and L4 replay silently uses the pre-fold compiler.
+        assert seen["seed_collect_mode"] == resolved.collect_mode
+        assert seen["source_frontend_from_folded_context"] is True
 
     def test_no_parallel_public_header_derivation(self) -> None:
         """``dump_cmd`` must not re-derive the public-header split itself.

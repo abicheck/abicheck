@@ -22,3 +22,11 @@
   shared pipeline's own precedence rule rather than dropping it.
   PE/Mach-O `dump` (`handle_non_elf_dump`) is unmigrated — no PE/Mach-O
   toolchain was available to verify a migration against.
+  Two follow-up fixes to the same migration (review, before release): the
+  real ELF run now also forwards its resolved collect mode to the L2
+  include/compile seed (so a `--sources` tree with no compile database
+  still runs its zero-config inferred build query, matching the retired
+  `perform_elf_dump`'s behavior) and always selects L4 source replay's
+  compiler from the L3 build-context fold once it applies (matching
+  `scan`'s own candidate resolution) — both were silently dropped kwargs
+  in the initial migration, not new behavior.

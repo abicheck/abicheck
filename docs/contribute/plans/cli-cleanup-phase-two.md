@@ -3163,6 +3163,36 @@ pipelines a fourth time.
   > 2 (the `scan`-vs-`dump`/`compare` L4 extractor default divergence) is
   > unchanged, deliberately.
 
+  > **Update: two real regressions in the migration above, found by review
+  > and fixed before this PR merged.** Both were plain dropped kwargs —
+  > `execute_dump_request`/`_resolve_side_snapshot_impl` already had the
+  > parameters `scan`'s own candidate resolution needs for the identical
+  > purpose, but the migrated ELF call site never passed either:
+  > (1) `seed_collect_mode` was never forwarded, so the L2 include/compile
+  > seed silently ran with the Tier-2 API's own "never execute a build
+  > system as a side effect" pin (`collect_mode="off"`) instead of the CLI's
+  > actually-resolved collect mode — unlike `perform_elf_dump`, which always
+  > forwarded its own resolved `collect_mode`, a `--sources` tree with no
+  > compile database lost its zero-config inferred build query entirely.
+  > (2) `source_frontend_from_folded_context` was never passed, so L4 source
+  > replay kept selecting its compiler from the pre-fold context instead of
+  > the L3 build-context fold's own match — unlike `perform_elf_dump`, which
+  > always reassigned `gcc_path`/`gcc_prefix` from the folded context once
+  > it applied, a project whose real compiler (clang-cl, a prefixed
+  > cross-compiler, one named only in a compile database) is discovered
+  > only through that fold could replay source with the wrong driver.
+  > Fixed by threading both through `execute_dump_request`'s own new
+  > `seed_collect_mode`/`source_frontend_from_folded_context` parameters
+  > (mirroring the existing pass-through pattern for `legacy_compile_db_*`)
+  > down to `_resolve_side_snapshot_impl`, and having `dump_execute.
+  > execute_dump_cli_run` pass `seed_collect_mode=resolved.collect_mode`/
+  > `source_frontend_from_folded_context=True` unconditionally — exactly
+  > the values `scan`'s own candidate resolution already passes, for the
+  > identical reasons. `tests/test_dump_request_from_cli.py`'s existing
+  > `TestExecutionConsumesTheResolvedPlan` spy now also asserts both kwargs
+  > reach `execute_dump_request` (verified to fail against the pre-fix code
+  > with a `KeyError`, confirming the test catches the exact regression).
+
 `dump --build-query` and `dump --build-compile-db` describe how the *project*
 is built, not what this snapshot is. They are already documented as CLI
 equivalents of the `.abicheck.yml` `build.query` / `build.compile_db` fields,

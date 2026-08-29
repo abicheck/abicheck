@@ -76,6 +76,8 @@ def execute_dump_cli_run(
     allow_build_query: bool,
     legacy_compile_db_tokens: tuple[str, ...],
     legacy_compile_db_matched: bool,
+    seed_collect_mode: str | None,
+    source_frontend_from_folded_context: bool,
 ) -> AbiSnapshot:
     """Run the real ELF ``dump`` extraction and return its snapshot.
 
@@ -125,6 +127,17 @@ def execute_dump_cli_run(
     ``cli_resolve._click_notify``, ``compare``'s own CLI convention for the
     identical pipeline, reused verbatim rather than invented a second time.
 
+    *seed_collect_mode*/*source_frontend_from_folded_context* (Codex review,
+    two real regressions the initial migration introduced): forwarded
+    verbatim to :func:`~abicheck.service_dump_pipeline.execute_dump_request`,
+    whose own docstring documents each and states the precedence/behavior
+    ``perform_elf_dump`` had that these preserve. The caller passes
+    ``seed_collect_mode=resolved.collect_mode`` (the same collect mode
+    ``--dry-run`` already projects and ``_write_snapshot_output`` already
+    consumes) and ``source_frontend_from_folded_context=True`` unconditionally
+    -- matching ``scan``'s own candidate resolution, which passes the
+    identical value for the identical reason.
+
     Raises:
         click.ClickException: If extraction fails (mirrors
             ``perform_elf_dump``'s own ``except`` clause exactly).
@@ -141,6 +154,8 @@ def execute_dump_cli_run(
             allow_build_query=allow_build_query,
             legacy_compile_db_tokens=legacy_compile_db_tokens,
             legacy_compile_db_matched=legacy_compile_db_matched,
+            seed_collect_mode=seed_collect_mode,
+            source_frontend_from_folded_context=source_frontend_from_folded_context,
         )
     except (AbicheckError, RuntimeError, OSError, ValueError) as exc:
         raise click.ClickException(str(exc)) from exc

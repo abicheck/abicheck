@@ -753,6 +753,14 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
         allow_build_query=allow_build_query,
         legacy_compile_db_tokens=tuple(build_context_flags),
         legacy_compile_db_matched=compile_db_matched,
+        # Codex review, two real regressions: `perform_elf_dump` always
+        # forwarded its own resolved collect mode to the L2 seed (running a
+        # zero-config inferred build query for a `--sources` tree with no
+        # compile database) and always replayed L4 source through the L3
+        # fold's own compiler once it applied -- both must be preserved
+        # here, exactly as `scan`'s own candidate resolution already does.
+        seed_collect_mode=_resolved.collect_mode,
+        source_frontend_from_folded_context=True,
     )
 
     _stamp_provenance(snap, git_tag=git_tag, build_id=build_id, no_git=no_git)
