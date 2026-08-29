@@ -6714,7 +6714,7 @@ every cv token found is unambiguously by-value, never pointee, cv. (2)
 unlike `resolve_function_identity`'s own `func.is_const`/
 `func.is_volatile` booleans, a caller-supplied token tuple invites order-
 dependence for one member-cv qualification spelled two ways (`("const",
-"volatile")` vs. `("volatage", "const")` -- caught named literally as
+"volatile")` vs. `("volatile", "const")` -- caught named literally as
 `f() const volatile` vs. `f() volatile const`). Fixed by replacing the
 parameter with `is_const: bool = False, is_volatile: bool = False`,
 matching `resolve_function_identity`'s own representation exactly and
@@ -6779,6 +6779,49 @@ Omitting it (no wired producer yet, same scope boundary this module's own
 docstring already states for `LocalToFunction`/`Anonymous` before their
 producers existed) keeps the pre-existing degenerate-collision behavior,
 not a silent, unrequested change. Six new tests pin both fixes.
+
+**Correction (2026-08-29, same day, seventh Codex review round on PR #941,
+commit b767576): two more real gaps in the by-value/array-decay logic,
+plus a new hard architectural gate the fix itself then had to satisfy.**
+(1) The pointer branch skipped *all* cv processing as soon as it saw any
+top-level `*`/`&`/`[`, so a cv-qualifier trailing the parameter's own
+outermost pointer sigil (`int * const` -- the pointer VALUE itself is
+const, not what it points to) survived unstripped, even though the
+standard drops it exactly like any other top-level parameter qualifier:
+`void f(int *)` and `void f(int * const)` name the same function. Fixed
+by splitting the string at the LAST top-level `*`/`&`: everything up to
+and including it is kept verbatim (an intermediate pointer level's own
+qualifier, e.g. `int * const *`'s middle `const`, is genuinely
+distinguishing and must survive), only the suffix is stripped. (2) The
+earlier `[`-is-pointer-shaped fix stopped `int []`/`const int []` from
+colliding, but never performed the actual array-to-pointer decay, so
+`int []`/`int [3]`/`int [4]`/`int *` -- all one identical adjusted
+parameter type -- still canonicalized to four different strings. Fixed
+with `_decay_top_level_array`, deliberately narrow: multi-dimensional
+arrays (`T[][N]`) and parenthesized declarators (`int (*)[3]`, "pointer to
+array", where the trailing `[3]` is the POINTEE's bound, not the
+parameter's own shape) are left entirely unchanged rather than mis-decayed
+-- an accepted, documented limitation, not a silent gap. **Implementing
+these two together, correctly, in `model/identity.py` pushed that file to
+834 lines, over the AI-readiness gate's 800-line production maximum with
+no debt-ledger entry possible for a brand-new file (`debt-exemption`
+explicitly forbids that) -- a second, different hard architectural
+constraint from the fifth correction's `debt-no-growth` one, caught before
+push this time by running `scripts/check_ai_readiness.py` locally first.**
+Resolved by splitting the whole cv/array-decay block into a new sibling
+leaf module, `abicheck/model/signature_normalization.py` (`identity.py`
+now 586 lines, the new module 299) -- not a design change, purely a file
+split, with `identity.py` importing the one public
+`canonicalize_function_signature_param_type` from it. The new module also
+got its own dedicated primitive-level test file,
+`tests/test_signature_normalization.py` (per AGENTS.md's own convention
+for a new reusable primitive), which caught a genuine bug of its own
+before it shipped: the array-decay path bypassed
+`canonicalize_type_name`'s east-const normalization (its regex never
+matches a bracket-containing string), so `"const int [3]"` and `"const int
+*"` -- the identical adjusted type -- canonicalized to two different
+strings until the decay result was re-canonicalized a second time. Fixed
+in the same commit; `test_element_cv_becomes_pointee_cv` pins it.
 
 ---
 

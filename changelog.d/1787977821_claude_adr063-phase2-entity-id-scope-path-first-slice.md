@@ -59,21 +59,32 @@
   exported symbol reused for both fields -- so a header/DWARF
   observation's demangled `name` and that export-only observation's raw
   name would otherwise disagree despite an identical, genuine mangling.
-  A new module-private `model.identity._canonicalize_function_signature_
-  param_type` additionally drops a top-level BY-VALUE cv-qualifier from a
-  parameter type (`"int"` and `"const int"` now canonicalize the same,
-  matching the C++ standard's own linkage/mangling rule) while
-  deliberately leaving a *pointee* cv-qualifier on a pointer/reference
-  parameter untouched (`"char *"` and `"const char *"` remain genuinely
-  distinct overloads) -- narrower than `name_classification`'s existing
-  `_strip_cv_qualifiers`/`func_signature_cv_only_differ`, which are
-  permissive at the pointee level for a different, diff-reporting
-  question and would have wrongly merged distinct overloads if reused
-  here. Implemented locally in `model/identity.py` (a small,
-  self-contained reimplementation of the top-level-pointer/reference
-  detection those functions use, not an import of it) rather than added
-  to `name_classification.py`, since that module is a frozen, no-growth
-  legacy file under ADR-061's debt ledger. `entity_id_for_function`'s
+  A new `model.signature_normalization.
+  canonicalize_function_signature_param_type` additionally drops a
+  top-level BY-VALUE cv-qualifier from a parameter type (`"int"` and
+  `"const int"` now canonicalize the same, matching the C++ standard's
+  own linkage/mangling rule) while deliberately leaving a *pointee*
+  cv-qualifier on a pointer/reference parameter untouched (`"char *"` and
+  `"const char *"` remain genuinely distinct overloads) -- narrower than
+  `name_classification`'s existing `_strip_cv_qualifiers`/
+  `func_signature_cv_only_differ`, which are permissive at the pointee
+  level for a different, diff-reporting question and would have wrongly
+  merged distinct overloads if reused here. A cv-qualifier trailing the
+  parameter's own outermost pointer sigil (`int * const`) is also now
+  correctly dropped as by-value, while an intermediate pointer level's
+  own qualifier (`int * const *`) stays genuinely distinguishing. An
+  array parameter is decayed to its adjusted pointer type first
+  (`int []`/`int [3]`/`int [4]`/`int *` now all canonicalize identically,
+  the bound plays no part in the real adjusted type), with multi-
+  dimensional arrays and parenthesized declarators (`int (*)[3]`) left
+  as an accepted, documented, unchanged limitation rather than
+  mis-decayed. This whole primitive lives in its own new sibling leaf
+  module, `abicheck/model/signature_normalization.py` (not
+  `name_classification.py`, a frozen, no-growth legacy file under
+  ADR-061's debt ledger; and split out of `model/identity.py` itself once
+  it grew past the AI-readiness gate's 800-line production maximum),
+  with its own dedicated primitive-level test file,
+  `tests/test_signature_normalization.py`. `entity_id_for_function`'s
   `cv_qualifiers: tuple[str, ...]` parameter is replaced by `is_const: bool
   = False, is_volatile: bool = False` -- matching `resolve_function_
   identity`'s own two-boolean representation and eliminating a real

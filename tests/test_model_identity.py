@@ -608,6 +608,40 @@ class TestFunctionOverloadDiscrimination:
         const_array = entity_id_for_function(scope, "f", param_types=("const int []",))
         assert mutable_array != const_array
 
+    def test_array_bound_does_not_distinguish_overloads(self) -> None:
+        # Fresh Codex finding: int [], int [3], int [4], and int * are all
+        # the identical adjusted parameter type -- the bound plays no part
+        # in it at all -- so redeclarations spelled with different bounds
+        # must produce ONE EntityId, not four.
+        scope = (Namespace("ns"),)
+        no_bound = entity_id_for_function(scope, "f", param_types=("int []",))
+        bound_3 = entity_id_for_function(scope, "f", param_types=("int [3]",))
+        bound_4 = entity_id_for_function(scope, "f", param_types=("int [4]",))
+        plain_ptr = entity_id_for_function(scope, "f", param_types=("int *",))
+        assert no_bound == bound_3 == bound_4 == plain_ptr
+
+    def test_pointers_own_top_level_cv_does_not_distinguish_overloads(self) -> None:
+        # Fresh Codex finding: a cv-qualifier trailing the pointer's own
+        # outermost sigil qualifies the pointer value itself, not what it
+        # points to -- void f(int *) and void f(int * const) name the
+        # same function, the identical by-value-cv rule generalized to a
+        # pointer parameter instead of a scalar one.
+        scope = (Namespace("ns"),)
+        plain = entity_id_for_function(scope, "f", param_types=("int *",))
+        pointer_const = entity_id_for_function(scope, "f", param_types=("int * const",))
+        assert plain == pointer_const
+
+    def test_non_outermost_pointer_cv_still_distinguishes_overloads(self) -> None:
+        # Contrast with the case above: a cv-qualifier on an INTERMEDIATE
+        # pointer level (not the parameter's own outermost sigil) is
+        # genuinely part of the pointee's type -- "pointer to a
+        # const-qualified pointer to int" is not the same type as
+        # "pointer to pointer to int".
+        scope = (Namespace("ns"),)
+        plain = entity_id_for_function(scope, "f", param_types=("int **",))
+        inner_const = entity_id_for_function(scope, "f", param_types=("int * const *",))
+        assert plain != inner_const
+
 
 class TestVariableMangledDiscriminator:
     def test_distinct_mangled_names_never_collide(self) -> None:

@@ -58,10 +58,9 @@ Leaf module: no dependency on ``checker_types``/``diff_*``/anything above
 from __future__ import annotations
 
 import enum
-import re
 from dataclasses import dataclass, field
 
-from ..name_classification import canonicalize_type_name
+from .signature_normalization import canonicalize_function_signature_param_type
 
 __all__ = [
     "Anonymous",
@@ -273,120 +272,6 @@ def _scope_path(scope: ScopePath) -> ScopePath:
     answer for one input, not object identity of the scope argument.
     """
     return tuple(scope)
-
-
-_CV_WORD_RE = re.compile(r"\b(?:const|volatile)\b")
-
-
-def _has_top_level_ptr_or_ref(canonical_type: str) -> bool:
-    """Whether *canonical_type* is pointer-shaped at nesting depth 0 --
-    a ``*``/``&`` sigil, or a top-level ``[`` array declarator (Codex
-    review, PR #941: a function PARAMETER's array type always decays to a
-    pointer, e.g. ``int []`` -> ``int *``, so any cv-qualifier on the
-    element type is pointee-level, exactly like an explicit pointer --
-    ``void f(int[])`` and ``void f(const int[])`` are two distinct,
-    independently-mangled overloads, not one). Either shape means the
-    value itself is a pointer, not merely something passed by value that
-    happens to *contain* one (``Box<int *>``, ``std::function<void(int&)>``,
-    an array *bound inside* a template argument). A minimal, self-
-    contained reimplementation of the identical algorithm
-    ``name_classification._has_top_level_ptr_or_ref`` already applies for
-    a different purpose -- deliberately duplicated rather than imported,
-    since ``name_classification.py`` is a frozen, no-growth legacy module
-    (ADR-061 debt ledger, `architecture/debt.yaml`) that new code must not
-    grow, and the helper it would be imported from is private besides.
-    The array case is added here rather than upstream because this
-    module's fallback signature discriminator is built directly from a
-    caller-supplied *string* that may still spell an array literally
-    (``"int []"``) -- it makes no assumption about whether a given
-    producer's own parsed representation already reflects the decay.
-    """
-    depth = 0
-    for ch in canonical_type:
-        if ch == "[" and depth == 0:
-            return True
-        if ch in "<([":
-            depth += 1
-        elif ch in ">)]":
-            depth = max(0, depth - 1)
-        elif ch in "*&" and depth == 0:
-            return True
-    return False
-
-
-def _canonicalize_function_signature_param_type(name: str) -> str:
-    """The canonical form of a function *parameter* type, for
-    identity/overload-discriminator purposes -- as opposed to
-    ``canonicalize_type_name``, which normalizes only cross-producer
-    spelling differences and deliberately keeps every cv-qualifier,
-    including a top-level by-value one, as real, distinguishing content.
-
-    Drops a top-level BY-VALUE cv-qualifier (``int`` -> ``const int``):
-    per the C++ standard, that qualifier is dropped from the function's
-    own type for linkage/mangling purposes -- ``void f(int)`` and ``void
-    f(const int)`` name the very same function (see
-    ``name_classification.func_signature_cv_only_differ``'s own docstring
-    for the citation). **Deliberately narrower than reusing that sibling
-    module's own private ``_strip_cv_qualifiers`` helper** (which is what
-    a first attempt at this reached for, since Codex's own finding named
-    it): that helper is permissive at the true top level, stripping a
-    *pointee* cv-qualifier too (``"const char *"`` -> ``"char *"``) --
-    correct for *"is this an already-matched declaration's param change
-    worth reporting as ABI-breaking"* (``diff_symbols._params_differ``'s
-    own question), but wrong for *this* function's job. A pointee
-    cv-qualifier on a pointer/reference parameter is a genuine, standard-
-    mandated overload discriminator (``void f(char *)`` and ``void
-    f(const char *)`` are two simultaneously-declarable, independently-
-    mangled overloads, not one declaration): collapsing them here would
-    silently merge two distinct functions into one identity, reintroducing
-    exactly the sibling-overload-collision class this whole primitive
-    exists to prevent. So this function strips a cv token only when the
-    canonicalized type carries no top-level pointer/reference sigil at
-    all (:func:`_has_top_level_ptr_or_ref`) -- the one case where every cv
-    token present is unambiguously by-value, not pointee, cv -- and, when
-    it does, only a token outside any ``<...>``/``(...)``/``[...]``
-    nesting (a cv-qualifier nested in a template argument names a
-    genuinely different type, e.g. ``Box<const int>`` vs. ``Box<int>``,
-    the same rule ``canonicalize_type_name`` itself already documents).
-
-    >>> _canonicalize_function_signature_param_type("int")
-    'int'
-    >>> _canonicalize_function_signature_param_type("const int")
-    'int'
-    >>> _canonicalize_function_signature_param_type("volatile unsigned long long")
-    'unsigned long long'
-    >>> _canonicalize_function_signature_param_type("char const*")
-    'char const *'
-    >>> _canonicalize_function_signature_param_type("const char *")
-    'char const *'
-    >>> _canonicalize_function_signature_param_type("const std::vector<const int>")
-    'std::vector<const int>'
-    >>> _canonicalize_function_signature_param_type("const int []")
-    'const int []'
-    """
-    canonical = canonicalize_type_name(name)
-    if _has_top_level_ptr_or_ref(canonical):
-        return canonical
-    depth = 0
-    out: list[str] = []
-    i = 0
-    n = len(canonical)
-    while i < n:
-        ch = canonical[i]
-        if ch in "<([":
-            depth += 1
-            out.append(ch)
-            i += 1
-        elif ch in ">)]":
-            depth = max(0, depth - 1)
-            out.append(ch)
-            i += 1
-        elif depth == 0 and (m := _CV_WORD_RE.match(canonical, i)):
-            i = m.end()
-        else:
-            out.append(ch)
-            i += 1
-    return re.sub(r"\s+", " ", "".join(out)).strip()
 
 
 def _anonymous_self_extra(
@@ -642,9 +527,9 @@ def entity_id_for_function(
     makes two same-named, same-signature sibling declarations in
     different scopes distinct.
 
-    *param_types* are canonicalized via this module's own
-    ``_canonicalize_function_signature_param_type`` before joining into
-    ``extra`` -- CastXML's ``"char const*"`` and Clang's
+    *param_types* are canonicalized via the sibling
+    ``signature_normalization.canonicalize_function_signature_param_type``
+    before joining into ``extra`` -- CastXML's ``"char const*"`` and Clang's
     ``"char const *"`` spell an otherwise-identical parameter type
     differently, and without canonicalization the same declaration
     observed by the two backends would get two different ``EntityId``s,
@@ -685,7 +570,7 @@ def entity_id_for_function(
     else:
         extra = (
             "sig",
-            *(_canonicalize_function_signature_param_type(p) for p in param_types),
+            *(canonicalize_function_signature_param_type(p) for p in param_types),
             f"const:{is_const}",
             f"volatile:{is_volatile}",
             ref_qualifier,
