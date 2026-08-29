@@ -8218,6 +8218,46 @@ correctly. Regression test in `tests/test_entity_id_carrier.py`
 confirmed to fail against the pre-fix sticky-OR propagation via `git
 stash` on just the source file.
 
+**Correction (2026-08-29, same day, Codex review on PR #943): a hidden
+friend function/function-template's `EntityId` was resolved in the
+befriending class's scope, not the enclosing namespace it is actually
+injected into.** Per [namespace.memdef], a hidden friend (one with no
+prior declaration reachable by ordinary lookup) is a member of the
+*nearest enclosing namespace*, not of the class it is lexically written
+inside. Confirmed by direct compilation: clang rejects `struct A {
+template<class T> friend void f(T) {} }; struct B { template<class T>
+friend void f(T) {} };` as a **redefinition** of `f` -- proof the two
+hidden friend templates are the identical entity in the global namespace,
+not two distinct class-scoped ones. The clang backend's own scope-building
+walk is lexical, though: it pushes a `Record` segment for the enclosing
+class regardless of whether a nested declaration is a genuine member or a
+hidden friend, so each declaration's `scope_path` (and therefore its `sig`
+fallback `EntityId`, since neither gets a real mangled name as an
+uninstantiated template) wrongly still named its own befriending class
+(`Record("A")` vs. `Record("B")`) -- an identity collision in the opposite
+direction from every other fix in this phase: two genuinely identical
+declarations wrongly compared *unequal*, rather than two distinct ones
+wrongly compared equal. castxml does not have this bug: its `context`
+attribute for a hidden friend already points at the enclosing namespace
+element directly (confirmed with real castxml output), with the
+befriending class recorded only via a separate `befriending` attribute --
+exactly the split this fix brings the clang backend to. Fixed by adding
+`strip_record_scopes()` to `extract/headers/scope_segments.py` (drops
+every `Record` segment and every record-kind `Anonymous` segment -- ALL of
+them, not just the innermost, since a friend hidden inside nested classes
+is injected past every enclosing class -- keeping `Namespace`/
+`InlineNamespace`/an anonymous-*namespace* `Anonymous`/`LocalToFunction`
+unchanged) and applying it only to the `scope` argument
+`entity_id_for_function` receives for a hidden friend in
+`extract/headers/clang/functions.py`; `hidden_friend_owner` and every
+other use of `entry.scope_path` (display qualified name included) are
+untouched. Regression tests: `tests/test_scope_segments.py`'s
+`TestStripRecordScopes` (the primitive, in isolation) and
+`tests/test_entity_id_carrier.py`'s
+`test_live_clang_hidden_friend_template_resolves_in_namespace_scope` (the
+live-clang end-to-end case, confirmed to fail pre-fix via `git stash` on
+just the source files).
+
 ---
 
 ### Phase 3 — public surface as a graph query over one evidence graph (D5)

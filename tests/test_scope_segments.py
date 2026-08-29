@@ -44,6 +44,7 @@ from abicheck.extract.headers.scope_segments import (
     flat_names,
     namespace_segment,
     record_segment,
+    strip_record_scopes,
 )
 from abicheck.model.identity import (
     Anonymous,
@@ -181,3 +182,41 @@ class TestFlatNamesParity:
         nested_namespace = (Namespace("A"),)
         assert flat_names(nested_record) == flat_names(nested_namespace)
         assert nested_record != nested_namespace
+
+
+class TestStripRecordScopes:
+    """``strip_record_scopes`` -- the hidden-friend namespace-injection fix
+    (Codex review, PR #943; see the function's own docstring for the
+    compilation-confirmed motivating case)."""
+
+    def test_record_segments_are_dropped(self) -> None:
+        path = (Namespace("ns"), Record("A"), Record("B"))
+        assert strip_record_scopes(path) == (Namespace("ns"),)
+
+    def test_record_kind_anonymous_segments_are_dropped(self) -> None:
+        for kind in RECORD_TAG_KINDS:
+            assert strip_record_scopes((anonymous_segment(kind, 0),)) == ()
+
+    def test_anonymous_namespace_segments_are_kept(self) -> None:
+        path = (anonymous_segment(ANONYMOUS_NAMESPACE, 0), Record("A"))
+        assert strip_record_scopes(path) == (Anonymous(ANONYMOUS_NAMESPACE, 0),)
+
+    def test_namespace_and_inline_namespace_segments_are_kept(self) -> None:
+        path = (Namespace("ns"), InlineNamespace("v1", "1"), Record("A"))
+        assert strip_record_scopes(path) == (
+            Namespace("ns"),
+            InlineNamespace("v1", "1"),
+        )
+
+    def test_all_nested_record_scopes_are_stripped_not_just_innermost(self) -> None:
+        """A friend hidden inside doubly-nested classes is injected past
+        BOTH, not just the immediately enclosing one."""
+        path = (Namespace("ns"), Record("Outer"), Record("Inner"))
+        assert strip_record_scopes(path) == (Namespace("ns"),)
+
+    def test_empty_path_is_unchanged(self) -> None:
+        assert strip_record_scopes(()) == ()
+
+    def test_path_with_no_record_scopes_is_unchanged(self) -> None:
+        path = (Namespace("ns"), InlineNamespace("v1"))
+        assert strip_record_scopes(path) == path

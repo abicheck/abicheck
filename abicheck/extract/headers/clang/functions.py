@@ -75,6 +75,7 @@ from ....model.identity import (
     canonicalize_type_param_references,
     entity_id_for_function,
 )
+from ..scope_segments import strip_record_scopes
 from .context import (
     _Decl,
     access_level as _access_level,
@@ -582,7 +583,19 @@ def parse_functions(
                 # is routed through `is_extern_c` instead, same order
                 # `finding_identity.resolve_function_identity` applies.
                 entity_id=entity_id_for_function(
-                    entry.scope_path,
+                    # A hidden friend's OWN scope is the nearest enclosing
+                    # namespace, never the befriending class it is lexically
+                    # nested inside (Codex review, PR #943) -- see
+                    # `strip_record_scopes`'s own docstring for the
+                    # confirmed-by-compilation redefinition proof.
+                    # `entry.scope_path` stays untouched everywhere else
+                    # (display qualified name, `hidden_friend_owner` below),
+                    # so this is the one place the distinction matters.
+                    (
+                        strip_record_scopes(entry.scope_path)
+                        if entry.in_friend
+                        else entry.scope_path
+                    ),
                     leaf_name,
                     mangled_name=(
                         raw_mangled

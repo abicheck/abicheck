@@ -631,17 +631,12 @@ def test_live_castxml_honors_static_export_evidence_for_c_linkage(
     the same extern-"C" override a dynamically-linked one gets.
 
     castxml's language-mode detection for an ambiguous header defaults to
-    C++ (the same "case141" class of issue this module's own comments
-    already document for the dynamic-export case), so a plain,
-    C-compiled ``int foo(int);`` gets a bogus pseudo-Itanium
-    ``mangled="_Z3fooi"`` attribute -- confirmed by direct compilation.
-    The override that recovers the real, unmangled identity checked only
-    ``exported_dynamic``, so a symbol observed exclusively through a
-    static archive's own export set (``exported_static``) left that bogus
-    guess standing, disagreeing with both the archive's own observed
-    symbol and the clang producer's extern_c identity for the same
-    declaration (Codex review, PR #943).
-    """
+    C++ (the "case141" class of issue), so a plain C-compiled
+    ``int foo(int);`` gets a bogus pseudo-Itanium ``mangled="_Z3fooi"``
+    attribute -- confirmed by direct compilation. The recovery override
+    checked only ``exported_dynamic``, so a symbol observed only through a
+    static archive's export set (``exported_static``) left that bogus guess
+    standing (Codex review, PR #943)."""
     header = tmp_path / "static_c.h"
     header.write_text("int foo(int x);\n")
     xml_out = tmp_path / "static_c.xml"
@@ -731,19 +726,11 @@ def test_live_clang_missing_mangling_is_not_read_as_c_linkage(tmp_path: Path) ->
     collapsed onto one ``EntityId`` (reproduced end to end before the fix;
     Codex + CodeRabbit review, PR #943).
 
-    Its sibling above
-    (``test_live_clang_uninstantiated_template_functions_never_collide_as_
-    extern_c``) pins the exact ``EntityId`` values for the free-function
-    pair, which is the shape the review actually reported; this one is the
-    class-level counterpart and deliberately does not repeat those literals.
-
-    The assertion here is about the *class*, not the one reported input: all three shapes clang leaves unmangled are exercised (a free
-    function template, a class-template method, and a class-template
-    pattern's static member — the last through the variable constructor,
-    which had the identical bug), each as a same-leaf-name pair in
-    different namespaces, so every declaration whose identity depends on
-    the signature/scope tier is covered rather than just the first one
-    someone happened to report.
+    Exercises the *class* of the bug, not just the reported input: all
+    three shapes clang leaves unmangled (a free function template, a
+    class-template method, a class-template pattern's static member,
+    the last through the variable constructor which had the identical bug),
+    each as a same-leaf-name pair in different namespaces.
     """
     parser = _clang_parser(_UNINSTANTIATED_TEMPLATES, tmp_path, "tmpl")
 
@@ -812,6 +799,36 @@ def test_live_clang_nested_cpp_linkage_inside_extern_c_is_not_extern_c(
 
 @pytest.mark.integration
 @pytest.mark.skipif(shutil.which("clang") is None, reason="clang not installed")
+def test_live_clang_hidden_friend_template_resolves_in_namespace_scope(
+    tmp_path: Path,
+) -> None:
+    """A hidden friend template is a member of the enclosing namespace, not
+    the befriending class ([namespace.memdef]) -- confirmed by compilation:
+    clang rejects two such friends with identical signatures in different
+    classes as a *redefinition*, proof they're one entity. The lexical walk
+    previously kept each ``EntityId`` under its own class's ``Record``
+    scope, wrongly making them unequal (Codex review, PR #943);
+    ``hidden_friend_owner`` still distinguishes the befriending class."""
+    parser = _clang_parser(
+        "struct A { template<class T> friend void f(T); };"
+        " struct B { template<class U> friend void f(U); };",
+        tmp_path,
+        "hiddenfriend",
+    )
+    funcs = [fn for fn in parser.parse_functions() if fn.name == "f"]
+    assert len(funcs) == 2
+    a_fn = next(fn for fn in funcs if fn.hidden_friend_owner == "A")
+    b_fn = next(fn for fn in funcs if fn.hidden_friend_owner == "B")
+    assert a_fn.is_hidden_friend is True
+    assert b_fn.is_hidden_friend is True
+    assert a_fn.entity_id is not None and b_fn.entity_id is not None
+    assert a_fn.entity_id.scope == ()
+    assert b_fn.entity_id.scope == ()
+    assert a_fn.entity_id == b_fn.entity_id
+
+
+@pytest.mark.integration
+@pytest.mark.skipif(shutil.which("clang") is None, reason="clang not installed")
 def test_live_clang_template_param_kind_discriminates_overloaded_templates(
     tmp_path: Path,
 ) -> None:
@@ -860,15 +877,12 @@ def test_live_clang_template_param_rename_does_not_change_identity(
     tmp_path: Path,
 ) -> None:
     """A pure template-parameter RENAME must NOT change the ``EntityId``.
-
-    ``template<class T, T N> void f();`` and ``template<class U, U N> void
-    f();`` are the identical declaration under a parameter rename, but
-    clang's own ``qualType`` for the non-type parameter ``N`` spells the
+    ``template<class T, T N> void f();``/``template<class U, U N> void
+    f();`` are identical, but clang's ``qualType`` for ``N`` spells the
     dependent type literally as the type parameter's own name
-    (``"T"``/``"U"``) -- reproduced end to end before this fix: the two
-    revisions produced unequal ``EntityId``s, which would fingerprint a
-    non-semantic rename as a remove+add (Codex review, PR #943).
-    """
+    (``"T"``/``"U"``) -- unequal ``EntityId``s before this fix, which would
+    fingerprint a non-semantic rename as a remove+add (Codex review, PR
+    #943)."""
     a = _one(
         _clang_parser(
             _TEMPLATE_PARAM_DEPENDENT_RENAME_A, tmp_path, "depa"
@@ -915,17 +929,12 @@ def test_live_clang_template_template_param_nested_arity_discriminates(
 def test_live_clang_template_template_param_rename_does_not_change_identity(
     tmp_path: Path,
 ) -> None:
-    """A pure RENAME of a template-TEMPLATE parameter must NOT change
-    the ``EntityId``.
-
-    ``template<template<class> class TT, TT<int>* N> void f();`` and the
-    same declaration with ``TT`` renamed to ``UU`` are the identical
-    declaration, but clang's own ``qualType`` for ``N`` spells the
-    dependent type literally as the template-template parameter's own
-    name (``"TT<int> *"``/``"UU<int> *"``) -- reproduced end to end
-    before this fix: the two revisions produced unequal ``EntityId``s
-    (Codex review, PR #943).
-    """
+    """A pure RENAME of a template-TEMPLATE parameter must NOT change the
+    ``EntityId``. ``template<template<class> class TT, TT<int>* N> void
+    f();`` renamed ``TT`` to ``UU`` is identical, but clang's ``qualType``
+    for ``N`` spells the dependent type literally (``"TT<int> *"``/
+    ``"UU<int> *"``) -- unequal ``EntityId``s before this fix (Codex
+    review, PR #943)."""
     a = _one(
         _clang_parser(
             _TEMPLATE_TEMPLATE_PARAM_DEPENDENT_RENAME_A, tmp_path, "ttdepa"
@@ -949,15 +958,11 @@ def test_live_clang_template_param_rename_in_ordinary_param_does_not_change_iden
     tmp_path: Path,
 ) -> None:
     """A pure template-parameter RENAME must NOT change identity when it
-    affects an ORDINARY parameter, not a non-type template parameter's
-    own declared type.
-
-    ``template<class T> void f(T);`` and ``template<class U> void
-    f(U);`` are the identical declaration, but clang's own ordinary
-    parameter spelling names the template parameter literally
-    (``"T"``/``"U"``) -- reproduced end to end before this fix: the two
-    revisions produced unequal ``EntityId``s (Codex review, PR #943).
-    """
+    affects an ORDINARY parameter, not a non-type parameter's own type.
+    ``template<class T> void f(T);``/``template<class U> void f(U);`` are
+    identical, but clang's ordinary-parameter spelling names the template
+    parameter literally (``"T"``/``"U"``) -- unequal ``EntityId``s before
+    this fix (Codex review, PR #943)."""
     a = _one(
         _clang_parser(
             _TEMPLATE_PARAM_ORDINARY_PARAM_RENAME_A, tmp_path, "ordpa"

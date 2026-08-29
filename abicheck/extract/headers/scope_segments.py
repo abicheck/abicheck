@@ -57,6 +57,7 @@ __all__ = [
     "flat_names",
     "namespace_segment",
     "record_segment",
+    "strip_record_scopes",
 ]
 
 #: ``Anonymous.kind`` for an unnamed namespace. Deliberately distinct from
@@ -185,4 +186,67 @@ def flat_names(path: ScopePath) -> tuple[str, ...]:
         seg.name
         for seg in path
         if isinstance(seg, Namespace | Record | InlineNamespace)
+    )
+
+
+def strip_record_scopes(path: ScopePath) -> ScopePath:
+    """*path* with every record-nesting segment removed.
+
+    A hidden friend (a friend function/function-template with no prior
+    declaration reachable by ordinary lookup) is, per [namespace.memdef],
+    injected as a member of the *nearest enclosing namespace* -- not of the
+    befriending class it is lexically written inside. Both header-AST
+    backends' own scope-building walk is lexical, though: it pushes a
+    :class:`~abicheck.model.identity.Record` segment for the enclosing
+    class regardless of whether a nested declaration is a genuine member or
+    a hidden friend, so a hidden friend's raw ``scope_path`` wrongly still
+    names the class.
+
+    Confirmed by direct compilation (Codex review, PR #943): clang rejects
+    ``struct A { template<class T> friend void f(T) {} }; struct B {
+    template<class T> friend void f(T) {} };`` as a *redefinition* of `f`
+    -- proof the two hidden friend templates are the same entity in the
+    nearest enclosing namespace (here, the global namespace), not two
+    distinct class-scoped ones -- yet the clang backend's own lexical walk
+    had given them ``scope_path``s of ``(Record("A"),)`` and
+    ``(Record("B"),)`` respectively, an ``EntityId`` collision in the
+    opposite direction from every other identity fix in this module: two
+    genuinely identical declarations wrongly compared *unequal*, rather
+    than two distinct ones wrongly compared equal.
+
+    Every :class:`~abicheck.model.identity.Namespace`,
+    :class:`~abicheck.model.identity.InlineNamespace`, and
+    :class:`~abicheck.model.identity.LocalToFunction` segment is kept
+    unchanged, along with an :class:`~abicheck.model.identity.Anonymous`
+    segment whose ``kind`` is an anonymous *namespace* -- none of those name
+    a class, so none block a hidden friend's namespace injection. Only
+    :class:`~abicheck.model.identity.Record` and a record-kind
+    :class:`~abicheck.model.identity.Anonymous` (an anonymous
+    struct/class/union) are dropped, and every one of them is, deliberately
+    -- a friend hidden inside nested classes is injected past *all* of
+    them, not just the innermost.
+
+    This is the caller's decision to make, not this function's: only the
+    ``EntityId`` computation for a hidden friend should see the stripped
+    path (mirroring castxml's own ``befriending``-attribute resolution,
+    which already places a hidden friend's ``context`` at the enclosing
+    namespace and records the befriending class separately) -- a hidden
+    friend's *display* qualified name and its recorded
+    ``hidden_friend_owner`` still name the befriending class, unaffected by
+    this helper.
+
+    >>> strip_record_scopes((Namespace("ns"), Record("A"), Record("B")))
+    (Namespace(name='ns'),)
+    >>> strip_record_scopes((Record("A"), Anonymous("struct", 0)))
+    ()
+    >>> strip_record_scopes((Anonymous("namespace", 0), Record("A")))
+    (Anonymous(kind='namespace', ordinal=0),)
+    """
+    return tuple(
+        seg
+        for seg in path
+        if not (
+            isinstance(seg, Record)
+            or (isinstance(seg, Anonymous) and seg.kind != ANONYMOUS_NAMESPACE)
+        )
     )
