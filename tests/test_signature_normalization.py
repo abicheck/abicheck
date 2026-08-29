@@ -165,6 +165,29 @@ class TestPointerToMemberOwnCvIsDropped:
         assert "(int)" in canon("void (C::* const)(int)")
 
 
+class TestTemplateQualifiedMemberPointerOwnCvIsDropped:
+    """A nested-name-specifier's own segment can itself be a template-id
+    (``C<int>::``), not only a plain identifier -- the declarator-group
+    transparency test must still recognize it and find the sigil, since a
+    real nested-name-specifier commonly looks like this."""
+
+    def test_template_member_pointer_own_const_dropped(self) -> None:
+        assert canon("void (C<int>::* const)(int)") == canon("void (C<int>::*)(int)")
+
+    def test_nested_template_arguments_handled(self) -> None:
+        # A template argument can itself contain another template-id --
+        # the balanced-<...> scan must not stop at the first ">".
+        assert canon("void (Box<Pair<int, int>>::* const)(int)") == canon(
+            "void (Box<Pair<int, int>>::*)(int)"
+        )
+
+    def test_template_member_pointer_param_list_untouched(self) -> None:
+        assert "(int)" in canon("void (C<int>::*)(int)")
+
+    def test_template_argument_content_preserved(self) -> None:
+        assert "C<int>" in canon("void (C<int>::*)(int)")
+
+
 class TestCallingConventionDeclaratorGroupIsRecognized:
     """An MSVC/PE calling-convention keyword (``__cdecl``, ``__stdcall``,
     ...) can precede a declarator's own sigil inside its grouping parens
@@ -232,6 +255,31 @@ class TestPointerToMemberTrailingQualifiersPreserved:
         assert canon("void (C::*)(int) &&") == canon("void (C::*)(int) &&")
         assert "(int)" in canon("void (C::*)(int) &&")
         assert "C" in canon("void (C::*)(int) &&")
+
+    def test_noexcept_distinguishes_from_unqualified(self) -> None:
+        # Regression pin: an earlier revision of the trailing-qualifier
+        # fix reconstructed the whole trailing region from only cv/ref,
+        # silently dropping "noexcept" -- collapsing two genuinely
+        # different, non-interchangeable C++17 function-pointer types
+        # into one identity, the same over-merge class this whole
+        # primitive exists to prevent.
+        assert canon("void (*)(int) noexcept") != canon("void (*)(int)")
+
+    def test_noexcept_still_present(self) -> None:
+        assert "noexcept" in canon("void (*)(int) noexcept")
+
+    def test_noexcept_combines_with_trailing_cv(self) -> None:
+        assert canon("void (C::*)(int) const noexcept") != canon(
+            "void (C::*)(int) const"
+        )
+        assert canon("void (C::*)(int) const noexcept") != canon(
+            "void (C::*)(int) noexcept"
+        )
+
+    def test_cv_still_order_independent_alongside_noexcept(self) -> None:
+        assert canon("void (C::*)(int) const noexcept") == canon(
+            "void (C::*)(int) noexcept const"
+        )
 
 
 class TestNestedCallbackParametersAreNormalizedRecursively:
@@ -302,6 +350,14 @@ class TestIdempotence:
 
     def test_idempotent_on_trailing_member_qualifiers(self) -> None:
         once = canon("void (C::*)(int) volatile const")
+        assert canon(once) == once
+
+    def test_idempotent_on_template_qualified_member_pointer(self) -> None:
+        once = canon("void (C<int>::* const)(int)")
+        assert canon(once) == once
+
+    def test_idempotent_on_noexcept(self) -> None:
+        once = canon("void (C::*)(int) noexcept const")
         assert canon(once) == once
 
 

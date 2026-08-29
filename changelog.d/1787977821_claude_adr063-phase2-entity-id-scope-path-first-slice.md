@@ -137,3 +137,10 @@
   are -- only reordered for cv, never dropped, and a trailing `&&`
   ref-qualifier (which `canonicalize_type_name` itself spells `"& &"`) no
   longer corrupts the declarator's own sigil detection.
+  A nested-name-specifier's own segment can now also be a template-id
+  (`void (C<int>::* const)(int)`, to any template-argument nesting depth),
+  recognized as the same declarator-grouping transparency. The
+  pointer-to-member trailing-qualifier handling no longer drops any
+  specifier it doesn't individually name -- a `noexcept`-specifier (part
+  of a C++17 function's type, and previously silently discarded) now
+  survives verbatim alongside order-independent `const`/`volatile`.

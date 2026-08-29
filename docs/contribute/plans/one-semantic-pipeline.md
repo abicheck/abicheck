@@ -6987,6 +6987,45 @@ positive on a legitimate class-type spelling that happens to end in a
 parenthesized group. Recorded here as an accepted, documented limitation
 rather than silently dropped.
 
+**Correction (2026-08-29, same day, eleventh Codex review round on PR #941,
+commit ea44356): one more real gap in the declarator-transparency test,
+plus a second, more serious self-caught over-merge in the tenth round's
+own trailing-qualifier fix.** (1) `_DECLARATOR_GROUP_RE`'s qualified-name
+loop matched only plain `identifier::` segments, so a template-qualified
+nested-name-specifier -- `void (C<int>::* const)(int)`, a real, common
+C++ shape -- was never recognized as a declarator group, and its own
+by-value cv stayed unstripped. Fixed by replacing the single regex with a
+manual scanner, `_is_declarator_group`: a template-argument list can nest
+arbitrarily deep (`Box<Pair<int, int>>::`), which `re`'s non-recursive
+matching cannot balance, so this needed real character-by-character
+`<`/`>` depth tracking, not a regex extension. (2) The tenth round's
+`_canonicalize_member_qualifiers` fixed the over-merge on trailing
+`const`/`&`/`&&`, but did so by RECONSTRUCTING the whole trailing region
+from only those three tokens -- silently dropping anything else found
+there. The practically important case: a `noexcept`-specifier, which
+C++17 made part of the function type, so `void (*)(int) noexcept` and
+`void (*)(int)` are two different, non-interchangeable types -- and this
+primitive was merging them into one identity, the exact same over-merge
+class the tenth round's own fix existed to close, just relocated rather
+than eliminated. Fixed generally: instead of naming every possible
+trailing specifier and reconstructing from a fixed list, the function now
+only ever removes and reorders the `const`/`volatile` WORDS themselves
+(via `_CV_WORD_RE`, the same primitive `_strip_cv_tokens_outside_nesting`
+already uses) and passes everything else through verbatim, in its
+original relative order -- `dcl.fct`'s own grammar already fixes
+cv-qualifier-seq first among a function's trailing specifiers, so a real
+producer's placement of ref-qualifier/`noexcept`/anything else never
+needs inferring, only cv needs reordering relative to itself. This also
+means the function no longer special-cases the ref-qualifier's `"&&"` ->
+`"& &"` spelling quirk (`canonicalize_type_name` already normalizes that
+upstream, before this function ever sees the string, so passing the
+leftover text through verbatim is already consistent). Eight new tests in
+`tests/test_signature_normalization.py`
+(`TestTemplateQualifiedMemberPointerOwnCvIsDropped`, four new cases in
+`TestPointerToMemberTrailingQualifiersPreserved` for `noexcept`, plus two
+new idempotence cases) pin both fixes, including a nested template
+argument and `noexcept` combined with order-independent cv.
+
 ---
 
 ### Phase 3 — public surface as a graph query over one evidence graph (D5)

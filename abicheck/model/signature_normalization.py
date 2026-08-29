@@ -42,20 +42,27 @@ _CV_WORD_RE = re.compile(r"\b(?:const|volatile)\b")
 # A declarator-grouping paren's content, up to its own sigil: an optional
 # MSVC calling-convention keyword, then either a bare pointer/reference
 # (`*`, `&`) or a pointer-to-member's qualified-name prefix (`C::*`,
-# `ns::C::*` -- one or more `identifier::` segments) then the sigil. Used
-# to tell a declarator-grouping paren (transparent, not a real nesting
-# level) from a genuine parameter-list paren (opaque): a parameter list's
-# first token is always a type, which can itself start with an identifier,
-# but is never a calling-convention keyword and never immediately followed
-# by `::` then only a bare sigil -- both shapes are unique to a declarator
-# (Codex review, PR #941: the ninth round added the qualified-name-prefix
-# form, so `void (C::* const)(int)` -- cv on a pointer-to-member's own
-# outermost sigil -- was found at depth 0; the tenth round added the
-# calling-convention keyword, since a real MSVC/PE calling-convention
-# decoration -- e.g. `void (__cdecl * const)(int)` -- otherwise defeated
-# the same transparency test the identical way).  The convention keyword
-# itself is matched, not consumed/erased -- it stays in the returned
-# prefix verbatim, a genuine part of the type, same as the qualified-name
+# `ns::C::*`, `C<int>::*` -- one or more `identifier[<template-args>]::`
+# segments) then the sigil. Used to tell a declarator-grouping paren
+# (transparent, not a real nesting level) from a genuine parameter-list
+# paren (opaque): a parameter list's first token is always a type, which
+# can itself start with an identifier, but is never a calling-convention
+# keyword and never immediately followed by `::` then only a bare sigil --
+# both shapes are unique to a declarator (Codex review, PR #941: the
+# ninth round added the qualified-name-prefix form, so `void (C::*
+# const)(int)` -- cv on a pointer-to-member's own outermost sigil -- was
+# found at depth 0; the tenth round added the calling-convention keyword,
+# since a real MSVC/PE calling-convention decoration -- e.g. `void
+# (__cdecl * const)(int)` -- otherwise defeated the same transparency
+# test the identical way; the eleventh round added the template-argument
+# list, since a real nested-name-specifier's segment can itself be a
+# template-id, e.g. `void (C<int>::* const)(int)`, which a plain
+# `identifier::` match can't recognize -- checked with a manual scanner,
+# not a single regex, since a template-argument list can nest arbitrarily
+# deep, `Box<Pair<int, int>>::`, which `re`'s non-recursive matching
+# cannot balance). The convention keyword and any template-argument list
+# are matched, not consumed/erased -- they stay in the returned prefix
+# verbatim, genuine parts of the type, same as the plain qualified-name
 # prefix already does.
 _CALLING_CONVENTIONS = (
     "__cdecl",
@@ -64,10 +71,55 @@ _CALLING_CONVENTIONS = (
     "__thiscall",
     "__vectorcall",
 )
-_DECLARATOR_GROUP_RE = re.compile(
-    r"\s*(?:(?:" + "|".join(_CALLING_CONVENTIONS) + r")\s*)?"
-    r"(?:[A-Za-z_]\w*\s*::\s*)*[*&]"
-)
+_IDENTIFIER_RE = re.compile(r"[A-Za-z_]\w*")
+
+
+def _is_declarator_group(s: str, start: int) -> bool:
+    """Whether ``s[start:]`` is a declarator-grouping paren's own content
+    (see :data:`_CALLING_CONVENTIONS`'s module-level comment for the full
+    shape) -- called with *start* right after the paren's own ``(``.
+    """
+    n = len(s)
+    i = start
+    while i < n and s[i] == " ":
+        i += 1
+    for conv in _CALLING_CONVENTIONS:
+        if s.startswith(conv, i):
+            i += len(conv)
+            while i < n and s[i] == " ":
+                i += 1
+            break
+    while True:
+        j = i
+        while j < n and s[j] == " ":
+            j += 1
+        m = _IDENTIFIER_RE.match(s, j)
+        if not m:
+            break
+        k = m.end()
+        if k < n and s[k] == "<":
+            depth = 0
+            p = k
+            while p < n:
+                if s[p] == "<":
+                    depth += 1
+                elif s[p] == ">":
+                    depth -= 1
+                    if depth == 0:
+                        p += 1
+                        break
+                p += 1
+            else:
+                return False  # unmatched '<' -- malformed, bail out
+            k = p
+        while k < n and s[k] == " ":
+            k += 1
+        if not s.startswith("::", k):
+            break
+        i = k + 2
+    while i < n and s[i] == " ":
+        i += 1
+    return i < n and s[i] in "*&"
 
 
 def _strip_cv_tokens_outside_nesting(s: str) -> str:
@@ -261,40 +313,49 @@ def _split_at_trailing_param_list(suffix: str) -> tuple[str, str] | None:
 
 
 def _canonicalize_member_qualifiers(s: str) -> str:
-    """Canonicalize a pointer-to-member-function's own trailing cv/ref
-    qualifiers -- the ``const``/``volatile``/``&``/``&&`` that can follow
-    its parameter list, e.g. the ``const`` in ``void (C::*)(int) const``.
-    These qualify the POINTED-TO member function itself: a genuine,
-    standard-mandated overload/type discriminator (``void (C::*)(int)
-    const`` and ``void (C::*)(int)`` are two different, non-interchangeable
-    pointer-to-member types), unlike the pointer's own by-value qualifier
-    already stripped separately -- so this function only reorders (never
-    drops) them, the same "eliminate ordering by construction" treatment
-    ``entity_id_for_function``'s own ``is_const``/``is_volatile`` booleans
-    already give the outer function's member-cv (Codex review, PR #941,
-    tenth round: an earlier revision blanket-stripped every depth-0 cv
-    token found anywhere after the sigil, which wrongly erased this
-    genuinely-distinguishing trailing qualifier instead of only the
-    pointer's own by-value one before the parameter list).
+    """Canonicalize a pointer-to-member-function's own trailing
+    specifiers -- the cv-qualifiers, ref-qualifier, and (post-C++17)
+    ``noexcept``-specifier that can follow its parameter list, e.g. the
+    ``const`` in ``void (C::*)(int) const`` or the ``noexcept`` in
+    ``void (*)(int) noexcept``. These qualify the POINTED-TO member
+    function itself: genuine, standard-mandated overload/type
+    discriminators (``void (C::*)(int) const`` and ``void (C::*)(int)``
+    are two different, non-interchangeable pointer-to-member types; since
+    C++17 a ``noexcept``/non-``noexcept`` function is likewise a distinct
+    type), unlike the pointer's own by-value qualifier already stripped
+    separately -- so this function only ever REORDERS ``const``/
+    ``volatile`` relative to each other (the same "eliminate ordering by
+    construction" treatment ``entity_id_for_function``'s own
+    ``is_const``/``is_volatile`` booleans already give the outer
+    function's member-cv), while every other specifier -- ref-qualifier,
+    ``noexcept``, and anything else this function does not need to
+    individually name -- passes through verbatim, in its original
+    relative order (Codex review, PR #941, tenth round: an earlier
+    revision blanket-stripped every depth-0 cv token found anywhere after
+    the sigil, which wrongly erased this genuinely-distinguishing trailing
+    region entirely; eleventh round: the fix for that then reconstructed
+    the trailing region from ONLY cv/ref, which silently dropped
+    ``noexcept`` instead -- a second, different over-merge of the same
+    class, `void (*)(int) noexcept` and `void (*)(int)` wrongly collapsing
+    to one identity. `dcl.fct`'s own grammar already fixes cv-qualifier-
+    seq first among these trailing specifiers, so a real producer's
+    placement never needs inferring -- only cv needs reordering relative
+    to itself; everything else keeps whatever order it was already
+    spelled in).
     """
     stripped = s.strip()
     if not stripped:
         return ""
     has_const = re.search(r"\bconst\b", stripped) is not None
     has_volatile = re.search(r"\bvolatile\b", stripped) is not None
-    # canonicalize_type_name spells "&&" as "& &" (its own established
-    # sigil-spacing convention, same source as "int * const *" -> "int
-    # *const *" elsewhere in this module) -- compare on a whitespace-
-    # collapsed form so a trailing rvalue-ref qualifier is still found.
-    compact = re.sub(r"\s+", "", stripped)
-    ref = "&&" if compact.endswith("&&") else "&" if compact.endswith("&") else ""
+    rest = re.sub(r"\s+", " ", _CV_WORD_RE.sub("", stripped)).strip()
     parts = [
         p
         for p, present in (("const", has_const), ("volatile", has_volatile))
         if present
     ]
-    if ref:
-        parts.append(ref)
+    if rest:
+        parts.append(rest)
     return " ".join(parts)
 
 
@@ -481,7 +542,23 @@ def canonicalize_function_signature_param_type(name: str) -> str:
     >>> canonicalize_function_signature_param_type("void (C::*)(int) volatile const")
     'void (C:: * )(int) const volatile'
     >>> canonicalize_function_signature_param_type("void (C::*)(int) &&")
-    'void (C:: * )(int) &&'
+    'void (C:: * )(int) & &'
+
+    A nested-name-specifier's own segment can itself be a template-id
+    (``C<int>::``), not only a plain identifier -- recognized the same
+    transparent way, to any template-argument nesting depth. And any
+    OTHER trailing specifier this function does not individually name --
+    a ``noexcept``-specifier being the practically important one, since
+    C++17 makes it part of the function type -- passes through verbatim
+    rather than being dropped: only ``const``/``volatile`` are ever
+    reordered here, never anything else.
+
+    >>> canonicalize_function_signature_param_type("void (C<int>::* const)(int)")
+    'void (C<int>:: * )(int)'
+    >>> canonicalize_function_signature_param_type("void (*)(int) noexcept")
+    'void ( * )(int) noexcept'
+    >>> canonicalize_function_signature_param_type("void (C::*)(int) noexcept const")
+    'void (C:: * )(int) const noexcept'
     """
     canonical = canonicalize_type_name(
         _decay_top_level_array(canonicalize_type_name(name))
@@ -505,7 +582,7 @@ def canonicalize_function_signature_param_type(name: str) -> str:
     seen_top_level_opaque_paren = False
     for i, ch in enumerate(canonical):
         if ch == "(":
-            transparent = _DECLARATOR_GROUP_RE.match(canonical, i + 1) is not None
+            transparent = _is_declarator_group(canonical, i + 1)
             transparent_parens.append(transparent)
             if not transparent:
                 if depth == 0:
