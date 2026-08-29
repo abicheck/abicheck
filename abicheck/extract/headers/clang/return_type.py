@@ -94,8 +94,9 @@ def _top_level_paren_spans(s: str) -> list[tuple[int, int]]:
     return spans
 
 
-_EXCEPTION_SPEC_KEYWORD_RE = re.compile(r"\b(?:noexcept|throw)\s*$")
+_EXCEPTION_SPEC_KEYWORD_RE = re.compile(r"\b(?:noexcept|throw|__attribute__)\s*$")
 _LEADING_EXCEPTION_SPEC_RE = re.compile(r"^\s*\b(?:noexcept|throw)\b")
+_TRAILING_ATTRIBUTE_KEYWORD_RE = re.compile(r"\b__attribute__\s*$")
 
 
 def _find_top_level_arrow(s: str) -> int | None:
@@ -256,6 +257,39 @@ def _excise_own_param_list(s: str) -> str:
     return s[:first_start] + "()" + remainder
 
 
+def _strip_trailing_gnu_attribute(s: str) -> str:
+    """Remove one or more trailing GNU ``__attribute__((...))`` clauses
+    from *s*, if present at the very end.
+
+    Unlike an exception specification (part of the function's TYPE since
+    C++17, and real distinguishing return-type content -- see
+    :func:`return_type`'s own docstring), a GNU attribute is never part of
+    the type: it doesn't affect overload resolution or type identity, so
+    it must not leak into the reported return type at all -- confirmed by
+    direct compilation that ``template<class T> int (*f(T))(int)
+    __attribute__((sysv_abi));``'s ``qualType`` is ``"int (*(T))(int)
+    __attribute__((sysv_abi))"``, which the SPIRAL branch's tail
+    (everything after the wrapper's own trailing group, kept verbatim
+    otherwise) would otherwise carry straight into ``return_type``
+    (Codex review, PR #943, on a later round -- the sibling hazard to the
+    fallback branch's own attribute-vs-parameter-list confusion, which
+    :data:`_EXCEPTION_SPEC_KEYWORD_RE` closes separately by also excluding
+    an attribute's own argument-clause group from being mistaken for the
+    real parameter list).
+    """
+    while True:
+        spans = _top_level_paren_spans(s)
+        if not spans:
+            return s
+        last_start, last_end = spans[-1]
+        if last_end != len(s.rstrip()):
+            return s
+        keyword = _TRAILING_ATTRIBUTE_KEYWORD_RE.search(s[:last_start])
+        if not keyword:
+            return s
+        s = s[: keyword.start()].rstrip()
+
+
 def return_type(qualtype: str) -> str:
     """The return type spelling of a function ``qualType`` (``ret (params)…``).
 
@@ -327,7 +361,7 @@ def return_type(qualtype: str) -> str:
     if _is_spiral_wrapper_prefix(first_interior):
         leading = qualtype[:first_start].strip()
         inner = _excise_own_param_list(first_interior)
-        tail = qualtype[first_end:]
+        tail = _strip_trailing_gnu_attribute(qualtype[first_end:])
         return (leading + " (" + inner + ")" + tail).strip()
 
     real_start = spans[-1][0]

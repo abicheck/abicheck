@@ -1084,3 +1084,44 @@ def test_live_clang_decltype_dereferenced_cast_is_not_mistaken_for_spiral_declar
     assert f.return_type == "decltype(*(typename T::x *)0)"
     assert g.return_type == "decltype(*(typename T::y *)0)"
     assert f.return_type != g.return_type
+
+
+@pytest.mark.integration
+@pytest.mark.skipif(shutil.which("clang") is None, reason="clang not installed")
+def test_live_clang_trailing_gnu_attribute_does_not_leak_into_return_type(
+    tmp_path: Path,
+) -> None:
+    """A trailing GNU `__attribute__((...))` clause is never part of a
+    function's TYPE (unlike an exception specification, part of the type
+    since C++17) and must not leak into `return_type` in either the
+    ordinary (scan-from-end) or SPIRAL-declarator branch: `int (int)
+    __attribute__((sysv_abi));`'s `qualType` is `"int (int)
+    __attribute__((sysv_abi))"` (confirmed by direct compilation) --
+    the scan-from-end branch mistook the attribute's own argument-clause
+    group for the real parameter list, reducing `return_type` to `"int
+    (int) __attribute__"` instead of `"int"`. A spiral (function-pointer-
+    returning) function with the identical trailing attribute leaked it
+    into the tail kept verbatim otherwise: `template<class T> int
+    (*f(T))(int) __attribute__((sysv_abi));`'s `qualType` is `"int
+    (*(T))(int) __attribute__((sysv_abi))"`, previously reduced to `"int
+    (*())(int) __attribute__((sysv_abi))"` instead of `"int (*())(int)"`
+    (Codex review, PR #943, on a later round)."""
+    ordinary = _one(
+        _clang_parser(
+            "int f(int) __attribute__((sysv_abi));",
+            tmp_path,
+            "attrordinary",
+        ).parse_functions(),
+        name="f",
+    )
+    assert ordinary.return_type == "int"
+
+    spiral = _one(
+        _clang_parser(
+            "template<class T> int (*f(T))(int) __attribute__((sysv_abi));",
+            tmp_path,
+            "attrspiral",
+        ).parse_functions(),
+        name="f",
+    )
+    assert spiral.return_type == "int (*())(int)"

@@ -8939,6 +8939,40 @@ module (spiral pointer/reference/member-pointer/block-pointer cases
 included) still passes unchanged. `mypy abicheck/` clean, `ruff check`/
 `ruff format --check` clean, `check_architecture.py` 0 errors.
 
+**Correction (2026-08-29, same day, Codex review on PR #943): a trailing
+GNU `__attribute__((...))` clause was mistaken for the function's real
+parameter list, and separately leaked verbatim into a spiral
+declarator's return type.** Confirmed by direct compilation:
+`int f(int) __attribute__((sysv_abi));`'s `qualType` is `"int (int)
+__attribute__((sysv_abi))"` -- the attribute clause's own argument
+group (`((sysv_abi))`) is a second top-level span, and the fallback
+branch's scan-from-end picked it as "the last group not preceded by
+`noexcept`/`throw`", swallowing the real parameter list `(int)` into
+what was reported as the return type (`"int (int) __attribute__"`
+instead of `"int"`). Separately, `template<class T> int (*f(T))(int)
+__attribute__((sysv_abi));`'s spiral-branch tail (kept verbatim
+otherwise, since an exception specification there is real,
+distinguishing return-type content per the earlier correction above)
+carried the attribute text straight through too (`"int (*())(int)
+__attribute__((sysv_abi))"` instead of `"int (*())(int)"`). Unlike an
+exception specification -- part of the function's TYPE since C++17 --
+a GNU attribute is never part of the type: it doesn't affect overload
+resolution or type identity, so both hazards needed fixing, and neither
+the same way as an exception spec. Fixed by (1) extending
+`_EXCEPTION_SPEC_KEYWORD_RE` (the fallback branch's own group-exclusion
+check) to also exclude a group immediately preceded by
+`__attribute__`, and (2) adding `_strip_trailing_gnu_attribute`, applied
+to the spiral branch's tail, which repeatedly strips one or more
+trailing `__attribute__((...))` clauses outright (never keeping them,
+unlike the exception-spec tail case). Regression test in
+`tests/test_entity_id_template_discriminators.py`
+(`test_live_clang_trailing_gnu_attribute_does_not_leak_into_return_type`),
+covering both the ordinary scan-from-end case and the spiral case,
+confirmed to fail pre-fix via `git stash` on just the source file and
+pass post-fix; every existing return-type discriminator test in that
+module still passes unchanged. `mypy abicheck/` clean, `ruff check`/
+`ruff format --check` clean, `check_architecture.py` 0 errors.
+
 ---
 
 ### Phase 3 — public surface as a graph query over one evidence graph (D5)
