@@ -8502,6 +8502,33 @@ independently checked to keep their existing spellings (`int g(int)`
 still reads `"int"`, `auto f(int) -> int*` still reports
 `return_pointer_depth=1`).
 
+**Correction (2026-08-29, same day, Codex review on PR #943): a nested
+template-template parameter's own non-type parameter could reference an
+ENCLOSING parameter's name, but the recursive descent started that
+nested scope's substitution empty.** `template<class T, template<T>
+class TT> void f();` is valid C++ -- confirmed by direct compilation:
+clang parses it without error, and the nested, unnamed
+`NonTypeTemplateParmDecl` inside `TT`'s own parameter list carries
+`qualType` `"T"`, the literal enclosing type parameter's name. But
+`_template_param_kinds_from_node`'s recursive call for a
+`TemplateTemplateParmDecl` (`extract.headers.clang.functions`) passed no
+enclosing names into the nested walk, so
+`canonicalize_type_param_references` had nothing to substitute `"T"`
+against inside that nested scope -- renaming the enclosing parameter to
+`U` produced `"template(nontype:T)"` vs. `"template(nontype:U)"` for the
+otherwise-identical declaration, the same collision shape the earlier
+enclosing-class-template-parameter correction fixed for an ordinary
+member, just one level further inward. Fixed by threading an
+`enclosing_type_param_names` parameter through the recursive descent,
+seeded once ahead of the nested list's own accumulated names so a nested
+parameter never shadows an enclosing one's substitution position.
+Regression test in `tests/test_entity_id_template_discriminators.py`
+(`test_live_clang_nested_template_template_param_sees_enclosing_names`),
+confirmed to fail pre-fix via `git stash` on just the source file; every
+existing template-template-parameter discriminator test in that module
+(kind/packness/nested-arity collisions, the `TT`/`UU` rename case) still
+passes unchanged.
+
 ---
 
 ### Phase 3 — public surface as a graph query over one evidence graph (D5)

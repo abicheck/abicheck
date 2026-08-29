@@ -551,3 +551,38 @@ def test_live_clang_trailing_return_type_discriminates_overloaded_templates(
     assert a.entity_id != b.entity_id
     assert a.return_type == "typename T::x"
     assert b.return_type == "typename T::y"
+
+
+@pytest.mark.integration
+@pytest.mark.skipif(shutil.which("clang") is None, reason="clang not installed")
+def test_live_clang_nested_template_template_param_sees_enclosing_names(
+    tmp_path: Path,
+) -> None:
+    """A NESTED non-type parameter (inside a template-template parameter's
+    own parameter list) can legally reference an ENCLOSING parameter's
+    name: `template<class T, template<T> class TT> void f();` is valid
+    C++ (confirmed by direct compilation), and clang's `qualType` for the
+    nested, unnamed non-type parameter inside `TT` spells its type as the
+    literal enclosing name `T`. A pure rename of the enclosing parameter
+    (`T` -> `U`) must not change the identity, but the recursive descent
+    used to start the nested list's own substitution scope empty, so the
+    nested `nontype:T`/`nontype:U` entries never got canonicalized
+    against the enclosing scope (Codex review, PR #943)."""
+    a = _one(
+        _clang_parser(
+            "template<class T, template<T> class TT> void f();",
+            tmp_path,
+            "nesttta",
+        ).parse_functions(),
+        name="f",
+    )
+    b = _one(
+        _clang_parser(
+            "template<class U, template<U> class TT> void f();",
+            tmp_path,
+            "nestttb",
+        ).parse_functions(),
+        name="f",
+    )
+    assert a.entity_id is not None and a.entity_id == b.entity_id
+    assert a.entity_id.extra[-1] == "template(nontype:type-param-0)"

@@ -326,11 +326,16 @@ def function_template_param_kinds(
     class> class TT>`` -- two more legal overloads sharing every OTHER
     discriminator this function produces -- collapsed onto one bare
     ``"template"`` entry before this recursion (Codex review, PR #943, on
-    the third version of this function). Each nesting level gets its own
-    independent ``type_param_names`` scope -- a template-template
-    parameter's own type parameters live at a different depth than the
-    enclosing list's, so a non-type parameter at one level can never
-    reference a type parameter declared at another.
+    the third version of this function). A nested non-type parameter's own
+    declared type CAN legally reference an ENCLOSING parameter's name --
+    confirmed by direct compilation: ``template<class T, template<T> class
+    TT> void f();`` is valid C++, and clang's ``qualType`` for the nested,
+    unnamed ``NonTypeTemplateParmDecl`` inside ``TT`` spells its type as the
+    literal enclosing name ``"T"`` -- so the recursive descent is seeded
+    with every enclosing name already visible, not an empty scope (Codex
+    review, PR #943, on the fifth version of this function; a nested
+    parameter's OWN names still do not leak back out to an enclosing or
+    sibling scope, only inherit inward).
     """
     return _template_param_kinds_from_node(function_template_decl)[0]
 
@@ -388,6 +393,7 @@ def class_template_type_param_names(
 
 def _template_param_kinds_from_node(
     node: dict[str, Any],
+    enclosing_type_param_names: tuple[str, ...] = (),
 ) -> tuple[tuple[str, ...], tuple[str, ...]]:
     """Shared recursive body of :func:`function_template_param_kinds` and
     :func:`function_template_type_param_names` -- returns ``(kinds,
@@ -397,10 +403,21 @@ def _template_param_kinds_from_node(
     and a ``TemplateTemplateParmDecl`` (the nested, recursive call) --
     confirmed by direct compilation that clang gives the latter's own
     ``inner`` the identical parameter-list shape as the former's, so no
-    node-kind-specific branching is needed here.
+    node-kind-specific branching is needed here. *enclosing_type_param_names*
+    seeds the substitution scope for a nested (``TemplateTemplateParmDecl``)
+    call with every name already visible from the enclosing list -- a
+    nested non-type parameter's own declared type can legally reference one
+    (confirmed by direct compilation; see :func:`function_template_param_kinds`'s
+    own docstring) -- while the top-level call passes none, since a
+    ``FunctionTemplateDecl``'s own list has no enclosing scope of its own.
+    Enclosing names are seeded once, ahead of any name this call's own
+    parameters accumulate, so a nested parameter never shadows an enclosing
+    one's POSITION in the substitution index -- only names visible when the
+    nested reference could legally appear are ever candidates.
     """
     kinds: list[str] = []
-    type_param_names: list[str] = []
+    type_param_names: list[str] = list(enclosing_type_param_names)
+    own_type_param_names: list[str] = []
     for child in node.get("inner", []) or []:
         if not isinstance(child, dict):
             continue
@@ -408,11 +425,17 @@ def _template_param_kinds_from_node(
         pack = "..." if child.get("isParameterPack") else ""
         if kind == "TemplateTypeParmDecl":
             kinds.append(f"type{pack}")
-            type_param_names.append(str(child.get("name") or ""))
+            name = str(child.get("name") or "")
+            type_param_names.append(name)
+            own_type_param_names.append(name)
         elif kind == "TemplateTemplateParmDecl":
-            nested_kinds, _nested_names = _template_param_kinds_from_node(child)
+            nested_kinds, _nested_names = _template_param_kinds_from_node(
+                child, tuple(type_param_names)
+            )
             kinds.append(f"template{pack}({','.join(nested_kinds)})")
-            type_param_names.append(str(child.get("name") or ""))
+            name = str(child.get("name") or "")
+            type_param_names.append(name)
+            own_type_param_names.append(name)
         elif kind == "NonTypeTemplateParmDecl":
             type_obj = child.get("type")
             spelling = (
@@ -426,10 +449,12 @@ def _template_param_kinds_from_node(
             # one's name too (e.g. `decltype(N)` for a preceding non-type
             # parameter `N`), so it joins the same substitution list --
             # confirmed by direct compilation (Codex review, PR #943).
-            type_param_names.append(str(child.get("name") or ""))
+            name = str(child.get("name") or "")
+            type_param_names.append(name)
+            own_type_param_names.append(name)
         else:
             break
-    return tuple(kinds), tuple(type_param_names)
+    return tuple(kinds), tuple(own_type_param_names)
 
 
 def parse_functions(
