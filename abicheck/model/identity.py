@@ -60,6 +60,8 @@ from __future__ import annotations
 import enum
 from dataclasses import dataclass, field
 
+from ..name_classification import canonicalize_type_name
+
 __all__ = [
     "Anonymous",
     "EntityId",
@@ -213,9 +215,20 @@ class LocalToFunction:
     matching :class:`Anonymous.ordinal` for the same reason: a caller must
     supply a real value rather than silently under-specifying identity by
     relying on an unwired default.
+
+    ``owner`` is the *owning function's own* :class:`EntityId`, not a bare
+    string -- a plain function name collides two overloads that each
+    declare a same-named local in their (corresponding) block
+    (``f(int) { struct A {}; }`` vs. ``f(double) { struct A {}; }`` --
+    identical ``owner="f"`` string, identical leaf name, so the two locals
+    would wrongly merge under an unconstrained-string owner; Codex review,
+    PR #941). Recursion is intentional and safe: `EntityId` is frozen/
+    hashable, so an `EntityId` naming a function whose own scope path
+    happens to include an outer `LocalToFunction` nests exactly as deep as
+    the real declaration does, with no special-casing needed here.
     """
 
-    owner: str
+    owner: EntityId
     block_ordinal: int
 
 
@@ -392,21 +405,56 @@ def entity_id_for_function(
     *ref_qualifier*/*is_variadic* are all ignored -- there is nothing left
     for a signature-free tag to add once the mangled name already
     disambiguates the declaration.
+
+    The *is_extern_c* branch's resulting ``EntityId.scope`` is always
+    ``()``, regardless of *scope*: ``resolve_symbol_identity`` deliberately
+    bases an extern-"C" identity on the raw export spelling alone rather
+    than a qualified name, precisely because scope availability varies by
+    evidence tier -- a header/DWARF-derived observation of a namespaced
+    ``extern "C"`` function may supply a real ``ScopePath``, while an
+    export-table-only snapshot of the identical binary symbol knows only
+    the bare exported name (extern "C" linkage means the symbol *is* that
+    bare name at the ABI level, so no namespace is even recoverable from
+    the export table alone). Folding a caller-supplied *scope* into the id
+    here would fragment one entity's identity across those two evidence
+    tiers -- the same reason ``resolve_symbol_identity`` explicitly prefers
+    the raw literal over ``qualified_name`` for this exact case (Codex
+    review, PR #941). The *mangled* branch keeps *scope* as given: a real
+    mangled name already fully and deterministically encodes scope, so no
+    evidence-tier divergence is possible there, and the extra `scope` field
+    is redundant but harmless. The *sig* fallback also keeps *scope* as
+    given -- a DWARF-only, mangling-free function has no comparable
+    varying-availability-by-tier problem to guard against, and scope is
+    exactly what makes two same-named, same-signature sibling declarations
+    in different scopes distinct.
+
+    *param_types* are canonicalized via
+    ``name_classification.canonicalize_type_name`` before joining into
+    ``extra`` -- CastXML's ``"char const*"`` and Clang's ``"char const *"``
+    spell an otherwise-identical parameter type differently, and without
+    canonicalization the same declaration observed by the two backends
+    would get two different ``EntityId``s, fragmenting identity across
+    header-AST backends the same way an uncanonicalized qualified name
+    would. Mirrors ``resolve_function_identity``'s own canonicalization of
+    ``func.params`` for the identical reason (Codex review, PR #941).
     """
     if mangled_name:
         extra: tuple[str, ...] = ("mangled", mangled_name)
+        resolved_scope = _scope_path(scope)
     elif is_extern_c:
         extra = ("extern_c",)
+        resolved_scope = ()
     else:
         extra = (
             "sig",
-            *param_types,
+            *(canonicalize_type_name(p) for p in param_types),
             *cv_qualifiers,
             ref_qualifier,
             str(is_variadic),
         )
+        resolved_scope = _scope_path(scope)
     return EntityId(
-        scope=_scope_path(scope),
+        scope=resolved_scope,
         kind=EntityKind.FUNCTION,
         leaf_name=leaf_name,
         extra=extra,

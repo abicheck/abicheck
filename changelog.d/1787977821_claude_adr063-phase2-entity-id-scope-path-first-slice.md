@@ -28,4 +28,17 @@
   `owner`, so two same-named locals declared in sibling compound blocks of
   one function no longer collapse onto the same `EntityId` -- the same
   sibling-collision shape `Anonymous.ordinal` already closes, applied to
-  its own segment kind.
+  its own segment kind. `LocalToFunction.owner` is now the owning
+  function's own `EntityId` rather than a bare string, so two overloads
+  that each declare a same-named local no longer collide just because
+  both share one bare function name. `entity_id_for_function`'s
+  `is_extern_c` branch now returns `scope=()` regardless of the caller-
+  supplied `scope`, matching `resolve_symbol_identity`'s own choice to
+  base an extern-"C" identity on the raw export rather than a qualified
+  name (evidence-tier scope availability varies for this case: an export-
+  table-only snapshot cannot recover a namespace an `extern "C"` symbol
+  was declared in). `param_types` in the signature-fallback branch are now
+  canonicalized via `name_classification.canonicalize_type_name` before
+  joining into `extra`, so CastXML's and Clang's differing spellings of an
+  otherwise-identical parameter type no longer fragment identity across
+  header-AST backends.

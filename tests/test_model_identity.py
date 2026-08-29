@@ -38,6 +38,7 @@ from hypothesis import given, strategies as st
 from abicheck.model import identity as model_identity
 from abicheck.model.identity import (
     Anonymous,
+    EntityId,
     EntityKind,
     InlineNamespace,
     LocalToFunction,
@@ -160,14 +161,21 @@ class TestInlineNamespaceVersionTagIsIdentity:
         )
 
 
+def _owner(name: str, *param_types: str) -> EntityId:
+    """Build a plausible owning-function ``EntityId`` for ``LocalToFunction``
+    tests -- ``owner`` is the owning function's own identity, not a bare
+    string (Codex review, PR #941: see ``LocalToFunction``'s docstring)."""
+    return entity_id_for_function((), name, param_types=param_types)
+
+
 class TestLocalToFunctionOwnerIsIdentity:
     @given(owner_a=_names, owner_b=_names)
     def test_distinct_owner_never_equal(self, owner_a: str, owner_b: str) -> None:
         if owner_a == owner_b:
             return
-        assert LocalToFunction(owner=owner_a, block_ordinal=0) != LocalToFunction(
-            owner=owner_b, block_ordinal=0
-        )
+        assert LocalToFunction(
+            owner=_owner(owner_a), block_ordinal=0
+        ) != LocalToFunction(owner=_owner(owner_b), block_ordinal=0)
 
     @given(owner=_names, ordinal_a=_ordinals, ordinal_b=_ordinals)
     def test_distinct_block_ordinal_never_equal(
@@ -178,14 +186,28 @@ class TestLocalToFunctionOwnerIsIdentity:
         # the same sibling-collision shape Anonymous.ordinal already closes.
         if ordinal_a == ordinal_b:
             return
-        assert LocalToFunction(owner=owner, block_ordinal=ordinal_a) != LocalToFunction(
-            owner=owner, block_ordinal=ordinal_b
+        o = _owner(owner)
+        assert LocalToFunction(owner=o, block_ordinal=ordinal_a) != LocalToFunction(
+            owner=o, block_ordinal=ordinal_b
         )
 
     @given(owner=_names, ordinal=_ordinals)
     def test_same_owner_and_block_ordinal_equal(self, owner: str, ordinal: int) -> None:
-        assert LocalToFunction(owner=owner, block_ordinal=ordinal) == LocalToFunction(
-            owner=owner, block_ordinal=ordinal
+        o = _owner(owner)
+        assert LocalToFunction(owner=o, block_ordinal=ordinal) == LocalToFunction(
+            owner=o, block_ordinal=ordinal
+        )
+
+    def test_overloaded_owners_never_collide(self) -> None:
+        # The Codex-flagged gap this dimension exists to close: f(int) and
+        # f(double) each declaring the same local struct A in their
+        # (corresponding) block must not merge just because both owners
+        # share the bare function name "f" -- owner carries the *full*
+        # overload-disambiguated identity of the enclosing function.
+        int_overload = _owner("f", "int")
+        double_overload = _owner("f", "double")
+        assert LocalToFunction(owner=int_overload, block_ordinal=0) != LocalToFunction(
+            owner=double_overload, block_ordinal=0
         )
 
 
@@ -200,7 +222,7 @@ class TestSegmentsAreHashable:
             Record(name="C", access="private"),
             InlineNamespace(name="v1", version_tag="v1"),
             Anonymous(kind="struct", ordinal=0),
-            LocalToFunction(owner="f", block_ordinal=0),
+            LocalToFunction(owner=_owner("f"), block_ordinal=0),
         ]
         as_set = set(segments)
         assert len(as_set) == len(segments)
@@ -399,6 +421,54 @@ class TestFunctionOverloadDiscrimination:
         )
         b = entity_id_for_function(scope, "f", mangled_name="_Z1fv")
         assert a == b
+
+    def test_extern_c_identity_is_independent_of_scope(self) -> None:
+        # The other Codex-flagged gap: a header/DWARF observation of a
+        # namespaced extern "C" function may supply a real ScopePath, while
+        # an export-table-only snapshot of the identical binary symbol
+        # knows only the bare exported name -- extern "C" linkage means the
+        # symbol *is* that bare name at the ABI level, so no namespace is
+        # even recoverable from the export table alone. The two must still
+        # produce the same EntityId, mirroring resolve_symbol_identity's
+        # own choice to base an extern-C identity on the raw export rather
+        # than a qualified name for exactly this reason.
+        namespaced = entity_id_for_function((Namespace("ns"),), "foo", is_extern_c=True)
+        export_only = entity_id_for_function((), "foo", is_extern_c=True)
+        assert namespaced == export_only
+        assert namespaced.scope == ()
+
+    def test_extern_c_scope_independence_does_not_erase_leaf_name(self) -> None:
+        # Scope-independence must not go too far -- two different exported
+        # extern "C" names still must not collide just because both were
+        # observed with no scope.
+        foo = entity_id_for_function((), "foo", is_extern_c=True)
+        bar = entity_id_for_function((), "bar", is_extern_c=True)
+        assert foo != bar
+
+    def test_mangled_and_sig_branches_keep_caller_supplied_scope(self) -> None:
+        # Contrast with the extern-C branch above: neither the mangled nor
+        # the sig fallback branch has an evidence-tier scope-availability
+        # problem to guard against, so scope stays exactly as given.
+        ns_a = entity_id_for_function((Namespace("a"),), "f", mangled_name="_Z1fv")
+        ns_b = entity_id_for_function((Namespace("b"),), "f", mangled_name="_Z1fv")
+        assert ns_a != ns_b
+        sig_a = entity_id_for_function((Namespace("a"),), "f")
+        sig_b = entity_id_for_function((Namespace("b"),), "f")
+        assert sig_a != sig_b
+
+    def test_param_types_canonicalized_across_producer_spellings(self) -> None:
+        # CastXML's "char const*" and Clang's "char const *" spell an
+        # otherwise-identical parameter type differently -- without
+        # canonicalization the same declaration observed by the two
+        # backends would get two different EntityIds.
+        scope = (Namespace("ns"),)
+        castxml_spelling = entity_id_for_function(
+            scope, "f", param_types=("char const*",)
+        )
+        clang_spelling = entity_id_for_function(
+            scope, "f", param_types=("char const *",)
+        )
+        assert castxml_spelling == clang_spelling
 
 
 class TestVariableMangledDiscriminator:

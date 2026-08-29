@@ -6577,6 +6577,50 @@ struct that, before this correction, had only one field -- a real
 inconsistency between the stated contract and the actual shape, not just
 prose.
 
+**Correction (2026-08-29, same day, second Codex review round on PR #941,
+commit de0f23e): three more real gaps found and fixed, on top of the two
+already closed above.** (1) `block_ordinal`'s own fix (just above) was
+itself incomplete: `LocalToFunction.owner` stayed a bare `str`, which
+still collides two *overloads* that each declare a same-named local in
+their corresponding block (`f(int) { struct A {}; }` vs. `f(double) {
+struct A {}; }` -- identical `owner="f"` string, identical leaf name).
+Fixed by changing `owner`'s type to `EntityId` -- the owning function's
+*own*, already-overload-disambiguated identity -- rather than widening it
+to yet another bespoke discriminator field; `EntityId` is frozen/hashable,
+so the resulting recursive structure (an `EntityId` whose `scope` may
+contain a `LocalToFunction` whose own `owner` is another `EntityId`) is
+free, not a special case. (2) The `is_extern_c` branch added earlier
+folded the caller-supplied `scope` into the returned `EntityId` unchanged,
+which reintroduces exactly the evidence-tier fragmentation problem
+`resolve_symbol_identity` deliberately avoids for this case: a header/
+DWARF-derived observation of a namespaced `extern "C"` function may supply
+a real `ScopePath`, while an export-table-only snapshot of the identical
+binary symbol knows only the bare exported name (extern "C" linkage means
+the symbol *is* that bare name at the ABI level -- no namespace is even
+recoverable from an export table alone). Fixed by forcing `scope=()` for
+the `is_extern_c` branch specifically, regardless of what `scope` argument
+the caller passed; the `mangled`/`sig` branches are unaffected -- a real
+mangled name already fully and deterministically encodes scope (no
+evidence-tier divergence possible), and a DWARF-only, mangling-free
+function has no comparable across-tier availability problem to guard
+against. (3) The `sig` fallback's `param_types` were joined into `extra`
+as raw, uncanonicalized strings, so CastXML's `"char const*"` and Clang's
+`"char const *"` -- an otherwise-identical parameter type -- would
+fragment identity across the two header-AST backends. Fixed by running
+each `param_types` entry through `name_classification.
+canonicalize_type_name` before joining, mirroring
+`resolve_function_identity`'s own canonicalization of `func.params` for
+the identical reason; `name_classification` is itself a dependency-free
+leaf module already imported by other `model/` modules
+(`model/graph_identity.py`, `model/stdlib_surface.py`), so this does not
+violate this module's own leaf-module contract (ADR-063 D10) -- it is not
+`checker_types`/`diff_*`/`checker`/`compare`/`finding_identity`. Nine new
+tests in `tests/test_model_identity.py` pin all three fixes, including the
+overload-disambiguated-owner case, the export-only-vs-namespaced
+scope-independence case (and that it does not erase `leaf_name`'s own
+discriminating power), that the `mangled`/`sig` branches keep scope as
+given, and the cross-backend canonicalization.
+
 ---
 
 ### Phase 3 — public surface as a graph query over one evidence graph (D5)
