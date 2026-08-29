@@ -7859,6 +7859,44 @@ plainly as the transferable lesson: a purely additive model field is not
 automatically inert, because a *generic object-graph walk* elsewhere in
 the codebase makes every new field its input.
 
+**Correction (2026-08-29, same day, Codex and CodeRabbit independently on
+PR #943): the third slice wired the clang producer's own `is_extern_c`
+into the identity constructor, and that field is broader than the
+constructor's `is_extern_c` parameter means.** `parse_functions`'
+`mangled` local falls back to the bare `name` whenever clang emits no
+`mangledName`, and the long-standing `mangled == name` heuristic reads
+that fallback as C linkage. Confirmed by direct compilation that clang
+omits `mangledName` entirely for three real shapes -- an uninstantiated
+function template, an uninstantiated class-template method, and a
+class-template pattern's static member -- and then reproduced the
+consequence through the real parser: `A::f`/`B::f` collapsed onto one
+`EntityId`, as did `C::S::v`/`D::S::v` through the variable path, because
+the `extern_c` branch deliberately forces `scope=()` and drops the
+signature. Fixed by gating the heuristic on the AST key's own *presence*
+rather than the fallback-widened value's truthiness, in both the function
+and the variable path; verified the narrowing cannot break real C linkage
+(`clang -x c` on a plain C header and `clang -x c++` on an `extern "C"`
+block both emit an explicit `mangledName` equal to the name, functions and
+variables alike), and pinned that as a negative control. castxml needs no
+counterpart -- verified directly that it emits nothing at all for an
+uninstantiated template, so its own absent-`mangled` attribute genuinely
+does mean C linkage.
+
+The transferable point, which generalizes past this one field: **every
+evidence-tier branch this constructor added that ERASES a discriminator
+(`scope=()` for `mangled`/`extern_c`, `leaf_name=""` for `mangled`) turns
+any over-broad predicate feeding it into an identity collapse, silently.**
+Those erasures are correct -- they exist to stop one entity fragmenting
+across evidence tiers, per the third/fourth Codex rounds above -- but they
+invert the usual failure mode: a wrong answer here merges two entities
+rather than splitting one, and merges are the direction no downstream
+consumer can recover from. A producer wiring a new caller into these
+constructors owes the same check this correction had to make after the
+fact: is the linkage/mangling signal I am passing *authoritative*, or is
+it a display fallback that happens to be true? The second slice's own
+`is_extern_c` field had been an inert inaccuracy for as long as it
+existed; only the carrier made it load-bearing.
+
 Next slice, in order (superseding the second slice's list, whose item (a)
 that slice landed and whose item (b) this slice's own finding above
 re-sequences): (c1) the storage v2 wire bridge -- `storage/entity_ids.py`'s
