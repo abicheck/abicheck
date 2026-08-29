@@ -6433,6 +6433,979 @@ exists in the repository after this phase, in `model/identity.py` —
 shows no regression (a net-new suppressed finding from the identity
 change is a Phase 2 bug, not acceptable drift).
 
+**Landed (first slice, 2026-08-29), not the whole phase — read this before
+assuming the Design section above is fully implemented.**
+`abicheck/model/identity.py` is real: the five `ScopeSegment` types
+(`Namespace`, `Record`, `InlineNamespace`, `Anonymous`, `LocalToFunction`)
+with exactly the identity-vs-payload field split the Design section states
+(`Record.access` excluded from equality/hash via `field(compare=False)`,
+every other segment's fields all participate), the corrected `EntityId`
+shape (`scope`, `kind`, `leaf_name`, `extra`), and `entity_id_for_type`/
+`_enum`/`_typedef`/`_constant`/`_variable`/`_function` constructors
+implementing the function/variable discriminator rules (mangled name first
+when the caller has already established it is genuine, normalized
+param-type/cv-qualifier fallback otherwise — both branches tagged
+(`"mangled"`/`"sig"`) so they occupy disjoint regions of `extra`'s value
+space and can never collide with each other by coincidence).
+`EntityKind`/`ObservationKind` are relocated from `storage/entity_ids.py`
+into this module and re-exported from there under their original names, so
+`storage.entity_ids.EntityKind is model.identity.EntityKind` — that one
+acceptance criterion is closed now, ahead of the rest of the phase.
+Primitive-level property tests in `tests/test_model_identity.py` (not
+`tests/test_entity_identity.py` as this phase's own "Tests" section named —
+that file was already taken, by the unrelated ADR-048/G31
+`buildsource.entity_identity` L5 primitive; corrected here rather than
+silently reusing the wrong name) pin: `Record.access` never affects
+equality/hash; `Anonymous`/`InlineNamespace`/`LocalToFunction` are identity
+on every field; a record nested in a record never collides with the same
+bare names nested in a namespace (the exact collision a `qualified_name`-
+only identity cannot distinguish, since both render to `"A::B"`); sibling
+declarations of the same kind in one scope never collide (enums, typedefs,
+constants, and the two function-overload shapes named in the Tests
+section — `f(int)` vs. `f(double)`, `void f()` vs. `void f() const`);
+`extern "C"`-shaped input (a genuine mangled name present) ignores param
+types, matching `finding_identity.resolve_function_identity`'s own
+documented rule; and the relocation itself, including a hashability check
+per segment and a real AST-based (not substring) leaf-module-import check
+per ADR-063 D10. Full fast unit suite green; storage's own existing test
+suite (1421 tests) re-run clean against the relocated enums; `mypy
+abicheck/` and `ruff` both clean.
+
+**What this slice deliberately does not attempt, and why** — both of Phase
+2's own named open design questions are still open, on purpose:
+
+1. *No `ScopePath` is derived from a real parser yet.* Every
+   `entity_id_for_*` constructor takes an already-built `ScopePath` as
+   input; none of them reach into `dumper_clang.py`'s/`dumper_castxml.py`'s
+   `entry.scope` (still a bare `list[str]`, exactly as insufficient as the
+   Design section found it). Widening that parser state is real,
+   separately-reviewable work of its own — this slice does not touch either
+   dumper module.
+2. *The carrier-field question (option (a) vs. (b)) is still unresolved,*
+   because nothing yet needs it resolved: with no real `ScopePath` producer
+   wired up, there is nothing for a post-parse consumer
+   (`diff_filtering.py`'s `_find_opaque_types` and siblings,
+   `type_reachability.py`) to migrate onto yet, so this slice does not touch
+   either of them, and their existing string-based ambiguity-tracking
+   machinery is untouched and still the one working implementation. Per this
+   phase's own acceptance criteria, deleting them now — before either option
+   is chosen and actually wired — would be strictly worse, not a shortcut.
+3. *`finding_identity.py` does not delegate to this module yet.* The
+   "direction of reuse" note above is correct about where the algorithm
+   should end up, but `finding_identity.is_real_mangled_name`/
+   `normalize_mangled_name` (the ~450-line, independently multi-round-
+   reviewed Itanium-mangling-validation machinery that decides whether a
+   caller-supplied `mangled_name` is genuine) has not moved. This slice's
+   `entity_id_for_function`/`entity_id_for_variable` instead take that
+   determination as an already-resolved `mangled_name: str | None` argument
+   from the caller, documented in the module's own docstring as a
+   deliberate scope boundary rather than an oversight. Migrating that
+   validation logic, and turning `resolve_function_identity`/
+   `resolve_variable_identity` into thin wrappers, is real follow-on work
+   this slice intentionally leaves for its own dedicated, independently
+   reviewable pass — not attempted here to keep this slice small enough to
+   review on its own, matching how every other phase's own first slice in
+   this plan has been landed one piece at a time.
+4. *No storage v2 wire-schema bridge (`to_dto`/`from_dto`) exists yet.*
+   `storage.entity_ids.EntityId`/`OccurrenceId` are completely unchanged
+   beyond the two enum imports — `model.identity.EntityId` and
+   `storage.entity_ids.EntityId` are two independent types today, which the
+   Design section's own note names as the accepted, temporary state until a
+   later slice does the `ScopePath`-preserving v2 encoding it specifies.
+
+Next slice, in order: (a) widen `entry.scope` in both dumper modules to a
+typed segment list (this is the fork point for the carrier-field question —
+see the Design section's own framing of why it can't be answered
+independently of that work), then (b) migrate `diff_filtering.py`/
+`type_reachability.py` once a real producer exists, then (c) the
+`finding_identity.py` algorithm migration and the storage v2 wire bridge,
+each as their own reviewable slice.
+
+**Correction (2026-08-29, same day, Codex review on PR #941): two real
+discriminator gaps in `entity_id_for_function` fixed, both traced to the
+same root cause -- the constructor accepted a strict subset of the
+dimensions `finding_identity.resolve_function_identity` already treats as
+load-bearing, so a caller reproducing that resolver's own contract through
+this constructor could not.** (1) An `extern "C"` producer follows
+*mangled_name*'s own documented contract and passes `None` for it (its raw
+export spelling is not a genuine mangling) -- with no separate linkage
+signal, that fell through to the signature-based fallback branch, so a
+changed parameter list on a genuinely-non-overloadable C-linkage function
+produced two ids instead of one modification, defeating the name-based
+extern-C fallback the rest of the codebase relies on. Fixed by adding an
+explicit `is_extern_c: bool = False` parameter that takes a third,
+signature-free `("extern_c",)` branch, mirroring `resolve_function_
+identity`'s own `func.is_extern_c` gate. (2) The signature fallback carried
+only `param_types`/`cv_qualifiers`, missing the two dimensions
+`resolve_function_identity` already folds in (`ref_qualifier`,
+`is_variadic`) -- `C::f() &` vs. `C::f() &&`, and `void f(int)` vs.
+`void f(int, ...)`, both collided. Fixed by adding `ref_qualifier: str = ""`
+and `is_variadic: bool | None = None` parameters, folded into the tagged
+`("sig", ...)` tuple; `is_variadic` stays a tri-state (not defaulting to
+`False`) for the same reason `resolve_function_identity` keeps it one --
+"doesn't know" must not silently collapse onto "confirmed non-variadic".
+Both fixes are additive keyword-only parameters with backward-compatible
+defaults; no existing call site changes behavior (there are none outside
+this module's own tests yet). Six new tests in `tests/test_model_identity.py`
+pin each new dimension, the three-way tag disjointness, the tri-state
+`is_variadic`, and that a genuine `mangled_name` still wins outright and
+ignores every other dimension.
+
+**Correction (2026-08-29, same day, CodeRabbit review on PR #941): the
+Design section above states `LocalToFunction(owner)` as a single-field
+segment, but that is an under-specification the same review caught for
+real -- fixed by adding `block_ordinal`, a required second field.**
+`owner` alone disambiguates two same-named locals declared in *different*
+functions, but not two same-named locals in *sibling compound blocks of
+the same function* (`void f() { { struct A {}; } { struct A {}; } }` --
+two distinct declarations, identical `owner`, identical leaf name, so both
+would collapse onto one `EntityId` under the Design section's original
+single-field shape). `block_ordinal` closes this exactly the way
+`Anonymous.ordinal` already closes the structurally identical
+sibling-anonymous-scope case: a deterministic per-function sequence
+number assigned at parse time, stable within one parse only -- the
+identical accepted, documented limitation `Anonymous` already states (an
+inserted or removed earlier local block shifts every later sibling's
+ordinal and therefore its whole `EntityId`, even though nothing about
+those later declarations changed). No default value, matching
+`Anonymous.ordinal`, since nothing constructs a `LocalToFunction` outside
+this module's own tests yet -- a caller must supply a real value rather
+than silently under-specifying identity via an unwired default. The code
+docstring's original "Both fields are identity" language was already
+correct in intent (mirroring `Anonymous`'s own phrasing) but described a
+struct that, before this correction, had only one field -- a real
+inconsistency between the stated contract and the actual shape, not just
+prose.
+
+**Correction (2026-08-29, same day, second Codex review round on PR #941,
+commit de0f23e): three more real gaps found and fixed, on top of the two
+already closed above.** (1) `block_ordinal`'s own fix (just above) was
+itself incomplete: `LocalToFunction.owner` stayed a bare `str`, which
+still collides two *overloads* that each declare a same-named local in
+their corresponding block (`f(int) { struct A {}; }` vs. `f(double) {
+struct A {}; }` -- identical `owner="f"` string, identical leaf name).
+Fixed by changing `owner`'s type to `EntityId` -- the owning function's
+*own*, already-overload-disambiguated identity -- rather than widening it
+to yet another bespoke discriminator field; `EntityId` is frozen/hashable,
+so the resulting recursive structure (an `EntityId` whose `scope` may
+contain a `LocalToFunction` whose own `owner` is another `EntityId`) is
+free, not a special case. (2) The `is_extern_c` branch added earlier
+folded the caller-supplied `scope` into the returned `EntityId` unchanged,
+which reintroduces exactly the evidence-tier fragmentation problem
+`resolve_symbol_identity` deliberately avoids for this case: a header/
+DWARF-derived observation of a namespaced `extern "C"` function may supply
+a real `ScopePath`, while an export-table-only snapshot of the identical
+binary symbol knows only the bare exported name (extern "C" linkage means
+the symbol *is* that bare name at the ABI level -- no namespace is even
+recoverable from an export table alone). Fixed by forcing `scope=()` for
+the `is_extern_c` branch specifically, regardless of what `scope` argument
+the caller passed; the `mangled`/`sig` branches are unaffected -- a real
+mangled name already fully and deterministically encodes scope (no
+evidence-tier divergence possible), and a DWARF-only, mangling-free
+function has no comparable across-tier availability problem to guard
+against. (3) The `sig` fallback's `param_types` were joined into `extra`
+as raw, uncanonicalized strings, so CastXML's `"char const*"` and Clang's
+`"char const *"` -- an otherwise-identical parameter type -- would
+fragment identity across the two header-AST backends. Fixed by running
+each `param_types` entry through `name_classification.
+canonicalize_type_name` before joining, mirroring
+`resolve_function_identity`'s own canonicalization of `func.params` for
+the identical reason; `name_classification` is itself a dependency-free
+leaf module already imported by other `model/` modules
+(`model/graph_identity.py`, `model/stdlib_surface.py`), so this does not
+violate this module's own leaf-module contract (ADR-063 D10) -- it is not
+`checker_types`/`diff_*`/`checker`/`compare`/`finding_identity`. Nine new
+tests in `tests/test_model_identity.py` pin all three fixes, including the
+overload-disambiguated-owner case, the export-only-vs-namespaced
+scope-independence case (and that it does not erase `leaf_name`'s own
+discriminating power), that the `sig` branch keeps scope as given, and
+the cross-backend canonicalization. (This section originally also claimed
+the `mangled` branch keeps scope as given, alongside `sig` -- see the next
+correction below for why that claim was itself wrong and has been fixed
+here rather than left standing.)
+
+**Correction (2026-08-29, same day, third Codex review round on PR #941,
+commit e5cbdf2): the previous correction's own claim that the `mangled`
+branch "keeps scope as given... redundant but harmless" was wrong, and
+the identical evidence-tier-fragmentation bug the `is_extern_c` branch
+was fixed for above turned out to reach two more places.** (1)
+`entity_id_for_function`'s *mangled* branch folded the caller-supplied
+`scope` into the returned `EntityId` unchanged. That is not harmless: a
+header/DWARF-derived observation of a mangled function may supply a real
+`ScopePath`, while an export-table-only snapshot of the identical binary
+symbol knows only the bare mangled name -- exactly the same
+evidence-tier-availability mismatch the `is_extern_c` fix already closed,
+just for the mangled case instead of the extern-"C" case.
+`resolve_symbol_identity`'s own real primary id for a genuine mangling is
+`f"mangled:{real_mangled}"` alone, with no scope folded in at all --
+confirming the mangled branch should have matched the `is_extern_c`
+branch's `scope=()` treatment from the start. Fixed by forcing `scope=()`
+for the mangled branch too; only the `sig` fallback -- which has no
+authoritative, scope-independent name to fall back on -- keeps scope as
+given. (2) `entity_id_for_variable` had no `is_extern_c` parameter at all,
+so a namespaced `extern "C"` variable (caller passes `mangled_name=None`
+per that parameter's own contract) had no way to reach a scope-independent
+identity the way the equivalent function case now does, and its own
+*mangled* branch had the identical scope-folding bug as (1). Fixed by
+adding the same `is_extern_c` parameter `entity_id_for_function` has, and
+forcing `scope=()` for both its mangled and its `is_extern_c` branches.
+Six new tests across both constructors pin all of this: mangled-branch
+scope-independence for both functions and variables, the `sig` branch
+still keeping scope as given, the new variable `is_extern_c` path and its
+own tag-disjointness from the pre-existing mangling-free degenerate case,
+and mangled-name-wins-over-`is_extern_c` precedence for variables
+(mirroring the function constructor's own precedence, already tested).
+
+**Correction (2026-08-29, same day, fourth Codex review round on PR #941,
+commit f22ecf7): a fourth, *confirmed* (not merely hypothetical) gap in
+the mangled branch, found by reading the real producer code.** The
+previous correction made the mangled branch's `EntityId.scope` always
+`()`, but left `leaf_name` folded in unchanged. Codex's finding named a
+concrete, real code path proving this still fragments identity:
+`dumper_elf_fallback.py`'s ELF-only (export-table-only) path constructs
+`Function(name=sym, mangled=sym, ...)` and `Variable(name=sym,
+mangled=sym, ...)` -- the raw exported symbol reused for *both* fields,
+confirmed by reading that module directly rather than assumed. A header/
+DWARF observation of the identical symbol supplies the real demangled
+short name for `name` (e.g. `"f"`), while the export-only observation's
+`name` is the raw mangled spelling itself (e.g. `"_Z1fv"`). Since
+`leaf_name` was still part of the mangled branch's `EntityId`, these two
+observations of the *same* symbol -- agreeing on the mangled evidence --
+would not merge. Fixed by ignoring the caller-supplied `leaf_name`
+entirely in the mangled branch (both constructors), using `""` instead:
+the mangled spelling in `extra` already disambiguates every declaration
+losslessly, so nothing is lost. Four new tests (two per constructor) pin
+that a demangled-short-name observation and a raw-symbol-reused-as-name
+observation of the identical mangled symbol now produce one `EntityId`.
+
+**Correction (2026-08-29, same day, fifth Codex review round on PR #941,
+commit 4ad03da): two real gaps in the `sig` fallback's own signature
+normalization, one requiring a genuinely new, carefully-scoped
+primitive rather than reuse of an existing one.** (1) `param_types` were
+canonicalized only for cross-producer *spelling* (via
+`canonicalize_type_name`), not for the C++-standard-mandated fact that a
+top-level BY-VALUE cv-qualifier is dropped from a function's own type for
+linkage/mangling purposes -- `void f(int)` and `void f(const int)` name
+the identical function, but `"int"` and `"const int"` canonicalize to
+different strings and collided as two overloads. **The naive fix --
+reusing this codebase's existing `_strip_cv_qualifiers`/
+`func_signature_cv_only_differ` (the primitive an initial attempt reached
+for, since Codex's own finding named it) -- was investigated and found to
+be wrong, not merely reused:** that helper is deliberately permissive at
+the true top level, stripping a *pointee* cv-qualifier too (`"const char
+*"` -> `"char *"`), because its actual job is "is this an already-
+positionally-matched declaration's param change worth reporting as ABI-
+breaking" (`diff_symbols._params_differ`'s question) -- a *different*
+question from this primitive's, "are these the same overload for identity
+purposes." A pointee cv-qualifier on a pointer/reference parameter is a
+genuine, standard-mandated overload discriminator (`void f(char*)` and
+`void f(const char*)` are two simultaneously-declarable, independently-
+mangled overloads), so reusing the permissive helper verbatim would have
+silently merged two distinct functions into one identity -- reintroducing
+exactly the sibling-overload-collision class this whole primitive exists
+to prevent, while fixing the narrower problem Codex actually named. Fixed
+correctly instead: a new, narrower public primitive,
+`name_classification.canonicalize_function_signature_type`, strips a cv
+token only when the canonicalized type carries no top-level pointer/
+reference sigil at all (checked via the same `_has_top_level_ptr_or_ref`
+helper `cv_qualifiers_only_differ` already uses) -- the one case where
+every cv token found is unambiguously by-value, never pointee, cv. (2)
+`cv_qualifiers: tuple[str, ...]` was itself the wrong representation:
+unlike `resolve_function_identity`'s own `func.is_const`/
+`func.is_volatile` booleans, a caller-supplied token tuple invites order-
+dependence for one member-cv qualification spelled two ways (`("const",
+"volatile")` vs. `("volatile", "const")` -- caught named literally as
+`f() const volatile` vs. `f() volatile const`). Fixed by replacing the
+parameter with `is_const: bool = False, is_volatile: bool = False`,
+matching `resolve_function_identity`'s own representation exactly and
+eliminating the ordering question by construction rather than by
+normalizing a tuple after the fact. Six new tests pin both fixes: by-value
+top-level cv non-distinction, pointee cv's continued distinguishing power,
+independent const/volatile discrimination, and that the two booleans'
+call-site order cannot affect the resulting id.
+
+**Correction (2026-08-29, same day): the fifth correction's own new
+primitive landed in the wrong module and had to be relocated before
+push.** `name_classification.canonicalize_function_signature_type` was
+first added directly to `abicheck/name_classification.py` -- but that
+file is a frozen, no-growth legacy module under ADR-061's debt ledger
+(`architecture/debt.yaml`, baseline 1258 lines), and CI's
+`debt-no-growth` architecture check (`scripts/check_architecture.py`)
+correctly failed the push for exceeding it. Relocated the whole primitive
+into `abicheck/model/identity.py` itself as a module-private
+`_canonicalize_function_signature_param_type`, along with a
+self-contained, deliberately-duplicated (not imported) reimplementation
+of the top-level-pointer/reference-sigil detection algorithm
+`name_classification._has_top_level_ptr_or_ref` already applies for a
+different purpose -- duplication here is the correct outcome of the
+no-growth constraint, not an oversight: the alternative (importing a
+private helper from the frozen module) would be worse, and the algorithm
+is small, stable, and independently tested in its new location. This is
+exactly the kind of tension a genuinely completed ADR-061 migration of
+`name_classification.py` would resolve (see that file's own debt-ledger
+entry, "target: see ADR-061 ownership map") -- not attempted here, since
+migrating the whole file is far outside this slice's scope. `git diff
+--stat`/`wc -l` confirm `name_classification.py` is back to exactly 1258
+lines (its original baseline) and `scripts/check_architecture.py`
+reports 0 errors.
+
+**Correction (2026-08-29, same day, sixth Codex review round on PR #941,
+commit 1b3575d): two more real gaps found, both requiring a genuine
+extension rather than reuse.** (1) The by-value-cv fix above left one
+case unhandled: a function PARAMETER's array type always decays to a
+pointer (``int []`` -> ``int *``), so a cv-qualifier on the array's
+element type is pointee-level, exactly like an explicit pointer -- ``void
+f(int[])`` and ``void f(const int[])`` are two distinct, independently-
+mangled overloads, not one. Neither spelling contains a ``*``/``&``
+sigil, so `_has_top_level_ptr_or_ref` (module-private, in
+`model/identity.py`) wrongly treated both as by-value and stripped the
+``const``. Fixed by also treating a top-level ``[`` as pointer-shaped for
+this determination -- the fix landed in this correction's own new
+`model/identity.py` primitive precisely because it was already the
+no-growth-safe location the fifth correction relocated to; there was no
+second relocation needed. (2) `ScopePath` names only the *containing*
+scope, never the leaf declaration (this module's own stated design), so
+two anonymous sibling records/enums both passing `leaf_name=""` collided
+onto one identical `EntityId` regardless of which is meant --
+`Anonymous.ordinal` (a `ScopePath` segment) disambiguates a *descendant's*
+containing scope, not the anonymous declaration's own identity, so it
+does not help here. Fixed by adding an opt-in `anonymous_ordinal: int |
+None = None` keyword to `entity_id_for_type`/`entity_id_for_enum` (the
+two kinds C++ actually allows to be anonymous), folded into `extra` as
+`("anonymous", str(ordinal))` only when `leaf_name` is empty -- mirroring
+`Anonymous.ordinal`'s own deterministic-per-parent-sequence-number
+semantics and identical within-one-parse-only accepted limitation.
+Omitting it (no wired producer yet, same scope boundary this module's own
+docstring already states for `LocalToFunction`/`Anonymous` before their
+producers existed) keeps the pre-existing degenerate-collision behavior,
+not a silent, unrequested change. Six new tests pin both fixes.
+
+**Correction (2026-08-29, same day, seventh Codex review round on PR #941,
+commit b767576): two more real gaps in the by-value/array-decay logic,
+plus a new hard architectural gate the fix itself then had to satisfy.**
+(1) The pointer branch skipped *all* cv processing as soon as it saw any
+top-level `*`/`&`/`[`, so a cv-qualifier trailing the parameter's own
+outermost pointer sigil (`int * const` -- the pointer VALUE itself is
+const, not what it points to) survived unstripped, even though the
+standard drops it exactly like any other top-level parameter qualifier:
+`void f(int *)` and `void f(int * const)` name the same function. Fixed
+by splitting the string at the LAST top-level `*`/`&`: everything up to
+and including it is kept verbatim (an intermediate pointer level's own
+qualifier, e.g. `int * const *`'s middle `const`, is genuinely
+distinguishing and must survive), only the suffix is stripped. (2) The
+earlier `[`-is-pointer-shaped fix stopped `int []`/`const int []` from
+colliding, but never performed the actual array-to-pointer decay, so
+`int []`/`int [3]`/`int [4]`/`int *` -- all one identical adjusted
+parameter type -- still canonicalized to four different strings. Fixed
+with `_decay_top_level_array`, deliberately narrow: multi-dimensional
+arrays (`T[][N]`) and parenthesized declarators (`int (*)[3]`, "pointer to
+array", where the trailing `[3]` is the POINTEE's bound, not the
+parameter's own shape) are left entirely unchanged rather than mis-decayed
+-- an accepted, documented limitation, not a silent gap. **Implementing
+these two together, correctly, in `model/identity.py` pushed that file to
+834 lines, over the AI-readiness gate's 800-line production maximum with
+no debt-ledger entry possible for a brand-new file (`debt-exemption`
+explicitly forbids that) -- a second, different hard architectural
+constraint from the fifth correction's `debt-no-growth` one, caught before
+push this time by running `scripts/check_ai_readiness.py` locally first.**
+Resolved by splitting the whole cv/array-decay block into a new sibling
+leaf module, `abicheck/model/signature_normalization.py` (`identity.py`
+now 586 lines, the new module 299) -- not a design change, purely a file
+split, with `identity.py` importing the one public
+`canonicalize_function_signature_param_type` from it. The new module also
+got its own dedicated primitive-level test file,
+`tests/test_signature_normalization.py` (per AGENTS.md's own convention
+for a new reusable primitive), which caught a genuine bug of its own
+before it shipped: the array-decay path bypassed
+`canonicalize_type_name`'s east-const normalization (its regex never
+matches a bracket-containing string), so `"const int [3]"` and `"const int
+*"` -- the identical adjusted type -- canonicalized to two different
+strings until the decay result was re-canonicalized a second time. Fixed
+in the same commit; `test_element_cv_becomes_pointee_cv` pins it.
+
+**Correction (2026-08-29, same day, eighth Codex review round on PR #941,
+commit 572de14): a parenthesized declarator's own outer pointer skipped
+by-value cv stripping entirely.** The sigil-scan treated every `(` as a
+real nesting level, so a cv-qualifier written inside a declarator's own
+grouping parens -- `void (* const)(int)` (a callback parameter: "const
+pointer to a function taking int"), or `int (* const)[3]` (a const
+pointer to an array of 3 ints) -- was never found at depth 0 and so never
+stripped, even though it qualifies the parameter's own outermost pointer
+exactly like an unparenthesized `int * const` does. Fixed by making an
+opening `(` "transparent" (not a real nesting level) whenever the next
+non-space character is `*`/`&` -- the one shape a real function-parameter-
+list paren can never have, since a parameter list's first token is always
+a type, never a bare sigil. This also reaches the previously-unchanged
+pointer-to-array case (`int (*)[3]`) the same way: its own outermost
+pointer's cv-qualifier, once one exists, is by-value too, while the
+trailing array bound inside the parens (the pointee's own shape) stays
+untouched exactly as before. Also removed `_has_top_level_ptr_or_ref`,
+a leftover private helper from an earlier revision of this module that had
+become genuinely dead code -- the array/pointer-shape detection it
+described was already reimplemented inline at each of its two call sites
+during earlier correction rounds, and nothing in this module or its tests
+called it. Four new tests in `tests/test_signature_normalization.py`
+(`TestParenthesizedDeclaratorOwnCvIsDropped`) pin both the fix and that the
+callback/pointee's own inner types stay untouched.
+
+A second finding from the same round -- that a raw, platform-decorated PE
+export name (`_foo@4` for an `extern "C"` `foo`) reaching this module's
+`is_extern_c` branch as `leaf_name` would fragment identity against an
+undecorated header/DWARF observation of the same symbol -- was investigated
+and NOT fixed here. `entity_id_for_function`'s docstring already states
+this branch is deliberately built to mirror `resolve_symbol_identity`'s own
+representation, and that resolver has the identical property: it also
+keys a non-`_Z`/`?` `mangled` value on its literal raw spelling, undecorated
+(`finding_identity.py`'s own `normalized_basis = mangled if (mangled and
+not real_mangled) else qn` never strips a stdcall/cdecl decoration either).
+This module's stated contract is to *match* that resolver's own chosen
+representation for evidence-tier scope/leaf-name handling, not to invent a
+new normalization capability the mirrored function doesn't have -- and no
+PE-decoration-stripping helper exists anywhere else in the codebase to
+reuse. Introducing one is a real, valid gap worth closing, but it is a
+separate design question (most naturally `pe_metadata.py`'s own extraction
+layer, where the platform's decoration convention is already known, not
+this identity primitive) and out of scope for this "purely additive,
+mirrors the existing resolver" first slice.
+
+**Correction (2026-08-29, same day, ninth Codex review round on PR #941,
+commit 0b7a80a): two more real gaps in the same paren-transparency logic,
+both fixed with a general recursive treatment rather than another one-off
+patch.** (1) A *pointer-to-member-function* declarator (`void (C::*
+const)(int)`) has its own outermost sigil preceded by the member's
+qualified-name prefix (`C::`) rather than a bare sigil -- the eighth
+round's transparency check ("next non-space character after `(` is
+`*`/`&`") never recognized this shape, so its own trailing cv-qualifier
+stayed unstripped. Fixed by generalizing the transparency test to a regex
+(`_DECLARATOR_GROUP_RE`) matching one or more `identifier::` segments
+before the sigil, not only a bare one. (2) A declarator's own trailing
+parameter list (the `(int)` in `void (*)(int)`) is itself exactly as much
+"a function's parameters" as this function's own top-level parameter --
+C++ drops a nested callback parameter's top-level by-value cv from the
+callback's own function type too, so `void (*)(int)` and
+`void (*)(const int)` name the identical adjusted callback type, not two.
+The eighth round's fix left every trailing parameter-list paren entirely
+opaque, so this nested by-value cv was never stripped. Fixed with a real,
+general recursive treatment rather than a narrow special case: every
+top-level `(...)` group found after the declarator's own sigil is now
+comma-split (`_split_top_level_commas`, depth-aware) and each of its own
+parameters is recursively run back through
+`canonicalize_function_signature_param_type` itself
+(`_normalize_nested_param_lists`/`_normalize_param_list_contents`) --
+unlike the array-decay limitations, this is not "unbounded C declarator
+grammar": it is one already-correct function applied to a strictly
+shorter substring at each level, which is what terminates it, and it
+reaches a callback-of-a-callback automatically since each recursive call
+performs the identical treatment on its own nested parameter lists. An
+empty parameter list, a bare `void`, and a variadic `...` marker are left
+untouched (none is itself a parameter type). Ten new tests in
+`tests/test_signature_normalization.py`
+(`TestPointerToMemberOwnCvIsDropped`,
+`TestNestedCallbackParametersAreNormalizedRecursively`, plus two new
+idempotence cases) pin both fixes, including that a nested parameter's
+genuine *pointee* cv still distinguishes, a doubly-nested callback
+normalizes at its innermost level too, and the variadic/void/empty
+special cases pass through unchanged.
+
+**Correction (2026-08-29, same day, tenth Codex review round on PR #941,
+commit fd715cc): two more real gaps in the same declarator handling, plus
+a self-caught correctness regression from fixing the second one.** (1) The
+paren-transparency regex recognized a bare sigil or a member-pointer's
+qualified-name prefix, but not an MSVC/PE calling-convention keyword
+(`__cdecl`, `__stdcall`, `__fastcall`, `__thiscall`, `__vectorcall`)
+preceding the sigil, so `void (__cdecl * const)(int)` -- confirmed a real,
+reachable shape (this codebase's own PE/PDB-decorated-export handling in
+`diff_platform.py` already deals with `__cdecl`-decorated exports) --
+never found its sigil at depth 0 either. Fixed by widening
+`_DECLARATOR_GROUP_RE` to accept an optional calling-convention keyword
+before the existing qualified-name-prefix loop; the keyword itself is
+matched, not erased, so it stays genuine, distinguishing content in the
+prefix (`void (__cdecl *)(int)` and `void (__stdcall *)(int)` correctly
+stay two different types). (2) A pointer-to-member-function's own
+TRAILING cv/ref-qualifiers -- the ones that follow its parameter list,
+e.g. `const` in `void (C::*)(int) const` -- were wrongly blanket-stripped
+by the same by-value logic that (correctly) strips the pointer's own
+qualifier *before* the parameter list. These are not the same thing: a
+trailing qualifier qualifies the POINTED-TO member function itself, a
+genuine, standard-mandated discriminator (`void (C::*)(int) const` is a
+different, non-interchangeable type from `void (C::*)(int)`), so
+collapsing them together was a real over-merge, the same class of mistake
+this whole primitive exists to prevent, not merely an incompleteness.
+Fixed by splitting the suffix at the declarator's own trailing parameter
+list (`_split_at_trailing_param_list`): everything before it stays the
+pointer's own by-value region (stripped, as before); everything after it
+now goes through a new `_canonicalize_member_qualifiers`, which -- mirroring
+`entity_id_for_function`'s own `is_const`/`is_volatile` two-boolean
+treatment for the identical ordering problem one level up -- only
+reorders `const`/`volatile` into a fixed order and normalizes a ref-
+qualifier (`&`/`&&`), rather than dropping any of it.
+
+**Self-caught regression, found by this round's own new ref-qualifier
+tests before push, not by a reviewer:** implementing fix (2) initially
+broke on `void (C::*)(int) &&`, canonicalizing it as `void (C:: * )(int)
+&&` for `&` but corrupting the `&&` case into `void (C:: * )(int) & &` --
+worse, `canon(...) != canon(...)` on the SAME input, an outright identity
+non-determinism bug. Root cause: `canonicalize_type_name` spells `&&` as
+`"& &"` (its own established sigil-spacing convention, the same source as
+`"int * const *"` -> `"int *const *"` elsewhere in this module), and the
+main sigil-scanning loop records the LAST `*`/`&` found anywhere at depth
+0 as `last_top_level_sigil` -- so the second `&` of the trailing `"& &"`
+ref-qualifier, itself sitting at depth 0 well after the declarator's own
+parameter list had already closed, wrongly overrode the member-pointer's
+own already-found `*`, corrupting the entire prefix/suffix split. Fixed
+at the root: the main loop now tracks whether it has already seen a
+top-level *opaque* paren (the declarator's own trailing parameter list)
+and stops updating `last_top_level_sigil` once it has -- nothing
+`*`/`&`-shaped appearing after a declarator's parameter list closes can
+ever be a NEW top-level sigil, only a ref-qualifier on what came before.
+`_canonicalize_member_qualifiers`'s own ref-qualifier detection was
+likewise fixed to compare against a whitespace-collapsed form so `"& &"`
+is still recognized as `&&`, not two separate `&` tokens. Eleven new tests
+in `tests/test_signature_normalization.py`
+(`TestCallingConventionDeclaratorGroupIsRecognized`,
+`TestPointerToMemberTrailingQualifiersPreserved`, plus two new idempotence
+cases) pin all of this, including the exact `&&`-vs-`& &` regression.
+
+A third finding from the same round -- that a bare, unadjusted function
+*type* used as a parameter (`void(int)`, as opposed to the already-
+adjusted `void (*)(int)`) is returned unchanged rather than decayed to a
+pointer the way an array parameter is -- was investigated and NOT fixed.
+Checked against this codebase's own real header-AST producer output
+(`tests/test_dumper_clang.py`'s and `test_dumper_clang_vtable.py`'s fixed
+`qualType` strings) and confirmed: a real castxml/clang dump always
+already prints the ADJUSTED pointer form for a function-typed parameter
+(`"void (*)(int)"`), never the bare, unadjusted function type -- unlike
+the array case, where the plan's own earlier correction explicitly notes
+this primitive "makes no assumption about whether a given producer's own
+parsed representation already reflects the decay" because an unadjusted
+array spelling genuinely does reach this function from real callers.
+There is no equivalent confirmed real code path supplying an unadjusted
+bare function type here, so implementing a heuristic "is this really an
+unadjusted function type, not some other paren-containing spelling" guess
+would be solving a hypothetical shape, with the attendant risk of a false
+positive on a legitimate class-type spelling that happens to end in a
+parenthesized group. Recorded here as an accepted, documented limitation
+rather than silently dropped.
+
+**Correction (2026-08-29, same day, eleventh Codex review round on PR #941,
+commit ea44356): one more real gap in the declarator-transparency test,
+plus a second, more serious self-caught over-merge in the tenth round's
+own trailing-qualifier fix.** (1) `_DECLARATOR_GROUP_RE`'s qualified-name
+loop matched only plain `identifier::` segments, so a template-qualified
+nested-name-specifier -- `void (C<int>::* const)(int)`, a real, common
+C++ shape -- was never recognized as a declarator group, and its own
+by-value cv stayed unstripped. Fixed by replacing the single regex with a
+manual scanner, `_is_declarator_group`: a template-argument list can nest
+arbitrarily deep (`Box<Pair<int, int>>::`), which `re`'s non-recursive
+matching cannot balance, so this needed real character-by-character
+`<`/`>` depth tracking, not a regex extension. (2) The tenth round's
+`_canonicalize_member_qualifiers` fixed the over-merge on trailing
+`const`/`&`/`&&`, but did so by RECONSTRUCTING the whole trailing region
+from only those three tokens -- silently dropping anything else found
+there. The practically important case: a `noexcept`-specifier, which
+C++17 made part of the function type, so `void (*)(int) noexcept` and
+`void (*)(int)` are two different, non-interchangeable types -- and this
+primitive was merging them into one identity, the exact same over-merge
+class the tenth round's own fix existed to close, just relocated rather
+than eliminated. Fixed generally: instead of naming every possible
+trailing specifier and reconstructing from a fixed list, the function now
+only ever removes and reorders the `const`/`volatile` WORDS themselves
+(via `_CV_WORD_RE`, the same primitive `_strip_cv_tokens_outside_nesting`
+already uses) and passes everything else through verbatim, in its
+original relative order -- `dcl.fct`'s own grammar already fixes
+cv-qualifier-seq first among a function's trailing specifiers, so a real
+producer's placement of ref-qualifier/`noexcept`/anything else never
+needs inferring, only cv needs reordering relative to itself. This also
+means the function no longer special-cases the ref-qualifier's `"&&"` ->
+`"& &"` spelling quirk (`canonicalize_type_name` already normalizes that
+upstream, before this function ever sees the string, so passing the
+leftover text through verbatim is already consistent). Eight new tests in
+`tests/test_signature_normalization.py`
+(`TestTemplateQualifiedMemberPointerOwnCvIsDropped`, four new cases in
+`TestPointerToMemberTrailingQualifiersPreserved` for `noexcept`, plus two
+new idempotence cases) pin both fixes, including a nested template
+argument and `noexcept` combined with order-independent cv.
+
+**Correction (2026-08-29, same day, twelfth Codex review round on PR #941,
+commit 509e3f3): the eleventh round's `noexcept` fix preserved the
+specifier verbatim, which was necessary but not sufficient -- preserving
+its exact SPELLING is not the same as canonicalizing it.** Since C++17, a
+function type's exception specification collapses to exactly two kinds
+for TYPE purposes: "non-throwing" (bare `noexcept` or `noexcept(true)`)
+and "potentially-throwing" (no specifier at all, or `noexcept(false)`).
+Those pairs are the SAME type and must canonicalize identically, but the
+eleventh round's fix passed the raw text through unchanged, so
+`void (*)(int) noexcept` and `void (*)(int) noexcept(true)` -- one
+identical adjusted type -- canonicalized to two different strings (an
+under-merge this time, the milder sibling of the over-merges every
+earlier round fixed, but the same underlying principle: "verbatim
+preservation" is not "canonicalization"). Fixed with a new
+`_canonicalize_noexcept`: only the two literal, constant-expression
+spellings (`true`/`false`) are recognized and normalized -- bare
+`noexcept`/`noexcept(true)` collapse to the single canonical spelling
+`"noexcept"`, `noexcept(false)` is dropped entirely (equivalent, for type
+purposes, to an already-absent specifier) -- while any other,
+non-literal `noexcept(expr)` is left completely untouched, since
+evaluating an arbitrary constant expression is out of scope, the same
+"don't solve the fully general grammar" limit this module already draws
+for multi-dimensional arrays and non-literal declarator shapes elsewhere.
+Nine new tests in `tests/test_signature_normalization.py`
+(`TestNoexceptSpellingsCanonicalized`, plus two new idempotence cases)
+pin this, including that a non-literal expression stays genuinely
+distinguishing rather than being silently (and wrongly) folded into
+either canonical form.
+
+**Correction (2026-08-29, same day, thirteenth Codex review round on PR
+#941, commit 45fd050): one more real under-merge, plus one more real
+over-merge -- this time an actively corrupting one -- in the trailing-
+qualifier and nested-parameter-list handling.** (1)
+`_normalize_param_list_contents` returned an empty parameter list and a
+bare `void` unchanged rather than unifying them, so `void (*)()` and
+`void (*)(void)` -- the identical "no parameters" adjusted type --
+canonicalized to two different strings. Fixed by collapsing both to the
+same canonical empty form. (2) `_canonicalize_member_qualifiers`'s
+`const`/`volatile` extraction used a plain, depth-blind `re.search`/
+`re.sub` over the WHOLE trailing region, which wrongly reached inside a
+non-literal `noexcept(expr)`'s own argument too -- a `const`/`volatile`
+token that is part of THAT expression's own text (e.g.
+`noexcept(Foo<const int>)`) is not this declarator's own cv-qualifier at
+all. This was worse than the earlier over-merges: it didn't just misjudge
+which type two spellings belonged to, it actively MUTATED the nested
+expression's own text (moving the found "const" out to the front,
+leaving the argument reading `Foo< int>`), and could merge two genuinely
+different overloads that happen to share a nested "const" by coincidence.
+Fixed with a depth-aware scan, `_extract_top_level_cv`, mirroring
+`_strip_cv_tokens_outside_nesting`'s own outside-nesting discipline: only
+a cv word sitting at nesting depth 0 -- outside any `(...)`/`<...>`/
+`[...]` -- is ever this declarator's own trailing qualifier. Thirteen new
+tests in `tests/test_signature_normalization.py`
+(`TestCvInsideNoexceptExpressionIsNotExtracted`, a corrected
+`test_empty_and_void_param_lists_unify`, plus two new idempotence cases)
+pin both fixes, including that the nested `const` neither merges with nor
+is corrupted by a real leading `const`.
+
+**Correction (2026-08-29, same day, fourteenth CodeRabbit review round on
+PR #941, commit 45fd050): one more real, serious over-merge in the
+tenth round's `seen_top_level_opaque_paren` flag itself, plus two
+minor cleanups.** (1) That flag was armed on ANY top-level opaque paren,
+regardless of whether the declarator's own sigil had already been found.
+This is wrong for a real, observed producer spelling this codebase
+already handles elsewhere (`tests/test_diff_templates.py`'s own
+`"(anonymous namespace)::T"`): `(anonymous namespace)::Foo const *`
+starts with an opaque paren (`_is_declarator_group` correctly rejects it
+-- it's not a declarator group) that precedes the parameter's own actual
+pointer sigil entirely, not a trailing parameter list. Arming the flag
+there locked out that LATER real sigil, so the whole type fell through to
+the by-value-strip branch and wrongly merged `Foo const *` with `Foo *`
+-- pointer-to-const vs. pointer-to-non-const, two genuinely
+non-interchangeable types. Fixed by only arming the flag once
+`last_top_level_sigil != -1` -- an opaque paren before the declarator's
+own sigil is never its trailing parameter list, so it must never lock
+sigil detection out. (2) A tautological test assertion
+(`canon(x) == canon(x)`, which cannot fail for a pure function and pinned
+nothing) was replaced with a real idempotence check. (3) The twelfth
+round's own changelog wording claimed a non-literal `noexcept(expr)`
+"stays genuinely distinguishing", which overclaims: C++ evaluates a
+constant expression's actual boolean VALUE, not its literal spelling, so
+e.g. `noexcept(sizeof(int))` is genuinely type-equivalent to
+`noexcept(true)` while this primitive (which only recognizes the two
+literal `true`/`false` spellings, per its own docstring's already-correct
+hedge) treats them as different -- a real, documented over-splitting
+limitation, corrected in the changelog fragment's wording rather than the
+code (evaluating an arbitrary constant expression remains out of scope).
+Two new tests in `tests/test_signature_normalization.py` pin the
+anonymous-namespace fix, including idempotence.
+
+**Correction (2026-08-29, same day, fifteenth Codex review round on PR
+#941): a bare data-member-pointer's pointee cv-qualifier was misplaced
+across the `ClassName::` infix, plus the fix's own line-count growth
+forced a second module split.** `canonicalize_type_name`'s own east-const
+regex -- unmodifiable, since `name_classification.py` is a frozen,
+no-growth legacy file -- does not know how to normalize a leading
+cv-qualifier across a bare (non-parenthesized) data-member-pointer's own
+`ClassName::` infix, and MISPLACES it depending on which side it started
+on: `"int const C::*"` stays `"int const C:: *"` (matching this
+primitive's own canonical output), but `"const int C::*"` becomes
+`"int C:: const *"` -- the cv-word shoved in between the qualifier and
+the sigil, indistinguishable in that position from the pointer's own
+by-value qualifier. Both spell the identical pointer-to-const-int-member
+type and must canonicalize identically; a first, narrower fix attempt
+(scanning only immediately before the sigil) caught the first
+manifestation but not the second, discovered via direct testing. Fixed
+with a more robust "reliable marker" strategy in the new
+`_find_member_pointer_qualifier`: a member pointer's own qualifier is
+always followed by a single space before whatever comes next
+(`"C:: *"`), unlike ordinary namespace qualification within a type's own
+spelling, which never has a space after `::` (`"ns::Foo"`) -- so the LAST
+`"::` "` marks the qualifier's end reliably, and the caller re-collects
+any cv word found on either side of the qualifier (base-side and
+tail-side) before re-canonicalizing the combined base. A related,
+broader limitation was found and deliberately left out of scope:
+`canonicalize_type_name` never reorders `volatile` at all (only
+`const`), a pre-existing gap affecting every pointee-volatile position in
+this module, not specific to member pointers -- fixing it is a
+substantially larger undertaking than this round's actual Codex finding
+(which named `const` specifically), so it is documented directly in
+`_find_member_pointer_qualifier`'s own docstring and the corresponding
+doctest as an accepted, out-of-scope residual gap rather than silently
+patched over.
+
+Implementing this pushed `signature_normalization.py` to 908 lines, over
+the AI-readiness gate's 800-line production maximum (which has no
+debt-ledger workaround for a file this new) -- the identical situation
+the seventh round's own `identity.py` -> `signature_normalization.py`
+split addressed one level up. Resolved the same way: a second sibling
+leaf module, `abicheck/model/declarator_qualifiers.py`, now holds every
+piece of this module's own machinery that has no *recursive* dependency
+back into `canonicalize_function_signature_param_type` itself --
+`_is_declarator_group` (+ its `_CALLING_CONVENTIONS`/`_IDENTIFIER_RE`
+supporting constants), `_extract_top_level_cv`, the new
+`_find_member_pointer_qualifier` (+ `_MEMBER_POINTER_TAIL_RE`),
+`_split_at_trailing_param_list`, `_canonicalize_member_qualifiers`, and
+`_canonicalize_noexcept` (+ `_NOEXCEPT_RE`). What stays behind in
+`signature_normalization.py` is exactly the machinery that DOES recurse
+back into `canonicalize_function_signature_param_type`
+(`_normalize_param_list_contents`/`_normalize_nested_param_lists`, for a
+callback/member-function-pointer's own nested parameter list) plus the
+top-level by-value cv/array-decay logic and the main function itself --
+so the import is strictly one-way (`signature_normalization ->
+declarator_qualifiers`, never the reverse), avoiding a cycle between the
+two sibling leaf modules. `_CV_WORD_RE` (a trivial one-line regex
+constant) is duplicated in both modules rather than shared, since sharing
+it would need an import in the direction that would create that cycle.
+Both files stay comfortably under the cap after the split (~600 and ~370
+lines respectively). The new module gets its own dedicated
+primitive-level test file, `tests/test_declarator_qualifiers.py`
+(mirroring `test_signature_normalization.py`'s own rationale and
+including its own leaf-module-contract test), alongside new tests in
+`tests/test_signature_normalization.py` pinning the member-pointer fix
+itself (both cv-spelling orderings unifying, an ordinary namespace-
+qualified pointer staying unaffected, the parenthesized member-function-
+pointer case staying unaffected, and idempotence).
+
+**Correction (2026-08-29, same day, sixteenth Codex review round on PR
+#941, commit 932814b): `restrict`/`__restrict`/`__restrict__` was left
+completely unstripped, fragmenting identity across a compatible
+parameter-qualifier change.** `int *` and `int *restrict` canonicalized
+to two different strings, even though restrict has NO effect on the
+Itanium C++ ABI's mangling at all -- this repository already tracks the
+fact separately (`Param.is_restrict`; `dumper_castxml.py`'s own
+extraction comments state the identical thing), so treating a restrict
+addition/removal as an `EntityId` change turned that dedicated compatible
+change into a spurious removal/addition pair instead. The finding as
+reported scoped a fix to only the parameter's own outermost pointer,
+mirroring how a genuine BY-VALUE cv-qualifier is scoped (per this
+primitive's own established, deliberately narrow-scoped-to-review-
+evidence discipline) -- but unlike cv, restrict's absence from mangling
+does not depend on WHERE in the declarator it sits (the C/C++ grammar
+only ever allows it directly after the `*` it qualifies, at any nesting
+depth), so a fix scoped to "outermost only" would leave e.g.
+`int * restrict *` and `int * *` still wrongly distinguishing. Fixed more
+generally than the reported scope: a new `_RESTRICT_WORD_RE` strips every
+`restrict`/`__restrict`/`__restrict__` token from the canonical type
+string unconditionally, before any of the position-sensitive cv/pointer
+logic runs -- so a nested callback parameter's own restrict-qualified
+pointer is covered too, through this function's existing recursion into
+itself for a trailing parameter list's own parameters, with no special-
+casing needed for that case. New tests:
+`TestRestrictQualifierIsAlwaysStripped` in
+`tests/test_signature_normalization.py` (all three spellings, a
+non-outermost-pointer restrict, a callback parameter's own restrict, a
+sanity check that a genuine pointee cv-qualifier still distinguishes, and
+idempotence).
+
+**Correction (2026-08-29, same day, seventeenth Codex review round on PR
+#941, commit 2264423): Clang's own trailing calling-convention attribute
+spelling was not recognized, fragmenting identity across header-AST
+backends.** Clang's `ParmVarDecl.type.qualType` renders a calling-
+convention-decorated function-pointer declarator as e.g.
+`void (*)(int) __attribute__((cdecl))` -- the attribute trails the
+parameter list -- rather than MSVC/castxml's leading-keyword spelling,
+`void (__cdecl *)(int)`, which `_is_declarator_group`/
+`_CALLING_CONVENTIONS` already recognized. The two spellings of one
+identical type canonicalized differently, so a template or DWARF-only
+function observed through both backends would fragment. Fixed with a new
+`_CALLING_CONVENTION_ATTR_RE`, matching the same five attribute-node
+kinds `dumper_clang_attributes.py`'s own `_CLANG_ATTR_TOKENS` mapping
+already recognizes for a FunctionDecl's own top-level contract
+attributes (this is the textual, parameter-type-spelling equivalent, for
+the mangling-free signature-fallback identity this module computes): when
+found in the trailing region after a declarator's own parameter list, the
+attribute text is removed and, if the leading `prefix` doesn't already
+carry a calling-convention keyword, the equivalent `__cdecl`-style
+keyword is injected at the same position `_is_declarator_group` looks for
+it -- so both spellings converge on one `prefix` before the ordinary
+member-qualifier canonicalization runs on whatever remains of the
+trailing text. Verified this is a real, internally-corroborated Clang
+spelling (not merely the finding's own claim) via
+`dumper_clang_attributes.py`'s existing, independent handling of the
+identical attribute-node kinds for the top-level FunctionDecl case. New
+tests: `TestClangTrailingCallingConventionAttributeUnifies` in
+`tests/test_signature_normalization.py` (cdecl and stdcall unifying with
+their leading-keyword equivalents, the member-function-pointer case,
+no-attribute staying unaffected, two different conventions still
+distinguishing, coexistence with a trailing `noexcept`, idempotence, and
+a defensive redundant-both-spellings-at-once case).
+
+**Correction (2026-08-29, same day, eighteenth Codex review round on PR
+#941, commit 06255fc): the sixteenth round's own "restrict never affects
+mangling, strip it everywhere" fix was itself wrong -- a real
+generalization mistake, not a narrow miss.** Fresh evidence, confirmed by
+direct compilation rather than mere assertion (`g++ -c`, inspecting the
+real mangled symbols): `void f(int **)` and `void f(int * restrict *)`
+mangle to two DIFFERENT, simultaneously-declarable Itanium symbols
+(`_Z1fPPi` vs. `_Z1fPrPi`), so restrict on a NON-outermost pointer level
+genuinely IS a standard-mandated, mangling-relevant overload
+discriminator -- the sixteenth round's own unconditional strip wrongly
+collapsed that pair into one identity. Only restrict on the parameter's
+own OUTERMOST, by-value pointer position drops from the mangled name
+(`void f(int *)`/`void f(int * restrict)` mangle identically, and GCC
+even refuses to compile them together as an overload set -- the same
+"can't be a real overload pair" signal a genuine by-value cv-qualifier
+gives). This is exactly the position-sensitivity the SIXTEENTH round's
+own docstring dismissed ("restrict's absence from mangling does not
+depend on where in the declarator it sits") -- which was the actual bug:
+restrict behaves like cv, not like a pure no-op token. Fixed by
+REVERTING the standalone `_RESTRICT_WORD_RE`-based unconditional strip
+entirely and instead folding restrict's three spellings into
+`_CV_WORD_RE` itself, so it goes through the exact same outermost-vs-pointee
+position discipline `const`/`volatile` already have throughout this
+module (`_strip_cv_tokens_outside_nesting`'s existing depth-aware scan,
+applied at exactly the same two safe positions as always -- no new
+logic needed, since the position discipline was already correct for cv
+and restrict needed nothing different from it). Updated tests: `TestRestrictQualifierIsAlwaysStripped` renamed to
+`TestRestrictQualifierSharesCvPositionDiscipline`
+in `tests/test_signature_normalization.py`, with the previously-wrong
+`test_restrict_on_non_outermost_pointer_also_stripped` (asserting
+equality) replaced by
+`test_restrict_on_non_outermost_pointer_still_distinguishes` (asserting
+INequality) plus a new idempotence case for the inner-restrict spelling.
+This is the second consecutive round to revise the SAME primitive's
+restrict handling (sixteenth introduced it, this one corrects its own
+overreach) -- direct compiler verification, not just re-reading the
+finding text, is now the standard for any future ABI-mangling-behavior
+claim in this file before implementing a fix, the same discipline that
+already caught this round's own error.
+
+**Correction (2026-08-29, same day, nineteenth Codex review round on PR
+#941, commit 3aeccc2): an explicit leading `::` (forced global-namespace
+lookup) fragmented identity across producers.** `::dep::Thing *` and
+`dep::Thing *` -- the identical type, since `dep` is unambiguous --
+canonicalized differently, because nothing stripped the leading
+qualifier. Confirmed as a real, already-documented producer spelling
+rather than a hypothetical: direct-clang's own `qualType` preserves an
+explicit global-scope qualifier verbatim, the identical fact
+`tests/test_dumper_scoping_dependency_retention.py`'s own twenty-sixth-
+round docstring already states from the *type-matching* side of this
+codebase (`test_globally_qualified_signature_spelling_still_matches`).
+Fixed with a new `_GLOBAL_SCOPE_RE`, applied unconditionally (not
+position-sensitive the way restrict/cv are, since global-vs-unqualified
+lookup never changes which entity a name denotes) up front, before any
+of the position-sensitive machinery runs. The match is anchored to
+SPECIFIC preceding characters (string start, or immediately after
+whitespace/`(`/`<`/`,`/`*`/`&` -- everywhere a fresh type-name token can
+begin) rather than a blanket "not preceded by an identifier character"
+negative lookbehind: a first draft used exactly that blanket test and
+would have wrongly stripped the genuine, load-bearing `::` in
+`(anonymous namespace)::Foo` too (that separator follows a `)`, not an
+identifier character, so the naive test can't tell it apart from a
+genuine leading global-scope marker) -- caught before implementing by
+walking through the anonymous-namespace case as a check, not discovered
+after the fact. New tests:
+`TestLeadingGlobalScopeQualifierIsStripped` in
+`tests/test_signature_normalization.py` (the bare case, the qualifier
+surviving after stripping, inside a template argument, inside a callback
+parameter, an ordinary namespace qualifier staying unaffected, the
+anonymous-namespace regression pin, the member-pointer qualified-name-
+prefix case, idempotence).
+
+**Correction (2026-08-29, same day, twentieth Codex review round on PR
+#941, commit 2a14e2e): the seventeenth round's own "does prefix already
+carry a calling-convention keyword" check used a bare substring test,
+which a coincidentally-named return type defeats.** `any(cc in prefix
+for cc in _CALLING_CONVENTIONS)` matches whenever any of the five
+keyword strings appears ANYWHERE in `prefix` -- but `prefix` also
+contains the return type, which can legitimately CONTAIN one of these
+keywords as a substring of an unrelated identifier, e.g.
+`my__cdecl_result`. For `my__cdecl_result (*)(int)
+__attribute__((stdcall))`, the substring test wrongly concluded a
+convention keyword was already present (matching `__cdecl` inside
+`my__cdecl_result`), which both skipped injecting the REAL `__stdcall`
+keyword AND still stripped the trailing attribute text -- silently
+merging two distinct callback types (one genuinely `__stdcall`, one with
+no calling convention at all) into one identity. Fixed with a new
+`_CALLING_CONVENTION_KEYWORD_RE`, matched as a genuine whole token
+positioned immediately after the declarator's own opening paren
+(allowing leading whitespace, mirroring exactly where
+`_is_declarator_group`/`_CALLING_CONVENTIONS` themselves look for a
+convention keyword) rather than a substring test anywhere in `prefix`.
+New tests: a doctest plus
+`test_return_type_containing_convention_keyword_as_substring` in
+`TestClangTrailingCallingConventionAttributeUnifies` (asserting both the
+correct injected keyword AND non-collision with the convention-free
+form).
+
+**Correction (2026-08-29, same day, twenty-first Codex review round on
+PR #941, commit 05091da): two findings -- one real fix (noexcept
+integer literals), one real REGRESSION in the nineteenth round's own
+global-scope-stripping fix, reverted after direct-compilation
+falsification.**
+
+*Fix 1 (real, implemented):* `noexcept`'s argument is contextually
+converted to `bool`, so `noexcept(1)`/`noexcept(0)` are the identical
+types as `noexcept(true)`/`noexcept(false)` -- confirmed both by direct
+compilation (`g++`: redefinition errors for each pair) and by Clang's
+own `qualType`, which genuinely emits these integer-literal spellings
+verbatim (`clang -Xclang -ast-dump=json`: `void (int) noexcept(1)`).
+`_canonicalize_noexcept` now recognizes `"1"`/`"0"` alongside
+`"true"`/`"false"`, deliberately narrow to exactly these two literals
+(a non-0/1 integer constant in this position triggers a
+narrowing-conversion diagnostic in real compilers and is not a spelling
+this module has confirmed evidence for).
+
+*Fix 2 (self-correction, REVERTED):* the nineteenth round's own
+`_GLOBAL_SCOPE_RE`-based unconditional stripping of a leading `::` was
+itself wrong, falsified by direct compilation before reverting rather
+than accepted on the strength of a plausible-sounding C++ semantic
+argument. Given
+```
+namespace dep { struct Thing; }
+namespace local { namespace dep { struct Thing; } void f(dep::Thing*); }
+```
+Clang's own `qualType` for `f`'s parameter prints the BARE, unqualified
+`dep::Thing *` (no leading `::`) even though it resolves to
+`local::dep::Thing` -- a type DISTINCT from the true global
+`::dep::Thing` a sibling declaration in the SAME namespace prints WITH
+the leading `::` (verified via `clang -Xclang -ast-dump=json` on both
+declarations side by side). This module has no scope-tree information;
+it operates purely on already-printed type-name text, so it cannot tell
+"a genuinely global entity, spelled either way" apart from "an
+unqualified name that happens to resolve to a DIFFERENT, locally-
+shadowing entity of the same spelling" -- Clang's own choice to include
+or omit the leading `::` IS exactly that distinguishing signal, so
+erasing it can silently merge two non-interchangeable types. Separately:
+the nineteenth round's own motivating evidence
+(`tests/test_dumper_scoping_dependency_retention.py::
+test_globally_qualified_signature_spelling_still_matches`) turns out to
+be for a DIFFERENT subsystem entirely -- matching a signature's type
+reference against an already-KNOWN declared type's own `qualified_name`
+within ONE snapshot's dependency-scoping pass, not comparing two
+independently-observed SIGNATURES for cross-producer/cross-revision
+identity (this function's own job) -- and does not establish that
+castxml and Clang ever disagree on this leading `::` for one identical
+real declaration. `_GLOBAL_SCOPE_RE` is removed entirely (not merely
+disabled); `TestLeadingGlobalScopeQualifierIsStripped` in
+`tests/test_signature_normalization.py` is renamed to
+`TestLeadingGlobalScopeQualifierIsPreserved` with every assertion
+flipped from equality to inequality. This is the SECOND self-correction
+on this primitive (the first was the restrict handling, sixteenth ->
+eighteenth rounds) -- the common thread both times is that a plausible-
+sounding cross-producer-normalization generalization was accepted
+without direct-compilation verification first; every future claim about
+what two spellings "mean the same thing" on this primitive gets checked
+against real compiler/AST-dumper output before implementing, not merely
+re-derived from C++ semantics on paper.
+
 ---
 
 ### Phase 3 — public surface as a graph query over one evidence graph (D5)

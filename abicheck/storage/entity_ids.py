@@ -26,16 +26,31 @@ arrangement would have made the two modules a cycle.
 The key encoding lives here too, since it is what makes an identifier an
 identifier: :func:`_packed` length-prefixes every part, so no content a part
 can carry changes how a key parses.
+
+**``EntityKind``/``ObservationKind`` are relocated, not redefined, as of
+ADR-063 Phase 2.** They are domain vocabulary (what kind of thing an
+identity names), not a storage wire concern, so they now live in
+:mod:`abicheck.model.identity` — the leaf module ADR-061's ``storage ->
+model`` import direction requires them to live in, and re-exported here
+under their original names so every existing ``storage.entity_ids.
+EntityKind``/``storage.entity_ids.ObservationKind`` import keeps resolving
+unchanged. ``model.identity`` also defines a second, independent
+``EntityId``/``ScopePath``-based domain identity type of its own; the two
+``EntityId``s are not yet bridged (that is Phase 2's still-open wire-DTO
+work — see that phase's own "not the same claim" note in
+``docs/contribute/plans/one-semantic-pipeline.md``), so this module's
+``EntityId``/``OccurrenceId`` wire pair below is unaffected by the
+relocation beyond the two enum imports.
 """
 
 from __future__ import annotations
 
-import enum
 import functools
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
+from ..model.identity import EntityKind, ObservationKind
 from .guards import (
     decision_key as _decision_key,
     enum_member as _enum_member,
@@ -81,37 +96,6 @@ def _packed(*parts: str) -> str:
     no byte a part can contain that changes how the key parses.
     """
     return "".join(f"{len(part)}:{part}" for part in parts)
-
-
-class EntityKind(enum.Enum):
-    """What kind of logical thing an :class:`EntityId` names."""
-
-    FUNCTION = "function"
-    VARIABLE = "variable"
-    TYPE = "type"
-    ENUM = "enum"
-    TYPEDEF = "typedef"
-    CONSTANT = "constant"
-    SYMBOL = "symbol"
-    FIELD = "field"
-    BASE = "base"
-
-
-class ObservationKind(enum.Enum):
-    """Where an :class:`OccurrenceId` was observed.
-
-    This is the axis that makes multiplicity legible: the same logical
-    function observed by Clang, by CastXML, in DWARF, and in the export
-    table is four occurrences of one entity, not four competing answers.
-    """
-
-    AST = "ast"
-    DWARF = "dwarf"
-    PDB = "pdb"
-    EXPORT_TABLE = "export_table"
-    TRANSLATION_UNIT = "translation_unit"
-    SOURCE_LOCATION = "source_location"
-    BUILD_UNIT = "build_unit"
 
 
 def _attribute_pair(pair: Any) -> tuple[str, str]:
