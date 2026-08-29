@@ -275,22 +275,36 @@ _NOEXCEPT_RE = re.compile(r"\bnoexcept\b(?:\s*\(\s*([^()]*)\s*\))?")
 
 
 def _canonicalize_noexcept(s: str) -> str:
-    """Normalize the two constant ``noexcept`` spellings this trailing
-    region can carry: bare ``noexcept``/``noexcept(true)`` (the
-    "non-throwing" type) collapse to the single canonical spelling
-    ``"noexcept"``; ``noexcept(false)`` (equivalent, for type purposes, to
-    no exception-specification at all) is dropped entirely, same as an
-    already-absent specifier. Any other ``noexcept(expr)`` -- a non-
-    literal constant expression this function cannot evaluate -- is left
-    untouched, verbatim.
+    """Normalize the constant ``noexcept`` spellings this trailing region
+    can carry: bare ``noexcept``, ``noexcept(true)``, and ``noexcept(1)``
+    (all the "non-throwing" type, since a ``noexcept`` argument is
+    contextually converted to ``bool``) collapse to the single canonical
+    spelling ``"noexcept"``; ``noexcept(false)``/``noexcept(0)``
+    (equivalent, for type purposes, to no exception-specification at all)
+    are dropped entirely, same as an already-absent specifier. Any other
+    ``noexcept(expr)`` -- a non-literal constant expression this function
+    cannot evaluate -- is left untouched, verbatim.
+
+    ``0``/``1`` are recognized alongside ``true``/``false`` because
+    Clang's own ``qualType`` genuinely emits these integer-literal
+    spellings verbatim (confirmed via ``clang -Xclang -ast-dump=json``:
+    ``void (int) noexcept(1)``) rather than folding them to the
+    boolean-literal spelling -- and direct compilation confirms
+    ``noexcept(1)``/``noexcept(true)`` are the identical type, as are
+    ``noexcept(0)``/no-specifier/``noexcept(false)`` (Codex review, PR
+    #941, twenty-first round). Deliberately narrow to exactly these two
+    integer literals, not "any nonzero integer" -- a non-0/1 integer
+    constant in this position triggers a narrowing-conversion diagnostic
+    in real compilers and is not a spelling this module has confirmed
+    evidence for.
     """
     m = _NOEXCEPT_RE.search(s)
     if not m:
         return s
     arg = m.group(1)
-    if arg is None or arg.strip() == "true":
+    if arg is None or arg.strip() in ("true", "1"):
         replacement = "noexcept"
-    elif arg.strip() == "false":
+    elif arg.strip() in ("false", "0"):
         replacement = ""
     else:
         return s

@@ -7345,6 +7345,67 @@ New tests: a doctest plus
 correct injected keyword AND non-collision with the convention-free
 form).
 
+**Correction (2026-08-29, same day, twenty-first Codex review round on
+PR #941, commit 05091da): two findings -- one real fix (noexcept
+integer literals), one real REGRESSION in the nineteenth round's own
+global-scope-stripping fix, reverted after direct-compilation
+falsification.**
+
+*Fix 1 (real, implemented):* `noexcept`'s argument is contextually
+converted to `bool`, so `noexcept(1)`/`noexcept(0)` are the identical
+types as `noexcept(true)`/`noexcept(false)` -- confirmed both by direct
+compilation (`g++`: redefinition errors for each pair) and by Clang's
+own `qualType`, which genuinely emits these integer-literal spellings
+verbatim (`clang -Xclang -ast-dump=json`: `void (int) noexcept(1)`).
+`_canonicalize_noexcept` now recognizes `"1"`/`"0"` alongside
+`"true"`/`"false"`, deliberately narrow to exactly these two literals
+(a non-0/1 integer constant in this position triggers a
+narrowing-conversion diagnostic in real compilers and is not a spelling
+this module has confirmed evidence for).
+
+*Fix 2 (self-correction, REVERTED):* the nineteenth round's own
+`_GLOBAL_SCOPE_RE`-based unconditional stripping of a leading `::` was
+itself wrong, falsified by direct compilation before reverting rather
+than accepted on the strength of a plausible-sounding C++ semantic
+argument. Given
+```
+namespace dep { struct Thing; }
+namespace local { namespace dep { struct Thing; } void f(dep::Thing*); }
+```
+Clang's own `qualType` for `f`'s parameter prints the BARE, unqualified
+`dep::Thing *` (no leading `::`) even though it resolves to
+`local::dep::Thing` -- a type DISTINCT from the true global
+`::dep::Thing` a sibling declaration in the SAME namespace prints WITH
+the leading `::` (verified via `clang -Xclang -ast-dump=json` on both
+declarations side by side). This module has no scope-tree information;
+it operates purely on already-printed type-name text, so it cannot tell
+"a genuinely global entity, spelled either way" apart from "an
+unqualified name that happens to resolve to a DIFFERENT, locally-
+shadowing entity of the same spelling" -- Clang's own choice to include
+or omit the leading `::` IS exactly that distinguishing signal, so
+erasing it can silently merge two non-interchangeable types. Separately:
+the nineteenth round's own motivating evidence
+(`tests/test_dumper_scoping_dependency_retention.py::
+test_globally_qualified_signature_spelling_still_matches`) turns out to
+be for a DIFFERENT subsystem entirely -- matching a signature's type
+reference against an already-KNOWN declared type's own `qualified_name`
+within ONE snapshot's dependency-scoping pass, not comparing two
+independently-observed SIGNATURES for cross-producer/cross-revision
+identity (this function's own job) -- and does not establish that
+castxml and Clang ever disagree on this leading `::` for one identical
+real declaration. `_GLOBAL_SCOPE_RE` is removed entirely (not merely
+disabled); `TestLeadingGlobalScopeQualifierIsStripped` in
+`tests/test_signature_normalization.py` is renamed to
+`TestLeadingGlobalScopeQualifierIsPreserved` with every assertion
+flipped from equality to inequality. This is the SECOND self-correction
+on this primitive (the first was the restrict handling, sixteenth ->
+eighteenth rounds) -- the common thread both times is that a plausible-
+sounding cross-producer-normalization generalization was accepted
+without direct-compilation verification first; every future claim about
+what two spellings "mean the same thing" on this primitive gets checked
+against real compiler/AST-dumper output before implementing, not merely
+re-derived from C++ semantics on paper.
+
 ---
 
 ### Phase 3 — public surface as a graph query over one evidence graph (D5)

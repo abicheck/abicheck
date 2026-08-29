@@ -110,31 +110,42 @@ _CALLING_CONVENTION_KEYWORD_RE = re.compile(
     r"\s*(?:__cdecl|__stdcall|__fastcall|__thiscall|__vectorcall)\b"
 )
 
-# A leading `::` explicitly requesting GLOBAL-namespace lookup for the
-# scoped name that follows (`::dep::Thing`) names the identical type an
-# unqualified spelling of the same, unambiguous name does (`dep::Thing`)
-# -- direct-clang's own `qualType` preserves this explicit qualifier
-# verbatim (a confirmed real producer spelling: see
-# `tests/test_dumper_scoping_dependency_retention.py::
-# test_globally_qualified_signature_spelling_still_matches`'s own
-# twenty-sixth-round docstring for the identical fact from the *type-
-# matching* side of this codebase), so leaving it in place here fragments
-# one declaration's identity across producers/revisions purely on this
-# spelling choice, the same class of cross-producer-spelling gap this
-# whole module exists to close. Matched by POSITION, not depth: safe to
-# strip only where `::` marks the START of a scoped-name token -- string
-# start, or immediately after whitespace/`(`/`<`/`,`/`*`/`&` (an opening
-# template-argument list, parameter list, or pointer/reference sigil, all
-# places a fresh type name can begin) -- never when `::` follows an
-# identifier character (an ordinary qualified name's own internal
-# separator, e.g. the second `::` in `dep::Thing`, must never be
-# touched) OR anything else, most importantly `)` -- the closing paren of
-# `(anonymous namespace)::Foo`'s own real producer spelling is NOT a
-# fresh-token boundary, and a naive negative-lookbehind-on-identifier-
-# chars-only regex (an earlier draft of this fix) would have wrongly
-# stripped that type's genuine, load-bearing separator, corrupting it to
-# `(anonymous namespace)Foo` (Codex review, PR #941, nineteenth round).
-_GLOBAL_SCOPE_RE = re.compile(r"(?:\A|(?<=[\s(<,*&]))::")
+# A leading `::` (explicit global-namespace lookup) is DELIBERATELY left
+# untouched, genuinely distinguishing -- despite a nineteenth-round
+# attempt (`_GLOBAL_SCOPE_RE`, since reverted) to strip it unconditionally
+# on the theory that `::dep::Thing` and `dep::Thing` always name the
+# identical type. That theory is false in general and was falsified by
+# direct compilation, not merely re-derived from principle: given
+#     namespace dep { struct Thing; }
+#     namespace local { namespace dep { struct Thing; } void f(dep::Thing*); }
+# Clang's own `qualType` for `f`'s parameter prints the BARE, unqualified
+# `dep::Thing *` -- with NO leading `::` -- even though it resolves to
+# `local::dep::Thing`, a type that is DISTINCT from the global
+# `::dep::Thing` a sibling declaration `void g(::dep::Thing*)` in the
+# same namespace prints WITH the leading `::` (Codex review, PR #941,
+# twenty-first round, reproduced independently via `clang -Xclang
+# -ast-dump=json` before reverting). Since this module has no scope-tree
+# information -- it operates purely on already-printed type-name text --
+# it cannot tell "a genuinely global entity, spelled either way" apart
+# from "an unqualified name that happens to resolve to a DIFFERENT,
+# locally-shadowing entity of the same spelling"; Clang's own choice to
+# include or omit the leading `::` is exactly the signal that
+# distinguishes them, so erasing it can silently merge two non-
+# interchangeable types. The nineteenth round's own motivating evidence
+# (`tests/test_dumper_scoping_dependency_retention.py::
+# test_globally_qualified_signature_spelling_still_matches`) is for a
+# DIFFERENT subsystem entirely -- matching a signature's type reference
+# against an already-KNOWN declared type's own `qualified_name` within
+# ONE snapshot's dependency-scoping pass -- not for comparing two
+# independently-observed SIGNATURES for cross-producer/cross-revision
+# identity, which is this function's own job; that evidence does not
+# establish that castxml and Clang ever disagree on this leading `::`
+# for one identical real declaration, and no such evidence has been
+# found. Absent that evidence, the conservative, keep-it-distinguishing
+# choice is correct, mirroring how a similarly narrow-scoped generalization
+# mistake in the sixteenth/eighteenth rounds' own restrict handling was
+# corrected the identical way: revert to the position that matches
+# confirmed compiler behavior rather than a plausible-sounding theory.
 
 
 def _strip_cv_tokens_outside_nesting(s: str) -> str:
@@ -520,10 +531,13 @@ def canonicalize_function_signature_param_type(name: str) -> str:
 
     Preserving ``noexcept`` verbatim is necessary but not sufficient: since
     C++17 a function type's exception specification is exactly one of two
-    kinds for TYPE purposes -- "non-throwing" (bare ``noexcept`` or
-    ``noexcept(true)``) and "potentially-throwing" (no specifier at all,
-    or ``noexcept(false)``) -- so those pairs canonicalize identically,
-    not merely both survive. Only the two literal spellings are
+    kinds for TYPE purposes -- "non-throwing" (bare ``noexcept``,
+    ``noexcept(true)``, or ``noexcept(1)`` -- a ``noexcept`` argument is
+    contextually converted to ``bool``, and Clang's own ``qualType``
+    genuinely emits the integer-literal spelling verbatim) and
+    "potentially-throwing" (no specifier at all, ``noexcept(false)``, or
+    ``noexcept(0)``) -- so those pairs canonicalize identically, not
+    merely both survive. Only these four literal spellings are
     recognized; any other, non-literal ``noexcept(expr)`` is left
     untouched (evaluating an arbitrary constant expression is out of
     scope).
@@ -531,6 +545,10 @@ def canonicalize_function_signature_param_type(name: str) -> str:
     >>> canonicalize_function_signature_param_type("void (*)(int) noexcept(true)")
     'void ( * )(int) noexcept'
     >>> canonicalize_function_signature_param_type("void (*)(int) noexcept(false)")
+    'void ( * )(int)'
+    >>> canonicalize_function_signature_param_type("void (*)(int) noexcept(1)")
+    'void ( * )(int) noexcept'
+    >>> canonicalize_function_signature_param_type("void (*)(int) noexcept(0)")
     'void ( * )(int)'
 
     An empty parameter list and a bare ``void`` are the identical "no
@@ -615,33 +633,28 @@ def canonicalize_function_signature_param_type(name: str) -> str:
     >>> canonicalize_function_signature_param_type("my__cdecl_result (*)(int) __attribute__((stdcall))")
     'my__cdecl_result (__stdcall * )(int)'
 
-    An explicit leading ``::`` (global-namespace lookup) names the
-    identical type an unqualified spelling of that same, unambiguous name
-    does -- direct-clang's own ``qualType`` preserves this qualifier
-    verbatim, a confirmed real producer spelling. A genuine, load-bearing
-    ``::`` separator -- an ordinary qualified name's own internal one, or
-    the one following an anonymous-namespace parenthesized group -- is
-    never touched.
+    An explicit leading ``::`` (global-namespace lookup) is left
+    genuinely distinguishing, NOT stripped -- direct compilation confirms
+    Clang's own ``qualType`` can print the bare, unqualified spelling
+    (no leading ``::``) for a type that resolves to a locally-shadowing
+    entity distinct from the true global one a sibling declaration
+    prints WITH the leading ``::`` -- so erasing that qualifier can
+    silently merge two non-interchangeable types. See the module-level
+    comment above (a since-reverted ``_GLOBAL_SCOPE_RE`` once stripped
+    it) for the full worked counterexample.
 
     >>> canonicalize_function_signature_param_type("::dep::Thing *")
-    'dep::Thing *'
+    '::dep::Thing *'
     >>> canonicalize_function_signature_param_type("dep::Thing *")
     'dep::Thing *'
+    >>> canonicalize_function_signature_param_type("::dep::Thing *") != canonicalize_function_signature_param_type("dep::Thing *")
+    True
     >>> canonicalize_function_signature_param_type("(anonymous namespace)::Foo *")
     '(anonymous namespace)::Foo *'
     """
     canonical = canonicalize_type_name(
         _decay_top_level_array(canonicalize_type_name(name))
     )
-    # An explicit leading `::` (global-namespace lookup) is stripped
-    # unconditionally, unlike restrict/cv -- it is never position-
-    # sensitive (a scoped name resolves to the identical entity whether
-    # or not the lookup was forced global), so this runs once, up front,
-    # rather than being folded into the position-sensitive machinery
-    # below. See `_GLOBAL_SCOPE_RE`'s own comment for why the match is
-    # anchored to specific preceding characters rather than a blanket
-    # "not preceded by an identifier" test.
-    canonical = _GLOBAL_SCOPE_RE.sub("", canonical)
     depth = 0
     # True for a paren currently open on `transparent_parens` that groups a
     # declarator's own sigil (see the docstring above) -- popped, not

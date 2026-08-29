@@ -332,40 +332,45 @@ class TestClangTrailingCallingConventionAttributeUnifies:
         )
 
 
-class TestLeadingGlobalScopeQualifierIsStripped:
-    """An explicit leading ``::`` (forcing global-namespace lookup) names
-    the identical type an unqualified spelling of that same, unambiguous
-    name does -- direct-clang's own ``qualType`` preserves it verbatim, a
-    confirmed real producer spelling
-    (``tests/test_dumper_scoping_dependency_retention.py``'s own
-    ``test_globally_qualified_signature_spelling_still_matches``)."""
+class TestLeadingGlobalScopeQualifierIsPreserved:
+    """An explicit leading ``::`` (forcing global-namespace lookup) must
+    NOT be stripped -- a nineteenth-round attempt to strip it
+    unconditionally was reverted in the twenty-first round once direct
+    compilation showed Clang's own ``qualType`` can legitimately print
+    the BARE, unqualified spelling for a type that resolves to a
+    locally-shadowing entity distinct from the true global one a sibling
+    declaration prints WITH the leading ``::`` -- so stripping it can
+    silently merge two non-interchangeable types. This primitive has no
+    scope-tree information to tell the two cases apart, so the leading
+    ``::`` -- Clang's own signal for the distinction -- must survive."""
 
-    def test_bare_global_qualifier_stripped(self) -> None:
-        assert canon("::dep::Thing *") == canon("dep::Thing *")
+    def test_leading_qualifier_preserved(self) -> None:
+        assert canon("::dep::Thing *") == "::dep::Thing *"
 
-    def test_qualifier_preserved_after_stripping(self) -> None:
-        assert "dep::Thing" in canon("::dep::Thing *")
+    def test_leading_qualifier_distinguishes_from_unqualified(self) -> None:
+        # The two spellings must NOT collapse -- they can name genuinely
+        # different, locally-shadowing entities.
+        assert canon("::dep::Thing *") != canon("dep::Thing *")
 
-    def test_template_argument_global_qualifier_stripped(self) -> None:
-        assert canon("Box<::dep::Thing>") == canon("Box<dep::Thing>")
+    def test_template_argument_qualifier_preserved(self) -> None:
+        assert canon("Box<::dep::Thing>") != canon("Box<dep::Thing>")
 
-    def test_callback_parameter_global_qualifier_stripped(self) -> None:
-        assert canon("void (*)(::dep::Thing*)") == canon("void (*)(dep::Thing*)")
+    def test_callback_parameter_qualifier_preserved(self) -> None:
+        assert canon("void (*)(::dep::Thing*)") != canon("void (*)(dep::Thing*)")
 
     def test_ordinary_namespace_qualifier_unaffected(self) -> None:
-        # A plain namespace-qualified name's own internal "::" must never
-        # be touched -- only a LEADING, global-scope one is stripped.
+        # A plain namespace-qualified name's own internal "::" was never
+        # touched by the reverted fix either -- only a leading one was.
         assert canon("ns::Foo *") != canon("Foo *")
 
     def test_anonymous_namespace_separator_unaffected(self) -> None:
-        # Regression pin: the "::" following "(anonymous namespace)" is a
-        # genuine, load-bearing separator, not a global-scope marker --
-        # a naive "not preceded by an identifier character" test would
-        # wrongly strip it too, since ")" isn't an identifier character.
+        # The "::" following "(anonymous namespace)" is a genuine,
+        # load-bearing separator, not a global-scope marker -- unrelated
+        # to this reverted fix, but still worth pinning here.
         assert canon("(anonymous namespace)::Foo *") == "(anonymous namespace)::Foo *"
 
-    def test_member_pointer_qualifier_global_scope_stripped(self) -> None:
-        assert canon("void (::C::*)(int)") == canon("void (C::*)(int)")
+    def test_member_pointer_qualifier_preserved(self) -> None:
+        assert canon("void (::C::*)(int)") != canon("void (C::*)(int)")
 
     def test_idempotent(self) -> None:
         once = canon("::dep::Thing *")
@@ -524,6 +529,37 @@ class TestNoexceptSpellingsCanonicalized:
         assert canon("void (C::*)(int) const noexcept(false)") == canon(
             "void (C::*)(int) const"
         )
+
+
+class TestNoexceptIntegerLiteralSpellingsCanonicalized:
+    """A ``noexcept`` argument is contextually converted to ``bool``, so
+    ``noexcept(1)``/``noexcept(0)`` are the identical types as
+    ``noexcept(true)``/``noexcept(false)`` -- confirmed both by direct
+    compilation (redefinition errors) and by Clang's own ``qualType``,
+    which genuinely emits these integer-literal spellings verbatim
+    (``clang -Xclang -ast-dump=json``: ``void (int) noexcept(1)``)."""
+
+    def test_noexcept_1_equals_noexcept_true(self) -> None:
+        assert canon("void (*)(int) noexcept(1)") == canon(
+            "void (*)(int) noexcept(true)"
+        )
+
+    def test_noexcept_0_equals_no_specifier(self) -> None:
+        assert canon("void (*)(int) noexcept(0)") == canon("void (*)(int)")
+
+    def test_noexcept_1_still_distinguishes_from_no_specifier(self) -> None:
+        assert canon("void (*)(int) noexcept(1)") != canon("void (*)(int)")
+
+    def test_other_integer_literal_left_untouched(self) -> None:
+        # Deliberately narrow to exactly 0/1 -- any other integer
+        # constant is not a spelling this module has confirmed evidence
+        # for, and triggers a narrowing-conversion diagnostic in real
+        # compilers, so it is left alone rather than guessed at.
+        assert "noexcept(2)" in canon("void (*)(int) noexcept(2)")
+
+    def test_idempotent_on_integer_literal_spelling(self) -> None:
+        once = canon("void (*)(int) noexcept(1)")
+        assert canon(once) == once
 
 
 class TestCvInsideNoexceptExpressionIsNotExtracted:

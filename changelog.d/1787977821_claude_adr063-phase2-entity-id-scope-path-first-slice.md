@@ -219,19 +219,33 @@
   keyword equivalent, so an identical calling-convention-decorated
   declaration observed through Clang's header-AST backend and through
   castxml/DWARF no longer fragments into two different `EntityId`s.
-  An explicit leading `::` (forced global-namespace lookup) is now
-  stripped from a parameter type, unconditionally, so `::dep::Thing *`
-  and `dep::Thing *` -- the identical type when the unqualified name is
-  unambiguous -- canonicalize identically; this is a confirmed real
-  producer spelling (direct-clang's own `qualType` preserves an explicit
-  global-scope qualifier verbatim). An ordinary qualified name's own
-  internal `::` separator, and the one following an anonymous-namespace
-  parenthesized group (`(anonymous namespace)::Foo`), are both left
-  untouched -- the match is anchored to specific preceding characters
-  (string start, or immediately after whitespace/`(`/`<`/`,`/`*`/`&`)
-  rather than a blanket "not preceded by an identifier" test, since the
-  latter cannot distinguish a genuine leading global-scope marker from
-  the anonymous-namespace case's own load-bearing separator.
+  An explicit leading `::` (forced global-namespace lookup) is left
+  genuinely distinguishing, NOT stripped -- direct compilation confirms
+  Clang's own `qualType` can legitimately print the BARE, unqualified
+  spelling (no leading `::`) for a type that resolves to a locally-
+  shadowing entity distinct from the true global one a sibling
+  declaration in the same namespace prints WITH the leading `::` (e.g.
+  a function inside `namespace local { namespace dep { struct Thing; }
+  ... }` prints its `dep::Thing*` parameter unqualified, even though it
+  is `local::dep::Thing`, not `::dep::Thing`). This module has no
+  scope-tree information to distinguish the two cases from text alone,
+  so erasing the leading `::` -- Clang's own signal for the distinction
+  -- can silently merge two non-interchangeable types. (An earlier
+  revision of this fix stripped the leading `::` unconditionally,
+  reasoning it never carries distinguishing meaning; that generalization
+  was itself wrong, caught by direct compiler verification rather than
+  accepted on the strength of a plausible-sounding C++ semantic
+  argument, and is reverted here to the always-preserved behavior
+  above -- the second such self-correction on this primitive, after the
+  restrict-handling one earlier in this same list.)
+  `noexcept`'s argument is contextually converted to `bool`, so
+  `noexcept(1)`/`noexcept(0)` now also canonicalize identically to
+  `noexcept(true)`/`noexcept(false)` respectively -- confirmed both by
+  direct compilation (redefinition errors for each pair) and by Clang's
+  own `qualType`, which genuinely emits these integer-literal spellings
+  verbatim. Deliberately narrow to exactly `1`/`0`; any other integer
+  constant in this position triggers a narrowing-conversion diagnostic in
+  real compilers and is left untouched.
   Fixed a related bug in the calling-convention-attribute injection
   itself: whether a declarator's own leading position already carries a
   calling-convention keyword was checked with a bare substring test
