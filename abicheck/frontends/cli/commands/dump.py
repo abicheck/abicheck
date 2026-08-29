@@ -67,6 +67,7 @@ from ....cli_params import (
     _load_suppression_and_policy as _load_suppression_and_policy,  # noqa: F401  — re-exported to keep cli import sites (test suite) stable
 )
 from ....cli_resolve import (
+    _click_notify,
     _dump_native_binary,
     _expand_header_inputs,
     _normalize_binary_input,
@@ -715,19 +716,28 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
     # through `execute_dump_request`, the one shared pipeline `compare`'s
     # implicit-dump operand and `scan`'s candidate resolution already route
     # through -- `perform_elf_dump` is retired for this path. (PE/Mach-O
-    # keeps its own `handle_non_elf_dump`, unmigrated -- see that module's
-    # own docstring.) This also folds in the L4 source-extractor default:
-    # the shared pipeline resolves an unflagged `--ast-frontend` through
-    # `effective_frontend`, which defaults to castxml (matching L4 to the L2
-    # header-AST parse), where `perform_elf_dump` forwarded the bare,
-    # unresolved `header_backend` straight to `embed_build_source`, which
-    # treated anything but the literal string "castxml" as clang -- a
-    # long-documented divergence (this plan's own PR 3A "item 2"/"a new,
-    # previously-undocumented divergence" notes) now closed for this path by
-    # construction rather than left as an accidental default nobody chose.
-    # See `dump_execute.execute_dump_cli_run`'s own docstring for the rest
-    # of this call's design notes (split into a sibling module purely to
-    # keep this file under the architecture gate's file-size cap).
+    # keeps its own `handle_non_elf_dump`, unmigrated.) This also folds in
+    # the L4 source-extractor default: the shared pipeline's unflagged
+    # `--ast-frontend` resolves to castxml (matching the L2 header-AST
+    # parse), where `perform_elf_dump` forwarded the bare, unresolved
+    # `header_backend` straight to `embed_build_source`, which treated
+    # anything but "castxml" as clang -- a long-documented divergence (this
+    # plan's own PR 3A "item 2"/"a new, previously-undocumented divergence"
+    # notes) now closed by construction. See `dump_execute.
+    # execute_dump_cli_run`'s own docstring for the rest of this call's
+    # design notes -- split into a sibling module purely to keep this file
+    # under the architecture gate's file-size cap, and it deliberately does
+    # not import back into the CLI-registration family this module itself
+    # sits in, which is why the re-resolution below (re-pointing at the
+    # *normalized* `so_path`, nulling `requested_depth` -- see that
+    # docstring for why) happens here rather than there.
+    _exec_request = dataclasses.replace(
+        _dump_request,
+        input=dataclasses.replace(_dump_request.input, path=so_path),
+    )
+    _exec_resolved = dataclasses.replace(
+        resolve_dump_request_for_cli(_exec_request), requested_depth=None,
+    )
     from ....workflows.extraction import (
         dump_manifest_header_roots,
         resolve_source_frontend_clang_bin,
@@ -735,8 +745,8 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
     from ..dump_execute import execute_dump_cli_run
 
     snap = execute_dump_cli_run(
-        _dump_request,
-        so_path=so_path,
+        _exec_resolved,
+        notify=_click_notify,
         build_config=build_config,
         build_query=build_query,
         build_compile_db=build_compile_db,
