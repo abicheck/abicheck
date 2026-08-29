@@ -252,7 +252,24 @@ def parse_functions(
             # (`owner_class_of`'s own docstring).
             name = "::".join((*entry.scope, name))
         qualtype = _qualtype(node)
-        mangled = str(node.get("mangledName", "")) or name
+        # ``raw_mangled`` distinguishes "clang genuinely emitted this
+        # mangling" from "clang emitted none, and `mangled` fell back to
+        # the bare name" -- ``node.get("mangledName", "")`` alone conflates
+        # the two, since an absent key and a present-but-empty one both
+        # read as falsy. This matters because the very next `is_extern_c`
+        # check below trusts "mangled == name" as a genuine C-linkage
+        # signal, which is only true when clang actually said so: verified
+        # directly (`clang -x c -Xclang -ast-dump=json`) that a real
+        # plain-C `FunctionDecl` DOES carry an explicit `"mangledName"` key
+        # equal to `name`, while an uninstantiated C++ function template's
+        # `FunctionDecl` carries NO `"mangledName"` key at all -- confirmed
+        # by checking key presence, not just value truthiness (Codex/
+        # CodeRabbit review, fresh evidence: two uninstantiated template
+        # methods named `f` in different namespaces both fell back to the
+        # bare name, so the old check wrongly read that fallback collision
+        # as C linkage and collapsed both to one `EntityId`).
+        raw_mangled = node.get("mangledName")
+        mangled = raw_mangled or name
         quals = _function_qualifiers(qualtype)
         ret_type = _return_type(qualtype) or "void"
         params = [
@@ -290,8 +307,14 @@ def parse_functions(
         # Hoisted from the ``Function(...)`` call below so the identity
         # constructor is handed the identical values the model object
         # records, rather than a second, independently-recomputed opinion
-        # about the same facts (ADR-063 Phase 2).
-        is_extern_c = entry.extern_c or mangled == name
+        # about the same facts (ADR-063 Phase 2). The `mangled == name`
+        # heuristic below is gated on `raw_mangled is not None` (see that
+        # variable's own comment above) -- without the gate, an
+        # uninstantiated template's fallback-to-`name` mangling reads as
+        # false C linkage.
+        is_extern_c = entry.extern_c or (
+            raw_mangled is not None and raw_mangled == name
+        )
         is_const = bool(re.search(r"\bconst\b", quals))
         is_volatile = bool(re.search(r"\bvolatile\b", quals))
         is_variadic = bool(node.get("variadic")) or "..." in qualtype
@@ -379,17 +402,26 @@ def parse_functions(
                     else None
                 ),
                 is_compiler_generated=False,
-                # ADR-063 Phase 2. `mangled` above falls back to the bare
-                # `name` when clang emits no `mangledName`, which is exactly
-                # the "not a genuine mangling" case `entity_id_for_function`
-                # documents -- so the mangled name is only offered when it
-                # is genuinely one, and the C-linkage case is routed through
-                # `is_extern_c` instead (the same order
-                # `finding_identity.resolve_function_identity` applies).
+                # ADR-063 Phase 2. `mangled_name` is offered here only when
+                # `raw_mangled` is genuinely present -- NOT when `mangled`
+                # (which may itself be the bare-`name` fallback) is merely
+                # non-empty. Passing the fallback through as if it were a
+                # real mangling was the exact bug this gate closes (Codex/
+                # CodeRabbit review, fresh evidence): two uninstantiated
+                # template functions named `f` in different namespaces both
+                # have `raw_mangled is None`, so both would otherwise offer
+                # the identical bogus "mangled name" `"f"`, which
+                # `entity_id_for_function`'s mangled-name branch takes
+                # priority over scope for -- collapsing two genuinely
+                # distinct functions into one `EntityId`. The C-linkage case
+                # is routed through `is_extern_c` instead, same order
+                # `finding_identity.resolve_function_identity` applies.
                 entity_id=entity_id_for_function(
                     entry.scope_path,
                     leaf_name,
-                    mangled_name=None if is_extern_c else mangled,
+                    mangled_name=(
+                        raw_mangled if (raw_mangled is not None and not is_extern_c) else None
+                    ),
                     is_extern_c=is_extern_c,
                     param_types=tuple(p.type for p in params),
                     is_const=is_const,

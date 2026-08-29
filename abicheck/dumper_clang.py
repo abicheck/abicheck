@@ -1075,11 +1075,23 @@ class _ClangAstParser:
             if node.get("storageClass") in ("auto", "register"):
                 continue
             name = str(node.get("name", ""))
-            mangled = str(node.get("mangledName", "")) or name
+            # `raw_mangled` distinguishes "clang genuinely emitted this
+            # mangling" from "clang emitted none, and `mangled` fell back
+            # to the bare name" -- see `functions.parse_functions`'s
+            # identical, more-fully-commented fix for the direct-
+            # compilation evidence (Codex/CodeRabbit review, fresh
+            # evidence): a static member of an uninstantiated class-
+            # template pattern carries no `mangledName` either, and the
+            # un-gated `mangled == name` heuristic below wrongly read that
+            # fallback collision as C linkage.
+            raw_mangled = node.get("mangledName")
+            mangled = raw_mangled or name
             if not mangled:
                 continue
             type_name = _qualtype(node)
-            is_extern_c = entry.extern_c or mangled == name
+            is_extern_c = entry.extern_c or (
+                raw_mangled is not None and raw_mangled == name
+            )
             variables.append(
                 Variable(
                     name=name,
@@ -1091,15 +1103,22 @@ class _ClangAstParser:
                     source_location=self._source_location(entry),
                     alignment_bits=_clang_var_alignment_bits(node),
                     deprecated=_clang_deprecated_message(node),
-                    # ADR-063 Phase 2, same routing as parse_functions:
-                    # `mangled` falls back to the bare `name` when clang
-                    # emits no `mangledName`, which is exactly the "not a
-                    # genuine mangling" case the constructor documents, so
-                    # that case goes through `is_extern_c` instead.
+                    # ADR-063 Phase 2, same routing/bug-fix as
+                    # parse_functions: `mangled_name` is offered only when
+                    # `raw_mangled` is genuinely present, not merely when
+                    # `mangled` (which may itself be the bare-`name`
+                    # fallback) is non-empty -- passing the fallback
+                    # through as a "genuine" mangling would collapse two
+                    # distinct static members of an uninstantiated
+                    # class-template pattern onto one `EntityId`.
                     entity_id=entity_id_for_variable(
                         entry.scope_path,
                         name,
-                        mangled_name=None if is_extern_c else mangled,
+                        mangled_name=(
+                            raw_mangled
+                            if (raw_mangled is not None and not is_extern_c)
+                            else None
+                        ),
                         is_extern_c=is_extern_c,
                     ),
                 )

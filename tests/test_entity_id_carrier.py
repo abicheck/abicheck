@@ -86,6 +86,20 @@ _PROBE_HEADER = textwrap.dedent(
     """
 )
 
+#: Two uninstantiated function templates, two uninstantiated class-template
+#: methods, and two class-template-pattern static members, each pair sharing a
+#: leaf name across different namespaces. Confirmed by direct compilation
+#: (`clang -Xclang -ast-dump=json`) that clang emits NO `mangledName` for any
+#: of these six, which is what makes them the counterexample below.
+_UNINSTANTIATED_TEMPLATES = textwrap.dedent(
+    """
+    namespace A { template <class T> void f(T); }
+    namespace B { template <class T> void f(T); }
+    namespace C { template <class T> struct S { static int v; void m(); }; }
+    namespace D { template <class T> struct S { static int v; void m(); }; }
+    """
+)
+
 #: The two halves of the collision this phase exists to close: a record
 #: nested in a **record** and the same bare names nested in a **namespace**.
 #: Both render to the identical ``"B::C"`` qualified name, which is exactly
@@ -471,3 +485,74 @@ def test_live_castxml_closes_the_record_vs_namespace_collision(tmp_path: Path) -
     assert in_namespace.entity_id == EntityId(
         scope=(Namespace("B"),), kind=EntityKind.TYPE, leaf_name="C"
     )
+
+
+@pytest.mark.integration
+@pytest.mark.skipif(shutil.which("clang") is None, reason="clang not installed")
+def test_live_clang_missing_mangling_is_not_read_as_c_linkage(tmp_path: Path) -> None:
+    """A mangling-free C++ template must not take the ``extern "C"`` branch.
+
+    Clang emits no ``mangledName`` for an uninstantiated template, so the
+    parser's ``mangled`` falls back to the bare ``name`` — which made the
+    long-standing ``mangled == name`` C-linkage heuristic read as True.
+    Routing that through ``entity_id_for_function``'s ``extern_c`` branch
+    forces ``scope=()`` and drops the signature, so ``A::f`` and ``B::f``
+    collapsed onto one ``EntityId`` (reproduced end to end before the fix;
+    Codex + CodeRabbit review, PR #943).
+
+    Its sibling above
+    (``test_live_clang_uninstantiated_template_functions_never_collide_as_
+    extern_c``) pins the exact ``EntityId`` values for the free-function
+    pair, which is the shape the review actually reported; this one is the
+    class-level counterpart and deliberately does not repeat those literals.
+
+    The assertion here is about the *class*, not the one reported input: all three shapes clang leaves unmangled are exercised (a free
+    function template, a class-template method, and a class-template
+    pattern's static member — the last through the variable constructor,
+    which had the identical bug), each as a same-leaf-name pair in
+    different namespaces, so every declaration whose identity depends on
+    the signature/scope tier is covered rather than just the first one
+    someone happened to report.
+    """
+    parser = _clang_parser(_UNINSTANTIATED_TEMPLATES, tmp_path, "tmpl")
+
+    for leaf in ("f", "m"):
+        pair = [fn for fn in parser.parse_functions() if fn.name == leaf]
+        assert len(pair) == 2, f"expected two {leaf!r} declarations"
+        assert all(fn.entity_id is not None for fn in pair)
+        # Neither may claim C linkage, and neither may lose its scope.
+        for fn in pair:
+            assert fn.entity_id is not None
+            assert fn.entity_id.extra[0] == "sig", fn.entity_id
+            assert fn.entity_id.scope != (), fn.entity_id
+        assert pair[0].entity_id != pair[1].entity_id
+
+    statics = [var for var in parser.parse_variables() if var.name == "v"]
+    assert len(statics) == 2
+    for var in statics:
+        assert var.entity_id is not None
+        assert var.entity_id.extra == (), var.entity_id
+        assert var.entity_id.scope != (), var.entity_id
+    assert statics[0].entity_id != statics[1].entity_id
+
+
+@pytest.mark.integration
+@pytest.mark.skipif(shutil.which("clang") is None, reason="clang not installed")
+def test_live_clang_real_c_linkage_still_takes_the_extern_c_branch(
+    tmp_path: Path,
+) -> None:
+    """The negative control for the fix above, which narrowed a heuristic.
+
+    Narrowing ``mangled == name`` to "clang actually emitted a
+    ``mangledName``" is only safe if a genuine C-linkage declaration really
+    does carry that key — verified directly (``clang -x c`` on a plain C
+    header, and ``clang -x c++`` on an ``extern "C"`` block: all four
+    declarations carry an explicit ``mangledName`` equal to their name), and
+    pinned here so a future narrowing cannot silently break extern-"C"
+    identity instead.
+    """
+    parser = _clang_parser(_PROBE_HEADER, tmp_path, "probe")
+    c_fn = _one(parser.parse_functions(), name="c_fn")
+    c_var = _one(parser.parse_variables(), name="c_var")
+    assert c_fn.entity_id is not None and c_fn.entity_id.extra == ("extern_c",)
+    assert c_var.entity_id is not None and c_var.entity_id.extra == ("extern_c",)
