@@ -43,7 +43,6 @@ import re
 
 from ..name_classification import canonicalize_type_name
 from .declarator_qualifiers import (
-    _CALLING_CONVENTIONS,
     _canonicalize_member_qualifiers,
     _find_member_pointer_qualifier,
     _is_declarator_group,
@@ -90,6 +89,25 @@ _CV_WORD_RE = re.compile(r"\b(?:const|volatile|restrict|__restrict__|__restrict)
 # attribute text (Codex review, PR #941, seventeenth round).
 _CALLING_CONVENTION_ATTR_RE = re.compile(
     r"__attribute__\s*\(\(\s*(cdecl|stdcall|fastcall|thiscall|vectorcall)\s*\)\)"
+)
+
+# Whether *prefix* already carries a leading calling-convention keyword,
+# used to decide whether to inject the equivalent one for a trailing
+# ``__attribute__(...)`` spelling (see the attribute-injection code
+# below). Matched as a genuine WHOLE TOKEN positioned immediately after
+# the declarator's own opening paren (allowing leading whitespace) --
+# never a bare substring test anywhere in `prefix` -- since `prefix`
+# also contains the return type, and a return type can legitimately
+# CONTAIN one of these keywords as a substring of an unrelated identifier
+# (e.g. `my__cdecl_result`) without that identifier being a calling-
+# convention keyword at all. A prior revision used `any(cc in prefix for
+# cc in _CALLING_CONVENTIONS)`, which matched that substring, wrongly
+# concluded a convention keyword was already present, and both skipped
+# injecting the real one AND still stripped the trailing attribute text
+# -- silently merging two distinct callback types (Codex review, PR #941,
+# twentieth round).
+_CALLING_CONVENTION_KEYWORD_RE = re.compile(
+    r"\s*(?:__cdecl|__stdcall|__fastcall|__thiscall|__vectorcall)\b"
 )
 
 # A leading `::` explicitly requesting GLOBAL-namespace lookup for the
@@ -589,6 +607,14 @@ def canonicalize_function_signature_param_type(name: str) -> str:
     >>> canonicalize_function_signature_param_type("void (C::*)(int) __attribute__((thiscall))")
     'void (__thiscall C:: * )(int)'
 
+    A return type that merely CONTAINS a calling-convention keyword as a
+    substring of an unrelated identifier (``my__cdecl_result``) must not
+    be mistaken for a declarator that already has one -- the trailing
+    attribute is still injected as the declarator's own leading keyword.
+
+    >>> canonicalize_function_signature_param_type("my__cdecl_result (*)(int) __attribute__((stdcall))")
+    'my__cdecl_result (__stdcall * )(int)'
+
     An explicit leading ``::`` (global-namespace lookup) names the
     identical type an unqualified spelling of that same, unambiguous name
     does -- direct-clang's own ``qualType`` preserves this qualifier
@@ -730,15 +756,16 @@ def canonicalize_function_signature_param_type(name: str) -> str:
         attr_match = _CALLING_CONVENTION_ATTR_RE.search(tail)
         if attr_match is not None:
             tail = tail[: attr_match.start()] + tail[attr_match.end() :]
-            if not any(cc in prefix for cc in _CALLING_CONVENTIONS):
-                open_idx = prefix.rfind("(")
-                if open_idx != -1:
-                    keyword = f"__{attr_match.group(1)}"
-                    prefix = re.sub(
-                        r"\s+",
-                        " ",
-                        prefix[: open_idx + 1] + f"{keyword} " + prefix[open_idx + 1 :],
-                    )
+            open_idx = prefix.rfind("(")
+            if open_idx != -1 and not _CALLING_CONVENTION_KEYWORD_RE.match(
+                prefix, open_idx + 1
+            ):
+                keyword = f"__{attr_match.group(1)}"
+                prefix = re.sub(
+                    r"\s+",
+                    " ",
+                    prefix[: open_idx + 1] + f"{keyword} " + prefix[open_idx + 1 :],
+                )
         member_quals = _canonicalize_member_qualifiers(tail)
         # `head` (a bare pointer-declarator's own closing paren, plus any
         # by-value cv already stripped out of it) is joined directly onto

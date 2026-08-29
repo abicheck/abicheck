@@ -7319,6 +7319,32 @@ parameter, an ordinary namespace qualifier staying unaffected, the
 anonymous-namespace regression pin, the member-pointer qualified-name-
 prefix case, idempotence).
 
+**Correction (2026-08-29, same day, twentieth Codex review round on PR
+#941, commit 2a14e2e): the seventeenth round's own "does prefix already
+carry a calling-convention keyword" check used a bare substring test,
+which a coincidentally-named return type defeats.** `any(cc in prefix
+for cc in _CALLING_CONVENTIONS)` matches whenever any of the five
+keyword strings appears ANYWHERE in `prefix` -- but `prefix` also
+contains the return type, which can legitimately CONTAIN one of these
+keywords as a substring of an unrelated identifier, e.g.
+`my__cdecl_result`. For `my__cdecl_result (*)(int)
+__attribute__((stdcall))`, the substring test wrongly concluded a
+convention keyword was already present (matching `__cdecl` inside
+`my__cdecl_result`), which both skipped injecting the REAL `__stdcall`
+keyword AND still stripped the trailing attribute text -- silently
+merging two distinct callback types (one genuinely `__stdcall`, one with
+no calling convention at all) into one identity. Fixed with a new
+`_CALLING_CONVENTION_KEYWORD_RE`, matched as a genuine whole token
+positioned immediately after the declarator's own opening paren
+(allowing leading whitespace, mirroring exactly where
+`_is_declarator_group`/`_CALLING_CONVENTIONS` themselves look for a
+convention keyword) rather than a substring test anywhere in `prefix`.
+New tests: a doctest plus
+`test_return_type_containing_convention_keyword_as_substring` in
+`TestClangTrailingCallingConventionAttributeUnifies` (asserting both the
+correct injected keyword AND non-collision with the convention-free
+form).
+
 ---
 
 ### Phase 3 — public surface as a graph query over one evidence graph (D5)

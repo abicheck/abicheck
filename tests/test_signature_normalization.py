@@ -318,6 +318,19 @@ class TestClangTrailingCallingConventionAttributeUnifies:
             "void (__cdecl *)(int)"
         )
 
+    def test_return_type_containing_convention_keyword_as_substring(self) -> None:
+        # A return type that merely CONTAINS a convention keyword as a
+        # substring of an unrelated identifier (e.g. "my__cdecl_result")
+        # must not be mistaken for a declarator that already has one --
+        # the trailing attribute must still be injected as the
+        # declarator's own leading keyword, not silently dropped.
+        assert canon("my__cdecl_result (*)(int) __attribute__((stdcall))") == canon(
+            "my__cdecl_result (__stdcall *)(int)"
+        )
+        assert canon("my__cdecl_result (*)(int) __attribute__((stdcall))") != canon(
+            "my__cdecl_result (*)(int)"
+        )
+
 
 class TestLeadingGlobalScopeQualifierIsStripped:
     """An explicit leading ``::`` (forcing global-namespace lookup) names

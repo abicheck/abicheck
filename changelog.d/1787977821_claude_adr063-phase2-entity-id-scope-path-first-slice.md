@@ -232,3 +232,12 @@
   rather than a blanket "not preceded by an identifier" test, since the
   latter cannot distinguish a genuine leading global-scope marker from
   the anonymous-namespace case's own load-bearing separator.
+  Fixed a related bug in the calling-convention-attribute injection
+  itself: whether a declarator's own leading position already carries a
+  calling-convention keyword was checked with a bare substring test
+  against the whole return-type-plus-declarator prefix, which a
+  coincidentally-named return type defeats (e.g. `my__cdecl_result`
+  contains the substring `__cdecl`). Now matched as a genuine whole
+  token positioned immediately after the declarator's own opening paren,
+  mirroring exactly where the declarator-group recognizer itself looks
+  for a convention keyword.
