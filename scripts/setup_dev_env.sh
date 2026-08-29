@@ -90,7 +90,18 @@ if [ -x "${CASTXML_PREFIX}/bin/castxml" ] && ! command -v castxml >/dev/null 2>&
   export PATH="${CASTXML_PREFIX}/bin:${PATH}"
 fi
 
-echo "==> castxml version: $(castxml --version 2>/dev/null | head -1)"
+# Explicit failure branch: `echo "$(cmd)"` never fails even if cmd does,
+# so a castxml that's on PATH but broken (bad install, wrong arch, a
+# missing shared lib) would otherwise be silently reported as success.
+# No `| head -1` here: under `set -o pipefail`, castxml exiting early from
+# SIGPIPE once head is done reading would itself look like a failure --
+# take the first line in bash instead, after capturing the real exit code.
+if ! CASTXML_FULL_OUTPUT="$(castxml --version 2>&1)"; then
+  echo "ERROR: castxml is on PATH but 'castxml --version' failed:" >&2
+  echo "${CASTXML_FULL_OUTPUT}" >&2
+  exit 1
+fi
+echo "==> castxml version: ${CASTXML_FULL_OUTPUT%%$'\n'*}"
 echo "==> setup_dev_env.sh complete."
 
 # Callers that need castxml on PATH beyond this process (e.g. a
