@@ -634,5 +634,29 @@ from .extract.headers.clang.templates import (  # noqa: E402,F401
     _template_param_defaults,
     _template_param_kinds,
     _template_param_names,
-    build_specialization_index,
+    build_specialization_index as _extract_build_specialization_index,
 )
+
+
+def build_specialization_index(
+    root: dict[str, Any],
+    param_kinds_by_qualname: dict[str, list[str | None]] | None = None,
+    param_defaults_by_qualname: dict[str, list[str | None]] | None = None,
+    param_names_by_qualname: dict[str, list[str | None]] | None = None,
+) -> dict[str, dict[str, Any]]:
+    """Back-compat wrapper -- see
+    :func:`abicheck.extract.headers.clang.templates.build_specialization_index`
+    for the full contract. The extract implementation takes
+    ``is_record_definition`` as a required keyword-only parameter (this
+    module's own layering forbids it importing that predicate itself at
+    module scope, see the module docstring above); this wrapper supplies
+    it, so a direct import of ``build_specialization_index`` off this
+    module keeps its pre-move, four-positional-argument call signature
+    (Codex review, PR #940)."""
+    return _extract_build_specialization_index(
+        root,
+        param_kinds_by_qualname,
+        param_defaults_by_qualname,
+        param_names_by_qualname,
+        is_record_definition=is_record_definition,
+    )
