@@ -69,6 +69,22 @@ if command -v castxml >/dev/null 2>&1; then
 elif [ -x "${CASTXML_PREFIX}/bin/castxml" ]; then
   echo "==> castxml already installed at ${CASTXML_PREFIX} (cached, pinned build)"
 else
+  # Only linux-64 has a pinned+verified micromamba asset and a reviewed
+  # castxml build (CASTXML_BUILD above, and pixi.lock's own platform list
+  # -- linux-64/osx-64/osx-arm64/win-64 -- carries no linux-aarch64 pin to
+  # point at either). Fail clearly rather than silently fetching the
+  # wrong-architecture micromamba binary (checksum would pass, then
+  # `Exec format error` on the first run) or an unpinned castxml.
+  HOST_ARCH="$(uname -m)"
+  if [ "$(uname -s)" != "Linux" ] || [ "${HOST_ARCH}" != "x86_64" ]; then
+    echo "ERROR: no pinned castxml/micromamba install path for $(uname -s) ${HOST_ARCH}." >&2
+    echo "This script only supports linux-64 (x86_64 Linux). Install castxml" >&2
+    echo "yourself (conda-forge/Homebrew/apt) and ensure it's on PATH, or use" >&2
+    echo "'pixi install' (pyproject.toml's [tool.pixi.feature.native-toolchain]" >&2
+    echo "already covers osx-64/osx-arm64 too)." >&2
+    exit 1
+  fi
+
   echo "==> Fetching micromamba ${MICROMAMBA_VERSION} (verifying sha256)"
   WORK_DIR="$(mktemp -d)"
   trap 'rm -rf "${WORK_DIR}"' EXIT
