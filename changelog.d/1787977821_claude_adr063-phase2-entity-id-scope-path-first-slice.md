@@ -19,11 +19,12 @@
   from parser scope-tracking state, and the still-open "carrier field vs.
   resolved on demand" design question that decision determines).
   `entity_id_for_function` accepts `is_extern_c`/`ref_qualifier`/
-  `is_variadic` alongside `mangled_name`/`param_types`/`cv_qualifiers`, so
-  its discriminator set matches `finding_identity.resolve_function_
-  identity`'s: an `extern "C"` function (mangled_name absent, is_extern_c
-  set) never differentiates by parameter list, and `C::f() &` vs.
-  `C::f() &&` / `void f(int)` vs. `void f(int, ...)` no longer collide.
+  `is_variadic` alongside `mangled_name`/`param_types`/`is_const`/
+  `is_volatile`, so its discriminator set matches `finding_identity.
+  resolve_function_identity`'s: an `extern "C"` function (mangled_name
+  absent, is_extern_c set) never differentiates by parameter list, and
+  `C::f() &` vs. `C::f() &&` / `void f(int)` vs. `void f(int, ...)` no
+  longer collide.
   `LocalToFunction` gained a required `block_ordinal` field alongside
   `owner`, so two same-named locals declared in sibling compound blocks of
   one function no longer collapse onto the same `EntityId` -- the same
@@ -58,3 +59,19 @@
   exported symbol reused for both fields -- so a header/DWARF
   observation's demangled `name` and that export-only observation's raw
   name would otherwise disagree despite an identical, genuine mangling.
+  A new public `name_classification.canonicalize_function_signature_type`
+  drops a top-level BY-VALUE cv-qualifier from a parameter type (`"int"`
+  and `"const int"` now canonicalize the same, matching the C++ standard's
+  own linkage/mangling rule) while deliberately leaving a *pointee*
+  cv-qualifier on a pointer/reference parameter untouched (`"char *"` and
+  `"const char *"` remain genuinely distinct overloads) -- narrower than
+  this codebase's existing `_strip_cv_qualifiers`/
+  `func_signature_cv_only_differ`, which is permissive at the pointee
+  level for a different, diff-reporting question and would have wrongly
+  merged distinct overloads if reused here. `entity_id_for_function`'s
+  `cv_qualifiers: tuple[str, ...]` parameter is replaced by `is_const: bool
+  = False, is_volatile: bool = False` -- matching `resolve_function_
+  identity`'s own two-boolean representation and eliminating a real
+  qualifier-token-order-dependence bug by construction (`("const",
+  "volatile")` vs. `("volatile", "const")` previously collided as two
+  different ids for one identical member-cv qualification).

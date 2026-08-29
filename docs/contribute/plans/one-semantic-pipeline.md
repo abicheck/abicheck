@@ -6678,6 +6678,52 @@ losslessly, so nothing is lost. Four new tests (two per constructor) pin
 that a demangled-short-name observation and a raw-symbol-reused-as-name
 observation of the identical mangled symbol now produce one `EntityId`.
 
+**Correction (2026-08-29, same day, fifth Codex review round on PR #941,
+commit 4ad03da): two real gaps in the `sig` fallback's own signature
+normalization, one requiring a genuinely new, carefully-scoped
+primitive rather than reuse of an existing one.** (1) `param_types` were
+canonicalized only for cross-producer *spelling* (via
+`canonicalize_type_name`), not for the C++-standard-mandated fact that a
+top-level BY-VALUE cv-qualifier is dropped from a function's own type for
+linkage/mangling purposes -- `void f(int)` and `void f(const int)` name
+the identical function, but `"int"` and `"const int"` canonicalize to
+different strings and collided as two overloads. **The naive fix --
+reusing this codebase's existing `_strip_cv_qualifiers`/
+`func_signature_cv_only_differ` (the primitive an initial attempt reached
+for, since Codex's own finding named it) -- was investigated and found to
+be wrong, not merely reused:** that helper is deliberately permissive at
+the true top level, stripping a *pointee* cv-qualifier too (`"const char
+*"` -> `"char *"`), because its actual job is "is this an already-
+positionally-matched declaration's param change worth reporting as ABI-
+breaking" (`diff_symbols._params_differ`'s question) -- a *different*
+question from this primitive's, "are these the same overload for identity
+purposes." A pointee cv-qualifier on a pointer/reference parameter is a
+genuine, standard-mandated overload discriminator (`void f(char*)` and
+`void f(const char*)` are two simultaneously-declarable, independently-
+mangled overloads), so reusing the permissive helper verbatim would have
+silently merged two distinct functions into one identity -- reintroducing
+exactly the sibling-overload-collision class this whole primitive exists
+to prevent, while fixing the narrower problem Codex actually named. Fixed
+correctly instead: a new, narrower public primitive,
+`name_classification.canonicalize_function_signature_type`, strips a cv
+token only when the canonicalized type carries no top-level pointer/
+reference sigil at all (checked via the same `_has_top_level_ptr_or_ref`
+helper `cv_qualifiers_only_differ` already uses) -- the one case where
+every cv token found is unambiguously by-value, never pointee, cv. (2)
+`cv_qualifiers: tuple[str, ...]` was itself the wrong representation:
+unlike `resolve_function_identity`'s own `func.is_const`/
+`func.is_volatile` booleans, a caller-supplied token tuple invites order-
+dependence for one member-cv qualification spelled two ways (`("const",
+"volatile")` vs. `("volatage", "const")` -- caught named literally as
+`f() const volatile` vs. `f() volatile const`). Fixed by replacing the
+parameter with `is_const: bool = False, is_volatile: bool = False`,
+matching `resolve_function_identity`'s own representation exactly and
+eliminating the ordering question by construction rather than by
+normalizing a tuple after the fact. Six new tests pin both fixes: by-value
+top-level cv non-distinction, pointee cv's continued distinguishing power,
+independent const/volatile discrimination, and that the two booleans'
+call-site order cannot affect the resulting id.
+
 ---
 
 ### Phase 3 — public surface as a graph query over one evidence graph (D5)

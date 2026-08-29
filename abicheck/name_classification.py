@@ -69,7 +69,9 @@ __all__ = [
     "is_abi_surface_type_name",
     "is_cxx_runtime_library",
     "canonicalize_type_name",
+    "canonicalize_function_signature_type",
     "cv_qualifiers_only_differ",
+    "func_signature_cv_only_differ",
     "STDLIB_TYPE_NAMESPACE_PREFIXES",
 ]
 
@@ -1256,3 +1258,50 @@ def func_signature_cv_only_differ(old_type: str, new_type: str) -> bool:
     if co == cn:
         return False
     return _strip_cv_qualifiers(co) == _strip_cv_qualifiers(cn)
+
+
+def canonicalize_function_signature_type(name: str) -> str:
+    """The canonical form of a function *parameter* or *return* type, for
+    identity/overload-discriminator purposes -- as opposed to
+    :func:`canonicalize_type_name`, which normalizes only cross-producer
+    spelling differences and deliberately keeps every cv-qualifier,
+    including a top-level by-value one, as real, distinguishing content.
+
+    Drops a top-level BY-VALUE cv-qualifier (``int`` -> ``const int``):
+    per the C++ standard, that qualifier is dropped from the function's
+    own type for linkage/mangling purposes -- ``void f(int)`` and ``void
+    f(const int)`` name the very same function (see
+    :func:`func_signature_cv_only_differ`'s own docstring for the
+    citation). **Deliberately narrower than reusing the private
+    ``_strip_cv_qualifiers`` helper those diff-reporting functions call**:
+    that helper is permissive at the true top level, stripping a
+    *pointee* cv-qualifier too (``const char *`` -> ``char *``) --
+    correct for *"is this an already-matched declaration's param change
+    worth reporting as ABI-breaking"* (``_params_differ``'s own question),
+    but wrong for *this* function's job. A pointee cv-qualifier on a
+    pointer/reference parameter is a genuine, standard-mandated overload
+    discriminator (``void f(char *)`` and ``void f(const char *)`` are two
+    simultaneously-declarable, independently-mangled overloads, not one
+    declaration): collapsing them here would silently merge two distinct
+    functions into one identity, reintroducing exactly the sibling-
+    overload-collision class this whole primitive exists to prevent.
+    So this function strips cv tokens only when *canonicalize_type_name*'s
+    result carries no top-level pointer/reference sigil at all -- the one
+    case where every cv token found is unambiguously by-value, not
+    pointee, cv.
+
+    >>> canonicalize_function_signature_type("int")
+    'int'
+    >>> canonicalize_function_signature_type("const int")
+    'int'
+    >>> canonicalize_function_signature_type("volatile unsigned long long")
+    'unsigned long long'
+    >>> canonicalize_function_signature_type("char const*")
+    'char const *'
+    >>> canonicalize_function_signature_type("const char *")
+    'char const *'
+    """
+    canonical = canonicalize_type_name(name)
+    if _has_top_level_ptr_or_ref(canonical):
+        return canonical
+    return _strip_cv_qualifiers(canonical)

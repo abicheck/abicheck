@@ -305,9 +305,27 @@ class TestFunctionOverloadDiscrimination:
 
     def test_const_vs_non_const_overload(self) -> None:
         scope = (Record("C"),)
-        plain = entity_id_for_function(scope, "f", cv_qualifiers=())
-        const = entity_id_for_function(scope, "f", cv_qualifiers=("const",))
+        plain = entity_id_for_function(scope, "f", is_const=False)
+        const = entity_id_for_function(scope, "f", is_const=True)
         assert plain != const
+
+    def test_volatile_vs_non_volatile_overload(self) -> None:
+        scope = (Record("C"),)
+        plain = entity_id_for_function(scope, "f", is_volatile=False)
+        volatile = entity_id_for_function(scope, "f", is_volatile=True)
+        assert plain != volatile
+
+    def test_const_and_volatile_are_independent_dimensions(self) -> None:
+        # is_const/is_volatile are two independent booleans, not an
+        # order-dependent qualifier-token tuple -- "const volatile" and
+        # "volatile const" spell the same member-cv qualification and must
+        # produce one id regardless of which boolean is set "first" (there
+        # is no first/second: this is the whole point of using two
+        # booleans instead of a tuple of tokens; Codex review, PR #941).
+        scope = (Record("C"),)
+        both_a = entity_id_for_function(scope, "f", is_const=True, is_volatile=True)
+        both_b = entity_id_for_function(scope, "f", is_volatile=True, is_const=True)
+        assert both_a == both_b
 
     def test_different_scope_same_name_never_collides_with_mangled_sig_tag(
         self,
@@ -373,8 +391,9 @@ class TestFunctionOverloadDiscrimination:
 
     def test_ref_qualifier_distinguishes_overloads(self) -> None:
         # The other Codex-flagged gap: C::f() & vs. C::f() && share scope,
-        # name, param_types, and cv_qualifiers -- only ref_qualifier tells
-        # them apart, mirroring resolve_function_identity's own dimension.
+        # name, param_types, is_const, and is_volatile -- only
+        # ref_qualifier tells them apart, mirroring
+        # resolve_function_identity's own dimension.
         scope = (Record("C"),)
         lvalue = entity_id_for_function(scope, "f", ref_qualifier="&")
         rvalue = entity_id_for_function(scope, "f", ref_qualifier="&&")
@@ -408,7 +427,7 @@ class TestFunctionOverloadDiscrimination:
     def test_mangled_name_wins_over_extern_c_and_ignores_signature_dims(self) -> None:
         # When a genuine mangled name is present, it wins outright --
         # is_extern_c/ref_qualifier/is_variadic are all ignored, matching
-        # the plain param_types/cv_qualifiers precedence already pinned by
+        # the plain param_types precedence already pinned by
         # test_mangled_name_present_ignores_param_types.
         scope = (Namespace("ns"),)
         a = entity_id_for_function(
@@ -499,6 +518,31 @@ class TestFunctionOverloadDiscrimination:
             scope, "f", param_types=("char const *",)
         )
         assert castxml_spelling == clang_spelling
+
+    def test_by_value_top_level_cv_does_not_distinguish_overloads(self) -> None:
+        # The Codex-flagged gap: void f(int) and void f(const int) name the
+        # same function per the C++ standard -- a top-level BY-VALUE
+        # cv-qualifier is dropped from the function's own type for
+        # linkage/mangling purposes, so these must not collide as two
+        # overloads.
+        scope = (Namespace("ns"),)
+        plain = entity_id_for_function(scope, "f", param_types=("int",))
+        cv_qualified = entity_id_for_function(scope, "f", param_types=("const int",))
+        assert plain == cv_qualified
+
+    def test_pointee_cv_still_distinguishes_overloads(self) -> None:
+        # Contrast with the by-value case above: a POINTEE cv-qualifier on
+        # a pointer/reference parameter is a genuine, standard-mandated
+        # overload discriminator -- void f(char*) and void f(const char*)
+        # are two simultaneously-declarable, independently-mangled
+        # overloads, not one declaration. Collapsing them would silently
+        # merge two distinct functions, reintroducing exactly the
+        # sibling-overload-collision class this primitive exists to
+        # prevent.
+        scope = (Namespace("ns"),)
+        mutable_ptr = entity_id_for_function(scope, "f", param_types=("char *",))
+        const_ptr = entity_id_for_function(scope, "f", param_types=("const char *",))
+        assert mutable_ptr != const_ptr
 
 
 class TestVariableMangledDiscriminator:

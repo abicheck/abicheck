@@ -60,7 +60,7 @@ from __future__ import annotations
 import enum
 from dataclasses import dataclass, field
 
-from ..name_classification import canonicalize_type_name
+from ..name_classification import canonicalize_function_signature_type
 
 __all__ = [
     "Anonymous",
@@ -389,7 +389,8 @@ def entity_id_for_function(
     mangled_name: str | None = None,
     is_extern_c: bool = False,
     param_types: tuple[str, ...] = (),
-    cv_qualifiers: tuple[str, ...] = (),
+    is_const: bool = False,
+    is_volatile: bool = False,
     ref_qualifier: str = "",
     is_variadic: bool | None = None,
 ) -> EntityId:
@@ -413,15 +414,24 @@ def entity_id_for_function(
     "C"`` function with no real mangling (a DWARF-only snapshot, which
     *can* be legally overloaded) -- does ``extra`` fall back to the
     normalized signature discriminator, ``("sig", *param_types,
-    *cv_qualifiers, ref_qualifier, is_variadic)``. ``ref_qualifier``
-    (``"&"``/``"&&"``/``""``) and ``is_variadic`` mirror
-    ``resolve_function_identity``'s own fallback dimensions -- without them
-    ``C::f() &`` vs. ``C::f() &&``, or ``void f(int)`` vs. ``void f(int,
-    ...)``, would collide on identical scope/name/param_types/cv_qualifiers.
-    ``is_variadic`` is ``bool | None`` rather than defaulting to ``False``
-    so a producer that genuinely doesn't know stays distinguishable from one
-    that confirmed non-variadic, the same reason
-    ``resolve_function_identity`` keeps that tri-state. Unlike
+    f"const:{is_const}", f"volatile:{is_volatile}", ref_qualifier,
+    is_variadic)``. *is_const*/*is_volatile* are two independent booleans,
+    not a ``cv_qualifiers`` string tuple -- deliberately mirroring
+    ``resolve_function_identity``'s own ``func.is_const``/
+    ``func.is_volatile`` representation exactly, rather than a tuple of
+    qualifier tokens whose *order* a caller could supply inconsistently
+    for the identical member-cv qualification (``"const volatile"`` vs.
+    ``"volatile const"`` spell the same qualification but would collide as
+    two different tuples; Codex review, PR #941). *ref_qualifier*
+    (``"&"``/``"&&"``/``""``) and *is_variadic* mirror
+    ``resolve_function_identity``'s own remaining fallback dimensions --
+    without them ``C::f() &`` vs. ``C::f() &&``, or ``void f(int)`` vs.
+    ``void f(int, ...)``, would collide on identical
+    scope/name/param_types/const/volatile. ``is_variadic`` is ``bool |
+    None`` rather than defaulting to ``False`` so a producer that
+    genuinely doesn't know stays distinguishable from one that confirmed
+    non-variadic, the same reason ``resolve_function_identity`` keeps that
+    tri-state. Unlike
     ``finding_identity.normalized_signature``'s own fallback tuple, the
     callable's qualified name does *not* need to be repeated inside
     ``extra`` here -- ``scope``/``leaf_name`` already carry it losslessly,
@@ -445,10 +455,10 @@ def entity_id_for_function(
     signature-free branch in that case, rather than silently falling
     through to the signature-based fallback the way a caller relying on
     ``mangled_name`` alone would. When *mangled_name* is genuinely present,
-    it wins outright and *is_extern_c*/*param_types*/*cv_qualifiers*/
-    *ref_qualifier*/*is_variadic* are all ignored -- there is nothing left
-    for a signature-free tag to add once the mangled name already
-    disambiguates the declaration.
+    it wins outright and *is_extern_c*/*param_types*/*is_const*/
+    *is_volatile*/*ref_qualifier*/*is_variadic* are all ignored -- there is
+    nothing left for a signature-free tag to add once the mangled name
+    already disambiguates the declaration.
 
     Both the *mangled* and *is_extern_c* branches' resulting
     ``EntityId.scope`` are always ``()``, regardless of *scope*.
@@ -477,14 +487,27 @@ def entity_id_for_function(
     different scopes distinct.
 
     *param_types* are canonicalized via
-    ``name_classification.canonicalize_type_name`` before joining into
-    ``extra`` -- CastXML's ``"char const*"`` and Clang's ``"char const *"``
-    spell an otherwise-identical parameter type differently, and without
-    canonicalization the same declaration observed by the two backends
-    would get two different ``EntityId``s, fragmenting identity across
-    header-AST backends the same way an uncanonicalized qualified name
-    would. Mirrors ``resolve_function_identity``'s own canonicalization of
-    ``func.params`` for the identical reason (Codex review, PR #941).
+    ``name_classification.canonicalize_function_signature_type`` before
+    joining into ``extra`` -- CastXML's ``"char const*"`` and Clang's
+    ``"char const *"`` spell an otherwise-identical parameter type
+    differently, and without canonicalization the same declaration
+    observed by the two backends would get two different ``EntityId``s,
+    fragmenting identity across header-AST backends the same way an
+    uncanonicalized qualified name would. That function *also* drops a
+    top-level BY-VALUE cv-qualifier a plain ``canonicalize_type_name``
+    would keep (``"int"`` vs. ``"const int"``): per the C++ standard that
+    qualifier is absent from the function's own type for linkage/mangling
+    purposes, so ``void f(int)``/``void f(const int)`` name the same
+    function and must not collide as two overloads -- while a *pointee*
+    cv-qualifier on a pointer/reference parameter (``"char *"`` vs.
+    ``"const char *"``) is deliberately left alone, since that genuinely
+    is a standard-mandated, independently-mangled overload discriminator;
+    see that function's own docstring for why the more permissive
+    ``_strip_cv_qualifiers`` diff-reporting helpers use is wrong to reuse
+    here. Mirrors ``resolve_function_identity``'s own canonicalization of
+    ``func.params`` for the identical cross-backend-spelling reason, and
+    its own ``func.is_extern_c``-gated omission of by-value param cv for
+    the identical linkage reason (Codex review, PR #941).
 
     When *mangled_name* is present, *leaf_name* is likewise ignored -- see
     :func:`entity_id_for_variable`'s docstring for the confirmed reason
@@ -506,8 +529,9 @@ def entity_id_for_function(
     else:
         extra = (
             "sig",
-            *(canonicalize_type_name(p) for p in param_types),
-            *cv_qualifiers,
+            *(canonicalize_function_signature_type(p) for p in param_types),
+            f"const:{is_const}",
+            f"volatile:{is_volatile}",
             ref_qualifier,
             str(is_variadic),
         )
