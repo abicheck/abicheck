@@ -6724,6 +6724,62 @@ top-level cv non-distinction, pointee cv's continued distinguishing power,
 independent const/volatile discrimination, and that the two booleans'
 call-site order cannot affect the resulting id.
 
+**Correction (2026-08-29, same day): the fifth correction's own new
+primitive landed in the wrong module and had to be relocated before
+push.** `name_classification.canonicalize_function_signature_type` was
+first added directly to `abicheck/name_classification.py` -- but that
+file is a frozen, no-growth legacy module under ADR-061's debt ledger
+(`architecture/debt.yaml`, baseline 1258 lines), and CI's
+`debt-no-growth` architecture check (`scripts/check_architecture.py`)
+correctly failed the push for exceeding it. Relocated the whole primitive
+into `abicheck/model/identity.py` itself as a module-private
+`_canonicalize_function_signature_param_type`, along with a
+self-contained, deliberately-duplicated (not imported) reimplementation
+of the top-level-pointer/reference-sigil detection algorithm
+`name_classification._has_top_level_ptr_or_ref` already applies for a
+different purpose -- duplication here is the correct outcome of the
+no-growth constraint, not an oversight: the alternative (importing a
+private helper from the frozen module) would be worse, and the algorithm
+is small, stable, and independently tested in its new location. This is
+exactly the kind of tension a genuinely completed ADR-061 migration of
+`name_classification.py` would resolve (see that file's own debt-ledger
+entry, "target: see ADR-061 ownership map") -- not attempted here, since
+migrating the whole file is far outside this slice's scope. `git diff
+--stat`/`wc -l` confirm `name_classification.py` is back to exactly 1258
+lines (its original baseline) and `scripts/check_architecture.py`
+reports 0 errors.
+
+**Correction (2026-08-29, same day, sixth Codex review round on PR #941,
+commit 1b3575d): two more real gaps found, both requiring a genuine
+extension rather than reuse.** (1) The by-value-cv fix above left one
+case unhandled: a function PARAMETER's array type always decays to a
+pointer (``int []`` -> ``int *``), so a cv-qualifier on the array's
+element type is pointee-level, exactly like an explicit pointer -- ``void
+f(int[])`` and ``void f(const int[])`` are two distinct, independently-
+mangled overloads, not one. Neither spelling contains a ``*``/``&``
+sigil, so `_has_top_level_ptr_or_ref` (module-private, in
+`model/identity.py`) wrongly treated both as by-value and stripped the
+``const``. Fixed by also treating a top-level ``[`` as pointer-shaped for
+this determination -- the fix landed in this correction's own new
+`model/identity.py` primitive precisely because it was already the
+no-growth-safe location the fifth correction relocated to; there was no
+second relocation needed. (2) `ScopePath` names only the *containing*
+scope, never the leaf declaration (this module's own stated design), so
+two anonymous sibling records/enums both passing `leaf_name=""` collided
+onto one identical `EntityId` regardless of which is meant --
+`Anonymous.ordinal` (a `ScopePath` segment) disambiguates a *descendant's*
+containing scope, not the anonymous declaration's own identity, so it
+does not help here. Fixed by adding an opt-in `anonymous_ordinal: int |
+None = None` keyword to `entity_id_for_type`/`entity_id_for_enum` (the
+two kinds C++ actually allows to be anonymous), folded into `extra` as
+`("anonymous", str(ordinal))` only when `leaf_name` is empty -- mirroring
+`Anonymous.ordinal`'s own deterministic-per-parent-sequence-number
+semantics and identical within-one-parse-only accepted limitation.
+Omitting it (no wired producer yet, same scope boundary this module's own
+docstring already states for `LocalToFunction`/`Anonymous` before their
+producers existed) keeps the pre-existing degenerate-collision behavior,
+not a silent, unrequested change. Six new tests pin both fixes.
+
 ---
 
 ### Phase 3 — public surface as a graph query over one evidence graph (D5)

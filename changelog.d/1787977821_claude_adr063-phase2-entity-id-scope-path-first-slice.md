@@ -39,10 +39,10 @@
   name (evidence-tier scope availability varies for this case: an export-
   table-only snapshot cannot recover a namespace an `extern "C"` symbol
   was declared in). `param_types` in the signature-fallback branch are now
-  canonicalized via `name_classification.canonicalize_type_name` before
-  joining into `extra`, so CastXML's and Clang's differing spellings of an
-  otherwise-identical parameter type no longer fragment identity across
-  header-AST backends. `entity_id_for_function`'s `mangled` branch also
+  canonicalized (cross-producer spelling, via `name_classification.
+  canonicalize_type_name`) before joining into `extra`, so CastXML's and
+  Clang's differing spellings of an otherwise-identical parameter type no
+  longer fragment identity across header-AST backends. `entity_id_for_function`'s `mangled` branch also
   now returns `scope=()` (matching `resolve_symbol_identity`'s real
   `f"mangled:{real_mangled}"` primary id, which folds in no scope at all)
   -- a genuine mangled name already fully encodes scope, so keeping a
@@ -59,19 +59,34 @@
   exported symbol reused for both fields -- so a header/DWARF
   observation's demangled `name` and that export-only observation's raw
   name would otherwise disagree despite an identical, genuine mangling.
-  A new public `name_classification.canonicalize_function_signature_type`
-  drops a top-level BY-VALUE cv-qualifier from a parameter type (`"int"`
-  and `"const int"` now canonicalize the same, matching the C++ standard's
-  own linkage/mangling rule) while deliberately leaving a *pointee*
-  cv-qualifier on a pointer/reference parameter untouched (`"char *"` and
-  `"const char *"` remain genuinely distinct overloads) -- narrower than
-  this codebase's existing `_strip_cv_qualifiers`/
-  `func_signature_cv_only_differ`, which is permissive at the pointee
-  level for a different, diff-reporting question and would have wrongly
-  merged distinct overloads if reused here. `entity_id_for_function`'s
+  A new module-private `model.identity._canonicalize_function_signature_
+  param_type` additionally drops a top-level BY-VALUE cv-qualifier from a
+  parameter type (`"int"` and `"const int"` now canonicalize the same,
+  matching the C++ standard's own linkage/mangling rule) while
+  deliberately leaving a *pointee* cv-qualifier on a pointer/reference
+  parameter untouched (`"char *"` and `"const char *"` remain genuinely
+  distinct overloads) -- narrower than `name_classification`'s existing
+  `_strip_cv_qualifiers`/`func_signature_cv_only_differ`, which are
+  permissive at the pointee level for a different, diff-reporting
+  question and would have wrongly merged distinct overloads if reused
+  here. Implemented locally in `model/identity.py` (a small,
+  self-contained reimplementation of the top-level-pointer/reference
+  detection those functions use, not an import of it) rather than added
+  to `name_classification.py`, since that module is a frozen, no-growth
+  legacy file under ADR-061's debt ledger. `entity_id_for_function`'s
   `cv_qualifiers: tuple[str, ...]` parameter is replaced by `is_const: bool
   = False, is_volatile: bool = False` -- matching `resolve_function_
   identity`'s own two-boolean representation and eliminating a real
   qualifier-token-order-dependence bug by construction (`("const",
   "volatile")` vs. `("volatile", "const")` previously collided as two
-  different ids for one identical member-cv qualification).
+  different ids for one identical member-cv qualification). The by-value
+  cv fix now also treats a top-level `[` (array declarator) as pointer-
+  shaped: a function parameter's array type always decays to a pointer
+  (`int []` -> `int *`), so `void f(int[])`/`void f(const int[])` are
+  distinct overloads and must not collapse. `entity_id_for_type`/
+  `entity_id_for_enum` gained an opt-in `anonymous_ordinal: int | None =
+  None` keyword, folded into `extra` only when `leaf_name` is empty: two
+  anonymous sibling records/enums previously collided onto one `EntityId`
+  regardless of which is meant, since `ScopePath` names only the
+  containing scope and `Anonymous.ordinal` disambiguates a *descendant's*
+  scope, not the anonymous declaration's own identity.

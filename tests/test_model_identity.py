@@ -288,6 +288,58 @@ class TestSiblingKindsNeverCollide:
         assert entity_id_for_type(scope, "A") != entity_id_for_constant(scope, "A")
 
 
+class TestAnonymousDeclarationSelfIdentity:
+    """The Codex-flagged gap: ScopePath names only the *containing* scope,
+    never the leaf declaration itself, so two anonymous sibling records/
+    enums both passing leaf_name="" would otherwise collide onto one
+    EntityId regardless of which one is meant -- distinct from
+    Anonymous.ordinal, which disambiguates a *descendant's* containing
+    scope, not the anonymous declaration itself."""
+
+    @given(ordinal_a=_ordinals, ordinal_b=_ordinals)
+    def test_distinct_anonymous_types_never_collide(
+        self, ordinal_a: int, ordinal_b: int
+    ) -> None:
+        if ordinal_a == ordinal_b:
+            return
+        scope = (Namespace("ns"),)
+        a = entity_id_for_type(scope, "", anonymous_ordinal=ordinal_a)
+        b = entity_id_for_type(scope, "", anonymous_ordinal=ordinal_b)
+        assert a != b
+
+    @given(ordinal_a=_ordinals, ordinal_b=_ordinals)
+    def test_distinct_anonymous_enums_never_collide(
+        self, ordinal_a: int, ordinal_b: int
+    ) -> None:
+        if ordinal_a == ordinal_b:
+            return
+        scope = (Namespace("ns"),)
+        a = entity_id_for_enum(scope, "", anonymous_ordinal=ordinal_a)
+        b = entity_id_for_enum(scope, "", anonymous_ordinal=ordinal_b)
+        assert a != b
+
+    def test_without_anonymous_ordinal_still_collides_as_before(self) -> None:
+        # Documented, deliberate: anonymous_ordinal is opt-in (no wired
+        # producer yet, mirroring this module's own scope boundary for
+        # LocalToFunction/Anonymous before their producers existed) -- a
+        # caller that omits it gets the pre-existing degenerate behavior,
+        # not a silent, unrequested change.
+        scope = (Namespace("ns"),)
+        a = entity_id_for_type(scope, "")
+        b = entity_id_for_type(scope, "")
+        assert a == b
+
+    def test_anonymous_ordinal_ignored_for_a_named_declaration(self) -> None:
+        # Only meaningful when leaf_name is empty -- a named declaration
+        # already disambiguates via leaf_name, so a caller that supplies
+        # both must not get a spurious extra discriminator.
+        scope = (Namespace("ns"),)
+        a = entity_id_for_type(scope, "Widget", anonymous_ordinal=0)
+        b = entity_id_for_type(scope, "Widget", anonymous_ordinal=1)
+        assert a == b
+        assert a == entity_id_for_type(scope, "Widget")
+
+
 # --------------------------------------------------------------------------
 # Function overload discrimination
 # --------------------------------------------------------------------------
@@ -543,6 +595,18 @@ class TestFunctionOverloadDiscrimination:
         mutable_ptr = entity_id_for_function(scope, "f", param_types=("char *",))
         const_ptr = entity_id_for_function(scope, "f", param_types=("const char *",))
         assert mutable_ptr != const_ptr
+
+    def test_array_parameter_element_cv_still_distinguishes_overloads(self) -> None:
+        # The Codex-flagged gap: a function PARAMETER's array type always
+        # decays to a pointer (int[] -> int*), so a cv-qualifier on the
+        # element type is pointee-level, exactly like an explicit pointer
+        # -- void f(int[]) and void f(const int[]) are two distinct,
+        # independently-mangled overloads. Neither spelling contains a
+        # "*"/"&" sigil, so this must not be treated as a by-value type.
+        scope = (Namespace("ns"),)
+        mutable_array = entity_id_for_function(scope, "f", param_types=("int []",))
+        const_array = entity_id_for_function(scope, "f", param_types=("const int []",))
+        assert mutable_array != const_array
 
 
 class TestVariableMangledDiscriminator:
