@@ -856,21 +856,48 @@ class _ClangAstParser:
             "ClassTemplateDecl",
             "ClassTemplatePartialSpecializationDecl",
         )
-        # Only THIS node's own direct FunctionDecl child needs a template
-        # parameter-kind discriminator (ADR-063 Phase 2) -- never inherited
-        # further down, since a nested declaration inside that function's own
-        # (non-existent, functions have no body here) subtree has nothing to
-        # do with it. See extract.headers.clang.functions.
-        # function_template_param_kinds's own docstring for why.
+        # Only THIS node's own direct FunctionDecl child needs the
+        # template parameter-KIND discriminator (ADR-063 Phase 2) -- never
+        # inherited further down, since a nested declaration inside that
+        # function's own (non-existent, functions have no body here)
+        # subtree has nothing to do with it. See extract.headers.clang.
+        # functions.function_template_param_kinds's own docstring for why.
+        # (`child_template_type_param_names` just below is a DIFFERENT
+        # story -- it must accumulate, not reset; see its own comment.)
         child_template_param_kinds = (
             _clang_functions.function_template_param_kinds(node)
             if kind == "FunctionTemplateDecl"
             else ()
         )
+        # UNLIKE `child_template_param_kinds` above, this one MUST be
+        # inherited (accumulated), not reset to `()` for every other node
+        # kind: a class template's own parameter names are needed by every
+        # ORDINARY (non-template) member declared anywhere in its pattern
+        # body, not just a directly-templated member (Codex review, PR
+        # #943 -- confirmed by direct compilation that `template<class T>
+        # struct A { void f(T); };` renamed to `template<class U> struct A
+        # { void f(U); };` is the identical declaration, yet `f`'s own
+        # ordinary parameter spells the ENCLOSING class template's
+        # parameter name literally, and `f` is never itself a
+        # `FunctionTemplateDecl`). `ClassTemplatePartialSpecializationDecl`
+        # carries the identical shape (own parameter list, then its own
+        # member pattern) and needs the same treatment -- confirmed by
+        # direct compilation. A nested member TEMPLATE still sees BOTH the
+        # enclosing class's names and its own (appended, never replacing),
+        # since `type_param_names` is looked up by name -- see
+        # `extract.headers.clang.functions.class_template_type_param_names`'s
+        # own docstring.
         child_template_type_param_names = (
-            _clang_functions.function_template_type_param_names(node)
+            template_type_param_names
+            + _clang_functions.function_template_type_param_names(node)
             if kind == "FunctionTemplateDecl"
-            else ()
+            else (
+                template_type_param_names
+                + _clang_functions.class_template_type_param_names(node)
+                if kind
+                in ("ClassTemplateDecl", "ClassTemplatePartialSpecializationDecl")
+                else template_type_param_names
+            )
         )
         # Per-parent (not global) anonymous-scope counter, assigned here
         # because an ordinal is a position among THIS node's own children: a

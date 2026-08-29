@@ -323,6 +323,34 @@ def function_template_type_param_names(
     return _template_param_kinds_from_node(function_template_decl)[1]
 
 
+def class_template_type_param_names(
+    class_template_decl: dict[str, Any],
+) -> tuple[str, ...]:
+    """The TOP-LEVEL parameter names of a ``ClassTemplateDecl``'s (or a
+    ``ClassTemplatePartialSpecializationDecl``'s) own parameter list, in
+    declaration order.
+
+    The class-template sibling of :func:`function_template_type_param_names`
+    -- confirmed by direct compilation that both node kinds carry the
+    identical shape (their own ``TemplateTypeParmDecl``/
+    ``TemplateTemplateParmDecl``/``NonTypeTemplateParmDecl`` children,
+    followed by the pattern body), so the same walk applies unchanged.
+    Needed for the SAME dependent-rename hazard as the function-template
+    case, but one level further out: ``template<class T> struct A { void
+    f(T); };`` renamed to ``template<class U> struct A { void f(U); };``
+    is the identical declaration, but a member's ordinary parameter type
+    spells the ENCLOSING class template's own parameter name literally
+    (``"T"``/``"U"``) -- confirmed by direct compilation, since `f` here
+    is an ordinary (non-template) member of the class-template pattern,
+    never itself a ``FunctionTemplateDecl`` (Codex review, PR #943).
+    Threaded by ``dumper_clang.py``'s ``_walk`` alongside (never
+    replacing) any FUNCTION-template names already accumulated, so a
+    member TEMPLATE nested inside a class template sees both its own and
+    the enclosing class's parameter names.
+    """
+    return _template_param_kinds_from_node(class_template_decl)[1]
+
+
 def _template_param_kinds_from_node(
     node: dict[str, Any],
 ) -> tuple[tuple[str, ...], tuple[str, ...]]:

@@ -8328,6 +8328,40 @@ prior dependent-return-type test
 (`test_live_clang_dependent_return_type_discriminates_overloaded_templates`)
 and its rename-invariance case both still pass unchanged.
 
+**Correction (2026-08-29, same day, Codex review on PR #943): an ordinary
+member function nested inside a class template still changed identity on
+a pure rename of the ENCLOSING class template's own parameter.** Every
+prior correction in this phase threaded a directly-templated FUNCTION's
+own type-parameter names into `entity_id_for_function`, but `_walk`
+computed `child_template_type_param_names` as `own-names-if-
+FunctionTemplateDecl-else-()` -- resetting to empty for every other node
+kind, including a `ClassTemplateDecl`. So `template<class T> struct A {
+void f(T); };` renamed to `template<class U> struct A { void f(U); };`
+-- the identical declaration -- fingerprinted as a remove+add: `f` is an
+ordinary (non-template) `CXXMethodDecl`, never itself a
+`FunctionTemplateDecl`, so it never received the enclosing class
+template's own parameter names to canonicalize its dependent ordinary
+parameter type against. Confirmed by direct compilation.
+`ClassTemplatePartialSpecializationDecl` carries the identical shape
+(its own parameter list, then its own member pattern) and needs the same
+treatment -- also confirmed by direct compilation. Fixed by making
+`child_template_type_param_names` an ACCUMULATING value (like
+`in_template`), not a per-node reset: a `ClassTemplateDecl`/
+`ClassTemplatePartialSpecializationDecl` node's own names (via a new
+`extract.headers.clang.functions.class_template_type_param_names`,
+sharing `function_template_type_param_names`'s exact node-shape walk) are
+now APPENDED to whatever was already accumulated, and every other node
+kind simply inherits the incoming value unchanged instead of discarding
+it. A member function template nested inside a class template sees BOTH
+levels' names (verified: `template<class T> struct B { template<class U>
+void g(T, U); };` renamed at both levels still resolves to one id).
+Regression test in the new `tests/test_entity_id_template_discriminators.py`
+(split out of `tests/test_entity_id_carrier.py`, which had grown past the
+architecture gate's 1200-line test-file cap, purely to keep both files
+under it -- no test content or behavior changed by the split itself)
+(`test_live_clang_enclosing_class_template_param_rename_does_not_change_identity`),
+confirmed to fail pre-fix via `git stash` on just the source files.
+
 ---
 
 ### Phase 3 — public surface as a graph query over one evidence graph (D5)
