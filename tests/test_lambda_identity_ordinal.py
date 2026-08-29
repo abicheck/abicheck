@@ -1140,19 +1140,22 @@ class TestFrozenDataclassesReachableFromTheWalkAreRebuilt:
         assert "#1" in result.name
 
     def test_a_changed_non_init_field_is_itself_rewritten(self) -> None:
-        # A field populated in `__post_init__` (simulated here via the
-        # identical `object.__setattr__` escape hatch) can independently
-        # hold its own closure marker -- `replace()` can't recompute it,
-        # since `name` never changes here (so `replacements` stays empty
-        # and no `replace()` call happens); discarding the rewrite would
-        # leave it stale forever (Codex review, PR #943).
+        # A field populated in `__post_init__` (simulated via the identical
+        # `object.__setattr__` escape hatch) independently holds its own
+        # closure marker; `name` never changes, so `replacements` stays
+        # empty -- discarding the rewrite left it stale (Codex review), and
+        # rebuilding a NEW instance only when `replacements` was non-empty
+        # instead mutated `original` in place (CodeRabbit review), PR #943.
         original = _FrozenWithNonInit(name="plain::Type")
         object.__setattr__(original, "derived", _closure("h.h", 10, 2))
+        original_derived = original.derived
         result = self._rewrite(original)
         assert isinstance(result, _FrozenWithNonInit)
         assert result.name == "plain::Type"
         assert "#1" in result.derived
         assert ":10:2" not in result.derived
+        assert result is not original
+        assert original.derived == original_derived
 
     def test_unchanged_frozen_dataclass_is_returned_as_the_same_object(self) -> None:
         # No marker to rewrite -> no rebuild, so a snapshot with no closures

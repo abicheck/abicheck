@@ -625,7 +625,7 @@ def _walk_rewrite_strings(value: object, rewrite: _Callable[[str], str]) -> obje
                 replacements[f.name] = new
             else:
                 frozen_field_updates[f.name] = new
-        if replacements:
+        if replacements or frozen_field_updates:
             value = _dataclasses.replace(value, **replacements)
         for name, new in frozen_field_updates.items():
             object.__setattr__(value, name, new)

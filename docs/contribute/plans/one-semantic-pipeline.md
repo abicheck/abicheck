@@ -8284,6 +8284,27 @@ Regression test in `tests/test_entity_id_carrier.py`
 (`test_live_clang_dependent_return_type_discriminates_overloaded_templates`),
 confirmed to fail pre-fix via `git stash` on just the source files.
 
+**Correction (2026-08-29, same day, CodeRabbit review on PR #943): the
+frozen-dataclass rebuild `qualified_name_segments._walk_rewrite_strings`
+added for an `init=False` field's own rewrite mutated the caller's
+ORIGINAL object when no `init=True` field also changed.** `value =
+_dataclasses.replace(value, **replacements)` ran only `if replacements`,
+so when only `frozen_field_updates` was non-empty (the exact motivating
+case this rebuild exists for -- a changed `init=True` field with no
+sibling `init=False` change is the common path, but the reverse is what
+this mechanism was added to handle), `value` still named the caller's own
+original frozen instance, and the following `object.__setattr__` loop
+mutated it in place instead of a fresh copy -- a frozen dataclass silently
+becoming not-actually-immutable to its own caller. Fixed by rebuilding
+whenever EITHER dict is non-empty (`if replacements or
+frozen_field_updates`); `dataclasses.replace(value)` with no overrides
+still constructs a genuinely new instance. Regression test in
+`tests/test_lambda_identity_ordinal.py`'s
+`test_a_changed_non_init_field_is_itself_rewritten`, extended to assert
+`result is not original` and that `original`'s own field is unchanged
+after the rewrite, confirmed to fail pre-fix via `git stash` on just the
+source file.
+
 ---
 
 ### Phase 3 — public surface as a graph query over one evidence graph (D5)
