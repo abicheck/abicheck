@@ -78,6 +78,7 @@ class _Decl:
         "scope",
         "scope_path",
         "template_param_kinds",
+        "template_type_param_names",
     )
 
     def __init__(
@@ -91,6 +92,7 @@ class _Decl:
         in_template: bool = False,
         scope_path: ScopePath = (),
         template_param_kinds: tuple[str, ...] = (),
+        template_type_param_names: tuple[str, ...] = (),
     ) -> None:
         self.node = node
         self.scope = scope
@@ -129,6 +131,14 @@ class _Decl:
         # inherited further down -- since only that one declaration needs a
         # discriminator no ordinary parameter list or mangled name provides.
         self.template_param_kinds = template_param_kinds
+        # The same enclosing FunctionTemplateDecl's own TOP-LEVEL type/
+        # template-template parameter NAMES (companion to
+        # template_param_kinds above; see
+        # extract.headers.clang.functions.function_template_type_param_names),
+        # used to canonicalize a dependent ORDINARY parameter type against a
+        # pure template-parameter rename the identical way template_param_kinds'
+        # own non-type-parameter entries already are.
+        self.template_type_param_names = template_type_param_names
 
 
 def is_builtin_file(file: str) -> bool:

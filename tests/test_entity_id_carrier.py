@@ -213,6 +213,27 @@ _TEMPLATE_TEMPLATE_PARAM_DEPENDENT_RENAME_B = textwrap.dedent(
     """
 )
 
+#: A pure template-parameter RENAME affecting an ORDINARY parameter, not
+#: a non-type template parameter's own declared type: ``template<class
+#: T> void f(T);`` and the same declaration with ``T`` renamed to ``U``
+#: are the identical declaration, but clang's own ordinary-parameter
+#: spelling names the template parameter literally (``"T"``/``"U"``) --
+#: confirmed by direct compilation (Codex review, PR #943).
+_TEMPLATE_PARAM_ORDINARY_PARAM_RENAME_A = textwrap.dedent(
+    """
+    namespace ns {
+    template <class T> void f(T);
+    }
+    """
+)
+_TEMPLATE_PARAM_ORDINARY_PARAM_RENAME_B = textwrap.dedent(
+    """
+    namespace ns {
+    template <class U> void f(U);
+    }
+    """
+)
+
 #: The two halves of the collision this phase exists to close: a record
 #: nested in a **record** and the same bare names nested in a **namespace**.
 #: Both render to the identical ``"B::C"`` qualified name, which is exactly
@@ -565,6 +586,53 @@ def test_live_castxml_populates_every_kind(tmp_path: Path) -> None:
 
 
 @pytest.mark.integration
+@pytest.mark.skipif(shutil.which("castxml") is None, reason="castxml not installed")
+def test_live_castxml_honors_static_export_evidence_for_c_linkage(
+    tmp_path: Path,
+) -> None:
+    """A C API observed only via a STATIC archive's export set must get
+    the same extern-"C" override a dynamically-linked one gets.
+
+    castxml's language-mode detection for an ambiguous header defaults to
+    C++ (the same "case141" class of issue this module's own comments
+    already document for the dynamic-export case), so a plain,
+    C-compiled ``int foo(int);`` gets a bogus pseudo-Itanium
+    ``mangled="_Z3fooi"`` attribute -- confirmed by direct compilation.
+    The override that recovers the real, unmangled identity checked only
+    ``exported_dynamic``, so a symbol observed exclusively through a
+    static archive's own export set (``exported_static``) left that bogus
+    guess standing, disagreeing with both the archive's own observed
+    symbol and the clang producer's extern_c identity for the same
+    declaration (Codex review, PR #943).
+    """
+    header = tmp_path / "static_c.h"
+    header.write_text("int foo(int x);\n")
+    xml_out = tmp_path / "static_c.xml"
+    subprocess.run(
+        [
+            "castxml",
+            "--castxml-output=1",
+            "-std=c++17",
+            "-x",
+            "c++",
+            str(header),
+            "-o",
+            str(xml_out),
+        ],
+        check=True,
+        capture_output=True,
+    )
+    parser = _CastxmlParser(
+        parse_xml(xml_out).getroot(),
+        exported_dynamic=set(),
+        exported_static={"foo"},
+    )
+    foo = _one(parser.parse_functions(), name="foo")
+    assert foo.mangled == "foo"
+    assert foo.entity_id is not None and foo.entity_id.extra == ("extern_c",)
+
+
+@pytest.mark.integration
 @pytest.mark.skipif(shutil.which("clang") is None, reason="clang not installed")
 def test_live_clang_closes_the_record_vs_namespace_collision(tmp_path: Path) -> None:
     """``B::C`` nested in a record and in a namespace are two identities.
@@ -834,6 +902,38 @@ def test_live_clang_template_template_param_rename_does_not_change_identity(
     assert a.entity_id is not None and b.entity_id is not None
     assert a.entity_id == b.entity_id
     assert a.entity_id.extra[-1] == "nontype:type-param-0<int> *"
+
+
+@pytest.mark.integration
+@pytest.mark.skipif(shutil.which("clang") is None, reason="clang not installed")
+def test_live_clang_template_param_rename_in_ordinary_param_does_not_change_identity(
+    tmp_path: Path,
+) -> None:
+    """A pure template-parameter RENAME must NOT change identity when it
+    affects an ORDINARY parameter, not a non-type template parameter's
+    own declared type.
+
+    ``template<class T> void f(T);`` and ``template<class U> void
+    f(U);`` are the identical declaration, but clang's own ordinary
+    parameter spelling names the template parameter literally
+    (``"T"``/``"U"``) -- reproduced end to end before this fix: the two
+    revisions produced unequal ``EntityId``s (Codex review, PR #943).
+    """
+    a = _one(
+        _clang_parser(
+            _TEMPLATE_PARAM_ORDINARY_PARAM_RENAME_A, tmp_path, "ordpa"
+        ).parse_functions(),
+        name="f",
+    )
+    b = _one(
+        _clang_parser(
+            _TEMPLATE_PARAM_ORDINARY_PARAM_RENAME_B, tmp_path, "ordpb"
+        ).parse_functions(),
+        name="f",
+    )
+    assert a.entity_id is not None and b.entity_id is not None
+    assert a.entity_id == b.entity_id
+    assert a.entity_id.extra[1] == "type-param-0"
 
 
 # ── hybrid dumper: entity_id must stay in sync across post-parse rewrites ────

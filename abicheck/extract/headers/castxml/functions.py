@@ -463,11 +463,22 @@ def parse_function_element(
     # function's identity onto that unrelated export instead. A real
     # (possibly extern "C") function this override is meant to recover
     # is always declared at global scope.
+    # Checks BOTH exported_dynamic and exported_static -- a C API observed
+    # only through a static archive's own export set (a bare, unmangled
+    # symbol) must recover the identical extern-"C" override a
+    # dynamically-linked one gets; restricting this to exported_dynamic
+    # alone left a static-archive-only C function's guessed C++ mangling
+    # standing, disagreeing with both the archive's own observed symbol
+    # and the clang producer's extern_c identity for the same declaration
+    # (Codex review, PR #943). Mirrors the identical
+    # exported_dynamic|exported_static union dumper_castxml.py's own
+    # sibling variable-level override already uses.
     if (
         el.tag == "Function"
         and mangled.startswith("_Z")
         and mangled not in ctx.exported_dynamic
-        and name in ctx.exported_dynamic
+        and mangled not in ctx.exported_static
+        and name in (ctx.exported_dynamic | ctx.exported_static)
         and is_global_scope(ctx, el)
     ):
         mangled = name

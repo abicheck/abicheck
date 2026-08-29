@@ -58,6 +58,7 @@ Leaf module: no dependency on ``checker_types``/``diff_*``/anything above
 from __future__ import annotations
 
 import enum
+import re
 from dataclasses import dataclass, field, replace
 
 from .signature_normalization import canonicalize_function_signature_param_type
@@ -73,6 +74,7 @@ __all__ = [
     "Record",
     "ScopePath",
     "ScopeSegment",
+    "canonicalize_type_param_references",
     "entity_id_for_constant",
     "entity_id_for_enum",
     "entity_id_for_function",
@@ -424,6 +426,35 @@ def entity_id_for_variable(
     )
 
 
+def canonicalize_type_param_references(
+    spelling: str, type_param_names: tuple[str, ...]
+) -> str:
+    """Replace each name in *type_param_names* with its 0-based position.
+
+    A dependent type reference spells itself using the referenced
+    template parameter's own declared name (confirmed by direct
+    compilation) -- so ``template<class T> void f(T);`` and
+    ``template<class U> void f(U);`` are the identical declaration under
+    a pure parameter rename, but a caller building a per-parse
+    discriminator from the raw spelling alone would see ``"T"`` and
+    ``"U"`` and fingerprint them as two different overloads. A whole-word
+    (``\\b``) substitution, so a name that is a substring of another
+    (``T`` inside ``TT``) is never partially replaced, and a compound
+    spelling (``"T *"``) still resolves correctly (``"type-param-0 *"``).
+    Shared by :func:`entity_id_for_function` (for the ordinary parameter
+    list) and ``extract.headers.clang.functions.
+    function_template_param_kinds`` (for a non-type template parameter's
+    own declared type) -- both are the identical hazard, just for two
+    different sources of a "type spelling that can reference a template
+    parameter" (Codex review, PR #943).
+    """
+    for index, name in enumerate(type_param_names):
+        if not name:
+            continue
+        spelling = re.sub(rf"\b{re.escape(name)}\b", f"type-param-{index}", spelling)
+    return spelling
+
+
 def entity_id_for_function(
     scope: ScopePath,
     leaf_name: str,
@@ -436,6 +467,7 @@ def entity_id_for_function(
     ref_qualifier: str = "",
     is_variadic: bool | None = None,
     template_param_kinds: tuple[str, ...] = (),
+    type_param_names: tuple[str, ...] = (),
 ) -> EntityId:
     """``EntityId`` for a function.
 
@@ -566,6 +598,20 @@ def entity_id_for_function(
     its own ``func.is_extern_c``-gated omission of by-value param cv for
     the identical linkage reason (Codex review, PR #941).
 
+    *param_types* are ALSO run through
+    :func:`canonicalize_type_param_references` against *type_param_names*
+    -- the enclosing function template's own type/template-template
+    parameter names, in declaration order -- before the signature
+    canonicalization above: ``template<class T> void f(T);`` and
+    ``template<class U> void f(U);`` are the identical declaration under
+    a pure rename, but an ordinary parameter's raw spelling names the
+    template parameter literally (``"T"``/``"U"``), the same hazard
+    ``template_param_kinds``'s own non-type-parameter entries already
+    guard against -- this is the ordinary-parameter-list sibling of that
+    fix (Codex review, PR #943). A no-op (``type_param_names == ()``) for
+    every non-template function, so an ordinary function's ``extra``
+    tuple is unchanged byte-for-byte.
+
     When *mangled_name* is present, *leaf_name* is likewise ignored -- see
     :func:`entity_id_for_variable`'s docstring for the confirmed reason
     (the ELF-only fallback path reuses the raw exported symbol for both
@@ -586,7 +632,12 @@ def entity_id_for_function(
     else:
         extra = (
             "sig",
-            *(canonicalize_function_signature_param_type(p) for p in param_types),
+            *(
+                canonicalize_type_param_references(
+                    canonicalize_function_signature_param_type(p), type_param_names
+                )
+                for p in param_types
+            ),
             f"const:{is_const}",
             f"volatile:{is_volatile}",
             ref_qualifier,

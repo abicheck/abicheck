@@ -669,6 +669,7 @@ class _ClangAstParser:
         scope_path: ScopePath = (),
         anonymous_ordinal: int | None = None,
         template_param_kinds: tuple[str, ...] = (),
+        template_type_param_names: tuple[str, ...] = (),
     ) -> str:
         """Pre-order walk that categorizes public decls, threading the sticky file.
 
@@ -731,6 +732,7 @@ class _ClangAstParser:
                 in_template,
                 scope_path,
                 template_param_kinds,
+                template_type_param_names,
             )
 
         # A function/method body is not an ABI declaration surface: its
@@ -850,6 +852,11 @@ class _ClangAstParser:
             if kind == "FunctionTemplateDecl"
             else ()
         )
+        child_template_type_param_names = (
+            _clang_functions.function_template_type_param_names(node)
+            if kind == "FunctionTemplateDecl"
+            else ()
+        )
         # Per-parent (not global) anonymous-scope counter, assigned here
         # because an ordinal is a position among THIS node's own children: a
         # global counter would make one anonymous struct's identity depend on
@@ -933,6 +940,7 @@ class _ClangAstParser:
                 in_friend=child_in_friend,
                 in_template=child_in_template,
                 template_param_kinds=child_template_param_kinds,
+                template_type_param_names=child_template_type_param_names,
             )
         return file
 
@@ -949,6 +957,7 @@ class _ClangAstParser:
         in_template: bool = False,
         scope_path: ScopePath = (),
         template_param_kinds: tuple[str, ...] = (),
+        template_type_param_names: tuple[str, ...] = (),
     ) -> None:
         entry = _Decl(
             node=node,
@@ -960,6 +969,7 @@ class _ClangAstParser:
             in_template=in_template,
             scope_path=scope_path,
             template_param_kinds=template_param_kinds,
+            template_type_param_names=template_type_param_names,
         )
         if kind in _FUNCTION_NODE_KINDS and name:
             self._functions.append(entry)

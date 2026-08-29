@@ -8109,6 +8109,48 @@ test in `tests/test_lambda_identity_ordinal.py`
 against the pre-fix walk (verified via `git stash` on just the source
 file).
 
+**Correction (2026-08-29, same day, Codex review on PR #943): the
+dependent-rename hazard also reached the ORDINARY parameter list, not
+just non-type template parameters.** `template<class T> void f(T);` and
+`template<class U> void f(U);` are the identical declaration, but an
+ordinary parameter's raw spelling names the template parameter literally
+too (confirmed by direct compilation), and `entity_id_for_function`'s
+`param_types` were never canonicalized against the enclosing template's
+own type parameter names -- reproduced end to end: the two renamed
+revisions produced unequal `EntityId`s. Fixed by generalizing the
+canonicalization helper (renamed `canonicalize_type_param_references`,
+relocated from `extract/headers/clang/functions.py` to `model/identity.py`
+since both a model-layer function and an extract-layer one now need it,
+and ADR-061's import direction is extract -> model, never the reverse)
+and adding a new `type_param_names` parameter to `entity_id_for_function`,
+applied to each `param_types` entry before the existing cross-backend
+signature canonicalization. The producer side threads the enclosing
+function template's own TOP-LEVEL type/template-template parameter names
+through a new `function_template_type_param_names` (sharing
+`_template_param_kinds_from_node`'s exact walk with
+`function_template_param_kinds`, now returning `(kinds,
+type_param_names)`) and a new `_Decl.template_type_param_names` field,
+threaded through `_walk`/`_categorize` in `dumper_clang.py` identically to
+the existing `template_param_kinds` field. Regression test in
+`tests/test_entity_id_carrier.py`
+(`test_live_clang_template_param_rename_in_ordinary_param_does_not_change_identity`).
+
+A second finding from the same review round, in the castxml backend
+rather than this discriminator: castxml's own C-linkage recovery for a
+bogus pseudo-Itanium mangled name (the "case141" class of issue) checked
+only `exported_dynamic`, so a C API observed exclusively through a static
+archive's own export set (`exported_static`) left the bogus guess
+standing -- confirmed by direct compilation (a plain, unmarked `int
+foo(int);` gets `mangled="_Z3fooi"` from castxml's ambiguous-language-mode
+default) and by inspecting `dumper_castxml.py`'s own sibling
+variable-level override, which already checks the
+`exported_dynamic | exported_static` union. Fixed by extending
+`extract/headers/castxml/functions.py`'s function-level override to the
+identical union. Regression test in `tests/test_entity_id_carrier.py`
+(`test_live_castxml_honors_static_export_evidence_for_c_linkage`),
+confirmed to fail against the pre-fix override via `git stash` on just
+the source file.
+
 ---
 
 ### Phase 3 — public surface as a graph query over one evidence graph (D5)

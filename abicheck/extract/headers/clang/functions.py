@@ -71,7 +71,10 @@ from ....dumper_clang_qualifiers import (
     clang_param_is_va_list as _clang_param_is_va_list,
 )
 from ....model import Fact, Function, Param
-from ....model.identity import entity_id_for_function
+from ....model.identity import (
+    canonicalize_type_param_references,
+    entity_id_for_function,
+)
 from .context import (
     _Decl,
     access_level as _access_level,
@@ -285,11 +288,36 @@ def function_template_param_kinds(
     enclosing list's, so a non-type parameter at one level can never
     reference a type parameter declared at another.
     """
-    return _template_param_kinds_from_node(function_template_decl)
+    return _template_param_kinds_from_node(function_template_decl)[0]
 
 
-def _template_param_kinds_from_node(node: dict[str, Any]) -> tuple[str, ...]:
-    """Shared recursive body of :func:`function_template_param_kinds`.
+def function_template_type_param_names(
+    function_template_decl: dict[str, Any],
+) -> tuple[str, ...]:
+    """The TOP-LEVEL type/template-template parameter names of a
+    ``FunctionTemplateDecl``'s own parameter list, in declaration order.
+
+    Companion to :func:`function_template_param_kinds`, sharing its exact
+    walk (:func:`_template_param_kinds_from_node`) -- but for a different
+    consumer: ``entity_id_for_function``'s ORDINARY parameter list has the
+    identical dependent-rename hazard a non-type template parameter's own
+    declared type already gets canonicalized against (see that function's
+    own docstring), since an ordinary parameter can equally be typed
+    ``T``/``U`` after a pure template-parameter rename (Codex review, PR
+    #943). Only the top-level names are returned -- never a nested
+    ``TemplateTemplateParmDecl``'s own inner ones, which are invisible
+    outside that parameter's own signature and so can never appear in the
+    enclosing function's ordinary parameter list.
+    """
+    return _template_param_kinds_from_node(function_template_decl)[1]
+
+
+def _template_param_kinds_from_node(
+    node: dict[str, Any],
+) -> tuple[tuple[str, ...], tuple[str, ...]]:
+    """Shared recursive body of :func:`function_template_param_kinds` and
+    :func:`function_template_type_param_names` -- returns ``(kinds,
+    type_param_names)``.
 
     Runs identically over a ``FunctionTemplateDecl`` (the top-level call)
     and a ``TemplateTemplateParmDecl`` (the nested, recursive call) --
@@ -308,38 +336,21 @@ def _template_param_kinds_from_node(node: dict[str, Any]) -> tuple[str, ...]:
             kinds.append(f"type{pack}")
             type_param_names.append(str(child.get("name") or ""))
         elif kind == "TemplateTemplateParmDecl":
-            nested = _template_param_kinds_from_node(child)
-            kinds.append(f"template{pack}({','.join(nested)})")
+            nested_kinds, _nested_names = _template_param_kinds_from_node(child)
+            kinds.append(f"template{pack}({','.join(nested_kinds)})")
             type_param_names.append(str(child.get("name") or ""))
         elif kind == "NonTypeTemplateParmDecl":
             type_obj = child.get("type")
             spelling = (
                 str(type_obj.get("qualType", "")) if isinstance(type_obj, dict) else ""
             )
-            spelling = _canonicalize_dependent_type_param_spelling(
-                spelling, type_param_names
+            spelling = canonicalize_type_param_references(
+                spelling, tuple(type_param_names)
             )
             kinds.append(f"nontype{pack}:{spelling}")
         else:
             break
-    return tuple(kinds)
-
-
-def _canonicalize_dependent_type_param_spelling(
-    spelling: str, type_param_names: list[str]
-) -> str:
-    """Replace each name in *type_param_names* with its 0-based position.
-
-    Helper for :func:`function_template_param_kinds` -- see that function's
-    own docstring for why. A whole-word (``\\b``) substitution, so a name
-    that is a substring of another (``T`` inside ``TT``) is never partially
-    replaced.
-    """
-    for index, name in enumerate(type_param_names):
-        if not name:
-            continue
-        spelling = re.sub(rf"\b{re.escape(name)}\b", f"type-param-{index}", spelling)
-    return spelling
+    return tuple(kinds), tuple(type_param_names)
 
 
 def parse_functions(
@@ -576,6 +587,12 @@ def parse_functions(
                     # mangled_name=None, so without this the "sig" fallback
                     # tuple would collide them too (Codex review, PR #943).
                     template_param_kinds=entry.template_param_kinds,
+                    # Canonicalizes a dependent ORDINARY parameter type
+                    # (e.g. `template<class T> void f(T)`) against a pure
+                    # template-parameter rename the identical way a
+                    # non-type template parameter's own declared type
+                    # already is (Codex review, PR #943).
+                    type_param_names=entry.template_type_param_names,
                 ),
             )
         )
