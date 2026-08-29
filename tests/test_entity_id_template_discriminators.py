@@ -839,3 +839,41 @@ def test_live_clang_enclosing_class_template_param_rename_does_not_change_member
     )
     assert a.entity_id is not None and a.entity_id == b.entity_id
     assert a.entity_id.extra[-1] == "nontype:type-param-0"
+
+
+@pytest.mark.integration
+@pytest.mark.skipif(shutil.which("clang") is None, reason="clang not installed")
+def test_live_clang_member_pointer_spiral_return_declarator_preserves_returned_function_parameter_list(
+    tmp_path: Path,
+) -> None:
+    """A POINTER-TO-MEMBER-FUNCTION return type is another spiral
+    declarator, but its wrapper prefix is a qualified `C::*`, not a bare
+    `*`/`&`: `template<class T> int (C::*f(T))(int);` and the sibling
+    returning a pointer to a member function taking `double` instead both
+    compile with no redefinition error (confirmed by direct compilation),
+    but a leading-sigil check restricted to bare `*`/`&` missed this
+    shape entirely, falling through to the scan-from-the-end branch and
+    discarding the returned function's own parameter list -- the
+    identical hazard the ordinary pointer/reference spiral fix already
+    closed, just for a class-qualified sigil (Codex review, PR #943, on
+    a later round)."""
+    a = _one(
+        _clang_parser(
+            "struct C {}; template<class T> int (C::*f(T))(int);",
+            tmp_path,
+            "memberptra",
+        ).parse_functions(),
+        name="f",
+    )
+    b = _one(
+        _clang_parser(
+            "struct C {}; template<class T> int (C::*f(T))(double);",
+            tmp_path,
+            "memberptrb",
+        ).parse_functions(),
+        name="f",
+    )
+    assert a.entity_id is not None and b.entity_id is not None
+    assert a.entity_id != b.entity_id
+    assert a.return_type == "int (C::*())(int)"
+    assert b.return_type == "int (C::*())(double)"

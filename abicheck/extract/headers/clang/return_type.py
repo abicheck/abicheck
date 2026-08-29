@@ -96,6 +96,30 @@ def _find_top_level_arrow(s: str) -> int | None:
     return None
 
 
+def _is_spiral_wrapper_prefix(interior: str) -> bool:
+    """Whether a first top-level group's *interior* is a SPIRAL-declarator
+    wrapper (a pointer, reference, or pointer-to-member declarator around a
+    nested parameter list) rather than unrelated return-type text (e.g. a
+    ``decltype``'s own parenthesized operand).
+
+    The wrapper's declarator prefix -- everything before its own first
+    nested top-level group -- is exactly one of ``*``, ``&``, ``&&``, or a
+    POINTER-TO-MEMBER declarator, ``<qualified-class-name>::*`` (e.g.
+    ``C::*``, or a qualified/templated class name like ``Ns::C<int>::*``)
+    -- confirmed by direct compilation that clang spells a function
+    returning a pointer to member function as ``int (C::*(T))(int)``,
+    whose first group's interior is ``C::*(T)``: a bare leading-sigil check
+    (``*``/``&`` only) missed this shape entirely, falling through to the
+    scan-from-the-end branch and discarding the returned function's own
+    parameter list -- the identical hazard the pointer/reference case
+    already fixed, just for a class-qualified sigil (Codex review, PR
+    #943, on a later round).
+    """
+    spans = _top_level_paren_spans(interior)
+    prefix = interior[: spans[0][0]].strip() if spans else interior.strip()
+    return prefix in ("*", "&", "&&") or prefix.endswith("::*")
+
+
 def _excise_own_param_list(s: str) -> str:
     """Recursive helper for :func:`return_type`'s SPIRAL-declarator branch.
 
@@ -188,10 +212,10 @@ def return_type(qualtype: str) -> str:
         return qualtype.strip()
 
     first_start, first_end = spans[0]
-    first_interior = qualtype[first_start + 1 : first_end - 1].lstrip()
-    if first_interior[:1] in ("*", "&"):
+    first_interior = qualtype[first_start + 1 : first_end - 1]
+    if _is_spiral_wrapper_prefix(first_interior):
         leading = qualtype[:first_start].strip()
-        inner = _excise_own_param_list(qualtype[first_start + 1 : first_end - 1])
+        inner = _excise_own_param_list(first_interior)
         return (leading + " (" + inner + ")" + qualtype[first_end:]).strip()
 
     real_start = spans[-1][0]

@@ -8746,6 +8746,33 @@ confirmed to fail pre-fix via `git stash` on just the source files;
 every existing template-parameter discriminator test in that module
 still passes unchanged.
 
+**Correction (2026-08-29, same day, Codex review on PR #943): a
+POINTER-TO-MEMBER-FUNCTION return type is another spiral declarator, but
+its wrapper prefix is a qualified `C::*`, not a bare `*`/`&`, and the
+spiral-detection sigil check from two corrections ago only recognized
+the latter.** `template<class T> int (C::*f(T))(int);` and the sibling
+returning a pointer to a member function taking `double` instead both
+compile with no redefinition error -- confirmed by direct compilation
+that clang spells this as `int (C::*(T))(int)`, whose first group's
+interior, `C::*(T)`, does not start with a bare `*`/`&`. The
+leading-sigil check (`first_interior[:1] in ("*", "&")`) missed this
+shape entirely, falling through to the scan-from-the-end branch and
+discarding the returned member function's own parameter list -- the
+identical hazard the ordinary pointer/reference spiral fix already
+closed, just for a class-qualified sigil. Fixed by replacing the
+single-character check with `_is_spiral_wrapper_prefix`: it locates the
+first group's own nested top-level group (if any) and checks whether
+the text BEFORE it is exactly `*`/`&`/`&&`, or ends with `::*` (any
+qualified, possibly-templated class name followed by the pointer-to-
+member sigil) -- both confirmed correct against the full existing case
+set (ordinary, spiral pointer/reference, dependent-parens, `noexcept`,
+trailing-return, member-pointer). Regression test in
+`tests/test_entity_id_template_discriminators.py`
+(`test_live_clang_member_pointer_spiral_return_declarator_preserves_returned_function_parameter_list`),
+confirmed to fail pre-fix via `git stash` on just the source file; every
+existing return-type discriminator test in that module still passes
+unchanged.
+
 ---
 
 ### Phase 3 — public surface as a graph query over one evidence graph (D5)
