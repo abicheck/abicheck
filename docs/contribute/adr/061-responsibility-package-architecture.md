@@ -1,7 +1,7 @@
 # ADR-061: Responsibility-Package Architecture and Flat-Namespace Migration
 
 **Date:** 2026-08-24
-**Status:** Accepted — partially implemented (Phases 0-1 implemented; Phases 2-4 in progress; Phase 5 begun — the `model` package and the `*_metadata.py` dataclass/parser split have landed; D9's change-catalog work (item 3) is fully done — all 4 registry-validation properties (unique identifiers, valid references, non-contradictory defaults, complete metadata) are enforced, and the 397 entries have been repartitioned into `model/change_catalog/{symbols,types,platform,build,source}.py` by taxonomy; the CastXML/Clang parser split (item 1) has only started — the `extract` package now exists with one stateless-helper module moved out of `dumper_castxml.py`, but the stateful entity-by-entity split is unstarted — source-graph separation (item 2) and the bulk of item 4's cycle-exception cleanup also remain — and otherwise incremental).
+**Status:** Accepted — partially implemented (Phases 0-1 implemented; Phases 2-4 in progress; Phase 5 begun — the `model` package and the `*_metadata.py` dataclass/parser split have landed; D9's change-catalog work (item 3) is fully done — all 4 registry-validation properties (unique identifiers, valid references, non-contradictory defaults, complete metadata) are enforced, and the 397 entries have been repartitioned into `model/change_catalog/{symbols,types,platform,build,source}.py` by taxonomy; the CastXML/Clang parser split (item 1) has only started — the `extract` package now exists with one stateless-helper module moved out of `dumper_castxml.py`, but the stateful entity-by-entity split is unstarted — source-graph separation (item 2) has also only started — its values third moved to `abicheck/model/source_graph.py`, construction and comparison remain in `buildsource/source_graph.py` — and the bulk of item 4's cycle-exception cleanup also remains — and otherwise incremental).
 **Decision maker:** abicheck maintainers
 
 ## Context
@@ -2073,7 +2073,32 @@ without promising a new export.
    the equivalent split for `dumper_clang.py` — has not started; it needs
    the shared-context design this ADR's D9 describes before any entity
    module can move, which is a larger, separately-scoped slice;
-2. separate source-graph values, construction, and comparison;
+2. separate source-graph values, construction, and comparison. **Started,
+   not done.** The values third moved: `abicheck/model/source_graph.py`
+   now owns `SourceGraphSummary` (the ADR-031 D7 compact graph container
+   and all its methods), `GraphSummaryDiff` (the structural-diff result
+   shape), the node-id constructors (`_source_node_id` and its ten
+   siblings, `function_decl_identity`), and the schema vocabulary
+   (`NODE_KINDS`/`EDGE_KINDS`/`DEPENDENCY_EDGE_KINDS`/
+   `SOURCE_GRAPH_VERSION`/`EVIDENCE_TIER_L5`). `buildsource/source_graph.py`
+   re-exports every moved name (`X as X`, the same convention its own
+   pre-existing `graph_facts.py` re-export block already used), so all 77
+   existing callers keep resolving; it drops from 2000 to 1352 lines.
+   `entity_resolver.py` — needed as `SourceGraphSummary.entity_resolver`'s
+   field type — is now classified `model` in `architecture/modules.yaml`
+   (virtual classification, still physically flat, the same pattern this
+   ADR's Phase 3/4 sections already used elsewhere); `_conf_from_build`
+   deliberately did **not** move with the rest, because it needs
+   `build_evidence.py`'s `Confidence` enum and `build_evidence.py`
+   transitively imports `comdat_groups.py` (`extract`-classified) —
+   classifying `build_evidence.py` `model` to satisfy that one function
+   would have created a real `model -> extract` cycle, caught by
+   `check_architecture.py` before this landed rather than assumed. The
+   construction half (`build_source_graph` and its `_fold_*`/`_augment_*`
+   helpers — these still need `BuildEvidence`/`SourceAbiSurface`, so
+   moving them means resolving the same `build_evidence.py`/`extract`
+   coupling for real rather than routing around it) and the comparison
+   half (`diff_source_graph`, `localize_symbol`) have not started;
 3. **Done.** Repartitioned the change catalog into D9's `model/change_catalog/
    {symbols,types,platform,build,source}.py` taxonomy — all four
    registry-validation properties (global uniqueness, valid references,

@@ -49,6 +49,7 @@ types, so `from abicheck.elf_metadata import ElfMetadata` still resolves.
 | A new snapshot-level field or layer attachment | `snapshot.py` |
 | A new ELF/PE/Mach-O/DWARF/SYCL/kABI fact | the matching `*_facts.py` |
 | A snapshot-aware surface predicate | `stdlib_surface.py` |
+| An L5 source-graph value field, node-id spelling, or schema vocabulary entry (`NODE_KINDS`/`EDGE_KINDS`) | `source_graph.py` |
 
 `__init__.py` is the supported import surface and stays a re-export list
 with `__all__` — no logic, no new names that are not owned by a submodule.
