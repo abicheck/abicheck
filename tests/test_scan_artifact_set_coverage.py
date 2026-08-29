@@ -164,6 +164,47 @@ class TestArtifactSetRepeatableOptionBranches:
         assert result.exit_code == 1, result.output
         assert "EVIDENCE_CONTRACT_ERROR" in result.output
 
+    def test_dry_run_blocks_on_an_inert_build_config_with_no_query(
+        self, runner: CliRunner, tmp_path: Path
+    ) -> None:
+        # Codex review: a bare --config with no build.query gives the real
+        # run nothing to collect either (scan_engine._check_scan_evidence_
+        # contract's gave_source_input never counts build_config itself) --
+        # treating its mere presence as evidence was optimistic and let the
+        # preview report exit 0 for a run that would fail.
+        p1, p2 = tmp_path / "liba.so", tmp_path / "libb.so"
+        _write_elf_shared_object_stub(p1)
+        _write_elf_shared_object_stub(p2)
+        config = tmp_path / "abicheck.yml"
+        config.write_text("build:\n  compile_db: build/compile_commands.json\n")
+        result = runner.invoke(
+            main,
+            [
+                "scan", "--artifact-set", str(p1), "--artifact-set", str(p2),
+                "--dry-run", "--depth", "source", "--config", str(config),
+            ],
+        )
+        assert result.exit_code == 1, result.output
+        assert "EVIDENCE_CONTRACT_ERROR" in result.output
+
+    def test_dry_run_does_not_block_a_build_config_that_declares_a_query(
+        self, runner: CliRunner, tmp_path: Path
+    ) -> None:
+        p1, p2 = tmp_path / "liba.so", tmp_path / "libb.so"
+        _write_elf_shared_object_stub(p1)
+        _write_elf_shared_object_stub(p2)
+        config = tmp_path / "abicheck.yml"
+        config.write_text("build:\n  query: cmake -DCMAKE_EXPORT_COMPILE_COMMANDS=ON .\n")
+        result = runner.invoke(
+            main,
+            [
+                "scan", "--artifact-set", str(p1), "--artifact-set", str(p2),
+                "--dry-run", "--depth", "source", "--config", str(config),
+            ],
+        )
+        assert result.exit_code == 0, result.output
+        assert "EVIDENCE_CONTRACT_ERROR" not in result.output
+
     def test_dry_run_does_not_block_a_shallow_pinned_depth(
         self, runner: CliRunner, tmp_path: Path
     ) -> None:

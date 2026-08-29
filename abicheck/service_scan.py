@@ -128,14 +128,11 @@ def expand_public_header_inputs(headers: Iterable[Path]) -> list[str]:
 
 
 # ── Scan service: typed request/result + per-project cost estimate ───────────
-#
-# ADR-035 D10 / G19.7 (Phase 3b). One typed contract — :class:`ScanRequest` →
-# :class:`ScanResult` / ``[CostEstimate]`` — that the CLI (`cli_scan.py`) and CI
-# wrappers drive, so there is one engine and many renderings. ``estimate_scan``
-# is a first-class **dry-run** (ADR-035 D10): it probes the project (TU count,
+# See the module docstring above for the contract. ``estimate_scan`` is a
+# first-class **dry-run** (ADR-035 D10): it probes the project (TU count,
 # header fan-out, cache state) and returns the projected cost of each L-layer
-# for *this* project so a maintainer can pick a depth on measured cost instead
-# of guesswork — it scans nothing and runs no compiler.
+# so a maintainer can pick a depth on measured cost, not guesswork — it scans
+# nothing and runs no compiler.
 
 
 def _scan_imports() -> tuple[Any, ...]:
@@ -173,10 +170,9 @@ class Budget:
     partial_ok: bool = True  # a partial scan (missing tool/layer) is success
 
 
-# CompileContext itself now lives in the leaf `compile_context` module
-# (ADR-055 D1, imported at the top of this file and re-exported here) so a
-# module outside this file's import-cycle-allowlisted cluster (api_types.py,
-# in particular) can depend on the type without joining the cluster itself.
+# CompileContext lives in the leaf `compile_context` module (ADR-055 D1,
+# imported above, re-exported here) so api_types.py can depend on the type
+# without joining this file's import-cycle-allowlisted cluster.
 
 
 def pair_wide_cxx20_std_override(
@@ -338,35 +334,33 @@ class LayerResult:
 
 #: Per-TU / per-file cost anchors (seconds) for the dry-run estimate. These are
 #: deliberately coarse starting defaults (§11 of the ADR-035 proposal: a full
-#: ``-fsyntax-only`` pass dominates; pattern/compile-DB scans are <1-5%). The real
-#: per-project number comes from the actual run; the estimate only ranks layers so
-#: a maintainer can pick a depth.
+#: ``-fsyntax-only`` pass dominates; pattern/compile-DB scans are <1-5%). The
+#: real per-project number comes from the actual run; the estimate only ranks
+#: layers so a maintainer can pick a depth.
 _COST_PER_HEADER_PARSE = 0.08  # L2 base: castxml/clang startup + preprocess per header
 #: L2 marginal cost per KB of header text. A flat per-header anchor priced a
-#: one-line shim and a 200 KB templated umbrella (ICU's ``unicode/*.h``,
-#: hdf5's C++ API) identically, so a large public surface was under-ranked and
-#: ``scan --estimate`` understated header-audit cost. Weighting by on-disk size
-#: ranks heavy headers above trivial ones (field-eval P1: ICU/HDF5 header scans
-#: took 80-180 s while the estimate read flat).
+#: one-line shim and a 200 KB templated umbrella (ICU/hdf5) identically,
+#: under-ranking a large public surface. Weighting by on-disk size ranks
+#: heavy headers above trivial ones (field-eval P1: ICU/HDF5 scans took
+#: 80-180 s while the estimate read flat).
 _COST_PER_HEADER_KB = 0.004
 _COST_PER_TU_BUILD = 0.002  # L3 compile-DB entry parse
-# Cold L4 is a full clang JSON-AST replay + Python JSON parse + macro pass per TU.
-# Real-world pvxs/oneDAL validation showed ~7.5s/TU cold; the old 0.45s/TU anchor
-# under-promised source/full scans by an order of magnitude and made 100+ TU runs
-# look like one-minute jobs. Warm cache is reported by live coverage; dry-run stays
-# conservative unless a future cache probe can prove hits up front.
+# Cold L4 is a full clang JSON-AST replay + Python JSON parse + macro pass per
+# TU. Real-world pvxs/oneDAL validation showed ~7.5s/TU cold; the old 0.45s/TU
+# anchor under-promised source/full scans by an order of magnitude, making
+# 100+ TU runs look like one-minute jobs. Warm cache is reported by live
+# coverage; dry-run stays conservative absent a future cache probe.
 _COST_PER_TU_REPLAY = 7.5  # L4 per-TU semantic AST replay, cold-cache default
 _COST_PER_TU_GRAPH = 0.02  # L5 per-TU graph fold/edge
 
 
 #: A flat size-based estimate prices a one-line ``#include`` umbrella and a
-#: heavily-templated header identically per KB — real-world field evidence (the
-#: SVS ``datatype.h``/``float16.h``/``meta.h`` trio) showed a dry-run estimate
-#: of 0.51s for headers whose actual parse ran over 15,000s before an external
-#: SIGKILL: none of that cost is visible in on-disk bytes, it comes from
-#: template/include fan-out the compiler has to instantiate. These are a cheap,
-#: local (no compiler invocation) peek for that signal so the dry-run estimate
-#: can flag it instead of reporting a falsely precise number.
+#: heavily-templated header identically per KB — real-world field evidence
+#: (the SVS ``datatype.h``/``float16.h``/``meta.h`` trio) showed a dry-run
+#: estimate of 0.51s for headers whose actual parse ran over 15,000s before
+#: an external SIGKILL: that cost comes from template/include fan-out, not
+#: on-disk bytes. These are a cheap, local (no compiler invocation) peek for
+#: that signal so the estimate can flag it instead of a falsely precise number.
 _COMPLEXITY_PEEK_BYTES = 512 * 1024
 _COMPLEXITY_INCLUDE_THRESHOLD = 8  # local #include lines
 _COMPLEXITY_TEMPLATE_THRESHOLD = 5  # template/concept/requires/SFINAE hits
@@ -622,13 +616,10 @@ def _resolve_estimate_level(
     return resolved, eff_depth, collect_mode
 
 
-# Codex review, fresh evidence: TU counts here are workspace-wide (a
-# pre-captured Bazel aquery/cquery jsonproto is never filtered by `targets`
-# -- adapters/bazel.py's BazelAdapter only scopes a *live* query, see its
-# own `collect()`), so a `--build-target` run's real TU count is typically
-# lower. Previously only cli_scan.py's dry-run bullet flagged this; baked
-# into each row's own `note` here so a Python-API caller reading
-# `ScanResult.estimate`/`estimate_scan()` directly sees it too.
+# Codex review: TU counts here are workspace-wide (a pre-captured Bazel
+# aquery/cquery jsonproto is never filtered by `targets` -- BazelAdapter only
+# scopes a *live* query), so a `--build-target` run's real count is typically
+# lower. Baked into each row's `note` so a Python-API caller sees it too.
 _UNSCOPED_TU_NOTE_SUFFIX = (
     " [UNSCOPED: --build-target given, but this TU count is workspace-wide -- "
     "the real run's Bazel collection scopes to the requested root target(s) "
@@ -877,11 +868,10 @@ class ScanArtifactResult:
         return {"artifact": str(self.artifact), **self.result.to_dict()}
 
 
-# ADR-056 D3: ScanSetResult's own explicit verdict/exit-code precedence —
-# deliberately NOT a reuse of compare-release's `_RELEASE_VERDICT_ORDER`
-# (`cli_compare_release_helpers.py`), which has no entries for the two
-# scan-specific failure verdicts (`BUDGET_OVERFLOW`/`EVIDENCE_CONTRACT_ERROR`)
-# a ScanResult can carry. See _aggregate_scan_set_verdict's docstring.
+# ADR-056 D3: ScanSetResult's own verdict/exit-code precedence — not a reuse
+# of compare-release's `_RELEASE_VERDICT_ORDER`, which has no entries for the
+# two scan-specific failure verdicts a ScanResult can carry
+# (`BUDGET_OVERFLOW`/`EVIDENCE_CONTRACT_ERROR`).
 _SCAN_SET_COMPAT_ORDER: dict[str, int] = {
     # NO_CHANGE ranks strictly below COMPATIBLE (not tied at 0): the bundle audit's own verdict is always appended
     # to `candidates` below and often reads NO_CHANGE when it simply found nothing to flag -- with a tied rank, the
@@ -1071,18 +1061,31 @@ def _resolve_member_scan_level(
 _COST_PER_MEMBER_BUNDLE_AUDIT = 0.1  # per-member bundle-audit anchor, ~= L0_binary's
 
 
+def _build_config_declares_query(path: Path) -> bool:
+    """Does *path* declare ``build.query`` -- the only way a bare
+    ``--build-config`` supplies L3 evidence on its own (Codex review: an
+    inert config gives the real run nothing to collect either). ``False`` on
+    any read/parse failure -- a dry-run can't know whether an unparseable
+    query would have succeeded."""
+    from .buildsource.build_config_io import load_build_config_with_digest
+
+    try:
+        config, _digest = load_build_config_with_digest(path)
+    except ValueError:
+        return False
+    return bool(config.query)
+
+
 def estimate_artifact_set(
     req: ScanRequest, member_paths: list[Path]
 ) -> tuple[dict[str, tuple[int, float]], list[str], str | None]:
     """Per-layer cost total for ``scan --artifact-set --dry-run``: one
-    single-binary estimate per member at the level
-    :func:`_resolve_member_scan_level` resolves once (shared with
-    :func:`_run_scan_one_member`), plus a ``bundle_audit`` entry. Third
-    return value: a blocker message, or ``None`` -- set only when
-    ``collect_mode != "off"`` (mirrors ``scan_engine.
-    _check_scan_evidence_contract``'s own short-circuit, so a shallow pinned
-    depth like ``binary``/``headers`` never trips it) and no source/build
-    evidence was given, matching the real run's ``EVIDENCE_CONTRACT_ERROR``
+    single-binary estimate per member at the level :func:`_resolve_member_scan_level`
+    resolves once (shared with :func:`_run_scan_one_member`), plus a
+    ``bundle_audit`` entry. Third return value: a blocker message, or
+    ``None`` -- set only when ``collect_mode != "off"`` (mirrors
+    ``scan_engine._check_scan_evidence_contract``'s short-circuit) and no
+    source/build evidence was given, matching ``EVIDENCE_CONTRACT_ERROR``
     (exit 1). Kept out of *notes* so the caller routes it through
     :meth:`DryRunResult.block` instead (Codex review).
     """
@@ -1092,12 +1095,14 @@ def estimate_artifact_set(
     seen: set[str] = set()
     blocker: str | None = None
     pinned = dp is not None or (sm is not None and sm != "auto")
-    no_evidence = not (req.sources or req.build_info or req.build_config)
+    cfg_query = req.build_config and _build_config_declares_query(req.build_config)
+    no_evidence = not (req.sources or req.build_info or cfg_query)
     if pinned and collect_mode != "off" and no_evidence:
         blocker = (
-            f"pinned depth '{eff_depth.value}' has no --sources/--build-info/"
-            "--build-config -- the real run would fail with "
-            "EVIDENCE_CONTRACT_ERROR (exit 1), not run as priced below."
+            f"pinned depth '{eff_depth.value}' has no --sources/--build-info, "
+            "and --build-config declares no build.query -- the real run "
+            "would fail with EVIDENCE_CONTRACT_ERROR (exit 1), not run as "
+            "priced below."
         )
     for member_path in member_paths:
         member_req = replace(req, binaries=[member_path], mode="audit")
@@ -1114,10 +1119,7 @@ def estimate_artifact_set(
 
 #: Every ``ScanRequest`` field meaningful only for a baseline comparison,
 #: keyed to a predicate that's ``True`` when *req* carries a caller-set,
-#: non-default value. A plain dict so a structural test can cross-check its
-#: keys against ``_run_baseline_compare``'s own signature -- generalizing the
-#: "forwarded but never guarded" gap a P2 review caught twice here (see
-#: `test_every_baseline_only_field_is_guarded`).
+#: non-default value (see `test_every_baseline_only_field_is_guarded`).
 _COMPARISON_ONLY_FIELD_PREDICATES: dict[str, Callable[[ScanRequest], bool]] = {
     "suppression": lambda r: r.suppression is not None,
     "policy": lambda r: r.policy != "strict_abi",
@@ -1134,13 +1136,11 @@ _COMPARISON_ONLY_FIELD_PREDICATES: dict[str, Callable[[ScanRequest], bool]] = {
 
 
 def _reject_comparison_only_fields(req: ScanRequest) -> None:
-    """Raise :class:`ValidationError` for a set ``_COMPARISON_ONLY_FIELD_PREDICATES`` field with no baseline for it to apply to.
-
-    Shared by :func:`run_scan` (baseline ``None``/audit mode) and
-    :func:`run_scan_set` (always audit-only, ADR-056 D2) so both entry points
-    enforce the identical contract (P2 regression, Codex review:
-    ``run_scan_set()`` used to only validate ``req.baseline`` itself, letting
-    e.g. ``policy_file``/``env_matrix`` through silently discarded).
+    """Raise :class:`ValidationError` for a set ``_COMPARISON_ONLY_FIELD_PREDICATES``
+    field with no baseline for it to apply to. Shared by :func:`run_scan`
+    (baseline ``None``/audit mode) and :func:`run_scan_set` (always
+    audit-only, ADR-056 D2) so both enforce the identical contract (P2
+    regression: ``run_scan_set()`` used to only validate ``req.baseline``).
     """
     _non_default = [
         name for name, is_set in _COMPARISON_ONLY_FIELD_PREDICATES.items() if is_set(req)
