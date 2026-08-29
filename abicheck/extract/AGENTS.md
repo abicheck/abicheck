@@ -119,9 +119,21 @@ helpers this module needs (`record_kind`, `reduce_opaque_kind_set`,
 `field_own_cv_source`, `desugared_qualtype`) were still private with
 exactly one external caller apiece — public-ized in place, each keeping
 its old private spelling as a back-compat alias, rather than physically
-relocated. `templates.py` on both backends has not moved yet — see
-ADR-061's own "Phase 5" section for the full account, including the real
-before/after dump verification this correctness-sensitive move required.
+relocated.
+
+`templates.py` closes Phase 5 item 1 on both backends. castxml has none: its
+XML resolves a specialization to an ordinary `Struct`/`Class` element,
+indistinguishable from a non-template record. `headers/clang/templates.py`
+holds template-parameter-kind/default/name reconstruction and
+specialization-spelling/indexing (`_index_template_param_*`,
+`_specialization_spelling`, `build_specialization_index`), moved out of
+`dumper_clang_vtable.py` as free functions -- no `parse_templates()` entry
+point, since a `ClassTemplateSpecializationDecl` never joins a categorized
+`_Decl` list, so `_walk`/`_categorize` stayed put. `_SCOPE_NODE_KINDS` moved
+out of `dumper_clang_expr.py` (unimportable here -- pulls in `compare`) into
+`templates.py`; `build_specialization_index` takes `is_record_definition` as
+an explicit keyword-only parameter rather than importing it back through
+`dumper_clang_vtable.py`'s back-compat re-export. See ADR-061 Phase 5.
 
 ## Rules that are easy to get wrong
 

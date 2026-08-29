@@ -37,11 +37,27 @@ entity module split out the same way -- ``ctx.vtable_slot_root``/
 ``ctx.vtable_slot_extra_roots`` already lived on the shared context (put
 there during the ``functions.py`` slice, since clang's analogous
 ``RecordVtableIndex`` needed the same state), so no context-shape change
-was needed to move the code that reads and mutates them. ``templates.py``
-has not moved yet. Every method below that has a counterpart in one of
-those modules is a thin delegating wrapper, kept for every existing
-internal and external caller (tests included) that still reads
-``_CastxmlParser``'s private surface directly.
+was needed to move the code that reads and mutates them. This closes
+Phase 5 item 1's parser-split work on the castxml backend: there is no
+separate ``templates.py`` here, and none is missing -- castxml's XML output
+resolves a class-template specialization down to an ordinary ``Struct``/
+``Class`` element indistinguishable (at the AST-node level) from a
+non-template record, carrying no ``ClassTemplateSpecializationDecl``-shaped
+node, no separate specialization-index pass, and no
+``RecordType.is_template_pattern`` concept at all (verified: grepping this
+module and every module in ``extract/headers/castxml/`` for
+"template"/"specialization"/"Specialization" turns up nothing but this
+paragraph and an unrelated cross-reference to ``diff_templates.py``, the
+compare-layer detector). Every fact a specialization's own record carries
+(fields, bases, vtable/RTTI layout) is already produced by the ordinary
+record path ``records.py`` owns -- there is no castxml counterpart to
+clang's own template-parameter-kind/default/name reconstruction or
+specialization-spelling machinery (contrast ``dumper_clang.py``'s module
+docstring, and ``extract.headers.clang.templates``, for why clang's JSON
+AST needs that reconstruction and castxml's XML does not). Every method
+below that has a counterpart in one of those modules is a thin delegating
+wrapper, kept for every existing internal and external caller (tests
+included) that still reads ``_CastxmlParser``'s private surface directly.
 """
 
 from __future__ import annotations

@@ -64,10 +64,22 @@ entity kind's parsing already received as a parameter) and the
 built-in-file/qualtype/source-location/deprecation-message primitives more
 than one entity kind reads now live in
 :mod:`abicheck.extract.headers.clang.context`, with enum parsing built on
-top of it in :mod:`abicheck.extract.headers.clang.enums`. Every name below
-with a counterpart there is a thin delegating wrapper, kept so every
+top of it in :mod:`abicheck.extract.headers.clang.enums`, function-entity
+parsing in :mod:`abicheck.extract.headers.clang.functions`, record-entity
+parsing in :mod:`abicheck.extract.headers.clang.records`, and
+template-specialization parsing (``_index_template_param_kinds``/
+``_index_template_param_defaults``/``_index_template_param_names``/
+``_specialization_spelling``/``build_specialization_index``, imported
+below from their new home rather than from ``dumper_clang_vtable.py``
+directly) in :mod:`abicheck.extract.headers.clang.templates` — this
+closes Phase 5 item 1's parser-split work on this backend. Every name
+below with a counterpart there is a thin delegating wrapper, kept so every
 existing internal and external caller (tests included) that still reads
-this module's private surface directly keeps resolving.
+this module's private surface directly keeps resolving. ``_walk``/
+``_categorize`` (the shared traversal/categorization dispatch every entity
+kind goes through, template specializations included) stays here — see
+``templates.py``'s own docstring for why it, unlike every other entity's
+parsing, was not itself split out.
 """
 
 from __future__ import annotations
@@ -114,18 +126,18 @@ from .dumper_clang_qualifiers import (  # noqa: F401  (compatibility re-exports)
     _record_kind,
     _reduce_opaque_kind_set,
 )
-from .dumper_clang_vtable import (
-    _index_template_param_defaults,
-    _index_template_param_kinds,
-    _index_template_param_names,
-    _specialization_spelling,
-)
 from .errors import AstContextMissingError, SnapshotError
 from .extract.headers.clang import (
     context as _clang_context,
     enums as _clang_enums,
     functions as _clang_functions,
     records as _clang_records,
+)
+from .extract.headers.clang.templates import (
+    _index_template_param_defaults,
+    _index_template_param_kinds,
+    _index_template_param_names,
+    _specialization_spelling,
 )
 from .model import (
     AccessLevel,
@@ -650,8 +662,9 @@ class _ClangAstParser:
         template_param_kinds`/`_index_template_param_defaults`/`_index_
         template_param_names` use for their own qualname keys (Codex
         review, fresh evidence, second round: see the identical *lookup_
-        scope* split in `dumper_clang_vtable.build_specialization_index`
-        for the full empirical reasoning -- those three index functions
+        scope* split in `extract.headers.clang.templates.
+        build_specialization_index` for the full empirical reasoning --
+        those three index functions
         register a NESTED template's own `ClassTemplateDecl` under its
         natural, unspelled scope, confirmed empirically to differ from
         *scope*'s own spelled qualname the moment a specialization ancestor

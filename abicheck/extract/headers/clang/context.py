@@ -49,14 +49,11 @@ from __future__ import annotations
 
 from typing import Any
 
-from ....dumper_clang_vtable import (
-    build_specialization_index,
-    build_vtable,
-    is_record_definition,
-)
+from ....dumper_clang_vtable import build_vtable, is_record_definition
 from ....model import AccessLevel, ScopeOrigin, Visibility
 from ....name_classification import strip_anonymous_type_location
 from ....provenance import classify_origin, header_from_location
+from .templates import build_specialization_index
 
 #: Pseudo-files clang attributes builtin / command-line declarations to.
 BUILTIN_FILES = frozenset(
@@ -404,9 +401,9 @@ class RecordVtableIndex:
         return self._record_by_qualname
 
     def specialization_record_index(self) -> dict[str, dict[str, Any]]:
-        """Lazily-built, memoized :func:`dumper_clang_vtable.
-        build_specialization_index` over this parser's own AST root -- see
-        that function's docstring for the full "why". Passes through the
+        """Lazily-built, memoized :func:`.templates.build_specialization_index`
+        over this parser's own AST root -- see that function's docstring for
+        the full "why". Passes through the
         param-kinds/param-defaults indices already computed eagerly by
         ``dumper_clang.py``'s ``__init__`` (for ``_walk``'s own
         specialization-scoping use) instead of paying for a second
@@ -418,6 +415,7 @@ class RecordVtableIndex:
                 self._template_param_kinds_by_qualname,
                 self._template_param_defaults_by_qualname,
                 self._template_param_names_by_qualname,
+                is_record_definition=is_record_definition,
             )
         return self._specialization_by_qualname
 

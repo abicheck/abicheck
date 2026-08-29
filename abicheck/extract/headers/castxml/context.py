@@ -22,10 +22,10 @@ that let each ``parse_*`` entry point iterate only its own node kind, and
 the memoization caches the type-resolution helpers in this package share.
 
 This module does not parse a function, record, enum, or template itself —
-that is each entity module's job (``enums.py`` today; ``functions.py``,
-``records.py``, and ``templates.py`` are not yet split out — see
-``abicheck/dumper_castxml.py``'s module docstring for what still lives
-there). An entity module receives a :class:`CastxmlParserContext` instance
+that is each entity module's job (``enums.py``, ``functions.py``, and
+``records.py``; castxml has no separate template-entity module — see
+``abicheck/dumper_castxml.py``'s module docstring for why). An entity
+module receives a :class:`CastxmlParserContext` instance
 explicitly rather than reading instance state off a monolithic parser
 class, per D9's "entity modules parse one class of node using shared
 context" — they do not independently open input, resolve global
