@@ -192,6 +192,7 @@ def _param_has_default(param: dict[str, Any]) -> bool:
 
 def function_template_param_kinds(
     function_template_decl: dict[str, Any],
+    enclosing_type_param_names: tuple[str, ...] = (),
 ) -> tuple[str, ...]:
     """The per-position parameter-KIND signature of a ``FunctionTemplateDecl``'s
     own (uninstantiated) template parameter list, in declaration order.
@@ -284,8 +285,28 @@ def function_template_param_kinds(
     review, PR #943, on the fifth version of this function; a nested
     parameter's OWN names still do not leak back out to an enclosing or
     sibling scope, only inherit inward).
+
+    *enclosing_type_param_names* extends that same seeding one level
+    further OUT, to an ENCLOSING CLASS template's own parameter names --
+    the identical hazard as the nested-parameter-template case just
+    above, just one level higher: ``template<class T> struct A {
+    template<T N> void f(); };`` renamed to ``template<class U> struct A
+    { template<U N> void f(); };`` is the identical declaration, and
+    clang's ``qualType`` for the MEMBER template's own non-type parameter
+    ``N`` spells its type literally as the enclosing class template's
+    own parameter name, ``"T"``/``"U"`` (confirmed by direct
+    compilation) -- the same hazard ``class_template_type_param_names``
+    already exists to fix for an ORDINARY member's own parameter type,
+    just for a member that is itself a ``FunctionTemplateDecl`` (Codex
+    review, PR #943, on a later round). Passed through unchanged to the
+    top-level call only -- a nested ``TemplateTemplateParmDecl``'s own
+    recursive call already seeds itself from the accumulated
+    ``type_param_names`` at that point, which already includes whatever
+    was passed in here.
     """
-    return _template_param_kinds_from_node(function_template_decl)[0]
+    return _template_param_kinds_from_node(
+        function_template_decl, enclosing_type_param_names
+    )[0]
 
 
 def function_template_type_param_names(

@@ -802,3 +802,40 @@ def test_live_clang_quoted_literal_is_not_canonicalized_as_a_param_ref(
     )
     assert a.entity_id is not None and a.entity_id == b.entity_id
     assert a.entity_id.extra[1] == "Literal<'N'>"
+
+
+@pytest.mark.integration
+@pytest.mark.skipif(shutil.which("clang") is None, reason="clang not installed")
+def test_live_clang_enclosing_class_template_param_rename_does_not_change_member_template_identity(
+    tmp_path: Path,
+) -> None:
+    """A rename of an ENCLOSING class template's own parameter must NOT
+    change a MEMBER FUNCTION TEMPLATE's identity either: `template<class
+    T> struct A { template<T N> void f(); };` renamed to `template<class
+    U> struct A { template<U N> void f(); };` is the identical
+    declaration, and clang's `qualType` for the member template's own
+    non-type parameter `N` spells its type literally as the enclosing
+    class template's own parameter name (`"T"`/`"U"`) -- confirmed by
+    direct compilation. The identical hazard the sibling test above
+    fixes for an ordinary (non-template) member, one level further in:
+    `function_template_param_kinds` must also be seeded with the
+    enclosing class template's own parameter names, not just its own
+    (Codex review, PR #943, on a later round)."""
+    a = _one(
+        _clang_parser(
+            "template<class T> struct A { template<T N> void f(); };",
+            tmp_path,
+            "membtmpla",
+        ).parse_functions(),
+        name="f",
+    )
+    b = _one(
+        _clang_parser(
+            "template<class U> struct A { template<U N> void f(); };",
+            tmp_path,
+            "membtmplb",
+        ).parse_functions(),
+        name="f",
+    )
+    assert a.entity_id is not None and a.entity_id == b.entity_id
+    assert a.entity_id.extra[-1] == "nontype:type-param-0"

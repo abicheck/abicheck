@@ -8720,6 +8720,32 @@ whose start falls inside a single- or double-quoted literal span
 confirmed to fail pre-fix via `git stash` on just the source file; every
 existing rename-invariance test in that module still passes unchanged.
 
+**Correction (2026-08-29, same day, Codex review on PR #943): a MEMBER
+FUNCTION TEMPLATE's own non-type parameter could reference an ENCLOSING
+CLASS template's parameter, one level further out than the earlier
+nested-template-template correction, and `function_template_param_kinds`
+had no seeding for that scope at all.** `template<class T> struct A {
+template<T N> void f(); };` is valid C++ -- confirmed by direct
+compilation -- and clang's `qualType` for the member template's own
+non-type parameter `N` spells its type literally as the enclosing class
+template's own parameter name, `"T"`. But `function_template_param_kinds`
+took no `enclosing_type_param_names` parameter at all (unlike
+`class_template_type_param_names`, which already exists to fix the
+identical hazard for an ORDINARY, non-template member), so renaming the
+enclosing parameter to `U` produced `"nontype:T"` vs. `"nontype:U"` for
+the otherwise-identical declaration. Fixed by adding an
+`enclosing_type_param_names` parameter (mirroring the nested-template-
+template-parameter fix already threaded through
+`_template_param_kinds_from_node`'s own recursion) and passing
+`dumper_clang.py`'s already-accumulated `template_type_param_names`
+(the enclosing scope, available at the exact point a `FunctionTemplateDecl`
+node is visited, before its own names are folded in) into the call.
+Regression test in `tests/test_entity_id_template_discriminators.py`
+(`test_live_clang_enclosing_class_template_param_rename_does_not_change_member_template_identity`),
+confirmed to fail pre-fix via `git stash` on just the source files;
+every existing template-parameter discriminator test in that module
+still passes unchanged.
+
 ---
 
 ### Phase 3 — public surface as a graph query over one evidence graph (D5)

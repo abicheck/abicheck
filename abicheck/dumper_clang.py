@@ -485,8 +485,6 @@ _FUNCTION_NODE_KINDS = frozenset(
 _BUILTIN_FILES = _clang_context.BUILTIN_FILES
 
 
-
-
 def _pointer_depth(type_str: str) -> int:
     """See ``extract.headers.clang.functions._pointer_depth`` (the canonical
     implementation this delegates to) for the full contract."""
@@ -870,8 +868,18 @@ class _ClangAstParser:
         # functions.function_template_param_kinds's own docstring for why.
         # (`child_template_type_param_names` just below is a DIFFERENT
         # story -- it must accumulate, not reset; see its own comment.)
+        # `template_type_param_names` (the ALREADY-accumulated enclosing
+        # scope, not yet including this node's own names) is threaded in
+        # too -- a member function template's own non-type parameter can
+        # legally reference an ENCLOSING class template's parameter name
+        # (`template<class T> struct A { template<T N> void f(); };`,
+        # confirmed by direct compilation), the identical hazard
+        # `class_template_type_param_names` below already fixes for an
+        # ordinary member, one level further in (Codex review, PR #943).
         child_template_param_kinds = (
-            _clang_functions.function_template_param_kinds(node)
+            _clang_functions.function_template_param_kinds(
+                node, template_type_param_names
+            )
             if kind == "FunctionTemplateDecl"
             else ()
         )
