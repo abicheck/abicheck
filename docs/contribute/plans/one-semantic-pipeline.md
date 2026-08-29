@@ -8029,6 +8029,44 @@ docstring), with no source text available to it. Recorded here as a
 `requires`-clause-only overload pair is the one template-overload shape
 this discriminator still cannot distinguish.
 
+**Correction (2026-08-29, same day, CodeRabbit review on PR #943): a third
+sibling collision -- a template-TEMPLATE parameter's own NESTED arity.**
+`template<template<class> class TT> void f();` and
+`template<template<class, class> class TT> void f();` are two more legal
+overloads sharing scope, leaf name, and an identical ordinary parameter
+list; the `TemplateTemplateParmDecl` branch recorded only the bare
+`"template"`/`"template..."` tag, with nothing encoding ITS OWN nested
+parameter list -- reproduced end to end: `distinct: 1` of 2 declarations.
+Confirmed by direct compilation that clang shapes a
+`TemplateTemplateParmDecl`'s own `inner` exactly like a top-level
+parameter list (its own `TemplateTypeParmDecl`/`NonTypeTemplateParmDecl`/
+nested `TemplateTemplateParmDecl` children), so the fix is a genuine
+recursion rather than a special case: `function_template_param_kinds` now
+delegates to a shared `_template_param_kinds_from_node` helper that runs
+identically over the top-level `FunctionTemplateDecl` and any nested
+`TemplateTemplateParmDecl`, each level getting its own independent
+`type_param_names` scope (a template-template parameter's own type
+parameters live at a different depth than the enclosing list's). A
+template-template parameter's entry now reads e.g.
+`"template(type,type)"` for two nested type parameters. Regression test
+in `tests/test_entity_id_carrier.py`
+(`test_live_clang_template_template_param_nested_arity_discriminates`).
+
+While landing that fix, also found and fixed an unrelated, pre-existing
+test bug in the SAME file: `_clang_parser`'s subprocess invocation named
+no `--target`, so it silently compiled for whichever platform the test
+happened to run on -- on a macOS CI runner, clang's own default target
+(Darwin/Mach-O) bakes an extra leading underscore directly into
+`mangledName` (`__ZN2ns4gVarE` rather than the Linux-target
+`_ZN2ns4gVarE`), which every assertion in this file was written against.
+Confirmed reproducible via cross-compilation (`--target=x86_64-apple-
+darwin` on this Linux sandbox reproduces the exact double-underscore
+spelling a real macOS CI run hit). Fixed by pinning
+`--target=x86_64-unknown-linux-gnu` on the one `clang` invocation this
+file's helpers share -- this module tests entity-identity logic, not
+host-linker-convention accidents, so every live-clang probe here now
+compiles for one fixed target regardless of which OS runs the test.
+
 ---
 
 ### Phase 3 — public surface as a graph query over one evidence graph (D5)

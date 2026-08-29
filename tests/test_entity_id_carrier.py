@@ -167,6 +167,24 @@ _TEMPLATE_PARAM_DEPENDENT_RENAME_B = textwrap.dedent(
     """
 )
 
+#: Two more legal overloads sharing scope, leaf name, and an identical
+#: (empty) ordinary parameter list, this time differing in a
+#: template-TEMPLATE parameter's own NESTED parameter list.
+#: ``template<template<class> class TT>`` vs. ``template<template<class,
+#: class> class TT>`` -- confirmed by direct compilation that clang shapes
+#: a ``TemplateTemplateParmDecl``'s own ``inner`` exactly like a top-level
+#: parameter list, and that the first version of this discriminator, which
+#: recorded only the bare ``"template"`` tag, still reduced both to the
+#: identical entry (Codex review, PR #943).
+_TEMPLATE_TEMPLATE_PARAM_NESTED_ARITY_COLLISION = textwrap.dedent(
+    """
+    namespace ns {
+    template <template<class> class TT> void f();
+    template <template<class, class> class TT> void f();
+    }
+    """
+)
+
 #: The two halves of the collision this phase exists to close: a record
 #: nested in a **record** and the same bare names nested in a **namespace**.
 #: Both render to the identical ``"B::C"`` qualified name, which is exactly
@@ -184,6 +202,19 @@ def _clang_parser(header_text: str, tmp_path: Path, name: str) -> _ClangAstParse
             "-x",
             "c++",
             "-std=c++17",
+            # Pinned rather than left at the runner's own default target --
+            # confirmed by direct compilation that clang's own `mangledName`
+            # differs by host: `--target=x86_64-apple-darwin` (a macOS CI
+            # runner's implicit default) mangles a namespaced variable as
+            # `__ZN2ns4gVarE` (Mach-O's extra leading underscore baked
+            # directly into the AST-dump JSON, not something this module's
+            # own Mach-O normalization ever sees), while
+            # `x86_64-unknown-linux-gnu` gives the plain `_ZN2ns4gVarE`
+            # every assertion in this file is written against. This module
+            # tests entity-identity logic, not host-linker-convention
+            # accidents, so every live-clang probe here compiles for one
+            # fixed target regardless of which OS runs the test.
+            "--target=x86_64-unknown-linux-gnu",
             "-Xclang",
             "-ast-dump=json",
             "-fsyntax-only",
@@ -711,6 +742,37 @@ def test_live_clang_template_param_rename_does_not_change_identity(
     assert a.entity_id is not None and b.entity_id is not None
     assert a.entity_id == b.entity_id
     assert a.entity_id.extra[-1] == "nontype:type-param-0"
+
+
+@pytest.mark.integration
+@pytest.mark.skipif(shutil.which("clang") is None, reason="clang not installed")
+def test_live_clang_template_template_param_nested_arity_discriminates(
+    tmp_path: Path,
+) -> None:
+    """Two template-template parameters differing only in NESTED arity.
+
+    ``template<template<class> class TT> void f()`` and
+    ``template<template<class, class> class TT> void f()`` are two more
+    legal overloads sharing scope, leaf name, and an identical (empty)
+    ordinary parameter list -- and the earlier, non-recursive version of
+    this discriminator, which recorded only the bare ``"template"`` tag for
+    a ``TemplateTemplateParmDecl``, still reduced both to the identical
+    entry, missing this collision entirely (reproduced end to end before
+    this fix: `distinct: 1` of 2 declarations; Codex review, PR #943).
+    """
+    parser = _clang_parser(
+        _TEMPLATE_TEMPLATE_PARAM_NESTED_ARITY_COLLISION, tmp_path, "tmpltt"
+    )
+    pair = [fn for fn in parser.parse_functions() if fn.name == "f"]
+    assert len(pair) == 2
+    assert all(fn.entity_id is not None for fn in pair)
+    for fn in pair:
+        assert fn.entity_id is not None
+        assert fn.entity_id.extra[0] == "sig", fn.entity_id
+        assert fn.entity_id.extra[-2] == "tmpl", fn.entity_id
+    assert pair[0].entity_id != pair[1].entity_id
+    kinds = {fn.entity_id.extra[-1] for fn in pair if fn.entity_id is not None}
+    assert kinds == {"template(type)", "template(type,type)"}
 
 
 # ── hybrid dumper: entity_id must stay in sync across post-parse rewrites ────

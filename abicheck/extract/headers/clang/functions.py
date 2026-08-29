@@ -257,10 +257,38 @@ def function_template_param_kinds(
     another (``T`` inside ``TT``) since a word-boundary match never fires
     mid-identifier, and against a compound spelling like ``"T *"``, which
     still resolves to ``"type-param-0 *"``.
+
+    A ``TemplateTemplateParmDecl``'s own entry additionally encodes ITS
+    parameter list recursively, e.g. ``"template(type,type)"`` for
+    ``template<template<class, class> class TT>``: confirmed by direct
+    compilation that clang shapes a ``TemplateTemplateParmDecl``'s ``inner``
+    exactly like a top-level parameter list (its own ``TemplateTypeParmDecl``/
+    ``NonTypeTemplateParmDecl``/nested ``TemplateTemplateParmDecl`` children),
+    so ``template<template<class> class TT>`` and ``template<template<class,
+    class> class TT>`` -- two more legal overloads sharing every OTHER
+    discriminator this function produces -- collapsed onto one bare
+    ``"template"`` entry before this recursion (Codex review, PR #943, on
+    the third version of this function). Each nesting level gets its own
+    independent ``type_param_names`` scope -- a template-template
+    parameter's own type parameters live at a different depth than the
+    enclosing list's, so a non-type parameter at one level can never
+    reference a type parameter declared at another.
+    """
+    return _template_param_kinds_from_node(function_template_decl)
+
+
+def _template_param_kinds_from_node(node: dict[str, Any]) -> tuple[str, ...]:
+    """Shared recursive body of :func:`function_template_param_kinds`.
+
+    Runs identically over a ``FunctionTemplateDecl`` (the top-level call)
+    and a ``TemplateTemplateParmDecl`` (the nested, recursive call) --
+    confirmed by direct compilation that clang gives the latter's own
+    ``inner`` the identical parameter-list shape as the former's, so no
+    node-kind-specific branching is needed here.
     """
     kinds: list[str] = []
     type_param_names: list[str] = []
-    for child in function_template_decl.get("inner", []) or []:
+    for child in node.get("inner", []) or []:
         if not isinstance(child, dict):
             continue
         kind = child.get("kind")
@@ -269,7 +297,8 @@ def function_template_param_kinds(
             kinds.append(f"type{pack}")
             type_param_names.append(str(child.get("name") or ""))
         elif kind == "TemplateTemplateParmDecl":
-            kinds.append(f"template{pack}")
+            nested = _template_param_kinds_from_node(child)
+            kinds.append(f"template{pack}({','.join(nested)})")
         elif kind == "NonTypeTemplateParmDecl":
             type_obj = child.get("type")
             spelling = (
