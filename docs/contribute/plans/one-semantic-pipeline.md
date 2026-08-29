@@ -7969,6 +7969,25 @@ test in `tests/test_entity_id_carrier.py`
 confirmed to fail (collapsing to one `EntityId`) against the pre-fix
 `entity_id_for_function`.
 
+**Correction (2026-08-29, same day, Codex review on PR #943): the
+template-parameter-kind fix above still missed a second, sibling
+collision -- two legal overloads differing only in parameter
+*packness*.** `template<class T> void f();` and `template<class... T>
+void f();` share scope, leaf name, and an identical ordinary parameter
+list, and the first version of `function_template_param_kinds` recorded
+only parameter *kind* (`"type"`/`"template"`/`"nontype:..."`), so both
+still reduced to the identical `("type",)` -- reproduced end to end:
+`distinct: 1` of 2 declarations. Confirmed by direct compilation that
+clang tags a pack parameter with `isParameterPack: true` on all three
+parameter-node kinds (`TemplateTypeParmDecl`, `NonTypeTemplateParmDecl`,
+`TemplateTemplateParmDecl` alike), omitting the key entirely otherwise.
+Fixed by appending a trailing `"..."` to each discriminator entry when
+that flag is set, giving e.g. `"type"` vs. `"type..."`,
+`"nontype:int"` vs. `"nontype...:int"`. Regression test in
+`tests/test_entity_id_carrier.py`
+(`test_live_clang_template_param_packness_discriminates_overloaded_templates`),
+confirmed to fail against the pre-fix (kind-only) version.
+
 ---
 
 ### Phase 3 — public surface as a graph query over one evidence graph (D5)
