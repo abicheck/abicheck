@@ -57,10 +57,19 @@ def test_dump_fails_on_non_elf_input(tmp_path: Path) -> None:
     assert out.returncode != 0
     combined = out.stderr + out.stdout
     # Error message varies: old ELF-only builds say "Failed to parse ELF file",
-    # cross-platform builds say "Unrecognised binary format" or similar.
+    # cross-platform builds say "Unrecognised binary format" or similar, and
+    # `dump`'s real ELF run (since CLI cleanup phase two, PR C) now shares
+    # `service.resolve_input`'s canonical "Cannot detect format" wording with
+    # `compare`/`scan` instead of `dumper.dump`'s own bespoke ELF-only message.
     assert any(
         msg in combined
-        for msg in ("Failed to parse ELF file", "Unrecognised binary format", "unknown format", "not a valid")
+        for msg in (
+            "Failed to parse ELF file",
+            "Unrecognised binary format",
+            "unknown format",
+            "not a valid",
+            "Cannot detect format",
+        )
     ), f"Unexpected error output: {combined!r}"
 
 
