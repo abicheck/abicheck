@@ -4580,6 +4580,92 @@ looked like the obvious fix and wasn't.
   corpus to also parametrize over castxml is real, still-open follow-on
   work this phase did not attempt.
 
+  **Update (2026-08-29): the legacy-match threading half of blocker 2 is now
+  closed; routing `perform_elf_dump` itself through `execute_dump_request`
+  is still open.** This session re-read the exact mechanism the entry above
+  names (`cli_helpers_compare._resolve_build_context_flags`'s legacy
+  ``-p``/``--compile-db`` auto-match having no equivalent inside
+  `resolve_dump_request`/`execute_dump_request`) and closed the piece that
+  was safely landable without also restructuring `perform_elf_dump`'s own
+  try/except/cleanup structure in the same change:
+
+  1. `execute_dump_request` gained a new, purely additive
+     `legacy_compile_db_tokens: tuple[str, ...] = ()` parameter, threaded
+     down through `workflows.artifact.execute._resolve_side_snapshot_impl`
+     into `workflows.artifact.resolve._seeded_includes_and_compile_context`
+     — the exact same "optional pass-through, defaulted to a no-op, that
+     exists only for `dump`'s still-live CLI legacy flags" pattern
+     `build_config`/`build_query`/`build_compile_db` already established on
+     these same three functions (PR 3A). A caller that already computed the
+     legacy match's own derived flags (exactly what `dump_cmd` already does
+     via `_resolve_build_context_flags`, unchanged) can now thread them
+     through the typed pipeline and have them actually reach the real L2
+     header-AST parse (`service.resolve_input`'s `compile=` argument).
+  2. **Precedence preserved exactly**, mirroring `perform_elf_dump`'s own
+     "legacy-match overlap" fix this entry already documents: the tokens are
+     merged into the resolved `CompileContext.gcc_options` only when the
+     P0.3 fold's own `applied` came back `False` for a given header — when
+     the fold *does* apply, its own result is used verbatim and the legacy
+     tokens are discarded rather than stacked on top, verified by a
+     dedicated precedence test (see below) that pins the merged
+     `gcc_options`/`gcc_option_tokens` string as byte-identical between "no
+     legacy tokens" and "legacy tokens given" when the fold applies.
+  3. The merge helper (`_fold_legacy_compile_db_tokens`) is a small,
+     independent 3-line reimplementation of
+     `cli_helpers_compare._merge_gcc_options`'s ordering (legacy flags
+     prepended ahead of any existing `gcc_options`), not an import of that
+     function — `workflows/artifact/resolve.py` is an engine-layer module
+     under `scripts/check_ai_readiness.py`'s `engine-cli-boundary` check,
+     which forbids importing a `cli_*` sibling (that module itself imports
+     `click`). Confirmed via `check_ai_readiness.py`: zero new
+     `engine-cli-boundary` findings.
+  4. Verified end to end against a real `g++` build + real `compile_commands.json`
+     + real clang L2 parse, not only the merge helper in isolation
+     (`tests/test_legacy_compile_db_typed_threading.py`, 4/4 green): a
+     compile unit whose source text does not `#include` the public header
+     at all is exactly the shape where the two mechanisms provably disagree
+     — `header_compile_context.resolve_header_compile_context` (the P0.3
+     fold) returns `context=None` with **no union fallback** (confirmed by
+     reading its own docstring: "no header the given `CompileUnit`s
+     reference" degrades to nothing, full stop), while `build_context.
+     build_context_for_header` (the legacy match) falls back to
+     `build_context_union_fallback`, which still merges the compile
+     database's `-D`s and still sets `compile_db_path` (so
+     `_resolve_build_context_flags`'s own `matched` comes back `True`). One
+     test proves the real CLI already sees the union-fallback define (the
+     fixed point to reproduce); one proves the typed path does **not** see
+     it with the new parameter absent (proving the gap this closes was
+     real, and that the new parameter is genuinely opt-in rather than
+     silently changing existing callers' behavior); one proves the typed
+     path **does** see it, byte-identically to the CLI, once the CLI's own
+     already-computed `_resolve_build_context_flags` output is threaded
+     through `legacy_compile_db_tokens`; one proves the fold-wins precedence
+     holds when the fold does apply.
+
+  **What is explicitly still open, and why this session did not attempt
+  it**: `perform_elf_dump`'s primary parse (the first try block --
+  `seed_includes_and_fold_compile_context` + `dump()`) does **not** yet call
+  `execute_dump_request()` — the real `dump` CLI's ELF/PE/Mach-O run still
+  executes through `cli_dump_helpers.perform_elf_dump`/`handle_non_elf_dump`
+  exactly as before, so `dump_cmd` does not pass `legacy_compile_db_tokens`
+  anywhere yet (there is nowhere in it that calls `execute_dump_request` to
+  pass it to). Closing that remaining piece needs restructuring
+  `perform_elf_dump`'s own try/except/`ResolvedArtifactPlan` cleanup
+  handling to delegate to `execute_dump_request()` while preserving its
+  second try block's post-processing hooks (the ADR-039 collector's own
+  second call, the header-graph attach, the clang-layout-tool attach) as
+  hooks applied to the returned `DumpResult`'s snapshot — this entry's own
+  earlier sub-finding 1 already confirmed that keeping those hooks as a
+  second pass is safe/idempotent, so the remaining work is purely the
+  control-flow restructuring itself, not a new correctness question. Given
+  this exact code area's own history in this entry (18+ numbered findings
+  on the adjacent L3->L2-fold alone, several reverted-and-refixed), that
+  restructuring was deliberately left as its own, separately-reviewable
+  slice rather than folded into this one — consistent with how every prior
+  slice in this entry was landed one at a time. `cli_dump_request.py`'s own
+  module docstring and `service_dump_pipeline.execute_dump_request`'s
+  docstring both point back here for exactly what remains.
+
 - **Lambda-closure churn survives at the *function* level after the type-level
   fix — investigated, deliberately not patched (oneTBB flow-graph report,
   fresh evidence).** `name_classification._ANONYMOUS_TYPE_MARKERS` did not

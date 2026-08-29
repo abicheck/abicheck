@@ -5923,6 +5923,37 @@ scoped to "both backends" (dry-run resolution never invokes either
 compiler, so nothing about it is backend-specific), unlike the routing
 half's own now-corrected clang/castxml framing.
 
+**Update (2026-08-29): the design question named above is now answered and
+landed, but the routing itself is still open.** `execute_dump_request`
+gained an additive `legacy_compile_db_tokens: tuple[str, ...] = ()`
+parameter, threaded through `_resolve_side_snapshot_impl` into
+`_seeded_includes_and_compile_context` — the same "optional pass-through
+for `dump`'s still-live CLI legacy flags" shape `build_config`/
+`build_query`/`build_compile_db` already use on these same three
+functions, rather than a new `DumpRequest`/`CompileContext` field. That
+answers the design question the paragraph above left open: the legacy
+match's *derived* value stays out of `DumpRequest`/`CompileContext`
+entirely (preserving "records the run, not a second opinion about it"),
+and rides as a separate, explicitly-legacy parameter instead — a caller
+(today: nothing yet; `dump_cmd` itself still executes through
+`perform_elf_dump`, not `execute_dump_request`) that already computed the
+legacy match's flags can now thread them through and have them reach the
+real parse, with the P0.3 fold's own result still winning outright
+whenever it applies (verified by a dedicated precedence test — see
+`known-gaps.md`'s dated addendum to the "PR C" entry for the full
+mechanism and the real-`g++`-build regression test,
+`tests/test_legacy_compile_db_typed_threading.py`). **`perform_elf_dump`
+still does not call `execute_dump_request()`** — that remains exactly the
+routing restructuring described above (its own try/except/
+`ResolvedArtifactPlan` cleanup handling needs to delegate rather than
+call `dumper.dump()` directly, keeping the second try block's hooks
+applied to the returned `DumpResult`), left as its own slice for the same
+reason stated there: this exact code area's review history (18+ numbered
+findings on the adjacent fold alone) argues for landing one
+independently-verifiable piece at a time rather than combining the
+threading and the routing in one change. This phase's Acceptance criteria
+section is therefore still not met for the routing half.
+
 ---
 
 ### Phase 2 — `EntityId`/`ScopePath` as the one identity primitive

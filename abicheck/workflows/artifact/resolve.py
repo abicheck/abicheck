@@ -50,6 +50,7 @@ cycle (AGENTS.md "What NOT to do").
 
 from __future__ import annotations
 
+import dataclasses
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -288,6 +289,38 @@ def _gated_build_query_inputs(
     return gated_config, gated_query
 
 
+def _fold_legacy_compile_db_tokens(
+    ctx: CompileContext | None, tokens: tuple[str, ...]
+) -> CompileContext | None:
+    """Merge already-derived legacy ``-p``/``--compile-db`` castxml flags into
+    *ctx* (ADR-063 Phase 1 -- see ``docs/contribute/known-gaps.md``'s
+    "ADR-063 Phase 1" entry).
+
+    A no-op (*ctx* returned unchanged, ``None`` included) when *tokens* is
+    empty -- the overwhelmingly common case, since a caller passes a
+    non-empty tuple only when the CLI's own legacy ``-p``/``--compile-db``
+    auto-match genuinely derived something. Prepends *tokens* ahead of any
+    existing ``gcc_options``, mirroring
+    ``cli_helpers_compare._merge_gcc_options``'s own ordering exactly (that
+    function cannot be imported here: it lives in a ``cli_*`` module, and
+    this file is under ``workflows/artifact/`` -- an engine-layer tree
+    ``scripts/check_ai_readiness.py``'s ``engine-cli-boundary`` check
+    forbids importing a CLI sibling from) -- so the merged
+    ``gcc_options`` a real ``-p compile_commands.json`` run would produce is
+    identical byte-for-byte regardless of which path computed it.
+    """
+    if not tokens:
+        return ctx
+    base = ctx.gcc_options if ctx is not None else None
+    merged = " ".join(tokens)
+    gcc_options = f"{merged} {base}" if base else merged
+    if ctx is None:
+        from ...compile_context import CompileContext
+
+        return CompileContext(gcc_options=gcc_options)
+    return dataclasses.replace(ctx, gcc_options=gcc_options)
+
+
 def _seeded_includes_and_compile_context(
     side: InputSpec,
     evidence: SideEvidence,
@@ -300,6 +333,7 @@ def _seeded_includes_and_compile_context(
     allow_build_query: bool = False,
     build_config_locally_trusted: bool = False,
     collect_mode: str | None = None,
+    legacy_compile_db_tokens: tuple[str, ...] = (),
 ) -> tuple[list[Path], CompileContext | None, bool, list[Callable[[], None]]]:
     """This input's L2 include-dir seed *and* its P0.3 L3->L2 compile-context
     fold, resolved together in one L3 collection (PR C, typed dump/scan
@@ -375,6 +409,33 @@ def _seeded_includes_and_compile_context(
     primitive instead of a second, independent call to the same underlying
     function.
 
+    *legacy_compile_db_tokens* (ADR-063 Phase 1, threading the ``-p``/
+    ``--compile-db`` legacy auto-match into the typed pipeline -- see
+    ``docs/contribute/known-gaps.md``'s "ADR-063 Phase 1" entry for the
+    precise mechanism this closes): the castxml flags
+    ``cli_helpers_compare._resolve_build_context_flags`` already derived
+    from that *separate*, older ``build_context_for_header``/
+    ``build_context_union_fallback`` match -- passed in already-computed,
+    the same way ``perform_elf_dump``'s own ``legacy_build_context_flags``
+    parameter carries them, rather than re-derived here (this function has
+    no ``--compile-db``/``compile_db_filter`` matching logic of its own, and
+    must not grow a second one). Defaulted to ``()`` so every existing
+    caller is unaffected.
+
+    **Precedence, mirroring ``perform_elf_dump``'s own "legacy-match
+    overlap" fix exactly**: never fed to the P0.3 fold above as if it were
+    explicit user context -- ``ctx.gcc_options`` (this side's own
+    caller-supplied :class:`CompileContext`, never a legacy-derived value)
+    is the fold's only explicit input, same as it already was. The tokens
+    are folded in *after* the fold decides, only when the fold's own
+    ``applied`` came back ``False`` -- the fold's result wins and supersedes
+    the legacy match whenever the fold *does* match a header, identical to
+    ``perform_elf_dump``'s own reassignment. This is additive threading
+    only: no caller of this function is wired to actually pass a non-empty
+    tuple yet (that is ``dump_cmd``'s real-execution branch, which still
+    executes through ``perform_elf_dump``/``handle_non_elf_dump``, not this
+    typed pipeline -- see the known-gaps entry for what remains open).
+
     **Enforced here, not merely forwarded (Codex review, fresh evidence, two
     rounds)**: *allow_build_query* gates whether *build_config*/*build_query*
     — the two potentially-*executable* inputs — are forwarded at all, via the
@@ -415,7 +476,12 @@ def _seeded_includes_and_compile_context(
     never silently resolved by picking one).
     """
     if not (side.sources or side.build_info) or not evidence.headers:
-        return list(side.includes), evidence.compile, False, []
+        return (
+            list(side.includes),
+            _fold_legacy_compile_db_tokens(evidence.compile, legacy_compile_db_tokens),
+            False,
+            [],
+        )
     from ...buildsource.l2_seed import seed_includes_and_fold_compile_context
 
     # See _gated_build_query_inputs's own docstring: build_compile_db is a
@@ -467,4 +533,18 @@ def _seeded_includes_and_compile_context(
     # because unrelated build evidence was supplied and matched nothing.
     if not applied and ctx is None:
         effective_ctx = None
+    # ADR-063 Phase 1: the legacy `-p`/`--compile-db` auto-match's own
+    # already-derived flags are folded in ONLY when the P0.3 fold above did
+    # NOT itself apply -- the fold's result wins and supersedes the legacy
+    # match whenever the fold does match a header, exactly the same
+    # "legacy-match overlap" precedence `perform_elf_dump`'s own
+    # `l3_context_applied` reassignment already enforces for the CLI's
+    # real-execution path. `applied=True` means real L3 evidence was folded
+    # in above using `ctx.gcc_options` (never a legacy-derived value) as the
+    # fold's own explicit input, so the legacy tokens are simply discarded
+    # here rather than double-counted on top of it.
+    if not applied:
+        effective_ctx = _fold_legacy_compile_db_tokens(
+            effective_ctx, legacy_compile_db_tokens
+        )
     return includes, effective_ctx, applied, cleanups

@@ -444,6 +444,7 @@ def execute_dump_request(
     build_compile_db: str | None = None,
     changed_paths: tuple[str, ...] = (),
     allow_build_query: bool | None = None,
+    legacy_compile_db_tokens: tuple[str, ...] = (),
 ) -> DumpResult:
     """Execute a :class:`ResolvedDumpRequest` — steps 3-5 of
     :func:`run_dump_request`'s own docstring (``resolve_input``, the
@@ -463,6 +464,20 @@ def execute_dump_request(
     ``--build-compile-db``/``--config`` flags (until PR 3C removes them) to
     route through this one shared primitive instead of a second, independent
     call to the same underlying fold.
+
+    *legacy_compile_db_tokens* (ADR-063 Phase 1): the castxml flags the CLI's
+    own legacy ``-p``/``--compile-db`` auto-match
+    (``cli_helpers_compare._resolve_build_context_flags``) already derived,
+    forwarded verbatim to :func:`~abicheck.workflows.artifact.execute._resolve_side_snapshot_impl`
+    -- see that function's own docstring for the precedence rule (the P0.3
+    fold's own result wins whenever it applies) and
+    ``docs/contribute/known-gaps.md``'s "ADR-063 Phase 1" entry for exactly
+    what this closes and what still doesn't. Defaulted to ``()``, so every
+    pre-existing caller (including :func:`run_dump_request`) is unaffected.
+    Not yet passed by anything in the real ``dump`` CLI's ELF/PE/Mach-O
+    run -- that run still executes through
+    ``cli_dump_helpers.perform_elf_dump``/``handle_non_elf_dump``, not this
+    function, which is the remaining piece of the same known-gaps entry.
 
     Raises:
         ValidationError: If *resolved* requests a ``depth`` the resolved
@@ -527,6 +542,7 @@ def execute_dump_request(
         build_compile_db=build_compile_db,
         changed_paths=changed_paths,
         allow_build_query=allow_build_query,
+        legacy_compile_db_tokens=legacy_compile_db_tokens,
     )
     snap = resolution.snapshot
 
