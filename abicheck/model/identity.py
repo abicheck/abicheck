@@ -473,8 +473,20 @@ def canonicalize_type_param_references(
     index_by_name = {name: index for index, name in enumerate(type_param_names) if name}
     if not index_by_name:
         return spelling
+    # `(?<!::)` -- an EXPLICITLY globally-qualified name (`::T::X`) is a
+    # namespace lookup, not a dependent reference to a template parameter
+    # named `T`, even when the spelling happens to collide (confirmed by
+    # direct compilation: `namespace T { struct X {}; } template<class T>
+    # void f(::T::X);` keeps `::T::X` verbatim in clang's own `qualType` --
+    # it does NOT resolve to the parameter). Substituting it anyway
+    # produced unequal `EntityId`s for the identical declaration after
+    # renaming the (here, unused) template parameter, since only the
+    # colliding-name revision got rewritten (Codex review, PR #943). A
+    # bare `::` prefix (global scope, no preceding name) is the only
+    # legal spelling this can appear after in a type/expression spelling,
+    # so the lookbehind needs no alternation.
     pattern = re.compile(
-        r"\b(" + "|".join(re.escape(name) for name in index_by_name) + r")\b"
+        r"(?<!::)\b(" + "|".join(re.escape(name) for name in index_by_name) + r")\b"
     )
     return pattern.sub(lambda m: f"type-param-{index_by_name[m.group(1)]}", spelling)
 

@@ -8426,6 +8426,29 @@ strings the Windows CI log showed, confirmed to fail pre-fix via `git
 stash` on just the source files. Both originally-failing tests
 (unmodified) were re-verified to still pass on Linux.
 
+**Correction (2026-08-29, same day, Codex review on PR #943): the
+rename-blind substitution treated an EXPLICITLY globally-qualified name
+as a reference to a template parameter merely because it collided in
+spelling.** `canonicalize_type_param_references`'s whole-word
+substitution had no way to distinguish a genuine dependent reference
+from a name that only happens to share a spelling with the template
+parameter but is actually disambiguated to the global namespace by a
+leading `::`. Confirmed by direct compilation: `namespace T { struct X
+{}; } template<class T> void f(::T::X);` keeps `::T::X` verbatim in
+clang's own `qualType` (it does not resolve to the parameter), yet the
+substitution rewrote it to `::type-param-0::X` regardless -- so renaming
+the (here, unused) parameter to `U` left the second revision's `::T::X`
+untouched (since `"U"` doesn't match), producing unequal `EntityId`s for
+the identical declaration. Fixed by adding a `(?<!::)` negative
+lookbehind to the substitution pattern -- a bare `::` prefix (global
+scope, no preceding name) is the only legal spelling a name can appear
+after in this position, so no alternation is needed. Regression test in
+`tests/test_entity_id_template_discriminators.py`
+(`test_live_clang_globally_qualified_name_is_not_canonicalized_as_a_param_ref`),
+confirmed to fail pre-fix via `git stash` on just the source file; every
+existing rename-invariance test in that module (ordinary dependent
+references, none globally-qualified) still passes unchanged.
+
 ---
 
 ### Phase 3 — public surface as a graph query over one evidence graph (D5)

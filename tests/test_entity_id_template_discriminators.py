@@ -442,3 +442,35 @@ def test_live_clang_enclosing_class_template_param_rename_does_not_change_identi
         name="f",
     )
     assert a.entity_id is not None and a.entity_id == b.entity_id
+
+
+@pytest.mark.integration
+@pytest.mark.skipif(shutil.which("clang") is None, reason="clang not installed")
+def test_live_clang_globally_qualified_name_is_not_canonicalized_as_a_param_ref(
+    tmp_path: Path,
+) -> None:
+    """An EXPLICITLY globally-qualified name (`::T::X`) must NOT be
+    canonicalized as a reference to a template parameter merely because it
+    collides in spelling. `namespace T { struct X {}; } template<class T>
+    void f(::T::X);` keeps `::T::X` verbatim in clang's own `qualType` --
+    it does not resolve to the parameter -- so substituting it anyway
+    fingerprinted the (unused) parameter's own rename as a remove+add for
+    an otherwise-identical declaration (Codex review, PR #943)."""
+    a = _one(
+        _clang_parser(
+            "namespace T { struct X {}; } template<class T> void f(::T::X);",
+            tmp_path,
+            "gqa",
+        ).parse_functions(),
+        name="f",
+    )
+    b = _one(
+        _clang_parser(
+            "namespace T { struct X {}; } template<class U> void f(::T::X);",
+            tmp_path,
+            "gqb",
+        ).parse_functions(),
+        name="f",
+    )
+    assert a.entity_id is not None and a.entity_id == b.entity_id
+    assert a.entity_id.extra[1] == "::T::X"
