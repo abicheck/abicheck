@@ -95,6 +95,7 @@ from .context import (
     access_level,
     clang_deprecated_message,
     decl_is_public,
+    default_record_access as _default_record_access,
     is_builtin_file,
     qualtype,
     source_location,
@@ -417,11 +418,6 @@ def _make_field(
         ),
         deprecated=clang_deprecated_message(child),
     )
-
-
-def _default_record_access(node: dict[str, Any]) -> str:
-    """Default member access before any ``AccessSpecDecl`` (``class`` → private)."""
-    return "private" if node.get("tagUsed") == "class" else "public"
 
 
 def _clang_record_is_final(node: dict[str, Any]) -> bool:

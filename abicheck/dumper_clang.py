@@ -1167,8 +1167,9 @@ def _is_builtin_file(file: str) -> bool:
 
 
 def _default_record_access(node: dict[str, Any]) -> str:
-    """Default member access before any ``AccessSpecDecl`` (``class`` → private)."""
-    return "private" if node.get("tagUsed") == "class" else "public"
+    """See ``extract.headers.clang.context.default_record_access`` (the
+    canonical implementation this delegates to) for the full contract."""
+    return _clang_context.default_record_access(node)
 
 
 def _param_has_default(param: dict[str, Any]) -> bool:

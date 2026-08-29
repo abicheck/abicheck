@@ -217,6 +217,16 @@ def access_level(access: str) -> AccessLevel:
     return AccessLevel.PUBLIC
 
 
+def default_record_access(node: dict[str, Any]) -> str:
+    """Default member access before any ``AccessSpecDecl`` (``class`` ->
+    private). Read by both the shared ``_walk`` traversal (``dumper_clang.py``)
+    and record-entity field parsing (``records.py``) -- a second, previously
+    undetected copy of this predicate is exactly the divergence risk this
+    module's own "more than one entity kind" rule exists to close (Codex
+    review, PR #940)."""
+    return "private" if node.get("tagUsed") == "class" else "public"
+
+
 def symbol_candidates(mangled: str) -> tuple[str, ...]:
     """The mangled name plus, on a leading underscore, its de-prefixed form.
 
