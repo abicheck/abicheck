@@ -6521,6 +6521,62 @@ independently of that work), then (b) migrate `diff_filtering.py`/
 `finding_identity.py` algorithm migration and the storage v2 wire bridge,
 each as their own reviewable slice.
 
+**Correction (2026-08-29, same day, Codex review on PR #941): two real
+discriminator gaps in `entity_id_for_function` fixed, both traced to the
+same root cause -- the constructor accepted a strict subset of the
+dimensions `finding_identity.resolve_function_identity` already treats as
+load-bearing, so a caller reproducing that resolver's own contract through
+this constructor could not.** (1) An `extern "C"` producer follows
+*mangled_name*'s own documented contract and passes `None` for it (its raw
+export spelling is not a genuine mangling) -- with no separate linkage
+signal, that fell through to the signature-based fallback branch, so a
+changed parameter list on a genuinely-non-overloadable C-linkage function
+produced two ids instead of one modification, defeating the name-based
+extern-C fallback the rest of the codebase relies on. Fixed by adding an
+explicit `is_extern_c: bool = False` parameter that takes a third,
+signature-free `("extern_c",)` branch, mirroring `resolve_function_
+identity`'s own `func.is_extern_c` gate. (2) The signature fallback carried
+only `param_types`/`cv_qualifiers`, missing the two dimensions
+`resolve_function_identity` already folds in (`ref_qualifier`,
+`is_variadic`) -- `C::f() &` vs. `C::f() &&`, and `void f(int)` vs.
+`void f(int, ...)`, both collided. Fixed by adding `ref_qualifier: str = ""`
+and `is_variadic: bool | None = None` parameters, folded into the tagged
+`("sig", ...)` tuple; `is_variadic` stays a tri-state (not defaulting to
+`False`) for the same reason `resolve_function_identity` keeps it one --
+"doesn't know" must not silently collapse onto "confirmed non-variadic".
+Both fixes are additive keyword-only parameters with backward-compatible
+defaults; no existing call site changes behavior (there are none outside
+this module's own tests yet). Six new tests in `tests/test_model_identity.py`
+pin each new dimension, the three-way tag disjointness, the tri-state
+`is_variadic`, and that a genuine `mangled_name` still wins outright and
+ignores every other dimension.
+
+**Correction (2026-08-29, same day, CodeRabbit review on PR #941): the
+Design section above states `LocalToFunction(owner)` as a single-field
+segment, but that is an under-specification the same review caught for
+real -- fixed by adding `block_ordinal`, a required second field.**
+`owner` alone disambiguates two same-named locals declared in *different*
+functions, but not two same-named locals in *sibling compound blocks of
+the same function* (`void f() { { struct A {}; } { struct A {}; } }` --
+two distinct declarations, identical `owner`, identical leaf name, so both
+would collapse onto one `EntityId` under the Design section's original
+single-field shape). `block_ordinal` closes this exactly the way
+`Anonymous.ordinal` already closes the structurally identical
+sibling-anonymous-scope case: a deterministic per-function sequence
+number assigned at parse time, stable within one parse only -- the
+identical accepted, documented limitation `Anonymous` already states (an
+inserted or removed earlier local block shifts every later sibling's
+ordinal and therefore its whole `EntityId`, even though nothing about
+those later declarations changed). No default value, matching
+`Anonymous.ordinal`, since nothing constructs a `LocalToFunction` outside
+this module's own tests yet -- a caller must supply a real value rather
+than silently under-specifying identity via an unwired default. The code
+docstring's original "Both fields are identity" language was already
+correct in intent (mirroring `Anonymous`'s own phrasing) but described a
+struct that, before this correction, had only one field -- a real
+inconsistency between the stated contract and the actual shape, not just
+prose.
+
 ---
 
 ### Phase 3 — public surface as a graph query over one evidence graph (D5)

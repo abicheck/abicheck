@@ -195,10 +195,28 @@ class Anonymous:
 
 @dataclass(frozen=True)
 class LocalToFunction:
-    """A scope local to one function body. Both fields are identity --
-    nothing else disambiguates two same-named locals in one function."""
+    """A scope local to one function body.
+
+    Both fields are identity, deliberately, for exactly the reason
+    :class:`Anonymous` gives for its own ``ordinal``: ``owner`` alone
+    disambiguates two same-named locals across *different* functions, but
+    not two same-named locals in *sibling compound blocks of the same
+    function* (``void f() { { struct A {}; } { struct A {}; } }`` -- two
+    distinct declarations, same ``owner``, same leaf name). ``block_ordinal``
+    closes that gap the same way ``Anonymous.ordinal`` closes its sibling
+    case: a deterministic per-function sequence number assigned at parse
+    time, stable *within one parse*, not across revisions -- the identical
+    accepted, documented limitation :class:`Anonymous` already states (an
+    edit that adds or removes an earlier local block shifts every later
+    sibling's ordinal and therefore its whole ``EntityId``, even though
+    nothing about those later declarations changed). No default is given,
+    matching :class:`Anonymous.ordinal` for the same reason: a caller must
+    supply a real value rather than silently under-specifying identity by
+    relying on an unwired default.
+    """
 
     owner: str
+    block_ordinal: int
 
 
 ScopeSegment = Namespace | Record | InlineNamespace | Anonymous | LocalToFunction
@@ -312,8 +330,11 @@ def entity_id_for_function(
     leaf_name: str,
     *,
     mangled_name: str | None = None,
+    is_extern_c: bool = False,
     param_types: tuple[str, ...] = (),
     cv_qualifiers: tuple[str, ...] = (),
+    ref_qualifier: str = "",
+    is_variadic: bool | None = None,
 ) -> EntityId:
     """``EntityId`` for a function.
 
@@ -324,37 +345,66 @@ def entity_id_for_function(
     ``finding_identity.resolve_function_identity``/``SymbolIdentityIndex``
     and ADR-048's normalized identity already establish: mangled name first
     when one exists (the common case, already globally unique per
-    overload) -- ``extra`` becomes ``("mangled", mangled_name)`` -- and only
-    for the genuinely mangling-free case (a non-``extern "C"`` function on a
-    DWARF-only snapshot) does ``extra`` fall back to the normalized
-    signature discriminator, ``("sig", *param_types, *cv_qualifiers)``.
-    Unlike ``finding_identity.normalized_signature``'s own fallback tuple,
-    the callable's qualified name does *not* need to be repeated inside
+    overload) -- ``extra`` becomes ``("mangled", mangled_name)``. Next,
+    *is_extern_c* (a genuinely mangling-free C-linkage function -- ``extra``
+    becomes the bare ``("extern_c",)`` tag, deliberately dropping every
+    signature dimension: C has no overload resolution, so a changed
+    parameter list is a modification of the one function named
+    ``leaf_name``, not a different overload -- the same rule
+    ``finding_identity.resolve_function_identity`` documents and applies via
+    ``func.is_extern_c``). Only for the remaining case -- a non-``extern
+    "C"`` function with no real mangling (a DWARF-only snapshot, which
+    *can* be legally overloaded) -- does ``extra`` fall back to the
+    normalized signature discriminator, ``("sig", *param_types,
+    *cv_qualifiers, ref_qualifier, is_variadic)``. ``ref_qualifier``
+    (``"&"``/``"&&"``/``""``) and ``is_variadic`` mirror
+    ``resolve_function_identity``'s own fallback dimensions -- without them
+    ``C::f() &`` vs. ``C::f() &&``, or ``void f(int)`` vs. ``void f(int,
+    ...)``, would collide on identical scope/name/param_types/cv_qualifiers.
+    ``is_variadic`` is ``bool | None`` rather than defaulting to ``False``
+    so a producer that genuinely doesn't know stays distinguishable from one
+    that confirmed non-variadic, the same reason
+    ``resolve_function_identity`` keeps that tri-state. Unlike
+    ``finding_identity.normalized_signature``'s own fallback tuple, the
+    callable's qualified name does *not* need to be repeated inside
     ``extra`` here -- ``scope``/``leaf_name`` already carry it losslessly,
     with no string-joining involved, so there is nothing left for the
     fallback tuple to lose by omitting it.
 
-    Both branches are tagged (``"mangled"``/``"sig"``) rather than left as a
-    bare tuple, so a mangled name that happens to equal some function's
-    literal signature-tuple spelling can never collide with it -- the two
-    branches occupy disjoint regions of ``extra``'s value space by
-    construction, not by coincidence of what real mangled names or type
-    spellings look like.
+    All three branches are tagged (``"mangled"``/``"extern_c"``/``"sig"``)
+    rather than left as a bare tuple, so a mangled name that happens to
+    equal some function's literal signature-tuple spelling can never
+    collide with it -- the branches occupy disjoint regions of ``extra``'s
+    value space by construction, not by coincidence of what real mangled
+    names or type spellings look like.
 
     *mangled_name* must already be established as a genuine mangling by the
     caller -- see this module's docstring for why that determination is not
-    made here. When a genuine mangled name is supplied, *param_types*/
-    *cv_qualifiers* are ignored (an ``extern "C"`` function has no
-    overloading, so a changed parameter list is a modification of the one
-    function named ``leaf_name``, not a different overload -- the same rule
-    ``finding_identity.resolve_function_identity`` already documents and
-    applies).
+    made here. *is_extern_c* is a separate, caller-supplied linkage signal:
+    an ``extern "C"`` producer's ``mangled_name`` is typically ``None``
+    (its raw export spelling is not a genuine mangling, so a caller
+    following *mangled_name*'s own contract passes ``None`` for it) --
+    *is_extern_c* is what tells this constructor to still take the
+    signature-free branch in that case, rather than silently falling
+    through to the signature-based fallback the way a caller relying on
+    ``mangled_name`` alone would. When *mangled_name* is genuinely present,
+    it wins outright and *is_extern_c*/*param_types*/*cv_qualifiers*/
+    *ref_qualifier*/*is_variadic* are all ignored -- there is nothing left
+    for a signature-free tag to add once the mangled name already
+    disambiguates the declaration.
     """
-    extra = (
-        ("mangled", mangled_name)
-        if mangled_name
-        else ("sig", *param_types, *cv_qualifiers)
-    )
+    if mangled_name:
+        extra: tuple[str, ...] = ("mangled", mangled_name)
+    elif is_extern_c:
+        extra = ("extern_c",)
+    else:
+        extra = (
+            "sig",
+            *param_types,
+            *cv_qualifiers,
+            ref_qualifier,
+            str(is_variadic),
+        )
     return EntityId(
         scope=_scope_path(scope),
         kind=EntityKind.FUNCTION,

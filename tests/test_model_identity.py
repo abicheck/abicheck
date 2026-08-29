@@ -165,7 +165,28 @@ class TestLocalToFunctionOwnerIsIdentity:
     def test_distinct_owner_never_equal(self, owner_a: str, owner_b: str) -> None:
         if owner_a == owner_b:
             return
-        assert LocalToFunction(owner=owner_a) != LocalToFunction(owner=owner_b)
+        assert LocalToFunction(owner=owner_a, block_ordinal=0) != LocalToFunction(
+            owner=owner_b, block_ordinal=0
+        )
+
+    @given(owner=_names, ordinal_a=_ordinals, ordinal_b=_ordinals)
+    def test_distinct_block_ordinal_never_equal(
+        self, owner: str, ordinal_a: int, ordinal_b: int
+    ) -> None:
+        # CodeRabbit-flagged gap: owner alone doesn't disambiguate two
+        # same-named locals in sibling compound blocks of one function --
+        # the same sibling-collision shape Anonymous.ordinal already closes.
+        if ordinal_a == ordinal_b:
+            return
+        assert LocalToFunction(owner=owner, block_ordinal=ordinal_a) != LocalToFunction(
+            owner=owner, block_ordinal=ordinal_b
+        )
+
+    @given(owner=_names, ordinal=_ordinals)
+    def test_same_owner_and_block_ordinal_equal(self, owner: str, ordinal: int) -> None:
+        assert LocalToFunction(owner=owner, block_ordinal=ordinal) == LocalToFunction(
+            owner=owner, block_ordinal=ordinal
+        )
 
 
 class TestSegmentsAreHashable:
@@ -179,7 +200,7 @@ class TestSegmentsAreHashable:
             Record(name="C", access="private"),
             InlineNamespace(name="v1", version_tag="v1"),
             Anonymous(kind="struct", ordinal=0),
-            LocalToFunction(owner="f"),
+            LocalToFunction(owner="f", block_ordinal=0),
         ]
         as_set = set(segments)
         assert len(as_set) == len(segments)
@@ -294,6 +315,81 @@ class TestFunctionOverloadDiscrimination:
         a = entity_id_for_function(scope, "f", mangled_name="_Z1fi")
         b = entity_id_for_function(scope, "f", mangled_name="_Z1fd")
         assert a != b
+
+    def test_extern_c_ignores_param_types(self) -> None:
+        # The Codex-flagged gap: an extern "C" caller follows mangled_name's
+        # own contract and passes None for it (the raw export spelling is
+        # not a genuine mangling) -- without is_extern_c, that falls
+        # through to the signature branch and a parameter-type change would
+        # wrongly look like a different overload. C has no overload
+        # resolution, so this must collapse to one id, mirroring
+        # resolve_function_identity's func.is_extern_c gate.
+        scope = (Namespace("ns"),)
+        a = entity_id_for_function(scope, "f", is_extern_c=True, param_types=("int",))
+        b = entity_id_for_function(
+            scope, "f", is_extern_c=True, param_types=("double", "int")
+        )
+        assert a == b
+
+    def test_extern_c_tag_never_collides_with_sig_tag(self) -> None:
+        # ("extern_c",) and ("sig", ...) must occupy disjoint regions of
+        # extra's value space, same discipline as ("mangled", ...) vs.
+        # ("sig", ...).
+        scope = (Namespace("ns"),)
+        extern_c = entity_id_for_function(scope, "f", is_extern_c=True)
+        sig = entity_id_for_function(scope, "f")
+        assert extern_c != sig
+
+    def test_ref_qualifier_distinguishes_overloads(self) -> None:
+        # The other Codex-flagged gap: C::f() & vs. C::f() && share scope,
+        # name, param_types, and cv_qualifiers -- only ref_qualifier tells
+        # them apart, mirroring resolve_function_identity's own dimension.
+        scope = (Record("C"),)
+        lvalue = entity_id_for_function(scope, "f", ref_qualifier="&")
+        rvalue = entity_id_for_function(scope, "f", ref_qualifier="&&")
+        assert lvalue != rvalue
+
+    def test_variadic_distinguishes_overloads(self) -> None:
+        # void f(int) vs. void f(int, ...) share identical fixed
+        # parameters -- only is_variadic tells them apart.
+        scope = (Namespace("ns"),)
+        fixed = entity_id_for_function(
+            scope, "f", param_types=("int",), is_variadic=False
+        )
+        variadic = entity_id_for_function(
+            scope, "f", param_types=("int",), is_variadic=True
+        )
+        assert fixed != variadic
+
+    def test_variadic_none_is_distinct_from_confirmed_states(self) -> None:
+        # bool | None: a producer that doesn't know must not silently
+        # collapse onto "confirmed non-variadic", the same tri-state
+        # resolve_function_identity's own f"variadic:{func.is_variadic}"
+        # preserves.
+        scope = (Namespace("ns"),)
+        unknown = entity_id_for_function(scope, "f", is_variadic=None)
+        confirmed_false = entity_id_for_function(scope, "f", is_variadic=False)
+        confirmed_true = entity_id_for_function(scope, "f", is_variadic=True)
+        assert unknown != confirmed_false
+        assert unknown != confirmed_true
+        assert confirmed_false != confirmed_true
+
+    def test_mangled_name_wins_over_extern_c_and_ignores_signature_dims(self) -> None:
+        # When a genuine mangled name is present, it wins outright --
+        # is_extern_c/ref_qualifier/is_variadic are all ignored, matching
+        # the plain param_types/cv_qualifiers precedence already pinned by
+        # test_mangled_name_present_ignores_param_types.
+        scope = (Namespace("ns"),)
+        a = entity_id_for_function(
+            scope,
+            "f",
+            mangled_name="_Z1fv",
+            is_extern_c=True,
+            ref_qualifier="&",
+            is_variadic=True,
+        )
+        b = entity_id_for_function(scope, "f", mangled_name="_Z1fv")
+        assert a == b
 
 
 class TestVariableMangledDiscriminator:
