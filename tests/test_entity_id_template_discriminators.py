@@ -1045,3 +1045,42 @@ def test_live_clang_string_literal_in_return_type_does_not_confuse_paren_scan(
     assert f.return_type == 'decltype("(")'
     assert g.return_type == 'decltype(")")'
     assert f.return_type != g.return_type
+
+
+@pytest.mark.integration
+@pytest.mark.skipif(shutil.which("clang") is None, reason="clang not installed")
+def test_live_clang_decltype_dereferenced_cast_is_not_mistaken_for_spiral_declarator(
+    tmp_path: Path,
+) -> None:
+    """A `decltype` operand that happens to start with a bare `*` sigil
+    followed by a parenthesized group -- a dereferenced C-style cast, not a
+    declarator -- must not be mistaken for a spiral (function-pointer-
+    returning) declarator: `template<class T> decltype(*(typename T::x
+    *)0) f(T);`'s `qualType` is `"decltype(*(typename T::x *)0) (T)"`
+    (confirmed by direct compilation, alongside a legal, distinct `T::y`
+    sibling) -- `_is_spiral_wrapper_prefix` matched the leading `*` and
+    treated the whole dependent operand as a spiral wrapper, discarding it
+    via `_excise_own_param_list` and collapsing both overloads onto the
+    identical `"decltype (*()0) (T)"` (Codex review, PR #943, on a later
+    round). The two must resolve to distinct return types, preserving the
+    entire dependent expression verbatim."""
+    s = "struct S { using x = int; using y = double; };\n"
+    f = _one(
+        _clang_parser(
+            s + "template<class T> decltype(*(typename T::x *)0) f(T);",
+            tmp_path,
+            "decltypederefa",
+        ).parse_functions(),
+        name="f",
+    )
+    g = _one(
+        _clang_parser(
+            s + "template<class T> decltype(*(typename T::y *)0) g(T);",
+            tmp_path,
+            "decltypederefb",
+        ).parse_functions(),
+        name="g",
+    )
+    assert f.return_type == "decltype(*(typename T::x *)0)"
+    assert g.return_type == "decltype(*(typename T::y *)0)"
+    assert f.return_type != g.return_type

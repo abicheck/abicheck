@@ -160,8 +160,31 @@ def _is_spiral_wrapper_prefix(interior: str) -> bool:
     round still).
     """
     spans = _top_level_paren_spans(interior)
-    prefix = interior[: spans[0][0]].strip() if spans else interior.strip()
-    return prefix in ("*", "&", "&&", "^") or prefix.endswith("::*")
+    if not spans:
+        return False
+    prefix = interior[: spans[0][0]].strip()
+    if prefix not in ("*", "&", "&&", "^") and not prefix.endswith("::*"):
+        return False
+    # A sigil immediately followed by a parenthesized group is not enough
+    # on its own -- a `decltype` operand can spell an unrelated expression
+    # that happens to start with the identical shape, e.g. a dereferenced
+    # C-style cast: `decltype(*(typename T::x *)0)`'s first_interior is
+    # `*(typename T::x *)0`, whose prefix is the bare sigil `*` too.
+    # Confirmed by direct compilation that this and its `T::y` sibling are
+    # legal, distinct overloads (Codex review, PR #943, on a later round)
+    # -- treating it as a spiral wrapper discarded the entire dependent
+    # operand via `_excise_own_param_list`, collapsing both to the
+    # identical `"decltype (*()0) (T)"`. What follows a GENUINE spiral
+    # wrapper's first nested group is never arbitrary expression text: it
+    # is either nothing, the original function's own exception
+    # specification, or a further-nested spiral level's own parameter
+    # list (verbatim ``(...)``) -- never a bare token like the `0` above.
+    remainder = interior[spans[0][1] :].strip()
+    if not remainder:
+        return True
+    if _LEADING_EXCEPTION_SPEC_RE.match(remainder):
+        return True
+    return remainder.startswith("(")
 
 
 def _excise_own_param_list(s: str) -> str:

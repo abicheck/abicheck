@@ -8911,6 +8911,34 @@ module still passes unchanged. `mypy abicheck/` clean (515 files),
 errors (confirming the new `extract -> model` import introduces no
 cycle).
 
+**Correction (2026-08-29, same day, Codex review on PR #943): the
+spiral-declarator sigil check alone was too permissive, matching a
+`decltype` operand's own unrelated expression syntax.** Confirmed by
+direct compilation: `template<class T> decltype(*(typename T::x *)0)
+f(T);`'s `qualType` is `"decltype(*(typename T::x *)0) (T)"` -- a
+dereferenced C-style cast, not a declarator, whose first top-level
+group's interior (`*(typename T::x *)0`) nonetheless starts with the
+bare sigil `*` that `_is_spiral_wrapper_prefix` treats as a
+function-pointer-return marker. The check fired, and
+`_excise_own_param_list` discarded the entire dependent operand,
+collapsing this and a legal `T::y` sibling onto the identical
+`"decltype (*()0) (T)"`. Fixed by requiring `_is_spiral_wrapper_prefix`
+to also validate what follows the sigil's first nested group: nothing,
+the original function's own exception specification, or a
+further-nested spiral level's own parameter list (verbatim `(...)`) are
+all genuine declarator continuations; anything else (here, the bare
+token `0`) is expression text, not a declarator, and the check now
+returns `False` for it, falling through correctly to the scan-from-end
+branch, which keeps the entire dependent operand verbatim as
+distinguishing return-type content. Regression test in
+`tests/test_entity_id_template_discriminators.py`
+(`test_live_clang_decltype_dereferenced_cast_is_not_mistaken_for_spiral_declarator`),
+confirmed to fail pre-fix via `git stash` on just the source file and
+pass post-fix; every existing return-type discriminator test in that
+module (spiral pointer/reference/member-pointer/block-pointer cases
+included) still passes unchanged. `mypy abicheck/` clean, `ruff check`/
+`ruff format --check` clean, `check_architecture.py` 0 errors.
+
 ---
 
 ### Phase 3 — public surface as a graph query over one evidence graph (D5)
