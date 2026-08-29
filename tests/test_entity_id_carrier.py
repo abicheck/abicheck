@@ -650,3 +650,87 @@ def test_macho_normalization_resynchronizes_entity_id_mangled_tag() -> None:
     assert reconciled is not None
     assert reconciled.entity_id is not None
     assert reconciled.entity_id.extra == ("mangled", stripped)
+
+
+def _mangled_rewrite_sites() -> list[tuple[str, int, bool]]:
+    """Every post-parse rewrite of a declaration's ``mangled`` field.
+
+    Returns ``(path, line, keeps_carrier_in_sync)`` for each
+    ``dataclasses.replace(..., mangled=...)`` call anywhere under
+    ``abicheck/`` — a real AST scan for the keyword, not a textual match,
+    so a ``mangled`` mentioned in a docstring or a differently-named
+    keyword is not counted.
+    """
+    sites: list[tuple[str, int, bool]] = []
+    for path in sorted(_ABICHECK_ROOT.rglob("*.py")):
+        tree = ast.parse(path.read_text(), filename=str(path))
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            func = node.func
+            called = (
+                func.id
+                if isinstance(func, ast.Name)
+                else func.attr
+                if isinstance(func, ast.Attribute)
+                else ""
+            )
+            if called != "replace":
+                continue
+            keywords = {kw.arg for kw in node.keywords}
+            if "mangled" not in keywords:
+                continue
+            sites.append(
+                (
+                    path.relative_to(_ABICHECK_ROOT.parent).as_posix(),
+                    node.lineno,
+                    "entity_id" in keywords,
+                )
+            )
+    return sites
+
+
+class TestMangledRewritesKeepTheCarrierInSync:
+    """A rewrite of ``mangled`` must rewrite ``entity_id`` alongside it.
+
+    A function's/variable's ``EntityId`` is *derived* from its mangled
+    spelling (``extra=("mangled", ...)``), so any code that re-spells
+    ``mangled`` after a producer already resolved the identity leaves the
+    carrier pointing at a name that may no longer exist. That is not
+    hypothetical: ``dumper_hybrid.py`` does exactly this in two places —
+    reconciling a castxml synthetic ctor/dtor placeholder key to clang's
+    real mangling, and normalizing a Mach-O linker symbol's leading
+    underscore — and both silently desynced the carrier until review caught
+    it (Codex, PR #943).
+
+    This is the third distinct way an "inert, purely additive" field turned
+    out not to be inert (the other two: a generic object-graph walk that
+    crashed on the frozen carrier, and an over-broad ``extern "C"``
+    predicate feeding the resolver). Three one-off fixes do not close a
+    class, so the invariant is stated mechanically here: the audit that
+    found all three sites is only true on the day it was run, and a fourth
+    rewrite added later would desync in silence exactly like the first
+    three did.
+    """
+
+    def test_every_mangled_rewrite_also_rewrites_the_carrier(self) -> None:
+        desynced = [
+            f"{path}:{line}"
+            for path, line, in_sync in _mangled_rewrite_sites()
+            if not in_sync
+        ]
+        assert desynced == [], (
+            "these sites re-spell `mangled` without updating `entity_id`, "
+            "leaving the identity carrier pointing at a stale spelling; pass "
+            "`entity_id=model.identity.with_mangled_name(<old>, <new>)` (or "
+            "the matching declaration's own already-resolved entity_id) "
+            f"alongside it: {desynced}"
+        )
+
+    def test_the_scan_actually_finds_the_known_rewrite_sites(self) -> None:
+        # A guard on the guard: an assertion that only ever sees an empty
+        # list passes just as happily against a scanner that matches
+        # nothing. These are the real rewrites the audit found.
+        found = {path for path, _line, _sync in _mangled_rewrite_sites()}
+        assert "abicheck/dumper_hybrid.py" in found, found
+        assert len(_mangled_rewrite_sites()) >= 3, _mangled_rewrite_sites()

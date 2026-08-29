@@ -484,6 +484,54 @@ _FUNCTION_NODE_KINDS = frozenset(
 _BUILTIN_FILES = _clang_context.BUILTIN_FILES
 
 
+def _function_template_param_kinds(function_template_decl: dict[str, Any]) -> tuple[str, ...]:
+    """The per-position parameter-KIND signature of a ``FunctionTemplateDecl``'s
+    own (uninstantiated) template parameter list, in declaration order.
+
+    Distinguishes ``template<class T> void f();`` from ``template<int N>
+    void f();`` -- two distinct, legally-overloaded declarations (real C++:
+    explicit-template-argument calls like ``f<5>()`` disambiguate them)
+    that otherwise share the identical scope, leaf name, and (empty)
+    ordinary parameter list. Neither ever gets a real ``mangledName`` from
+    clang (confirmed by direct compilation: the key is absent entirely, not
+    merely empty, for an uninstantiated template), so
+    ``entity_id_for_function``'s "sig" signature-fallback tuple -- built
+    only from ordinary `param_types`/qualifiers -- could not tell them
+    apart either, collapsing two real declarations onto one ``EntityId``
+    (Codex review, fresh evidence).
+
+    Each entry is ``"type"`` (a ``TemplateTypeParmDecl``), ``"template"`` (a
+    ``TemplateTemplateParmDecl``), or ``"nontype:<type-spelling>"`` (a
+    ``NonTypeTemplateParmDecl``, keyed on its own declared type so
+    ``template<int N>`` and ``template<bool B>`` stay distinguishable too).
+    Stops at the first non-parameter child, mirroring
+    ``extract.headers.clang.templates._template_param_kinds``'s identical
+    convention for a ``ClassTemplateDecl``'s own list -- the parameter list
+    always precedes the pattern's own body in ``inner`` order. Returns
+    ``()`` for a node with no parameters at all, which is never actually
+    reachable (a ``FunctionTemplateDecl`` always has at least one), but
+    keeps the function total rather than assuming.
+    """
+    kinds: list[str] = []
+    for child in function_template_decl.get("inner", []) or []:
+        if not isinstance(child, dict):
+            continue
+        kind = child.get("kind")
+        if kind == "TemplateTypeParmDecl":
+            kinds.append("type")
+        elif kind == "TemplateTemplateParmDecl":
+            kinds.append("template")
+        elif kind == "NonTypeTemplateParmDecl":
+            type_obj = child.get("type")
+            spelling = (
+                str(type_obj.get("qualType", "")) if isinstance(type_obj, dict) else ""
+            )
+            kinds.append(f"nontype:{spelling}")
+        else:
+            break
+    return tuple(kinds)
+
+
 def _pointer_depth(type_str: str) -> int:
     """See ``extract.headers.clang.functions._pointer_depth`` (the canonical
     implementation this delegates to) for the full contract."""
