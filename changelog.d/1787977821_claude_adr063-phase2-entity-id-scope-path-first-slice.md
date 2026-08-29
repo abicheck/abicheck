@@ -41,4 +41,14 @@
   canonicalized via `name_classification.canonicalize_type_name` before
   joining into `extra`, so CastXML's and Clang's differing spellings of an
   otherwise-identical parameter type no longer fragment identity across
-  header-AST backends.
+  header-AST backends. `entity_id_for_function`'s `mangled` branch also
+  now returns `scope=()` (matching `resolve_symbol_identity`'s real
+  `f"mangled:{real_mangled}"` primary id, which folds in no scope at all)
+  -- a genuine mangled name already fully encodes scope, so keeping a
+  caller-supplied `scope` fragmented identity across evidence tiers that
+  differ in whether they can supply one, the same problem the
+  `is_extern_c` branch was fixed for. `entity_id_for_variable` gained the
+  same `is_extern_c` parameter `entity_id_for_function` has, and its
+  `mangled`/`is_extern_c` branches get the identical `scope=()` treatment
+  -- closing the same gap for variables that had no linkage signal at all
+  before this fix.

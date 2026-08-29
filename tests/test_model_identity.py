@@ -445,13 +445,27 @@ class TestFunctionOverloadDiscrimination:
         bar = entity_id_for_function((), "bar", is_extern_c=True)
         assert foo != bar
 
-    def test_mangled_and_sig_branches_keep_caller_supplied_scope(self) -> None:
-        # Contrast with the extern-C branch above: neither the mangled nor
-        # the sig fallback branch has an evidence-tier scope-availability
-        # problem to guard against, so scope stays exactly as given.
-        ns_a = entity_id_for_function((Namespace("a"),), "f", mangled_name="_Z1fv")
-        ns_b = entity_id_for_function((Namespace("b"),), "f", mangled_name="_Z1fv")
-        assert ns_a != ns_b
+    def test_mangled_name_identity_is_also_independent_of_scope(self) -> None:
+        # The Codex-flagged gap this corrects: a real mangled name already
+        # fully and deterministically encodes scope, so folding a caller-
+        # supplied scope on top only fragments identity across evidence
+        # tiers that differ in whether they can supply one -- the same
+        # mechanism the is_extern_c branch guards against, not a
+        # different, harmless case (an earlier revision of this test and
+        # the code's own docstring both wrongly assumed it was).
+        namespaced = entity_id_for_function(
+            (Namespace("ns"),), "f", mangled_name="_Z1fv"
+        )
+        no_scope = entity_id_for_function((), "f", mangled_name="_Z1fv")
+        assert namespaced == no_scope
+        assert namespaced.scope == ()
+
+    def test_sig_branch_keeps_caller_supplied_scope(self) -> None:
+        # Contrast with the mangled/extern-C branches above: a DWARF-only,
+        # mangling-free, non-extern-"C" function has no authoritative,
+        # scope-independent name to fall back on, so scope is exactly what
+        # makes two same-named, same-signature sibling declarations in
+        # different scopes distinct.
         sig_a = entity_id_for_function((Namespace("a"),), "f")
         sig_b = entity_id_for_function((Namespace("b"),), "f")
         assert sig_a != sig_b
@@ -486,6 +500,42 @@ class TestVariableMangledDiscriminator:
         scope = (Namespace("ns"),)
         a = entity_id_for_variable(scope, "v")
         b = entity_id_for_variable(scope, "v")
+        assert a == b
+
+    def test_mangled_name_identity_is_independent_of_scope(self) -> None:
+        # Same Codex-flagged gap as entity_id_for_function's mangled
+        # branch: a genuine mangled name already fully encodes scope, so a
+        # header/DWARF observation and an export-only observation of the
+        # identical symbol must produce the same EntityId.
+        namespaced = entity_id_for_variable((Namespace("ns"),), "v", mangled_name="_Zv")
+        no_scope = entity_id_for_variable((), "v", mangled_name="_Zv")
+        assert namespaced == no_scope
+        assert namespaced.scope == ()
+
+    def test_extern_c_variable_ignores_param_evidence_free_signature(self) -> None:
+        # The other Codex-flagged gap: an extern "C" variable caller
+        # follows mangled_name's own contract and passes None for it, but
+        # entity_id_for_variable had no equivalent linkage signal at all --
+        # is_extern_c closes that the same way it does for functions.
+        scope = (Namespace("ns"),)
+        a = entity_id_for_variable(scope, "v", is_extern_c=True)
+        b = entity_id_for_variable((), "v", is_extern_c=True)
+        assert a == b
+        assert a.scope == ()
+
+    def test_extern_c_variable_tag_never_collides_with_degenerate_case(self) -> None:
+        # ("extern_c",) and the bare () degenerate-case tag must occupy
+        # disjoint regions of extra's value space.
+        scope = (Namespace("ns"),)
+        extern_c = entity_id_for_variable(scope, "v", is_extern_c=True)
+        degenerate = entity_id_for_variable(scope, "v")
+        assert extern_c != degenerate
+
+    def test_mangled_name_wins_over_is_extern_c_for_variables(self) -> None:
+        a = entity_id_for_variable(
+            (Namespace("ns"),), "v", mangled_name="_Zv", is_extern_c=True
+        )
+        b = entity_id_for_variable((), "v", mangled_name="_Zv")
         assert a == b
 
 

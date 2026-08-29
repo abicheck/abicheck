@@ -6618,8 +6618,43 @@ violate this module's own leaf-module contract (ADR-063 D10) -- it is not
 tests in `tests/test_model_identity.py` pin all three fixes, including the
 overload-disambiguated-owner case, the export-only-vs-namespaced
 scope-independence case (and that it does not erase `leaf_name`'s own
-discriminating power), that the `mangled`/`sig` branches keep scope as
-given, and the cross-backend canonicalization.
+discriminating power), that the `sig` branch keeps scope as given, and
+the cross-backend canonicalization. (This section originally also claimed
+the `mangled` branch keeps scope as given, alongside `sig` -- see the next
+correction below for why that claim was itself wrong and has been fixed
+here rather than left standing.)
+
+**Correction (2026-08-29, same day, third Codex review round on PR #941,
+commit e5cbdf2): the previous correction's own claim that the `mangled`
+branch "keeps scope as given... redundant but harmless" was wrong, and
+the identical evidence-tier-fragmentation bug the `is_extern_c` branch
+was fixed for above turned out to reach two more places.** (1)
+`entity_id_for_function`'s *mangled* branch folded the caller-supplied
+`scope` into the returned `EntityId` unchanged. That is not harmless: a
+header/DWARF-derived observation of a mangled function may supply a real
+`ScopePath`, while an export-table-only snapshot of the identical binary
+symbol knows only the bare mangled name -- exactly the same
+evidence-tier-availability mismatch the `is_extern_c` fix already closed,
+just for the mangled case instead of the extern-"C" case.
+`resolve_symbol_identity`'s own real primary id for a genuine mangling is
+`f"mangled:{real_mangled}"` alone, with no scope folded in at all --
+confirming the mangled branch should have matched the `is_extern_c`
+branch's `scope=()` treatment from the start. Fixed by forcing `scope=()`
+for the mangled branch too; only the `sig` fallback -- which has no
+authoritative, scope-independent name to fall back on -- keeps scope as
+given. (2) `entity_id_for_variable` had no `is_extern_c` parameter at all,
+so a namespaced `extern "C"` variable (caller passes `mangled_name=None`
+per that parameter's own contract) had no way to reach a scope-independent
+identity the way the equivalent function case now does, and its own
+*mangled* branch had the identical scope-folding bug as (1). Fixed by
+adding the same `is_extern_c` parameter `entity_id_for_function` has, and
+forcing `scope=()` for both its mangled and its `is_extern_c` branches.
+Six new tests across both constructors pin all of this: mangled-branch
+scope-independence for both functions and variables, the `sig` branch
+still keeping scope as given, the new variable `is_extern_c` path and its
+own tag-disjointness from the pre-existing mangling-free degenerate case,
+and mangled-name-wins-over-`is_extern_c` precedence for variables
+(mirroring the function constructor's own precedence, already tested).
 
 ---
 

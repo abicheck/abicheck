@@ -308,6 +308,7 @@ def entity_id_for_variable(
     leaf_name: str,
     *,
     mangled_name: str | None = None,
+    is_extern_c: bool = False,
 ) -> EntityId:
     """``EntityId`` for a variable.
 
@@ -327,11 +328,38 @@ def entity_id_for_variable(
     *mangled_name* must already be established as a genuine mangling by the
     caller, never a bare name that merely rode in the mangled field (an
     ``extern "C"`` producer's ``mangled == name``) -- see this module's
-    docstring for why that determination is not made here.
+    docstring for why that determination is not made here. *is_extern_c* is
+    the same separate, caller-supplied linkage signal
+    :func:`entity_id_for_function` accepts, for the identical reason: a
+    caller following *mangled_name*'s own contract passes ``None`` for an
+    ``extern "C"`` variable (Codex review, PR #941 -- the fresh gap this
+    parameter closes).
+
+    When either *mangled_name* or *is_extern_c* applies, the resulting
+    ``EntityId.scope`` is always ``()``, regardless of the caller-supplied
+    *scope*. A genuine mangled name already fully and deterministically
+    encodes scope, so folding a caller-supplied *scope* in on top adds
+    nothing when it is available and actively fragments identity when it
+    is not: a header/DWARF-derived observation may supply a real
+    ``ScopePath`` for the identical symbol an export-table-only snapshot
+    observes with no scope at all (Codex review, PR #941 -- the same
+    evidence-tier-fragmentation mechanism :func:`entity_id_for_function`'s
+    own *is_extern_c* branch already guards against, generalized here to
+    every name-based -- as opposed to signature-based -- discriminator,
+    mangled included). Only the genuinely mangling-free, non-``extern
+    "C"`` degenerate case keeps *scope* as given.
     """
-    extra = ("mangled", mangled_name) if mangled_name else ()
+    if mangled_name:
+        extra: tuple[str, ...] = ("mangled", mangled_name)
+        resolved_scope: ScopePath = ()
+    elif is_extern_c:
+        extra = ("extern_c",)
+        resolved_scope = ()
+    else:
+        extra = ()
+        resolved_scope = _scope_path(scope)
     return EntityId(
-        scope=_scope_path(scope),
+        scope=resolved_scope,
         kind=EntityKind.VARIABLE,
         leaf_name=leaf_name,
         extra=extra,
@@ -406,27 +434,31 @@ def entity_id_for_function(
     for a signature-free tag to add once the mangled name already
     disambiguates the declaration.
 
-    The *is_extern_c* branch's resulting ``EntityId.scope`` is always
-    ``()``, regardless of *scope*: ``resolve_symbol_identity`` deliberately
-    bases an extern-"C" identity on the raw export spelling alone rather
+    Both the *mangled* and *is_extern_c* branches' resulting
+    ``EntityId.scope`` are always ``()``, regardless of *scope*.
+    ``resolve_symbol_identity`` deliberately bases a real-mangled or
+    extern-"C" identity on the raw name alone (``mangled:...``) rather
     than a qualified name, precisely because scope availability varies by
     evidence tier -- a header/DWARF-derived observation of a namespaced
-    ``extern "C"`` function may supply a real ``ScopePath``, while an
-    export-table-only snapshot of the identical binary symbol knows only
-    the bare exported name (extern "C" linkage means the symbol *is* that
-    bare name at the ABI level, so no namespace is even recoverable from
-    the export table alone). Folding a caller-supplied *scope* into the id
-    here would fragment one entity's identity across those two evidence
-    tiers -- the same reason ``resolve_symbol_identity`` explicitly prefers
-    the raw literal over ``qualified_name`` for this exact case (Codex
-    review, PR #941). The *mangled* branch keeps *scope* as given: a real
-    mangled name already fully and deterministically encodes scope, so no
-    evidence-tier divergence is possible there, and the extra `scope` field
-    is redundant but harmless. The *sig* fallback also keeps *scope* as
-    given -- a DWARF-only, mangling-free function has no comparable
-    varying-availability-by-tier problem to guard against, and scope is
-    exactly what makes two same-named, same-signature sibling declarations
-    in different scopes distinct.
+    function (mangled or ``extern "C"``) may supply a real ``ScopePath``,
+    while an export-table-only snapshot of the identical binary symbol
+    knows only the bare exported/mangled name. Folding a caller-supplied
+    *scope* into the id would fragment one entity's identity across those
+    two evidence tiers even though the name already, on its own,
+    unambiguously identifies the declaration -- for a genuine mangled
+    name this holds losslessly (the mangling itself fully encodes scope);
+    for ``extern "C"`` it holds because the symbol *is* that bare name at
+    the ABI level, so no namespace is even recoverable from an export
+    table alone. (An earlier revision of this docstring claimed the
+    *mangled* branch's redundant `scope` was merely harmless rather than
+    actively fragmenting -- Codex review on PR #941 caught that this is
+    the identical mechanism the *is_extern_c* branch already guards
+    against, not a different, safe case; corrected here.) The *sig*
+    fallback is the one branch that keeps *scope* as given -- a DWARF-only,
+    mangling-free, non-``extern "C"`` function has no authoritative,
+    scope-independent name to fall back on, and scope is exactly what
+    makes two same-named, same-signature sibling declarations in
+    different scopes distinct.
 
     *param_types* are canonicalized via
     ``name_classification.canonicalize_type_name`` before joining into
@@ -440,7 +472,7 @@ def entity_id_for_function(
     """
     if mangled_name:
         extra: tuple[str, ...] = ("mangled", mangled_name)
-        resolved_scope = _scope_path(scope)
+        resolved_scope: ScopePath = ()
     elif is_extern_c:
         extra = ("extern_c",)
         resolved_scope = ()
