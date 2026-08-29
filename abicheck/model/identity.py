@@ -62,6 +62,7 @@ import re
 from dataclasses import dataclass, field, replace
 
 from ..name_classification import canonicalize_type_name
+from .identity_literals import quoted_literal_spans as _quoted_literal_spans
 from .signature_normalization import canonicalize_function_signature_param_type
 
 __all__ = [
@@ -451,47 +452,46 @@ def canonicalize_type_param_references(
     the identical hazard, just for two different sources of a "type
     spelling that can reference a template parameter").
 
-    All substitutions happen in ONE combined regex pass, rather than one
-    ``re.sub`` call per name applied sequentially to the same string --
-    confirmed by direct compilation that the sequential form has its own
-    self-inflicted collision: if an EARLIER name (e.g. ``T``) is replaced
-    first, producing ``"type-param-0"``, and a LATER parameter happens to
-    be named literally ``type`` (a legal, unremarkable C++ identifier),
-    that later substitution's own ``\\btype\\b`` pattern matches the
-    ``"type"`` INSIDE the already-generated ``"type-param-0"`` token,
-    corrupting it into ``"type-param-1-param-0"`` -- and since this
-    corruption only fires when a later name happens to collide with the
-    generated marker's own prefix, renaming an entirely unrelated,
-    unused parameter changed the ``EntityId`` too (Codex review, PR #943,
-    on the version of this function that had that sequential form). A
-    single combined-alternation pass never re-scans replacement text at
-    all (Python's ``re.sub`` resumes scanning immediately after each
-    match, in the ORIGINAL string, never inside what it just substituted),
-    so this class of collision cannot occur regardless of what any
-    parameter happens to be named.
+    All substitutions happen in ONE combined regex pass, not one ``re.sub``
+    per name applied sequentially -- confirmed by direct compilation that
+    the sequential form has its own collision: replacing an earlier name
+    (``T`` -> ``"type-param-0"``) first, then a LATER parameter literally
+    named ``type`` matches ``\\btype\\b`` INSIDE that already-generated
+    token, corrupting it into ``"type-param-1-param-0"`` -- so renaming an
+    unrelated, unused parameter changed the ``EntityId`` too (Codex review,
+    PR #943). A single combined-alternation pass never re-scans replacement
+    text (``re.sub`` resumes in the ORIGINAL string after each match), so
+    this cannot occur regardless of naming.
     """
     index_by_name = {name: index for index, name in enumerate(type_param_names) if name}
     if not index_by_name:
         return spelling
     # `(?<!::)` -- an EXPLICITLY globally-qualified name (`::T::X`) is a
-    # namespace lookup, not a dependent reference to a template parameter
-    # named `T`, even when the spelling collides (confirmed by direct
-    # compilation: `namespace T { struct X {}; } template<class T> void
-    # f(::T::X);` keeps `::T::X` verbatim in clang's own `qualType`).
-    # Substituting it anyway fingerprinted the (here, unused) parameter's
-    # own rename as a remove+add for an otherwise-identical declaration
-    # (Codex review, PR #943).
-    #
+    # namespace lookup, not a param reference, even when it collides
+    # (confirmed by direct compilation: `namespace T { struct X {}; }
+    # template<class T> void f(::T::X);` keeps `::T::X` verbatim).
     # `(?<!\.)`/`(?<!->)` -- same hazard for MEMBER ACCESS (`S{}.N`,
-    # `((S*)0)->N`): confirmed by direct compilation that clang keeps the
-    # member name verbatim regardless of a same-spelled template
-    # parameter's own name (Codex review, PR #943).
+    # `((S*)0)->N`): clang keeps the member name verbatim regardless of a
+    # same-spelled parameter's own name. Both confirmed by direct
+    # compilation; substituting either anyway fingerprinted an unrelated
+    # parameter's own rename as a remove+add (Codex review, PR #943).
     pattern = re.compile(
         r"(?<!::)(?<!\.)(?<!->)\b("
         + "|".join(re.escape(name) for name in index_by_name)
         + r")\b"
     )
-    return pattern.sub(lambda m: f"type-param-{index_by_name[m.group(1)]}", spelling)
+    # A QUOTED LITERAL (`'N'`) is a value, not a param reference, even when
+    # it collides -- confirmed by direct compilation: `std::integral_
+    # constant<char, 'N'>` keeps `'N'` verbatim regardless of an unused
+    # parameter's name (Codex review, PR #943).
+    literal_spans = _quoted_literal_spans(spelling)
+
+    def _substitute(m: re.Match[str]) -> str:
+        if any(start <= m.start() < end for start, end in literal_spans):
+            return m.group(0)
+        return f"type-param-{index_by_name[m.group(1)]}"
+
+    return pattern.sub(_substitute, spelling)
 
 
 def entity_id_for_function(

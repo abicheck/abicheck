@@ -8696,6 +8696,30 @@ exactly one external call site, matching this package's own established
 "prefer extending a split-out module over growing the parent toward the
 cap" convention.
 
+**Correction (2026-08-29, same day, Codex review on PR #943): a QUOTED
+LITERAL sharing a template parameter's spelling was rewritten by the
+same rename-blind substitution as if it were a reference to that
+parameter.** `template<char C> struct Literal {}; template<int N> void
+f(Literal<'N'>);` keeps the char literal `'N'` verbatim in clang's own
+`qualType` -- confirmed by direct compilation -- it does not resolve to
+the (here, unused) non-type parameter, yet
+`canonicalize_type_param_references`'s whole-word substitution rewrote
+it to `Literal<'type-param-0'>` anyway, so renaming the parameter to `M`
+left the second revision's `Literal<'N'>` untouched, producing unequal
+`EntityId`s for the identical declaration -- the identical collision
+shape the globally-qualified-name and member-access corrections earlier
+in this file fixed, just for a quoted literal instead of `::`/`.`/`->`.
+Fixed by adding `quoted_literal_spans` (a new leaf module,
+`model/identity_literals.py` -- `identity.py` was already at the
+800-line cap after the return-type corrections above, so this stayed a
+sibling module rather than inline) and skipping any substitution match
+whose start falls inside a single- or double-quoted literal span
+(backslash-escapes honored). Regression test in
+`tests/test_entity_id_template_discriminators.py`
+(`test_live_clang_quoted_literal_is_not_canonicalized_as_a_param_ref`),
+confirmed to fail pre-fix via `git stash` on just the source file; every
+existing rename-invariance test in that module still passes unchanged.
+
 ---
 
 ### Phase 3 — public surface as a graph query over one evidence graph (D5)

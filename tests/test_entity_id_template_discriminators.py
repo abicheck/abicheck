@@ -774,3 +774,31 @@ def test_live_clang_spiral_declarator_preserves_returned_function_parameter_list
     assert a.entity_id != b.entity_id
     assert a.return_type == "typename S::x (*())(int)"
     assert b.return_type == "typename S::x (*())(double)"
+
+
+@pytest.mark.integration
+@pytest.mark.skipif(shutil.which("clang") is None, reason="clang not installed")
+def test_live_clang_quoted_literal_is_not_canonicalized_as_a_param_ref(
+    tmp_path: Path,
+) -> None:
+    """A QUOTED LITERAL (`'N'`) must NOT be canonicalized as a reference to
+    a template parameter merely because it collides in spelling.
+    `template<char C> struct Literal {}; template<int N> void
+    f(Literal<'N'>);` keeps the char literal `'N'` verbatim in clang's own
+    `qualType` -- it does not resolve to the (here, unused) non-type
+    parameter -- so substituting it anyway fingerprinted the parameter's
+    own rename as a remove+add for an otherwise-identical declaration
+    (Codex review, PR #943)."""
+    header = (
+        "template<char C> struct Literal {}; template<int %s> void f(Literal<'N'>);"
+    )
+    a = _one(
+        _clang_parser(header % "N", tmp_path, "litparama").parse_functions(),
+        name="f",
+    )
+    b = _one(
+        _clang_parser(header % "M", tmp_path, "litparamb").parse_functions(),
+        name="f",
+    )
+    assert a.entity_id is not None and a.entity_id == b.entity_id
+    assert a.entity_id.extra[1] == "Literal<'N'>"
