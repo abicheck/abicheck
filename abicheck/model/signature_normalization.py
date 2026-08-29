@@ -52,25 +52,26 @@ from .declarator_qualifiers import (
 
 __all__ = ["canonicalize_function_signature_param_type"]
 
-_CV_WORD_RE = re.compile(r"\b(?:const|volatile)\b")
-
-# `restrict`/`__restrict`/`__restrict__` -- a pointer type qualifier with NO
-# effect on the Itanium C++ ABI's mangling at all, unlike `const`/
-# `volatile` (which stay genuinely distinguishing at the pointee level).
-# This repository already models the fact separately, on `Param.
-# is_restrict` (`dumper_castxml.py`'s/`dumper_clang_qualifiers.py`'s own
-# extraction comments state the same thing: restrict has no ABI/mangling
-# effect) -- so, unlike cv, it is safe to strip UNCONDITIONALLY, at any
-# position and nesting depth a real declarator can place it (the grammar
-# only ever allows it directly after the `*` it qualifies), not merely on
-# this parameter's own outermost pointer (Codex review, PR #941, sixteenth
-# round: the finding as reported scoped a fix to only the outermost
-# pointer, matching how a genuine BY-VALUE cv-qualifier is scoped -- but
-# restrict is not cv; its total absence from mangling holds regardless of
-# position, so narrowing to "outermost only" would leave
-# `int * restrict *` and `int * *` still distinguishing, when they must
-# not).
-_RESTRICT_WORD_RE = re.compile(r"\b(?:__restrict__|__restrict|restrict)\b")
+# `restrict`/`__restrict`/`__restrict__` -- a qualifier attached to a
+# specific pointer, positioned exactly where a `const`/`volatile` on that
+# same pointer would be, and it turns out to be POSITION-SENSITIVE the
+# identical way: real-compiler verification (`g++ -c`, GCC's own Itanium
+# mangler) confirms `void f(int *)` and `void f(int * restrict)` are the
+# SAME function (restrict on the parameter's own outermost, by-value
+# pointer position drops from the mangled name, `_Z1fPi` both ways --
+# GCC even refuses to compile that pair as a legal overload set, exactly
+# the "same function" signal) -- but `void f(int **)` and
+# `void f(int * restrict *)` mangle to two DIFFERENT, simultaneously-
+# declarable symbols (`_Z1fPPi` vs `_Z1fPrPi`). So restrict is folded
+# into this same strippable-word set, reusing the SAME outermost-vs-
+# pointee position discipline `const`/`volatile` already have throughout
+# this module -- not stripped unconditionally (Codex review, PR #941,
+# eighteenth round: the sixteenth round's own "restrict never affects
+# mangling, strip it everywhere" fix turned out to be the wrong
+# generalization, verified wrong by direct compilation rather than mere
+# assertion -- restrict does NOT behave like a pure no-op token, it
+# behaves like cv).
+_CV_WORD_RE = re.compile(r"\b(?:const|volatile|restrict|__restrict__|__restrict)\b")
 
 # Clang's own ``qualType`` spelling for a calling-convention-decorated
 # function-pointer declarator does NOT use the leading ``__cdecl``-style
@@ -93,14 +94,18 @@ _CALLING_CONVENTION_ATTR_RE = re.compile(
 
 
 def _strip_cv_tokens_outside_nesting(s: str) -> str:
-    """Blank out every ``const``/``volatile`` token in *s* that sits at
-    nesting depth 0 (outside any ``<...>``/``(...)``/``[...]``), then
-    collapse the resulting whitespace. The one primitive both branches of
+    """Blank out every ``const``/``volatile``/``restrict`` (any of its
+    three spellings) token in *s* that sits at nesting depth 0 (outside
+    any ``<...>``/``(...)``/``[...]``), then collapse the resulting
+    whitespace. The one primitive both branches of
     :func:`canonicalize_function_signature_param_type` reduce to -- the
     by-value case applies it to the whole string, the pointer case applies
     it only to the suffix after the parameter's outermost pointer/
     reference sigil (see that function's own docstring for why those are
-    the two, and only the two, safe places to strip).
+    the two, and only the two, safe places to strip). ``restrict`` shares
+    this exact position discipline with ``const``/``volatile`` -- it is
+    NOT unconditionally mangling-inert (see ``_CV_WORD_RE``'s own comment
+    for the direct-compilation evidence).
     """
     depth = 0
     out: list[str] = []
@@ -525,12 +530,14 @@ def canonicalize_function_signature_param_type(name: str) -> str:
     >>> canonicalize_function_signature_param_type("int const C::*")
     'int const C:: *'
 
-    ``restrict``/``__restrict``/``__restrict__`` -- a pointer-qualifier
-    with NO effect on the Itanium C++ ABI's mangling at all, unlike
-    ``const``/``volatile`` -- is stripped unconditionally, at any position,
-    rather than only on this parameter's own outermost pointer: unlike a
-    genuine by-value cv-qualifier, restrict's total absence from mangling
-    does not depend on where in the declarator it sits.
+    ``restrict``/``__restrict``/``__restrict__`` shares the exact same
+    outermost-vs-pointee position discipline ``const``/``volatile``
+    already have here: dropped on the parameter's own outermost, by-value
+    pointer position (real-compiler mangling confirms ``void f(int *)``
+    and ``void f(int * restrict)`` are the SAME function), but preserved,
+    genuinely distinguishing, on an inner pointer level (``void f(int
+    **)`` and ``void f(int * restrict *)`` mangle to two different
+    symbols) -- restrict is not unconditionally mangling-inert.
 
     >>> canonicalize_function_signature_param_type("int *")
     'int *'
@@ -538,8 +545,8 @@ def canonicalize_function_signature_param_type(name: str) -> str:
     'int *'
     >>> canonicalize_function_signature_param_type("int *__restrict")
     'int *'
-    >>> canonicalize_function_signature_param_type("int * restrict *")
-    'int * *'
+    >>> canonicalize_function_signature_param_type("int * restrict *") == canonicalize_function_signature_param_type("int * *")
+    False
     >>> canonicalize_function_signature_param_type("void (*)(int *restrict)")
     'void ( * )(int *)'
 
@@ -559,10 +566,6 @@ def canonicalize_function_signature_param_type(name: str) -> str:
     canonical = canonicalize_type_name(
         _decay_top_level_array(canonicalize_type_name(name))
     )
-    # `restrict` never affects mangling, at any position -- strip it
-    # unconditionally before any of the position-sensitive cv/pointer
-    # logic below runs, rather than special-casing it into that logic.
-    canonical = re.sub(r"\s+", " ", _RESTRICT_WORD_RE.sub("", canonical)).strip()
     depth = 0
     # True for a paren currently open on `transparent_parens` that groups a
     # declarator's own sigil (see the docstring above) -- popped, not

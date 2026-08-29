@@ -7247,6 +7247,46 @@ no-attribute staying unaffected, two different conventions still
 distinguishing, coexistence with a trailing `noexcept`, idempotence, and
 a defensive redundant-both-spellings-at-once case).
 
+**Correction (2026-08-29, same day, eighteenth Codex review round on PR
+#941, commit 06255fc): the sixteenth round's own "restrict never affects
+mangling, strip it everywhere" fix was itself wrong -- a real
+generalization mistake, not a narrow miss.** Fresh evidence, confirmed by
+direct compilation rather than mere assertion (`g++ -c`, inspecting the
+real mangled symbols): `void f(int **)` and `void f(int * restrict *)`
+mangle to two DIFFERENT, simultaneously-declarable Itanium symbols
+(`_Z1fPPi` vs. `_Z1fPrPi`), so restrict on a NON-outermost pointer level
+genuinely IS a standard-mandated, mangling-relevant overload
+discriminator -- the sixteenth round's own unconditional strip wrongly
+collapsed that pair into one identity. Only restrict on the parameter's
+own OUTERMOST, by-value pointer position drops from the mangled name
+(`void f(int *)`/`void f(int * restrict)` mangle identically, and GCC
+even refuses to compile them together as an overload set -- the same
+"can't be a real overload pair" signal a genuine by-value cv-qualifier
+gives). This is exactly the position-sensitivity the SIXTEENTH round's
+own docstring dismissed ("restrict's absence from mangling does not
+depend on where in the declarator it sits") -- which was the actual bug:
+restrict behaves like cv, not like a pure no-op token. Fixed by
+REVERTING the standalone `_RESTRICT_WORD_RE`-based unconditional strip
+entirely and instead folding restrict's three spellings into
+`_CV_WORD_RE` itself, so it goes through the exact same outermost-vs-pointee
+position discipline `const`/`volatile` already have throughout this
+module (`_strip_cv_tokens_outside_nesting`'s existing depth-aware scan,
+applied at exactly the same two safe positions as always -- no new
+logic needed, since the position discipline was already correct for cv
+and restrict needed nothing different from it). Updated tests: `TestRestrictQualifierIsAlwaysStripped` renamed to
+`TestRestrictQualifierSharesCvPositionDiscipline`
+in `tests/test_signature_normalization.py`, with the previously-wrong
+`test_restrict_on_non_outermost_pointer_also_stripped` (asserting
+equality) replaced by
+`test_restrict_on_non_outermost_pointer_still_distinguishes` (asserting
+INequality) plus a new idempotence case for the inner-restrict spelling.
+This is the second consecutive round to revise the SAME primitive's
+restrict handling (sixteenth introduced it, this one corrects its own
+overreach) -- direct compiler verification, not just re-reading the
+finding text, is now the standard for any future ABI-mangling-behavior
+claim in this file before implementing a fix, the same discipline that
+already caught this round's own error.
+
 ---
 
 ### Phase 3 — public surface as a graph query over one evidence graph (D5)

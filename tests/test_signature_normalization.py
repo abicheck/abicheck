@@ -220,15 +220,18 @@ class TestBareDataMemberPointerPointeeCvIsCanonicalized:
         assert canon("void (C::* const)(int)") == canon("void (C::*)(int)")
 
 
-class TestRestrictQualifierIsAlwaysStripped:
-    """``restrict``/``__restrict``/``__restrict__`` never affects the
-    Itanium C++ ABI's mangling, at ANY position -- unlike a genuine
-    by-value cv-qualifier, which is only by-value (and so only safe to
-    strip) on the parameter's own outermost pointer. This repository
-    already tracks the fact separately (``Param.is_restrict``); collapsing
-    it into an unmangled fallback signature's identity would turn that
-    dedicated compatible parameter-qualifier change into a spurious
-    removal/addition pair instead."""
+class TestRestrictQualifierSharesCvPositionDiscipline:
+    """``restrict``/``__restrict``/``__restrict__`` is dropped on the
+    parameter's own outermost, by-value pointer position -- exactly like
+    a genuine cv-qualifier there -- but stays genuinely distinguishing on
+    an inner pointer level, ALSO exactly like cv. Verified against real
+    compiler output (``g++ -c``, both GCC and Clang): ``void f(int *)``
+    and ``void f(int * restrict)`` mangle identically and cannot even be
+    declared as an overload pair, but ``void f(int **)`` and
+    ``void f(int * restrict *)`` mangle to two different, simultaneously-
+    declarable symbols (``_Z1fPPi`` vs ``_Z1fPrPi``) -- restrict is NOT
+    unconditionally mangling-inert, contrary to an earlier (reverted)
+    round's own "strip everywhere" fix."""
 
     def test_bare_pointer_restrict_stripped(self) -> None:
         assert canon("int *restrict") == canon("int *")
@@ -246,19 +249,24 @@ class TestRestrictQualifierIsAlwaysStripped:
         # distinguishing pointee cv-qualifier too.
         assert canon("int *restrict") != canon("const int *")
 
-    def test_restrict_on_non_outermost_pointer_also_stripped(self) -> None:
-        # Restrict's absence from mangling holds regardless of WHERE in
-        # the declarator it sits -- not only the parameter's own
-        # outermost pointer, unlike a genuine by-value cv-qualifier.
-        assert canon("int * restrict *") == canon("int * *")
+    def test_restrict_on_non_outermost_pointer_still_distinguishes(self) -> None:
+        # Restrict on an INNER pointer level is a genuine, standard-
+        # mandated (GCC/Clang-confirmed) overload discriminator, just
+        # like a genuine pointee cv-qualifier there -- must NOT collapse.
+        assert canon("int * restrict *") != canon("int * *")
 
     def test_restrict_inside_callback_parameter_stripped(self) -> None:
         # The recursive nested-parameter-list normalization must also
-        # apply this rule to each of a callback's own parameters.
+        # apply the outermost-position rule to each of a callback's own
+        # parameters.
         assert canon("void (*)(int *restrict)") == canon("void (*)(int *)")
 
-    def test_idempotent(self) -> None:
+    def test_idempotent_on_outermost_restrict(self) -> None:
         once = canon("int *restrict")
+        assert canon(once) == once
+
+    def test_idempotent_on_inner_restrict(self) -> None:
+        once = canon("int * restrict *")
         assert canon(once) == once
 
 

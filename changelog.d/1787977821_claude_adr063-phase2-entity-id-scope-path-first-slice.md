@@ -194,17 +194,24 @@
   (import is strictly one-way, `signature_normalization ->
   declarator_qualifiers`, to avoid a cycle between the two), with its own
   dedicated test file, `tests/test_declarator_qualifiers.py`.
-  `restrict`/`__restrict`/`__restrict__` (a pointer-qualifier with NO
-  effect on the Itanium C++ ABI's mangling at all, unlike `const`/
-  `volatile`) is now stripped from a parameter's type unconditionally, at
-  any position and nesting depth -- not only the parameter's own outermost
-  pointer, unlike a genuine by-value cv-qualifier -- so `int *` and
-  `int *restrict` (in any of its three spellings) now canonicalize
-  identically, including inside a nested callback parameter. This
-  repository already tracks the fact separately on `Param.is_restrict`;
-  without this fix, a restrict addition/removal produced a spurious
-  removal/addition pair here instead of the dedicated compatible
-  parameter-qualifier change it should be.
+  `restrict`/`__restrict`/`__restrict__` now shares the exact same
+  outermost-vs-pointee position discipline `const`/`volatile` already
+  have here: dropped on the parameter's own outermost, by-value pointer
+  position (`int *` and `int *restrict`, in any of its three spellings,
+  including inside a nested callback parameter, now canonicalize
+  identically), while staying genuinely distinguishing on an inner
+  pointer level, exactly like a real pointee cv-qualifier there (`int **`
+  and `int * restrict *` do NOT canonicalize identically) -- verified
+  against real compiler output (`g++ -c`): the outermost pair mangle
+  identically and cannot even be declared together as an overload set,
+  while the inner-pointer pair mangle to two different, simultaneously-
+  declarable Itanium symbols (`_Z1fPPi` vs. `_Z1fPrPi`). This repository
+  already tracks the fact separately on `Param.is_restrict`. (An earlier
+  revision of this same fix stripped restrict unconditionally at every
+  position, reasoning it never affects mangling at all -- that
+  generalization was itself wrong, caught by direct compiler verification
+  rather than by re-reading the finding text a second time, and is
+  corrected here to the position-sensitive behavior above.)
   Clang's own calling-convention spelling for a function-pointer
   declarator -- a trailing `__attribute__((cdecl))`-style attribute after
   the parameter list, rather than MSVC/castxml's leading `__cdecl`-style
