@@ -885,3 +885,51 @@ def test_run_scan_set_subprocess_propagates_unexpected_error_as_runtime_error(
             ScanRequest(binaries=[snap_path, snap_path], mode="audit"),
             timeout=120.0,
         )
+
+
+class TestResolveMemberScanLevel:
+    """``_resolve_member_scan_level`` is the one resolution
+    ``_run_scan_one_member`` and ``estimate_artifact_set`` (``scan
+    --artifact-set --dry-run``) both consume (Codex review, ``workflows/
+    AGENTS.md``'s "dry-run and execution must consume the same resolved
+    plan" rule) -- test it directly rather than only through those two
+    callers.
+    """
+
+    def test_raises_on_malformed_risk_rules(self, tmp_path: Path) -> None:
+        import abicheck.service_scan as service_scan_mod
+
+        bad = tmp_path / "bad.yml"
+        bad.write_text("risk_rules: [1, 2\n  - broken")
+        req = ScanRequest(
+            binaries=[], mode="audit", source_method="auto",
+            changed_paths=["src/foo.c"], seeded=True, risk_rules_path=bad,
+        )
+        with pytest.raises(ValueError, match="cannot read --risk-rules"):
+            service_scan_mod._resolve_member_scan_level(req)
+
+    def test_pinned_depth_ignores_risk_rules_default_and_still_resolves(self) -> None:
+        import abicheck.service_scan as service_scan_mod
+
+        req = ScanRequest(binaries=[], mode="audit", depth="build")
+        sm, dp, changed, seeded, risk, resolved, eff_depth, collect_mode = (
+            service_scan_mod._resolve_member_scan_level(req)
+        )
+        assert sm is None
+        assert eff_depth.value == "build"
+        assert changed == []
+        assert seeded is False
+
+    def test_seeded_auto_uses_risk_recommended_method(self) -> None:
+        import abicheck.service_scan as service_scan_mod
+
+        req = ScanRequest(
+            binaries=[], mode="audit", source_method="auto",
+            changed_paths=["include/public.h"], seeded=True,
+        )
+        _sm, _dp, changed, seeded, risk, resolved, _eff_depth, _collect_mode = (
+            service_scan_mod._resolve_member_scan_level(req)
+        )
+        assert changed == ["include/public.h"]
+        assert seeded is True
+        assert resolved.value == risk.recommended_method

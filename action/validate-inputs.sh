@@ -108,17 +108,12 @@ case "$MODE" in
       if [[ -n "${INPUT_AGAINST:-}" || -n "${INPUT_ABI_BASELINE:-}" ]]; then
         _fail "mode: scan with new-library-set does not support against/abi-baseline -- new-library-set is audit-only (no old side to compare a set against, ADR-056). Remove against/abi-baseline, or use new-library (a single artifact) for a baseline comparison instead."
       fi
-      # --artifact-set estimation isn't implemented yet (cli_scan.py
-      # rejects --dry-run outright with --artifact-set) -- without this,
-      # a dry-run: true + new-library-set step incurs the full Python/
-      # toolchain install before hitting that CLI-level usage error
-      # (Codex review). Also check the deprecated estimate: true alias --
-      # run.sh converts INPUT_ESTIMATE to INPUT_DRY_RUN=true downstream, so
-      # a set + estimate combination would otherwise pass this preflight
-      # and only fail after Python/toolchain install too (Codex review).
-      if [[ "${INPUT_DRY_RUN:-false}" == "true" || "${INPUT_ESTIMATE:-false}" == "true" ]]; then
-        _fail "mode: scan with new-library-set does not support dry-run/estimate -- --artifact-set estimation is not implemented yet. Remove dry-run/estimate, or use new-library (a single artifact) to preview a scan."
-      fi
+      # --artifact-set dry-run/estimate IS implemented (CLI cleanup phase
+      # two, PR 5: cli_scan._run_artifact_set previews the set instead of
+      # rejecting --dry-run outright) -- no preflight rejection needed
+      # here any more; dry-run: true + new-library-set (and the deprecated
+      # estimate: true alias, which run.sh converts to INPUT_DRY_RUN=true
+      # downstream) both reach the real dry-run path in run.sh.
       # cli_scan._run_artifact_set rejects old=/new= header/include scoping
       # outright (no old side for a set) -- old-header/old-include are
       # meaningless here; run.sh maps new-header/new-include to bare flags

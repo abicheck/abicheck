@@ -650,26 +650,26 @@ def _emit_scan_report(
         sys.exit(outcome.exit_code)
 
 
-def _resolve_artifact_set_paths(spec: str) -> tuple[list[Path], bool]:
-    """``--artifact-set`` value → ``(paths, explicit)`` (ADR-056).
+def _resolve_artifact_set_paths(spec: tuple[str, ...]) -> tuple[list[Path], bool]:
+    """``--artifact-set`` values → ``(paths, explicit)`` (ADR-056).
 
-    A single existing directory is expanded to every discoverable shared
-    library in it (``explicit=False`` — an unsupported file found this way is
-    silently skipped, mirroring ``build_bundle_snapshot``'s directory-scan
-    behavior); anything else is read as a comma-separated explicit path list
-    (``explicit=True`` — every named member must resolve and must look like a
-    real library, enforced by :func:`bundle.discover_artifact_set`).
+    ``spec`` is the tuple Click's repeatable ``--artifact-set`` collects (CLI
+    cleanup phase two, PR 5 -- the comma-separated single-string form this
+    replaced is gone, no alias). A single value naming a directory expands
+    to every discoverable shared library in it (``explicit=False`` -- an
+    unsupported file found this way is silently skipped, mirroring
+    ``build_bundle_snapshot``'s directory-scan behavior); anything else is
+    an explicit path list, one member per occurrence, every member of which
+    must resolve (``explicit=True``, per :func:`bundle.discover_artifact_set`).
     """
     from .workflows.extraction import discover_shared_libraries
 
-    candidate = Path(spec)
-    if "," not in spec and candidate.is_dir():
-        return discover_shared_libraries(candidate), False
-    parts = [p.strip() for p in spec.split(",") if p.strip()]
-    if not parts:
-        raise click.UsageError("--artifact-set must not be empty.")
+    if len(spec) == 1:
+        candidate = Path(spec[0])
+        if candidate.is_dir():
+            return discover_shared_libraries(candidate), False
     paths: list[Path] = []
-    for part in parts:
+    for part in spec:
         p = Path(part)
         if not p.exists():
             raise click.UsageError(f"--artifact-set member not found: {part}")
@@ -805,7 +805,8 @@ def _reject_comparison_only_flags(*, no_baseline_reason: str) -> None:
 
 def _run_artifact_set(
     *,
-    artifact_set: str,
+    artifact_set: tuple[str, ...],
+    dry_run: bool,
     bundle_system_providers: str,
     header_pairs: tuple[tuple[str, Path], ...],
     include_pairs: tuple[tuple[str, Path], ...],
@@ -834,13 +835,11 @@ def _run_artifact_set(
     compiler_prefix: str | None = None,
     compiler_option_tokens: tuple[str, ...] = (),
 ) -> None:
-    """``scan --artifact-set`` (ADR-056/G34): audit a set of libraries as one.
-
-    No old side (no ``--against``): discovers the declared set, scans each
-    member (the same always-on tier + pinned level every single-binary scan
-    runs), and adds one cross-library bundle-audit pass over the whole set.
-    Deliberately does not thread ``--dry-run`` through yet — see G34's
-    status for what's still deferred from this first slice.
+    """``scan --artifact-set`` (ADR-056/G34): audit a set of libraries as one,
+    no old side. Discovers the set, scans each member (the same tier +
+    pinned level a single-binary scan runs), adds one cross-library
+    bundle-audit pass. ``--dry-run`` previews it (``frontends.cli.
+    artifact_set_dry_run``).
     """
     from .bundle import ArtifactSetError, discover_artifact_set
     from .service import Budget, ScanRequest
@@ -906,11 +905,9 @@ def _run_artifact_set(
         build_info=build_info,
         baseline=None,
         mode="audit",
-        # The unset dial means 'auto' (ADR-037 D5), same as the single-binary
-        # path: only when --depth was omitted entirely does a member opt into
-        # risk-driven method selection -- a pinned --depth stays deterministic
-        # (Codex review: this was hard-coded to None, silently disabling
-        # --since/--changed-path risk-driven selection for every member).
+        # Unset means 'auto' (ADR-037 D5): only an omitted --depth opts a
+        # member into risk-driven method selection; a pinned --depth stays
+        # deterministic (Codex review: was hard-coded to None).
         source_method=SourceMethod.AUTO.value if depth is None else None,
         depth=depth,
         changed_paths=changed,
@@ -928,25 +925,26 @@ def _run_artifact_set(
         changed_src=changed_src,
         build_targets=build_targets,
     )
+    if dry_run:
+        from .bundle import check_artifact_set_soname_collisions
+        from .dry_run import emit_dry_run
+        from .frontends.cli.artifact_set_dry_run import render_artifact_set_dry_run
+        from .service_scan import estimate_artifact_set
+        try:
+            # run_scan_set() rejects an ambiguous duplicate-DT_SONAME set (exit
+            # 64) and a malformed --risk-rules profile the same way -- fail
+            # loud here too, not a "successful" preview of a rejected request.
+            check_artifact_set_soname_collisions(discovered)
+            totals, notes, blocker = estimate_artifact_set(req, list(discovered.values()))
+        except (ArtifactSetError, ValueError) as exc:
+            raise click.UsageError(str(exc)) from exc
+        emit_dry_run(render_artifact_set_dry_run(
+            req, discovered=discovered, explicit=explicit, header_backend=header_backend,
+            fmt=fmt, totals=totals, notes=notes, blocker=blocker))
     try:
-        # run_scan_set()'s own audit_bundle() call can raise ArtifactSetError
-        # too (e.g. an ambiguous duplicate-SONAME set, only detectable after
-        # parsing every member's ELF metadata) -- propagated rather than
-        # degraded to a "successful" bundle_incomplete result (Codex
-        # review), surfaced here the same way discover_artifact_set's own
-        # ArtifactSetError already is above.
-        #
-        # ValueError: run_scan_set() loads --risk-rules via
-        # _load_risk_rules_for_service(), which is deliberately click-free
-        # (service_scan.py has no click dependency -- it's also reachable
-        # from the MCP server/Python API) and converts the single-binary
-        # path's own click.ClickException into ValueError instead. The
-        # single-binary path never needs a try/except for this because it
-        # calls the click-raising _load_risk_rules() directly, letting
-        # Click's own top-level handler render it; this service-layer call
-        # must translate that ValueError back into a usage error itself, or
-        # a malformed/unreadable --risk-rules file surfaces as an
-        # unhandled Python traceback and exit 1 instead (Codex review).
+        # ArtifactSetError (ambiguous duplicate-SONAME set) and ValueError
+        # (malformed --risk-rules, service_scan.py is click-free) both
+        # translate to a usage error here, not an unhandled traceback.
         result = run_scan_set(req)
     except (ArtifactSetError, ValueError) as exc:
         raise click.UsageError(str(exc)) from exc
@@ -1406,7 +1404,7 @@ def _discover_scan_project_config(
 @compile_context_options()  # dump↔scan L2 compile-context parity (ADR-037 D3)
 def scan_cmd(
     artifact: Path | None,
-    artifact_set: str | None,
+    artifact_set: tuple[str, ...],
     bundle_system_providers: str,
     header_pairs: tuple[tuple[str, Path], ...],
     include_pairs: tuple[tuple[str, Path], ...],
@@ -1508,26 +1506,30 @@ def scan_cmd(
     # ARTIFACT, with --against (audit-only -- no old side for a set), and
     # --bundle-system-providers is meaningless without --artifact-set.
     #
-    # An empty ``--artifact-set ""`` must count as *supplied* (and be
-    # rejected outright), not as "not set": the exclusivity check below
-    # used to test truthiness (`bool(artifact_set)`, False for "") while
-    # the branch just after it tested `is not None` (True for "") -- with
-    # ARTIFACT also given, that mismatch let both pass the exclusivity
-    # check and then silently ignored ARTIFACT, resolving the empty string
-    # to Path("") == Path(".") and auditing the whole CWD instead of
-    # erroring (CodeRabbit review).
+    # --artifact-set is now a repeatable option (CLI cleanup phase two, PR
+    # 5): `artifact_set` is the tuple Click collects, empty when unset, so
+    # "supplied" is exactly `bool(artifact_set)` -- a bare `--artifact-set
+    # ""` is still the truthy `("",)`, correctly "supplied" and rejected by
+    # `reject_incoherent_scan_operands`'s own empty-member check. The old
+    # comma-string form needed a `bool()`/`is not None` distinction here
+    # because an empty *string* was falsy but not `None`, which is what let
+    # ARTIFACT and an empty --artifact-set both pass exclusivity and
+    # silently resolve to `Path("") == Path(".")` (CodeRabbit review,
+    # historical) -- a tuple has no such falsy-but-present state.
     _reject_incoherent_scan_operands(
         artifact=artifact, artifact_set=artifact_set, against=against,
-        dry_run=dry_run, bundle_system_providers=bundle_system_providers,
+        bundle_system_providers=bundle_system_providers,
     )
     _reject_incoherent_secondary_output(
         dry_run=dry_run, output=output, secondary_fmt=secondary_fmt,
         secondary_output=secondary_output, artifact_set=artifact_set,
     )
-    if artifact_set is not None:
+    if artifact_set:
+        reject_dry_run_with_output(dry_run, output)
         _reject_comparison_only_flags(no_baseline_reason="drop --artifact-set")
         _run_artifact_set(
             artifact_set=artifact_set,
+            dry_run=dry_run,
             bundle_system_providers=bundle_system_providers,
             header_pairs=header_pairs,
             include_pairs=include_pairs,

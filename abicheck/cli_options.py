@@ -1321,13 +1321,13 @@ def artifact_set_options(func: F) -> F:
     func = click.option(
         "--artifact-set",
         "artifact_set",
-        default=None,
-        metavar="DIR|PATH,PATH,...",
+        multiple=True,
+        metavar="DIR|PATH",
         help="Audit a *set* of libraries with no old side, as one artifact "
-        "(ADR-056): a directory (every discoverable shared library in it) "
-        "or an explicit comma-separated path list. Mutually exclusive with "
-        "the positional ARTIFACT and with --against (audit-only — no "
-        "old-side comparison for a set).",
+        "(ADR-056): a directory (every discoverable shared library in it), "
+        "or a repeatable explicit path, one --artifact-set per member. "
+        "Mutually exclusive with the positional ARTIFACT and with --against "
+        "(audit-only — no old-side comparison for a set).",
     )(func)
     func = click.option(
         "--bundle-system-providers",

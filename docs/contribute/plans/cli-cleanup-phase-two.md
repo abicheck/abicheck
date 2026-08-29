@@ -2361,6 +2361,61 @@ pipelines a fourth time.
   > update, no longer blocked on it either) remains the sole open item in
   > this prerequisite.
   >
+  > **Re-audited (2026-08-28, later session), no code change, no drift
+  > found.** Re-checked this section's live claims directly against current
+  > `main` rather than trusting the prior notes' status cells: `dump_cmd`'s
+  > real ELF/PE/Mach-O execution still goes through `perform_elf_dump`/
+  > `handle_non_elf_dump`, not `execute_dump_request` (the migration itself
+  > is still unstarted); `scan_engine.py` still hardcodes
+  > `source_extractor="auto"`; `--build-query`/`--build-compile-db`/
+  > `--exit-code-scheme` are all still live CLI options. Nothing in this
+  > section had gone stale.
+  >
+  > **Correction (Codex review, same PR): the castxml-tooling paragraph this
+  > note originally carried here sent an implementer the wrong way and is
+  > replaced rather than kept for history.** It reported `apt`'s castxml
+  > (0.6.3, below the 0.6.11 floor) and a hand-assembled conda-forge 0.7.0
+  > build with an unresolved `libclang-cpp.so.20.1` dependency — both real
+  > observations, but neither needed: this repository already ships a
+  > checksum-pinned installer, `action/install-castxml.sh` (the same one
+  > `.github/actions/setup-castxml` and the CI `integration` lane use), with
+  > a `castxml-ubuntu-24.04-x86_64` asset. Running it in this session's own
+  > Ubuntu 24.04/x86_64 container installed CastXML `0.6.20260105-g9864b1e`
+  > (bundled Clang 21.1.8) in under a minute, no dependency assembly
+  > required, and `castxml_policy.evaluate_castxml_version()` confirms
+  > `supported=True` against its real `--version` output. **Any future note
+  > in this section needing a policy-compliant castxml should run
+  > `action/install-castxml.sh` first, rather than reassembling one from
+  > `apt`/`pip`/conda-forge by hand** — `apt`'s own package genuinely fails
+  > the version floor, and `pip`'s only wheel is far below it too, but
+  > conda-forge itself is not unusable: the 2026-08-27 note below this one
+  > records a working conda-forge 0.7.0 install (`supported=True`), and the
+  > CI `integration` lane's own Windows leg installs castxml from
+  > conda-forge. What actually failed in *this* session was one manual
+  > dependency-assembly attempt (a missing `libclang-cpp.so.20.1` payload
+  > from the obvious conda-forge counterpart package) — not conda-forge as a
+  > source. Either route can work; the pinned installer is just faster and
+  > doesn't require re-solving that dependency split by hand.
+  >
+  > With that installer's castxml on `PATH`, `tests/
+  > test_dump_write_after_resolve_time_embed.py`'s three cases — previously
+  > only exercised under `--ast-frontend clang` per that module's own notes
+  > above, since no working castxml was available in the sessions that wrote
+  > it — now run and pass under the `integration` marker with a real,
+  > policy-compliant castxml present (not re-verified against the *default*
+  > castxml backend specifically, since that suite still pins
+  > `--ast-frontend clang` explicitly rather than exercising an unflagged
+  > `dump`/`execute_dump_request` call; that distinction is unchanged by
+  > this note). `tests/test_dump_scan_l3_comparability.py` was re-run too, as
+  > a reconfirmation rather than a new finding: 4 passed, 2 xfailed — the
+  > same `_SCAN_KNOWN_DIVERGENT_FRONTENDS` signature the fact owner already
+  > documents, not a new or different divergence. Neither run moves the
+  > still-open items: the whole migrated pipeline's byte-identical-output
+  > verification under the default castxml backend, and item 2's L4
+  > extractor default divergence fix, are both untouched — this note only
+  > removes a wrong tooling recipe and confirms the right one works here,
+  > it does not attempt the migration itself.
+  >
   > **Item 2 (the L4 extractor default divergence) is now locally
   > reconfirmed under real castxml — but this is a reproduction of an
   > already-established fact, not its first verification, and deliberately
@@ -3745,6 +3800,61 @@ mechanical PRs so a bisect over a red CI job lands on this PR unambiguously.
 
 ## PR 5 — `scan --artifact-set` refinement (not removal)
 
+**Status: the repeatable-option syntax slice is implemented (2026-08-28).**
+`--artifact-set` is now `multiple=True` (`cli_options.py`); a single
+directory value is unchanged, and multiple explicit paths are given as one
+`--artifact-set` per member (`--artifact-set a.so --artifact-set b.so`), not
+a comma-separated string. The comma-separated form is gone with no alias,
+same "hard cleanup" stance as every other removal in this plan — passing
+the old `a.so,b.so` spelling as a single value is now read as one literal
+(nonexistent) path and errors `--artifact-set member not found`, not
+silently parsed. `_resolve_artifact_set_paths` (`cli_scan.py`),
+`reject_incoherent_scan_operands`/`reject_incoherent_scan_secondary_output`
+(`cli_scan_helpers.py`), and `_run_artifact_set`/`scan_cmd`'s own type all
+moved from `str | None` to `tuple[str, ...]` together — "supplied" is now
+exactly `bool(artifact_set)`, which closes the CodeRabbit-caught
+truthiness/`is not None` mismatch class the comma-string form needed a
+special-cased comment to avoid (a tuple has no falsy-but-present state the
+way an empty string did). The composite Action's own `new-library-set`
+input (`action.yml`) deliberately keeps its comma-separated contract
+unchanged — that is a separate, already-decoupled front end, and front-end
+parity here means *staying working*, not re-breaking to match the CLI's new
+syntax — so `action/run.sh` now splits a comma-separated `new-library-set`
+value into one `--artifact-set` occurrence per member (a bare directory,
+having no comma, passes through as the single unsplit value it always was).
+Docs regenerated (`gen_cli_reference.py`); tests updated across
+`test_scan_artifact_set.py`, `test_bazel_root_targets_scan.py`, and
+`test_action_run_sh_artifact_set.py` (the latter gained two new cases
+pinning the Action-side comma-split and blank-member-skipping behavior
+directly against the real `action/run.sh` text, not a paraphrase of it).
+
+**A second slice (2026-08-29) shipped the dry-run/cost-estimation item.**
+`scan --artifact-set --dry-run` is a real preview now, not a hard rejection
+(`reject_incoherent_scan_operands`'s own `--dry-run` check was removed;
+`render_artifact_set_dry_run`, `abicheck/frontends/cli/
+artifact_set_dry_run.py`, builds the report). The cost projection is
+genuinely per-member-scaled: one single-binary `ScanRequest` is built per
+discovered member from the real request's shared fields, each run through
+`service.estimate_scan()` independently, and the per-layer TU/time results
+summed across members — rather than reusing the shared estimator's
+single-request shape, which only scales its `L0_binary` row by
+`len(binaries)` (see `docs/contribute/plans/g35-multi-artifact-scan.md`'s
+own estimator bullet for that general, still-open gap for other
+`estimate_scan()` callers). Lives in a new `frontends/cli/` leaf module
+rather than `cli_scan.py` (`no_growth`-debt-tracked, at its line-count
+baseline) or `cli_scan_helpers.py` (which cannot import `.service` without
+closing an import cycle back through `service -> service_scan ->
+scan_engine -> cli_scan_helpers`). Tests in
+`tests/test_scan_artifact_set_coverage.py`.
+
+**Still open, per the sequencing note below:** `--artifact-set-manifest`
+(no real domain contract proposed for it yet) and the remaining set-mode
+*semantics* items (expected provider DSO, a symbol moved between sibling
+libraries, duplicated providers, L4 symbol reconciliation) — the first
+slice touched only the value syntax and the second only the dry-run/cost
+item; the review itself called the syntax change "the only part of this
+section worth doing on its own."
+
 The draft proposed dispatching on the operand type:
 
 ```text
@@ -3762,16 +3872,16 @@ What is actually worth changing is the *value syntax*. The comma-separated form
 (`_resolve_artifact_set_paths` in `cli_scan.py`) is the weak part:
 
 ```bash
-# today
+# before this slice (removed, no alias — now errors, see the status note above)
 abicheck scan --artifact-set a.so,b.so,c.so
 
-# proposed: repeatable option
+# landed: repeatable option
 abicheck scan --artifact-set a.so --artifact-set b.so --artifact-set c.so
 
 # unchanged
 abicheck scan --artifact-set directory/
 
-# optional, for bundles needing stable IDs / expected-provider ownership
+# still just a proposal, not implemented — see "Still open" in the status note above
 abicheck scan --artifact-set-manifest set.json
 ```
 
@@ -3786,8 +3896,10 @@ the surrounding text already shows as a usage example.
 
 **Sequencing note:** the syntax cleanup is lower value than finishing set-mode
 *semantics* — expected provider DSO, a symbol moved between sibling libraries,
-duplicated providers, L4 symbol reconciliation, cost estimation, and a
-machine-readable dry-run. Do the semantics first if the two compete. The
+duplicated providers, and L4 symbol reconciliation (cost estimation and the
+dry-run/cost preview shipped in the second slice above -- text-only, like
+every other `abicheck` dry-run, ADR-054). Do the remaining semantics first
+if they compete with anything else. The
 review reaffirms this and sharpens it: the *only* part of this section that is
 worth doing on its own is replacing the comma-separated value with a repeatable
 option. `--artifact-set-manifest` is worth adding only when it carries a real
@@ -3882,8 +3994,9 @@ PR G2 canonical exit decision, part 2 = PR 4 — one automatic gate algorithm,
                                        schema / report / Action parity
       └─ then DELETE --exit-code-scheme
 PR H  artifact-set semantics          = PR 5 — provider ownership, moved and
-                                       duplicated symbols, cost and dry-run;
-                                       syntax refinement last
+      (syntax slice DONE)               duplicated symbols, cost and dry-run;
+                                       syntax refinement (DONE) was the one
+                                       piece independent of the semantics work
 ```
 
 Independent of the chain, unblocked at any time: PR 1 (**done**), PR 2

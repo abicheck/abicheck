@@ -1413,7 +1413,63 @@ elif [[ "$MODE" == "scan" ]]; then
       echo "::error::mode: scan with new-library-set does not support against/abi-baseline — new-library-set is audit-only (no old side to compare a set against, ADR-056). Remove against/abi-baseline, or use new-library (a single artifact) for a baseline comparison instead."
       exit 1
     fi
-    CMD+=(--artifact-set "$SCAN_ARTIFACT_SET")
+    # `new-library-set`'s own input contract stays a directory or a
+    # comma-separated path list (action.yml) -- CLI cleanup phase two, PR 5
+    # changed only the native `scan --artifact-set` *CLI* value syntax to a
+    # repeatable option, and the Action's own input is a separate, already
+    # decoupled front end this plan's front-end-parity rule requires stay
+    # working, not re-broken to match. A bare directory (no comma) is passed
+    # through as the one CLI value unchanged; a comma-separated list is
+    # split into one `--artifact-set` occurrence per member here, so the
+    # Action's callers never see the CLI's syntax change. Blank members
+    # (from a stray leading/trailing/double comma) are skipped, mirroring
+    # the old CLI parser's own `if p.strip()` filter rather than forwarding
+    # them to a per-member CLI empty-string rejection.
+    if [[ "$SCAN_ARTIFACT_SET" == *,* || "$SCAN_ARTIFACT_SET" == *$'\n'* ]]; then
+      # `read -ra ... <<<` reads only the first line, silently dropping every
+      # member after an embedded newline (e.g. a YAML block-scalar
+      # new-library-set value like "a.so,\nb.so") -- a real regression from
+      # the old Python parser, which split the *entire* string on comma with
+      # no such truncation (Codex review). IFS word-splitting on the whole
+      # value has no line-based limit: setting IFS to comma-or-newline makes
+      # unquoted expansion split on either, so a *pure* newline-separated
+      # block scalar (no commas at all -- CodeRabbit review) splits too, not
+      # just the comma case str.split(",") would have handled.
+      # -f (noglob) is required alongside IFS splitting: an unquoted array
+      # assignment word-splits *then* pathname-expands each resulting word,
+      # so a member containing a glob metacharacter (e.g. "*.so,z.so") would
+      # otherwise silently expand "*.so" against the working directory and
+      # scan whatever files happen to match, not the literal requested
+      # member (Codex review, security-relevant for an untrusted Action
+      # input).
+      _old_ifs="$IFS"
+      IFS=$',\n'
+      set -f
+      # shellcheck disable=SC2206  # intentional word-splitting on IFS=$',\n'; -f above suppresses globbing
+      _scan_artifact_set_members=($SCAN_ARTIFACT_SET)
+      set +f
+      IFS="$_old_ifs"
+      for _scan_artifact_set_member in "${_scan_artifact_set_members[@]}"; do
+        # Trim surrounding whitespace (xargs-free, no subshell/echo pitfalls).
+        _scan_artifact_set_member="${_scan_artifact_set_member#"${_scan_artifact_set_member%%[![:space:]]*}"}"
+        _scan_artifact_set_member="${_scan_artifact_set_member%"${_scan_artifact_set_member##*[![:space:]]}"}"
+        [[ -n "$_scan_artifact_set_member" ]] || continue
+        CMD+=(--artifact-set "$_scan_artifact_set_member")
+      done
+    else
+      # A YAML block-scalar directory value commonly carries a trailing
+      # newline even with no comma at all (e.g. "libs/\n") -- trim it the
+      # same way the per-member branch above does, so it isn't forwarded as
+      # a literal, nonexistent path (CodeRabbit review; the old Python
+      # parser stripped every part unconditionally).
+      _scan_artifact_set_dir="${SCAN_ARTIFACT_SET#"${SCAN_ARTIFACT_SET%%[![:space:]]*}"}"
+      _scan_artifact_set_dir="${_scan_artifact_set_dir%"${_scan_artifact_set_dir##*[![:space:]]}"}"
+      if [[ -z "$_scan_artifact_set_dir" ]]; then
+        echo "::error::new-library-set must not be empty." >&2
+        exit 1
+      fi
+      CMD+=(--artifact-set "$_scan_artifact_set_dir")
+    fi
     add_single_flag "--bundle-system-providers" "${INPUT_BUNDLE_SYSTEM_PROVIDERS:-}"
   else
     SCAN_ARTIFACT="${INPUT_NEW_LIBRARY:?new-library (the scanned binary or .abi.json) is required for scan mode, unless new-library-set is given}"

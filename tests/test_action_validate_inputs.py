@@ -319,11 +319,11 @@ class TestScanNewLibrarySet:
         )
         assert result.returncode == 1
 
-    def test_rejects_dry_run_with_new_library_set(self) -> None:
-        # P2 regression (Codex review): --artifact-set estimation isn't
-        # implemented; without this preflight check a dry-run + set step
-        # incurred the full toolchain install before the CLI's own
-        # UsageError.
+    def test_allows_dry_run_with_new_library_set(self) -> None:
+        # CLI cleanup phase two, PR 5: --artifact-set --dry-run is a real
+        # preview now (cli_scan._run_artifact_set), not a hard rejection --
+        # this preflight must let it through to run.sh, not fail early the
+        # way it did while the CLI itself still rejected the combination.
         result = _run_validate(
             {
                 "INPUT_MODE": "scan",
@@ -331,16 +331,11 @@ class TestScanNewLibrarySet:
                 "INPUT_DRY_RUN": "true",
             }
         )
-        assert result.returncode == 1
-        assert "dry-run" in result.stdout
+        assert result.returncode == 0, result.stdout + result.stderr
 
-    def test_rejects_estimate_alias_with_new_library_set(self) -> None:
-        # P2 regression (Codex review): run.sh converts the deprecated
-        # estimate: true alias into INPUT_DRY_RUN=true downstream, but this
-        # preflight check only looked at INPUT_DRY_RUN directly -- a set +
-        # estimate combination passed preflight and only failed after the
-        # full Python/toolchain install, same as the direct dry-run case
-        # above.
+    def test_allows_estimate_alias_with_new_library_set(self) -> None:
+        # Same as above, via the deprecated estimate: true alias (run.sh
+        # converts it to INPUT_DRY_RUN=true downstream).
         result = _run_validate(
             {
                 "INPUT_MODE": "scan",
@@ -348,8 +343,7 @@ class TestScanNewLibrarySet:
                 "INPUT_ESTIMATE": "true",
             }
         )
-        assert result.returncode == 1
-        assert "estimate" in result.stdout
+        assert result.returncode == 0, result.stdout + result.stderr
 
     def test_warns_new_library_set_outside_scan(self) -> None:
         result = _run_validate(
