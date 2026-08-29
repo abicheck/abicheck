@@ -7583,8 +7583,8 @@ int>`), which is real, independently-reviewable work of its own, not a
 small fix bundled into this slice -- left for a follow-on slice rather
 than attempted under review pressure here.
 
-**Correction (2026-08-29, same day, a SECOND Codex review round on PR
-#943): the previous correction's own fix was itself incomplete -- keying
+**Correction (2026-08-29, same day, a SECOND Codex review round on
+PR #943): the previous correction's own fix was itself incomplete -- keying
 ordinal state by the walked node's identity is wrong whenever a
 TRANSPARENT AST wrapper sits between a scope and its anonymous
 children.** `extern "C" { ... }` (a `LinkageSpecDecl`) contributes NO
@@ -8610,8 +8610,8 @@ rather than the previous fix's excised `"typename T::x (*())(T)"`, since
 the new rule no longer excises the nested parameter list at all) still
 passes.
 
-**Correction (2026-08-29, same day, real Windows CI failures on PR
-#943): two more real Windows-only failures in the `EntityId` carrier
+**Correction (2026-08-29, same day, real Windows CI failures on
+PR #943): two more real Windows-only failures in the `EntityId` carrier
 test suite itself, this time in the test infrastructure rather than the
 production code.** (1) `TestResolverIsOnlyCalledByAProducer`/
 `TestMangledRewritesKeepTheCarrierInSync` (both new AST-scanning tests
