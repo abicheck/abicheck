@@ -15,13 +15,11 @@
 
 """Scan service — typed request/result contract and per-project cost estimate.
 
-ADR-035 D10 / G19.7 (Phase 3b). One typed contract — :class:`ScanRequest` →
-:class:`ScanResult` / ``[CostEstimate]`` — that the CLI (`cli_scan.py`), the MCP
-server, and CI wrappers all drive, so there is one engine and many renderings.
-
-This is a leaf module (it must not import from :mod:`abicheck.service`); the
-header-expansion helper it shares with the input-resolution path
-(:func:`expand_header_inputs`) lives here and is re-exported by ``service`` for
+ADR-035 D10 / G19.7 (Phase 3b). One typed contract — :class:`ScanRequest` ->
+:class:`ScanResult` / ``[CostEstimate]`` -- that the CLI, the MCP server, and
+CI wrappers all drive, so there is one engine and many renderings. A leaf
+module (must not import :mod:`abicheck.service`); its header-expansion
+helper (:func:`expand_header_inputs`) is re-exported by ``service`` for
 backward compatibility.
 """
 
@@ -381,12 +379,11 @@ _TEMPLATE_RE = re.compile(
 
 def _header_complexity_signal(path: Path) -> bool:
     """Best-effort local peek: many ``#include``s or heavy template/concept/
-    constexpr usage in *path* signal a header whose real parse time a flat
-    size-based estimate systematically under-prices (recursive template
-    instantiation is not linear in header bytes — the SVS pathological case had
-    small headers and a near-unbounded real parse time). Never raises; an
-    unreadable header is treated as unknown risk (not flagged), matching the
-    size estimate's own fall back to the base cost alone.
+    constexpr usage in *path* signals a header a flat size-based estimate
+    under-prices (template instantiation isn't linear in bytes -- the SVS
+    case had small headers and near-unbounded real parse time). Never
+    raises; unreadable is treated as unknown risk, matching the size
+    estimate's own fallback.
     """
     try:
         with open(path, "rb") as fh:
@@ -916,18 +913,15 @@ def _aggregate_scan_set_verdict(
     """Combine per-member + bundle verdicts into one set-level verdict/exit.
 
     1. Any member ``BUDGET_OVERFLOW`` -> the whole set is ``BUDGET_OVERFLOW``,
-       exit 5. Dominates every other outcome (ADR-050 D2's ``not_comparable``
-       precedent: a member whose analysis didn't finish is worse than one
-       that finished and found a break, because its true result is unknown).
+       exit 5 (dominates: an unfinished analysis is worse than a finished one
+       that found a break, ADR-050 D2's ``not_comparable`` precedent).
     2. Else, the worst compatibility verdict across `per_artifact` + the
        bundle layer's own verdict (`_SCAN_SET_COMPAT_ORDER`), with the
        matching exit code.
     3. Any member ``EVIDENCE_CONTRACT_ERROR`` floors the exit code at 1
-       without lowering a worse one from step 2, and — mirroring the exit
-       code — becomes the reported verdict *only* when step 2's worst
-       compatibility verdict was NO_CHANGE/COMPATIBLE/COMPATIBLE_WITH_RISK
-       (i.e. the error is the dominant problem); a stronger API_BREAK/
-       BREAKING from step 2 keeps that verdict string.
+       without lowering a worse one from step 2, and becomes the reported
+       verdict only when step 2's worst was NO_CHANGE/COMPATIBLE/
+       COMPATIBLE_WITH_RISK; a stronger API_BREAK/BREAKING keeps that string.
     """
     if any(a.result.verdict == "BUDGET_OVERFLOW" for a in per_artifact):
         return "BUDGET_OVERFLOW", 5
@@ -1088,13 +1082,22 @@ def estimate_artifact_set(
     """Per-layer cost total for ``scan --artifact-set --dry-run``: one
     single-binary estimate per member at the level
     :func:`_resolve_member_scan_level` resolves once (shared with
-    :func:`_run_scan_one_member`), plus a ``bundle_audit`` entry. Returns
-    ``(totals, notes)``.
+    :func:`_run_scan_one_member`), plus a ``bundle_audit`` entry. *notes*
+    also flags a pinned depth with no source evidence at all, which the
+    real run fails with ``EVIDENCE_CONTRACT_ERROR`` (not raised here -- a
+    `--build-config` run may yet supply evidence).
     """
-    _sm, _dp, _c, _s, _r, resolved, eff_depth, _cm = _resolve_member_scan_level(req)
+    sm, dp, _c, _s, _r, resolved, eff_depth, _cm = _resolve_member_scan_level(req)
     totals: dict[str, tuple[int, float]] = {}
     notes: list[str] = []
     seen: set[str] = set()
+    pinned = dp is not None or (sm is not None and sm != "auto")
+    if pinned and not (req.sources or req.build_info or req.build_config):
+        notes.append(
+            f"WARNING: pinned depth '{eff_depth.value}' has no --sources/"
+            "--build-info/--build-config -- the real run would fail with "
+            "EVIDENCE_CONTRACT_ERROR (exit 1), not run as priced below."
+        )
     for member_path in member_paths:
         member_req = replace(req, binaries=[member_path], mode="audit")
         for e in estimate_scan(member_req, resolved_level=(resolved, eff_depth)):
@@ -1936,13 +1939,11 @@ def run_scan_set(req: ScanRequest) -> ScanSetResult:
 
 def _scan_set_subprocess_worker(req: ScanRequest, q: Any) -> None:
     """Child-process entry for :func:`run_scan_set_subprocess` (ADR-056).
-
     Mirrors :func:`_scan_subprocess_worker`'s process-group detachment and
-    SIGTERM cleanup verbatim — same race, same fix: without these, a
-    clang/castxml child one of `run_scan_set`'s member scans spawns can
-    detach into its own process group in the gap between the parent's
-    descendant-pgid snapshot and its terminate() call, and outlive the
-    worker as an orphan (Codex review).
+    SIGTERM cleanup verbatim -- same race, same fix: without these, a
+    clang/castxml child a member scan spawns can detach into its own group
+    in the gap between the parent's descendant-pgid snapshot and its
+    terminate() call, and outlive the worker as an orphan (Codex review).
     """
     import os
 

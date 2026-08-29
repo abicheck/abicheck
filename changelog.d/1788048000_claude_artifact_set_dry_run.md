@@ -19,4 +19,10 @@
   independent copy of that precedence. The composite GitHub Action's
   `new-library-set` + `dry-run`/`estimate: true` inputs now reach this
   preview too -- `validate-inputs.sh`'s preflight rejection (written while
-  the CLI itself still rejected the combination) is removed.
+  the CLI itself still rejected the combination) is removed, and
+  `new-library-set` splitting now also handles a pure newline-separated
+  (no comma) YAML block-scalar value, not just the comma-joined form. The
+  preview also warns when a pinned `--depth` has no `--sources`/
+  `--build-info`/`--build-config` at all -- a combination the real run
+  fails with `EVIDENCE_CONTRACT_ERROR` (exit 1) rather than running as
+  priced.

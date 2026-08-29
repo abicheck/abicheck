@@ -169,6 +169,21 @@ class TestScanArtifactSetForwarding:
         j = cmd.index("--artifact-set", i + 1)
         assert cmd[j + 1] == "b.so"
 
+    def test_new_library_set_handles_newline_only_separation(self) -> None:
+        # CodeRabbit review: a YAML block-scalar value with no comma at all
+        # (e.g. "new-library-set: |\n  a.so\n  b.so") previously fell through
+        # to the single-value branch (only the *,* check triggered the
+        # comma/newline IFS split), forwarding the whole multi-line string
+        # as one nonexistent --artifact-set path.
+        cmd = _run_cmd(
+            {"INPUT_MODE": "scan", "INPUT_NEW_LIBRARY_SET": "a.so\nb.so"}
+        )
+        assert cmd.count("--artifact-set") == 2
+        i = cmd.index("--artifact-set")
+        assert cmd[i + 1] == "a.so"
+        j = cmd.index("--artifact-set", i + 1)
+        assert cmd[j + 1] == "b.so"
+
     def test_new_library_set_does_not_glob_expand_members(
         self, tmp_path: Path
     ) -> None:

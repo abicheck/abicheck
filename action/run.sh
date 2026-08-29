@@ -1425,15 +1425,16 @@ elif [[ "$MODE" == "scan" ]]; then
     # (from a stray leading/trailing/double comma) are skipped, mirroring
     # the old CLI parser's own `if p.strip()` filter rather than forwarding
     # them to a per-member CLI empty-string rejection.
-    if [[ "$SCAN_ARTIFACT_SET" == *,* ]]; then
+    if [[ "$SCAN_ARTIFACT_SET" == *,* || "$SCAN_ARTIFACT_SET" == *$'\n'* ]]; then
       # `read -ra ... <<<` reads only the first line, silently dropping every
       # member after an embedded newline (e.g. a YAML block-scalar
       # new-library-set value like "a.so,\nb.so") -- a real regression from
       # the old Python parser, which split the *entire* string on comma with
       # no such truncation (Codex review). IFS word-splitting on the whole
-      # value has no line-based limit: setting IFS to comma alone (no
-      # whitespace) makes unquoted expansion split only on commas, embedded
-      # newlines included, matching str.split(",") exactly.
+      # value has no line-based limit: setting IFS to comma-or-newline makes
+      # unquoted expansion split on either, so a *pure* newline-separated
+      # block scalar (no commas at all -- CodeRabbit review) splits too, not
+      # just the comma case str.split(",") would have handled.
       # -f (noglob) is required alongside IFS splitting: an unquoted array
       # assignment word-splits *then* pathname-expands each resulting word,
       # so a member containing a glob metacharacter (e.g. "*.so,z.so") would
@@ -1442,9 +1443,9 @@ elif [[ "$MODE" == "scan" ]]; then
       # member (Codex review, security-relevant for an untrusted Action
       # input).
       _old_ifs="$IFS"
-      IFS=','
+      IFS=$',\n'
       set -f
-      # shellcheck disable=SC2206  # intentional word-splitting on IFS=','; -f above suppresses globbing
+      # shellcheck disable=SC2206  # intentional word-splitting on IFS=$',\n'; -f above suppresses globbing
       _scan_artifact_set_members=($SCAN_ARTIFACT_SET)
       set +f
       IFS="$_old_ifs"

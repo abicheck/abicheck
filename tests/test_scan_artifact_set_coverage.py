@@ -136,6 +136,45 @@ class TestArtifactSetRepeatableOptionBranches:
         assert result.exit_code == 0, result.output
         assert "UNSCOPED" in result.output
 
+    def test_dry_run_warns_on_pinned_depth_with_no_evidence(
+        self, runner: CliRunner, tmp_path: Path
+    ) -> None:
+        # Codex review: --depth source with no --sources/--build-info/
+        # --build-config would fail the real run with EVIDENCE_CONTRACT_ERROR
+        # (exit 1); the dry-run must flag it rather than silently price a
+        # run that would never actually execute.
+        p1, p2 = tmp_path / "liba.so", tmp_path / "libb.so"
+        _write_elf_shared_object_stub(p1)
+        _write_elf_shared_object_stub(p2)
+        result = runner.invoke(
+            main,
+            [
+                "scan", "--artifact-set", str(p1), "--artifact-set", str(p2),
+                "--dry-run", "--depth", "source",
+            ],
+        )
+        assert result.exit_code == 0, result.output
+        assert "EVIDENCE_CONTRACT_ERROR" in result.output
+
+    def test_dry_run_does_not_warn_when_sources_are_given(
+        self, runner: CliRunner, tmp_path: Path
+    ) -> None:
+        p1, p2 = tmp_path / "liba.so", tmp_path / "libb.so"
+        _write_elf_shared_object_stub(p1)
+        _write_elf_shared_object_stub(p2)
+        src = tmp_path / "src"
+        src.mkdir()
+        (src / "a.c").write_text("int f(void) { return 0; }\n")
+        result = runner.invoke(
+            main,
+            [
+                "scan", "--artifact-set", str(p1), "--artifact-set", str(p2),
+                "--dry-run", "--depth", "source", "--sources", str(src),
+            ],
+        )
+        assert result.exit_code == 0, result.output
+        assert "EVIDENCE_CONTRACT_ERROR" not in result.output
+
     def test_dry_run_prices_the_cross_library_bundle_audit_pass(
         self, runner: CliRunner, tmp_path: Path
     ) -> None:
