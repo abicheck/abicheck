@@ -25,7 +25,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from .binary_utils import strip_vendor_hash
+from .binary_naming import strip_vendor_hash
 from .checker_policy import ChangeKind
 from .checker_types import Change
 from .diff_helpers import make_change

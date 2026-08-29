@@ -25,6 +25,13 @@ import re
 import struct
 from pathlib import Path
 
+# ``strip_vendor_hash``'s real home is ``binary_naming.py`` (ADR-061 D1): a
+# pure string transform with no I/O, classified ``model`` so ``compare``-layer
+# detectors can use it without a forbidden ``compare -> extract`` edge.
+# ``_canonical_library_key`` below still needs it; re-exported by value here
+# so an existing ``from .binary_utils import strip_vendor_hash`` still resolves.
+from .binary_naming import strip_vendor_hash as strip_vendor_hash
+
 # Mach-O magic bytes — covers all variants:
 # 32-bit BE/LE, 64-bit BE/LE, fat archive 32/64
 _MACHO_MAGICS: frozenset[bytes] = frozenset(
@@ -170,48 +177,6 @@ def detect_archive(path: str | Path) -> bool:
     except OSError:
         return False
     return magic in _ARCHIVE_MAGICS
-
-
-#: `auditwheel` (Linux) and `delocate` (macOS) rewrite each vendored library to
-#: ``lib<name>-<hex>.so.<ver>`` / ``lib<name>-<hex>.dylib`` and rewrite its
-#: SONAME/install-name to match, so the hash changes on every rebuild even
-#: though the underlying dependency didn't. Restricted to a hyphen + 6-16 hex
-#: chars immediately before ``.so``/``.dylib`` (or a numeric version
-#: component leading to one) so ordinary hyphenated names — e.g.
-#: ``libwebpdemux``, ``libbrotlicommon``, or a real ``-cafe`` (too short) —
-#: are never touched (G9, ADR: docs/contribute/plans/g9-wheel-vendored-matching.md).
-#: The lookahead ``(?=[0-9a-f]*[a-f])`` requires at least one non-decimal hex
-#: letter in the run: without it, a purely-decimal 6-16-digit suffix (a
-#: legitimate embedded build/version number, e.g. ``libfoo-100200.so.1`` vs.
-#: ``libfoo-100300.so.1``) also matched and stripped to the same key,
-#: silently hiding a real SONAME/dependency change as vendor-hash noise —
-#: the exact false-negative an ABI-breaking-change detector must not produce
-#: (self-review finding).
-#: Case-insensitive (``re.IGNORECASE``): a vendored library can carry an
-#: uppercase-hex or uppercase-extension spelling (``libfoo-ABCDEF.SO.1``) --
-#: matching only lowercase let two releases differing solely in that
-#: generated hash's case key as unrelated libraries, reporting spurious
-#: removal/addition noise (Codex). Only the matched hash/extension span is
-#: affected -- re.sub() replaces just that span with "", so the rest of the
-#: name (and every other consumer of the stripped result) keeps its
-#: original case.
-_VENDOR_HASH_RE = re.compile(
-    r"-(?=[0-9a-f]*[a-f])[0-9a-f]{6,16}(?=\.(?:so|dylib)\b|\.\d)", re.IGNORECASE
-)
-
-
-def strip_vendor_hash(name: str) -> str:
-    """Strip an auditwheel/delocate content-hash suffix from a library name.
-
-    Pairing on the unhashed stem lets ``compare-release`` diff two wheels'
-    vendored libraries directly instead of reporting every one as
-    removed+added noise every rebuild (G9), and lets SONAME/install-name
-    diffing treat a hash-only rebuild as unchanged rather than a spurious
-    ``SONAME_CHANGED``. A genuinely changed vendored dependency (e.g. a
-    SONAME major bump) still surfaces as a real break — this only normalizes
-    the filename/SONAME spelling, never the content.
-    """
-    return _VENDOR_HASH_RE.sub("", name)
 
 
 #: Mach-O's version-before-extension convention: ``libfoo.1.dylib``,
