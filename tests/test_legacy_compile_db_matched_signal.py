@@ -36,6 +36,17 @@ all): an empty ``legacy_compile_db_tokens`` tuple is indistinguishable from
 These are fast, monkeypatch-based unit tests (no compiler needed) --
 the true end-to-end proof against a real compile database lives in
 ``tests/test_legacy_compile_db_typed_threading.py`` (``integration``).
+
+A second review round on the fix above (still fresh evidence on PR #935,
+same commit range) found the complementary gap: a caller that passes
+non-empty ``legacy_compile_db_tokens`` while leaving ``legacy_compile_db_
+matched`` at its default ``False`` -- exactly the shape
+``tests/test_legacy_compile_db_typed_threading.py``'s own end-to-end caller
+uses -- still got ``applied=False`` even though the non-empty tokens are
+themselves proof a match occurred. ``_legacy_compile_db_achieved`` closes
+this by treating non-empty tokens as sufficient evidence on their own,
+independent of whether ``matched`` was also passed; see
+``test_tokens_alone_without_explicit_matched_flag_still_marks_applied``.
 """
 
 from __future__ import annotations
@@ -159,3 +170,55 @@ class TestLegacyMatchedIsASeparateSignalFromTokens:
         assert ctx is not None
         assert ctx.gcc_options == "-DFOLD=1"
         assert "-DLEGACY=1" not in (ctx.gcc_options or "")
+
+    def test_tokens_alone_without_explicit_matched_flag_still_marks_applied(
+        self, monkeypatch, tmp_path: Path
+    ) -> None:
+        """Codex review, second round: a caller may pass non-empty
+        `legacy_compile_db_tokens` while leaving `legacy_compile_db_matched`
+        at its default `False` -- the shape
+        `test_legacy_compile_db_typed_threading.py`'s own end-to-end caller
+        uses. Non-empty tokens are themselves proof a match occurred, so
+        `applied` must still become True even though `matched` was never
+        explicitly passed."""
+
+        def _fake_seed(*, pending_cleanups, **kwargs):
+            return [], False, None, ()
+
+        monkeypatch.setattr(
+            "abicheck.buildsource.l2_seed.seed_includes_and_fold_compile_context",
+            _fake_seed,
+        )
+        side, evidence = _side_and_evidence(tmp_path)
+
+        includes, ctx, applied, cleanups = _seeded_includes_and_compile_context(
+            side,
+            evidence,
+            legacy_compile_db_tokens=("-DWIDE=1",),
+            # legacy_compile_db_matched deliberately omitted (defaults False)
+        )
+        assert applied is True
+        assert ctx is not None
+        assert ctx.gcc_options == "-DWIDE=1"
+
+    def test_early_return_path_also_honors_tokens_alone(
+        self, monkeypatch, tmp_path: Path
+    ) -> None:
+        """Same gap, but in the early-return branch (no sources/build_info,
+        or no evidence.headers) -- it has its own independent `applied`
+        computation and needed the identical fix."""
+        header = tmp_path / "h.h"
+        header.write_text("void f();\n", encoding="utf-8")
+        side = InputSpec(path=tmp_path / "lib.so", sources=None, headers=(header,))
+        evidence = SideEvidence(
+            headers=[], compile=None, collect_mode="off", dump_manifest=None
+        )
+
+        includes, ctx, applied, cleanups = _seeded_includes_and_compile_context(
+            side,
+            evidence,
+            legacy_compile_db_tokens=("-DWIDE=1",),
+        )
+        assert applied is True
+        assert ctx is not None
+        assert ctx.gcc_options == "-DWIDE=1"

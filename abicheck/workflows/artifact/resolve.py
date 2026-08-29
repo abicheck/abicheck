@@ -321,6 +321,23 @@ def _fold_legacy_compile_db_tokens(
     return dataclasses.replace(ctx, gcc_options=gcc_options)
 
 
+def _legacy_compile_db_achieved(matched: bool, tokens: tuple[str, ...]) -> bool:
+    """Whether the legacy ``-p``/``--compile-db`` auto-match should count as
+    having achieved real build context (Codex review, fresh evidence on
+    ``f381deb``).
+
+    *matched* alone under-counts: a caller may pass non-empty *tokens*
+    (proof the match already derived real castxml flags) while leaving
+    *matched* at its default ``False``, as the tokens-only call shape in
+    ``tests/test_legacy_compile_db_typed_threading.py`` does. Non-empty
+    tokens are themselves sufficient evidence of a match, independent of
+    whether *matched* was also passed -- and *matched* remains necessary on
+    its own for a genuinely matched compile unit that legitimately derives
+    zero flags, which an empty token tuple cannot represent at all.
+    """
+    return matched or bool(tokens)
+
+
 def _seeded_includes_and_compile_context(
     side: InputSpec,
     evidence: SideEvidence,
@@ -495,7 +512,9 @@ def _seeded_includes_and_compile_context(
         return (
             list(side.includes),
             _fold_legacy_compile_db_tokens(evidence.compile, legacy_compile_db_tokens),
-            legacy_compile_db_matched,
+            _legacy_compile_db_achieved(
+                legacy_compile_db_matched, legacy_compile_db_tokens
+            ),
             [],
         )
     from ...buildsource.l2_seed import seed_includes_and_fold_compile_context
@@ -563,14 +582,19 @@ def _seeded_includes_and_compile_context(
         effective_ctx = _fold_legacy_compile_db_tokens(
             effective_ctx, legacy_compile_db_tokens
         )
-        # Codex review, fresh evidence: folding the legacy tokens into
-        # effective_ctx above is not enough on its own -- `applied` is what
-        # `_resolve_side_snapshot_impl` actually gates `parsed_with_build_
-        # context` on (mirroring `perform_elf_dump`'s own `compile_db_
-        # context_matched` OR `l3_context_applied` condition), and a real
-        # match with zero derived tokens (an empty tuple) is indistinguishable
-        # from "never matched" without a separate signal. `legacy_compile_db_
-        # matched` carries that signal the way `compile_db_context_matched`
-        # already does for the CLI path.
-        applied = legacy_compile_db_matched
+        # Codex review, fresh evidence (twice over): folding the legacy
+        # tokens into effective_ctx above is not enough on its own --
+        # `applied` is what `_resolve_side_snapshot_impl` actually gates
+        # `parsed_with_build_context` on (mirroring `perform_elf_dump`'s own
+        # `compile_db_context_matched` OR `l3_context_applied` condition).
+        # Two independent ways a call can prove a real match: an explicit
+        # `legacy_compile_db_matched=True` (a real match with zero derived
+        # tokens, which an empty token tuple alone can't represent), or a
+        # non-empty `legacy_compile_db_tokens` (which is itself proof a
+        # match already derived real flags, even when a caller left
+        # `legacy_compile_db_matched` at its default). See
+        # `_legacy_compile_db_achieved`.
+        applied = _legacy_compile_db_achieved(
+            legacy_compile_db_matched, legacy_compile_db_tokens
+        )
     return includes, effective_ctx, applied, cleanups

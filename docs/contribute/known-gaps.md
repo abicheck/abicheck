@@ -4713,6 +4713,35 @@ looked like the obvious fix and wasn't.
   'legacy_compile_db_matched'` against the pre-fix code (the parameter
   did not exist), not merely that they pass now.
 
+  **Second correction (2026-08-29, same day, second Codex review round on
+  PR #935): the fix above still under-counted a real call shape.** A caller
+  may thread non-empty `legacy_compile_db_tokens` while leaving the new
+  `legacy_compile_db_matched` parameter at its default `False` — exactly the
+  shape `tests/test_legacy_compile_db_typed_threading.py`'s own end-to-end
+  caller uses. `_seeded_includes_and_compile_context` still returned
+  `applied=legacy_compile_db_matched` alone in that case (both the
+  early-return and main-path branches), so `applied` stayed `False` even
+  though non-empty tokens are themselves proof a legacy match derived real
+  flags — reproducing the identical `parsed_with_build_context` under-report
+  the first correction above closed, just reachable from a different call
+  shape.
+
+  Fixed via a shared `_legacy_compile_db_achieved(matched, tokens) -> bool`
+  helper: `matched or bool(tokens)`. Both branches now call it instead of
+  reading `legacy_compile_db_matched` directly. `legacy_compile_db_matched`
+  remains necessary on its own for a genuinely matched compile unit that
+  legitimately derives zero flags (an empty token tuple can't represent that
+  case); non-empty tokens are sufficient evidence on their own, independent
+  of whether `matched` was also passed.
+
+  Verified with two new fast unit tests in the same file
+  (`test_tokens_alone_without_explicit_matched_flag_still_marks_applied`,
+  covering the main path; `test_early_return_path_also_honors_tokens_alone`,
+  covering the early-return branch) — both confirmed to fail against the
+  pre-fix code (`assert False is True`) via `git stash`, and to pass after.
+  Full fast unit suite re-run clean (33836 passed, 129 skipped, 4 xfailed,
+  0 failed) after this second correction.
+
 - **Lambda-closure churn survives at the *function* level after the type-level
   fix — investigated, deliberately not patched (oneTBB flow-graph report,
   fresh evidence).** `name_classification._ANONYMOUS_TYPE_MARKERS` did not
