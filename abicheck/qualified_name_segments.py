@@ -576,17 +576,43 @@ def _walk_rewrite_strings(value: object, rewrite: _Callable[[str], str]) -> obje
     mutating dataclasses/lists/dicts in place where possible -- except a
     field named in :data:`_PAYLOAD_FIELD_EXCLUSIONS`. Returns the (possibly
     new) value -- a bare ``str`` can't be mutated in place.
+
+    A **frozen** dataclass is rebuilt via ``dataclasses.replace`` rather
+    than mutated: ``setattr`` on one raises ``FrozenInstanceError``
+    outright, so this walk would crash the whole dump the moment any
+    reachable model field held one. That is not hypothetical -- ADR-063
+    Phase 2's ``entity_id`` carrier (a frozen ``model.identity.EntityId``,
+    itself holding a tuple of frozen scope segments) is reachable from
+    ``functions``/``variables``/``types``/``enums``, all four of which
+    :data:`_LAMBDA_IDENTITY_FIELDS` walks. Rebuilding is also the right
+    *behaviour*, not merely a way to avoid the exception: a closure marker
+    that survives unrewritten inside an identity carrier would leave that
+    carrier keyed on the raw ``:line:col`` spelling this whole function
+    exists to remove, i.e. path/line-tainted identity next to a normalized
+    one. Only ``init=True`` fields can be handed to ``replace``; a changed
+    ``init=False`` field on a frozen dataclass is unreachable by
+    construction and left as-is rather than silently dropped from a
+    half-applied rebuild.
     """
     if isinstance(value, str):
         return rewrite(value)
     if _dataclasses.is_dataclass(value) and not isinstance(value, type):
+        params = getattr(value, "__dataclass_params__", None)
+        is_frozen = bool(getattr(params, "frozen", False))
+        replacements: dict[str, object] = {}
         for f in _dataclasses.fields(value):
             if f.name in _PAYLOAD_FIELD_EXCLUSIONS:
                 continue
             old = getattr(value, f.name)
             new = _walk_rewrite_strings(old, rewrite)
-            if new is not old:
+            if new is old:
+                continue
+            if not is_frozen:
                 setattr(value, f.name, new)
+            elif f.init:
+                replacements[f.name] = new
+        if replacements:
+            return _dataclasses.replace(value, **replacements)
         return value
     if isinstance(value, list):
         for i, item in enumerate(value):
