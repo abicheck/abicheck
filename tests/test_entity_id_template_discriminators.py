@@ -1007,3 +1007,41 @@ def test_live_clang_block_pointer_spiral_return_declarator_preserves_returned_fu
     assert f.return_type == "int (^())(int)"
     assert g.return_type == "int (^())(double)"
     assert f.return_type != g.return_type
+
+
+@pytest.mark.integration
+@pytest.mark.skipif(shutil.which("clang") is None, reason="clang not installed")
+def test_live_clang_string_literal_in_return_type_does_not_confuse_paren_scan(
+    tmp_path: Path,
+) -> None:
+    """A dependent return type containing a quoted string/char literal whose
+    contents happen to include an unbalanced paren character must not
+    confuse the top-level paren scan: `template<class T> decltype("(")
+    f(T);`'s `qualType` is `'decltype("(") (T)'` (confirmed by direct
+    compilation) -- the literal's own `(` was previously counted as
+    structural, so the bracket-depth scan never returned to zero and
+    swallowed the real trailing `(T)` parameter-list group along with
+    everything else, reducing `return_type` to the bare `"decltype"` and
+    discarding the literal's own content entirely (CodeRabbit review, PR
+    #943, on a later round). `f` (containing `"("`) and its `")"`-literal
+    sibling `g` are legal, coexisting overloads and must resolve to
+    distinct return types."""
+    f = _one(
+        _clang_parser(
+            'template<class T> decltype("(") f(T);',
+            tmp_path,
+            "litparena",
+        ).parse_functions(),
+        name="f",
+    )
+    g = _one(
+        _clang_parser(
+            'template<class T> decltype(")") g(T);',
+            tmp_path,
+            "litparenb",
+        ).parse_functions(),
+        name="g",
+    )
+    assert f.return_type == 'decltype("(")'
+    assert g.return_type == 'decltype(")")'
+    assert f.return_type != g.return_type

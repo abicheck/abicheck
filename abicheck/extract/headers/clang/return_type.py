@@ -26,20 +26,47 @@ from __future__ import annotations
 
 import re
 
+from abicheck.model.identity_literals import quoted_literal_spans
+
 __all__ = ["return_type"]
+
+
+def _literal_end_at(literal_spans: list[tuple[int, int]], i: int) -> int | None:
+    """The end index of a quoted-literal span in *literal_spans* starting
+    exactly at *i*, or ``None``. A quoted C++ string/char literal is opaque
+    data, not declarator structure -- a literal like ``"("`` legitimately
+    contains an unbalanced paren character that isn't a real group boundary
+    (confirmed by direct compilation: ``template<class T> decltype("(")
+    f(T);``'s qualType is ``'decltype("(") (T)'``, whose bracket-depth scan
+    below, without this skip, never sees its counting return to zero and
+    swallows the real trailing ``(T)`` parameter-list group along with it --
+    CodeRabbit review, PR #943, on a later round).
+    """
+    for start, end in literal_spans:
+        if start == i:
+            return end
+        if start > i:
+            break
+    return None
 
 
 def _top_level_paren_spans(s: str) -> list[tuple[int, int]]:
     """``(start, end)`` spans (``end`` exclusive, closing ``)`` included) of
     every TOP-LEVEL parenthesized group in *s*, ignoring anything nested
-    inside ``<...>``/``[...]``. Shared by :func:`return_type` and its own
-    spiral-declarator recursion below.
+    inside ``<...>``/``[...]`` or inside a quoted string/char literal.
+    Shared by :func:`return_type` and its own spiral-declarator recursion
+    below.
     """
+    literal_spans = quoted_literal_spans(s)
     spans: list[tuple[int, int]] = []
     bracket = 0
     i = 0
     n = len(s)
     while i < n:
+        literal_end = _literal_end_at(literal_spans, i)
+        if literal_end is not None:
+            i = literal_end
+            continue
         ch = s[i]
         if ch in "<[":
             bracket += 1
@@ -51,6 +78,10 @@ def _top_level_paren_spans(s: str) -> list[tuple[int, int]]:
             depth = 1
             j = i + 1
             while j < n and depth:
+                inner_literal_end = _literal_end_at(literal_spans, j)
+                if inner_literal_end is not None:
+                    j = inner_literal_end
+                    continue
                 if s[j] == "(":
                     depth += 1
                 elif s[j] == ")":
@@ -70,16 +101,22 @@ _LEADING_EXCEPTION_SPEC_RE = re.compile(r"^\s*\b(?:noexcept|throw)\b")
 def _find_top_level_arrow(s: str) -> int | None:
     """Index just past a top-level ``->`` in *s* (paren depth 0 AND
     bracket depth 0), or ``None``. A TRAILING return type's own arrow is
-    always at this depth -- never inside ``(...)``/``<...>``/``[...]`` --
-    so this cannot be confused with an unrelated ``->`` a nested type
-    alias might spell (there is no realistic construct where a *second*,
-    nested trailing-return arrow could appear at this same depth).
+    always at this depth -- never inside ``(...)``/``[...]``, or inside a
+    quoted string/char literal -- so this cannot be confused with an
+    unrelated ``->`` a nested type alias might spell (there is no
+    realistic construct where a *second*, nested trailing-return arrow
+    could appear at this same depth).
     """
+    literal_spans = quoted_literal_spans(s)
     bracket = 0
     paren = 0
     i = 0
     n = len(s)
     while i < n:
+        literal_end = _literal_end_at(literal_spans, i)
+        if literal_end is not None:
+            i = literal_end
+            continue
         ch = s[i]
         if ch in "<[":
             bracket += 1

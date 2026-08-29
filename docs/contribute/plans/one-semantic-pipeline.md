@@ -8868,6 +8868,49 @@ return-type discriminator test in that module still passes unchanged.
 `mypy abicheck/` clean, `ruff check`/`ruff format --check` clean,
 `check_architecture.py` 0 errors.
 
+**Correction (2026-08-29, same day, CodeRabbit review on PR #943): a
+dependent return type containing a quoted literal with an unbalanced
+paren character corrupted the top-level paren scan itself.** Confirmed
+by direct compilation: `template<class T> decltype("(") f(T);`'s
+`qualType` is `'decltype("(") (T)'` -- the literal's own `(` character
+was counted as real declarator structure by `_top_level_paren_spans`'s
+naive bracket-depth counter (which has no concept of quoted text), so
+its running depth count from the opening `(` at `decltype(` never
+returned to zero before the string ended, swallowing the real trailing
+`(T)` parameter-list group along with everything else and reducing
+`return_type` to the bare `"decltype"` -- a `")"`-literal sibling
+(`decltype(")") f(T);`) happened to produce a different, but equally
+wrong, truncation, so the two were *also* distinguishable by accident,
+which is why this needed a repository review to surface rather than
+being caught by any existing test asserting an exact expected value. A
+second claim in the same review round -- that
+`canonicalize_type_param_references`'s `quoted_literal_spans` helper
+mishandles a raw string literal's `R"(...)"` delimiters -- was
+investigated and found NOT reproducible against real clang output:
+direct compilation of `template<class T, decltype(R"(T)") N> void f();`
+shows clang's own printed `qualType` for `N` is `"decltype(\"T\")"` --
+the raw-string prefix/delimiter never survives into the printed type at
+all, since clang's type printer always re-renders a string literal's
+*value* using ordinary quoted-string syntax, not its original source
+spelling. Every call site of `quoted_literal_spans`/
+`canonicalize_type_param_references` operates only on clang-derived
+`qualType` text, so a raw-string delimiter is not a real input this code
+path can ever see; no fix applied for that half, and no regression test
+added for an input that cannot occur. Fixed the confirmed half by adding
+`quoted_literal_spans` (`abicheck/model/identity_literals.py`, `extract
+-> model`, ADR-061's allowed direction) as a skip-list to both
+`_top_level_paren_spans` and `_find_top_level_arrow`: a literal span is
+now hopped over entirely when tracking bracket/paren depth, rather than
+having its contents inspected character-by-character. Regression test in
+`tests/test_entity_id_template_discriminators.py`
+(`test_live_clang_string_literal_in_return_type_does_not_confuse_paren_scan`),
+confirmed to fail pre-fix via `git stash` on just the source file and
+pass post-fix; every existing return-type discriminator test in that
+module still passes unchanged. `mypy abicheck/` clean (515 files),
+`ruff check`/`ruff format --check` clean, `check_architecture.py` 0
+errors (confirming the new `extract -> model` import introduces no
+cycle).
+
 ---
 
 ### Phase 3 — public surface as a graph query over one evidence graph (D5)
