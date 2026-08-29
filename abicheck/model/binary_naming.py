@@ -17,15 +17,18 @@
 Split out of ``binary_utils.py`` (a whole-file-classified ``extract`` module)
 because :func:`strip_vendor_hash` is a pure string transform with no I/O and
 no other ``abicheck`` dependency — the same shape ``qualified_name_segments.py``
-already has, and the same reason it's classified ``model`` rather than
-``extract``: several ``compare``-layer detectors (`diff_platform.py`,
+has, and the same reason it belongs in ``model`` rather than ``extract``:
+several ``compare``-layer detectors (`diff_platform.py`,
 `diff_platform_elf_dynamic.py`, `diff_versioning.py`, `diff_wheel_deployment.py`,
 `diff_cpp_patterns.py`) need this normalization to pair a vendored library
 across a rebuild, and ``compare`` may not import ``extract``
-(`architecture/modules.yaml`). ``binary_utils.py``'s own
-``_canonical_library_key`` (which *does* need file I/O, via
-``_pe_is_dll_content``) imports this back — an ``extract -> model`` edge,
-which is allowed.
+(`architecture/modules.yaml`). Lives physically under ``model/`` (not as a
+flat-root ``legacy_paths`` entry) since it is new code with no pre-existing
+root import path needing a compatibility facade — unlike
+``qualified_name_segments.py``, which predates ADR-061's classification
+(Codex review, PR #942). ``binary_utils.py``'s own ``_canonical_library_key``
+(which *does* need file I/O, via ``_pe_is_dll_content``) imports this back —
+an ``extract -> model`` edge, which is allowed.
 """
 
 from __future__ import annotations

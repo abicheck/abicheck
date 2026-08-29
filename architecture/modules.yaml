@@ -25,10 +25,8 @@
         "abicheck/elf_symbol_filter.py",
         "abicheck/evidence_depth.py",
         "abicheck/fact_provenance.py",
-        "abicheck/binary_naming.py",
         "abicheck/name_classification.py",
         "abicheck/qualified_name_segments.py",
-        "abicheck/stable_abi.py",
         "abicheck/stable_abi_data.py"
       ]
     },
@@ -229,10 +227,6 @@
       ],
       "legacy_paths": [
         "abicheck/analysis_assurance.py",
-        "abicheck/comparability_fields.py",
-        "abicheck/comparability_json.py",
-        "abicheck/comparability_language_mode.py",
-        "abicheck/comparability_sequences.py",
         "abicheck/compatibility_evaluation_config.py",
         "abicheck/compatibility_evaluation_packs.py",
         "abicheck/contract_coverage_exit.py",

@@ -12,9 +12,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Tests for :mod:`abicheck.binary_naming`, ``strip_vendor_hash``'s real home
-(ADR-061 D1, split out of ``binary_utils.py`` so ``compare``-layer detectors
-can use it without a forbidden ``compare -> extract`` edge).
+"""Tests for :mod:`abicheck.model.binary_naming`, ``strip_vendor_hash``'s
+real home (ADR-061 D1, split out of ``binary_utils.py`` so ``compare``-layer
+detectors can use it without a forbidden ``compare -> extract`` edge).
 
 Behavioral coverage of ``strip_vendor_hash`` itself lives in
 ``test_vendor_hash.py`` (imported via the ``binary_utils`` back-compat
@@ -25,7 +25,8 @@ re-export is the identical function object, not a copy that could drift.
 
 from __future__ import annotations
 
-from abicheck import binary_naming, binary_utils
+from abicheck import binary_utils
+from abicheck.model import binary_naming
 
 
 def test_strip_vendor_hash_importable_from_its_new_canonical_home() -> None:

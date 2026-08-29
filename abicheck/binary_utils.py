@@ -25,12 +25,13 @@ import re
 import struct
 from pathlib import Path
 
-# ``strip_vendor_hash``'s real home is ``binary_naming.py`` (ADR-061 D1): a
-# pure string transform with no I/O, classified ``model`` so ``compare``-layer
-# detectors can use it without a forbidden ``compare -> extract`` edge.
-# ``_canonical_library_key`` below still needs it; re-exported by value here
-# so an existing ``from .binary_utils import strip_vendor_hash`` still resolves.
-from .binary_naming import strip_vendor_hash as strip_vendor_hash
+# ``strip_vendor_hash``'s real home is ``model/binary_naming.py`` (ADR-061
+# D1): a pure string transform with no I/O, living in ``model`` so
+# ``compare``-layer detectors can use it without a forbidden
+# ``compare -> extract`` edge. ``_canonical_library_key`` below still needs
+# it; re-exported by value here so an existing
+# ``from .binary_utils import strip_vendor_hash`` still resolves.
+from .model.binary_naming import strip_vendor_hash as strip_vendor_hash
 
 # Mach-O magic bytes — covers all variants:
 # 32-bit BE/LE, 64-bit BE/LE, fat archive 32/64
