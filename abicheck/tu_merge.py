@@ -69,12 +69,12 @@ from dataclasses import replace
 from functools import partial
 from typing import Protocol, TypeVar
 
-from .diff_symbols import _is_cc_attribute as _is_cc_attribute
 from .dumper_castxml import (
     _mangled_name_is_local_linkage as _mangled_name_is_local_linkage,
 )
 from .errors import TuMergeError
 from .model import EnumType, Function, Param, RecordType, ScopeOrigin, Variable
+from .model.cc_attributes import is_cc_attribute as _is_cc_attribute
 from .provenance import build_public_set, classify_origin, header_from_location
 from .tu_fragment import MergedTuFragments, TuFragment, entity_key
 

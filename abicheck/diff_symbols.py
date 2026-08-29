@@ -121,6 +121,12 @@ from .model import (
     is_abi_surface_type_name,
     stdlib_namespaces_excluded,
 )
+
+# Real home is model/cc_attributes.py (ADR-061 D1): a pure membership test
+# with no I/O, living in model so extract's tu_merge.py can use it too
+# without a forbidden extract -> compare edge. Re-exported by value here
+# for back-compat.
+from .model.cc_attributes import is_cc_attribute as _is_cc_attribute
 from .name_classification import is_local_rtti_symbol
 
 # Visibility levels that constitute the public ABI surface.
@@ -549,27 +555,6 @@ def _check_variadic_change(
         ),
         removed_values=("variadic", "fixed-arity"),
     )
-
-
-#: Calling-convention attribute base names. When one of these flips inside
-#: ``contract_attributes`` it is a parameter-passing change, not a semantic
-#: contract change, so it routes to the existing BREAKING kind.
-_CC_ATTRIBUTE_BASES = frozenset(
-    {
-        "cdecl",
-        "stdcall",
-        "fastcall",
-        "thiscall",
-        "regparm",
-        "ms_abi",
-        "sysv_abi",
-        "vectorcall",
-    }
-)
-
-
-def _is_cc_attribute(token: str) -> bool:
-    return token.split("(", 1)[0] in _CC_ATTRIBUTE_BASES
 
 
 def _check_contract_attributes_change(
