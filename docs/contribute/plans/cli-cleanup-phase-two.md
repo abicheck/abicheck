@@ -72,11 +72,15 @@ its own section below), PR 4 changes what a CI job's exit code means.
 > block PR B closing.
 > **PR 0B/P0 is still the single outstanding item with no code-side gap
 > left** — see its status note below for the ready-to-apply Ruleset
-> artifact this pass added. PR C (typed dump/scan convergence) remains the
-> largest genuinely unfinished slice; its own section below has the fullest,
-> most current account (it has absorbed a long running series of
-> investigate/fix/revert rounds — read its own text, not this summary, for
-> what is actually closed today).
+> artifact this pass added. **PR C's real ELF run is now migrated** onto
+> `execute_dump_request` — see its own section's closing status note
+> ("Slice landed: the real ELF run is migrated") for the account; the
+> section's own long investigation history above that note remains as the
+> record of why this was not attempted sooner. PR C's PE/Mach-O half
+> (`handle_non_elf_dump`) is unmigrated — no PE/Mach-O toolchain was
+> available where this was done — and PR F/3C's removal itself still needs
+> that half closed too, per 3C's own "all three resolvers" ordering rule
+> (its own section, unchanged by this update).
 >
 > **Update (2026-08-16, later the same day).** PR G1 (canonical `ExitDecision`
 > + report block) landed as [#789](https://github.com/abicheck/abicheck/pull/789)
@@ -2119,8 +2123,26 @@ pipelines a fourth time.
   > baseline-reuse rule lives in one shared primitive with an opt-in hook on
   > the shared resolver.
   >
+  > **Update: item 1's `dump`-side half is now closed for ELF.** See PR C's
+  > own section above ("Slice landed: the real ELF run is migrated") — the
+  > real ELF `dump` run now executes through `execute_dump_request`, the
+  > identical shared pipeline `scan`'s candidate resolution already routes
+  > through (that half of item 1 closed earlier, in the 3A sub-section
+  > above). **3C is therefore down to exactly one blocker on item 1**:
+  > `handle_non_elf_dump` (PE/Mach-O) still executes independently — no
+  > PE/Mach-O toolchain was available where the ELF migration was verified,
+  > and this section's own "measure, don't reason" discipline means that
+  > half is not attempted without one. Item 2 (the `scan`-vs-`dump`/
+  > `compare` L4 extractor default divergence) is unchanged, deliberately —
+  > closing item 1 did not require closing item 2, and item 2 stays its own
+  > separate, deferred decision. 3C's removal itself remains blocked until
+  > PE/Mach-O closes item 1 in full, per this entry's own "all three
+  > resolvers" rule.
+  >
   > **What still blocks the removal**, restated precisely because "3A is not
-  > done" is now too coarse to act on:
+  > done" is now too coarse to act on (numbered list below predates the
+  > update immediately above; item 1's `dump`-side/ELF half is superseded by
+  > it, not by anything in this list):
   >
   > 1. **Neither real run routes through the shared pipeline yet.** The ELF/
   >    PE/Mach-O `dump` executes through `perform_elf_dump`/
@@ -3050,6 +3072,97 @@ pipelines a fourth time.
   > This fix removes that decision's main objection (castxml's L4 surface
   > was unsafe to trust), but does not itself change any default.
 
+  > **Slice landed: the real ELF run is migrated.** With item 3's fix
+  > landed (above) and the reordering prerequisite's Flow-2 half closed
+  > (above, "Update (2026-08-28): the Flow-2 half is closed"), the two
+  > remaining named blockers to "the migration itself" — a policy-compliant
+  > castxml, and byte-identical-output verification — are both cleared:
+  > `dump_cmd`'s real ELF branch (`frontends/cli/commands/dump.py`) now
+  > calls `execute_dump_request` directly, retiring `perform_elf_dump` from
+  > this call site (the function itself is unchanged and still defined, in
+  > case another caller depends on it — only `dump_cmd` no longer imports
+  > it). Built on exactly the pieces this section already closed, not a
+  > fresh redesign: the same `DumpRequest` `--dry-run` already resolves
+  > (`_dump_request`), re-pointed at the post-linker-script-following
+  > `so_path` (`resolve_dump_request`'s own `detect_binary_format` call runs
+  > before any such following, so feeding it the pre-follow path risked a
+  > wrong `fmt` for a symlink-to-linker-script input — a fresh
+  > `ResolvedDumpRequest` is built for execution alone, leaving `--dry-run`'s
+  > own, already-tested resolution against the pre-follow path unchanged);
+  > `requested_depth` nulled out on that execution-only copy, so
+  > `execute_dump_request`'s own `enforce_requested_depth` — a differently
+  > worded `ValidationError` than `check_requested_depth_satisfied`'s
+  > `DumpDepthNotSatisfiedError` for the identical condition — never fires,
+  > keeping `_write_snapshot_output`'s own call (unchanged) the sole
+  > enforcement point and its pinned message intact
+  > (`tests/test_depth_vocabulary.py`); and the legacy `-p`/`--compile-db`
+  > auto-match threaded through via `legacy_compile_db_tokens`/
+  > `legacy_compile_db_matched`, the explicit pass-through ADR-063 Phase 1
+  > already built into `execute_dump_request` for exactly this purpose
+  > (its own docstring's precedence rule), rather than a new `InputSpec`
+  > field — the pass-through already reproduces `perform_elf_dump`'s own
+  > `_fold_explicit_gcc_options` unfold-when-the-fold-applies logic, so a
+  > second, dataclass-shaped copy of the same fact would be a second place
+  > for it to drift, not a cleaner one. `_write_snapshot_output`'s own
+  > write-time embed fallback (`build_source_already_satisfies`), depth
+  > gate, Flow-2 `--inputs` fold, and dependency-scope resolution are all
+  > unchanged, called exactly as before with the now-execution-produced
+  > snapshot — the embed itself is the only step this migration actually
+  > moves to resolution time, not the whole write sequence PR 3A's earlier
+  > "reordering" framing worried about; see the root `AGENTS.md`'s own PR C
+  > entry (search "The real ELF `dump` run is migrated") for the precise
+  > account of why that split is safe, including the one structural nuance
+  > that is measured rather than proven in general (the shared pipeline's
+  > own pre-existing double-dependency-scoping, confirmed idempotent for
+  > every shape this migration's own parity suite exercises).
+  >
+  > One real, user-visible default change falls out of the migration:
+  > `dump`'s L4 source-extractor default flips from an accidental **clang**
+  > (`perform_elf_dump` forwarded the bare, unresolved `header_backend`
+  > straight to the write-time embed, which treats anything but the literal
+  > string `"castxml"` as clang) to **castxml** (the shared pipeline's
+  > `effective_frontend`, matching `compare`'s implicit-dump operand, the
+  > typed `DumpRequest` API, and `dump`'s own L2 header-AST default) — safe
+  > now specifically because item 3's castxml L4 phantom-implicit-member fix
+  > landed first; `--ast-frontend clang` recovers the previous default.
+  > **`scan`'s own item 2 divergence (`scan_engine._build_new_snapshot`'s
+  > `source_extractor="auto"` override) is unchanged by this** — it stays
+  > its own separate, deliberately deferred decision, exactly as the
+  > paragraph immediately above already states.
+  >
+  > Verified with real `g++`/clang/castxml (this session's environment has a
+  > policy-compliant castxml on `PATH`, unlike the sessions that wrote most
+  > of this section's history): the full fast unit suite; the
+  > `integration`-marked suite for this area end to end —
+  > `test_dump_cli_typed_api_parity.py` (16 cases; `_CONTRACT_KNOWN_
+  > DIVERGENT_FIELDS` stays empty, i.e. the migrated CLI path and the typed
+  > pipeline now agree on the extraction contract with zero remaining
+  > divergence, for every parametrized real-build shape this module
+  > exercises — the byte-identical-output bar this section's own history
+  > named as the last open item), `test_dump_scan_l3_comparability.py` (2
+  > xfails, the same pre-existing `_SCAN_KNOWN_DIVERGENT_FRONTENDS`
+  > signature item 2 already documents, unchanged), `test_dump_write_after_
+  > resolve_time_embed.py`, `test_dump_embed_idempotence.py` (updated to
+  > count both the write-time embed call site and the new resolve-time one,
+  > since a single-site count can no longer distinguish "moved" from
+  > "doubled"), `test_compile_db_filter_scope.py`, `test_dry_run_contract.py`,
+  > `test_dry_run_build_query_contract.py`, `test_l2_seed_flow2_packs.py`,
+  > `test_scan_adr039_build_context.py`, `test_castxml_l4_phantom_members.py`,
+  > `test_dump_depth_provenance.py`, `test_depth_vocabulary.py` — and
+  > `test_dump_request_from_cli.py`'s own `TestExecutionConsumesTheResolvedPlan`
+  > (updated to spy on `execute_dump_request` instead of the now-retired
+  > `perform_elf_dump` call site). `mypy`/`ruff` clean on every touched
+  > module.
+  >
+  > **What this does not close.** `handle_non_elf_dump` (PE/Mach-O) is
+  > untouched — no PE/Mach-O toolchain was available in this environment to
+  > verify a migration against, and this section's own established
+  > discipline is to measure, not reason, before moving a real-run call
+  > site. PR 3C's removal itself stays blocked on that half per its own
+  > "all three resolvers" ordering rule below, unchanged by this slice. Item
+  > 2 (the `scan`-vs-`dump`/`compare` L4 extractor default divergence) is
+  > unchanged, deliberately.
+
 `dump --build-query` and `dump --build-compile-db` describe how the *project*
 is built, not what this snapshot is. They are already documented as CLI
 equivalents of the `.abicheck.yml` `build.query` / `build.compile_db` fields,
@@ -3967,11 +4080,17 @@ PR B  effective configuration parity  — packs resolved once into one
                                        deliberately reassigned to PR G2,
                                        see PR B's own section for why
 PR C  typed dump+scan convergence     = PR 3A — DumpRequest →
-                                       ResolvedDumpRequest → DumpResult, one
+      (ELF done, PE/Mach-O open)       ResolvedDumpRequest → DumpResult, one
                                        resolver for dump CLI/Python/Action
                                        *and* scan_engine's candidate
                                        resolution, JSON dry-run rendered
-                                       from that object
+                                       from that object. The real ELF `dump`
+                                       run now executes through
+                                       execute_dump_request (scan's
+                                       candidate resolution already did);
+                                       handle_non_elf_dump (PE/Mach-O) is
+                                       unmigrated -- no PE/Mach-O toolchain
+                                       was available to verify against
 PR D  build-context completeness      = PR 3B — matched compile-unit
       (DONE)                           selection, forced includes, provenance
                                        tests
@@ -3985,10 +4104,13 @@ PR E  Action machine-report           = PR 1b — uncapped persisted release
       └─ DELETE --annotate, --annotate-additions — DONE, verified against
          current abicheck/cli.py and action.yml
 PR F  trusted build config            = PR 3C — build.query executes only
-                                       from an explicit --config (a data
+      (blocked on PE/Mach-O, below)     from an explicit --config (a data
                                        path like build.compile_db carries no
                                        such restriction), trust receipt in
-                                       --dry-run, fail closed
+                                       --dry-run, fail closed. Blocked on
+                                       PR C's remaining half: handle_non_elf_
+                                       dump (PE/Mach-O) still resolves
+                                       independently of the shared pipeline
       └─ then DELETE dump --build-query, dump --build-compile-db
 PR G2 canonical exit decision, part 2 = PR 4 — one automatic gate algorithm,
                                        schema / report / Action parity
