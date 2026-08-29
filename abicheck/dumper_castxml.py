@@ -22,13 +22,20 @@ soft cap. Re-exported from ``abicheck.dumper`` so existing imports of
 The vtable-index, mangled-name, and synthetic-key helpers now live in
 ``abicheck.extract.headers.castxml.names`` (ADR-061 Phase 5 item 1) and are
 re-exported here so every existing import of them from this module keeps
-working unchanged.
+working unchanged. Parser state (the id map, tag-grouped element lists, and
+memoization caches) now lives on a shared ``CastxmlParserContext``
+(``extract.headers.castxml.context``), with location resolution
+(``location.py``), the type-graph walk (``type_resolution.py``), and enum
+parsing (``enums.py``) built on top of it as free functions taking that
+context explicitly. Every method below that has a counterpart in one of
+those modules is a thin delegating wrapper, kept for every existing
+internal and external caller (tests included) that still reads
+``_CastxmlParser``'s private surface directly.
 """
 
 from __future__ import annotations
 
 import re
-from pathlib import Path
 from typing import Any
 from xml.etree.ElementTree import (
     Element,  # type annotation only; parsing uses defusedxml
@@ -38,6 +45,12 @@ from . import dumper_castxml_typedefs as _typedefs_helpers
 from .dumper_castxml_typedefs import (
     _deprecation_marker as _deprecation_marker,
     _extract_contract_attributes as _extract_contract_attributes,
+)
+from .extract.headers.castxml import (
+    context as _castxml_context,
+    enums as _castxml_enums,
+    location as _castxml_location,
+    type_resolution as _castxml_type_resolution,
 )
 from .extract.headers.castxml.names import (
     _SYNTHETIC_DTOR_KEY_PREFIX as _SYNTHETIC_DTOR_KEY_PREFIX,
@@ -52,7 +65,6 @@ from .extract.headers.castxml.names import (
 )
 from .model import (
     AccessLevel,
-    EnumMember,
     EnumType,
     Fact,
     Function,
@@ -64,7 +76,7 @@ from .model import (
     Visibility,
 )
 from .name_classification import strip_anonymous_type_location
-from .provenance import build_public_set, classify_origin, header_from_location
+from .provenance import classify_origin, header_from_location
 
 
 class _CastxmlParser:
@@ -78,74 +90,99 @@ class _CastxmlParser:
         public_header_paths: list[str] | None = None,
         public_dir_paths: list[str] | None = None,
     ):
-        self._root = root
-        self._exported_dynamic = exported_dynamic
-        self._exported_static = exported_static
-        # Public-header surface used to scope constant extraction
-        # (parse_constants). Seeded from the parsed headers (-H/--header) plus
-        # any explicit public-header inputs, and matched
-        # with the same provenance segment logic used elsewhere — so constants
-        # reached via an umbrella header or a public include dir are kept, while
-        # transitively-included system/private-header constants are excluded.
-        # Empty → constant extraction is skipped (provenance is opt-in).
-        (self._pub_header_segs, self._pub_dir_segs, self._have_public_set) = (
-            build_public_set(
-                public_header_paths,
-                public_dir_paths,
-            )
+        # All parser state now lives on a shared context object (ADR-061 D9
+        # "context.py") so entity-parsing modules under
+        # ``extract.headers.castxml`` can read it without depending on this
+        # class. Each field below is still reachable as ``self._xxx`` via the
+        # read-only properties following this method, so every method in
+        # this class not yet migrated to a shared-context module -- and every
+        # external caller (tests included) that reads a parser's private
+        # state directly -- keeps working unchanged.
+        self._ctx = _castxml_context.CastxmlParserContext(
+            root,
+            exported_dynamic,
+            exported_static,
+            public_header_paths,
+            public_dir_paths,
         )
-        self._id_map: dict[str, Element] = {}
-        self._virtual_methods_by_class: dict[str, list[Element]] = {}
-        self._source_lines_cache: dict[str, list[str]] = {}
-        # Tag-grouped elements populated by the single pass in _build_id_map()
-        # below, so parse_functions()/parse_types()/etc. below don't each
-        # re-scan every top-level element themselves.
-        self._function_els: list[Element] = []
-        self._variable_els: list[Element] = []
-        self._record_els: list[Element] = []
-        self._enum_els: list[Element] = []
-        self._typedef_els: list[Element] = []
-        # Per-id memoization for the recursive type-graph resolvers below;
-        # safe since the XML tree is immutable for this parser instance.
-        self._type_name_cache: dict[str, str] = {}
-        self._pointer_depth_cache: dict[str, int] = {}
-        # method element id -> canonical vtable-slot key, resolved through any
-        # `overrides` chain. Populated lazily by _collect_virtual_methods(); see
-        # its docstring for why this is needed alongside vtable_index.
-        self._vtable_slot_root: dict[str, int | str] = {}
-        # method element id -> any ADDITIONAL slot keys beyond the primary one
-        # in _vtable_slot_root, for a method that itself overrides more than
-        # one base slot (non-virtual multiple inheritance). A further-derived
-        # override referencing this id by `overrides` must propagate to every
-        # one of these, not just the primary -- see _collect_virtual_methods.
-        self._vtable_slot_extra_roots: dict[str, list[int | str]] = {}
-        self._build_id_map()
+        self._ctx.build_id_map()
 
-    def _build_id_map(self) -> None:
-        # Single pass building the id map, the virtual-method index, and the
-        # tag-grouped element lists parse_functions()/parse_types()/etc. use.
-        for el in self._root:
-            eid = el.get("id")
-            if eid:
-                self._id_map[eid] = el
-            tag = el.tag
-            if tag in ("Method", "Destructor") and el.get("virtual") == "1":
-                ctx = el.get("context")
-                if ctx:
-                    self._virtual_methods_by_class.setdefault(ctx, []).append(el)
-            if tag in self._FUNCTION_TAGS:
-                self._function_els.append(el)
-            elif tag == "Variable":
-                self._variable_els.append(el)
-            elif tag in ("Struct", "Class", "Union"):
-                self._record_els.append(el)
-            elif tag == "Enumeration":
-                self._enum_els.append(el)
-            elif tag == "Typedef":
-                self._typedef_els.append(el)
+    # ── shared-context state, exposed for methods not yet migrated ─────────
+
+    @property
+    def _root(self) -> Element:
+        return self._ctx.root
+
+    @property
+    def _exported_dynamic(self) -> set[str]:
+        return self._ctx.exported_dynamic
+
+    @property
+    def _exported_static(self) -> set[str]:
+        return self._ctx.exported_static
+
+    @property
+    def _pub_header_segs(self) -> Any:
+        return self._ctx.pub_header_segs
+
+    @property
+    def _pub_dir_segs(self) -> Any:
+        return self._ctx.pub_dir_segs
+
+    @property
+    def _have_public_set(self) -> bool:
+        return self._ctx.have_public_set
+
+    @property
+    def _id_map(self) -> dict[str, Element]:
+        return self._ctx.id_map
+
+    @property
+    def _virtual_methods_by_class(self) -> dict[str, list[Element]]:
+        return self._ctx.virtual_methods_by_class
+
+    @property
+    def _source_lines_cache(self) -> dict[str, list[str]]:
+        return self._ctx.source_lines_cache
+
+    @property
+    def _function_els(self) -> list[Element]:
+        return self._ctx.function_els
+
+    @property
+    def _variable_els(self) -> list[Element]:
+        return self._ctx.variable_els
+
+    @property
+    def _record_els(self) -> list[Element]:
+        return self._ctx.record_els
+
+    @property
+    def _enum_els(self) -> list[Element]:
+        return self._ctx.enum_els
+
+    @property
+    def _typedef_els(self) -> list[Element]:
+        return self._ctx.typedef_els
+
+    @property
+    def _type_name_cache(self) -> dict[str, str]:
+        return self._ctx.type_name_cache
+
+    @property
+    def _pointer_depth_cache(self) -> dict[str, int]:
+        return self._ctx.pointer_depth_cache
+
+    @property
+    def _vtable_slot_root(self) -> dict[str, int | str]:
+        return self._ctx.vtable_slot_root
+
+    @property
+    def _vtable_slot_extra_roots(self) -> dict[str, list[int | str]]:
+        return self._ctx.vtable_slot_extra_roots
 
     def _resolve(self, id_: str) -> Element | None:
-        return self._id_map.get(id_)
+        return self._ctx.resolve(id_)
 
     def _source_line_has_explicit(
         self,
@@ -153,325 +190,40 @@ class _CastxmlParser:
         declaration_el: Element | None = None,
     ) -> bool | None:
         """Fallback for castxml Converter nodes that omit explicit="1"."""
-        if loc_el is not None:
-            file_id = loc_el.get("file", "")
-            line_raw = loc_el.get("line", "")
-        elif declaration_el is not None:
-            file_id = declaration_el.get("file", "")
-            line_raw = declaration_el.get("line", "")
-        else:
-            return None
-        file_el = self._id_map.get(file_id)
-        if file_el is None:
-            return None
-        fname = file_el.get("name", "")
-        if not fname or not line_raw:
-            return None
-        try:
-            line_no = int(line_raw)
-            lines = self._source_lines_cache.get(fname)
-            if lines is None:
-                lines = Path(fname).read_text(encoding="utf-8").splitlines()
-                self._source_lines_cache[fname] = lines
-        except (OSError, UnicodeDecodeError, ValueError, IndexError):
-            return None
-        # CastXML can point a split conversion operator at the ``operator``
-        # line, while the ``explicit`` keyword is on the preceding line.
-        start = max(0, line_no - 4)
-        window_parts: list[str] = []
-        for line in lines[start : min(len(lines), line_no + 5)]:
-            window_parts.append(line.strip())
-            if line_no - 1 <= start + len(window_parts) - 1 and (
-                ";" in line or "{" in line
-            ):
-                break
-        window = " ".join(window_parts)
-        operator_match = re.search(r"\boperator\b", window)
-        if operator_match is None:
-            return False
-        prefix = window[: operator_match.start()]
-        declaration_start = max(prefix.rfind(";"), prefix.rfind("{"), prefix.rfind("}"))
-        return bool(re.search(r"\bexplicit\b", prefix[declaration_start + 1 :]))
+        return _castxml_location.source_line_has_explicit(
+            self._ctx, loc_el, declaration_el
+        )
+
+    # ── type-graph resolution, delegated to extract.headers.castxml.type_resolution ──
+    # (ADR-061 D9 "type_resolution.py": entity modules and the still-unmigrated
+    # methods below share one context object rather than reading `self`.)
 
     def _type_name(self, id_: str, depth: int = 0) -> str:
-        # Memoized by id alone (not depth): the same type id is commonly
-        # resolved from thousands of call sites on a large ABI surface. A
-        # depth-capped ("?") result is never cached, so reaching the same id
-        # again within budget still resolves it properly.
-        cached = self._type_name_cache.get(id_)
-        if cached is not None:
-            return cached
-        result = self._type_name_uncached(id_, depth)
-        if depth <= 10:
-            self._type_name_cache[id_] = result
-        return result
+        return _castxml_type_resolution.type_name(self._ctx, id_, depth)
 
     def _type_name_uncached(self, id_: str, depth: int = 0) -> str:
-        if depth > 10:
-            return "?"
-        el = self._resolve(id_)
-        if el is None:
-            return "?"
-        tag = el.tag
-        if tag == "FundamentalType":
-            return el.get("name", "?")
-        if tag == "Enumeration":
-            # Strip the same marker parse_enums() strips from the declaration.
-            return strip_anonymous_type_location(el.get("name", "?"))
-        if tag == "PointerType":
-            return self._type_name(el.get("type", ""), depth + 1) + "*"
-        if tag == "ReferenceType":
-            return self._type_name(el.get("type", ""), depth + 1) + "&"
-        if tag == "RValueReferenceType":
-            return self._type_name(el.get("type", ""), depth + 1) + "&&"
-        if tag == "CvQualifiedType":
-            inner_id = el.get("type", "")
-            base = self._type_name(inner_id, depth + 1)
-            # castxml's CvQualifiedType also carries `volatile`; only `const`
-            # was read here previously, so a volatile-qualified type's name
-            # silently dropped it instead of just missing a dedicated
-            # attribute (unlike the genuinely-unmodelable Atomic case below).
-            # Order matches the "const volatile" spelling convention already
-            # used by the DWARF backend's own qualifier stripping
-            # (dwarf_snapshot._strip_type_decorators).
-            #
-            # Deliberately NOT `restrict` here (Codex review, PR #582):
-            # unlike const/volatile — which are real signature-level
-            # qualifiers on a pointee position and participate in mangling —
-            # `restrict` has zero ABI/mangling effect and is already tracked
-            # as its own compatible-classified fact (Param.is_restrict /
-            # PARAM_RESTRICT_CHANGED, populated in _parse_function_params
-            # via _resolve_cv_restrict below). Folding it into the generic
-            # type-name spelling would make a restrict-only parameter change
-            # look like an ordinary type mismatch and misfire the BREAKING
-            # ``FUNC_PARAMS_CHANGED`` generic-type-diff path instead of the
-            # dedicated compatible one.
-            quals = [
-                q
-                for q, attr in (("const", "const"), ("volatile", "volatile"))
-                if el.get(attr) == "1"
-            ]
-            if not quals:
-                return base
-            qual_str = " ".join(quals)
-            # A CvQualifiedType directly wrapping a Pointer/Reference type
-            # qualifies the pointer/reference VALUE itself (`int *
-            # volatile`), not what it points to (`volatile int *`) — two
-            # genuinely different declarations that a plain prefix always
-            # collapsed to the identical spelling (G28 "known, deferred
-            # limitation": confirmed via CodeRabbit review, PR #582). Render
-            # the value-qualifier as a suffix instead, matching the "T *
-            # const" convention cv_qualifiers_only_differ/
-            # canonicalize_type_name already treat as canonical for this
-            # case. A pointee-position qualifier (`const int *` —
-            # PointerType wrapping CvQualifiedType) is unaffected: this
-            # branch never sees it, since it fires from the CvQualifiedType
-            # side, not the PointerType side. Deliberately NOT extended
-            # through Typedef/ElaboratedType aliasing — see
-            # _cv_qualifies_pointer_value's docstring (Codex review): the
-            # clang backend takes clang's own `qualType` spelling verbatim,
-            # which does not relocate a qualifier through an alias either,
-            # so doing so here would newly diverge from clang on that case.
-            if self._cv_qualifies_pointer_value(inner_id):
-                return f"{base} {qual_str}"
-            return f"{qual_str} {base}"
-        if tag == "ElaboratedType":
-            # castxml wraps an elaborated-type-specifier (`struct Foo`, `union
-            # Foo`, `enum Foo` used directly rather than via a typedef) in an
-            # ElaboratedType node with no `name` attribute of its own — resolve
-            # through to the real underlying type instead of falling through to
-            # the `tag` fallback below (which would literally return
-            # "ElaboratedType").
-            return self._type_name(el.get("type", ""), depth + 1)
-        if tag in ("Struct", "Class", "Union"):
-            # See strip_anonymous_type_location's docstring.
-            return strip_anonymous_type_location(el.get("name", "?"))
-        if tag == "Typedef":
-            return el.get("name", "?")
-        if tag == "ArrayType":
-            max_ = el.get("max", "")
-            base = self._type_name(el.get("type", ""), depth + 1)
-            return f"{base}[{max_}]" if max_ else f"{base}[]"
-        if tag == "AtomicType" or (
-            tag == "Unimplemented" and el.get("type_class") == "Atomic"
-        ):
-            # CastXML emits either AtomicType or legacy Unimplemented/Atomic.
-            # Preserve a wrapped type when present; retain a bare fallback.
-            inner_id = el.get("type", "")
-            return f"_Atomic({self._type_name(inner_id, depth + 1)})" if inner_id else "_Atomic"
-        return el.get("name", tag)
+        return _castxml_type_resolution.type_name_uncached(self._ctx, id_, depth)
 
     def _cv_qualifies_pointer_value(self, type_id: str) -> bool:
-        """True if a ``CvQualifiedType`` wrapping *type_id* qualifies a
-        pointer/reference VALUE rather than pointee data.
-
-        Deliberately does NOT follow ``Typedef``/``ElaboratedType`` aliasing
-        (Codex review): the clang backend's type spelling is clang's own
-        ``qualType`` pretty-print, taken verbatim rather than re-derived —
-        and clang's printer does not "see through" a typedef to relocate a
-        qualifier after an implicit, textually-absent ``*`` either. For
-        ``typedef int *IntPtr; volatile IntPtr x;``, clang spells it
-        ``"volatile IntPtr"`` (prefix), not ``"IntPtr volatile"``. Following
-        the typedef here to detect the aliased pointer and render a suffix
-        would make castxml diverge from clang specifically on this case,
-        even though both agreed (by prefixing) before this qualifier-suffix
-        fix existed. Since the alias name itself carries no visible ``*``/
-        ``&`` to move a qualifier around, there is no real prefix-vs-suffix
-        ambiguity to resolve for it anyway (unlike a directly-spelled
-        pointer) — only a DIRECT wrap is unambiguous and worth fixing.
-        """
-        el = self._resolve(type_id)
-        if el is None:
-            return False
-        return el.tag in ("PointerType", "ReferenceType", "RValueReferenceType")
+        return _castxml_type_resolution.cv_qualifies_pointer_value(self._ctx, type_id)
 
     def _type_alignment_bits(self, id_: str, depth: int = 0) -> int | None:
-        """Natural (computed) alignment in bits for a type id, if castxml exposes it.
-
-        Unlike a Variable's own explicit ``align`` attribute (see
-        ``parse_variables``), this walks through cv-qualifiers, typedefs,
-        elaborated types, and arrays to the nearest type node with ``align``.
-        CastXML populates it with the compiler's computed alignment, as trusted
-        by ``_build_record_type`` for records. ``ArrayType`` carries no ``align``/``size``
-        of its own (confirmed empirically: an array's alignment is always its
-        element type's) — recursing into its ``type`` is required, not just
-        an optimization, or every exported array global would silently fall
-        back to the same address-derived false-positive risk this method
-        exists to close for scalars. Used as declared-alignment corroboration
-        evidence for a plain variable with no explicit override, so
-        ``_check_object_alignment_reduced`` isn't left with two ``None``s
-        (and therefore no corroboration at all) for the overwhelming majority
-        of exported globals that never carry an explicit alignment
-        attribute.
-        """
-        if depth > 10 or not id_:
-            return None
-        el = self._resolve(id_)
-        if el is None:
-            return None
-        align = self._optional_int_attr(el, "align")
-        if align is not None:
-            return align
-        if el.tag in ("CvQualifiedType", "Typedef", "ElaboratedType", "ArrayType"):
-            return self._type_alignment_bits(el.get("type", ""), depth + 1)
-        return None
+        return _castxml_type_resolution.type_alignment_bits(self._ctx, id_, depth)
 
     def _resolve_cv_restrict(self, id_: str, depth: int = 0) -> tuple[bool, bool, bool]:
-        """Whether *id_*'s own (top-level) qualification is const/volatile/restrict.
-
-        Walks the real XML type chain rather than pattern-matching the
-        rendered ``_type_name`` spelling: a field or parameter declared
-        through a ``Typedef`` whose target is itself cv-qualified (``typedef
-        const int T; struct S { T x; };``) renders as the bare alias name
-        ("T"), so a regex over the spelling can never see the qualifier
-        behind it (Codex review, PR #582). ``ElaboratedType`` is followed for
-        the same reason ``_type_name`` follows it. A further ``CvQualifiedType``
-        or ``Typedef`` reached *through* one already-seen ``CvQualifiedType``
-        combines in (rare, but e.g. two typedefs each adding one qualifier);
-        any other tag (``PointerType`` chief among them) stops the walk so a
-        *pointee*'s qualification is never attributed to the pointer/field
-        itself — ``const int *`` is a non-const pointer to const int, not a
-        const pointer.
-        """
-        if depth > 20 or not id_:
-            return (False, False, False)
-        el = self._resolve(id_)
-        if el is None:
-            return (False, False, False)
-        if el.tag == "CvQualifiedType":
-            const = el.get("const") == "1"
-            volatile = el.get("volatile") == "1"
-            restrict = el.get("restrict") == "1"
-            inner_const, inner_volatile, inner_restrict = self._resolve_cv_restrict(
-                el.get("type", ""), depth + 1
-            )
-            return (
-                const or inner_const,
-                volatile or inner_volatile,
-                restrict or inner_restrict,
-            )
-        if el.tag in ("Typedef", "ElaboratedType"):
-            return self._resolve_cv_restrict(el.get("type", ""), depth + 1)
-        return (False, False, False)
+        return _castxml_type_resolution.resolve_cv_restrict(self._ctx, id_, depth)
 
     def _is_global_scope(self, el: Any) -> bool:
-        """True if *el*'s immediate lexical context is the root ``::``
-        namespace — i.e. not nested in any namespace or class.
-
-        Every function-like element carries a ``context`` id; the file-level
-        root ``Namespace`` element is the one with no ``context`` of its own
-        (``name="::"``). A missing/unresolvable ``context`` is treated as
-        global too (conservative default matching this method's callers,
-        which only need to positively rule out namespace/class nesting).
-        """
-        ctx_id = el.get("context", "")
-        if not ctx_id:
-            return True
-        ctx = self._resolve(ctx_id)
-        if ctx is None:
-            return True
-        return ctx.tag == "Namespace" and not ctx.get("context")
+        return _castxml_type_resolution.is_global_scope(self._ctx, el)
 
     def _qualified_type_name(self, el: Any, leaf_name: str | None = None) -> str | None:
-        """Namespace/enclosing-class-qualified name for a Struct/Class/Union
-        element, or ``None`` if already at global scope (cycle/depth cap hit).
-        Walks castxml's ``context`` chain, prepending each ancestor's name,
-        stopping at the root ``Namespace``. Used only where a real namespace
-        path is required (internal-leak detection, SYCL-queue param
-        matching); ``RecordType.name`` stays bare (see model.py).
-        """
-        segments: list[str] = []
-        seen_ids: set[str] = set()
-        cur = el
-        for _ in range(16):
-            ctx_id = cur.get("context", "")
-            if not ctx_id or ctx_id in seen_ids:
-                break
-            seen_ids.add(ctx_id)
-            parent = self._resolve(ctx_id)
-            if parent is None:
-                break
-            if parent.tag == "Namespace":
-                pname = parent.get("name", "")
-                if pname and pname != "::":
-                    segments.append(pname)
-                cur = parent
-                continue
-            if parent.tag in ("Struct", "Class", "Union"):
-                pname = strip_anonymous_type_location(parent.get("name", ""))
-                if pname:
-                    segments.append(pname)
-                cur = parent
-                continue
-            break
-        leaf = strip_anonymous_type_location(leaf_name if leaf_name is not None else el.get("name", ""))
-        if not segments or not leaf:
-            return None
-        segments.reverse()
-        return "::".join([*segments, leaf])
+        return _castxml_type_resolution.qualified_type_name(self._ctx, el, leaf_name)
 
     def _pointer_depth(self, id_: str, depth: int = 0) -> int:
-        """Count pointer nesting depth: T=0, T*=1, T**=2, etc."""
-        # Memoized by id alone, same rationale/safety as _type_name above.
-        cached = self._pointer_depth_cache.get(id_)
-        if cached is not None:
-            return cached
-        result = self._pointer_depth_uncached(id_, depth)
-        if depth <= 10:
-            self._pointer_depth_cache[id_] = result
-        return result
+        return _castxml_type_resolution.pointer_depth(self._ctx, id_, depth)
 
     def _pointer_depth_uncached(self, id_: str, depth: int = 0) -> int:
-        if depth > 10:
-            return 0
-        el = self._resolve(id_)
-        if el is None:
-            return 0
-        if el.tag == "PointerType":
-            return 1 + self._pointer_depth(el.get("type", ""), depth + 1)
-        if el.tag in ("CvQualifiedType", "Typedef"):
-            return self._pointer_depth(el.get("type", ""), depth + 1)
-        return 0
+        return _castxml_type_resolution.pointer_depth_uncached(self._ctx, id_, depth)
 
     @staticmethod
     def _access_level(el: Element) -> AccessLevel:
@@ -602,26 +354,8 @@ class _CastxmlParser:
         return Visibility.PUBLIC
 
     def _is_builtin_element(self, el: Element) -> bool:
-        """Return True if element originates from a compiler built-in pseudo-file.
-
-        Real castxml output: elements carry a ``file`` attribute (e.g. ``file="f0"``)
-        pointing directly to a ``File`` element in the id-map — NOT via a separate
-        ``Location`` element.  The compound ``location`` attribute (``"f0:0"``) is
-        informational only and is NOT a map key.
-
-        Known built-in file names emitted by castxml:
-        - ``<builtin>``       (clang/castxml built-in declarations)
-        - ``<built-in>``      (older castxml / GCC)
-        - ``<command-line>``  (preprocessor command-line defines)
-        """
-        file_id = el.get("file", "")
-        if not file_id:
-            return False
-        file_el = self._id_map.get(file_id)
-        if file_el is None:
-            return False
-        fname = file_el.get("name", "")
-        return fname in ("<builtin>", "<built-in>", "<command-line>")
+        """Return True if element originates from a compiler built-in pseudo-file."""
+        return _castxml_location.is_builtin_element(self._ctx, el)
 
     def _build_hidden_friend_ids(self) -> dict[str, str]:
         """Map function ids to the qualified name of their befriending class.
@@ -668,16 +402,11 @@ class _CastxmlParser:
 
     # castxml emits non-member operator overloads as <OperatorFunction>
     # (e.g. `bool operator==(const Foo&, const Foo&)` at namespace scope,
-    # including hidden friends declared inside a class body).
-    _FUNCTION_TAGS: tuple[str, ...] = (
-        "Function",
-        "Method",
-        "Constructor",
-        "Destructor",
-        "Converter",
-        "OperatorFunction",
-        "OperatorMethod",
-    )
+    # including hidden friends declared inside a class body). Single source
+    # of truth is now `extract.headers.castxml.context.FUNCTION_TAGS`, which
+    # `CastxmlParserContext.build_id_map` itself uses; kept as a class
+    # attribute of the same name for any external reader of it.
+    _FUNCTION_TAGS: tuple[str, ...] = _castxml_context.FUNCTION_TAGS
 
     def parse_functions(self) -> list[Function]:
         funcs: list[Function] = []
@@ -1378,29 +1107,11 @@ class _CastxmlParser:
         )
 
     def _source_location(self, el: Any) -> str | None:
-        """Resolve a declaration's ``file:line`` source location.
-
-        Mirrors the function-parsing path: castxml emits the location either
-        directly as ``file``/``line`` attributes or as a ``location`` id
-        referencing a ``Location`` element. Returns ``None`` when neither is
-        present. Used to populate provenance (``source_header``/``origin``)
-        on records, variables, and enums (ADR-015 v6).
-        """
-        file_id = el.get("file", "")
-        line = el.get("line", "")
-        if not (file_id and line):
-            loc_id = el.get("location", "")
-            loc_el = self._id_map.get(loc_id) if loc_id else None
-            if loc_el is not None:
-                file_id = loc_el.get("file", "")
-                line = loc_el.get("line", "")
-        file_el = self._id_map.get(file_id) if file_id else None
-        fname = file_el.get("name", "") if file_el is not None else ""
-        return f"{fname}:{line}" if fname and line else None
+        """Resolve a declaration's ``file:line`` source location."""
+        return _castxml_location.source_location(self._ctx, el)
 
     def _optional_int_attr(self, el: Any, attr: str) -> int | None:
-        raw = el.get(attr)
-        return int(raw) if raw and raw.isdigit() else None
+        return _castxml_location.optional_int_attr(el, attr)
 
     def _parse_record_fields(self, el: Any) -> list[TypeField]:
         """Parse struct/class/union fields.
@@ -1713,57 +1424,11 @@ class _CastxmlParser:
         return key, extra_keys, idx
 
     def parse_enums(self) -> list[EnumType]:
-        enums = []
-        for el in self._enum_els:
-            name = strip_anonymous_type_location(el.get("name", ""))
-            if not name or name.startswith("__"):
-                continue
-            if self._is_builtin_element(el):
-                continue
-            members = []
-            for child in el:
-                if child.tag == "EnumValue":
-                    m_name = child.get("name", "")
-                    m_val_str = child.get("init", "0")
-                    try:
-                        # base=0 auto-detects 0x.../0o.../0b... prefixes and signs
-                        # so common C/C++ initializers like 0x10 don't silently
-                        # collapse to 0.
-                        m_val = int(m_val_str, 0)
-                    except ValueError:
-                        m_val = 0
-                    members.append(EnumMember(name=m_name, value=m_val))
-            enum_type_id = el.get("type", "")
-            underlying_type = (
-                self._underlying_type_name(enum_type_id) if enum_type_id else "int"
-            )
-            enums.append(
-                EnumType(
-                    name=name,
-                    members=members,
-                    underlying_type=underlying_type,
-                    source_location=self._source_location(el),
-                    # castxml's `scoped="1"` marks `enum class`/`enum struct`.
-                    is_scoped=el.get("scoped") == "1",
-                    # See RecordType.deprecated for the message-text convention.
-                    deprecated=_deprecation_marker(el),
-                    # See RecordType.qualified_name for the bare-vs-qualified
-                    # name convention this mirrors.
-                    qualified_name=self._qualified_type_name(el, leaf_name=name),
-                )
-            )
-        return enums
+        return _castxml_enums.parse_enums(self._ctx)
 
     def _underlying_type_name(self, id_: str, depth: int = 0) -> str:
         """Follow typedef chains to the concrete base type name."""
-        if depth > 20:
-            return "?"
-        el = self._resolve(id_)
-        if el is None:
-            return "?"
-        if el.tag == "Typedef":
-            return self._underlying_type_name(el.get("type", ""), depth + 1)
-        return self._type_name(id_)
+        return _castxml_type_resolution.underlying_type_name(self._ctx, id_, depth)
 
     def parse_typedefs(self) -> dict[str, str]:
         return _typedefs_helpers.parse_typedefs(

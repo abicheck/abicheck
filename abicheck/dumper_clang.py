@@ -58,6 +58,16 @@ arrays) rather than reading a value the AST dump already carries.
 The parser is pure (no subprocess): it consumes an already-parsed JSON dict, so
 every emit path is unit-testable without clang installed. Shelling out to clang
 lives in :func:`abicheck.dumper._clang_header_dump`.
+
+Per ADR-061 D9, ``_Decl`` (the categorized-node-plus-walk-context type every
+entity kind's parsing already received as a parameter) and the
+built-in-file/qualtype/source-location/deprecation-message primitives more
+than one entity kind reads now live in
+:mod:`abicheck.extract.headers.clang.context`, with enum parsing built on
+top of it in :mod:`abicheck.extract.headers.clang.enums`. Every name below
+with a counterpart there is a thin delegating wrapper, kept so every
+existing internal and external caller (tests included) that still reads
+this module's private surface directly keeps resolving.
 """
 
 from __future__ import annotations
@@ -109,9 +119,9 @@ from .dumper_clang_vtable import (
     build_vtable as _build_clang_vtable,
 )
 from .errors import AstContextMissingError, SnapshotError
+from .extract.headers.clang import context as _clang_context, enums as _clang_enums
 from .model import (
     AccessLevel,
-    EnumMember,
     EnumType,
     Fact,
     Function,
@@ -122,7 +132,6 @@ from .model import (
     Variable,
     Visibility,
 )
-from .name_classification import strip_anonymous_type_location
 from .provenance import (
     build_public_set,
     classify_origin,
@@ -455,9 +464,9 @@ _FUNCTION_NODE_KINDS = frozenset(
     }
 )
 #: Pseudo-files clang attributes builtin / command-line declarations to.
-_BUILTIN_FILES = frozenset(
-    {"<built-in>", "<builtin>", "<command line>", "<scratch space>"}
-)
+#: Single source of truth is now ``extract.headers.clang.context.BUILTIN_FILES``;
+#: kept as a module attribute of the same name for any external reader of it.
+_BUILTIN_FILES = _clang_context.BUILTIN_FILES
 
 
 def _pointer_depth(type_str: str) -> int:
@@ -545,28 +554,12 @@ def _clang_record_is_final(node: dict[str, Any]) -> bool:
 
 
 def _clang_deprecated_message(node: dict[str, Any]) -> str | None:
-    """Deprecation message for *node*, or ``None`` if not deprecated (G31
-    Phase C schema-completeness audit) — the direct-clang backend's
-    counterpart to ``dumper_castxml._deprecation_marker``, matching its exact
-    three-way convention (message text / ``""`` for a bare, messageless
-    ``[[deprecated]]`` / ``None`` for not deprecated) so the two backends'
-    ``Function.deprecated``/``Variable.deprecated``/``TypeField.deprecated``/
-    ``RecordType.deprecated``/``EnumType.deprecated`` agree.
+    """Deprecation message for *node*, or ``None`` if not deprecated.
 
-    Verified against real ``clang -ast-dump=json`` output (Clang 18) before
-    wiring this up: unlike castxml (a compound ``attributes`` string plus a
-    separate ``deprecation="..."`` XML attribute only for a non-empty
-    message), clang emits a ``DeprecatedAttr`` child node under the
-    declaration's own ``"inner"`` list — present for both the bare and
-    messaged forms, with an optional ``message`` string key present *only*
-    for the messaged form (confirmed empirically: a bare ``[[deprecated]]``'s
-    ``DeprecatedAttr`` node carries no ``message`` key at all, not an empty
-    string).
+    See ``extract.headers.clang.context.clang_deprecated_message`` (the
+    canonical implementation this delegates to) for the full contract.
     """
-    for child in node.get("inner", []) or []:
-        if isinstance(child, dict) and child.get("kind") == "DeprecatedAttr":
-            return str(child.get("message", ""))
-    return None
+    return _clang_context.clang_deprecated_message(node)
 
 
 def _clang_var_alignment_bits(node: dict[str, Any]) -> int | None:
@@ -957,18 +950,10 @@ class _ClangAstParser:
     def _source_location(entry: _Decl) -> str | None:
         """``file:line`` for a decl, or the bare file when clang omits the line.
 
-        clang makes ``loc.line`` sticky just like ``loc.file`` — a declaration
-        nested on the same source line as its parent (e.g. a ``static constexpr``
-        member of a one-line ``struct``) often carries the inherited file but no
-        ``line``. Dropping the whole location there would strip provenance and
-        make ``_decl_is_public`` discard an otherwise-public constant/type, so
-        the file is kept (``header_from_location`` tolerates a path with no
-        ``:line`` suffix). Returns ``None`` only when there is no file at all.
+        See ``extract.headers.clang.context.source_location`` (the canonical
+        implementation this delegates to) for the full contract.
         """
-        if not entry.file:
-            return None
-        line = _node_line(entry.node)
-        return f"{entry.file}:{line}" if line else entry.file
+        return _clang_context.source_location(entry)
 
     def _qualified(self, entry: _Decl) -> str:
         name = entry.node.get("name", "")
@@ -1247,7 +1232,9 @@ class _ClangAstParser:
                     deprecated=_clang_deprecated_message(node),
                     # G31 Phase C backend audit -- see _clang_method_is_override.
                     is_override=(
-                        _clang_method_is_override(node) if kind in _OVERRIDE_ELIGIBLE_KINDS else None
+                        _clang_method_is_override(node)
+                        if kind in _OVERRIDE_ELIGIBLE_KINDS
+                        else None
                     ),
                     is_compiler_generated=False,
                 )
@@ -1425,7 +1412,9 @@ class _ClangAstParser:
                 bases_fact=Fact.present([]),
                 virtual_bases_fact=Fact.present([]),
                 vtable_fact=Fact.present([]),
-                vptr_offset_bits_fact=Fact.partial(None),  # heuristic field (see below), partial even here
+                vptr_offset_bits_fact=Fact.partial(
+                    None
+                ),  # heuristic field (see below), partial even here
             )
         fields = self._parse_fields(node)
         bases, virtual_bases, _base_access = _parse_bases(node)
@@ -1497,8 +1486,10 @@ class _ClangAstParser:
             # G31 Phase C backend audit -- see _clang_record_is_abstract.
             is_abstract=_clang_record_is_abstract(node),
             # Stated explicitly -- this parse genuinely resolved these. vptr_offset_bits_fact is `partial`, not `present`: 0-if-vtable-else-None is the Itanium primary-base heuristic, not a real offset read (matches vptr_offset_bits's own PARTIAL row).
-            bases_fact=Fact.present(bases), virtual_bases_fact=Fact.present(virtual_bases),
-            vtable_fact=Fact.present(vtable), vptr_offset_bits_fact=Fact.partial(0 if vtable else None),
+            bases_fact=Fact.present(bases),
+            virtual_bases_fact=Fact.present(virtual_bases),
+            vtable_fact=Fact.present(vtable),
+            vptr_offset_bits_fact=Fact.partial(0 if vtable else None),
         )
 
     def _parse_fields(self, node: dict[str, Any]) -> list[TypeField]:
@@ -1582,71 +1573,9 @@ class _ClangAstParser:
         )
 
     def parse_enums(self) -> list[EnumType]:
-        enums: list[EnumType] = []
-        typedef_names_by_enum_id: dict[str, str] = {}
-        for entry in self._typedefs:
-            node = entry.node
-            if _is_builtin_file(entry.file):
-                continue
-            typedef_name = str(node.get("name", ""))
-            if not typedef_name:
-                continue
-            for child in node.get("inner", []) or []:
-                if not isinstance(child, dict):
-                    continue
-                owned = child.get("ownedTagDecl") or {}
-                if owned.get("kind") == "EnumDecl" and owned.get("id"):
-                    typedef_names_by_enum_id[str(owned["id"])] = typedef_name
-
-        for entry in self._enums:
-            node = entry.node
-            if _is_builtin_file(entry.file):
-                continue
-            name = str(node.get("name", "")) or typedef_names_by_enum_id.get(
-                str(node.get("id", "")), ""
-            )
-            if not name or name.startswith("__"):
-                continue
-            members: list[EnumMember] = []
-            # C/C++ enumerator values auto-increment from the previous one
-            # (starting at 0) unless an explicit initializer overrides them;
-            # clang's JSON only carries the value on an explicit ConstantExpr, so
-            # reconstruct the implicit ones here.
-            next_value = 0
-            for child in node.get("inner", []) or []:
-                if (
-                    not isinstance(child, dict)
-                    or child.get("kind") != "EnumConstantDecl"
-                ):
-                    continue
-                explicit = _enum_constant_value(child)
-                value = explicit if explicit is not None else next_value
-                members.append(EnumMember(name=str(child.get("name", "")), value=value))
-                next_value = value + 1
-            enums.append(
-                EnumType(
-                    name=name,
-                    members=members,
-                    underlying_type=_enum_underlying(node),
-                    source_location=self._source_location(entry),
-                    # See RecordType.qualified_name (_build_record) for why
-                    # this is only set when it differs from the bare name.
-                    qualified_name=(
-                        "::".join([*entry.scope, name]) if entry.scope else None
-                    ),
-                    # G31 Phase C: clang's EnumDecl carries a "scopedEnumTag"
-                    # key ("class"/"struct") only for an `enum class`/`enum
-                    # struct` -- absent (not merely false) for a plain C-style
-                    # enum, confirmed against real clang -ast-dump=json output.
-                    # Unlike is_standard_layout/is_trivially_copyable, a plain
-                    # EnumDecl always has a definitive answer here (there is
-                    # no "not collected" case for a real enum definition), so
-                    # this is a concrete bool, never None, on this backend.
-                    is_scoped="scopedEnumTag" in node,
-                    deprecated=_clang_deprecated_message(node),
-                )
-            )
-        return enums
+        return _clang_enums.parse_enums(
+            self._typedefs, self._enums, _evaluated_int_value
+        )
 
     def parse_typedefs(self) -> dict[str, str]:
         typedefs: dict[str, str] = {}
@@ -1684,84 +1613,21 @@ class _ClangAstParser:
 # ─── pure node helpers (module-level so they are unit-testable on their own) ──
 
 
-class _Decl:
-    """A categorized clang AST decl node plus its walk context.
-
-    ``__slots__`` keeps the per-decl overhead low on large headers.
-    """
-
-    __slots__ = (
-        "access",
-        "extern_c",
-        "file",
-        "in_friend",
-        "in_template",
-        "node",
-        "scope",
-    )
-
-    def __init__(
-        self,
-        node: dict[str, Any],
-        scope: tuple[str, ...],
-        file: str,
-        access: str,
-        extern_c: bool = False,
-        in_friend: bool = False,
-        in_template: bool = False,
-    ) -> None:
-        self.node = node
-        self.scope = scope
-        self.file = file
-        self.access = access
-        # True when the decl sits inside an ``extern "C"`` linkage spec — an
-        # authoritative C-linkage signal that beats the mangled==name heuristic.
-        self.extern_c = extern_c
-        # True when the decl is reached through a ``friend`` declaration: the
-        # function is ADL-only ("hidden friend") and the diff treats it apart
-        # from the ordinary public surface.
-        self.in_friend = in_friend
-        # True when the decl is the pattern body of a class template (e.g. the
-        # CXXRecordDecl inside a ClassTemplateDecl): same kind and bare name as
-        # an ordinary record, but its members reference dependent template-
-        # parameter types with no fixed layout for any one instantiation. Kept
-        # as a RecordType (its field *names*/*types* are still real public
-        # surface — case17_template_abi's field-added detection relies on it)
-        # but flagged so a name-based match (e.g. DWARF layout backfill)
-        # never treats it as an ordinary concrete type (Codex review).
-        self.in_template = in_template
+# ``_Decl`` now lives in ``extract.headers.clang.context`` (ADR-061 D9
+# "context.py" — the one shared type every entity-parsing module in that
+# package receives). Re-exported under its old name so the many existing
+# ``from abicheck.dumper_clang import _Decl`` call sites (production and
+# tests alike) keep resolving.
+_Decl = _clang_context._Decl
 
 
 def _qualtype(node: dict[str, Any]) -> str:
-    """A declaration's own ``type.qualType`` spelling -- the single choke
-    point every field/param/variable/function type string in this module is
-    built from (`_parse_fields`, `_parse_functions`'s own signature and
-    param loop, `parse_variables`, `parse_constants`).
+    """A declaration's own ``type.qualType`` spelling.
 
-    Stripped via :func:`strip_anonymous_type_location`: verified against
-    real Clang 18 (``-ast-dump=json``) that a lambda closure type embedded in
-    a type spelling -- e.g. a class-template specialization instantiated
-    with a lambda argument, ``Guard<decltype([]{})>`` -- prints its
-    ``qualType`` as ``"(lambda at <path>:<line>:<col>)"`` (Clang's
-    TypePrinter, the same diagnostic-style spelling castxml's own XML `name`
-    attribute uses, confirmed on a `FieldDecl` whose declared type IS the
-    lambda type parameter). Left unstripped, that absolute, checkout-
-    dependent path leaks into `TypeField.type`/`Param.type`/`Variable.type`/
-    `Function.return_type`, so two checkouts of the identical, unchanged
-    declaration would produce two different type spellings and could
-    manufacture a spurious finding on the field/param/variable/function
-    carrying it -- the same class of bug `dumper_castxml.py`'s own
-    `strip_anonymous_type_location` calls guard against for its `name`/
-    `qualified_name` fields, just reached through this backend's type-string
-    printer rather than its declaration-name attribute (which, unlike
-    castxml's, never itself embeds a location -- confirmed empirically: a
-    template specialization's own `name` node stays the bare template name,
-    e.g. ``"Guard"``, never ``"Guard<(lambda at ...)>"``).
+    See ``extract.headers.clang.context.qualtype`` (the canonical
+    implementation this delegates to) for the full contract.
     """
-    type_obj = node.get("type")
-    if isinstance(type_obj, dict):
-        return strip_anonymous_type_location(str(type_obj.get("qualType", "")))
-    return ""
+    return _clang_context.qualtype(node)
 
 
 def _node_file(node: dict[str, Any], current: str) -> str:
@@ -1781,22 +1647,12 @@ def _node_file(node: dict[str, Any], current: str) -> str:
 
 
 def _node_line(node: dict[str, Any]) -> int:
-    loc = node.get("loc")
-    if isinstance(loc, dict):
-        line = loc.get("line")
-        if isinstance(line, int):
-            return line
-        # Mirror _node_file's macro/expansion fallback so a decl whose file comes
-        # from expansionLoc/spellingLoc gets its line from the same place.
-        for sub in ("expansionLoc", "spellingLoc"):
-            s = loc.get(sub)
-            if isinstance(s, dict) and isinstance(s.get("line"), int):
-                return int(s["line"])
-    return 0
+    """See ``extract.headers.clang.context.node_line``."""
+    return _clang_context.node_line(node)
 
 
 def _is_builtin_file(file: str) -> bool:
-    return file in _BUILTIN_FILES
+    return _clang_context.is_builtin_file(file)
 
 
 def _default_record_access(node: dict[str, Any]) -> str:
@@ -1840,6 +1696,14 @@ def _evaluated_int_value(node: dict[str, Any]) -> int | None:
     every enumerator after it. Walk the same single-child-wrapper chain
     ``_unwrap_expr`` follows, but check every node passed through, not just
     the endpoints.
+
+    Deliberately NOT delegated to ``extract.headers.clang.context``: this
+    walk depends on ``_WRAPPER_EXPR_KINDS`` (``dumper_clang_expr.py``),
+    which itself imports ``diff_cxx_rules`` (classified ``compare``) for
+    ``itanium_scope_components`` — moving this function into the
+    ``extract``-classified package would create a real ``extract -> compare``
+    edge. ``extract.headers.clang.enums.parse_enums`` instead takes this
+    function as an explicit parameter (see that module's own docstring).
     """
     cur: Any = node
     while isinstance(cur, dict):
@@ -1851,7 +1715,11 @@ def _evaluated_int_value(node: dict[str, Any]) -> int | None:
                 pass
         if cur.get("kind") not in _WRAPPER_EXPR_KINDS:
             break
-        inner = [c for c in raw if isinstance(c, dict)] if isinstance(raw := cur.get("inner"), list) else []
+        inner = (
+            [c for c in raw if isinstance(c, dict)]
+            if isinstance(raw := cur.get("inner"), list)
+            else []
+        )
         if len(inner) != 1:
             break
         cur = inner[0]
@@ -1909,23 +1777,11 @@ def _parse_bases(node: dict[str, Any]) -> tuple[list[str], list[str], dict[str, 
     return bases, virtual_bases, access
 
 
-def _enum_underlying(node: dict[str, Any]) -> str:
-    """The enum's fixed underlying type spelling, defaulting to ``int``."""
-    fixed = node.get("fixedUnderlyingType")
-    if isinstance(fixed, dict) and fixed.get("qualType"):
-        return str(fixed["qualType"])
-    return "int"
-
-
-def _enum_constant_value(node: dict[str, Any]) -> int | None:
-    """The explicit value of an ``EnumConstantDecl``, or ``None`` if implicit."""
-    for child in node.get("inner", []) or []:
-        if not isinstance(child, dict):
-            continue
-        value = _evaluated_int_value(child)
-        if value is not None:
-            return value
-    return None
+# ``_enum_underlying``/``_enum_constant_value`` moved to
+# ``extract.headers.clang.enums`` with ``parse_enums`` itself (ADR-061 D9);
+# re-exported under their old names for any external reader of them.
+_enum_underlying = _clang_enums._enum_underlying
+_enum_constant_value = _clang_enums._enum_constant_value
 
 
 def _owned_tag_id(typedef_node: dict[str, Any]) -> str:

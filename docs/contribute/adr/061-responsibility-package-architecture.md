@@ -1,7 +1,7 @@
 # ADR-061: Responsibility-Package Architecture and Flat-Namespace Migration
 
 **Date:** 2026-08-24
-**Status:** Accepted — partially implemented (Phases 0-1 implemented; Phases 2-4 in progress; Phase 5 begun — the `model` package and the `*_metadata.py` dataclass/parser split have landed; D9's change-catalog work (item 3) is fully done — all 4 registry-validation properties (unique identifiers, valid references, non-contradictory defaults, complete metadata) are enforced, and the 397 entries have been repartitioned into `model/change_catalog/{symbols,types,platform,build,source}.py` by taxonomy; the CastXML/Clang parser split (item 1) has only started — the `extract` package now exists with one stateless-helper module moved out of `dumper_castxml.py`, but the stateful entity-by-entity split is unstarted — source-graph separation (item 2) is now split three ways: its values third moved to `abicheck/model/source_graph.py`; construction (`build_source_graph` and its private folding helpers) moved into `buildsource/source_graph_build.py` (classified `extract`) and `buildsource/source_graph_build_source_abi.py` (classified `extract`); comparison (`diff_source_graph`, `localize_symbol`) moved into `buildsource/source_graph_compare.py` (classified `compare`); a shared node/edge-classification predicate module neither half owns exclusively (`buildsource/source_graph_query.py`) stays unclassified, same as several of its own callers; `buildsource/source_graph.py` itself is now a 140-line re-export facade — and the bulk of item 4's cycle-exception cleanup also remains — and otherwise incremental).
+**Status:** Accepted — partially implemented (Phases 0-1 implemented; Phases 2-4 in progress; Phase 5 begun — the `model` package and the `*_metadata.py` dataclass/parser split have landed; D9's change-catalog work (item 3) is fully done — all 4 registry-validation properties (unique identifiers, valid references, non-contradictory defaults, complete metadata) are enforced, and the 397 entries have been repartitioned into `model/change_catalog/{symbols,types,platform,build,source}.py` by taxonomy; the CastXML/Clang parser split (item 1) is now underway with a real shared-context design proven on both backends — `extract/headers/{castxml,clang}/context.py` (plus castxml's own `location.py`/`type_resolution.py`) hold the parser state/node-inspection primitives an entity module needs, and `enums.py` is the first entity split out of each backend, both calling through their context object rather than `self` — but `functions.py`/`records.py`/`templates.py` on either side have not moved yet — source-graph separation (item 2) is now split three ways: its values third moved to `abicheck/model/source_graph.py`; construction (`build_source_graph` and its private folding helpers) moved into `buildsource/source_graph_build.py` (classified `extract`) and `buildsource/source_graph_build_source_abi.py` (classified `extract`); comparison (`diff_source_graph`, `localize_symbol`) moved into `buildsource/source_graph_compare.py` (classified `compare`); a shared node/edge-classification predicate module neither half owns exclusively (`buildsource/source_graph_query.py`) stays unclassified, same as several of its own callers; `buildsource/source_graph.py` itself is now a 140-line re-export facade — and the bulk of item 4's cycle-exception cleanup also remains — and otherwise incremental).
 **Decision maker:** abicheck maintainers
 
 ## Context
@@ -2055,24 +2055,85 @@ describe the attribute's real effect (folding permission, not linkage)
 without promising a new export.
 
 1. split CastXML and Clang parsing by entity and shared parser context.
-   **Started, not done.** `abicheck.extract` now exists (see `abicheck/
-   extract/AGENTS.md`) with its first tenant, `extract/headers/castxml/
-   names.py`: the vtable-index/mangled-name/synthetic-key helpers that sat
-   as module-level functions above `_CastxmlParser` in `dumper_castxml.py`
-   — `_parse_vtable_index`, `_vt_sort_key`, `_ref_qualifier_from_mangled`,
+   **Started, not done — but the "shared-context design" prerequisite this
+   status previously called out as unstarted is now real on both
+   backends.** `extract/headers/castxml/names.py` was the first tenant: the
+   vtable-index/mangled-name/synthetic-key helpers that sat as module-level
+   functions above `_CastxmlParser` in `dumper_castxml.py` —
+   `_parse_vtable_index`, `_vt_sort_key`, `_ref_qualifier_from_mangled`,
    `_mangled_name_is_local_linkage`, `is_synthetic_ctor_key`/`is_synthetic_
    dtor_key`, `_virtual_method_mangled_name`, and their two prefix
    constants. Each is a pure function over a string or a single XML
    element — none of them read `_CastxmlParser`'s id map or any other
    instance state, which is exactly why this was the piece that could move
-   without first designing the shared parser context (`context.py`) the
-   rest of the split needs. `dumper_castxml.py` imports and re-exports all
-   of them unchanged (1934 → 1822 lines). The stateful part — splitting
-   `_CastxmlParser`'s ~60 methods into `functions.py`/`records.py`/
-   `enums.py`/`templates.py` entity modules sharing one `context.py`, and
-   the equivalent split for `dumper_clang.py` — has not started; it needs
-   the shared-context design this ADR's D9 describes before any entity
-   module can move, which is a larger, separately-scoped slice;
+   without first designing the shared parser context the rest of the split
+   needs.
+
+   That context design has now been built for real, against both backends,
+   rather than merely sketched: `extract/headers/castxml/context.py` holds
+   a `CastxmlParserContext` class carrying every piece of state
+   `_CastxmlParser` used to keep directly on `self` — the id-to-element
+   map, the exported-symbol sets and public-header segments, the
+   tag-grouped element lists `build_id_map()` populates in one pass, and
+   the type-name/pointer-depth memoization caches — plus `build_id_map()`
+   and `resolve()` themselves. `extract/headers/castxml/location.py` and
+   `type_resolution.py` hold the location-resolution and full type-graph
+   walk (spelling, pointer depth, alignment, cv/restrict qualification) as
+   free functions taking that context explicitly, matching D9's "entity
+   modules ... using shared context" shape applied to the responsibilities
+   more than one entity kind's parsing reads, not only to one entity kind.
+   `_CastxmlParser.__init__` now constructs one `CastxmlParserContext` and
+   holds it as `self._ctx`; every field it used to assign directly
+   (`self._id_map`, `self._type_name_cache`, ...) is now a read-only
+   property delegating to the context object, so every method not yet
+   migrated — and every external caller, tests included, that reads a
+   parser's private state directly (`parser._id_map`, `parser._type_name(...)`)
+   — keeps working unchanged. `extract/headers/castxml/enums.py` is the
+   first entity module built on this: `parse_enums()` and its
+   `underlying_type_name()` helper (the latter shared with typedef
+   resolution, so it lives in `type_resolution.py`, not `enums.py`) now
+   live there, with `_CastxmlParser.parse_enums`/`_underlying_type_name`
+   reduced to one-line delegations.
+
+   The clang backend got the equivalent, independently-designed split
+   proving the context shape isn't a castxml-only artifact:
+   `extract/headers/clang/context.py` holds `_Decl` (the categorized
+   AST-node-plus-walk-context type every entity kind already received as a
+   parameter, not `self` state — clang's own traversal was already
+   context-parameter-shaped here, unlike castxml's) plus the
+   built-in-file/qualtype/source-location/deprecation-message primitives
+   more than one entity kind's parsing reads, and
+   `extract/headers/clang/enums.py` is the matching first entity module.
+   One real, deliberately-recorded exception surfaced building it:
+   `dumper_clang._evaluated_int_value` (the constant-expression evaluator
+   `_enum_constant_value` needs) depends on `_WRAPPER_EXPR_KINDS`
+   (`dumper_clang_expr.py`), which itself imports `diff_cxx_rules`
+   (classified `compare`) for `itanium_scope_components` — the exact
+   "shared piece entangled with another layer" case `extract/AGENTS.md`
+   already names as the pattern to avoid rather than paper over with a new
+   import (confirmed the hard way: classifying `dumper_clang_expr.py` as
+   `extract` to unblock the import made `check_architecture.py` fail with a
+   real `extract -> compare` edge, not a false positive). Rather than move
+   that evaluator into `extract` and recreate the edge one module down,
+   `enums.py.parse_enums` takes it as an explicit parameter — the same
+   "context is whatever the entity module actually needs" principle
+   expressed as a parameter instead of a state field, since the value in
+   question is a pure function, not parser state. Both backends' `enums.py`
+   are proof the design generalizes, not just a design note: real code
+   parses a real entity kind through a real shared context object on each
+   backend, with `dumper_castxml.py`/`dumper_clang.py` reduced to thin
+   delegating wrappers for every migrated name and zero output/snapshot
+   change (the full non-integration test suite for both backends — 1291
+   tests — passes unchanged).
+
+   Still open for the next slice: `functions.py`/`records.py`/
+   `templates.py` on both backends have not moved. Records are the
+   fullest test of the design so far, since `_CastxmlParser._build_record_type`
+   and friends touch vtable/RTTI state (`vtable_slot_root`,
+   `virtual_methods_by_class`) that `enums.py` never had to; functions
+   pull in the widest set of type-resolution calls per entity. Whichever
+   moves next should reuse `context.py`/`location.py`/`type_resolution.py`
+   as-is rather than growing a second, competing context shape;
 2. separate source-graph values, construction, and comparison. **Started,
    not done.** The values third moved: `abicheck/model/source_graph.py`
    now owns `SourceGraphSummary` (the ADR-031 D7 compact graph container

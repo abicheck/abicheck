@@ -35,15 +35,24 @@ inside this directory.
 | compile-commands/CMake/Bazel/Make build evidence | `build/` (not yet created) |
 | Source-graph construction, source-ABI replay, provenance | `source/` (not yet created; see ADR-061 Phase 5 item 2) |
 
-`headers/castxml/names.py` is the first tenant: vtable-index, mangled-name,
+`headers/castxml/names.py` was the first tenant: vtable-index, mangled-name,
 and synthetic-key helpers moved out of the still-flat `dumper_castxml.py`,
 which imports and re-exports them so every existing caller is unaffected.
-The rest of `dumper_castxml.py`/`dumper_clang.py` — the stateful per-entity
-parsing (`functions.py`, `records.py`, `enums.py`, `templates.py`) and the
-shared parser context (`context.py`, `location.py`, `type_resolution.py`)
-their methods currently read off `self` — has not moved yet; see ADR-061's
-own "Phase 5" section for the reason splitting a stateful class safely is a
-larger slice than moving a handful of pure functions.
+The shared-context design is now real on both backends, and `enums.py` is
+the first entity module split out of each: `headers/castxml/context.py`
+(the id-map, tag-grouped element lists, and memoization caches
+`_CastxmlParser` used to carry directly on `self`), `location.py`
+(built-in-origin/source-location resolution), and `type_resolution.py`
+(the full type-graph walk — spelling, pointer depth, alignment, cv/restrict
+qualification); `headers/clang/context.py` (the `_Decl` categorized-node
+type plus built-in-file/qualtype/location/deprecation helpers). Every
+function in these modules takes its context object as an explicit
+parameter rather than reading `self`. `dumper_castxml.py`/`dumper_clang.py`
+keep every migrated method/module-level name as a thin delegating wrapper,
+so every existing caller (including tests reading a parser's private
+attributes) is unaffected. `functions.py`/`records.py`/`templates.py` on
+both backends have not moved yet — see ADR-061's own "Phase 5" section for
+exactly what's still on the monolithic parser classes and why.
 
 ## Rules that are easy to get wrong
 
