@@ -280,7 +280,6 @@
         "abicheck/environment_matrix.py",
         "abicheck/l0_export_delta.py",
         "abicheck/post_manifest.py",
-        "abicheck/product_baseline.py",
         "abicheck/resolver.py",
         "abicheck/service.py",
         "abicheck/service_compare_evidence.py",
@@ -293,7 +292,6 @@
         "abicheck/service_header_scoped.py",
         "abicheck/service_input_resolution.py",
         "abicheck/service_scan.py",
-        "abicheck/stack_binding_diff.py",
         "abicheck/stack_checker.py"
       ]
     },
