@@ -76,9 +76,25 @@ fit `context.py`'s existing "read by more than one entity kind" charter
 (record-entity parsing needs the same index), the id-index evaluator took
 the same explicit-parameter treatment `enums.py` already established for
 its own excluded evaluator, and the target triple turned out to be a
-stateless pass-through. `records.py`/`templates.py` on both backends have
-not moved yet — see ADR-061's own "Phase 5" section for exactly what's
-still on the monolithic parser classes and why.
+stateless pass-through. `records.py` is now the third entity module split
+out — **on the castxml backend only**: `headers/castxml/records.py` holds
+`parse_types`/`build_record_type`/`parse_record_fields`/
+`expand_anonymous_field`/`parse_bitfield_bits` plus the vtable/RTTI layout
+walk (`build_vtable`/`collect_virtual_methods`/`inherited_vtable_slots`/
+`resolved_override_keys`/`vtable_slot_key`), all as free functions taking
+`CastxmlParserContext` explicitly. This needed no context-shape change:
+`ctx.vtable_slot_root`/`ctx.vtable_slot_extra_roots` already lived on the
+context object from the `functions.py` slice above, so `records.py` only
+had to move the code that reads and mutates them —
+`collect_virtual_methods`/`vtable_slot_key` are the first functions in
+this package that mutate shared context state rather than only read it,
+proof the "entity module takes context explicitly" shape generalizes past
+the read-only case `enums.py`/`functions.py` exercised. Clang's
+`records.py`, and `templates.py` on both backends, have not moved yet —
+see ADR-061's own "Phase 5" section for exactly what's still on the
+monolithic parser classes and why (record parsing's different shape on
+each backend argued against moving both in the same pass, given how
+correctness-sensitive vtable/RTTI layout facts are).
 
 ## Rules that are easy to get wrong
 
