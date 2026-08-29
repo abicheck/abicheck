@@ -47,14 +47,17 @@ from typing import Any
 
 from .diff_cxx_rules import itanium_scope_components
 
-#: Decl contexts we descend into, tracking the enclosing scope name so a
-#: namespace/class-qualified constant key is built (``ns::C::kLimit``).
-#: Shared with ``dumper_clang._ClangAstParser._walk``'s own public-surface
-#: qualified-name building (imported back from there) — kept as ONE
-#: definition rather than two independently-drifting copies.
-_SCOPE_NODE_KINDS = frozenset(
-    {"NamespaceDecl", "CXXRecordDecl", "RecordDecl", "LinkageSpecDecl"}
-)
+# Canonical definition moved to ``extract.headers.clang.templates`` (ADR-061
+# Phase 5 item 1): that package's own ``build_specialization_index`` and its
+# sibling `_index_template_param_*` walks need this constant, and `extract`
+# may not import this module (it pulls in `diff_cxx_rules`, classified
+# `compare`) -- so the constant now lives on the side that CAN be imported
+# from unconditionally, and this module reads it back, keeping this as the
+# ONE definition (never two independently-drifting copies) the same way
+# ``dumper_clang.py``'s own ``_ClangAstParser._walk`` already did before
+# this move.
+from .extract.headers.clang.templates import _SCOPE_NODE_KINDS as _SCOPE_NODE_KINDS
+
 #: Literal node kinds whose ``value`` is a stable, human-meaningful constant.
 _LITERAL_NODE_KINDS = frozenset(
     {

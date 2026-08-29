@@ -13,25 +13,18 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""``_CastxmlParser.parse_typedefs``/``parse_typedefs_qualified`` bodies,
-plus ``_extract_contract_attributes`` — a small, unrelated pure per-element
-helper that also moved here purely to keep :mod:`abicheck.dumper_castxml`
-under the AI-readiness file-size hard cap (there being no
-responsibility-package owner for it yet is ADR-061's own still-open
-migration, not a design choice made here — see that ADR for the target
-shape; adding a *new* flat ``dumper_`` sibling module is what
-``architecture/modules.yaml``'s ``frozen_root_families`` exists to prevent,
-so this reuses the one already-allowlisted split-out module in this family
-rather than adding another).
+"""``_CastxmlParser.parse_typedefs``/``parse_typedefs_qualified`` bodies.
 
-``_deprecation_marker`` moved on to
-:mod:`abicheck.extract.headers.castxml.location` (ADR-061 D9, Codex review
-on PR #939) once an ``extract``-owned entity module needed it — this
-module, still flat and unmigrated itself, is exactly the "legacy sibling"
-``abicheck/extract/AGENTS.md`` says a new ``extract`` module must not reach
-into the private helpers of. Re-exported here under its old private name so
-every existing caller (including ``dumper_castxml.py``'s own re-export of
-it) is unaffected.
+``_deprecation_marker`` and ``_extract_contract_attributes`` both moved on
+to :mod:`abicheck.extract.headers.castxml.location` (ADR-061 D9, Codex
+review on PR #939 and PR #940 respectively) once an ``extract``-owned
+entity module needed each — this module, still flat and unmigrated itself,
+is exactly the "legacy sibling" ``abicheck/extract/AGENTS.md`` says a new
+``extract`` module must not reach into the private helpers of. Both are
+re-exported here under their old private names so every existing caller
+(including ``dumper_castxml.py``'s own re-export of them, and the direct
+``from abicheck.dumper_castxml_typedefs import ...`` test imports) is
+unaffected.
 
 Pure functions taking the parser's own bound helper methods (or an
 already-extracted XML attribute string/``Element``) as arguments, never
@@ -56,52 +49,18 @@ from xml.etree.ElementTree import (
 # warns against. Re-exported under its old private name so every existing
 # caller here (and `dumper_castxml.py`'s own `as`-aliased re-export of it)
 # is unaffected.
-from .extract.headers.castxml.location import deprecation_marker
-
-_CONTRACT_ATTRIBUTE_BASES = frozenset(
-    {
-        "noreturn",
-        "nonnull",
-        "returns_nonnull",
-        "malloc",
-        "format",
-        "format_arg",
-        "alloc_size",
-        "alloc_align",
-        "warn_unused_result",
-        "sentinel",
-        # calling-convention selections — a flip is an ABI change on the
-        # affected targets, reported via the contract-attribute kinds.
-        "cdecl",
-        "stdcall",
-        "fastcall",
-        "thiscall",
-        "regparm",
-        "ms_abi",
-        "sysv_abi",
-        "vectorcall",
-    }
+from .extract.headers.castxml.location import (
+    _CONTRACT_ATTRIBUTE_BASES as _CONTRACT_ATTRIBUTE_BASES,
+    contract_attributes,
+    deprecation_marker,
 )
 
 
 def _extract_contract_attributes(attributes: str) -> list[str]:
-    """Filter a castxml ``attributes`` string down to contract attributes.
-
-    Returns normalized, sorted tokens with any ``gnu:``/``gnu::`` namespace
-    prefix stripped and argument lists preserved (``nonnull(1)``). Tokens not
-    in the known contract set (``noexcept``, ``final``, …) are ignored.
-    """
-    tokens: set[str] = set()
-    for raw in attributes.split():
-        token = raw
-        for prefix in ("gnu::", "gnu:", "__"):
-            if token.startswith(prefix):
-                token = token[len(prefix) :]
-        token = token.strip("_")
-        base = token.split("(", 1)[0]
-        if base in _CONTRACT_ATTRIBUTE_BASES:
-            tokens.add(token)
-    return sorted(tokens)
+    """Back-compat private alias — see
+    :func:`abicheck.extract.headers.castxml.location.contract_attributes`,
+    this primitive's real home since ADR-061 D9."""
+    return contract_attributes(attributes)
 
 
 def _deprecation_marker(el: Element) -> str | None:
