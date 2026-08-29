@@ -750,7 +750,11 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
         build_config=build_config,
         build_query=build_query,
         build_compile_db=build_compile_db,
-        allow_build_query=allow_build_query,
+        # `allow_build_query` (the deprecated `--allow-build-query` no-op
+        # flag) is NOT this call's trust signal -- see `execute_dump_cli_run`'s
+        # own docstring (Codex review, third regression) for why `True` is
+        # correct here unconditionally.
+        allow_build_query=True,
         legacy_compile_db_tokens=tuple(build_context_flags),
         legacy_compile_db_matched=compile_db_matched,
         # Codex review, two real regressions: `perform_elf_dump` always

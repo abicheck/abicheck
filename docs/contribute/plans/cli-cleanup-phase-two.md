@@ -3193,6 +3193,26 @@ pipelines a fourth time.
   > reach `execute_dump_request` (verified to fail against the pre-fix code
   > with a `KeyError`, confirming the test catches the exact regression).
 
+  > **A third regression, same review round.** `execute_dump_cli_run`'s call
+  > forwarded `dump_cmd`'s own `allow_build_query` local -- the deprecated,
+  > always-`False` `--allow-build-query` no-op flag (`cli_options.py`: "Kept
+  > as a no-op for backward compatibility") -- straight into
+  > `_gated_build_query_inputs`, a Tier-2 gate written for a programmatic API
+  > caller who must opt in. That silently nulled an explicit `--config`/
+  > `--build-query` for the execution step alone, contradicting both flags'
+  > own documented CLI contract (`--build-query`: "runs automatically as
+  > trusted operator input"; `--config`: "build.query runs only from an
+  > explicit --config") and regressing `perform_elf_dump`, which forwarded
+  > both unchanged with no such gate. `dump`'s CLI is itself the trust
+  > boundary an explicit `--config`/`--build-query` already crossed by being
+  > typed there at all -- unlike `scan`'s config-file-sourced `build.query`,
+  > which needs its own `resolve_effective_allow_query` "level-implies-query"
+  > decision (ADR-037 D4) precisely because it is not operator-typed. Fixed
+  > by passing `allow_build_query=True` unconditionally at this one call
+  > site instead of the CLI local. The same spy test now also asserts
+  > `seen["allow_build_query"] is True` (verified to fail against the
+  > pre-fix code the same way).
+
 `dump --build-query` and `dump --build-compile-db` describe how the *project*
 is built, not what this snapshot is. They are already documented as CLI
 equivalents of the `.abicheck.yml` `build.query` / `build.compile_db` fields,
