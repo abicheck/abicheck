@@ -621,6 +621,14 @@ def parse_functions(
                     # non-type template parameter's own declared type
                     # already is (Codex review, PR #943).
                     type_param_names=entry.template_type_param_names,
+                    # A function template's return type can itself depend
+                    # on a template parameter (`template<class T> typename
+                    # T::x f(T);`) -- two such templates can share every
+                    # other "sig" dimension and still be distinct, legal
+                    # overloads (Codex review, PR #943). Ignored by
+                    # `entity_id_for_function` for a non-template function,
+                    # so this is a no-op there.
+                    return_type=ret_type,
                 ),
             )
         )

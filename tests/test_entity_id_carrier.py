@@ -125,16 +125,11 @@ _TEMPLATE_PARAM_KIND_COLLISION = textwrap.dedent(
     """
 )
 
-#: Two more legal overloads sharing scope, leaf name, and an identical
-#: (empty) ordinary parameter list -- this time differing only in
-#: template-parameter *packness*, not kind: ``template<class T>`` vs.
-#: ``template<class... T>``. Confirmed by direct compilation that clang
-#: tags a pack parameter with ``isParameterPack: true`` (omitting the key
-#: entirely for a non-pack parameter of the same kind), and that the first
-#: version of ``function_template_param_kinds`` -- which only recorded
-#: ``"type"``/``"template"``/``"nontype:..."`` -- still reduced both to
-#: the identical ``("type",)``, missing this second collision entirely
-#: (Codex review, PR #943).
+#: Two more legal overloads, differing only in template-parameter
+#: *packness*, not kind: ``template<class T>`` vs. ``template<class... T>``.
+#: The first version of ``function_template_param_kinds`` reduced both to
+#: the identical ``("type",)``, missing this collision (Codex review, PR
+#: #943).
 _TEMPLATE_PARAM_PACKNESS_COLLISION = textwrap.dedent(
     """
     namespace ns {
@@ -144,14 +139,11 @@ _TEMPLATE_PARAM_PACKNESS_COLLISION = textwrap.dedent(
     """
 )
 
-#: A pure template-parameter RENAME, not a collision to close but the
-#: opposite hazard: ``template<class T, T N>`` and ``template<class U, U
-#: N>`` are the identical declaration, yet clang's own ``qualType`` for
-#: the non-type parameter spells the dependent type literally as the type
-#: parameter's own name (``"T"``/``"U"``) -- confirmed by direct
-#: compilation. Without canonicalizing that dependent reference to a
-#: parameter position, a non-semantic rename would fingerprint as two
-#: different overloads (Codex review, PR #943).
+#: A pure template-parameter RENAME, the opposite hazard: ``template<class
+#: T, T N>`` and ``template<class U, U N>`` are identical, yet clang's own
+#: ``qualType`` for the non-type parameter spells the dependent type
+#: literally as the type parameter's own name (``"T"``/``"U"``) (Codex
+#: review, PR #943).
 _TEMPLATE_PARAM_DEPENDENT_RENAME_A = textwrap.dedent(
     """
     namespace ns {
@@ -167,15 +159,11 @@ _TEMPLATE_PARAM_DEPENDENT_RENAME_B = textwrap.dedent(
     """
 )
 
-#: Two more legal overloads sharing scope, leaf name, and an identical
-#: (empty) ordinary parameter list, this time differing in a
-#: template-TEMPLATE parameter's own NESTED parameter list.
-#: ``template<template<class> class TT>`` vs. ``template<template<class,
-#: class> class TT>`` -- confirmed by direct compilation that clang shapes
-#: a ``TemplateTemplateParmDecl``'s own ``inner`` exactly like a top-level
-#: parameter list, and that the first version of this discriminator, which
-#: recorded only the bare ``"template"`` tag, still reduced both to the
-#: identical entry (Codex review, PR #943).
+#: Two more legal overloads, differing in a template-TEMPLATE parameter's
+#: own NESTED parameter list: ``template<template<class> class TT>`` vs.
+#: ``template<template<class, class> class TT>``. The first, non-recursive
+#: version of this discriminator reduced both to the bare ``"template"``
+#: tag (Codex review, PR #943).
 _TEMPLATE_TEMPLATE_PARAM_NESTED_ARITY_COLLISION = textwrap.dedent(
     """
     namespace ns {
@@ -185,19 +173,10 @@ _TEMPLATE_TEMPLATE_PARAM_NESTED_ARITY_COLLISION = textwrap.dedent(
     """
 )
 
-#: A pure RENAME of a template-TEMPLATE parameter, not a collision to
-#: close but the opposite hazard (the sibling of
-#: ``_TEMPLATE_PARAM_DEPENDENT_RENAME_A``/``B`` above, this time for a
-#: dependent reference to a template-template parameter rather than a
-#: type parameter): ``template<template<class> class TT, TT<int>* N>``
-#: and the same declaration with ``TT`` renamed to ``UU`` are the
-#: identical declaration, but clang's own ``qualType`` for ``N`` spells
-#: the dependent type literally as the template-template parameter's own
-#: name (``"TT<int> *"``/``"UU<int> *"``) -- confirmed by direct
-#: compilation, including that a bare (uninstantiated) reference to a
-#: template-template parameter is not itself legal C++, so a real
-#: non-type parameter dependent on one always names a concrete
-#: instantiation like ``TT<int>`` (Codex review, PR #943).
+#: A pure RENAME of a template-TEMPLATE parameter -- the ``TT``/``UU``
+#: sibling of ``_TEMPLATE_PARAM_DEPENDENT_RENAME_A``/``B`` above: clang's
+#: ``qualType`` for ``N`` spells the dependent type literally as ``TT``'s
+#: own name (Codex review, PR #943).
 _TEMPLATE_TEMPLATE_PARAM_DEPENDENT_RENAME_A = textwrap.dedent(
     """
     namespace ns {
@@ -718,20 +697,11 @@ def test_live_castxml_closes_the_record_vs_namespace_collision(tmp_path: Path) -
 def test_live_clang_missing_mangling_is_not_read_as_c_linkage(tmp_path: Path) -> None:
     """A mangling-free C++ template must not take the ``extern "C"`` branch.
 
-    Clang emits no ``mangledName`` for an uninstantiated template, so the
-    parser's ``mangled`` falls back to the bare ``name`` — which made the
-    long-standing ``mangled == name`` C-linkage heuristic read as True.
-    Routing that through ``entity_id_for_function``'s ``extern_c`` branch
-    forces ``scope=()`` and drops the signature, so ``A::f`` and ``B::f``
-    collapsed onto one ``EntityId`` (reproduced end to end before the fix;
-    Codex + CodeRabbit review, PR #943).
-
-    Exercises the *class* of the bug, not just the reported input: all
-    three shapes clang leaves unmangled (a free function template, a
-    class-template method, a class-template pattern's static member,
-    the last through the variable constructor which had the identical bug),
-    each as a same-leaf-name pair in different namespaces.
-    """
+    Clang emits no ``mangledName`` for an uninstantiated template, so
+    ``mangled`` falls back to the bare ``name`` -- reading True for the
+    ``mangled == name`` C-linkage heuristic, forcing ``scope=()`` and
+    collapsing ``A::f``/``B::f`` onto one ``EntityId`` (Codex + CodeRabbit
+    review, PR #943). Exercises all three unmangled shapes as pairs."""
     parser = _clang_parser(_UNINSTANTIATED_TEMPLATES, tmp_path, "tmpl")
 
     for leaf in ("f", "m"):
@@ -759,16 +729,11 @@ def test_live_clang_missing_mangling_is_not_read_as_c_linkage(tmp_path: Path) ->
 def test_live_clang_real_c_linkage_still_takes_the_extern_c_branch(
     tmp_path: Path,
 ) -> None:
-    """The negative control for the fix above, which narrowed a heuristic.
-
-    Narrowing ``mangled == name`` to "clang actually emitted a
-    ``mangledName``" is only safe if a genuine C-linkage declaration really
-    does carry that key — verified directly (``clang -x c`` on a plain C
-    header, and ``clang -x c++`` on an ``extern "C"`` block: all four
-    declarations carry an explicit ``mangledName`` equal to their name), and
-    pinned here so a future narrowing cannot silently break extern-"C"
-    identity instead.
-    """
+    """The negative control for the fix above, which narrowed a heuristic:
+    a genuine C-linkage declaration really does carry an explicit
+    ``mangledName`` equal to its name (verified via ``clang -x c``/``-x
+    c++ extern "C"``), pinned so a future narrowing cannot silently break
+    extern-"C" identity too."""
     parser = _clang_parser(_PROBE_HEADER, tmp_path, "probe")
     c_fn = _one(parser.parse_functions(), name="c_fn")
     c_var = _one(parser.parse_variables(), name="c_var")
@@ -803,12 +768,11 @@ def test_live_clang_hidden_friend_template_resolves_in_namespace_scope(
     tmp_path: Path,
 ) -> None:
     """A hidden friend template is a member of the enclosing namespace, not
-    the befriending class ([namespace.memdef]) -- confirmed by compilation:
-    clang rejects two such friends with identical signatures in different
-    classes as a *redefinition*, proof they're one entity. The lexical walk
-    previously kept each ``EntityId`` under its own class's ``Record``
-    scope, wrongly making them unequal (Codex review, PR #943);
-    ``hidden_friend_owner`` still distinguishes the befriending class."""
+    the befriending class ([namespace.memdef]): clang rejects two such
+    friends with identical signatures in different classes as a
+    *redefinition*, proof they're one entity, but the lexical walk kept
+    each ``EntityId`` under its own class's ``Record`` scope (Codex
+    review, PR #943); ``hidden_friend_owner`` still names the class."""
     parser = _clang_parser(
         "struct A { template<class T> friend void f(T); };"
         " struct B { template<class U> friend void f(U); };",
@@ -838,12 +802,10 @@ def test_live_clang_template_param_kind_discriminates_overloaded_templates(
     before this fix (Codex review, PR #943)."""
     parser = _clang_parser(_TEMPLATE_PARAM_KIND_COLLISION, tmp_path, "tmplkind")
     pair = [fn for fn in parser.parse_functions() if fn.name == "f"]
-    assert len(pair) == 2
-    assert all(fn.entity_id is not None for fn in pair)
+    assert len(pair) == 2 and all(fn.entity_id is not None for fn in pair)
     for fn in pair:
-        assert fn.entity_id is not None
-        assert fn.entity_id.extra[0] == "sig", fn.entity_id
-        assert fn.entity_id.extra[-2] == "tmpl", fn.entity_id
+        assert fn.entity_id is not None  # narrows for mypy
+        assert fn.entity_id.extra[0] == "sig" and fn.entity_id.extra[-2] == "tmpl"
     assert pair[0].entity_id != pair[1].entity_id
     kinds = {fn.entity_id.extra[-1] for fn in pair if fn.entity_id is not None}
     assert kinds == {"type", "nontype:int"}
@@ -860,12 +822,10 @@ def test_live_clang_template_param_packness_discriminates_overloaded_templates(
     before this fix (Codex review, PR #943)."""
     parser = _clang_parser(_TEMPLATE_PARAM_PACKNESS_COLLISION, tmp_path, "tmplpack")
     pair = [fn for fn in parser.parse_functions() if fn.name == "f"]
-    assert len(pair) == 2
-    assert all(fn.entity_id is not None for fn in pair)
+    assert len(pair) == 2 and all(fn.entity_id is not None for fn in pair)
     for fn in pair:
-        assert fn.entity_id is not None
-        assert fn.entity_id.extra[0] == "sig", fn.entity_id
-        assert fn.entity_id.extra[-2] == "tmpl", fn.entity_id
+        assert fn.entity_id is not None  # narrows for mypy
+        assert fn.entity_id.extra[0] == "sig" and fn.entity_id.extra[-2] == "tmpl"
     assert pair[0].entity_id != pair[1].entity_id
     kinds = {fn.entity_id.extra[-1] for fn in pair if fn.entity_id is not None}
     assert kinds == {"type", "type..."}
@@ -1030,6 +990,46 @@ def test_live_clang_rename_of_param_named_type_does_not_corrupt_a_prior_marker(
     assert a.entity_id is not None and b.entity_id is not None
     assert a.entity_id == b.entity_id
     assert a.entity_id.extra[-1] == "nontype:type-param-0"
+
+
+@pytest.mark.integration
+@pytest.mark.skipif(shutil.which("clang") is None, reason="clang not installed")
+def test_live_clang_dependent_return_type_discriminates_overloaded_templates(
+    tmp_path: Path,
+) -> None:
+    """Two templates differing ONLY in a dependent return type are legal,
+    coexisting overloads (clang accepts both with no redefinition error),
+    but shared scope/leaf/params/kinds collided them (Codex review, PR
+    #943); a rename reflected only in the return type must still match."""
+    header = (
+        "struct A { using x = int; using y = double; };"
+        " template<class T> typename T::x f(T);"
+        " template<class T> typename T::y f(T);"
+    )
+    pair = [
+        fn
+        for fn in _clang_parser(header, tmp_path, "rettmpl").parse_functions()
+        if fn.name == "f"
+    ]
+    assert len(pair) == 2 and pair[0].entity_id != pair[1].entity_id
+
+    a = _one(
+        _clang_parser(
+            "struct A { using x = int; }; template<class T> typename T::x f(T);",
+            tmp_path,
+            "retrena",
+        ).parse_functions(),
+        name="f",
+    )
+    b = _one(
+        _clang_parser(
+            "struct A { using x = int; }; template<class U> typename U::x f(U);",
+            tmp_path,
+            "retrenb",
+        ).parse_functions(),
+        name="f",
+    )
+    assert a.entity_id is not None and a.entity_id == b.entity_id
 
 
 # ── hybrid dumper: entity_id must stay in sync across post-parse rewrites ────

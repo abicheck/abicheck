@@ -491,6 +491,7 @@ def entity_id_for_function(
     is_variadic: bool | None = None,
     template_param_kinds: tuple[str, ...] = (),
     type_param_names: tuple[str, ...] = (),
+    return_type: str = "",
 ) -> EntityId:
     """``EntityId`` for a function.
 
@@ -635,6 +636,23 @@ def entity_id_for_function(
     every non-template function, so an ordinary function's ``extra``
     tuple is unchanged byte-for-byte.
 
+    *return_type* is folded into ``extra`` (as ``("ret", <canonicalized
+    spelling>)``, placed before the ``"tmpl"`` block so it never shifts
+    the fixed tail position every ``template_param_kinds`` consumer reads)
+    ONLY when *template_param_kinds* is non-empty -- an ordinary function
+    can never legally overload solely by return type, but a function
+    TEMPLATE's return type can itself depend on a template parameter
+    (``template<class T> typename T::x f(T);``), so two such templates can
+    share every other dimension in ``extra`` and still be genuinely
+    distinct, legally-coexisting declarations (Codex review, PR #943;
+    confirmed by direct compilation that clang accepts both that
+    declaration and its ``typename T::y`` sibling with no redefinition
+    error). Canonicalized identically to a dependent ordinary parameter
+    type -- ``canonicalize_function_signature_param_type`` then
+    ``canonicalize_type_param_references`` -- so a pure template-parameter
+    rename that only the return type's own dependent spelling reflects
+    still resolves to the same ``EntityId``.
+
     When *mangled_name* is present, *leaf_name* is likewise ignored -- see
     :func:`entity_id_for_variable`'s docstring for the confirmed reason
     (the ELF-only fallback path reuses the raw exported symbol for both
@@ -665,6 +683,40 @@ def entity_id_for_function(
             f"volatile:{is_volatile}",
             ref_qualifier,
             str(is_variadic),
+            # A function template's return type CAN depend on its own
+            # template parameters (`template<class T> typename T::x f(T);`),
+            # so two such templates can share scope/leaf_name/param_types/
+            # template_param_kinds while genuinely being distinct, legal
+            # overloads distinguished only by that dependent return type --
+            # confirmed by direct compilation (Codex review, PR #943):
+            # clang accepts BOTH `template<class T> typename T::x f(T);`
+            # and `template<class T> typename T::y f(T);` with no
+            # redefinition error, two real `FunctionTemplateDecl`s. Folded
+            # in only for a template (`template_param_kinds` non-empty) --
+            # an ORDINARY function can never legally overload solely by
+            # return type (the same reason `finding_identity.
+            # normalized_signature` never folds return type in at all), so
+            # including it there would add nothing and only risk widening
+            # a genuine return-type EDIT into a spurious remove+add for a
+            # function this branch already fully identifies by its other
+            # dimensions. Placed AFTER the variadic marker but BEFORE the
+            # ``"tmpl"`` block (not appended at the very end) so this
+            # doesn't shift the fixed `extra[-1]`/`extra[-2]` positions
+            # every existing `template_param_kinds` consumer already reads
+            # off the tail of `extra`. Canonicalized identically to an
+            # ordinary parameter's dependent type (cross-producer spelling
+            # normalization, then the same rename-blind substitution).
+            *(
+                (
+                    "ret",
+                    canonicalize_type_param_references(
+                        canonicalize_function_signature_param_type(return_type),
+                        type_param_names,
+                    ),
+                )
+                if template_param_kinds
+                else ()
+            ),
             *(("tmpl", *template_param_kinds) if template_param_kinds else ()),
         )
         resolved_scope = _scope_path(scope)

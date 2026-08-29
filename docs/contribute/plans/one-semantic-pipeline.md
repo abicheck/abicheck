@@ -8258,6 +8258,32 @@ untouched. Regression tests: `tests/test_scope_segments.py`'s
 live-clang end-to-end case, confirmed to fail pre-fix via `git stash` on
 just the source files).
 
+**Correction (2026-08-29, same day, Codex review on PR #943): the
+unmangled function-TEMPLATE identity fallback ignored a dependent return
+type, so two templates differing only in it collapsed onto one
+`EntityId`.** A function template's return type can itself depend on its
+own template parameter (`template<class T> typename T::x f(T);`) --
+confirmed by direct compilation that clang accepts both that declaration
+and its `typename T::y` sibling with no redefinition error, two real
+`FunctionTemplateDecl`s. `entity_id_for_function`'s `sig` fallback already
+folded ordinary parameters, const/volatile/ref-qualifier/variadic, and
+template-parameter kinds into `extra`, but never the return type, so the
+two templates shared every dimension and collided. Fixed by adding a
+`return_type` parameter, folded into `extra` as `("ret", <canonicalized
+spelling>)` -- placed BEFORE the existing `"tmpl"` block so it doesn't
+shift the fixed `extra[-1]`/`extra[-2]` tail position every existing
+`template_param_kinds` consumer already reads -- and ONLY when
+`template_param_kinds` is non-empty: an ORDINARY function can never
+legally overload solely by return type, so this is a no-op there,
+identical to why `finding_identity.normalized_signature` never folds
+return type in at all. Canonicalized identically to a dependent ordinary
+parameter type (`canonicalize_function_signature_param_type` then
+`canonicalize_type_param_references`), so a pure template-parameter
+rename reflected only in the return type still resolves to the same id.
+Regression test in `tests/test_entity_id_carrier.py`
+(`test_live_clang_dependent_return_type_discriminates_overloaded_templates`),
+confirmed to fail pre-fix via `git stash` on just the source files.
+
 ---
 
 ### Phase 3 — public surface as a graph query over one evidence graph (D5)
