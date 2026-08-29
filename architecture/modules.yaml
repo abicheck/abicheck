@@ -26,6 +26,8 @@
         "abicheck/evidence_depth.py",
         "abicheck/fact_provenance.py",
         "abicheck/name_classification.py",
+        "abicheck/qualified_name_segments.py",
+        "abicheck/stable_abi.py",
         "abicheck/stable_abi_data.py"
       ]
     },
@@ -147,7 +149,8 @@
         "abicheck/sycl_metadata.py",
         "abicheck/symvers_metadata.py",
         "abicheck/tu_fragment.py",
-        "abicheck/type_metadata.py"
+        "abicheck/type_metadata.py",
+        "abicheck/dumper_manifest.py"
       ]
     },
     "compare": {
@@ -206,7 +209,6 @@
         "abicheck/finding_identity_atomic.py",
         "abicheck/finding_identity_ctor_dtor.py",
         "abicheck/probe_harness.py",
-        "abicheck/qualified_name_segments.py",
         "abicheck/type_reachability_spelling.py",
         "abicheck/versioned_symbol_scheme.py"
       ]
@@ -219,16 +221,24 @@
       ],
       "legacy_paths": [
         "abicheck/analysis_assurance.py",
+        "abicheck/comparability_fields.py",
+        "abicheck/comparability_json.py",
+        "abicheck/comparability_language_mode.py",
+        "abicheck/comparability_sequences.py",
         "abicheck/compatibility_evaluation_config.py",
         "abicheck/compatibility_evaluation_packs.py",
+        "abicheck/contract_coverage_exit.py",
         "abicheck/contract_evaluation.py",
         "abicheck/contract_evidence_collect.py",
+        "abicheck/exit_decision.py",
         "abicheck/export_surface.py",
         "abicheck/idioms.py",
+        "abicheck/pattern_verdicts.py",
         "abicheck/post_processing.py",
         "abicheck/post_processing_context.py",
         "abicheck/post_processing_reachability.py",
         "abicheck/semver.py",
+        "abicheck/severity.py",
         "abicheck/suppression_yaml.py",
         "abicheck/surface.py"
       ]
@@ -270,6 +280,7 @@
         "abicheck/environment_matrix.py",
         "abicheck/l0_export_delta.py",
         "abicheck/post_manifest.py",
+        "abicheck/product_baseline.py",
         "abicheck/resolver.py",
         "abicheck/service.py",
         "abicheck/service_compare_evidence.py",
@@ -282,6 +293,7 @@
         "abicheck/service_header_scoped.py",
         "abicheck/service_input_resolution.py",
         "abicheck/service_scan.py",
+        "abicheck/stack_binding_diff.py",
         "abicheck/stack_checker.py"
       ]
     },
@@ -297,14 +309,20 @@
         "abicheck/annotations.py",
         "abicheck/annotations_step_summary.py",
         "abicheck/appcompat_html.py",
+        "abicheck/html_report.py",
         "abicheck/html_template.py",
         "abicheck/junit_coverage_warnings.py",
+        "abicheck/junit_report.py",
         "abicheck/pr_comment.py",
         "abicheck/pr_comment_base.py",
         "abicheck/pr_comment_scan.py",
         "abicheck/report_classifications.py",
         "abicheck/report_correlation.py",
+        "abicheck/report_model.py",
+        "abicheck/report_summary.py",
         "abicheck/reporter.py",
+        "abicheck/reporter_contract_blocks.py",
+        "abicheck/reporter_markdown.py",
         "abicheck/root_cause_evidence.py",
         "abicheck/sarif.py",
         "abicheck/stack_html.py",
