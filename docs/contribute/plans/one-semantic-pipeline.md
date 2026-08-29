@@ -8392,6 +8392,37 @@ narrow, risky patch under this PR's own scope; the corresponding review
 thread was left open by design, the same as the `requires`-clause gap
 above.
 
+**Correction (2026-08-29, same day, real Windows CI failure on PR #943):
+the castxml C-linkage export-evidence override never fired on the
+Windows CI leg, since it was gated on Itanium's own `"_Z"` mangling
+prefix.** Both `extract.headers.castxml.functions.parse_function_element`
+and `dumper_castxml.parse_variables`'s override (recovering `extern "C"`
+identity when castxml's own guess is ambiguous, matching a confirmed
+bare-name export) checked `mangled.startswith("_Z")` before considering
+the export evidence. A real Windows CI run failed two tests
+(`test_live_castxml_populates_every_kind`, `test_live_castxml_honors_
+static_export_evidence_for_c_linkage`) because the Windows-targeting
+castxml install decorates a guessed C-linkage function/variable with its
+own MSVC `"?...@@..."` prefix instead -- `extern "C" int c_var;` got
+`mangled="?c_var@@3HA"`, and a plain (no-`extern`) `int foo(int x);` got
+`"?foo@@YAHH@Z"` -- so the `"_Z"` check silently never matched on that
+platform, leaving the bogus MSVC-decorated symbol standing even though
+`exported_dynamic`/`exported_static` already confirmed the bare name.
+Nothing else in the override's condition is ABI-specific: `mangled not
+in (exported_dynamic|exported_static)` already means "not itself a real
+observed export" regardless of what guessed prefix produced it. Fixed by
+dropping the `"_Z"`-prefix gate from both overrides entirely, making
+them recognize the identical evidence on every mangling scheme
+castxml's underlying compiler can guess. Regression test in
+`tests/test_entity_id_carrier.py`
+(`test_live_castxml_export_override_recognizes_non_itanium_mangling_prefixes`)
+-- since this sandbox has no MSVC-targeting castxml to reproduce the
+real failure directly, it runs a real (Linux) castxml dump and then
+rewrites its own `mangled` attributes to the exact MSVC-decorated
+strings the Windows CI log showed, confirmed to fail pre-fix via `git
+stash` on just the source files. Both originally-failing tests
+(unmodified) were re-verified to still pass on Linux.
+
 ---
 
 ### Phase 3 — public surface as a graph query over one evidence graph (D5)

@@ -504,6 +504,55 @@ def test_live_castxml_honors_static_export_evidence_for_c_linkage(
 
 
 @pytest.mark.integration
+@pytest.mark.skipif(shutil.which("castxml") is None, reason="castxml not installed")
+def test_live_castxml_export_override_recognizes_non_itanium_mangling_prefixes(
+    tmp_path: Path,
+) -> None:
+    """The export-evidence override must fire regardless of which
+    mangling-scheme prefix castxml's guessed attribute happens to use --
+    gating it on Itanium's own ``"_Z"`` prefix left a real Windows CI
+    failure standing: a Windows-targeting castxml decorates a guessed
+    C-linkage function/variable with its own ``"?...@@..."`` prefix,
+    never Itanium's, so the override never matched even though the real
+    export table already confirmed the bare name (Codex review, PR
+    #943). Simulates that prefix by rewriting a real castxml dump's own
+    ``mangled`` attributes post-hoc -- this sandbox has no MSVC-targeting
+    castxml to reproduce the real failure directly."""
+    header = tmp_path / "msvc_like.h"
+    header.write_text("int foo(int x);\nextern \"C\" int c_var;\n")
+    xml_out = tmp_path / "msvc_like.xml"
+    subprocess.run(
+        [
+            "castxml",
+            "--castxml-output=1",
+            "-std=c++17",
+            "-x",
+            "c++",
+            str(header),
+            "-o",
+            str(xml_out),
+        ],
+        check=True,
+        capture_output=True,
+    )
+    root = parse_xml(xml_out).getroot()
+    for el in root.iter():
+        if el.get("name") == "foo" and el.get("mangled"):
+            el.set("mangled", "?foo@@YAHH@Z")
+        elif el.get("name") == "c_var" and el.get("mangled"):
+            el.set("mangled", "?c_var@@3HA")
+    parser = _CastxmlParser(
+        root, exported_dynamic={"foo", "c_var"}, exported_static=set()
+    )
+    foo = _one(parser.parse_functions(), name="foo")
+    assert foo.mangled == "foo"
+    assert foo.entity_id is not None and foo.entity_id.extra == ("extern_c",)
+    c_var = _one(parser.parse_variables(), name="c_var")
+    assert c_var.mangled == "c_var"
+    assert c_var.entity_id is not None and c_var.entity_id.extra == ("extern_c",)
+
+
+@pytest.mark.integration
 @pytest.mark.skipif(shutil.which("clang") is None, reason="clang not installed")
 def test_live_clang_closes_the_record_vs_namespace_collision(tmp_path: Path) -> None:
     """``B::C`` nested in a record and in a namespace are two identities.

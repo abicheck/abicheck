@@ -479,9 +479,26 @@ class _CastxmlParser:
             # Restricted to global scope for the same reason as the function
             # override: a namespaced C++ variable's bare leaf could
             # coincidentally match an unrelated global export.
+            #
+            # Deliberately NOT gated on ``mangled.startswith("_Z")`` (an
+            # earlier revision was): that hard-coded the Itanium mangling
+            # prefix, so a Windows CI leg's real MSVC-targeting castxml --
+            # which decorates a guessed C-linkage variable with its own
+            # ``?...@@...`` prefix, never Itanium's ``_Z`` -- silently
+            # never matched the condition at all, leaving the bogus
+            # MSVC-decorated guess standing even though the real export
+            # table already confirmed the bare name (confirmed via a real
+            # Windows CI failure, Codex review, PR #943). Nothing else in
+            # this condition is ABI-specific: `mangled not in
+            # (exported_dynamic|exported_static)` already means "not
+            # itself a real observed export" regardless of what guessed
+            # prefix produced it, so dropping the prefix check makes this
+            # override recognize the identical evidence on every mangling
+            # scheme castxml's underlying compiler can guess, not just
+            # Itanium's. Mirrors the identical fix to the sibling
+            # function-level override in extract.headers.castxml.functions.
             if (
-                mangled.startswith("_Z")
-                and mangled not in self._exported_dynamic
+                mangled not in self._exported_dynamic
                 and mangled not in self._exported_static
                 and name in (self._exported_dynamic | self._exported_static)
                 and self._is_global_scope(el)
