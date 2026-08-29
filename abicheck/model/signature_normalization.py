@@ -92,6 +92,32 @@ _CALLING_CONVENTION_ATTR_RE = re.compile(
     r"__attribute__\s*\(\(\s*(cdecl|stdcall|fastcall|thiscall|vectorcall)\s*\)\)"
 )
 
+# A leading `::` explicitly requesting GLOBAL-namespace lookup for the
+# scoped name that follows (`::dep::Thing`) names the identical type an
+# unqualified spelling of the same, unambiguous name does (`dep::Thing`)
+# -- direct-clang's own `qualType` preserves this explicit qualifier
+# verbatim (a confirmed real producer spelling: see
+# `tests/test_dumper_scoping_dependency_retention.py::
+# test_globally_qualified_signature_spelling_still_matches`'s own
+# twenty-sixth-round docstring for the identical fact from the *type-
+# matching* side of this codebase), so leaving it in place here fragments
+# one declaration's identity across producers/revisions purely on this
+# spelling choice, the same class of cross-producer-spelling gap this
+# whole module exists to close. Matched by POSITION, not depth: safe to
+# strip only where `::` marks the START of a scoped-name token -- string
+# start, or immediately after whitespace/`(`/`<`/`,`/`*`/`&` (an opening
+# template-argument list, parameter list, or pointer/reference sigil, all
+# places a fresh type name can begin) -- never when `::` follows an
+# identifier character (an ordinary qualified name's own internal
+# separator, e.g. the second `::` in `dep::Thing`, must never be
+# touched) OR anything else, most importantly `)` -- the closing paren of
+# `(anonymous namespace)::Foo`'s own real producer spelling is NOT a
+# fresh-token boundary, and a naive negative-lookbehind-on-identifier-
+# chars-only regex (an earlier draft of this fix) would have wrongly
+# stripped that type's genuine, load-bearing separator, corrupting it to
+# `(anonymous namespace)Foo` (Codex review, PR #941, nineteenth round).
+_GLOBAL_SCOPE_RE = re.compile(r"(?:\A|(?<=[\s(<,*&]))::")
+
 
 def _strip_cv_tokens_outside_nesting(s: str) -> str:
     """Blank out every ``const``/``volatile``/``restrict`` (any of its
@@ -562,10 +588,34 @@ def canonicalize_function_signature_param_type(name: str) -> str:
     'void (__cdecl * )(int)'
     >>> canonicalize_function_signature_param_type("void (C::*)(int) __attribute__((thiscall))")
     'void (__thiscall C:: * )(int)'
+
+    An explicit leading ``::`` (global-namespace lookup) names the
+    identical type an unqualified spelling of that same, unambiguous name
+    does -- direct-clang's own ``qualType`` preserves this qualifier
+    verbatim, a confirmed real producer spelling. A genuine, load-bearing
+    ``::`` separator -- an ordinary qualified name's own internal one, or
+    the one following an anonymous-namespace parenthesized group -- is
+    never touched.
+
+    >>> canonicalize_function_signature_param_type("::dep::Thing *")
+    'dep::Thing *'
+    >>> canonicalize_function_signature_param_type("dep::Thing *")
+    'dep::Thing *'
+    >>> canonicalize_function_signature_param_type("(anonymous namespace)::Foo *")
+    '(anonymous namespace)::Foo *'
     """
     canonical = canonicalize_type_name(
         _decay_top_level_array(canonicalize_type_name(name))
     )
+    # An explicit leading `::` (global-namespace lookup) is stripped
+    # unconditionally, unlike restrict/cv -- it is never position-
+    # sensitive (a scoped name resolves to the identical entity whether
+    # or not the lookup was forced global), so this runs once, up front,
+    # rather than being folded into the position-sensitive machinery
+    # below. See `_GLOBAL_SCOPE_RE`'s own comment for why the match is
+    # anchored to specific preceding characters rather than a blanket
+    # "not preceded by an identifier" test.
+    canonical = _GLOBAL_SCOPE_RE.sub("", canonical)
     depth = 0
     # True for a paren currently open on `transparent_parens` that groups a
     # declarator's own sigil (see the docstring above) -- popped, not

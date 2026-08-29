@@ -319,6 +319,46 @@ class TestClangTrailingCallingConventionAttributeUnifies:
         )
 
 
+class TestLeadingGlobalScopeQualifierIsStripped:
+    """An explicit leading ``::`` (forcing global-namespace lookup) names
+    the identical type an unqualified spelling of that same, unambiguous
+    name does -- direct-clang's own ``qualType`` preserves it verbatim, a
+    confirmed real producer spelling
+    (``tests/test_dumper_scoping_dependency_retention.py``'s own
+    ``test_globally_qualified_signature_spelling_still_matches``)."""
+
+    def test_bare_global_qualifier_stripped(self) -> None:
+        assert canon("::dep::Thing *") == canon("dep::Thing *")
+
+    def test_qualifier_preserved_after_stripping(self) -> None:
+        assert "dep::Thing" in canon("::dep::Thing *")
+
+    def test_template_argument_global_qualifier_stripped(self) -> None:
+        assert canon("Box<::dep::Thing>") == canon("Box<dep::Thing>")
+
+    def test_callback_parameter_global_qualifier_stripped(self) -> None:
+        assert canon("void (*)(::dep::Thing*)") == canon("void (*)(dep::Thing*)")
+
+    def test_ordinary_namespace_qualifier_unaffected(self) -> None:
+        # A plain namespace-qualified name's own internal "::" must never
+        # be touched -- only a LEADING, global-scope one is stripped.
+        assert canon("ns::Foo *") != canon("Foo *")
+
+    def test_anonymous_namespace_separator_unaffected(self) -> None:
+        # Regression pin: the "::" following "(anonymous namespace)" is a
+        # genuine, load-bearing separator, not a global-scope marker --
+        # a naive "not preceded by an identifier character" test would
+        # wrongly strip it too, since ")" isn't an identifier character.
+        assert canon("(anonymous namespace)::Foo *") == "(anonymous namespace)::Foo *"
+
+    def test_member_pointer_qualifier_global_scope_stripped(self) -> None:
+        assert canon("void (::C::*)(int)") == canon("void (C::*)(int)")
+
+    def test_idempotent(self) -> None:
+        once = canon("::dep::Thing *")
+        assert canon(once) == once
+
+
 class TestTemplateQualifiedMemberPointerOwnCvIsDropped:
     """A nested-name-specifier's own segment can itself be a template-id
     (``C<int>::``), not only a plain identifier -- the declarator-group

@@ -7287,6 +7287,38 @@ finding text, is now the standard for any future ABI-mangling-behavior
 claim in this file before implementing a fix, the same discipline that
 already caught this round's own error.
 
+**Correction (2026-08-29, same day, nineteenth Codex review round on PR
+#941, commit 3aeccc2): an explicit leading `::` (forced global-namespace
+lookup) fragmented identity across producers.** `::dep::Thing *` and
+`dep::Thing *` -- the identical type, since `dep` is unambiguous --
+canonicalized differently, because nothing stripped the leading
+qualifier. Confirmed as a real, already-documented producer spelling
+rather than a hypothetical: direct-clang's own `qualType` preserves an
+explicit global-scope qualifier verbatim, the identical fact
+`tests/test_dumper_scoping_dependency_retention.py`'s own twenty-sixth-
+round docstring already states from the *type-matching* side of this
+codebase (`test_globally_qualified_signature_spelling_still_matches`).
+Fixed with a new `_GLOBAL_SCOPE_RE`, applied unconditionally (not
+position-sensitive the way restrict/cv are, since global-vs-unqualified
+lookup never changes which entity a name denotes) up front, before any
+of the position-sensitive machinery runs. The match is anchored to
+SPECIFIC preceding characters (string start, or immediately after
+whitespace/`(`/`<`/`,`/`*`/`&` -- everywhere a fresh type-name token can
+begin) rather than a blanket "not preceded by an identifier character"
+negative lookbehind: a first draft used exactly that blanket test and
+would have wrongly stripped the genuine, load-bearing `::` in
+`(anonymous namespace)::Foo` too (that separator follows a `)`, not an
+identifier character, so the naive test can't tell it apart from a
+genuine leading global-scope marker) -- caught before implementing by
+walking through the anonymous-namespace case as a check, not discovered
+after the fact. New tests:
+`TestLeadingGlobalScopeQualifierIsStripped` in
+`tests/test_signature_normalization.py` (the bare case, the qualifier
+surviving after stripping, inside a template argument, inside a callback
+parameter, an ordinary namespace qualifier staying unaffected, the
+anonymous-namespace regression pin, the member-pointer qualified-name-
+prefix case, idempotence).
+
 ---
 
 ### Phase 3 — public surface as a graph query over one evidence graph (D5)

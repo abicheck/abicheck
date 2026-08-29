@@ -219,3 +219,16 @@
   keyword equivalent, so an identical calling-convention-decorated
   declaration observed through Clang's header-AST backend and through
   castxml/DWARF no longer fragments into two different `EntityId`s.
+  An explicit leading `::` (forced global-namespace lookup) is now
+  stripped from a parameter type, unconditionally, so `::dep::Thing *`
+  and `dep::Thing *` -- the identical type when the unqualified name is
+  unambiguous -- canonicalize identically; this is a confirmed real
+  producer spelling (direct-clang's own `qualType` preserves an explicit
+  global-scope qualifier verbatim). An ordinary qualified name's own
+  internal `::` separator, and the one following an anonymous-namespace
+  parenthesized group (`(anonymous namespace)::Foo`), are both left
+  untouched -- the match is anchored to specific preceding characters
+  (string start, or immediately after whitespace/`(`/`<`/`,`/`*`/`&`)
+  rather than a blanket "not preceded by an identifier" test, since the
+  latter cannot distinguish a genuine leading global-scope marker from
+  the anonymous-namespace case's own load-bearing separator.
