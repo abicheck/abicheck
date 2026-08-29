@@ -183,7 +183,15 @@ jobs:
 
   unit-tests:
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 15
+    # 15 was too tight for the canonical (ubuntu, 3.13) leg: its own
+    # coverage-collecting main-suite step alone measured 803s (13m23s) on
+    # 2026-08-29, leaving under two minutes of job budget for the
+    # subsequent "Run slow tests" step, the durations/coverage uploads, and
+    # normal runner variance — which twice cancelled that step mid-run at
+    # the identical ~73% completion point (PR #940) despite every test up
+    # to that point passing. 20 matches the headroom other multi-step jobs
+    # in this file already carry.
+    timeout-minutes: 20
     permissions:
       contents: read
       id-token: write
