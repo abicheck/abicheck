@@ -58,8 +58,21 @@ import re
 #: affected -- re.sub() replaces just that span with "", so the rest of the
 #: name (and every other consumer of the stripped result) keeps its
 #: original case.
+#: The numeric-version lookahead branch (``\.\d+(?:\.\d+)*\.(?:so|dylib)\b``,
+#: e.g. ``libfoo-abcdef.1.2.so``, a version segment sitting between the hash
+#: and the extension) must still require a real ``.so``/``.dylib`` suffix
+#: somewhere after it -- a bare ``\.\d`` matched *any* numeric-looking
+#: continuation regardless of what followed, so a non-library filename that
+#: merely happens to contain a hyphenated hex run before a numeric segment
+#: (e.g. ``plugin-abcdef.1.json``) was silently mis-stripped to
+#: ``plugin.1.json`` (CodeRabbit review, PR #942, fresh evidence) -- a false
+#: positive this normalization must not produce, the same class of bug the
+#: at-least-one-hex-letter guard above already exists to prevent for the
+#: purely-decimal case.
 _VENDOR_HASH_RE = re.compile(
-    r"-(?=[0-9a-f]*[a-f])[0-9a-f]{6,16}(?=\.(?:so|dylib)\b|\.\d)", re.IGNORECASE
+    r"-(?=[0-9a-f]*[a-f])[0-9a-f]{6,16}"
+    r"(?=\.(?:so|dylib)\b|\.\d+(?:\.\d+)*\.(?:so|dylib)\b)",
+    re.IGNORECASE,
 )
 
 

@@ -26,7 +26,6 @@
         "abicheck/evidence_depth.py",
         "abicheck/fact_provenance.py",
         "abicheck/name_classification.py",
-        "abicheck/qualified_name_segments.py",
         "abicheck/stable_abi_data.py"
       ]
     },
@@ -150,8 +149,7 @@
         "abicheck/symvers_metadata.py",
         "abicheck/tu_fragment.py",
         "abicheck/tu_merge.py",
-        "abicheck/type_metadata.py",
-        "abicheck/dumper_manifest.py"
+        "abicheck/type_metadata.py"
       ]
     },
     "compare": {
