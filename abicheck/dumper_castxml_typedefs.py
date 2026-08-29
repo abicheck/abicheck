@@ -50,6 +50,7 @@ from xml.etree.ElementTree import (
 # caller here (and `dumper_castxml.py`'s own `as`-aliased re-export of it)
 # is unaffected.
 from .extract.headers.castxml.location import (
+    _CONTRACT_ATTRIBUTE_BASES as _CONTRACT_ATTRIBUTE_BASES,
     contract_attributes,
     deprecation_marker,
 )
