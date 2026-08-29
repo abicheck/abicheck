@@ -49,7 +49,7 @@ from .checker_types import Change
 from .detector_registry import registry
 from .diff_helpers import make_change
 from .model import AbiSnapshot
-from .python_ext import PythonExtMetadata
+from .model.python_facts import PythonExtMetadata
 from .stable_abi import StableAbiStatus
 
 

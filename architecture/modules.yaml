@@ -26,7 +26,8 @@
         "abicheck/evidence_depth.py",
         "abicheck/fact_provenance.py",
         "abicheck/name_classification.py",
-        "abicheck/stable_abi_data.py"
+        "abicheck/stable_abi_data.py",
+        "abicheck/errors.py"
       ]
     },
     "storage": {
@@ -109,6 +110,7 @@
         "abicheck/dumper_clang.py",
         "abicheck/dumper_clang_attributes.py",
         "abicheck/dumper_clang_errors.py",
+        "abicheck/dumper_clang_expr.py",
         "abicheck/dumper_clang_qualifiers.py",
         "abicheck/dumper_clang_streaming.py",
         "abicheck/dumper_clang_vtable.py",
@@ -147,7 +149,9 @@
         "abicheck/sycl_metadata.py",
         "abicheck/symvers_metadata.py",
         "abicheck/tu_fragment.py",
-        "abicheck/type_metadata.py"
+        "abicheck/tu_merge.py",
+        "abicheck/type_metadata.py",
+        "abicheck/dumper_contract.py"
       ]
     },
     "compare": {
@@ -182,9 +186,14 @@
         "abicheck/diff_layout_coherence.py",
         "abicheck/diff_long_double.py",
         "abicheck/diff_namespaces.py",
+        "abicheck/diff_numpy_capi.py",
         "abicheck/diff_param_qualifiers.py",
+        "abicheck/diff_platform.py",
+        "abicheck/diff_platform_elf_dynamic.py",
         "abicheck/diff_platform_elf_symbols.py",
         "abicheck/diff_platform_templates.py",
+        "abicheck/diff_python.py",
+        "abicheck/diff_python_api.py",
         "abicheck/diff_reconcile.py",
         "abicheck/diff_serialization.py",
         "abicheck/diff_surface_metrics.py",
@@ -202,11 +211,11 @@
         "abicheck/diff_types_surface.py",
         "abicheck/diff_unnamed_types.py",
         "abicheck/diff_vtable_layout.py",
+        "abicheck/diff_wheel_deployment.py",
         "abicheck/finding_identity.py",
         "abicheck/finding_identity_atomic.py",
         "abicheck/finding_identity_ctor_dtor.py",
         "abicheck/probe_harness.py",
-        "abicheck/qualified_name_segments.py",
         "abicheck/type_reachability_spelling.py",
         "abicheck/versioned_symbol_scheme.py"
       ]
@@ -221,14 +230,18 @@
         "abicheck/analysis_assurance.py",
         "abicheck/compatibility_evaluation_config.py",
         "abicheck/compatibility_evaluation_packs.py",
+        "abicheck/contract_coverage_exit.py",
         "abicheck/contract_evaluation.py",
         "abicheck/contract_evidence_collect.py",
+        "abicheck/exit_decision.py",
         "abicheck/export_surface.py",
         "abicheck/idioms.py",
+        "abicheck/pattern_verdicts.py",
         "abicheck/post_processing.py",
         "abicheck/post_processing_context.py",
         "abicheck/post_processing_reachability.py",
         "abicheck/semver.py",
+        "abicheck/severity.py",
         "abicheck/suppression_yaml.py",
         "abicheck/surface.py"
       ]
@@ -282,7 +295,10 @@
         "abicheck/service_header_scoped.py",
         "abicheck/service_input_resolution.py",
         "abicheck/service_scan.py",
-        "abicheck/stack_checker.py"
+        "abicheck/stack_checker.py",
+        "abicheck/aggregate.py",
+        "abicheck/aggregate_findings.py",
+        "abicheck/aggregate_manifest.py"
       ]
     },
     "report": {
@@ -297,14 +313,20 @@
         "abicheck/annotations.py",
         "abicheck/annotations_step_summary.py",
         "abicheck/appcompat_html.py",
+        "abicheck/html_report.py",
         "abicheck/html_template.py",
         "abicheck/junit_coverage_warnings.py",
+        "abicheck/junit_report.py",
         "abicheck/pr_comment.py",
         "abicheck/pr_comment_base.py",
         "abicheck/pr_comment_scan.py",
         "abicheck/report_classifications.py",
         "abicheck/report_correlation.py",
+        "abicheck/report_model.py",
+        "abicheck/report_summary.py",
         "abicheck/reporter.py",
+        "abicheck/reporter_contract_blocks.py",
+        "abicheck/reporter_markdown.py",
         "abicheck/root_cause_evidence.py",
         "abicheck/sarif.py",
         "abicheck/stack_html.py",
@@ -351,7 +373,8 @@
         "abicheck/cli_scan_receipt.py",
         "abicheck/cli_stack.py",
         "abicheck/compat/cli.py",
-        "abicheck/dry_run.py"
+        "abicheck/dry_run.py",
+        "abicheck/__main__.py"
       ]
     }
   },

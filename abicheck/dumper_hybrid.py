@@ -114,7 +114,6 @@ from typing import Any
 
 from . import qualified_name_segments
 from .comparability import PROFILE_FIELD_KEYS, _sha256_of
-from .diff_cxx_rules import _skip_template_args, itanium_scope_components
 from .diff_helpers import type_map_key
 from .dumper_castxml import (
     SYNTHETIC_CTOR_KEY_PREFIX,
@@ -129,6 +128,7 @@ from .fact_provenance import (
     var_fact_key,
 )
 from .model import AbiSnapshot, EnumType, Function, RecordType, TypeField, Variable
+from .model.mangled_name import _skip_template_args, itanium_scope_components
 from .name_classification import canonicalize_type_name
 
 _CTOR_MARKER = "{ctor}"
@@ -162,7 +162,7 @@ def _backfill_fact(
 def _ctor_dtor_scope(mangled: str) -> tuple[str, str] | None:
     """``(marker, qualified_scope)`` for a REAL Itanium-mangled ctor/dtor, or
     None if *mangled* isn't one (parsed structurally — see
-    ``diff_cxx_rules.itanium_scope_components``, which returns the ctor/dtor
+    ``model.mangled_name.itanium_scope_components``, which returns the ctor/dtor
     marker as the last scope component)."""
     comps = itanium_scope_components(mangled)
     if not comps or comps[-1] not in (_CTOR_MARKER, _DTOR_MARKER):
