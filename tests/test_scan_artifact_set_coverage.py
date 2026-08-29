@@ -123,14 +123,21 @@ class TestArtifactSetRepeatableOptionBranches:
         # Codex review: estimate_scan()'s per-estimate `note` (e.g. the
         # --build-target workspace-wide-TU-count caveat) must survive into
         # the aggregated preview, not be dropped in favor of bare totals.
+        # --sources is required here so this pinned --depth build request
+        # isn't itself the EVIDENCE_CONTRACT_ERROR case under test elsewhere
+        # (--build-target alone supplies no source/build evidence).
         p1, p2 = tmp_path / "liba.so", tmp_path / "libb.so"
         _write_elf_shared_object_stub(p1)
         _write_elf_shared_object_stub(p2)
+        src = tmp_path / "src"
+        src.mkdir()
+        (src / "a.c").write_text("int f(void) { return 0; }\n")
         result = runner.invoke(
             main,
             [
                 "scan", "--artifact-set", str(p1), "--artifact-set", str(p2),
                 "--dry-run", "--depth", "build", "--build-target", "//pkg:lib",
+                "--sources", str(src),
             ],
         )
         assert result.exit_code == 0, result.output
@@ -141,8 +148,9 @@ class TestArtifactSetRepeatableOptionBranches:
     ) -> None:
         # Codex review: --depth source with no --sources/--build-info/
         # --build-config would fail the real run with EVIDENCE_CONTRACT_ERROR
-        # (exit 1); the dry-run must flag it rather than silently price a
-        # run that would never actually execute.
+        # (exit 1); the dry-run must flag it (as a DryRunResult.block(), not
+        # a plain note -- so its own exit code matches the real run's) rather
+        # than silently price a run that would never actually execute.
         p1, p2 = tmp_path / "liba.so", tmp_path / "libb.so"
         _write_elf_shared_object_stub(p1)
         _write_elf_shared_object_stub(p2)
@@ -153,8 +161,29 @@ class TestArtifactSetRepeatableOptionBranches:
                 "--dry-run", "--depth", "source",
             ],
         )
-        assert result.exit_code == 0, result.output
+        assert result.exit_code == 1, result.output
         assert "EVIDENCE_CONTRACT_ERROR" in result.output
+
+    def test_dry_run_does_not_block_a_shallow_pinned_depth(
+        self, runner: CliRunner, tmp_path: Path
+    ) -> None:
+        # Codex review: a shallow pinned depth like --depth binary resolves
+        # collect_mode == "off", which scan_engine._check_scan_evidence_
+        # contract itself short-circuits on -- the real run never raises
+        # EVIDENCE_CONTRACT_ERROR for it, so the dry-run must not block it
+        # either, even with no --sources/--build-info/--build-config given.
+        p1, p2 = tmp_path / "liba.so", tmp_path / "libb.so"
+        _write_elf_shared_object_stub(p1)
+        _write_elf_shared_object_stub(p2)
+        result = runner.invoke(
+            main,
+            [
+                "scan", "--artifact-set", str(p1), "--artifact-set", str(p2),
+                "--dry-run", "--depth", "binary",
+            ],
+        )
+        assert result.exit_code == 0, result.output
+        assert "EVIDENCE_CONTRACT_ERROR" not in result.output
 
     def test_dry_run_rejects_ambiguous_duplicate_soname(
         self, runner: CliRunner, tmp_path: Path, monkeypatch: pytest.MonkeyPatch

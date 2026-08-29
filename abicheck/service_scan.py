@@ -16,11 +16,11 @@
 """Scan service — typed request/result contract and per-project cost estimate.
 
 ADR-035 D10 / G19.7 (Phase 3b). One typed contract — :class:`ScanRequest` ->
-:class:`ScanResult` / ``[CostEstimate]`` -- that the CLI, the MCP server, and
-CI wrappers all drive, so there is one engine and many renderings. A leaf
-module (must not import :mod:`abicheck.service`); its header-expansion
-helper (:func:`expand_header_inputs`) is re-exported by ``service`` for
-backward compatibility.
+:class:`ScanResult` / ``[CostEstimate]`` -- that the CLI and CI wrappers all
+drive, so there is one engine and many renderings. A leaf module (must not
+import :mod:`abicheck.service`); its header-expansion helper
+(:func:`expand_header_inputs`) is re-exported by ``service`` for backward
+compatibility.
 """
 
 from __future__ import annotations
@@ -130,12 +130,12 @@ def expand_public_header_inputs(headers: Iterable[Path]) -> list[str]:
 # ── Scan service: typed request/result + per-project cost estimate ───────────
 #
 # ADR-035 D10 / G19.7 (Phase 3b). One typed contract — :class:`ScanRequest` →
-# :class:`ScanResult` / ``[CostEstimate]`` — that the CLI (`cli_scan.py`), the MCP
-# server, and CI wrappers all drive, so there is one engine and many renderings.
-# ``estimate_scan`` is a first-class **dry-run** (ADR-035 D10): it probes the
-# project (TU count, header fan-out, cache state) and returns the projected cost
-# of each L-layer for *this* project so a maintainer can pick a depth on measured
-# cost instead of guesswork — it scans nothing and runs no compiler.
+# :class:`ScanResult` / ``[CostEstimate]`` — that the CLI (`cli_scan.py`) and CI
+# wrappers drive, so there is one engine and many renderings. ``estimate_scan``
+# is a first-class **dry-run** (ADR-035 D10): it probes the project (TU count,
+# header fan-out, cache state) and returns the projected cost of each L-layer
+# for *this* project so a maintainer can pick a depth on measured cost instead
+# of guesswork — it scans nothing and runs no compiler.
 
 
 def _scan_imports() -> tuple[Any, ...]:
@@ -821,8 +821,7 @@ def estimate_scan(
     returns one :class:`CostEstimate` per L-layer the level would touch --
     **without running any compiler or parsing any binary**. Coarse anchors
     (see ``_COST_PER_*``): ranks layers for a depth/budget pick, not a
-    precise wall-clock prediction.
-    """
+    precise wall-clock prediction."""
     resolved, eff_depth, collect_mode = _resolve_estimate_level(req, resolved_level)
     total_tus, tu_note = _estimate_total_tus(req)
     replay_tus = _estimate_replay_tus(req, collect_mode, total_tus)
@@ -838,10 +837,8 @@ def estimate_scan(
 @dataclass(frozen=True)
 class ScanResult:
     """Typed result of an executed scan (ADR-035 D10) — the one object the CLI
-    and library callers consume.
-
-    ``diff`` is the full report payload (``None``-free); ``findings`` are the raw
-    cross-source :class:`Change` objects; ``layers`` is the per-layer coverage;
+    and library callers consume. ``findings`` are the raw cross-source
+    :class:`Change` objects; ``layers`` is the per-layer coverage;
     ``confidence`` is the §6.8 provider-agreement matrix; ``estimate`` is the
     projected per-layer cost for comparison against the actual run.
     """
@@ -871,8 +868,7 @@ class ScanResult:
 class ScanArtifactResult:
     """One member's :class:`ScanResult`, with the identity that result alone
     doesn't carry (ADR-056 — neither `ScanResult` nor its nested report
-    carries a binary path or library name anywhere).
-    """
+    carries a binary path or library name anywhere)."""
 
     artifact: Path
     result: ScanResult
@@ -1047,9 +1043,8 @@ def _resolve_member_scan_level(
 ) -> tuple[Any, Any, list[str], bool, Any, Any, Any, str]:
     """Resolve ``(sm, dp, changed, seeded, risk, resolved, eff_depth,
     collect_mode)`` for one member -- shared by :func:`_run_scan_one_member`
-    and :func:`estimate_artifact_set` (``--artifact-set --dry-run``), per
-    ``workflows/AGENTS.md``'s "dry-run and execution must consume the same
-    resolved plan" rule.
+    and :func:`estimate_artifact_set`, per ``workflows/AGENTS.md``'s
+    "dry-run and execution must consume the same resolved plan" rule.
     """
     (
         RiskRules, score_changed_paths, _EvidenceDepth, ScanMode, SourceMethod,
@@ -1078,24 +1073,30 @@ _COST_PER_MEMBER_BUNDLE_AUDIT = 0.1  # per-member bundle-audit anchor, ~= L0_bin
 
 def estimate_artifact_set(
     req: ScanRequest, member_paths: list[Path]
-) -> tuple[dict[str, tuple[int, float]], list[str]]:
+) -> tuple[dict[str, tuple[int, float]], list[str], str | None]:
     """Per-layer cost total for ``scan --artifact-set --dry-run``: one
     single-binary estimate per member at the level
     :func:`_resolve_member_scan_level` resolves once (shared with
-    :func:`_run_scan_one_member`), plus a ``bundle_audit`` entry. *notes*
-    also flags a pinned depth with no source evidence at all, which the
-    real run fails with ``EVIDENCE_CONTRACT_ERROR`` (not raised here -- a
-    `--build-config` run may yet supply evidence).
+    :func:`_run_scan_one_member`), plus a ``bundle_audit`` entry. Third
+    return value: a blocker message, or ``None`` -- set only when
+    ``collect_mode != "off"`` (mirrors ``scan_engine.
+    _check_scan_evidence_contract``'s own short-circuit, so a shallow pinned
+    depth like ``binary``/``headers`` never trips it) and no source/build
+    evidence was given, matching the real run's ``EVIDENCE_CONTRACT_ERROR``
+    (exit 1). Kept out of *notes* so the caller routes it through
+    :meth:`DryRunResult.block` instead (Codex review).
     """
-    sm, dp, _c, _s, _r, resolved, eff_depth, _cm = _resolve_member_scan_level(req)
+    sm, dp, _c, _s, _r, resolved, eff_depth, collect_mode = _resolve_member_scan_level(req)
     totals: dict[str, tuple[int, float]] = {}
     notes: list[str] = []
     seen: set[str] = set()
+    blocker: str | None = None
     pinned = dp is not None or (sm is not None and sm != "auto")
-    if pinned and not (req.sources or req.build_info or req.build_config):
-        notes.append(
-            f"WARNING: pinned depth '{eff_depth.value}' has no --sources/"
-            "--build-info/--build-config -- the real run would fail with "
+    no_evidence = not (req.sources or req.build_info or req.build_config)
+    if pinned and collect_mode != "off" and no_evidence:
+        blocker = (
+            f"pinned depth '{eff_depth.value}' has no --sources/--build-info/"
+            "--build-config -- the real run would fail with "
             "EVIDENCE_CONTRACT_ERROR (exit 1), not run as priced below."
         )
     for member_path in member_paths:
@@ -1108,15 +1109,14 @@ def estimate_artifact_set(
                 notes.append(e.note)
     n = len(member_paths)
     totals["bundle_audit"] = (n, _COST_PER_MEMBER_BUNDLE_AUDIT * n)
-    return totals, notes
+    return totals, notes, blocker
 
 
 #: Every ``ScanRequest`` field meaningful only for a baseline comparison,
 #: keyed to a predicate that's ``True`` when *req* carries a caller-set,
-#: non-default value. A plain dict (not logic buried in
-#: ``_reject_comparison_only_fields``) so a structural test can cross-check
-#: its keys against ``_run_baseline_compare``'s own signature -- generalizing
-#: the "forwarded but never guarded" gap a P2 review caught twice here (see
+#: non-default value. A plain dict so a structural test can cross-check its
+#: keys against ``_run_baseline_compare``'s own signature -- generalizing the
+#: "forwarded but never guarded" gap a P2 review caught twice here (see
 #: `test_every_baseline_only_field_is_guarded`).
 _COMPARISON_ONLY_FIELD_PREDICATES: dict[str, Callable[[ScanRequest], bool]] = {
     "suppression": lambda r: r.suppression is not None,

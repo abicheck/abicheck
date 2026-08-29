@@ -22,11 +22,15 @@
   the CLI itself still rejected the combination) is removed, and
   `new-library-set` splitting now also handles a pure newline-separated
   (no comma) YAML block-scalar value, not just the comma-joined form. The
-  preview also warns when a pinned `--depth` has no `--sources`/
-  `--build-info`/`--build-config` at all -- a combination the real run
-  fails with `EVIDENCE_CONTRACT_ERROR` (exit 1) rather than running as
-  priced -- and now rejects an ambiguous duplicate-`DT_SONAME` set the
-  same way `run_scan_set` does, rather than previewing a request that
-  was always going to be rejected. The Action's single-directory
-  `new-library-set` form (no comma) also trims a trailing newline now,
-  matching the multi-member form.
+  preview also blocks (via `DryRunResult.block`, exit code 1 -- not a plain
+  warning line) when a pinned `--depth` actually needs source/build
+  evidence (`collect_mode != "off"`, the same guard the real evidence-
+  contract check itself short-circuits on) and no `--sources`/
+  `--build-info`/`--build-config` was given at all, matching the real run's
+  `EVIDENCE_CONTRACT_ERROR` (exit 1) instead of previewing a run that would
+  never actually execute; a shallow pinned depth like `binary`/`headers`
+  never trips this, since the real run doesn't reject it either. It also
+  rejects an ambiguous duplicate-`DT_SONAME` set the same way `run_scan_set`
+  does, rather than previewing a request that was always going to be
+  rejected. The Action's single-directory `new-library-set` form (no comma)
+  also trims a trailing newline now, matching the multi-member form.

@@ -935,12 +935,12 @@ def _run_artifact_set(
             # 64) and a malformed --risk-rules profile the same way -- fail
             # loud here too, not a "successful" preview of a rejected request.
             check_artifact_set_soname_collisions(discovered)
-            totals, notes = estimate_artifact_set(req, list(discovered.values()))
+            totals, notes, blocker = estimate_artifact_set(req, list(discovered.values()))
         except (ArtifactSetError, ValueError) as exc:
             raise click.UsageError(str(exc)) from exc
         emit_dry_run(render_artifact_set_dry_run(
-            req, discovered=discovered, explicit=explicit,
-            header_backend=header_backend, fmt=fmt, totals=totals, notes=notes))
+            req, discovered=discovered, explicit=explicit, header_backend=header_backend,
+            fmt=fmt, totals=totals, notes=notes, blocker=blocker))
     try:
         # ArtifactSetError (ambiguous duplicate-SONAME set) and ValueError
         # (malformed --risk-rules, service_scan.py is click-free) both

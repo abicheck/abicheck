@@ -4664,3 +4664,32 @@ looked like the obvious fix and wasn't.
   strings too, verified against a case that actually mixes flat-visible
   and graph-only closures in one header -- a real, cross-cutting change
   to two independently-evolving modules, not a same-PR reactive patch.
+
+- **Neither `scan`'s dry-run report validates `--abi3` applicability before
+  reporting success (Codex review, CLI cleanup phase two PR 5, fresh
+  evidence).** `scan_engine._run_abi3_audit` raises `_EvidenceContractError`
+  (surfaced as `EVIDENCE_CONTRACT_ERROR`, exit 1) when `--abi3` is given but
+  the candidate binary is not a recognisable CPython extension module
+  (`new_snap.python_ext is None or not is_extension`) -- but neither dry-run
+  renderer checks this ahead of time: `cli_scan.render_scan_dry_run` (the
+  single-binary `scan --dry-run` path) never even receives `abi3_floor` as a
+  parameter, and `frontends.cli.artifact_set_dry_run.render_artifact_set_dry_run`
+  (the `--artifact-set --dry-run` path added in that PR) doesn't inspect
+  `req.abi3_floor` either. Both report exit 0 for an invocation the real run
+  would reject with exit 1. **Not fixed in that PR**: this is a pre-existing
+  gap shared identically by the single-binary dry-run (not something the
+  artifact-set addition introduced), and closing it properly means reading
+  each candidate binary's export table to answer "is this a CPython
+  extension module" -- a real binary read, which sits at the edge of (if not
+  outside) the dry-run contract's "no compiler/frontend invocation" promise
+  (`dry_run.py`'s module docstring). A correct fix needs: (1) a decision on
+  whether a cheap export-table sniff (no DWARF/AST parse, just checking for
+  a `PyInit_*` export and CPython C-API import names -- the same class of
+  probe `_estimate_total_tus`'s "binary export table parse" line already
+  describes without performing) is within that contract or needs an
+  explicit carve-out; (2) threading `abi3_floor`/binary path(s) through both
+  dry-run builders uniformly, since a fix to only one would leave the two
+  dry-run reports inconsistent about the same flag; (3) routing a positive
+  finding through `DryRunResult.block()` (exit 1), matching the depth/
+  evidence-contract blocker the artifact-set dry-run gained in the same PR
+  (`service_scan.estimate_artifact_set`'s `collect_mode != "off"` check).

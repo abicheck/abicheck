@@ -51,13 +51,17 @@ def render_artifact_set_dry_run(
     fmt: str,
     totals: dict[str, tuple[int, float]],
     notes: list[str],
+    blocker: str | None = None,
 ) -> Any:
     """Build the report from *req* (the set-wide ``ScanRequest``) and the
-    already-computed ``(totals, notes)`` (``service_scan.
+    already-computed ``(totals, notes, blocker)`` (``service_scan.
     estimate_artifact_set``'s return value). ``discovered``/``explicit`` are
     already resolved and ELF-validated by the time this runs
     (``cli_scan._resolve_artifact_set_paths`` + ``bundle.
-    discover_artifact_set``), the same as the real run.
+    discover_artifact_set``), the same as the real run. *blocker*, when set,
+    is routed through :meth:`DryRunResult.block` so the preview's own exit
+    code (1) matches the real run's ``EVIDENCE_CONTRACT_ERROR`` exit code,
+    the same convention every other command's dry-run blocker follows.
     """
     from ...dry_run import DryRunResult, tool_status
 
@@ -108,4 +112,6 @@ def render_artifact_set_dry_run(
         "audit-only, no old side)",
     )
     result.add("Output and exit-code behavior", f"format: {fmt}")
+    if blocker:
+        result.block(blocker)
     return result
