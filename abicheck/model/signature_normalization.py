@@ -43,6 +43,7 @@ import re
 
 from ..name_classification import canonicalize_type_name
 from .declarator_qualifiers import (
+    _CALLING_CONVENTIONS,
     _canonicalize_member_qualifiers,
     _find_member_pointer_qualifier,
     _is_declarator_group,
@@ -70,6 +71,25 @@ _CV_WORD_RE = re.compile(r"\b(?:const|volatile)\b")
 # `int * restrict *` and `int * *` still distinguishing, when they must
 # not).
 _RESTRICT_WORD_RE = re.compile(r"\b(?:__restrict__|__restrict|restrict)\b")
+
+# Clang's own ``qualType`` spelling for a calling-convention-decorated
+# function-pointer declarator does NOT use the leading ``__cdecl``-style
+# keyword ``_CALLING_CONVENTIONS``/``_is_declarator_group`` recognize --
+# instead it renders the attribute AFTER the declarator's own trailing
+# parameter list, e.g. ``void (*)(int) __attribute__((cdecl))`` for the
+# identical type MSVC/castxml spell ``void (__cdecl *)(int)``
+# (`dumper_clang_attributes.py`'s own `_CLANG_ATTR_TOKENS` mapping already
+# recognizes these same attribute-node kinds for a FunctionDecl's own
+# top-level contract attributes; this is the textual, parameter-type-
+# spelling equivalent, for the mangling-free signature-fallback identity
+# this module computes). Without normalizing this too, two backends
+# observing the identical DWARF-only or header-only declaration would
+# fragment into two different `EntityId`s purely because one produces
+# CastXML-style leading-keyword text and the other Clang-style trailing-
+# attribute text (Codex review, PR #941, seventeenth round).
+_CALLING_CONVENTION_ATTR_RE = re.compile(
+    r"__attribute__\s*\(\(\s*(cdecl|stdcall|fastcall|thiscall|vectorcall)\s*\)\)"
+)
 
 
 def _strip_cv_tokens_outside_nesting(s: str) -> str:
@@ -522,6 +542,19 @@ def canonicalize_function_signature_param_type(name: str) -> str:
     'int * *'
     >>> canonicalize_function_signature_param_type("void (*)(int *restrict)")
     'void ( * )(int *)'
+
+    Clang's own ``qualType`` spelling for a calling-convention-decorated
+    function-pointer declarator trails the attribute AFTER the parameter
+    list (``__attribute__((cdecl))``) rather than using the leading
+    ``__cdecl``-style keyword MSVC/castxml spell it with -- both spellings
+    of the identical type now converge on one canonical form.
+
+    >>> canonicalize_function_signature_param_type("void (__cdecl *)(int)")
+    'void (__cdecl * )(int)'
+    >>> canonicalize_function_signature_param_type("void (*)(int) __attribute__((cdecl))")
+    'void (__cdecl * )(int)'
+    >>> canonicalize_function_signature_param_type("void (C::*)(int) __attribute__((thiscall))")
+    'void (__thiscall C:: * )(int)'
     """
     canonical = canonicalize_type_name(
         _decay_top_level_array(canonicalize_type_name(name))
@@ -632,7 +665,28 @@ def canonicalize_function_signature_param_type(name: str) -> str:
         head = _strip_cv_tokens_outside_nesting(head)
         close = _find_matching_paren(params_and_after, 0)
         params = _normalize_nested_param_lists(params_and_after[: close + 1])
-        member_quals = _canonicalize_member_qualifiers(params_and_after[close + 1 :])
+        tail = params_and_after[close + 1 :]
+        # Clang's trailing `__attribute__((cdecl))`-style calling-
+        # convention spelling (see `_CALLING_CONVENTION_ATTR_RE`'s own
+        # comment) is not itself a member/pointed-to-function qualifier --
+        # normalize it into the SAME leading-keyword position
+        # `_is_declarator_group` already recognizes, so both spellings of
+        # one identical type converge on one `prefix`, before whatever
+        # remains of `tail` goes through the ordinary member-qualifier
+        # canonicalization below.
+        attr_match = _CALLING_CONVENTION_ATTR_RE.search(tail)
+        if attr_match is not None:
+            tail = tail[: attr_match.start()] + tail[attr_match.end() :]
+            if not any(cc in prefix for cc in _CALLING_CONVENTIONS):
+                open_idx = prefix.rfind("(")
+                if open_idx != -1:
+                    keyword = f"__{attr_match.group(1)}"
+                    prefix = re.sub(
+                        r"\s+",
+                        " ",
+                        prefix[: open_idx + 1] + f"{keyword} " + prefix[open_idx + 1 :],
+                    )
+        member_quals = _canonicalize_member_qualifiers(tail)
         # `head` (a bare pointer-declarator's own closing paren, plus any
         # by-value cv already stripped out of it) is joined directly onto
         # `params` -- no separator space -- since `head` always ends in

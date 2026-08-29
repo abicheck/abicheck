@@ -205,3 +205,10 @@
   without this fix, a restrict addition/removal produced a spurious
   removal/addition pair here instead of the dedicated compatible
   parameter-qualifier change it should be.
+  Clang's own calling-convention spelling for a function-pointer
+  declarator -- a trailing `__attribute__((cdecl))`-style attribute after
+  the parameter list, rather than MSVC/castxml's leading `__cdecl`-style
+  keyword -- now also canonicalizes to the same form as its leading-
+  keyword equivalent, so an identical calling-convention-decorated
+  declaration observed through Clang's header-AST backend and through
+  castxml/DWARF no longer fragments into two different `EntityId`s.

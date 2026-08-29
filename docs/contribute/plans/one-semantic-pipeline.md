@@ -7214,6 +7214,39 @@ non-outermost-pointer restrict, a callback parameter's own restrict, a
 sanity check that a genuine pointee cv-qualifier still distinguishes, and
 idempotence).
 
+**Correction (2026-08-29, same day, seventeenth Codex review round on PR
+#941, commit 2264423): Clang's own trailing calling-convention attribute
+spelling was not recognized, fragmenting identity across header-AST
+backends.** Clang's `ParmVarDecl.type.qualType` renders a calling-
+convention-decorated function-pointer declarator as e.g.
+`void (*)(int) __attribute__((cdecl))` -- the attribute trails the
+parameter list -- rather than MSVC/castxml's leading-keyword spelling,
+`void (__cdecl *)(int)`, which `_is_declarator_group`/
+`_CALLING_CONVENTIONS` already recognized. The two spellings of one
+identical type canonicalized differently, so a template or DWARF-only
+function observed through both backends would fragment. Fixed with a new
+`_CALLING_CONVENTION_ATTR_RE`, matching the same five attribute-node
+kinds `dumper_clang_attributes.py`'s own `_CLANG_ATTR_TOKENS` mapping
+already recognizes for a FunctionDecl's own top-level contract
+attributes (this is the textual, parameter-type-spelling equivalent, for
+the mangling-free signature-fallback identity this module computes): when
+found in the trailing region after a declarator's own parameter list, the
+attribute text is removed and, if the leading `prefix` doesn't already
+carry a calling-convention keyword, the equivalent `__cdecl`-style
+keyword is injected at the same position `_is_declarator_group` looks for
+it -- so both spellings converge on one `prefix` before the ordinary
+member-qualifier canonicalization runs on whatever remains of the
+trailing text. Verified this is a real, internally-corroborated Clang
+spelling (not merely the finding's own claim) via
+`dumper_clang_attributes.py`'s existing, independent handling of the
+identical attribute-node kinds for the top-level FunctionDecl case. New
+tests: `TestClangTrailingCallingConventionAttributeUnifies` in
+`tests/test_signature_normalization.py` (cdecl and stdcall unifying with
+their leading-keyword equivalents, the member-function-pointer case,
+no-attribute staying unaffected, two different conventions still
+distinguishing, coexistence with a trailing `noexcept`, idempotence, and
+a defensive redundant-both-spellings-at-once case).
+
 ---
 
 ### Phase 3 — public surface as a graph query over one evidence graph (D5)

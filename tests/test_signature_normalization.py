@@ -262,6 +262,55 @@ class TestRestrictQualifierIsAlwaysStripped:
         assert canon(once) == once
 
 
+class TestClangTrailingCallingConventionAttributeUnifies:
+    """Clang's own ``qualType`` spelling for a calling-convention-decorated
+    function-pointer declarator trails the attribute AFTER the parameter
+    list (``__attribute__((cdecl))``) rather than using the leading
+    ``__cdecl``-style keyword MSVC/castxml spell it with -- both spellings
+    of the identical type must converge on one identity, or two backends
+    observing the same declaration would fragment it."""
+
+    def test_cdecl_attribute_unifies_with_leading_keyword(self) -> None:
+        assert canon("void (*)(int) __attribute__((cdecl))") == canon(
+            "void (__cdecl *)(int)"
+        )
+
+    def test_stdcall_attribute_unifies_with_leading_keyword(self) -> None:
+        assert canon("void (*)(int) __attribute__((stdcall))") == canon(
+            "void (__stdcall *)(int)"
+        )
+
+    def test_member_function_pointer_attribute_unifies(self) -> None:
+        assert canon("void (C::*)(int) __attribute__((thiscall))") == canon(
+            "void (__thiscall C::*)(int)"
+        )
+
+    def test_no_attribute_stays_unaffected(self) -> None:
+        assert canon("void (*)(int)") == "void ( * )(int)"
+
+    def test_different_conventions_still_distinguish(self) -> None:
+        assert canon("void (*)(int) __attribute__((cdecl))") != canon(
+            "void (*)(int) __attribute__((stdcall))"
+        )
+
+    def test_attribute_coexists_with_trailing_noexcept(self) -> None:
+        assert canon("void (*)(int) __attribute__((cdecl)) noexcept") == canon(
+            "void (__cdecl *)(int) noexcept"
+        )
+
+    def test_idempotent(self) -> None:
+        once = canon("void (*)(int) __attribute__((cdecl))")
+        assert canon(once) == once
+
+    def test_redundant_leading_and_trailing_spelling_deduplicates(self) -> None:
+        # An (unrealistic, but defensive) input carrying BOTH spellings at
+        # once must not duplicate the keyword -- the existing leading one
+        # wins and the trailing attribute is simply dropped.
+        assert canon("void (__cdecl *)(int) __attribute__((cdecl))") == canon(
+            "void (__cdecl *)(int)"
+        )
+
+
 class TestTemplateQualifiedMemberPointerOwnCvIsDropped:
     """A nested-name-specifier's own segment can itself be a template-id
     (``C<int>::``), not only a plain identifier -- the declarator-group

@@ -42,6 +42,7 @@ from __future__ import annotations
 import re
 
 __all__ = [
+    "_CALLING_CONVENTIONS",
     "_is_declarator_group",
     "_find_member_pointer_qualifier",
     "_split_at_trailing_param_list",
