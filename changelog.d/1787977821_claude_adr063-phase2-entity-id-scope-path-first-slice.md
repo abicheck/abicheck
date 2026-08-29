@@ -101,3 +101,12 @@
   regardless of which is meant, since `ScopePath` names only the
   containing scope and `Anonymous.ordinal` disambiguates a *descendant's*
   scope, not the anonymous declaration's own identity.
+  `model.signature_normalization.canonicalize_function_signature_param_type`
+  now also treats a parenthesized declarator's own grouping parens
+  (`void (* const)(int)`, a callback parameter; `int (* const)[3]`, a
+  pointer to an array) as transparent for by-value cv purposes -- the
+  cv-qualifier on the declarator's own outermost pointer is by-value and
+  dropped, exactly like an unparenthesized `int * const`, while a
+  callback's own parameter types and a pointer-to-array's own trailing
+  bound stay untouched. An unused, dead leftover private helper,
+  `_has_top_level_ptr_or_ref`, was removed from this module.

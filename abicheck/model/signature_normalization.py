@@ -40,42 +40,6 @@ __all__ = ["canonicalize_function_signature_param_type"]
 _CV_WORD_RE = re.compile(r"\b(?:const|volatile)\b")
 
 
-def _has_top_level_ptr_or_ref(canonical_type: str) -> bool:
-    """Whether *canonical_type* is pointer-shaped at nesting depth 0 --
-    a ``*``/``&`` sigil, or a top-level ``[`` array declarator (Codex
-    review, PR #941: a function PARAMETER's array type always decays to a
-    pointer, e.g. ``int []`` -> ``int *``, so any cv-qualifier on the
-    element type is pointee-level, exactly like an explicit pointer --
-    ``void f(int[])`` and ``void f(const int[])`` are two distinct,
-    independently-mangled overloads, not one). Either shape means the
-    value itself is a pointer, not merely something passed by value that
-    happens to *contain* one (``Box<int *>``, ``std::function<void(int&)>``,
-    an array *bound inside* a template argument). A minimal, self-
-    contained reimplementation of the identical algorithm
-    ``name_classification._has_top_level_ptr_or_ref`` already applies for
-    a different purpose -- deliberately duplicated rather than imported,
-    since ``name_classification.py`` is a frozen, no-growth legacy module
-    (ADR-061 debt ledger, `architecture/debt.yaml`) that new code must not
-    grow, and the helper it would be imported from is private besides.
-    The array case is added here rather than upstream because this
-    module's fallback signature discriminator is built directly from a
-    caller-supplied *string* that may still spell an array literally
-    (``"int []"``) -- it makes no assumption about whether a given
-    producer's own parsed representation already reflects the decay.
-    """
-    depth = 0
-    for ch in canonical_type:
-        if ch == "[" and depth == 0:
-            return True
-        if ch in "<([":
-            depth += 1
-        elif ch in ">)]":
-            depth = max(0, depth - 1)
-        elif ch in "*&" and depth == 0:
-            return True
-    return False
-
-
 def _strip_cv_tokens_outside_nesting(s: str) -> str:
     """Blank out every ``const``/``volatile`` token in *s* that sits at
     nesting depth 0 (outside any ``<...>``/``(...)``/``[...]``), then
@@ -116,10 +80,10 @@ def _decay_top_level_array(canonical_type: str) -> str:
     element-level cv-qualifier survives verbatim as the decayed pointer's
     pointee cv, e.g. ``const int [3]`` -> ``const int *``). Codex review,
     PR #941: an earlier revision of this module treated a top-level ``[``
-    as "pointer-shaped enough not to strip its cv" (:func:`_has_top_level_
-    ptr_or_ref`) but never performed the decay itself, so ``int []``/
-    ``int [3]``/``int [4]``/``int *`` -- all the identical adjusted
-    parameter type -- still canonicalized to four different strings.
+    as "pointer-shaped enough not to strip its cv" but never performed the
+    decay itself, so ``int []``/``int [3]``/``int [4]``/``int *`` -- all
+    the identical adjusted parameter type -- still canonicalized to four
+    different strings.
 
     Deliberately narrow: a genuinely *multi-dimensional* array parameter
     (``T[][N]``, which adjusts to ``T(*)[N]``, a pointer to an array, not
@@ -265,21 +229,68 @@ def canonicalize_function_signature_param_type(name: str) -> str:
     'int [3][4]'
     >>> canonicalize_function_signature_param_type("const int [3][4]")
     'const int [3][4]'
+
+    A parenthesized declarator's own grouping parens (``void (*)(int)``, a
+    pointer to a function; ``int (*)[3]``, a pointer to an array) are
+    transparent for this purpose, not a real nesting level: the ``*``
+    inside them is still the parameter's own outermost, by-value-qualified
+    sigil, exactly like an unparenthesized ``int *``. An opening ``(`` is
+    recognized as declarator grouping (and so does not itself count as
+    nesting depth) whenever the next non-space character is ``*``/``&`` --
+    a real function-parameter-list paren never starts that way, since a
+    parameter list's first token is always a type, not a bare sigil. So
+    ``void f(void (*)(int))`` and ``void f(void (* const)(int))`` name the
+    same function -- the qualifier on the callback parameter's own pointer
+    is by-value, just like ``int *``/``int * const`` (Codex review, PR
+    #941: an earlier revision here treated every ``(`` as opaque, so a
+    parenthesized declarator's own trailing cv-qualifier was silently
+    preserved instead of stripped, fragmenting two spellings of one
+    identical parameter type). This also reaches the previously-unchanged
+    pointer-to-array case (``int (*)[3]``) the same way, for the identical
+    reason -- its own outermost pointer's cv-qualifier, if any, is by-value
+    too; only the trailing array bound inside the parens (the *pointee's*
+    shape) stays untouched, same as always.
+
+    >>> canonicalize_function_signature_param_type("void (*)(int)")
+    'void ( * )(int)'
+    >>> canonicalize_function_signature_param_type("void (* const)(int)")
+    'void ( * )(int)'
     >>> canonicalize_function_signature_param_type("int (*)[3]")
-    'int ( *)[3]'
+    'int ( * )[3]'
+    >>> canonicalize_function_signature_param_type("int (* const)[3]")
+    'int ( * )[3]'
     """
     canonical = canonicalize_type_name(
         _decay_top_level_array(canonicalize_type_name(name))
     )
     depth = 0
+    # True for a paren currently open on `transparent_parens` that groups a
+    # declarator's own sigil (see the docstring above) -- popped, not
+    # depth-counted, so a sigil inside one is still found at depth 0.
+    transparent_parens: list[bool] = []
     last_top_level_sigil = -1
     has_top_level_bracket = False
+    n = len(canonical)
     for i, ch in enumerate(canonical):
+        if ch == "(":
+            j = i + 1
+            while j < n and canonical[j] == " ":
+                j += 1
+            transparent = j < n and canonical[j] in "*&"
+            transparent_parens.append(transparent)
+            if not transparent:
+                depth += 1
+            continue
+        if ch == ")":
+            was_transparent = transparent_parens.pop() if transparent_parens else False
+            if not was_transparent:
+                depth = max(0, depth - 1)
+            continue
         if ch == "[" and depth == 0:
             has_top_level_bracket = True
-        if ch in "<([":
+        if ch in "<[":
             depth += 1
-        elif ch in ">)]":
+        elif ch in ">]":
             depth = max(0, depth - 1)
         elif ch in "*&" and depth == 0:
             last_top_level_sigil = i

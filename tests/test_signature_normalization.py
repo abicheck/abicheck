@@ -126,6 +126,28 @@ class TestArrayParameterDecay:
         assert "[3]" in canon("int (*)[3]")
 
 
+class TestParenthesizedDeclaratorOwnCvIsDropped:
+    """A parenthesized declarator's own grouping parens (a function-pointer
+    or pointer-to-array parameter) are transparent for by-value cv
+    purposes -- the cv-qualifier on the declarator's own outermost pointer
+    is by-value and dropped, exactly like an unparenthesized pointer."""
+
+    def test_function_pointer_own_const_dropped(self) -> None:
+        assert canon("void (* const)(int)") == canon("void (*)(int)")
+
+    def test_function_pointer_param_list_untouched(self) -> None:
+        # The callback's OWN parameter types are not this parameter's
+        # by-value qualifiers -- they must survive verbatim either way.
+        assert "(int)" in canon("void (*)(int)")
+        assert "(int)" in canon("void (* const)(int)")
+
+    def test_pointer_to_array_own_const_dropped(self) -> None:
+        assert canon("int (* const)[3]") == canon("int (*)[3]")
+
+    def test_pointer_to_array_bound_untouched(self) -> None:
+        assert "[3]" in canon("int (* const)[3]")
+
+
 class TestIdempotence:
     """Canonicalizing an already-canonical form is a no-op -- a basic
     sanity property any normalization function should hold."""
@@ -140,6 +162,10 @@ class TestIdempotence:
 
     def test_idempotent_on_array_type(self) -> None:
         once = canon("const int [3]")
+        assert canon(once) == once
+
+    def test_idempotent_on_function_pointer_type(self) -> None:
+        once = canon("void (* const)(int)")
         assert canon(once) == once
 
 

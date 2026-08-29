@@ -6823,6 +6823,51 @@ matches a bracket-containing string), so `"const int [3]"` and `"const int
 strings until the decay result was re-canonicalized a second time. Fixed
 in the same commit; `test_element_cv_becomes_pointee_cv` pins it.
 
+**Correction (2026-08-29, same day, eighth Codex review round on PR #941,
+commit 572de14): a parenthesized declarator's own outer pointer skipped
+by-value cv stripping entirely.** The sigil-scan treated every `(` as a
+real nesting level, so a cv-qualifier written inside a declarator's own
+grouping parens -- `void (* const)(int)` (a callback parameter: "const
+pointer to a function taking int"), or `int (* const)[3]` (a const
+pointer to an array of 3 ints) -- was never found at depth 0 and so never
+stripped, even though it qualifies the parameter's own outermost pointer
+exactly like an unparenthesized `int * const` does. Fixed by making an
+opening `(` "transparent" (not a real nesting level) whenever the next
+non-space character is `*`/`&` -- the one shape a real function-parameter-
+list paren can never have, since a parameter list's first token is always
+a type, never a bare sigil. This also reaches the previously-unchanged
+pointer-to-array case (`int (*)[3]`) the same way: its own outermost
+pointer's cv-qualifier, once one exists, is by-value too, while the
+trailing array bound inside the parens (the pointee's own shape) stays
+untouched exactly as before. Also removed `_has_top_level_ptr_or_ref`,
+a leftover private helper from an earlier revision of this module that had
+become genuinely dead code -- the array/pointer-shape detection it
+described was already reimplemented inline at each of its two call sites
+during earlier correction rounds, and nothing in this module or its tests
+called it. Four new tests in `tests/test_signature_normalization.py`
+(`TestParenthesizedDeclaratorOwnCvIsDropped`) pin both the fix and that the
+callback/pointee's own inner types stay untouched.
+
+A second finding from the same round -- that a raw, platform-decorated PE
+export name (`_foo@4` for an `extern "C"` `foo`) reaching this module's
+`is_extern_c` branch as `leaf_name` would fragment identity against an
+undecorated header/DWARF observation of the same symbol -- was investigated
+and NOT fixed here. `entity_id_for_function`'s docstring already states
+this branch is deliberately built to mirror `resolve_symbol_identity`'s own
+representation, and that resolver has the identical property: it also
+keys a non-`_Z`/`?` `mangled` value on its literal raw spelling, undecorated
+(`finding_identity.py`'s own `normalized_basis = mangled if (mangled and
+not real_mangled) else qn` never strips a stdcall/cdecl decoration either).
+This module's stated contract is to *match* that resolver's own chosen
+representation for evidence-tier scope/leaf-name handling, not to invent a
+new normalization capability the mirrored function doesn't have -- and no
+PE-decoration-stripping helper exists anywhere else in the codebase to
+reuse. Introducing one is a real, valid gap worth closing, but it is a
+separate design question (most naturally `pe_metadata.py`'s own extraction
+layer, where the platform's decoration convention is already known, not
+this identity primitive) and out of scope for this "purely additive,
+mirrors the existing resolver" first slice.
+
 ---
 
 ### Phase 3 — public surface as a graph query over one evidence graph (D5)
