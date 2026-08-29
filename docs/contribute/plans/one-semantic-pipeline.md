@@ -7580,6 +7580,48 @@ int>`), which is real, independently-reviewable work of its own, not a
 small fix bundled into this slice -- left for a follow-on slice rather
 than attempted under review pressure here.
 
+**Correction (2026-08-29, same day, a SECOND Codex review round on PR
+#943): the previous correction's own fix was itself incomplete -- keying
+ordinal state by the walked node's identity is wrong whenever a
+TRANSPARENT AST wrapper sits between a scope and its anonymous
+children.** `extern "C" { ... }` (a `LinkageSpecDecl`) contributes NO
+`ScopePath` segment of its own (confirmed above: `scope_segment_for`
+returns `None` for it, so `child_scope_path` for its children is exactly
+`scope_path`, unchanged) -- but it IS a separate AST node and a separate
+`_walk` call. `namespace N { extern "C" { struct { struct X {}; } a; }
+struct { struct Y {}; } b; }`: confirmed directly (`clang -Xclang
+-ast-dump=json`) that the `LinkageSpecDecl` sits directly between `N` and
+`X`'s anonymous struct, while `Y`'s anonymous struct is a direct child of
+`N`. Both are, from `ScopePath`'s own perspective, direct children of the
+IDENTICAL logical scope `(Namespace("N"),)` -- but the previous fix's
+node-identity key gave them separate `_anonymous_ordinal_state` entries
+anyway (one keyed by the `LinkageSpecDecl`'s own id, one by `N`'s), so both
+got ordinal 0. The reopened-namespace fix and this one share a root cause:
+ordinal state was keyed by *which AST node produced it*, when the actual
+invariant is about *which logical scope the children are entering* --
+`child_scope_path` IS that answer, computed once per `_walk` call already
+for an unrelated reason (threading the typed path to children), and using
+it as the ordinal-state key closes BOTH cases with one rule instead of two
+special-cased identity fallbacks: a reopened namespace's two blocks
+compute the identical segment tuple (construction depends only on
+name/`isInline`, never on which node/block produced it), and a transparent
+wrapper's `child_scope_path` is *by definition* identical to its own
+`scope_path`. `ScopeSegment`s are frozen/hashable, so the tuple is a valid
+dict key directly -- no string-identity/objid fallback needed at all, which
+also means the previous fix's `"objid:{id(node)}"` fallback branch (for a
+node with no id) is gone, not merely untested: `child_scope_path` is
+always a real, comparable value regardless of whether the node producing
+it happens to carry an id. New regression coverage: `test_live_clang_
+typed_scope_paths` adds an `extern "C"` block beside a plain anonymous
+struct in the same namespace and asserts distinct ordinals (confirmed to
+fail against the node-identity-keyed fix, both reporting ordinal 0,
+verified by reverting to that version locally before committing the real
+fix). This is the same "verify before generalizing, and verify again when
+generalizing a second time" discipline the earlier restrict/calling-
+convention/global-scope corrections on this same plan established --
+two review rounds in a row found the previous round's fix real but
+incomplete, which is exactly what direct-compilation verification is for.
+
 ---
 
 ### Phase 3 — public surface as a graph query over one evidence graph (D5)

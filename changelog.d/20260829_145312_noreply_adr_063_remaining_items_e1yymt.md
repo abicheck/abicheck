@@ -13,5 +13,8 @@
   snapshot field is byte-for-byte unchanged, and no `EntityId` is built from
   this yet. No user-visible behaviour change. (Fixed in review: the
   per-parent anonymous-ordinal counter is now shared across a named
-  namespace's separate reopened blocks, instead of resetting per block and
-  colliding two unrelated anonymous scopes onto the same ordinal.)
+  namespace's separate reopened blocks and across a transparent AST
+  wrapper such as `extern "C" { ... }`, keyed by the logical scope path
+  itself rather than by which AST node produced it — previously, either
+  case could collide two unrelated anonymous scopes onto the same
+  ordinal.)
