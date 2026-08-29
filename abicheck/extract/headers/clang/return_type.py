@@ -104,7 +104,8 @@ def _is_spiral_wrapper_prefix(interior: str) -> bool:
     ``decltype``'s own parenthesized operand).
 
     The wrapper's declarator prefix -- everything before its own first
-    nested top-level group -- is exactly one of ``*``, ``&``, ``&&``, or a
+    nested top-level group -- is exactly one of ``*``, ``&``, ``&&``, ``^``
+    (a Clang Blocks-extension block-pointer declarator), or a
     POINTER-TO-MEMBER declarator, ``<qualified-class-name>::*`` (e.g.
     ``C::*``, or a qualified/templated class name like ``Ns::C<int>::*``)
     -- confirmed by direct compilation that clang spells a function
@@ -114,11 +115,16 @@ def _is_spiral_wrapper_prefix(interior: str) -> bool:
     scan-from-the-end branch and discarding the returned function's own
     parameter list -- the identical hazard the pointer/reference case
     already fixed, just for a class-qualified sigil (Codex review, PR
-    #943, on a later round).
+    #943, on a later round). The block-pointer sigil is the identical
+    hazard again, one level further: confirmed by direct compilation
+    (``clang -fblocks``) that ``int (^f(int))(int)`` is spelled
+    ``"int (^(int))(int)"``, structurally identical to the pointer case
+    but with ``^`` instead of ``*`` (Codex review, PR #943, on a later
+    round still).
     """
     spans = _top_level_paren_spans(interior)
     prefix = interior[: spans[0][0]].strip() if spans else interior.strip()
-    return prefix in ("*", "&", "&&") or prefix.endswith("::*")
+    return prefix in ("*", "&", "&&", "^") or prefix.endswith("::*")
 
 
 def _excise_own_param_list(s: str) -> str:

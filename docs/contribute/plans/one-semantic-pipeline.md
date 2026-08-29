@@ -8845,6 +8845,29 @@ above) still passes unchanged. `mypy abicheck/` clean (515 files),
 `ruff check`/`ruff format --check` clean on both touched files,
 `check_architecture.py` 0 errors, `check_ai_readiness.py` 0 new errors.
 
+**Correction (2026-08-29, same day, Codex review on PR #943): a function
+returning a Clang Blocks-extension block pointer collapsed the same way
+the pointer/reference and pointer-to-member spiral cases above once did,
+for a sigil `_is_spiral_wrapper_prefix` never covered.** Confirmed by
+direct compilation (`clang -fblocks -x c++ -Xclang -ast-dump=json`):
+`int (^f(int))(int);` is spelled `"int (^(int))(int)"`, structurally
+identical to the pointer-declarator spiral case but with `^` instead of
+`*` -- `_is_spiral_wrapper_prefix` only recognized `*`/`&`/`&&` and a
+qualified `<class>::*` prefix, so this fell through to the scan-from-end
+branch and discarded the returned block's own parameter list, exactly
+the hazard the member-pointer-spiral fix above already closed for a
+different sigil: `int (^f(int))(int);` and `int (^g(int))(double);` both
+reduced to the identical `"int (^(int))"` before this fix. Fixed by
+adding `^` to `_is_spiral_wrapper_prefix`'s recognized prefix set.
+Regression test in `tests/test_entity_id_template_discriminators.py`
+(`test_live_clang_block_pointer_spiral_return_declarator_preserves_returned_function_parameter_list`,
+using a local `_clang_blocks_parser` helper since this is the only case
+in this module needing `-fblocks` enabled), confirmed to fail pre-fix via
+`git stash` on just the source file and pass post-fix; every existing
+return-type discriminator test in that module still passes unchanged.
+`mypy abicheck/` clean, `ruff check`/`ruff format --check` clean,
+`check_architecture.py` 0 errors.
+
 ---
 
 ### Phase 3 — public surface as a graph query over one evidence graph (D5)

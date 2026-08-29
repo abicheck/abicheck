@@ -31,12 +31,16 @@ PR #943's review history for the individual finding.
 
 from __future__ import annotations
 
+import json
 import shutil
+import subprocess
 import textwrap
 from pathlib import Path
 
 import pytest
 from test_entity_id_carrier import _clang_parser, _one
+
+from abicheck.dumper_clang import _ClangAstParser
 
 #: Two uninstantiated function templates sharing scope, leaf name, and an
 #: identical (empty) ordinary parameter list, differing only in
@@ -939,3 +943,67 @@ def test_live_clang_spiral_return_own_exception_spec_excised(
         name="g",
     )
     assert fn.return_type == "int (*())(int)"
+
+
+def _clang_blocks_parser(
+    header_text: str, tmp_path: Path, name: str
+) -> _ClangAstParser:
+    """Like `test_entity_id_carrier._clang_parser`, but with `-fblocks`
+    enabled -- needed only for the block-pointer spiral-return case below,
+    which cannot be reproduced without Clang's Blocks extension."""
+    header = tmp_path / f"{name}.hpp"
+    header.write_text(header_text)
+    out = subprocess.run(
+        [
+            "clang",
+            "-fblocks",
+            "-x",
+            "c++",
+            "-std=c++17",
+            "--target=x86_64-unknown-linux-gnu",
+            "-Xclang",
+            "-ast-dump=json",
+            "-fsyntax-only",
+            str(header),
+        ],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    return _ClangAstParser(json.loads(out.stdout), {"c_fn", "c_var"}, set())
+
+
+@pytest.mark.integration
+@pytest.mark.skipif(shutil.which("clang") is None, reason="clang not installed")
+def test_live_clang_block_pointer_spiral_return_declarator_preserves_returned_function_parameter_list(
+    tmp_path: Path,
+) -> None:
+    """A function returning a Clang Blocks-extension block pointer is spelled
+    as a spiral declarator using `^` instead of `*`/`&`: `int (^f(int))(int);`
+    (with `-fblocks` enabled) has `qualType` `"int (^(int))(int)"` (confirmed
+    by direct compilation) -- structurally identical to the pointer/reference
+    and pointer-to-member spiral cases above, just with a different sigil,
+    which `_is_spiral_wrapper_prefix` didn't recognize, falling through to the
+    scan-from-the-end branch and discarding the returned block's own
+    parameter list. Two sibling declarations differing only in that returned
+    block's parameter type must not collapse onto the same `return_type`
+    (Codex review, PR #943, on a later round)."""
+    f = _one(
+        _clang_blocks_parser(
+            "int (^f(int))(int);",
+            tmp_path,
+            "blockspirala",
+        ).parse_functions(),
+        name="f",
+    )
+    g = _one(
+        _clang_blocks_parser(
+            "int (^g(int))(double);",
+            tmp_path,
+            "blockspiralb",
+        ).parse_functions(),
+        name="g",
+    )
+    assert f.return_type == "int (^())(int)"
+    assert g.return_type == "int (^())(double)"
+    assert f.return_type != g.return_type
