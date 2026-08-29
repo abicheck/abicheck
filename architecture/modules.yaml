@@ -26,7 +26,10 @@
         "abicheck/evidence_depth.py",
         "abicheck/fact_provenance.py",
         "abicheck/name_classification.py",
-        "abicheck/stable_abi_data.py"
+        "abicheck/stable_abi_data.py",
+        "abicheck/config_paths.py",
+        "abicheck/contract_gating.py",
+        "abicheck/errors.py"
       ]
     },
     "storage": {
@@ -149,7 +152,9 @@
         "abicheck/symvers_metadata.py",
         "abicheck/tu_fragment.py",
         "abicheck/tu_merge.py",
-        "abicheck/type_metadata.py"
+        "abicheck/type_metadata.py",
+        "abicheck/dumper_contract.py",
+        "abicheck/snapshot_cache.py"
       ]
     },
     "compare": {
@@ -293,7 +298,11 @@
         "abicheck/service_header_scoped.py",
         "abicheck/service_input_resolution.py",
         "abicheck/service_scan.py",
-        "abicheck/stack_checker.py"
+        "abicheck/stack_checker.py",
+        "abicheck/aggregate.py",
+        "abicheck/aggregate_findings.py",
+        "abicheck/aggregate_manifest.py",
+        "abicheck/api_types.py"
       ]
     },
     "report": {
@@ -368,7 +377,8 @@
         "abicheck/cli_scan_receipt.py",
         "abicheck/cli_stack.py",
         "abicheck/compat/cli.py",
-        "abicheck/dry_run.py"
+        "abicheck/dry_run.py",
+        "abicheck/__main__.py"
       ]
     }
   },
