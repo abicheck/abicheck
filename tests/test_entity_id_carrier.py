@@ -144,6 +144,29 @@ _TEMPLATE_PARAM_PACKNESS_COLLISION = textwrap.dedent(
     """
 )
 
+#: A pure template-parameter RENAME, not a collision to close but the
+#: opposite hazard: ``template<class T, T N>`` and ``template<class U, U
+#: N>`` are the identical declaration, yet clang's own ``qualType`` for
+#: the non-type parameter spells the dependent type literally as the type
+#: parameter's own name (``"T"``/``"U"``) -- confirmed by direct
+#: compilation. Without canonicalizing that dependent reference to a
+#: parameter position, a non-semantic rename would fingerprint as two
+#: different overloads (Codex review, PR #943).
+_TEMPLATE_PARAM_DEPENDENT_RENAME_A = textwrap.dedent(
+    """
+    namespace ns {
+    template <class T, T N> void f();
+    }
+    """
+)
+_TEMPLATE_PARAM_DEPENDENT_RENAME_B = textwrap.dedent(
+    """
+    namespace ns {
+    template <class U, U N> void f();
+    }
+    """
+)
+
 #: The two halves of the collision this phase exists to close: a record
 #: nested in a **record** and the same bare names nested in a **namespace**.
 #: Both render to the identical ``"B::C"`` qualified name, which is exactly
@@ -656,6 +679,38 @@ def test_live_clang_template_param_packness_discriminates_overloaded_templates(
     assert pair[0].entity_id != pair[1].entity_id
     kinds = {fn.entity_id.extra[-1] for fn in pair if fn.entity_id is not None}
     assert kinds == {"type", "type..."}
+
+
+@pytest.mark.integration
+@pytest.mark.skipif(shutil.which("clang") is None, reason="clang not installed")
+def test_live_clang_template_param_rename_does_not_change_identity(
+    tmp_path: Path,
+) -> None:
+    """A pure template-parameter RENAME must NOT change the ``EntityId``.
+
+    ``template<class T, T N> void f();`` and ``template<class U, U N> void
+    f();`` are the identical declaration under a parameter rename, but
+    clang's own ``qualType`` for the non-type parameter ``N`` spells the
+    dependent type literally as the type parameter's own name
+    (``"T"``/``"U"``) -- reproduced end to end before this fix: the two
+    revisions produced unequal ``EntityId``s, which would fingerprint a
+    non-semantic rename as a remove+add (Codex review, PR #943).
+    """
+    a = _one(
+        _clang_parser(
+            _TEMPLATE_PARAM_DEPENDENT_RENAME_A, tmp_path, "depa"
+        ).parse_functions(),
+        name="f",
+    )
+    b = _one(
+        _clang_parser(
+            _TEMPLATE_PARAM_DEPENDENT_RENAME_B, tmp_path, "depb"
+        ).parse_functions(),
+        name="f",
+    )
+    assert a.entity_id is not None and b.entity_id is not None
+    assert a.entity_id == b.entity_id
+    assert a.entity_id.extra[-1] == "nontype:type-param-0"
 
 
 # ── hybrid dumper: entity_id must stay in sync across post-parse rewrites ────

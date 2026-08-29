@@ -7988,6 +7988,47 @@ that flag is set, giving e.g. `"type"` vs. `"type..."`,
 (`test_live_clang_template_param_packness_discriminates_overloaded_templates`),
 confirmed to fail against the pre-fix (kind-only) version.
 
+**Correction (2026-08-29, same day, Codex review on PR #943): the opposite
+hazard -- a non-semantic template-parameter RENAME changing identity.**
+`template<class T, T N> void f();` and `template<class U, U N> void
+f();` are the identical declaration under a pure rename, but clang's own
+`qualType` for the non-type parameter `N` spells its dependent type
+literally as the type parameter's own name (confirmed by direct
+compilation: `"T"` vs. `"U"` respectively), and the discriminator built
+directly from that spelling changed too -- reproduced end to end: the two
+revisions produced unequal `EntityId`s. Fixed by canonicalizing a
+non-type parameter's own declared type against the PRECEDING type
+parameters' names before joining into the `"nontype:"` entry, replacing
+each type-parameter name with its 0-based position
+(`_canonicalize_dependent_type_param_spelling`, a whole-word
+regex substitution so a name that is a substring of another, e.g. `T`
+inside `TT`, is never partially replaced) -- `("type", "nontype:T")` and
+`("type", "nontype:U")` both become `("type", "nontype:type-param-0")`.
+Verified this does not collapse a genuinely different non-type parameter
+type (`template<class T, int N>` still keeps `nontype:int`, distinct from
+either rename revision). Regression test in
+`tests/test_entity_id_carrier.py`
+(`test_live_clang_template_param_rename_does_not_change_identity`).
+
+A second finding from the same review round -- two overloads
+distinguished only by a `requires`-clause (e.g. `template<class T>
+requires C1<T> void f();` vs. the same constrained by `C2<T>`) still
+collide, since clang's own `ConceptSpecializationExpr` node (confirmed by
+direct compilation to appear as a `FunctionTemplateDecl` child right
+after its `TemplateTypeParmDecl`) carries no concept name or a
+resolvable reference to one anywhere in its own JSON subtree -- verified
+directly, not assumed: every key on the node and its
+`ImplicitConceptSpecializationDecl` child was inspected, and neither
+carries anything but synthetic AST ids and dependent-type placeholders
+(`type-parameter-0-0`). Recovering the concept's actual name would need
+either a different clang AST-dump mode/flag or the raw header source
+text sliced at the node's own `range` offsets -- and `_ClangAstParser`
+deliberately consumes only an already-parsed JSON tree (this module's own
+docstring), with no source text available to it. Recorded here as a
+**known gap** rather than attempted as a fragile source-offset hack: a
+`requires`-clause-only overload pair is the one template-overload shape
+this discriminator still cannot distinguish.
+
 ---
 
 ### Phase 3 — public surface as a graph query over one evidence graph (D5)

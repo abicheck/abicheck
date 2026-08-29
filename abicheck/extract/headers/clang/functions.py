@@ -242,8 +242,24 @@ def function_template_param_kinds(
     ``templates._template_param_kinds``'s identical convention for a
     ``ClassTemplateDecl``'s own list -- the parameter list always precedes
     the pattern's own body in ``inner`` order.
+
+    A non-type parameter's own declared type is canonicalized against the
+    PRECEDING type parameters' names before joining into a ``"nontype:"``
+    entry: ``template<class T, T N> void f();`` and ``template<class U, U
+    N> void f();`` are the identical declaration under a pure parameter
+    rename, but clang's own ``qualType`` for ``N`` spells the dependent
+    type literally as ``"T"``/``"U"`` (confirmed by direct compilation),
+    which would otherwise fingerprint a non-semantic rename as two
+    different overloads (Codex review, PR #943, on the second version of
+    this function). Each earlier ``TemplateTypeParmDecl``'s own name is
+    replaced by its 0-based position (``"type-param-0"``, ...) via a
+    whole-word substitution -- safe against one name being a substring of
+    another (``T`` inside ``TT``) since a word-boundary match never fires
+    mid-identifier, and against a compound spelling like ``"T *"``, which
+    still resolves to ``"type-param-0 *"``.
     """
     kinds: list[str] = []
+    type_param_names: list[str] = []
     for child in function_template_decl.get("inner", []) or []:
         if not isinstance(child, dict):
             continue
@@ -251,6 +267,7 @@ def function_template_param_kinds(
         pack = "..." if child.get("isParameterPack") else ""
         if kind == "TemplateTypeParmDecl":
             kinds.append(f"type{pack}")
+            type_param_names.append(str(child.get("name") or ""))
         elif kind == "TemplateTemplateParmDecl":
             kinds.append(f"template{pack}")
         elif kind == "NonTypeTemplateParmDecl":
@@ -258,10 +275,30 @@ def function_template_param_kinds(
             spelling = (
                 str(type_obj.get("qualType", "")) if isinstance(type_obj, dict) else ""
             )
+            spelling = _canonicalize_dependent_type_param_spelling(
+                spelling, type_param_names
+            )
             kinds.append(f"nontype{pack}:{spelling}")
         else:
             break
     return tuple(kinds)
+
+
+def _canonicalize_dependent_type_param_spelling(
+    spelling: str, type_param_names: list[str]
+) -> str:
+    """Replace each name in *type_param_names* with its 0-based position.
+
+    Helper for :func:`function_template_param_kinds` -- see that function's
+    own docstring for why. A whole-word (``\\b``) substitution, so a name
+    that is a substring of another (``T`` inside ``TT``) is never partially
+    replaced.
+    """
+    for index, name in enumerate(type_param_names):
+        if not name:
+            continue
+        spelling = re.sub(rf"\b{re.escape(name)}\b", f"type-param-{index}", spelling)
+    return spelling
 
 
 def parse_functions(
