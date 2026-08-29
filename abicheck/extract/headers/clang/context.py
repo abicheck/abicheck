@@ -54,8 +54,9 @@ from ....dumper_clang_vtable import (
     build_vtable,
     is_record_definition,
 )
-from ....model import AccessLevel, Visibility
+from ....model import AccessLevel, ScopeOrigin, Visibility
 from ....name_classification import strip_anonymous_type_location
+from ....provenance import classify_origin, header_from_location
 
 #: Pseudo-files clang attributes builtin / command-line declarations to.
 BUILTIN_FILES = frozenset(
@@ -280,6 +281,40 @@ def qualified_name(entry: _Decl) -> str:
     """
     name = entry.node.get("name", "")
     return "::".join([*entry.scope, name]) if entry.scope else name
+
+
+def decl_is_public(
+    entry: _Decl,
+    pub_header_segs: list[tuple[str, ...]],
+    pub_dir_segs: list[tuple[str, ...]],
+    have_public_set: bool,
+) -> bool:
+    """True if *entry*'s declaring header classifies as a public header.
+
+    Uses the shared provenance segment matcher (``classify_origin`` /
+    ``header_from_location``, the same ones ``dumper_castxml.py``'s own
+    ``decl_is_public`` — see ``extract.headers.castxml.location`` — reads),
+    so build-prefixed paths and umbrella-included public headers match while
+    system/private headers do not. Read by more than one entity kind's
+    parsing on this backend too (constant parsing in ``dumper_clang.py``'s
+    still-unmigrated ``parse_constants``, and record-entity parsing in
+    ``extract.headers.clang.records``), same "more than one entity kind"
+    rule this module's own docstring states for ``access_level``/
+    ``visibility``/``qualified_name`` above. Takes the three
+    ``provenance.build_public_set`` outputs explicitly rather than a
+    wrapping context object -- clang's own convention (``functions.py``/
+    ``enums.py``) is explicit parameters, not a second, competing context
+    shape.
+    """
+    sh = header_from_location(source_location(entry))
+    if not sh:
+        return False
+    return (
+        classify_origin(
+            sh, pub_header_segs, pub_dir_segs, have_public_set=have_public_set
+        )
+        == ScopeOrigin.PUBLIC_HEADER
+    )
 
 
 class RecordVtableIndex:

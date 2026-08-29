@@ -77,7 +77,7 @@ fit `context.py`'s existing "read by more than one entity kind" charter
 the same explicit-parameter treatment `enums.py` already established for
 its own excluded evaluator, and the target triple turned out to be a
 stateless pass-through. `records.py` is now the third entity module split
-out — **on the castxml backend only**: `headers/castxml/records.py` holds
+out **on both backends**. `headers/castxml/records.py` holds
 `parse_types`/`build_record_type`/`parse_record_fields`/
 `expand_anonymous_field`/`parse_bitfield_bits` plus the vtable/RTTI layout
 walk (`build_vtable`/`collect_virtual_methods`/`inherited_vtable_slots`/
@@ -89,12 +89,39 @@ had to move the code that reads and mutates them —
 `collect_virtual_methods`/`vtable_slot_key` are the first functions in
 this package that mutate shared context state rather than only read it,
 proof the "entity module takes context explicitly" shape generalizes past
-the read-only case `enums.py`/`functions.py` exercised. Clang's
-`records.py`, and `templates.py` on both backends, have not moved yet —
-see ADR-061's own "Phase 5" section for exactly what's still on the
-monolithic parser classes and why (record parsing's different shape on
-each backend argued against moving both in the same pass, given how
-correctness-sensitive vtable/RTTI layout facts are).
+the read-only case `enums.py`/`functions.py` exercised.
+
+`headers/clang/records.py` followed in the next slice, once investigating
+`_ClangAstParser._build_record`/`parse_types` in full (deliberately
+deferred by the prior slice pending exactly this investigation) found no
+remaining state that didn't already fit either a per-declaration `_Decl`
+parameter, an existing `context.py` free function, an already-public
+sibling-module helper, or a record-only pure helper with one caller.
+`parse_types`/`_build_record`/`_parse_fields`/`_collect_fields`/
+`_make_field` moved as free functions taking the categorized `_Decl` lists
+plus explicit `evaluate_bitfield_int`/`field_default_value` evaluators
+(the same `extract -> compare` layering reason `functions.py`'s
+`default_value` and `enums.py`'s `evaluate_int` already take one — the
+real evaluators depend on `dumper_clang_expr.py`, which imports
+`diff_cxx_rules`, classified `compare`), alongside five record-only
+helpers with exactly one caller (`_clang_record_is_final`/
+`_bitfield_width`/`_anonymous_member_names`/`_parse_bases`/
+`_owned_tag_id`). Two cross-entity-kind findings applied proactively per
+this file's own "public-ize in place" rule below (the lesson the prior
+castxml `records.py` slice's `is_record_definition` review round
+established): `decl_is_public` — read by both record parsing and
+constant parsing (`dumper_clang.py`'s still-unmigrated `parse_constants`)
+— moved into `context.py` alongside this module, taking the three
+`provenance.build_public_set` outputs as explicit parameters per clang's
+established context-less convention; and six `dumper_clang_qualifiers.py`
+helpers this module needs (`record_kind`, `reduce_opaque_kind_set`,
+`clang_record_type_traits`, `clang_record_is_abstract`,
+`field_own_cv_source`, `desugared_qualtype`) were still private with
+exactly one external caller apiece — public-ized in place, each keeping
+its old private spelling as a back-compat alias, rather than physically
+relocated. `templates.py` on both backends has not moved yet — see
+ADR-061's own "Phase 5" section for the full account, including the real
+before/after dump verification this correctness-sensitive move required.
 
 ## Rules that are easy to get wrong
 

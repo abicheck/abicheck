@@ -44,7 +44,7 @@ import re
 from typing import Any
 
 
-def _desugared_qualtype(node: dict[str, Any]) -> str:
+def desugared_qualtype(node: dict[str, Any]) -> str:
     """The fully-desugared type spelling, when clang provides one.
 
     A field declared through a typedef to a cv-qualified type
@@ -69,6 +69,10 @@ def _desugared_qualtype(node: dict[str, Any]) -> str:
     return ""
 
 
+#: Back-compat alias -- see :func:`desugared_qualtype`'s own docstring.
+_desugared_qualtype = desugared_qualtype
+
+
 def _last_top_level_ptr_end(type_str: str) -> int:
     """Index just past the last depth-0 ``*`` in *type_str*, or -1 if none.
 
@@ -89,7 +93,7 @@ def _last_top_level_ptr_end(type_str: str) -> int:
     return last
 
 
-def _field_own_cv_source(desugared: str) -> str:
+def field_own_cv_source(desugared: str) -> str:
     """Substring of *desugared* that describes the FIELD's OWN const/
     volatile qualifier, as opposed to its pointee's.
 
@@ -108,6 +112,10 @@ def _field_own_cv_source(desugared: str) -> str:
     """
     end = _last_top_level_ptr_end(desugared)
     return desugared[end:] if end >= 0 else desugared
+
+
+#: Back-compat alias -- see :func:`field_own_cv_source`'s own docstring.
+_field_own_cv_source = field_own_cv_source
 
 
 #: Type operators whose parenthesized operand is an *expression*, not a
@@ -387,13 +395,17 @@ def clang_param_is_va_list(node: dict[str, Any]) -> bool:
 _clang_param_is_va_list = clang_param_is_va_list
 
 
-def _record_kind(node: dict[str, Any]) -> str:
+def record_kind(node: dict[str, Any]) -> str:
     """``"union"``/``"struct"``/``"class"`` from a record's ``tagUsed``."""
     tag = node.get("tagUsed")
     return tag if tag in ("union", "struct") else "class"
 
 
-def _reduce_opaque_kind_set(kinds: set[str] | None) -> str | None:
+#: Back-compat alias -- see :func:`record_kind`'s own docstring.
+_record_kind = record_kind
+
+
+def reduce_opaque_kind_set(kinds: set[str] | None) -> str | None:
     """Reduce all raw kinds observed for one identity's non-def redecls to a
     single ``RecordType.kind`` override (Codex review, PR #719, two follow-up
     rounds).
@@ -429,6 +441,10 @@ def _reduce_opaque_kind_set(kinds: set[str] | None) -> str | None:
         return next(iter(kinds))
     folded = {"struct" if k == "class" else k for k in kinds}
     return folded.pop() if len(folded) == 1 else min(kinds)
+
+
+#: Back-compat alias -- see :func:`reduce_opaque_kind_set`'s own docstring.
+_reduce_opaque_kind_set = reduce_opaque_kind_set
 
 
 def clang_method_is_override(node: dict[str, Any]) -> bool:
@@ -479,7 +495,7 @@ OVERRIDE_ELIGIBLE_KINDS = frozenset(
 _OVERRIDE_ELIGIBLE_KINDS = OVERRIDE_ELIGIBLE_KINDS
 
 
-def _clang_record_is_abstract(node: dict[str, Any]) -> bool | None:
+def clang_record_is_abstract(node: dict[str, Any]) -> bool | None:
     """``RecordType.is_abstract`` from a record's own ``definitionData`` (G31
     Phase C backend audit) — the direct-clang counterpart to
     ``dumper_castxml.py``'s ``el.get("abstract") == "1"`` (castxml's own real
@@ -510,7 +526,11 @@ def _clang_record_is_abstract(node: dict[str, Any]) -> bool | None:
     return bool(definition_data.get("isAbstract", False))
 
 
-def _clang_record_type_traits(node: dict[str, Any]) -> tuple[bool | None, bool | None]:
+#: Back-compat alias -- see :func:`clang_record_is_abstract`'s own docstring.
+_clang_record_is_abstract = clang_record_is_abstract
+
+
+def clang_record_type_traits(node: dict[str, Any]) -> tuple[bool | None, bool | None]:
     """``(is_standard_layout, is_trivially_copyable)`` from a record's own
     ``definitionData`` (G31 Phase C schema-completeness audit).
 
@@ -537,9 +557,9 @@ def _clang_record_type_traits(node: dict[str, Any]) -> tuple[bool | None, bool |
     ``RecordDecl`` (these are C++-only type-trait concepts, so a C struct's
     node carries no ``definitionData`` key whatsoever — not "trivially true
     by default", genuinely absent), and an incomplete/forward-declared record
-    (filtered out upstream by ``dumper_clang._is_record_definition`` before
-    this is ever called, but kept conservative here too in case that guard's
-    scope ever narrows).
+    (filtered out upstream by ``dumper_clang_vtable.is_record_definition``
+    before this is ever called, but kept conservative here too in case that
+    guard's scope ever narrows).
     """
     definition_data = node.get("definitionData")
     if not isinstance(definition_data, dict):
@@ -548,3 +568,7 @@ def _clang_record_type_traits(node: dict[str, Any]) -> tuple[bool | None, bool |
         bool(definition_data.get("isStandardLayout", False)),
         bool(definition_data.get("isTriviallyCopyable", False)),
     )
+
+
+#: Back-compat alias -- see :func:`clang_record_type_traits`'s own docstring.
+_clang_record_type_traits = clang_record_type_traits

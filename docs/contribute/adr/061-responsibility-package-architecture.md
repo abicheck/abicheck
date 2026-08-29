@@ -1,7 +1,7 @@
 # ADR-061: Responsibility-Package Architecture and Flat-Namespace Migration
 
 **Date:** 2026-08-24
-**Status:** Accepted — partially implemented (Phases 0-1 implemented; Phases 2-4 in progress; Phase 5 begun — the `model` package and the `*_metadata.py` dataclass/parser split have landed; Phase 2's D9 item 4 gate-decision half is now closed via `policy/gate_decision.py`'s `gate_decision_for_result`, read by every JSON/SARIF/HTML/scan call site instead of each independently recomputing it (Markdown/HTML prose rewrite and per-finding verdict consolidation remain open, see Phase 2's own section); D9's change-catalog work (item 3) is fully done — all 4 registry-validation properties (unique identifiers, valid references, non-contradictory defaults, complete metadata) are enforced, and the 397 entries have been repartitioned into `model/change_catalog/{symbols,types,platform,build,source}.py` by taxonomy; the CastXML/Clang parser split (item 1) is now underway with a real shared-context design proven on both backends — `extract/headers/{castxml,clang}/context.py` (plus castxml's own `location.py`/`type_resolution.py`) hold the parser state/node-inspection primitives an entity module needs, and `enums.py` is the first entity split out of each backend, both calling through their context object rather than `self`; `functions.py` is now the second entity module split out on BOTH backends — castxml's (plus `qualified_name`/`decl_is_public`/`visibility`/`access_level` promoted into `location.py` alongside it, since typedef/variable/constant parsing reads them too) and clang's (its `_virtual_mangled_names()`/`_record_index()`/`_specialization_record_index()`/`_base_lookup_index()` instance state moved into a new `RecordVtableIndex` class in `context.py` itself, since record-entity parsing reads it too, not a functions-only concern despite the name; `_id_index` taken as an explicit `default_value` parameter the same way `enums.py` already takes `evaluate_int`; `_target_triple` turned out to be a stateless pass-through needing no shared home at all); `records.py` is now the third entity module split out, **on the castxml backend only** — `ctx.vtable_slot_root`/`ctx.vtable_slot_extra_roots` already lived on the shared context from the `functions.py` slice, so the move needed no context-shape change, only relocating `parse_types`/`build_record_type`/the vtable-slot walk (`collect_virtual_methods`/`vtable_slot_key`, the first functions in this package to mutate shared context state rather than only read it) as free functions taking `CastxmlParserContext` explicitly; clang's `records.py` and `templates.py` on both backends have not moved yet — source-graph separation (item 2) is now split three ways: its values third moved to `abicheck/model/source_graph.py`; construction (`build_source_graph` and its private folding helpers) moved into `buildsource/source_graph_build.py` (classified `extract`) and `buildsource/source_graph_build_source_abi.py` (classified `extract`); comparison (`diff_source_graph`, `localize_symbol`) moved into `buildsource/source_graph_compare.py` (classified `compare`); a shared node/edge-classification predicate module neither half owns exclusively (`buildsource/source_graph_query.py`) stays unclassified, same as several of its own callers; `buildsource/source_graph.py` itself is now a 140-line re-export facade — and the bulk of item 4's cycle-exception cleanup also remains — and otherwise incremental).
+**Status:** Accepted — partially implemented (Phases 0-1 implemented; Phases 2-4 in progress; Phase 5 begun — the `model` package and the `*_metadata.py` dataclass/parser split have landed; Phase 2's D9 item 4 gate-decision half is now closed via `policy/gate_decision.py`'s `gate_decision_for_result`, read by every JSON/SARIF/HTML/scan call site instead of each independently recomputing it (Markdown/HTML prose rewrite and per-finding verdict consolidation remain open, see Phase 2's own section); D9's change-catalog work (item 3) is fully done — all 4 registry-validation properties (unique identifiers, valid references, non-contradictory defaults, complete metadata) are enforced, and the 397 entries have been repartitioned into `model/change_catalog/{symbols,types,platform,build,source}.py` by taxonomy; the CastXML/Clang parser split (item 1) is now underway with a real shared-context design proven on both backends — `extract/headers/{castxml,clang}/context.py` (plus castxml's own `location.py`/`type_resolution.py`) hold the parser state/node-inspection primitives an entity module needs, and `enums.py` is the first entity split out of each backend, both calling through their context object rather than `self`; `functions.py` is now the second entity module split out on BOTH backends — castxml's (plus `qualified_name`/`decl_is_public`/`visibility`/`access_level` promoted into `location.py` alongside it, since typedef/variable/constant parsing reads them too) and clang's (its `_virtual_mangled_names()`/`_record_index()`/`_specialization_record_index()`/`_base_lookup_index()` instance state moved into a new `RecordVtableIndex` class in `context.py` itself, since record-entity parsing reads it too, not a functions-only concern despite the name; `_id_index` taken as an explicit `default_value` parameter the same way `enums.py` already takes `evaluate_int`; `_target_triple` turned out to be a stateless pass-through needing no shared home at all); `records.py` is now the third entity module split out **on both backends** — castxml's first (`ctx.vtable_slot_root`/`ctx.vtable_slot_extra_roots` already lived on the shared context from the `functions.py` slice, so the move needed no context-shape change, only relocating `parse_types`/`build_record_type`/the vtable-slot walk (`collect_virtual_methods`/`vtable_slot_key`, the first functions in this package to mutate shared context state rather than only read it) as free functions taking `CastxmlParserContext` explicitly), then clang's (`extract/headers/clang/records.py` — `parse_types`/`_build_record`/`_parse_fields`/`_collect_fields`/`_make_field` plus five record-only helpers moved as free functions taking the categorized `_Decl` lists and explicit evaluators, the same shape `functions.py` established; `decl_is_public` — read by both record and constant parsing — promoted into `context.py` alongside it, and six previously-private `dumper_clang_qualifiers.py` helpers with exactly one external caller apiece were public-ized in place rather than moved, each keeping its old private spelling as a back-compat alias); `templates.py` on both backends has not moved yet — source-graph separation (item 2) is now split three ways: its values third moved to `abicheck/model/source_graph.py`; construction (`build_source_graph` and its private folding helpers) moved into `buildsource/source_graph_build.py` (classified `extract`) and `buildsource/source_graph_build_source_abi.py` (classified `extract`); comparison (`diff_source_graph`, `localize_symbol`) moved into `buildsource/source_graph_compare.py` (classified `compare`); a shared node/edge-classification predicate module neither half owns exclusively (`buildsource/source_graph_query.py`) stays unclassified, same as several of its own callers; `buildsource/source_graph.py` itself is now a 140-line re-export facade — and the bulk of item 4's cycle-exception cleanup also remains — and otherwise incremental).
 **Decision maker:** abicheck maintainers
 
 ## Context
@@ -2450,25 +2450,93 @@ without promising a new export.
    `test_castxml_clang_parity_gate.py`/`test_g23_vtable_b1.py` — passes
    unchanged.
 
-   Clang's `records.py` did not move in this pass, by explicit choice
+   Clang's `records.py` did not move in that pass, by explicit choice
    rather than time pressure (per this repository's own decision-making
    principles, effort is never a reason to defer a thorough fix) — the
-   castxml and clang record-parsing bodies are different enough in shape
+   castxml and clang record-parsing bodies were different enough in shape
    (`_build_record_type` is one method; `dumper_clang.py`'s record parsing
-   is `_categorize_records`/`_build_record`/`_collect_fields` plus several
+   was `_categorize_records`/`_build_record`/`_collect_fields` plus several
    private helpers, already interleaved with anonymous-record/typedef
    handling that reads `RecordVtableIndex`) that moving both in the same
-   pass risked exactly the correctness pressure this slice's own
+   pass risked exactly the correctness pressure that slice's own
    instructions called out: vtable/RTTI layout facts feed real
    ABI-break detection (vtable slot shifts, base-class layout changes), so
    a rushed second move in the same review pass was a worse bet than a
-   clean single-backend slice plus a clearly-recorded remainder. Whichever
-   moves next (clang `records.py`, then `templates.py` on both backends)
-   should reuse `context.py`/`location.py`/`type_resolution.py` (castxml)
-   or `context.py` (clang) as-is rather than growing a second, competing
-   context shape — and, per every slice above, should read every helper's
-   *other* callers before assuming an entity-shaped name means an
-   entity-only helper;
+   clean single-backend slice plus a clearly-recorded remainder.
+
+   **A following slice moved clang's `records.py` too — investigating
+   confirmed the deferral was warranted (the interleaving was real) but
+   also that it decomposed safely once done deliberately.** Reading
+   `_ClangAstParser._build_record`/`parse_types` and everything they call
+   found a shape closer to castxml's own than the prior slice's necessarily
+   provisional read suggested: every piece of state `_build_record` touches
+   was already either (a) per-declaration (the `_Decl` entry itself), (b)
+   already a free function on `context.py` from the `functions.py` slice
+   (`access_level`/`clang_deprecated_message`/`source_location`,
+   `RecordVtableIndex.base_lookup_index()`), (c) already public on a sibling
+   flat module (`dumper_clang_vtable.build_vtable`/`is_record_definition`),
+   or (d) a record-only pure helper with exactly one caller
+   (`_clang_record_is_final`/`_bitfield_width`/`_anonymous_member_names`/
+   `_parse_bases`/`_owned_tag_id`) — no genuinely separate, entangled helper
+   cluster remained once the walk/traversal machinery (`_walk`/`_categorize`,
+   which stays in `dumper_clang.py` — it is shared by every entity kind, not
+   record-specific) was set aside. `extract/headers/clang/records.py` now
+   holds `parse_types`/`_build_record`/`_parse_fields`/`_collect_fields`/
+   `_make_field` plus those five record-only helpers, all as free functions
+   taking the categorized `_Decl` lists and — following clang's established
+   "explicit parameters, not a wrapping context object" convention — an
+   `evaluate_bitfield_int`/`field_default_value` evaluator pair for the same
+   `extract -> compare` layering reason `parse_functions`'s own
+   `default_value` and `parse_enums`'s own `evaluate_int` take one:
+   `dumper_clang._evaluated_int_value`/`_field_initializer_value` depend on
+   `dumper_clang_expr.py`, which imports `diff_cxx_rules` (classified
+   `compare`) for `itanium_scope_components`.
+
+   Two "read every helper's other callers" findings from this slice,
+   applied proactively rather than waiting for a review round to flag them
+   (per this repository's own `extract/AGENTS.md` guidance and the prior
+   castxml `is_record_definition` precedent it names): `decl_is_public` was
+   used by both record parsing (moving) and constant parsing (still in
+   `dumper_clang.py`), so it moved into `context.py` rather than living only
+   in `records.py` — clang's counterpart to castxml's own
+   `location.py::decl_is_public`, taking the three `provenance.
+   build_public_set` outputs as explicit parameters per clang's context-less
+   convention. And six `dumper_clang_qualifiers.py` helpers `records.py`
+   needs (`record_kind`, `reduce_opaque_kind_set`, `clang_record_type_traits`,
+   `clang_record_is_abstract`, `field_own_cv_source`, `desugared_qualtype`)
+   were still private (leading-underscore) with exactly one external caller
+   apiece — public-ized in place, each keeping its old private spelling as a
+   back-compat alias, rather than physically relocated (a move would have
+   split `dumper_clang_qualifiers.py`'s own documented interdependent
+   qualifier-spelling cluster for no benefit, since nothing else needs them
+   to live specifically in `records.py`).
+
+   `_ClangAstParser`'s eight matching methods/module-level functions
+   (`parse_types`, `_decl_is_public`, `_anon_typedef_names`, `_build_record`,
+   `_parse_fields`, `_collect_fields`, `_make_field`, `_clang_record_is_final`,
+   plus `_bitfield_width`/`_anonymous_member_names`/`_parse_bases`/
+   `_owned_tag_id`) are now one-line delegations, so every existing internal
+   and external caller keeps resolving unchanged; `dumper_clang.py` shrank
+   from 1496 to 1255 lines (well under its 1961-line adoption-debt baseline).
+   Verified content-preserving two ways: the `castxml or clang or dumper or
+   vtable or record`-scoped suite (3880 tests, unchanged count from the prior
+   slice) and the whole fast suite pass unchanged; a real clang header dump
+   of a multi-inheritance/virtual-method/bitfield/anonymous-aggregate/opaque
+   header (`Base1`/`Base2`/`Derived`, a bitfield, an anonymous struct member,
+   an opaque forward declaration, and a `typedef struct {...} AnonTypedef`)
+   produces byte-identical `RecordType`/`TypeField` output before and after
+   the move, and the real `integration`-marker clang suite — including every
+   vtable/RTTI case in `test_castxml_clang_parity_gate.py`/
+   `test_g23_vtable_b1.py`/`test_clang_header_backend_integration.py` and
+   every other `integration`-marked vtable/vptr/rtti/virtual/inherit test —
+   passes unchanged.
+
+   `templates.py` on both backends is the one piece of item 1 still open.
+   Whichever moves next should reuse `context.py`/`location.py`/
+   `type_resolution.py` (castxml) or `context.py` (clang) as-is rather than
+   growing a second, competing context shape — and, per every slice above,
+   should read every helper's *other* callers before assuming an
+   entity-shaped name means an entity-only helper;
 2. separate source-graph values, construction, and comparison. **Started,
    not done.** The values third moved: `abicheck/model/source_graph.py`
    now owns `SourceGraphSummary` (the ADR-031 D7 compact graph container

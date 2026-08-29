@@ -118,32 +118,25 @@ from .dumper_clang_vtable import (
     _index_template_param_defaults,
     _index_template_param_kinds,
     _index_template_param_names,
-    _is_record_definition,
     _specialization_spelling,
-    build_vtable as _build_clang_vtable,
 )
 from .errors import AstContextMissingError, SnapshotError
 from .extract.headers.clang import (
     context as _clang_context,
     enums as _clang_enums,
     functions as _clang_functions,
+    records as _clang_records,
 )
 from .model import (
     AccessLevel,
     EnumType,
-    Fact,
     Function,
     RecordType,
-    ScopeOrigin,
     TypeField,
     Variable,
     Visibility,
 )
-from .provenance import (
-    build_public_set,
-    classify_origin,
-    header_from_location,
-)
+from .provenance import build_public_set
 
 
 def _clang_available(clang_bin: str = "clang") -> bool:
@@ -501,17 +494,9 @@ def _clang_exception_spec(quals: str) -> str:
 
 
 def _clang_record_is_final(node: dict[str, Any]) -> bool:
-    """Whether a ``CXXRecordDecl`` carries the ``final`` class-virt-specifier.
-
-    Unlike castxml (which exposes ``final`` as a plain XML attribute), clang's
-    ``-ast-dump=json`` signals it as a child ``FinalAttr`` node under
-    ``"inner"`` rather than a boolean field on the record itself — there is no
-    ``node["final"]`` key to read.
-    """
-    return any(
-        isinstance(child, dict) and child.get("kind") == "FinalAttr"
-        for child in node.get("inner", []) or []
-    )
+    """See ``extract.headers.clang.records._clang_record_is_final`` (the
+    canonical implementation this delegates to) for the full contract."""
+    return _clang_records._clang_record_is_final(node)
 
 
 def _clang_deprecated_message(node: dict[str, Any]) -> str | None:
@@ -993,72 +978,38 @@ class _ClangAstParser:
         return out
 
     def _decl_is_public(self, entry: _Decl) -> bool:
-        sh = header_from_location(self._source_location(entry))
-        if not sh:
-            return False
-        return (
-            classify_origin(
-                sh,
-                self._pub_header_segs,
-                self._pub_dir_segs,
-                have_public_set=self._have_public_set,
-            )
-            == ScopeOrigin.PUBLIC_HEADER
+        """See ``extract.headers.clang.context.decl_is_public`` (the
+        canonical implementation this delegates to) for the full contract."""
+        return _clang_context.decl_is_public(
+            entry, self._pub_header_segs, self._pub_dir_segs, self._have_public_set
         )
 
     def parse_types(self) -> list[RecordType]:
-        anon_names = self._anon_typedef_names()
-        best: dict[str, tuple[_Decl, str]] = {}
-        order: list[str] = []
-        deprecated: dict[str, str] = {}
-        opaque_kind_sets: dict[str, set[str]] = {}  # raw kinds of non-def redecls
-        for entry in self._records:
-            node = entry.node
-            if _is_builtin_file(entry.file):
-                continue
-            name = str(node.get("name", ""))
-            if not name:
-                name = anon_names.get(str(node.get("id", "")), "")
-                if not name:
-                    continue  # a truly anonymous record (e.g. an inline union member)
-            if name.startswith("__"):
-                continue
-            identity = "::".join([*entry.scope, name]) if entry.scope else name
-            if (msg := _clang_deprecated_message(node)) is not None:  # most recent wins
-                deprecated[identity] = msg
-            if not (node_is_def := _is_record_definition(node)):
-                opaque_kind_sets.setdefault(identity, set()).add(_record_kind(node))
-            if (existing := best.get(identity)) is None:
-                best[identity] = (entry, name)
-                order.append(identity)
-                continue
-            if _is_record_definition(existing[0].node):
-                continue
-            node_pub = self._decl_is_public(entry)
-            if node_is_def or (node_pub and not self._decl_is_public(existing[0])):
-                best[identity] = (entry, name)
-        return [
-            self._build_record(
-                (rec := best[identity])[0],
-                override_name=rec[1],
-                is_opaque=not _is_record_definition(rec[0].node),
-                dep_msg=deprecated.get(identity),
-                override_kind=_reduce_opaque_kind_set(opaque_kind_sets.get(identity)),
-            )
-            for identity in order
-        ]
+        """See ``extract.headers.clang.records.parse_types`` (the canonical
+        implementation this delegates to) for the full contract.
+
+        ``evaluate_bitfield_int``/``field_default_value`` are passed as
+        bound-method/module-function references for the same reason
+        ``parse_functions``'s own ``default_value`` is: the real evaluators
+        live in ``dumper_clang_expr.py``, which imports ``diff_cxx_rules``
+        and so cannot be imported from the ``extract``-classified
+        ``records.py`` module directly.
+        """
+        return _clang_records.parse_types(
+            self._records,
+            self._typedefs,
+            pub_header_segs=self._pub_header_segs,
+            pub_dir_segs=self._pub_dir_segs,
+            have_public_set=self._have_public_set,
+            base_lookup_index=self._base_lookup_index(),
+            evaluate_bitfield_int=_evaluated_int_value,
+            field_default_value=lambda p: _field_initializer_value(p, self._id_index),
+        )
 
     def _anon_typedef_names(self) -> dict[str, str]:
-        """``{anonymous-record-id: typedef-name}`` from the collected typedefs."""
-        out: dict[str, str] = {}
-        for entry in self._typedefs:
-            tname = str(entry.node.get("name", ""))
-            if not tname:
-                continue
-            rid = _owned_tag_id(entry.node)
-            if rid:
-                out.setdefault(rid, tname)
-        return out
+        """See ``extract.headers.clang.records._anon_typedef_names`` (the
+        canonical implementation this delegates to) for the full contract."""
+        return _clang_records._anon_typedef_names(self._typedefs)
 
     def _build_record(
         self,
@@ -1068,125 +1019,27 @@ class _ClangAstParser:
         dep_msg: str | None = None,
         override_kind: str | None = None,
     ) -> RecordType:
-        node = entry.node
-        kind = override_kind if is_opaque and override_kind else _record_kind(node)
-        own_name = override_name or str(node.get("name", ""))
-        deprecated = dep_msg if dep_msg is not None else _clang_deprecated_message(node)
-        if is_opaque:
-            # Mirrors dumper_castxml.py's `incomplete="1"` branch.
-            return RecordType(
-                name=own_name,
-                kind=kind,
-                qualified_name=(
-                    "::".join([*entry.scope, own_name]) if entry.scope else None
-                ),
-                size_bits=None,
-                alignment_bits=None,
-                fields=[],
-                bases=[],
-                virtual_bases=[],
-                vtable=[],
-                vptr_offset_bits=None,
-                is_union=kind == "union",
-                is_opaque=is_opaque,
-                is_final=_clang_record_is_final(node),
-                is_standard_layout=None,
-                is_trivially_copyable=None,
-                is_template_pattern=entry.in_template,
-                has_anonymous_aggregate_fields=False,
-                source_location=self._source_location(entry),
-                deprecated=deprecated,
-                # Empty lists are the parse's own answer -- matches dumper_castxml.py's opaque-record Fact stance.
-                bases_fact=Fact.present([]),
-                virtual_bases_fact=Fact.present([]),
-                vtable_fact=Fact.present([]),
-                vptr_offset_bits_fact=Fact.partial(
-                    None
-                ),  # heuristic field (see below), partial even here
-            )
-        fields = self._parse_fields(node)
-        bases, virtual_bases, _base_access = _parse_bases(node)
-        injected = _anonymous_member_names(node)
-        is_standard_layout, is_trivially_copyable = _clang_record_type_traits(node)
-        # G31 Phase C: reconstruct the vtable (and, from it, the same
-        # 0-if-polymorphic vptr_offset_bits heuristic castxml already uses)
-        # via dumper_clang_vtable's own signature-matching walk -- see that
-        # module's docstring for why this can't be a simple `node.get
-        # ("virtual")` check the way castxml's real semantic analysis allows.
-        # Keyed by the SAME qualname _base_qualnames'/_record_index's own
-        # lookups use, not `qualified_name` (which is None for a top-level
-        # record) -- an anonymous-record's `override_name` never appears in
-        # a `bases` array, so using it here (rather than the node's own bare
-        # "") is what lets it still resolve if ever referenced as a base.
-        own_qualname = "::".join([*entry.scope, own_name]) if entry.scope else own_name
-        vtable = _build_clang_vtable(own_qualname, self._base_lookup_index())
-        return RecordType(
-            name=own_name,
-            kind=kind,
-            # Namespace/enclosing-class-qualified spelling, set only when it
-            # actually differs from the bare name (mirrors castxml's own
-            # RecordType.qualified_name convention) -- without this, ANY
-            # namespaced/nested clang-parsed type had qualified_name=None, so
-            # a lookup keyed on the tool's own fully-qualified
-            # getQualifiedNameAsString() spelling (e.g. "ns::Foo") fell back
-            # to the bare "Foo" and never matched (Codex review, G28 Phase 4).
-            qualified_name=(
-                "::".join([*entry.scope, own_name]) if entry.scope else None
-            ),
-            # clang's JSON AST does not compute layout — size/align/offsets are
-            # left None so the layout detectors skip an unknown-vs-unknown
-            # comparison (DWARF remains the layout authority on this host).
-            size_bits=None,
-            alignment_bits=None,
-            fields=fields,
-            bases=bases,
-            virtual_bases=virtual_bases,
-            vtable=vtable,
-            # Same convention as dumper_castxml.py: polymorphic (non-empty
-            # vtable) -> vtable pointer at offset 0 (the Itanium ABI's
-            # primary-base-at-offset-0 rule); None (unknown) otherwise. Real
-            # multi-inheritance secondary-vtable placement is still not
-            # tracked by either backend -- see the G31 plan doc.
-            vptr_offset_bits=0 if vtable else None,
-            is_union=kind == "union",
+        """See ``extract.headers.clang.records._build_record`` (the
+        canonical implementation this delegates to) for the full contract."""
+        return _clang_records._build_record(
+            entry,
+            self._base_lookup_index(),
+            _evaluated_int_value,
+            lambda p: _field_initializer_value(p, self._id_index),
+            override_name=override_name,
             is_opaque=is_opaque,
-            is_final=_clang_record_is_final(node),
-            # G31 Phase C: unlike layout (size/align/offsets), these are
-            # semantic type traits clang's AST computes independent of any
-            # layout pass, and are genuinely absent from CastXML's own schema
-            # (see dumper_castxml.py's own is_standard_layout/
-            # is_trivially_copyable comment) — the direct-clang backend is
-            # the one place these can actually be populated.
-            is_standard_layout=is_standard_layout,
-            is_trivially_copyable=is_trivially_copyable,
-            is_template_pattern=entry.in_template,
-            # True only when *every* field came from the anonymous-aggregate
-            # flatten, not merely "at least one did" (Codex review): a mixed
-            # record like `struct Foo { union { int i; }; int tag; };` would
-            # otherwise report the flag for `tag` too, letting the DWARF
-            # layout-backfill exact-match branch trust an unrelated empty
-            # DWARF candidate for a field (`tag`) the flag was never meant to
-            # vouch for.
-            has_anonymous_aggregate_fields=bool(injected)
-            and all(f.name in injected for f in fields),
-            source_location=self._source_location(entry),
-            deprecated=deprecated,
-            # G31 Phase C backend audit -- see _clang_record_is_abstract.
-            is_abstract=_clang_record_is_abstract(node),
-            # Stated explicitly -- this parse genuinely resolved these. vptr_offset_bits_fact is `partial`, not `present`: 0-if-vtable-else-None is the Itanium primary-base heuristic, not a real offset read (matches vptr_offset_bits's own PARTIAL row).
-            bases_fact=Fact.present(bases),
-            virtual_bases_fact=Fact.present(virtual_bases),
-            vtable_fact=Fact.present(vtable),
-            vptr_offset_bits_fact=Fact.partial(0 if vtable else None),
+            dep_msg=dep_msg,
+            override_kind=override_kind,
         )
 
     def _parse_fields(self, node: dict[str, Any]) -> list[TypeField]:
-        # Members injected from an anonymous struct/union are referenced by
-        # ``IndirectFieldDecl`` siblings; collect their names so the anonymous
-        # record's FieldDecls can be flattened up into this record (and so a
-        # typedef'd anonymous record, which has no IndirectFieldDecl, is not).
-        injected = _anonymous_member_names(node)
-        return self._collect_fields(node, _default_record_access(node), injected)
+        """See ``extract.headers.clang.records._parse_fields`` (the
+        canonical implementation this delegates to) for the full contract."""
+        return _clang_records._parse_fields(
+            node,
+            _evaluated_int_value,
+            lambda p: _field_initializer_value(p, self._id_index),
+        )
 
     def _collect_fields(
         self,
@@ -1196,68 +1049,25 @@ class _ClangAstParser:
         *,
         nested: bool = False,
     ) -> list[TypeField]:
-        fields: list[TypeField] = []
-        for child in node.get("inner", []) or []:
-            if not isinstance(child, dict):
-                continue
-            kind = child.get("kind")
-            if kind == "AccessSpecDecl":
-                running = child.get("access", running)
-                continue
-            if kind in ("RecordDecl", "CXXRecordDecl") and not child.get("name"):
-                # Anonymous struct/union member: its public members live directly
-                # in the enclosing record's namespace, so flatten them here. Keep
-                # only the injected names to avoid pulling in a typedef'd
-                # anonymous record's fields.
-                fields.extend(
-                    self._collect_fields(child, running, injected, nested=True)
-                )
-                continue
-            if kind != "FieldDecl":
-                continue
-            fname = str(child.get("name", ""))
-            if not fname:
-                continue
-            if nested and fname not in injected:
-                # A nested unnamed record contributes only the members that an
-                # IndirectFieldDecl injected (anonymous aggregate); a typedef'd
-                # anonymous record injects nothing, so its fields are dropped.
-                continue
-            fields.append(self._make_field(child, child.get("access", running)))
-        return fields
+        """See ``extract.headers.clang.records._collect_fields`` (the
+        canonical implementation this delegates to) for the full contract."""
+        return _clang_records._collect_fields(
+            node,
+            running,
+            injected,
+            _evaluated_int_value,
+            lambda p: _field_initializer_value(p, self._id_index),
+            nested=nested,
+        )
 
     def _make_field(self, child: dict[str, Any], access: str) -> TypeField:
-        ftype = _qualtype(child)
-        cv_type = _field_own_cv_source(_desugared_qualtype(child))
-        bits, is_bitfield = _bitfield_width(child)
-        return TypeField(
-            name=str(child.get("name", "")),
-            type=ftype,
-            offset_bits=None,
-            is_bitfield=is_bitfield,
-            bitfield_bits=bits,
-            is_const=bool(re.search(r"\bconst\b", cv_type)),
-            is_volatile=bool(re.search(r"\bvolatile\b", cv_type)),
-            is_mutable=bool(child.get("mutable")),
-            access=self._access_level(access),
-            # self._id_index (uncalled -- a bound-method reference, matching
-            # _IdIndexProvider's lazy contract) is only actually invoked deep
-            # inside _canonical_expr, and only for a real referencedDecl --
-            # never for an ordinary literal default or a field with no
-            # initializer at all (Codex review, two rounds: passing the
-            # CALLED self._id_index() built the whole-AST index eagerly for
-            # every field regardless; gating only on hasInClassInitializer
-            # still left every LITERAL default, e.g. `int timeout = 30;`,
-            # paying for it too, since that never reaches the referencedDecl
-            # branch either). The hasInClassInitializer ternary itself stays,
-            # to skip the function call entirely for a field with no
-            # initializer.
-            default=(
-                _field_initializer_value(child, self._id_index)
-                if child.get("hasInClassInitializer")
-                else None
-            ),
-            deprecated=_clang_deprecated_message(child),
+        """See ``extract.headers.clang.records._make_field`` (the canonical
+        implementation this delegates to) for the full contract."""
+        return _clang_records._make_field(
+            child,
+            access,
+            _evaluated_int_value,
+            lambda p: _field_initializer_value(p, self._id_index),
         )
 
     def parse_enums(self) -> list[EnumType]:
@@ -1407,54 +1217,21 @@ def _evaluated_int_value(node: dict[str, Any]) -> int | None:
 
 
 def _bitfield_width(field: dict[str, Any]) -> tuple[int | None, bool]:
-    """``(width, is_bitfield)`` for a ``FieldDecl`` (width from its inner expr)."""
-    if not field.get("isBitfield"):
-        return None, False
-    for child in field.get("inner", []) or []:
-        if isinstance(child, dict):
-            return _evaluated_int_value(child), True
-    return None, True
+    """See ``extract.headers.clang.records._bitfield_width`` (the canonical
+    implementation this delegates to) for the full contract."""
+    return _clang_records._bitfield_width(field, _evaluated_int_value)
 
 
 def _anonymous_member_names(node: dict[str, Any]) -> set[str]:
-    """Names injected into *node* from anonymous struct/union members.
-
-    clang emits an ``IndirectFieldDecl`` for every member that an anonymous
-    aggregate injects into its enclosing record; their names mark exactly which
-    of the anonymous record's fields belong to this record's surface.
-    """
-    names: set[str] = set()
-    for child in node.get("inner", []) or []:
-        if isinstance(child, dict) and child.get("kind") == "IndirectFieldDecl":
-            name = child.get("name")
-            if name:
-                names.add(str(name))
-    return names
+    """See ``extract.headers.clang.records._anonymous_member_names`` (the
+    canonical implementation this delegates to) for the full contract."""
+    return _clang_records._anonymous_member_names(node)
 
 
 def _parse_bases(node: dict[str, Any]) -> tuple[list[str], list[str], dict[str, str]]:
-    """Direct base names, virtual base names, and base→access from a record node.
-
-    clang emits base specifiers as a ``bases`` array on the ``CXXRecordDecl``
-    definition; each entry carries the base ``type.qualType``, its ``access``,
-    and an ``isVirtual`` flag. Absent on a non-polymorphic C ``RecordDecl``.
-    """
-    bases: list[str] = []
-    virtual_bases: list[str] = []
-    access: dict[str, str] = {}
-    for b in node.get("bases", []) or []:
-        if not isinstance(b, dict):
-            continue
-        type_obj = b.get("type")
-        bname = str(type_obj.get("qualType", "")) if isinstance(type_obj, dict) else ""
-        if not bname:
-            continue
-        if b.get("isVirtual"):
-            virtual_bases.append(bname)
-        else:
-            bases.append(bname)
-        access[bname] = str(b.get("access", "public"))
-    return bases, virtual_bases, access
+    """See ``extract.headers.clang.records._parse_bases`` (the canonical
+    implementation this delegates to) for the full contract."""
+    return _clang_records._parse_bases(node)
 
 
 # ``_enum_underlying``/``_enum_constant_value`` moved to
@@ -1465,27 +1242,9 @@ _enum_constant_value = _clang_enums._enum_constant_value
 
 
 def _owned_tag_id(typedef_node: dict[str, Any]) -> str:
-    """The clang id of an anonymous tag a typedef *owns*, or ``""``.
-
-    For ``typedef struct {…} Foo;`` clang nests an ``ElaboratedType`` under the
-    ``TypedefDecl`` whose ``ownedTagDecl`` points at the unnamed ``RecordDecl``
-    that holds the fields. Returns that record's ``id`` so parse_types can emit
-    the otherwise-anonymous record under the typedef name.
-    """
-
-    def _scan(node: Any) -> str:
-        if not isinstance(node, dict):
-            return ""
-        owned = node.get("ownedTagDecl")
-        if isinstance(owned, dict) and isinstance(owned.get("id"), str):
-            return str(owned["id"])
-        for child in node.get("inner", []) or []:
-            found = _scan(child)
-            if found:
-                return found
-        return ""
-
-    return _scan(typedef_node)
+    """See ``extract.headers.clang.records._owned_tag_id`` (the canonical
+    implementation this delegates to) for the full contract."""
+    return _clang_records._owned_tag_id(typedef_node)
 
 
 def _typedef_underlying(node: dict[str, Any]) -> str:
