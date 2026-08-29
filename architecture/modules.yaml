@@ -110,6 +110,7 @@
         "abicheck/dumper_clang.py",
         "abicheck/dumper_clang_attributes.py",
         "abicheck/dumper_clang_errors.py",
+        "abicheck/dumper_clang_expr.py",
         "abicheck/dumper_clang_qualifiers.py",
         "abicheck/dumper_clang_streaming.py",
         "abicheck/dumper_clang_vtable.py",
