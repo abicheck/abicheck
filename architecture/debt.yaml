@@ -934,11 +934,11 @@
     {
       "path": "abicheck/policy_file.py",
       "baseline_lines": 990,
-      "target": "see ADR-061 ownership map",
+      "target": "policy (blocked)",
       "rule": "no_growth",
       "category": "legacy_oversized_module",
       "owner": "abicheck maintainers",
-      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice.",
+      "rationale": "Classifying this `policy` (measured directly by adding it to architecture/modules.yaml's policy layer and running scripts/check_architecture.py) surfaces a real `model -> policy` edge: checker_types.py (model-classified) imports PolicyFile for DiffResult.policy_file's field type, and its resolution methods depend on ChangeKind/ReclassifyRule. This is ADR-061 Phase 2/4's own recorded 'compare<->policy' design tension -- resolving it needs a model-owned Protocol/facts split for PolicyFile, ChangeKind, and ReclassifyRule that DiffResult's public breaking/source_breaks/compatible/risk properties rest on, which the ADR deliberately defers as a breaking-Python-API-surface decision for a maintainer, not a routine move.",
       "review_by": "2026-11-30"
     },
     {
@@ -1034,21 +1034,21 @@
     {
       "path": "abicheck/serialization.py",
       "baseline_lines": 1985,
-      "target": "storage",
+      "target": "storage (blocked, deeper than expected)",
       "rule": "no_growth",
       "category": "legacy_storage_monolith",
       "owner": "abicheck maintainers",
-      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice.",
+      "rationale": "Classifying this `storage` (measured directly) surfaces 72 findings, not a handful: this module itself reaches into extract, compare, and workflows content (dozens of sites) that storage's `may_import: [model]` forbids, plus real `frontends -> storage`/`compare -> storage` edges at cli_buildsource.py, cli_buildsource_merge.py, cli_compare_release_helpers.py, compat/cli.py, and probe_harness.py. The `storage` target this entry previously named understated the work: this is a dataclass/parser-shaped split (like the *_metadata.py precedent in ADR-061 Phase 4/5), not a routine reclassification, and is real, not-yet-scoped follow-up work rather than something to force through opportunistically.",
       "review_by": "2026-11-30"
     },
     {
       "path": "abicheck/service.py",
-      "baseline_lines": 873,
-      "target": "workflows-or-frontends",
+      "baseline_lines": 886,
+      "target": "workflows-or-frontends (genuinely undecided, not just unmeasured)",
       "rule": "no_growth",
       "category": "legacy_workflow_or_frontend_monolith",
       "owner": "abicheck maintainers",
-      "rationale": "Existing implementation predates ADR-061. The dump-orchestration block (run_dump/_dump_elf/_dump_pe/_dump_macho and siblings) was split out to service_dump_native.py/service_dump_native_pe.py, shrinking this file from 1763 to 873 lines; the remaining input-resolution/compare-wrapper/policy-loading content and the many re-export blocks still predate ADR-061 and cannot move safely without a further behavior-preserving vertical slice.",
+      "rationale": "Re-measured for ADR-061 Phase 4 (service.py thinning slice): already classified `workflows` in architecture/modules.yaml's legacy_paths, and its own AST-scanned first-party import list is down to 9 unclassified targets today (compat.abicc_dump_import, policy_file, serialization, service_dump_cache, service_header_graph_attach, service_render, snapshot_io, suppression) -- far fewer than the ~24 an earlier ADR-061 revision recorded, since Phase 3's pipeline extraction already gave most of service.py's old content workflows-classified homes. service_dump_cache.py and service_header_graph_attach.py were classified `workflows` in this pass (verified 0 architecture errors) -- both are single-importer leaves with no forbidden edges. The other six each hit a real, individually measured blocker: policy_file.py and suppression.py are `policy`-shaped but blocked (see their own debt entries and ADR-061 Phase 2/4's 'compare<->policy' design tension); snapshot_io.py/serialization.py are `storage`-shaped but blocked by real frontends/compare/extract edges (see their own debt entries); service_render.py cannot cleanly join `workflows` at all -- it imports reporter.py/sarif.py (`report`-classified), and `workflows -> report` is forbidden (report depends on workflows, not the reverse), which is exactly why this entry's target says workflows-or-frontends rather than picking one: service.py's own resolve_input/compare_snapshots half needs extract/compare/policy (workflows-shaped) while its render_output half needs report (frontends-shaped), and no single layer admits both without a further split. Physically relocating service.py into either package remains unsafe until that split (or the policy_file/suppression/snapshot_io/serialization reroutes) lands.",
       "review_by": "2026-11-30"
     },
     {
@@ -1064,11 +1064,11 @@
     {
       "path": "abicheck/snapshot_io.py",
       "baseline_lines": 1042,
-      "target": "storage",
+      "target": "storage (blocked)",
       "rule": "no_growth",
       "category": "legacy_storage_monolith",
       "owner": "abicheck maintainers",
-      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice.",
+      "rationale": "Classifying this `storage` (measured directly by adding it to architecture/modules.yaml's storage layer and running scripts/check_architecture.py) surfaces real `frontends -> storage` edges at cli_dump_helpers.py, cli_helpers_compare.py, cli_resolve.py, and compat/cli.py, which import its compression/sniffing helpers directly rather than through a workflows re-export -- the same shape service.py's own compare_snapshots/resolve_input already route through correctly. Needs those four frontends call sites rerouted through a workflows-owned facade before this classification is safe; not attempted here to avoid unreviewed scope creep beyond the abicheck/service.py thinning slice this entry's rationale was last updated for.",
       "review_by": "2026-11-30"
     },
     {
@@ -1084,11 +1084,11 @@
     {
       "path": "abicheck/suppression.py",
       "baseline_lines": 1993,
-      "target": "see ADR-061 ownership map",
+      "target": "policy (blocked)",
       "rule": "no_growth",
       "category": "legacy_oversized_module",
       "owner": "abicheck maintainers",
-      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice.",
+      "rationale": "Classifying this `policy` (measured directly by adding it to architecture/modules.yaml's policy layer and running scripts/check_architecture.py) surfaces a real `frontends -> policy` edge at cli_params.py:27,383 and cli_scan_baseline.py:52, which import SuppressionList directly rather than through a workflows re-export -- the same shape service.py's own load_suppression_and_policy already routes through correctly. Needs those two frontends call sites rerouted through a workflows-owned facade before this classification is safe; not attempted here to avoid unreviewed scope creep beyond the abicheck/service.py thinning slice this entry's rationale was last updated for.",
       "review_by": "2026-11-30"
     },
     {

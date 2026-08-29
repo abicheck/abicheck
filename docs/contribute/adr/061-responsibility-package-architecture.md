@@ -1639,6 +1639,114 @@ to be re-measured (`python scripts/check_architecture.py` against a
 temporary classification, the same method used throughout) rather than
 trusted verbatim by whoever picks this up next.
 
+**Re-measured again for the `service.py`-thinning slice, following exactly
+that instruction, and the "two dozen" figure has since narrowed on its own.**
+`service.py` is 886 lines today (up slightly from the 873 recorded above —
+still `no_growth`-tracked, diff-scoped against the branch base, not the
+absolute figure). A fresh AST scan of its first-party imports (the same
+method, corrected for the bare-`from . import X` and dynamic-`importlib`
+gaps this section's own history already found) lists only **9** unclassified
+targets, not ~24: `compat.abicc_dump_import`, `policy_file`, `serialization`,
+`service_dump_cache`, `service_header_graph_attach`, `service_render`,
+`snapshot_io`, `suppression`, plus `dumper_cache` (already known, line 658,
+via the same dynamic-import path this section previously flagged). The drop
+is real, not a re-measurement artifact: Phase 3's pipeline extraction gave
+most of `service.py`'s old direct parser/dumper imports `workflows`-owned
+siblings (`service_dump_native.py`, `service_compare_pipeline.py`,
+`service_dump_pipeline.py`, `service_scan.py`) that `service.py` now imports
+instead of the flat parsers themselves.
+
+Two of the nine were genuinely safe to classify and were, in this pass:
+`service_dump_cache.py` and `service_header_graph_attach.py` are each
+imported by exactly one or two already-`workflows` modules
+(`service.py`/`service_dump_native.py`), reach nothing outside
+`model`/`compare`-classified leaves or already-unclassified siblings, and
+`python scripts/check_architecture.py` reports zero findings with both added
+to `workflows`'s `legacy_paths` — verified, not assumed, the same way every
+classification in this document is meant to be. Both are now `workflows` in
+`architecture/modules.yaml`.
+
+The other seven were each measured individually (add the candidate
+classification, run the checker, read the real output) rather than grouped,
+because grouping is exactly what produced this section's earlier "67", "two
+dozen", and "three sites" overclaims:
+
+- **`policy_file.py` -> `policy`**: blocked by the identical `model -> policy`
+  edge this whole section already spent nine paragraphs on — `checker_types.py`
+  imports `PolicyFile` for `DiffResult.policy_file`'s field type. Not a new
+  finding, just today's confirmation that the standing blocker still applies
+  unchanged; see `architecture/debt.yaml`'s own entry for this file for the
+  measured rationale.
+- **`suppression.py` -> `policy`**: a *different*, smaller, previously
+  unrecorded blocker — a real `frontends -> policy` edge at
+  `cli_params.py:27,383` and `cli_scan_baseline.py:52`, which import
+  `SuppressionList` directly rather than through a `workflows` re-export
+  (the shape `service.py`'s own `load_suppression_and_policy` already gets
+  right). Two files, three sites — mechanically fixable by rerouting those
+  call sites through a `workflows`-owned facade, but that reroute is its own
+  reviewed slice, not a drive-by inside this one.
+- **`snapshot_io.py` -> `storage`**: the same shape as `suppression.py`,
+  independently measured — a real `frontends -> storage` edge at
+  `cli_dump_helpers.py`, `cli_helpers_compare.py`, `cli_resolve.py`, and
+  `compat/cli.py`, all importing its compression/sniffing helpers directly.
+  `classify.py` and `package.py` also import it, but both are `extract`-
+  classified and `extract -> storage` is allowed, so they are not part of
+  the blocker (a plausible-looking `model -> storage` concern from an earlier
+  pass turned out to rest on misclassifying `classify.py` as `model`; it is
+  actually `extract`, checked directly against `architecture/modules.yaml`
+  rather than assumed).
+- **`serialization.py` -> `storage`**: measured and found to be **worse**
+  than the debt ledger's existing `storage` target implied — 72 findings, not
+  a handful, because the module's own body reaches into `extract`/`compare`/
+  `workflows` content at dozens of sites that `storage`'s `may_import:
+  [model]` forbids, on top of the same `frontends -> storage` shape the two
+  entries above show. This is a dataclass/parser-shaped split the size of
+  Phase 5's `*_metadata.py` work, not a reclassification — see the updated
+  `architecture/debt.yaml` entry.
+- **`compat.abicc_dump_import` -> `extract`**: blocked by a real
+  `frontends -> extract` edge at `cli_resolve.py:38` and `compat/cli.py:75`,
+  both importing it directly rather than through a `workflows` re-export.
+  `classify.py` also imports it function-locally, but `classify.py` is
+  itself `extract`-classified, so that particular edge is `extract ->
+  extract` and fires nothing — the two `frontends` sites are the whole
+  blocker here, not a third site hiding behind physical-location exemptions.
+- **`service_render.py` -> `workflows`**: this is the one finding that
+  reframes the whole entry, not just adds to it. `service_render.py` imports
+  `reporter.py`/`sarif.py` — both `report`-classified — and `workflows ->
+  report` is forbidden by design (`report` depends on `workflows`, not the
+  reverse; letting it go the other way would make the two mutually
+  dependent). So `service_render.py`, and by extension the `render_output`
+  half of `service.py`'s own public surface, cannot join `workflows` at all;
+  it is `report`-shaped, or `frontends`-shaped (the way `cli.py`'s own
+  render/exit-decision logic already lives in `frontends/cli/runtime.py`),
+  never `workflows`-shaped.
+
+**That last finding is the actual answer to this document's own open
+question about `service.py`'s target layer, not a new blocker to add to
+the list.** `debt.yaml`'s "workflows-or-frontends" target was recorded as an
+open choice; today's measurement shows it is not a choice between two
+layers for one file so much as a split waiting to happen: `resolve_input`/
+`compare_snapshots`/`load_suppression_and_policy`/`collect_metadata` need
+`extract`/`compare`/`policy` (`workflows`-shaped, exactly where `service.py`
+sits today), while `render_output` needs `report` (`frontends`-shaped,
+exactly where `cli.py`'s own equivalent rendering glue already moved in
+this same Phase). A single-layer classification of `service.py` as a whole
+will keep failing this way no matter which of the two is picked, for the
+same structural reason `*_metadata.py` kept failing a single-layer
+classification until it was split into a model half and an extract half.
+The mechanical next step this measurement points at — once someone signs
+off on it — is: keep `resolve_input`/`compare_snapshots`/dump-orchestration
+re-exports as the `workflows`-classified core (already the case), and give
+`render_output`/`_render_json_output`/`_render_deps_section_md` their own
+`frontends`-classified home (a `frontends/cli/rendering.py` or similar),
+re-exported from `service.py` exactly as `__all__` already promises callers
+today — the identical "facade re-exports, physical ownership moves"
+pattern `cli.py`'s own transformation in this same phase already used. Not
+attempted in this pass: it is a real, reviewable move in its own right
+(`render_output`'s public signature and every caller's patch target need
+checking, the same care `cli.py`'s own split took), not a mechanical
+consequence of anything else in this slice.
+
 1. Move command input translation into `frontends/cli/commands` and reusable
    Click-only option declaration into `frontends/cli/options`.
 2. Make workflows the sole operation owners and reports the sole rendering

@@ -41,7 +41,11 @@ import pytest
 from abicheck.checker import Change, ChangeKind, DiffResult, Verdict
 from abicheck.html_report import generate_html_report
 from abicheck.policy.gate_decision import gate_decision_for_result
-from abicheck.policy.severity import SeverityConfig, SeverityLevel, resolve_severity_config
+from abicheck.policy.severity import (
+    SeverityConfig,
+    SeverityLevel,
+    resolve_severity_config,
+)
 from abicheck.reporter import to_json
 from abicheck.sarif import to_sarif_str
 
