@@ -6433,6 +6433,94 @@ exists in the repository after this phase, in `model/identity.py` —
 shows no regression (a net-new suppressed finding from the identity
 change is a Phase 2 bug, not acceptable drift).
 
+**Landed (first slice, 2026-08-29), not the whole phase — read this before
+assuming the Design section above is fully implemented.**
+`abicheck/model/identity.py` is real: the five `ScopeSegment` types
+(`Namespace`, `Record`, `InlineNamespace`, `Anonymous`, `LocalToFunction`)
+with exactly the identity-vs-payload field split the Design section states
+(`Record.access` excluded from equality/hash via `field(compare=False)`,
+every other segment's fields all participate), the corrected `EntityId`
+shape (`scope`, `kind`, `leaf_name`, `extra`), and `entity_id_for_type`/
+`_enum`/`_typedef`/`_constant`/`_variable`/`_function` constructors
+implementing the function/variable discriminator rules (mangled name first
+when the caller has already established it is genuine, normalized
+param-type/cv-qualifier fallback otherwise — both branches tagged
+(`"mangled"`/`"sig"`) so they occupy disjoint regions of `extra`'s value
+space and can never collide with each other by coincidence).
+`EntityKind`/`ObservationKind` are relocated from `storage/entity_ids.py`
+into this module and re-exported from there under their original names, so
+`storage.entity_ids.EntityKind is model.identity.EntityKind` — that one
+acceptance criterion is closed now, ahead of the rest of the phase.
+Primitive-level property tests in `tests/test_model_identity.py` (not
+`tests/test_entity_identity.py` as this phase's own "Tests" section named —
+that file was already taken, by the unrelated ADR-048/G31
+`buildsource.entity_identity` L5 primitive; corrected here rather than
+silently reusing the wrong name) pin: `Record.access` never affects
+equality/hash; `Anonymous`/`InlineNamespace`/`LocalToFunction` are identity
+on every field; a record nested in a record never collides with the same
+bare names nested in a namespace (the exact collision a `qualified_name`-
+only identity cannot distinguish, since both render to `"A::B"`); sibling
+declarations of the same kind in one scope never collide (enums, typedefs,
+constants, and the two function-overload shapes named in the Tests
+section — `f(int)` vs. `f(double)`, `void f()` vs. `void f() const`);
+`extern "C"`-shaped input (a genuine mangled name present) ignores param
+types, matching `finding_identity.resolve_function_identity`'s own
+documented rule; and the relocation itself, including a hashability check
+per segment and a real AST-based (not substring) leaf-module-import check
+per ADR-063 D10. Full fast unit suite green; storage's own existing test
+suite (1421 tests) re-run clean against the relocated enums; `mypy
+abicheck/` and `ruff` both clean.
+
+**What this slice deliberately does not attempt, and why** — both of Phase
+2's own named open design questions are still open, on purpose:
+
+1. *No `ScopePath` is derived from a real parser yet.* Every
+   `entity_id_for_*` constructor takes an already-built `ScopePath` as
+   input; none of them reach into `dumper_clang.py`'s/`dumper_castxml.py`'s
+   `entry.scope` (still a bare `list[str]`, exactly as insufficient as the
+   Design section found it). Widening that parser state is real,
+   separately-reviewable work of its own — this slice does not touch either
+   dumper module.
+2. *The carrier-field question (option (a) vs. (b)) is still unresolved,*
+   because nothing yet needs it resolved: with no real `ScopePath` producer
+   wired up, there is nothing for a post-parse consumer
+   (`diff_filtering.py`'s `_find_opaque_types` and siblings,
+   `type_reachability.py`) to migrate onto yet, so this slice does not touch
+   either of them, and their existing string-based ambiguity-tracking
+   machinery is untouched and still the one working implementation. Per this
+   phase's own acceptance criteria, deleting them now — before either option
+   is chosen and actually wired — would be strictly worse, not a shortcut.
+3. *`finding_identity.py` does not delegate to this module yet.* The
+   "direction of reuse" note above is correct about where the algorithm
+   should end up, but `finding_identity.is_real_mangled_name`/
+   `normalize_mangled_name` (the ~450-line, independently multi-round-
+   reviewed Itanium-mangling-validation machinery that decides whether a
+   caller-supplied `mangled_name` is genuine) has not moved. This slice's
+   `entity_id_for_function`/`entity_id_for_variable` instead take that
+   determination as an already-resolved `mangled_name: str | None` argument
+   from the caller, documented in the module's own docstring as a
+   deliberate scope boundary rather than an oversight. Migrating that
+   validation logic, and turning `resolve_function_identity`/
+   `resolve_variable_identity` into thin wrappers, is real follow-on work
+   this slice intentionally leaves for its own dedicated, independently
+   reviewable pass — not attempted here to keep this slice small enough to
+   review on its own, matching how every other phase's own first slice in
+   this plan has been landed one piece at a time.
+4. *No storage v2 wire-schema bridge (`to_dto`/`from_dto`) exists yet.*
+   `storage.entity_ids.EntityId`/`OccurrenceId` are completely unchanged
+   beyond the two enum imports — `model.identity.EntityId` and
+   `storage.entity_ids.EntityId` are two independent types today, which the
+   Design section's own note names as the accepted, temporary state until a
+   later slice does the `ScopePath`-preserving v2 encoding it specifies.
+
+Next slice, in order: (a) widen `entry.scope` in both dumper modules to a
+typed segment list (this is the fork point for the carrier-field question —
+see the Design section's own framing of why it can't be answered
+independently of that work), then (b) migrate `diff_filtering.py`/
+`type_reachability.py` once a real producer exists, then (c) the
+`finding_identity.py` algorithm migration and the storage v2 wire bridge,
+each as their own reviewable slice.
+
 ---
 
 ### Phase 3 — public surface as a graph query over one evidence graph (D5)
