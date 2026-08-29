@@ -6,16 +6,17 @@
 # principle: don't hand-duplicate a command here). This hook only adds
 # what's specific to *this* runtime:
 #   1. Runs only in a remote session ($CLAUDE_CODE_REMOTE guard).
-#   2. Persists castxml's PATH entry into $CLAUDE_ENV_FILE so it's on
-#      PATH for the rest of the session, not just this hook process.
-#   3. Reorders PATH so the pip-installed, correctly-pinned pytest/ruff/
-#      mypy (CLAUDE.md's ruff==0.16.3/mypy==1.19.1 pins) actually run
-#      when you type `pytest`/`ruff`/`mypy` -- this image also ships a
-#      pre-existing `uv tool install`-managed pytest/ruff in
-#      ~/.local/bin, earlier on PATH than pip's /usr/local/bin, silently
-#      shadowing the project-pinned versions (observed: ruff 0.15.8
-#      instead of the pinned 0.16.3) with no error, just a different
-#      lint verdict.
+#   2. Persists the dev venv's and castxml's PATH entries into
+#      $CLAUDE_ENV_FILE so they're on PATH for the rest of the session,
+#      not just this hook process.
+#   3. That venv-bin entry also happens to fix a real, observed problem:
+#      this image ships a pre-existing `uv tool install`-managed
+#      pytest/ruff in ~/.local/bin, earlier on PATH than anything a plain
+#      `pip install` would use, silently shadowing the project-pinned
+#      versions (observed: ruff 0.15.8 instead of CLAUDE.md's pinned
+#      0.16.3) with no error, just a different lint verdict. Putting the
+#      venv first on PATH wins over that shadow the same way it would for
+#      any other pre-existing PATH entry.
 set -euo pipefail
 
 if [ "${CLAUDE_CODE_REMOTE:-}" != "true" ]; then
@@ -26,10 +27,12 @@ cd "${CLAUDE_PROJECT_DIR:-.}"
 
 bash scripts/setup_dev_env.sh
 
-# Put pip's install dir ahead of ~/.local/bin so the pinned pytest/ruff/
-# mypy setup_dev_env.sh just installed win over the pre-existing uv-tool
+# Put the dev venv ahead of ~/.local/bin so the pinned pytest/ruff/mypy
+# setup_dev_env.sh just installed win over the pre-existing uv-tool
 # shadow described above.
-echo "export PATH=\"/usr/local/bin:\$PATH\"" >> "${CLAUDE_ENV_FILE}"
+# shellcheck source=../../scripts/dev_venv_pin.env
+source scripts/dev_venv_pin.env
+echo "export PATH=\"${DEV_VENV_DIR}/bin:\$PATH\"" >> "${CLAUDE_ENV_FILE}"
 
 # shellcheck source=../../scripts/castxml_pin.env
 source scripts/castxml_pin.env

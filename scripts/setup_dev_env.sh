@@ -4,7 +4,18 @@
 # Installs what a from-scratch Linux dev environment needs to run the
 # "fast"/"pr" scripts/verify.py profiles (CLAUDE.md/AGENTS.md "M0-3"):
 #   1. abicheck itself, editable, with the dev/docs/dist extras (pytest,
-#      ruff, mypy, hypothesis, mkdocs, build/twine, ...).
+#      ruff, mypy, hypothesis, mkdocs, build/twine, ...), into an isolated
+#      venv (DEV_VENV_DIR, scripts/dev_venv_pin.env) rather than the
+#      system interpreter -- some Debian-based images ship dpkg-owned
+#      Python packages (e.g. python3-packaging) with no pip RECORD, which
+#      an in-place `pip install` on the system interpreter can't upgrade
+#      cleanly. `--ignore-installed` "fixes" that particular conflict, but
+#      it's a whole-invocation flag, not scoped to the one conflicting
+#      package: pip warns it can overwrite *any* package another package
+#      manager installed, and it would rerun on every session regardless
+#      of what's already satisfied. A dedicated venv has no dpkg-owned
+#      packages to conflict with in the first place, so nothing needs
+#      ignoring.
 #   2. castxml, from conda-forge via a throwaway micromamba (castxml has
 #      no apt/pip package) -- pinned to the exact linux-64 build
 #      `pixi.lock` already commits to (see CASTXML_BUILD below), so this
@@ -37,14 +48,20 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "${REPO_ROOT}"
 
+# shellcheck source=dev_venv_pin.env
+source "${REPO_ROOT}/scripts/dev_venv_pin.env"
+
+if [ ! -x "${DEV_VENV_DIR}/bin/python3" ]; then
+  echo "==> Creating dev venv at ${DEV_VENV_DIR}"
+  python3 -m venv "${DEV_VENV_DIR}"
+fi
+# Ahead of the rest of PATH for the remainder of this script: every
+# `python3`/`pip` call below (and the castxml_policy import further down)
+# resolves inside the venv, not the system interpreter.
+export PATH="${DEV_VENV_DIR}/bin:${PATH}"
+
 echo "==> Installing abicheck (editable) + dev/docs/dist extras"
-# --ignore-installed: some Debian-based images ship dpkg-owned Python
-# packages (e.g. python3-packaging) with no pip RECORD, which pip cannot
-# uninstall to satisfy a newer version pin -- ignore-installed shadows
-# them instead of trying to remove them first, which is pip's own
-# recommended workaround for this PEP 668 / debian-packaged-python
-# conflict. A no-op flag on a normal virtualenv.
-pip install -q --ignore-installed -e ".[dev,docs,dist]"
+pip install -q -e ".[dev,docs,dist]"
 
 echo "==> Checking native toolchain (gcc/g++/cmake)"
 for tool in gcc g++ cmake; do
@@ -146,8 +163,9 @@ if not result.supported:
 fi
 echo "==> setup_dev_env.sh complete."
 
-# Callers that need castxml on PATH beyond this process (e.g. a
-# SessionStart hook persisting env for the rest of the session) should
-# source scripts/castxml_pin.env themselves and add "${CASTXML_PREFIX}/bin"
-# to PATH -- this script only guarantees it's on PATH for its own
-# remaining steps.
+# Callers that need the dev venv's tools (pytest/ruff/mypy/...) or castxml
+# on PATH beyond this process (e.g. a SessionStart hook persisting env for
+# the rest of the session) should source scripts/dev_venv_pin.env /
+# scripts/castxml_pin.env themselves and add "${DEV_VENV_DIR}/bin" /
+# "${CASTXML_PREFIX}/bin" to PATH -- this script only guarantees they're
+# on PATH for its own remaining steps.
