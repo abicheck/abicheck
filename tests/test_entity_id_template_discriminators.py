@@ -382,7 +382,9 @@ def test_live_clang_dependent_return_type_discriminates_overloaded_templates(
         for fn in _clang_parser(header, tmp_path, "rettmpl").parse_functions()
         if fn.name == "f"
     ]
-    assert len(pair) == 2 and pair[0].entity_id != pair[1].entity_id
+    assert len(pair) == 2
+    assert all(fn.entity_id is not None for fn in pair)
+    assert pair[0].entity_id != pair[1].entity_id
 
     a = _one(
         _clang_parser(
@@ -415,7 +417,9 @@ def test_live_clang_return_type_top_level_cv_discriminates_overloaded_templates(
     header = "template<class T> T f(T); template<class T> const T f(T);"
     parser = _clang_parser(header, tmp_path, "retcv")
     pair = [fn for fn in parser.parse_functions() if fn.name == "f"]
-    assert len(pair) == 2 and pair[0].entity_id != pair[1].entity_id
+    assert len(pair) == 2
+    assert all(fn.entity_id is not None for fn in pair)
+    assert pair[0].entity_id != pair[1].entity_id
 
 
 @pytest.mark.integration
@@ -602,10 +606,10 @@ def test_live_clang_function_pointer_return_declarator_discriminates_overloaded_
     used to treat the FIRST top-level group as the parameter list
     outright, discarding everything after it, so both overloads' return
     type collapsed onto the identical `typename T::x` (Codex review, PR
-    #943). Fixed by scanning from the END for the real parameter-list
-    group instead -- see that function's own docstring for the two other
-    confirmed cases (a dependent return type with its own parenthesized
-    sub-expression, and an ordinary `noexcept(expr)`) this same fix had to
+    #943). Fixed by detecting the spiral shape (a leading `*`/`&` sigil
+    inside the first group) and recursively excising just `f`'s own
+    nested parameter list, keeping the wrapper -- see that function's own
+    docstring for the several other confirmed cases this same fix had to
     keep correct at once."""
     a = _one(
         _clang_parser(
@@ -626,7 +630,7 @@ def test_live_clang_function_pointer_return_declarator_discriminates_overloaded_
     assert a.entity_id is not None and b.entity_id is not None
     assert a.entity_id != b.entity_id
     assert a.return_type == "typename T::x"
-    assert b.return_type == "typename T::x (*(T))"
+    assert b.return_type == "typename T::x (*())(T)"
 
 
 @pytest.mark.integration
@@ -692,3 +696,81 @@ def test_live_clang_noexcept_expression_group_is_not_mistaken_for_return_type(
     )
     assert fn.return_type == "int"
     assert fn.is_noexcept is True
+
+
+@pytest.mark.integration
+@pytest.mark.skipif(shutil.which("clang") is None, reason="clang not installed")
+def test_live_clang_trailing_return_type_containing_parens_discriminates_overloaded_templates(
+    tmp_path: Path,
+) -> None:
+    """A TRAILING return type that itself contains parentheses
+    (`auto f(T) -> decltype((T::x))`) must not have those parentheses
+    mistaken for a second parameter-list group: `template<class T> auto
+    f(T) -> decltype((T::x));` and the `T::y` sibling both compile with
+    no redefinition error (confirmed by direct compilation), but locating
+    "the" parameter-list group BEFORE ever checking for a top-level `->`
+    (the fix directly above, before this correction) picked the
+    `decltype`'s own `((T::x))` group instead of the real one before the
+    arrow, reducing both overloads' return type to the identical
+    `"auto (T) -> decltype"` and discarding the dependent operand
+    entirely (Codex review, PR #943, on a later round)."""
+    a = _one(
+        _clang_parser(
+            "struct S { using x = int; using y = double; };"
+            " template<class T> auto f(T) -> decltype((T::x));",
+            tmp_path,
+            "trdecltypea",
+        ).parse_functions(),
+        name="f",
+    )
+    b = _one(
+        _clang_parser(
+            "struct S { using x = int; using y = double; };"
+            " template<class T> auto f(T) -> decltype((T::y));",
+            tmp_path,
+            "trdecltypeb",
+        ).parse_functions(),
+        name="f",
+    )
+    assert a.entity_id is not None and b.entity_id is not None
+    assert a.entity_id != b.entity_id
+    assert a.return_type == "decltype((T::x))"
+    assert b.return_type == "decltype((T::y))"
+
+
+@pytest.mark.integration
+@pytest.mark.skipif(shutil.which("clang") is None, reason="clang not installed")
+def test_live_clang_spiral_declarator_preserves_returned_function_parameter_list(
+    tmp_path: Path,
+) -> None:
+    """A function-pointer/reference return type's OWN parameter list is
+    real, distinguishing content that must be preserved, not discarded:
+    `template<class T> typename S::x (*f(T))(int);` and the sibling
+    returning a pointer to a function taking `double` instead both
+    compile with no redefinition error (confirmed by direct compilation),
+    but treating the spiral wrapper's trailing group as if it were `f`'s
+    OWN parameter list (an earlier version of the spiral-declarator fix)
+    discarded it entirely, reducing both overloads' return type to the
+    identical `"typename S::x (*(T))"` (CodeRabbit review, PR #943)."""
+    a = _one(
+        _clang_parser(
+            "struct S { using x = int; };"
+            " template<class T> typename S::x (*f(T))(int);",
+            tmp_path,
+            "spiralparama",
+        ).parse_functions(),
+        name="f",
+    )
+    b = _one(
+        _clang_parser(
+            "struct S { using x = int; };"
+            " template<class T> typename S::x (*f(T))(double);",
+            tmp_path,
+            "spiralparamb",
+        ).parse_functions(),
+        name="f",
+    )
+    assert a.entity_id is not None and b.entity_id is not None
+    assert a.entity_id != b.entity_id
+    assert a.return_type == "typename S::x (*())(int)"
+    assert b.return_type == "typename S::x (*())(double)"

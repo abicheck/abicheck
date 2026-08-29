@@ -134,6 +134,7 @@ from .extract.headers.clang import (
     records as _clang_records,
     scope as _clang_scope,
 )
+from .extract.headers.clang.return_type import return_type as _clang_return_type
 from .extract.headers.clang.templates import (
     _index_template_param_defaults,
     _index_template_param_kinds,
@@ -493,9 +494,9 @@ def _pointer_depth(type_str: str) -> int:
 
 
 def _return_type(qualtype: str) -> str:
-    """See ``extract.headers.clang.functions._return_type`` (the canonical
+    """See ``extract.headers.clang.return_type.return_type`` (the canonical
     implementation this delegates to) for the full contract."""
-    return _clang_functions._return_type(qualtype)
+    return _clang_return_type(qualtype)
 
 
 def _is_noexcept_qualifier(quals: str) -> bool:
@@ -705,9 +706,14 @@ class _ClangAstParser:
         untouched, so every `qualified_name` this walk feeds is byte-for-
         byte what it was; `extract.headers.scope_segments.flat_names` maps
         the typed path back onto *scope*, which is what pins that parity.
-        Parser-internal state only for now: it is threaded onto `_Decl` for
-        a future slice's resolver to read, and no `EntityId` is built from
-        it yet (the plan's carrier-field question stays open).
+        Parser-internal state, threaded onto `_Decl` for each entity
+        module's own `parse_*` to read and build an `entity_id_for_*`
+        carrier from -- a runtime-only field on the parsed declaration,
+        never persisted to a snapshot (CodeRabbit review, PR #943, on this
+        docstring going stale once that wiring landed; the plan's
+        carrier-field question is about a DIFFERENT, still-open choice --
+        whether a persisted model object should ever carry one -- and
+        stays open).
 
         *anonymous_ordinal* is assigned by the PARENT frame's own child
         loop, not derived here, because the ordinal is a per-parent

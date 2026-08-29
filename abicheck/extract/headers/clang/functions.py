@@ -85,6 +85,7 @@ from .context import (
     source_location as _source_location,
     visibility as _visibility,
 )
+from .return_type import return_type as _return_type
 
 #: Evaluates a param's default-argument initializer to its snapshot value
 #: (or ``None`` for an unevaluable one). Matches
@@ -111,120 +112,6 @@ def _pointer_depth(type_str: str) -> int:
         elif ch == "*" and bracket == 0:
             depth += 1
     return depth
-
-
-def _top_level_paren_spans(s: str) -> list[tuple[int, int]]:
-    """``(start, end)`` spans (``end`` exclusive, closing ``)`` included) of
-    every TOP-LEVEL parenthesized group in *s*, ignoring anything nested
-    inside ``<...>``/``[...]``. Shared by :func:`_return_type` and its own
-    spiral-declarator recursion below.
-    """
-    spans: list[tuple[int, int]] = []
-    bracket = 0
-    i = 0
-    n = len(s)
-    while i < n:
-        ch = s[i]
-        if ch in "<[":
-            bracket += 1
-            i += 1
-        elif ch in ">]":
-            bracket = max(0, bracket - 1)
-            i += 1
-        elif ch == "(" and bracket == 0:
-            depth = 1
-            j = i + 1
-            while j < n and depth:
-                if s[j] == "(":
-                    depth += 1
-                elif s[j] == ")":
-                    depth -= 1
-                j += 1
-            spans.append((i, j))
-            i = j
-        else:
-            i += 1
-    return spans
-
-
-_EXCEPTION_SPEC_KEYWORD_RE = re.compile(r"\b(?:noexcept|throw)\s*$")
-
-
-def _return_type(qualtype: str) -> str:
-    """The return type spelling of a function ``qualType`` (``ret (params)…``).
-
-    The function's own real, top-level parameter list is the LAST
-    top-level parenthesized group in *qualtype* that is not itself an
-    exception-specification's own group (a ``noexcept(...)``/``throw(...)``
-    immediately preceding it -- checked via :data:`_EXCEPTION_SPEC_KEYWORD_RE`
-    against the text just before the candidate group). Everything before
-    that group (verbatim, no further parsing needed) is the return type;
-    a top-level ``->`` after it is a TRAILING return type (see below).
-
-    Scanning from the END, not assuming the FIRST top-level group is
-    always the parameter list, is what makes this correct for THREE
-    confirmed cases together, not just one at a time (Codex review, PR
-    #943, across several rounds):
-
-    - **A dependent return type containing its OWN parenthesized
-      sub-expression** (``decltype((T::x)) f(T)``): the first top-level
-      group here (``((T::x))``) is part of the return type, not a
-      parameter-list wrapper at all -- confirmed by direct compilation
-      that two overloads differing only in this dependent operand
-      (``T::x`` vs. ``T::y``) both compile with no redefinition error.
-      Treating the first group as "the" parameter list (an earlier
-      version of this function) discarded the operand entirely,
-      collapsing both onto the identical return type.
-    - **A function-pointer/reference return type**
-      (``typename T::x (*f(T))(T)``): clang spells this as a SPIRAL
-      declarator, ``typename T::x (*(T))(T)``, where the first top-level
-      group (``(*(T))``) wraps ``f``'s own parameter list one level
-      deeper and a SECOND, trailing group belongs to the RETURNED
-      function type -- confirmed by direct compilation that this and the
-      ordinary same-signature overload (``typename T::x f(T)``) both
-      compile with no redefinition error. Scanning from the end finds
-      this trailing group as "the" parameter list and keeps everything
-      before it (the whole ``(*(T))`` wrapper, ``f``'s own nested
-      parameter list included) as return-type text -- distinguishing the
-      declarator SHAPE (``*``/``&``, and any further nesting) without
-      needing to recurse into or excise anything: ``f``'s own ordinary
-      parameter list is already discriminated on separately via
-      ``entity_id_for_function``'s `param_types`, so its harmless
-      duplication here costs nothing.
-    - **An ordinary function with a `noexcept(expr)`/`throw(...)`
-      exception specification** (``int () noexcept(cond())``): its OWN
-      trailing group must not be mistaken for a second parameter list
-      wrapper -- confirmed by direct compilation that this qualType is
-      real and common. Excluding a group immediately preceded by the
-      literal keyword is what keeps this case landing on the correct
-      (here, first and only remaining) group instead of the exception
-      spec's own.
-
-    A TRAILING return type (``auto f(T) -> typename T::x``) is handled
-    once the real parameter-list group is found: clang's ``qualType``
-    spells the leading part as the bare placeholder ``auto``, which is
-    not the actual return type and collapses two legal overloads
-    differing only in their trailing return (``-> typename T::x`` vs.
-    ``-> typename T::y``) onto the identical spelling -- confirmed by
-    direct compilation (both overloads' ``qualType`` leads with the
-    literal string ``"auto"``, the real type appearing only after
-    ``->``). So a top-level ``->`` anywhere after the real group means
-    the real return type is everything after that arrow, not the leading
-    ``auto`` placeholder.
-    """
-    spans = _top_level_paren_spans(qualtype)
-    if not spans:
-        return qualtype.strip()
-    real_start, real_end = spans[-1]
-    for start, end in reversed(spans):
-        if not _EXCEPTION_SPEC_KEYWORD_RE.search(qualtype[:start]):
-            real_start, real_end = start, end
-            break
-    leading = qualtype[:real_start].strip()
-    arrow = re.search(r"->\s*(.+)$", qualtype[real_end:])
-    if arrow:
-        return arrow.group(1).strip()
-    return leading
 
 
 def _is_noexcept_qualifier(quals: str) -> bool:

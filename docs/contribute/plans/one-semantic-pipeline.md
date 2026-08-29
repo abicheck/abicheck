@@ -8641,6 +8641,61 @@ targets Itanium by default) and by confirming this repository's own
 mypy/ruff/architecture gates and the full `clang`/`castxml`-marked test
 subset stay green.
 
+**Correction (2026-08-29, same day, Codex and CodeRabbit independently
+on PR #943): two more real return-type collisions the "scan from the
+end" fix above still missed.** (1) Codex: a TRAILING return type that
+itself contains parentheses, `auto f(T) -> decltype((T::x))` and the
+`T::y` sibling, both compile with no redefinition error, but locating
+"the" parameter-list group BEFORE ever checking for a top-level `->`
+(the previous fix's own order of operations) picked the `decltype`'s own
+`((T::x))` group -- the LAST top-level group, and not preceded by
+`noexcept`/`throw` -- as if it were the parameter list, reducing both
+overloads to the identical `"auto (T) -> decltype"` and discarding the
+dependent operand entirely. (2) CodeRabbit: a function-pointer/reference
+return type's OWN parameter list is real, distinguishing content, but
+"scan from the end, pick the last non-exception-spec group" picked the
+RETURNED function's parameter list (`(int)`/`(double)` in `typename S::x
+(*f(T))(int)` vs. `...(double)`) as if it were `f`'s own, discarding it
+entirely and reducing both overloads to the identical `"typename S::x
+(*(T))"` -- the exact distinguishing content the ORIGINAL (pre-"scan
+from the end") recursive-excision design preserved, before that design
+was replaced to fix the `noexcept`/`decltype` cases. Both confirmed by
+direct compilation. Root cause, in both cases: "scan from the end" is
+not a single correct rule for every shape -- a trailing return type must
+never be group-parsed at all (its own parentheses are never a parameter
+list), and a spiral function-pointer/reference return type's REAL
+parameter list is always nested ONE LEVEL INSIDE the first group, not
+the last group at the top level. Fixed by re-introducing a three-step
+resolution, each step checked in order and never falling through once
+one matches: (1) a top-level `->` (checked FIRST, before any group
+scan) takes everything after it verbatim, so a trailing return type's
+own parentheses are never mistaken for a parameter list; (2) a spiral
+declarator (detected by the first top-level group's own interior
+starting with a `*`/`&` sigil) uses the ORIGINAL recursive
+`_excise_own_param_list` design, which correctly preserves the returned
+function type's own parameter list while excising only the nested,
+duplicate copy of `f`'s own; (3) otherwise, scan from the end for the
+last non-exception-spec group, exactly as the previous fix already
+established for the ordinary/dependent-parens/`noexcept` cases. Verified
+all eight cases together (ordinary, trailing-return, spiral pointer,
+spiral reference, dependent-parens, `noexcept`, spiral-with-differing-
+returned-parameters, and trailing-return-containing-parens). Regression
+tests added in `tests/test_entity_id_template_discriminators.py`
+(`test_live_clang_trailing_return_type_containing_parens_discriminates_overloaded_templates`,
+`test_live_clang_spiral_declarator_preserves_returned_function_parameter_list`),
+both confirmed to fail against the prior commit's code via `git stash`
+and pass post-fix; the spiral-declarator test from the earlier round had
+its own expected string updated back to the excised form
+(`"typename T::x (*())(T)"`) since excision is back. This correction
+also split `_return_type` (now `return_type`) and its three private
+helpers out of `extract/headers/clang/functions.py` into a new sibling
+leaf module, `extract/headers/clang/return_type.py` -- the accumulated
+docstrings pushed `functions.py` past the AI-readiness gate's 800-line
+production soft cap, and this primitive was already self-contained with
+exactly one external call site, matching this package's own established
+"prefer extending a split-out module over growing the parent toward the
+cap" convention.
+
 ---
 
 ### Phase 3 — public surface as a graph query over one evidence graph (D5)

@@ -656,8 +656,10 @@ class _CastxmlParser:
         own XML tag and ``access`` attribute instead of discarding them into
         a flat ``"::"``-joined string. Purely additive --
         :meth:`_qualified_name` is unchanged and still what every existing
-        consumer reads, and nothing builds an ``EntityId`` from this yet. See
-        :func:`~.extract.headers.castxml.scope.scope_path`.
+        consumer reads. Feeds `entity_id_for_*` (a runtime-only carrier on
+        the parsed declaration, never persisted to a snapshot -- CodeRabbit
+        review, PR #943, on the docstring going stale once that wiring
+        landed). See :func:`~.extract.headers.castxml.scope.scope_path`.
         """
         return _castxml_scope.scope_path(self._ctx, el)
 
