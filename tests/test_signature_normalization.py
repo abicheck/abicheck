@@ -165,6 +165,75 @@ class TestPointerToMemberOwnCvIsDropped:
         assert "(int)" in canon("void (C::* const)(int)")
 
 
+class TestCallingConventionDeclaratorGroupIsRecognized:
+    """An MSVC/PE calling-convention keyword (``__cdecl``, ``__stdcall``,
+    ...) can precede a declarator's own sigil inside its grouping parens
+    -- the transparency test must still find the sigil at depth 0, and the
+    convention keyword itself must survive verbatim (it is genuine,
+    distinguishing content, not something this primitive erases)."""
+
+    def test_own_const_dropped_with_calling_convention_present(self) -> None:
+        assert canon("void (__cdecl * const)(int)") == canon("void (__cdecl *)(int)")
+
+    def test_calling_convention_keyword_preserved(self) -> None:
+        assert "__cdecl" in canon("void (__cdecl *)(int)")
+
+    def test_different_calling_conventions_still_distinguish(self) -> None:
+        # The convention itself is genuine ABI content -- __cdecl and
+        # __stdcall are two different, non-interchangeable types.
+        assert canon("void (__cdecl *)(int)") != canon("void (__stdcall *)(int)")
+
+
+class TestPointerToMemberTrailingQualifiersPreserved:
+    """A pointer-to-member-function's own trailing cv/ref-qualifiers (the
+    ``const``/``volatile``/``&``/``&&`` that can follow its parameter
+    list) qualify the POINTED-TO member function -- a genuine,
+    standard-mandated discriminator, unlike the pointer's own by-value
+    qualifier -- so they must survive, only reordered, never dropped."""
+
+    def test_trailing_const_distinguishes_from_unqualified(self) -> None:
+        assert canon("void (C::*)(int) const") != canon("void (C::*)(int)")
+
+    def test_trailing_const_still_present(self) -> None:
+        assert "const" in canon("void (C::*)(int) const")
+
+    def test_trailing_qualifier_order_does_not_matter(self) -> None:
+        assert canon("void (C::*)(int) const volatile") == canon(
+            "void (C::*)(int) volatile const"
+        )
+
+    def test_own_by_value_cv_still_dropped_alongside_trailing_qualifier(self) -> None:
+        # The pointer's own by-value cv (before the parameter list) and
+        # the pointed-to function's own trailing cv (after it) are
+        # independent regions -- dropping the former must not affect the
+        # latter surviving.
+        assert canon("void (C::* const)(int) const") == canon("void (C::*)(int) const")
+        assert canon("void (C::* const)(int) const") != canon("void (C::*)(int)")
+
+    def test_trailing_lvalue_ref_qualifier_distinguishes(self) -> None:
+        assert canon("void (C::*)(int) &") != canon("void (C::*)(int)")
+
+    def test_trailing_rvalue_ref_qualifier_distinguishes(self) -> None:
+        # canonicalize_type_name spells "&&" as "& &" internally -- this
+        # must not be mistaken for two separate top-level sigils, and must
+        # not collide with the single-"&" lvalue-ref-qualifier case.
+        assert canon("void (C::*)(int) &&") != canon("void (C::*)(int)")
+        assert canon("void (C::*)(int) &&") != canon("void (C::*)(int) &")
+
+    def test_trailing_cv_and_ref_qualifier_combine(self) -> None:
+        assert canon("void (C::*)(int) const &") != canon("void (C::*)(int) const")
+        assert canon("void (C::*)(int) const &") != canon("void (C::*)(int) &")
+
+    def test_trailing_ref_qualifier_does_not_corrupt_own_sigil(self) -> None:
+        # Regression pin for a self-caught bug: a trailing "&"/"&&" was
+        # briefly mistaken for a NEW top-level sigil, overriding the
+        # declarator's own already-found "*" and corrupting the
+        # prefix/suffix split entirely.
+        assert canon("void (C::*)(int) &&") == canon("void (C::*)(int) &&")
+        assert "(int)" in canon("void (C::*)(int) &&")
+        assert "C" in canon("void (C::*)(int) &&")
+
+
 class TestNestedCallbackParametersAreNormalizedRecursively:
     """A declarator's own trailing parameter list (a callback or
     member-function-pointer's parameters) is exactly as much a function's
@@ -225,6 +294,14 @@ class TestIdempotence:
 
     def test_idempotent_on_nested_callback_type(self) -> None:
         once = canon("void (*)(const int, void (*)(char *))")
+        assert canon(once) == once
+
+    def test_idempotent_on_calling_convention_type(self) -> None:
+        once = canon("void (__cdecl * const)(int)")
+        assert canon(once) == once
+
+    def test_idempotent_on_trailing_member_qualifiers(self) -> None:
+        once = canon("void (C::*)(int) volatile const")
         assert canon(once) == once
 
 

@@ -39,18 +39,35 @@ __all__ = ["canonicalize_function_signature_param_type"]
 
 _CV_WORD_RE = re.compile(r"\b(?:const|volatile)\b")
 
-# A declarator-grouping paren's content, up to its own sigil: either a bare
-# pointer/reference (`*`, `&`), or a pointer-to-member's qualified-name
-# prefix (`C::*`, `ns::C::*`) -- one or more `identifier::` segments then
-# the sigil. Used to tell a declarator-grouping paren (transparent, not a
-# real nesting level) from a genuine parameter-list paren (opaque): a
-# parameter list's first token is always a type, which can itself start
-# with an identifier, but is never immediately followed by `::` then only
-# a bare sigil -- that specific shape is unique to a member-pointer
-# declarator (Codex review, PR #941, ninth round: an earlier revision here
-# recognized only the bare-sigil form, so `void (C::* const)(int)` -- cv on
-# a pointer-to-member's own outermost sigil -- was never found at depth 0).
-_DECLARATOR_GROUP_RE = re.compile(r"\s*(?:[A-Za-z_]\w*\s*::\s*)*[*&]")
+# A declarator-grouping paren's content, up to its own sigil: an optional
+# MSVC calling-convention keyword, then either a bare pointer/reference
+# (`*`, `&`) or a pointer-to-member's qualified-name prefix (`C::*`,
+# `ns::C::*` -- one or more `identifier::` segments) then the sigil. Used
+# to tell a declarator-grouping paren (transparent, not a real nesting
+# level) from a genuine parameter-list paren (opaque): a parameter list's
+# first token is always a type, which can itself start with an identifier,
+# but is never a calling-convention keyword and never immediately followed
+# by `::` then only a bare sigil -- both shapes are unique to a declarator
+# (Codex review, PR #941: the ninth round added the qualified-name-prefix
+# form, so `void (C::* const)(int)` -- cv on a pointer-to-member's own
+# outermost sigil -- was found at depth 0; the tenth round added the
+# calling-convention keyword, since a real MSVC/PE calling-convention
+# decoration -- e.g. `void (__cdecl * const)(int)` -- otherwise defeated
+# the same transparency test the identical way).  The convention keyword
+# itself is matched, not consumed/erased -- it stays in the returned
+# prefix verbatim, a genuine part of the type, same as the qualified-name
+# prefix already does.
+_CALLING_CONVENTIONS = (
+    "__cdecl",
+    "__stdcall",
+    "__fastcall",
+    "__thiscall",
+    "__vectorcall",
+)
+_DECLARATOR_GROUP_RE = re.compile(
+    r"\s*(?:(?:" + "|".join(_CALLING_CONVENTIONS) + r")\s*)?"
+    r"(?:[A-Za-z_]\w*\s*::\s*)*[*&]"
+)
 
 
 def _strip_cv_tokens_outside_nesting(s: str) -> str:
@@ -200,16 +217,19 @@ def _normalize_param_list_contents(inner: str) -> str:
 
 
 def _normalize_nested_param_lists(s: str) -> str:
-    """Recursively canonicalize the contents of every top-level ``(...)``
-    parameter list appearing in *s* -- a declarator's own trailing
-    parameter list, e.g. the ``(int)`` in ``void (*)(int)`` or
-    ``void (C::*)(int)``, to any nesting depth (a callback parameter that
-    itself takes a callback parameter). Depth-tracks ``<([``/``>)]``
-    generally so a paren nested inside a template argument or array bound
-    is not mistaken for a top-level parameter list; recursion through
-    :func:`canonicalize_function_signature_param_type` (via
-    :func:`_normalize_param_list_contents`) applies this same nested
-    treatment at every level, so it needs no explicit depth limit -- each
+    """Canonicalize the contents of the one top-level ``(...)`` parameter
+    list *s* is -- a declarator's own trailing parameter list, e.g. the
+    ``(int)`` in ``void (*)(int)`` or ``void (C::*)(int)``. *s* is always
+    exactly that: from its own opening paren to its matching closing paren
+    (its only caller slices it out via :func:`_find_matching_paren`
+    first), so no scan for a top-level paren is needed here.
+
+    Reaches arbitrary nesting depth (a callback parameter that itself
+    takes a callback parameter) through :func:`_normalize_param_list_
+    contents`, which recurses back into
+    :func:`canonicalize_function_signature_param_type` for each individual
+    parameter -- each of ITS own trailing parameter lists (if any) then
+    makes its own, identically-shaped call back into this function. Each
     recursive call operates on a strictly shorter substring, which is what
     guarantees termination (Codex review, PR #941, ninth round: an earlier
     revision left a callback parameter's own parameter list entirely
@@ -217,26 +237,65 @@ def _normalize_nested_param_lists(s: str) -> str:
     identical adjusted callback type -- canonicalized to two different
     strings).
     """
-    out: list[str] = []
-    i = 0
-    n = len(s)
+    return "(" + _normalize_param_list_contents(s[1:-1]) + ")"
+
+
+def _split_at_trailing_param_list(suffix: str) -> tuple[str, str] | None:
+    """If *suffix* (the text after a declarator's own outermost sigil)
+    contains a top-level ``(...)`` group -- the declarator's own trailing
+    parameter list, e.g. the ``(int)`` in ``void (*)(int)`` -- return
+    ``(head, params_and_after)`` split so ``params_and_after`` starts
+    exactly at that paren's ``(``. Returns ``None`` when *suffix* has no
+    top-level ``(`` at all (a bare pointer, with no trailing declarator to
+    split off).
+    """
     depth = 0
-    while i < n:
-        ch = s[i]
+    for i, ch in enumerate(suffix):
         if ch == "(" and depth == 0:
-            close = _find_matching_paren(s, i)
-            out.append("(")
-            out.append(_normalize_param_list_contents(s[i + 1 : close]))
-            out.append(")")
-            i = close + 1
-            continue
+            return suffix[:i], suffix[i:]
         if ch in "<([":
             depth += 1
         elif ch in ">)]":
             depth = max(0, depth - 1)
-        out.append(ch)
-        i += 1
-    return "".join(out)
+    return None
+
+
+def _canonicalize_member_qualifiers(s: str) -> str:
+    """Canonicalize a pointer-to-member-function's own trailing cv/ref
+    qualifiers -- the ``const``/``volatile``/``&``/``&&`` that can follow
+    its parameter list, e.g. the ``const`` in ``void (C::*)(int) const``.
+    These qualify the POINTED-TO member function itself: a genuine,
+    standard-mandated overload/type discriminator (``void (C::*)(int)
+    const`` and ``void (C::*)(int)`` are two different, non-interchangeable
+    pointer-to-member types), unlike the pointer's own by-value qualifier
+    already stripped separately -- so this function only reorders (never
+    drops) them, the same "eliminate ordering by construction" treatment
+    ``entity_id_for_function``'s own ``is_const``/``is_volatile`` booleans
+    already give the outer function's member-cv (Codex review, PR #941,
+    tenth round: an earlier revision blanket-stripped every depth-0 cv
+    token found anywhere after the sigil, which wrongly erased this
+    genuinely-distinguishing trailing qualifier instead of only the
+    pointer's own by-value one before the parameter list).
+    """
+    stripped = s.strip()
+    if not stripped:
+        return ""
+    has_const = re.search(r"\bconst\b", stripped) is not None
+    has_volatile = re.search(r"\bvolatile\b", stripped) is not None
+    # canonicalize_type_name spells "&&" as "& &" (its own established
+    # sigil-spacing convention, same source as "int * const *" -> "int
+    # *const *" elsewhere in this module) -- compare on a whitespace-
+    # collapsed form so a trailing rvalue-ref qualifier is still found.
+    compact = re.sub(r"\s+", "", stripped)
+    ref = "&&" if compact.endswith("&&") else "&" if compact.endswith("&") else ""
+    parts = [
+        p
+        for p, present in (("const", has_const), ("volatile", has_volatile))
+        if present
+    ]
+    if ref:
+        parts.append(ref)
+    return " ".join(parts)
 
 
 def canonicalize_function_signature_param_type(name: str) -> str:
@@ -402,6 +461,27 @@ def canonicalize_function_signature_param_type(name: str) -> str:
     'void ( * )(char *)'
     >>> canonicalize_function_signature_param_type("void (*)(const char *)")
     'void ( * )(char const *)'
+
+    An MSVC/PE calling-convention keyword (``__cdecl``, ``__stdcall``, ...)
+    can also precede a declarator's own sigil -- recognized the identical
+    transparent way, and kept verbatim (it is genuine, distinguishing
+    content, not something dropped). And a pointer-to-member-function's
+    own TRAILING cv/ref-qualifiers -- the ones that follow its parameter
+    list, e.g. ``const`` in ``void (C::*)(int) const`` -- are different
+    from the pointer's own by-value qualifier before the parameter list:
+    they qualify the POINTED-TO member function itself, a genuine,
+    standard-mandated discriminator (``void (C::*)(int) const`` and
+    ``void (C::*)(int)`` are two different, non-interchangeable types), so
+    they are only reordered for cv, never dropped.
+
+    >>> canonicalize_function_signature_param_type("void (__cdecl * const)(int)")
+    'void (__cdecl * )(int)'
+    >>> canonicalize_function_signature_param_type("void (C::*)(int) const")
+    'void (C:: * )(int) const'
+    >>> canonicalize_function_signature_param_type("void (C::*)(int) volatile const")
+    'void (C:: * )(int) const volatile'
+    >>> canonicalize_function_signature_param_type("void (C::*)(int) &&")
+    'void (C:: * )(int) &&'
     """
     canonical = canonicalize_type_name(
         _decay_top_level_array(canonicalize_type_name(name))
@@ -413,11 +493,23 @@ def canonicalize_function_signature_param_type(name: str) -> str:
     transparent_parens: list[bool] = []
     last_top_level_sigil = -1
     has_top_level_bracket = False
+    # Once a genuine (opaque) top-level paren has been seen -- the
+    # declarator's own trailing parameter list -- nothing after it is
+    # eligible to become a new "last top-level sigil". Without this, a
+    # trailing ref-qualifier on a pointer-to-member-function
+    # (`void (C::*)(int) &&`) -- itself a `*`/`&`-shaped token sitting at
+    # depth 0, textually after the parameter list closes -- would wrongly
+    # override the declarator's own already-found sigil and corrupt the
+    # prefix/suffix split (Codex review, PR #941, tenth round: caught by
+    # this round's own new ref-qualifier test, not by a reviewer finding).
+    seen_top_level_opaque_paren = False
     for i, ch in enumerate(canonical):
         if ch == "(":
             transparent = _DECLARATOR_GROUP_RE.match(canonical, i + 1) is not None
             transparent_parens.append(transparent)
             if not transparent:
+                if depth == 0:
+                    seen_top_level_opaque_paren = True
                 depth += 1
             continue
         if ch == ")":
@@ -431,7 +523,7 @@ def canonicalize_function_signature_param_type(name: str) -> str:
             depth += 1
         elif ch in ">]":
             depth = max(0, depth - 1)
-        elif ch in "*&" and depth == 0:
+        elif ch in "*&" and depth == 0 and not seen_top_level_opaque_paren:
             last_top_level_sigil = i
     if last_top_level_sigil == -1:
         # No real pointer/reference sigil. An undecayed top-level array
@@ -445,6 +537,31 @@ def canonicalize_function_signature_param_type(name: str) -> str:
             else _strip_cv_tokens_outside_nesting(canonical)
         )
     prefix = canonical[: last_top_level_sigil + 1]
-    suffix = _strip_cv_tokens_outside_nesting(canonical[last_top_level_sigil + 1 :])
-    suffix = _normalize_nested_param_lists(suffix)
+    raw_suffix = canonical[last_top_level_sigil + 1 :]
+    split = _split_at_trailing_param_list(raw_suffix)
+    if split is None:
+        # A bare pointer with no trailing declarator (e.g. "int * const")
+        # -- every depth-0 cv token here is the pointer's own, by-value.
+        suffix = _strip_cv_tokens_outside_nesting(raw_suffix)
+    else:
+        # A declarator's own trailing parameter list is present (a
+        # callback or pointer-to-member-function). Everything BEFORE it is
+        # still the pointer's own by-value qualifier region (stripped);
+        # the parameter list's own contents get the identical nested
+        # by-value treatment; anything AFTER the parameter list's closing
+        # paren is the POINTED-TO member function's own cv/ref qualifiers
+        # -- genuinely distinguishing, only reordered, never stripped.
+        head, params_and_after = split
+        head = _strip_cv_tokens_outside_nesting(head)
+        close = _find_matching_paren(params_and_after, 0)
+        params = _normalize_nested_param_lists(params_and_after[: close + 1])
+        member_quals = _canonicalize_member_qualifiers(params_and_after[close + 1 :])
+        # `head` (a bare pointer-declarator's own closing paren, plus any
+        # by-value cv already stripped out of it) is joined directly onto
+        # `params` -- no separator space -- since `head` always ends in
+        # the declarator group's own ")" immediately followed by the
+        # parameter list's own "(", with nothing to separate.
+        suffix = head + params
+        if member_quals:
+            suffix = f"{suffix} {member_quals}"
     return f"{prefix} {suffix}".rstrip() if suffix else prefix

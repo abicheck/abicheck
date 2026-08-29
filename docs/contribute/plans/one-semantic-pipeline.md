@@ -6907,6 +6907,86 @@ genuine *pointee* cv still distinguishes, a doubly-nested callback
 normalizes at its innermost level too, and the variadic/void/empty
 special cases pass through unchanged.
 
+**Correction (2026-08-29, same day, tenth Codex review round on PR #941,
+commit fd715cc): two more real gaps in the same declarator handling, plus
+a self-caught correctness regression from fixing the second one.** (1) The
+paren-transparency regex recognized a bare sigil or a member-pointer's
+qualified-name prefix, but not an MSVC/PE calling-convention keyword
+(`__cdecl`, `__stdcall`, `__fastcall`, `__thiscall`, `__vectorcall`)
+preceding the sigil, so `void (__cdecl * const)(int)` -- confirmed a real,
+reachable shape (this codebase's own PE/PDB-decorated-export handling in
+`diff_platform.py` already deals with `__cdecl`-decorated exports) --
+never found its sigil at depth 0 either. Fixed by widening
+`_DECLARATOR_GROUP_RE` to accept an optional calling-convention keyword
+before the existing qualified-name-prefix loop; the keyword itself is
+matched, not erased, so it stays genuine, distinguishing content in the
+prefix (`void (__cdecl *)(int)` and `void (__stdcall *)(int)` correctly
+stay two different types). (2) A pointer-to-member-function's own
+TRAILING cv/ref-qualifiers -- the ones that follow its parameter list,
+e.g. `const` in `void (C::*)(int) const` -- were wrongly blanket-stripped
+by the same by-value logic that (correctly) strips the pointer's own
+qualifier *before* the parameter list. These are not the same thing: a
+trailing qualifier qualifies the POINTED-TO member function itself, a
+genuine, standard-mandated discriminator (`void (C::*)(int) const` is a
+different, non-interchangeable type from `void (C::*)(int)`), so
+collapsing them together was a real over-merge, the same class of mistake
+this whole primitive exists to prevent, not merely an incompleteness.
+Fixed by splitting the suffix at the declarator's own trailing parameter
+list (`_split_at_trailing_param_list`): everything before it stays the
+pointer's own by-value region (stripped, as before); everything after it
+now goes through a new `_canonicalize_member_qualifiers`, which -- mirroring
+`entity_id_for_function`'s own `is_const`/`is_volatile` two-boolean
+treatment for the identical ordering problem one level up -- only
+reorders `const`/`volatile` into a fixed order and normalizes a ref-
+qualifier (`&`/`&&`), rather than dropping any of it.
+
+**Self-caught regression, found by this round's own new ref-qualifier
+tests before push, not by a reviewer:** implementing fix (2) initially
+broke on `void (C::*)(int) &&`, canonicalizing it as `void (C:: * )(int)
+&&` for `&` but corrupting the `&&` case into `void (C:: * )(int) & &` --
+worse, `canon(...) != canon(...)` on the SAME input, an outright identity
+non-determinism bug. Root cause: `canonicalize_type_name` spells `&&` as
+`"& &"` (its own established sigil-spacing convention, the same source as
+`"int * const *"` -> `"int *const *"` elsewhere in this module), and the
+main sigil-scanning loop records the LAST `*`/`&` found anywhere at depth
+0 as `last_top_level_sigil` -- so the second `&` of the trailing `"& &"`
+ref-qualifier, itself sitting at depth 0 well after the declarator's own
+parameter list had already closed, wrongly overrode the member-pointer's
+own already-found `*`, corrupting the entire prefix/suffix split. Fixed
+at the root: the main loop now tracks whether it has already seen a
+top-level *opaque* paren (the declarator's own trailing parameter list)
+and stops updating `last_top_level_sigil` once it has -- nothing
+`*`/`&`-shaped appearing after a declarator's parameter list closes can
+ever be a NEW top-level sigil, only a ref-qualifier on what came before.
+`_canonicalize_member_qualifiers`'s own ref-qualifier detection was
+likewise fixed to compare against a whitespace-collapsed form so `"& &"`
+is still recognized as `&&`, not two separate `&` tokens. Eleven new tests
+in `tests/test_signature_normalization.py`
+(`TestCallingConventionDeclaratorGroupIsRecognized`,
+`TestPointerToMemberTrailingQualifiersPreserved`, plus two new idempotence
+cases) pin all of this, including the exact `&&`-vs-`& &` regression.
+
+A third finding from the same round -- that a bare, unadjusted function
+*type* used as a parameter (`void(int)`, as opposed to the already-
+adjusted `void (*)(int)`) is returned unchanged rather than decayed to a
+pointer the way an array parameter is -- was investigated and NOT fixed.
+Checked against this codebase's own real header-AST producer output
+(`tests/test_dumper_clang.py`'s and `test_dumper_clang_vtable.py`'s fixed
+`qualType` strings) and confirmed: a real castxml/clang dump always
+already prints the ADJUSTED pointer form for a function-typed parameter
+(`"void (*)(int)"`), never the bare, unadjusted function type -- unlike
+the array case, where the plan's own earlier correction explicitly notes
+this primitive "makes no assumption about whether a given producer's own
+parsed representation already reflects the decay" because an unadjusted
+array spelling genuinely does reach this function from real callers.
+There is no equivalent confirmed real code path supplying an unadjusted
+bare function type here, so implementing a heuristic "is this really an
+unadjusted function type, not some other paren-containing spelling" guess
+would be solving a hypothetical shape, with the attendant risk of a false
+positive on a legitimate class-type spelling that happens to end in a
+parenthesized group. Recorded here as an accepted, documented limitation
+rather than silently dropped.
+
 ---
 
 ### Phase 3 — public surface as a graph query over one evidence graph (D5)
