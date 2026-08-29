@@ -791,19 +791,34 @@ def test_live_clang_real_c_linkage_still_takes_the_extern_c_branch(
 
 @pytest.mark.integration
 @pytest.mark.skipif(shutil.which("clang") is None, reason="clang not installed")
+def test_live_clang_nested_cpp_linkage_inside_extern_c_is_not_extern_c(
+    tmp_path: Path,
+) -> None:
+    """``extern "C++"`` nested inside ``extern "C"`` must reset linkage
+    back to genuine C++ -- linkage specs don't stack, the innermost wins.
+    Clang genuinely mangles ``cppfun`` (``_Z6cppfunv``), but the previous
+    sticky (OR-only) propagation never reset for the inner block,
+    collapsing it onto the bare ``("extern_c",)`` id (Codex review, PR
+    #943)."""
+    parser = _clang_parser(
+        'extern "C" { extern "C++" { void cppfun(); } }', tmp_path, "nestedlinkage"
+    )
+    cppfun = _one(parser.parse_functions(), name="cppfun")
+    assert cppfun.mangled == "_Z6cppfunv"
+    assert cppfun.is_extern_c is False
+    assert cppfun.entity_id is not None
+    assert cppfun.entity_id.extra == ("mangled", "_Z6cppfunv")
+
+
+@pytest.mark.integration
+@pytest.mark.skipif(shutil.which("clang") is None, reason="clang not installed")
 def test_live_clang_template_param_kind_discriminates_overloaded_templates(
     tmp_path: Path,
 ) -> None:
-    """Two uninstantiated templates differing only by parameter KIND.
-
-    ``template<class T> void f()`` and ``template<int N> void f()`` share
-    scope, leaf name, and an identical (empty) ordinary parameter list, and
-    neither gets a real ``mangledName`` from clang (uninstantiated templates
-    aren't mangled) -- so after the extern-C fix above, the ``sig`` fallback
-    tuple still had nothing to distinguish them by, and they collapsed onto
-    one ``EntityId`` (reproduced end to end before this fix: `distinct: 1` of
-    2 declarations; Codex review, PR #943).
-    """
+    """``template<class T> void f()`` vs ``template<int N> void f()``
+    share scope/leaf name/params, and neither is mangled, so the ``sig``
+    fallback had nothing to distinguish them by -- `distinct: 1` of 2
+    before this fix (Codex review, PR #943)."""
     parser = _clang_parser(_TEMPLATE_PARAM_KIND_COLLISION, tmp_path, "tmplkind")
     pair = [fn for fn in parser.parse_functions() if fn.name == "f"]
     assert len(pair) == 2
@@ -822,16 +837,10 @@ def test_live_clang_template_param_kind_discriminates_overloaded_templates(
 def test_live_clang_template_param_packness_discriminates_overloaded_templates(
     tmp_path: Path,
 ) -> None:
-    """Two uninstantiated templates differing only by parameter PACKNESS.
-
-    ``template<class T> void f()`` and ``template<class... T> void f()`` are
-    two more legal overloads sharing scope, leaf name, and an identical
-    (empty) ordinary parameter list -- and the first version of the fix
-    above, which only recorded parameter *kind* (``"type"``), still reduced
-    both to the identical discriminator, missing this second collision
-    entirely (reproduced end to end before this fix: `distinct: 1` of 2
-    declarations; Codex review, PR #943).
-    """
+    """``template<class T> void f()`` vs ``template<class... T> void f()``
+    are legal overloads sharing every other discriminator; the kind-only
+    fix above still reduced both to `("type",)` -- `distinct: 1` of 2
+    before this fix (Codex review, PR #943)."""
     parser = _clang_parser(_TEMPLATE_PARAM_PACKNESS_COLLISION, tmp_path, "tmplpack")
     pair = [fn for fn in parser.parse_functions() if fn.name == "f"]
     assert len(pair) == 2
@@ -882,17 +891,10 @@ def test_live_clang_template_param_rename_does_not_change_identity(
 def test_live_clang_template_template_param_nested_arity_discriminates(
     tmp_path: Path,
 ) -> None:
-    """Two template-template parameters differing only in NESTED arity.
-
-    ``template<template<class> class TT> void f()`` and
-    ``template<template<class, class> class TT> void f()`` are two more
-    legal overloads sharing scope, leaf name, and an identical (empty)
-    ordinary parameter list -- and the earlier, non-recursive version of
-    this discriminator, which recorded only the bare ``"template"`` tag for
-    a ``TemplateTemplateParmDecl``, still reduced both to the identical
-    entry, missing this collision entirely (reproduced end to end before
-    this fix: `distinct: 1` of 2 declarations; Codex review, PR #943).
-    """
+    """``template<template<class> class TT>`` vs ``template<template<class,
+    class> class TT>`` share every other discriminator; the earlier,
+    non-recursive version reduced both to the bare ``"template"`` tag --
+    `distinct: 1` of 2 before this fix (Codex review, PR #943)."""
     parser = _clang_parser(
         _TEMPLATE_TEMPLATE_PARAM_NESTED_ARITY_COLLISION, tmp_path, "tmpltt"
     )

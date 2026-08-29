@@ -8190,6 +8190,34 @@ Regression tests for both in `tests/test_entity_id_carrier.py`
 both confirmed to fail against the pre-fix (sequential, non-type-name-
 excluding) canonicalization via `git stash` on just the source files.
 
+**Correction (2026-08-29, same day, Codex review on PR #943): a
+pre-existing bug in `dumper_clang.py`'s own linkage-state propagation
+(not new code from this phase, but only newly OBSERVABLE through the
+entity_id carrier this phase adds) -- a nested `extern "C++"` block
+inside `extern "C"` was misidentified as C linkage.** Confirmed by direct
+compilation that `extern "C" { extern "C++" { void cppfun(); } }` places
+a `language="C++"` `LinkageSpecDecl` directly inside a `language="C"`
+one, and clang genuinely mangles `cppfun` normally (`_Z6cppfunv`) -- real
+C++ linkage nested inside a C block, a legal and real shape. `_walk`'s
+`child_extern_c` computation was `extern_c or (kind == "LinkageSpecDecl"
+and node.get("language") == "C")` -- a sticky OR that never resets back
+to `False` for the inner block, so `cppfun` got `is_extern_c=True` and
+collapsed onto the bare `("extern_c",)` `EntityId`, colliding with every
+other C-linkage declaration. Verified this line is unchanged from
+`origin/main` (a genuinely pre-existing defect, not something this PR's
+own diff introduced), but fixed it here anyway since it directly affects
+identity correctness -- the exact class of thing this phase is about --
+and the fix is small and self-contained. Fixed by having a
+`LinkageSpecDecl` RESET the linkage state to its own declared `language`
+rather than only ever OR-ing a `True` in -- linkage specs don't stack,
+the innermost one wins, so a non-`LinkageSpecDecl` node simply inherits
+whatever is already in effect. Verified plain `extern "C"` and plain
+top-level C++ (no enclosing linkage spec at all) both still resolve
+correctly. Regression test in `tests/test_entity_id_carrier.py`
+(`test_live_clang_nested_cpp_linkage_inside_extern_c_is_not_extern_c`),
+confirmed to fail against the pre-fix sticky-OR propagation via `git
+stash` on just the source file.
+
 ---
 
 ### Phase 3 — public surface as a graph query over one evidence graph (D5)

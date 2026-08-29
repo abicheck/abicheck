@@ -745,8 +745,23 @@ class _ClangAstParser:
 
         # A record body's children inherit the tag's default access until an
         # AccessSpecDecl switches it; namespaces/linkage-specs impose none.
-        child_extern_c = extern_c or (
-            kind == "LinkageSpecDecl" and node.get("language") == "C"
+        #
+        # A `LinkageSpecDecl` RESETS the linkage state to its own
+        # `language`, rather than only ever OR-ing a `True` in: confirmed
+        # by direct compilation that `extern "C" { extern "C++" { void
+        # cppfun(); } }` places a `language="C++"` `LinkageSpecDecl`
+        # directly inside a `language="C"` one, and clang genuinely
+        # mangles `cppfun` normally (`_Z6cppfunv`) -- real C++ linkage
+        # nested inside a `C` block. The previous sticky-OR form never
+        # reset back to `False` for the inner block, so `cppfun` got
+        # `is_extern_c=True` and collapsed onto the bare `("extern_c",)`
+        # `EntityId`, colliding with every other extern-"C" declaration
+        # (Codex review, PR #943). A `LinkageSpecDecl`'s own `language`
+        # is authoritative for everything beneath it -- linkage specs
+        # don't stack, the innermost one wins -- so a non-`LinkageSpecDecl`
+        # node simply inherits whatever is already in effect.
+        child_extern_c = (
+            node.get("language") == "C" if kind == "LinkageSpecDecl" else extern_c
         )
         # The typed counterpart of the flat `child_scope` computed below,
         # built from the node itself (kind/`isInline`/`tagUsed`/access) and
