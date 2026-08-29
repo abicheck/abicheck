@@ -173,6 +173,18 @@ class TestClangAnonymousScopeKey:
         node["previousDecl"] = "0x1"
         assert anonymous_scope_key(node) == "0x1"
 
+    def test_previous_decl_is_used_when_original_namespace_has_no_id(self) -> None:
+        """``originalNamespace`` present as a dict, but without a usable
+        ``id`` of its own, falls through to ``previousDecl`` rather than
+        reporting no key at all -- never observed in real clang output (an
+        ``originalNamespace`` always carries the referenced node's real
+        id), but this function must not assume it."""
+        node = _ns(None)
+        node["id"] = "0x2"
+        node["previousDecl"] = "0x1"
+        node["originalNamespace"] = {"kind": "NamespaceDecl", "name": ""}
+        assert anonymous_scope_key(node) == "0x1"
+
     def test_first_declaration_reports_its_own_id(self) -> None:
         node = _ns(None)
         node["id"] = "0x1"
@@ -408,6 +420,113 @@ class TestCastxmlScopePaths:
         root = _castxml_root()
         parser = _CastxmlParser(root, exported_dynamic=set(), exported_static=set())
         assert parser._scope_path(_by_id(root)["_4"]) == ()
+
+    def test_dangling_context_id_stops_the_walk(self) -> None:
+        """A ``context`` id with no matching element is never real castxml
+        output (every id it emits resolves), but the walk must not raise on
+        one -- it stops exactly where the chain goes dangling, same as
+        reaching the global scope."""
+        root = Element("CastXML")
+        _el(root, "Struct", id="_1", name="Dangling", context="_missing")
+        parser = _CastxmlParser(root, exported_dynamic=set(), exported_static=set())
+        assert parser._scope_path(_by_id(root)["_1"]) == ()
+
+    def test_named_non_scope_context_contributes_no_segment(self) -> None:
+        """Only ``Namespace``/``Struct``/``Class``/``Union`` are ever
+        referenced as a ``context`` in real castxml output (this module's own
+        docstring) -- a named element of any other tag must still contribute
+        nothing rather than a guessed segment kind."""
+        root = Element("CastXML")
+        _el(root, "Namespace", id="_1", name="::")
+        _el(root, "Function", id="_2", name="foo", context="_1")
+        _el(root, "Struct", id="_3", name="Inner", context="_2")
+        parser = _CastxmlParser(root, exported_dynamic=set(), exported_static=set())
+        assert parser._scope_path(_by_id(root)["_3"]) == ()
+
+    def test_anonymous_non_scope_context_contributes_no_segment(self) -> None:
+        """The unnamed counterpart of the above: an unnamed element of an
+        unrecognized tag contributes no ``Anonymous`` segment either."""
+        root = Element("CastXML")
+        _el(root, "Namespace", id="_1", name="::")
+        _el(root, "Function", id="_2", context="_1")
+        _el(root, "Struct", id="_3", name="Inner", context="_2")
+        parser = _CastxmlParser(root, exported_dynamic=set(), exported_static=set())
+        assert parser._scope_path(_by_id(root)["_3"]) == ()
+
+    def test_ordinal_falls_back_to_a_full_scan_when_members_is_stale(self) -> None:
+        """``members`` is castxml's own record of declaration order, but
+        this module must not trust it blindly: a member missing from a
+        stale/incomplete ``members`` string still gets a real ordinal from
+        the full id-map scan, not a silently wrong one (and the member that
+        *is* listed still resolves the fast way, without needing the scan)."""
+        root = Element("CastXML")
+        _el(root, "Namespace", id="_1", name="::")
+        _el(root, "Struct", id="_2", name="Container", context="_1", members="_3")
+        _el(root, "Struct", id="_3", context="_2")  # listed in `members`
+        _el(root, "Struct", id="_4", context="_2")  # NOT listed -- stale
+        # A field inside each anonymous struct, so its own scope_path names
+        # the struct's Anonymous segment (scope_path never includes *el*
+        # itself, only what contains it).
+        _el(root, "Field", id="_5", name="f3", context="_3")
+        _el(root, "Field", id="_6", name="f4", context="_4")
+        parser = _CastxmlParser(root, exported_dynamic=set(), exported_static=set())
+        els = _by_id(root)
+        assert parser._scope_path(els["_5"]) == (
+            Record("Container"),
+            Anonymous("struct", 0),
+        )
+        assert parser._scope_path(els["_6"]) == (
+            Record("Container"),
+            Anonymous("struct", 1),
+        )
+
+    def test_ordinal_falls_back_when_members_attribute_is_empty(self) -> None:
+        """``members=""`` (present but empty) must take the same full-scan
+        fallback as a missing ``members`` attribute entirely, not be
+        mistaken for "one member, the empty string"."""
+        root = Element("CastXML")
+        _el(root, "Namespace", id="_1", name="::")
+        _el(root, "Struct", id="_2", name="Container", context="_1", members="")
+        _el(root, "Struct", id="_3", context="_2")
+        _el(root, "Field", id="_4", name="f3", context="_3")
+        parser = _CastxmlParser(root, exported_dynamic=set(), exported_static=set())
+        assert parser._scope_path(_by_id(root)["_4"]) == (
+            Record("Container"),
+            Anonymous("struct", 0),
+        )
+
+    def test_ordinal_falls_back_when_the_parent_itself_is_unresolvable(self) -> None:
+        """An anonymous scope whose own ``context`` id resolves to nothing
+        (never real castxml output -- every id it emits resolves -- but not
+        this module's job to assume) still gets a deterministic ordinal
+        from the full-document fallback scan instead of raising."""
+        root = Element("CastXML")
+        _el(root, "Struct", id="_1", context="_missing")
+        _el(root, "Field", id="_2", name="f", context="_1")
+        parser = _CastxmlParser(root, exported_dynamic=set(), exported_static=set())
+        assert parser._scope_path(_by_id(root)["_2"]) == (Anonymous("struct", 0),)
+
+    def test_ordinal_skips_a_dangling_id_inside_members(self) -> None:
+        """A ``members`` string naming an id absent from the document (never
+        real castxml output, but not this module's job to assume) is
+        skipped rather than raising or miscounting the real siblings."""
+        root = Element("CastXML")
+        _el(root, "Namespace", id="_1", name="::")
+        _el(
+            root,
+            "Struct",
+            id="_2",
+            name="Container",
+            context="_1",
+            members="_missing _3",
+        )
+        _el(root, "Struct", id="_3", context="_2")
+        _el(root, "Field", id="_4", name="f3", context="_3")
+        parser = _CastxmlParser(root, exported_dynamic=set(), exported_static=set())
+        assert parser._scope_path(_by_id(root)["_4"]) == (
+            Record("Container"),
+            Anonymous("struct", 0),
+        )
 
     def test_typed_path_reproduces_qualified_name_exactly(self) -> None:
         """Oracle: ``qualified_name`` is exactly the typed path's own names
