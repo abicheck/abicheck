@@ -334,6 +334,7 @@ def _seeded_includes_and_compile_context(
     build_config_locally_trusted: bool = False,
     collect_mode: str | None = None,
     legacy_compile_db_tokens: tuple[str, ...] = (),
+    legacy_compile_db_matched: bool = False,
 ) -> tuple[list[Path], CompileContext | None, bool, list[Callable[[], None]]]:
     """This input's L2 include-dir seed *and* its P0.3 L3->L2 compile-context
     fold, resolved together in one L3 collection (PR C, typed dump/scan
@@ -436,6 +437,21 @@ def _seeded_includes_and_compile_context(
     executes through ``perform_elf_dump``/``handle_non_elf_dump``, not this
     typed pipeline -- see the known-gaps entry for what remains open).
 
+    *legacy_compile_db_matched* (Codex review, fresh evidence): whether the
+    legacy match actually matched a compile unit at all -- the second
+    element of ``cli_helpers_compare._resolve_build_context_flags``'s own
+    return, mirroring ``perform_elf_dump``'s ``compile_db_context_matched``
+    parameter exactly. A separate signal from *legacy_compile_db_tokens*
+    on purpose: a genuinely matched compile unit that legitimately derives
+    zero castxml flags is real build-context evidence (the returned
+    ``applied`` must become ``True`` so ``parsed_with_build_context`` gets
+    stamped, same as ``perform_elf_dump``'s own gate), but an empty token
+    tuple alone cannot distinguish that case from "the legacy match never
+    ran" -- collapsing the two would either wrongly claim context for an
+    unmatched header or (this parameter's absence, before this fix) wrongly
+    deny it for a matched one whose own flags folded in silently without
+    ever flipping ``applied``.
+
     **Enforced here, not merely forwarded (Codex review, fresh evidence, two
     rounds)**: *allow_build_query* gates whether *build_config*/*build_query*
     — the two potentially-*executable* inputs — are forwarded at all, via the
@@ -479,7 +495,7 @@ def _seeded_includes_and_compile_context(
         return (
             list(side.includes),
             _fold_legacy_compile_db_tokens(evidence.compile, legacy_compile_db_tokens),
-            False,
+            legacy_compile_db_matched,
             [],
         )
     from ...buildsource.l2_seed import seed_includes_and_fold_compile_context
@@ -547,4 +563,14 @@ def _seeded_includes_and_compile_context(
         effective_ctx = _fold_legacy_compile_db_tokens(
             effective_ctx, legacy_compile_db_tokens
         )
+        # Codex review, fresh evidence: folding the legacy tokens into
+        # effective_ctx above is not enough on its own -- `applied` is what
+        # `_resolve_side_snapshot_impl` actually gates `parsed_with_build_
+        # context` on (mirroring `perform_elf_dump`'s own `compile_db_
+        # context_matched` OR `l3_context_applied` condition), and a real
+        # match with zero derived tokens (an empty tuple) is indistinguishable
+        # from "never matched" without a separate signal. `legacy_compile_db_
+        # matched` carries that signal the way `compile_db_context_matched`
+        # already does for the CLI path.
+        applied = legacy_compile_db_matched
     return includes, effective_ctx, applied, cleanups

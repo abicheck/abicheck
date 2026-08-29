@@ -4666,6 +4666,53 @@ looked like the obvious fix and wasn't.
   module docstring and `service_dump_pipeline.execute_dump_request`'s
   docstring both point back here for exactly what remains.
 
+  **Correction (2026-08-29, same day, Codex review on PR #935): the
+  threading above landed with a real bookkeeping gap of its own, now
+  fixed.** Folding the legacy tokens into the resolved `CompileContext`
+  (sub-finding 2 above) updated `gcc_options` but left the function's
+  returned `applied` boolean — the exact signal `_resolve_side_snapshot_
+  impl` gates `AbiSnapshot.parsed_with_build_context` on — untouched at
+  `False` whenever the P0.3 fold itself did not match. Confirmed by reading
+  the actual gate (`workflows/artifact/execute.py`'s `if context_applied
+  and snap.from_headers: snap.parsed_with_build_context = True`): a typed
+  dump relying purely on the legacy-match fallback would have parsed real
+  compile-database context and then still reported it as absent — wrongly
+  triggering the `header_parse_context_drift`/`header_build_context_
+  mismatch` advisory findings and wrongly failing a `--depth build` gate
+  that the real CLI's own `perform_elf_dump` path (whose `compile_db_
+  context_matched` OR `l3_context_applied` condition already handles this
+  correctly) would have satisfied for the identical evidence. A second,
+  distinct problem in the same spot: an empty `legacy_compile_db_tokens`
+  tuple is indistinguishable from "the legacy match never ran" — so a
+  compile unit the legacy match genuinely matched, but which legitimately
+  derives zero castxml flags, had no way to signal that it *was* matched.
+
+  Fixed by adding a second, independent parameter, `legacy_compile_db_
+  matched: bool = False` — mirroring `perform_elf_dump`'s own `compile_db_
+  context_matched` parameter exactly, the second element of
+  `_resolve_build_context_flags`'s own return — threaded through the
+  identical three-function chain (`execute_dump_request` →
+  `_resolve_side_snapshot_impl` → `_seeded_includes_and_compile_context`).
+  `_seeded_includes_and_compile_context` now returns `applied=legacy_
+  compile_db_matched` (not the fold's own, already-`False` `applied`) in
+  the branch where the P0.3 fold did not match, in both its early-return
+  path (no `sources`/`build_info`, or no headers) and its main path — so
+  a real match sets `parsed_with_build_context` regardless of whether any
+  tokens were actually derived, while an unmatched call (the default, and
+  every pre-existing caller) stays exactly as it was. Both new parameters
+  default falsy, so this remains purely additive.
+
+  Verified with four fast, monkeypatch-based unit tests (no compiler
+  needed — `tests/test_legacy_compile_db_matched_signal.py`): matched with
+  zero tokens still sets `applied=True`; unmatched with zero tokens stays
+  `applied=False` (the pre-existing default behavior, pinned unchanged);
+  matched with real tokens sets both the folded `gcc_options` and
+  `applied=True`; the fold-applies-wins precedence (sub-finding 2 above)
+  holds regardless of what the legacy-match parameters claim. Confirmed
+  each of the four fails with `TypeError: unexpected keyword argument
+  'legacy_compile_db_matched'` against the pre-fix code (the parameter
+  did not exist), not merely that they pass now.
+
 - **Lambda-closure churn survives at the *function* level after the type-level
   fix — investigated, deliberately not patched (oneTBB flow-graph report,
   fresh evidence).** `name_classification._ANONYMOUS_TYPE_MARKERS` did not
