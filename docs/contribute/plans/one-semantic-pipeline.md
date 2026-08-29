@@ -5838,6 +5838,159 @@ and — per the same scoping — only once castxml parity closes too, not on
 the strength of clang-only convergence alone, since `--build-query`/
 `--build-compile-db` are reachable under either backend.
 
+**Landed (first slice), not the whole phase — read this before assuming
+the Design section above is fully implemented.** The environmental
+precondition the Design section's option (a)/(b) split turned on no
+longer holds the way it was written: castxml is genuinely available and
+working in the environment this slice was implemented in (a
+solver-resolved conda-forge install — clang 20.1.8 + libclang-cpp20.1 +
+castxml 0.7.0, wrapped at `/usr/local/bin/castxml` to carry its
+`LD_LIBRARY_PATH` — not the hand-assembled 0.7.0 build the Design
+section's own investigation found segfaulting inside
+`clang::ParseAST`; that specific segfault was an artifact of a bad manual
+install, not of castxml 0.7.0 itself). `test_dump_cli_typed_api_parity.py
+-m integration` is 16/16 green — but that file is itself clang-only, not
+evidence of castxml coverage: every one of its subprocess invocations
+hard-codes `--ast-frontend clang` and it is not parametrized by backend
+(`-k castxml` against this file alone selects zero tests). What castxml's
+newfound availability separately confirmed, run against the *wider*
+integration suite instead (`pytest tests/ -m "integration and not slow" -k
+castxml`), is that `abicheck dump --ast-frontend castxml` genuinely works
+end to end in this environment today (38/38 green, only the two
+pre-existing, unrelated `xfail`s) — real, useful confirmation, but not the
+same claim this section's acceptance criteria makes about the parity
+corpus specifically. That field-level parity was, however, already closed
+before this slice started (`_CONTRACT_KNOWN_DIVERGENT_FIELDS`/
+`_SCAN_KNOWN_DIVERGENT_SHAPES` were both already empty — this slice found
+no shape to flip from `xfail` to passing) — so what this slice actually
+landed is narrower: only `render_dump_dry_run()`'s own migration named
+above -- the function itself is not deleted (this section's Acceptance
+criteria's "is deleted" language describes the whole phase's eventual
+end state, not this slice), only its independent primitive-threading
+implementation is. `render_dump_dry_run` now takes the real `ResolvedDumpRequest`
+`resolve_dump_request_for_cli` already builds and reads
+`so_path`/`headers`/`sources`/`build_info`/`depth`/`collect_mode`/
+`header_backend`/`dump_manifest` off it, rather than being handed fifteen
+independently-threaded primitives `dump_cmd` re-derived by hand — closing
+this phase's own "Files" list item for that function. `resolve_dump_request`
+itself never invokes castxml/clang (see its own docstring), so this
+rendering path is backend-agnostic by construction, not merely by test
+coverage; verified via the clang-scoped parity corpus above, the full fast
+unit suite, and `mypy`/`ruff` clean.
+
+**The real routing step — `perform_elf_dump`/`handle_non_elf_dump` calling
+`execute_dump_request` instead of `dumper.dump()` directly — was
+investigated in this slice and NOT landed, for a reason that turned out to
+be independent of castxml availability.** Read `docs/contribute/
+known-gaps.md`'s "PR C" entry (its own newest addendum, appended by this
+slice) for the full account. In short: two of the concerns the Design
+section implicitly bundled under "post-processing passes driven by
+CLI-only inputs" turned out, on a fresh read of the real code, not to be
+blockers at all (the ADR-039 collector's `attach_build_context_for_
+parsed_headers` already runs a second time inside `_resolve_side_
+snapshot_impl`, and re-running it a third time from `perform_elf_dump`'s
+own existing hook is a safe, idempotent no-op, not a double-count; the
+`scope_header_dirs` parameter `perform_elf_dump`'s own `dump()` call
+passes is provably redundant with what `resolve_dump_request`'s own
+`public_header_dirs` already carries). A third, genuinely structural
+blocker was found instead: `dump_cmd`'s legacy `-p`/`--compile-db`
+auto-match (`cli_helpers_compare._resolve_build_context_flags` —
+`build_context_for_header`/`build_context_union_fallback`, a completely
+different code path from the P0.3 L3→L2 fold) runs strictly after
+`resolve_dump_request_for_cli` already built the resolved object, and its
+derived flags are the *sole* source of compile-database-derived context
+for any header the L3→L2 fold itself does not independently match — a
+still-live, still-documented fallback (`dump --build-query`/
+`--build-compile-db`/`-p`/`--compile-db` are explicitly not yet removed).
+`resolve_dump_request`/`_resolve_side_snapshot_impl` has no call to that
+legacy matcher anywhere, so routing the primary parse through
+`execute_dump_request()` as it stands today would silently drop that
+fallback's flags for exactly the headers the fold doesn't match — a real
+regression, not a refactor, for a project still relying on the legacy
+match. Closing this needs the legacy match's computation moved earlier
+(before `resolve_dump_request_for_cli` runs) and threaded into the
+`DumpRequest`/`CompileContext` the resolved object carries, which is a
+genuine, separate design question (which field absorbs a *derived*, not
+user-typed, value, and how that squares with `DumpRequest`'s documented
+"records the run, not a second opinion about it" contract) — not a
+same-session drive-by fix, and independent of which AST backend is used.
+Not attempted here; recorded in `known-gaps.md` at the precision needed
+for a future slice to start from the actual mechanism rather than
+re-diagnosing it. This phase's Acceptance criteria section above is
+therefore still not met for the routing half — only for the dry-run
+half named in its own last two sentences, which was already correctly
+scoped to "both backends" (dry-run resolution never invokes either
+compiler, so nothing about it is backend-specific), unlike the routing
+half's own now-corrected clang/castxml framing.
+
+**Update (2026-08-29): the design question named above is now answered and
+landed, but the routing itself is still open.** `execute_dump_request`
+gained an additive `legacy_compile_db_tokens: tuple[str, ...] = ()`
+parameter, threaded through `_resolve_side_snapshot_impl` into
+`_seeded_includes_and_compile_context` — the same "optional pass-through
+for `dump`'s still-live CLI legacy flags" shape `build_config`/
+`build_query`/`build_compile_db` already use on these same three
+functions, rather than a new `DumpRequest`/`CompileContext` field. That
+answers the design question the paragraph above left open: the legacy
+match's *derived* value stays out of `DumpRequest`/`CompileContext`
+entirely (preserving "records the run, not a second opinion about it"),
+and rides as a separate, explicitly-legacy parameter instead — a caller
+(today: nothing yet; `dump_cmd` itself still executes through
+`perform_elf_dump`, not `execute_dump_request`) that already computed the
+legacy match's flags can now thread them through and have them reach the
+real parse, with the P0.3 fold's own result still winning outright
+whenever it applies (verified by a dedicated precedence test — see
+`known-gaps.md`'s dated addendum to the "PR C" entry for the full
+mechanism and the real-`g++`-build regression test,
+`tests/test_legacy_compile_db_typed_threading.py`). **`perform_elf_dump`
+still does not call `execute_dump_request()`** — that remains exactly the
+routing restructuring described above (its own try/except/
+`ResolvedArtifactPlan` cleanup handling needs to delegate rather than
+call `dumper.dump()` directly, keeping the second try block's hooks
+applied to the returned `DumpResult`), left as its own slice for the same
+reason stated there: this exact code area's review history (18+ numbered
+findings on the adjacent fold alone) argues for landing one
+independently-verifiable piece at a time rather than combining the
+threading and the routing in one change. This phase's Acceptance criteria
+section is therefore still not met for the routing half.
+
+**Update (2026-08-29, same day): the routing was attempted as its own slice
+and NOT landed — and the "purely the control-flow restructuring itself, not
+a new correctness question" framing above is retracted as wrong.** A
+dedicated session read both execution paths and the whole typed pipeline end
+to end and built the parameter-by-parameter parity map, then found two
+*structural* blockers neither this section nor the known-gaps entry had
+anticipated. Both are recorded in full, with the exact mechanisms and the
+list of previously-suspected blockers that were ruled out with evidence, in
+`docs/contribute/known-gaps.md`'s "ADR-063 Phase 1" entry (its "Fourth
+correction (2026-08-29)" addendum). In short:
+
+- **A (ELF only)** — the L2 seed's inferred-build-dir cleanup has two
+  mutually exclusive correct drain points. `perform_elf_dump` must drain
+  *after* its header-graph and clang-layout second passes (they re-parse
+  headers under the seeded dirs); `_resolve_side_snapshot_impl` must drain
+  *before* `embed_side_build_source` (whose own inferred query otherwise
+  self-contends on the same `flock` for up to 600s). They do not conflict
+  today only because `perform_elf_dump` runs no embed inside its plan;
+  routing makes the conflict live. This is exactly `DumpResult`'s own
+  documented "Lifetime caveat", and its fix is the pair-aware/lifetime
+  redesign PR 3A already scopes as separate work.
+- **B (both paths)** — `execute_dump_request` embeds L3-L5, applies
+  dependency scoping and enforces the depth floor *inside* resolution, while
+  the `dump` CLI does all three at write time in
+  `cli_buildsource._write_snapshot_output`, after provenance stamping.
+  Routing reorders all three, which changes what the post-processing hooks
+  see, enforces the depth floor before the embed that actually fills L3-L5
+  for a `dump`, and swaps a Click error for a `ValidationError`.
+
+`handle_non_elf_dump` is free of A (no second pass; it already drains where
+the shared primitive does) but is blocked by B alone, so converting the
+smaller PE/Mach-O path first does not isolate a safely-landable slice
+either. This phase's Acceptance criteria section remains unmet for the
+routing half; closing it now has two named prerequisites (the seed-cleanup
+ownership redesign, and a decision on where `dump`'s embed/enforce/scope
+stanza belongs) rather than being a mechanical restructuring.
+
 ---
 
 ### Phase 2 — `EntityId`/`ScopePath` as the one identity primitive

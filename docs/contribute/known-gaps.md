@@ -4461,6 +4461,487 @@ looked like the obvious fix and wasn't.
   emptying that test's own `headers` list, since its actual subject is
   `public_headers`/`public_header_dirs`'s own expansion, not `headers`'s.
 
+  **ADR-063 Phase 1 (`docs/contribute/plans/one-semantic-pipeline.md`,
+  "finish the `dump`/`scan` typed-API convergence") re-investigated this
+  entry's still-open blocker 2 with castxml genuinely available in the
+  investigating environment (a solver-resolved conda-forge install, not the
+  hand-assembled 0.7.0 build the plan's Design section found segfaulting) —
+  so the environmental precondition for full option (a) convergence no
+  longer blocks. **One real, safely-landable slice of blocker 1 closed for
+  real** (`cli_dump_helpers.render_dump_dry_run` now takes the real
+  `ResolvedDumpRequest` `resolve_dump_request_for_cli` already produces —
+  `so_path`/`headers`/`sources`/`build_info`/`depth`/`collect_mode`/
+  `header_backend`/`dump_manifest` are all read off it, not re-passed as
+  fifteen independently-threaded primitives — verified against
+  `test_dump_cli_typed_api_parity.py -m integration`, 16/16 green. **That
+  acceptance-gate file itself is clang-only, not evidence of castxml
+  coverage**: every one of its subprocess invocations hard-codes
+  `--ast-frontend clang`, not parametrized by backend at all (confirmed —
+  `pytest tests/test_dump_cli_typed_api_parity.py -m integration -k
+  castxml` selects zero tests). What castxml's newfound availability
+  separately confirmed is broader but different: the wider integration
+  suite's own castxml-specific cases (`pytest tests/ -m "integration and
+  not slow" -k castxml`) are 38/38 green with only the two pre-existing,
+  unrelated `xfail`s — real evidence `abicheck dump --ast-frontend castxml`
+  itself works end to end in this environment, not evidence this
+  particular parity file exercises it. Field-level parity between the two
+  paths was already closed
+  before this phase started -- `_CONTRACT_KNOWN_DIVERGENT_FIELDS` and
+  `_SCAN_KNOWN_DIVERGENT_SHAPES` in that test module were both already
+  empty -- so there was no xfail-gated shape left for this phase to flip;
+  confirmed empty both before and after this phase's change.
+
+  **Blocker 2 (the post-processing hooks) does NOT close, and the reason is
+  independent of which AST backend is available, so obtaining castxml did
+  not remove it.** Re-read `perform_elf_dump` end to end (not skimmed)
+  looking specifically for whether its first try block (the primary
+  `seed_includes_and_fold_compile_context` + `dump()` call) could be
+  replaced by a call to `execute_dump_request()`, keeping the second try
+  block's post-processing hooks (the ADR-039 collector's own explicit
+  second call, the header-graph attach, the clang-layout-tool attach)
+  unchanged as hooks applied to the returned snapshot. Two sub-findings,
+  each confirmed against the real code, not assumed:
+
+  1. *(Not actually a blocker — investigated and ruled out.)* The ADR-039
+     collector (`attach_build_context_for_parsed_headers`) already runs a
+     second time, unconditionally, inside `_resolve_side_snapshot_impl`
+     itself (PR C's own shared-gate work wired it in there too). Calling it
+     a *third* time from `perform_elf_dump`'s own existing second block —
+     which is what "keep the hook, route the primary parse" would produce
+     — is safe: `attach_build_context` *assigns*
+     `snap.build_context_defines`/`conditional_fields`, it never
+     accumulates, so a second identically-scoped call is idempotent, and
+     `parsed_with_build_context` is only ever set `True`, never reset to
+     `False`, so a redundant second stamp cannot regress it. Similarly,
+     `scope_header_dirs` (a parameter `perform_elf_dump`'s own `dump()`
+     call passes that `_dump_elf`, reached via `execute_dump_request`,
+     does not) turns out to be provably redundant with `resolve_dump_
+     request`'s own `public_header_dirs` (both are derived from the
+     identical `split_public_header_inputs(headers)` call, and `dump()`
+     unions them for the extraction contract) — so this is not a real
+     divergence either, just a vestigial second computation of the same
+     set of directories.
+  2. *(A real, structural blocker, confirmed by reading the code, distinct
+     from anything the Design section named.)* `dump_cmd`'s legacy
+     `-p`/`--compile-db` auto-match (`cli_helpers_compare.
+     _resolve_build_context_flags`, using `build_context_for_header`/
+     `build_context_union_fallback` — a completely different code path from
+     the P0.3 L3->L2 fold's `seed_includes_and_fold_compile_context`) is
+     computed in `dump_cmd` *after* `resolve_dump_request_for_cli` already
+     built the `ResolvedDumpRequest` (`_resolved`), on the real-execution
+     branch only, never on the typed-request-building path at all. Its
+     result (`effective_gcc_options`/`effective_compile_db`/
+     `compile_db_context_matched`) is what `perform_elf_dump`'s own
+     `effective_gcc_options` parameter already carries into its primary
+     `dump()` call -- and per this same entry's earlier "legacy-match
+     overlap" fix, that legacy match's derived flags are the *sole* source
+     of compile-database-derived context whenever the P0.3 fold does *not*
+     independently match the same header (the fold's result wins and
+     supersedes it whenever the fold *does* match — already the case
+     `effective_gcc_options`/`l3_context_applied`'s reassignment in
+     `perform_elf_dump` handles). `resolve_dump_request`/
+     `_resolve_side_snapshot_impl` has no equivalent call to
+     `_resolve_build_context_flags` anywhere -- `DumpRequest.input.compile`
+     only ever carries the CLI's own explicit `--gcc-options`, never the
+     legacy match's derived flags. So routing `perform_elf_dump`'s primary
+     parse through `execute_dump_request()` as-is would silently drop real,
+     still-live, still-documented (`dump --build-query`/
+     `--build-compile-db`/`-p`/`--compile-db` are explicitly not yet
+     removed — PR 3C is gated on this same convergence closing first)
+     compile-database-derived flags for exactly the headers the P0.3 fold
+     itself does not match — a real regression, not a refactor, for any
+     project relying on that fallback. Closing this for real needs the
+     legacy match's computation moved earlier (before `resolve_dump_
+     request_for_cli` runs) and threaded into the `DumpRequest`/
+     `CompileContext` the resolved object carries, so the typed pipeline
+     sees it too — a genuine, separate design change to the request-
+     building sequence (which field absorbs the legacy match's *derived*,
+     not user-typed, flags, and whether that blurs `DumpRequest`'s
+     documented "records the run, not a second opinion about it"
+     contract), not a same-session drive-by fix. **Not attempted here** —
+     recorded so a future attempt starts from this precise mechanism
+     instead of re-deriving it, per this file's own "known gaps over risky
+     reactive patches" convention.
+
+  **Net effect on this phase's own scoping**: full "route `perform_elf_dump`
+  through `execute_dump_request`" (Design section item, this entry's
+  original blocker 2) remains unattempted for the reason above -- this was
+  never actually gated on castxml availability the way the Design section's
+  own item 2 implied; that item's "(b) scope to clang, castxml tracked as
+  residual" framing turned out to describe the wrong axis. What castxml's
+  availability *did* let this phase newly verify -- run against the wider
+  integration suite, not the clang-only acceptance corpus itself (see
+  above) -- is that `abicheck dump --ast-frontend castxml` genuinely works
+  end to end in this environment today, closing the environmental
+  uncertainty the Design section's segfault finding had left open. The
+  acceptance corpus's own field-level parity (`_CONTRACT_KNOWN_DIVERGENT_
+  FIELDS`/`_SCAN_KNOWN_DIVERGENT_SHAPES` empty) remains verified for clang
+  only, exactly as it was before this phase -- extending that specific
+  corpus to also parametrize over castxml is real, still-open follow-on
+  work this phase did not attempt.
+
+  **Update (2026-08-29): the legacy-match threading half of blocker 2 is now
+  closed; routing `perform_elf_dump` itself through `execute_dump_request`
+  is still open.** This session re-read the exact mechanism the entry above
+  names (`cli_helpers_compare._resolve_build_context_flags`'s legacy
+  ``-p``/``--compile-db`` auto-match having no equivalent inside
+  `resolve_dump_request`/`execute_dump_request`) and closed the piece that
+  was safely landable without also restructuring `perform_elf_dump`'s own
+  try/except/cleanup structure in the same change:
+
+  1. `execute_dump_request` gained a new, purely additive
+     `legacy_compile_db_tokens: tuple[str, ...] = ()` parameter, threaded
+     down through `workflows.artifact.execute._resolve_side_snapshot_impl`
+     into `workflows.artifact.resolve._seeded_includes_and_compile_context`
+     — the exact same "optional pass-through, defaulted to a no-op, that
+     exists only for `dump`'s still-live CLI legacy flags" pattern
+     `build_config`/`build_query`/`build_compile_db` already established on
+     these same three functions (PR 3A). A caller that already computed the
+     legacy match's own derived flags (exactly what `dump_cmd` already does
+     via `_resolve_build_context_flags`, unchanged) can now thread them
+     through the typed pipeline and have them actually reach the real L2
+     header-AST parse (`service.resolve_input`'s `compile=` argument).
+  2. **Precedence preserved exactly**, mirroring `perform_elf_dump`'s own
+     "legacy-match overlap" fix this entry already documents: the tokens are
+     merged into the resolved `CompileContext.gcc_options` only when the
+     P0.3 fold's own `applied` came back `False` for a given header — when
+     the fold *does* apply, its own result is used verbatim and the legacy
+     tokens are discarded rather than stacked on top, verified by a
+     dedicated precedence test (see below) that pins the merged
+     `gcc_options`/`gcc_option_tokens` string as byte-identical between "no
+     legacy tokens" and "legacy tokens given" when the fold applies.
+  3. The merge helper (`_fold_legacy_compile_db_tokens`) is a small,
+     independent 3-line reimplementation of
+     `cli_helpers_compare._merge_gcc_options`'s ordering (legacy flags
+     prepended ahead of any existing `gcc_options`), not an import of that
+     function — `workflows/artifact/resolve.py` is an engine-layer module
+     under `scripts/check_ai_readiness.py`'s `engine-cli-boundary` check,
+     which forbids importing a `cli_*` sibling (that module itself imports
+     `click`). Confirmed via `check_ai_readiness.py`: zero new
+     `engine-cli-boundary` findings.
+  4. Verified end to end against a real `g++` build + real `compile_commands.json`
+     + real clang L2 parse, not only the merge helper in isolation
+     (`tests/test_legacy_compile_db_typed_threading.py`, 4/4 green): a
+     compile unit whose source text does not `#include` the public header
+     at all is exactly the shape where the two mechanisms provably disagree
+     — `header_compile_context.resolve_header_compile_context` (the P0.3
+     fold) returns `context=None` with **no union fallback** (confirmed by
+     reading its own docstring: "no header the given `CompileUnit`s
+     reference" degrades to nothing, full stop), while `build_context.
+     build_context_for_header` (the legacy match) falls back to
+     `build_context_union_fallback`, which still merges the compile
+     database's `-D`s and still sets `compile_db_path` (so
+     `_resolve_build_context_flags`'s own `matched` comes back `True`). One
+     test proves the real CLI already sees the union-fallback define (the
+     fixed point to reproduce); one proves the typed path does **not** see
+     it with the new parameter absent (proving the gap this closes was
+     real, and that the new parameter is genuinely opt-in rather than
+     silently changing existing callers' behavior); one proves the typed
+     path **does** see it, byte-identically to the CLI, once the CLI's own
+     already-computed `_resolve_build_context_flags` output is threaded
+     through `legacy_compile_db_tokens`; one proves the fold-wins precedence
+     holds when the fold does apply.
+
+  **What is explicitly still open, and why this session did not attempt
+  it**: `perform_elf_dump`'s primary parse (the first try block --
+  `seed_includes_and_fold_compile_context` + `dump()`) does **not** yet call
+  `execute_dump_request()` — the real `dump` CLI's ELF/PE/Mach-O run still
+  executes through `cli_dump_helpers.perform_elf_dump`/`handle_non_elf_dump`
+  exactly as before, so `dump_cmd` does not pass `legacy_compile_db_tokens`
+  anywhere yet (there is nowhere in it that calls `execute_dump_request` to
+  pass it to). Closing that remaining piece needs restructuring
+  `perform_elf_dump`'s own try/except/`ResolvedArtifactPlan` cleanup
+  handling to delegate to `execute_dump_request()` while preserving its
+  second try block's post-processing hooks (the ADR-039 collector's own
+  second call, the header-graph attach, the clang-layout-tool attach) as
+  hooks applied to the returned `DumpResult`'s snapshot — this entry's own
+  earlier sub-finding 1 already confirmed that keeping those hooks as a
+  second pass is safe/idempotent, so the remaining work is purely the
+  control-flow restructuring itself, not a new correctness question. Given
+  this exact code area's own history in this entry (18+ numbered findings
+  on the adjacent L3->L2-fold alone, several reverted-and-refixed), that
+  restructuring was deliberately left as its own, separately-reviewable
+  slice rather than folded into this one — consistent with how every prior
+  slice in this entry was landed one at a time. `cli_dump_request.py`'s own
+  module docstring and `service_dump_pipeline.execute_dump_request`'s
+  docstring both point back here for exactly what remains.
+
+  **Correction (2026-08-29, same day, Codex review on PR #935): the
+  threading above landed with a real bookkeeping gap of its own, now
+  fixed.** Folding the legacy tokens into the resolved `CompileContext`
+  (sub-finding 2 above) updated `gcc_options` but left the function's
+  returned `applied` boolean — the exact signal `_resolve_side_snapshot_
+  impl` gates `AbiSnapshot.parsed_with_build_context` on — untouched at
+  `False` whenever the P0.3 fold itself did not match. Confirmed by reading
+  the actual gate (`workflows/artifact/execute.py`'s `if context_applied
+  and snap.from_headers: snap.parsed_with_build_context = True`): a typed
+  dump relying purely on the legacy-match fallback would have parsed real
+  compile-database context and then still reported it as absent — wrongly
+  triggering the `header_parse_context_drift`/`header_build_context_
+  mismatch` advisory findings and wrongly failing a `--depth build` gate
+  that the real CLI's own `perform_elf_dump` path (whose `compile_db_
+  context_matched` OR `l3_context_applied` condition already handles this
+  correctly) would have satisfied for the identical evidence. A second,
+  distinct problem in the same spot: an empty `legacy_compile_db_tokens`
+  tuple is indistinguishable from "the legacy match never ran" — so a
+  compile unit the legacy match genuinely matched, but which legitimately
+  derives zero castxml flags, had no way to signal that it *was* matched.
+
+  Fixed by adding a second, independent parameter, `legacy_compile_db_
+  matched: bool = False` — mirroring `perform_elf_dump`'s own `compile_db_
+  context_matched` parameter exactly, the second element of
+  `_resolve_build_context_flags`'s own return — threaded through the
+  identical three-function chain (`execute_dump_request` →
+  `_resolve_side_snapshot_impl` → `_seeded_includes_and_compile_context`).
+  `_seeded_includes_and_compile_context` now returns `applied=legacy_
+  compile_db_matched` (not the fold's own, already-`False` `applied`) in
+  the branch where the P0.3 fold did not match, in both its early-return
+  path (no `sources`/`build_info`, or no headers) and its main path — so
+  a real match sets `parsed_with_build_context` regardless of whether any
+  tokens were actually derived, while an unmatched call (the default, and
+  every pre-existing caller) stays exactly as it was. Both new parameters
+  default falsy, so this remains purely additive.
+
+  Verified with four fast, monkeypatch-based unit tests (no compiler
+  needed — `tests/test_legacy_compile_db_matched_signal.py`): matched with
+  zero tokens still sets `applied=True`; unmatched with zero tokens stays
+  `applied=False` (the pre-existing default behavior, pinned unchanged);
+  matched with real tokens sets both the folded `gcc_options` and
+  `applied=True`; the fold-applies-wins precedence (sub-finding 2 above)
+  holds regardless of what the legacy-match parameters claim. Confirmed
+  each of the four fails with `TypeError: unexpected keyword argument
+  'legacy_compile_db_matched'` against the pre-fix code (the parameter
+  did not exist), not merely that they pass now.
+
+  **Second correction (2026-08-29, same day, second Codex review round on
+  PR #935): the fix above still under-counted a real call shape.** A caller
+  may thread non-empty `legacy_compile_db_tokens` while leaving the new
+  `legacy_compile_db_matched` parameter at its default `False` — exactly the
+  shape `tests/test_legacy_compile_db_typed_threading.py`'s own end-to-end
+  caller uses. `_seeded_includes_and_compile_context` still returned
+  `applied=legacy_compile_db_matched` alone in that case (both the
+  early-return and main-path branches), so `applied` stayed `False` even
+  though non-empty tokens are themselves proof a legacy match derived real
+  flags — reproducing the identical `parsed_with_build_context` under-report
+  the first correction above closed, just reachable from a different call
+  shape.
+
+  Fixed via a shared `_legacy_compile_db_achieved(matched, tokens) -> bool`
+  helper: `matched or bool(tokens)`. Both branches now call it instead of
+  reading `legacy_compile_db_matched` directly. `legacy_compile_db_matched`
+  remains necessary on its own for a genuinely matched compile unit that
+  legitimately derives zero flags (an empty token tuple can't represent that
+  case); non-empty tokens are sufficient evidence on their own, independent
+  of whether `matched` was also passed.
+
+  Verified with two new fast unit tests in the same file
+  (`test_tokens_alone_without_explicit_matched_flag_still_marks_applied`,
+  covering the main path; `test_early_return_path_also_honors_tokens_alone`,
+  covering the early-return branch) — both confirmed to fail against the
+  pre-fix code (`assert False is True`) via `git stash`, and to pass after.
+  Full fast unit suite re-run clean (33836 passed, 129 skipped, 4 xfailed,
+  0 failed) after this second correction.
+
+  **Third correction (2026-08-29, same day, third Codex review round on PR
+  #935): a distinct, real correctness bug in the same function, found by
+  reading the actual token shapes involved rather than assumed.**
+  `_fold_legacy_compile_db_tokens` used to merge *tokens* into
+  `CompileContext.gcc_options` via `" ".join(tokens)` — but *tokens* are
+  already-split argv entries (`build_context.to_castxml_flags()`'s own
+  return, e.g. `("-I", "/opt/SDK Files/include")`, one element per argv
+  position, never pre-joined), and every consumer of `gcc_options`
+  re-splits it via `_compiler_options.split_gcc_options` before handing it
+  to the real castxml/clang subprocess. A token containing embedded
+  whitespace — a Windows SDK include path with a space, or a compile-db
+  `-DNAME=a b` define — silently split back into the wrong number of
+  tokens on that second pass, corrupting the derived include path or macro
+  value the moment a typed dump relying on the legacy match actually
+  reached the real parse. Confirmed real, not theoretical: `to_castxml_
+  flags()` genuinely emits `-I`/`<path>` as two separate list elements
+  (`flags.extend(["-I", str(inc)])`), so any compile-database include path
+  with a space reaches this function in exactly the corrupting shape.
+
+  **Also confirmed to be pre-existing, shared debt, not novel to this
+  PR**: `cli_helpers_compare._merge_gcc_options` — the real CLI's own
+  legacy-match merge path, which `_fold_legacy_compile_db_tokens`'s own
+  docstring already documented as byte-for-byte mirroring — has the
+  identical `" ".join(build_context_flags)` pattern feeding the identical
+  `CompileContext(gcc_options=...)` field, so the real, unconditional
+  `dump -p compile_commands.json` CLI path carries this same corruption
+  today for a compile-database entry whose derived flags include
+  whitespace. **Not fixed here** — this correction's scope is the typed
+  pipeline this session's own work introduced; `_merge_gcc_options` is
+  pre-existing, live, widely-exercised code with its own blast radius, and
+  changing it needs its own dedicated review pass rather than riding along
+  inside an unrelated correction. Recorded here as a known, real,
+  reproducible gap: an include path or define value containing a space in
+  a compile database used with `dump -p`/`--compile-db` (no `--dry-run`
+  involved — this is the real-execution path) can silently corrupt the
+  derived castxml flags.
+
+  Fixed in the typed pipeline by routing *tokens* through
+  `CompileContext.gcc_option_tokens` (verbatim argv entries, a field that
+  is never re-parsed by `split_gcc_options`) instead of the `gcc_options`
+  string. Precedence preserved exactly: since the combined-token order
+  always places `gcc_options` ahead of `gcc_option_tokens` (later wins),
+  and the legacy match must still lose to an explicit, caller-supplied
+  value, *ctx*'s own `gcc_options` string is split once here — with the
+  identical `split_gcc_options` splitter every consumer already applies to
+  it downstream, so this changes no token list, only where the split
+  happens — and the combined tuple built as `(*tokens, *split(ctx.
+  gcc_options), *ctx.gcc_option_tokens)`: legacy first (lowest
+  precedence), then whatever *ctx* already carried, in its original
+  relative order.
+
+  Verified with five new fast unit tests
+  (`TestWhitespaceBearingTokensSurviveTheFold` in
+  `tests/test_legacy_compile_db_matched_signal.py`): a whitespace-bearing
+  include path and a whitespace-bearing define value both survive intact;
+  an explicit `ctx.gcc_options` still outranks a conflicting legacy token;
+  an explicit `ctx.gcc_option_tokens` still outranks a conflicting legacy
+  token; an empty token tuple remains a true no-op (`ctx` returned
+  unchanged by identity, not merely by value). Three of the five confirmed
+  to fail against the pre-fix code via `git stash` (the two whitespace
+  tests, and the `gcc_option_tokens`-precedence test — the `gcc_options`-
+  precedence test and the no-op test already held under both versions).
+  The three pre-existing tests this correction's field change touched
+  (`test_matched_with_tokens_folds_flags_and_marks_applied`,
+  `test_tokens_alone_without_explicit_matched_flag_still_marks_applied`,
+  `test_early_return_path_also_honors_tokens_alone`) were updated to
+  assert `gcc_option_tokens` instead of the now-unused `gcc_options`
+  string; `tests/test_legacy_compile_db_typed_threading.py`'s own
+  precedence test (`test_fold_wins_over_legacy_tokens_when_it_applies`)
+  needed no change, since it already read the *combined* effective token
+  sequence across both fields rather than pinning `gcc_options` alone.
+
+  **Fourth correction (2026-08-29, same day): this entry's own claim that
+  "the remaining work is purely the control-flow restructuring itself, not a
+  new correctness question" is WRONG, and is retracted here.** A dedicated
+  session set out to do exactly the routing that claim scoped —
+  `perform_elf_dump`'s primary parse calling `execute_dump_request()` instead
+  of `seed_includes_and_fold_compile_context()` + `dumper.dump()` as two
+  independent steps — read every function on both sides end to end
+  (`perform_elf_dump`, `handle_non_elf_dump`, `service_dump_pipeline`'s
+  `resolve_dump_request`/`execute_dump_request`/`ResolvedDumpRequest`/
+  `DumpResult`, `workflows/artifact/execute.py`'s
+  `_resolve_side_snapshot_impl`/`enforce_requested_depth`,
+  `workflows/artifact/resolve.py`'s `_seeded_includes_and_compile_context`,
+  `service.resolve_input`, `service_dump_native._dump_elf`,
+  `cli_buildsource._write_snapshot_output`, `cli_dump_request.
+  build_dump_request`, and `frontends/cli/commands/dump.py`'s real call
+  sites) and built the parameter-by-parameter parity map the routing needs.
+  **Neither function was converted.** Two *structural* blockers were found
+  that the claim above did not anticipate, both distinct from the legacy
+  `-p`/`--compile-db` mechanism the earlier sub-finding 2 named and closed.
+  Several previously-suspected blockers were, by contrast, ruled out for
+  real; both lists are below so a future attempt starts from measured facts.
+
+  **Blocker A (ELF only, and it is exactly `DumpResult`'s own documented
+  "Lifetime caveat" made live rather than latent).** `perform_elf_dump`
+  passes the CLI's *real* `collect_mode` to
+  `seed_includes_and_fold_compile_context`, which sets
+  `allow_inferred_build_query=collect_mode != "off"` (`buildsource/l2_seed.py`)
+  and therefore genuinely returns non-empty `pending_cleanups` — the
+  temporary build directory a zero-config *inferred* build-system query
+  seeded, whose generated headers the seeded include dirs point at.
+  `perform_elf_dump` drains that plan in a `finally` placed deliberately
+  **after** its two post-processing second passes (`service._attach_header_
+  graph` and `workflows.extraction.attach_clang_layout`), and its own inline
+  comment states why in as many words: "the header-graph pass above (when
+  requested) reuses the same seeded include dirs the main `dump()` parse
+  used, so cleanup must wait until it ... has run". `_resolve_side_snapshot_
+  impl` drains in a *nested* `finally` immediately after
+  `service.resolve_input`, and its own comment states, equally explicitly,
+  why it must: `embed_side_build_source` runs its own inferred query inside
+  the same call, and an undrained seed still holds the deterministic
+  per-source-tree build dir under an exclusive `flock`, so a later drain
+  makes the second query self-contend for up to `INFERRED_QUERY_TIMEOUT_S`
+  (600s) — the identical self-contention shape recorded as the fifth finding
+  on the L3→L2-fold entry. The two requirements are in **direct conflict**
+  the moment `perform_elf_dump`'s parse routes through that primitive: today
+  they don't conflict only because `perform_elf_dump` runs no embed inside
+  its own plan. Deferring the seed cleanups back out to the CLI caller (an
+  additive `defer_seed_cleanup` pass-through, the obvious-looking fix) is
+  precisely what re-creates the 600s contention; draining them where the
+  shared primitive does is precisely what deletes the directories the two
+  second passes still need to re-parse headers under. `DumpResult`'s own
+  docstring already names this ("safe for *identity or comparison* ... a
+  caller intending to re-read a file under one of these paths ... cannot yet
+  do so safely"), and already scopes the fix as PR 3A's pair-aware/lifetime
+  redesign — a separate piece of work, not a control-flow rewrite. Weakening
+  or disabling either second pass to dodge it was considered and rejected:
+  each exists because of its own recorded Codex-review regression (a second
+  clang pass silently degrading to a declaration-only graph, and a
+  `dump --ast-frontend clang` baseline silently carrying no layout-tool
+  facts).
+
+  **Blocker B (both ELF and PE/Mach-O).** `execute_dump_request` is a
+  resolve **+ embed + enforce** pipeline: `_resolve_side_snapshot_impl` runs
+  `embed_side_build_source` (L3-L5) inline, `service.resolve_input` →
+  `run_dump` applies `dumper_scoping.resolve_dependency_scope` from
+  `InputSpec.include_dependencies`, and `execute_dump_request` then calls
+  `enforce_requested_depth`. The `dump` CLI does all three of those things
+  **after** the parse and after provenance stamping, in
+  `cli_buildsource._write_snapshot_output`: `embed_build_source` (guarded by
+  `build_source_already_satisfies`), then `check_requested_depth_satisfied`,
+  then `resolve_dependency_scope(snap, include_dependencies, header_roots)`.
+  Routing the primary parse through `execute_dump_request` therefore reorders
+  all three relative to the CLI's own post-parse pipeline, with three
+  concrete consequences, none of them cosmetic: (1) the ADR-039 build-context
+  reconciliation, the header-graph attach and the clang-layout attach would
+  run over an *already dependency-scoped* snapshot (`--include-system-
+  declarations` defaults off, so `InputSpec.include_dependencies=False` is
+  the common case, and the inner scope call has no access to the write path's
+  `header_roots` set at all); (2) the depth floor would be enforced against
+  only the *inner* embed's result, before `_write_snapshot_output`'s own
+  embed — the one that actually fills L3-L5 for a `dump` today — has run; and
+  (3) that floor raises `ValidationError` where the CLI's own
+  `check_requested_depth_satisfied` raises a Click error, a different
+  user-facing message and exit code for the identical input. Making this
+  safe means either suppressing three behaviors inside a shared Tier-2
+  primitive for one caller (inventing a code path, which this entry's own
+  convention forbids) or moving the CLI's write-time embed/enforce/scope
+  stanza to resolution time — a real, separately-reviewable redesign of
+  `_write_snapshot_output`'s contract, not part of the routing.
+
+  **Ruled out, with evidence, so they are not re-litigated.** (i) The
+  P0.3 fold's fourth return value (`l3_include_dirs`, which
+  `perform_elf_dump` folds into `extra_hash_dirs`) is *not* lost: the folded
+  context's own tokens carry those dirs, and `service_dump_native._dump_elf`
+  independently recomputes the same set via
+  `cache_relevant_operand_paths(cc.gcc_option_tokens)`. (ii) The P3
+  inferred-header-root derivation (`resolve_inferred_header_roots` →
+  `inc_extra`/`deferred`/`deferred_dirs`) is *not* lost either — `_dump_elf`
+  performs the identical derivation itself. (iii) `debug_info_path` is not
+  lost: `_dump_elf` resolves it from `debug_roots`/`enable_debuginfod`, both
+  of which `build_dump_request` already puts on the `InputSpec` (it would be
+  resolved *twice*, once by `dump_cmd` for its echo and once here, which is
+  wasteful and double-logs but is not a correctness gap). (iv) The
+  whole-snapshot cache (`resolve_input` → `cached_run_dump`, which
+  `perform_elf_dump`'s bare `dump()` bypasses) does **not** newly activate:
+  `build_dump_request` always sets `InputSpec.compile` to the CLI's resolved
+  `CompileContext`, and `service_dump_cache._dump_is_cacheable` refuses to
+  cache any call with a non-`None` `compile`. (v) `follow_deps` on PE/Mach-O
+  is not a divergence: `populate_side_dependency_info` is documented and
+  implemented as an ELF-only no-op. (vi) `ast_memoize_scope()`/
+  `suppress_streaming_prune()` are trivially preservable — the caller can
+  wrap the `execute_dump_request` call itself. (vii) `handle_non_elf_dump`
+  has **no** Blocker A: it runs no post-processing second pass and already
+  drains its plan in a `finally` immediately after the parse, exactly where
+  the shared primitive does. It is blocked by B alone, which is why
+  converting "the small one first as a warm-up" does not in fact isolate a
+  safely-landable slice.
+
+  **Net**: the remaining piece of this entry is *not* control-flow-only.
+  Closing it needs (a) PR 3A's already-scoped pair-aware/lifetime redesign of
+  the L2 seed's cleanup ownership, so a caller with post-parse hooks can keep
+  the seeded dirs alive without the embed step self-contending on their lock,
+  and (b) a decision about where `dump`'s L3-L5 embed, depth enforcement and
+  dependency scoping belong — resolution time (matching the typed pipeline)
+  or write time (matching today's CLI) — since the two cannot both be true of
+  one code path. Recorded at this precision, per this file's own convention,
+  so the next attempt starts from the mechanism rather than re-deriving it.
+
 - **Lambda-closure churn survives at the *function* level after the type-level
   fix — investigated, deliberately not patched (oneTBB flow-graph report,
   fresh evidence).** `name_classification._ANONYMOUS_TYPE_MARKERS` did not

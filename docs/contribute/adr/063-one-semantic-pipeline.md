@@ -1,10 +1,43 @@
 # ADR-063: One Semantic Pipeline — Unifying Application, Fact, Identity, and Outcome Models
 
 **Date:** 2026-08-27
-**Status:** Proposed — roadmap ADR, not implemented. Several of its decisions
+**Status:** Proposed — roadmap ADR, partially implemented. Phase 0's
+infrastructure (`Fact[T]`/`FactStatus` in `abicheck/model/`, the five
+converted `RecordType`/`Param` fields with producer-side construction and
+serialization round-trip, and the `fact-detector-misuse`/
+`fact-field-readers` AI-readiness gates) has landed, per that phase's own
+"landed (Nth slice)" scoping in the implementation plan — but **no
+detector has migrated to read the converted fields' `Fact[...]` siblings
+yet**; every existing detector still reads the retained legacy fields
+(`RecordType.vtable`/`bases`/etc., `AbiSnapshot.clang_vtable_facts_reliable`)
+unchanged, which is intentional and within Phase 0's own deliberately
+narrow scope (a blanket detector migration is Phase 5's job) but means
+Phase 0 has not yet changed any detector's actual behavior — it is
+enforcement/tracking infrastructure (an allowlist-and-shrink baseline of
+known unmigrated legacy-field readers — see `scripts/fact_field_readers.py`'s
+`KNOWN_UNMIGRATED_READERS` for the current, authoritative count, not
+restated here since it is expected to shrink as readers migrate — the same
+convention this codebase's `IMPORT_CYCLE_ALLOWLIST` already uses), not a
+completed migration. Phase 1 ("finish the `dump`/`scan` typed-API
+convergence") has landed one narrow, verified slice of its own (`dump
+--dry-run` renders from a real resolved `DumpRequest` for both header
+backends) — its own "Files"/"Acceptance criteria" routing step
+(`perform_elf_dump`/`handle_non_elf_dump` calling the typed executor
+instead of `dumper.dump()` directly) has not, for reasons
+independent of AST-backend availability — that routing was attempted as its
+own slice on 2026-08-29 and deliberately not landed, on two structural
+blockers (the L2 seed's inferred-build-dir cleanup having two mutually
+exclusive correct drain points, and the typed executor embedding/enforcing/
+scoping inside resolution where the `dump` CLI does all three at write
+time); see the implementation plan's Phase 1 section and
+`docs/contribute/known-gaps.md`'s "ADR-063 Phase 1" entry for the precise,
+still-open mechanisms and for the previously-suspected blockers that were
+ruled out with evidence. Phases 2-10 are still unimplemented design
+text — see the
+[implementation plan](../plans/one-semantic-pipeline.md) for the
+phase-by-phase state. Several of the still-unimplemented phases' decisions
 are already partially satisfied by work this ADR consolidates rather than
-replaces (see "Relationship to existing ADRs" below); none of its new
-primitives exist yet.
+replaces (see "Relationship to existing ADRs" below).
 **Decision maker:** abicheck maintainers
 **Relates to / builds on:** [ADR-024](024-public-abi-surface-resolution.md),
 [ADR-031](031-source-implementation-graph-augmentation.md),
