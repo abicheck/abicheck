@@ -58,7 +58,7 @@ Leaf module: no dependency on ``checker_types``/``diff_*``/anything above
 from __future__ import annotations
 
 import enum
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
 from .signature_normalization import canonicalize_function_signature_param_type
 
@@ -79,6 +79,7 @@ __all__ = [
     "entity_id_for_type",
     "entity_id_for_typedef",
     "entity_id_for_variable",
+    "with_mangled_name",
 ]
 
 
@@ -584,3 +585,37 @@ def entity_id_for_function(
         leaf_name=resolved_leaf_name,
         extra=extra,
     )
+
+
+def with_mangled_name(
+    entity_id: EntityId | None, new_mangled_name: str
+) -> EntityId | None:
+    """*entity_id* with its ``"mangled"`` tag re-spelled to *new_mangled_name*.
+
+    A declaration's own mangled spelling can legitimately change AFTER its
+    ``EntityId`` was already resolved by a producer -- e.g. a hybrid
+    dumper reconciling a castxml synthetic ctor/dtor placeholder key to
+    clang's real mangled name, or normalizing a Mach-O linker symbol's
+    leading underscore before cross-producer matching. Rebuilding the
+    identity from scratch at that point is not an option: by then the
+    caller no longer has the original ``ScopePath`` the resolver needs
+    (that data is parser-internal, per this module's own carrier-field
+    design). This is the narrow, safe alternative -- it only ever touches
+    an identity genuinely tagged ``("mangled", ...)``; an
+    ``extern_c``-/``sig``-tagged identity, or no identity at all, is
+    returned unchanged, since neither of those was derived from the
+    mangled spelling in the first place, and rewriting either would
+    silently fabricate a tag the resolver never produced.
+
+    >>> eid = entity_id_for_function((), "f", mangled_name="_Z1fv")
+    >>> with_mangled_name(eid, "_Z1fi").extra
+    ('mangled', '_Z1fi')
+    >>> extern_c_eid = entity_id_for_function((), "f", is_extern_c=True)
+    >>> with_mangled_name(extern_c_eid, "_Z1fv") is extern_c_eid
+    True
+    >>> with_mangled_name(None, "_Z1fv") is None
+    True
+    """
+    if entity_id is None or entity_id.extra[:1] != ("mangled",):
+        return entity_id
+    return replace(entity_id, extra=("mangled", new_mangled_name))

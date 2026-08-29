@@ -50,10 +50,20 @@ from typing import Any
 from xml.etree.ElementTree import parse as parse_xml
 
 import pytest
+from test_dumper_hybrid import _snap as _hybrid_snap
 
+from abicheck import dumper_hybrid as _hybrid
 from abicheck.dumper_castxml import _CastxmlParser
 from abicheck.dumper_clang import _ClangAstParser
-from abicheck.model import AbiSnapshot, EnumType, Function, RecordType, Variable
+from abicheck.model import (
+    AbiSnapshot,
+    AccessLevel,
+    EnumType,
+    Function,
+    Param,
+    RecordType,
+    Variable,
+)
 from abicheck.model.identity import (
     EntityId,
     EntityKind,
@@ -556,3 +566,87 @@ def test_live_clang_real_c_linkage_still_takes_the_extern_c_branch(
     c_var = _one(parser.parse_variables(), name="c_var")
     assert c_fn.entity_id is not None and c_fn.entity_id.extra == ("extern_c",)
     assert c_var.entity_id is not None and c_var.entity_id.extra == ("extern_c",)
+
+
+# ── hybrid dumper: entity_id must stay in sync across post-parse rewrites ────
+#
+# `dumper_hybrid.py` rewrites a declaration's `mangled` field in two places
+# AFTER it was already parsed with a real `entity_id`: reconciling a castxml
+# ctor/dtor synthetic placeholder key to clang's real mangling, and
+# normalizing a Mach-O linker symbol's leading underscore. Both tests live
+# here, not in `test_dumper_hybrid.py`, since they're about this module's own
+# identity-carrier contract (ADR-063 Phase 2), not the hybrid merge itself.
+
+
+def test_reconciled_constructor_adopts_clangs_entity_id() -> None:
+    """The identity carrier must be rewritten alongside ``mangled``, not
+    left holding the stale synthetic placeholder key (Codex review, fresh
+    evidence).
+
+    Before this fix, ``dataclasses.replace(f, mangled=match.mangled)``
+    rewrote only the ``mangled`` field: the reconciled function's own
+    ``mangled`` correctly showed the real clang symbol, but its
+    ``entity_id`` still carried the synthetic, no-such-symbol-exists
+    placeholder inside its own "mangled" tag -- a caller keying on
+    ``entity_id`` (rather than ``mangled``) would fragment this one real
+    declaration into two identities across a comparison.
+    """
+    synthetic = f"{_hybrid.SYNTHETIC_CTOR_KEY_PREFIX}ns::Widget(int)"
+    castxml_ctor = Function(
+        name="Widget",
+        mangled=synthetic,
+        return_type="void",
+        params=[Param(name="n", type="int")],
+        access=AccessLevel.PUBLIC,
+        entity_id=entity_id_for_function((), "Widget", mangled_name=synthetic),
+    )
+    real_mangled = "_ZN2ns6WidgetC1Ei"
+    real_entity_id = entity_id_for_function((), "Widget", mangled_name=real_mangled)
+    clang_ctor = Function(
+        name="Widget",
+        mangled=real_mangled,
+        return_type="void",
+        params=[Param(name="n", type="int")],
+        access=AccessLevel.PUBLIC,
+        entity_id=real_entity_id,
+    )
+    castxml = _hybrid_snap(functions=[castxml_ctor], ast_producer="castxml")
+    clang = _hybrid_snap(functions=[clang_ctor], ast_producer="clang")
+    merged = _hybrid.merge_snapshots(castxml, clang)
+
+    reconciled = merged.func_by_mangled(real_mangled)
+    assert reconciled is not None
+    assert reconciled.entity_id == real_entity_id
+    assert reconciled.entity_id.extra == ("mangled", real_mangled)
+
+
+def test_macho_normalization_resynchronizes_entity_id_mangled_tag() -> None:
+    """The Mach-O underscore-strip must re-spell the identity carrier's own
+    "mangled" tag alongside the ``mangled`` field it strips it from (Codex
+    review, fresh evidence) -- otherwise a clang-side declaration's
+    ``entity_id`` still names the prefixed Darwin linker symbol after
+    ``mangled`` itself has been normalized to castxml's prefix-free
+    spelling, desynchronizing the two.
+
+    A **clang-only** variable (no matching castxml declaration) is the real
+    path this matters for: castxml's own already-correct identity always
+    wins on a matched pair, so a normalization bug here is invisible unless
+    the clang-only declaration itself -- with no castxml counterpart to
+    shadow it -- passes straight through into the merged snapshot.
+    """
+    prefixed = "__ZN2ns1gE"
+    stripped = "_ZN2ns1gE"
+    clang_v = Variable(
+        name="g",
+        mangled=prefixed,
+        type="int",
+        entity_id=entity_id_for_variable((), "g", mangled_name=prefixed),
+    )
+    castxml = _hybrid_snap(variables=[], ast_producer="castxml", platform="macho")
+    clang = _hybrid_snap(variables=[clang_v], ast_producer="clang", platform="macho")
+    merged = _hybrid.merge_snapshots(castxml, clang)
+
+    reconciled = merged.var_by_mangled(stripped)
+    assert reconciled is not None
+    assert reconciled.entity_id is not None
+    assert reconciled.entity_id.extra == ("mangled", stripped)
