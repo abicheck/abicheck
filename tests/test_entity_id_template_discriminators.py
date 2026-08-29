@@ -877,3 +877,29 @@ def test_live_clang_member_pointer_spiral_return_declarator_preserves_returned_f
     assert a.entity_id != b.entity_id
     assert a.return_type == "int (C::*())(int)"
     assert b.return_type == "int (C::*())(double)"
+
+
+@pytest.mark.integration
+@pytest.mark.skipif(shutil.which("clang") is None, reason="clang not installed")
+def test_live_clang_spiral_return_strips_outer_exception_spec(
+    tmp_path: Path,
+) -> None:
+    """A spiral (function-pointer-returning) function's OWN, OUTER
+    exception specification must not leak into `return_type`:
+    `template<class T> int (*f(T))(int) noexcept(noexcept(T()));`'s
+    `qualType` is `"int (*(T))(int) noexcept(noexcept(T()))"` (confirmed
+    by direct compilation) -- appending the spiral branch's trailing
+    group verbatim (an earlier version of the spiral-declarator fix)
+    dragged the exception-specification text along with it, which would
+    fabricate a spurious return-type-changed finding whenever only the
+    `noexcept` condition changes (Codex review, PR #943, on a later
+    round)."""
+    fn = _one(
+        _clang_parser(
+            "template<class T> int (*f(T))(int) noexcept(noexcept(T()));",
+            tmp_path,
+            "spiralnoexcept",
+        ).parse_functions(),
+        name="f",
+    )
+    assert fn.return_type == "int (*())(int)"

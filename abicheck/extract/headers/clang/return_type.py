@@ -64,6 +64,37 @@ def _top_level_paren_spans(s: str) -> list[tuple[int, int]]:
 
 
 _EXCEPTION_SPEC_KEYWORD_RE = re.compile(r"\b(?:noexcept|throw)\s*$")
+_TRAILING_BARE_NOEXCEPT_RE = re.compile(r"\s*\bnoexcept\s*$")
+
+
+def _strip_trailing_exception_spec(s: str) -> str:
+    """Remove a trailing ``noexcept(...)``/``throw(...)`` (or bare
+    ``noexcept``) exception specification from *s*, if one is present at
+    the very end.
+
+    Needed by the SPIRAL-declarator branch specifically: unlike the
+    scan-from-the-end branch (which never includes anything after the
+    real parameter list at all), the spiral branch appends the RETURNED
+    function's own trailing group verbatim, which can itself be followed
+    by the OUTER function's own exception specification -- confirmed by
+    direct compilation: ``template<class T> int (*f(T))(int)
+    noexcept(noexcept(T()));``'s ``qualType`` is ``"int (*(T))(int)
+    noexcept(noexcept(T()))"``. Left unstripped, this pollutes
+    ``return_type`` with exception-specification text, which would
+    fabricate a spurious return-type-changed finding whenever only the
+    exception-specification condition changes (Codex review, PR #943, on
+    a later round -- the identical hazard the ordinary, non-spiral
+    ``noexcept`` correction closed, here for the spiral branch's own
+    trailing group instead of its parameter-list-selection logic).
+    """
+    spans = _top_level_paren_spans(s)
+    if spans:
+        last_start, last_end = spans[-1]
+        if last_end == len(s.rstrip()):
+            keyword = _EXCEPTION_SPEC_KEYWORD_RE.search(s[:last_start])
+            if keyword:
+                return s[: keyword.start()].rstrip()
+    return _TRAILING_BARE_NOEXCEPT_RE.sub("", s)
 
 
 def _find_top_level_arrow(s: str) -> int | None:
@@ -216,7 +247,8 @@ def return_type(qualtype: str) -> str:
     if _is_spiral_wrapper_prefix(first_interior):
         leading = qualtype[:first_start].strip()
         inner = _excise_own_param_list(first_interior)
-        return (leading + " (" + inner + ")" + qualtype[first_end:]).strip()
+        tail = _strip_trailing_exception_spec(qualtype[first_end:])
+        return (leading + " (" + inner + ")" + tail).strip()
 
     real_start = spans[-1][0]
     for start, _end in reversed(spans):

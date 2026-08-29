@@ -8773,6 +8773,31 @@ confirmed to fail pre-fix via `git stash` on just the source file; every
 existing return-type discriminator test in that module still passes
 unchanged.
 
+**Correction (2026-08-29, same day, Codex review on PR #943): a
+function-pointer-returning function's own OUTER exception specification
+leaked into `return_type` through the SPIRAL branch's trailing group.**
+`template<class T> int (*f(T))(int) noexcept(noexcept(T()));`'s
+`qualType` is `"int (*(T))(int) noexcept(noexcept(T()))"` -- confirmed
+by direct compilation -- and the spiral branch appends
+`qualtype[first_end:]` (everything after the wrapper group) verbatim,
+which here includes the trailing `noexcept(noexcept(T()))` text on top
+of the returned function's own real `(int)` parameter list. Left
+unstripped this pollutes `return_type` with exception-specification
+text, which would fabricate a spurious return-type-changed finding
+whenever only the exception-specification condition changes, not the
+actual return type -- the identical hazard the ordinary, non-spiral
+`noexcept` correction closed, here for the spiral branch's own trailing
+group instead of its parameter-list-selection logic. Fixed by adding
+`_strip_trailing_exception_spec`, applied to the spiral branch's tail
+before appending it: it finds the last top-level group in the tail and,
+if that group is immediately preceded by `noexcept`/`throw` AND sits at
+the very end of the string, truncates the tail to remove it (falling
+back to a plain regex strip for a bare, parenthesis-free `noexcept`).
+Regression test in `tests/test_entity_id_template_discriminators.py`
+(`test_live_clang_spiral_return_strips_outer_exception_spec`), confirmed
+to fail pre-fix via `git stash` on just the source file; every existing
+return-type discriminator test in that module still passes unchanged.
+
 ---
 
 ### Phase 3 — public surface as a graph query over one evidence graph (D5)
