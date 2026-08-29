@@ -19,7 +19,6 @@ from __future__ import annotations
 import re
 from typing import TYPE_CHECKING, Any
 
-from .model.binary_naming import strip_vendor_hash
 from .checker_policy import ChangeKind
 from .checker_types import SYMBOL_VERSION_ALIAS_NOT_RETAINED_MARKER, Change
 from .detector_registry import registry
@@ -69,6 +68,7 @@ from .model import (
     is_non_abi_surface_type,
     stdlib_namespaces_excluded,
 )
+from .model.binary_naming import strip_vendor_hash
 from .model.elf_facts import SymbolType
 from .name_classification import RTTI_DATA_PREFIXES
 

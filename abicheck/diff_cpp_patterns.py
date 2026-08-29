@@ -48,7 +48,6 @@ from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from .model.binary_naming import strip_vendor_hash
 from .checker_policy import ChangeKind, ReachabilityState
 from .checker_types import Change
 from .diff_helpers import make_change
@@ -72,6 +71,7 @@ from .diff_templates import (  # noqa: F401
     detect_missing_instantiations,
 )
 from .model import AccessLevel
+from .model.binary_naming import strip_vendor_hash
 
 if TYPE_CHECKING:
     from .model import AbiSnapshot, Function, RecordType
