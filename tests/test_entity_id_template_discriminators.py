@@ -881,19 +881,27 @@ def test_live_clang_member_pointer_spiral_return_declarator_preserves_returned_f
 
 @pytest.mark.integration
 @pytest.mark.skipif(shutil.which("clang") is None, reason="clang not installed")
-def test_live_clang_spiral_return_strips_outer_exception_spec(
+def test_live_clang_spiral_trailing_exception_spec_belongs_to_returned_function(
     tmp_path: Path,
 ) -> None:
-    """A spiral (function-pointer-returning) function's OWN, OUTER
-    exception specification must not leak into `return_type`:
-    `template<class T> int (*f(T))(int) noexcept(noexcept(T()));`'s
-    `qualType` is `"int (*(T))(int) noexcept(noexcept(T()))"` (confirmed
-    by direct compilation) -- appending the spiral branch's trailing
-    group verbatim (an earlier version of the spiral-declarator fix)
-    dragged the exception-specification text along with it, which would
-    fabricate a spurious return-type-changed finding whenever only the
-    `noexcept` condition changes (Codex review, PR #943, on a later
-    round)."""
+    """A spiral (function-pointer-returning) function's TRAILING exception
+    specification -- the one following the whole declarator, after the
+    returned function's own parameter list -- describes the RETURNED
+    function type, not the outer one, and must be KEPT in `return_type`,
+    not stripped: `static_assert(!noexcept(f(0)))` and
+    `static_assert(noexcept((*(decltype(f(0)))(0))))` both hold for
+    `template<class T> int (*f(T))(int) noexcept(noexcept(T()));`
+    (confirmed by direct compilation) -- `f` itself is not noexcept, but
+    calling through the returned function pointer is. An earlier version of
+    this fix (Codex review, PR #943) wrongly assumed any exception spec
+    following a spiral return type's trailing group was the OUTER
+    function's own, and stripped it -- silently hiding a real
+    return-type difference between `noexcept(true)`/`noexcept(false)`
+    overload-shaped return types. The distinct hazard this fix closed
+    instead -- the OUTER function's own exception spec, spelled differently,
+    directly after its own (not the returned function's) parameter list --
+    is covered by `test_live_clang_spiral_return_own_exception_spec_excised`
+    below."""
     fn = _one(
         _clang_parser(
             "template<class T> int (*f(T))(int) noexcept(noexcept(T()));",
@@ -901,5 +909,33 @@ def test_live_clang_spiral_return_strips_outer_exception_spec(
             "spiralnoexcept",
         ).parse_functions(),
         name="f",
+    )
+    assert fn.return_type == "int (*())(int) noexcept(noexcept(T()))"
+
+
+@pytest.mark.integration
+@pytest.mark.skipif(shutil.which("clang") is None, reason="clang not installed")
+def test_live_clang_spiral_return_own_exception_spec_excised(
+    tmp_path: Path,
+) -> None:
+    """A spiral function's OWN exception specification -- attached directly
+    after ITS OWN parameter list, before the returned function's own
+    trailing group -- must not leak into `return_type`:
+    `template<class T> int (*g(T) noexcept(noexcept(T())))(int);`'s
+    `qualType` is `"int (*(T) noexcept(noexcept(T())))(int)"` (confirmed by
+    direct compilation that `g(0)` itself IS noexcept there, unlike the
+    returned-function-type case above) -- a complex condition is itself
+    parenthesized, producing a second top-level group in the same position
+    a genuine further-nested spiral level would, so a span-count-only rule
+    mistook `g`'s own parameter list for a further wrapper needing recursion
+    and preserved it (plus the whole exception spec) verbatim in the
+    reported return type (Codex review, PR #943, on a later round)."""
+    fn = _one(
+        _clang_parser(
+            "template<class T> int (*g(T) noexcept(noexcept(T())))(int);",
+            tmp_path,
+            "spiralownnoexcept",
+        ).parse_functions(),
+        name="g",
     )
     assert fn.return_type == "int (*())(int)"

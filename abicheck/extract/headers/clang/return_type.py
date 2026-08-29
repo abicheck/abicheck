@@ -64,37 +64,7 @@ def _top_level_paren_spans(s: str) -> list[tuple[int, int]]:
 
 
 _EXCEPTION_SPEC_KEYWORD_RE = re.compile(r"\b(?:noexcept|throw)\s*$")
-_TRAILING_BARE_NOEXCEPT_RE = re.compile(r"\s*\bnoexcept\s*$")
-
-
-def _strip_trailing_exception_spec(s: str) -> str:
-    """Remove a trailing ``noexcept(...)``/``throw(...)`` (or bare
-    ``noexcept``) exception specification from *s*, if one is present at
-    the very end.
-
-    Needed by the SPIRAL-declarator branch specifically: unlike the
-    scan-from-the-end branch (which never includes anything after the
-    real parameter list at all), the spiral branch appends the RETURNED
-    function's own trailing group verbatim, which can itself be followed
-    by the OUTER function's own exception specification -- confirmed by
-    direct compilation: ``template<class T> int (*f(T))(int)
-    noexcept(noexcept(T()));``'s ``qualType`` is ``"int (*(T))(int)
-    noexcept(noexcept(T()))"``. Left unstripped, this pollutes
-    ``return_type`` with exception-specification text, which would
-    fabricate a spurious return-type-changed finding whenever only the
-    exception-specification condition changes (Codex review, PR #943, on
-    a later round -- the identical hazard the ordinary, non-spiral
-    ``noexcept`` correction closed, here for the spiral branch's own
-    trailing group instead of its parameter-list-selection logic).
-    """
-    spans = _top_level_paren_spans(s)
-    if spans:
-        last_start, last_end = spans[-1]
-        if last_end == len(s.rstrip()):
-            keyword = _EXCEPTION_SPEC_KEYWORD_RE.search(s[:last_start])
-            if keyword:
-                return s[: keyword.start()].rstrip()
-    return _TRAILING_BARE_NOEXCEPT_RE.sub("", s)
+_LEADING_EXCEPTION_SPEC_RE = re.compile(r"^\s*\b(?:noexcept|throw)\b")
 
 
 def _find_top_level_arrow(s: str) -> int | None:
@@ -176,15 +146,48 @@ def _excise_own_param_list(s: str) -> str:
     level for each further layer of pointer/reference-to-function nesting,
     so an arbitrarily deep spiral (pointer to function returning pointer
     to function returning ...) still bottoms out correctly.
+
+    Whatever immediately follows the FIRST top-level group in *s*
+    (``s[first_end:]``) is either the ORIGINAL function's own exception
+    specification (discarded outright -- it describes the original
+    function, not its return type) or a further-nested RETURNED function's
+    own parameter list (kept verbatim -- real, distinguishing return-type
+    content). The two cannot be told apart by ``len(spans)`` alone: a
+    complex condition (``noexcept(noexcept(T()))``) is itself parenthesized,
+    so it produces a SECOND top-level span in *s* exactly like a genuine
+    further-nested spiral level does (confirmed by direct compilation of
+    both ``int (*g(int) noexcept)(int);`` -- one span -- and
+    ``template<class T> int (*g(T) noexcept(noexcept(T())))(int);`` -- two
+    spans, since the ``(noexcept(...))`` condition is itself a balanced
+    top-level group). The real discriminator, checked AFTER discarding any
+    leading exception specification, is whether anything real is left: a
+    further-nested spiral level's own parameter list starts directly with
+    ``(`` once the exception spec (if any) is stripped (confirmed via
+    ``int (*(*h(T))(T))(T)``'s first_interior, ``*(*(T))(T)``, whose second
+    top-level span ``(T)`` is real, kept content, with no exception spec in
+    front of it) -- only THEN is spans[0] itself a further wrapper needing
+    recursion; otherwise spans[0] is already the actual, bottommost own
+    parameter list, excised outright regardless of how many top-level
+    groups its own trailing exception condition happened to introduce.
+    Confirmed still leaking before this rule existed (Codex review, PR
+    #943, on a later round): a span-count-only decision correctly excised a
+    *simple* trailing ``noexcept`` but, for the complex-condition case,
+    mistook spans[0] for "needs recursion" (since the exception span made
+    ``len(spans) == 2``) and so preserved spans[0] itself -- the original
+    function's own actual parameter list -- verbatim in what is reported as
+    its return type.
     """
     spans = _top_level_paren_spans(s)
     if not spans:
         return s
     first_start, first_end = spans[0]
-    if len(spans) == 1:
-        return s[:first_start] + "()" + s[first_end:]
-    inner = _excise_own_param_list(s[first_start + 1 : first_end - 1])
-    return s[:first_start] + "(" + inner + ")" + s[first_end:]
+    remainder = s[first_end:]
+    if _LEADING_EXCEPTION_SPEC_RE.match(remainder):
+        remainder = ""
+    if remainder.strip().startswith("("):
+        inner = _excise_own_param_list(s[first_start + 1 : first_end - 1])
+        return s[:first_start] + "(" + inner + ")" + remainder
+    return s[:first_start] + "()" + remainder
 
 
 def return_type(qualtype: str) -> str:
@@ -219,7 +222,18 @@ def return_type(qualtype: str) -> str:
        docstring for why a RECURSIVE excision (not merely picking a
        group) is required here specifically: the returned function
        type's own parameter list is real, distinguishing content that
-       must be preserved, not discarded.
+       must be preserved, not discarded. Everything after the first
+       group (``tail``, below) is kept VERBATIM, including any trailing
+       exception specification: confirmed by direct compilation that a
+       trailing ``noexcept`` here binds to the RETURNED function type,
+       not to the original function itself (``int (*a())() noexcept;``
+       -- ``a()`` itself is not noexcept, but calling through the
+       returned function pointer is), so it is real return-type content,
+       not something to strip. The original function's OWN exception
+       specification, if any, is discarded separately, inside
+       :func:`_excise_own_param_list`'s base case (Codex review, PR #943,
+       across two rounds -- the first round wrongly stripped this
+       trailing spec as if it were always the outer function's own).
     3. Otherwise, the function's own real top-level parameter list is the
        LAST top-level parenthesized group that is not itself an
        exception-specification's own group (a ``noexcept(...)``/
@@ -247,7 +261,7 @@ def return_type(qualtype: str) -> str:
     if _is_spiral_wrapper_prefix(first_interior):
         leading = qualtype[:first_start].strip()
         inner = _excise_own_param_list(first_interior)
-        tail = _strip_trailing_exception_spec(qualtype[first_end:])
+        tail = qualtype[first_end:]
         return (leading + " (" + inner + ")" + tail).strip()
 
     real_start = spans[-1][0]

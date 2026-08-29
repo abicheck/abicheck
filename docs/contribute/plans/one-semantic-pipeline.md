@@ -8798,6 +8798,53 @@ Regression test in `tests/test_entity_id_template_discriminators.py`
 to fail pre-fix via `git stash` on just the source file; every existing
 return-type discriminator test in that module still passes unchanged.
 
+**Correction (2026-08-29, same day, Codex review on PR #943): the
+previous correction's own premise was backwards, and it left a distinct,
+still-real leak unfixed.** Direct compilation (`static_assert(!noexcept(
+f(0)))` plus `static_assert(noexcept((*(decltype(f(0)))(0))))` for
+`template<class T> int (*f(T))(int) noexcept(noexcept(T()));`) proves the
+trailing `noexcept(noexcept(T()))` in that qualType belongs to the
+RETURNED function pointer type, not to `f` itself -- the previous
+correction's `_strip_trailing_exception_spec` removed it anyway, silently
+collapsing two overloads differing only in that condition onto the same
+reported return type (the identical class of hazard the arrow-first and
+scan-from-end corrections above exist to prevent, just reintroduced here
+by this fix). Separately, fresh review on this same head found the
+*genuinely* outer case Codex originally raised had never actually been
+fixed: for `template<class T> int (*g(T) noexcept(noexcept(T())))(int);`
+(qualType `"int (*(T) noexcept(noexcept(T())))(int)"`, confirmed by
+direct compilation that `g(0)` itself IS noexcept there), the exception
+specification sits INSIDE the wrapper's own first top-level group --
+`_excise_own_param_list`'s `len(spans) == 1` base case -- not in the
+tail `_strip_trailing_exception_spec` was applied to; a complex condition
+is itself parenthesized, so it produces a SECOND top-level span in that
+same interior exactly like a genuine further-nested spiral level does
+(compare `int (*(*h(T))(T))(T)`'s first_interior, `*(*(T))(T)`, whose
+second span `(T)` is real, kept return-type content) -- a span-count-only
+rule cannot tell the two apart, so `g`'s complex own condition took the
+"further wrapper, recurse" branch and both the spec AND `g`'s own
+parameter list leaked through verbatim. Fixed by removing
+`_strip_trailing_exception_spec` entirely (the spiral branch's `tail` is
+now kept exactly as `qualtype[first_end:]`, unmodified -- confirmed real
+return-type content, never something to strip) and instead
+discriminating inside `_excise_own_param_list` on what immediately
+follows the wrapper's own nested parameter list: a new
+`_LEADING_EXCEPTION_SPEC_RE` match (a leading `noexcept`/`throw` keyword,
+regardless of how many parenthesized groups its own condition
+introduces) discards that remainder outright as the CURRENT level's own
+spec, while anything else that starts with `(` is real further-nested
+return-type content, recursed into as before. Two regression tests in
+`tests/test_entity_id_template_discriminators.py`
+(`test_live_clang_spiral_trailing_exception_spec_belongs_to_returned_function`,
+replacing the now-incorrect `test_live_clang_spiral_return_strips_outer_
+exception_spec`, and `test_live_clang_spiral_return_own_exception_spec_
+excised`), each confirmed to fail pre-fix via `git stash` on just the
+source file; every existing return-type discriminator test in that
+module (including the double-spiral and member-pointer-spiral cases
+above) still passes unchanged. `mypy abicheck/` clean (515 files),
+`ruff check`/`ruff format --check` clean on both touched files,
+`check_architecture.py` 0 errors, `check_ai_readiness.py` 0 new errors.
+
 ---
 
 ### Phase 3 — public surface as a graph query over one evidence graph (D5)
