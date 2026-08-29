@@ -5954,6 +5954,43 @@ independently-verifiable piece at a time rather than combining the
 threading and the routing in one change. This phase's Acceptance criteria
 section is therefore still not met for the routing half.
 
+**Update (2026-08-29, same day): the routing was attempted as its own slice
+and NOT landed — and the "purely the control-flow restructuring itself, not
+a new correctness question" framing above is retracted as wrong.** A
+dedicated session read both execution paths and the whole typed pipeline end
+to end and built the parameter-by-parameter parity map, then found two
+*structural* blockers neither this section nor the known-gaps entry had
+anticipated. Both are recorded in full, with the exact mechanisms and the
+list of previously-suspected blockers that were ruled out with evidence, in
+`docs/contribute/known-gaps.md`'s "ADR-063 Phase 1" entry (its "Fourth
+correction (2026-08-29)" addendum). In short:
+
+- **A (ELF only)** — the L2 seed's inferred-build-dir cleanup has two
+  mutually exclusive correct drain points. `perform_elf_dump` must drain
+  *after* its header-graph and clang-layout second passes (they re-parse
+  headers under the seeded dirs); `_resolve_side_snapshot_impl` must drain
+  *before* `embed_side_build_source` (whose own inferred query otherwise
+  self-contends on the same `flock` for up to 600s). They do not conflict
+  today only because `perform_elf_dump` runs no embed inside its plan;
+  routing makes the conflict live. This is exactly `DumpResult`'s own
+  documented "Lifetime caveat", and its fix is the pair-aware/lifetime
+  redesign PR 3A already scopes as separate work.
+- **B (both paths)** — `execute_dump_request` embeds L3-L5, applies
+  dependency scoping and enforces the depth floor *inside* resolution, while
+  the `dump` CLI does all three at write time in
+  `cli_buildsource._write_snapshot_output`, after provenance stamping.
+  Routing reorders all three, which changes what the post-processing hooks
+  see, enforces the depth floor before the embed that actually fills L3-L5
+  for a `dump`, and swaps a Click error for a `ValidationError`.
+
+`handle_non_elf_dump` is free of A (no second pass; it already drains where
+the shared primitive does) but is blocked by B alone, so converting the
+smaller PE/Mach-O path first does not isolate a safely-landable slice
+either. This phase's Acceptance criteria section remains unmet for the
+routing half; closing it now has two named prerequisites (the seed-cleanup
+ownership redesign, and a decision on where `dump`'s embed/enforce/scope
+stanza belongs) rather than being a mechanical restructuring.
+
 ---
 
 ### Phase 2 — `EntityId`/`ScopePath` as the one identity primitive

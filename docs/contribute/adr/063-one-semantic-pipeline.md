@@ -23,10 +23,16 @@ convergence") has landed one narrow, verified slice of its own (`dump
 --dry-run` renders from a real resolved `DumpRequest` for both header
 backends) — its own "Files"/"Acceptance criteria" routing step
 (`perform_elf_dump`/`handle_non_elf_dump` calling the typed executor
-instead of `dumper.dump()` directly) has not, for a reason
-independent of AST-backend availability; see the implementation plan's
-Phase 1 section and `docs/contribute/known-gaps.md`'s "PR C" entry for the
-precise, still-open mechanism. Phases 2-10 are still unimplemented design
+instead of `dumper.dump()` directly) has not, for reasons
+independent of AST-backend availability — that routing was attempted as its
+own slice on 2026-08-29 and deliberately not landed, on two structural
+blockers (the L2 seed's inferred-build-dir cleanup having two mutually
+exclusive correct drain points, and the typed executor embedding/enforcing/
+scoping inside resolution where the `dump` CLI does all three at write
+time); see the implementation plan's Phase 1 section and
+`docs/contribute/known-gaps.md`'s "ADR-063 Phase 1" entry for the precise,
+still-open mechanisms and for the previously-suspected blockers that were
+ruled out with evidence. Phases 2-10 are still unimplemented design
 text — see the
 [implementation plan](../plans/one-semantic-pipeline.md) for the
 phase-by-phase state. Several of the still-unimplemented phases' decisions

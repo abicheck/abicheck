@@ -4814,6 +4814,134 @@ looked like the obvious fix and wasn't.
   needed no change, since it already read the *combined* effective token
   sequence across both fields rather than pinning `gcc_options` alone.
 
+  **Fourth correction (2026-08-29, same day): this entry's own claim that
+  "the remaining work is purely the control-flow restructuring itself, not a
+  new correctness question" is WRONG, and is retracted here.** A dedicated
+  session set out to do exactly the routing that claim scoped —
+  `perform_elf_dump`'s primary parse calling `execute_dump_request()` instead
+  of `seed_includes_and_fold_compile_context()` + `dumper.dump()` as two
+  independent steps — read every function on both sides end to end
+  (`perform_elf_dump`, `handle_non_elf_dump`, `service_dump_pipeline`'s
+  `resolve_dump_request`/`execute_dump_request`/`ResolvedDumpRequest`/
+  `DumpResult`, `workflows/artifact/execute.py`'s
+  `_resolve_side_snapshot_impl`/`enforce_requested_depth`,
+  `workflows/artifact/resolve.py`'s `_seeded_includes_and_compile_context`,
+  `service.resolve_input`, `service_dump_native._dump_elf`,
+  `cli_buildsource._write_snapshot_output`, `cli_dump_request.
+  build_dump_request`, and `frontends/cli/commands/dump.py`'s real call
+  sites) and built the parameter-by-parameter parity map the routing needs.
+  **Neither function was converted.** Two *structural* blockers were found
+  that the claim above did not anticipate, both distinct from the legacy
+  `-p`/`--compile-db` mechanism the earlier sub-finding 2 named and closed.
+  Several previously-suspected blockers were, by contrast, ruled out for
+  real; both lists are below so a future attempt starts from measured facts.
+
+  **Blocker A (ELF only, and it is exactly `DumpResult`'s own documented
+  "Lifetime caveat" made live rather than latent).** `perform_elf_dump`
+  passes the CLI's *real* `collect_mode` to
+  `seed_includes_and_fold_compile_context`, which sets
+  `allow_inferred_build_query=collect_mode != "off"` (`buildsource/l2_seed.py`)
+  and therefore genuinely returns non-empty `pending_cleanups` — the
+  temporary build directory a zero-config *inferred* build-system query
+  seeded, whose generated headers the seeded include dirs point at.
+  `perform_elf_dump` drains that plan in a `finally` placed deliberately
+  **after** its two post-processing second passes (`service._attach_header_
+  graph` and `workflows.extraction.attach_clang_layout`), and its own inline
+  comment states why in as many words: "the header-graph pass above (when
+  requested) reuses the same seeded include dirs the main `dump()` parse
+  used, so cleanup must wait until it ... has run". `_resolve_side_snapshot_
+  impl` drains in a *nested* `finally` immediately after
+  `service.resolve_input`, and its own comment states, equally explicitly,
+  why it must: `embed_side_build_source` runs its own inferred query inside
+  the same call, and an undrained seed still holds the deterministic
+  per-source-tree build dir under an exclusive `flock`, so a later drain
+  makes the second query self-contend for up to `INFERRED_QUERY_TIMEOUT_S`
+  (600s) — the identical self-contention shape recorded as the fifth finding
+  on the L3→L2-fold entry. The two requirements are in **direct conflict**
+  the moment `perform_elf_dump`'s parse routes through that primitive: today
+  they don't conflict only because `perform_elf_dump` runs no embed inside
+  its own plan. Deferring the seed cleanups back out to the CLI caller (an
+  additive `defer_seed_cleanup` pass-through, the obvious-looking fix) is
+  precisely what re-creates the 600s contention; draining them where the
+  shared primitive does is precisely what deletes the directories the two
+  second passes still need to re-parse headers under. `DumpResult`'s own
+  docstring already names this ("safe for *identity or comparison* ... a
+  caller intending to re-read a file under one of these paths ... cannot yet
+  do so safely"), and already scopes the fix as PR 3A's pair-aware/lifetime
+  redesign — a separate piece of work, not a control-flow rewrite. Weakening
+  or disabling either second pass to dodge it was considered and rejected:
+  each exists because of its own recorded Codex-review regression (a second
+  clang pass silently degrading to a declaration-only graph, and a
+  `dump --ast-frontend clang` baseline silently carrying no layout-tool
+  facts).
+
+  **Blocker B (both ELF and PE/Mach-O).** `execute_dump_request` is a
+  resolve **+ embed + enforce** pipeline: `_resolve_side_snapshot_impl` runs
+  `embed_side_build_source` (L3-L5) inline, `service.resolve_input` →
+  `run_dump` applies `dumper_scoping.resolve_dependency_scope` from
+  `InputSpec.include_dependencies`, and `execute_dump_request` then calls
+  `enforce_requested_depth`. The `dump` CLI does all three of those things
+  **after** the parse and after provenance stamping, in
+  `cli_buildsource._write_snapshot_output`: `embed_build_source` (guarded by
+  `build_source_already_satisfies`), then `check_requested_depth_satisfied`,
+  then `resolve_dependency_scope(snap, include_dependencies, header_roots)`.
+  Routing the primary parse through `execute_dump_request` therefore reorders
+  all three relative to the CLI's own post-parse pipeline, with three
+  concrete consequences, none of them cosmetic: (1) the ADR-039 build-context
+  reconciliation, the header-graph attach and the clang-layout attach would
+  run over an *already dependency-scoped* snapshot (`--include-system-
+  declarations` defaults off, so `InputSpec.include_dependencies=False` is
+  the common case, and the inner scope call has no access to the write path's
+  `header_roots` set at all); (2) the depth floor would be enforced against
+  only the *inner* embed's result, before `_write_snapshot_output`'s own
+  embed — the one that actually fills L3-L5 for a `dump` today — has run; and
+  (3) that floor raises `ValidationError` where the CLI's own
+  `check_requested_depth_satisfied` raises a Click error, a different
+  user-facing message and exit code for the identical input. Making this
+  safe means either suppressing three behaviors inside a shared Tier-2
+  primitive for one caller (inventing a code path, which this entry's own
+  convention forbids) or moving the CLI's write-time embed/enforce/scope
+  stanza to resolution time — a real, separately-reviewable redesign of
+  `_write_snapshot_output`'s contract, not part of the routing.
+
+  **Ruled out, with evidence, so they are not re-litigated.** (i) The
+  P0.3 fold's fourth return value (`l3_include_dirs`, which
+  `perform_elf_dump` folds into `extra_hash_dirs`) is *not* lost: the folded
+  context's own tokens carry those dirs, and `service_dump_native._dump_elf`
+  independently recomputes the same set via
+  `cache_relevant_operand_paths(cc.gcc_option_tokens)`. (ii) The P3
+  inferred-header-root derivation (`resolve_inferred_header_roots` →
+  `inc_extra`/`deferred`/`deferred_dirs`) is *not* lost either — `_dump_elf`
+  performs the identical derivation itself. (iii) `debug_info_path` is not
+  lost: `_dump_elf` resolves it from `debug_roots`/`enable_debuginfod`, both
+  of which `build_dump_request` already puts on the `InputSpec` (it would be
+  resolved *twice*, once by `dump_cmd` for its echo and once here, which is
+  wasteful and double-logs but is not a correctness gap). (iv) The
+  whole-snapshot cache (`resolve_input` → `cached_run_dump`, which
+  `perform_elf_dump`'s bare `dump()` bypasses) does **not** newly activate:
+  `build_dump_request` always sets `InputSpec.compile` to the CLI's resolved
+  `CompileContext`, and `service_dump_cache._dump_is_cacheable` refuses to
+  cache any call with a non-`None` `compile`. (v) `follow_deps` on PE/Mach-O
+  is not a divergence: `populate_side_dependency_info` is documented and
+  implemented as an ELF-only no-op. (vi) `ast_memoize_scope()`/
+  `suppress_streaming_prune()` are trivially preservable — the caller can
+  wrap the `execute_dump_request` call itself. (vii) `handle_non_elf_dump`
+  has **no** Blocker A: it runs no post-processing second pass and already
+  drains its plan in a `finally` immediately after the parse, exactly where
+  the shared primitive does. It is blocked by B alone, which is why
+  converting "the small one first as a warm-up" does not in fact isolate a
+  safely-landable slice.
+
+  **Net**: the remaining piece of this entry is *not* control-flow-only.
+  Closing it needs (a) PR 3A's already-scoped pair-aware/lifetime redesign of
+  the L2 seed's cleanup ownership, so a caller with post-parse hooks can keep
+  the seeded dirs alive without the embed step self-contending on their lock,
+  and (b) a decision about where `dump`'s L3-L5 embed, depth enforcement and
+  dependency scoping belong — resolution time (matching the typed pipeline)
+  or write time (matching today's CLI) — since the two cannot both be true of
+  one code path. Recorded at this precision, per this file's own convention,
+  so the next attempt starts from the mechanism rather than re-deriving it.
+
 - **Lambda-closure churn survives at the *function* level after the type-level
   fix — investigated, deliberately not patched (oneTBB flow-graph report,
   fresh evidence).** `name_classification._ANONYMOUS_TYPE_MARKERS` did not
