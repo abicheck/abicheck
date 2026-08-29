@@ -40,6 +40,19 @@ depends on ``dumper_clang_expr.py``, which imports ``diff_cxx_rules``
 from here would give this ``extract``-classified package a real
 ``extract -> compare`` edge, the identical reasoning ``enums.py`` already
 documents for its own ``evaluate_int`` parameter.
+
+Contract-attribute filtering, override/restrict/va-list parameter
+classification, and the eligible-override-kind set are read from
+``dumper_clang_attributes.py``/``dumper_clang_qualifiers.py`` by their
+PUBLIC names (``clang_contract_attributes``, ``clang_method_is_override``,
+``clang_param_is_restrict``, ``clang_param_is_va_list``,
+``OVERRIDE_ELIGIBLE_KINDS``, imported here under their old private aliases
+for a minimal diff against every existing call site in this module) rather
+than a still-flat sibling's private surface — those modules made the names
+public specifically for this cross-boundary read, each keeping its old
+private spelling as a back-compat alias (Codex review, PR #940), the same
+treatment ``location.py``'s ``deprecation_marker``/``contract_attributes``
+and ``context.py``'s ``is_record_definition`` already received.
 """
 
 from __future__ import annotations
@@ -48,12 +61,14 @@ import re
 from collections.abc import Callable
 from typing import Any
 
-from ....dumper_clang_attributes import _clang_contract_attributes
+from ....dumper_clang_attributes import (
+    clang_contract_attributes as _clang_contract_attributes,
+)
 from ....dumper_clang_qualifiers import (
-    _OVERRIDE_ELIGIBLE_KINDS,
-    _clang_method_is_override,
-    _clang_param_is_restrict,
-    _clang_param_is_va_list,
+    OVERRIDE_ELIGIBLE_KINDS as _OVERRIDE_ELIGIBLE_KINDS,
+    clang_method_is_override as _clang_method_is_override,
+    clang_param_is_restrict as _clang_param_is_restrict,
+    clang_param_is_va_list as _clang_param_is_va_list,
 )
 from ....model import Fact, Function, Param
 from .context import (

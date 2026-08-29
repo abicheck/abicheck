@@ -182,15 +182,13 @@ from typing import Any
 from .dumper_clang_expr import _SCOPE_NODE_KINDS
 
 
-def _is_record_definition(node: dict[str, Any]) -> bool:
+def is_record_definition(node: dict[str, Any]) -> bool:
     """Whether a record node is a definition (has a body) vs. a forward decl.
 
-    Shared by ``dumper_clang.py``'s own ``_record_index()`` (an ordinary
-    ``CXXRecordDecl``/``RecordDecl``) and :func:`build_specialization_index`
-    below (a ``ClassTemplateSpecializationDecl``) -- both need the identical
-    "prefer a complete definition over a forward-decl stub sharing the same
-    qualname" tie-break, and both node kinds carry the same
-    ``completeDefinition``/member-child shape.
+    Shared by ``_record_index()``, :func:`build_specialization_index` below,
+    and ``RecordVtableIndex`` -- all need the "prefer a definition over a
+    forward-decl stub sharing the qualname" tie-break. Public (Codex, PR
+    #940); ``_is_record_definition`` below is an alias.
     """
     if node.get("completeDefinition"):
         return True
@@ -200,6 +198,8 @@ def _is_record_definition(node: dict[str, Any]) -> bool:
         for c in node.get("inner", []) or []
     )
 
+
+_is_record_definition = is_record_definition  # back-compat alias
 
 #: Sentinel signature key for a destructor slot -- unifies a base's own
 #: `~Base` and a derived class's own `~Derived` under one signature-index

@@ -220,8 +220,13 @@ def _declarator_group(type_str: str) -> str | None:
     return None
 
 
-def _clang_param_is_restrict(node: dict[str, Any]) -> bool:
+def clang_param_is_restrict(node: dict[str, Any]) -> bool:
     """Whether *node* (a ``ParmVarDecl``) is a ``restrict``-qualified pointer.
+
+    Public (no leading underscore) since ``extract.headers.clang.functions``
+    reads it across the module boundary -- ``_clang_param_is_restrict``
+    below is kept as a back-compat alias for every existing caller spelling
+    the old private name (Codex review, PR #940).
 
     Matches :meth:`abicheck.dumper_castxml._CastxmlParser._resolve_cv_restrict`'s
     semantics — the parameter's OWN (top-level) qualification, with typedef
@@ -313,8 +318,17 @@ _VA_LIST_TAG_PTR_RE = re.compile(
 )
 
 
-def _clang_param_is_va_list(node: dict[str, Any]) -> bool:
+#: Back-compat alias -- see :func:`clang_param_is_restrict`'s own docstring.
+_clang_param_is_restrict = clang_param_is_restrict
+
+
+def clang_param_is_va_list(node: dict[str, Any]) -> bool:
     """Whether *node* (a ``ParmVarDecl``) is a ``va_list`` parameter.
+
+    Public (no leading underscore) since ``extract.headers.clang.functions``
+    reads it across the module boundary -- ``_clang_param_is_va_list`` below
+    is kept as a back-compat alias for every existing caller spelling the
+    old private name (Codex review, PR #940).
 
     ``va_list`` is itself an array-of-one-struct typedef
     (``__builtin_va_list`` on x86-64 System V, the ABI this environment can
@@ -369,6 +383,10 @@ def _clang_param_is_va_list(node: dict[str, Any]) -> bool:
     return bool(_VA_LIST_TAG_PTR_RE.match(desugared.strip()))
 
 
+#: Back-compat alias -- see :func:`clang_param_is_va_list`'s own docstring.
+_clang_param_is_va_list = clang_param_is_va_list
+
+
 def _record_kind(node: dict[str, Any]) -> str:
     """``"union"``/``"struct"``/``"class"`` from a record's ``tagUsed``."""
     tag = node.get("tagUsed")
@@ -413,7 +431,7 @@ def _reduce_opaque_kind_set(kinds: set[str] | None) -> str | None:
     return folded.pop() if len(folded) == 1 else min(kinds)
 
 
-def _clang_method_is_override(node: dict[str, Any]) -> bool:
+def clang_method_is_override(node: dict[str, Any]) -> bool:
     """Explicit C++11 ``override`` specifier on *node* (G31 Phase C backend
     audit) — the direct-clang counterpart to ``dumper_castxml.py``'s
     ``is_override`` (a compound-``attributes``-string regex search for the
@@ -428,11 +446,21 @@ def _clang_method_is_override(node: dict[str, Any]) -> bool:
     under ``"inner"`` — the same child-node convention
     ``dumper_clang._clang_final_attr``/``_clang_deprecated_message`` already
     read for ``final``/``[[deprecated]]``.
+
+    Public (no leading underscore) since ``extract.headers.clang.functions``
+    reads it and ``_OVERRIDE_ELIGIBLE_KINDS`` below across the module
+    boundary -- ``_clang_method_is_override`` is kept as a back-compat alias
+    for every existing caller spelling the old private name (Codex review,
+    PR #940).
     """
     return any(
         isinstance(child, dict) and child.get("kind") == "OverrideAttr"
         for child in node.get("inner", []) or []
     )
+
+
+#: Back-compat alias -- see :func:`clang_method_is_override`'s own docstring.
+_clang_method_is_override = clang_method_is_override
 
 
 #: clang node kinds castxml's own ``is_override`` restricts to (its
@@ -442,10 +470,13 @@ def _clang_method_is_override(node: dict[str, Any]) -> bool:
 #: ``FunctionDecl`` (a free function/operator can't either); clang has no
 #: separate "operator method" node kind the way castxml's XML schema does —
 #: an overloaded operator is an ordinary ``CXXMethodDecl`` here, already
-#: covered.
-_OVERRIDE_ELIGIBLE_KINDS = frozenset(
+#: covered. Public (no leading underscore) for the same cross-module reason
+#: as :func:`clang_method_is_override` above; ``_OVERRIDE_ELIGIBLE_KINDS`` is
+#: kept as a back-compat alias.
+OVERRIDE_ELIGIBLE_KINDS = frozenset(
     {"CXXMethodDecl", "CXXDestructorDecl", "CXXConversionDecl"}
 )
+_OVERRIDE_ELIGIBLE_KINDS = OVERRIDE_ELIGIBLE_KINDS
 
 
 def _clang_record_is_abstract(node: dict[str, Any]) -> bool | None:

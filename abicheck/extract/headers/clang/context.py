@@ -50,9 +50,9 @@ from __future__ import annotations
 from typing import Any
 
 from ....dumper_clang_vtable import (
-    _is_record_definition,
     build_specialization_index,
     build_vtable,
+    is_record_definition,
 )
 from ....model import AccessLevel, Visibility
 from ....name_classification import strip_anonymous_type_location
@@ -361,8 +361,8 @@ class RecordVtableIndex:
                 qualname = qualified_name(entry)
                 existing = idx.get(qualname)
                 if existing is None or (
-                    not _is_record_definition(existing)
-                    and _is_record_definition(entry.node)
+                    not is_record_definition(existing)
+                    and is_record_definition(entry.node)
                 ):
                     idx[qualname] = entry.node
             self._record_by_qualname = idx
