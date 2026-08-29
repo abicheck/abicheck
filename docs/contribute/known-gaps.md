@@ -4693,3 +4693,27 @@ looked like the obvious fix and wasn't.
   finding through `DryRunResult.block()` (exit 1), matching the depth/
   evidence-contract blocker the artifact-set dry-run gained in the same PR
   (`service_scan.estimate_artifact_set`'s `collect_mode != "off"` check).
+
+- **A pinned depth backed only by a query-declaring `--config` (no
+  `--sources`/`--build-info`) prices L3/L4/L5 at zero TUs/zero cost, silently
+  understating the projected total a `--budget` pick relies on (Codex
+  review, CLI cleanup phase two PR 5, fresh evidence).** `_estimate_total_tus`
+  (the function both `estimate_scan` and `service_scan.
+  estimate_artifact_set` share) only counts TUs from `req.compile_db`/
+  `req.build_info`/`req.sources` -- it never reads `req.build_config` at all,
+  even when `_build_config_declares_query` (added in this PR to fix the
+  evidence-contract false-negative above) confirms the config declares a
+  real `build.query`. So a request that correctly passes the feasibility
+  check (the real run's trusted query will supply L3) still reports "0 TUs,
+  ~0s" for every source-tier layer, rather than flagging that the actual
+  count is unknown until the query runs. **Not fixed in this PR**: this is a
+  pre-existing gap in `_estimate_total_tus` itself, shared identically by
+  every single-binary `scan --dry-run --depth build/source --config
+  <query-declaring file>` invocation with no `--sources`/`--build-info` --
+  not something the artifact-set per-member estimation introduced or can fix
+  in isolation. A correct fix adds a `query_only` branch to
+  `_estimate_total_tus` (config declares `query`, no other source input)
+  that reports the TU count as unknown with an explicit caveat note (the
+  same shape `_UNSCOPED_TU_NOTE_SUFFIX` already uses for the sibling
+  `--build-target` undercount case) rather than folding a confident-looking
+  zero into the summed total, and applies to both dry-run paths at once.
