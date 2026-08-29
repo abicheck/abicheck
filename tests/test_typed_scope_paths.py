@@ -446,6 +446,8 @@ _LIVE_HEADER = textwrap.dedent(
     namespace { struct P { int a; }; }
     namespace { struct Q { int b; }; }
     struct Holder { union { int u1; float u2; }; union { int u3; }; };
+    namespace Reopened { struct { struct RFirst {}; } r1; }
+    namespace Reopened { struct { struct RSecond {}; } r2; }
     """
 )
 
@@ -490,6 +492,26 @@ def test_live_clang_typed_scope_paths(tmp_path: Path) -> None:
     p = next(d for (n, _), d in decls.items() if n == "P")
     q = next(d for (n, _), d in decls.items() if n == "Q")
     assert p.scope_path == q.scope_path == (Anonymous("namespace", 0),)
+
+    # A NAMED namespace reopened in two separate blocks must share ONE
+    # running anonymous-ordinal counter across both blocks -- each block is
+    # walked as a SEPARATE `_walk` call, so a call-local counter resets
+    # between them and hands the second block's anonymous struct the same
+    # ordinal already given to the first block's (Codex review, fresh
+    # evidence: confirmed via `originalNamespace`/`previousDecl` linkage on
+    # a real two-block reopening, identical to the anonymous-namespace case
+    # above). `RFirst`/`RSecond` are two genuinely distinct anonymous
+    # structs -- unlike a reopened namespace, an anonymous struct is never
+    # merged across blocks -- so they must get DISTINCT ordinals under the
+    # SAME `Namespace("Reopened")` segment, not collide at ordinal 0.
+    r_first = next(d for d in parser._records if d.node.get("name") == "RFirst")
+    r_second = next(d for d in parser._records if d.node.get("name") == "RSecond")
+    assert r_first.scope_path[0] == r_second.scope_path[0] == Namespace("Reopened")
+    assert r_first.scope_path[1] != r_second.scope_path[1]
+    assert {r_first.scope_path[1], r_second.scope_path[1]} == {
+        Anonymous("struct", 0),
+        Anonymous("struct", 1),
+    }
 
     # Parity with the flat spelling, over every categorized declaration.
     for decl in parser._records + parser._functions + parser._variables:

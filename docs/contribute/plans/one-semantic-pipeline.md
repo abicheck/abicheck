@@ -7526,6 +7526,60 @@ slice produces does not outlive the parse; then (c) the
 `finding_identity.py` algorithm migration and the storage v2 wire bridge,
 each as their own reviewable slice.
 
+**Correction (2026-08-29, same day, Codex review on PR #943): the
+per-parent anonymous-ordinal counter this same slice introduced was itself
+a call-frame-local variable, and a NAMED namespace reopened across two
+separate blocks defeats exactly that.** `namespace N { struct { ... } a; }
+... namespace N { struct { ... } b; }` walks the second block as a
+SEPARATE `_walk` call from the first -- confirmed directly (`clang -Xclang
+-ast-dump=json`): a reopening block carries `originalNamespace`/
+`previousDecl` pointing at the first block's node, identical linkage to
+the anonymous-namespace-reopening case this slice's own "Landed" paragraph
+above already handles, just one level up (the *container* being reopened,
+not an anonymous *child* of it). A call-local `anonymous_ordinals` dict
+resets between the two calls, so block two's first anonymous child gets
+ordinal 0 again -- the SAME ordinal already given to block one's first
+anonymous child -- silently merging two genuinely distinct anonymous
+scopes under one `ScopePath`, the exact collision this whole primitive
+exists to prevent. Fixed by moving the ordinal state off the call stack
+entirely: `_ClangAstParser` now holds
+`self._anonymous_ordinal_state: dict[str, dict[str, Any]]`, keyed by
+`_clang_scope.anonymous_scope_key` computed on the CONTAINER node itself
+(the one whose children are about to be numbered) rather than only ever
+being called on an anonymous child -- that function's own merge logic
+(originalNamespace/previousDecl, falling back to the node's own id) is
+generic to any node kind, and was already exactly what this fix needed,
+not a new mechanism. A node with no id at all (the root call, or a
+hand-built test AST) falls back to its own Python object identity
+(`f"objid:{id(node)}"`), so two such calls never accidentally share
+state. New regression coverage: `test_live_clang_typed_scope_paths`
+reopens a NAMED namespace with a distinct anonymous struct in each block
+and asserts the two get DIFFERENT ordinals under the same `Namespace(...)`
+segment (confirmed to fail with the pre-fix call-local dict: both reported
+`Anonymous("struct", 0)`, verified by reverting the fix locally before
+committing it).
+
+**A second Codex finding on the same PR, investigated and left open
+rather than fixed here.** `Y` in `template<class T> struct X<T, int> {
+struct Y {}; };` is, per real clang output, nested directly under a
+`ClassTemplatePartialSpecializationDecl` -- a node kind neither in
+`_RECORD_NODE_KINDS`/`_SCOPE_NODE_KINDS` nor covered by `_walk`'s own
+`ClassTemplateSpecializationDecl` (FULL-specialization-only) spelling
+-reconstruction branch, so `Y.scope_path` (and, checked directly:
+`Y`'s pre-existing flat `scope`/`qualified_name` too) omits the
+partial specialization's own containing scope entirely. **This is
+confirmed, by direct compilation, to be a PRE-EXISTING gap in the flat
+representation this slice's own parity contract requires reproducing
+byte-for-byte** -- not a regression this slice's typed `scope_path`
+introduces on top of a previously-correct flat spelling. Building a real
+partial-specialization scope segment needs a spelling reconstruction
+comparable to `_specialization_spelling`'s existing full-specialization
+handling (matching template arguments against the partial pattern's own
+parameter list, e.g. `X<T, int>` rather than a fully-concrete `X<double,
+int>`), which is real, independently-reviewable work of its own, not a
+small fix bundled into this slice -- left for a follow-on slice rather
+than attempted under review pressure here.
+
 ---
 
 ### Phase 3 — public surface as a graph query over one evidence graph (D5)

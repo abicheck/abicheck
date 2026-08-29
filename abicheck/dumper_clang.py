@@ -586,6 +586,19 @@ class _ClangAstParser:
         self._target_triple = target_triple
         self._exported_dynamic = exported_dynamic
         self._exported_static = exported_static
+        # Per-*entity* (not per-walk-frame) anonymous-ordinal state, keyed by
+        # the merged identity `_clang_scope.anonymous_scope_key` computes for
+        # the node whose children are about to be numbered (`container_key`
+        # below) -- see that key's own docstring for why a reopened
+        # namespace's two blocks must share one entry. A frame-local dict
+        # (this module's first cut) resets every time `_walk` re-enters a
+        # reopened namespace's second block, handing an anonymous sibling in
+        # the second block the SAME ordinal as one already assigned in the
+        # first -- confirmed by direct compilation (Codex review, fresh
+        # evidence). Persisting this on `self`, across every `_walk` call for
+        # the whole AST, is what lets two blocks of the same namespace share
+        # one counter instead of each starting over at 0.
+        self._anonymous_ordinal_state: dict[str, dict[str, Any]] = {}
         (
             self._pub_header_segs,
             self._pub_dir_segs,
@@ -832,8 +845,28 @@ class _ClangAstParser:
         # clang links them via `originalNamespace`/`previousDecl` -- numbering
         # blocks would split one real scope into two identities (see
         # `_clang_scope.anonymous_scope_key`).
-        next_anonymous_ordinal = 0
-        anonymous_ordinals: dict[str, int] = {}
+        #
+        # The counter/seen-set pair itself must be keyed by *this node's own*
+        # merged identity, not held as a plain per-call local, for the same
+        # reopening reason one level up: a NAMED namespace reopened in two
+        # blocks (`namespace N { ... } ... namespace N { ... }`) is walked as
+        # two SEPARATE `_walk` calls, one per block -- confirmed identical
+        # `originalNamespace`/`previousDecl` linkage to the anonymous case via
+        # direct compilation (Codex review, fresh evidence). A call-local
+        # dict resets between those two calls, so an anonymous struct that is
+        # the first anonymous child of block two collides with the ordinal
+        # already given to block one's first anonymous child. Persisting the
+        # state on `self`, keyed by `_clang_scope.anonymous_scope_key(node)`
+        # (falling back to this node's own object identity when no id is
+        # available at all -- the root call, or a hand-built test AST -- so
+        # two such calls never accidentally share state), lets both blocks of
+        # one reopened namespace share the same running counter.
+        container_key = _clang_scope.anonymous_scope_key(node)
+        if container_key is None:
+            container_key = f"objid:{id(node)}"
+        ordinal_state = self._anonymous_ordinal_state.setdefault(
+            container_key, {"next": 0, "seen": {}}
+        )
         for child in node.get("inner", []) or []:
             if not isinstance(child, dict):
                 continue
@@ -843,18 +876,15 @@ class _ClangAstParser:
             child_anonymous_ordinal: int | None = None
             if _clang_scope.anonymous_scope_kind(child) is not None:
                 entity_key = _clang_scope.anonymous_scope_key(child)
-                already = (
-                    anonymous_ordinals.get(entity_key)
-                    if entity_key is not None
-                    else None
-                )
+                seen: dict[str, int] = ordinal_state["seen"]
+                already = seen.get(entity_key) if entity_key is not None else None
                 if already is not None:
                     child_anonymous_ordinal = already
                 else:
-                    child_anonymous_ordinal = next_anonymous_ordinal
-                    next_anonymous_ordinal += 1
+                    child_anonymous_ordinal = ordinal_state["next"]
+                    ordinal_state["next"] += 1
                     if entity_key is not None:
-                        anonymous_ordinals[entity_key] = child_anonymous_ordinal
+                        seen[entity_key] = child_anonymous_ordinal
             file = self._walk(
                 child,
                 scope=child_scope,

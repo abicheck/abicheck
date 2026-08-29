@@ -11,4 +11,7 @@
   looks identical to the same names nested in a namespace (ADR-063 Phase 2).
   Purely additive parser-internal state: every `qualified_name` and every
   snapshot field is byte-for-byte unchanged, and no `EntityId` is built from
-  this yet. No user-visible behaviour change.
+  this yet. No user-visible behaviour change. (Fixed in review: the
+  per-parent anonymous-ordinal counter is now shared across a named
+  namespace's separate reopened blocks, instead of resetting per block and
+  colliding two unrelated anonymous scopes onto the same ordinal.)
