@@ -7829,6 +7829,36 @@ That check carries its own guard -- an assertion that the scan actually
 finds the four real producer modules -- since an emptiness assertion alone
 passes just as happily against a broken scanner.
 
+**Correction (2026-08-29, same day, found by the third slice's own full
+local suite before review): adding the carrier broke every dump of a
+lambda-bearing library outright, and the cause was not the carrier.**
+`qualified_name_segments.renumber_anonymous_closure_identities` -- the pass
+that replaces a closure marker's raw `:line:col` with a snapshot-stable
+ordinal, i.e. the machinery `identity.environment_taint` rests on -- walks
+every dataclass reachable from `functions`/`variables`/`types`/`enums` and
+assigns rewritten strings back with `setattr`. `EntityId` is frozen, so the
+first lambda marker anywhere in a snapshot raised `FrozenInstanceError` and
+aborted the dump; ten end-to-end tests in
+`tests/test_identity_taint_end_to_end.py` failed at once, none of which the
+targeted per-module runs this slice had done so far would have reached.
+Fixed at the root rather than by excluding the new field from the walk: a
+frozen dataclass is now rebuilt via `dataclasses.replace`. Excluding it was
+considered and rejected -- a closure marker surviving unrewritten *inside*
+an identity carrier is a path/line-tainted identity sitting next to the
+normalized ones, which is precisely the taint class that pass exists to
+remove, so the crash would have been traded for a silent version of the
+same bug. The regression coverage is stated about the walk primitive
+itself over six independently-chosen frozen shapes (nested in a tuple, a
+list, a dict value, two levels deep, under a mutable parent, under a
+frozen parent) plus an `init=False` field and an unchanged-value
+object-identity case, alongside the concrete `entity_id` case through the
+public entry point, so the next frozen model field is covered by
+construction rather than by someone remembering; all nine were confirmed
+to fail against the pre-fix walk by reverting it locally. Worth stating
+plainly as the transferable lesson: a purely additive model field is not
+automatically inert, because a *generic object-graph walk* elsewhere in
+the codebase makes every new field its input.
+
 Next slice, in order (superseding the second slice's list, whose item (a)
 that slice landed and whose item (b) this slice's own finding above
 re-sequences): (c1) the storage v2 wire bridge -- `storage/entity_ids.py`'s
