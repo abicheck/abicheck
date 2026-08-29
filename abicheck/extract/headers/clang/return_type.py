@@ -121,6 +121,7 @@ def _top_level_paren_spans(s: str) -> list[tuple[int, int]]:
 
 _EXCEPTION_SPEC_KEYWORD_RE = re.compile(r"\b(?:noexcept|throw|__attribute__)\s*$")
 _LEADING_EXCEPTION_SPEC_RE = re.compile(r"^\s*\b(?:noexcept|throw)\b")
+_DECLTYPE_OPERAND_RE = re.compile(r"\bdecltype\s*$")
 
 
 def _find_top_level_arrow(s: str) -> int | None:
@@ -172,11 +173,12 @@ def _find_top_level_arrow(s: str) -> int | None:
     return None
 
 
-def _is_spiral_wrapper_prefix(interior: str) -> bool:
+def _is_spiral_wrapper_prefix(interior: str, leading: str) -> bool:
     """Whether a first top-level group's *interior* is a SPIRAL-declarator
     wrapper (a pointer, reference, or pointer-to-member declarator around a
     nested parameter list) rather than unrelated return-type text (e.g. a
-    ``decltype``'s own parenthesized operand).
+    ``decltype``'s own parenthesized operand). *leading* is the text
+    immediately BEFORE the group, used to rule out the latter.
 
     The wrapper's declarator prefix -- everything before its own first
     nested top-level group -- is exactly one of ``*``, ``&``, ``&&``, ``^``
@@ -197,6 +199,30 @@ def _is_spiral_wrapper_prefix(interior: str) -> bool:
     but with ``^`` instead of ``*`` (Codex review, PR #943, on a later
     round still).
     """
+    # A group whose text immediately precedes it is the bare token
+    # `decltype` (no space, since that's how clang always prints it) is
+    # ALWAYS that operator's own parenthesized operand, never a spiral
+    # wrapper -- regardless of what the operand's own text happens to
+    # start with. This is a sound, general rule (not another
+    # sigil-specific patch): `decltype(...)`'s parens can never be
+    # anything else, so nothing inside them is ever declarator structure,
+    # only expression text that may coincidentally share a spiral
+    # wrapper's shape. Confirmed by direct compilation that
+    # `decltype(&(S::x)) f();` and the `S::y` sibling are legal, distinct
+    # declarations (`qualType`s `"decltype(&(S::x)) ()"` /
+    # `"decltype(&(S::y)) ()"`) -- an address-of a parenthesized
+    # member-access expression, whose leading sigil `&` and EMPTY
+    # remainder after its own nested group (`(S::x)`) exactly matched a
+    # genuine reference-returning spiral declarator with no parameters
+    # (e.g. `int (&f())();`, `qualType` `"int (&())()"`) with nothing left
+    # to tell them apart by remainder alone -- the prior fix's
+    # remainder-based check (below) cannot distinguish an EMPTY remainder
+    # from a genuine one, since both look identical; only the `decltype`
+    # prefix reveals the group is an operand (Codex review, PR #943, on a
+    # later round, the address-of sibling of the dereferenced-cast case
+    # already closed below).
+    if _DECLTYPE_OPERAND_RE.search(leading):
+        return False
     spans = _top_level_paren_spans(interior)
     if not spans:
         return False
@@ -217,6 +243,10 @@ def _is_spiral_wrapper_prefix(interior: str) -> bool:
     # is either nothing, the original function's own exception
     # specification, or a further-nested spiral level's own parameter
     # list (verbatim ``(...)``) -- never a bare token like the `0` above.
+    # (Now redundant with the `decltype` check above for this specific
+    # case, since a bare dereferenced cast is always a `decltype` operand
+    # too, but kept as a second, independent line of defense for any
+    # non-`decltype` construct this hasn't been confirmed to cover.)
     remainder = interior[spans[0][1] :].strip()
     if not remainder:
         return True
@@ -392,7 +422,7 @@ def return_type(qualtype: str) -> str:
 
     first_start, first_end = spans[0]
     first_interior = qualtype[first_start + 1 : first_end - 1]
-    if _is_spiral_wrapper_prefix(first_interior):
+    if _is_spiral_wrapper_prefix(first_interior, qualtype[:first_start]):
         leading = qualtype[:first_start].strip()
         inner = _excise_own_param_list(first_interior)
         tail = qualtype[first_end:]

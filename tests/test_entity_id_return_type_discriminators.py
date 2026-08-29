@@ -676,3 +676,44 @@ def test_live_clang_relational_operator_in_template_argument_does_not_corrupt_br
         name="g",
     )
     assert arrow.return_type == "T"
+
+
+@pytest.mark.integration
+@pytest.mark.skipif(shutil.which("clang") is None, reason="clang not installed")
+def test_live_clang_decltype_address_of_expression_is_not_mistaken_for_spiral_declarator(
+    tmp_path: Path,
+) -> None:
+    """A `decltype` operand that happens to start with a bare `&` sigil
+    followed by a parenthesized group -- an address-of a parenthesized
+    member-access expression, not a declarator -- must not be mistaken for
+    a spiral (reference-returning) declarator: `decltype(&(S::x)) f();`'s
+    `qualType` is `"decltype(&(S::x)) ()"` (confirmed by direct
+    compilation, alongside a legal, distinct `S::y` sibling) -- its EMPTY
+    remainder after the nested group exactly matches a genuine
+    reference-returning spiral declarator with no parameters (e.g. `int
+    (&f())();`, `qualType` `"int (&())()"`), so a remainder-based check
+    alone cannot tell them apart; only the fact that the group is
+    `decltype`'s own operand does (Codex review, PR #943, on a later
+    round, the address-of sibling of the dereferenced-cast case above).
+    The two must resolve to distinct return types, preserving the entire
+    dependent expression verbatim."""
+    s = "struct S { int x; double y; };\n"
+    f = _one(
+        _clang_parser(
+            s + "decltype(&(S::x)) f();",
+            tmp_path,
+            "decltypeaddrofa",
+        ).parse_functions(),
+        name="f",
+    )
+    g = _one(
+        _clang_parser(
+            s + "decltype(&(S::y)) g();",
+            tmp_path,
+            "decltypeaddrofb",
+        ).parse_functions(),
+        name="g",
+    )
+    assert f.return_type == "decltype(&(S::x))"
+    assert g.return_type == "decltype(&(S::y))"
+    assert f.return_type != g.return_type

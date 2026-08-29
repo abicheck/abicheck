@@ -9064,6 +9064,40 @@ pass post-fix; every existing return-type discriminator test still
 passes unchanged. `mypy abicheck/` clean, `ruff check`/`ruff format
 --check` clean, `check_architecture.py` 0 errors.
 
+**Correction (2026-08-29, same day, Codex review on PR #943): the
+remainder-based spiral-wrapper check has an irreducible blind spot for
+an EMPTY remainder, closed with a more general rule instead of another
+remainder heuristic.** Confirmed by direct compilation:
+`decltype(&(S::x)) f();`'s qualType is `"decltype(&(S::x)) ()"` -- an
+address-of a parenthesized member-access expression, whose leading `&`
+sigil and EMPTY remainder after its own nested group (`(S::x)`) is
+BYTE-FOR-BYTE indistinguishable, by the remainder check alone, from a
+genuine reference-returning spiral declarator with no parameters (`int
+(&f())();`, qualType `"int (&())()"`) -- both are `<sigil>(<content>)`
+with nothing following. No refinement of "what follows the group" can
+ever close this specific shape, since there is nothing following in
+either case; the two are only distinguishable by what's INSIDE the
+group (a type vs. an arbitrary expression), which plain text scanning
+cannot determine in general. Fixed with a different, SOUND signal
+instead of attempting to refine the remainder check further: a group
+whose immediately preceding text (no space, exactly as clang always
+prints it) is the bare token `decltype` is ALWAYS that operator's own
+parenthesized operand, never a declarator wrapper, regardless of what
+the operand's own text starts with -- this closes the address-of case
+here, the earlier dereferenced-cast case, and (by the same reasoning)
+any future construct sharing the identical shape, in one general rule
+rather than adding a third sigil- or remainder-specific patch.
+`_is_spiral_wrapper_prefix` now takes the group's own preceding text as
+a second parameter to check this before its existing sigil/remainder
+checks (which remain, as a second line of defense, for any construct
+other than `decltype` this hasn't been confirmed to need). Regression
+test in `tests/test_entity_id_return_type_discriminators.py`
+(`test_live_clang_decltype_address_of_expression_is_not_mistaken_for_spiral_declarator`),
+confirmed to fail against the pre-fix code via `git stash` on just the
+source file and pass post-fix; every existing return-type discriminator
+test still passes unchanged. `mypy abicheck/` clean, `ruff check`/`ruff
+format --check` clean, `check_architecture.py` 0 errors.
+
 ---
 
 ### Phase 3 — public surface as a graph query over one evidence graph (D5)
