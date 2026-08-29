@@ -514,3 +514,40 @@ def test_live_clang_member_access_name_is_not_canonicalized_as_a_param_ref(
     # (backend-dependent) cast spacing.
     assert a.entity_id.extra[1].endswith("N)")
     assert "type-param" not in a.entity_id.extra[1]
+
+
+@pytest.mark.integration
+@pytest.mark.skipif(shutil.which("clang") is None, reason="clang not installed")
+def test_live_clang_trailing_return_type_discriminates_overloaded_templates(
+    tmp_path: Path,
+) -> None:
+    """Two templates differing ONLY in their TRAILING return type
+    (``auto f(T) -> typename T::x`` vs. ``-> typename T::y``) are legal,
+    coexisting overloads, but clang's own ``qualType`` spells the leading
+    part as the bare placeholder ``auto`` for both -- confirmed by direct
+    compilation -- so a discriminator built from only the leading spelling
+    collapsed them onto one ``EntityId`` (Codex review, PR #943, the
+    trailing-return-type sibling of the dependent-leading-return-type case
+    above)."""
+    a = _one(
+        _clang_parser(
+            "struct S1 { using x = int; };"
+            " template<class T> auto f(T) -> typename T::x;",
+            tmp_path,
+            "trailreta",
+        ).parse_functions(),
+        name="f",
+    )
+    b = _one(
+        _clang_parser(
+            "struct S2 { using y = double; };"
+            " template<class T> auto f(T) -> typename T::y;",
+            tmp_path,
+            "trailretb",
+        ).parse_functions(),
+        name="f",
+    )
+    assert a.entity_id is not None and b.entity_id is not None
+    assert a.entity_id != b.entity_id
+    assert a.return_type == "typename T::x"
+    assert b.return_type == "typename T::y"

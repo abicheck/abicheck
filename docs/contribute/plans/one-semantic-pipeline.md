@@ -8475,6 +8475,33 @@ lookbehind comments were condensed to fit rather than granted a debt-
 ledger entry, since both fixes are genuinely small and the file was
 already at 797 lines before this correction.
 
+**Correction (2026-08-29, same day, Codex review on PR #943): a function
+template's TRAILING return type was discarded entirely, collapsing two
+legal, coexisting overloads onto one identity.** `_return_type`
+(`extract.headers.clang.functions`) scanned a function `qualType` for
+the first top-level `(` (the start of the parameter list) and returned
+everything before it -- correct for an ordinary leading return type, but
+clang spells a trailing-return-type function's leading part as the bare
+placeholder `"auto"`, confirmed by direct compilation: `template<class
+T> auto f(T) -> typename T::x;` and the sibling overload returning
+`typename T::y` both carry the literal `qualType` `"auto (T) -> typename
+T::x"`/`"auto (T) -> typename T::y"`. So both the model's own
+`Function.return_type` field and (for an uninstantiated template with no
+mangled name) the `EntityId`'s "sig" fallback read `"auto"` for both
+overloads, discarding the one thing that actually distinguishes them.
+Fixed by resuming the same bracket-depth scan past the parameter list's
+matching `)` and, when a top-level `->` follows (never inside
+`<...>`/`[...]`, so a nested `std::function<T(int)->int>`-shaped alias
+cannot be mistaken for one), returning the spelling after it instead of
+the leading placeholder. Regression test in
+`tests/test_entity_id_template_discriminators.py`
+(`test_live_clang_trailing_return_type_discriminates_overloaded_templates`),
+confirmed to fail pre-fix via `git stash` on just the source file;
+non-template, non-trailing, and function-pointer-return-type cases were
+independently checked to keep their existing spellings (`int g(int)`
+still reads `"int"`, `auto f(int) -> int*` still reports
+`return_pointer_depth=1`).
+
 ---
 
 ### Phase 3 — public surface as a graph query over one evidence graph (D5)

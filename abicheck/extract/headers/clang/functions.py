@@ -119,16 +119,51 @@ def _return_type(qualtype: str) -> str:
     Scans for the first ``(`` at bracket depth 0 — the start of the parameter
     list — and returns everything before it. Function-pointer return types (rare)
     degrade to the whole spelling; ordinary returns are exact.
+
+    A TRAILING return type (``auto f(T) -> typename T::x``) is the one
+    exception: clang's ``qualType`` spells the leading part as the bare
+    placeholder ``auto``, which is not the actual return type and collapses
+    two legal overloads differing only in their trailing return
+    (``-> typename T::x`` vs. ``-> typename T::y``) onto the identical
+    spelling -- confirmed by direct compilation
+    (``clang -Xclang -ast-dump=json``: both overloads' ``qualType`` leads
+    with the literal string ``"auto"``, the real type appearing only after
+    ``->``). So once the parameter list's matching ``)`` is found, a
+    top-level ``->`` anywhere after it (found by resuming the same
+    bracket-depth scan, never inside ``<...>``/``[...]``, so a nested
+    ``std::function<T(int)->int>``-shaped alias cannot be mistaken for one)
+    means the real return type is everything after that arrow, not the
+    leading ``auto`` placeholder (Codex review, PR #943).
     """
     bracket = 0
+    depth = 0
+    param_list_start = -1
+    param_list_end = -1
     for idx, ch in enumerate(qualtype):
-        if ch in "<[":
-            bracket += 1
-        elif ch in ">]":
-            bracket = max(0, bracket - 1)
-        elif ch == "(" and bracket == 0:
-            return qualtype[:idx].strip()
-    return qualtype.strip()
+        if param_list_start == -1:
+            if ch in "<[":
+                bracket += 1
+            elif ch in ">]":
+                bracket = max(0, bracket - 1)
+            elif ch == "(" and bracket == 0:
+                param_list_start = idx
+                depth = 1
+        else:
+            if ch == "(":
+                depth += 1
+            elif ch == ")":
+                depth -= 1
+                if depth == 0:
+                    param_list_end = idx + 1
+                    break
+    if param_list_start == -1:
+        return qualtype.strip()
+    leading = qualtype[:param_list_start].strip()
+    if param_list_end != -1:
+        arrow = re.search(r"->\s*(.+)$", qualtype[param_list_end:])
+        if arrow:
+            return arrow.group(1).strip()
+    return leading
 
 
 def _is_noexcept_qualifier(quals: str) -> bool:
