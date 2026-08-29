@@ -9098,6 +9098,31 @@ source file and pass post-fix; every existing return-type discriminator
 test still passes unchanged. `mypy abicheck/` clean, `ruff check`/`ruff
 format --check` clean, `check_architecture.py` 0 errors.
 
+**Correction (2026-08-29, same day, Codex review on PR #943): a
+QUALIFIED MEMBER-TEMPLATE name is one qualifier keyword past what the
+existing `::`/`.`/`->` exclusions reach.** Confirmed by direct
+compilation: `struct Base { template<class T> static int N(); };
+template<int N, class S> void f(decltype(S::template N<int>()));` keeps
+`S::template N<int>()` verbatim in clang's own qualType regardless of
+the non-type parameter `N`'s own name -- but `canonicalize_type_param_
+references`'s existing `(?<!::)` lookbehind (which already protects the
+plain `S::N` shape) doesn't reach this `N`, since it's separated from
+`::` by the literal `template` keyword and a space, not adjacent to it.
+Substituting it anyway fingerprinted a pure rename of the unrelated
+outer non-type parameter (`N` -> `M`) as a remove+add, since the
+member-template call's own raw text is identical either way. Fixed by
+adding a fourth fixed-width negative lookbehind, `(?<!::template )`, to
+the same combined pattern the `::`/`.`/`->` exclusions already share.
+Regression test in `tests/test_entity_id_template_discriminators.py`
+(`test_live_clang_qualified_member_template_name_is_not_canonicalized_as_a_param_ref`),
+confirmed to fail against the pre-fix code via `git stash` on just the
+source file and pass post-fix; every existing rename-invariance test
+still passes unchanged. `identity.py`'s own docstrings condensed further
+to stay at the AI-readiness gate's 800-line production cap after this
+addition (no wording removed beyond redundant restatement). `mypy
+abicheck/` clean, `ruff check`/`ruff format --check` clean,
+`check_architecture.py` 0 errors.
+
 ---
 
 ### Phase 3 — public surface as a graph query over one evidence graph (D5)

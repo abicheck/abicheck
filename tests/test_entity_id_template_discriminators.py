@@ -597,3 +597,47 @@ def test_live_clang_enclosing_class_template_param_rename_does_not_change_member
     )
     assert a.entity_id is not None and a.entity_id == b.entity_id
     assert a.entity_id.extra[-1] == "nontype:type-param-0"
+
+
+@pytest.mark.integration
+@pytest.mark.skipif(shutil.which("clang") is None, reason="clang not installed")
+def test_live_clang_qualified_member_template_name_is_not_canonicalized_as_a_param_ref(
+    tmp_path: Path,
+) -> None:
+    """A QUALIFIED MEMBER-TEMPLATE name (`S::template N<int>()`, the
+    disambiguated form a dependent qualified-id naming a template member
+    requires) must NOT be canonicalized as a reference to a same-spelled
+    template parameter merely because it collides in spelling. `struct
+    Base { template<class T> static int N(); }; template<int N, class S>
+    void f(decltype(S::template N<int>()));` keeps `S::template N<int>()`
+    verbatim in clang's own `qualType` -- it does not resolve to the
+    non-type parameter `N` -- so substituting it anyway fingerprinted a
+    pure rename of that unrelated parameter (`N` -> `M`) as a remove+add
+    for an otherwise-identical declaration, since the member-template
+    call's own raw text is unaffected by that rename either way (Codex
+    review, PR #943, on a later round -- the member-access case above's
+    own sibling, one qualifier keyword further, which the existing
+    `(?<!::)` lookbehind doesn't reach since `template` and a space sit
+    between the `::` and the name)."""
+    prelude = "struct Base { template<class T> static int N(); };\n"
+    a = _one(
+        _clang_parser(
+            prelude
+            + "template<int N, class S> void f(decltype(S::template N<int>()));",
+            tmp_path,
+            "membtmplnamea",
+        ).parse_functions(),
+        name="f",
+    )
+    b = _one(
+        _clang_parser(
+            prelude
+            + "template<int M, class S> void f(decltype(S::template N<int>()));",
+            tmp_path,
+            "membtmplnameb",
+        ).parse_functions(),
+        name="f",
+    )
+    assert a.entity_id is not None and a.entity_id == b.entity_id
+    assert "N<int>()" in a.entity_id.extra[1]
+    assert "type-param" not in a.entity_id.extra[1].split("::template ")[1]

@@ -457,11 +457,8 @@ def canonicalize_type_param_references(
     the sequential form has its own collision: replacing an earlier name
     (``T`` -> ``"type-param-0"``) first, then a LATER parameter literally
     named ``type`` matches ``\\btype\\b`` INSIDE that already-generated
-    token, corrupting it into ``"type-param-1-param-0"`` -- so renaming an
-    unrelated, unused parameter changed the ``EntityId`` too (Codex review,
-    PR #943). A single combined-alternation pass never re-scans replacement
-    text (``re.sub`` resumes in the ORIGINAL string after each match), so
-    this cannot occur regardless of naming.
+    token, corrupting it (Codex review, PR #943). A combined-alternation
+    pass never re-scans replacement text, so this cannot occur.
     """
     index_by_name = {name: index for index, name in enumerate(type_param_names) if name}
     if not index_by_name:
@@ -475,15 +472,18 @@ def canonicalize_type_param_references(
     # same-spelled parameter's own name. Both confirmed by direct
     # compilation; substituting either anyway fingerprinted an unrelated
     # parameter's own rename as a remove+add (Codex review, PR #943).
+    # `(?<!::template )` -- same hazard one token further, for a QUALIFIED
+    # MEMBER-TEMPLATE name (`S::template N<int>()`): `S::N` is already
+    # covered by `(?<!::)` above, but here `N` is separated from `::` by
+    # the `template` keyword and a space. Confirmed by direct compilation
+    # (Codex review, PR #943, on a later round).
     pattern = re.compile(
-        r"(?<!::)(?<!\.)(?<!->)\b("
+        r"(?<!::)(?<!\.)(?<!->)(?<!::template )\b("
         + "|".join(re.escape(name) for name in index_by_name)
         + r")\b"
     )
     # A QUOTED LITERAL (`'N'`) is a value, not a param reference, even when
-    # it collides -- confirmed by direct compilation: `std::integral_
-    # constant<char, 'N'>` keeps `'N'` verbatim regardless of an unused
-    # parameter's name (Codex review, PR #943).
+    # it collides (confirmed by direct compilation, Codex review, PR #943).
     literal_spans = _quoted_literal_spans(spelling)
 
     def _substitute(m: re.Match[str]) -> str:
