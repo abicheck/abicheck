@@ -474,3 +474,43 @@ def test_live_clang_globally_qualified_name_is_not_canonicalized_as_a_param_ref(
     )
     assert a.entity_id is not None and a.entity_id == b.entity_id
     assert a.entity_id.extra[1] == "::T::X"
+
+
+@pytest.mark.integration
+@pytest.mark.skipif(shutil.which("clang") is None, reason="clang not installed")
+@pytest.mark.parametrize(
+    "access_expr",
+    ["S{}.N", "((S*)0)->N"],
+    ids=["dot", "arrow"],
+)
+def test_live_clang_member_access_name_is_not_canonicalized_as_a_param_ref(
+    tmp_path: Path, access_expr: str
+) -> None:
+    """A MEMBER-ACCESS expression (`S{}.N` or `((S*)0)->N`) must NOT be
+    canonicalized as a reference to a template parameter merely because it
+    collides in spelling. `struct S { int N; }; template<int N>
+    void f(decltype(<access_expr>));` keeps the member name `N` verbatim in
+    clang's own `qualType` -- it does not resolve to the (here, unused)
+    non-type template parameter -- so substituting it anyway fingerprinted
+    the parameter's own rename as a remove+add for an otherwise-identical
+    declaration (Codex review, PR #943, same collision shape as the
+    globally-qualified-name case above, just for `.`/`->` instead of `::`)."""
+    header = "struct S { int N; }; template<int %s> void f(decltype(%s));"
+    a = _one(
+        _clang_parser(
+            header % ("N", access_expr), tmp_path, "membaccessa"
+        ).parse_functions(),
+        name="f",
+    )
+    b = _one(
+        _clang_parser(
+            header % ("M", access_expr), tmp_path, "membaccessb"
+        ).parse_functions(),
+        name="f",
+    )
+    assert a.entity_id is not None and a.entity_id == b.entity_id
+    # clang normalizes `(S*)` to `(S *)` in its own `qualType` spelling, so
+    # assert the member name survived un-substituted rather than the exact
+    # (backend-dependent) cast spacing.
+    assert a.entity_id.extra[1].endswith("N)")
+    assert "type-param" not in a.entity_id.extra[1]

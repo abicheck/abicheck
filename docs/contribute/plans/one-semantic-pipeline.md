@@ -8449,6 +8449,32 @@ confirmed to fail pre-fix via `git stash` on just the source file; every
 existing rename-invariance test in that module (ordinary dependent
 references, none globally-qualified) still passes unchanged.
 
+**Correction (2026-08-29, same day, Codex review on PR #943): the same
+whole-word substitution also mistook a MEMBER-ACCESS expression's member
+name for a template-parameter reference merely because it collided in
+spelling.** `struct S { int N; }; template<int N> void
+f(decltype(S{}.N));` (and the pointer form `((S*)0)->N`) keeps the
+member name `N` verbatim in clang's own `qualType` regardless of what
+the (here, unused) non-type template parameter is actually named --
+confirmed by direct compilation for both `.` and `->` forms -- yet the
+substitution rewrote it to `type-param-0` anyway, so renaming the
+parameter to `M` left the second revision's `S{}.N`/`((S*)0)->N`
+untouched, producing unequal `EntityId`s for the identical declaration.
+Same collision shape as the globally-qualified-name correction directly
+above, just for `.`/`->` instead of `::`. Fixed by extending the
+substitution pattern with `(?<!\.)(?<!->)` negative lookbehinds
+alongside the existing `(?<!::)` one. Regression test in
+`tests/test_entity_id_template_discriminators.py`
+(`test_live_clang_member_access_name_is_not_canonicalized_as_a_param_ref`,
+parametrized over both the `.` and `->` forms), confirmed to fail
+pre-fix via `git stash` on just the source file for both parametrized
+cases; every existing test in that module still passes unchanged.
+`abicheck/model/identity.py` sits exactly at the AI-readiness
+production-file soft cap (800 lines) after this fix -- the two related
+lookbehind comments were condensed to fit rather than granted a debt-
+ledger entry, since both fixes are genuinely small and the file was
+already at 797 lines before this correction.
+
 ---
 
 ### Phase 3 — public surface as a graph query over one evidence graph (D5)

@@ -475,18 +475,21 @@ def canonicalize_type_param_references(
         return spelling
     # `(?<!::)` -- an EXPLICITLY globally-qualified name (`::T::X`) is a
     # namespace lookup, not a dependent reference to a template parameter
-    # named `T`, even when the spelling happens to collide (confirmed by
-    # direct compilation: `namespace T { struct X {}; } template<class T>
-    # void f(::T::X);` keeps `::T::X` verbatim in clang's own `qualType` --
-    # it does NOT resolve to the parameter). Substituting it anyway
-    # produced unequal `EntityId`s for the identical declaration after
-    # renaming the (here, unused) template parameter, since only the
-    # colliding-name revision got rewritten (Codex review, PR #943). A
-    # bare `::` prefix (global scope, no preceding name) is the only
-    # legal spelling this can appear after in a type/expression spelling,
-    # so the lookbehind needs no alternation.
+    # named `T`, even when the spelling collides (confirmed by direct
+    # compilation: `namespace T { struct X {}; } template<class T> void
+    # f(::T::X);` keeps `::T::X` verbatim in clang's own `qualType`).
+    # Substituting it anyway fingerprinted the (here, unused) parameter's
+    # own rename as a remove+add for an otherwise-identical declaration
+    # (Codex review, PR #943).
+    #
+    # `(?<!\.)`/`(?<!->)` -- same hazard for MEMBER ACCESS (`S{}.N`,
+    # `((S*)0)->N`): confirmed by direct compilation that clang keeps the
+    # member name verbatim regardless of a same-spelled template
+    # parameter's own name (Codex review, PR #943).
     pattern = re.compile(
-        r"(?<!::)\b(" + "|".join(re.escape(name) for name in index_by_name) + r")\b"
+        r"(?<!::)(?<!\.)(?<!->)\b("
+        + "|".join(re.escape(name) for name in index_by_name)
+        + r")\b"
     )
     return pattern.sub(lambda m: f"type-param-{index_by_name[m.group(1)]}", spelling)
 
