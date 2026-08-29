@@ -24,12 +24,12 @@ sibling ``render_scan_dry_run`` lives in) or :mod:`abicheck.cli_scan_helpers`
 close an import cycle back through ``service_scan -> scan_engine ->
 cli_scan_helpers``, see that module's own docstring).
 
-Imports :mod:`abicheck.service_scan` directly rather than through the
-:mod:`abicheck.service` root facade -- ``frontends/`` may never import back
-through ``cli.py``/``compat/cli.py``/``service.py`` (see
-``abicheck/frontends/AGENTS.md``'s "Public compatibility" section) --
-the same way ``cli_scan.py`` itself already does for ``ScanRequest``'s
-sibling imports (e.g. ``run_scan_set``, ``CompileContext``).
+The cost projection itself lives in
+:func:`abicheck.workflows.scan_estimate.estimate_artifact_set`, not here:
+``frontends/`` may import only ``abicheck.model``, ``abicheck.workflows``,
+and ``abicheck.report`` (``abicheck/frontends/AGENTS.md``'s "Permitted
+imports") -- it must not reach into the flat ``abicheck.service_scan``
+implementation module directly the way that estimation needs to.
 """
 
 from __future__ import annotations
@@ -48,28 +48,16 @@ def render_artifact_set_dry_run(
 ) -> Any:
     """Build the report. Takes the already-assembled set-wide
     ``ScanRequest`` (``req``) the real run would submit to
-    :func:`~abicheck.service_scan.run_scan_set`, rather than its fields
-    spelled out one by one, to keep the call site short; ``discovered``/
-    ``explicit``/``header_backend``/``fmt`` aren't ``ScanRequest`` fields,
-    so those four stay explicit. ``discovered``/``explicit`` are already
-    resolved and ELF-validated by the time this runs
-    (``cli_scan._resolve_artifact_set_paths`` +
-    ``bundle.discover_artifact_set``), the same as the real run -- a
-    malformed member fails loud before any dry-run text is printed.
-
-    The cost projection is summed **per member**, not read off one shared
-    :func:`~abicheck.service_scan.estimate_scan` call the way a naive port
-    of the single-binary preview would: only its L0_binary row scales by
-    ``len(binaries)`` (a known, still-open gap in the shared estimator for
-    other callers). Building one single-binary ``ScanRequest`` per
-    discovered member (reusing ``req``'s own shared fields) and summing
-    each member's own :func:`~abicheck.service_scan.estimate_scan` result
-    gives a genuinely per-member-scaled total for this preview
-    specifically, without changing ``estimate_scan``'s own single-request
-    contract.
+    ``service_scan.run_scan_set``, rather than its fields spelled out one by
+    one, to keep the call site short; ``discovered``/``explicit``/
+    ``header_backend``/``fmt`` aren't ``ScanRequest`` fields, so those four
+    stay explicit. ``discovered``/``explicit`` are already resolved and
+    ELF-validated by the time this runs (``cli_scan._resolve_artifact_set_
+    paths`` + ``bundle.discover_artifact_set``), the same as the real run --
+    a malformed member fails loud before any dry-run text is printed.
     """
     from ...dry_run import DryRunResult, tool_status
-    from ...service_scan import ScanRequest, estimate_scan
+    from ...workflows.scan_estimate import estimate_artifact_set
 
     result = DryRunResult(command="scan")
     members = sorted(discovered.items())
@@ -108,29 +96,22 @@ def render_artifact_set_dry_run(
         "audit-only, no old side)",
     )
     result.add("Output and exit-code behavior", f"format: {fmt}")
+    member_paths = [path for _name, path in members]
     try:
-        from ...buildsource.scan_levels import SourceMethod
+        totals, notes = estimate_artifact_set(req, member_paths)
+    except ValueError as exc:
+        # A malformed --risk-rules profile: the real run fails the same way
+        # (service_scan._load_risk_rules_for_service raises ValueError,
+        # which _run_artifact_set converts to this same click.UsageError) --
+        # a dry-run must fail loud here too, not silently report a
+        # successful preview for a run that would actually error out
+        # (Codex review).
+        import click
 
-        totals: dict[str, tuple[int, float]] = {}
-        for _name, member_path in members:
-            member_req = ScanRequest(
-                binaries=[member_path],
-                headers=list(req.headers),
-                includes=list(req.includes),
-                sources=req.sources,
-                build_info=req.build_info,
-                mode="audit",
-                source_method=SourceMethod.AUTO.value if req.depth is None else None,
-                depth=req.depth,
-                changed_paths=list(req.changed_paths),
-                seeded=req.seeded,
-                budget=req.budget,
-                lang=req.lang,
-                build_targets=req.build_targets,
-            )
-            for e in estimate_scan(member_req):
-                tus, seconds = totals.get(e.layer, (0, 0.0))
-                totals[e.layer] = (tus + e.tus, seconds + e.est_seconds)
+        raise click.UsageError(str(exc)) from exc
+    except Exception as exc:  # pragma: no cover - best-effort probe
+        result.warn(f"could not project per-layer cost: {exc}")
+    else:
         total_seconds = sum(seconds for _tus, seconds in totals.values())
         result.add(
             "Resolved depth and source scope",
@@ -143,7 +124,6 @@ def render_artifact_set_dry_run(
             "note: each member is estimated independently and summed; this "
             "does not price the cross-library bundle-audit pass itself "
             "(cheap ELF/dynsym-only, no compiler invocation)",
+            *notes,
         )
-    except Exception as exc:  # pragma: no cover - best-effort probe
-        result.warn(f"could not project per-layer cost: {exc}")
     return result

@@ -84,6 +84,57 @@ class TestArtifactSetRepeatableOptionBranches:
         assert "projected total:" in result.output
         assert "Dry run only" in result.output
 
+    def test_dry_run_fails_the_same_way_as_a_real_run_on_bad_risk_rules(
+        self, runner: CliRunner, tmp_path: Path
+    ) -> None:
+        # Codex review: the per-member estimate must resolve --risk-rules
+        # itself (workflows.scan_estimate._resolve_level), not silently fall
+        # back to RiskRules.default() -- a malformed profile must fail the
+        # dry-run exactly like it fails the real run (click.UsageError, not
+        # a "successful" preview of a run that would actually error out).
+        p1, p2 = tmp_path / "liba.so", tmp_path / "libb.so"
+        _write_elf_shared_object_stub(p1)
+        _write_elf_shared_object_stub(p2)
+        bad_rules = tmp_path / "bad.yml"
+        bad_rules.write_text("risk_rules: [1, 2\n  - broken")
+
+        dry_run_result = runner.invoke(
+            main,
+            [
+                "scan", "--artifact-set", str(p1), "--artifact-set", str(p2),
+                "--dry-run", "--risk-rules", str(bad_rules),
+            ],
+        )
+        real_run_result = runner.invoke(
+            main,
+            [
+                "scan", "--artifact-set", str(p1), "--artifact-set", str(p2),
+                "--risk-rules", str(bad_rules),
+            ],
+        )
+        assert dry_run_result.exit_code == real_run_result.exit_code == 64
+        assert "cannot read --risk-rules" in dry_run_result.output
+        assert "cannot read --risk-rules" in real_run_result.output
+
+    def test_dry_run_preserves_estimator_notes(
+        self, runner: CliRunner, tmp_path: Path
+    ) -> None:
+        # Codex review: estimate_scan()'s per-estimate `note` (e.g. the
+        # --build-target workspace-wide-TU-count caveat) must survive into
+        # the aggregated preview, not be dropped in favor of bare totals.
+        p1, p2 = tmp_path / "liba.so", tmp_path / "libb.so"
+        _write_elf_shared_object_stub(p1)
+        _write_elf_shared_object_stub(p2)
+        result = runner.invoke(
+            main,
+            [
+                "scan", "--artifact-set", str(p1), "--artifact-set", str(p2),
+                "--dry-run", "--depth", "build", "--build-target", "//pkg:lib",
+            ],
+        )
+        assert result.exit_code == 0, result.output
+        assert "UNSCOPED" in result.output
+
     def test_rejects_dry_run_with_artifact_set_and_output(
         self, runner: CliRunner, tmp_path: Path
     ) -> None:
