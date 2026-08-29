@@ -1,7 +1,7 @@
 # ADR-061: Responsibility-Package Architecture and Flat-Namespace Migration
 
 **Date:** 2026-08-24
-**Status:** Accepted — partially implemented (Phases 0-1 implemented; Phases 2-4 in progress; Phase 5 begun — the `model` package and the `*_metadata.py` dataclass/parser split have landed; D9's change-catalog work (item 3) is fully done — all 4 registry-validation properties (unique identifiers, valid references, non-contradictory defaults, complete metadata) are enforced, and the 397 entries have been repartitioned into `model/change_catalog/{symbols,types,platform,build,source}.py` by taxonomy; the CastXML/Clang parser split (item 1) has only started — the `extract` package now exists with one stateless-helper module moved out of `dumper_castxml.py`, but the stateful entity-by-entity split is unstarted — source-graph separation (item 2) has also only started — its values third moved to `abicheck/model/source_graph.py`, construction and comparison remain in `buildsource/source_graph.py` — and the bulk of item 4's cycle-exception cleanup also remains — and otherwise incremental).
+**Status:** Accepted — partially implemented (Phases 0-1 implemented; Phases 2-4 in progress; Phase 5 begun — the `model` package and the `*_metadata.py` dataclass/parser split have landed; Phase 2's D9 item 4 gate-decision half is now closed via `policy/gate_decision.py`'s `gate_decision_for_result`, read by every JSON/SARIF/HTML/scan call site instead of each independently recomputing it (Markdown/HTML prose rewrite and per-finding verdict consolidation remain open, see Phase 2's own section); D9's change-catalog work (item 3) is fully done — all 4 registry-validation properties (unique identifiers, valid references, non-contradictory defaults, complete metadata) are enforced, and the 397 entries have been repartitioned into `model/change_catalog/{symbols,types,platform,build,source}.py` by taxonomy; the CastXML/Clang parser split (item 1) is now underway with a real shared-context design proven on both backends — `extract/headers/{castxml,clang}/context.py` (plus castxml's own `location.py`/`type_resolution.py`) hold the parser state/node-inspection primitives an entity module needs, and `enums.py` is the first entity split out of each backend, both calling through their context object rather than `self` — but `functions.py`/`records.py`/`templates.py` on either side have not moved yet — source-graph separation (item 2) is now split three ways: its values third moved to `abicheck/model/source_graph.py`; construction (`build_source_graph` and its private folding helpers) moved into `buildsource/source_graph_build.py` (classified `extract`) and `buildsource/source_graph_build_source_abi.py` (classified `extract`); comparison (`diff_source_graph`, `localize_symbol`) moved into `buildsource/source_graph_compare.py` (classified `compare`); a shared node/edge-classification predicate module neither half owns exclusively (`buildsource/source_graph_query.py`) stays unclassified, same as several of its own callers; `buildsource/source_graph.py` itself is now a 140-line re-export facade — and the bulk of item 4's cycle-exception cleanup also remains — and otherwise incremental).
 **Decision maker:** abicheck maintainers
 
 ## Context
@@ -672,25 +672,65 @@ sizes:
    both modules against their golden output, i.e. its own vertical slice
    (plausibly one per format), not a follow-on edit to a serialization
    change.
-2. *Items 4 and 5 — decisions and post-render mutation.* Every renderer
-   still reaches into policy itself: `sarif._severity_gate_properties`,
-   `html_report`'s gate card, and `reporter._build_severity_json` each call
-   `severity.compute_gate_decision`, and `junit_report`/`html_report`/
-   `reporter_markdown` each resolve a per-finding verdict through
-   `effective_verdict_for_change`. These are calls to *the single canonical*
-   resolver rather than drifting reimplementations, so the risk today is
-   ownership rather than disagreement — but D9 says a projection consumes
-   decisions, it does not make them, so closing this needs one
-   decisions-computed-once value carried into document construction and read
-   by every format. Separately, `cli_compare_fold.py`'s
+2. *Items 4 and 5 — decisions and post-render mutation.* Item 4's **gate
+   decision** half is now closed: `abicheck.policy.gate_decision.
+   gate_decision_for_result(result, severity_config)` is the one call site
+   that turns a `DiffResult` + optional `SeverityConfig` into a
+   `GateDecision`, and `sarif._severity_gate_properties`, `html_report`'s
+   gate card, `reporter._build_severity_json` (all four of its call sites),
+   `cli_scan_baseline.py`'s severity-scheme scan summary, and
+   `cli_compare_release.py`'s per-library gating buckets all read the
+   already-computed value instead of independently importing
+   `severity.compute_gate_decision` and reassembling its arguments
+   (`result.changes`/`result.policy`/`result._effective_kind_sets()`/
+   `result.policy_file`) themselves. `frontends`-classified callers
+   (`cli_scan_baseline.py`, `cli_compare_release.py`) reach it through
+   `workflows.gate`'s existing re-export facade rather than importing
+   `policy` directly, matching that facade's own stated purpose.
+   `tests/test_gate_decision_shared.py` is the property test D9 asks for:
+   it sweeps several finding combinations across four severity
+   configurations and asserts JSON's `severity` block, SARIF's
+   `properties.severityGate`, and HTML's CI-gate card all equal the one
+   `GateDecision` `gate_decision_for_result` returns — a test that fails if
+   any renderer could ever compute its own, independently-drifting answer,
+   not merely a golden-output pin. One related call site is deliberately
+   **not** folded in: `cli_helpers_compare.py`'s scoped-gate categorization
+   (`--used-by`/`--required-symbol`) computes `compute_gate_decision` over a
+   *scoped* subset of changes, not `result.changes` — a genuinely different
+   decision, not an instance of the same one, so forcing it through
+   `gate_decision_for_result`'s unfiltered-changes contract would be the
+   wrong abstraction rather than closing a gap.
+
+   The **per-finding verdict** half of item 4 remains open:
+   `junit_report`/`html_report`/`reporter_markdown` each still resolve a
+   per-change verdict through `effective_verdict_for_change`/
+   `DiffResult._effective_verdict_for_change` at their own call sites
+   (`junit_report.py` alone calls it independently from both `_is_failure`
+   and `_failure_type` for the same change). Unlike the gate decision, this
+   is not a single value with one shape: it is resolved once per `Change`,
+   already threads a caller-precomputed `kind_sets` through several of
+   these call sites specifically to avoid rebuilding *that* per finding, and
+   sits directly upstream of `DiffResult`'s own public `breaking`/
+   `source_breaks`/`compatible`/`risk` properties — which this ADR has
+   already ruled out moving, as a breaking change to the documented public
+   Python API (see above). Consolidating it correctly needs a real design
+   decision (a per-change decision cache keyed off `Change` identity, most
+   plausibly on `DiffResult` itself, given `Change` is not hashable) that
+   affects heavily-reviewed, scar-tissue-dense logic in three format
+   modules at once; attempting it as a drive-by inside this gate-decision
+   slice would risk exactly the "wrong abstraction, forced through" failure
+   mode this ADR warns against elsewhere. It remains its own follow-up
+   slice.
+
+   Item 5 (post-render mutation) is untouched by this slice, for the
+   original reason: `cli_compare_fold.py`'s
    `_fold_scoped_compat_into_text`/`_fold_suppression_audit_into_text`/
    `_fold_use_case_impact_into_text` and `cli_compare_helpers.
-   _fold_evidence_depth_into_json` are exactly the "post-render mutation"
-   item 5 names: they re-parse rendered JSON (or append to rendered
-   Markdown) to add facts the workflow result should have carried in the
-   first place. Both are behavior-visible changes across every format at
-   once, so neither belongs in a slice whose parity argument is
-   byte-identical output.
+   _fold_evidence_depth_into_json` re-parse rendered JSON (or append to
+   rendered Markdown) to add facts the workflow result should have carried
+   in the first place. That is a behavior-visible change across every
+   format at once, so it does not belong in a slice whose parity argument
+   is byte-identical output.
 
 **The `compare -> policy` blocker this section previously recorded is
 closed**, and how it was re-measured is worth keeping: the earlier note
@@ -1599,6 +1639,114 @@ to be re-measured (`python scripts/check_architecture.py` against a
 temporary classification, the same method used throughout) rather than
 trusted verbatim by whoever picks this up next.
 
+**Re-measured again for the `service.py`-thinning slice, following exactly
+that instruction, and the "two dozen" figure has since narrowed on its own.**
+`service.py` is 886 lines today (up slightly from the 873 recorded above —
+still `no_growth`-tracked, diff-scoped against the branch base, not the
+absolute figure). A fresh AST scan of its first-party imports (the same
+method, corrected for the bare-`from . import X` and dynamic-`importlib`
+gaps this section's own history already found) lists only **9** unclassified
+targets, not ~24: `compat.abicc_dump_import`, `policy_file`, `serialization`,
+`service_dump_cache`, `service_header_graph_attach`, `service_render`,
+`snapshot_io`, `suppression`, plus `dumper_cache` (already known, line 658,
+via the same dynamic-import path this section previously flagged). The drop
+is real, not a re-measurement artifact: Phase 3's pipeline extraction gave
+most of `service.py`'s old direct parser/dumper imports `workflows`-owned
+siblings (`service_dump_native.py`, `service_compare_pipeline.py`,
+`service_dump_pipeline.py`, `service_scan.py`) that `service.py` now imports
+instead of the flat parsers themselves.
+
+Two of the nine were genuinely safe to classify and were, in this pass:
+`service_dump_cache.py` and `service_header_graph_attach.py` are each
+imported by exactly one or two already-`workflows` modules
+(`service.py`/`service_dump_native.py`), reach nothing outside
+`model`/`compare`-classified leaves or already-unclassified siblings, and
+`python scripts/check_architecture.py` reports zero findings with both added
+to `workflows`'s `legacy_paths` — verified, not assumed, the same way every
+classification in this document is meant to be. Both are now `workflows` in
+`architecture/modules.yaml`.
+
+The other seven were each measured individually (add the candidate
+classification, run the checker, read the real output) rather than grouped,
+because grouping is exactly what produced this section's earlier "67", "two
+dozen", and "three sites" overclaims:
+
+- **`policy_file.py` -> `policy`**: blocked by the identical `model -> policy`
+  edge this whole section already spent nine paragraphs on — `checker_types.py`
+  imports `PolicyFile` for `DiffResult.policy_file`'s field type. Not a new
+  finding, just today's confirmation that the standing blocker still applies
+  unchanged; see `architecture/debt.yaml`'s own entry for this file for the
+  measured rationale.
+- **`suppression.py` -> `policy`**: a *different*, smaller, previously
+  unrecorded blocker — a real `frontends -> policy` edge at
+  `cli_params.py:27,383` and `cli_scan_baseline.py:52`, which import
+  `SuppressionList` directly rather than through a `workflows` re-export
+  (the shape `service.py`'s own `load_suppression_and_policy` already gets
+  right). Two files, three sites — mechanically fixable by rerouting those
+  call sites through a `workflows`-owned facade, but that reroute is its own
+  reviewed slice, not a drive-by inside this one.
+- **`snapshot_io.py` -> `storage`**: the same shape as `suppression.py`,
+  independently measured — a real `frontends -> storage` edge at
+  `cli_dump_helpers.py`, `cli_helpers_compare.py`, `cli_resolve.py`, and
+  `compat/cli.py`, all importing its compression/sniffing helpers directly.
+  `classify.py` and `package.py` also import it, but both are `extract`-
+  classified and `extract -> storage` is allowed, so they are not part of
+  the blocker (a plausible-looking `model -> storage` concern from an earlier
+  pass turned out to rest on misclassifying `classify.py` as `model`; it is
+  actually `extract`, checked directly against `architecture/modules.yaml`
+  rather than assumed).
+- **`serialization.py` -> `storage`**: measured and found to be **worse**
+  than the debt ledger's existing `storage` target implied — 72 findings, not
+  a handful, because the module's own body reaches into `extract`/`compare`/
+  `workflows` content at dozens of sites that `storage`'s `may_import:
+  [model]` forbids, on top of the same `frontends -> storage` shape the two
+  entries above show. This is a dataclass/parser-shaped split the size of
+  Phase 5's `*_metadata.py` work, not a reclassification — see the updated
+  `architecture/debt.yaml` entry.
+- **`compat.abicc_dump_import` -> `extract`**: blocked by a real
+  `frontends -> extract` edge at `cli_resolve.py:38` and `compat/cli.py:75`,
+  both importing it directly rather than through a `workflows` re-export.
+  `classify.py` also imports it function-locally, but `classify.py` is
+  itself `extract`-classified, so that particular edge is `extract ->
+  extract` and fires nothing — the two `frontends` sites are the whole
+  blocker here, not a third site hiding behind physical-location exemptions.
+- **`service_render.py` -> `workflows`**: this is the one finding that
+  reframes the whole entry, not just adds to it. `service_render.py` imports
+  `reporter.py`/`sarif.py` — both `report`-classified — and `workflows ->
+  report` is forbidden by design (`report` depends on `workflows`, not the
+  reverse; letting it go the other way would make the two mutually
+  dependent). So `service_render.py`, and by extension the `render_output`
+  half of `service.py`'s own public surface, cannot join `workflows` at all;
+  it is `report`-shaped, or `frontends`-shaped (the way `cli.py`'s own
+  render/exit-decision logic already lives in `frontends/cli/runtime.py`),
+  never `workflows`-shaped.
+
+**That last finding is the actual answer to this document's own open
+question about `service.py`'s target layer, not a new blocker to add to
+the list.** `debt.yaml`'s "workflows-or-frontends" target was recorded as an
+open choice; today's measurement shows it is not a choice between two
+layers for one file so much as a split waiting to happen: `resolve_input`/
+`compare_snapshots`/`load_suppression_and_policy`/`collect_metadata` need
+`extract`/`compare`/`policy` (`workflows`-shaped, exactly where `service.py`
+sits today), while `render_output` needs `report` (`frontends`-shaped,
+exactly where `cli.py`'s own equivalent rendering glue already moved in
+this same Phase). A single-layer classification of `service.py` as a whole
+will keep failing this way no matter which of the two is picked, for the
+same structural reason `*_metadata.py` kept failing a single-layer
+classification until it was split into a model half and an extract half.
+The mechanical next step this measurement points at — once someone signs
+off on it — is: keep `resolve_input`/`compare_snapshots`/dump-orchestration
+re-exports as the `workflows`-classified core (already the case), and give
+`render_output`/`_render_json_output`/`_render_deps_section_md` their own
+`frontends`-classified home (a `frontends/cli/rendering.py` or similar),
+re-exported from `service.py` exactly as `__all__` already promises callers
+today — the identical "facade re-exports, physical ownership moves"
+pattern `cli.py`'s own transformation in this same phase already used. Not
+attempted in this pass: it is a real, reviewable move in its own right
+(`render_output`'s public signature and every caller's patch target need
+checking, the same care `cli.py`'s own split took), not a mechanical
+consequence of anything else in this slice.
+
 1. Move command input translation into `frontends/cli/commands` and reusable
    Click-only option declaration into `frontends/cli/options`.
 2. Make workflows the sole operation owners and reports the sole rendering
@@ -2055,24 +2203,85 @@ describe the attribute's real effect (folding permission, not linkage)
 without promising a new export.
 
 1. split CastXML and Clang parsing by entity and shared parser context.
-   **Started, not done.** `abicheck.extract` now exists (see `abicheck/
-   extract/AGENTS.md`) with its first tenant, `extract/headers/castxml/
-   names.py`: the vtable-index/mangled-name/synthetic-key helpers that sat
-   as module-level functions above `_CastxmlParser` in `dumper_castxml.py`
-   — `_parse_vtable_index`, `_vt_sort_key`, `_ref_qualifier_from_mangled`,
+   **Started, not done — but the "shared-context design" prerequisite this
+   status previously called out as unstarted is now real on both
+   backends.** `extract/headers/castxml/names.py` was the first tenant: the
+   vtable-index/mangled-name/synthetic-key helpers that sat as module-level
+   functions above `_CastxmlParser` in `dumper_castxml.py` —
+   `_parse_vtable_index`, `_vt_sort_key`, `_ref_qualifier_from_mangled`,
    `_mangled_name_is_local_linkage`, `is_synthetic_ctor_key`/`is_synthetic_
    dtor_key`, `_virtual_method_mangled_name`, and their two prefix
    constants. Each is a pure function over a string or a single XML
    element — none of them read `_CastxmlParser`'s id map or any other
    instance state, which is exactly why this was the piece that could move
-   without first designing the shared parser context (`context.py`) the
-   rest of the split needs. `dumper_castxml.py` imports and re-exports all
-   of them unchanged (1934 → 1822 lines). The stateful part — splitting
-   `_CastxmlParser`'s ~60 methods into `functions.py`/`records.py`/
-   `enums.py`/`templates.py` entity modules sharing one `context.py`, and
-   the equivalent split for `dumper_clang.py` — has not started; it needs
-   the shared-context design this ADR's D9 describes before any entity
-   module can move, which is a larger, separately-scoped slice;
+   without first designing the shared parser context the rest of the split
+   needs.
+
+   That context design has now been built for real, against both backends,
+   rather than merely sketched: `extract/headers/castxml/context.py` holds
+   a `CastxmlParserContext` class carrying every piece of state
+   `_CastxmlParser` used to keep directly on `self` — the id-to-element
+   map, the exported-symbol sets and public-header segments, the
+   tag-grouped element lists `build_id_map()` populates in one pass, and
+   the type-name/pointer-depth memoization caches — plus `build_id_map()`
+   and `resolve()` themselves. `extract/headers/castxml/location.py` and
+   `type_resolution.py` hold the location-resolution and full type-graph
+   walk (spelling, pointer depth, alignment, cv/restrict qualification) as
+   free functions taking that context explicitly, matching D9's "entity
+   modules ... using shared context" shape applied to the responsibilities
+   more than one entity kind's parsing reads, not only to one entity kind.
+   `_CastxmlParser.__init__` now constructs one `CastxmlParserContext` and
+   holds it as `self._ctx`; every field it used to assign directly
+   (`self._id_map`, `self._type_name_cache`, ...) is now a read-only
+   property delegating to the context object, so every method not yet
+   migrated — and every external caller, tests included, that reads a
+   parser's private state directly (`parser._id_map`, `parser._type_name(...)`)
+   — keeps working unchanged. `extract/headers/castxml/enums.py` is the
+   first entity module built on this: `parse_enums()` and its
+   `underlying_type_name()` helper (the latter shared with typedef
+   resolution, so it lives in `type_resolution.py`, not `enums.py`) now
+   live there, with `_CastxmlParser.parse_enums`/`_underlying_type_name`
+   reduced to one-line delegations.
+
+   The clang backend got the equivalent, independently-designed split
+   proving the context shape isn't a castxml-only artifact:
+   `extract/headers/clang/context.py` holds `_Decl` (the categorized
+   AST-node-plus-walk-context type every entity kind already received as a
+   parameter, not `self` state — clang's own traversal was already
+   context-parameter-shaped here, unlike castxml's) plus the
+   built-in-file/qualtype/source-location/deprecation-message primitives
+   more than one entity kind's parsing reads, and
+   `extract/headers/clang/enums.py` is the matching first entity module.
+   One real, deliberately-recorded exception surfaced building it:
+   `dumper_clang._evaluated_int_value` (the constant-expression evaluator
+   `_enum_constant_value` needs) depends on `_WRAPPER_EXPR_KINDS`
+   (`dumper_clang_expr.py`), which itself imports `diff_cxx_rules`
+   (classified `compare`) for `itanium_scope_components` — the exact
+   "shared piece entangled with another layer" case `extract/AGENTS.md`
+   already names as the pattern to avoid rather than paper over with a new
+   import (confirmed the hard way: classifying `dumper_clang_expr.py` as
+   `extract` to unblock the import made `check_architecture.py` fail with a
+   real `extract -> compare` edge, not a false positive). Rather than move
+   that evaluator into `extract` and recreate the edge one module down,
+   `enums.py.parse_enums` takes it as an explicit parameter — the same
+   "context is whatever the entity module actually needs" principle
+   expressed as a parameter instead of a state field, since the value in
+   question is a pure function, not parser state. Both backends' `enums.py`
+   are proof the design generalizes, not just a design note: real code
+   parses a real entity kind through a real shared context object on each
+   backend, with `dumper_castxml.py`/`dumper_clang.py` reduced to thin
+   delegating wrappers for every migrated name and zero output/snapshot
+   change (the full non-integration test suite for both backends — 1291
+   tests — passes unchanged).
+
+   Still open for the next slice: `functions.py`/`records.py`/
+   `templates.py` on both backends have not moved. Records are the
+   fullest test of the design so far, since `_CastxmlParser._build_record_type`
+   and friends touch vtable/RTTI state (`vtable_slot_root`,
+   `virtual_methods_by_class`) that `enums.py` never had to; functions
+   pull in the widest set of type-resolution calls per entity. Whichever
+   moves next should reuse `context.py`/`location.py`/`type_resolution.py`
+   as-is rather than growing a second, competing context shape;
 2. separate source-graph values, construction, and comparison. **Started,
    not done.** The values third moved: `abicheck/model/source_graph.py`
    now owns `SourceGraphSummary` (the ADR-031 D7 compact graph container
@@ -2124,11 +2333,91 @@ without promising a new export.
    classifying `build_evidence.py` `model` to satisfy that one function
    would have created a real `model -> extract` cycle, caught by
    `check_architecture.py` before this landed rather than assumed. The
-   construction half (`build_source_graph` and its `_fold_*`/`_augment_*`
-   helpers — these still need `BuildEvidence`/`SourceAbiSurface`, so
-   moving them means resolving the same `build_evidence.py`/`extract`
-   coupling for real rather than routing around it) and the comparison
-   half (`diff_source_graph`, `localize_symbol`) have not started;
+   construction and comparison halves have now moved too. **Re-measured
+   before moving, per this section's own earlier finding that a recorded
+   blocker can be stale or smaller than described**: the
+   `build_evidence.py`/`comdat_groups.py` coupling above only blocked
+   *physically relocating* `graph_facts.py`/`entity_resolver.py` into
+   `abicheck/model/` proper (`_conf_from_build`'s need for `build_evidence.
+   Confidence`, transitively pulling in the `extract`-classified
+   `comdat_groups.py`, would have made that a real `model -> extract`
+   cycle). It does not apply to construction/comparison themselves:
+   `check_architecture.py`'s `unclassified-import`/`dependency-direction`
+   checks fire only for a module *physically* under a layer's own
+   directory (`migrated_source` in that script) — a `legacy_paths` entry
+   naming a module that stays flat in `buildsource/` is classified for
+   ownership bookkeeping without ever triggering either check, exactly the
+   pattern this ADR's Phase 3/4 sections already used for other flat
+   modules (e.g. `crosscheck_base.py`/`crosscheck_coherence.py`, classified
+   `compare` while physically flat). So `build_source_graph` and
+   `diff_source_graph` could move without resolving the `build_evidence.py`
+   coupling at all — confirmed, not assumed: `python
+   scripts/check_architecture.py` reports 0 errors both before and after.
+   Construction split into **two** new flat modules (again purely for the
+   new-file 800-line cap, the same reason `graph_facts.py` split three ways
+   above): `buildsource/source_graph_build.py` (454 lines — `_conf_from_build`,
+   `_STATIC_LIBRARY_SUFFIXES`, `project_source_files`, `build_source_graph`,
+   `_link_options_to_symbols`, `_fold_link_provenance`; ADR-031 Phase 2) and
+   `buildsource/source_graph_build_source_abi.py` (567 lines —
+   `_file_in_project`, `_augment_with_source_abi`,
+   `_source_edge_endpoint_ids`, `fold_source_edges`,
+   `mark_source_edges_extractor_coverage`; ADR-031 Phases 3-4 + the ADR-038
+   C.9 `source_edges` fold), both classified `extract` in
+   `architecture/modules.yaml`. Comparison moved into
+   `buildsource/source_graph_compare.py` (134 lines — `_label_map`,
+   `_kind_map`, `localize_symbol`, `diff_source_graph`), classified
+   `compare`. A **third slice the original two-way split didn't name**
+   surfaced on inspection: `is_public_dependency_node`/
+   `is_internal_dependency_node`/`is_consumer_compiled_node`/
+   `is_consumer_compiled_public_entry`/`looks_like_system_name`/
+   `decl_declaring_files` and their `PUBLIC_VISIBILITIES`/`DECL_NODE_KINDS`-
+   family constants are read-only classification predicates over an
+   *already-built* graph — they construct nothing and diff nothing, and are
+   shared well beyond either half (`crosscheck.py`, `graph_reconcile.py`,
+   `internal_leak.py`, `impact/use_cases.py`/`impact/consumer_graph.py`,
+   `surface.py`, `post_processing_reachability.py`, `scan_engine.py`).
+   Moved into `buildsource/source_graph_query.py` (267 lines), left
+   **unclassified** in `architecture/modules.yaml` — the same state several
+   of its own callers (`crosscheck.py`, `source_abi.py`,
+   `source_graph_findings.py`) are already in, since no single ADR-061
+   responsibility package owns this cross-cutting vocabulary yet and
+   forcing a classification decision wasn't asked for by this slice.
+   `buildsource/source_graph.py` itself is now a pure re-export facade
+   (1352 → 140 lines, under the 150-line facade cap), re-exporting every
+   name from all four new modules plus the two `model` modules, via the
+   same `X as X` convention its own pre-existing blocks already used, and
+   keeping its existing lazy `__getattr__` shim for
+   `diff_source_graph_findings`. That shim's own target,
+   `source_graph_findings.py`, needed a real fix rather than a pure move:
+   it previously imported `_TYPE_ENTITY_KINDS`/`_kind_map`/`_label_map`/
+   `PUBLIC_VISIBILITIES`/etc. from `.source_graph` (the facade) — a reverse-
+   facade import D6 prohibits, and one that broke for real the moment those
+   names left the facade's own module body (an `ImportError` on the lazy
+   `__getattr__`'s own import, not merely a lint violation) — so it now
+   imports each name from its real new home
+   (`..model.graph_facts`/`..model.source_graph`/`.source_graph_compare`/
+   `.source_graph_query`) directly. No other pre-existing internal caller
+   was rewritten in this pass (`call_graph.py`, `header_graph.py`,
+   `poi.py`, and the ~15 other flat `buildsource/` modules importing
+   `build_source_graph`/`diff_source_graph`/the predicates keep importing
+   through the facade) — matching the "values" slice's own precedent of
+   not rewriting all 77 existing callers in one PR; migrating them
+   incrementally is exactly what the facade exists to allow. Tests moved
+   with their implementation (D10): `tests/test_source_graph.py` (1996
+   lines) split three ways — the Phase 2/3-4 construction tests
+   (`build_source_graph`/`fold_source_edges`/
+   `mark_source_edges_extractor_coverage`) into
+   `tests/test_source_graph_build.py` (885 lines); the two `localize_symbol`
+   tests and two `diff_source_graph` tests into
+   `tests/test_source_graph_compare.py` (143 lines); the graph-derived risk
+   findings (`source_graph_findings.py`), schema round-trip, and pack/CLI
+   wiring tests stayed in `tests/test_source_graph.py` (now 1175 lines,
+   under the 1200-line test cap). All 105 tests across the three files
+   still pass, unchanged in behavior. `architecture/debt.yaml`'s
+   `abicheck/buildsource/source_graph.py` no-growth entry was removed (its
+   rationale no longer applies at 140 lines) along with
+   `tests/test_source_graph.py`'s own entry (1175 lines is now under the
+   1200-line cap, needing no debt tracking);
 3. **Done.** Repartitioned the change catalog into D9's `model/change_catalog/
    {symbols,types,platform,build,source}.py` taxonomy — all four
    registry-validation properties (global uniqueness, valid references,

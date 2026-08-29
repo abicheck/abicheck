@@ -33,9 +33,11 @@ against each other:
 1. :data:`FACT_ROWS` — the curated claim, one row per field of the six
    declaration dataclasses, with the reasoning a table cell can't hold.
 2. :func:`scan_backend_evidence` — the *observed* answer, read straight out of
-   ``dumper_castxml.py``/``dumper_clang.py`` with :mod:`ast`: which keyword
-   each backend actually passes when it constructs one of those dataclasses,
-   and whether the value is a real expression or a hardcoded literal (a
+   ``dumper_castxml.py``/``dumper_clang.py`` (plus any entity-parsing modules
+   ADR-061 D9 has since split out of either facade under
+   ``extract/headers/{castxml,clang}/``) with :mod:`ast`: which keyword each
+   backend actually passes when it constructs one of those dataclasses, and
+   whether the value is a real expression or a hardcoded literal (a
    ``size_bits=None`` or ``is_opaque=False`` is *not* extraction).
 
 ``tests/test_backend_capability_matrix.py`` asserts the two agree, and that
@@ -50,6 +52,7 @@ The hybrid column is **derived, never hand-typed** — see
 from __future__ import annotations
 
 import ast
+from collections.abc import Iterable
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
@@ -811,18 +814,27 @@ def _is_placeholder_literal(node: ast.expr) -> bool:
     return False
 
 
-def scan_backend_evidence(module_path: Path) -> dict[str, dict[str, Evidence]]:
-    """``{class name: {field: Evidence}}`` for one backend module.
+def scan_backend_evidence(
+    module_paths: Path | Iterable[Path],
+) -> dict[str, dict[str, Evidence]]:
+    """``{class name: {field: Evidence}}`` for one backend's module(s).
 
-    Reads the module with :mod:`ast` rather than by regex: a keyword's value
-    spans several lines often enough (``bases=[] if is_opaque else [...]``)
-    that a line-oriented match reports the wrong answer — an early version of
-    this scanner called both `bases` and `virtual_bases` hardcoded-empty on the
-    castxml backend for exactly that reason.
+    Reads the module(s) with :mod:`ast` rather than by regex: a keyword's
+    value spans several lines often enough (``bases=[] if is_opaque else
+    [...]``) that a line-oriented match reports the wrong answer — an early
+    version of this scanner called both `bases` and `virtual_bases`
+    hardcoded-empty on the castxml backend for exactly that reason.
+
+    A single path scans one module; a backend that has started splitting
+    entity parsing out of its flat facade (ADR-061 D9 — see
+    ``abicheck/extract/AGENTS.md``) passes every module a constructor could
+    now live in, since the facade's own AST no longer shows evidence for a
+    fact an ``extract``-owned entity module now populates.
 
     A field constructed in more than one place counts as ``EXTRACTED`` if ANY
     construction extracts it (``dumper_castxml`` builds ``TypeField`` from two
-    call sites).
+    call sites) — this holds across files too, so a field's home moving from
+    the facade to an entity module changes nothing about the merged verdict.
 
     **Constructor keywords only.** An earlier version also counted an
     attribute assignment (``field.access = ...``) as evidence, on the theory
@@ -836,42 +848,71 @@ def scan_backend_evidence(module_path: Path) -> dict[str, dict[str, Evidence]]:
     ``test_matrix_claims_match_parser_source`` — a loud, locatable failure
     rather than a silently wrong published matrix.
     """
-    tree = ast.parse(module_path.read_text(encoding="utf-8"))
+    paths = [module_paths] if isinstance(module_paths, Path) else list(module_paths)
     out: dict[str, dict[str, Evidence]] = {c: {} for c in COVERED_MODEL_CLASSES}
 
     def record(cls: str, field: str, evidence: Evidence) -> None:
         """Keep the strongest evidence seen, so one placeholder among several
-        construction sites cannot mask a real extraction elsewhere."""
+        construction sites (in one file or across files) cannot mask a real
+        extraction elsewhere."""
         if out[cls].get(field) is not Evidence.EXTRACTED:
             out[cls][field] = evidence
 
-    for node in ast.walk(tree):
-        if (
-            isinstance(node, ast.Call)
-            and isinstance(node.func, ast.Name)
-            and node.func.id in out
-        ):
-            for kw in node.keywords:
-                if kw.arg is None:
-                    continue
-                record(
-                    node.func.id,
-                    kw.arg,
-                    Evidence.LITERAL
-                    if _is_placeholder_literal(kw.value)
-                    else Evidence.EXTRACTED,
-                )
+    for module_path in paths:
+        tree = ast.parse(module_path.read_text(encoding="utf-8"))
+        for node in ast.walk(tree):
+            if (
+                isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Name)
+                and node.func.id in out
+            ):
+                for kw in node.keywords:
+                    if kw.arg is None:
+                        continue
+                    record(
+                        node.func.id,
+                        kw.arg,
+                        Evidence.LITERAL
+                        if _is_placeholder_literal(kw.value)
+                        else Evidence.EXTRACTED,
+                    )
     return out
 
 
+def _entity_module_paths(header_backend_dir: Path) -> list[Path]:
+    """Every entity-parsing module already split out of a backend's facade.
+
+    Sorted for deterministic scan order; excludes ``__init__.py`` (package
+    marker, never a construction site) and non-parsing leaves that construct
+    nothing (``context.py`` holds only per-parser state, not entity output —
+    harmless either way, since a module with no covered-class constructor
+    call contributes no evidence, but excluding it keeps this scanner's own
+    intent — "entity modules" — honest).
+    """
+    if not header_backend_dir.is_dir():
+        return []
+    excluded = {"__init__.py", "context.py"}
+    return sorted(
+        p
+        for p in header_backend_dir.glob("*.py")
+        if p.name not in excluded
+    )
+
+
 def castxml_evidence() -> dict[str, dict[str, Evidence]]:
-    """What ``dumper_castxml.py``'s own source shows it populating."""
-    return scan_backend_evidence(PKG_DIR / "dumper_castxml.py")
+    """What ``dumper_castxml.py`` and its split-out entity modules populate."""
+    return scan_backend_evidence(
+        [PKG_DIR / "dumper_castxml.py"]
+        + _entity_module_paths(PKG_DIR / "extract" / "headers" / "castxml")
+    )
 
 
 def clang_evidence() -> dict[str, dict[str, Evidence]]:
-    """What ``dumper_clang.py``'s own source shows it populating."""
-    return scan_backend_evidence(PKG_DIR / "dumper_clang.py")
+    """What ``dumper_clang.py`` and its split-out entity modules populate."""
+    return scan_backend_evidence(
+        [PKG_DIR / "dumper_clang.py"]
+        + _entity_module_paths(PKG_DIR / "extract" / "headers" / "clang")
+    )
 
 
 def rows_for(owner: str) -> tuple[FactRow, ...]:

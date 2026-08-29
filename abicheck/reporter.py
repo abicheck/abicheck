@@ -23,7 +23,7 @@ from collections.abc import Sequence
 from typing import TYPE_CHECKING, Any, cast
 
 if TYPE_CHECKING:
-    from .severity import KindSets, SeverityConfig
+    from .severity import GateDecision, KindSets, SeverityConfig
 from .checker import (
     Change,
     DiffResult,
@@ -39,6 +39,7 @@ from .checker_policy import (
 )
 from .checker_types import validate_check_id, validate_evidence_depth
 from .impact import assess_change
+from .policy.gate_decision import gate_decision_for_result
 from .report.document import ReportDocument
 from .report.render_json import render_json
 from .report_model import VERDICT_TO_SEVERITY_LABEL as _VERDICT_TO_SEVERITY_LABEL
@@ -191,9 +192,12 @@ def to_stat_json(
     }
     _add_check_identity(d, result)
     if severity_config is not None:
+        gate = gate_decision_for_result(result, severity_config)
+        assert gate is not None  # severity_config is not None here
         d["severity"] = _build_severity_json(
             result.changes,
             severity_config,
+            gate=gate,
             policy=result.policy,
             kind_sets=result._effective_kind_sets(),
             policy_file=result.policy_file,
@@ -524,10 +528,12 @@ def _to_json_leaf(
     }
     _add_check_identity(d, result)
     if severity_config is not None:
+        gate = gate_decision_for_result(result, severity_config)
+        assert gate is not None  # severity_config is not None here
         d["severity"] = _build_severity_json(
             changes,
             severity_config,
-            all_changes=list(result.changes),
+            gate=gate,
             policy=result.policy,
             kind_sets=eff_sets,
             policy_file=result.policy_file,
@@ -727,10 +733,12 @@ def _to_json_root_cause(
     if show_only:
         _add_show_only_filter(d, result, changes, show_only)
     if severity_config is not None:
+        gate = gate_decision_for_result(result, severity_config)
+        assert gate is not None  # severity_config is not None here
         d["severity"] = _build_severity_json(
             changes,
             severity_config,
-            all_changes=list(result.changes),
+            gate=gate,
             policy=result.policy,
             kind_sets=eff_sets,
             policy_file=result.policy_file,
@@ -1178,10 +1186,12 @@ def to_json(
 
     # Severity-categorized summary when severity config is provided
     if severity_config is not None:
+        gate = gate_decision_for_result(result, severity_config)
+        assert gate is not None  # severity_config is not None here
         d["severity"] = _build_severity_json(
             changes,
             severity_config,
-            all_changes=list(result.changes),
+            gate=gate,
             policy=result.policy,
             kind_sets=eff_sets,
             policy_file=result.policy_file,
@@ -1635,20 +1645,21 @@ def _build_severity_json(
     changes: list[Change],
     severity_config: SeverityConfig,
     *,
-    all_changes: list[Change] | None = None,
+    gate: GateDecision,
     policy: str | None = None,
     kind_sets: KindSets | None = None,
     policy_file: object | None = None,
 ) -> dict[str, object]:
     """Build severity information for JSON output.
 
-    *changes* are the (possibly filtered) changes for display counts.
-    *all_changes*, when provided, is the unfiltered set used to compute
-    the exit code so that ``--show-only`` does not affect the exit code.
-    *kind_sets* from ``DiffResult._effective_kind_sets()`` includes
-    PolicyFile overrides.
+    *changes* are the (possibly filtered) changes for display counts. *gate*
+    is the caller's already-computed :func:`gate_decision_for_result` value
+    (ADR-061 D9: this function projects a decision, it does not recompute
+    one) -- always derived from the *unfiltered* change set, so
+    ``--show-only`` does not affect the exit code it reports. *kind_sets*
+    from ``DiffResult._effective_kind_sets()`` includes PolicyFile overrides.
     """
-    from .severity import SeverityLevel, categorize_changes, compute_gate_decision
+    from .severity import SeverityLevel, categorize_changes
 
     categorized = categorize_changes(
         changes,
@@ -1688,24 +1699,12 @@ def _build_severity_json(
     # build" from ``config``/``categories`` itself; this makes that answer a
     # first-class, versioned part of the report.
     #
-    # Derived from *exit_changes* (the unfiltered gate set), not ``changes``
-    # (the possibly --show-only-filtered *display* set) — otherwise hiding
-    # the one category that's actually failing the build (e.g.
-    # ``--show-only=breaking`` when an addition promoted to ``error`` is
-    # what's blocking) would report ``blocking: true`` alongside
-    # ``blocking_categories: []`` (Codex review on #557). Routed through
-    # ``compute_gate_decision`` — the single canonical gate computation —
-    # rather than hand-rolling exit_code and blocking_categories as two
-    # independent computations that could drift apart from each other.
-    exit_changes = all_changes if all_changes is not None else changes
-    gate = compute_gate_decision(
-        exit_changes,
-        severity_config,
-        policy=policy,
-        kind_sets=kind_sets,
-        policy_file=policy_file,
-    )
-
+    # ``gate`` was computed once by the caller from the unfiltered change
+    # set, not ``changes`` (the possibly --show-only-filtered *display*
+    # set) — otherwise hiding the one category that's actually failing the
+    # build (e.g. ``--show-only=breaking`` when an addition promoted to
+    # ``error`` is what's blocking) would report ``blocking: true`` alongside
+    # ``blocking_categories: []`` (Codex review on #557).
     return {
         "config": config_dict,
         "categories": categories,

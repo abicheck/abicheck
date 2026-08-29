@@ -52,6 +52,7 @@ from .html_template import (
     render_document,
     render_footer,
 )
+from .policy.gate_decision import gate_decision_for_result
 from .report_classifications import (
     ADDED_KINDS,
     BREAKING_KINDS,
@@ -728,7 +729,6 @@ def _build_impact_html(
 
 def _gate_card_html(
     result: DiffResult,
-    all_changes: list[Any],
     severity_config: Any,
     *,
     h: Any,
@@ -736,19 +736,16 @@ def _gate_card_html(
     """Render the CI-gate card, or ``""`` when no severity gate is configured.
 
     Split out of :func:`generate_html_report`; the scoped-vs-full gate split
-    and blocking-category naming reasoning is kept with the code below."""
-    if severity_config is None:
+    and blocking-category naming reasoning is kept with the code below.
+    The gate decision itself is not computed here -- it is projected from
+    :func:`abicheck.policy.gate_decision.gate_decision_for_result`, the same
+    single call site ``reporter._build_severity_json`` and
+    ``sarif._severity_gate_properties`` read (ADR-061 D9): this function
+    makes no policy decision of its own.
+    """
+    full_gate = gate_decision_for_result(result, severity_config)
+    if full_gate is None:
         return ""
-    from .severity import compute_gate_decision
-
-    _eff_kind_sets_fn2 = getattr(result, "_effective_kind_sets", None)
-    full_gate = compute_gate_decision(
-        cast(list[HasKind], all_changes),
-        severity_config,
-        policy=getattr(result, "policy", None),
-        kind_sets=_eff_kind_sets_fn2() if callable(_eff_kind_sets_fn2) else None,
-        policy_file=getattr(result, "policy_file", None),
-    )
     # `--used-by`/`--required-symbol(s)` scoping (ADR-043): the CLI exits on
     # the *scoped* gate, not this full-library one (CodeRabbit review).
     scoped_exit_code = getattr(result, "scoped_exit_code", None)
@@ -957,7 +954,7 @@ def generate_html_report(
 
     verdict_icon = _verdict_icon(verdict)
 
-    gate_html = _gate_card_html(result, all_changes, severity_config, h=h)
+    gate_html = _gate_card_html(result, severity_config, h=h)
 
     scoped_verdict = getattr(result, "scoped_verdict", None)
     scoped_html = ""
