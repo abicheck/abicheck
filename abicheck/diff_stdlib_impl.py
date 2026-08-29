@@ -50,15 +50,16 @@ from __future__ import annotations
 import re
 from typing import TYPE_CHECKING
 
-from .build_mode import StdlibFamily, build_mode_from_signals
+from .build_mode import build_mode_from_signals
 from .checker_policy import ChangeKind, Verdict
 from .checker_types import Change
 from .detector_registry import registry
 from .diff_helpers import make_change
+from .model.build_mode_facts import StdlibFamily
 
 if TYPE_CHECKING:
-    from .build_mode import BuildMode
     from .model import AbiSnapshot
+    from .model.build_mode_facts import BuildMode
 
 #: Real ``std::`` namespace token in a *demangled* name. The negative lookbehind
 #: rejects a match inside a user identifier such as ``mystd::`` (Codex #345) — it
