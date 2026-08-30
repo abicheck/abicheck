@@ -144,6 +144,16 @@ class ExitReason(str, Enum):
     #: "Removed-required-library is mode-dependent" section for the exact
     #: switch this reason's precedence reproduces.
     REMOVED_REQUIRED_LIBRARY = "removed_required_library"
+    #: A directory/package release comparison only. The aggregated code
+    #: `resolve_release_exit_decision` folded as its compatibility axis
+    #: came from a library that failed to dump/extract/compare (the
+    #: release fan-out's own operational `ERROR` sentinel, floored to `4`)
+    #: -- not from a real `API_BREAK`/`BREAKING` verdict or a severity
+    #: category. Passing that code through under `COMPATIBILITY_GATE`
+    #: (Codex review, fresh evidence) would falsely claim an ABI/API or
+    #: policy finding decided the exit, when the comparison for that
+    #: library never actually ran to completion.
+    OPERATIONAL_ERROR = "operational_error"
 
 
 @dataclass(frozen=True)
@@ -591,6 +601,7 @@ def resolve_release_exit_decision(
     verdict_or_severity_contribution: int,
     removed_required_library: bool = False,
     contract_coverage_contribution: int = 0,
+    is_operational_error: bool = False,
     not_comparable_code: int = 16,
     removed_required_library_code: int = 8,
 ) -> ExitDecision:
@@ -629,6 +640,23 @@ def resolve_release_exit_decision(
     matching `resolve_compare_exit_decision`'s own convention of taking an
     already-resolved compatibility contribution rather than re-deriving one.
 
+    *is_operational_error* names which of those two `worst_verdict ==
+    "ERROR"` can mean: pass `True` when *verdict_or_severity_contribution*
+    is `4` because a library's own dump/extract/compare failed (the release
+    fan-out's operational `ERROR` sentinel, not a `Verdict` member) so the
+    returned decision's compatibility axis is tagged
+    :class:`ExitReason.OPERATIONAL_ERROR` instead of the default
+    `COMPATIBILITY_GATE` (Codex review, fresh evidence: an earlier revision
+    always used `COMPATIBILITY_GATE`, which would misreport an extraction
+    failure as an ABI/API or policy finding once this resolver is wired
+    in). Only meaningful when *verdict_or_severity_contribution* is what
+    decides `code` -- it has no effect when `not_comparable`/
+    `removed_required_library` wins instead, since neither of those
+    dominant decisions names `COMPATIBILITY_GATE`/`OPERATIONAL_ERROR` in
+    `reasons` regardless (the value is still preserved in
+    `compatibility_contribution` either way, per the `not_comparable`
+    branch's own comment below).
+
     Pure, additive logic (ADR-064's first stage): not yet called from
     `cli_compare_release_helpers.py`, so no existing release comparison's
     actually-returned exit code changes because this function exists. As
@@ -636,6 +664,11 @@ def resolve_release_exit_decision(
     `removed_required_library_code` that does not strictly exceed a
     preserved contribution raises `ValueError`.
     """
+    compatibility_reason = (
+        ExitReason.OPERATIONAL_ERROR
+        if is_operational_error
+        else ExitReason.COMPATIBILITY_GATE
+    )
     if not_comparable:
         # Both *verdict_or_severity_contribution* and
         # *contract_coverage_contribution* are already-resolved parameters
@@ -673,6 +706,7 @@ def resolve_release_exit_decision(
         return resolve_exit_decision(
             compatibility_contribution=verdict_or_severity_contribution,
             contract_coverage_contribution=contract_coverage_contribution,
+            compatibility_reason=compatibility_reason,
         )
 
     # Legacy scheme: a nonzero verdict/ERROR contribution wins outright,
@@ -681,6 +715,7 @@ def resolve_release_exit_decision(
         return resolve_exit_decision(
             compatibility_contribution=verdict_or_severity_contribution,
             contract_coverage_contribution=contract_coverage_contribution,
+            compatibility_reason=compatibility_reason,
         )
     if removed_required_library:
         # verdict_or_severity_contribution is 0 here by construction (the

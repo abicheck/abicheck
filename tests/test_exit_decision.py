@@ -459,6 +459,36 @@ class TestResolveReleaseExitDecision:
         assert decision.code == 2
         assert decision.reasons == (ExitReason.COMPATIBILITY_GATE,)
 
+    def test_severity_scheme_operational_error_is_tagged_distinctly(self) -> None:
+        """Codex review, fresh evidence: a library that failed to dump/
+        extract/compare (the release fan-out's own operational `ERROR`
+        sentinel, floored to `4`) is not a real ABI/API or policy finding
+        -- `is_operational_error=True` must tag it `OPERATIONAL_ERROR`,
+        not the default `COMPATIBILITY_GATE`, so a report reader isn't
+        told a compatibility gate decided an exit that was actually an
+        extraction failure.
+        """
+        decision = resolve_release_exit_decision(
+            not_comparable=False,
+            severity_scheme_active=True,
+            verdict_or_severity_contribution=4,
+            removed_required_library=False,
+            is_operational_error=True,
+        )
+        assert decision.code == 4
+        assert decision.reasons == (ExitReason.OPERATIONAL_ERROR,)
+
+    def test_legacy_scheme_operational_error_is_tagged_distinctly(self) -> None:
+        decision = resolve_release_exit_decision(
+            not_comparable=False,
+            severity_scheme_active=False,
+            verdict_or_severity_contribution=4,
+            removed_required_library=True,  # must lose to the ERROR anyway
+            is_operational_error=True,
+        )
+        assert decision.code == 4
+        assert decision.reasons == (ExitReason.OPERATIONAL_ERROR,)
+
     def test_severity_scheme_clean_with_no_removed_library_is_clean(self) -> None:
         decision = resolve_release_exit_decision(
             not_comparable=False,
