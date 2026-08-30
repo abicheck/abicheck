@@ -144,6 +144,37 @@ def test_detect_python_extension_from_binary_none_for_malformed_json(
     assert detect_python_extension_from_binary(path) is None
 
 
+def test_detect_python_extension_from_binary_recognizes_gzip_snapshot(
+    tmp_path: Path,
+) -> None:
+    """Codex review, second round: `load_snapshot` transparently decompresses
+    gzip/zstd (ADR-059), and `service.resolve_input` accepts such a snapshot
+    directly -- the probe's earlier fix only checked for a raw `{` byte,
+    which a compressed snapshot never starts with."""
+    from abicheck.model import AbiSnapshot
+    from abicheck.python_ext import PythonExtMetadata
+    from abicheck.serialization import write_snapshot
+
+    snap = AbiSnapshot(
+        library="foo.abi3.so",
+        version="1.0",
+        elf=ElfMetadata(),
+        python_ext=PythonExtMetadata(
+            module_name="foo",
+            init_symbol="PyInit_foo",
+            python_major=3,
+            cpython_imports=["PyLong_FromLong"],
+        ),
+    )
+    path = tmp_path / "foo.abi.json.gz"
+    write_snapshot(snap, path, compression="gzip")
+
+    result = detect_python_extension_from_binary(path)
+    assert result is not None
+    assert result.is_extension
+    assert result.module_name == "foo"
+
+
 def test_detect_python_extension_from_binary_follows_linker_script(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
