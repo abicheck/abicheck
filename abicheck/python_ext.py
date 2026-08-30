@@ -37,7 +37,8 @@ here because they all emit the same ``PyInit_*`` export and link ``libpython``.
 from __future__ import annotations
 
 import re
-from typing import TYPE_CHECKING
+from pathlib import Path
+from typing import TYPE_CHECKING, Any
 
 from . import stable_abi
 
@@ -245,3 +246,128 @@ def detect_python_extension(snap: AbiSnapshot) -> PythonExtMetadata | None:
         cpython_imports=cpython_imports,
         cpython_dlls=_iter_cpython_dlls(snap),
     )
+
+
+def abi3_precondition_message(abi3_floor: tuple[int, int], binary_name: str) -> str:
+    """The "not a recognisable extension module" message ``scan --abi3``'s
+    real precondition failure reports (:func:`abicheck.scan_engine.
+    _run_abi3_audit`'s ``_EvidenceContractError``) and both dry-run previews
+    of the identical precondition state -- one shared spelling so all three
+    callers describe the same failure identically rather than three
+    independently-drifting copies of the same sentence.
+    """
+    return (
+        f"--abi3 {abi3_floor[0]}.{abi3_floor[1]} was given but "
+        f"'{binary_name}' is not a recognisable CPython extension module "
+        "(no PyInit_* export and no CPython C-API imports). The stable-ABI "
+        "audit applies only to extension modules (Cython/pybind11/"
+        "nanobind/C)."
+    )
+
+
+def detect_python_extension_from_binary(path: Path) -> PythonExtMetadata | None:
+    """Cheap, binary-container-only extension recognition for dry-run previews.
+
+    ``scan --abi3``'s real run requires the candidate to be a recognisable
+    CPython extension module (:func:`detect_python_extension` against the
+    real dump's snapshot) -- but neither ``scan --dry-run`` nor
+    ``scan --artifact-set --dry-run`` builds a snapshot at all, since a dry
+    run promises no compiler/frontend invocation. This applies the identical
+    recognition logic to a snapshot built from *only* the container facts a
+    plain binary read supplies (the export table on ELF/Mach-O, the export/
+    import directory on PE) -- no DWARF, no header/build parse -- which is
+    the same "binary export table parse" the L0_binary dry-run row already
+    prices as within the dry-run contract. ``None`` for an unrecognised
+    format or a binary that does not parse (mirrors the real parsers' own
+    "empty metadata on any parse error" contract), same as a genuine
+    non-extension library.
+    """
+    from . import binary_utils
+    from .model import AbiSnapshot
+
+    fmt = binary_utils.detect_binary_format(path)
+    snap = AbiSnapshot(library=Path(path).name, version="", source_path=str(path))
+    if fmt == "elf":
+        from .elf_metadata import parse_elf_metadata
+
+        snap.elf = parse_elf_metadata(Path(path))
+    elif fmt == "pe":
+        from .pe_metadata import parse_pe_metadata
+
+        snap.pe = parse_pe_metadata(Path(path))
+    elif fmt == "macho":
+        from .macho_metadata import parse_macho_metadata
+
+        snap.macho = parse_macho_metadata(Path(path))
+    else:
+        return None
+    return detect_python_extension(snap)
+
+
+def _qualifies_for_abi3(path: Path) -> bool:
+    ext = detect_python_extension_from_binary(path)
+    return ext is not None and ext.is_extension
+
+
+def abi3_single_binary_blocker(binary: Path, abi3_floor: tuple[int, int]) -> str | None:
+    """``None`` when *binary* would satisfy ``scan --abi3``'s real-run
+    precondition; else the same blocker message the real run raises, for a
+    single-binary ``scan --dry-run`` preview."""
+    if _qualifies_for_abi3(binary):
+        return None
+    return abi3_precondition_message(abi3_floor, binary.name)
+
+
+def abi3_non_extension_members(
+    members: list[tuple[str, Path]],
+) -> list[tuple[str, Path]]:
+    """The ``(name, path)`` entries of *members* that would fail ``scan
+    --abi3``'s real-run precondition, for a ``--artifact-set`` dry-run
+    preview -- empty when every member qualifies."""
+    return [(name, path) for name, path in members if not _qualifies_for_abi3(path)]
+
+
+def apply_abi3_dry_run_check(
+    result: Any, artifact: Path, abi3_floor: tuple[int, int] | None
+) -> None:
+    """Validate ``--abi3`` for a single-binary ``scan --dry-run`` preview,
+    mutating *result* (a :class:`~abicheck.dry_run.DryRunResult`) with a
+    blocker or an informational line. No-op when *abi3_floor* is ``None``."""
+    if abi3_floor is None:
+        return
+    blocker = abi3_single_binary_blocker(artifact, abi3_floor)
+    if blocker:
+        result.block(blocker)
+    else:
+        result.add(
+            "Consumer/contract scoping",
+            f"--abi3 {abi3_floor[0]}.{abi3_floor[1]} stable-ABI audit: will run",
+        )
+
+
+def apply_abi3_dry_run_check_set(
+    result: Any, members: list[tuple[str, Path]], abi3_floor: tuple[int, int] | None
+) -> None:
+    """The ``--artifact-set --dry-run`` sibling of
+    :func:`apply_abi3_dry_run_check`: a non-extension member doesn't abort
+    the real set-scan (``service_scan.run_scan_set``'s per-member
+    ``_EvidenceContractError`` handling), so this lists every affected
+    member rather than a single opaque blocker."""
+    if abi3_floor is None:
+        return
+    bad = abi3_non_extension_members(members)
+    if bad:
+        result.block(
+            f"--abi3 {abi3_floor[0]}.{abi3_floor[1]} was given but "
+            f"{len(bad)} of {len(members)} member(s) are not recognisable "
+            "CPython extension modules (no PyInit_* export and no CPython "
+            "C-API imports): " + ", ".join(f"{n} ({p})" for n, p in bad) +
+            ". Each such member's own scan would report "
+            "EVIDENCE_CONTRACT_ERROR (exit 1)."
+        )
+    else:
+        result.add(
+            "Consumer/contract scoping",
+            f"--abi3 {abi3_floor[0]}.{abi3_floor[1]} stable-ABI audit: "
+            f"will run for all {len(members)} member(s)",
+        )

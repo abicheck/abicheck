@@ -626,6 +626,10 @@ _UNSCOPED_TU_NOTE_SUFFIX = (
     "and typically touches fewer TUs]"
 )
 
+# A query-only build.query can't be counted at dry-run time -- flag unknown
+# rather than folding a confident `0` into the total (see known-gaps.md).
+_QUERY_ONLY_TU_NOTE_SUFFIX = " [UNKNOWN: query-only build.query]"
+
 
 def _estimate_total_tus(req: ScanRequest) -> tuple[int, str]:
     """Project-wide TU count and its provenance note for the estimate."""
@@ -650,6 +654,8 @@ def _estimate_total_tus(req: ScanRequest) -> tuple[int, str]:
         total, note = _count_compile_db_tus(compile_db), f"compile DB: {compile_db.name}"
     elif req.sources is not None:
         total, note = _count_source_tus(req.sources), "counted source files (no compile DB)"
+    elif req.build_config is not None and _build_config_declares_query(req.build_config):
+        total, note = 0, f"build.query: {req.build_config.name}" + _QUERY_ONLY_TU_NOTE_SUFFIX
     else:
         total, note = 0, "no source tree / compile DB"
     if req.build_targets:

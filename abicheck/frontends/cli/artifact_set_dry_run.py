@@ -112,6 +112,9 @@ def render_artifact_set_dry_run(
         "audit-only, no old side)",
     )
     result.add("Output and exit-code behavior", f"format: {fmt}")
+    from ...python_ext import apply_abi3_dry_run_check_set
+
+    apply_abi3_dry_run_check_set(result, members, req.abi3_floor)
     if blocker:
         result.block(blocker)
     return result

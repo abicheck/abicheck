@@ -5256,58 +5256,32 @@ looked like the obvious fix and wasn't.
   and graph-only closures in one header -- a real, cross-cutting change
   to two independently-evolving modules, not a same-PR reactive patch.
 
-- **Neither `scan`'s dry-run report validates `--abi3` applicability before
-  reporting success (Codex review, CLI cleanup phase two PR 5, fresh
-  evidence).** `scan_engine._run_abi3_audit` raises `_EvidenceContractError`
-  (surfaced as `EVIDENCE_CONTRACT_ERROR`, exit 1) when `--abi3` is given but
-  the candidate binary is not a recognisable CPython extension module
-  (`new_snap.python_ext is None or not is_extension`) -- but neither dry-run
-  renderer checks this ahead of time: `cli_scan.render_scan_dry_run` (the
-  single-binary `scan --dry-run` path) never even receives `abi3_floor` as a
-  parameter, and `frontends.cli.artifact_set_dry_run.render_artifact_set_dry_run`
-  (the `--artifact-set --dry-run` path added in that PR) doesn't inspect
-  `req.abi3_floor` either. Both report exit 0 for an invocation the real run
-  would reject with exit 1. **Not fixed in that PR**: this is a pre-existing
-  gap shared identically by the single-binary dry-run (not something the
-  artifact-set addition introduced), and closing it properly means reading
-  each candidate binary's export table to answer "is this a CPython
-  extension module" -- a real binary read, which sits at the edge of (if not
-  outside) the dry-run contract's "no compiler/frontend invocation" promise
-  (`dry_run.py`'s module docstring). A correct fix needs: (1) a decision on
-  whether a cheap export-table sniff (no DWARF/AST parse, just checking for
-  a `PyInit_*` export and CPython C-API import names -- the same class of
-  probe `_estimate_total_tus`'s "binary export table parse" line already
-  describes without performing) is within that contract or needs an
-  explicit carve-out; (2) threading `abi3_floor`/binary path(s) through both
-  dry-run builders uniformly, since a fix to only one would leave the two
-  dry-run reports inconsistent about the same flag; (3) routing a positive
-  finding through `DryRunResult.block()` (exit 1), matching the depth/
-  evidence-contract blocker the artifact-set dry-run gained in the same PR
-  (`service_scan.estimate_artifact_set`'s `collect_mode != "off"` check).
+- ~~Neither `scan`'s dry-run report validates `--abi3` applicability before
+  reporting success~~ **Fixed (CLI cleanup phase two, PR 5 follow-up).**
+  Both `cli_scan.render_scan_dry_run` (single-binary) and
+  `frontends.cli.artifact_set_dry_run.render_artifact_set_dry_run`
+  (`--artifact-set`) now run a cheap, binary-only extension probe
+  (`python_ext.detect_python_extension_from_binary` -- container-only ELF/
+  PE/Mach-O read, no DWARF/AST parse, the same "binary export table parse"
+  already priced under the L0_binary dry-run row) and route a non-qualifying
+  candidate through `DryRunResult.block()` (exit 1), matching the real run's
+  `EVIDENCE_CONTRACT_ERROR`. The message text is shared with
+  `scan_engine._run_abi3_audit`'s real precondition failure via
+  `python_ext.abi3_precondition_message()` so the three callers cannot
+  independently drift. See `tests/test_scan_dry_run_abi3.py`.
 
-- **A pinned depth backed only by a query-declaring `--config` (no
-  `--sources`/`--build-info`) prices L3/L4/L5 at zero TUs/zero cost, silently
-  understating the projected total a `--budget` pick relies on (Codex
-  review, CLI cleanup phase two PR 5, fresh evidence).** `_estimate_total_tus`
-  (the function both `estimate_scan` and `service_scan.
-  estimate_artifact_set` share) only counts TUs from `req.compile_db`/
-  `req.build_info`/`req.sources` -- it never reads `req.build_config` at all,
-  even when `_build_config_declares_query` (added in this PR to fix the
-  evidence-contract false-negative above) confirms the config declares a
-  real `build.query`. So a request that correctly passes the feasibility
-  check (the real run's trusted query will supply L3) still reports "0 TUs,
-  ~0s" for every source-tier layer, rather than flagging that the actual
-  count is unknown until the query runs. **Not fixed in this PR**: this is a
-  pre-existing gap in `_estimate_total_tus` itself, shared identically by
-  every single-binary `scan --dry-run --depth build/source --config
-  <query-declaring file>` invocation with no `--sources`/`--build-info` --
-  not something the artifact-set per-member estimation introduced or can fix
-  in isolation. A correct fix adds a `query_only` branch to
-  `_estimate_total_tus` (config declares `query`, no other source input)
-  that reports the TU count as unknown with an explicit caveat note (the
-  same shape `_UNSCOPED_TU_NOTE_SUFFIX` already uses for the sibling
-  `--build-target` undercount case) rather than folding a confident-looking
-  zero into the summed total, and applies to both dry-run paths at once.
+- ~~A pinned depth backed only by a query-declaring `--config` (no
+  `--sources`/`--build-info`) prices L3/L4/L5 at zero TUs/zero cost~~
+  **Fixed (CLI cleanup phase two, PR 5 follow-up).** `_estimate_total_tus`
+  gained a `query_only` branch: when `req.build_config` declares a real
+  `build.query` and no `--sources`/`--build-info`/compile DB is given, the
+  note is flagged `[UNKNOWN: build.query declared, ...]` (the same
+  "annotate honestly rather than fold a floor into the summed total" shape
+  `_UNSCOPED_TU_NOTE_SUFFIX` already uses for the sibling `--build-target`
+  undercount case) instead of the confident-looking `0` every other
+  "nothing given" case reports. Reaches both dry-run paths uniformly, since
+  both call `estimate_scan()`. See
+  `tests/test_scan_dry_run_abi3.py::test_estimate_total_tus_query_only_config_marks_count_unknown`.
 
 - **Two function/method template overloads distinguished only by a
   `requires`-clause still collide under ADR-063 Phase 2's `EntityId`

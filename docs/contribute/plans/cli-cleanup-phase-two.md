@@ -4172,10 +4172,12 @@ PR H  artifact-set semantics          = PR 5 — provider ownership, moved and
 ```
 
 Independent of the chain, unblocked at any time: PR 1 (**done**), PR 2
-(**done**, minus its `.abicheck.yml` gate-policy sourcing follow-up), PR E /
-1b (**done** — annotations moved to the Action; see PR 1b's own section,
-whose "blocked on a persistence prerequisite" subtitle was stale until this
-pass corrected it).
+(**done**, including its `.abicheck.yml` gate-policy sourcing follow-up —
+see PR 2's own section: `aggregate: gate:` shipped, and `project plan`'s
+`--gate-missing-required`/`--gate-unexpected-target` flags were removed),
+PR E / 1b (**done** — annotations moved to the Action; see PR 1b's own
+section, whose "blocked on a persistence prerequisite" subtitle was stale
+until this pass corrected it).
 
 **Superseded original ordering:**
 

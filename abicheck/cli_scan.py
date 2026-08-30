@@ -450,6 +450,7 @@ def render_scan_dry_run(
     build_targets: tuple[str, ...] = (),
     scheme_label: str = "legacy (0/2/4)",
     sev_config: Any = None,
+    abi3_floor: tuple[int, int] | None = None,
 ) -> Any:
     """Build the ``scan --dry-run`` report (ADR-043 D4): resolve, never scan.
 
@@ -465,7 +466,8 @@ def render_scan_dry_run(
     run that exits 0 on a breaking comparison (Codex review). Same defect
     `compare --dry-run` already had and fixed, which is why the scheme label
     comes from its :func:`~abicheck.cli_compare_receipt.dry_run_scheme_label`
-    rather than a second spelling of the same idea.
+    rather than a second spelling of the same idea. *abi3_floor* is validated
+    via :func:`~abicheck.python_ext.apply_abi3_dry_run_check`.
     """
     from .dry_run import DryRunResult, tool_status
     from .service import Budget, ScanRequest, estimate_scan
@@ -499,6 +501,9 @@ def render_scan_dry_run(
         if against is not None
         else "compatibility comparison: will NOT run (no --against)",
     )
+    from .python_ext import apply_abi3_dry_run_check
+
+    apply_abi3_dry_run_check(result, artifact, abi3_floor)
     result.add(
         "Output and exit-code behavior",
         f"format: {fmt}",
@@ -1882,6 +1887,7 @@ def scan_cmd(
                 build_targets=build_targets,
                 scheme_label=scheme_label,
                 sev_config=sev_config_for_preview,
+                abi3_floor=abi3_floor,
             )
         )
 
