@@ -126,7 +126,7 @@ def render_scan_dry_run(
     via :func:`~abicheck.workflows.scan_abi3_dry_run.apply_abi3_dry_run_check`.
     """
     from ...dry_run import DryRunResult, tool_status
-    from ...service import Budget, ScanRequest, estimate_scan
+    from ...service_scan import Budget, ScanRequest, estimate_scan
     from ...workflows.scan_abi3_dry_run import apply_abi3_dry_run_check
 
     result = DryRunResult(command="scan")

@@ -92,6 +92,58 @@ def test_detect_python_extension_from_binary_none_for_plain_library(
     assert detect_python_extension_from_binary(path) is None
 
 
+def test_detect_python_extension_from_binary_recognizes_json_snapshot(
+    tmp_path: Path,
+) -> None:
+    """Codex review: `scan ARTIFACT` also accepts a pre-dumped JSON snapshot
+    (no container magic bytes at all), and the real --abi3 run recognizes
+    such an input's already-embedded `python_ext` fact directly -- the
+    binary-only probe must not misreport it as "not an extension"."""
+    from abicheck.model import AbiSnapshot
+    from abicheck.python_ext import PythonExtMetadata
+    from abicheck.serialization import snapshot_to_json
+
+    snap = AbiSnapshot(
+        library="foo.abi3.so",
+        version="1.0",
+        elf=ElfMetadata(),
+        python_ext=PythonExtMetadata(
+            module_name="foo",
+            init_symbol="PyInit_foo",
+            python_major=3,
+            cpython_imports=["PyLong_FromLong"],
+        ),
+    )
+    path = tmp_path / "foo.abi.json"
+    path.write_text(snapshot_to_json(snap))
+
+    result = detect_python_extension_from_binary(path)
+    assert result is not None
+    assert result.is_extension
+    assert result.module_name == "foo"
+
+
+def test_detect_python_extension_from_binary_none_for_plain_json_snapshot(
+    tmp_path: Path,
+) -> None:
+    from abicheck.model import AbiSnapshot
+    from abicheck.serialization import snapshot_to_json
+
+    snap = AbiSnapshot(library="libplain.so", version="1.0", elf=ElfMetadata())
+    path = tmp_path / "libplain.abi.json"
+    path.write_text(snapshot_to_json(snap))
+
+    assert detect_python_extension_from_binary(path) is None
+
+
+def test_detect_python_extension_from_binary_none_for_malformed_json(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "broken.abi.json"
+    path.write_text("{not valid json")
+    assert detect_python_extension_from_binary(path) is None
+
+
 # ── render_scan_dry_run: validates --abi3 instead of previewing exit 0 ──
 
 

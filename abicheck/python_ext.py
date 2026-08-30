@@ -300,7 +300,27 @@ def detect_python_extension_from_binary(path: Path) -> PythonExtMetadata | None:
 
         snap.macho = parse_macho_metadata(Path(path))
     else:
-        return None
+        # Not a recognised binary container -- `scan ARTIFACT` also accepts a
+        # pre-dumped JSON snapshot (`service.resolve_input`'s own detection
+        # order), which already carries a real `python_ext` fact if the
+        # library it was dumped from is one. Recognising only container
+        # magic bytes would otherwise misreport a valid snapshot-based
+        # `--abi3` scan as "not a recognisable extension module" (Codex
+        # review). Uncompressed-only: a compressed snapshot is a rarer dry-run
+        # input, and this is a best-effort preview probe, not the real loader.
+        try:
+            with open(path, "rb") as f:
+                head = f.read(1)
+        except OSError:
+            return None
+        if head != b"{":
+            return None
+        from .serialization import load_snapshot
+
+        try:
+            return load_snapshot(path).python_ext
+        except Exception:
+            return None
     return detect_python_extension(snap)
 
 
