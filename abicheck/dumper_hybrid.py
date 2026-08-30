@@ -128,6 +128,7 @@ from .fact_provenance import (
     var_fact_key,
 )
 from .model import AbiSnapshot, EnumType, Function, RecordType, TypeField, Variable
+from .model.identity import with_mangled_name
 from .model.mangled_name import _skip_template_args, itanium_scope_components
 from .name_classification import canonicalize_type_name
 
@@ -487,7 +488,8 @@ def _merge_functions(
         if is_synthetic_ctor_key(f.mangled) or is_synthetic_dtor_key(f.mangled):
             match = _match_synthetic_ctor_dtor(f, clang_ctor_dtor)
             if match is not None:
-                f = replace(f, mangled=match.mangled)
+                # Adopt match's entity_id too, or it keeps the synthetic key.
+                f = replace(f, mangled=match.mangled, entity_id=match.entity_id)
         merged.append(f)
 
     clang_by_mangled = {cf.mangled: cf for cf in clang_funcs}
@@ -748,16 +750,19 @@ def merge_snapshots(castxml_snap: AbiSnapshot, clang_snap: AbiSnapshot) -> AbiSn
     # variables) -- see _macho_normalize_mangled's docstring. Type/enum
     # merges key on the source-level NAME, not a mangled linker symbol, so
     # they carry no such platform-specific decoration and need no change.
+    # entity_id's "mangled" tag is re-spelled too (Codex review).
     clang_functions = clang_snap.functions
     clang_variables = clang_snap.variables
     if castxml_snap.platform == "macho":
         clang_functions = [
-            replace(cf, mangled=_macho_normalize_mangled(cf.mangled))
+            replace(cf, mangled=nm, entity_id=with_mangled_name(cf.entity_id, nm))
             for cf in clang_functions
+            for nm in (_macho_normalize_mangled(cf.mangled),)
         ]
         clang_variables = [
-            replace(cv, mangled=_macho_normalize_mangled(cv.mangled))
+            replace(cv, mangled=nm, entity_id=with_mangled_name(cv.entity_id, nm))
             for cv in clang_variables
+            for nm in (_macho_normalize_mangled(cv.mangled),)
         ]
 
     # Keyed by type_map_key (namespace-qualified identity), not the bare

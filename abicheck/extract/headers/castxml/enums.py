@@ -26,6 +26,7 @@ owns opening the castxml document and driving ``build_id_map()``.
 from __future__ import annotations
 
 from ....model import EnumMember, EnumType
+from ....model.identity import entity_id_for_enum
 from ....name_classification import strip_anonymous_type_location
 from .context import CastxmlParserContext
 from .location import (
@@ -33,6 +34,7 @@ from .location import (
     is_builtin_element,
     source_location,
 )
+from .scope import scope_path
 from .type_resolution import (
     qualified_type_name,
     underlying_type_name as _underlying_type_name,
@@ -77,6 +79,8 @@ def parse_enums(ctx: CastxmlParserContext) -> list[EnumType]:
                 # See RecordType.qualified_name for the bare-vs-qualified
                 # name convention this mirrors.
                 qualified_name=qualified_type_name(ctx, el, leaf_name=name),
+                # ADR-063 Phase 2 -- see build_record_type's own comment.
+                entity_id=entity_id_for_enum(scope_path(ctx, el), name),
             )
         )
     return enums

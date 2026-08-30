@@ -40,10 +40,11 @@ import pathlib
 
 #: Modules that are not ADR-062 Phase 0 primitives. G40's content-addressed
 #: bundle archive and its guards, per `abicheck/storage/AGENTS.md`, plus
-#: ADR-063 Phase 0's Fact[T] snapshot encode/decode/legacy-backfill helpers
-#: (fact_codec, enum_codec) — a third, independent body of work in this
-#: package, unrelated to either ADR-062's Phase 0 primitives or G40's
-#: container.
+#: ADR-063's own snapshot encode/decode/legacy-backfill helpers (Phase 0's
+#: Fact[T] pair `fact_codec`/`enum_codec`, and Phase 2's `entity_id_codec`,
+#: which keeps the parse-time `EntityId` carrier out of the wire format) — a
+#: third, independent body of work in this package, unrelated to either
+#: ADR-062's Phase 0 primitives or G40's container.
 NON_ADR062_MODULES = frozenset(
     {
         "bundle_archive",
@@ -54,6 +55,7 @@ NON_ADR062_MODULES = frozenset(
         "zstd_frame_guard",
         "fact_codec",
         "enum_codec",
+        "entity_id_codec",
     }
 )
 

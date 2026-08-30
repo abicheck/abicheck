@@ -58,8 +58,11 @@ Leaf module: no dependency on ``checker_types``/``diff_*``/anything above
 from __future__ import annotations
 
 import enum
-from dataclasses import dataclass, field
+import re
+from dataclasses import dataclass, field, replace
 
+from ..name_classification import canonicalize_type_name
+from .identity_literals import quoted_literal_spans as _quoted_literal_spans
 from .signature_normalization import canonicalize_function_signature_param_type
 
 __all__ = [
@@ -73,12 +76,14 @@ __all__ = [
     "Record",
     "ScopePath",
     "ScopeSegment",
+    "canonicalize_type_param_references",
     "entity_id_for_constant",
     "entity_id_for_enum",
     "entity_id_for_function",
     "entity_id_for_type",
     "entity_id_for_typedef",
     "entity_id_for_variable",
+    "with_mangled_name",
 ]
 
 
@@ -423,6 +428,72 @@ def entity_id_for_variable(
     )
 
 
+def canonicalize_type_param_references(
+    spelling: str, type_param_names: tuple[str, ...]
+) -> str:
+    """Replace each name in *type_param_names* with its 0-based position.
+
+    A dependent type reference spells itself using the referenced
+    template parameter's own declared name (confirmed by direct
+    compilation) -- so ``template<class T> void f(T);`` and
+    ``template<class U> void f(U);`` are the identical declaration under
+    a pure parameter rename, but a caller building a per-parse
+    discriminator from the raw spelling alone would see ``"T"`` and
+    ``"U"`` and fingerprint them as two different overloads. A whole-word
+    (``\\b``) substitution, so a name that is a substring of another
+    (``T`` inside ``TT``) is never partially replaced, and a compound
+    spelling (``"T *"``) still resolves correctly (``"type-param-0 *"``).
+    Shared by :func:`entity_id_for_function` and ``extract.headers.clang.
+    functions.function_template_param_kinds`` (for a non-type template
+    parameter's own declared type, e.g. ``decltype(N)`` -- Codex review,
+    PR #943: the identical hazard for two sources of a referencing type).
+
+    All substitutions happen in ONE combined regex pass, not one ``re.sub``
+    per name applied sequentially -- confirmed by direct compilation that
+    the sequential form has its own collision: replacing an earlier name
+    (``T`` -> ``"type-param-0"``) first, then a LATER parameter literally
+    named ``type`` matches ``\\btype\\b`` INSIDE that already-generated
+    token, corrupting it (Codex review, PR #943). A combined-alternation
+    pass never re-scans replacement text, so this cannot occur.
+    """
+    index_by_name = {name: index for index, name in enumerate(type_param_names) if name}
+    if not index_by_name:
+        return spelling
+    # `(?<!::)` -- an EXPLICITLY globally-qualified name (`::T::X`) is a
+    # namespace lookup, not a param reference, even when it collides
+    # (confirmed: `namespace T { struct X {}; } template<class T> void
+    # f(::T::X);` keeps `::T::X` verbatim). `(?<!\.)`/`(?<!->)` -- same
+    # hazard for MEMBER ACCESS (`S{}.N`, `((S*)0)->N`); substituting either
+    # anyway fingerprinted an unrelated parameter's own rename as a
+    # remove+add (Codex review, PR #943). `(?<!::template )` -- same
+    # hazard one token further, for a QUALIFIED MEMBER-TEMPLATE name
+    # (`S::template N<int>()`): `S::N` is already covered by `(?<!::)`
+    # above, but here `N` is separated from `::` by the `template` keyword
+    # and a space (Codex review, PR #943, on a later round).
+    pattern = re.compile(
+        r"(?<!::)(?<!\.)(?<!->)(?<!::template )\b("
+        + "|".join(re.escape(name) for name in index_by_name)
+        + r")\b"
+    )
+    # A QUOTED LITERAL (`'N'`) is a value, not a param reference, even when
+    # it collides (Codex review, PR #943). A USER-DEFINED LITERAL SUFFIX
+    # (`'x'_tag`) is an operator name, not a param reference, even though
+    # it sits OUTSIDE the literal span (a UDL suffix always attaches with
+    # no space directly after the closing quote) -- confirmed by direct
+    # compilation (Codex review, PR #943, on a later round).
+    literal_spans = _quoted_literal_spans(spelling)
+    literal_ends = {end for _start, end in literal_spans}
+
+    def _substitute(m: re.Match[str]) -> str:
+        if any(start <= m.start() < end for start, end in literal_spans):
+            return m.group(0)
+        if m.start() in literal_ends:
+            return m.group(0)
+        return f"type-param-{index_by_name[m.group(1)]}"
+
+    return pattern.sub(_substitute, spelling)
+
+
 def entity_id_for_function(
     scope: ScopePath,
     leaf_name: str,
@@ -434,6 +505,9 @@ def entity_id_for_function(
     is_volatile: bool = False,
     ref_qualifier: str = "",
     is_variadic: bool | None = None,
+    template_param_kinds: tuple[str, ...] = (),
+    type_param_names: tuple[str, ...] = (),
+    return_type: str = "",
 ) -> EntityId:
     """``EntityId`` for a function.
 
@@ -497,9 +571,23 @@ def entity_id_for_function(
     through to the signature-based fallback the way a caller relying on
     ``mangled_name`` alone would. When *mangled_name* is genuinely present,
     it wins outright and *is_extern_c*/*param_types*/*is_const*/
-    *is_volatile*/*ref_qualifier*/*is_variadic* are all ignored -- there is
-    nothing left for a signature-free tag to add once the mangled name
-    already disambiguates the declaration.
+    *is_volatile*/*ref_qualifier*/*is_variadic*/*template_param_kinds* are
+    all ignored -- there is nothing left for a signature-free tag to add
+    once the mangled name already disambiguates the declaration.
+
+    *template_param_kinds* is the per-position parameter-KIND signature
+    (``"type"``, ``"template"``, ``"nontype:<type-spelling>"``) of an
+    uninstantiated function/method template's own template parameter list,
+    in declaration order -- e.g. ``("type",)`` for
+    ``template<class T> void f()`` vs. ``("nontype:int",)`` for
+    ``template<int N> void f()``. Two such templates can share scope, leaf
+    name, and an identical (possibly empty) ordinary parameter list while
+    still being genuinely distinct overloads, and neither gets a real
+    mangled name from an AST-only producer (uninstantiated templates aren't
+    mangled), so without this the *sig* fallback tuple would collide them
+    (Codex review, PR #943). Folded in only when non-empty and tagged
+    (``"tmpl", *template_param_kinds``) so an ordinary, non-template
+    function's ``extra`` tuple is unchanged byte-for-byte.
 
     Both the *mangled* and *is_extern_c* branches' resulting
     ``EntityId.scope`` are always ``()``, regardless of *scope*.
@@ -550,6 +638,44 @@ def entity_id_for_function(
     its own ``func.is_extern_c``-gated omission of by-value param cv for
     the identical linkage reason (Codex review, PR #941).
 
+    *param_types* are ALSO run through
+    :func:`canonicalize_type_param_references` against *type_param_names*
+    -- the enclosing function template's own type/template-template
+    parameter names, in declaration order -- before the signature
+    canonicalization above: ``template<class T> void f(T);`` and
+    ``template<class U> void f(U);`` are the identical declaration under
+    a pure rename, but an ordinary parameter's raw spelling names the
+    template parameter literally (``"T"``/``"U"``), the same hazard
+    ``template_param_kinds``'s own non-type-parameter entries already
+    guard against -- this is the ordinary-parameter-list sibling of that
+    fix (Codex review, PR #943). A no-op (``type_param_names == ()``) for
+    every non-template function, so an ordinary function's ``extra``
+    tuple is unchanged byte-for-byte.
+
+    *return_type* is folded into ``extra`` (as ``("ret", <canonicalized
+    spelling>)``, placed before the ``"tmpl"`` block so it never shifts
+    the fixed tail position every ``template_param_kinds`` consumer reads)
+    ONLY when *template_param_kinds* is non-empty -- an ordinary function
+    can never legally overload solely by return type, but a function
+    TEMPLATE's return type can itself depend on a template parameter
+    (``template<class T> typename T::x f(T);``), so two such templates can
+    share every other dimension in ``extra`` and still be genuinely
+    distinct, legally-coexisting declarations (Codex review, PR #943;
+    confirmed by direct compilation that clang accepts both that
+    declaration and its ``typename T::y`` sibling with no redefinition
+    error). Canonicalized via ``canonicalize_type_name`` (cross-producer
+    spelling normalization only) then ``canonicalize_type_param_references``
+    -- deliberately NOT ``canonicalize_function_signature_param_type``,
+    unlike a dependent ordinary parameter: a top-level by-value
+    cv-qualifier on the return type is a genuine, standard-permitted
+    overload discriminator for a function TEMPLATE (confirmed by direct
+    compilation, fresh Codex review: ``template<class T> T f(T);`` and
+    ``template<class T> const T f(T);`` are two more real, coexisting
+    templates), the opposite of an ordinary function/parameter, where that
+    same qualifier is dropped and two such declarations are a redefinition
+    error. A pure template-parameter rename that only the return type's
+    own dependent spelling reflects still resolves to the same ``EntityId``.
+
     When *mangled_name* is present, *leaf_name* is likewise ignored -- see
     :func:`entity_id_for_variable`'s docstring for the confirmed reason
     (the ELF-only fallback path reuses the raw exported symbol for both
@@ -570,11 +696,65 @@ def entity_id_for_function(
     else:
         extra = (
             "sig",
-            *(canonicalize_function_signature_param_type(p) for p in param_types),
+            *(
+                canonicalize_type_param_references(
+                    canonicalize_function_signature_param_type(p), type_param_names
+                )
+                for p in param_types
+            ),
             f"const:{is_const}",
             f"volatile:{is_volatile}",
             ref_qualifier,
             str(is_variadic),
+            # A function template's return type CAN depend on its own
+            # template parameters (`template<class T> typename T::x f(T);`),
+            # so two such templates can share scope/leaf_name/param_types/
+            # template_param_kinds while genuinely being distinct, legal
+            # overloads distinguished only by that dependent return type --
+            # confirmed by direct compilation (Codex review, PR #943):
+            # clang accepts BOTH `template<class T> typename T::x f(T);`
+            # and `template<class T> typename T::y f(T);` with no
+            # redefinition error, two real `FunctionTemplateDecl`s. Folded
+            # in only for a template (`template_param_kinds` non-empty) --
+            # an ORDINARY function can never legally overload solely by
+            # return type (the same reason `finding_identity.
+            # normalized_signature` never folds return type in at all), so
+            # including it there would add nothing and only risk widening
+            # a genuine return-type EDIT into a spurious remove+add for a
+            # function this branch already fully identifies by its other
+            # dimensions. Placed AFTER the variadic marker but BEFORE the
+            # ``"tmpl"`` block (not appended at the very end) so this
+            # doesn't shift the fixed `extra[-1]`/`extra[-2]` positions
+            # every existing `template_param_kinds` consumer already reads
+            # off the tail of `extra`. Canonicalized via
+            # ``canonicalize_type_name`` -- NOT
+            # ``canonicalize_function_signature_param_type``, unlike an
+            # ordinary parameter -- deliberately KEEPING a top-level
+            # by-value cv-qualifier: confirmed by direct compilation
+            # (fresh Codex review, PR #943) that `template<class T> T
+            # f(T);` and `template<class T> const T f(T);` are two more
+            # real, legally-coexisting `FunctionTemplateDecl`s (clang
+            # accepts both, `T (T)` vs. `const T (T)`), distinguished ONLY
+            # by that top-level cv on the return type -- the opposite of
+            # an ORDINARY function/parameter, where the standard drops
+            # exactly that qualifier and two such declarations are a
+            # redefinition error (confirmed: `int f(int); const int
+            # f(int);` fails to compile). Still run through
+            # ``canonicalize_type_param_references`` afterwards for the
+            # identical rename-blind substitution as every other dependent
+            # spelling here.
+            *(
+                (
+                    "ret",
+                    canonicalize_type_param_references(
+                        canonicalize_type_name(return_type),
+                        type_param_names,
+                    ),
+                )
+                if template_param_kinds
+                else ()
+            ),
+            *(("tmpl", *template_param_kinds) if template_param_kinds else ()),
         )
         resolved_scope = _scope_path(scope)
         resolved_leaf_name = leaf_name
@@ -584,3 +764,37 @@ def entity_id_for_function(
         leaf_name=resolved_leaf_name,
         extra=extra,
     )
+
+
+def with_mangled_name(
+    entity_id: EntityId | None, new_mangled_name: str
+) -> EntityId | None:
+    """*entity_id* with its ``"mangled"`` tag re-spelled to *new_mangled_name*.
+
+    A declaration's own mangled spelling can legitimately change AFTER its
+    ``EntityId`` was already resolved by a producer -- e.g. a hybrid
+    dumper reconciling a castxml synthetic ctor/dtor placeholder key to
+    clang's real mangled name, or normalizing a Mach-O linker symbol's
+    leading underscore before cross-producer matching. Rebuilding the
+    identity from scratch at that point is not an option: by then the
+    caller no longer has the original ``ScopePath`` the resolver needs
+    (that data is parser-internal, per this module's own carrier-field
+    design). This is the narrow, safe alternative -- it only ever touches
+    an identity genuinely tagged ``("mangled", ...)``; an
+    ``extern_c``-/``sig``-tagged identity, or no identity at all, is
+    returned unchanged, since neither of those was derived from the
+    mangled spelling in the first place, and rewriting either would
+    silently fabricate a tag the resolver never produced.
+
+    >>> eid = entity_id_for_function((), "f", mangled_name="_Z1fv")
+    >>> with_mangled_name(eid, "_Z1fi").extra
+    ('mangled', '_Z1fi')
+    >>> extern_c_eid = entity_id_for_function((), "f", is_extern_c=True)
+    >>> with_mangled_name(extern_c_eid, "_Z1fv") is extern_c_eid
+    True
+    >>> with_mangled_name(None, "_Z1fv") is None
+    True
+    """
+    if entity_id is None or entity_id.extra[:1] != ("mangled",):
+        return entity_id
+    return replace(entity_id, extra=("mangled", new_mangled_name))

@@ -54,6 +54,7 @@ import re
 from typing import Any
 
 from ....model import Fact, RecordType, TypeField
+from ....model.identity import entity_id_for_type
 from ....name_classification import strip_anonymous_type_location
 from .context import CastxmlParserContext
 from .location import (
@@ -68,6 +69,7 @@ from .names import (
     _virtual_method_mangled_name,
     _vt_sort_key,
 )
+from .scope import scope_path
 from .type_resolution import qualified_type_name, resolve_cv_restrict, type_name
 
 
@@ -179,6 +181,11 @@ def build_record_type(
         vtable_fact=Fact.present(vtable),
         # 0-if-vtable-else-None is the Itanium primary-base heuristic above, not a real offset read -- partial, not present (Codex review; matches vptr_offset_bits's own PARTIAL row).
         vptr_offset_bits_fact=Fact.partial(vptr_offset_bits),
+        # ADR-063 Phase 2: resolved from the typed `context`-chain walk,
+        # which keeps each parent's own XML tag -- never reconstructed from
+        # the flattened `qualified_name` on the next line, which cannot say
+        # whether a segment was a namespace or a record.
+        entity_id=entity_id_for_type(scope_path(ctx, el), name),
         qualified_name=qualified_type_name(ctx, el, leaf_name=name),
         # castxml records the `final` class-key specifier as a `final`
         # token inside the compound ``attributes`` string (e.g.

@@ -132,13 +132,16 @@ from .extract.headers.clang import (
     enums as _clang_enums,
     functions as _clang_functions,
     records as _clang_records,
+    scope as _clang_scope,
 )
+from .extract.headers.clang.return_type import return_type as _clang_return_type
 from .extract.headers.clang.templates import (
     _index_template_param_defaults,
     _index_template_param_kinds,
     _index_template_param_names,
     _specialization_spelling,
 )
+from .extract.headers.scope_segments import record_segment as _record_scope_segment
 from .model import (
     AccessLevel,
     EnumType,
@@ -148,6 +151,7 @@ from .model import (
     Variable,
     Visibility,
 )
+from .model.identity import ScopePath, entity_id_for_variable
 from .provenance import build_public_set
 
 
@@ -488,9 +492,9 @@ def _pointer_depth(type_str: str) -> int:
 
 
 def _return_type(qualtype: str) -> str:
-    """See ``extract.headers.clang.functions._return_type`` (the canonical
+    """See ``extract.headers.clang.return_type.return_type`` (the canonical
     implementation this delegates to) for the full contract."""
-    return _clang_functions._return_type(qualtype)
+    return _clang_return_type(qualtype)
 
 
 def _is_noexcept_qualifier(quals: str) -> bool:
@@ -583,6 +587,18 @@ class _ClangAstParser:
         self._target_triple = target_triple
         self._exported_dynamic = exported_dynamic
         self._exported_static = exported_static
+        # Per-*logical-scope* (not per-walk-frame, and not per-AST-node
+        # either) anonymous-ordinal state, keyed by `child_scope_path` --
+        # the typed `ScopePath` a `_walk` call's children actually enter --
+        # at the point in `_walk` below where it is used. See that site's
+        # own comment for why this must be keyed by the resulting scope
+        # path rather than by a per-call local (a reopened named namespace
+        # is walked as two separate `_walk` calls) or by the walked node's
+        # own identity (a transparent AST wrapper like `LinkageSpecDecl`
+        # contributes no segment of its own, so its anonymous children must
+        # share the counter of whatever real scope contains it) -- both
+        # confirmed by direct compilation, two separate Codex review rounds.
+        self._anonymous_ordinal_state: dict[ScopePath, dict[str, Any]] = {}
         (
             self._pub_header_segs,
             self._pub_dir_segs,
@@ -628,6 +644,7 @@ class _ClangAstParser:
         self._walk(
             root,
             scope=(),
+            scope_path=(),
             lookup_scope=(),
             current_file="",
             access="public",
@@ -648,6 +665,10 @@ class _ClangAstParser:
         extern_c: bool,
         in_friend: bool,
         in_template: bool = False,
+        scope_path: ScopePath = (),
+        anonymous_ordinal: int | None = None,
+        template_param_kinds: tuple[str, ...] = (),
+        template_type_param_names: tuple[str, ...] = (),
     ) -> str:
         """Pre-order walk that categorizes public decls, threading the sticky file.
 
@@ -672,6 +693,29 @@ class _ClangAstParser:
         such entry, degrading a nested specialization's own member back to
         the SAME owner-mismatch false positive the `ClassTemplateSpecial
         izationDecl` branch below was originally built to fix).
+
+        *scope_path* is a THIRD scope representation, running exactly
+        alongside *scope* rather than replacing it (ADR-063 Phase 2, second
+        slice): the same containing scopes, as typed
+        `model.identity.ScopeSegment`s instead of bare names, recorded at
+        the exact point each scope is entered -- which is the only point the
+        node kind (`NamespaceDecl` vs. `CXXRecordDecl`), its `isInline`
+        flag, and its access specifier are still in hand. *scope* itself is
+        untouched, so every `qualified_name` this walk feeds is byte-for-
+        byte what it was; `extract.headers.scope_segments.flat_names` maps
+        the typed path back onto *scope*, which is what pins that parity.
+        Parser-internal state, threaded onto `_Decl` for each entity
+        module's own `parse_*` to read and build an `entity_id_for_*`
+        carrier from -- a runtime-only field on the parsed declaration,
+        never persisted to a snapshot (CodeRabbit review, PR #943, on this
+        docstring going stale once that wiring landed; the plan's
+        carrier-field question is about a DIFFERENT, still-open choice --
+        whether a persisted model object should ever carry one -- and
+        stays open).
+
+        *anonymous_ordinal* is assigned by the PARENT frame's own child
+        loop, not derived here, because the ordinal is a per-parent
+        sequence: a node cannot know its own position among its siblings.
         """
         if not isinstance(node, dict):
             return current_file
@@ -681,7 +725,18 @@ class _ClangAstParser:
 
         if not node.get("isImplicit"):
             self._categorize(
-                node, kind, name, scope, file, access, extern_c, in_friend, in_template
+                node,
+                kind,
+                name,
+                scope,
+                file,
+                access,
+                extern_c,
+                in_friend,
+                in_template,
+                scope_path,
+                template_param_kinds,
+                template_type_param_names,
             )
 
         # A function/method body is not an ABI declaration surface: its
@@ -694,8 +749,37 @@ class _ClangAstParser:
 
         # A record body's children inherit the tag's default access until an
         # AccessSpecDecl switches it; namespaces/linkage-specs impose none.
-        child_extern_c = extern_c or (
-            kind == "LinkageSpecDecl" and node.get("language") == "C"
+        #
+        # A `LinkageSpecDecl` RESETS the linkage state to its own
+        # `language`, rather than only ever OR-ing a `True` in: confirmed
+        # by direct compilation that `extern "C" { extern "C++" { void
+        # cppfun(); } }` places a `language="C++"` `LinkageSpecDecl`
+        # directly inside a `language="C"` one, and clang genuinely
+        # mangles `cppfun` normally (`_Z6cppfunv`) -- real C++ linkage
+        # nested inside a `C` block. The previous sticky-OR form never
+        # reset back to `False` for the inner block, so `cppfun` got
+        # `is_extern_c=True` and collapsed onto the bare `("extern_c",)`
+        # `EntityId`, colliding with every other extern-"C" declaration
+        # (Codex review, PR #943). A `LinkageSpecDecl`'s own `language`
+        # is authoritative for everything beneath it -- linkage specs
+        # don't stack, the innermost one wins -- so a non-`LinkageSpecDecl`
+        # node simply inherits whatever is already in effect.
+        child_extern_c = (
+            node.get("language") == "C" if kind == "LinkageSpecDecl" else extern_c
+        )
+        # The typed counterpart of the flat `child_scope` computed below,
+        # built from the node itself (kind/`isInline`/`tagUsed`/access) and
+        # never reconstructed from the flattened spelling. A `None` segment
+        # means "this node introduces no typed scope", which matches every
+        # branch below that leaves `child_scope` unchanged -- EXCEPT a named
+        # `LinkageSpecDecl`: real clang never emits one (a linkage
+        # specification is spelled with a string literal, never an
+        # identifier), and mapping that unreachable case onto some segment
+        # kind would manufacture exactly the two-node-kinds-one-segment
+        # ambiguity `ScopePath` exists to prevent. See
+        # `extract.headers.clang.scope.scope_segment_for`.
+        segment = _clang_scope.scope_segment_for(
+            node, access=access, anonymous_ordinal=anonymous_ordinal
         )
         if kind in _SCOPE_NODE_KINDS and name:
             child_scope = (*scope, name)
@@ -741,9 +825,16 @@ class _ClangAstParser:
             )
             child_scope = (*scope, spelling) if spelling else scope
             child_lookup_scope = lookup_scope
+            # A specialization's scope spelling is this branch's own
+            # reconstruction; `scope_segment_for` returns None for this node
+            # kind precisely so it cannot form a second, differently-trimmed
+            # opinion about it.
+            if spelling:
+                segment = _record_scope_segment(spelling, access=access)
         else:
             child_scope = scope
             child_lookup_scope = lookup_scope
+        child_scope_path = (*scope_path, segment) if segment is not None else scope_path
         running = (
             _default_record_access(node)
             if kind in ("CXXRecordDecl", "RecordDecl")
@@ -769,21 +860,143 @@ class _ClangAstParser:
             "ClassTemplateDecl",
             "ClassTemplatePartialSpecializationDecl",
         )
+        # Only THIS node's own direct FunctionDecl child needs the
+        # template parameter-KIND discriminator (ADR-063 Phase 2) -- never
+        # inherited further down, since a nested declaration inside that
+        # function's own (non-existent, functions have no body here)
+        # subtree has nothing to do with it. See extract.headers.clang.
+        # functions.function_template_param_kinds's own docstring for why.
+        # (`child_template_type_param_names` just below is a DIFFERENT
+        # story -- it must accumulate, not reset; see its own comment.)
+        # `template_type_param_names` (the ALREADY-accumulated enclosing
+        # scope, not yet including this node's own names) is threaded in
+        # too -- a member function template's own non-type parameter can
+        # legally reference an ENCLOSING class template's parameter name
+        # (`template<class T> struct A { template<T N> void f(); };`,
+        # confirmed by direct compilation), the identical hazard
+        # `class_template_type_param_names` below already fixes for an
+        # ordinary member, one level further in (Codex review, PR #943).
+        child_template_param_kinds = (
+            _clang_functions.function_template_param_kinds(
+                node, template_type_param_names
+            )
+            if kind == "FunctionTemplateDecl"
+            else ()
+        )
+        # UNLIKE `child_template_param_kinds` above, this one MUST be
+        # inherited (accumulated), not reset to `()` for every other node
+        # kind: a class template's own parameter names are needed by every
+        # ORDINARY (non-template) member declared anywhere in its pattern
+        # body, not just a directly-templated member (Codex review, PR
+        # #943 -- confirmed by direct compilation that `template<class T>
+        # struct A { void f(T); };` renamed to `template<class U> struct A
+        # { void f(U); };` is the identical declaration, yet `f`'s own
+        # ordinary parameter spells the ENCLOSING class template's
+        # parameter name literally, and `f` is never itself a
+        # `FunctionTemplateDecl`). `ClassTemplatePartialSpecializationDecl`
+        # carries the identical shape (own parameter list, then its own
+        # member pattern) and needs the same treatment -- confirmed by
+        # direct compilation. A nested member TEMPLATE still sees BOTH the
+        # enclosing class's names and its own (appended, never replacing),
+        # since `type_param_names` is looked up by name -- see
+        # `extract.headers.clang.functions.class_template_type_param_names`'s
+        # own docstring.
+        child_template_type_param_names = (
+            template_type_param_names
+            + _clang_functions.function_template_type_param_names(node)
+            if kind == "FunctionTemplateDecl"
+            else (
+                template_type_param_names
+                + _clang_functions.class_template_type_param_names(node)
+                if kind
+                in ("ClassTemplateDecl", "ClassTemplatePartialSpecializationDecl")
+                else template_type_param_names
+            )
+        )
+        # Per-parent (not global) anonymous-scope counter, assigned here
+        # because an ordinal is a position among THIS node's own children: a
+        # global counter would make one anonymous struct's identity depend on
+        # how many unrelated anonymous scopes happened to be walked before it
+        # anywhere in the translation unit. Counted per *entity*, not per
+        # block: two `namespace { }` blocks reopen ONE unnamed namespace, and
+        # clang links them via `originalNamespace`/`previousDecl` -- numbering
+        # blocks would split one real scope into two identities (see
+        # `_clang_scope.anonymous_scope_key`).
+        #
+        # The counter/seen-set pair itself must be keyed by the *logical C++
+        # scope this node's children are actually entering* -- `child_scope_
+        # path` itself -- not held as a plain per-call local, and not keyed
+        # by `node`'s own identity either (an earlier version of this fix
+        # tried that and was itself wrong, see below). Two real cases prove
+        # this, both confirmed by direct compilation (Codex review, fresh
+        # evidence, two separate rounds):
+        #
+        # (1) A NAMED namespace reopened in two blocks (`namespace N { ... }
+        # ... namespace N { ... }`) is walked as two SEPARATE `_walk` calls,
+        # one per block. A call-local dict resets between those two calls,
+        # so an anonymous struct that is the first anonymous child of block
+        # two collides with the ordinal already given to block one's first
+        # anonymous child.
+        #
+        # (2) A TRANSPARENT AST wrapper -- `LinkageSpecDecl` (`extern "C"
+        # { ... }`) is the confirmed real case, and any future node kind
+        # `scope_segment_for` maps to `None` would be another -- contributes
+        # NO segment of its own (`child_scope_path` for its children is
+        # exactly `scope_path`, unchanged), yet it IS a separate `_walk`
+        # call/node. Keying by `node`'s own identity (this fix's first
+        # attempt) gave the wrapper's anonymous children their own counter,
+        # separate from a sibling anonymous scope declared directly in the
+        # SAME enclosing namespace right next to the `extern "C"` block --
+        # two scopes that are, from `ScopePath`'s own perspective, both
+        # direct children of the identical logical scope.
+        #
+        # `child_scope_path` closes both at once with one rule, since it IS
+        # the value that answers "which logical scope are these children
+        # actually in": two reopened blocks of namespace `N` compute the
+        # identical `(..., Namespace("N"))` tuple (segment construction
+        # depends only on the name/`isInline` flag, never on `node` identity
+        # or which block produced it), and a transparent wrapper's
+        # `child_scope_path` is *by definition* identical to its own
+        # `scope_path` (no segment appended), so its anonymous children
+        # share the counter of whatever real scope contains the wrapper.
+        # `ScopeSegment`s are frozen/hashable, so the tuple itself is a valid
+        # dict key -- no string-identity/objid fallback needed at all, and
+        # none of the "no id available" edge cases the node-identity version
+        # had to account for can arise here.
+        ordinal_state = self._anonymous_ordinal_state.setdefault(
+            child_scope_path, {"next": 0, "seen": {}}
+        )
         for child in node.get("inner", []) or []:
             if not isinstance(child, dict):
                 continue
             if child.get("kind") == "AccessSpecDecl":
                 running = child.get("access", running)
                 continue
+            child_anonymous_ordinal: int | None = None
+            if _clang_scope.anonymous_scope_kind(child) is not None:
+                entity_key = _clang_scope.anonymous_scope_key(child)
+                seen: dict[str, int] = ordinal_state["seen"]
+                already = seen.get(entity_key) if entity_key is not None else None
+                if already is not None:
+                    child_anonymous_ordinal = already
+                else:
+                    child_anonymous_ordinal = ordinal_state["next"]
+                    ordinal_state["next"] += 1
+                    if entity_key is not None:
+                        seen[entity_key] = child_anonymous_ordinal
             file = self._walk(
                 child,
                 scope=child_scope,
                 lookup_scope=child_lookup_scope,
+                scope_path=child_scope_path,
+                anonymous_ordinal=child_anonymous_ordinal,
                 current_file=file,
                 access=child.get("access", running),
                 extern_c=child_extern_c,
                 in_friend=child_in_friend,
                 in_template=child_in_template,
+                template_param_kinds=child_template_param_kinds,
+                template_type_param_names=child_template_type_param_names,
             )
         return file
 
@@ -798,6 +1011,9 @@ class _ClangAstParser:
         extern_c: bool,
         in_friend: bool,
         in_template: bool = False,
+        scope_path: ScopePath = (),
+        template_param_kinds: tuple[str, ...] = (),
+        template_type_param_names: tuple[str, ...] = (),
     ) -> None:
         entry = _Decl(
             node=node,
@@ -807,6 +1023,9 @@ class _ClangAstParser:
             extern_c=extern_c,
             in_friend=in_friend,
             in_template=in_template,
+            scope_path=scope_path,
+            template_param_kinds=template_param_kinds,
+            template_type_param_names=template_type_param_names,
         )
         if kind in _FUNCTION_NODE_KINDS and name:
             self._functions.append(entry)
@@ -940,10 +1159,23 @@ class _ClangAstParser:
             if node.get("storageClass") in ("auto", "register"):
                 continue
             name = str(node.get("name", ""))
-            mangled = str(node.get("mangledName", "")) or name
+            # `raw_mangled` distinguishes "clang genuinely emitted this
+            # mangling" from "clang emitted none, and `mangled` fell back
+            # to the bare name" -- see `functions.parse_functions`'s
+            # identical, more-fully-commented fix for the direct-
+            # compilation evidence (Codex/CodeRabbit review, fresh
+            # evidence): a static member of an uninstantiated class-
+            # template pattern carries no `mangledName` either, and the
+            # un-gated `mangled == name` heuristic below wrongly read that
+            # fallback collision as C linkage.
+            raw_mangled = node.get("mangledName")
+            mangled = raw_mangled or name
             if not mangled:
                 continue
             type_name = _qualtype(node)
+            is_extern_c = entry.extern_c or (
+                raw_mangled is not None and raw_mangled == name
+            )
             variables.append(
                 Variable(
                     name=name,
@@ -955,6 +1187,24 @@ class _ClangAstParser:
                     source_location=self._source_location(entry),
                     alignment_bits=_clang_var_alignment_bits(node),
                     deprecated=_clang_deprecated_message(node),
+                    # ADR-063 Phase 2, same routing/bug-fix as
+                    # parse_functions: `mangled_name` is offered only when
+                    # `raw_mangled` is genuinely present, not merely when
+                    # `mangled` (which may itself be the bare-`name`
+                    # fallback) is non-empty -- passing the fallback
+                    # through as a "genuine" mangling would collapse two
+                    # distinct static members of an uninstantiated
+                    # class-template pattern onto one `EntityId`.
+                    entity_id=entity_id_for_variable(
+                        entry.scope_path,
+                        name,
+                        mangled_name=(
+                            raw_mangled
+                            if (raw_mangled is not None and not is_extern_c)
+                            else None
+                        ),
+                        is_extern_c=is_extern_c,
+                    ),
                 )
             )
         return variables

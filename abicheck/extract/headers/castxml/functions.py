@@ -38,6 +38,7 @@ import re
 from xml.etree.ElementTree import Element
 
 from ....model import AccessLevel, Fact, Function, Param, Visibility
+from ....model.identity import entity_id_for_function
 from .context import CastxmlParserContext
 from .location import (
     access_level,
@@ -54,6 +55,7 @@ from .names import (
     _parse_vtable_index,
     _ref_qualifier_from_mangled,
 )
+from .scope import scope_path
 from .type_resolution import (
     is_global_scope,
     pointer_depth,
@@ -461,11 +463,36 @@ def parse_function_element(
     # function's identity onto that unrelated export instead. A real
     # (possibly extern "C") function this override is meant to recover
     # is always declared at global scope.
+    # Checks BOTH exported_dynamic and exported_static -- a C API observed
+    # only through a static archive's own export set (a bare, unmangled
+    # symbol) must recover the identical extern-"C" override a
+    # dynamically-linked one gets; restricting this to exported_dynamic
+    # alone left a static-archive-only C function's guessed C++ mangling
+    # standing, disagreeing with both the archive's own observed symbol
+    # and the clang producer's extern_c identity for the same declaration
+    # (Codex review, PR #943). Mirrors the identical
+    # exported_dynamic|exported_static union dumper_castxml.py's own
+    # sibling variable-level override already uses.
+    #
+    # Deliberately NOT gated on ``mangled.startswith("_Z")`` (an earlier
+    # revision was): that hard-coded the Itanium mangling prefix, so a
+    # Windows CI leg's real MSVC-targeting castxml -- which decorates a
+    # guessed C-linkage function with its own ``?...@@...`` prefix, never
+    # Itanium's ``_Z`` -- silently never matched the condition at all,
+    # leaving the bogus MSVC-decorated guess standing even though the
+    # real export table already confirmed the bare name (confirmed via a
+    # real Windows CI failure, Codex review, PR #943). Nothing else in
+    # this condition is ABI-specific: `mangled not in
+    # (exported_dynamic|exported_static)` already means "not itself a
+    # real observed export" regardless of what guessed prefix produced
+    # it, so dropping the prefix check makes this override recognize the
+    # identical evidence on every mangling scheme castxml's underlying
+    # compiler can guess, not just Itanium's.
     if (
         el.tag == "Function"
-        and mangled.startswith("_Z")
         and mangled not in ctx.exported_dynamic
-        and name in ctx.exported_dynamic
+        and mangled not in ctx.exported_static
+        and name in (ctx.exported_dynamic | ctx.exported_static)
         and is_global_scope(ctx, el)
     ):
         mangled = name
@@ -497,6 +524,12 @@ def parse_function_element(
         else visibility(ctx, raw_mangled, name)
     )
 
+    # Hoisted so the identity constructor is handed the identical values
+    # the model object records, rather than a second, independently
+    # recomputed opinion about the same facts (ADR-063 Phase 2).
+    is_const = el.get("const") == "1"
+    is_volatile = el.get("volatile") == "1"
+    ref_qualifier = function_ref_qualifier(el, mangled)
     return Function(
         name=name,
         mangled=mangled,
@@ -509,15 +542,15 @@ def parse_function_element(
         vtable_index=vtable_index,
         source_location=source_loc,
         is_static=el.get("static") == "1",
-        is_const=el.get("const") == "1",
-        is_volatile=el.get("volatile") == "1",
+        is_const=is_const,
+        is_volatile=is_volatile,
         is_pure_virtual=el.get("pure_virtual") == "1",
         is_deleted=is_deleted,
         # castxml emits inline="1" for inline functions/methods
         is_inline=el.get("inline") == "1",
         access=access,
         return_pointer_depth=ret_ptr_depth,
-        ref_qualifier=function_ref_qualifier(el, mangled),
+        ref_qualifier=ref_qualifier,
         is_explicit=function_is_explicit(ctx, el, loc_el),
         # Hidden-friend marker: castxml records the link via the
         # ``befriending`` attribute on the class element. We resolved
@@ -546,6 +579,23 @@ def parse_function_element(
             else None
         ),
         is_compiler_generated=el.get("artificial") == "1",
+        # ADR-063 Phase 2. castxml ALWAYS emits a pseudo-Itanium `mangled`
+        # attribute, even for a plain C function (see the extern-"C"
+        # override above), so a genuine mangling is only offered when this
+        # element's own linkage says it is one -- otherwise the C-linkage
+        # case routes through `is_extern_c`, the same order
+        # `finding_identity.resolve_function_identity` applies.
+        entity_id=entity_id_for_function(
+            scope_path(ctx, el),
+            name,
+            mangled_name=None if is_extern_c else mangled,
+            is_extern_c=is_extern_c,
+            param_types=tuple(p.type for p in params),
+            is_const=is_const,
+            is_volatile=is_volatile,
+            ref_qualifier=ref_qualifier,
+            is_variadic=is_variadic,
+        ),
     )
 
 

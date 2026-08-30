@@ -79,6 +79,7 @@ from .extract.headers.castxml import (
     functions as _castxml_functions,
     location as _castxml_location,
     records as _castxml_records,
+    scope as _castxml_scope,
     type_resolution as _castxml_type_resolution,
 )
 from .extract.headers.castxml.names import (
@@ -102,6 +103,7 @@ from .model import (
     Variable,
     Visibility,
 )
+from .model.identity import ScopePath, entity_id_for_variable
 from .provenance import header_from_location
 
 
@@ -477,9 +479,26 @@ class _CastxmlParser:
             # Restricted to global scope for the same reason as the function
             # override: a namespaced C++ variable's bare leaf could
             # coincidentally match an unrelated global export.
+            #
+            # Deliberately NOT gated on ``mangled.startswith("_Z")`` (an
+            # earlier revision was): that hard-coded the Itanium mangling
+            # prefix, so a Windows CI leg's real MSVC-targeting castxml --
+            # which decorates a guessed C-linkage variable with its own
+            # ``?...@@...`` prefix, never Itanium's ``_Z`` -- silently
+            # never matched the condition at all, leaving the bogus
+            # MSVC-decorated guess standing even though the real export
+            # table already confirmed the bare name (confirmed via a real
+            # Windows CI failure, Codex review, PR #943). Nothing else in
+            # this condition is ABI-specific: `mangled not in
+            # (exported_dynamic|exported_static)` already means "not
+            # itself a real observed export" regardless of what guessed
+            # prefix produced it, so dropping the prefix check makes this
+            # override recognize the identical evidence on every mangling
+            # scheme castxml's underlying compiler can guess, not just
+            # Itanium's. Mirrors the identical fix to the sibling
+            # function-level override in extract.headers.castxml.functions.
             if (
-                mangled.startswith("_Z")
-                and mangled not in self._exported_dynamic
+                mangled not in self._exported_dynamic
                 and mangled not in self._exported_static
                 and name in (self._exported_dynamic | self._exported_static)
                 and self._is_global_scope(el)
@@ -496,6 +515,17 @@ class _CastxmlParser:
                 re.search(r"\bconst\b", type_name)
             )
             vis = self._variable_visibility(el, mangled, name)
+            # ADR-063 Phase 2: whether `mangled` is a genuine mangling at
+            # all. castxml emits a pseudo-Itanium `mangled` attribute even
+            # for a C-linkage variable, and the ELF-export override above
+            # rewrites it back to the bare name -- in both cases the symbol
+            # IS its bare name at the ABI level, which is exactly what
+            # `entity_id_for_variable`'s `is_extern_c` branch encodes.
+            # (A genuine C++ variable at *namespace* scope always mangles
+            # to a distinct `_ZN...` spelling, and the override above is
+            # itself restricted to global scope, so this cannot silently
+            # drop a real namespace from a namespaced variable's identity.)
+            symbol_is_bare_name = mangled == name
             variables.append(
                 Variable(
                     name=name,
@@ -519,6 +549,13 @@ class _CastxmlParser:
                     or self._type_alignment_bits(el.get("type", "")),
                     # See RecordType.deprecated for the message-text convention.
                     deprecated=_deprecation_marker(el),
+                    # ADR-063 Phase 2 -- see symbol_is_bare_name above.
+                    entity_id=entity_id_for_variable(
+                        self._scope_path(el),
+                        name,
+                        mangled_name=None if symbol_is_bare_name else mangled,
+                        is_extern_c=symbol_is_bare_name,
+                    ),
                 )
             )
         return variables
@@ -610,6 +647,21 @@ class _CastxmlParser:
         than one entity kind's parsing, same as ``is_builtin_element``/
         ``source_location``."""
         return _castxml_location.qualified_name(self._ctx, el)
+
+    def _scope_path(self, el: Any) -> ScopePath:
+        """*el*'s containing scope as typed ``model.identity`` segments.
+
+        The structural counterpart of :meth:`_qualified_name` (ADR-063
+        Phase 2): the identical ``context``-chain walk, keeping each parent's
+        own XML tag and ``access`` attribute instead of discarding them into
+        a flat ``"::"``-joined string. Purely additive --
+        :meth:`_qualified_name` is unchanged and still what every existing
+        consumer reads. Feeds `entity_id_for_*` (a runtime-only carrier on
+        the parsed declaration, never persisted to a snapshot -- CodeRabbit
+        review, PR #943, on the docstring going stale once that wiring
+        landed). See :func:`~.extract.headers.castxml.scope.scope_path`.
+        """
+        return _castxml_scope.scope_path(self._ctx, el)
 
     def _decl_is_public(self, el: Any) -> bool:
         """True if *el*'s declaring header classifies as a public header.

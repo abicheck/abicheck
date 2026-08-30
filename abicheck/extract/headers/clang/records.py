@@ -90,6 +90,7 @@ from ....dumper_clang_qualifiers import (
 )
 from ....dumper_clang_vtable import build_vtable, is_record_definition
 from ....model import Fact, RecordType, TypeField
+from ....model.identity import entity_id_for_type
 from .context import (
     _Decl,
     access_level,
@@ -234,6 +235,10 @@ def _build_record(
             vptr_offset_bits_fact=Fact.partial(
                 None
             ),  # heuristic field (see below), partial even here
+            # ADR-063 Phase 2: resolved from the typed scope path the walk
+            # recorded, never reconstructed from `qualified_name` (which
+            # cannot say whether a segment was a namespace or a record).
+            entity_id=entity_id_for_type(entry.scope_path, own_name),
         )
     fields = _parse_fields(node, evaluate_bitfield_int, field_default_value)
     bases, virtual_bases, _base_access = _parse_bases(node)
@@ -307,6 +312,8 @@ def _build_record(
         virtual_bases_fact=Fact.present(virtual_bases),
         vtable_fact=Fact.present(vtable),
         vptr_offset_bits_fact=Fact.partial(0 if vtable else None),
+        # ADR-063 Phase 2 -- see the opaque branch above.
+        entity_id=entity_id_for_type(entry.scope_path, own_name),
     )
 
 

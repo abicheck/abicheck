@@ -21,6 +21,7 @@ from dataclasses import dataclass, field
 from typing import Any, cast
 
 from .fact import Fact, _Omitted, bridge_legacy_and_fact
+from .identity import EntityId
 from .vocabulary import AccessLevel, ScopeOrigin
 
 # ADR-063 Phase 0: private omission sentinels for RecordType's Fact[T]-backed
@@ -188,6 +189,45 @@ class RecordType:
     vtable_fact: Fact[list[str]] | None = field(default=None, kw_only=True)
     vptr_offset_bits_fact: Fact[int | None] | None = field(default=None, kw_only=True)
 
+    # ── ADR-063 Phase 2 (third slice): the resolved identity carrier ────────
+    # The plan's Phase 2 open design question ("option (a) a real carrier
+    # field vs. option (b) defer every post-parse consumer to Phase 6") is
+    # resolved as option (a): `EntityId` is computed ONCE, at parse time --
+    # the only point the typed `ScopePath` exists at all -- and carried
+    # forward here. See docs/contribute/plans/one-semantic-pipeline.md's
+    # Phase 2 section for the full decision and its consequences.
+    #
+    # Four properties of this field are deliberate, not incidental:
+    #
+    # * `None` is a real, honest value: "no producer supplied one". Every
+    #   external caller constructing a `RecordType` directly (this is a
+    #   public API dataclass) gets `None` rather than a fabricated identity
+    #   -- inventing one from the flattened `name`/`qualified_name` is
+    #   exactly the structurally-insufficient reconstruction the plan found
+    #   cannot work.
+    # * `kw_only=True`, appended last: a public, non-keyword-only dataclass
+    #   cannot take a positional insertion without silently rebinding an
+    #   existing caller's arguments (the same reasoning
+    #   `Function.hidden_friend_owner` already records).
+    # * `compare=False`: identity is *derived* from the declaration, so
+    #   folding it into `__eq__` would make two otherwise-identical model
+    #   objects compare unequal purely on whether a producer wired it --
+    #   the same identity-vs-payload discipline `identity.Record.access`
+    #   already applies one level down.
+    # * **Not persisted.** `serialization.snapshot_to_dict` drops it
+    #   (`storage/entity_id_codec.py`); a snapshot loaded from JSON carries
+    #   `entity_id=None` for every declaration. Encoding it correctly needs
+    #   the `ScopePath`-preserving storage v2 wire DTO the plan specifies
+    #   for `storage/entity_ids.py`, which is its own reviewable slice --
+    #   and a lossy stopgap encoding (flattening `ScopePath` to a string)
+    #   is exactly the round-trip collision the plan already rejected by
+    #   name. Until that lands, no diff/report consumer may read this
+    #   field: it is present in an in-memory dump and absent from a
+    #   reloaded one, so a consumer keyed on it would answer differently
+    #   for the same two libraries depending only on whether a snapshot was
+    #   written to disk in between.
+    entity_id: EntityId | None = field(default=None, kw_only=True, compare=False)
+
     def __post_init__(self) -> None:
         self.bases, self.bases_fact = bridge_legacy_and_fact(
             self.bases, self.bases_fact, _OMITTED_BASES, []
@@ -235,6 +275,11 @@ class EnumType:
     # type-map-key reasons documented on ``RecordType.qualified_name``. None
     # when the enum is at global scope or the dumper couldn't determine it.
     qualified_name: str | None = None
+    # ADR-063 Phase 2 (third slice) identity carrier -- see
+    # RecordType.entity_id above for the full rationale, including why this
+    # is keyword-only, excluded from equality, and deliberately not
+    # persisted.
+    entity_id: EntityId | None = field(default=None, kw_only=True, compare=False)
 
 
 def record_layout_facts(
