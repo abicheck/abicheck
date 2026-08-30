@@ -37,6 +37,7 @@ here because they all emit the same ``PyInit_*`` export and link ``libpython``.
 from __future__ import annotations
 
 import re
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from . import stable_abi
@@ -245,3 +246,80 @@ def detect_python_extension(snap: AbiSnapshot) -> PythonExtMetadata | None:
         cpython_imports=cpython_imports,
         cpython_dlls=_iter_cpython_dlls(snap),
     )
+
+
+def abi3_precondition_message(abi3_floor: tuple[int, int], binary_name: str) -> str:
+    """The "not a recognisable extension module" message ``scan --abi3``'s
+    real precondition failure reports (:func:`abicheck.scan_engine.
+    _run_abi3_audit`'s ``_EvidenceContractError``) and both dry-run previews
+    of the identical precondition state -- one shared spelling so all three
+    callers describe the same failure identically rather than three
+    independently-drifting copies of the same sentence.
+    """
+    return (
+        f"--abi3 {abi3_floor[0]}.{abi3_floor[1]} was given but "
+        f"'{binary_name}' is not a recognisable CPython extension module "
+        "(no PyInit_* export and no CPython C-API imports). The stable-ABI "
+        "audit applies only to extension modules (Cython/pybind11/"
+        "nanobind/C)."
+    )
+
+
+def detect_python_extension_from_binary(path: Path) -> PythonExtMetadata | None:
+    """Cheap, binary-container-only extension recognition for dry-run previews.
+
+    ``scan --abi3``'s real run requires the candidate to be a recognisable
+    CPython extension module (:func:`detect_python_extension` against the
+    real dump's snapshot) -- but neither ``scan --dry-run`` nor
+    ``scan --artifact-set --dry-run`` builds a snapshot at all, since a dry
+    run promises no compiler/frontend invocation. This applies the identical
+    recognition logic to a snapshot built from *only* the container facts a
+    plain binary read supplies (the export table on ELF/Mach-O, the export/
+    import directory on PE) -- no DWARF, no header/build parse -- which is
+    the same "binary export table parse" the L0_binary dry-run row already
+    prices as within the dry-run contract. ``None`` for an unrecognised
+    format or a binary that does not parse (mirrors the real parsers' own
+    "empty metadata on any parse error" contract), same as a genuine
+    non-extension library.
+
+    Binary-container recognition only -- deliberately does not fall back to
+    loading *path* as a serialized snapshot (a real, supported `scan
+    ARTIFACT` input shape too): that fallback needs `serialization.
+    load_snapshot`, which itself imports this module (for
+    `PythonExtMetadata`/`detect_python_extension`), so adding the reverse
+    edge here would create a real two-module import cycle (AI-readiness
+    `import-cycle-growth`, fresh evidence). See
+    :mod:`abicheck.scan_abi3_resolve`'s own resolver for the snapshot-aware
+    orchestration that combines this function with that fallback from a
+    module that can safely depend on both.
+    """
+    from . import binary_utils
+    from .model import AbiSnapshot
+
+    # A GNU ld linker script (a dev symlink stand-in like `libfoo.so` ->
+    # `libfoo.so.1`) is itself plain text with no container magic bytes --
+    # the real run follows it via `service.resolve_input`'s own recursive
+    # resolution, so this probe must too, or a script pointing at a genuine
+    # extension module misreports "not an extension" (Codex review). A no-op
+    # for every other input (including a JSON snapshot, whose content never
+    # matches the linker-script regex).
+    path = binary_utils.resolve_linker_script_chain(Path(path))
+    fmt = binary_utils.detect_binary_format(path)
+    snap = AbiSnapshot(library=Path(path).name, version="", source_path=str(path))
+    if fmt == "elf":
+        from .elf_metadata import parse_elf_metadata
+
+        snap.elf = parse_elf_metadata(Path(path))
+    elif fmt == "pe":
+        from .pe_metadata import parse_pe_metadata
+
+        snap.pe = parse_pe_metadata(Path(path))
+    elif fmt == "macho":
+        from .macho_metadata import parse_macho_metadata
+
+        snap.macho = parse_macho_metadata(Path(path))
+    else:
+        return None
+    return detect_python_extension(snap)
+
+
