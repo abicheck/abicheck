@@ -607,6 +607,17 @@ def _domain_entity_id_from_v1_dto(data: Mapping[str, Any]) -> _DomainEntityId:
     v2 encoding the same logical declaration would produce today — this is an
     accepted, one-time migration-boundary gap (D8's "a migration adapter per
     DTO version"), not a property the wire format promises going forward.
+
+    Empty ``::``-separated components are preserved, not discarded --
+    ``storage.entity_ids.EntityId.qualified_name`` places no grammar
+    restriction on this identity-bearing string (only that it is a plain
+    ``str``), so ``"A::B"`` and ``"A::::B"`` are two structurally different,
+    equally legal values a v1 producer could have written, and dropping the
+    empty component collapsed both onto the identical scope/leaf, colliding
+    two distinct identities rather than merely losing which *kind* each
+    segment was (Codex review). Preserving it as an explicit, empty-named
+    ``Namespace`` segment keeps the two distinguishable without asserting
+    anything about what an empty component originally meant.
     """
     kind = EntityKind(_required_field(data, "kind", "an entity-id document"))
     qualified_name = _identity_text(
@@ -614,13 +625,9 @@ def _domain_entity_id_from_v1_dto(data: Mapping[str, Any]) -> _DomainEntityId:
         "qualified_name",
     )
     discriminator = _identity_text(data.get("discriminator", ""), "discriminator")
-    components = [part for part in qualified_name.split("::") if part]
-    if components:
-        *scope_names, leaf_name = components
-    else:
-        # A v1 `qualified_name` of "" or "::" alone carries no leaf name
-        # either — nothing left to recover it from.
-        scope_names, leaf_name = [], ""
+    # str.split always returns at least one element (even for "" or "::"
+    # alone), so no separate empty-input branch is needed.
+    *scope_names, leaf_name = qualified_name.split("::")
     scope: _DomainScopePath = tuple(Namespace(name=name) for name in scope_names)
     extra = (discriminator,) if discriminator else ()
     return _DomainEntityId(scope=scope, kind=kind, leaf_name=leaf_name, extra=extra)

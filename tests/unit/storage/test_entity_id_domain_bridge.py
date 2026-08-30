@@ -255,6 +255,23 @@ class TestV1MigrationAdapter:
         assert migrated.scope == (Namespace("ns"),)
         assert migrated.extra == ("int",)
 
+    def test_empty_qualified_name_components_are_preserved_not_collapsed(self) -> None:
+        """``storage.entity_ids.EntityId.qualified_name`` places no grammar
+        restriction on this string -- ``"A::B"`` and ``"A::::B"`` are two
+        equally legal, structurally different v1 values, so filtering out
+        empty ``::``-separated components collided them onto the identical
+        scope/leaf (Codex review)."""
+        without_empty = domain_entity_id_from_dto(
+            {"kind": "type", "qualified_name": "A::B"}
+        )
+        with_empty = domain_entity_id_from_dto(
+            {"kind": "type", "qualified_name": "A::::B"}
+        )
+        assert without_empty != with_empty
+        assert without_empty.scope == (Namespace("A"),)
+        assert with_empty.scope == (Namespace("A"), Namespace(""))
+        assert without_empty.leaf_name == with_empty.leaf_name == "B"
+
 
 class TestMalformedDocuments:
     def test_unknown_schema_version_is_refused(self) -> None:
