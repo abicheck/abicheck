@@ -35,12 +35,20 @@ model`` import direction requires them to live in, and re-exported here
 under their original names so every existing ``storage.entity_ids.
 EntityKind``/``storage.entity_ids.ObservationKind`` import keeps resolving
 unchanged. ``model.identity`` also defines a second, independent
-``EntityId``/``ScopePath``-based domain identity type of its own; the two
-``EntityId``s are not yet bridged (that is Phase 2's still-open wire-DTO
-work — see that phase's own "not the same claim" note in
-``docs/contribute/plans/one-semantic-pipeline.md``), so this module's
-``EntityId``/``OccurrenceId`` wire pair below is unaffected by the
-relocation beyond the two enum imports.
+``EntityId``/``ScopePath``-based domain identity type of its own.
+
+**The two ``EntityId``s are bridged, not merged, as of Phase 2's storage v2
+wire-schema slice.** ``EntityId``/``OccurrenceId`` below remain the packed-
+key wire DTO this module has always been (``kind``/``qualified_name``/
+``discriminator``, unchanged) — that shape stays the one thing a caller
+that only needs a flat, orderable, key-producing identity reaches for.
+:func:`domain_entity_id_to_dto`/:func:`domain_entity_id_from_dto` are a
+*separate* bridge pair operating on ``model.identity.EntityId`` directly,
+producing its own wire-schema-versioned JSON document (schema version 2)
+that encodes ``ScopePath`` as an explicit list of typed segment records —
+see their own docstrings for why a rendered ``qualified_name`` string
+cannot be the wire shape for that type (two distinct ``ScopePath``s can
+render identically) and for the version-1-document migration adapter.
 """
 
 from __future__ import annotations
@@ -50,7 +58,18 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
-from ..model.identity import EntityKind, ObservationKind
+from ..model.identity import (
+    Anonymous,
+    EntityId as _DomainEntityId,
+    EntityKind,
+    InlineNamespace,
+    LocalToFunction,
+    Namespace,
+    ObservationKind,
+    Record,
+    ScopePath as _DomainScopePath,
+    ScopeSegment as _DomainScopeSegment,
+)
 from .guards import (
     decision_key as _decision_key,
     enum_member as _enum_member,
@@ -62,12 +81,24 @@ from .guards import (
 )
 
 __all__ = [
+    "DOMAIN_ENTITY_ID_SCHEMA_VERSION",
     "EntityId",
     "EntityKind",
     "ObservationKind",
     "OccurrenceId",
+    "domain_entity_id_from_dto",
+    "domain_entity_id_to_dto",
     "elf_symbol_occurrence",
 ]
+
+#: Wire-schema version for :func:`domain_entity_id_to_dto`'s own document
+#: shape. Version 1 is the pre-existing bare ``kind``/``qualified_name``/
+#: ``discriminator`` shape (what this module's own :class:`EntityId`
+#: produces) — never written by :func:`domain_entity_id_to_dto` itself, but
+#: still readable by :func:`domain_entity_id_from_dto` via
+#: :func:`_domain_entity_id_from_v1_dto`, D8's "a migration adapter per DTO
+#: version."
+DOMAIN_ENTITY_ID_SCHEMA_VERSION = 2
 
 
 def _packed(*parts: str) -> str:
@@ -405,6 +436,209 @@ class OccurrenceId:
                 for pair in _row_sequence(data.get("attributes", ()), "attributes")
             ),
         )
+
+
+# --------------------------------------------------------------------------
+# model.identity.EntityId <-> wire-schema-v2 document bridge
+#
+# See this module's own docstring for why a rendered `qualified_name` string
+# (this module's pre-existing v1 EntityId shape, above) cannot be the wire
+# form for the `ScopePath`-based domain EntityId: two distinct `ScopePath`s
+# can render to the identical string, so `from_dict` reconstructing a domain
+# `EntityId` from one could not recover which one it was. `to_dto`/`from_dto`
+# below encode `ScopePath` as an explicit list of typed segment records
+# instead, one entry per segment, so no information `ScopePath` itself
+# carries is lost in the round trip.
+# --------------------------------------------------------------------------
+
+
+def _domain_segment_to_dict(segment: _DomainScopeSegment) -> dict[str, Any]:
+    """One ``ScopePath`` segment, encoded with its own kind tag.
+
+    A discriminated union of five segment types has no single "the" shape —
+    tagging each with its own ``"kind"`` string (distinct from
+    :class:`EntityKind`'s vocabulary; a scope segment and the entity it
+    contains are never the same kind of thing) is what lets
+    :func:`_domain_segment_from_dict` dispatch back to the right dataclass
+    rather than guessing from which optional keys happen to be present.
+    """
+    if isinstance(segment, Namespace):
+        return {"kind": "namespace", "name": segment.name}
+    if isinstance(segment, Record):
+        return {"kind": "record", "name": segment.name, "access": segment.access}
+    if isinstance(segment, InlineNamespace):
+        return {
+            "kind": "inline_namespace",
+            "name": segment.name,
+            "version_tag": segment.version_tag,
+        }
+    if isinstance(segment, Anonymous):
+        # `segment.kind` is that segment's OWN payload field (what kind of
+        # anonymous scope it is — "struct"/"union"/"namespace"/"enum"), not
+        # this dict's own discriminator tag — spelled `scope_kind` here so
+        # the two `"kind"`-shaped things sharing one document never collide.
+        return {
+            "kind": "anonymous",
+            "scope_kind": segment.kind,
+            "ordinal": segment.ordinal,
+        }
+    if isinstance(segment, LocalToFunction):
+        return {
+            "kind": "local_to_function",
+            # Recursive, not a bare string: `owner` is itself a full domain
+            # `EntityId` (this module's own docstring on `LocalToFunction`
+            # explains why a bare name would collide two overloads' same-named
+            # locals), so it needs the identical typed round trip this
+            # function's own caller is providing for the outer entity.
+            "owner": domain_entity_id_to_dto(segment.owner),
+            "block_ordinal": segment.block_ordinal,
+        }
+    raise TypeError(f"unrecognized ScopePath segment type: {type(segment).__name__}")
+
+
+def _domain_segment_from_dict(data: Any) -> _DomainScopeSegment:
+    """The inverse of :func:`_domain_segment_to_dict`."""
+    _mapping(data, "a scope-segment document")
+    segment_kind = _required_field(data, "kind", "a scope-segment document")
+    if segment_kind == "namespace":
+        return Namespace(
+            name=_identity_text(
+                _required_field(data, "name", "a namespace segment document"),
+                "name",
+            )
+        )
+    if segment_kind == "record":
+        return Record(
+            name=_identity_text(
+                _required_field(data, "name", "a record segment document"), "name"
+            ),
+            access=_identity_text(data.get("access", ""), "access"),
+        )
+    if segment_kind == "inline_namespace":
+        return InlineNamespace(
+            name=_identity_text(
+                _required_field(data, "name", "an inline-namespace segment document"),
+                "name",
+            ),
+            version_tag=_identity_text(data.get("version_tag", ""), "version_tag"),
+        )
+    if segment_kind == "anonymous":
+        return Anonymous(
+            kind=_identity_text(
+                _required_field(data, "scope_kind", "an anonymous segment document"),
+                "scope_kind",
+            ),
+            ordinal=_instance_of(
+                _required_field(data, "ordinal", "an anonymous segment document"),
+                int,
+                "ordinal",
+            ),
+        )
+    if segment_kind == "local_to_function":
+        return LocalToFunction(
+            owner=domain_entity_id_from_dto(
+                _required_field(data, "owner", "a local-to-function segment document")
+            ),
+            block_ordinal=_instance_of(
+                _required_field(
+                    data, "block_ordinal", "a local-to-function segment document"
+                ),
+                int,
+                "block_ordinal",
+            ),
+        )
+    raise ValueError(
+        f"unrecognized scope-segment kind {segment_kind!r} in a scope-segment document"
+    )
+
+
+def domain_entity_id_to_dto(entity_id: _DomainEntityId) -> dict[str, Any]:
+    """``model.identity.EntityId`` -> a wire-schema-v2 JSON document.
+
+    Every field ``model.identity.EntityId`` carries is represented as its
+    own typed entry — ``scope`` as a list of :func:`_domain_segment_to_dict`
+    records, ``leaf_name``/``extra`` kept as their own fields rather than
+    folded into one ``discriminator`` string — so
+    :func:`domain_entity_id_from_dto` can reconstruct the identical domain
+    object, not merely some string that happens to describe it.
+    """
+    return {
+        "schema_version": DOMAIN_ENTITY_ID_SCHEMA_VERSION,
+        "scope": [_domain_segment_to_dict(segment) for segment in entity_id.scope],
+        "kind": entity_id.kind.value,
+        "leaf_name": entity_id.leaf_name,
+        "extra": list(entity_id.extra),
+    }
+
+
+def _domain_entity_id_from_v1_dto(data: Mapping[str, Any]) -> _DomainEntityId:
+    """Best-effort reconstruction of a version-1 (``kind``/``qualified_name``/
+    ``discriminator``) document as a domain ``EntityId``.
+
+    Version 1 never recorded which kind a scope segment was — it only ever
+    stored one flat, already-rendered ``qualified_name`` string — so this is
+    necessarily lossy: every ``::``-separated component becomes an untyped
+    :class:`Namespace` segment (the closest v2 shape a v1 document's own
+    information supports), even when the real declaration nested inside a
+    record, an inline namespace, or an anonymous scope instead. A v1-loaded
+    ``EntityId`` is a best-effort reconstruction, not guaranteed equal to the
+    v2 encoding the same logical declaration would produce today — this is an
+    accepted, one-time migration-boundary gap (D8's "a migration adapter per
+    DTO version"), not a property the wire format promises going forward.
+    """
+    kind = EntityKind(_required_field(data, "kind", "an entity-id document"))
+    qualified_name = _identity_text(
+        _required_field(data, "qualified_name", "an entity-id document"),
+        "qualified_name",
+    )
+    discriminator = _identity_text(data.get("discriminator", ""), "discriminator")
+    components = [part for part in qualified_name.split("::") if part]
+    if components:
+        *scope_names, leaf_name = components
+    else:
+        # A v1 `qualified_name` of "" or "::" alone carries no leaf name
+        # either — nothing left to recover it from.
+        scope_names, leaf_name = [], ""
+    scope: _DomainScopePath = tuple(Namespace(name=name) for name in scope_names)
+    extra = (discriminator,) if discriminator else ()
+    return _DomainEntityId(scope=scope, kind=kind, leaf_name=leaf_name, extra=extra)
+
+
+def domain_entity_id_from_dto(data: Mapping[str, Any]) -> _DomainEntityId:
+    """The inverse of :func:`domain_entity_id_to_dto`.
+
+    Dispatches on ``schema_version``: an absent version, or an explicit
+    ``1``, is this module's own pre-existing v1 shape, handled by
+    :func:`_domain_entity_id_from_v1_dto`'s best-effort migration adapter; the
+    current :data:`DOMAIN_ENTITY_ID_SCHEMA_VERSION` is the lossless round
+    trip :func:`domain_entity_id_to_dto` produces. Any other version is
+    refused outright rather than guessed at — a document from a wire schema
+    this build has never written is not this function's to interpret.
+    """
+    _mapping(data, "an entity-id document")
+    version = data.get("schema_version", 1)
+    if version == 1:
+        return _domain_entity_id_from_v1_dto(data)
+    if version != DOMAIN_ENTITY_ID_SCHEMA_VERSION:
+        raise ValueError(
+            f"unsupported entity-id wire schema version: {version!r} "
+            f"(this build reads v1 and v{DOMAIN_ENTITY_ID_SCHEMA_VERSION})"
+        )
+    scope = tuple(
+        _domain_segment_from_dict(segment)
+        for segment in _row_sequence(
+            _required_field(data, "scope", "an entity-id document"), "scope"
+        )
+    )
+    kind = EntityKind(_required_field(data, "kind", "an entity-id document"))
+    leaf_name = _identity_text(
+        _required_field(data, "leaf_name", "an entity-id document"), "leaf_name"
+    )
+    extra = tuple(
+        _identity_text(entry, "an extra entry")
+        for entry in _row_sequence(data.get("extra", ()), "extra")
+    )
+    return _DomainEntityId(scope=scope, kind=kind, leaf_name=leaf_name, extra=extra)
 
 
 def elf_symbol_occurrence(

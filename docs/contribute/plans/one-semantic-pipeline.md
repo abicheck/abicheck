@@ -7941,6 +7941,74 @@ consumer migrations, now unblocked: `diff_filtering.py`'s
 `type_reachability.py`'s eleven-plus-case ambiguity machinery, with their
 string-based helpers deleted in the same PR per the Acceptance criteria.
 
+**Landed (fourth slice, 2026-08-30): (c1)'s bridge half, not its
+persistence half.** `storage/entity_ids.py` gains
+`domain_entity_id_to_dto`/`domain_entity_id_from_dto`, a wire-schema-
+versioned (`DOMAIN_ENTITY_ID_SCHEMA_VERSION = 2`) pair operating on
+`model.identity.EntityId` directly -- kept deliberately separate from this
+module's own pre-existing `EntityId`/`OccurrenceId` packed-key wire DTO
+(unchanged, still the shape a caller that only needs a flat, orderable,
+key-producing identity reaches for; `storage/identity.py`'s re-export is
+therefore unaffected, exactly as the Design section's own note predicted).
+`domain_entity_id_to_dto` encodes `ScopePath` as an explicit list of typed
+segment records (`{"kind": "namespace"|"record"|"inline_namespace"|
+"anonymous"|"local_to_function", ...}`, one entry per segment, each
+carrying that segment's own fields -- `Record.access`, `InlineNamespace.
+version_tag`, `Anonymous.{kind,ordinal}`, and `LocalToFunction`'s own
+`owner`/`block_ordinal`, with `owner` itself recursively encoded as a full
+nested `EntityId` document, not a bare string, since `LocalToFunction.owner`
+is a whole `EntityId` by the primitive's own design (see that segment's own
+docstring in `model/identity.py`) -- rather than one rendered
+`qualified_name` string, which is exactly the lossy encoding the Design
+section's own finding named (a record nested in a record vs. the same
+bare names nested in a namespace both render `"A::B"`, and a
+`from_dict`-style reconstruction from that string alone cannot recover
+which one it was). `domain_entity_id_from_dto` dispatches on
+`schema_version`: an absent version or an explicit `1` routes through
+`_domain_entity_id_from_v1_dto`, a best-effort migration adapter matching
+the Design section's own stated shape (each `::`-separated
+`qualified_name` component becomes an untyped `Namespace` segment, the
+last becomes `leaf_name`, and a non-empty `discriminator` becomes a
+single-entry `extra` tuple) -- documented, in the test suite and not only
+in prose, as a lossy reconstruction never asserted equal to a fresh v2
+encoding of the same logical declaration. Tests in
+`tests/unit/storage/test_entity_id_domain_bridge.py`: a Hypothesis
+round-trip property (`from_dto(to_dto(x)) == x`) generating arbitrary
+`EntityId`s across every `ScopePath` segment kind, plus dedicated cases for
+the exact `Record`-vs-`Namespace` and `InlineNamespace`-vs-`Namespace`
+counterexamples the Design section's own finding raised (confirmed
+distinct both before and after the round trip, and confirmed to encode to
+*different* wire documents -- not merely to reconstruct correctly, which
+alone would not rule out two different domain objects sharing one
+document by coincidence), a case pinning that `Record.access` stays
+non-identity across the bridge the same way it is in-memory (the wire
+document itself still records the real access level; only equality
+ignores it), recursive `LocalToFunction.owner` round-trips (including an
+owner that is itself local to another function), the mangled-variable
+branch's degenerate `scope=()`/`leaf_name=""` shape, and malformed-input
+refusals (an unknown `schema_version`, an unrecognized segment `"kind"`
+tag, a non-mapping document, an unrecognized `ScopeSegment` type passed
+directly to `to_dto`). Full fast unit suite green; `mypy abicheck/` and
+`ruff` both clean; `tests/unit/storage/test_landed_surface.py`'s table
+check (this plan's storage-v2 sibling document,
+`docs/contribute/plans/storage-format-v2.md`) updated with the three new
+names.
+
+**What this slice deliberately does not attempt.** No `entity_id` carrier
+field exists anywhere in `abicheck/model/` yet -- the open carrier-field
+question (option (a) vs. (b)) from the first slice is still unresolved, so
+there is nothing for a real snapshot to persist through this bridge yet.
+"Real persistence of the `entity_id` carrier with a schema bump," the
+second half of (c1) as originally scoped above, therefore stays open:
+that work is what actually wires this bridge into `AbiSnapshot`
+serialization (a `SCHEMA_VERSION` bump, `serialization.py`/
+`snapshot_cache.py` changes, and a real snapshot-level round-trip test),
+and it cannot be built before the carrier-field question is resolved --
+this slice only makes the wire *shape* ready for whichever option that
+resolution picks. (c2) (the `finding_identity.py` algorithm migration)
+and (b) (the post-parse consumer migrations) remain open exactly as
+stated above.
+
 **Correction (2026-08-29, same day, Codex review on PR #943): the
 over-broad-extern-C fix above closed one collision but left a sibling one
 open -- two uninstantiated function/method templates that share scope, leaf
