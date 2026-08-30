@@ -12,8 +12,10 @@
   `save_bundle_facts` serialize a `workflows`-owned type (`BundleFacts`), so
   they now live beside it rather than inside the module ADR-061 is moving
   towards `storage`. `abicheck.serialization` keeps resolving all four names
-  unchanged (lazily, via a module `__getattr__`, avoiding a real import
-  cycle between the two modules) — no call site changes. This also retires
+  unchanged, via four typed wrapper functions that delegate to the new
+  module lazily (avoiding a real import cycle between the two modules) — no
+  call site changes and no loss of type checking for existing callers. This
+  also retires
   a historical duplicate: `abicheck.storage.bundle_facts_validation`'s own
   copy of the `filesystem_aliases`/`library_filenames` validators is now
   called directly instead of being kept in sync by hand.
