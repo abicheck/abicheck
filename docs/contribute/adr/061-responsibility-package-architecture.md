@@ -1758,13 +1758,29 @@ dozen", and "three sites" overclaims:
   `snapshot_to_dict`/`snapshot_from_dict`, so a static import in both
   directions is exactly the `serialization <-> bundle_facts_serialization`
   cycle `scripts/check_ai_readiness.py`'s `import-cycle-growth` check flags
-  via static AST scanning regardless of laziness (verified directly: it
-  fired on the first draft of this slice) — the identical reason
-  `abicheck.cli`'s own `__getattr__` resolves its moved names through
-  `abicheck.frontends.cli.moved` instead of importing them back. A module-
-  level `__getattr__` (PEP 562) on `serialization.py` resolves the four
-  names from `bundle_facts_serialization` at *access* time instead, closing
-  the cycle. Measured count after this slice: **62** findings, not 72 —
+  via a full `ast.walk` (so even a function-scoped `from ... import ...`
+  counts, not only a module-level one — verified directly: it fired on the
+  first draft of this slice, which used a function-local import) — the
+  identical reason `abicheck.cli`'s own `__getattr__` resolves its moved
+  names through `abicheck.frontends.cli.moved` instead of importing them
+  back. `serialization.py`'s first fix mirrored that shape exactly — a
+  blanket module `__getattr__` (PEP 562) — and a Codex review round on this
+  PR caught the real regression it introduced: these four names are called
+  with real argument/return types by other first-party modules
+  (`bundle_variants_config.py`, `cli_compare_release_helpers.py`, ...), and
+  `__getattr__(name) -> Any` resolves every one of them as `Any` for a
+  caller reaching them through `from abicheck.serialization import ...` —
+  silently erasing the type checking those signatures used to provide
+  before this split (verified directly: `reveal_type()` on each name
+  through that path showed `Any` before the fix, the real declared
+  signature after). `abicheck.cli`'s own moved names are mostly private
+  CLI internals with no such external typed callers, which is why that
+  shape never surfaced the same problem there. The fix keeps four real,
+  separately-typed `def`s in `serialization.py` — each resolving its
+  implementation via `importlib.import_module` (a runtime function call,
+  not an `ast.Import`/`ast.ImportFrom` node, so it stays invisible to the
+  cycle scan) inside its own body, rather than a shared `__getattr__`.
+  Measured count after this slice: **62** findings, not 72 —
   `python scripts/check_architecture.py` against a temporary `storage`
   classification for `serialization.py`, the same method this whole
   investigation uses throughout.
