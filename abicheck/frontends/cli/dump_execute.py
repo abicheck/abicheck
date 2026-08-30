@@ -138,6 +138,24 @@ def execute_dump_cli_run(
     -- matching ``scan``'s own candidate resolution, which passes the
     identical value for the identical reason.
 
+    *allow_build_query* -- the caller passes ``True`` unconditionally here,
+    NOT ``dump_cmd``'s own ``allow_build_query`` local (Codex review, a third
+    regression). That local is the deprecated, always-``False`` no-op
+    ``--allow-build-query`` flag (``cli_options.py``: "Kept as a no-op for
+    backward compatibility"), never a real trust signal for this call.
+    Forwarding it verbatim into ``_gated_build_query_inputs`` -- a Tier-2
+    gate written for a programmatic API caller who must opt in -- nulled an
+    explicit ``--config``/``--build-query`` for this execution step alone,
+    contradicting both flags' own documented CLI contract (``--build-query``:
+    "runs automatically as trusted operator input"; ``--config``: "build.
+    query runs only from an explicit --config") and regressing
+    ``perform_elf_dump``, which forwarded both unchanged with no such gate.
+    ``dump``'s CLI is itself the trust boundary an explicit ``--config``/
+    ``--build-query`` already crossed by being typed here at all -- unlike
+    ``scan``'s config-file-sourced ``build.query``, which needs its own
+    ``resolve_effective_allow_query`` "level-implies-query" decision
+    (ADR-037 D4) precisely because it is not operator-typed.
+
     Raises:
         click.ClickException: If extraction fails (mirrors
             ``perform_elf_dump``'s own ``except`` clause exactly).

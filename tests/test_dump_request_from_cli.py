@@ -456,6 +456,16 @@ class TestExecutionConsumesTheResolvedPlan:
         # pins to "off" and L4 replay silently uses the pre-fold compiler.
         assert seen["seed_collect_mode"] == resolved.collect_mode
         assert seen["source_frontend_from_folded_context"] is True
+        # Codex review, third real regression: `dump_cmd`'s own
+        # `allow_build_query` local is the deprecated, always-False no-op
+        # `--allow-build-query` flag -- not the trust signal for this
+        # execution step. This invocation passes no `--allow-build-query`,
+        # so `allow_build_query` (the CLI local) is False; `seen`'s value
+        # must be True regardless, or an explicit `--config`/`--build-query`
+        # given on this exact command line would be silently nulled by
+        # `_gated_build_query_inputs` for the execution step alone -- see
+        # `execute_dump_cli_run`'s own docstring for the full contract.
+        assert seen["allow_build_query"] is True
 
     def test_no_parallel_public_header_derivation(self) -> None:
         """``dump_cmd`` must not re-derive the public-header split itself.
