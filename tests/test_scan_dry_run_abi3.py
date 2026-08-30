@@ -348,6 +348,68 @@ def test_artifact_set_dry_run_skips_abi3_check_when_unset(tmp_path: Path) -> Non
     assert result.exit_code == 0
 
 
+def test_artifact_set_dry_run_shows_unknown_not_zero_for_l3(tmp_path: Path) -> None:
+    """Codex review, fresh evidence: the aggregate renderer folded an
+    unknown member's (0, 0.0) into the summed L3_build total and rendered a
+    confident-looking "0 TU(s) total, ~0.00s" -- the separate [UNKNOWN note
+    bullet alone didn't stop that numeric row from misleading a reader."""
+    a = tmp_path / "a.so"
+    a.write_bytes(b"")
+    req = SimpleNamespace(
+        bundle_system_providers=(),
+        depth="build",
+        changed_src="none",
+        changed_paths=[],
+        sources=None,
+        build_info=None,
+        build_targets=(),
+        abi3_floor=None,
+    )
+    result = render_artifact_set_dry_run(
+        req,
+        discovered={"a.so": a},
+        explicit=True,
+        header_backend="auto",
+        fmt="text",
+        totals={"L3_build": (0, 0.0)},
+        notes=["build.query: .abicheck.yml [UNKNOWN: query-only build.query]"],
+        blocker=None,
+    )
+    lines = result.sections.get("Resolved depth and source scope", [])
+    l3_lines = [ln for ln in lines if ln.startswith("L3_build:")]
+    assert l3_lines == ["L3_build: TU count/cost unknown for at least one member (see notes below)"]
+    assert any("understating it" in ln for ln in lines)
+
+
+def test_artifact_set_dry_run_normal_totals_unaffected(tmp_path: Path) -> None:
+    a = tmp_path / "a.so"
+    a.write_bytes(b"")
+    req = SimpleNamespace(
+        bundle_system_providers=(),
+        depth="build",
+        changed_src="none",
+        changed_paths=[],
+        sources=None,
+        build_info=None,
+        build_targets=(),
+        abi3_floor=None,
+    )
+    result = render_artifact_set_dry_run(
+        req,
+        discovered={"a.so": a},
+        explicit=True,
+        header_backend="auto",
+        fmt="text",
+        totals={"L3_build": (5, 1.25)},
+        notes=["compile DB: compile_commands.json"],
+        blocker=None,
+    )
+    lines = result.sections.get("Resolved depth and source scope", [])
+    l3_lines = [ln for ln in lines if ln.startswith("L3_build:")]
+    assert l3_lines == ["L3_build: 5 TU(s) total, ~1.25s -- summed over 1 member(s)"]
+    assert not any("understating it" in ln for ln in lines)
+
+
 # ── _estimate_total_tus: query-only build config prices as unknown, not 0 ──
 
 

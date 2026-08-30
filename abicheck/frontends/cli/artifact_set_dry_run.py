@@ -78,12 +78,23 @@ def render_artifact_set_dry_run(
         if req.bundle_system_providers
         else None,
     )
+    # A member whose own L3 estimate is genuinely unknown (a query-only
+    # build.query, service_scan._estimate_total_tus) still contributes a
+    # numeric (0, 0.0) into `totals`'s sum -- rendering it as a confident
+    # "0 TU(s) total, ~0.00s" would read as a real near-zero cost rather
+    # than "not counted", the same defect the single-binary renderer fixes
+    # for its own per-layer row (Codex review, fresh evidence: the separate
+    # `[UNKNOWN` note bullet alone doesn't stop the numeric row from
+    # misleading a reader who only skims the totals).
+    any_unknown = any("[UNKNOWN" in n for n in notes)
     result.add(
         "Resolved depth and source scope",
         f"requested depth: {req.depth or '(auto per member)'}",
         f"changed paths ({req.changed_src}): {len(req.changed_paths)}",
         *(
-            f"{layer}: {tus} TU(s) total, ~{seconds:.2f}s -- summed over "
+            f"{layer}: TU count/cost unknown for at least one member (see notes below)"
+            if layer == "L3_build" and any_unknown
+            else f"{layer}: {tus} TU(s) total, ~{seconds:.2f}s -- summed over "
             f"{len(members)} member(s)"
             for layer, (tus, seconds) in totals.items()
         ),
@@ -91,6 +102,10 @@ def render_artifact_set_dry_run(
         "note: each member is estimated independently and summed; "
         "'bundle_audit' prices the one cross-library pass run once over "
         "the whole set (ELF/dynsym-only, no compiler invocation)",
+        "note: at least one member's TU count/cost is unknown (see above) "
+        "-- it contributes 0.0s to the projected total, understating it"
+        if any_unknown
+        else None,
         *notes,
     )
     result.add("Headers and compile context", f"ast-frontend: {header_backend}")
