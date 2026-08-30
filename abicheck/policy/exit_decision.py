@@ -577,6 +577,7 @@ def _dominant_decision(
 
 def resolve_scan_exit_decision(
     *,
+    budget_overflow_before_evidence_check: bool = False,
     evidence_contract_error: bool = False,
     budget_overflow: bool = False,
     not_comparable: bool = False,
@@ -588,43 +589,60 @@ def resolve_scan_exit_decision(
     """ADR-064's outer precedence layer for `scan`, ahead of
     :func:`resolve_compare_exit_decision`'s gate/coverage/assurance fold.
 
-    Reproduces `scan_engine.run_scan_core`'s exact raise/check order:
-    `_EvidenceContractError` aborts during evidence collection, before a
-    candidate/baseline comparison is even attempted, so it dominates
-    everything (`evidence_contract_error` wins even if the caller also
-    passes `budget_overflow=True`/`not_comparable=True` -- those axes were
-    never reached, and there is never a `prior_decision` for this axis).
-    `_BudgetOverflow` is raised by `_check_scan_budget`, called
-    *unconditionally* after a `not_comparable` result may already have been
-    decided by the same run's baseline compare -- and that call discards
-    the already-decided result rather than losing to it (the
-    `ScanOutcome`/report is never constructed once `_BudgetOverflow`
-    propagates), so `budget_overflow` wins over `not_comparable` here too,
-    not the other way around. When the budget check fires *after* a
-    comparable baseline compare already built a full gate/coverage/
-    assurance decision, pass that decision as *prior_decision* so it is
-    preserved in the returned object's own contribution fields for
-    explainability -- it did not decide `code`, but a report reader can
-    still see what it was. `not_comparable` never has a `prior_decision`
-    (no `DiffResult` exists for that outcome, so nothing was computed).
-    Returns `None` when none of the three axes apply, meaning the
-    comparison actually ran and the caller should resolve an ordinary
-    :class:`ExitDecision` for it instead (via
+    Reproduces `scan_engine.run_scan_core`'s exact raise/check order --
+    which, contrary to an earlier revision's simpler "evidence always beats
+    budget" rule, puts `_BudgetOverflow` on **both** sides of
+    `_EvidenceContractError` (Codex review, fresh evidence against the real
+    line order): candidate-snapshot collection is deadline-guarded
+    (`scan_engine.py:1180-1221`) and raises `_BudgetOverflow` if it
+    overruns, *before* `_check_scan_evidence_contract` is even called
+    (`scan_engine.py:1229`) -- so a budget overflow at that specific,
+    earlier stage preempts the evidence-contract check entirely and must
+    win. Only *after* that check passes does the run reach the baseline
+    compare's own deadline scope and the final, unconditional
+    `_check_scan_budget` call -- so a budget overflow at *those* later
+    stages comes after `_EvidenceContractError` had its chance to fire and
+    must lose to it.
+
+    *budget_overflow_before_evidence_check* is that earlier axis --
+    dominates everything, including `evidence_contract_error`, since
+    nothing after candidate-snapshot collection ever ran. There is never a
+    `prior_decision` for it either (nothing later was computed).
+    *evidence_contract_error* dominates the later *budget_overflow* and
+    *not_comparable* -- both raised by code that runs only once the
+    evidence-contract check has already passed. *budget_overflow* (the
+    later axis: the baseline compare's deadline, or the final
+    `_check_scan_budget` call after a `not_comparable` result may already
+    have been decided) discards that already-decided result rather than
+    losing to it -- the `ScanOutcome`/report is never constructed once
+    `_BudgetOverflow` propagates -- so it wins over `not_comparable` too.
+    When it fires *after* a comparable baseline compare already built a
+    full gate/coverage/assurance decision, pass that decision as
+    *prior_decision* so it is preserved in the returned object's own
+    contribution fields for explainability -- it did not decide `code`,
+    but a report reader can still see what it was. `not_comparable` never
+    has a `prior_decision` (no `DiffResult` exists for that outcome, so
+    nothing was computed). Returns `None` when none of the four axes
+    apply, meaning the comparison actually ran and the caller should
+    resolve an ordinary :class:`ExitDecision` for it instead (via
     :func:`resolve_compare_exit_decision`/:func:`resolve_exit_decision`).
 
     This is pure, additive logic (ADR-064's first stage) -- it is not yet
     called from `scan_engine.py`/`cli_scan_baseline.py`, so no existing
     call site's actually-returned exit code changes because this function
     exists. The `*_code` keyword arguments default to `scan`'s own real
-    numbers (1/5/6) but are accepted explicitly rather than hard-coded, so
-    a future caller for a different command with the same three axes (none
-    is known today) is not forced to share `scan`'s numbering, per
-    ADR-064's "numbers are not unified across commands" rule -- but a
-    custom code that does not strictly exceed a preserved prior
-    contribution raises `ValueError` (`_dominant_decision`'s own
-    docstring), rather than silently returning a self-contradictory
-    `ExitDecision`.
+    numbers (1/5/6, shared by both budget-overflow axes since they map to
+    the identical exit code regardless of which raised it) but are
+    accepted explicitly rather than hard-coded, so a future caller for a
+    different command with the same axes (none is known today) is not
+    forced to share `scan`'s numbering, per ADR-064's "numbers are not
+    unified across commands" rule -- but a custom code that does not
+    strictly exceed a preserved prior contribution raises `ValueError`
+    (`_dominant_decision`'s own docstring), rather than silently returning
+    a self-contradictory `ExitDecision`.
     """
+    if budget_overflow_before_evidence_check:
+        return _dominant_decision(budget_overflow_code, ExitReason.BUDGET_OVERFLOW)
     if evidence_contract_error:
         return _dominant_decision(
             evidence_contract_error_code, ExitReason.EVIDENCE_CONTRACT_ERROR

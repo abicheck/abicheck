@@ -290,9 +290,10 @@ class TestResolveScanExitDecision:
         assert decision.code == 5
         assert decision.reasons == (ExitReason.BUDGET_OVERFLOW,)
 
-    def test_evidence_contract_error_dominates_the_other_two(self) -> None:
+    def test_evidence_contract_error_dominates_the_later_two(self) -> None:
         """`_EvidenceContractError` aborts during evidence collection, before
-        a baseline comparison -- and therefore before budget/not-comparable
+        a baseline comparison -- and therefore before the *later* budget
+        checks (baseline-compare deadline, final check) or not-comparable
         could ever be decided -- is even attempted.
         """
         decision = resolve_scan_exit_decision(
@@ -301,6 +302,38 @@ class TestResolveScanExitDecision:
         assert decision is not None
         assert decision.code == 1
         assert decision.reasons == (ExitReason.EVIDENCE_CONTRACT_ERROR,)
+
+    def test_budget_overflow_before_evidence_check_dominates_everything(self) -> None:
+        """Codex review, fresh evidence against the real line order in
+        `scan_engine.py`: candidate-snapshot collection (its own deadline
+        scope, `scan_engine.py:1180-1221`) runs *before*
+        `_check_scan_evidence_contract` (`scan_engine.py:1229`) is even
+        called. A budget overflow at that specific, earlier stage preempts
+        the evidence-contract check entirely -- it must win even over
+        `evidence_contract_error`, reversing the ordinary (later-stage)
+        `budget_overflow` axis's own precedence relative to it.
+        """
+        decision = resolve_scan_exit_decision(
+            budget_overflow_before_evidence_check=True,
+            evidence_contract_error=True,
+            budget_overflow=True,
+            not_comparable=True,
+        )
+        assert decision is not None
+        assert decision.code == 5
+        assert decision.reasons == (ExitReason.BUDGET_OVERFLOW,)
+
+    def test_budget_overflow_before_evidence_check_alone(self) -> None:
+        decision = resolve_scan_exit_decision(
+            budget_overflow_before_evidence_check=True,
+        )
+        assert decision is not None
+        assert decision.code == 5
+        assert decision.reasons == (ExitReason.BUDGET_OVERFLOW,)
+        # Nothing later ever ran -- genuinely "not asked", same as the
+        # ordinary evidence-contract-error case.
+        assert decision.compatibility_contribution == 0
+        assert decision.contract_coverage_contribution == 0
 
     def test_custom_codes_are_honored(self) -> None:
         """The `*_code` keywords default to `scan`'s own numbers, but are

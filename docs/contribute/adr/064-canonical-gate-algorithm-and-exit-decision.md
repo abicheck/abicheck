@@ -84,17 +84,48 @@ the axes that don't apply to a given command simply absent rather than
 special-cased:
 
 ```text
-usage/config error            (outside the report entirely — 64 everywhere)
-scan evidence-contract error  (scan only, exit 1 — ADR-037 D5)
-scan budget exceeded          (scan only, exit 5 — dominates not-comparable
-                                below when both would apply in the same run)
-not comparable                (dominates the removed-library/gate pair below,
-                                but never dominates budget above — ADR-050 D2)
-removed required library    ─┐ mode-dependent rank, not a fixed slot — see
-ABI / API / policy gate      ─┘ "Removed-required-library is mode-dependent"
-coverage & assurance floors   (max-folded on top; never lowers the above)
+usage/config error              (outside the report entirely — 64 everywhere)
+scan budget exceeded            (scan only, exit 5 — ONLY the candidate-
+  (candidate-collection stage)   snapshot-collection deadline, scan_engine.py
+                                 :1180-1221; this specific stage runs BEFORE
+                                 the evidence-contract check below, so an
+                                 overflow here preempts it — see "Budget
+                                 exceeded is not one precedence slot" below)
+scan evidence-contract error    (scan only, exit 1 — ADR-037 D5)
+scan budget exceeded            (scan only, exit 5 — the baseline-compare
+  (later stages)                 deadline or the final, unconditional check;
+                                 both run only once the evidence-contract
+                                 check above has already passed, and this
+                                 axis dominates not-comparable below when
+                                 both would apply in the same run)
+not comparable                  (dominates the removed-library/gate pair
+                                 below, but never dominates either budget
+                                 slot above — ADR-050 D2)
+removed required library      ─┐ mode-dependent rank, not a fixed slot — see
+ABI / API / policy gate        ─┘ "Removed-required-library is mode-dependent"
+coverage & assurance floors     (max-folded on top; never lowers the above)
 clean
 ```
+
+**Budget exceeded is not one precedence slot — it is two, and a resolver
+that treats it as one gets the wrong answer for a real, reachable case**
+(Codex review, fresh evidence, against the real line order in
+`scan_engine.py`). `run_scan_core`'s deadline-guarded candidate-snapshot
+collection (`scan_engine.py:1180-1221`) raises `_BudgetOverflow` — and,
+critically, this runs *before* `_check_scan_evidence_contract`
+(`scan_engine.py:1229`) is even called. A pinned deep scan that both lacks
+the source evidence its depth requires *and* overruns the budget while
+still building the candidate snapshot never reaches the evidence-contract
+check at all — the real outcome is exit `5`, not exit `1`. Only the *later*
+budget checks (the baseline compare's own deadline scope, and the final,
+unconditional `_check_scan_budget` call after the comparison completes)
+run after the evidence-contract check has already had its chance to fire,
+and it is only against *those* that evidence-contract error legitimately
+wins. `abicheck/policy/exit_decision.py`'s `resolve_scan_exit_decision`
+models this as two separate boolean inputs (`budget_overflow_before_
+evidence_check` and `budget_overflow`) rather than one, precisely so a
+future caller cannot collapse them back into a single, incorrectly-ordered
+axis.
 
 **`auto`'s existing inference rule is the policy, restated, not changed:**
 a severity preset, an explicit `--severity-*` flag, a `.abicheck.yml`
