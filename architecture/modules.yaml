@@ -278,6 +278,7 @@
         "abicheck/contract_pipeline.py",
         "abicheck/contract_replay.py",
         "abicheck/contract_scoped_promotion.py",
+        "abicheck/cxx20_pair_dialect.py",
         "abicheck/debian_symbols.py",
         "abicheck/dependency_info.py",
         "abicheck/dumper_hybrid.py",
@@ -298,7 +299,6 @@
         "abicheck/service_header_scoped.py",
         "abicheck/service_input_resolution.py",
         "abicheck/service_scan.py",
-        "abicheck/service_scan_estimate.py",
         "abicheck/stack_checker.py",
         "abicheck/aggregate.py",
         "abicheck/aggregate_findings.py",
@@ -441,8 +441,7 @@
       "service_input_resolution.py",
       "service_metadata_attach.py",
       "service_render.py",
-      "service_scan.py",
-      "service_scan_estimate.py"
+      "service_scan.py"
     ],
     "reporter_": [
       "reporter_contract_blocks.py",
@@ -660,6 +659,7 @@
     "contract_replay.py",
     "contract_scoped_promotion.py",
     "ctf_metadata.py",
+    "cxx20_pair_dialect.py",
     "deadline.py",
     "debian_symbols.py",
     "debug_resolver.py",
@@ -820,7 +820,6 @@
     "service_metadata_attach.py",
     "service_render.py",
     "service_scan.py",
-    "service_scan_estimate.py",
     "severity.py",
     "snapshot_cache.py",
     "snapshot_io.py",

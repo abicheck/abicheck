@@ -5279,9 +5279,9 @@ looked like the obvious fix and wasn't.
   "annotate honestly rather than fold a floor into the summed total" shape
   `_UNSCOPED_TU_NOTE_SUFFIX` already uses for the sibling `--build-target`
   undercount case) instead of the confident-looking `0` every other
-  "nothing given" case reports. `_source_layer_estimates` (now in
-  `service_scan_estimate.py`) carries the same marker onto the derived
-  `L4_source_abi`/`L5_source_graph` notes too (Codex review, fresh
+  "nothing given" case reports. `_source_layer_estimates` carries the same
+  marker onto the derived `L4_source_abi`/`L5_source_graph` notes too
+  (Codex review, fresh
   evidence: an earlier revision of this fix only flagged L3's own row, so
   `--depth source`/`--depth graph` still priced the derived layers as a
   confident zero), and `estimate_artifact_set`'s 4th return value
