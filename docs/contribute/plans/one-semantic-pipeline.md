@@ -9123,6 +9123,31 @@ addition (no wording removed beyond redundant restatement). `mypy
 abicheck/` clean, `ruff check`/`ruff format --check` clean,
 `check_architecture.py` 0 errors.
 
+**Correction (2026-08-30, same day, Codex review on PR #943): a
+USER-DEFINED LITERAL SUFFIX (`'x'_tag`) is a fifth hazard the existing
+literal exclusion doesn't reach, since it sits OUTSIDE the quoted
+literal span rather than inside it.** Confirmed by direct compilation:
+`struct X { char v; }; constexpr X operator""_tag(char c) { return
+{c}; }; template<int _tag> void f(decltype('x'_tag));` keeps `'x'_tag`
+verbatim in clang's own qualType regardless of the non-type parameter
+`_tag`'s own name -- the existing quoted-literal exclusion in
+`canonicalize_type_param_references` checks whether a candidate
+match's start falls INSIDE a literal span (`'x'`), but a UDL suffix
+(`_tag`) is the token immediately AFTER the literal's closing quote,
+outside every recorded span, so it wasn't excluded and got substituted
+like an ordinary identifier. Fixed by also excluding any match whose
+start coincides exactly with a literal span's own end index (a UDL
+suffix always attaches with no space directly after the closing quote,
+per the language grammar, so this is a precise, not heuristic, test).
+Regression test in `tests/test_entity_id_template_discriminators.py`
+(`test_live_clang_user_defined_literal_suffix_is_not_canonicalized_as_a_param_ref`),
+confirmed to fail against the pre-fix code via `git stash` on just the
+source file and pass post-fix; every existing rename-invariance test
+still passes unchanged. `identity.py`'s own docstrings condensed
+further still to stay at the 800-line production cap after this
+addition. `mypy abicheck/` clean, `ruff check`/`ruff format --check`
+clean, `check_architecture.py` 0 errors.
+
 ---
 
 ### Phase 3 — public surface as a graph query over one evidence graph (D5)

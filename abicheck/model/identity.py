@@ -443,14 +443,10 @@ def canonicalize_type_param_references(
     (``\\b``) substitution, so a name that is a substring of another
     (``T`` inside ``TT``) is never partially replaced, and a compound
     spelling (``"T *"``) still resolves correctly (``"type-param-0 *"``).
-    Shared by :func:`entity_id_for_function` (for the ordinary parameter
-    list) and ``extract.headers.clang.functions.
-    function_template_param_kinds`` (for a non-type template parameter's
-    own declared type, referencing either a preceding type/template-
-    template parameter OR a preceding NON-TYPE one, e.g.
-    ``decltype(N)`` -- Codex review, PR #943, on a later round: both are
-    the identical hazard, just for two different sources of a "type
-    spelling that can reference a template parameter").
+    Shared by :func:`entity_id_for_function` and ``extract.headers.clang.
+    functions.function_template_param_kinds`` (for a non-type template
+    parameter's own declared type, e.g. ``decltype(N)`` -- Codex review,
+    PR #943: the identical hazard for two sources of a referencing type).
 
     All substitutions happen in ONE combined regex pass, not one ``re.sub``
     per name applied sequentially -- confirmed by direct compilation that
@@ -465,29 +461,33 @@ def canonicalize_type_param_references(
         return spelling
     # `(?<!::)` -- an EXPLICITLY globally-qualified name (`::T::X`) is a
     # namespace lookup, not a param reference, even when it collides
-    # (confirmed by direct compilation: `namespace T { struct X {}; }
-    # template<class T> void f(::T::X);` keeps `::T::X` verbatim).
-    # `(?<!\.)`/`(?<!->)` -- same hazard for MEMBER ACCESS (`S{}.N`,
-    # `((S*)0)->N`): clang keeps the member name verbatim regardless of a
-    # same-spelled parameter's own name. Both confirmed by direct
-    # compilation; substituting either anyway fingerprinted an unrelated
-    # parameter's own rename as a remove+add (Codex review, PR #943).
-    # `(?<!::template )` -- same hazard one token further, for a QUALIFIED
-    # MEMBER-TEMPLATE name (`S::template N<int>()`): `S::N` is already
-    # covered by `(?<!::)` above, but here `N` is separated from `::` by
-    # the `template` keyword and a space. Confirmed by direct compilation
-    # (Codex review, PR #943, on a later round).
+    # (confirmed: `namespace T { struct X {}; } template<class T> void
+    # f(::T::X);` keeps `::T::X` verbatim). `(?<!\.)`/`(?<!->)` -- same
+    # hazard for MEMBER ACCESS (`S{}.N`, `((S*)0)->N`); substituting either
+    # anyway fingerprinted an unrelated parameter's own rename as a
+    # remove+add (Codex review, PR #943). `(?<!::template )` -- same
+    # hazard one token further, for a QUALIFIED MEMBER-TEMPLATE name
+    # (`S::template N<int>()`): `S::N` is already covered by `(?<!::)`
+    # above, but here `N` is separated from `::` by the `template` keyword
+    # and a space (Codex review, PR #943, on a later round).
     pattern = re.compile(
         r"(?<!::)(?<!\.)(?<!->)(?<!::template )\b("
         + "|".join(re.escape(name) for name in index_by_name)
         + r")\b"
     )
     # A QUOTED LITERAL (`'N'`) is a value, not a param reference, even when
-    # it collides (confirmed by direct compilation, Codex review, PR #943).
+    # it collides (Codex review, PR #943). A USER-DEFINED LITERAL SUFFIX
+    # (`'x'_tag`) is an operator name, not a param reference, even though
+    # it sits OUTSIDE the literal span (a UDL suffix always attaches with
+    # no space directly after the closing quote) -- confirmed by direct
+    # compilation (Codex review, PR #943, on a later round).
     literal_spans = _quoted_literal_spans(spelling)
+    literal_ends = {end for _start, end in literal_spans}
 
     def _substitute(m: re.Match[str]) -> str:
         if any(start <= m.start() < end for start, end in literal_spans):
+            return m.group(0)
+        if m.start() in literal_ends:
             return m.group(0)
         return f"type-param-{index_by_name[m.group(1)]}"
 

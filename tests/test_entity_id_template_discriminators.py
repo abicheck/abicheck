@@ -641,3 +641,42 @@ def test_live_clang_qualified_member_template_name_is_not_canonicalized_as_a_par
     assert a.entity_id is not None and a.entity_id == b.entity_id
     assert "N<int>()" in a.entity_id.extra[1]
     assert "type-param" not in a.entity_id.extra[1].split("::template ")[1]
+
+
+@pytest.mark.integration
+@pytest.mark.skipif(shutil.which("clang") is None, reason="clang not installed")
+def test_live_clang_user_defined_literal_suffix_is_not_canonicalized_as_a_param_ref(
+    tmp_path: Path,
+) -> None:
+    """A USER-DEFINED LITERAL SUFFIX (`'x'_tag`) is an operator name, not a
+    reference to a template parameter, even though it collides in
+    spelling and sits immediately (no space) after the closing quote of
+    the literal it attaches to -- outside the quoted-literal span itself,
+    unlike the plain-quoted-literal case above. `struct X { char v; };
+    constexpr X operator""_tag(char c) { return {c}; } template<int _tag>
+    void f(decltype('x'_tag));` keeps `'x'_tag` verbatim in clang's own
+    `qualType` -- it does not resolve to the (here, unused) non-type
+    parameter -- so substituting it anyway fingerprinted the parameter's
+    own rename as a remove+add for an otherwise-identical declaration
+    (Codex review, PR #943, on a later round)."""
+    prelude = (
+        'struct X { char v; }; constexpr X operator""_tag(char c) { return {c}; }\n'
+    )
+    a = _one(
+        _clang_parser(
+            prelude + "template<int _tag> void f(decltype('x'_tag));",
+            tmp_path,
+            "udlsuffixa",
+        ).parse_functions(),
+        name="f",
+    )
+    b = _one(
+        _clang_parser(
+            prelude + "template<int _other> void f(decltype('x'_tag));",
+            tmp_path,
+            "udlsuffixb",
+        ).parse_functions(),
+        name="f",
+    )
+    assert a.entity_id is not None and a.entity_id == b.entity_id
+    assert a.entity_id.extra[1] == "decltype('x'_tag)"
