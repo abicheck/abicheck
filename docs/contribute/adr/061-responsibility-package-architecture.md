@@ -973,8 +973,16 @@ builds a second, execution-scoped `ResolvedDumpRequest` from the same
 `DumpRequest` `--dry-run` already resolves and calls
 `frontends.cli.dump_execute`, which runs it through
 `service_dump_pipeline.execute_dump_request` — the L3-L5 embed moved to
-resolution time, while depth enforcement and dependency scoping stay at
-write time, unchanged, in `_write_snapshot_output`. `perform_elf_dump` is
+resolution time, while depth enforcement stays at write time, unchanged, in
+`_write_snapshot_output`. Dependency scoping is not purely write-time
+either way: `service.run_dump`'s own choke point already dependency-scopes
+the snapshot at resolve time, before the ADR-039 collector/header-graph/
+clang-layout attaches run on it — this predates and is unchanged by this
+migration — so `_write_snapshot_output`'s own unchanged
+`resolve_dependency_scope` call is a second, write-time pass over an
+already-once-scoped snapshot, confirmed idempotent for the shapes this
+migration's parity suite exercises but not proven idempotent in general.
+`perform_elf_dump` is
 retired from that call site (still defined, for any other caller that
 depends on it, but no longer imported by `dump_cmd`). The legacy
 `-p`/`--compile-db` auto-match is threaded through as an explicit
