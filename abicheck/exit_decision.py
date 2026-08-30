@@ -30,6 +30,8 @@ from .policy.exit_decision import (
     ExitReason,
     resolve_compare_exit_decision,
     resolve_exit_decision,
+    resolve_release_exit_decision,
+    resolve_scan_exit_decision,
 )
 
 __all__ = [
@@ -37,4 +39,6 @@ __all__ = [
     "ExitReason",
     "resolve_compare_exit_decision",
     "resolve_exit_decision",
+    "resolve_release_exit_decision",
+    "resolve_scan_exit_decision",
 ]

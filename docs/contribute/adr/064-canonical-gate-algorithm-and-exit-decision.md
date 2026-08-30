@@ -1,12 +1,18 @@
 # ADR-064: One Canonical Gate Algorithm and Exit-Decision Precedence
 
 **Date:** 2026-08-30
-**Status:** Accepted — not implemented. `ExitDecision`'s three-axis core
-(compatibility gate, contract coverage, analysis assurance) already shipped
+**Status:** Accepted — partially implemented. `ExitDecision`'s three-axis
+core (compatibility gate, contract coverage, analysis assurance) shipped
 additively as PR G1 (#789, `abicheck/policy/exit_decision.py`) before this
-ADR was written; the full six-axis precedence this ADR pins, the release
-fan-out's `GateOptions` unification, and the `--exit-code-scheme` removal
-itself (PR G2) are not implemented. See
+ADR was written. This ADR's own additive stage has also landed:
+`resolve_scan_exit_decision`/`resolve_release_exit_decision` are pure
+functions reproducing the remaining axes' full precedence (evidence-contract
+error, budget overflow, not-comparable, the mode-dependent
+removed-required-library rank), unit-tested against the real code they
+model. Not yet implemented: wiring those two resolvers into any command's
+persisted report or actually-returned exit code (a real report-schema
+version bump), the release fan-out's `GateOptions` unification, and the
+`--exit-code-scheme` removal itself (PR G2's atomic stage). See
 [cli-cleanup-phase-two.md](../plans/cli-cleanup-phase-two.md)'s "PR 4 — one
 gate algorithm" section, which this ADR formalizes rather than restates.
 **Decision maker:** Nikolay Petrov

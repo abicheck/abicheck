@@ -88,6 +88,22 @@ class TestBothImportSpellingsWork:
         assert ExitDecision is not None
         assert resolve_exit_decision is not None
 
+    def test_from_abicheck_exit_decision_import_adr_064_resolvers(self) -> None:
+        """ADR-064's two additive resolvers (`resolve_scan_exit_decision`/
+        `resolve_release_exit_decision`) must reach the flat shim too, per
+        this file's own contract that a moved module's *full* public
+        surface stays reachable at the old path (Codex review: an earlier
+        revision added both only to `abicheck.policy.exit_decision`,
+        leaving this exact import raising `ImportError`).
+        """
+        from abicheck.exit_decision import (
+            resolve_release_exit_decision,
+            resolve_scan_exit_decision,
+        )
+
+        assert resolve_scan_exit_decision is not None
+        assert resolve_release_exit_decision is not None
+
     def test_from_abicheck_import_exit_decision(self) -> None:
         from abicheck import exit_decision
 

@@ -150,17 +150,45 @@ class ExitReason(str, Enum):
 class ExitDecision:
     """One comparison's fully explainable exit code.
 
-    ``code`` is exactly ``max(compatibility_contribution,
-    contract_coverage_contribution, analysis_assurance_contribution,
-    crosscheck_promotion_contribution)`` -- the first three are the identical
-    value today's ad hoc fold chain in ``cli._exit_with_severity_or_verdict``
-    already produces, computed once here instead of via three separately-
-    called functions; the fourth exists only for `scan --against`'s own
-    maintainer-promoted `--crosscheck KEY=error` finding and is always `0`
-    for a native `compare` report (see :class:`ExitReason.PROMOTED_
-    CROSSCHECK`). ``reasons`` names every axis tied for that maximum; see
+    ``code`` is exactly ``max()`` over every contribution field below --
+    the first four (``compatibility_contribution`` through
+    ``crosscheck_promotion_contribution``) are the axes PR G1 modeled: the
+    first three are the identical value today's ad hoc fold chain in
+    ``cli._exit_with_severity_or_verdict`` already produces, computed once
+    here instead of via three separately-called functions; the fourth
+    exists only for `scan --against`'s own maintainer-promoted
+    `--crosscheck KEY=error` finding and is always `0` for a native
+    `compare` report (see :class:`ExitReason.PROMOTED_CROSSCHECK`).
+    ``reasons`` names every axis tied for that maximum; see
     :class:`ExitReason` for why a lower, non-winning contribution is
     excluded.
+
+    The remaining four fields (``evidence_contract_error_contribution``
+    through ``removed_required_library_contribution``) are ADR-064's
+    additive extension (:func:`resolve_scan_exit_decision`/
+    :func:`resolve_release_exit_decision`, below) -- every decision built
+    by :func:`resolve_exit_decision`/:func:`resolve_compare_exit_decision`
+    (every existing call site) leaves all four at their `0` default, so
+    the invariant above is unaffected for them. A decision built by one of
+    the two ADR-064 resolvers sets *at most one* of the four to a nonzero
+    value (they are mutually exclusive by construction -- each corresponds
+    to one precedence-ordered early-return branch, never two at once), and
+    that value is always `code` itself: each of those axes' real numeric
+    code (`1`/`5`/`6`/`8`/`16`) is chosen large enough that it always
+    exceeds whatever the first four fields could independently contribute
+    (`0`-`4`), so recording a "prior" or already-available value in the
+    first four fields alongside a nonzero fifth-through-eighth field can
+    never change which one is the maximum.
+
+    **Deliberately not yet in :meth:`to_dict`.** These four fields exist so
+    the *Python object* is self-consistent and testable today; serializing
+    them into the report's persisted ``exit`` block is real, further work
+    (wiring the ADR-064 resolvers into `scan_engine.py`/
+    `cli_compare_release_helpers.py`) that also needs its own report-schema
+    version bump -- adding always-`0` keys to the shape `to_dict()`
+    produces today would itself be an unreviewed, unversioned change to the
+    already-shipped `exit` block every existing `compare`/`scan --against`
+    report emits.
     """
 
     code: int
@@ -183,6 +211,33 @@ class ExitDecision:
     #: decision through :func:`resolve_exit_decision` instead of hand-
     #: patching two of its five fields.
     crosscheck_promotion_contribution: int = 0
+
+    #: `scan` only. Nonzero (always equal to `code`) exactly when
+    #: :func:`resolve_scan_exit_decision` returned this decision because
+    #: `_EvidenceContractError` fired. `0` for every decision built any
+    #: other way.
+    evidence_contract_error_contribution: int = 0
+    #: `scan` only. Nonzero (always equal to `code`) exactly when
+    #: :func:`resolve_scan_exit_decision` returned this decision because
+    #: `_BudgetOverflow` fired. `0` for every decision built any other way.
+    budget_overflow_contribution: int = 0
+    #: Nonzero (always equal to `code`) exactly when
+    #: :func:`resolve_scan_exit_decision`/:func:`resolve_release_exit_
+    #: decision` returned this decision because the comparison was not
+    #: comparable (ADR-050 D2). `0` for every decision built any other way
+    #: -- including native `compare`'s own not-comparable outcome, which
+    #: has no `DiffResult`/`ExitDecision` at all (see
+    #: :func:`resolve_compare_exit_decision`'s own docstring).
+    not_comparable_contribution: int = 0
+    #: A directory/package release comparison only. Nonzero (always equal
+    #: to `code`) exactly when :func:`resolve_release_exit_decision`
+    #: returned this decision because removed-required-library won its
+    #: mode-dependent precedence check. `0` whenever removed-required-
+    #: library was not consulted at all (a nonzero legacy-scheme verdict/
+    #: `ERROR` contribution already won first) as well as whenever it was
+    #: consulted and lost (it wasn't set) -- both are genuinely "did not
+    #: determine this outcome," which `0` correctly states either way.
+    removed_required_library_contribution: int = 0
 
     def to_dict(self) -> dict[str, object]:
         """JSON-serializable form, for the report's ``exit`` block."""
@@ -358,18 +413,76 @@ def resolve_compare_exit_decision(
     )
 
 
-def _dominant_decision(code: int, reason: ExitReason) -> ExitDecision:
-    """One axis fully determines the outcome; the others were never
-    computed for this run (there is no `DiffResult` to compute them from),
-    so every other contribution is `0` -- not "evaluated and came out
-    clean," genuinely "not asked."
+#: Which of :class:`ExitDecision`'s four ADR-064 fields corresponds to each
+#: dominant :class:`ExitReason`. `_dominant_decision` uses this so exactly
+#: one of the four is ever set (to `code`), keeping `code == max()` over
+#: every field literally true rather than merely true "by convention."
+_DOMINANT_FIELD = {
+    ExitReason.EVIDENCE_CONTRACT_ERROR: "evidence_contract_error_contribution",
+    ExitReason.BUDGET_OVERFLOW: "budget_overflow_contribution",
+    ExitReason.NOT_COMPARABLE: "not_comparable_contribution",
+    ExitReason.REMOVED_REQUIRED_LIBRARY: "removed_required_library_contribution",
+}
+
+
+def _dominant_decision(
+    code: int,
+    reason: ExitReason,
+    *,
+    prior: ExitDecision | None = None,
+    compatibility_contribution: int = 0,
+    contract_coverage_contribution: int = 0,
+    analysis_assurance_contribution: int = 0,
+) -> ExitDecision:
+    """One of ADR-064's four axes overrides whatever the ordinary
+    gate/coverage/assurance fold would otherwise have decided.
+
+    Sets *reason*'s own dedicated field (`_DOMINANT_FIELD`) to *code* --
+    the only one of the four ADR-064 fields this decision ever sets to
+    nonzero -- so `ExitDecision`'s own `code == max()` invariant holds
+    literally, not merely "by convention," even though this decision was
+    reached by an early-return override rather than a flat fold.
+
+    *prior* is the ordinary :class:`ExitDecision` already computed for this
+    run before the dominant axis fired, when the caller has one available
+    (e.g. `scan`'s budget check runs *after* a comparable baseline compare
+    already built a full decision) -- its four PR-G1 contributions are
+    carried through so a report reader can see what the gate/coverage/
+    assurance/crosscheck axes actually were, even though they did not
+    decide `code`. The three `*_contribution` keywords are a narrower
+    escape hatch for a caller that has one or more already-computed
+    *values* available but no full prior `ExitDecision` object to pass
+    (the release fan-out's own removed-required-library and
+    not-comparable branches, which receive the aggregated verdict/severity
+    code and coverage floor as bare ints). Leave everything at its `0`
+    default -- genuinely "not asked," not "evaluated and came out clean"
+    -- only when nothing was computed at all (no `DiffResult` exists yet:
+    `scan`'s evidence-contract error).
+
+    Every dominant `code` this module produces (`1`/`5`/`6`/`8`/`16`) is
+    chosen so it always exceeds any contribution the ordinary fold or a
+    release's own severity/coverage axes can produce (`0`-`4`) -- so
+    carrying a prior/raw value through here can never make `code` stop
+    being the maximum contribution.
     """
+    dominant_field = _DOMINANT_FIELD[reason]
+    if prior is not None:
+        return ExitDecision(
+            code=code,
+            reasons=(reason,),
+            compatibility_contribution=prior.compatibility_contribution,
+            contract_coverage_contribution=prior.contract_coverage_contribution,
+            analysis_assurance_contribution=prior.analysis_assurance_contribution,
+            crosscheck_promotion_contribution=prior.crosscheck_promotion_contribution,
+            **{dominant_field: code},
+        )
     return ExitDecision(
         code=code,
         reasons=(reason,),
-        compatibility_contribution=0,
-        contract_coverage_contribution=0,
-        analysis_assurance_contribution=0,
+        compatibility_contribution=compatibility_contribution,
+        contract_coverage_contribution=contract_coverage_contribution,
+        analysis_assurance_contribution=analysis_assurance_contribution,
+        **{dominant_field: code},
     )
 
 
@@ -381,6 +494,7 @@ def resolve_scan_exit_decision(
     evidence_contract_error_code: int = 1,
     budget_overflow_code: int = 5,
     not_comparable_code: int = 6,
+    prior_decision: ExitDecision | None = None,
 ) -> ExitDecision | None:
     """ADR-064's outer precedence layer for `scan`, ahead of
     :func:`resolve_compare_exit_decision`'s gate/coverage/assurance fold.
@@ -390,15 +504,23 @@ def resolve_scan_exit_decision(
     candidate/baseline comparison is even attempted, so it dominates
     everything (`evidence_contract_error` wins even if the caller also
     passes `budget_overflow=True`/`not_comparable=True` -- those axes were
-    never reached). `_BudgetOverflow` is raised by `_check_scan_budget`,
-    called *unconditionally* after a `not_comparable` result may already
-    have been decided by the same run's baseline compare -- and that call
-    discards the already-decided result rather than losing to it (the
+    never reached, and there is never a `prior_decision` for this axis).
+    `_BudgetOverflow` is raised by `_check_scan_budget`, called
+    *unconditionally* after a `not_comparable` result may already have been
+    decided by the same run's baseline compare -- and that call discards
+    the already-decided result rather than losing to it (the
     `ScanOutcome`/report is never constructed once `_BudgetOverflow`
     propagates), so `budget_overflow` wins over `not_comparable` here too,
-    not the other way around. Returns `None` when none of the three axes
-    apply, meaning the comparison actually ran and the caller should
-    resolve an ordinary :class:`ExitDecision` for it instead (via
+    not the other way around. When the budget check fires *after* a
+    comparable baseline compare already built a full gate/coverage/
+    assurance decision, pass that decision as *prior_decision* so it is
+    preserved in the returned object's own contribution fields for
+    explainability -- it did not decide `code`, but a report reader can
+    still see what it was. `not_comparable` never has a `prior_decision`
+    (no `DiffResult` exists for that outcome, so nothing was computed).
+    Returns `None` when none of the three axes apply, meaning the
+    comparison actually ran and the caller should resolve an ordinary
+    :class:`ExitDecision` for it instead (via
     :func:`resolve_compare_exit_decision`/:func:`resolve_exit_decision`).
 
     This is pure, additive logic (ADR-064's first stage) -- it is not yet
@@ -415,7 +537,11 @@ def resolve_scan_exit_decision(
             evidence_contract_error_code, ExitReason.EVIDENCE_CONTRACT_ERROR
         )
     if budget_overflow:
-        return _dominant_decision(budget_overflow_code, ExitReason.BUDGET_OVERFLOW)
+        return _dominant_decision(
+            budget_overflow_code,
+            ExitReason.BUDGET_OVERFLOW,
+            prior=prior_decision,
+        )
     if not_comparable:
         return _dominant_decision(not_comparable_code, ExitReason.NOT_COMPARABLE)
     return None
@@ -471,12 +597,38 @@ def resolve_release_exit_decision(
     actually-returned exit code changes because this function exists.
     """
     if not_comparable:
-        return _dominant_decision(not_comparable_code, ExitReason.NOT_COMPARABLE)
+        # Both *verdict_or_severity_contribution* and
+        # *contract_coverage_contribution* are already-resolved parameters
+        # at this point regardless of which branch below would otherwise
+        # run -- `not_comparable` short-circuits *this* function's own
+        # choice among them, it does not mean nothing was computed
+        # upstream (a release's aggregated severity/coverage code is
+        # folded across every library before `_exit_compare_release` is
+        # even called). Carry them through for explainability; `16` always
+        # exceeds either (severity/verdict codes cap at `4`, coverage at
+        # `1`), so `reasons` still names only `NOT_COMPARABLE`.
+        return _dominant_decision(
+            not_comparable_code,
+            ExitReason.NOT_COMPARABLE,
+            compatibility_contribution=verdict_or_severity_contribution,
+            contract_coverage_contribution=contract_coverage_contribution,
+        )
 
     if severity_scheme_active:
         if removed_required_library:
+            # `contract_coverage_contribution` is preserved even though
+            # today's real `_exit_compare_release` never reads it once this
+            # branch's own `sys.exit(8)` fires first -- it is still an
+            # already-computed, available value (the caller resolves it
+            # unconditionally before calling this function at all), and
+            # `8` always exceeds coverage's `0`/`1` range, so preserving it
+            # cannot affect `code`/`reasons`, only the report's
+            # explainability.
             return _dominant_decision(
-                removed_required_library_code, ExitReason.REMOVED_REQUIRED_LIBRARY
+                removed_required_library_code,
+                ExitReason.REMOVED_REQUIRED_LIBRARY,
+                compatibility_contribution=verdict_or_severity_contribution,
+                contract_coverage_contribution=contract_coverage_contribution,
             )
         return resolve_exit_decision(
             compatibility_contribution=verdict_or_severity_contribution,
@@ -491,8 +643,13 @@ def resolve_release_exit_decision(
             contract_coverage_contribution=contract_coverage_contribution,
         )
     if removed_required_library:
+        # verdict_or_severity_contribution is 0 here by construction (the
+        # branch above already returned otherwise); coverage is preserved
+        # for the same reason as the severity-scheme branch above.
         return _dominant_decision(
-            removed_required_library_code, ExitReason.REMOVED_REQUIRED_LIBRARY
+            removed_required_library_code,
+            ExitReason.REMOVED_REQUIRED_LIBRARY,
+            contract_coverage_contribution=contract_coverage_contribution,
         )
     return resolve_exit_decision(
         compatibility_contribution=0,
