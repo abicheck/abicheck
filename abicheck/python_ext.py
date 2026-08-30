@@ -285,6 +285,14 @@ def detect_python_extension_from_binary(path: Path) -> PythonExtMetadata | None:
     from . import binary_utils
     from .model import AbiSnapshot
 
+    # A GNU ld linker script (a dev symlink stand-in like `libfoo.so` ->
+    # `libfoo.so.1`) is itself plain text with no container magic bytes --
+    # the real run follows it via `service.resolve_input`'s own recursive
+    # resolution, so this probe must too, or a script pointing at a genuine
+    # extension module misreports "not an extension" (Codex review). A no-op
+    # for every other input (including a JSON snapshot, whose content never
+    # matches the linker-script regex).
+    path = binary_utils.resolve_linker_script_chain(Path(path))
     fmt = binary_utils.detect_binary_format(path)
     snap = AbiSnapshot(library=Path(path).name, version="", source_path=str(path))
     if fmt == "elf":

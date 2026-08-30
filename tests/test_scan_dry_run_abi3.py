@@ -144,6 +144,30 @@ def test_detect_python_extension_from_binary_none_for_malformed_json(
     assert detect_python_extension_from_binary(path) is None
 
 
+def test_detect_python_extension_from_binary_follows_linker_script(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Codex review: a GNU ld linker script (`libfoo.so` -> `libfoo.so.1`)
+    has no container magic bytes at all -- the real run follows it via
+    `service.resolve_input`'s own recursive resolution, so this probe must
+    too, or a script pointing at a genuine extension module misreports
+    "not an extension"."""
+    real_binary = tmp_path / "libfoo.so.1"
+    real_binary.write_bytes(b"\x7fELF" + b"\x00" * 60)
+    script = tmp_path / "libfoo.so"
+    script.write_text("INPUT(libfoo.so.1)\n")
+
+    meta = ElfMetadata()
+    meta.symbols = [
+        ElfSymbol(name="PyInit_foo", binding=SymbolBinding.GLOBAL, sym_type=SymbolType.FUNC)
+    ]
+    monkeypatch.setattr("abicheck.elf_metadata.parse_elf_metadata", lambda p: meta)
+
+    result = detect_python_extension_from_binary(script)
+    assert result is not None
+    assert result.is_extension
+
+
 # ── render_scan_dry_run: validates --abi3 instead of previewing exit 0 ──
 
 
