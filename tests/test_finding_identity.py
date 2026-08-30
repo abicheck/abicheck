@@ -725,8 +725,7 @@ class TestResolveFunctionIdentity:
 
     def test_by_value_cv_delegates_to_shared_signature_primitive(self) -> None:
         # ADR-063 Phase 2: shares canonicalize_function_signature_param_type
-        # with entity_id_for_function -- drops a top-level BY-VALUE cv but
-        # keeps a POINTEE cv distinguishing.
+        # with entity_id_for_function -- drops a BY-VALUE cv, keeps a POINTEE one.
         def sig(t: str) -> str:
             f = Function(
                 name="f", mangled="f", return_type="void", params=[Param("x", t)]
@@ -735,6 +734,7 @@ class TestResolveFunctionIdentity:
 
         assert sig("int") == sig("const int")
         assert sig("char *") != sig("const char *")
+        sig("void (*)(" * 500 + "int" + ")" * 500)  # must not raise (PR #952)
 
 
 class TestResolveVariableIdentity:

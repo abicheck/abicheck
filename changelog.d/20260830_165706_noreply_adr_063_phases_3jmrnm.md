@@ -16,3 +16,11 @@
   into two distinct identities. A *pointee* cv-qualifier (`char *` vs.
   `const char *`) remains a genuine, independently-mangled overload
   discriminator and still distinguishes.
+- **`canonicalize_function_signature_param_type` no longer crashes `compare`
+  with an uncaught `RecursionError` on a pathologically nested callback
+  parameter type.** A hand-crafted or corrupted snapshot's parameter-type
+  string (e.g. hundreds of levels of nested function-pointer declarators)
+  could exhaust Python's call stack and abort the whole comparison. A
+  generous, bounded recursion depth now falls back to leaving the
+  offending fragment unnormalized instead of crashing; no real,
+  non-adversarial C++ signature is affected.
