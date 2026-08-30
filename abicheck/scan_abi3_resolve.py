@@ -55,14 +55,26 @@ def resolve_python_ext(path: Path) -> PythonExtMetadata | None:
     """Binary-container recognition first, then a serialized-snapshot
     fallback (plain, gzip, or zstd, ADR-059) -- the two real ``scan
     ARTIFACT`` input shapes a dry-run preview must recognize identically to
-    the real run's own ``service.resolve_input``."""
-    ext = python_ext.detect_python_extension_from_binary(path)
+    the real run's own ``service.resolve_input``.
+
+    Resolves a GNU ld linker script chain up front (Codex review, fresh
+    evidence): ``detect_python_extension_from_binary`` already follows one
+    to probe container bytes, but doesn't hand the resolved path back, so
+    the snapshot fallback below was re-reading the original script text
+    instead of the snapshot it actually points to -- a script pointing at a
+    real snapshot misreported "not an extension" the identical way a script
+    pointing at a real binary once did.
+    """
+    from . import binary_utils
+
+    resolved_path = binary_utils.resolve_linker_script_chain(Path(path))
+    ext = python_ext.detect_python_extension_from_binary(resolved_path)
     if ext is not None:
         return ext
     from .serialization import load_snapshot
 
     try:
-        return load_snapshot(path).python_ext
+        return load_snapshot(resolved_path).python_ext
     except Exception:
         return None
 

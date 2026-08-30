@@ -177,6 +177,43 @@ def test_resolve_python_ext_recognizes_gzip_snapshot(tmp_path: Path) -> None:
     assert result.module_name == "foo"
 
 
+def test_resolve_python_ext_follows_linker_script_to_a_snapshot(
+    tmp_path: Path,
+) -> None:
+    """Codex review, fresh evidence: `detect_python_extension_from_binary`
+    already follows a GNU ld linker script chain to probe container bytes,
+    but doesn't hand the resolved path back -- the snapshot fallback was
+    re-reading the *script's own text* (not a binary, not a snapshot) and
+    always failing, so a script pointing at a real snapshot misreported
+    "not an extension" the same way a script pointing at a real binary once
+    did."""
+    from abicheck.model import AbiSnapshot
+    from abicheck.python_ext import PythonExtMetadata
+    from abicheck.scan_abi3_resolve import resolve_python_ext
+    from abicheck.serialization import snapshot_to_json
+
+    snap = AbiSnapshot(
+        library="foo.abi3.so",
+        version="1.0",
+        elf=ElfMetadata(),
+        python_ext=PythonExtMetadata(
+            module_name="foo",
+            init_symbol="PyInit_foo",
+            python_major=3,
+            cpython_imports=["PyLong_FromLong"],
+        ),
+    )
+    real_snapshot = tmp_path / "foo.abi3.so.abi.json"
+    real_snapshot.write_text(snapshot_to_json(snap))
+    script = tmp_path / "foo.abi3.so"
+    script.write_text("INPUT(foo.abi3.so.abi.json)\n")
+
+    result = resolve_python_ext(script)
+    assert result is not None
+    assert result.is_extension
+    assert result.module_name == "foo"
+
+
 def test_detect_python_extension_from_binary_follows_linker_script(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
