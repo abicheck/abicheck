@@ -79,6 +79,7 @@ from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Generic, TypeVar
 
 from .finding_identity_atomic import canonicalize_atomic_slot
+from .model.signature_normalization import canonicalize_function_signature_param_type
 from .name_classification import canonicalize_type_name
 
 if TYPE_CHECKING:
@@ -691,23 +692,21 @@ def resolve_function_identity(func: Function) -> FindingIdentity:
     ``ref_qualifier``, which alone distinguish legal overloads with
     otherwise identical names and parameter types (``void f()`` vs.
     ``void f() const``, ``void f() &`` vs. ``void f() &&``; Codex review).
+
+    Per-parameter canonicalization delegates to ``model.signature_
+    normalization.canonicalize_function_signature_param_type`` -- the same
+    primitive ``entity_id_for_function`` uses (ADR-063 Phase 2's
+    "finding_identity.py algorithm migration") -- rather than
+    ``canonicalize_type_name`` alone, which keeps a top-level by-value
+    cv-qualifier distinguishing where the shared primitive correctly drops
+    it (``void f(int)``/``void f(const int)`` are the same function). A
+    *pointee* cv-qualifier still distinguishes either way.
     """
     param_types = (
         ()
         if func.is_extern_c
         else (
-            # canonicalize_type_name: castxml ("char const*") and clang's
-            # -ast-dump=json ("char const *") spell an otherwise-identical
-            # parameter type differently -- name_classification.py's own
-            # docstring documents this as a real, confirmed cross-producer
-            # discrepancy, and diff_symbols.py's _params_differ already
-            # compares parameter types through this function for exactly
-            # that reason. Without it, the same declaration seen from two
-            # producers would get different NORMALIZED-tier signatures
-            # here, fragmenting identity across evidence tiers the same
-            # way an uncanonicalized qualified_name/source_location would
-            # (Codex review).
-            *(canonicalize_type_name(p.type) for p in func.params),
+            *(canonicalize_function_signature_param_type(p.type) for p in func.params),
             f"const:{func.is_const}",
             f"volatile:{func.is_volatile}",
             f"ref:{func.ref_qualifier}",

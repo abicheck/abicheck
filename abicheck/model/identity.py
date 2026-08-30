@@ -15,41 +15,36 @@
 
 """``ScopePath``/``EntityId`` — the one identity primitive (ADR-063 Phase 2).
 
-**This module is a first, isolated slice of Phase 2, not the whole
-phase.** See ``docs/contribute/plans/one-semantic-pipeline.md``'s "Phase 2
-— EntityId/ScopePath as the one identity primitive" section for the full
-design, including two questions this slice deliberately leaves open:
+See ``docs/contribute/plans/one-semantic-pipeline.md``'s "Phase 2 —
+EntityId/ScopePath as the one identity primitive" section for the full
+design and landed-slice history; that ADR/plan pair, not this docstring, is
+the authoritative status record — this docstring only orients a reader
+already in the file. Landed so far: the ``ScopePath``/``EntityId`` shape
+itself; both header-AST backends deriving a typed ``ScopePath`` at parse
+time and populating a resolved ``entity_id`` carrier on
+``RecordType``/``EnumType``/``Function``/``Variable`` (the plan's "carrier
+field" question resolved as option (a) — computed once at parse time, not
+recomputed on demand); that carrier persisting through ``serialization.py``
+(schema v28); and, as a first, bounded step of the
+``finding_identity.py`` algorithm migration,
+``finding_identity.resolve_function_identity`` now canonicalizing each
+parameter via this module's own ``signature_normalization.
+canonicalize_function_signature_param_type`` (the identical primitive
+``entity_id_for_function``'s own "sig" fallback branch uses) instead of a
+second, independently-maintained copy. Still open: the mangled-name-is-
+genuine determination stays owned by ``finding_identity.
+is_real_mangled_name``/``normalize_mangled_name`` (``compare -> model``
+stays the only allowed edge, and that validation logic is not a dependency
+this module needs); giving ``Change`` an ``EntityId`` to key on; and the
+post-parse consumer migrations (``diff_filtering.py``/
+``type_reachability.py``'s string-based ambiguity machinery) — **no
+consumer may read the ``entity_id`` carrier field itself yet**.
 
-1. *Where ``ScopePath`` gets built from.* This module's ``entity_id_for_*``
-   constructors take an already-built :data:`ScopePath` as input — they do
-   not derive one from a parser's internal scope-tracking state
-   (``entry.scope`` in ``dumper_clang.py``/``dumper_castxml.py`` today is a
-   bare ``list[str]``, structurally insufficient to build a typed
-   ``ScopePath`` from; see the plan). Widening that parser state, and
-   deciding whether the resulting ``EntityId`` is computed once and carried
-   on the model object or recomputed on demand (the plan's "no carrier
-   field" open question, options (a)/(b)), is separate follow-on work.
-2. *The mangled-name-is-genuine determination.* ``entity_id_for_function``/
-   ``entity_id_for_variable`` take a caller-supplied ``mangled_name`` and
-   trust it is a real mangling, not a bare name that merely rode in the
-   mangled field (the ``extern "C"`` case). That determination stays owned
-   by ``finding_identity.is_real_mangled_name``/``normalize_mangled_name``
-   for now — this slice does not migrate that ~450-line, independently
-   reviewed Itanium-mangling-validation machinery, and
-   ``finding_identity.py`` does not yet delegate to this module. A future
-   slice is expected to move that algorithm here and make
-   ``finding_identity.resolve_function_identity`` a thin wrapper, per the
-   plan's "direction of reuse" note — not attempted here, to keep this
-   slice reviewable on its own.
-
-What *is* real and load-bearing in this slice: the ``ScopePath`` segment
-types and their identity-vs-payload field split, the ``EntityId`` shape
-itself (``scope``, ``kind``, ``leaf_name``, ``extra`` — never a bare
-``(ScopePath, kind)``, which collides sibling declarations), and the
-``EntityKind``/``ObservationKind`` relocation from ``storage.entity_ids``
-(domain vocabulary belongs in ``model``, not the storage wire layer, per
-ADR-061's ``storage -> model`` import direction — ``storage.entity_ids`` now
-imports these two enums rather than redefining them).
+``EntityKind``/``ObservationKind`` relocated here from ``storage.
+entity_ids`` (domain vocabulary belongs in ``model``, not the storage wire
+layer, per ADR-061's ``storage -> model`` import direction) —
+``storage.entity_ids`` now imports these two enums rather than redefining
+them.
 
 Leaf module: no dependency on ``checker_types``/``diff_*``/anything above
 ``model``, per ADR-063 D10.

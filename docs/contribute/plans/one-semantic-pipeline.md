@@ -9375,6 +9375,56 @@ further still to stay at the 800-line production cap after this
 addition. `mypy abicheck/` clean, `ruff check`/`ruff format --check`
 clean, `check_architecture.py` 0 errors.
 
+**Landed (sixth slice, 2026-08-30): a first, bounded piece of (c2), not
+all of it.** (c2) has two stated deliverables (see the fourth slice's own
+"Next slice" note above): the `finding_identity.py` algorithm migration
+itself, and giving `Change` an `EntityId` to key on. This slice lands only
+the first half of the first deliverable. `finding_identity.
+resolve_function_identity`'s per-parameter canonicalization -- previously
+a second, independently-maintained `canonicalize_type_name(p.type)` call,
+duplicating rather than reusing the cross-producer-spelling/cv-qualifier
+logic `entity_id_for_function`'s own `"sig"` fallback branch already
+established -- now calls `model.signature_normalization.
+canonicalize_function_signature_param_type` directly, the same primitive.
+Not a pure refactor: that primitive additionally drops a top-level
+BY-VALUE cv-qualifier (`void f(int)`/`void f(const int)` name the same
+function per the C++ standard's own linkage rules), which
+`canonicalize_type_name` deliberately does not -- so a DWARF-only,
+non-mangled function whose parameter merely gained or lost a top-level
+`const` no longer fragments into two NORMALIZED-tier identities. A
+*pointee* cv-qualifier (`char *` vs. `const char *`) remains genuinely
+distinguishing either way; both directions are pinned by new tests in
+`tests/test_finding_identity.py`
+(`test_by_value_cv_qualifier_no_longer_distinguishes_overloads`,
+`test_pointee_cv_qualifier_still_distinguishes_overloads`). The
+mangled-name-is-genuine determination (`is_real_mangled_name`/
+`normalize_mangled_name`) stays owned by `finding_identity.py`, unchanged
+-- `model/identity.py`'s own docstring already records why moving it would
+reverse the required `compare -> model` import direction (`entity_id_for_
+function`'s contract only ever needs an already-vetted mangled name as
+input, never `finding_identity`'s own validation logic). Full fast unit
+suite green; `mypy abicheck/` and `ruff check`/`ruff format --check`
+clean.
+
+**What this slice deliberately does not attempt.** `resolve_variable_
+identity` takes no `param_types` argument at all, so it has nothing
+equivalent to delegate (variables have no signature-shaped discriminator
+to canonicalize). Giving `Change` an `EntityId` to key on -- (c2)'s other,
+larger deliverable, which touches `checker_types.Change`,
+`resolve_change_identity`, and the `diff_symbols.py`/`diff_filtering.py`
+call sites that construct a `Change` -- is not attempted here; neither is
+(b), the post-parse consumer migrations (`diff_filtering.py`'s
+`_find_opaque_types`/`_find_by_value_types`/`_root_type_name` and
+`type_reachability.py`'s ambiguity machinery). Both remain open, and
+**no consumer may read the `entity_id` carrier field itself yet** --
+this slice recomputes the signature discriminator from `Function`'s own
+raw fields on every call, the same "one algorithm, not a cached value"
+discipline the carrier's own design note states, rather than reading the
+carrier `Function.entity_id` may already hold. Next slice, in order:
+give `Change` an `EntityId` (closing (c2)), then the post-parse consumer
+migrations (b), per the fourth slice's own sequencing note above, which
+this slice does not otherwise revise.
+
 ---
 
 ### Phase 3 — public surface as a graph query over one evidence graph (D5)

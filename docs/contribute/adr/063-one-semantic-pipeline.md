@@ -26,7 +26,7 @@
   path (`handle_non_elf_dump`)** — no PE/Mach-O toolchain was available to
   verify a migration against; see that same known-gaps entry.
 - **Phase 2** ("`EntityId`/`ScopePath` as the one identity primitive") has
-  landed five slices: the `ScopePath`/`EntityId` primitive itself
+  landed six slices: the `ScopePath`/`EntityId` primitive itself
   (`abicheck/model/identity.py`); both header-AST backends (`dumper_clang.py`/
   `dumper_castxml.py`) tracking scope as typed segments at parse time;
   `RecordType`/`EnumType`/`Function`/`Variable` gaining a parse-time-resolved
@@ -34,12 +34,31 @@
   carrier-field question resolved as option (a)); a `storage/entity_ids.py`
   wire-schema-v2 bridge (`domain_entity_id_to_dto`/`_from_dto`) that encodes
   `ScopePath` losslessly (a rendered `qualified_name` string cannot — two
-  distinct `ScopePath`s can render identically); and that carrier now
-  persisting through `serialization.py` (`SCHEMA_VERSION` 28). **No
-  consumer may read the carrier field yet** — the `finding_identity.py`
-  algorithm migration and the post-parse consumer migrations
-  (`diff_filtering.py`/`type_reachability.py`'s string-based ambiguity
-  machinery) are the two remaining items before Phase 2 is complete.
+  distinct `ScopePath`s can render identically); that carrier now
+  persisting through `serialization.py` (`SCHEMA_VERSION` 28); and, as the
+  sixth slice, a first, bounded piece of the `finding_identity.py` algorithm
+  migration (c2) —
+  `finding_identity.resolve_function_identity` now canonicalizes each
+  parameter through the same
+  `model.signature_normalization.canonicalize_function_signature_param_type`
+  primitive `entity_id_for_function`'s own signature-fallback branch uses,
+  rather than a second, independently-maintained
+  `canonicalize_type_name`-only pass — a real behavior fix (a top-level
+  by-value cv-qualifier no longer fragments identity, matching the C++
+  standard's own linkage rules), not only a dedup. **Still not landed: the
+  mangled-name-is-genuine determination** (`finding_identity.
+  is_real_mangled_name`/`normalize_mangled_name` stay finding_identity's own
+  — `model/identity.py`'s own docstring records why moving them would
+  reverse the required `compare -> model` import direction), **giving
+  `Change` an `EntityId` to key on** (c2's other stated deliverable), **and
+  every post-parse consumer migration** (`diff_filtering.py`/
+  `type_reachability.py`'s string-based ambiguity machinery) — **no
+  consumer may read the carrier field itself yet**, since nothing has
+  defined what the stored `entity_id`
+  means to a comparison; the algorithm-delegation slice above recomputes
+  the signature discriminator from `Function`'s own raw fields rather than
+  reading the carrier. Those are the remaining items before Phase 2 is
+  complete.
 - **Phases 3–10** are still unimplemented design text.
 
 See the [implementation plan](../plans/one-semantic-pipeline.md) for the
