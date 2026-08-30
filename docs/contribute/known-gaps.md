@@ -5258,7 +5258,7 @@ looked like the obvious fix and wasn't.
 
 - ~~Neither `scan`'s dry-run report validates `--abi3` applicability before
   reporting success~~ **Fixed (CLI cleanup phase two, PR 5 follow-up).**
-  Both `cli_scan.render_scan_dry_run` (single-binary) and
+  Both `frontends.cli.scan_dry_run.render_scan_dry_run` (single-binary) and
   `frontends.cli.artifact_set_dry_run.render_artifact_set_dry_run`
   (`--artifact-set`) now run a cheap, binary-only extension probe
   (`python_ext.detect_python_extension_from_binary` -- container-only ELF/
@@ -5275,13 +5275,23 @@ looked like the obvious fix and wasn't.
   **Fixed (CLI cleanup phase two, PR 5 follow-up).** `_estimate_total_tus`
   gained a `query_only` branch: when `req.build_config` declares a real
   `build.query` and no `--sources`/`--build-info`/compile DB is given, the
-  note is flagged `[UNKNOWN: build.query declared, ...]` (the same
+  L3 note is flagged `[UNKNOWN: build.query declared, ...]` (the same
   "annotate honestly rather than fold a floor into the summed total" shape
   `_UNSCOPED_TU_NOTE_SUFFIX` already uses for the sibling `--build-target`
   undercount case) instead of the confident-looking `0` every other
-  "nothing given" case reports. Reaches both dry-run paths uniformly, since
-  both call `estimate_scan()`. See
-  `tests/test_scan_dry_run_abi3.py::test_estimate_total_tus_query_only_config_marks_count_unknown`.
+  "nothing given" case reports. `_source_layer_estimates` (now in
+  `service_scan_estimate.py`) carries the same marker onto the derived
+  `L4_source_abi`/`L5_source_graph` notes too (Codex review, fresh
+  evidence: an earlier revision of this fix only flagged L3's own row, so
+  `--depth source`/`--depth graph` still priced the derived layers as a
+  confident zero), and `estimate_artifact_set`'s 4th return value
+  (`unknown_layers`) lets the `--artifact-set` aggregate renderer apply the
+  same per-layer treatment rather than a single project-wide flag hardcoded
+  to `L3_build`. Reaches both dry-run paths uniformly, since both call
+  `estimate_scan()`. See
+  `tests/test_scan_dry_run_abi3.py::test_estimate_total_tus_query_only_config_marks_count_unknown`
+  and its `test_estimate_scan_propagates_unknown_tu_count_to_l4_and_l5`/
+  `test_estimate_artifact_set_reports_unknown_layers_per_layer` siblings.
 
 - **Two function/method template overloads distinguished only by a
   `requires`-clause still collide under ADR-063 Phase 2's `EntityId`
