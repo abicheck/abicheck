@@ -9375,6 +9375,75 @@ further still to stay at the 800-line production cap after this
 addition. `mypy abicheck/` clean, `ruff check`/`ruff format --check`
 clean, `check_architecture.py` 0 errors.
 
+**Landed (sixth slice, 2026-08-30): (c2)'s narrower, still-real scope --
+the mangled-name-is-genuine determination moved, not the whole
+`finding_identity.py` algorithm migration.** `is_real_mangled_name`/
+`normalize_mangled_name` and the ~450-line Itanium-mangling-validation
+machinery behind them (`_looks_structurally_mangled`,
+`_looks_like_itanium_encoding` and its per-production handlers,
+`_source_name_end`/`_valid_source_name`/`_operand_looks_valid`, ...)
+relocated verbatim out of `finding_identity.py` into a new leaf module,
+`model/mangled_name_validity.py` -- not `model/identity.py` itself, and not
+`model/mangled_name.py` (that name was already taken by ADR-061 D1's
+unrelated Itanium scope-component *parsing* chain, discovered only by
+trying to write there and clobbering it, reverted via `git checkout HEAD
+--` before anything was committed). `model/identity.py` imports and
+re-exports both names under their original spelling
+(`model.identity.is_real_mangled_name` still resolves), and
+`finding_identity.py` does the same, so every existing call site --
+`resolve_symbol_identity`'s own callers included -- is unaffected;
+`buildsource/entity_identity.py`'s *own*, independently-existing
+`model/entity_identity.py`-based `is_real_mangled_name`/
+`normalize_mangled_name` (ADR-048's L5 source-graph identity, which
+deliberately calls the real `demangle` module rather than staying
+host-independent) is a genuinely separate implementation for a genuinely
+separate purpose and was not touched.
+
+This slice does **not** attempt the rest of what (c2) as originally scoped
+implied -- `resolve_function_identity`/`resolve_variable_identity`
+becoming thin wrappers over `entity_id_for_function`/`entity_id_for_
+variable` themselves, or giving `Change` an `EntityId` to key on. Those
+constructors already build their own, independently-shaped `extra` tuple
+(the tagged `"mangled"`/`"extern_c"`/`"sig"` scheme the third slice
+landed) rather than `finding_identity`'s string-joined `normalized_
+signature`, so unifying the two identity *shapes* -- not just the mangled-
+name determination feeding them -- is real, separately-reviewable follow-
+on work, not a rename. `normalized_signature`/`source_relative_identity`/
+`resolve_symbol_identity`/`resolve_function_identity`/`resolve_variable_
+identity`/`FindingIdentity` all stay in `finding_identity.py` unchanged.
+
+*Tests.* `tests/test_finding_identity.py`'s own `TestIsRealMangledName`/
+`TestLooksLikeItaniumEncoding`/`TestNormalizeMangledName`/
+`TestSourceNameEnd` classes moved with the code, verbatim, to a new file
+(`tests/test_mangled_name_validity.py`, matching the production module's
+own name -- not `tests/test_mangled_name.py`, which already existed for
+ADR-061 D1's unrelated `model/mangled_name.py` and was, like the
+production module, discovered only by momentarily clobbering it with
+`Write` and reverted via `git checkout HEAD --` before anything was
+committed) -- both to keep the test suite's module structure matching
+production, and because leaving them in place would have pushed
+`tests/test_finding_identity.py` over its own `debt-no-growth`
+adoption-baseline ceiling (this move was in fact what the architecture
+gate caught first: moving the code alone, without moving its tests, grew
+the file by the handful of lines the new re-export comment/import added).
+A new `test_module_declares_no_dependency_above_model` in
+`tests/test_mangled_name_validity.py` pins the identical leaf-module
+AST-import contract `tests/test_model_identity.py` already pins for
+`model/identity.py` itself, now for its new sibling. Full fast unit suite
+green;
+`mypy abicheck/`, `ruff check`/`ruff format --check`, and
+`check_architecture.py` all clean (`model/identity.py` sits at exactly the
+800-line production cap after the docstring trimming this move's own
+size pressure required -- see the module's own docstring for why).
+
+**What this slice deliberately does not attempt.** The rest of (c2) (unifying
+`finding_identity`'s string-keyed identity shape with `model.identity.
+EntityId`, and giving `Change` an `EntityId` to key on) and (b) (the
+post-parse consumer migrations -- `diff_filtering.py`'s `_find_opaque_
+types`/`_find_by_value_types`/`_root_type_name` and `type_reachability.py`'s
+ambiguity machinery) remain the two open items before Phase 2 can be
+considered complete.
+
 ---
 
 ### Phase 3 — public surface as a graph query over one evidence graph (D5)

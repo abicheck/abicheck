@@ -18,41 +18,35 @@
 **This module is a first, isolated slice of Phase 2, not the whole
 phase.** See ``docs/contribute/plans/one-semantic-pipeline.md``'s "Phase 2
 — EntityId/ScopePath as the one identity primitive" section for the full
-design, including two questions this slice deliberately leaves open:
+design. One question this slice deliberately leaves open: *where
+``ScopePath`` gets built from.* This module's ``entity_id_for_*``
+constructors take an already-built :data:`ScopePath` as input — they do not
+derive one from a parser's internal scope-tracking state (``entry.scope``
+in ``dumper_clang.py``/``dumper_castxml.py`` today is a bare ``list[str]``,
+structurally insufficient to build one from; see the plan). Widening that
+state, and deciding whether the resulting ``EntityId`` is computed once and
+carried on the model object or recomputed on demand (the plan's "no
+carrier field" open question, options (a)/(b)), is separate follow-on work.
 
-1. *Where ``ScopePath`` gets built from.* This module's ``entity_id_for_*``
-   constructors take an already-built :data:`ScopePath` as input — they do
-   not derive one from a parser's internal scope-tracking state
-   (``entry.scope`` in ``dumper_clang.py``/``dumper_castxml.py`` today is a
-   bare ``list[str]``, structurally insufficient to build a typed
-   ``ScopePath`` from; see the plan). Widening that parser state, and
-   deciding whether the resulting ``EntityId`` is computed once and carried
-   on the model object or recomputed on demand (the plan's "no carrier
-   field" open question, options (a)/(b)), is separate follow-on work.
-2. *The mangled-name-is-genuine determination.* ``entity_id_for_function``/
-   ``entity_id_for_variable`` take a caller-supplied ``mangled_name`` and
-   trust it is a real mangling, not a bare name that merely rode in the
-   mangled field (the ``extern "C"`` case). That determination stays owned
-   by ``finding_identity.is_real_mangled_name``/``normalize_mangled_name``
-   for now — this slice does not migrate that ~450-line, independently
-   reviewed Itanium-mangling-validation machinery, and
-   ``finding_identity.py`` does not yet delegate to this module. A future
-   slice is expected to move that algorithm here and make
-   ``finding_identity.resolve_function_identity`` a thin wrapper, per the
-   plan's "direction of reuse" note — not attempted here, to keep this
-   slice reviewable on its own.
+*The mangled-name-is-genuine determination* used to be a second open
+question — where the ~450-line Itanium-mangling-validation machinery
+deciding this should live. **No longer open**: a later slice (sixth)
+moved that algorithm from ``finding_identity.py`` into the sibling leaf
+``model/mangled_name_validity.py`` (split out once inlining it here would
+cross this module's size cap; named ``_validity`` since
+``model/mangled_name.py`` already exists for an unrelated purpose —
+ADR-061 D1's scope-component *parsing* chain), per the plan's "direction
+of reuse" note. This module re-exports :func:`is_real_mangled_name`/
+:func:`normalize_mangled_name`; ``entity_id_for_function``/
+``entity_id_for_variable`` still take an already-resolved ``mangled_name``.
 
 What *is* real and load-bearing in this slice: the ``ScopePath`` segment
 types and their identity-vs-payload field split, the ``EntityId`` shape
 itself (``scope``, ``kind``, ``leaf_name``, ``extra`` — never a bare
 ``(ScopePath, kind)``, which collides sibling declarations), and the
 ``EntityKind``/``ObservationKind`` relocation from ``storage.entity_ids``
-(domain vocabulary belongs in ``model``, not the storage wire layer, per
-ADR-061's ``storage -> model`` import direction — ``storage.entity_ids`` now
-imports these two enums rather than redefining them).
-
-Leaf module: no dependency on ``checker_types``/``diff_*``/anything above
-``model``, per ADR-063 D10.
+(``storage.entity_ids`` now imports rather than redefines them). Leaf: no
+dependency on ``checker_types``/``diff_*`` above ``model``.
 """
 
 from __future__ import annotations
@@ -63,6 +57,10 @@ from dataclasses import dataclass, field, replace
 
 from ..name_classification import canonicalize_type_name
 from .identity_literals import quoted_literal_spans as _quoted_literal_spans
+from .mangled_name_validity import (
+    is_real_mangled_name as is_real_mangled_name,
+    normalize_mangled_name as normalize_mangled_name,
+)
 from .signature_normalization import canonicalize_function_signature_param_type
 
 __all__ = [
@@ -83,6 +81,8 @@ __all__ = [
     "entity_id_for_type",
     "entity_id_for_typedef",
     "entity_id_for_variable",
+    "is_real_mangled_name",
+    "normalize_mangled_name",
     "with_mangled_name",
 ]
 

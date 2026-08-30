@@ -26,7 +26,7 @@
   path (`handle_non_elf_dump`)** — no PE/Mach-O toolchain was available to
   verify a migration against; see that same known-gaps entry.
 - **Phase 2** ("`EntityId`/`ScopePath` as the one identity primitive") has
-  landed five slices: the `ScopePath`/`EntityId` primitive itself
+  landed six slices: the `ScopePath`/`EntityId` primitive itself
   (`abicheck/model/identity.py`); both header-AST backends (`dumper_clang.py`/
   `dumper_castxml.py`) tracking scope as typed segments at parse time;
   `RecordType`/`EnumType`/`Function`/`Variable` gaining a parse-time-resolved
@@ -34,10 +34,15 @@
   carrier-field question resolved as option (a)); a `storage/entity_ids.py`
   wire-schema-v2 bridge (`domain_entity_id_to_dto`/`_from_dto`) that encodes
   `ScopePath` losslessly (a rendered `qualified_name` string cannot — two
-  distinct `ScopePath`s can render identically); and that carrier now
-  persisting through `serialization.py` (`SCHEMA_VERSION` 28). **No
-  consumer may read the carrier field yet** — the `finding_identity.py`
-  algorithm migration and the post-parse consumer migrations
+  distinct `ScopePath`s can render identically); that carrier now
+  persisting through `serialization.py` (`SCHEMA_VERSION` 28); and the
+  mangled-name-is-genuine determination (`is_real_mangled_name`/
+  `normalize_mangled_name`) relocated from `finding_identity.py` into a
+  new leaf sibling, `model/mangled_name_validity.py`, re-exported under
+  their original names from both modules. **No consumer may read the
+  carrier field yet, and `finding_identity.py`'s own identity *shape*
+  still hasn't unified with `EntityId`** — that unification (giving
+  `Change` an `EntityId` to key on) and the post-parse consumer migrations
   (`diff_filtering.py`/`type_reachability.py`'s string-based ambiguity
   machinery) are the two remaining items before Phase 2 is complete.
 - **Phases 3–10** are still unimplemented design text.
