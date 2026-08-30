@@ -38,7 +38,7 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from . import stable_abi
 
@@ -325,49 +325,3 @@ def abi3_non_extension_members(
     --abi3``'s real-run precondition, for a ``--artifact-set`` dry-run
     preview -- empty when every member qualifies."""
     return [(name, path) for name, path in members if not _qualifies_for_abi3(path)]
-
-
-def apply_abi3_dry_run_check(
-    result: Any, artifact: Path, abi3_floor: tuple[int, int] | None
-) -> None:
-    """Validate ``--abi3`` for a single-binary ``scan --dry-run`` preview,
-    mutating *result* (a :class:`~abicheck.dry_run.DryRunResult`) with a
-    blocker or an informational line. No-op when *abi3_floor* is ``None``."""
-    if abi3_floor is None:
-        return
-    blocker = abi3_single_binary_blocker(artifact, abi3_floor)
-    if blocker:
-        result.block(blocker)
-    else:
-        result.add(
-            "Consumer/contract scoping",
-            f"--abi3 {abi3_floor[0]}.{abi3_floor[1]} stable-ABI audit: will run",
-        )
-
-
-def apply_abi3_dry_run_check_set(
-    result: Any, members: list[tuple[str, Path]], abi3_floor: tuple[int, int] | None
-) -> None:
-    """The ``--artifact-set --dry-run`` sibling of
-    :func:`apply_abi3_dry_run_check`: a non-extension member doesn't abort
-    the real set-scan (``service_scan.run_scan_set``'s per-member
-    ``_EvidenceContractError`` handling), so this lists every affected
-    member rather than a single opaque blocker."""
-    if abi3_floor is None:
-        return
-    bad = abi3_non_extension_members(members)
-    if bad:
-        result.block(
-            f"--abi3 {abi3_floor[0]}.{abi3_floor[1]} was given but "
-            f"{len(bad)} of {len(members)} member(s) are not recognisable "
-            "CPython extension modules (no PyInit_* export and no CPython "
-            "C-API imports): " + ", ".join(f"{n} ({p})" for n, p in bad) +
-            ". Each such member's own scan would report "
-            "EVIDENCE_CONTRACT_ERROR (exit 1)."
-        )
-    else:
-        result.add(
-            "Consumer/contract scoping",
-            f"--abi3 {abi3_floor[0]}.{abi3_floor[1]} stable-ABI audit: "
-            f"will run for all {len(members)} member(s)",
-        )

@@ -35,7 +35,6 @@ from types import SimpleNamespace
 import pytest
 
 from abicheck.buildsource.scan_levels import EvidenceDepth, SourceMethod
-from abicheck.cli_scan import render_scan_dry_run
 from abicheck.elf_metadata import (
     ElfImport,
     ElfMetadata,
@@ -44,6 +43,7 @@ from abicheck.elf_metadata import (
     SymbolType,
 )
 from abicheck.frontends.cli.artifact_set_dry_run import render_artifact_set_dry_run
+from abicheck.frontends.cli.scan_dry_run import render_scan_dry_run
 from abicheck.python_ext import detect_python_extension_from_binary
 from abicheck.service_scan import ScanRequest, _estimate_total_tus
 

@@ -25,15 +25,17 @@ Takes the per-layer cost ``totals``/``notes`` as already-computed data
 (``cli_scan._run_artifact_set`` calls ``service_scan.estimate_artifact_set``
 and passes the result in) rather than computing them itself: a module in
 between ``cli_scan`` and ``service_scan`` that imported the latter directly
-or transitively (via a ``workflows`` seam) would join the large, already-
-accepted CLI-registration import cycle those two modules both already sit
-in (``cli -> cli_scan -> ... -> service_scan -> scan_engine ->
-cli_scan_baseline -> cli_buildsource -> cli``) -- growing that cycle's
-membership, which the AI-readiness ``import-cycle-growth`` gate rejects.
-Taking already-computed data instead means this module needs no import of
-``service_scan``/``workflows`` at all, which also happens to be the purest
-reading of ``frontends/AGENTS.md``'s "Permitted imports" (it translates a
-result into a process response; it does not compute the result itself).
+or transitively would join the large, already-accepted CLI-registration
+import cycle those two modules both already sit in (``cli -> cli_scan ->
+... -> service_scan -> scan_engine -> cli_scan_baseline -> cli_buildsource
+-> cli``) -- growing that cycle's membership, which the AI-readiness
+``import-cycle-growth`` gate rejects. It does import one leaf ``workflows``
+module, :mod:`abicheck.workflows.scan_abi3_dry_run` (the ``--abi3``
+precondition check, CLI cleanup phase two PR 5 follow-up) -- that module
+depends only on :mod:`abicheck.python_ext`, so it sits outside the
+CLI-registration cycle entirely (``frontends -> extract`` is otherwise
+forbidden by ADR-061, which is why this renderer cannot call
+``python_ext`` directly).
 """
 
 from __future__ import annotations
@@ -112,7 +114,7 @@ def render_artifact_set_dry_run(
         "audit-only, no old side)",
     )
     result.add("Output and exit-code behavior", f"format: {fmt}")
-    from ...python_ext import apply_abi3_dry_run_check_set
+    from ...workflows.scan_abi3_dry_run import apply_abi3_dry_run_check_set
 
     apply_abi3_dry_run_check_set(result, members, req.abi3_floor)
     if blocker:

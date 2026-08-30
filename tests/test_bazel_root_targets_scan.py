@@ -267,7 +267,7 @@ def test_dry_run_preview_mentions_requested_build_target_and_flags_estimate(
     it's actually a workspace-wide probe. Fixed by stating the requested
     target(s) and flagging the estimate as unscoped."""
     from abicheck.buildsource.scan_levels import EvidenceDepth, SourceMethod
-    from abicheck.cli_scan import render_scan_dry_run
+    from abicheck.frontends.cli.scan_dry_run import render_scan_dry_run
 
     result = render_scan_dry_run(
         artifact=tmp_path / "lib.so",
@@ -297,7 +297,7 @@ def test_dry_run_preview_mentions_requested_build_target_and_flags_estimate(
 
 def test_dry_run_preview_omits_build_target_note_when_unset(tmp_path: Path) -> None:
     from abicheck.buildsource.scan_levels import EvidenceDepth, SourceMethod
-    from abicheck.cli_scan import render_scan_dry_run
+    from abicheck.frontends.cli.scan_dry_run import render_scan_dry_run
 
     result = render_scan_dry_run(
         artifact=tmp_path / "lib.so",
