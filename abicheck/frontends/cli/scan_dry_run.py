@@ -87,8 +87,6 @@ def render_scan_dry_run(
     *,
     artifact: Path,
     against: Path | None,
-    headers: list[Path],
-    includes: list[Path],
     sources: Path | None,
     effective_build_info: Path | None,
     changed: list[str],
@@ -98,21 +96,30 @@ def render_scan_dry_run(
     eff_depth_enum: EvidenceDepth,
     resolved: SourceMethod,
     collect_mode: str,
-    budget_s: float | None,
-    lang: str,
     header_backend: str,
     fmt: str,
     build_targets: tuple[str, ...] = (),
     scheme_label: str = "legacy (0/2/4)",
     sev_config: Any = None,
     abi3_floor: tuple[int, int] | None = None,
-    build_config: Path | None = None,
+    estimates: list[Any] | None = None,
+    estimate_error: str | None = None,
 ) -> Any:
     """Build the ``scan --dry-run`` report (ADR-043 D4): resolve, never scan.
 
-    Reuses :func:`service.estimate_scan`'s per-layer cost/TU-count probe (the
-    same read-only projection ``--estimate`` used to provide) so the report
-    also states how many translation units the resolved level would touch.
+    *estimates* is the caller's already-computed
+    :func:`~abicheck.service_scan.estimate_scan` result (the same read-only
+    per-layer cost/TU-count projection ``--estimate`` used to provide), and
+    *estimate_error* is set instead when computing it raised. Taken as
+    already-computed data rather than resolved here so this module needs no
+    import of ``service_scan`` itself: it already sits on the large,
+    already-accepted CLI-registration import cycle (``cli -> cli_scan ->
+    frontends.cli.scan_dry_run -> ...``), and importing it directly from here
+    would grow that cycle's membership (AI-readiness ``import-cycle-growth``,
+    fresh evidence) -- the identical reason
+    :mod:`abicheck.frontends.cli.artifact_set_dry_run` takes its own
+    ``totals``/``notes`` as already-computed data instead of calling
+    ``estimate_artifact_set`` itself.
 
     *scheme_label*/*sev_config* describe this invocation's **already-resolved**
     gate (the caller resolves them before emitting), so the preview states the
@@ -126,7 +133,6 @@ def render_scan_dry_run(
     via :func:`~abicheck.workflows.scan_abi3_dry_run.apply_abi3_dry_run_check`.
     """
     from ...dry_run import DryRunResult, tool_status
-    from ...service_scan import Budget, ScanRequest, estimate_scan
     from ...workflows.scan_abi3_dry_run import apply_abi3_dry_run_check
 
     result = DryRunResult(command="scan")
@@ -164,24 +170,9 @@ def render_scan_dry_run(
         f"format: {fmt}",
         *_dry_run_exit_code_lines(scheme_label, sev_config, against),
     )
-    try:
-        req = ScanRequest(
-            binaries=[artifact],
-            headers=headers,
-            includes=includes,
-            sources=sources,
-            build_info=effective_build_info,
-            mode="pr",
-            source_method=resolved.value,
-            depth=eff_depth_enum.value,
-            changed_paths=list(changed),
-            seeded=seeded,
-            budget=Budget(total_timeout=budget_s),
-            lang=lang,
-            build_targets=build_targets,
-            build_config=build_config,
-        )
-        estimates = estimate_scan(req, resolved_level=(resolved, eff_depth_enum))
+    if estimate_error is not None:
+        result.warn(f"could not project per-layer cost: {estimate_error}")
+    elif estimates is not None:
         total = sum(e.est_seconds for e in estimates)
         result.add(
             "Resolved depth and source scope",
@@ -213,6 +204,4 @@ def render_scan_dry_run(
             if any("[UNKNOWN" in e.note for e in estimates)
             else None,
         )
-    except Exception as exc:  # pragma: no cover - best-effort probe
-        result.warn(f"could not project per-layer cost: {exc}")
     return result

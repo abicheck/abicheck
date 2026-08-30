@@ -92,15 +92,18 @@ def test_detect_python_extension_from_binary_none_for_plain_library(
     assert detect_python_extension_from_binary(path) is None
 
 
-def test_detect_python_extension_from_binary_recognizes_json_snapshot(
-    tmp_path: Path,
-) -> None:
+def test_resolve_python_ext_recognizes_json_snapshot(tmp_path: Path) -> None:
     """Codex review: `scan ARTIFACT` also accepts a pre-dumped JSON snapshot
     (no container magic bytes at all), and the real --abi3 run recognizes
     such an input's already-embedded `python_ext` fact directly -- the
-    binary-only probe must not misreport it as "not an extension"."""
+    dry-run resolver's binary-only probe alone must not misreport it as "not
+    an extension"; the snapshot fallback (`scan_abi3_resolve.
+    resolve_python_ext`, not `python_ext.detect_python_extension_from_binary`
+    itself -- see that function's own docstring for why the two are split
+    across modules) closes the gap."""
     from abicheck.model import AbiSnapshot
     from abicheck.python_ext import PythonExtMetadata
+    from abicheck.scan_abi3_resolve import resolve_python_ext
     from abicheck.serialization import snapshot_to_json
 
     snap = AbiSnapshot(
@@ -117,7 +120,7 @@ def test_detect_python_extension_from_binary_recognizes_json_snapshot(
     path = tmp_path / "foo.abi.json"
     path.write_text(snapshot_to_json(snap))
 
-    result = detect_python_extension_from_binary(path)
+    result = resolve_python_ext(path)
     assert result is not None
     assert result.is_extension
     assert result.module_name == "foo"
@@ -144,15 +147,14 @@ def test_detect_python_extension_from_binary_none_for_malformed_json(
     assert detect_python_extension_from_binary(path) is None
 
 
-def test_detect_python_extension_from_binary_recognizes_gzip_snapshot(
-    tmp_path: Path,
-) -> None:
+def test_resolve_python_ext_recognizes_gzip_snapshot(tmp_path: Path) -> None:
     """Codex review, second round: `load_snapshot` transparently decompresses
     gzip/zstd (ADR-059), and `service.resolve_input` accepts such a snapshot
-    directly -- the probe's earlier fix only checked for a raw `{` byte,
+    directly -- the resolver's earlier fix only checked for a raw `{` byte,
     which a compressed snapshot never starts with."""
     from abicheck.model import AbiSnapshot
     from abicheck.python_ext import PythonExtMetadata
+    from abicheck.scan_abi3_resolve import resolve_python_ext
     from abicheck.serialization import write_snapshot
 
     snap = AbiSnapshot(
@@ -169,7 +171,7 @@ def test_detect_python_extension_from_binary_recognizes_gzip_snapshot(
     path = tmp_path / "foo.abi.json.gz"
     write_snapshot(snap, path, compression="gzip")
 
-    result = detect_python_extension_from_binary(path)
+    result = resolve_python_ext(path)
     assert result is not None
     assert result.is_extension
     assert result.module_name == "foo"
@@ -190,7 +192,9 @@ def test_detect_python_extension_from_binary_follows_linker_script(
 
     meta = ElfMetadata()
     meta.symbols = [
-        ElfSymbol(name="PyInit_foo", binding=SymbolBinding.GLOBAL, sym_type=SymbolType.FUNC)
+        ElfSymbol(
+            name="PyInit_foo", binding=SymbolBinding.GLOBAL, sym_type=SymbolType.FUNC
+        )
     ]
     monkeypatch.setattr("abicheck.elf_metadata.parse_elf_metadata", lambda p: meta)
 
@@ -206,8 +210,6 @@ def _dry_run_kwargs(tmp_path: Path, **overrides: object) -> dict[str, object]:
     kwargs: dict[str, object] = dict(
         artifact=tmp_path / "lib.so",
         against=None,
-        headers=[],
-        includes=[],
         sources=None,
         effective_build_info=None,
         changed=[],
@@ -217,8 +219,6 @@ def _dry_run_kwargs(tmp_path: Path, **overrides: object) -> dict[str, object]:
         eff_depth_enum=EvidenceDepth.BINARY,
         resolved=SourceMethod.S0,
         collect_mode="off",
-        budget_s=None,
-        lang="c++",
         header_backend="auto",
         fmt="text",
     )
@@ -377,7 +377,9 @@ def test_artifact_set_dry_run_shows_unknown_not_zero_for_l3(tmp_path: Path) -> N
     )
     lines = result.sections.get("Resolved depth and source scope", [])
     l3_lines = [ln for ln in lines if ln.startswith("L3_build:")]
-    assert l3_lines == ["L3_build: TU count/cost unknown for at least one member (see notes below)"]
+    assert l3_lines == [
+        "L3_build: TU count/cost unknown for at least one member (see notes below)"
+    ]
     assert any("understating it" in ln for ln in lines)
 
 
@@ -446,10 +448,30 @@ def test_render_scan_dry_run_wires_build_config_and_shows_unknown_not_zero(
     ``ScanRequest`` without ``build_config`` at all, so the branch was
     unreachable from ``scan --dry-run`` itself), and the rendered preview
     must not report a numeric "0 TU(s), ~0.00s" for a count that is
-    genuinely unknown rather than counted as zero."""
+    genuinely unknown rather than counted as zero.
+
+    ``render_scan_dry_run`` itself takes ``estimates``/``estimate_error`` as
+    already-computed data (it must not import ``service_scan`` -- see its
+    own docstring), so this test computes them exactly the way
+    ``cli_scan.py``'s ``scan_cmd`` does before calling it, to genuinely
+    exercise the query-only ``_estimate_total_tus`` branch end to end.
+    """
+    from abicheck.service_scan import Budget, estimate_scan
+
     config_path = tmp_path / ".abicheck.yml"
     config_path.write_text(
         'build:\n  query: "cmake --build . --target compile_commands"\n'
+    )
+    estimate_req = ScanRequest(
+        binaries=[tmp_path / "lib.so"],
+        mode="pr",
+        source_method=SourceMethod.S1.value,
+        depth=EvidenceDepth.BUILD.value,
+        budget=Budget(total_timeout=None),
+        build_config=config_path,
+    )
+    estimates = estimate_scan(
+        estimate_req, resolved_level=(SourceMethod.S1, EvidenceDepth.BUILD)
     )
     result = render_scan_dry_run(
         **_dry_run_kwargs(
@@ -458,14 +480,16 @@ def test_render_scan_dry_run_wires_build_config_and_shows_unknown_not_zero(
             eff_depth_enum=EvidenceDepth.BUILD,
             resolved=SourceMethod.S1,
             collect_mode="build",
-            build_config=config_path,
+            estimates=estimates,
         )
     )
     lines = result.sections.get("Resolved depth and source scope", [])
     l3_lines = [ln for ln in lines if ln.startswith("L3_build:")]
-    assert l3_lines == ["L3_build: TU count/cost unknown -- build.query: .abicheck.yml "
-                         "[UNKNOWN: query-only build.query, real run's trusted query "
-                         "determines the actual count]"]
+    assert l3_lines == [
+        "L3_build: TU count/cost unknown -- build.query: .abicheck.yml "
+        "[UNKNOWN: query-only build.query, real run's trusted query "
+        "determines the actual count]"
+    ]
     assert any("understating it" in ln for ln in lines)
 
 

@@ -20,10 +20,17 @@ which may not import ``python_ext`` (``extract``) directly.
 
 :func:`apply_abi3_dry_run_check`/:func:`apply_abi3_dry_run_check_set` are the
 one place ``scan --dry-run``/``scan --artifact-set --dry-run`` validate
-``--abi3`` against the same recognition
-:func:`~abicheck.python_ext.detect_python_extension_from_binary` applies, so
-a preview cannot drift from what the real run's
-:func:`~abicheck.scan_engine._run_abi3_audit` precondition actually checks.
+``--abi3`` against the same recognition the real run's
+:func:`~abicheck.scan_engine._run_abi3_audit` precondition checks, so a
+preview cannot drift from it. The candidate-resolution logic itself
+(binary-container recognition, then a serialized-snapshot fallback) lives in
+:mod:`abicheck.scan_abi3_resolve` -- a *flat* ``workflows``-legacy module,
+not this migrated package -- because it needs ``serialization.
+load_snapshot``, which has no ADR-061 layer classification of its own; a
+module physically under this migrated ``workflows/`` package may not import
+an unclassified first-party module (``scripts/check_architecture.py``'s
+``unclassified-import`` check), while a flat legacy-paths sibling can. See
+that module's own docstring for the full reasoning.
 """
 
 from __future__ import annotations
@@ -31,7 +38,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from ..python_ext import abi3_non_extension_members, abi3_single_binary_blocker
+from ..scan_abi3_resolve import abi3_non_extension_members, abi3_single_binary_blocker
 
 
 def apply_abi3_dry_run_check(
@@ -68,8 +75,9 @@ def apply_abi3_dry_run_check_set(
             f"--abi3 {abi3_floor[0]}.{abi3_floor[1]} was given but "
             f"{len(bad)} of {len(members)} member(s) are not recognisable "
             "CPython extension modules (no PyInit_* export and no CPython "
-            "C-API imports): " + ", ".join(f"{n} ({p})" for n, p in bad) +
-            ". Each such member's own scan would report "
+            "C-API imports): "
+            + ", ".join(f"{n} ({p})" for n, p in bad)
+            + ". Each such member's own scan would report "
             "EVIDENCE_CONTRACT_ERROR (exit 1)."
         )
     else:
@@ -80,4 +88,7 @@ def apply_abi3_dry_run_check_set(
         )
 
 
-__all__ = ["apply_abi3_dry_run_check", "apply_abi3_dry_run_check_set"]
+__all__ = [
+    "apply_abi3_dry_run_check",
+    "apply_abi3_dry_run_check_set",
+]

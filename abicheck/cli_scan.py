@@ -1694,13 +1694,44 @@ def scan_cmd(
     if dry_run:
         from .dry_run import emit_dry_run
         from .frontends.cli.scan_dry_run import render_scan_dry_run
+        from .service import Budget, ScanRequest, estimate_scan
+
+        # Computed here, not inside render_scan_dry_run: that module is a
+        # canonical frontends/cli/ file, which must not import service_scan
+        # directly -- doing so once already grew the large, already-accepted
+        # CLI-registration import cycle (AI-readiness import-cycle-growth,
+        # fresh evidence), the same reason artifact_set_dry_run.py takes its
+        # own totals/notes as already-computed data instead of calling
+        # estimate_artifact_set itself.
+        try:
+            estimate_req = ScanRequest(
+                binaries=[artifact],
+                headers=list(headers),
+                includes=list(includes),
+                sources=sources,
+                build_info=effective_build_info,
+                mode="pr",
+                source_method=resolved.value,
+                depth=eff_depth_enum.value,
+                changed_paths=list(changed),
+                seeded=seeded,
+                budget=Budget(total_timeout=budget_s),
+                lang=lang,
+                build_targets=build_targets,
+                build_config=build_config,
+            )
+            estimates = estimate_scan(
+                estimate_req, resolved_level=(resolved, eff_depth_enum)
+            )
+            estimate_error = None
+        except Exception as exc:  # pragma: no cover - best-effort probe
+            estimates = None
+            estimate_error = str(exc)
 
         emit_dry_run(
             render_scan_dry_run(
                 artifact=artifact,
                 against=against,
-                headers=list(headers),
-                includes=list(includes),
                 sources=sources,
                 effective_build_info=effective_build_info,
                 changed=changed,
@@ -1710,15 +1741,14 @@ def scan_cmd(
                 eff_depth_enum=eff_depth_enum,
                 resolved=resolved,
                 collect_mode=collect_mode,
-                budget_s=budget_s,
-                lang=lang,
                 header_backend=header_backend,
                 fmt=fmt,
                 build_targets=build_targets,
                 scheme_label=scheme_label,
                 sev_config=sev_config_for_preview,
                 abi3_floor=abi3_floor,
-                build_config=build_config,
+                estimates=estimates,
+                estimate_error=estimate_error,
             )
         )
 

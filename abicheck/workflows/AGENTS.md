@@ -49,7 +49,7 @@ without importing a ring it may not (`frontends` may import only `model`,
 | `extraction.py` | Input-side operations: header expansion, the L2 seed, the L3→L2 fold, build-source embedding |
 | `findings.py` | Finding identity and the probe matrix |
 | `scan_config.py` | Scan config, risk rules, and the public-provenance rule (owned here, not aliased) |
-| `scan_abi3_dry_run.py` | The `--abi3` dry-run precondition check both `scan --dry-run` renderers use (CLI cleanup phase two, PR 5 follow-up) — depends only on `python_ext` (`extract`), so it stays outside the CLI-registration import cycle entirely |
+| `scan_abi3_dry_run.py` | The `--abi3` dry-run precondition check both `scan --dry-run` renderers use (CLI cleanup phase two, PR 5 follow-up) — delegates candidate resolution to `scan_abi3_resolve.py` (a flat `workflows`-legacy root module, not this package: it needs `serialization.load_snapshot`, which has no ADR-061 layer of its own, and this migrated package may not import an unclassified module directly), so it stays outside the CLI-registration import cycle entirely |
 
 `gate.py` earns its place rather than laundering an import: three orthogonal
 axes feed one exit code, and a frontend importing them separately is free to

@@ -286,6 +286,7 @@
         "abicheck/l0_export_delta.py",
         "abicheck/post_manifest.py",
         "abicheck/resolver.py",
+        "abicheck/scan_abi3_resolve.py",
         "abicheck/service.py",
         "abicheck/service_compare_evidence.py",
         "abicheck/service_compare_pipeline.py",

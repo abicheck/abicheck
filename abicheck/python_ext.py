@@ -281,6 +281,17 @@ def detect_python_extension_from_binary(path: Path) -> PythonExtMetadata | None:
     format or a binary that does not parse (mirrors the real parsers' own
     "empty metadata on any parse error" contract), same as a genuine
     non-extension library.
+
+    Binary-container recognition only -- deliberately does not fall back to
+    loading *path* as a serialized snapshot (a real, supported `scan
+    ARTIFACT` input shape too): that fallback needs `serialization.
+    load_snapshot`, which itself imports this module (for
+    `PythonExtMetadata`/`detect_python_extension`), so adding the reverse
+    edge here would create a real two-module import cycle (AI-readiness
+    `import-cycle-growth`, fresh evidence). See
+    :mod:`abicheck.scan_abi3_resolve`'s own resolver for the snapshot-aware
+    orchestration that combines this function with that fallback from a
+    module that can safely depend on both.
     """
     from . import binary_utils
     from .model import AbiSnapshot
@@ -308,42 +319,7 @@ def detect_python_extension_from_binary(path: Path) -> PythonExtMetadata | None:
 
         snap.macho = parse_macho_metadata(Path(path))
     else:
-        # Not a recognised binary container -- `scan ARTIFACT` also accepts a
-        # pre-dumped JSON snapshot (plain, gzip, or zstd -- `service.
-        # resolve_input`'s own detection order and `serialization.
-        # load_snapshot`'s own transparent decompression, ADR-059), which
-        # already carries a real `python_ext` fact if the library it was
-        # dumped from is one. Recognising only container magic bytes would
-        # otherwise misreport a valid snapshot-based `--abi3` scan as "not a
-        # recognisable extension module" (Codex review, two rounds -- the
-        # first fix only handled a plain/uncompressed snapshot).
-        from .serialization import load_snapshot
-
-        try:
-            return load_snapshot(path).python_ext
-        except Exception:
-            return None
+        return None
     return detect_python_extension(snap)
 
 
-def _qualifies_for_abi3(path: Path) -> bool:
-    ext = detect_python_extension_from_binary(path)
-    return ext is not None and ext.is_extension
-
-
-def abi3_single_binary_blocker(binary: Path, abi3_floor: tuple[int, int]) -> str | None:
-    """``None`` when *binary* would satisfy ``scan --abi3``'s real-run
-    precondition; else the same blocker message the real run raises, for a
-    single-binary ``scan --dry-run`` preview."""
-    if _qualifies_for_abi3(binary):
-        return None
-    return abi3_precondition_message(abi3_floor, binary.name)
-
-
-def abi3_non_extension_members(
-    members: list[tuple[str, Path]],
-) -> list[tuple[str, Path]]:
-    """The ``(name, path)`` entries of *members* that would fail ``scan
-    --abi3``'s real-run precondition, for a ``--artifact-set`` dry-run
-    preview -- empty when every member qualifies."""
-    return [(name, path) for name, path in members if not _qualifies_for_abi3(path)]
