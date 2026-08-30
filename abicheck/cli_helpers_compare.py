@@ -418,7 +418,7 @@ def _version_sort_key(
     # ambiguous, indistinguishable from the filename alone, and already
     # surfaced by `_build_match_map`'s own "Ambiguous match" warning for
     # any multi-candidate bucket.)
-    from .snapshot_io import _COMPRESSED_SUFFIXES
+    from .workflows.storage import _COMPRESSED_SUFFIXES
 
     for suffix, _compression in _COMPRESSED_SUFFIXES:
         if lower.endswith(suffix):

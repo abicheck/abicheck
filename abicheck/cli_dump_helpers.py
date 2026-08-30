@@ -360,7 +360,7 @@ def write_snapshot_payload(
     """
     import json
 
-    from .snapshot_io import write_snapshot_text
+    from .workflows.storage import write_snapshot_text
 
     text = json.dumps(payload, indent=2)
     return write_snapshot_text(text, path, compression=compression)
@@ -381,7 +381,7 @@ def reject_snapshot_compression_conflict(
     if output is None:
         return
     from .errors import SnapshotError
-    from .snapshot_io import SnapshotCompression, resolve_write_compression
+    from .workflows.storage import SnapshotCompression, resolve_write_compression
 
     try:
         resolve_write_compression(output, SnapshotCompression(snapshot_compression))
@@ -402,7 +402,7 @@ def write_snapshot_and_report(
     readiness file-size gate.
     """
     from .errors import SnapshotError
-    from .snapshot_io import SnapshotCompression
+    from .workflows.storage import SnapshotCompression
 
     try:
         write_result = write_snapshot_payload(
@@ -888,7 +888,7 @@ def render_dump_dry_run(
     )
     if output is not None:
         from .errors import SnapshotError
-        from .snapshot_io import SnapshotCompression, resolve_write_compression
+        from .workflows.storage import SnapshotCompression, resolve_write_compression
 
         try:
             resolved_compression = resolve_write_compression(

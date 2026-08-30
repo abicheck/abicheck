@@ -37,7 +37,12 @@ from ..errors import ProfileMismatchError, ScopeMismatchError, SnapshotError
 from ..html_report import write_html_report
 from ..reporter import to_json, to_markdown
 from ..serialization import load_snapshot, save_snapshot
-from ..workflows.extraction import suppress_streaming_prune
+from ..workflows.extraction import (
+    import_abicc_perl_dump,
+    is_abicc_perl_dump_file,
+    looks_like_perl_dump,
+    suppress_streaming_prune,
+)
 from ._errors import (
     _classify_compat_error_exit_code,
     _classify_fs_error,
@@ -71,11 +76,6 @@ from ._helpers import (  # noqa: F401
     _setup_logging as _setup_logging,
     _warn_stub_flags as _warn_stub_flags,
     _write_affected_list as _write_affected_list,
-)
-from .abicc_dump_import import (
-    import_abicc_perl_dump,
-    is_abicc_perl_dump_file,
-    looks_like_perl_dump,
 )
 from .descriptor import parse_descriptor
 from .xml_report import write_xml_report
@@ -1208,7 +1208,7 @@ def _load_descriptor_or_dump(
     name = path.name.lower()
     if name.endswith((".json.gz", ".json.zst")):
         return load_snapshot(path)
-    from ..snapshot_io import SnapshotCompression, detect_snapshot_compression
+    from ..workflows.storage import SnapshotCompression, detect_snapshot_compression
 
     try:
         compression_hint = detect_snapshot_compression(path)
@@ -1429,9 +1429,7 @@ def _generate_compat_report(
         # native `legacy_exit_code`/`compute_exit_code` PR G1's `exit` block
         # would compute -- emitting it here would disagree with the actual
         # `compat check` exit code for the same run (Codex review).
-        path.write_text(
-            to_json(r, include_exit_decision=False), encoding="utf-8"
-        )
+        path.write_text(to_json(r, include_exit_decision=False), encoding="utf-8")
     else:
         path.write_text(to_markdown(r), encoding="utf-8")
 

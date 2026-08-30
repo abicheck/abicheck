@@ -967,14 +967,34 @@ Hoisting the resolve also fixed a real inconsistency it exposed: a bare `dump`
 and a bare `dump --dry-run` rejected the *same* invalid input with two
 different messages.
 
-**Still open:** the real ELF/PE/Mach-O run still *executes* through
-`perform_elf_dump`/`handle_non_elf_dump` rather than `execute_dump_request`.
-What changed is which object supplies its resolved inputs. That last migration
-needs the ADR-039 collector's CLI-only inputs represented in the typed API and
-`_write_snapshot_output`'s provenance/`--inputs`/depth-gate sequence reordered
-around a resolve-time embed; it is also unverifiable here, since the default
-header backend is castxml and no policy-conformant build is obtainable in this
-environment (a hand-assembled conda-forge 0.6.13 segfaults in `ParseAST`).
+**The ELF half of this is now closed (CLI cleanup phase two, PR C).**
+`frontends/cli/commands/dump.py`'s real (non-`--dry-run`) ELF branch now
+builds a second, execution-scoped `ResolvedDumpRequest` from the same
+`DumpRequest` `--dry-run` already resolves and calls
+`frontends.cli.dump_execute`, which runs it through
+`service_dump_pipeline.execute_dump_request` — the L3-L5 embed moved to
+resolution time, while depth enforcement stays at write time, unchanged, in
+`_write_snapshot_output`. Dependency scoping is not purely write-time
+either way: `service.run_dump`'s own choke point already dependency-scopes
+the snapshot at resolve time, before the ADR-039 collector/header-graph/
+clang-layout attaches run on it — this predates and is unchanged by this
+migration — so `_write_snapshot_output`'s own unchanged
+`resolve_dependency_scope` call is a second, write-time pass over an
+already-once-scoped snapshot, confirmed idempotent for the shapes this
+migration's parity suite exercises but not proven idempotent in general.
+`perform_elf_dump` is
+retired from that call site (still defined, for any other caller that
+depends on it, but no longer imported by `dump_cmd`). The legacy
+`-p`/`--compile-db` auto-match is threaded through as an explicit
+pass-through (`execute_dump_request(..., legacy_compile_db_tokens=...,
+legacy_compile_db_matched=...)`) rather than a typed-API field. See
+`docs/contribute/known-gaps.md`'s "PR C" entry for the full mechanism,
+including the one real behavior change this migration carries (`dump`'s L4
+source-extractor default flips from an accidental clang to castxml).
+
+**Still open: PE/Mach-O.** `handle_non_elf_dump` still executes
+independently of `execute_dump_request` — no PE/Mach-O toolchain was
+available to verify that migration against, so it remains open.
 
 Use the pattern already emerging in the typed compare, dump, input-resolution,
 and artifact-plan code:
@@ -1685,16 +1705,26 @@ dozen", and "three sites" overclaims:
   right). Two files, three sites — mechanically fixable by rerouting those
   call sites through a `workflows`-owned facade, but that reroute is its own
   reviewed slice, not a drive-by inside this one.
-- **`snapshot_io.py` -> `storage`**: the same shape as `suppression.py`,
-  independently measured — a real `frontends -> storage` edge at
-  `cli_dump_helpers.py`, `cli_helpers_compare.py`, `cli_resolve.py`, and
-  `compat/cli.py`, all importing its compression/sniffing helpers directly.
-  `classify.py` and `package.py` also import it, but both are `extract`-
-  classified and `extract -> storage` is allowed, so they are not part of
-  the blocker (a plausible-looking `model -> storage` concern from an earlier
-  pass turned out to rest on misclassifying `classify.py` as `model`; it is
-  actually `extract`, checked directly against `architecture/modules.yaml`
-  rather than assumed).
+- **`snapshot_io.py` -> `storage`: done.** The same shape as `suppression.py`
+  below, and it got the reroute that entry says this shape needs: a real
+  `frontends -> storage` edge at `cli_dump_helpers.py`, `cli_helpers_compare.py`,
+  `cli_resolve.py`, and `compat/cli.py`, all importing its compression/sniffing
+  helpers directly. `classify.py` and `package.py` also import it, but both
+  are `extract`-classified and `extract -> storage` is allowed, so they were
+  never part of the blocker (a plausible-looking `model -> storage` concern
+  from an earlier pass turned out to rest on misclassifying `classify.py` as
+  `model`; it is actually `extract`). Fixed the same way `extraction.py`
+  already fixed the identical shape for `extract`-owned operations: a new
+  sibling facade, `workflows/storage.py`, re-exports `snapshot_io.py`'s
+  `SnapshotCompression`/`write_snapshot_text`/`resolve_write_compression`/
+  `detect_snapshot_compression`/`bounded_decoded_prefix`/
+  `_COMPRESSED_SUFFIXES` (kept as its own module rather than folded into
+  `extraction.py`, since these are ADR-059's storage-envelope responsibility,
+  not extraction, and merging the two facades would blur exactly the
+  ownership boundary this ADR exists to keep explicit), and all four call
+  sites now import through it instead of `snapshot_io` directly.
+  `snapshot_io.py` is now `storage` in `architecture/modules.yaml`;
+  `python scripts/check_architecture.py` reports 0 findings.
 - **`serialization.py` -> `storage`**: measured and found to be **worse**
   than the debt ledger's existing `storage` target implied — 72 findings, not
   a handful, because the module's own body reaches into `extract`/`compare`/
@@ -1703,13 +1733,20 @@ dozen", and "three sites" overclaims:
   entries above show. This is a dataclass/parser-shaped split the size of
   Phase 5's `*_metadata.py` work, not a reclassification — see the updated
   `architecture/debt.yaml` entry.
-- **`compat.abicc_dump_import` -> `extract`**: blocked by a real
+- **`compat.abicc_dump_import` -> `extract`: done.** Blocked by a real
   `frontends -> extract` edge at `cli_resolve.py:38` and `compat/cli.py:75`,
   both importing it directly rather than through a `workflows` re-export.
   `classify.py` also imports it function-locally, but `classify.py` is
   itself `extract`-classified, so that particular edge is `extract ->
-  extract` and fires nothing — the two `frontends` sites are the whole
+  extract` and fires nothing — the two `frontends` sites were the whole
   blocker here, not a third site hiding behind physical-location exemptions.
+  Fixed the same way `elf_metadata.py`/`symvers_metadata.py`/siblings
+  already route through `extraction.py`: `looks_like_perl_dump`,
+  `import_abicc_perl_dump`, and `is_abicc_perl_dump_file` joined that
+  facade's existing re-export list, and both `frontends` sites now import
+  them from there instead of `compat.abicc_dump_import` directly.
+  `compat/abicc_dump_import.py` is now `extract` in `architecture/modules.yaml`;
+  `python scripts/check_architecture.py` reports 0 findings.
 - **`service_render.py` -> `workflows`**: this is the one finding that
   reframes the whole entry, not just adds to it. `service_render.py` imports
   `reporter.py`/`sarif.py` — both `report`-classified — and `workflows ->

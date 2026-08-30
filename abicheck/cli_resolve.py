@@ -35,7 +35,6 @@ from typing import TYPE_CHECKING, Any
 
 import click
 
-from .compat.abicc_dump_import import looks_like_perl_dump
 from .errors import SnapshotError
 from .workflows.extraction import PRUNED_HEADER_DIR_SEGMENTS, iter_directory_headers
 
@@ -101,7 +100,7 @@ def _expand_header_inputs(inputs: list[Path]) -> list[Path]:
 
 def _sniff_text_format(path: Path) -> str:
     """Read a small header chunk and return 'json', 'perl', 'symvers', or 'unknown'. ADR-059: a gzip/zstd-compressed snapshot is recognized via a bounded decoded prefix, mirroring ``service.sniff_text_format`` (kept as a separate copy here rather than importing that one, matching this module's existing "no cross-import for this exact helper" shape)."""
-    from .snapshot_io import bounded_decoded_prefix, detect_snapshot_compression
+    from .workflows.storage import bounded_decoded_prefix, detect_snapshot_compression
 
     try:
         compression = detect_snapshot_compression(path)
@@ -120,14 +119,14 @@ def _sniff_text_format(path: Path) -> str:
         head = raw.decode("utf-8", errors="replace").lstrip()
     except OSError:
         return "unknown"
+    from .workflows.extraction import looks_like_perl_dump, looks_like_symvers
+
     # Check Perl dump BEFORE JSON — a Perl dump can start with $VAR1 = {
     # which would incorrectly match the JSON heuristic after the '{'
     if looks_like_perl_dump(head):
         return "perl"
     if head.startswith("{"):
         return "json"
-    from .workflows.extraction import looks_like_symvers
-
     return "symvers" if looks_like_symvers(head) else "unknown"
 
 
