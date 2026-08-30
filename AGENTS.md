@@ -548,10 +548,16 @@ Core pipeline (in order of data flow):
      `fold_dump_provenance_into_json`). Since CLI cleanup phase two's PR 3A
      the native `dump` CLI *does* build a real `DumpRequest`
      (`cli_dump_request.py`) and `--dry-run` renders from
-     `resolve_dump_request`'s `ResolvedDumpRequest` — but the real ELF/PE/
-     Mach-O run still executes through `perform_elf_dump`/
-     `handle_non_elf_dump`, not `execute_dump_request`; see the "PR C" entry
-     under "Known gaps" for what that last step needs
+     `resolve_dump_request`'s `ResolvedDumpRequest`. The real **ELF** run now
+     executes through `execute_dump_request` too (PR C, landed) — the same
+     shared pipeline `compare`'s implicit-dump operand and `scan`'s
+     candidate resolution already use, with the legacy `-p`/`--compile-db`
+     auto-match threaded through as an explicit pass-through rather than a
+     typed-API field (`execute_dump_request`'s own docstring). `handle_non_
+     elf_dump` (PE/Mach-O) is unmigrated — no PE/Mach-O toolchain was
+     available to verify a migration against; see the "PR C" entry under
+     "Known gaps" for the full account, including the L4 source-extractor
+     default change this migration carries for ELF
    - `cli_dump_request.py` — CLI cleanup phase two, PR 3A: `dump_cmd`'s ~30
      Click parameters as one `DumpRequest`, plus the Tier-2-to-Click error
      translation the boundary owes. Fed the CLI's *already-resolved* compile

@@ -1386,6 +1386,20 @@ IMPORT_CYCLE_ALLOWLIST: frozenset[frozenset[str]] = frozenset(
                 "frontends.cli.commands.compare",
                 "frontends.cli.commands.dump",
                 "frontends.cli.runtime",
+                # CLI cleanup phase two, PR C: `frontends.cli.dump_execute` is
+                # a same-session size-split sibling of `frontends.cli.commands
+                # .dump` (already a member, immediately above) -- it holds
+                # the real ELF run's call into `service_dump_pipeline.
+                # execute_dump_request` (already a member) that used to live
+                # directly in `dump.py`. Every edge it has --
+                # `service_dump_pipeline`, function-local, exactly the shape
+                # `cli_dump_helpers`/`cli_buildsource` already reach it
+                # through -- is an edge this cluster already carried, moved
+                # one file over rather than added; `dump.py` itself calls it
+                # (a new intra-cluster edge, not an edge leaving the
+                # cluster). No init deadlock: it imports only `click`/
+                # `errors` (a leaf) at module load.
+                "frontends.cli.dump_execute",
             }
         ),
         # TYPE_CHECKING-only typing cycle (no runtime import): AbiSnapshot

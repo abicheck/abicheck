@@ -4942,6 +4942,116 @@ looked like the obvious fix and wasn't.
   one code path. Recorded at this precision, per this file's own convention,
   so the next attempt starts from the mechanism rather than re-deriving it.
 
+  **The real ELF `dump` run is migrated (CLI cleanup phase two, PR C).**
+  Decision (b) above is resolved as **split, not uniform**: only the L3-L5
+  embed moves to resolution time (`execute_dump_request`); depth enforcement
+  and dependency scoping stay at write time, unchanged, in
+  `_write_snapshot_output`. This became possible only because two
+  prerequisites this entry's own "Blocker A"/"Blocker B" analysis called
+  for were separately closed first, in the plan doc's own PR 3A subsection
+  (2026-08-27/28, "Investigated further"/"Update"): a real, end-to-end test
+  (`tests/test_dump_write_after_resolve_time_embed.py`) confirmed the
+  depth-gate/provenance/dependency-scope half of `_write_snapshot_output`'s
+  sequence already handles a resolve-time-embedded snapshot correctly with
+  *no* code change (the two depth checks share the identical
+  `evidence_depth.gated_source_label`/`depth_rank` primitives, so calling
+  both is redundant, not wrong), and the Flow-2 `--inputs` pack fold was
+  separately verified safe layered on top of a resolve-time embed too. That
+  closes Blocker B's "resolve + embed + enforce" concern for the
+  *embed* alone — depth enforcement is not moved, so its own reordering
+  hazard never applies; **Blocker A (the seed-cleanup self-contention) is
+  independently a non-issue for `dump`'s real invocation shape**, because a
+  `dump` CLI request's own `header_backend`/`allow_build_query` inputs never
+  produce a resolve-time seed with non-empty `pending_cleanups` for a
+  request that also carries a compile database or a pack `--sources`/
+  `--build-info` value under the shapes this migration's own tests exercise
+  (`build_source_already_satisfies` already accounts for the common,
+  compile-DB-backed case) — the two ELF-specific post-processing second
+  passes (`_attach_header_graph`, `attach_clang_layout`) that Blocker A
+  worried about run *inside* `service.resolve_input`'s own ELF dispatch
+  (`service_dump_native.py`), not as a separate stage `execute_dump_request`
+  adds on top, so they already see the seeded dirs before that dispatch's
+  own cleanup drains them — the same ordering `perform_elf_dump` itself
+  used to hand-maintain, now owned by one implementation instead of two.
+  One structural nuance from Blocker B's own concern (1) is real and
+  *not* separately reasoned away here, only measured: `service.run_dump`'s
+  own choke point (`dumper_scoping.apply_dependency_scope_to_run_dump_
+  result`) already dependency-scopes the snapshot *before*
+  `_resolve_side_snapshot_impl`'s own ADR-039 collector/header-graph/
+  clang-layout attaches run on it (this is the shared pipeline's own
+  existing, pre-migration behavior for `compare`/`scan`, not something this
+  migration introduces) — so `_write_snapshot_output`'s own, unchanged
+  `resolve_dependency_scope` call at the end is a second, write-time pass
+  over an already-once-scoped snapshot rather than the sole pass it used to
+  be. Confirmed idempotent for every shape this migration's own parity
+  suite exercises (both calls scope against the same effective header-root
+  set), not proven idempotent in general.
+  `frontends/cli/commands/dump.py`'s real (non-`--dry-run`) ELF branch calls
+  a sibling module, `frontends/cli/dump_execute.py` (split out purely to
+  keep `dump.py` under the architecture gate's 800-line production-file cap
+  — ADR-061 freezes the flat `cli_*.py` root family's member list, so a
+  genuinely new module goes into its responsibility-package tree, alongside
+  `runtime.py`/`artifact_set_dry_run.py`, instead), which builds a second,
+  execution-scoped `ResolvedDumpRequest` from the same
+  `DumpRequest` `--dry-run` already resolves — re-pointed at the
+  post-linker-script-following `so_path` (`resolve_dump_request`'s own
+  `detect_binary_format` call runs before any such following, so feeding it
+  the pre-follow path risked a wrong `fmt` for a symlink-to-linker-script
+  input) and with `requested_depth` nulled out (so `execute_dump_request`'s
+  own `enforce_requested_depth` — a *different*, more generically-worded
+  `ValidationError` than `check_requested_depth_satisfied`'s
+  `DumpDepthNotSatisfiedError` — never fires; `_write_snapshot_output`'s own
+  call stays the sole, unchanged enforcement point for this case, preserving
+  `tests/test_depth_vocabulary.py`'s pinned message) — and calls
+  `execute_dump_request(exec_resolved, legacy_compile_db_tokens=...,
+  legacy_compile_db_matched=...)`, threading the legacy `-p`/`--compile-db`
+  auto-match through as the explicit pass-through ADR-063 Phase 1 already
+  built for exactly this purpose (`execute_dump_request`'s own docstring)
+  rather than porting it into `InputSpec` as a first-class field — the
+  pass-through already implements the P0.3-fold-wins precedence rule
+  `perform_elf_dump`'s own `_fold_explicit_gcc_options` hand-rolled, so
+  adding a second, dataclass-shaped representation of the identical fact
+  would be a second place for it to drift, not a cleaner one.
+  `perform_elf_dump` itself is retired from this call site (still defined,
+  in case any other caller depends on it, but `dump_cmd` no longer imports
+  it); `handle_non_elf_dump` (PE/Mach-O) is untouched — no PE/Mach-O
+  toolchain was available in this environment to verify a migration
+  against, so it stays exactly where this entry's "Blocker B (both ELF and
+  PE/Mach-O)" heading already scoped it: open.
+  One real, user-visible behavior change falls out of the migration rather
+  than being a side effect nobody decided: `dump`'s L4 source-extractor
+  default flips from an accidental **clang** (`perform_elf_dump` forwarded
+  the bare, unresolved `header_backend` straight to the write-time embed,
+  which treats anything but the literal string `"castxml"` as clang) to
+  **castxml** (the shared pipeline's `effective_frontend` resolution,
+  matching `compare`'s implicit-dump operand, the typed `DumpRequest` API,
+  and `dump`'s own L2 header-AST default) — this is the plan's own
+  "item 3" castxml L4 phantom-implicit-member bug's actual payoff: that fix
+  (`Function.is_compiler_generated`, elsewhere in this file) is exactly what
+  makes this default safe to inherit now, where an earlier investigation in
+  this same entry explicitly deferred it for being unsafe before that fix
+  existed. `--ast-frontend clang` recovers the previous default for a caller
+  that needs it. The sibling `scan`-vs-`dump`/`compare` L4 extractor default
+  divergence (the plan's own "item 2") is **unchanged by this migration** —
+  `scan_engine._build_new_snapshot` still hardcodes `source_extractor="auto"`
+  (resolving clang) via its own opt-in override on the shared primitive,
+  deliberately preserved when `scan`'s candidate resolution was migrated
+  onto the same primitive; that remains its own separate, deferred decision.
+  Verified: the full fast unit suite; the real-toolchain (`g++`/clang/
+  castxml) integration suite for this area
+  (`test_dump_cli_typed_api_parity.py`'s 16 cases — `_CONTRACT_KNOWN_
+  DIVERGENT_FIELDS` stays empty, i.e. zero remaining divergence between the
+  migrated CLI path and the typed pipeline — plus `test_dump_scan_l3_
+  comparability.py`, `test_dump_write_after_resolve_time_embed.py`,
+  `test_dump_embed_idempotence.py` — updated to count the resolve-time embed
+  call site too, not just the write-time fallback — `test_compile_db_
+  filter_scope.py`, `test_dry_run_contract.py`, `test_dry_run_build_query_
+  contract.py`, `test_l2_seed_flow2_packs.py`,
+  `test_scan_adr039_build_context.py`, `test_castxml_l4_phantom_members.py`,
+  `test_dump_depth_provenance.py`, `test_depth_vocabulary.py` — 2 xfails,
+  the same pre-existing, already-documented `_SCAN_KNOWN_DIVERGENT_FRONTENDS`
+  signature, unchanged); `mypy`/`ruff` clean on the touched modules.
+
 - **Lambda-closure churn survives at the *function* level after the type-level
   fix — investigated, deliberately not patched (oneTBB flow-graph report,
   fresh evidence).** `name_classification._ANONYMOUS_TYPE_MARKERS` did not

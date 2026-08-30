@@ -446,6 +446,8 @@ def execute_dump_request(
     allow_build_query: bool | None = None,
     legacy_compile_db_tokens: tuple[str, ...] = (),
     legacy_compile_db_matched: bool = False,
+    seed_collect_mode: str | None = None,
+    source_frontend_from_folded_context: bool = False,
 ) -> DumpResult:
     """Execute a :class:`ResolvedDumpRequest` — steps 3-5 of
     :func:`run_dump_request`'s own docstring (``resolve_input``, the
@@ -478,11 +480,30 @@ def execute_dump_request(
     tokens were actually derived -- see the resolve-layer function's own
     docstring for why a real match with zero derived flags still must set
     it. Both default falsy, so every pre-existing caller (including
-    :func:`run_dump_request`) is unaffected. Neither is yet passed by
-    anything in the real ``dump`` CLI's ELF/PE/Mach-O run -- that run still
-    executes through ``cli_dump_helpers.perform_elf_dump``/
-    ``handle_non_elf_dump``, not this function, which is the remaining
-    piece of the same known-gaps entry.
+    :func:`run_dump_request`) is unaffected. Both are passed by the migrated
+    ``dump`` CLI's real ELF run (``frontends.cli.dump_execute.
+    execute_dump_cli_run``); PE/Mach-O still executes through
+    ``cli_dump_helpers.handle_non_elf_dump``, not this function.
+
+    *seed_collect_mode*/*source_frontend_from_folded_context* (Codex review
+    on the initial ELF migration -- two real regressions it introduced):
+    forwarded verbatim to
+    :func:`~abicheck.workflows.artifact.execute._resolve_side_snapshot_impl`,
+    whose own docstring documents each. Both default to this function's
+    pre-existing behavior (``seed_collect_mode=None`` pins the L2 seed's
+    collect mode to ``"off"``; ``source_frontend_from_folded_context=False``
+    keeps L4 replay pointed at the pre-fold compiler), so every pre-existing
+    caller is unaffected. The retired ``perform_elf_dump`` always forwarded
+    its own resolved ``collect_mode`` to the identical L2 seed call
+    (unconditionally running a zero-config inferred build query for a
+    ``--sources`` tree with no compile database) and always reassigned
+    ``gcc_path``/``gcc_prefix``/``effective_gcc_options`` from the L3 fold's
+    context once it applied (so an L4 source replay used the compiler the L3
+    fold actually matched, not the caller's pre-fold default) -- the
+    migrated ELF run passes ``seed_collect_mode=resolved.collect_mode`` and
+    ``source_frontend_from_folded_context=True`` to preserve both, exactly
+    as ``scan``'s own candidate resolution already does for the identical
+    reasons (see that call site's comments).
 
     Raises:
         ValidationError: If *resolved* requests a ``depth`` the resolved
@@ -549,6 +570,8 @@ def execute_dump_request(
         allow_build_query=allow_build_query,
         legacy_compile_db_tokens=legacy_compile_db_tokens,
         legacy_compile_db_matched=legacy_compile_db_matched,
+        seed_collect_mode=seed_collect_mode,
+        source_frontend_from_folded_context=source_frontend_from_folded_context,
     )
     snap = resolution.snapshot
 

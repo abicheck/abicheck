@@ -198,19 +198,22 @@ def test_scan_frontend_context_device_reaches_dumper_dump(tmp_path):
 
 
 def test_dump_cli_elf_path_forwards_frontend_context_to_dumper_dump(tmp_path, runner):
-    """Codex review, PR #636: unlike `scan`/`compare` (which resolve through
-    `service.run_dump`/`service._dump_elf`, both of which already thread
-    `compile.frontend_context` into `dumper.dump`), the native `dump` CLI
-    command's ELF path calls `cli_dump_helpers.perform_elf_dump`, which bypasses
-    `service.run_dump` and calls `dumper.dump` directly. That direct call used
-    to omit `frontend_context` entirely, so `dump --frontend-context device`
+    """Codex review, PR #636: the native `dump` CLI command's ELF path used
+    to call `cli_dump_helpers.perform_elf_dump`, which bypassed
+    `service.run_dump` and called `dumper.dump` directly -- omitting
+    `frontend_context` entirely, so `dump --frontend-context device`
     silently produced a host-context snapshot instead of forwarding the
     request or failing.
 
-    `dump` is imported into `cli_dump_helpers`'s own module namespace (`from
-    .dumper import dump`), so the mock must patch it there -- patching
-    `abicheck.dumper.dump` would not affect the name already bound in
-    `cli_dump_helpers`.
+    CLI cleanup phase two, PR C: the real ELF run now executes through
+    `execute_dump_request` -> `service.resolve_input` -> `service._dump_elf`,
+    the same path `scan`/`compare` already used, which is exactly what
+    closes this gap for good rather than needing its own forwarding fix --
+    see `test_scan_frontend_context_device_reaches_dumper_dump` above, whose
+    identical patch target this test now shares. `dump` is looked up fresh
+    from `abicheck.dumper` at call time inside `service_dump_native._dump_elf`
+    (a function-local import), so patching `abicheck.dumper.dump` reaches it,
+    same as it already does for `scan`/`compare`.
     """
     from unittest.mock import patch
 
@@ -220,7 +223,7 @@ def test_dump_cli_elf_path_forwards_frontend_context_to_dumper_dump(tmp_path, ru
     hdr = tmp_path / "api.h"
     hdr.write_text("void f();\n")
     snap = AbiSnapshot(library="lib", version="1.0")
-    with patch("abicheck.cli_dump_helpers.dump", return_value=snap) as mock_dump:
+    with patch("abicheck.dumper.dump", return_value=snap) as mock_dump:
         result = runner.invoke(
             main,
             [

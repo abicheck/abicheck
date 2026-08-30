@@ -131,7 +131,7 @@ class TestDumpCmdStdout:
         hdr.write_text("int foo();", encoding="utf-8")
 
         snap = AbiSnapshot(library="libfoo.so", version="1.0")
-        monkeypatch.setattr("abicheck.cli_dump_helpers.dump", lambda **_kw: snap)
+        monkeypatch.setattr("abicheck.dumper.dump", lambda **_kw: snap)
 
         runner = CliRunner()
         result = runner.invoke(main, ["dump", str(so), "-H", str(hdr)])
