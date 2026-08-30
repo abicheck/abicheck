@@ -3464,6 +3464,30 @@ second top-level spelling of the same fact.
 
 ## PR 4 — one gate algorithm (`--exit-code-scheme` removal)
 
+> **Status (2026-08-30): the ADR landed; the atomic flag removal has not.**
+> [ADR-064](../adr/064-canonical-gate-algorithm-and-exit-decision.md) is the
+> settled design this section's own analysis called for — precedence order,
+> the mode-dependent removed-required-library rank, the "numbers stay
+> per-command" constraint, the `GateOptions` reassignment, and the two-stage
+> (additive, then atomic) landing plan. Its own first, additive stage has
+> also landed: `abicheck/policy/exit_decision.py` gained
+> `resolve_scan_exit_decision` (evidence-contract-error / budget-overflow /
+> not-comparable, with the exact "budget discards an already-decided
+> not-comparable result" ordering) and `resolve_release_exit_decision`
+> (the release fan-out's mode-dependent removed-required-library rank,
+> including the real severity-mode asymmetry where removed-library wins
+> outright even over a coverage contribution) — both pure functions,
+> verified against `scan_engine.py`/`cli_compare_release_helpers.py` and
+> unit-tested (`tests/test_exit_decision.py`'s
+> `TestResolveScanExitDecision`/`TestResolveReleaseExitDecision`), and
+> neither wired into any call site's actually-returned exit code yet, same
+> scoping as PR G1 itself. **Still open:** wiring those two resolvers into
+> `scan --against`'s nested `diff.exit` block and the release fan-out's own
+> summary (a real schema-version bump and cross-front-end parity pass, not
+> attempted in this slice), the release fan-out's `GateOptions` typed-object
+> rewrite, and the atomic stage itself — removing `--exit-code-scheme` and
+> updating CLI/API/Action/`aggregate` parity together.
+
 **This is the item the original draft got wrong, and it gets its own ADR.**
 
 `--exit-code-scheme auto|legacy|severity` is not a spelling choice; it selects
@@ -4163,7 +4187,8 @@ PR F  trusted build config            = PR 3C — build.query executes only
                                        independently of the shared pipeline
       └─ then DELETE dump --build-query, dump --build-compile-db
 PR G2 canonical exit decision, part 2 = PR 4 — one automatic gate algorithm,
-                                       schema / report / Action parity
+      (ADR-064 accepted; additive         schema / report / Action parity
+       resolvers landed, not wired)
       └─ then DELETE --exit-code-scheme
 PR H  artifact-set semantics          = PR 5 — provider ownership, moved and
       (syntax slice DONE)               duplicated symbols, cost and dry-run;

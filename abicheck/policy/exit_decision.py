@@ -38,17 +38,28 @@ contribution that never determined the result).
 
 **Deliberately scoped to the axes that already coexist on one
 `DiffResult`-backed report today** -- the compatibility gate (legacy verdict
-or severity-aware), contract coverage, and analysis assurance. Three axes
-the reviewed plan also names -- `not_comparable`, a release's
-removed-required-library policy, and `scan`'s budget-overflow floor -- are
-raised through different code paths today (`sys.exit` before a coherent
-`DiffResult` exists, or a release/scan-specific fold with its own,
-mode-dependent precedence against the compatibility gate; see the plan's
-"canonical `ExitDecision`" section for why removed-library's rank cannot be
-a fixed slot). Folding those in is real, further work for PR G2, not
-attempted here -- extending this module before that design is settled would
-risk exactly the kind of partially-verified, cross-cutting change this
-codebase's own conventions warn against.
+or severity-aware), contract coverage, and analysis assurance. Three more
+axes the reviewed plan also names -- `not_comparable`, a release's
+removed-required-library policy, and `scan`'s budget-overflow/evidence-
+contract-error floors -- are raised through different code paths today
+(`sys.exit` before a coherent `DiffResult` exists, or a release/scan-specific
+fold with its own, mode-dependent precedence against the compatibility
+gate).
+
+``docs/contribute/adr/064-canonical-gate-algorithm-and-exit-decision.md``
+("ADR-064") is the settled design for those three axes and for PR 4/G2's
+actual `--exit-code-scheme` removal. This module implements ADR-064's
+*additive* first stage only: :func:`resolve_scan_exit_decision` and
+:func:`resolve_release_exit_decision` below are pure functions reproducing
+today's exact precedence for `scan` and the directory/package release
+fan-out respectively (verified against `scan_engine.py`/
+`cli_compare_release_helpers.py` at the commit that added them) -- neither
+is wired into any call site's *actually returned* exit code yet, exactly
+the same "wraps the existing behaviour, doesn't call it yet" scoping PR G1
+itself used for the three axes above. Wiring these into the report's `exit`
+block (`scan --against`'s nested `diff.exit`, the release fan-out's own
+summary), and the atomic `--exit-code-scheme` removal itself, are ADR-064's
+second stage and remain open.
 """
 
 from __future__ import annotations
@@ -101,6 +112,38 @@ class ExitReason(str, Enum):
     #: "explains nothing about why the exit is N" trap this enum exists to
     #: avoid.
     PROMOTED_CROSSCHECK = "promoted_crosscheck"
+
+    #: `scan` only (ADR-037 D5). A pinned, non-`auto` `--depth`/
+    #: `--source-method` had no source evidence to satisfy it
+    #: (`scan_engine._EvidenceContractError`) -- raised during evidence
+    #: collection, before a candidate/baseline comparison is even attempted.
+    #: Dominates every other axis below it in ADR-064's precedence order,
+    #: since none of them were ever computed for this run.
+    EVIDENCE_CONTRACT_ERROR = "evidence_contract_error"
+    #: `scan` only. `--budget` overflowed (`scan_engine._BudgetOverflow`).
+    #: Checked *after* a `not_comparable` result may already have been
+    #: decided for the same run, and -- per ADR-064's "budget dominates
+    #: not-comparable" rule, reproducing `scan_engine.run_scan_core`'s own
+    #: unconditional post-comparison budget check -- discards that result
+    #: rather than losing to it.
+    BUDGET_OVERFLOW = "budget_overflow"
+    #: OLD and NEW (or, for a release, at least one library pair) were not
+    #: extracted under a comparable profile/scope contract (ADR-050 D2), so
+    #: no verdict was ever produced. Dominates the compatibility gate and
+    #: removed-required-library axes below it, but never `scan`'s own
+    #: `BUDGET_OVERFLOW` (see that reason's own docstring). No `DiffResult`
+    #: exists for this outcome, so contract-coverage/analysis-assurance are
+    #: never computed either -- every other contribution is `0` when this
+    #: reason applies.
+    NOT_COMPARABLE = "not_comparable"
+    #: A directory/package release comparison only. `--fail-on-removed-
+    #: library` is set and at least one library was removed between
+    #: releases. Its rank relative to the compatibility gate is
+    #: **mode-dependent, not fixed** -- see
+    #: :func:`resolve_release_exit_decision`'s own docstring and ADR-064's
+    #: "Removed-required-library is mode-dependent" section for the exact
+    #: switch this reason's precedence reproduces.
+    REMOVED_REQUIRED_LIBRARY = "removed_required_library"
 
 
 @dataclass(frozen=True)
@@ -312,4 +355,146 @@ def resolve_compare_exit_decision(
         compatibility_contribution=compatibility_contribution,
         contract_coverage_contribution=coverage_contribution,
         analysis_assurance_contribution=assurance_contribution,
+    )
+
+
+def _dominant_decision(code: int, reason: ExitReason) -> ExitDecision:
+    """One axis fully determines the outcome; the others were never
+    computed for this run (there is no `DiffResult` to compute them from),
+    so every other contribution is `0` -- not "evaluated and came out
+    clean," genuinely "not asked."
+    """
+    return ExitDecision(
+        code=code,
+        reasons=(reason,),
+        compatibility_contribution=0,
+        contract_coverage_contribution=0,
+        analysis_assurance_contribution=0,
+    )
+
+
+def resolve_scan_exit_decision(
+    *,
+    evidence_contract_error: bool = False,
+    budget_overflow: bool = False,
+    not_comparable: bool = False,
+    evidence_contract_error_code: int = 1,
+    budget_overflow_code: int = 5,
+    not_comparable_code: int = 6,
+) -> ExitDecision | None:
+    """ADR-064's outer precedence layer for `scan`, ahead of
+    :func:`resolve_compare_exit_decision`'s gate/coverage/assurance fold.
+
+    Reproduces `scan_engine.run_scan_core`'s exact raise/check order:
+    `_EvidenceContractError` aborts during evidence collection, before a
+    candidate/baseline comparison is even attempted, so it dominates
+    everything (`evidence_contract_error` wins even if the caller also
+    passes `budget_overflow=True`/`not_comparable=True` -- those axes were
+    never reached). `_BudgetOverflow` is raised by `_check_scan_budget`,
+    called *unconditionally* after a `not_comparable` result may already
+    have been decided by the same run's baseline compare -- and that call
+    discards the already-decided result rather than losing to it (the
+    `ScanOutcome`/report is never constructed once `_BudgetOverflow`
+    propagates), so `budget_overflow` wins over `not_comparable` here too,
+    not the other way around. Returns `None` when none of the three axes
+    apply, meaning the comparison actually ran and the caller should
+    resolve an ordinary :class:`ExitDecision` for it instead (via
+    :func:`resolve_compare_exit_decision`/:func:`resolve_exit_decision`).
+
+    This is pure, additive logic (ADR-064's first stage) -- it is not yet
+    called from `scan_engine.py`/`cli_scan_baseline.py`, so no existing
+    call site's actually-returned exit code changes because this function
+    exists. The `*_code` keyword arguments default to `scan`'s own real
+    numbers (1/5/6) but are accepted explicitly rather than hard-coded, so
+    a future caller for a different command with the same three axes (none
+    is known today) is not forced to share `scan`'s numbering, per
+    ADR-064's "numbers are not unified across commands" rule.
+    """
+    if evidence_contract_error:
+        return _dominant_decision(
+            evidence_contract_error_code, ExitReason.EVIDENCE_CONTRACT_ERROR
+        )
+    if budget_overflow:
+        return _dominant_decision(budget_overflow_code, ExitReason.BUDGET_OVERFLOW)
+    if not_comparable:
+        return _dominant_decision(not_comparable_code, ExitReason.NOT_COMPARABLE)
+    return None
+
+
+def resolve_release_exit_decision(
+    *,
+    not_comparable: bool,
+    severity_scheme_active: bool,
+    verdict_or_severity_contribution: int,
+    removed_required_library: bool = False,
+    contract_coverage_contribution: int = 0,
+    not_comparable_code: int = 16,
+    removed_required_library_code: int = 8,
+) -> ExitDecision:
+    """ADR-064's precedence for a directory/package release comparison,
+    reproducing `cli_compare_release_helpers._exit_compare_release` exactly
+    -- including the one asymmetry that function's own two branches encode,
+    which a flat `max()` over contributions cannot express (this is exactly
+    why ADR-064 calls removed-required-library's rank "mode-dependent, not
+    a fixed slot" rather than folding it into `resolve_exit_decision`):
+
+    - `not_comparable` dominates everything, in both schemes (mirrors
+      native `compare`'s own `16`, and release's `_exit_compare_release`
+      checking `worst_verdict == "not_comparable"` first, unconditionally).
+    - **Severity-aware scheme** (`severity_scheme_active=True`):
+      `removed_required_library` wins *outright* over the aggregated
+      verdict/severity code -- including over `contract_coverage_
+      contribution`, which is never folded in when removed-library fires.
+      This is a real, pre-existing asymmetry in today's code (the severity
+      branch's `sys.exit(8)` for a removed library runs before the coverage
+      floor is even read), not a simplification introduced here.
+    - **Legacy scheme** (`severity_scheme_active=False`): the opposite
+      priority -- a nonzero *verdict_or_severity_contribution* (an
+      `API_BREAK`/`BREAKING` verdict, or the release's own operational
+      `ERROR` sentinel floored to `4`) wins outright over
+      removed-required-library, which is checked only once that
+      contribution is `0`. `contract_coverage_contribution` folds in via
+      `max()` alongside whichever of the two decided the code, exactly as
+      `_exit_compare_release`'s own `max(code, contract_coverage_exit_
+      contribution)` calls do.
+
+    *verdict_or_severity_contribution* is the caller's own already-computed
+    aggregated code for the active scheme -- for severity, `max(
+    severity_exit_code, 4 if worst_verdict == "ERROR" else 0)`; for legacy,
+    `4` if `worst_verdict == "ERROR"` else `legacy_exit_code(Verdict[
+    worst_verdict])`. This function does not compute either fold itself,
+    matching `resolve_compare_exit_decision`'s own convention of taking an
+    already-resolved compatibility contribution rather than re-deriving one.
+
+    Pure, additive logic (ADR-064's first stage): not yet called from
+    `cli_compare_release_helpers.py`, so no existing release comparison's
+    actually-returned exit code changes because this function exists.
+    """
+    if not_comparable:
+        return _dominant_decision(not_comparable_code, ExitReason.NOT_COMPARABLE)
+
+    if severity_scheme_active:
+        if removed_required_library:
+            return _dominant_decision(
+                removed_required_library_code, ExitReason.REMOVED_REQUIRED_LIBRARY
+            )
+        return resolve_exit_decision(
+            compatibility_contribution=verdict_or_severity_contribution,
+            contract_coverage_contribution=contract_coverage_contribution,
+        )
+
+    # Legacy scheme: a nonzero verdict/ERROR contribution wins outright,
+    # ahead of removed-required-library -- checked only once it is 0.
+    if verdict_or_severity_contribution != 0:
+        return resolve_exit_decision(
+            compatibility_contribution=verdict_or_severity_contribution,
+            contract_coverage_contribution=contract_coverage_contribution,
+        )
+    if removed_required_library:
+        return _dominant_decision(
+            removed_required_library_code, ExitReason.REMOVED_REQUIRED_LIBRARY
+        )
+    return resolve_exit_decision(
+        compatibility_contribution=0,
+        contract_coverage_contribution=contract_coverage_contribution,
     )
