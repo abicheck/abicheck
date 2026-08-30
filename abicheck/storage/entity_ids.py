@@ -56,7 +56,7 @@ from __future__ import annotations
 import functools
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
-from typing import Any, cast
+from typing import Any
 
 from ..model.identity import (
     Anonymous,
@@ -78,6 +78,7 @@ from .guards import (
     mapping as _mapping,
     required_field as _required_field,
     row_sequence as _row_sequence,
+    strict_int as _strict_int,
 )
 
 __all__ = [
@@ -499,24 +500,13 @@ def _domain_segment_to_dict(segment: _DomainScopeSegment) -> dict[str, Any]:
 def _ordinal_field(document: Mapping[str, Any], key: str, record: str) -> int:
     """A required, strictly-integer ordinal field — never a ``bool``.
 
-    ``_instance_of(value, int, ...)`` alone accepts a ``bool``, since
-    ``bool`` is a subclass of ``int`` in Python — so a document carrying
-    JSON ``true`` for ``ordinal``/``block_ordinal`` silently parsed as ``1``,
-    and a document carrying ``false`` parsed as ``0``. Both are identity
-    fields (:class:`Anonymous`/:class:`LocalToFunction`'s own docstrings),
-    so two structurally distinct wire values — ``true`` and the integer
-    ``1`` — reconstructed to equal, same-hash segments: exactly the
-    collapsed-identity defect this package exists to prevent (Codex review).
+    Both :class:`Anonymous`/:class:`LocalToFunction`'s own ordinal fields
+    are identity, so two structurally distinct wire values (``true`` and
+    the integer ``1``) must not reconstruct to equal, same-hash segments —
+    see :func:`~abicheck.storage.guards.strict_int` for why plain
+    ``_instance_of(value, int, ...)`` is not enough.
     """
-    value = _required_field(document, key, record)
-    if isinstance(value, bool) or not isinstance(value, int):
-        raise TypeError(
-            f"{key} must be an int, not {type(value).__name__} ({value!r}); "
-            "a bool is never accepted here even though it subclasses int, "
-            "since two structurally distinct wire values would otherwise "
-            "reconstruct to one identity"
-        )
-    return cast(int, value)
+    return _strict_int(_required_field(document, key, record), key)
 
 
 def _domain_segment_from_dict(data: Any) -> _DomainScopeSegment:
@@ -644,19 +634,13 @@ def _entity_id_schema_version(data: Mapping[str, Any]) -> int:
     equal to ``2`` (``bool`` subclasses ``int`` in Python, and ``int``/
     ``float`` compare across type), so either would silently dispatch to a
     real version's own parser on a value that was never that version (Codex
-    review). Rejected outright rather than coerced, matching every other
-    identity-bearing field in this module.
+    review) — see :func:`~abicheck.storage.guards.strict_int`. Rejected
+    outright rather than coerced, matching every other identity-bearing
+    field in this module.
     """
     if "schema_version" not in data:
         return 1
-    version = data["schema_version"]
-    if isinstance(version, bool) or not isinstance(version, int):
-        raise TypeError(
-            f"schema_version must be an int, not {type(version).__name__} "
-            f"({version!r}); a bool or float could silently compare equal "
-            "to a real version number and dispatch to the wrong parser"
-        )
-    return cast(int, version)
+    return _strict_int(data["schema_version"], "schema_version")
 
 
 def domain_entity_id_from_dto(data: Mapping[str, Any]) -> _DomainEntityId:
