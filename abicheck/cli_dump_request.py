@@ -61,8 +61,10 @@ legacy_compile_db_matched=...)``) rather than a typed-API field — see
 independently of ``execute_dump_request`` — no PE/Mach-O toolchain was
 available to verify that migration against, so it remains exactly where
 that same "PR C" entry's "Blocker B" heading scoped it: open.
-This module is the prerequisite that migration needs,
-consumed today by ``--dry-run``.
+This module's object is consumed by both branches today: ``--dry-run``
+renders it directly, and ``dump_cmd``'s real ELF branch builds the
+execution-scoped ``ResolvedDumpRequest`` described above from it before
+calling ``execute_dump_cli_run``.
 """
 
 from __future__ import annotations
