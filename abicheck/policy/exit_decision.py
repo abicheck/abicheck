@@ -463,9 +463,42 @@ def _dominant_decision(
     chosen so it always exceeds any contribution the ordinary fold or a
     release's own severity/coverage axes can produce (`0`-`4`) -- so
     carrying a prior/raw value through here can never make `code` stop
-    being the maximum contribution.
+    being the maximum contribution -- **enforced**, not merely assumed:
+    every caller's *_code default is safe today, but the two public
+    resolvers below also accept a caller-supplied custom code (for a
+    future command with the same axes but different numbering, per
+    ADR-064's "numbers are not unified across commands" rule), and a
+    custom code that does not exceed a preserved prior/raw contribution
+    would silently produce an object violating `ExitDecision`'s own
+    `code == max(contributions)` invariant and drop a genuinely tied axis
+    from `reasons` (Codex review, fresh evidence, with the exact
+    counter-example: a custom code of `1` alongside a preserved
+    compatibility contribution of `4`). Fail loudly instead.
     """
     dominant_field = _DOMINANT_FIELD[reason]
+    preserved: tuple[int, ...]
+    if prior is not None:
+        preserved = (
+            prior.compatibility_contribution,
+            prior.contract_coverage_contribution,
+            prior.analysis_assurance_contribution,
+            prior.crosscheck_promotion_contribution,
+        )
+    else:
+        preserved = (
+            compatibility_contribution,
+            contract_coverage_contribution,
+            analysis_assurance_contribution,
+        )
+    if code <= max(preserved, default=0):
+        raise ValueError(
+            f"{reason.value}'s code ({code}) must strictly exceed every "
+            f"preserved contribution {preserved} -- a custom code that "
+            "only ties or falls below one would either violate "
+            "ExitDecision's own code == max(contributions) invariant "
+            "(if lower) or silently drop a genuinely tied axis from "
+            "`reasons` (if equal)"
+        )
     if prior is not None:
         return ExitDecision(
             code=code,
@@ -530,7 +563,11 @@ def resolve_scan_exit_decision(
     numbers (1/5/6) but are accepted explicitly rather than hard-coded, so
     a future caller for a different command with the same three axes (none
     is known today) is not forced to share `scan`'s numbering, per
-    ADR-064's "numbers are not unified across commands" rule.
+    ADR-064's "numbers are not unified across commands" rule -- but a
+    custom code that does not strictly exceed a preserved prior
+    contribution raises `ValueError` (`_dominant_decision`'s own
+    docstring), rather than silently returning a self-contradictory
+    `ExitDecision`.
     """
     if evidence_contract_error:
         return _dominant_decision(
@@ -594,7 +631,10 @@ def resolve_release_exit_decision(
 
     Pure, additive logic (ADR-064's first stage): not yet called from
     `cli_compare_release_helpers.py`, so no existing release comparison's
-    actually-returned exit code changes because this function exists.
+    actually-returned exit code changes because this function exists. As
+    with `resolve_scan_exit_decision`, a custom `not_comparable_code`/
+    `removed_required_library_code` that does not strictly exceed a
+    preserved contribution raises `ValueError`.
     """
     if not_comparable:
         # Both *verdict_or_severity_contribution* and

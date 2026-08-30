@@ -313,6 +313,38 @@ class TestResolveScanExitDecision:
         assert decision is not None
         assert decision.code == 99
 
+    def test_custom_code_not_exceeding_a_prior_contribution_is_rejected(
+        self,
+    ) -> None:
+        """Codex review, exact counter-example: a custom `budget_overflow_
+        code` of `1` alongside a preserved compatibility contribution of
+        `4` would return `code=1` while the true maximum contribution is
+        `4` -- an internally contradictory `ExitDecision`. Reject it
+        instead of silently constructing one.
+        """
+        prior = resolve_exit_decision(compatibility_contribution=4)
+        with pytest.raises(ValueError, match="must strictly exceed"):
+            resolve_scan_exit_decision(
+                budget_overflow=True,
+                budget_overflow_code=1,
+                prior_decision=prior,
+            )
+
+    def test_custom_code_exactly_tying_a_prior_contribution_is_also_rejected(
+        self,
+    ) -> None:
+        """A tie is rejected too, not just a strictly-lower code -- an equal
+        custom code would silently drop the genuinely tied prior axis from
+        `reasons` (Codex review's second half of the same finding).
+        """
+        prior = resolve_exit_decision(compatibility_contribution=5)
+        with pytest.raises(ValueError, match="must strictly exceed"):
+            resolve_scan_exit_decision(
+                budget_overflow=True,
+                budget_overflow_code=5,
+                prior_decision=prior,
+            )
+
 
 class TestResolveReleaseExitDecision:
     """`resolve_release_exit_decision` -- reproduces
@@ -445,6 +477,20 @@ class TestResolveReleaseExitDecision:
             not_comparable_code=77,
         )
         assert decision.code == 77
+
+    def test_custom_removed_library_code_not_exceeding_coverage_is_rejected(
+        self,
+    ) -> None:
+        prior_coverage = 9  # deliberately above a too-small custom code below
+        with pytest.raises(ValueError, match="must strictly exceed"):
+            resolve_release_exit_decision(
+                not_comparable=False,
+                severity_scheme_active=True,
+                verdict_or_severity_contribution=0,
+                removed_required_library=True,
+                contract_coverage_contribution=prior_coverage,
+                removed_required_library_code=8,
+            )
 
     @pytest.mark.parametrize(
         "decision",
