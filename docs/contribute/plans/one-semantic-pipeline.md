@@ -8105,15 +8105,27 @@ snapshot reloads with `entity_id=None` for every declaration, exactly the
 backward-compatible degradation this slice's own design states -- no golden
 fixture needed regeneration).
 
-**What this slice deliberately does not attempt.** `snapshot_cache.py`'s
-separate whole-process disk cache (`_SNAPSHOT_CACHE_VERSION`, independent of
-`SCHEMA_VERSION`) is untouched and does not need bumping: it caches parsed
-`AbiSnapshot` objects, whose `entity_id` carrier was already populated at
-parse time by the THIRD slice, before this slice existed -- this slice only
-changes whether the field SURVIVES A JSON WRITE/READ ROUND TRIP, not what a
-producer computes, and "no consumer may read this field yet" (this slice's
-own invariant, unchanged) means no cached entry's behavior differs from a
-warm-vs-cold cache regardless. (c2) (the `finding_identity.py` algorithm
+**Correction (2026-08-30, same day, Codex review on PR #949): the claim
+below that `snapshot_cache.py` needs no bump was wrong -- `_SNAPSHOT_CACHE_
+VERSION` bumped to `"22"`.** The original reasoning ("it caches parsed
+`AbiSnapshot` objects... no consumer reads this field yet") missed that
+`store_key`/`lookup_key` round-trip through `write_snapshot`/`load_snapshot`
+-- a real on-disk JSON write, not an in-memory object cache surviving one
+process's lifetime -- so a cache entry written before this slice really
+does have `entity_id=None` for every declaration, the same way an on-disk
+v27 snapshot does. The consequence the "no consumer reads it yet" argument
+missed: `snapshot_to_dict` stamps `converted["schema_version"] =
+SCHEMA_VERSION` unconditionally on every write, including a warm cache
+entry re-saved to a caller-visible file -- so a stale pre-this-slice cache
+entry would re-serialize claiming schema_version 28 while never having had
+the chance to resolve identities a genuine v28 extraction would. Exactly
+the same staleness shape the file's own pre-existing `v21` bump (`Function.
+is_compiler_generated`, schema v27) already documents and exists to
+prevent -- this slice missed applying its own established precedent to
+itself. Fixed by bumping `_SNAPSHOT_CACHE_VERSION` with a matching
+`v22` comment entry.
+
+**What this slice deliberately does not attempt.** (c2) (the `finding_identity.py` algorithm
 migration, which is also what gives `Change` an `EntityId` to key on) and
 (b) (the post-parse consumer migrations -- `diff_filtering.py`'s
 `_find_opaque_types`/`_find_by_value_types`/`_root_type_name` and
