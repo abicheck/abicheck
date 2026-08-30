@@ -378,7 +378,8 @@
         "abicheck/cli_stack.py",
         "abicheck/compat/cli.py",
         "abicheck/dry_run.py",
-        "abicheck/__main__.py"
+        "abicheck/__main__.py",
+        "abicheck/service_render.py"
       ]
     }
   },

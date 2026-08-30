@@ -59,6 +59,17 @@ worth knowing before writing a test against them — `from ..x import y` **binds
 a caller reaching it through the facade sees. Patch it where the call
 resolves.
 
+`render.py` is the reverse shape from the five above: it exists so
+`abicheck.service` (`workflows`) can keep re-exporting
+`render_output`/`_render_json_output`/`_render_deps_section_md` without a
+forbidden `workflows -> frontends` edge to `service_render.py`, which owns
+the real implementation but is itself classified `frontends` (it needs
+`report`). Each function is a real, separately-typed `def` that resolves
+`service_render.py` via `importlib.import_module` inside its own body — a
+runtime call, invisible to the static import scans `dependency-direction`
+and `import-cycle-growth` run — rather than a blanket `__getattr__`, which
+would resolve every name as `Any` for external callers (ADR-061).
+
 `abicheck/service_dump_pipeline.py` is classified `workflows` via
 `legacy_paths`: it is free of CLI imports and owns `DumpRequest ->
 ResolvedDumpRequest -> DumpResult`, but has not moved into this directory

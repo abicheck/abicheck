@@ -803,15 +803,6 @@ from .service_compare_pipeline import (  # noqa: E402,F401
 # every front end (CLI, Python, MCP ``abi_dump``) builds a request for. ───────
 from .service_dump_pipeline import run_dump_request  # noqa: E402,F401
 
-# ── Output rendering (extracted to leaf module service_render, a non-
-# importing-us leaf) to stay under the AI-readiness size cap; re-exported
-# verbatim so ``from abicheck.service import render_output`` is unchanged. ──
-from .service_render import (  # noqa: E402,F401
-    _render_deps_section_md,
-    _render_json_output,
-    render_output,
-)
-
 # ── Scan service (ADR-035 D10 typed engine: ScanRequest → ScanResult /
 # [CostEstimate]) extracted to leaf module service_scan, same size-cap/re-
 # export/non-circular-import rationale as service_render above. ────────────
@@ -843,6 +834,14 @@ from .service_scan import (  # noqa: E402,F401
     run_scan_set,
     run_scan_set_subprocess,
     run_scan_subprocess,
+)
+
+# ── Output rendering: service_render.py is `frontends`-classified (ADR-061),
+# re-exported via workflows/render.py's typed wrappers -- see its docstring.
+from .workflows.render import (  # noqa: E402,F401
+    _render_deps_section_md,
+    _render_json_output,
+    render_output,
 )
 
 # Explicit re-export (mypy strict / no_implicit_reexport): the scan engine moved

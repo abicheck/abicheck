@@ -30,7 +30,14 @@ from .reporter import to_json, to_markdown, to_stat, to_stat_json
 
 if TYPE_CHECKING:
     from .checker_types import DiffResult
-    from .severity import SeverityConfig
+
+    # ADR-061: this module is classified `frontends`, which may not import
+    # `policy` (where `severity.py`/`SeverityConfig` now physically live,
+    # `abicheck/policy/severity.py`) directly -- `workflows.gate` is the
+    # existing re-export facade `frontends`-classified callers already
+    # route policy-owned exit-decision types through (its own docstring:
+    # "the one place a frontend gets its process response").
+    from .workflows.gate import SeverityConfig
 
 #: Internal-only ``fmt`` value for :func:`render_output` — a one-line human
 #: summary, not exposed as a public ``--format`` choice (CLI cleanup phase
