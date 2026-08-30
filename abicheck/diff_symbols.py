@@ -304,6 +304,7 @@ def _check_removed_function(
             new_value=f_hidden.visibility.value,
             # See Change.symbol_binding's docstring -- stamped here too, not just on removal below.
             symbol_binding=f_old.elf_binding.value if f_old.elf_binding else None,
+            entity_id=f_old.entity_id,
         )
     removed_kind = (
         ChangeKind.FUNC_REMOVED_ELF_ONLY
@@ -317,6 +318,7 @@ def _check_removed_function(
         old_value=f_old.name,
         # See Change.symbol_binding's docstring — None when not captured.
         symbol_binding=f_old.elf_binding.value if f_old.elf_binding else None,
+        entity_id=f_old.entity_id,
     )
 
 
@@ -359,6 +361,7 @@ def _check_return_type_change(
             name=f_old.name,
             old=f_old.return_type,
             new=f_new.return_type,
+            entity_id=f_old.entity_id,
         )
     ]
 
@@ -423,6 +426,7 @@ def _check_params_change(
             name=f_old.name,
             old=_format_params(f_old.params),
             new=_format_params(f_new.params),
+            entity_id=f_old.entity_id,
         )
     ]
 
@@ -444,6 +448,7 @@ def _check_ref_qualifier_change(
             new=repr(new_rq),
             old_value=old_rq or "(none)",
             new_value=new_rq or "(none)",
+            entity_id=f_old.entity_id,
         )
     ]
 
@@ -463,6 +468,7 @@ def _check_linkage_change(
             name=f_old.name,
             old=old_linkage,
             new=new_linkage,
+            entity_id=f_old.entity_id,
         )
     ]
 
@@ -483,6 +489,7 @@ def _check_noexcept_change(
             ChangeKind.FUNC_NOEXCEPT_REMOVED,
             f"noexcept specifier removed: {f_old.name}",
         ),
+        entity_id=f_old.entity_id,
     )
 
 
@@ -499,6 +506,7 @@ def _check_virtual_change(
             ChangeKind.FUNC_VIRTUAL_REMOVED,
             f"Function is no longer virtual: {f_old.name}",
         ),
+        entity_id=f_old.entity_id,
     )
 
 
@@ -528,6 +536,7 @@ def _check_explicit_change(
             f"Constructor/conversion lost `explicit` specifier: {f_old.name}",
         ),
         removed_values=("explicit", "implicit"),
+        entity_id=f_old.entity_id,
     )
 
 
@@ -554,6 +563,7 @@ def _check_variadic_change(
             f"Function is no longer variadic (lost ...): {f_old.name}",
         ),
         removed_values=("variadic", "fixed-arity"),
+        entity_id=f_old.entity_id,
     )
 
 
@@ -589,6 +599,7 @@ def _check_contract_attributes_change(
                 ),
                 old_value=", ".join(sorted(old_cc)) or "(default)",
                 new_value=", ".join(sorted(new_cc)) or "(default)",
+                entity_id=f_old.entity_id,
             )
         )
         old_attrs -= old_cc
@@ -604,6 +615,7 @@ def _check_contract_attributes_change(
                 name=f_old.name,
                 detail=", ".join(gained),
                 new_value=", ".join(gained),
+                entity_id=f_old.entity_id,
             )
         )
     if lost:
@@ -614,6 +626,7 @@ def _check_contract_attributes_change(
                 name=f_old.name,
                 detail=", ".join(lost),
                 old_value=", ".join(lost),
+                entity_id=f_old.entity_id,
             )
         )
     return changes
@@ -638,6 +651,7 @@ def _check_exception_spec_change(
             name=f_old.name,
             old=f_old.exception_spec or "(none)",
             new=f_new.exception_spec or "(none)",
+            entity_id=f_old.entity_id,
         )
     ]
 
@@ -665,6 +679,7 @@ def _check_vtable_index_change(
             ),
             old_value=str(f_old.vtable_index),
             new_value=str(f_new.vtable_index),
+            entity_id=f_old.entity_id,
         )
     ]
 
@@ -729,6 +744,7 @@ def _check_inline_transitions(
                     ),
                     old_value="non-inline",
                     new_value="inline",
+                    entity_id=f_old.entity_id,
                 )
             )
         elif f_old.is_inline and not f_new.is_inline:
@@ -739,6 +755,7 @@ def _check_inline_transitions(
                     name=f_old.name,
                     old="inline",
                     new="non-inline",
+                    entity_id=f_old.entity_id,
                 )
             )
     return changes
@@ -763,12 +780,10 @@ def _match_old_function(
 
     ADR-049 Phase 2: both tiers of the join run through
     :class:`~abicheck.finding_identity.SymbolIdentityIndex` -- the exact-key
-    tier as this index's own ``Mapping`` lookup, and the ``extern "C"``
-    fallback as one ambiguity-checked alias lookup, replacing the hand-rolled
-    name multimap plus ``len(candidates) == 1`` count this function used to
-    carry. The rule is unchanged, and deliberately so: the count *was* the
-    ambiguity-safety, it just lived here instead of in the shared primitive
-    that every other flat join now uses.
+    tier as this index's own ``Mapping`` lookup, the ``extern "C"`` fallback
+    as one ambiguity-checked alias lookup (``len(candidates) == 1``, the
+    same rule the hand-rolled name multimap this replaced used, now living
+    in the shared primitive every other flat join uses too).
     """
     f_new_exact = new_index.get(mangled)
     if f_new_exact is not None:
@@ -834,12 +849,9 @@ def _detect_newly_deleted_functions(
 ) -> list[Change]:
     """Detect functions that gained ``= delete`` between snapshots.
 
-    FUNC_DELETED: detected via castxml is_deleted attribute (header analysis).
-    FUNC_DELETED_DWARF: detected via DWARF DW_AT_deleted attribute (binary analysis).
-
-    Only ABI-visible (PUBLIC / ELF_ONLY) functions are reported; hidden or
-    internal functions are not part of the public ABI surface and must not
-    produce spurious BREAKING findings. ``drift_old_by_new_key`` covers a
+    FUNC_DELETED: castxml ``is_deleted`` (header analysis). FUNC_DELETED_DWARF:
+    DWARF ``DW_AT_deleted`` (binary analysis). Only ABI-visible (PUBLIC /
+    ELF_ONLY) functions are reported. ``drift_old_by_new_key`` covers a
     reconciled ctor/dtor pair (PR #761 finding 2).
     """
     changes: list[Change] = []
@@ -849,23 +861,21 @@ def _detect_newly_deleted_functions(
     old_exported = exported_symbol_names(
         getattr(old_snapshot, "elf", None), FUNCTION_SYMBOL_TYPES
     )
-    # Whether the new side has an ELF symbol table at all. This tells "no ELF
-    # evidence available" apart from "ELF table present but this function is not
-    # exported": when a table exists, an empty *function* export set (e.g. the
-    # library exports only data, or every function is hidden) is authoritative —
-    # a DWARF-only DW_AT_deleted internal member is genuinely not exported and
-    # must not be reported. Keying on ``exported`` truthiness instead would only
-    # apply the filter when some *other* function happened to be exported.
+    # Whether the new side has an ELF symbol table at all -- "no ELF evidence
+    # available" vs. "table present but this function is not exported": when a
+    # table exists, an empty *function* export set is authoritative (a
+    # DWARF-only DW_AT_deleted internal member is genuinely not exported).
+    # Keying on ``exported`` truthiness alone would only apply this when some
+    # *other* function happened to be exported.
     has_elf_symbol_table = bool(getattr(new_elf, "symbols", None))
     for mangled, f_new in new_all.items():
         if not f_new.is_deleted:
             continue
-        # Suppress only a *genuinely internal* DWARF-deleted member: one that the
-        # new ELF table proves is not exported AND that was not exported in the
-        # old library either. A function that *was* an old export and is now
-        # ``= delete``'d + dropped from .dynsym is a real deletion of a public
-        # API and must still be reported (the removal-side path defers to this
-        # detector for it, so suppressing here would drop the finding entirely).
+        # Suppress only a *genuinely internal* DWARF-deleted member: not
+        # exported now AND not exported before either. One that *was* an old
+        # export and is now ``= delete``'d + dropped from .dynsym is a real
+        # deletion and must still be reported (the removal-side path defers
+        # to this detector for it).
         if (
             f_new.deleted_from_dwarf
             and has_elf_symbol_table
@@ -883,6 +893,7 @@ def _detect_newly_deleted_functions(
                 if f_new.deleted_from_dwarf
                 else ChangeKind.FUNC_DELETED
             )
+            deleted_entity_id = f_old_any.entity_id or f_new.entity_id
             changes.append(
                 make_change(
                     kind,
@@ -890,6 +901,7 @@ def _detect_newly_deleted_functions(
                     name=f_new.name,
                     old_value="callable",
                     new_value="deleted",
+                    entity_id=deleted_entity_id,
                 )
             )
     return changes
@@ -970,6 +982,7 @@ def _diff_functions(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
                     ChangeKind.FUNC_ADDED,
                     symbol=mangled,
                     new=f_new.name,
+                    entity_id=f_new.entity_id,
                 )
             )
 

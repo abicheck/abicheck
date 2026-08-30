@@ -9425,6 +9425,65 @@ give `Change` an `EntityId` (closing (c2)), then the post-parse consumer
 migrations (b), per the fourth slice's own sequencing note above, which
 this slice does not otherwise revise.
 
+**Landed (seventh slice, 2026-08-30): `Change` gains its own `entity_id`
+carrier, populated at every `diff_symbols.py` function-diff call site --
+not yet the exhaustive-population or consumer halves of (c2)/(b).**
+`checker_types.Change` gains `entity_id: EntityId | None = field(default=
+None, kw_only=True)`, appended last per the file's own established
+per-field-`kw_only` convention (`Change` is public API; see that
+convention's own comment, condensed in the same commit to make room under
+`checker_types.py`'s zero-slack `debt.yaml` `no_growth` pin). Semantics:
+the OLD side's `Function.entity_id` when it exists, else the NEW side's --
+mirroring `Change.symbol_binding`'s own already-documented old-side
+convention, rather than inventing a new rule. Wired at every
+function-level call site in `diff_symbols.py` where the producing
+`Function` object(s) are already in scope: `_check_removed_function` (both
+branches), `_check_return_type_change`, `_check_params_change`,
+`_check_ref_qualifier_change`, `_check_linkage_change`, the
+`_check_contract_attributes_change`'s three sites, `_check_exception_spec_
+change`, `_check_vtable_index_change`, `_check_inline_transitions`'s two
+sites, the `FUNC_ADDED` site in `_diff_functions` (new side, since there is
+no old side), and `_detect_newly_deleted_functions` (old side's, via
+`f_old_any.entity_id or f_new.entity_id`, since `f_old_any` -- present only
+when the symbol persisted before gaining `= delete` -- can be `None`).
+`diff_helpers.bool_transition` (backing the noexcept/virtual/explicit/
+variadic checks) gains a matching `entity_id: EntityId | None = None`
+parameter, passed through to both `Change(...)` constructions unchanged --
+it has no declaration of its own to derive one from, so resolving it stays
+the caller's job.
+
+**What this slice deliberately does not attempt**, named explicitly rather
+than left to be discovered: (1) the *other* family of `Change(...)`/
+`make_change(...)` construction sites -- variable-diff, type/enum/platform/
+versioning detectors -- even though several of those already construct
+`Change` from a `RecordType`/`EnumType`/`Variable` that also carries its
+own `.entity_id` (a ~400-site total population, per the scoping
+investigation this slice's own PR ran before implementing); (2)
+`finding_identity.resolve_change_identity`/`_change_discriminator` reading
+`Change.entity_id` at all -- both functions still key entirely on
+`change.symbol`/`change.qualified_name`/flat value fields, unchanged by
+this slice, so **no consumer may read this carrier field yet**, the
+identical staging the model-layer `entity_id` carriers (`Function.
+entity_id` et al.) already went through. Verified via a new, real
+`compare()`-level regression suite (`tests/test_change_entity_id_carrier.py`)
+rather than only unit-testing the private `_check_*` helpers directly:
+FUNC_RETURN_CHANGED/FUNC_REMOVED/FUNC_ADDED/FUNC_NOEXCEPT_ADDED each pin the
+carrier's value end to end, plus a no-producer-`entity_id` case confirming
+`Change.entity_id` stays honestly `None` rather than fabricating one. Full
+fast unit suite green; `mypy abicheck/` and `ruff check`/`ruff format
+--check` clean; `check_architecture.py` 0 new errors (`checker_types.py`
+and `diff_symbols.py` both land at or under their existing `debt.yaml`
+baselines; `diff_helpers.py` -- not itself debt-tracked, but sitting
+exactly at the architecture gate's general 800-line production ceiling --
+required the identical "trim existing verbose comments to make room"
+treatment `checker_types.py` needed, condensing `TypeMap`'s and
+`type_map_key`'s own pre-existing docstrings rather than growing past it).
+Next slice, in order: `resolve_change_identity`/`_change_discriminator`
+consuming `Change.entity_id` (the true completion of (c2)), then (b), the
+post-parse consumer migrations -- exhaustive `Change.entity_id` population
+beyond the function-diff path is a separate, larger follow-on this
+sequencing does not schedule.
+
 ---
 
 ### Phase 3 — public surface as a graph query over one evidence graph (D5)
