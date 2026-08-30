@@ -24,7 +24,7 @@ import click
 
 if TYPE_CHECKING:
     from .policy_file import PolicyFile
-    from .suppression import SuppressionList
+    from .workflows.suppression import SuppressionList
 
 
 #: The built-in verdict-classification profiles ``--policy`` accepts by name,
@@ -380,7 +380,7 @@ def _load_suppression_and_policy(
     oversized ``cli.py`` so the cross-command resolution logic has one home.
     """
     from .policy_file import PolicyFile, pending_validate_overrides_warnings
-    from .suppression import SuppressionList
+    from .workflows.suppression import SuppressionList
 
     suppression: SuppressionList | None = None
     if suppress is not None:

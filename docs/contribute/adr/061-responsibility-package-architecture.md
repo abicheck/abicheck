@@ -1733,6 +1733,73 @@ dozen", and "three sites" overclaims:
   entries above show. This is a dataclass/parser-shaped split the size of
   Phase 5's `*_metadata.py` work, not a reclassification — see the updated
   `architecture/debt.yaml` entry.
+
+  **One slice of it is now closed.** The `storage -> workflows` share of
+  those 72 findings was `bundle_facts_to_dict`/`bundle_facts_from_dict`/
+  `load_bundle_facts`/`save_bundle_facts` importing `BundleFacts` from
+  `bundle_facts.py` (already `workflows`-classified) — a real ownership
+  mismatch, not a wrong import path: those four functions serialize a
+  `workflows`-owned type, so they belong beside it, not inside `storage`.
+  `bundle_facts.py` itself is already at its own 800-line production cap,
+  so the fix is a new sibling — `bundle_facts_serialization.py`, classified
+  `workflows` — rather than growing that module, the same "oversized owner
+  gets a sibling" shape `service_render.py`/`service_dump_pipeline.py`
+  already established for `service.py`. That sibling imports `BundleFacts`
+  from `bundle_facts.py` and `snapshot_to_dict`/`snapshot_from_dict` from
+  `serialization.py` — both allowed `workflows -> *` edges — which also
+  retired a historical duplicate: `storage/bundle_facts_validation.py`'s
+  own `validated_alias_map`/`validated_filename_map` existed only because
+  neither `bundle_facts.py` nor `serialization.py` had a settled layer yet
+  (its own docstring recorded that reasoning); `bundle_facts_serialization.
+  py` now calls them directly instead of `serialization.py` keeping a
+  private, duplicate copy. `serialization.py` re-exports the four public
+  names unchanged, but **not** via a static `from .bundle_facts_serialization
+  import ...`: that module needs `serialization.py` back for
+  `snapshot_to_dict`/`snapshot_from_dict`, so a static import in both
+  directions is exactly the `serialization <-> bundle_facts_serialization`
+  cycle `scripts/check_ai_readiness.py`'s `import-cycle-growth` check flags
+  via static AST scanning regardless of laziness (verified directly: it
+  fired on the first draft of this slice) — the identical reason
+  `abicheck.cli`'s own `__getattr__` resolves its moved names through
+  `abicheck.frontends.cli.moved` instead of importing them back. A module-
+  level `__getattr__` (PEP 562) on `serialization.py` resolves the four
+  names from `bundle_facts_serialization` at *access* time instead, closing
+  the cycle. Measured count after this slice: **62** findings, not 72 —
+  `python scripts/check_architecture.py` against a temporary `storage`
+  classification for `serialization.py`, the same method this whole
+  investigation uses throughout.
+
+  **Two distinct kinds of finding remain in those 62, and only one is
+  mechanical.** (1) About ten `storage -> extract` sites where `serialization.
+  py`'s own `_xxx_from_dict` helpers (`_elf_from_dict`, `_pe_from_dict`, ...)
+  still import their dataclasses (`ElfMetadata`, `PeMetadata`, ...) from the
+  flat, unclassified parser modules (`elf_metadata.py`, `pe_metadata.py`,
+  ...) rather than the canonical `model/*_facts.py` home Phase 5 already
+  gave each one (which each parser module re-exports from unchanged) — a
+  same-object import-path correction, not a behavior change, but not done in
+  this slice because fixing it alone would not unblock classification (see
+  (2)), and `AGENTS.md`'s own "line-count reduction without ownership
+  transfer does not satisfy a phase" counsels against churning those sites
+  for no measurable gate movement. (2) One genuine behavioral edge, not a
+  wrong import path: `snapshot_from_dict`'s legacy-snapshot backward-
+  compatibility backfill calls `python_ext.detect_python_extension()` — real
+  extraction logic (inferring a fact from exported-symbol/import evidence),
+  not a fact lookup — so `storage`'s `may_import: [model]` cannot admit it as
+  written. Closing this needs a real design decision (moving that backfill to
+  a `workflows`-level post-load step, auditing every direct `snapshot_from_
+  dict` caller — not just `load_snapshot` — to confirm none loses the
+  backfill) or accepting `serialization.py` stays unclassified indefinitely,
+  the same treatment `policy_file.py` gets for an analogous reason. Not
+  attempted here. The remaining `frontends -> storage`/`compare -> storage`
+  edges this section's parent bullet named (`cli_buildsource.py`,
+  `cli_buildsource_merge.py`, `cli_compare_release_helpers.py`,
+  `compat/cli.py`, `probe_harness.py`) are unchanged and still real —
+  `probe_harness.py`'s is the one worth flagging precisely rather than
+  lumping with the rest: it is `compare`-classified and needs `snapshot_to_
+  dict`/`snapshot_from_dict` to serialize its own probe-matrix JSON, and
+  `compare`'s `may_import: [model]` has no `workflows` to route a facade
+  through the way the `frontends` edges above could — not investigated
+  further here.
 - **`compat.abicc_dump_import` -> `extract`: done.** Blocked by a real
   `frontends -> extract` edge at `cli_resolve.py:38` and `compat/cli.py:75`,
   both importing it directly rather than through a `workflows` re-export.

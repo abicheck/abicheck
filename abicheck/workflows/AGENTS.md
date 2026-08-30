@@ -49,6 +49,7 @@ without importing a ring it may not (`frontends` may import only `model`,
 | `extraction.py` | Input-side operations: header expansion, the L2 seed, the L3→L2 fold, build-source embedding |
 | `findings.py` | Finding identity and the probe matrix |
 | `scan_config.py` | Scan config, risk rules, and the public-provenance rule (owned here, not aliased) |
+| `suppression.py` | `SuppressionList`/`Suppression`, so a CLI helper can type and load a `--suppress` file without importing `policy`-classified `suppression.py` directly |
 
 `gate.py` earns its place rather than laundering an import: three orthogonal
 axes feed one exit code, and a frontend importing them separately is free to

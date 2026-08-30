@@ -244,6 +244,7 @@
         "abicheck/post_processing_reachability.py",
         "abicheck/semver.py",
         "abicheck/severity.py",
+        "abicheck/suppression.py",
         "abicheck/suppression_yaml.py",
         "abicheck/surface.py"
       ]
@@ -264,6 +265,7 @@
         "abicheck/bundle.py",
         "abicheck/bundle_analysis.py",
         "abicheck/bundle_facts.py",
+        "abicheck/bundle_facts_serialization.py",
         "abicheck/bundle_models.py",
         "abicheck/bundle_multibuild.py",
         "abicheck/bundle_resolution_reachability.py",
@@ -496,6 +498,7 @@
     "bundle_": [
       "bundle_analysis.py",
       "bundle_facts.py",
+      "bundle_facts_serialization.py",
       "bundle_manifest.py",
       "bundle_models.py",
       "bundle_multibuild.py",
@@ -583,6 +586,7 @@
     "bundle.py",
     "bundle_analysis.py",
     "bundle_facts.py",
+    "bundle_facts_serialization.py",
     "bundle_manifest.py",
     "bundle_models.py",
     "bundle_multibuild.py",
