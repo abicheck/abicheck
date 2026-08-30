@@ -204,10 +204,10 @@ class Function:
     # `api_relevant` computation, and AGENTS.md's "PR C" known-gaps entry
     # for the full empirical account.
     is_compiler_generated: bool | None = None
-    # ADR-063 Phase 2 (third slice) identity carrier -- see
+    # ADR-063 Phase 2 identity carrier (persisted since schema v28) -- see
     # ``model/entities.py``'s ``RecordType.entity_id`` for the full
     # rationale, including why this is keyword-only, excluded from
-    # equality, and deliberately not persisted.
+    # equality, and not yet readable by any consumer.
     entity_id: EntityId | None = field(default=None, kw_only=True, compare=False)
 
 
@@ -235,8 +235,8 @@ class Variable:
     # See Function.elf_binding for the ELF-linkage rationale; same population
     # path (dumper_elf_symbols._populate_elf_visibility).
     elf_binding: SymbolBinding | None = None
-    # ADR-063 Phase 2 (third slice) identity carrier -- see
+    # ADR-063 Phase 2 identity carrier (persisted since schema v28) -- see
     # ``model/entities.py``'s ``RecordType.entity_id`` for the full
     # rationale, including why this is keyword-only, excluded from
-    # equality, and deliberately not persisted.
+    # equality, and not yet readable by any consumer.
     entity_id: EntityId | None = field(default=None, kw_only=True, compare=False)

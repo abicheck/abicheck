@@ -7941,6 +7941,233 @@ consumer migrations, now unblocked: `diff_filtering.py`'s
 `type_reachability.py`'s eleven-plus-case ambiguity machinery, with their
 string-based helpers deleted in the same PR per the Acceptance criteria.
 
+**Landed (fourth slice, 2026-08-30): (c1)'s bridge half, not its
+persistence half.** `storage/entity_ids.py` gains
+`domain_entity_id_to_dto`/`domain_entity_id_from_dto`, a wire-schema-
+versioned (`DOMAIN_ENTITY_ID_SCHEMA_VERSION = 2`) pair operating on
+`model.identity.EntityId` directly -- kept deliberately separate from this
+module's own pre-existing `EntityId`/`OccurrenceId` packed-key wire DTO
+(unchanged, still the shape a caller that only needs a flat, orderable,
+key-producing identity reaches for; `storage/identity.py`'s re-export is
+therefore unaffected, exactly as the Design section's own note predicted).
+`domain_entity_id_to_dto` encodes `ScopePath` as an explicit list of typed
+segment records (`{"kind": "namespace"|"record"|"inline_namespace"|
+"anonymous"|"local_to_function", ...}`, one entry per segment, each
+carrying that segment's own fields -- `Record.access`, `InlineNamespace.
+version_tag`, `Anonymous.{kind,ordinal}`, and `LocalToFunction`'s own
+`owner`/`block_ordinal`, with `owner` itself recursively encoded as a full
+nested `EntityId` document, not a bare string, since `LocalToFunction.owner`
+is a whole `EntityId` by the primitive's own design (see that segment's own
+docstring in `model/identity.py`) -- rather than one rendered
+`qualified_name` string, which is exactly the lossy encoding the Design
+section's own finding named (a record nested in a record vs. the same
+bare names nested in a namespace both render `"A::B"`, and a
+`from_dict`-style reconstruction from that string alone cannot recover
+which one it was). `domain_entity_id_from_dto` dispatches on
+`schema_version`: an absent version or an explicit `1` routes through
+`_domain_entity_id_from_v1_dto`, a best-effort migration adapter matching
+the Design section's own stated shape (each `::`-separated
+`qualified_name` component becomes an untyped `Namespace` segment, the
+last becomes `leaf_name`, and a non-empty `discriminator` becomes a
+single-entry `extra` tuple) -- documented, in the test suite and not only
+in prose, as a lossy reconstruction never asserted equal to a fresh v2
+encoding of the same logical declaration. Tests in
+`tests/unit/storage/test_entity_id_domain_bridge.py`: a Hypothesis
+round-trip property (`from_dto(to_dto(x)) == x`) generating arbitrary
+`EntityId`s across every `ScopePath` segment kind, plus dedicated cases for
+the exact `Record`-vs-`Namespace` and `InlineNamespace`-vs-`Namespace`
+counterexamples the Design section's own finding raised (confirmed
+distinct both before and after the round trip, and confirmed to encode to
+*different* wire documents -- not merely to reconstruct correctly, which
+alone would not rule out two different domain objects sharing one
+document by coincidence), a case pinning that `Record.access` stays
+non-identity across the bridge the same way it is in-memory (the wire
+document itself still records the real access level; only equality
+ignores it), recursive `LocalToFunction.owner` round-trips (including an
+owner that is itself local to another function), the mangled-variable
+branch's degenerate `scope=()`/`leaf_name=""` shape, and malformed-input
+refusals (an unknown `schema_version`, an unrecognized segment `"kind"`
+tag, a non-mapping document, an unrecognized `ScopeSegment` type passed
+directly to `to_dto`). Full fast unit suite green; `mypy abicheck/` and
+`ruff` both clean; `tests/unit/storage/test_landed_surface.py`'s table
+check (this plan's storage-v2 sibling document,
+`docs/contribute/plans/storage-format-v2.md`) updated with the three new
+names.
+
+**Correction (2026-08-30, same day, Codex review on PR #949): three
+malformed-document leniency gaps in the reader half, all sharing one root
+cause -- a boundary door that coerced or defaulted instead of refusing, the
+same class of defect this module's own pre-existing `EntityId`/
+`OccurrenceId` guards exist to close, just not yet extended to the new v2
+bridge.** (1) `schema_version` was dispatched by `==` against `1`; since
+`bool` subclasses `int` and compares across `int`/`float` in Python,
+`True == 1` and `2.0 == 2`, so a document carrying either silently
+dispatched to a parser for a version it never declared (a `true`
+`schema_version` alongside real v2 `scope`/`extra` fields ran the *lossy
+v1 adapter*, discarding data the v1 shape cannot even express). Fixed by
+`_entity_id_schema_version`, which rejects any non-`int`-excluding-`bool`
+value outright rather than comparing it. (2) `ordinal`/`block_ordinal`
+were read via the existing `_instance_of(value, int, ...)` guard, which
+accepts `bool` for the identical subclassing reason -- so a document with
+`ordinal: true` and one with `ordinal: 1` reconstructed to equal,
+same-hash `Anonymous`/`LocalToFunction` segments, two structurally
+different wire values collapsing onto one identity. Fixed by
+`_ordinal_field`, a strict integer guard excluding `bool` for both fields.
+(3) `access`, `version_tag`, and `extra` were read via `.get(key, default)`
+even though the writer (`_domain_segment_to_dict`/`domain_entity_id_to_dto`)
+always emits every one of them regardless of value -- so a v2 document
+truncated or hand-edited to omit one of these silently read as "the
+producer had nothing to say" rather than "this document is malformed,"
+exactly the shape `storage.guards.row_sequence`'s own docstring already
+names as this package's central invariant. Fixed by reading all three via
+`_required_field`, matching how every other field in this bridge (`scope`,
+`kind`, `leaf_name`) was already read. New tests for all three in
+`tests/unit/storage/test_entity_id_domain_bridge.py`
+(`TestMalformedDocuments`), each starting from a real `domain_entity_id_to_dto`
+output and mutating exactly the field under test rather than a hand-typed
+fixture, confirmed to fail against the pre-fix reader.
+
+**Correction (2026-08-30, same day): the paragraph originally here
+overclaimed that no `entity_id` carrier field existed yet and that the
+carrier-field question was still unresolved -- both wrong.** The carrier
+field (`RecordType`/`EnumType`/`Function`/`Variable.entity_id`) was added
+by the THIRD slice, the day before this one, resolving the open question as
+option (a); this fourth slice's own opening line ("populated by both header-
+AST backends... schema-inert at the time: dropped before reaching the
+wire") already said so correctly two sections up. The error was writing
+this closing paragraph from the SECOND slice's own stale "what it doesn't
+do yet" framing instead of the current state. What this slice actually
+still does not attempt: "real persistence of the `entity_id` carrier with a
+schema bump," the second half of (c1) as originally scoped, stays open --
+that is what actually wires this bridge into `AbiSnapshot` serialization (a
+`SCHEMA_VERSION` bump and a real snapshot-level round-trip test). (c2) (the
+`finding_identity.py` algorithm migration) and (b) (the post-parse consumer
+migrations) remain open exactly as stated above. See the fifth slice below
+for the persistence half.
+
+**Landed (fifth slice, 2026-08-30): (c1)'s persistence half.** The
+`entity_id` carrier now round-trips through `serialization.py`
+(`SCHEMA_VERSION` 27 -> 28). `storage/entity_id_codec.py` gained
+`encode_entity_ids(d, snap)`/`decode_entity_id(raw)`, replacing the interim
+`drop_entity_ids` this section originally landed: `encode_entity_ids`
+cannot operate on the already-`dataclasses.asdict()`-ed snapshot dict alone
+the way this package's other codecs (`fact_codec.encode_fact_fields`) do,
+because `asdict()` recurses into a `ScopeSegment`'s own fields but loses
+which dataclass (`Namespace`/`Record`/...) produced them -- exactly the
+type tag `domain_entity_id_to_dto` needs. So it is given *both* the
+`asdict()`-ed dict and the original, still-typed `AbiSnapshot`, pairs each
+declaration list by position (`asdict()` preserves list order), and
+re-derives each declaration's wire-encoded `entity_id` from the ORIGINAL
+typed object rather than from what `asdict()` already flattened. A
+declaration with `entity_id is None` gets no key at all (sparse, matching
+`OccurrenceId.to_dict`'s existing convention), rather than an explicit
+`null` -- so a pre-persistence snapshot and a persisted one whose
+declarations never resolved an identity serialize identically.
+`snapshot_from_dict` wires `entity_id=decode_entity_id(f.get("entity_id"))`
+into all four reconstruction sites (`Function`, `Variable`, `RecordType` via
+`decode_record_facts`'s neighbor, and `_enum_type_from_dict`).
+`decode_entity_id` needs no schema-version-gated distinction the way
+`fact_codec.decode_fact` does (`Fact[T]`'s "predates the carrier" vs.
+"malformed" split): a missing/`None` `entity_id` is genuinely optional even
+on a snapshot written by the current build (not every declaration resolves
+one), so absence always means the same thing regardless of which side of
+v28 the snapshot was written on.
+
+**One AI-readiness hard-cap consequence, worth recording so it isn't
+rediscovered.** `serialization.py` was already at this repo's 2000-line
+hard cap before this slice (`load_bundle_facts`/`save_bundle_facts` are
+kept as long, single, `ruff format`-noncompliant lines specifically to stay
+under it -- a pre-existing, deliberate trade-off this slice found and
+preserved rather than "fixed": running `ruff format` on the whole file
+would reflow those two functions across ~20 more lines and push the file
+over the hard cap). New `entity_id` encode/decode call sites and the
+`SCHEMA_VERSION` history-comment entry were kept as terse as the existing
+convention allows, and `ruff format`/`ruff check` were run scoped to confirm
+no NEW formatting drift was introduced beyond that pre-existing, known
+exception -- not to "fix" it, which would have been a scope-creeping,
+cap-violating change bundled into an unrelated slice.
+
+*Tests.* `tests/test_entity_id_carrier.py`'s `TestCarrierIsNotPersisted`
+(third slice) is replaced by `TestCarrierIsPersisted`: a real
+`json.dumps`/`json.loads` round trip (not just the dict form) reconstructs
+an identical `EntityId` for all four carriers; the `Record`-vs-`Namespace`
+counterexample from the Design section's own finding survives the round
+trip at the WHOLE-SNAPSHOT level (not only in the storage-layer bridge's
+own unit tests from the fourth slice); a declaration with no resolved
+identity reloads as `None`, not a reconstructed guess; and a snapshot whose
+`schema_version` is pinned to 27 with `entity_id` keys stripped (simulating
+a genuine pre-v28 document, not merely an old in-memory object) reloads
+every carrier as `None` rather than raising. `tests/test_baseline_pinning.py`
+and `tests/test_serialization_roundtrip.py`'s own `SCHEMA_VERSION ==
+27` pins updated to 28. Full fast unit suite green; `mypy abicheck/` and
+`ruff check` clean; golden-marked tests green (a v27-stamped fixture
+snapshot reloads with `entity_id=None` for every declaration, exactly the
+backward-compatible degradation this slice's own design states -- no golden
+fixture needed regeneration).
+
+**Correction (2026-08-30, same day, Codex review on PR #949): the claim
+below that `snapshot_cache.py` needs no bump was wrong -- `_SNAPSHOT_CACHE_
+VERSION` bumped to `"22"`.** The original reasoning ("it caches parsed
+`AbiSnapshot` objects... no consumer reads this field yet") missed that
+`store_key`/`lookup_key` round-trip through `write_snapshot`/`load_snapshot`
+-- a real on-disk JSON write, not an in-memory object cache surviving one
+process's lifetime -- so a cache entry written before this slice really
+does have `entity_id=None` for every declaration, the same way an on-disk
+v27 snapshot does. The consequence the "no consumer reads it yet" argument
+missed: `snapshot_to_dict` stamps `converted["schema_version"] =
+SCHEMA_VERSION` unconditionally on every write, including a warm cache
+entry re-saved to a caller-visible file -- so a stale pre-this-slice cache
+entry would re-serialize claiming schema_version 28 while never having had
+the chance to resolve identities a genuine v28 extraction would. Exactly
+the same staleness shape the file's own pre-existing `v21` bump (`Function.
+is_compiler_generated`, schema v27) already documents and exists to
+prevent -- this slice missed applying its own established precedent to
+itself. Fixed by bumping `_SNAPSHOT_CACHE_VERSION` with a matching
+`v22` comment entry.
+
+**What this slice deliberately does not attempt.** (c2) (the `finding_identity.py` algorithm
+migration, which is also what gives `Change` an `EntityId` to key on) and
+(b) (the post-parse consumer migrations -- `diff_filtering.py`'s
+`_find_opaque_types`/`_find_by_value_types`/`_root_type_name` and
+`type_reachability.py`'s ambiguity machinery) remain the two open items
+before Phase 2 can be considered complete.
+
+**Correction (2026-08-30, same day, Codex review on PR #949): three
+findings, fixed in the same PR.** (1) `decode_entity_id` used `if not raw:
+return None` -- truthiness, not `raw is None` -- so a genuinely malformed
+wire value that happens to be falsy (`{}`, `[]`, `""`, `False`, `0`) was
+silently read as an honest "never resolved an identity" rather than
+reaching `domain_entity_id_from_dto`'s own validation to be refused. Fixed
+by testing `raw is None` specifically; regression test parametrized over
+all five bogus values in `tests/test_entity_id_carrier.py`. (2) and (3) were
+both `scripts/check_architecture.py` violations from *incidental*
+`ruff format` reflow of pre-existing, already-`ruff format`-noncompliant
+code the initial push happened to touch: `serialization.py`'s
+`debt-no-growth` gate (a stricter, separately-tracked adoption-debt ceiling
+of 1985 lines -- below the 2000-line AI-readiness hard cap this file was
+already sitting at) and a `tests/test_serialization_roundtrip.py`
+`new-test-size` violation (1200-line test-file cap) from unrelated
+multi-line reflows of long assertion lines that carried no functional
+change. Both fixed by reverting the incidental reflow (restoring the exact
+pre-existing single-line forms outside this PR's own touched lines) rather
+than "fixing" the formatting, which would have been unrelated scope creep
+bundled into this slice -- and, for `serialization.py` specifically, by a
+genuine simplification Codex's own finding prompted looking for:
+`decode_entity_id`'s four separate `entity_id=decode_entity_id(...)`
+keyword arguments (one inline at each of `Function`'s, `Variable`'s,
+`RecordType`'s, and `EnumType`'s own reconstruction site) collapsed into
+one new `decode_entity_ids(d, functions=funcs, variables=variables,
+types=types, enums=enums)` call, set post-construction (none of the four
+carrier-bearing dataclasses are frozen) -- a real reduction in
+`serialization.py`'s own footprint, not merely a line-count-driven
+rearrangement, since the four sites' near-identical one-line additions are
+exactly the kind of small, repeated wiring a single codec-owned helper
+should absorb. `encode_entity_ids` also gained a return value (returns `d`)
+so its own call site could fold back into the original single-statement
+`_sets_to_lists(encode_entity_ids(d, snap))` shape the pre-existing
+`_sets_to_lists(drop_entity_ids(d))` line already used, instead of a
+separate statement.
+
 **Correction (2026-08-29, same day, Codex review on PR #943): the
 over-broad-extern-C fix above closed one collision but left a sibling one
 open -- two uninstantiated function/method templates that share scope, leaf

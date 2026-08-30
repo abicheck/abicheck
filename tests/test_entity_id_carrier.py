@@ -13,7 +13,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""The ``entity_id`` carrier field (ADR-063 Phase 2, third slice).
+"""The ``entity_id`` carrier field (ADR-063 Phase 2, third and fifth slices).
 
 Phase 2's open design question — a real carrier field (option (a)) versus
 deferring every post-parse consumer to Phase 6 (option (b)) — is resolved as
@@ -27,14 +27,17 @@ the plan's own "Tests" section specifies for the option-(a) branch:
   than inferred);
 * a static check confirms the resolver is only ever called by a producer,
   never recomputed on an already-parsed model object;
-* and — the one place this slice deliberately departs from the plan's
-  option-(a) paragraph — the field does **not** round-trip through
-  ``serialization.py``: it is dropped, on purpose, because a faithful
-  encoding needs the ``ScopePath``-preserving storage v2 wire DTO that plan
-  scopes as its own slice. ``TestCarrierIsNotPersisted`` pins that as a
-  deliberate, tested property rather than an accident, so the slice that
-  adds real persistence has to change a test that states today's behaviour
-  outright.
+* and — as of the fifth slice (schema v28) — the field DOES round-trip
+  through ``serialization.py``, via ``storage/entity_id_codec.py``'s bridge
+  onto ``storage/entity_ids.py``'s wire-schema-v2 ``domain_entity_id_to_dto``/
+  ``domain_entity_id_from_dto``. The third slice's own interim state (the
+  field dropped outright, pinned by a now-superseded
+  ``TestCarrierIsNotPersisted``) existed only because that wire DTO did not
+  exist yet; ``TestCarrierIsPersisted`` below is this slice's replacement,
+  pinning the round trip as a real property instead. **No consumer may read
+  this field off a snapshot yet** — persistence landing is not the same as
+  the `finding_identity.py` algorithm migration or the post-parse consumer
+  migrations, both still open, separate slices.
 """
 
 from __future__ import annotations
@@ -242,9 +245,7 @@ class TestCarrierFieldShape:
         # one level down.
         assert build(identity) == build(None)
 
-    @pytest.mark.parametrize(
-        "cls", [RecordType, EnumType, Function, Variable]
-    )
+    @pytest.mark.parametrize("cls", [RecordType, EnumType, Function, Variable])
     def test_keyword_only_so_no_positional_slot_moves(self, cls: Any) -> None:
         # A public, non-keyword-only dataclass cannot take a positional
         # insertion without silently rebinding an existing caller's
@@ -287,51 +288,125 @@ def _snapshot_with_every_kind() -> AbiSnapshot:
             )
         ],
         enums=[
-            EnumType(
-                name="E", entity_id=entity_id_for_enum((Namespace("ns"),), "E")
-            )
+            EnumType(name="E", entity_id=entity_id_for_enum((Namespace("ns"),), "E"))
         ],
     )
 
 
-class TestCarrierIsNotPersisted:
-    """The deliberate limitation of this slice, stated as an executable fact.
+class TestCarrierIsPersisted:
+    """The fifth slice's own contract: the carrier round-trips losslessly.
 
-    Encoding an ``EntityId`` faithfully means preserving ``ScopePath``'s
-    *typed segments*; flattening them to a string is a lossy, one-way
-    projection (a record nested in a record and the same names nested in a
-    namespace render identically), so the plan specifies a versioned wire
-    DTO on ``storage/entity_ids.py`` instead — its own reviewable slice.
-    Until then the field is runtime-only, and no consumer may read it.
+    Supersedes the third slice's ``TestCarrierIsNotPersisted`` (see this
+    module's docstring) now that ``storage/entity_ids.py``'s wire-schema-v2
+    ``EntityId`` bridge exists to encode ``ScopePath``'s typed segments
+    without collapsing distinct scopes onto one rendered string.
     """
 
-    def test_no_entity_id_key_survives_serialization(self) -> None:
+    def test_entity_id_key_survives_serialization(self) -> None:
         d = snapshot_to_dict(_snapshot_with_every_kind())
         for list_key in ("types", "enums", "functions", "variables"):
             assert d[list_key], f"fixture must exercise {list_key}"
             for decl in d[list_key]:
-                assert "entity_id" not in decl
+                assert "entity_id" in decl
 
     def test_snapshot_still_json_serializable(self) -> None:
         # The real regression this guards: `EntityId.kind` is a plain Enum
-        # (not a (str, Enum)), and `scope` is a tuple of dataclasses, so an
-        # asdict()-ed carrier reaching json.dumps raises TypeError outright.
+        # (not a (str, Enum)), and `scope` is a tuple of dataclasses, so a
+        # naive asdict()-ed carrier reaching json.dumps raises TypeError
+        # outright -- the wire-schema-v2 encoding must produce a plain,
+        # JSON-safe document instead.
         text = json.dumps(snapshot_to_dict(_snapshot_with_every_kind()))
-        assert "entity_id" not in text
+        assert '"entity_id"' in text
 
-    def test_reload_yields_none_not_a_reconstructed_identity(self) -> None:
-        reloaded = snapshot_from_dict(snapshot_to_dict(_snapshot_with_every_kind()))
+    def test_reload_reconstructs_the_identical_identity(self) -> None:
+        original = _snapshot_with_every_kind()
+        # Through a real json.dumps/json.loads round trip, not just the dict
+        # form -- the property this schema bump exists to establish is that
+        # a snapshot WRITTEN TO DISK AND RELOADED keeps its identities.
+        reloaded = snapshot_from_dict(
+            json.loads(json.dumps(snapshot_to_dict(original)))
+        )
+        assert reloaded.functions[0].entity_id == original.functions[0].entity_id
+        assert reloaded.variables[0].entity_id == original.variables[0].entity_id
+        assert reloaded.types[0].entity_id == original.types[0].entity_id
+        assert reloaded.enums[0].entity_id == original.enums[0].entity_id
+
+    def test_record_nested_in_record_survives_the_round_trip(self) -> None:
+        # The exact counterexample the wire-schema-v2 Design section's own
+        # finding raised: a rendered qualified_name string cannot
+        # distinguish a record nested in a record from the same bare names
+        # nested in a namespace (both render "ns::A"). Pinned here at the
+        # whole-snapshot level, not only in the storage-layer bridge's own
+        # unit tests, since this is the property a real dump/compare run
+        # actually depends on.
+        snap = AbiSnapshot(
+            library="libx.so",
+            version="1.0",
+            types=[
+                RecordType(
+                    name="A",
+                    kind="struct",
+                    entity_id=entity_id_for_type((Record("ns"),), "A"),
+                )
+            ],
+        )
+        reloaded = snapshot_from_dict(json.loads(json.dumps(snapshot_to_dict(snap))))
+        assert reloaded.types[0].entity_id == snap.types[0].entity_id
+        assert reloaded.types[0].entity_id != entity_id_for_type(
+            (Namespace("ns"),), "A"
+        )
+
+    def test_declaration_with_no_resolved_identity_reloads_as_none(self) -> None:
+        # A direct, non-producer construction never fabricates an identity
+        # (TestCarrierFieldShape), and that honesty must survive a round
+        # trip too -- no key at all, and no reconstructed guess on reload.
+        snap = AbiSnapshot(
+            library="libx.so",
+            version="1.0",
+            functions=[Function(name="f", mangled="_Z1fv", return_type="void")],
+        )
+        d = snapshot_to_dict(snap)
+        assert "entity_id" not in d["functions"][0]
+        reloaded = snapshot_from_dict(json.loads(json.dumps(d)))
+        assert reloaded.functions[0].entity_id is None
+
+    def test_schema_version_moved_to_28(self) -> None:
+        from abicheck.serialization import SCHEMA_VERSION
+
+        assert SCHEMA_VERSION == 28
+
+    def test_pre_v28_snapshot_loads_with_entity_id_none(self) -> None:
+        # A legacy snapshot never wrote this key at all -- absence must
+        # degrade to "no identity available", not raise or fabricate one.
+        d = snapshot_to_dict(_snapshot_with_every_kind())
+        d["schema_version"] = 27
+        for list_key in ("types", "enums", "functions", "variables"):
+            for decl in d[list_key]:
+                decl.pop("entity_id", None)
+        reloaded = snapshot_from_dict(d)
         assert reloaded.functions[0].entity_id is None
         assert reloaded.variables[0].entity_id is None
         assert reloaded.types[0].entity_id is None
         assert reloaded.enums[0].entity_id is None
 
-    def test_schema_version_did_not_move(self) -> None:
-        # Nothing about the wire format changed, so a snapshot written by
-        # this build must stay readable by the previous one.
-        from abicheck.serialization import SCHEMA_VERSION
 
-        assert SCHEMA_VERSION == 27
+class TestMalformedEntityIdDocumentIsRefused:
+    """A falsy-but-present wire value (``{}``, ``[]``, ``""``, ``False``,
+    ``0``) is not the same thing as an absent/``None`` carrier -- only
+    ``None`` may load as "this declaration never resolved an identity";
+    anything else reaches the real wire-schema-v2 reader so its own
+    validation rejects the malformed document, rather than the truthiness
+    check silently reading it as an honest absence (Codex review, PR #949).
+    """
+
+    @pytest.mark.parametrize("bogus_entity_id", [{}, [], "", False, 0])
+    def test_falsy_entity_id_document_is_refused_not_treated_as_absent(
+        self, bogus_entity_id: object
+    ) -> None:
+        d = snapshot_to_dict(_snapshot_with_every_kind())
+        d["functions"][0]["entity_id"] = bogus_entity_id
+        with pytest.raises((TypeError, ValueError)):
+            snapshot_from_dict(d)
 
 
 #: Modules allowed to *call* an ``entity_id_for_*`` constructor: the two
@@ -532,7 +607,7 @@ def test_live_castxml_export_override_recognizes_non_itanium_mangling_prefixes(
     ``mangled`` attributes post-hoc -- this sandbox has no MSVC-targeting
     castxml to reproduce the real failure directly."""
     header = tmp_path / "msvc_like.h"
-    header.write_text("int foo(int x);\nextern \"C\" int c_var;\n")
+    header.write_text('int foo(int x);\nextern "C" int c_var;\n')
     xml_out = tmp_path / "msvc_like.xml"
     subprocess.run(
         [

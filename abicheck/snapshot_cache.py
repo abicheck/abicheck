@@ -45,7 +45,7 @@ MAX_ENTRIES: int = 100
 #: key invalidates all previously-cached entries on upgrade rather than risk
 #: serving a stale snapshot computed by an older, behaviorally-different
 #: abicheck version.
-_SNAPSHOT_CACHE_VERSION: str = "21"
+_SNAPSHOT_CACHE_VERSION: str = "22"
 # v2: castxml's CvQualifiedType type-name spelling changed for a
 # volatile-qualified pointer/reference VALUE (now a suffix, "T * volatile",
 # matching clang's own convention, rather than always a prefix) -- an
@@ -265,6 +265,20 @@ _SNAPSHOT_CACHE_VERSION: str = "21"
 # A warm cache from before this fix would keep serving the overclaimed
 # ``PRESENT`` status this fix exists to correct. Bumped so upgrading forces
 # re-extraction instead of silently replaying the stale status.
+#
+# v22 (ADR-063 Phase 2 (c1), Codex review on PR #949): the entity_id carrier
+# (schema v28) is now persisted through this cache too, since store_key/
+# lookup_key round-trip through write_snapshot/load_snapshot -- a real
+# on-disk JSON serialization, not an in-memory object cache. A warm cache
+# entry written before this change has entity_id=None for every declaration
+# (the field genuinely didn't survive serialization then), and re-saving
+# that loaded snapshot stamps it with the CURRENT SCHEMA_VERSION (28)
+# regardless of what schema_version it was loaded from -- so a stale v21
+# cache entry would silently masquerade as a genuine v28 extraction that
+# happens to have resolved no identities, rather than one that never had
+# the chance to. Bumped for the identical reason v21 above was: the same TU
+# inputs now produce a different AbiSnapshot, with no change to any
+# caller-supplied cache-key input.
 #
 # v21 (PR C item 3, Codex review): castxml/direct-clang started stamping
 # ``Function.is_compiler_generated`` (schema v27) from castxml's own

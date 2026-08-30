@@ -633,6 +633,30 @@ class TestEveryContainerGuardRefusesABinaryBuffer:
         item_iterable(iter([1, 2]), "field")
 
 
+class TestStrictIntRejectsBoolAndFloat:
+    """``strict_int`` (ADR-063 Phase 2): a plain ``instance_of(x, int, ...)``
+    would accept ``bool`` (it subclasses ``int``) and would not catch a
+    ``float`` that happens to compare equal to a real int -- both traps this
+    guard exists to close for a field whose two distinct wire values must
+    never collapse onto one meaning (an ordinal, a schema version).
+    """
+
+    @pytest.mark.parametrize("bogus", [True, False, 2.0, "2", None, [2]])
+    def test_bool_float_and_other_non_int_types_are_refused(
+        self, bogus: object
+    ) -> None:
+        from abicheck.storage.guards import strict_int
+
+        with pytest.raises(TypeError, match="must be an int"):
+            strict_int(bogus, "field")
+
+    def test_a_real_int_passes_through(self) -> None:
+        from abicheck.storage.guards import strict_int
+
+        assert strict_int(2, "field") == 2
+        assert strict_int(0, "field") == 0
+
+
 class TestRecordOperandsAreCheckedBeforeUse:
     """`narrowed` was the one record-taking method without an operand check.
 

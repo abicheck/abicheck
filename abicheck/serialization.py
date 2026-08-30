@@ -46,7 +46,7 @@ from .model import (
     Variable,
     Visibility,
 )
-from .storage.entity_id_codec import drop_entity_ids
+from .storage.entity_id_codec import decode_entity_ids, encode_entity_ids
 from .storage.enum_codec import encode_platform_enums
 from .storage.fact_codec import (
     apply_legacy_fact_backfill,
@@ -315,7 +315,7 @@ from .storage.fact_codec import (
 # doesn't hit any producer-specific threshold above stays silent, since every
 # CI baseline is *always* some number of versions behind and warning
 # regardless of relevance would just be noise.
-SCHEMA_VERSION: int = 27
+SCHEMA_VERSION: int = 28  # v28: entity_id carrier persisted, no reliability flag needed (genuinely optional even on a current snapshot); no consumer reads it yet -- see storage/entity_id_codec.py.
 
 # Schema version at which CastXML field CV facts became reliable (see v9 above).
 _MIN_SCHEMA_VERSION_FOR_CV_FACTS = 9
@@ -410,8 +410,8 @@ def snapshot_to_dict(snap: AbiSnapshot) -> dict[str, Any]:
     # ADR-063 Phase 0 (schema v26): see storage/fact_codec.py.
     encode_fact_fields(d)
 
-    # Convert all sets → sorted lists (needed for AdvancedDwarfMetadata.packed_structs and ToolchainInfo.abi_flags; json.dumps raises TypeError on set objects), having first dropped the runtime-only ADR-063 Phase 2 `entity_id` carrier -- it is never encoded, so SCHEMA_VERSION does not move; see storage/entity_id_codec.py for why a stopgap encoding is refused rather than invented here.
-    converted: dict[str, Any] = _sets_to_lists(drop_entity_ids(d))
+    # Convert all sets → sorted lists (needed for AdvancedDwarfMetadata.packed_structs and ToolchainInfo.abi_flags; json.dumps raises TypeError on set objects), having first encoded the ADR-063 Phase 2 (c1) `entity_id` carrier (storage/entity_id_codec.py).
+    converted: dict[str, Any] = _sets_to_lists(encode_entity_ids(d, snap))
 
     # BuildMode enums are (str, Enum), so dataclasses.asdict() carries
     # them through as Enum instances rather than plain strings; normalize
@@ -1021,6 +1021,7 @@ def snapshot_from_dict(d: dict[str, Any]) -> AbiSnapshot:
         for t in d.get("types", [])
     ]
     enums = [_enum_type_from_dict(e) for e in d.get("enums", [])]
+    decode_entity_ids(d, functions=funcs, variables=variables, types=types, enums=enums)
     typedefs: dict[str, str] = d.get("typedefs", {})
     typedefs_qualified: dict[str, str] = d.get("typedefs_qualified", {})
     elf_data = d.get("elf")
