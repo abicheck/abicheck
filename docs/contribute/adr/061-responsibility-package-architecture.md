@@ -967,14 +967,26 @@ Hoisting the resolve also fixed a real inconsistency it exposed: a bare `dump`
 and a bare `dump --dry-run` rejected the *same* invalid input with two
 different messages.
 
-**Still open:** the real ELF/PE/Mach-O run still *executes* through
-`perform_elf_dump`/`handle_non_elf_dump` rather than `execute_dump_request`.
-What changed is which object supplies its resolved inputs. That last migration
-needs the ADR-039 collector's CLI-only inputs represented in the typed API and
-`_write_snapshot_output`'s provenance/`--inputs`/depth-gate sequence reordered
-around a resolve-time embed; it is also unverifiable here, since the default
-header backend is castxml and no policy-conformant build is obtainable in this
-environment (a hand-assembled conda-forge 0.6.13 segfaults in `ParseAST`).
+**The ELF half of this is now closed (CLI cleanup phase two, PR C).**
+`frontends/cli/commands/dump.py`'s real (non-`--dry-run`) ELF branch now
+builds a second, execution-scoped `ResolvedDumpRequest` from the same
+`DumpRequest` `--dry-run` already resolves and calls
+`frontends.cli.dump_execute`, which runs it through
+`service_dump_pipeline.execute_dump_request` — the L3-L5 embed moved to
+resolution time, while depth enforcement and dependency scoping stay at
+write time, unchanged, in `_write_snapshot_output`. `perform_elf_dump` is
+retired from that call site (still defined, for any other caller that
+depends on it, but no longer imported by `dump_cmd`). The legacy
+`-p`/`--compile-db` auto-match is threaded through as an explicit
+pass-through (`execute_dump_request(..., legacy_compile_db_tokens=...,
+legacy_compile_db_matched=...)`) rather than a typed-API field. See
+`docs/contribute/known-gaps.md`'s "PR C" entry for the full mechanism,
+including the one real behavior change this migration carries (`dump`'s L4
+source-extractor default flips from an accidental clang to castxml).
+
+**Still open: PE/Mach-O.** `handle_non_elf_dump` still executes
+independently of `execute_dump_request` — no PE/Mach-O toolchain was
+available to verify that migration against, so it remains open.
 
 Use the pattern already emerging in the typed compare, dump, input-resolution,
 and artifact-plan code:

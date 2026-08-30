@@ -45,16 +45,22 @@ Its own module, not an addition to ``cli.py`` (1800+ lines, WARN) or
 ``cli_dump_helpers.py`` (at the 2000-line hard cap) — AGENTS.md, "Files that
 are large".
 
-**Scope, stated plainly**: the real ELF/PE/Mach-O run still executes through
-``perform_elf_dump``/``handle_non_elf_dump``, not through
-``service_dump_pipeline.execute_dump_request``. ADR-063 Phase 1 re-investigated
-this and found the ADR-039 collector's own post-processing passes are NOT
-actually a blocker (they already run inside ``_resolve_side_snapshot_impl``
-too, and a second, redundant call from ``perform_elf_dump`` is a safe no-op).
-The real, still-open blocker is the legacy ``-p``/``--compile-db`` auto-match
-(``cli_helpers_compare._resolve_build_context_flags``) having no equivalent
-inside ``resolve_dump_request``/``execute_dump_request`` at all — see
+**Scope, stated plainly**: the real ELF run has since migrated (CLI cleanup
+phase two, PR C) — ``frontends/cli/commands/dump.py`` builds a second,
+execution-scoped ``ResolvedDumpRequest`` from the object this module
+produces and calls ``frontends.cli.dump_execute``, which runs it through
+``service_dump_pipeline.execute_dump_request`` instead of the retired
+``perform_elf_dump`` call site (still defined, for any other caller that
+depends on it, but no longer imported by ``dump_cmd``). The legacy
+``-p``/``--compile-db`` auto-match this note used to call a blocker is
+threaded through as an explicit pass-through
+(``execute_dump_request(..., legacy_compile_db_tokens=...,
+legacy_compile_db_matched=...)``) rather than a typed-API field — see
 ``docs/contribute/known-gaps.md``'s "PR C" entry for the precise mechanism.
+**PE/Mach-O is not migrated**: ``handle_non_elf_dump`` still executes
+independently of ``execute_dump_request`` — no PE/Mach-O toolchain was
+available to verify that migration against, so it remains exactly where
+that same "PR C" entry's "Blocker B" heading scoped it: open.
 This module is the prerequisite that migration needs,
 consumed today by ``--dry-run``.
 """
