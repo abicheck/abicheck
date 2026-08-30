@@ -8027,20 +8027,98 @@ names as this package's central invariant. Fixed by reading all three via
 output and mutating exactly the field under test rather than a hand-typed
 fixture, confirmed to fail against the pre-fix reader.
 
-**What this slice deliberately does not attempt.** No `entity_id` carrier
-field exists anywhere in `abicheck/model/` yet -- the open carrier-field
-question (option (a) vs. (b)) from the first slice is still unresolved, so
-there is nothing for a real snapshot to persist through this bridge yet.
-"Real persistence of the `entity_id` carrier with a schema bump," the
-second half of (c1) as originally scoped above, therefore stays open:
-that work is what actually wires this bridge into `AbiSnapshot`
-serialization (a `SCHEMA_VERSION` bump, `serialization.py`/
-`snapshot_cache.py` changes, and a real snapshot-level round-trip test),
-and it cannot be built before the carrier-field question is resolved --
-this slice only makes the wire *shape* ready for whichever option that
-resolution picks. (c2) (the `finding_identity.py` algorithm migration)
-and (b) (the post-parse consumer migrations) remain open exactly as
-stated above.
+**Correction (2026-08-30, same day): the paragraph originally here
+overclaimed that no `entity_id` carrier field existed yet and that the
+carrier-field question was still unresolved -- both wrong.** The carrier
+field (`RecordType`/`EnumType`/`Function`/`Variable.entity_id`) was added
+by the THIRD slice, the day before this one, resolving the open question as
+option (a); this fourth slice's own opening line ("populated by both header-
+AST backends... schema-inert at the time: dropped before reaching the
+wire") already said so correctly two sections up. The error was writing
+this closing paragraph from the SECOND slice's own stale "what it doesn't
+do yet" framing instead of the current state. What this slice actually
+still does not attempt: "real persistence of the `entity_id` carrier with a
+schema bump," the second half of (c1) as originally scoped, stays open --
+that is what actually wires this bridge into `AbiSnapshot` serialization (a
+`SCHEMA_VERSION` bump and a real snapshot-level round-trip test). (c2) (the
+`finding_identity.py` algorithm migration) and (b) (the post-parse consumer
+migrations) remain open exactly as stated above. See the fifth slice below
+for the persistence half.
+
+**Landed (fifth slice, 2026-08-30): (c1)'s persistence half.** The
+`entity_id` carrier now round-trips through `serialization.py`
+(`SCHEMA_VERSION` 27 -> 28). `storage/entity_id_codec.py` gained
+`encode_entity_ids(d, snap)`/`decode_entity_id(raw)`, replacing the interim
+`drop_entity_ids` this section originally landed: `encode_entity_ids`
+cannot operate on the already-`dataclasses.asdict()`-ed snapshot dict alone
+the way this package's other codecs (`fact_codec.encode_fact_fields`) do,
+because `asdict()` recurses into a `ScopeSegment`'s own fields but loses
+which dataclass (`Namespace`/`Record`/...) produced them -- exactly the
+type tag `domain_entity_id_to_dto` needs. So it is given *both* the
+`asdict()`-ed dict and the original, still-typed `AbiSnapshot`, pairs each
+declaration list by position (`asdict()` preserves list order), and
+re-derives each declaration's wire-encoded `entity_id` from the ORIGINAL
+typed object rather than from what `asdict()` already flattened. A
+declaration with `entity_id is None` gets no key at all (sparse, matching
+`OccurrenceId.to_dict`'s existing convention), rather than an explicit
+`null` -- so a pre-persistence snapshot and a persisted one whose
+declarations never resolved an identity serialize identically.
+`snapshot_from_dict` wires `entity_id=decode_entity_id(f.get("entity_id"))`
+into all four reconstruction sites (`Function`, `Variable`, `RecordType` via
+`decode_record_facts`'s neighbor, and `_enum_type_from_dict`).
+`decode_entity_id` needs no schema-version-gated distinction the way
+`fact_codec.decode_fact` does (`Fact[T]`'s "predates the carrier" vs.
+"malformed" split): a missing/`None` `entity_id` is genuinely optional even
+on a snapshot written by the current build (not every declaration resolves
+one), so absence always means the same thing regardless of which side of
+v28 the snapshot was written on.
+
+**One AI-readiness hard-cap consequence, worth recording so it isn't
+rediscovered.** `serialization.py` was already at this repo's 2000-line
+hard cap before this slice (`load_bundle_facts`/`save_bundle_facts` are
+kept as long, single, `ruff format`-noncompliant lines specifically to stay
+under it -- a pre-existing, deliberate trade-off this slice found and
+preserved rather than "fixed": running `ruff format` on the whole file
+would reflow those two functions across ~20 more lines and push the file
+over the hard cap). New `entity_id` encode/decode call sites and the
+`SCHEMA_VERSION` history-comment entry were kept as terse as the existing
+convention allows, and `ruff format`/`ruff check` were run scoped to confirm
+no NEW formatting drift was introduced beyond that pre-existing, known
+exception -- not to "fix" it, which would have been a scope-creeping,
+cap-violating change bundled into an unrelated slice.
+
+*Tests.* `tests/test_entity_id_carrier.py`'s `TestCarrierIsNotPersisted`
+(third slice) is replaced by `TestCarrierIsPersisted`: a real
+`json.dumps`/`json.loads` round trip (not just the dict form) reconstructs
+an identical `EntityId` for all four carriers; the `Record`-vs-`Namespace`
+counterexample from the Design section's own finding survives the round
+trip at the WHOLE-SNAPSHOT level (not only in the storage-layer bridge's
+own unit tests from the fourth slice); a declaration with no resolved
+identity reloads as `None`, not a reconstructed guess; and a snapshot whose
+`schema_version` is pinned to 27 with `entity_id` keys stripped (simulating
+a genuine pre-v28 document, not merely an old in-memory object) reloads
+every carrier as `None` rather than raising. `tests/test_baseline_pinning.py`
+and `tests/test_serialization_roundtrip.py`'s own `SCHEMA_VERSION ==
+27` pins updated to 28. Full fast unit suite green; `mypy abicheck/` and
+`ruff check` clean; golden-marked tests green (a v27-stamped fixture
+snapshot reloads with `entity_id=None` for every declaration, exactly the
+backward-compatible degradation this slice's own design states -- no golden
+fixture needed regeneration).
+
+**What this slice deliberately does not attempt.** `snapshot_cache.py`'s
+separate whole-process disk cache (`_SNAPSHOT_CACHE_VERSION`, independent of
+`SCHEMA_VERSION`) is untouched and does not need bumping: it caches parsed
+`AbiSnapshot` objects, whose `entity_id` carrier was already populated at
+parse time by the THIRD slice, before this slice existed -- this slice only
+changes whether the field SURVIVES A JSON WRITE/READ ROUND TRIP, not what a
+producer computes, and "no consumer may read this field yet" (this slice's
+own invariant, unchanged) means no cached entry's behavior differs from a
+warm-vs-cold cache regardless. (c2) (the `finding_identity.py` algorithm
+migration, which is also what gives `Change` an `EntityId` to key on) and
+(b) (the post-parse consumer migrations -- `diff_filtering.py`'s
+`_find_opaque_types`/`_find_by_value_types`/`_root_type_name` and
+`type_reachability.py`'s ambiguity machinery) remain the two open items
+before Phase 2 can be considered complete.
 
 **Correction (2026-08-29, same day, Codex review on PR #943): the
 over-broad-extern-C fix above closed one collision but left a sibling one
