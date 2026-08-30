@@ -1089,9 +1089,7 @@ class TestExtractionContractRoundTrip:
 class TestFactFieldRoundTrip:
     """A freshly-built snapshot's Fact[...] fields survive a real snapshot_to_dict()/json.dumps()/snapshot_from_dict() round-trip, and a pre-v26 (schema_version < 26) snapshot with no *_fact keys backfills correctly from the existing reliability flags — never Fact.present([])/Fact.present(False) for the unreliable/unsupported case, the exact confusion (a placeholder read as a confirmed fact) this phase exists to make unrepresentable."""
 
-    def test_fresh_snapshot_round_trips_present_fact_and_is_json_serializable(
-        self,
-    ) -> None:
+    def test_fresh_snapshot_round_trips_present_fact_and_is_json_serializable(self) -> None:
         rec = RecordType(
             name="Widget", kind="struct", vtable=["_ZN6WidgetD1Ev"], bases=["Base"]
         )
@@ -1109,9 +1107,7 @@ class TestFactFieldRoundTrip:
         assert p.is_va_list_fact.status is FactStatus.PRESENT
         assert p.is_va_list_fact.value is True
 
-    def test_fresh_snapshot_confirmed_empty_survives_as_present_not_not_collected(
-        self,
-    ) -> None:
+    def test_fresh_snapshot_confirmed_empty_survives_as_present_not_not_collected(self) -> None:
         rec = RecordType(name="Plain", kind="struct", vtable=[])
         r = _round_trip(_make_snap(types=[rec])).types[0]
         assert r.vtable_fact.status is FactStatus.PRESENT
@@ -1176,15 +1172,10 @@ class TestFactFieldRoundTrip:
         p = snapshot_from_dict(d).functions[0].params[0]
         assert p.is_va_list_fact.status is FactStatus.NOT_COLLECTED
 
-    def test_legacy_snapshot_bases_always_backfills_present_unconditionally(
-        self,
-    ) -> None:
+    def test_legacy_snapshot_bases_always_backfills_present_unconditionally(self) -> None:
         # bases/virtual_bases have no reliability flag (AGENTS.md's
         # type_base_changed entry) — always backfills to Fact.present(raw).
-        d = _minimal_dict(
-            schema_version=20,
-            types=[{"name": "Foo", "kind": "struct", "bases": ["Base"]}],
-        )
+        d = _minimal_dict(schema_version=20, types=[{"name": "Foo", "kind": "struct", "bases": ["Base"]}])
         r = snapshot_from_dict(d).types[0]
         assert r.bases_fact.status is FactStatus.PRESENT
         assert r.bases_fact.value == ["Base"]
@@ -1199,19 +1190,11 @@ class TestFactFieldRoundTrip:
         snap = snapshot_from_dict(d)
         assert snap.types[0].bases_fact.status is FactStatus.NOT_COLLECTED
         assert snap.types[0].bases == []
-        assert (
-            snap.functions[0].params[0].is_va_list_fact.status
-            is FactStatus.NOT_COLLECTED
-        )
+        assert snap.functions[0].params[0].is_va_list_fact.status is FactStatus.NOT_COLLECTED
 
     def test_snapshot_to_dict_encodes_status_as_plain_string(self) -> None:
         rec = RecordType(name="Foo", kind="struct", vtable_fact=Fact.present(["m"]))
-        assert (
-            snapshot_to_dict(_make_snap(types=[rec]))["types"][0]["vtable_fact"][
-                "status"
-            ]
-            == "present"
-        )
+        assert snapshot_to_dict(_make_snap(types=[rec]))["types"][0]["vtable_fact"]["status"] == "present"
 
     def test_schema_version_is_26_or_higher(self) -> None:
         assert SCHEMA_VERSION >= 26

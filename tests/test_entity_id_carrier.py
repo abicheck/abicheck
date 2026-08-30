@@ -390,6 +390,25 @@ class TestCarrierIsPersisted:
         assert reloaded.enums[0].entity_id is None
 
 
+class TestMalformedEntityIdDocumentIsRefused:
+    """A falsy-but-present wire value (``{}``, ``[]``, ``""``, ``False``,
+    ``0``) is not the same thing as an absent/``None`` carrier -- only
+    ``None`` may load as "this declaration never resolved an identity";
+    anything else reaches the real wire-schema-v2 reader so its own
+    validation rejects the malformed document, rather than the truthiness
+    check silently reading it as an honest absence (Codex review, PR #949).
+    """
+
+    @pytest.mark.parametrize("bogus_entity_id", [{}, [], "", False, 0])
+    def test_falsy_entity_id_document_is_refused_not_treated_as_absent(
+        self, bogus_entity_id: object
+    ) -> None:
+        d = snapshot_to_dict(_snapshot_with_every_kind())
+        d["functions"][0]["entity_id"] = bogus_entity_id
+        with pytest.raises((TypeError, ValueError)):
+            snapshot_from_dict(d)
+
+
 #: Modules allowed to *call* an ``entity_id_for_*`` constructor: the two
 #: header-AST producers and their ``extract`` entity modules. By option
 #: (a)'s own design the identity is computed once, at parse time, and read

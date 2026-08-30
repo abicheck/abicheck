@@ -49,15 +49,30 @@ this repo's file-size cap.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from collections.abc import Sequence
+from typing import TYPE_CHECKING, Any, Protocol
 
 from .entity_ids import domain_entity_id_from_dto, domain_entity_id_to_dto
 
 if TYPE_CHECKING:
+    from ..model.declarations import Function, Variable
+    from ..model.entities import EnumType, RecordType
     from ..model.identity import EntityId
     from ..model.snapshot import AbiSnapshot
 
-__all__ = ["decode_entity_id", "encode_entity_ids"]
+    class _HasEntityIdCarrier(Protocol):
+        """Structural stand-in for the four carrier-bearing model dataclasses
+        (`Function`/`Variable`/`RecordType`/`EnumType`) — they share no
+        declared base class, so a single typed helper over "any one of the
+        four" needs a `Protocol`, not a `Union`, to stay a plain assignment
+        target (`decl.entity_id = ...`) rather than needing a cast at every
+        call site.
+        """
+
+        entity_id: EntityId | None
+
+
+__all__ = ["decode_entity_ids", "encode_entity_ids"]
 
 #: Snapshot keys holding lists of declaration dicts/objects that carry the
 #: field, paired with the matching ``AbiSnapshot`` attribute name.
@@ -72,9 +87,12 @@ _DECLARATION_LIST_KEYS = (
 )
 
 
-def encode_entity_ids(d: dict[str, Any], snap: AbiSnapshot) -> None:
+def encode_entity_ids(d: dict[str, Any], snap: AbiSnapshot) -> dict[str, Any]:
     """In-place: replace each declaration dict's ``entity_id`` with its
     wire-schema-v2 document, derived from *snap*'s own still-typed carrier.
+    Returns *d* itself, so a caller can chain it the same way this package's
+    other in-place fix-ups already do (``_sets_to_lists(encode_entity_ids(d,
+    snap))``).
 
     A declaration with no resolved identity (``entity_id is None``) gets no
     key at all — matching every other sparse, only-present-when-meaningful
@@ -107,13 +125,19 @@ def encode_entity_ids(d: dict[str, Any], snap: AbiSnapshot) -> None:
                 decl_dict.pop("entity_id", None)
             else:
                 decl_dict["entity_id"] = domain_entity_id_to_dto(entity_id)
+    return d
 
 
-def decode_entity_id(raw: Any) -> EntityId | None:
-    """Reconstruct a declaration's ``entity_id`` carrier from its wire
+def _decode_one(raw: Any) -> Any:
+    """Reconstruct one declaration's ``entity_id`` carrier from its wire
     document, or ``None`` when the declaration never resolved one.
 
-    Unlike ``Fact[T]`` fields, a missing/``None`` ``entity_id`` never means
+    ``raw is None``, not a truthiness check, is what means "absent" — a
+    malformed wire value that happens to be falsy (``{}``, ``[]``, ``""``,
+    ``False``, ``0``) must still reach ``domain_entity_id_from_dto`` so its
+    own mapping/required-field validation rejects it, rather than being
+    silently read as an ordinary, honestly-unresolved carrier (Codex
+    review). Unlike ``Fact[T]`` fields, an absent ``entity_id`` never means
     "this snapshot predates the carrier" versus "malformed" — the field is
     genuinely optional even on a snapshot written by the current build (a
     direct, non-producer construction of ``RecordType``/etc., or a
@@ -121,6 +145,50 @@ def decode_entity_id(raw: Any) -> EntityId | None:
     no schema-version-gated distinction to make here the way
     ``fact_codec.decode_fact`` has to draw one.
     """
-    if not raw:
+    if raw is None:
         return None
     return domain_entity_id_from_dto(raw)
+
+
+def decode_entity_ids(
+    d: dict[str, Any],
+    *,
+    functions: Sequence[Function],
+    variables: Sequence[Variable],
+    types: Sequence[RecordType],
+    enums: Sequence[EnumType],
+) -> None:
+    """In-place: set each already-constructed declaration's ``.entity_id``
+    from *d*'s own raw wire documents. The inverse of :func:`encode_entity_ids`.
+
+    Takes the four already-built declaration lists rather than constructing
+    them itself, the same "given the typed side, not just the dict" shape
+    :func:`encode_entity_ids` uses — `RecordType`/`EnumType`/`Function`/
+    `Variable` are not frozen, so setting the field post-construction (one
+    call here, instead of one `entity_id=...` keyword argument threaded
+    through each of the four separate reconstruction sites in
+    `serialization.py`, itself already at this repo's file-size debt
+    ceiling) is a real simplification, not merely a smaller diff. Declaration
+    lists are paired by *position* against ``d``'s own raw dicts, the same
+    convention :func:`encode_entity_ids` uses (`snapshot_from_dict` builds
+    each list via one list comprehension over `d[list_key]`, preserving
+    order) — a length mismatch is this function's own caller's error, so it
+    is asserted rather than tolerated, same as the encode side.
+    """
+    _decode_one_list(d, "functions", functions)
+    _decode_one_list(d, "variables", variables)
+    _decode_one_list(d, "types", types)
+    _decode_one_list(d, "enums", enums)
+
+
+def _decode_one_list(
+    d: dict[str, Any], list_key: str, decls: Sequence[_HasEntityIdCarrier]
+) -> None:
+    raw_decls = d.get(list_key, []) or []
+    assert len(raw_decls) == len(decls), (
+        f"{list_key}: {len(raw_decls)} raw documents but {len(decls)} typed "
+        "declarations — d and the decl lists must be built from the same "
+        "source list"
+    )
+    for raw_decl, decl in zip(raw_decls, decls, strict=True):
+        decl.entity_id = _decode_one(raw_decl.get("entity_id"))

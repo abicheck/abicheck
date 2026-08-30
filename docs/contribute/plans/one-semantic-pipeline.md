@@ -8120,6 +8120,42 @@ migration, which is also what gives `Change` an `EntityId` to key on) and
 `type_reachability.py`'s ambiguity machinery) remain the two open items
 before Phase 2 can be considered complete.
 
+**Correction (2026-08-30, same day, Codex review on PR #949): three
+findings, fixed in the same PR.** (1) `decode_entity_id` used `if not raw:
+return None` -- truthiness, not `raw is None` -- so a genuinely malformed
+wire value that happens to be falsy (`{}`, `[]`, `""`, `False`, `0`) was
+silently read as an honest "never resolved an identity" rather than
+reaching `domain_entity_id_from_dto`'s own validation to be refused. Fixed
+by testing `raw is None` specifically; regression test parametrized over
+all five bogus values in `tests/test_entity_id_carrier.py`. (2) and (3) were
+both `scripts/check_architecture.py` violations from *incidental*
+`ruff format` reflow of pre-existing, already-`ruff format`-noncompliant
+code the initial push happened to touch: `serialization.py`'s
+`debt-no-growth` gate (a stricter, separately-tracked adoption-debt ceiling
+of 1985 lines -- below the 2000-line AI-readiness hard cap this file was
+already sitting at) and a `tests/test_serialization_roundtrip.py`
+`new-test-size` violation (1200-line test-file cap) from unrelated
+multi-line reflows of long assertion lines that carried no functional
+change. Both fixed by reverting the incidental reflow (restoring the exact
+pre-existing single-line forms outside this PR's own touched lines) rather
+than "fixing" the formatting, which would have been unrelated scope creep
+bundled into this slice -- and, for `serialization.py` specifically, by a
+genuine simplification Codex's own finding prompted looking for:
+`decode_entity_id`'s four separate `entity_id=decode_entity_id(...)`
+keyword arguments (one inline at each of `Function`'s, `Variable`'s,
+`RecordType`'s, and `EnumType`'s own reconstruction site) collapsed into
+one new `decode_entity_ids(d, functions=funcs, variables=variables,
+types=types, enums=enums)` call, set post-construction (none of the four
+carrier-bearing dataclasses are frozen) -- a real reduction in
+`serialization.py`'s own footprint, not merely a line-count-driven
+rearrangement, since the four sites' near-identical one-line additions are
+exactly the kind of small, repeated wiring a single codec-owned helper
+should absorb. `encode_entity_ids` also gained a return value (returns `d`)
+so its own call site could fold back into the original single-statement
+`_sets_to_lists(encode_entity_ids(d, snap))` shape the pre-existing
+`_sets_to_lists(drop_entity_ids(d))` line already used, instead of a
+separate statement.
+
 **Correction (2026-08-29, same day, Codex review on PR #943): the
 over-broad-extern-C fix above closed one collision but left a sibling one
 open -- two uninstantiated function/method templates that share scope, leaf
