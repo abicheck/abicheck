@@ -268,12 +268,20 @@ def test_dry_run_preview_mentions_requested_build_target_and_flags_estimate(
     target(s) and flagging the estimate as unscoped."""
     from abicheck.buildsource.scan_levels import EvidenceDepth, SourceMethod
     from abicheck.frontends.cli.scan_dry_run import render_scan_dry_run
+    from abicheck.service_scan import ScanRequest, estimate_scan
 
+    estimates = estimate_scan(
+        ScanRequest(
+            binaries=[tmp_path / "lib.so"],
+            sources=tmp_path,
+            build_targets=("//:math",),
+            mode="audit",
+        ),
+        resolved_level=(SourceMethod.S0, EvidenceDepth.BINARY),
+    )
     result = render_scan_dry_run(
         artifact=tmp_path / "lib.so",
         against=None,
-        headers=[],
-        includes=[],
         sources=tmp_path,
         effective_build_info=None,
         changed=[],
@@ -283,11 +291,10 @@ def test_dry_run_preview_mentions_requested_build_target_and_flags_estimate(
         eff_depth_enum=EvidenceDepth.BINARY,
         resolved=SourceMethod.S0,
         collect_mode="off",
-        budget_s=None,
-        lang="c++",
         header_backend="auto",
         fmt="text",
         build_targets=("//:math",),
+        estimates=estimates,
     )
     build_lines = " ".join(result.sections.get("Build/source inputs", []))
     assert "--build-target: //:math" in build_lines
@@ -298,12 +305,15 @@ def test_dry_run_preview_mentions_requested_build_target_and_flags_estimate(
 def test_dry_run_preview_omits_build_target_note_when_unset(tmp_path: Path) -> None:
     from abicheck.buildsource.scan_levels import EvidenceDepth, SourceMethod
     from abicheck.frontends.cli.scan_dry_run import render_scan_dry_run
+    from abicheck.service_scan import ScanRequest, estimate_scan
 
+    estimates = estimate_scan(
+        ScanRequest(binaries=[tmp_path / "lib.so"], sources=tmp_path, mode="audit"),
+        resolved_level=(SourceMethod.S0, EvidenceDepth.BINARY),
+    )
     result = render_scan_dry_run(
         artifact=tmp_path / "lib.so",
         against=None,
-        headers=[],
-        includes=[],
         sources=tmp_path,
         effective_build_info=None,
         changed=[],
@@ -313,10 +323,9 @@ def test_dry_run_preview_omits_build_target_note_when_unset(tmp_path: Path) -> N
         eff_depth_enum=EvidenceDepth.BINARY,
         resolved=SourceMethod.S0,
         collect_mode="off",
-        budget_s=None,
-        lang="c++",
         header_backend="auto",
         fmt="text",
+        estimates=estimates,
     )
     build_lines = " ".join(result.sections.get("Build/source inputs", []))
     assert "--build-target" not in build_lines

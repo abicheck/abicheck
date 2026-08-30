@@ -298,6 +298,7 @@
         "abicheck/service_header_scoped.py",
         "abicheck/service_input_resolution.py",
         "abicheck/service_scan.py",
+        "abicheck/service_scan_estimate.py",
         "abicheck/stack_checker.py",
         "abicheck/aggregate.py",
         "abicheck/aggregate_findings.py",
@@ -440,7 +441,8 @@
       "service_input_resolution.py",
       "service_metadata_attach.py",
       "service_render.py",
-      "service_scan.py"
+      "service_scan.py",
+      "service_scan_estimate.py"
     ],
     "reporter_": [
       "reporter_contract_blocks.py",
@@ -818,6 +820,7 @@
     "service_metadata_attach.py",
     "service_render.py",
     "service_scan.py",
+    "service_scan_estimate.py",
     "severity.py",
     "snapshot_cache.py",
     "snapshot_io.py",

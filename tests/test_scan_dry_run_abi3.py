@@ -374,12 +374,67 @@ def test_artifact_set_dry_run_shows_unknown_not_zero_for_l3(tmp_path: Path) -> N
         totals={"L3_build": (0, 0.0)},
         notes=["build.query: .abicheck.yml [UNKNOWN: query-only build.query]"],
         blocker=None,
+        unknown_layers=frozenset({"L3_build"}),
     )
     lines = result.sections.get("Resolved depth and source scope", [])
     l3_lines = [ln for ln in lines if ln.startswith("L3_build:")]
     assert l3_lines == [
         "L3_build: TU count/cost unknown for at least one member (see notes below)"
     ]
+    assert any("understating it" in ln for ln in lines)
+
+
+def test_artifact_set_dry_run_shows_unknown_not_zero_for_l4_and_l5(
+    tmp_path: Path,
+) -> None:
+    """Codex review, fresh evidence: L4/L5 derive their own TU counts from
+    L3's -- an earlier revision of this fix hardcoded the "unknown, not a
+    confident zero" treatment to the L3_build row alone, so a query-only
+    build config's summed L4_source_abi/L5_source_graph rows still showed a
+    misleading "0 TU(s) total, ~0.00s" even once L3's own row said
+    "unknown". ``unknown_layers`` (not a single project-wide flag) is what
+    lets the renderer apply the same honesty to every affected layer, not
+    just the one the earlier fix happened to check."""
+    a = tmp_path / "a.so"
+    a.write_bytes(b"")
+    req = SimpleNamespace(
+        bundle_system_providers=(),
+        depth="source",
+        changed_src="none",
+        changed_paths=[],
+        sources=None,
+        build_info=None,
+        build_targets=(),
+        abi3_floor=None,
+    )
+    result = render_artifact_set_dry_run(
+        req,
+        discovered={"a.so": a},
+        explicit=True,
+        header_backend="auto",
+        fmt="text",
+        totals={
+            "L3_build": (0, 0.0),
+            "L4_source_abi": (0, 0.0),
+            "L5_source_graph": (0, 0.0),
+        },
+        notes=[
+            "build.query: .abicheck.yml [UNKNOWN: query-only build.query, "
+            "real run's trusted query determines the actual count]",
+            "source-target replay scope (0 of 0 TU(s)) [UNKNOWN: derived "
+            "from an unknown L3 TU count, see L3_build note]",
+            "source graph fold/edges [UNKNOWN: derived from an unknown L3 "
+            "TU count, see L3_build note]",
+        ],
+        blocker=None,
+        unknown_layers=frozenset({"L3_build", "L4_source_abi", "L5_source_graph"}),
+    )
+    lines = result.sections.get("Resolved depth and source scope", [])
+    for layer in ("L3_build", "L4_source_abi", "L5_source_graph"):
+        layer_lines = [ln for ln in lines if ln.startswith(f"{layer}:")]
+        assert layer_lines == [
+            f"{layer}: TU count/cost unknown for at least one member (see notes below)"
+        ], layer_lines
     assert any("understating it" in ln for ln in lines)
 
 
@@ -498,3 +553,110 @@ def test_estimate_total_tus_no_build_config_is_unaffected() -> None:
     total, note = _estimate_total_tus(req)
     assert total == 0
     assert "UNKNOWN" not in note
+
+
+# ── L4/L5 inherit L3's "unknown", not a confident zero (Codex, fresh evidence) ──
+
+
+def test_estimate_scan_propagates_unknown_tu_count_to_l4_and_l5(
+    tmp_path: Path,
+) -> None:
+    """A query-only build config makes L3's TU count genuinely unknown --
+    L4_source_abi and L5_source_graph derive their own counts from it and
+    must say so too, not price a confident-looking zero derived from a
+    count that was never actually counted."""
+    from abicheck.service_scan import Budget, estimate_scan
+
+    config_path = tmp_path / ".abicheck.yml"
+    config_path.write_text(
+        'build:\n  query: "cmake --build . --target compile_commands"\n'
+    )
+    req = ScanRequest(
+        binaries=[tmp_path / "lib.so"],
+        mode="pr",
+        source_method=SourceMethod.S5.value,
+        depth=EvidenceDepth.SOURCE.value,
+        seeded=False,
+        budget=Budget(total_timeout=None),
+        build_config=config_path,
+    )
+    estimates = estimate_scan(
+        req, resolved_level=(SourceMethod.S5, EvidenceDepth.SOURCE)
+    )
+    by_layer = {e.layer: e for e in estimates}
+    assert "L4_source_abi" in by_layer
+    assert "L5_source_graph" in by_layer
+    for layer, e in by_layer.items():
+        if layer.startswith("L3") or layer.startswith("L4") or layer.startswith("L5"):
+            assert "[UNKNOWN" in e.note, (layer, e.note)
+            assert e.tus == 0
+
+
+def test_estimate_scan_does_not_mark_l4_l5_unknown_for_a_real_count(
+    tmp_path: Path,
+) -> None:
+    """Negative control: a real, counted TU total must not be flagged
+    unknown just because L4/L5 pass through the same code path."""
+    from abicheck.service_scan import estimate_scan
+
+    compile_db = tmp_path / "compile_commands.json"
+    compile_db.write_text("[]")
+    req = ScanRequest(
+        binaries=[tmp_path / "lib.so"],
+        mode="pr",
+        source_method=SourceMethod.S5.value,
+        depth=EvidenceDepth.SOURCE.value,
+        compile_db=compile_db,
+    )
+    estimates = estimate_scan(
+        req, resolved_level=(SourceMethod.S5, EvidenceDepth.SOURCE)
+    )
+    assert estimates
+    assert not any("[UNKNOWN" in e.note for e in estimates)
+
+
+def test_estimate_artifact_set_reports_unknown_layers_per_layer(
+    tmp_path: Path,
+) -> None:
+    """``estimate_artifact_set``'s 4th return value names exactly the layers
+    at least one member's estimate flagged unknown -- not every layer, and
+    not a single project-wide bit that can't say which layer it means."""
+    from abicheck.service_scan import estimate_artifact_set
+
+    config_path = tmp_path / ".abicheck.yml"
+    config_path.write_text(
+        'build:\n  query: "cmake --build . --target compile_commands"\n'
+    )
+    a = tmp_path / "a.so"
+    a.write_bytes(b"")
+    req = ScanRequest(
+        binaries=[],
+        mode="pr",
+        depth=EvidenceDepth.SOURCE.value,
+        build_config=config_path,
+    )
+    totals, notes, blocker, unknown_layers = estimate_artifact_set(req, [a])
+    assert "L3_build" in unknown_layers
+    assert "L4_source_abi" in unknown_layers
+    assert "L5_source_graph" in unknown_layers
+    assert "L0_binary" not in unknown_layers
+    assert "bundle_audit" not in unknown_layers
+
+
+def test_estimate_artifact_set_unknown_layers_empty_for_real_counts(
+    tmp_path: Path,
+) -> None:
+    from abicheck.service_scan import estimate_artifact_set
+
+    compile_db = tmp_path / "compile_commands.json"
+    compile_db.write_text("[]")
+    a = tmp_path / "a.so"
+    a.write_bytes(b"")
+    req = ScanRequest(
+        binaries=[],
+        mode="pr",
+        depth=EvidenceDepth.SOURCE.value,
+        compile_db=compile_db,
+    )
+    _totals, _notes, _blocker, unknown_layers = estimate_artifact_set(req, [a])
+    assert unknown_layers == frozenset()

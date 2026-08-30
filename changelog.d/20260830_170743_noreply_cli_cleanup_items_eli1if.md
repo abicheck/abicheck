@@ -12,4 +12,8 @@
   no `--sources`/`--build-info` is given but `build.query` is declared, the
   real run's trusted query supplies L3 evidence at run time — the estimate
   now flags the count as genuinely unknown instead of silently understating
-  a `--budget` pick that relies on it.
+  a `--budget` pick that relies on it. `L4_source_abi`/`L5_source_graph`
+  derive their own counts from L3's, and previously stayed silently
+  confident (`"0 TU(s), ~0.00s"`) even once L3's own row was fixed to say
+  "unknown" — both single-binary and `--artifact-set` dry-run previews now
+  flag them too.
