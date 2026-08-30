@@ -106,6 +106,7 @@ def render_scan_dry_run(
     scheme_label: str = "legacy (0/2/4)",
     sev_config: Any = None,
     abi3_floor: tuple[int, int] | None = None,
+    build_config: Path | None = None,
 ) -> Any:
     """Build the ``scan --dry-run`` report (ADR-043 D4): resolve, never scan.
 
@@ -178,13 +179,21 @@ def render_scan_dry_run(
             budget=Budget(total_timeout=budget_s),
             lang=lang,
             build_targets=build_targets,
+            build_config=build_config,
         )
         estimates = estimate_scan(req, resolved_level=(resolved, eff_depth_enum))
         total = sum(e.est_seconds for e in estimates)
         result.add(
             "Resolved depth and source scope",
             *(
-                f"{e.layer}: {e.tus} TU(s), ~{e.est_seconds:.2f}s -- {e.note}"
+                # A query-only build.query (service_scan._estimate_total_tus)
+                # marks its note "[UNKNOWN" rather than folding a confident
+                # `0` into the count -- render that honestly too, since
+                # "0 TU(s), ~0.00s" reads as a real (near-zero) cost rather
+                # than "not counted yet" (Codex review).
+                f"{e.layer}: TU count/cost unknown -- {e.note}"
+                if "[UNKNOWN" in e.note
+                else f"{e.layer}: {e.tus} TU(s), ~{e.est_seconds:.2f}s -- {e.note}"
                 for e in estimates
             ),
             f"projected total: {total:.2f}s",
@@ -198,6 +207,10 @@ def render_scan_dry_run(
             "collection will scope to the requested root target(s) and "
             "typically touch fewer TUs than shown"
             if build_targets
+            else None,
+            "note: at least one layer's TU count/cost is unknown (see above) "
+            "-- it contributes 0.0s to the projected total, understating it"
+            if any("[UNKNOWN" in e.note for e in estimates)
             else None,
         )
     except Exception as exc:  # pragma: no cover - best-effort probe

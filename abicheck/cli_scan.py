@@ -1718,6 +1718,7 @@ def scan_cmd(
                 scheme_label=scheme_label,
                 sev_config=sev_config_for_preview,
                 abi3_floor=abi3_floor,
+                build_config=build_config,
             )
         )
 

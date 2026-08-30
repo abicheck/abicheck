@@ -268,6 +268,38 @@ def test_estimate_total_tus_config_without_query_is_unaffected(tmp_path: Path) -
     assert note == "no source tree / compile DB"
 
 
+def test_render_scan_dry_run_wires_build_config_and_shows_unknown_not_zero(
+    tmp_path: Path,
+) -> None:
+    """End-to-end: the single-binary CLI dry-run path must actually reach
+    ``_estimate_total_tus``'s query-only branch (Codex review: an earlier
+    revision of this fix left ``render_scan_dry_run``'s own internal
+    ``ScanRequest`` without ``build_config`` at all, so the branch was
+    unreachable from ``scan --dry-run`` itself), and the rendered preview
+    must not report a numeric "0 TU(s), ~0.00s" for a count that is
+    genuinely unknown rather than counted as zero."""
+    config_path = tmp_path / ".abicheck.yml"
+    config_path.write_text(
+        'build:\n  query: "cmake --build . --target compile_commands"\n'
+    )
+    result = render_scan_dry_run(
+        **_dry_run_kwargs(
+            tmp_path,
+            depth="build",
+            eff_depth_enum=EvidenceDepth.BUILD,
+            resolved=SourceMethod.S1,
+            collect_mode="build",
+            build_config=config_path,
+        )
+    )
+    lines = result.sections.get("Resolved depth and source scope", [])
+    l3_lines = [ln for ln in lines if ln.startswith("L3_build:")]
+    assert l3_lines == ["L3_build: TU count/cost unknown -- build.query: .abicheck.yml "
+                         "[UNKNOWN: query-only build.query, real run's trusted query "
+                         "determines the actual count]"]
+    assert any("understating it" in ln for ln in lines)
+
+
 def test_estimate_total_tus_no_build_config_is_unaffected() -> None:
     req = ScanRequest(binaries=[Path("lib.so")], mode="audit")
     total, note = _estimate_total_tus(req)
