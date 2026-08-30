@@ -214,18 +214,18 @@ class RecordType:
     #   objects compare unequal purely on whether a producer wired it --
     #   the same identity-vs-payload discipline `identity.Record.access`
     #   already applies one level down.
-    # * **Not persisted.** `serialization.snapshot_to_dict` drops it
-    #   (`storage/entity_id_codec.py`); a snapshot loaded from JSON carries
-    #   `entity_id=None` for every declaration. Encoding it correctly needs
-    #   the `ScopePath`-preserving storage v2 wire DTO the plan specifies
-    #   for `storage/entity_ids.py`, which is its own reviewable slice --
-    #   and a lossy stopgap encoding (flattening `ScopePath` to a string)
-    #   is exactly the round-trip collision the plan already rejected by
-    #   name. Until that lands, no diff/report consumer may read this
-    #   field: it is present in an in-memory dump and absent from a
-    #   reloaded one, so a consumer keyed on it would answer differently
-    #   for the same two libraries depending only on whether a snapshot was
-    #   written to disk in between.
+    # * **Persisted (schema v28), but not yet readable.** `serialization.
+    #   snapshot_to_dict`/`snapshot_from_dict` round-trip it through
+    #   `storage/entity_id_codec.py`'s bridge onto `storage/entity_ids.py`'s
+    #   `ScopePath`-preserving wire-schema-v2 `EntityId` encoding -- a
+    #   reloaded snapshot's declarations carry the identical `entity_id` an
+    #   in-memory one does (or `None`, honestly, when nothing resolved one).
+    #   **No diff/report consumer may read this field yet regardless**: the
+    #   `finding_identity.py` algorithm migration and the post-parse
+    #   consumer migrations (ADR-063 Phase 2's remaining items) haven't
+    #   landed, so nothing yet gives this field a defined meaning to a
+    #   comparison -- reading it early would be acting on a value nothing
+    #   has committed to the semantics of.
     entity_id: EntityId | None = field(default=None, kw_only=True, compare=False)
 
     def __post_init__(self) -> None:
@@ -275,10 +275,10 @@ class EnumType:
     # type-map-key reasons documented on ``RecordType.qualified_name``. None
     # when the enum is at global scope or the dumper couldn't determine it.
     qualified_name: str | None = None
-    # ADR-063 Phase 2 (third slice) identity carrier -- see
+    # ADR-063 Phase 2 identity carrier (persisted since schema v28) -- see
     # RecordType.entity_id above for the full rationale, including why this
-    # is keyword-only, excluded from equality, and deliberately not
-    # persisted.
+    # is keyword-only, excluded from equality, and not yet readable by any
+    # consumer.
     entity_id: EntityId | None = field(default=None, kw_only=True, compare=False)
 
 
