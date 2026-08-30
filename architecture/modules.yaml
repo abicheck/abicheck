@@ -37,7 +37,8 @@
       ],
       "legacy_paths": [
         "abicheck/buildsource/build_cache.py",
-        "abicheck/dumper_cache.py"
+        "abicheck/dumper_cache.py",
+        "abicheck/snapshot_io.py"
       ]
     },
     "extract": {
@@ -99,6 +100,7 @@
         "abicheck/cc_wrapper.py",
         "abicheck/clang_layout_tool.py",
         "abicheck/classify.py",
+        "abicheck/compat/abicc_dump_import.py",
         "abicheck/ctf_metadata.py",
         "abicheck/debug_resolver.py",
         "abicheck/dump_manifest.py",

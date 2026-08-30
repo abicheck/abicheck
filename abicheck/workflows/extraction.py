@@ -113,6 +113,11 @@ from ..buildsource.toolchain_bindings import (
 from ..buildsource.toolchain_probe import check_profile_toolchain_identity
 from ..clang_layout_tool import attach_clang_layout
 from ..classify import is_supported_compare_input
+from ..compat.abicc_dump_import import (
+    import_abicc_perl_dump,
+    is_abicc_perl_dump_file,
+    looks_like_perl_dump,
+)
 from ..debug_resolver import DebugArtifact, resolve_debug_info
 from ..dump_manifest import DumpManifest, load_manifest
 from ..dumper_cache import ast_memoize_scope
@@ -206,11 +211,13 @@ __all__ = [
     "fold_type_graph",
     "fold_virtual_dispatch_graph",
     "has_explicit_std",
+    "import_abicc_perl_dump",
     "include_operand_dirs",
     "ingest_codeql_call_results",
     "ingest_codeql_extends_results",
     "ingest_inputs_pack",
     "ingest_kythe_entries",
+    "is_abicc_perl_dump_file",
     "is_inputs_pack",
     "is_inputs_pack_dir",
     "is_pack_dir",
@@ -225,6 +232,7 @@ __all__ = [
     "load_inputs_pack_or_raise",
     "load_manifest",
     "load_pack_or_raise",
+    "looks_like_perl_dump",
     "looks_like_symvers",
     "normalize_binary_input",
     "parse_dwarf",

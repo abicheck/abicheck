@@ -1705,16 +1705,26 @@ dozen", and "three sites" overclaims:
   right). Two files, three sites — mechanically fixable by rerouting those
   call sites through a `workflows`-owned facade, but that reroute is its own
   reviewed slice, not a drive-by inside this one.
-- **`snapshot_io.py` -> `storage`**: the same shape as `suppression.py`,
-  independently measured — a real `frontends -> storage` edge at
-  `cli_dump_helpers.py`, `cli_helpers_compare.py`, `cli_resolve.py`, and
-  `compat/cli.py`, all importing its compression/sniffing helpers directly.
-  `classify.py` and `package.py` also import it, but both are `extract`-
-  classified and `extract -> storage` is allowed, so they are not part of
-  the blocker (a plausible-looking `model -> storage` concern from an earlier
-  pass turned out to rest on misclassifying `classify.py` as `model`; it is
-  actually `extract`, checked directly against `architecture/modules.yaml`
-  rather than assumed).
+- **`snapshot_io.py` -> `storage`: done.** The same shape as `suppression.py`
+  below, and it got the reroute that entry says this shape needs: a real
+  `frontends -> storage` edge at `cli_dump_helpers.py`, `cli_helpers_compare.py`,
+  `cli_resolve.py`, and `compat/cli.py`, all importing its compression/sniffing
+  helpers directly. `classify.py` and `package.py` also import it, but both
+  are `extract`-classified and `extract -> storage` is allowed, so they were
+  never part of the blocker (a plausible-looking `model -> storage` concern
+  from an earlier pass turned out to rest on misclassifying `classify.py` as
+  `model`; it is actually `extract`). Fixed the same way `extraction.py`
+  already fixed the identical shape for `extract`-owned operations: a new
+  sibling facade, `workflows/storage.py`, re-exports `snapshot_io.py`'s
+  `SnapshotCompression`/`write_snapshot_text`/`resolve_write_compression`/
+  `detect_snapshot_compression`/`bounded_decoded_prefix`/
+  `_COMPRESSED_SUFFIXES` (kept as its own module rather than folded into
+  `extraction.py`, since these are ADR-059's storage-envelope responsibility,
+  not extraction, and merging the two facades would blur exactly the
+  ownership boundary this ADR exists to keep explicit), and all four call
+  sites now import through it instead of `snapshot_io` directly.
+  `snapshot_io.py` is now `storage` in `architecture/modules.yaml`;
+  `python scripts/check_architecture.py` reports 0 findings.
 - **`serialization.py` -> `storage`**: measured and found to be **worse**
   than the debt ledger's existing `storage` target implied — 72 findings, not
   a handful, because the module's own body reaches into `extract`/`compare`/
@@ -1723,13 +1733,20 @@ dozen", and "three sites" overclaims:
   entries above show. This is a dataclass/parser-shaped split the size of
   Phase 5's `*_metadata.py` work, not a reclassification — see the updated
   `architecture/debt.yaml` entry.
-- **`compat.abicc_dump_import` -> `extract`**: blocked by a real
+- **`compat.abicc_dump_import` -> `extract`: done.** Blocked by a real
   `frontends -> extract` edge at `cli_resolve.py:38` and `compat/cli.py:75`,
   both importing it directly rather than through a `workflows` re-export.
   `classify.py` also imports it function-locally, but `classify.py` is
   itself `extract`-classified, so that particular edge is `extract ->
-  extract` and fires nothing — the two `frontends` sites are the whole
+  extract` and fires nothing — the two `frontends` sites were the whole
   blocker here, not a third site hiding behind physical-location exemptions.
+  Fixed the same way `elf_metadata.py`/`symvers_metadata.py`/siblings
+  already route through `extraction.py`: `looks_like_perl_dump`,
+  `import_abicc_perl_dump`, and `is_abicc_perl_dump_file` joined that
+  facade's existing re-export list, and both `frontends` sites now import
+  them from there instead of `compat.abicc_dump_import` directly.
+  `compat/abicc_dump_import.py` is now `extract` in `architecture/modules.yaml`;
+  `python scripts/check_architecture.py` reports 0 findings.
 - **`service_render.py` -> `workflows`**: this is the one finding that
   reframes the whole entry, not just adds to it. `service_render.py` imports
   `reporter.py`/`sarif.py` — both `report`-classified — and `workflows ->
