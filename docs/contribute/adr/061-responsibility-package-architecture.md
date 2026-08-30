@@ -1816,6 +1816,34 @@ dozen", and "three sites" overclaims:
   `compare`'s `may_import: [model]` has no `workflows` to route a facade
   through the way the `frontends` edges above could — not investigated
   further here.
+
+  **A Codex review round on the PR landing `bundle_facts_serialization.py`
+  raised a sharper version of the same question for that new module
+  specifically: shouldn't a module whose whole job is "serialize a
+  baseline's JSON schema" be `storage`, per this document's own task-routing
+  table, rather than `workflows`?** The observation is correct as stated,
+  and checked directly rather than waved away: `storage`'s `may_import:
+  [model]` means a `storage`-classified `bundle_facts_serialization.py`
+  importing `BundleFacts` from `bundle_facts.py` (`workflows`-classified,
+  a decision predating this module's own creation) would trip
+  `dependency-direction` as a `storage -> workflows` edge — the exact edge
+  this split exists to close, merely relocated one file over, and
+  `check_architecture.py`'s import scan counts a `TYPE_CHECKING`-only
+  reference identically to a runtime one, so there is no lazy-import escape
+  hatch here the way the `serialization <-> bundle_facts_serialization`
+  cycle itself had one. Closing it for real needs `BundleFacts` (the
+  dataclass) split out of `bundle_facts.py` into a `model`-owned type,
+  separate from that module's real orchestration logic
+  (`capture_bundle_facts`, `compare_bundle_from_facts`, the G40 archive
+  glue) — the identical dataclass/parser split Phase 5 already did for
+  `elf_metadata.py`/`pe_metadata.py`/etc. → `model/*_facts.py`. That is a
+  materially larger, separate slice (it touches `bundle_facts.py`'s own
+  classification and every caller importing `BundleFacts` from there), not
+  a drive-by fix to fold into the PR that raised it. Not recorded in
+  `architecture/debt.yaml`: that ledger tracks files already over their
+  line-count limit that cannot shrink without a vertical slice, and
+  `bundle_facts.py` is not oversized — this is a classification question
+  independent of line count, so this paragraph is its record instead.
 - **`compat.abicc_dump_import` -> `extract`: done.** Blocked by a real
   `frontends -> extract` edge at `cli_resolve.py:38` and `compat/cli.py:75`,
   both importing it directly rather than through a `workflows` re-export.
