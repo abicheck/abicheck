@@ -304,7 +304,7 @@ def _check_removed_function(
             new_value=f_hidden.visibility.value,
             # See Change.symbol_binding's docstring -- stamped here too, not just on removal below.
             symbol_binding=f_old.elf_binding.value if f_old.elf_binding else None,
-            entity_id=f_old.entity_id,
+            entity_id=f_old.entity_id or f_hidden.entity_id,
         )
     removed_kind = (
         ChangeKind.FUNC_REMOVED_ELF_ONLY
@@ -361,7 +361,7 @@ def _check_return_type_change(
             name=f_old.name,
             old=f_old.return_type,
             new=f_new.return_type,
-            entity_id=f_old.entity_id,
+            entity_id=f_old.entity_id or f_new.entity_id,
         )
     ]
 
@@ -426,7 +426,7 @@ def _check_params_change(
             name=f_old.name,
             old=_format_params(f_old.params),
             new=_format_params(f_new.params),
-            entity_id=f_old.entity_id,
+            entity_id=f_old.entity_id or f_new.entity_id,
         )
     ]
 
@@ -448,7 +448,7 @@ def _check_ref_qualifier_change(
             new=repr(new_rq),
             old_value=old_rq or "(none)",
             new_value=new_rq or "(none)",
-            entity_id=f_old.entity_id,
+            entity_id=f_old.entity_id or f_new.entity_id,
         )
     ]
 
@@ -468,7 +468,7 @@ def _check_linkage_change(
             name=f_old.name,
             old=old_linkage,
             new=new_linkage,
-            entity_id=f_old.entity_id,
+            entity_id=f_old.entity_id or f_new.entity_id,
         )
     ]
 
@@ -489,7 +489,7 @@ def _check_noexcept_change(
             ChangeKind.FUNC_NOEXCEPT_REMOVED,
             f"noexcept specifier removed: {f_old.name}",
         ),
-        entity_id=f_old.entity_id,
+        entity_id=f_old.entity_id or f_new.entity_id,
     )
 
 
@@ -506,7 +506,7 @@ def _check_virtual_change(
             ChangeKind.FUNC_VIRTUAL_REMOVED,
             f"Function is no longer virtual: {f_old.name}",
         ),
-        entity_id=f_old.entity_id,
+        entity_id=f_old.entity_id or f_new.entity_id,
     )
 
 
@@ -536,7 +536,7 @@ def _check_explicit_change(
             f"Constructor/conversion lost `explicit` specifier: {f_old.name}",
         ),
         removed_values=("explicit", "implicit"),
-        entity_id=f_old.entity_id,
+        entity_id=f_old.entity_id or f_new.entity_id,
     )
 
 
@@ -563,7 +563,7 @@ def _check_variadic_change(
             f"Function is no longer variadic (lost ...): {f_old.name}",
         ),
         removed_values=("variadic", "fixed-arity"),
-        entity_id=f_old.entity_id,
+        entity_id=f_old.entity_id or f_new.entity_id,
     )
 
 
@@ -599,7 +599,7 @@ def _check_contract_attributes_change(
                 ),
                 old_value=", ".join(sorted(old_cc)) or "(default)",
                 new_value=", ".join(sorted(new_cc)) or "(default)",
-                entity_id=f_old.entity_id,
+                entity_id=f_old.entity_id or f_new.entity_id,
             )
         )
         old_attrs -= old_cc
@@ -615,7 +615,7 @@ def _check_contract_attributes_change(
                 name=f_old.name,
                 detail=", ".join(gained),
                 new_value=", ".join(gained),
-                entity_id=f_old.entity_id,
+                entity_id=f_old.entity_id or f_new.entity_id,
             )
         )
     if lost:
@@ -626,7 +626,7 @@ def _check_contract_attributes_change(
                 name=f_old.name,
                 detail=", ".join(lost),
                 old_value=", ".join(lost),
-                entity_id=f_old.entity_id,
+                entity_id=f_old.entity_id or f_new.entity_id,
             )
         )
     return changes
@@ -651,7 +651,7 @@ def _check_exception_spec_change(
             name=f_old.name,
             old=f_old.exception_spec or "(none)",
             new=f_new.exception_spec or "(none)",
-            entity_id=f_old.entity_id,
+            entity_id=f_old.entity_id or f_new.entity_id,
         )
     ]
 
@@ -679,7 +679,7 @@ def _check_vtable_index_change(
             ),
             old_value=str(f_old.vtable_index),
             new_value=str(f_new.vtable_index),
-            entity_id=f_old.entity_id,
+            entity_id=f_old.entity_id or f_new.entity_id,
         )
     ]
 
@@ -744,7 +744,7 @@ def _check_inline_transitions(
                     ),
                     old_value="non-inline",
                     new_value="inline",
-                    entity_id=f_old.entity_id,
+                    entity_id=f_old.entity_id or f_new.entity_id,
                 )
             )
         elif f_old.is_inline and not f_new.is_inline:
@@ -755,7 +755,7 @@ def _check_inline_transitions(
                     name=f_old.name,
                     old="inline",
                     new="non-inline",
-                    entity_id=f_old.entity_id,
+                    entity_id=f_old.entity_id or f_new.entity_id,
                 )
             )
     return changes

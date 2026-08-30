@@ -79,3 +79,40 @@ class TestChangeEntityIdCarrier:
         new = _func("f", "_Z1fi", return_type="long")
         r = compare(_snap([old]), _snap([new]))
         assert _change(r, ChangeKind.FUNC_RETURN_CHANGED).entity_id is None  # type: ignore[attr-defined]
+
+    def test_matched_pair_falls_back_to_new_side_when_old_has_none(self) -> None:
+        # Codex review: a pre-v28 baseline's Function carries no entity_id
+        # at all (schema predates the carrier), while a freshly-dumped new
+        # side does -- the documented "old side, else new side" rule must
+        # actually fall back, not silently stay None just because old_val
+        # exists but its own entity_id is unresolved.
+        eid = entity_id_for_function((), "f", mangled_name="_Z1fi")
+        old = _func("f", "_Z1fi", return_type="int")
+        new = _func("f", "_Z1fi", return_type="long", entity_id=eid)
+        r = compare(_snap([old]), _snap([new]))
+        assert _change(r, ChangeKind.FUNC_RETURN_CHANGED).entity_id == eid  # type: ignore[attr-defined]
+
+    def test_added_virtual_method_carries_new_side_entity_id(self) -> None:
+        # Codex review: an added virtual method routes through
+        # diff_cxx_rules.virtual_method_addition's own VIRTUAL_METHOD_ADDED
+        # change instead of the ordinary FUNC_ADDED make_change() call --
+        # a separate construction site that must carry entity_id too.
+        from abicheck.model import RecordType
+
+        owner = RecordType(name="C", kind="class", size_bits=64, vtable=[])
+        old_owner = RecordType(name="C", kind="class", size_bits=64, vtable=[])
+        eid = entity_id_for_function((), "f", mangled_name="_ZN1C1fEv")
+        new_method = _func(
+            "C::f",
+            "_ZN1C1fEv",
+            return_type="void",
+            is_virtual=True,
+            source_location="c.h:1",
+            entity_id=eid,
+        )
+        old_snap = _snap([])
+        old_snap.types = [old_owner]
+        new_snap = _snap([new_method])
+        new_snap.types = [owner]
+        r = compare(old_snap, new_snap)
+        assert _change(r, ChangeKind.VIRTUAL_METHOD_ADDED).entity_id == eid  # type: ignore[attr-defined]
