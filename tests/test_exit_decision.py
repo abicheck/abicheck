@@ -463,28 +463,52 @@ class TestResolveReleaseExitDecision:
         """Codex review, fresh evidence: a library that failed to dump/
         extract/compare (the release fan-out's own operational `ERROR`
         sentinel, floored to `4`) is not a real ABI/API or policy finding
-        -- `is_operational_error=True` must tag it `OPERATIONAL_ERROR`,
-        not the default `COMPATIBILITY_GATE`, so a report reader isn't
-        told a compatibility gate decided an exit that was actually an
-        extraction failure.
+        -- a nonzero `operational_error_contribution` must be tagged
+        `OPERATIONAL_ERROR`, not folded into the default `COMPATIBILITY_
+        GATE`, so a report reader isn't told a compatibility gate decided
+        an exit that was actually an extraction failure.
+        """
+        decision = resolve_release_exit_decision(
+            not_comparable=False,
+            severity_scheme_active=True,
+            verdict_or_severity_contribution=0,
+            removed_required_library=False,
+            operational_error_contribution=4,
+        )
+        assert decision.code == 4
+        assert decision.reasons == (ExitReason.OPERATIONAL_ERROR,)
+
+    def test_severity_scheme_operational_error_ties_with_compatibility_gate(
+        self,
+    ) -> None:
+        """The real bug this axis exists to fix (Codex review, fresh
+        evidence): library A's own severity-gate finding and library B's
+        operational `ERROR` are independently computed by
+        `_compute_release_severity_exit_code`/`_fold_release_global_
+        severity` and then combined with `max()` -- a genuine tie an
+        `is_operational_error` boolean (an earlier revision) could not
+        represent, since it forced exactly one reason onto one combined
+        contribution. Both must be named when they tie.
         """
         decision = resolve_release_exit_decision(
             not_comparable=False,
             severity_scheme_active=True,
             verdict_or_severity_contribution=4,
             removed_required_library=False,
-            is_operational_error=True,
+            operational_error_contribution=4,
         )
         assert decision.code == 4
-        assert decision.reasons == (ExitReason.OPERATIONAL_ERROR,)
+        assert set(decision.reasons) == {
+            ExitReason.COMPATIBILITY_GATE, ExitReason.OPERATIONAL_ERROR,
+        }
 
     def test_legacy_scheme_operational_error_is_tagged_distinctly(self) -> None:
         decision = resolve_release_exit_decision(
             not_comparable=False,
             severity_scheme_active=False,
-            verdict_or_severity_contribution=4,
+            verdict_or_severity_contribution=0,
             removed_required_library=True,  # must lose to the ERROR anyway
-            is_operational_error=True,
+            operational_error_contribution=4,
         )
         assert decision.code == 4
         assert decision.reasons == (ExitReason.OPERATIONAL_ERROR,)
@@ -569,6 +593,7 @@ class TestResolveReleaseExitDecision:
             decision.contract_coverage_contribution,
             decision.analysis_assurance_contribution,
             decision.crosscheck_promotion_contribution,
+            decision.operational_error_contribution,
             decision.evidence_contract_error_contribution,
             decision.budget_overflow_contribution,
             decision.not_comparable_contribution,

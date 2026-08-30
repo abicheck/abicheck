@@ -4,15 +4,17 @@
 **Status:** Accepted — partially implemented. `ExitDecision`'s three-axis
 core (compatibility gate, contract coverage, analysis assurance) shipped
 additively as PR G1 (#789, `abicheck/policy/exit_decision.py`) before this
-ADR was written. This ADR's own additive stage has also landed:
+ADR was written. Of this ADR's own two-stage plan (see "Staged landing,
+additive first" below), only **stage 1a** has landed:
 `resolve_scan_exit_decision`/`resolve_release_exit_decision` are pure
 functions reproducing the remaining axes' full precedence (evidence-contract
 error, budget overflow, not-comparable, the mode-dependent
-removed-required-library rank), unit-tested against the real code they
-model. Not yet implemented: wiring those two resolvers into any command's
-persisted report or actually-returned exit code (a real report-schema
-version bump), the release fan-out's `GateOptions` unification, and the
-`--exit-code-scheme` removal itself (PR G2's atomic stage). See
+removed-required-library rank, and a release's independent operational-error
+axis), unit-tested against the real code they model. Not yet implemented:
+**stage 1b**, wiring those two resolvers into any command's persisted report
+or actually-returned exit code (a real report-schema version bump), the
+release fan-out's `GateOptions` unification, and **stage 2**, the
+`--exit-code-scheme` removal itself. See
 [cli-cleanup-phase-two.md](../plans/cli-cleanup-phase-two.md)'s "PR 4 — one
 gate algorithm" section, which this ADR formalizes rather than restates.
 **Decision maker:** Nikolay Petrov
@@ -158,14 +160,23 @@ Consistent with PR G1's own precedent and this codebase's "fix the cause,
 generalize the test, land additively where possible" convention, PR G2
 lands in two stages rather than one atomic change:
 
-1. **Additive.** Extend `ExitDecision`/`resolve_exit_decision` to compute
-   the three remaining axes (evidence-contract error, budget overflow,
-   not-comparable, and removed-required-library's mode-dependent rank) as
-   pure, independently unit-tested logic, and wire it into `scan`'s and the
-   release fan-out's report `exit` block for explanatory purposes — every
-   existing call site's *actually returned* exit code stays bit-for-bit
-   unchanged, exactly as PR G1 did for the first three axes. No flag is
-   removed in this stage.
+1. **Additive**, itself two independently-landable sub-steps — no flag is
+   removed in either:
+   1. **1a — pure resolvers.** Extend `ExitDecision`/`resolve_exit_decision`
+      to compute the remaining axes (evidence-contract error, budget
+      overflow, not-comparable, removed-required-library's mode-dependent
+      rank, and a release's independent operational-error axis) as pure,
+      independently unit-tested logic — verified against the real code
+      they reproduce, but not yet called from it.
+   2. **1b — wiring.** Call those resolvers from `scan_engine.py`/
+      `cli_compare_release_helpers.py` and persist the result into
+      `scan`'s and the release fan-out's own report `exit` block for
+      explanatory purposes — every existing call site's *actually
+      returned* exit code stays bit-for-bit unchanged, exactly as PR G1
+      did for the first three axes. This sub-step needs its own
+      report-schema version bump and cross-front-end parity pass (CLI,
+      typed API, Action), so it is reviewed and merged separately from 1a
+      rather than bundled with it.
 2. **Atomic.** Once the report block agrees with today's real behaviour for
    every axis and every mode (verified by the axis-separated tests this ADR
    requires below), remove `--exit-code-scheme` from `compare` and `scan`,

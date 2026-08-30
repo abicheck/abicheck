@@ -173,25 +173,41 @@ class ExitDecision:
     :class:`ExitReason` for why a lower, non-winning contribution is
     excluded.
 
+    A fifth field, ``operational_error_contribution``, joins that same
+    tie-inclusive fold -- ADR-064's addition for a directory/package
+    release, where one library's operational `ERROR` (a dump/extract/
+    compare failure, not a `Verdict`) and *another* library's real
+    compatibility-gate finding are independently computed and can
+    genuinely tie (`resolve_release_exit_decision`'s own docstring). It is
+    a full fold participant, not one of the four "dominant" fields below,
+    precisely because it must be able to tie with ``compatibility_
+    contribution`` rather than override it -- an earlier revision folded
+    an operational failure into ``compatibility_contribution`` itself
+    under a relabeled reason, which silently dropped the tied
+    compatibility-gate finding from ``reasons`` whenever both happened to
+    equal the same code (Codex review, fresh evidence). `0` for every
+    caller but the release resolver.
+
     The remaining four fields (``evidence_contract_error_contribution``
-    through ``removed_required_library_contribution``) are ADR-064's
-    additive extension (:func:`resolve_scan_exit_decision`/
+    through ``removed_required_library_contribution``) are ADR-064's other
+    addition (:func:`resolve_scan_exit_decision`/
     :func:`resolve_release_exit_decision`, below) -- every decision built
     by :func:`resolve_exit_decision`/:func:`resolve_compare_exit_decision`
     (every existing call site) leaves all four at their `0` default, so
     the invariant above is unaffected for them. A decision built by one of
-    the two ADR-064 resolvers sets *at most one* of the four to a nonzero
-    value (they are mutually exclusive by construction -- each corresponds
-    to one precedence-ordered early-return branch, never two at once), and
-    that value is always `code` itself: each of those axes' real numeric
-    code (`1`/`5`/`6`/`8`/`16`) is chosen large enough that it always
-    exceeds whatever the first four fields could independently contribute
-    (`0`-`4`), so recording a "prior" or already-available value in the
-    first four fields alongside a nonzero fifth-through-eighth field can
-    never change which one is the maximum.
+    the two ADR-064 resolvers sets *at most one* of these four to a
+    nonzero value (they are mutually exclusive by construction -- each
+    corresponds to one precedence-ordered early-return branch, never two
+    at once, and never with `operational_error_contribution`), and that
+    value is always `code` itself: each of those axes' real numeric code
+    (`1`/`5`/`6`/`8`/`16`) is chosen large enough that it always exceeds
+    whatever the other fields could independently contribute (`0`-`4`), so
+    recording a "prior" or already-available value there alongside a
+    nonzero dominant field can never change which one is the maximum.
 
-    **Deliberately not yet in :meth:`to_dict`.** These four fields exist so
-    the *Python object* is self-consistent and testable today; serializing
+    **Deliberately not yet in :meth:`to_dict`.** ``operational_error_
+    contribution`` and the four ADR-064 dominant fields exist so the
+    *Python object* is self-consistent and testable today; serializing
     them into the report's persisted ``exit`` block is real, further work
     (wiring the ADR-064 resolvers into `scan_engine.py`/
     `cli_compare_release_helpers.py`) that also needs its own report-schema
@@ -221,6 +237,16 @@ class ExitDecision:
     #: decision through :func:`resolve_exit_decision` instead of hand-
     #: patching two of its five fields.
     crosscheck_promotion_contribution: int = 0
+    #: A directory/package release comparison only (ADR-064). What one
+    #: library's operational `ERROR` sentinel (a dump/extract/compare
+    #: failure, not a `Verdict`) contributes -- a genuine fold participant
+    #: alongside `compatibility_contribution`, so a real compatibility-gate
+    #: finding from a *different* library in the same release and this
+    #: axis can tie and both be named in `reasons`, rather than one
+    #: silently replacing the other's reason. `0` for every caller but
+    #: `resolve_release_exit_decision`. See :class:`ExitReason.
+    #: OPERATIONAL_ERROR` and this class's own docstring above.
+    operational_error_contribution: int = 0
 
     #: `scan` only. Nonzero (always equal to `code`) exactly when
     #: :func:`resolve_scan_exit_decision` returned this decision because
@@ -267,6 +293,7 @@ def resolve_exit_decision(
     contract_coverage_contribution: int = 0,
     analysis_assurance_contribution: int = 0,
     crosscheck_promotion_contribution: int = 0,
+    operational_error_contribution: int = 0,
     compatibility_reason: ExitReason = ExitReason.COMPATIBILITY_GATE,
 ) -> ExitDecision:
     """Fold the axis contributions below into one explainable decision.
@@ -297,12 +324,25 @@ def resolve_exit_decision(
     contribution is known) -- see :class:`ExitDecision`'s own field
     docstring for why this has to be a real axis rather than a post-hoc
     patch to `code`/`reasons`.
+    *operational_error_contribution* defaults to ``0`` (every caller but
+    `resolve_release_exit_decision`, ADR-064's release resolver) --
+    :class:`ExitReason.OPERATIONAL_ERROR`'s own fixed reason, unlike
+    *compatibility_reason*, since a caller with a genuine operational
+    failure independent of any real ABI/API/policy finding needs it to
+    coexist with (and, on a tie, be named alongside) `compatibility_
+    contribution` rather than replace its reason -- see
+    `resolve_release_exit_decision`'s own docstring for why collapsing the
+    two into one contribution under a single reason (an earlier revision's
+    `is_operational_error` boolean) hid a real, independently-computed
+    compatibility-gate finding whenever both happened to tie (Codex
+    review, fresh evidence).
     """
     contributions = {
         compatibility_reason: compatibility_contribution,
         ExitReason.CONTRACT_COVERAGE: contract_coverage_contribution,
         ExitReason.ANALYSIS_ASSURANCE: analysis_assurance_contribution,
         ExitReason.PROMOTED_CROSSCHECK: crosscheck_promotion_contribution,
+        ExitReason.OPERATIONAL_ERROR: operational_error_contribution,
     }
     code = max(contributions.values())
     if code == 0:
@@ -320,6 +360,7 @@ def resolve_exit_decision(
         contract_coverage_contribution=contract_coverage_contribution,
         analysis_assurance_contribution=analysis_assurance_contribution,
         crosscheck_promotion_contribution=crosscheck_promotion_contribution,
+        operational_error_contribution=operational_error_contribution,
     )
 
 
@@ -443,6 +484,7 @@ def _dominant_decision(
     compatibility_contribution: int = 0,
     contract_coverage_contribution: int = 0,
     analysis_assurance_contribution: int = 0,
+    operational_error_contribution: int = 0,
 ) -> ExitDecision:
     """One of ADR-064's four axes overrides whatever the ordinary
     gate/coverage/assurance fold would otherwise have decided.
@@ -493,12 +535,14 @@ def _dominant_decision(
             prior.contract_coverage_contribution,
             prior.analysis_assurance_contribution,
             prior.crosscheck_promotion_contribution,
+            prior.operational_error_contribution,
         )
     else:
         preserved = (
             compatibility_contribution,
             contract_coverage_contribution,
             analysis_assurance_contribution,
+            operational_error_contribution,
         )
     if code <= max(preserved, default=0):
         raise ValueError(
@@ -517,6 +561,7 @@ def _dominant_decision(
             contract_coverage_contribution=prior.contract_coverage_contribution,
             analysis_assurance_contribution=prior.analysis_assurance_contribution,
             crosscheck_promotion_contribution=prior.crosscheck_promotion_contribution,
+            operational_error_contribution=prior.operational_error_contribution,
             **{dominant_field: code},
         )
     return ExitDecision(
@@ -525,6 +570,7 @@ def _dominant_decision(
         compatibility_contribution=compatibility_contribution,
         contract_coverage_contribution=contract_coverage_contribution,
         analysis_assurance_contribution=analysis_assurance_contribution,
+        operational_error_contribution=operational_error_contribution,
         **{dominant_field: code},
     )
 
@@ -601,7 +647,7 @@ def resolve_release_exit_decision(
     verdict_or_severity_contribution: int,
     removed_required_library: bool = False,
     contract_coverage_contribution: int = 0,
-    is_operational_error: bool = False,
+    operational_error_contribution: int = 0,
     not_comparable_code: int = 16,
     removed_required_library_code: int = 8,
 ) -> ExitDecision:
@@ -618,44 +664,47 @@ def resolve_release_exit_decision(
     - **Severity-aware scheme** (`severity_scheme_active=True`):
       `removed_required_library` wins *outright* over the aggregated
       verdict/severity code -- including over `contract_coverage_
-      contribution`, which is never folded in when removed-library fires.
-      This is a real, pre-existing asymmetry in today's code (the severity
-      branch's `sys.exit(8)` for a removed library runs before the coverage
-      floor is even read), not a simplification introduced here.
+      contribution`/`operational_error_contribution`, neither of which is
+      folded in when removed-library fires. This is a real, pre-existing
+      asymmetry in today's code (the severity branch's `sys.exit(8)` for a
+      removed library runs before the coverage floor is even read), not a
+      simplification introduced here.
     - **Legacy scheme** (`severity_scheme_active=False`): the opposite
-      priority -- a nonzero *verdict_or_severity_contribution* (an
-      `API_BREAK`/`BREAKING` verdict, or the release's own operational
-      `ERROR` sentinel floored to `4`) wins outright over
-      removed-required-library, which is checked only once that
-      contribution is `0`. `contract_coverage_contribution` folds in via
-      `max()` alongside whichever of the two decided the code, exactly as
+      priority -- a nonzero fold of *verdict_or_severity_contribution*
+      and *operational_error_contribution* (an `API_BREAK`/`BREAKING`
+      verdict, or the release's own operational `ERROR` sentinel floored
+      to `4` -- mutually exclusive in today's real code, since a release's
+      single `worst_verdict` string can only be one or the other) wins
+      outright over removed-required-library, which is checked only once
+      both are `0`. `contract_coverage_contribution` folds in via `max()`
+      alongside whichever of the two decided the code, exactly as
       `_exit_compare_release`'s own `max(code, contract_coverage_exit_
       contribution)` calls do.
 
-    *verdict_or_severity_contribution* is the caller's own already-computed
-    aggregated code for the active scheme -- for severity, `max(
-    severity_exit_code, 4 if worst_verdict == "ERROR" else 0)`; for legacy,
-    `4` if `worst_verdict == "ERROR"` else `legacy_exit_code(Verdict[
-    worst_verdict])`. This function does not compute either fold itself,
-    matching `resolve_compare_exit_decision`'s own convention of taking an
-    already-resolved compatibility contribution rather than re-deriving one.
+    *verdict_or_severity_contribution* and *operational_error_
+    contribution* are two **separately computed** axes, not one
+    pre-folded value -- pass them independently rather than folding them
+    yourself first (Codex review, fresh evidence: an earlier revision took
+    one pre-folded `verdict_or_severity_contribution` plus an
+    `is_operational_error` boolean, which could not represent the real
+    severity-scheme case where library A's own severity-gate finding and
+    library B's operational `ERROR` are independently computed by
+    `_compute_release_severity_exit_code`/`_fold_release_global_severity`
+    and then combined with `max()` -- a genuine tie the boolean design
+    collapsed into a single, wrongly-labelled reason, silently dropping
+    whichever finding lost the coin flip from `reasons`). Folding both
+    into one `resolve_exit_decision` call, below, lets a real tie between
+    them be named correctly instead.
 
-    *is_operational_error* names which of those two `worst_verdict ==
-    "ERROR"` can mean: pass `True` when *verdict_or_severity_contribution*
-    is `4` because a library's own dump/extract/compare failed (the release
-    fan-out's operational `ERROR` sentinel, not a `Verdict` member) so the
-    returned decision's compatibility axis is tagged
-    :class:`ExitReason.OPERATIONAL_ERROR` instead of the default
-    `COMPATIBILITY_GATE` (Codex review, fresh evidence: an earlier revision
-    always used `COMPATIBILITY_GATE`, which would misreport an extraction
-    failure as an ABI/API or policy finding once this resolver is wired
-    in). Only meaningful when *verdict_or_severity_contribution* is what
-    decides `code` -- it has no effect when `not_comparable`/
-    `removed_required_library` wins instead, since neither of those
-    dominant decisions names `COMPATIBILITY_GATE`/`OPERATIONAL_ERROR` in
-    `reasons` regardless (the value is still preserved in
-    `compatibility_contribution` either way, per the `not_comparable`
-    branch's own comment below).
+    *verdict_or_severity_contribution* is the caller's own already-computed
+    aggregated *verdict/severity-only* code for the active scheme -- for
+    severity, `severity_exit_code` alone; for legacy, `legacy_exit_code(
+    Verdict[worst_verdict])` (`0` when `worst_verdict` is `"ERROR"`, since
+    that string is not a `Verdict` member). *operational_error_
+    contribution* is `4` when `worst_verdict == "ERROR"`, else `0`. This
+    function does not compute either fold itself, matching
+    `resolve_compare_exit_decision`'s own convention of taking
+    already-resolved contributions rather than re-deriving them.
 
     Pure, additive logic (ADR-064's first stage): not yet called from
     `cli_compare_release_helpers.py`, so no existing release comparison's
@@ -664,37 +713,35 @@ def resolve_release_exit_decision(
     `removed_required_library_code` that does not strictly exceed a
     preserved contribution raises `ValueError`.
     """
-    compatibility_reason = (
-        ExitReason.OPERATIONAL_ERROR
-        if is_operational_error
-        else ExitReason.COMPATIBILITY_GATE
-    )
     if not_comparable:
-        # Both *verdict_or_severity_contribution* and
-        # *contract_coverage_contribution* are already-resolved parameters
-        # at this point regardless of which branch below would otherwise
-        # run -- `not_comparable` short-circuits *this* function's own
-        # choice among them, it does not mean nothing was computed
-        # upstream (a release's aggregated severity/coverage code is
-        # folded across every library before `_exit_compare_release` is
-        # even called). Carry them through for explainability; `16` always
-        # exceeds either (severity/verdict codes cap at `4`, coverage at
-        # `1`), so `reasons` still names only `NOT_COMPARABLE`.
+        # *verdict_or_severity_contribution*, *contract_coverage_
+        # contribution* and *operational_error_contribution* are all
+        # already-resolved parameters at this point regardless of which
+        # branch below would otherwise run -- `not_comparable` short-
+        # circuits *this* function's own choice among them, it does not
+        # mean nothing was computed upstream (a release's aggregated
+        # severity/coverage code is folded across every library before
+        # `_exit_compare_release` is even called). Carry them through for
+        # explainability; `16` always exceeds any of them (severity/verdict/
+        # operational-error codes cap at `4`, coverage at `1`), so
+        # `reasons` still names only `NOT_COMPARABLE`.
         return _dominant_decision(
             not_comparable_code,
             ExitReason.NOT_COMPARABLE,
             compatibility_contribution=verdict_or_severity_contribution,
             contract_coverage_contribution=contract_coverage_contribution,
+            operational_error_contribution=operational_error_contribution,
         )
 
     if severity_scheme_active:
         if removed_required_library:
-            # `contract_coverage_contribution` is preserved even though
-            # today's real `_exit_compare_release` never reads it once this
-            # branch's own `sys.exit(8)` fires first -- it is still an
-            # already-computed, available value (the caller resolves it
-            # unconditionally before calling this function at all), and
-            # `8` always exceeds coverage's `0`/`1` range, so preserving it
+            # `contract_coverage_contribution`/`operational_error_
+            # contribution` are preserved even though today's real
+            # `_exit_compare_release` never reads them once this branch's
+            # own `sys.exit(8)` fires first -- both are already-computed,
+            # available values (the caller resolves them unconditionally
+            # before calling this function at all), and `8` always exceeds
+            # either (`0`/`1` and `0`/`4` respectively), so preserving them
             # cannot affect `code`/`reasons`, only the report's
             # explainability.
             return _dominant_decision(
@@ -702,25 +749,27 @@ def resolve_release_exit_decision(
                 ExitReason.REMOVED_REQUIRED_LIBRARY,
                 compatibility_contribution=verdict_or_severity_contribution,
                 contract_coverage_contribution=contract_coverage_contribution,
+                operational_error_contribution=operational_error_contribution,
             )
         return resolve_exit_decision(
             compatibility_contribution=verdict_or_severity_contribution,
             contract_coverage_contribution=contract_coverage_contribution,
-            compatibility_reason=compatibility_reason,
+            operational_error_contribution=operational_error_contribution,
         )
 
-    # Legacy scheme: a nonzero verdict/ERROR contribution wins outright,
-    # ahead of removed-required-library -- checked only once it is 0.
-    if verdict_or_severity_contribution != 0:
+    # Legacy scheme: a nonzero fold of the verdict/severity and operational-
+    # error axes wins outright, ahead of removed-required-library -- checked
+    # only once both are 0.
+    if verdict_or_severity_contribution != 0 or operational_error_contribution != 0:
         return resolve_exit_decision(
             compatibility_contribution=verdict_or_severity_contribution,
             contract_coverage_contribution=contract_coverage_contribution,
-            compatibility_reason=compatibility_reason,
+            operational_error_contribution=operational_error_contribution,
         )
     if removed_required_library:
-        # verdict_or_severity_contribution is 0 here by construction (the
-        # branch above already returned otherwise); coverage is preserved
-        # for the same reason as the severity-scheme branch above.
+        # Both axes are 0 here by construction (the branch above already
+        # returned otherwise); coverage is preserved for the same reason
+        # as the severity-scheme branch above.
         return _dominant_decision(
             removed_required_library_code,
             ExitReason.REMOVED_REQUIRED_LIBRARY,
