@@ -847,13 +847,9 @@ def _run_abi3_audit(
     """
     py_ext = new_snap.python_ext
     if py_ext is None or not py_ext.is_extension:
-        raise _EvidenceContractError(
-            f"--abi3 {abi3_floor[0]}.{abi3_floor[1]} was given but "
-            f"'{binary.name}' is not a recognisable CPython extension module "
-            "(no PyInit_* export and no CPython C-API imports). The stable-ABI "
-            "audit applies only to extension modules (Cython/pybind11/"
-            "nanobind/C)."
-        )
+        from .python_ext import abi3_precondition_message
+
+        raise _EvidenceContractError(abi3_precondition_message(abi3_floor, binary.name))
     from .diff_python import audit_stable_abi_imports
 
     abi3_findings = audit_stable_abi_imports(py_ext, abi3_floor)

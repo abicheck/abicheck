@@ -37,6 +37,16 @@ from .buildsource.build_query import (
     drain_build_dir_cleanups,
 )
 from .compile_context import CompileContext as CompileContext  # re-exported, ADR-055 D1
+
+# pair_wide_cxx20_std_override lives in the leaf `cxx20_pair_dialect` module
+# (no dependency on anything service_scan-specific, so it moved cleanly to
+# make line-budget room for the L4/L5 `_TU_UNKNOWN_NOTE_SUFFIX` propagation
+# fix, Codex review, fresh evidence -- see that module's own docstring),
+# re-exported here so every existing `from .service_scan import
+# pair_wide_cxx20_std_override` call site is unaffected.
+from .cxx20_pair_dialect import (
+    pair_wide_cxx20_std_override as pair_wide_cxx20_std_override,
+)
 from .errors import ValidationError
 from .header_utils import HEADER_SUFFIXES, iter_directory_headers
 from .schemas import SCAN_SCHEMA_VERSION
@@ -175,50 +185,6 @@ class Budget:
 # without joining this file's import-cycle-allowlisted cluster.
 
 
-def pair_wide_cxx20_std_override(
-    lang: str,
-    old_headers: Iterable[Path],
-    new_headers: Iterable[Path],
-    gcc_options: str | None,
-    gcc_option_tokens: tuple[str, ...],
-) -> tuple[str, ...] | None:
-    """Pair-wide C++20 dialect decision, shared by every compare front-end
-    (P0 fix — CLI ``compare`` via ``cli_helpers_compare._pair_wide_dialect_override``,
-    the Python-API/MCP ``run_compare_request`` path).
-
-    ``dumper.py``'s C++20 ``requires``/``concept`` heuristic only ever sees ONE
-    side's headers at a time (each side is dumped independently), so an
-    old/new pair could silently disagree on the language standard whenever
-    neither side pins an explicit one — e.g. only the *new* side picks up a
-    ``concept`` and gets auto-upgraded to C++20 while *old* stays on the
-    toolchain default. That lets a real dialect-floor change masquerade as an
-    ordinary ABI diff (or, the inverse historical bug: a header containing
-    ``#error Foo requires Base`` tripped the heuristic on whichever side had
-    that text).
-
-    Decides the heuristic once, over the union of both sides' headers, so a
-    caller can pin the identical result onto both sides' compile context. An
-    explicit ``-std=``/``--std=``/``/std:`` from the user always wins
-    (``has_explicit_std`` short-circuits first); returns ``None`` in that case
-    and whenever no override is needed — never overriding an explicit choice.
-    Lives here (not in a CLI-layer module) so every front-end — CLI, Python
-    API, MCP — can share one implementation without a CLI-layer dependency
-    reaching into the Tier-2 service layer.
-    """
-    from ._compiler_options import has_explicit_std
-    from .dumper_ast_config_cpp20 import _detect_cpp20_headers
-
-    old_h = list(old_headers)
-    new_h = list(new_headers)
-    if lang.lower() != "c++" or not (old_h or new_h):
-        return None
-    if has_explicit_std(gcc_options, gcc_option_tokens):
-        return None
-    if not _detect_cpp20_headers(old_h + new_h):
-        return None
-    return ("-std=gnu++20",)
-
-
 @dataclass(frozen=True)
 class ScanRequest:
     """Typed input to the scan engine (ADR-035 D10). All additive over dump/compare."""
@@ -332,34 +298,41 @@ class LayerResult:
         }
 
 
-#: Per-TU / per-file cost anchors (seconds) for the dry-run estimate. These are
-#: deliberately coarse starting defaults (§11 of the ADR-035 proposal: a full
-#: ``-fsyntax-only`` pass dominates; pattern/compile-DB scans are <1-5%). The
-#: real per-project number comes from the actual run; the estimate only ranks
-#: layers so a maintainer can pick a depth.
+# Codex review: TU counts here are workspace-wide (a pre-captured Bazel aquery/cquery jsonproto is never filtered
+# by `targets` -- BazelAdapter only scopes a *live* query), so a `--build-target` run's real count is typically
+# lower. Baked into each row's `note` so a Python-API caller sees it too.
+_UNSCOPED_TU_NOTE_SUFFIX = (
+    " [UNSCOPED: --build-target given, but this TU count is workspace-wide -- "
+    "the real run's Bazel collection scopes to the requested root target(s) "
+    "and typically touches fewer TUs]"
+)
+# L4/L5 derive their counts from L3's -- inherit its "[UNKNOWN" state too.
+_TU_UNKNOWN_NOTE_SUFFIX = (
+    " [UNKNOWN: derived from an unknown L3 TU count, see L3_build note]"
+)
+
+#: Per-TU / per-file cost anchors (seconds) for the dry-run estimate. These are deliberately coarse starting
+#: defaults (§11 of the ADR-035 proposal: a full ``-fsyntax-only`` pass dominates; pattern/compile-DB scans are
+#: <1-5%). The real per-project number comes from the actual run; the estimate only ranks layers so a maintainer
+#: can pick a depth.
 _COST_PER_HEADER_PARSE = 0.08  # L2 base: castxml/clang startup + preprocess per header
-#: L2 marginal cost per KB of header text. A flat per-header anchor priced a
-#: one-line shim and a 200 KB templated umbrella (ICU/hdf5) identically,
-#: under-ranking a large public surface. Weighting by on-disk size ranks
-#: heavy headers above trivial ones (field-eval P1: ICU/HDF5 scans took
-#: 80-180 s while the estimate read flat).
+#: L2 marginal cost per KB of header text. A flat per-header anchor priced a one-line shim and a 200 KB templated
+#: umbrella (ICU/hdf5) identically, under-ranking a large public surface. Weighting by on-disk size ranks heavy
+#: headers above trivial ones (field-eval P1: ICU/HDF5 scans took 80-180 s while the estimate read flat).
 _COST_PER_HEADER_KB = 0.004
 _COST_PER_TU_BUILD = 0.002  # L3 compile-DB entry parse
-# Cold L4 is a full clang JSON-AST replay + Python JSON parse + macro pass per
-# TU. Real-world pvxs/oneDAL validation showed ~7.5s/TU cold; the old 0.45s/TU
-# anchor under-promised source/full scans by an order of magnitude, making
-# 100+ TU runs look like one-minute jobs. Warm cache is reported by live
-# coverage; dry-run stays conservative absent a future cache probe.
+# Cold L4 is a full clang JSON-AST replay + Python JSON parse + macro pass per TU. Real-world pvxs/oneDAL
+# validation showed ~7.5s/TU cold; the old 0.45s/TU anchor under-promised source/full scans by an order of
+# magnitude, making 100+ TU runs look like one-minute jobs. Warm cache is reported by live coverage; dry-run
+# stays conservative absent a future cache probe.
 _COST_PER_TU_REPLAY = 7.5  # L4 per-TU semantic AST replay, cold-cache default
 _COST_PER_TU_GRAPH = 0.02  # L5 per-TU graph fold/edge
 
 
-#: A flat size-based estimate prices a one-line ``#include`` umbrella and a
-#: heavily-templated header identically per KB — real-world field evidence
-#: (the SVS ``datatype.h``/``float16.h``/``meta.h`` trio) showed a dry-run
-#: estimate of 0.51s for headers whose actual parse ran over 15,000s before
-#: an external SIGKILL: that cost comes from template/include fan-out, not
-#: on-disk bytes. These are a cheap, local (no compiler invocation) peek for
+#: A flat size-based estimate prices a one-line ``#include`` umbrella and a heavily-templated header identically
+#: per KB — real-world field evidence (the SVS ``datatype.h``/``float16.h``/``meta.h`` trio) showed a dry-run
+#: estimate of 0.51s for headers whose actual parse ran over 15,000s before an external SIGKILL: that cost comes
+#: from template/include fan-out, not on-disk bytes. These are a cheap, local (no compiler invocation) peek for
 #: that signal so the estimate can flag it instead of a falsely precise number.
 _COMPLEXITY_PEEK_BYTES = 512 * 1024
 _COMPLEXITY_INCLUDE_THRESHOLD = 8  # local #include lines
@@ -616,17 +589,6 @@ def _resolve_estimate_level(
     return resolved, eff_depth, collect_mode
 
 
-# Codex review: TU counts here are workspace-wide (a pre-captured Bazel
-# aquery/cquery jsonproto is never filtered by `targets` -- BazelAdapter only
-# scopes a *live* query), so a `--build-target` run's real count is typically
-# lower. Baked into each row's `note` so a Python-API caller sees it too.
-_UNSCOPED_TU_NOTE_SUFFIX = (
-    " [UNSCOPED: --build-target given, but this TU count is workspace-wide -- "
-    "the real run's Bazel collection scopes to the requested root target(s) "
-    "and typically touches fewer TUs]"
-)
-
-
 def _estimate_total_tus(req: ScanRequest) -> tuple[int, str]:
     """Project-wide TU count and its provenance note for the estimate."""
     # Count TUs from the *same* effective build-info the real scan uses (`req.compile_db or req.build_info`) so an
@@ -647,11 +609,25 @@ def _estimate_total_tus(req: ScanRequest) -> tuple[int, str]:
     elif pack_tus is not None:
         total, note = pack_tus, "build-source pack (build_evidence)"
     elif compile_db is not None:
-        total, note = _count_compile_db_tus(compile_db), f"compile DB: {compile_db.name}"
+        total, note = (
+            _count_compile_db_tus(compile_db),
+            f"compile DB: {compile_db.name}",
+        )
     elif req.sources is not None:
-        total, note = _count_source_tus(req.sources), "counted source files (no compile DB)"
+        total, note = (
+            _count_source_tus(req.sources),
+            "counted source files (no compile DB)",
+        )
     else:
-        total, note = 0, "no source tree / compile DB"
+        total, note = (
+            0,
+            (
+                f"build.query: {req.build_config.name} [UNKNOWN: query-only build.query, real run's trusted query determines the actual count]"
+                if req.build_config is not None
+                and _build_config_declares_query(req.build_config)
+                else "no source tree / compile DB"
+            ),
+        )
     if req.build_targets:
         note += _UNSCOPED_TU_NOTE_SUFFIX
     return total, note
@@ -662,11 +638,10 @@ def _estimate_replay_tus(req: ScanRequest, collect_mode: str, total_tus: int) ->
     # The L4 replay scope: a changed-only collection touches at most the changed *source* TUs (POI-focused, D7); a
     # full/target scope touches every TU. The budget's max_tus is a documented cap (never shrinks scope silently —
     # it FAILS — but the estimate honestly reflects the cap as the upper bound). A changed *header* fans out:
-    # without an include graph (the common compile-DB-only path)
-    # ``source_replay.select_compile_units(scope='changed')`` fails open to **all** TUs so header ABI changes are
-    # never silently missed, so the estimate must charge ``total_tus`` for a header change rather than the single
-    # header path — else it understates L4 cost and a user picks too small a budget (Codex review). An
-    # empty/seedless diff is likewise broad.
+    # without an include graph (the common compile-DB-only path), ``source_replay.select_compile_units(scope=
+    # 'changed')`` fails open to **all** TUs so header ABI changes are never silently missed, so the estimate must
+    # charge ``total_tus`` for a header change rather than the single header path — else it understates L4 cost and
+    # a user picks too small a budget (Codex review). An empty/seedless diff is likewise broad.
     changed = [p for p in req.changed_paths if p]
     source_changed = [p for p in changed if _is_source_tu_path(p)]
     header_changed = any(_is_header_path(p) for p in changed)
@@ -738,11 +713,10 @@ def _source_layer_estimates(
     # "source-target" (ADR-043 D2/D3) is the unseeded sibling of "source-changed" — same L3/L4/L5 layers, just a
     # broader (target-scoped, not changed-only) replay; it must price identically to source-changed everywhere
     # below, else an unseeded explicit-source scan/estimate silently reports zero source layers (the same zero-TU
-    # defect the collect-mode fix addresses).
-    #
-    # L4/L5 inherit the same unscoped total_tus the L3 row's tu_note already
-    # flags -- a short back-reference, not the full sentence again (Codex review).
+    # defect the collect-mode fix addresses). L4/L5 inherit the same unscoped/unknown total_tus the L3 row's
+    # tu_note already flags -- a short back-reference, not the full sentence again.
     unscoped_ref = " [UNSCOPED, see L3_build note]" if build_targets else ""
+    unknown_ref = _TU_UNKNOWN_NOTE_SUFFIX if "[UNKNOWN" in tu_note else ""
     estimates: list[CostEstimate] = []
     if collect_mode in (
         "build",
@@ -769,7 +743,8 @@ def _source_layer_estimates(
                 replay_tus,
                 _COST_PER_TU_REPLAY * replay_tus,
                 0.0,
-                f"{collect_mode} replay scope ({replay_tus} of {total_tus} TU(s)){unscoped_ref}",
+                f"{collect_mode} replay scope ({replay_tus} of {total_tus} TU(s))"
+                f"{unscoped_ref}{unknown_ref}",
             )
         )
     # L5 structural fold runs for every graph-building mode (cheap).
@@ -781,7 +756,7 @@ def _source_layer_estimates(
                 total_tus,
                 _COST_PER_TU_GRAPH * total_tus,
                 0.0,
-                f"source graph fold/edges{unscoped_ref}",
+                f"source graph fold/edges{unscoped_ref}{unknown_ref}",
             )
         )
     # When both L4 and L5 are collected the inline path also runs a Clang
@@ -796,7 +771,8 @@ def _source_layer_estimates(
                 replay_tus,
                 _COST_PER_TU_REPLAY * replay_tus,
                 0.0,
-                f"call-graph clang pass ({replay_tus} of {total_tus} TU(s)){unscoped_ref}",
+                f"call-graph clang pass ({replay_tus} of {total_tus} TU(s))"
+                f"{unscoped_ref}{unknown_ref}",
             )
         )
     return estimates
@@ -1024,7 +1000,9 @@ def _load_risk_rules_for_service(risk_rules_path: Path) -> Any:
     try:
         return _load(risk_rules_path)
     except (click.ClickException, SnapshotError) as exc:
-        msg = exc.format_message() if isinstance(exc, click.ClickException) else str(exc)
+        msg = (
+            exc.format_message() if isinstance(exc, click.ClickException) else str(exc)
+        )
         raise ValueError(str(msg)) from exc
 
 
@@ -1037,8 +1015,15 @@ def _resolve_member_scan_level(
     "dry-run and execution must consume the same resolved plan" rule.
     """
     (
-        RiskRules, score_changed_paths, _EvidenceDepth, ScanMode, SourceMethod,
-        level_to_collect_mode, resolve_level, parse_user_depth, SourceScope,
+        RiskRules,
+        score_changed_paths,
+        _EvidenceDepth,
+        ScanMode,
+        SourceMethod,
+        level_to_collect_mode,
+        resolve_level,
+        parse_user_depth,
+        SourceScope,
     ) = _scan_imports()
     sm = SourceMethod(req.source_method) if req.source_method else None
     dp = parse_user_depth(req.depth)
@@ -1046,10 +1031,13 @@ def _resolve_member_scan_level(
     seeded = req.seeded or bool(changed)
     risk_rules = (
         _load_risk_rules_for_service(req.risk_rules_path)
-        if req.risk_rules_path is not None else RiskRules.default()
+        if req.risk_rules_path is not None
+        else RiskRules.default()
     )
     risk = score_changed_paths(changed, risk_rules)
-    auto_method = risk.recommended_method if (sm is SourceMethod.AUTO and seeded) else None
+    auto_method = (
+        risk.recommended_method if (sm is SourceMethod.AUTO and seeded) else None
+    )
     resolved, eff_depth = resolve_level(
         mode=ScanMode(req.mode), source_method=sm, depth=dp, auto_method=auto_method
     )
@@ -1078,7 +1066,7 @@ def _build_config_declares_query(path: Path) -> bool:
 
 def estimate_artifact_set(
     req: ScanRequest, member_paths: list[Path]
-) -> tuple[dict[str, tuple[int, float]], list[str], str | None]:
+) -> tuple[dict[str, tuple[int, float]], list[str], str | None, frozenset[str]]:
     """Per-layer cost total for ``scan --artifact-set --dry-run``: one
     single-binary estimate per member at the level :func:`_resolve_member_scan_level`
     resolves once (shared with :func:`_run_scan_one_member`), plus a
@@ -1087,12 +1075,16 @@ def estimate_artifact_set(
     ``scan_engine._check_scan_evidence_contract``'s short-circuit) and no
     source/build evidence was given, matching ``EVIDENCE_CONTRACT_ERROR``
     (exit 1). Kept out of *notes* so the caller routes it through
-    :meth:`DryRunResult.block` instead (Codex review).
+    :meth:`DryRunResult.block` instead. Fourth value *unknown_layers* names
+    per-layer unknown-marked members (totals alone can't tell zero from unknown).
     """
-    sm, dp, _c, _s, _r, resolved, eff_depth, collect_mode = _resolve_member_scan_level(req)
+    sm, dp, _c, _s, _r, resolved, eff_depth, collect_mode = _resolve_member_scan_level(
+        req
+    )
     totals: dict[str, tuple[int, float]] = {}
     notes: list[str] = []
     seen: set[str] = set()
+    unknown_layers: set[str] = set()
     blocker: str | None = None
     pinned = dp is not None or (sm is not None and sm != "auto")
     cfg_query = req.build_config and _build_config_declares_query(req.build_config)
@@ -1109,12 +1101,13 @@ def estimate_artifact_set(
         for e in estimate_scan(member_req, resolved_level=(resolved, eff_depth)):
             tus, seconds = totals.get(e.layer, (0, 0.0))
             totals[e.layer] = (tus + e.tus, seconds + e.est_seconds)
+            unknown_layers.update({e.layer} if "[UNKNOWN" in e.note else ())
             if e.note and e.note not in seen:
                 seen.add(e.note)
                 notes.append(e.note)
     n = len(member_paths)
     totals["bundle_audit"] = (n, _COST_PER_MEMBER_BUNDLE_AUDIT * n)
-    return totals, notes, blocker
+    return totals, notes, blocker, frozenset(unknown_layers)
 
 
 #: Every ``ScanRequest`` field meaningful only for a baseline comparison,
@@ -1143,7 +1136,9 @@ def _reject_comparison_only_fields(req: ScanRequest) -> None:
     regression: ``run_scan_set()`` used to only validate ``req.baseline``).
     """
     _non_default = [
-        name for name, is_set in _COMPARISON_ONLY_FIELD_PREDICATES.items() if is_set(req)
+        name
+        for name, is_set in _COMPARISON_ONLY_FIELD_PREDICATES.items()
+        if is_set(req)
     ]
     if _non_default:
         raise ValidationError(
@@ -1295,7 +1290,9 @@ def run_scan(req: ScanRequest) -> ScanResult:
 
     if req.max_findings is not None and req.max_findings < 1:
         # Up front, not after a wasted full scan (Codex review).
-        raise ValidationError(f"ScanRequest.max_findings must be positive, got {req.max_findings}")
+        raise ValidationError(
+            f"ScanRequest.max_findings must be positive, got {req.max_findings}"
+        )
     # ADR-049 Phase 5 review (Codex, PR #657): these fields only mean anything for a baseline comparison (`run_scan_core` only calls
     # `_run_baseline_compare` when `baseline is not None` AND `scan_mode is not ScanMode.AUDIT`) -- without one they'd be silently accepted and discarded, which could hide a `policy_file` requiring evidence the caller actually needed. Mirrors the CLI's identical `scan_cmd` guard.
     if req.baseline is None or ScanMode(req.mode) is ScanMode.AUDIT:
@@ -1654,7 +1651,9 @@ def _run_scan_one_member(
 
     # Shared with the --artifact-set --dry-run preview (workflows.scan_estimate) -- workflows/AGENTS.md's
     # "dry-run and execution must consume the same resolved plan" rule.
-    sm, dp, changed, seeded, risk, resolved, eff_depth, collect_mode = _resolve_member_scan_level(req)
+    sm, dp, changed, seeded, risk, resolved, eff_depth, collect_mode = (
+        _resolve_member_scan_level(req)
+    )
 
     scan_mode = ScanMode(req.mode)
     sm_pin = sm is not None and sm is not SourceMethod.AUTO
@@ -1859,8 +1858,9 @@ def run_scan_set(req: ScanRequest) -> ScanSetResult:
         per_artifact.append(ScanArtifactResult(artifact=binary, result=result))
         if result.verdict == "BUDGET_OVERFLOW":
             # The failure-guard contract: never keep scanning past overflow.
-            return ScanSetResult(verdict="BUDGET_OVERFLOW", exit_code=5,
-                                  per_artifact=per_artifact)
+            return ScanSetResult(
+                verdict="BUDGET_OVERFLOW", exit_code=5, per_artifact=per_artifact
+            )
 
     remaining = None if budget_s is None else budget_s - (_time.monotonic() - start)
     if remaining is not None and remaining <= 0:
