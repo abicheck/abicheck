@@ -1706,7 +1706,7 @@ def scan_cmd(
     if dry_run:
         from .dry_run import emit_dry_run
         from .frontends.cli.scan_dry_run import render_scan_dry_run
-        from .service import Budget, ScanRequest, estimate_scan
+        from .service_scan import Budget, ScanRequest, estimate_scan
 
         # Computed here, not inside render_scan_dry_run: that module is a
         # canonical frontends/cli/ file, which must not import service_scan

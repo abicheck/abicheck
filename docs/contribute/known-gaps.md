@@ -5358,3 +5358,45 @@ looked like the obvious fix and wasn't.
   resolution has the identical gap for parity). A correct fix needs that
   index plus verifying each edge case against a real compilation before
   landing, not a narrow patch for only the one reported shape.
+
+- **`scan_abi3_resolve.py` is a new flat `workflows`-legacy root module
+  whose own docstring says its placement exists specifically so
+  `scripts/check_architecture.py`'s `unclassified-import` check won't
+  inspect its dependency on `serialization.py` (Codex review, PR #951,
+  fresh evidence).** The module needs both `python_ext`
+  (`detect_python_extension_from_binary`) and `serialization`
+  (`load_snapshot`, for the snapshot-input fallback) to answer `scan
+  --dry-run --abi3`'s candidate-recognition question the same way the
+  real run's `service.resolve_input` does; `serialization.py` already
+  imports `python_ext` (for `PythonExtMetadata`/the `detect_python_extension`
+  backfill), so `python_ext` importing `serialization` back would form a
+  real two-module cycle, and a small module living outside both,
+  importing each, is the correct general shape. Codex is right that
+  keeping it flat rather than moving it under the migrated
+  `abicheck/workflows/` package (alongside `scan_abi3_dry_run.py`, its
+  only caller) sidesteps a check rather than satisfying it. **Investigated
+  the real fix and it doesn't fit in this PR**: `serialization.py`
+  matches `storage`'s own described responsibility (AGENTS.md's module
+  map: "snapshot serialization ... the public compatibility surface"),
+  so classifying it under `architecture/modules.yaml`'s `storage` layer
+  looks like the natural move -- but `storage`'s `may_import` is
+  `["model"]` only, and that reclassification immediately surfaces two
+  already-latent violations a purely-unclassified `serialization.py`
+  currently hides from `check_architecture.py`'s `dependency-direction`
+  check entirely (an unclassified import target is skipped by that check,
+  by design): `abicheck/probe_harness.py` (classified `compare`, whose own
+  `may_import` is `["model"]` only) already calls
+  `serialization.snapshot_to_dict`/`snapshot_from_dict` at runtime, and
+  `serialization.py` itself imports `python_ext` (classified `extract`)
+  at runtime for the same reason `scan_abi3_resolve.py` does. Unlike
+  `check_ai_readiness.py`'s `import-cycle-growth` check,
+  `dependency-direction` has no allowlist mechanism to grandfather either
+  violation while the reclassification lands. **Not fixed**: a correct
+  fix needs a real migration slice -- extracting `serialization.py`'s
+  `python_ext` coupling (so a `storage`-classified module doesn't reach
+  into `extract`) and re-routing `probe_harness.py`'s snapshot round-trip
+  through something `compare` may legitimately import -- verified against
+  the full architecture gate, not a one-line `modules.yaml` edit. Left
+  `scan_abi3_resolve.py` in its current, self-documenting flat-legacy
+  placement (its own docstring already states the reason and the
+  precedent it follows) as accepted debt until that slice is done.
