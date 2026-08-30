@@ -64,6 +64,14 @@ def resolve_python_ext(path: Path) -> PythonExtMetadata | None:
     instead of the snapshot it actually points to -- a script pointing at a
     real snapshot misreported "not an extension" the identical way a script
     pointing at a real binary once did.
+
+    Only attempts the snapshot fallback when *resolved_path* isn't itself a
+    recognised binary container (Codex review, fresh evidence): a real,
+    non-qualifying ELF/PE/Mach-O binary already got a definitive "not an
+    extension" answer from the probe above, so re-reading it as
+    ``load_snapshot``'s plain-text/JSON path would needlessly buffer the
+    whole file (up to its 1 GiB safety limit) only to fail UTF-8/JSON
+    validation -- wasted for every non-extension ``--artifact-set`` member.
     """
     from . import binary_utils
 
@@ -71,6 +79,8 @@ def resolve_python_ext(path: Path) -> PythonExtMetadata | None:
     ext = python_ext.detect_python_extension_from_binary(resolved_path)
     if ext is not None:
         return ext
+    if binary_utils.detect_binary_format(resolved_path) is not None:
+        return None
     from .serialization import load_snapshot
 
     try:

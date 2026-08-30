@@ -214,6 +214,30 @@ def test_resolve_python_ext_follows_linker_script_to_a_snapshot(
     assert result.module_name == "foo"
 
 
+def test_resolve_python_ext_skips_snapshot_fallback_for_a_real_binary(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Codex review, fresh evidence: a real, recognised ELF/PE/Mach-O binary
+    that isn't a Python extension already got a definitive answer from the
+    binary probe -- re-reading it through `load_snapshot`'s plain-text/JSON
+    path would needlessly buffer the whole file only to fail UTF-8/JSON
+    validation. `load_snapshot` must not even be called for such an input."""
+    from abicheck.scan_abi3_resolve import resolve_python_ext
+
+    path = tmp_path / "libplain.so"
+    path.write_bytes(b"\x7fELF" + b"\x00" * 60)
+
+    def _fail_if_called(*_args: object, **_kwargs: object) -> None:
+        raise AssertionError("load_snapshot must not be called for a real binary")
+
+    monkeypatch.setattr(
+        "abicheck.elf_metadata.parse_elf_metadata", lambda p: ElfMetadata()
+    )
+    monkeypatch.setattr("abicheck.serialization.load_snapshot", _fail_if_called)
+
+    assert resolve_python_ext(path) is None
+
+
 def test_detect_python_extension_from_binary_follows_linker_script(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
