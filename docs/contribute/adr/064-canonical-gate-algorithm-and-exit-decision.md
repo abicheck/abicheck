@@ -45,17 +45,27 @@ Two more forces make this larger than a two-value enum:
 
 1. **The axes multiplied since the flag was designed.** Contract coverage
    (ADR-049 Phase 7) and analysis assurance (P0.4) each add their own
-   orthogonal `1`, folded with `max()`. `scan` adds a budget-overflow floor
-   (`5`) and an evidence-contract-error floor (`1`) that precede the gate
-   entirely (`docs/reference/exit-codes.md`'s own text: both "are returned
-   before the baseline comparison — and therefore before any severity
-   computation — ever runs"). A release comparison adds a
-   removed-required-library code (`8`) whose precedence relative to the
-   gate is **mode-dependent**, not a fixed rank (`docs/reference/exit-codes.md`,
-   `abicheck compare` (multi-library) section). `NOT_COMPARABLE` (`16` for
-   native `compare`, `6` for `scan --against`, `9` for `compat check`)
-   dominates the release's gate/removed-library pair in both modes, but does
-   **not** dominate `scan`'s own budget overflow.
+   orthogonal `1`, folded with `max()`. `scan` adds an evidence-contract-error
+   floor (`1`) and a budget-overflow floor (`5`), and neither precedes the
+   gate at one fixed point — the evidence-contract-error check
+   (`scan_engine.py`'s `_check_scan_evidence_contract`) always precedes the
+   baseline compare (and therefore its severity computation) entirely, but
+   `--budget` is deadline-guarded at *two* separate points: candidate-
+   snapshot collection, which precedes the evidence-contract check too
+   (correcting a fresh review finding against an earlier draft of this
+   section, which had claimed budget overflow always precedes the gate the
+   same way evidence-contract error does), and the baseline compare's own
+   deadline plus the final, unconditional post-comparison check — both of
+   which run *after* severity computation, discarding whatever it decided
+   rather than preceding it. See "Budget exceeded is not one precedence
+   slot" under Decision below for the exact line references. A release
+   comparison adds a removed-required-library code (`8`) whose precedence
+   relative to the gate is **mode-dependent**, not a fixed rank
+   (`docs/reference/exit-codes.md`, `abicheck compare` (multi-library)
+   section). `NOT_COMPARABLE` (`16` for native `compare`, `6` for
+   `scan --against`, `9` for `compat check`) dominates the release's
+   gate/removed-library pair in both modes, but does **not** dominate
+   `scan`'s own budget overflow.
 2. **A flat `max()` over "the number" cannot explain a tie.** A caller
    reading a bare exit `1` cannot tell whether it came from an error-level
    addition, an incomplete contract-coverage domain, or an incomplete
