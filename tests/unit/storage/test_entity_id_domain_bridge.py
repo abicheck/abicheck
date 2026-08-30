@@ -288,6 +288,76 @@ class TestMalformedDocuments:
         with pytest.raises(TypeError, match="unrecognized ScopePath segment type"):
             domain_entity_id_to_dto(bogus)
 
+    def test_boolean_schema_version_is_refused_not_treated_as_1(self) -> None:
+        """``True == 1`` in Python -- a naive ``version == 1`` dispatch would
+        silently run the lossy v1 adapter on a document whose real
+        ``scope``/``extra`` fields it then discards (Codex review)."""
+        v2_document = domain_entity_id_to_dto(entity_id_for_type((), "X"))
+        v2_document["schema_version"] = True
+        with pytest.raises(TypeError, match="schema_version must be an int"):
+            domain_entity_id_from_dto(v2_document)
+
+    def test_float_schema_version_is_refused_not_treated_as_int(self) -> None:
+        """``2.0 == 2`` in Python -- must not silently dispatch to the v2
+        parser on a value that was never a real integer version."""
+        v2_document = domain_entity_id_to_dto(entity_id_for_type((), "X"))
+        v2_document["schema_version"] = 2.0
+        with pytest.raises(TypeError, match="schema_version must be an int"):
+            domain_entity_id_from_dto(v2_document)
+
+    def test_v2_document_missing_extra_is_refused(self) -> None:
+        """``domain_entity_id_to_dto`` always emits ``extra`` (empty list
+        included) -- a v2 document missing it entirely is truncated or
+        hand-edited, not a producer that legitimately had nothing to say."""
+        v2_document = domain_entity_id_to_dto(entity_id_for_type((), "X"))
+        del v2_document["extra"]
+        with pytest.raises(ValueError, match="missing required field 'extra'"):
+            domain_entity_id_from_dto(v2_document)
+
+    def test_record_segment_missing_access_is_refused(self) -> None:
+        v2_document = domain_entity_id_to_dto(
+            EntityId(scope=(Record("A"),), kind=EntityKind.TYPE, leaf_name="B")
+        )
+        del v2_document["scope"][0]["access"]
+        with pytest.raises(ValueError, match="missing required field 'access'"):
+            domain_entity_id_from_dto(v2_document)
+
+    def test_inline_namespace_segment_missing_version_tag_is_refused(self) -> None:
+        v2_document = domain_entity_id_to_dto(
+            EntityId(
+                scope=(InlineNamespace("v1"),), kind=EntityKind.TYPE, leaf_name="X"
+            )
+        )
+        del v2_document["scope"][0]["version_tag"]
+        with pytest.raises(ValueError, match="missing required field 'version_tag'"):
+            domain_entity_id_from_dto(v2_document)
+
+    def test_boolean_ordinal_is_refused_not_treated_as_an_int(self) -> None:
+        """``bool`` subclasses ``int`` in Python -- ``true``/``1`` must not
+        reconstruct to equal, same-hash ``Anonymous`` segments (Codex
+        review)."""
+        v2_document = domain_entity_id_to_dto(
+            EntityId(
+                scope=(Anonymous("struct", 1),), kind=EntityKind.TYPE, leaf_name=""
+            )
+        )
+        v2_document["scope"][0]["ordinal"] = True
+        with pytest.raises(TypeError, match="ordinal must be an int"):
+            domain_entity_id_from_dto(v2_document)
+
+    def test_boolean_block_ordinal_is_refused_not_treated_as_an_int(self) -> None:
+        owner = entity_id_for_function((), "f")
+        v2_document = domain_entity_id_to_dto(
+            EntityId(
+                scope=(LocalToFunction(owner=owner, block_ordinal=1),),
+                kind=EntityKind.TYPE,
+                leaf_name="A",
+            )
+        )
+        v2_document["scope"][0]["block_ordinal"] = False
+        with pytest.raises(TypeError, match="block_ordinal must be an int"):
+            domain_entity_id_from_dto(v2_document)
+
 
 def test_variable_mangled_branch_round_trips_through_the_bridge() -> None:
     """A non-empty-scope-collapsing branch: `entity_id_for_variable`'s

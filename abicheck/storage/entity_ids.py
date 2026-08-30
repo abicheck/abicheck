@@ -56,7 +56,7 @@ from __future__ import annotations
 import functools
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, cast
 
 from ..model.identity import (
     Anonymous,
@@ -496,8 +496,41 @@ def _domain_segment_to_dict(segment: _DomainScopeSegment) -> dict[str, Any]:
     raise TypeError(f"unrecognized ScopePath segment type: {type(segment).__name__}")
 
 
+def _ordinal_field(document: Mapping[str, Any], key: str, record: str) -> int:
+    """A required, strictly-integer ordinal field — never a ``bool``.
+
+    ``_instance_of(value, int, ...)`` alone accepts a ``bool``, since
+    ``bool`` is a subclass of ``int`` in Python — so a document carrying
+    JSON ``true`` for ``ordinal``/``block_ordinal`` silently parsed as ``1``,
+    and a document carrying ``false`` parsed as ``0``. Both are identity
+    fields (:class:`Anonymous`/:class:`LocalToFunction`'s own docstrings),
+    so two structurally distinct wire values — ``true`` and the integer
+    ``1`` — reconstructed to equal, same-hash segments: exactly the
+    collapsed-identity defect this package exists to prevent (Codex review).
+    """
+    value = _required_field(document, key, record)
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise TypeError(
+            f"{key} must be an int, not {type(value).__name__} ({value!r}); "
+            "a bool is never accepted here even though it subclasses int, "
+            "since two structurally distinct wire values would otherwise "
+            "reconstruct to one identity"
+        )
+    return cast(int, value)
+
+
 def _domain_segment_from_dict(data: Any) -> _DomainScopeSegment:
-    """The inverse of :func:`_domain_segment_to_dict`."""
+    """The inverse of :func:`_domain_segment_to_dict`.
+
+    Every field the writer (:func:`_domain_segment_to_dict`) always emits is
+    read via :func:`_required_field`, never ``.get(key, default)`` — a v2
+    document is written with ``access``/``version_tag`` present on every
+    record/inline-namespace segment regardless of value, so a document
+    missing one is truncated or hand-edited, not a producer that legitimately
+    had nothing to say (Codex review; the same "absence is not evidence"
+    rule :func:`~abicheck.storage.guards.row_sequence` already states for a
+    sibling field shape).
+    """
     _mapping(data, "a scope-segment document")
     segment_kind = _required_field(data, "kind", "a scope-segment document")
     if segment_kind == "namespace":
@@ -512,7 +545,9 @@ def _domain_segment_from_dict(data: Any) -> _DomainScopeSegment:
             name=_identity_text(
                 _required_field(data, "name", "a record segment document"), "name"
             ),
-            access=_identity_text(data.get("access", ""), "access"),
+            access=_identity_text(
+                _required_field(data, "access", "a record segment document"), "access"
+            ),
         )
     if segment_kind == "inline_namespace":
         return InlineNamespace(
@@ -520,7 +555,12 @@ def _domain_segment_from_dict(data: Any) -> _DomainScopeSegment:
                 _required_field(data, "name", "an inline-namespace segment document"),
                 "name",
             ),
-            version_tag=_identity_text(data.get("version_tag", ""), "version_tag"),
+            version_tag=_identity_text(
+                _required_field(
+                    data, "version_tag", "an inline-namespace segment document"
+                ),
+                "version_tag",
+            ),
         )
     if segment_kind == "anonymous":
         return Anonymous(
@@ -528,23 +568,15 @@ def _domain_segment_from_dict(data: Any) -> _DomainScopeSegment:
                 _required_field(data, "scope_kind", "an anonymous segment document"),
                 "scope_kind",
             ),
-            ordinal=_instance_of(
-                _required_field(data, "ordinal", "an anonymous segment document"),
-                int,
-                "ordinal",
-            ),
+            ordinal=_ordinal_field(data, "ordinal", "an anonymous segment document"),
         )
     if segment_kind == "local_to_function":
         return LocalToFunction(
             owner=domain_entity_id_from_dto(
                 _required_field(data, "owner", "a local-to-function segment document")
             ),
-            block_ordinal=_instance_of(
-                _required_field(
-                    data, "block_ordinal", "a local-to-function segment document"
-                ),
-                int,
-                "block_ordinal",
+            block_ordinal=_ordinal_field(
+                data, "block_ordinal", "a local-to-function segment document"
             ),
         )
     raise ValueError(
@@ -604,6 +636,29 @@ def _domain_entity_id_from_v1_dto(data: Mapping[str, Any]) -> _DomainEntityId:
     return _DomainEntityId(scope=scope, kind=kind, leaf_name=leaf_name, extra=extra)
 
 
+def _entity_id_schema_version(data: Mapping[str, Any]) -> int:
+    """The document's ``schema_version``, defaulting to ``1`` when absent.
+
+    Compared for dispatch by identity, not by ``==`` on the raw value: a
+    numeric ``==`` treats JSON ``true`` as equal to ``1`` and ``2.0`` as
+    equal to ``2`` (``bool`` subclasses ``int`` in Python, and ``int``/
+    ``float`` compare across type), so either would silently dispatch to a
+    real version's own parser on a value that was never that version (Codex
+    review). Rejected outright rather than coerced, matching every other
+    identity-bearing field in this module.
+    """
+    if "schema_version" not in data:
+        return 1
+    version = data["schema_version"]
+    if isinstance(version, bool) or not isinstance(version, int):
+        raise TypeError(
+            f"schema_version must be an int, not {type(version).__name__} "
+            f"({version!r}); a bool or float could silently compare equal "
+            "to a real version number and dispatch to the wrong parser"
+        )
+    return cast(int, version)
+
+
 def domain_entity_id_from_dto(data: Mapping[str, Any]) -> _DomainEntityId:
     """The inverse of :func:`domain_entity_id_to_dto`.
 
@@ -614,9 +669,16 @@ def domain_entity_id_from_dto(data: Mapping[str, Any]) -> _DomainEntityId:
     trip :func:`domain_entity_id_to_dto` produces. Any other version is
     refused outright rather than guessed at — a document from a wire schema
     this build has never written is not this function's to interpret.
+
+    ``extra`` is read via :func:`~abicheck.storage.guards.required_field`,
+    not ``.get(key, default)`` — :func:`domain_entity_id_to_dto` always
+    emits it, empty list included, so a v2 document missing it entirely is
+    truncated or hand-edited rather than a producer that legitimately had
+    nothing to say (Codex review, same reasoning as
+    :func:`_domain_segment_from_dict`'s per-segment fields).
     """
     _mapping(data, "an entity-id document")
-    version = data.get("schema_version", 1)
+    version = _entity_id_schema_version(data)
     if version == 1:
         return _domain_entity_id_from_v1_dto(data)
     if version != DOMAIN_ENTITY_ID_SCHEMA_VERSION:
@@ -636,7 +698,9 @@ def domain_entity_id_from_dto(data: Mapping[str, Any]) -> _DomainEntityId:
     )
     extra = tuple(
         _identity_text(entry, "an extra entry")
-        for entry in _row_sequence(data.get("extra", ()), "extra")
+        for entry in _row_sequence(
+            _required_field(data, "extra", "an entity-id document"), "extra"
+        )
     )
     return _DomainEntityId(scope=scope, kind=kind, leaf_name=leaf_name, extra=extra)
 

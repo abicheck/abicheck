@@ -7994,6 +7994,39 @@ check (this plan's storage-v2 sibling document,
 `docs/contribute/plans/storage-format-v2.md`) updated with the three new
 names.
 
+**Correction (2026-08-30, same day, Codex review on PR #949): three
+malformed-document leniency gaps in the reader half, all sharing one root
+cause -- a boundary door that coerced or defaulted instead of refusing, the
+same class of defect this module's own pre-existing `EntityId`/
+`OccurrenceId` guards exist to close, just not yet extended to the new v2
+bridge.** (1) `schema_version` was dispatched by `==` against `1`; since
+`bool` subclasses `int` and compares across `int`/`float` in Python,
+`True == 1` and `2.0 == 2`, so a document carrying either silently
+dispatched to a parser for a version it never declared (a `true`
+`schema_version` alongside real v2 `scope`/`extra` fields ran the *lossy
+v1 adapter*, discarding data the v1 shape cannot even express). Fixed by
+`_entity_id_schema_version`, which rejects any non-`int`-excluding-`bool`
+value outright rather than comparing it. (2) `ordinal`/`block_ordinal`
+were read via the existing `_instance_of(value, int, ...)` guard, which
+accepts `bool` for the identical subclassing reason -- so a document with
+`ordinal: true` and one with `ordinal: 1` reconstructed to equal,
+same-hash `Anonymous`/`LocalToFunction` segments, two structurally
+different wire values collapsing onto one identity. Fixed by
+`_ordinal_field`, a strict integer guard excluding `bool` for both fields.
+(3) `access`, `version_tag`, and `extra` were read via `.get(key, default)`
+even though the writer (`_domain_segment_to_dict`/`domain_entity_id_to_dto`)
+always emits every one of them regardless of value -- so a v2 document
+truncated or hand-edited to omit one of these silently read as "the
+producer had nothing to say" rather than "this document is malformed,"
+exactly the shape `storage.guards.row_sequence`'s own docstring already
+names as this package's central invariant. Fixed by reading all three via
+`_required_field`, matching how every other field in this bridge (`scope`,
+`kind`, `leaf_name`) was already read. New tests for all three in
+`tests/unit/storage/test_entity_id_domain_bridge.py`
+(`TestMalformedDocuments`), each starting from a real `domain_entity_id_to_dto`
+output and mutating exactly the field under test rather than a hand-typed
+fixture, confirmed to fail against the pre-fix reader.
+
 **What this slice deliberately does not attempt.** No `entity_id` carrier
 field exists anywhere in `abicheck/model/` yet -- the open carrier-field
 question (option (a) vs. (b)) from the first slice is still unresolved, so
