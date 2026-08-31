@@ -1545,7 +1545,7 @@ class TestCheckerLevelSuppressionDiagnostic:
             description="synthetic surface finding",
             public_reachable=True,
         )
-        monkeypatch.setattr(dsm, "diff_surface_metrics", lambda old, new: [finding])
+        monkeypatch.setattr(dsm, "diff_surface_metrics", lambda old, new, **kw: [finding])
         suppression = SuppressionList([
             Suppression(namespace="lib::detail::*", reason="broad rule")
         ])
@@ -1577,7 +1577,7 @@ class TestCheckerLevelSuppressionDiagnostic:
         finding = Change(
             kind=ChangeKind.FUNC_REMOVED, symbol="lib::Foo", description="synthetic"
         )
-        monkeypatch.setattr(dsm, "diff_surface_metrics", lambda old, new: [finding])
+        monkeypatch.setattr(dsm, "diff_surface_metrics", lambda old, new, **kw: [finding])
         suppression = SuppressionList([Suppression(symbol="lib::Foo", reason="exact")])
         old = _snap()
         new = _snap()

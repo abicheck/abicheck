@@ -137,6 +137,7 @@ from .policy_file import PolicyFile
 
 if TYPE_CHECKING:
     from .environment_matrix import EnvironmentMatrix
+    from .model.identity import EntityId
     from .post_processing import PipelineContext
     from .suppression import SuppressionList
 
@@ -255,6 +256,8 @@ def _apply_surface_metrics(
     policy_file: PolicyFile | None,
     current_verdict: Verdict,
     stage: ContractEvaluationStage | None = None,
+    old_public_entity_ids: frozenset[EntityId] | None = None,
+    new_public_entity_ids: frozenset[EntityId] | None = None,
 ) -> tuple[list[Change], Verdict]:
     """Compute aggregate surface-metric findings (ADR-027 A1/D1.2) and return
     the updated *kept* list and (possibly recomputed) *verdict*.
@@ -267,11 +270,23 @@ def _apply_surface_metrics(
     freshly-appended findings are contract-classified before they can score
     (ADR-049 D9) — they are appended after the first classification pass, so
     without it they would reach compatibility policy unclassified.
+
+    *old_public_entity_ids*/*new_public_entity_ids* pass through unchanged
+    to :func:`diff_surface_metrics` (ADR-063 Phase 3 D5).
     """
     from .diff_surface_metrics import diff_surface_metrics
 
     visible = _filter_suppressed_changes(
-        list(diff_surface_metrics(old, new)), suppression, suppressed
+        list(
+            diff_surface_metrics(
+                old,
+                new,
+                old_public_entity_ids=old_public_entity_ids,
+                new_public_entity_ids=new_public_entity_ids,
+            )
+        ),
+        suppression,
+        suppressed,
     )
     if not visible:
         return kept, current_verdict
@@ -362,6 +377,8 @@ def _apply_pattern_verdicts_step(
     evidence_tier: EvidenceTier,
     current_verdict: Verdict,
     stage: ContractEvaluationStage | None = None,
+    old_public_entity_ids: frozenset[EntityId] | None = None,
+    new_public_entity_ids: frozenset[EntityId] | None = None,
 ) -> tuple[list[Change], Verdict, list[dict[str, object]]]:
     """Apply ADR-027 A4 pattern-aware verdict modulation.
 
@@ -373,6 +390,9 @@ def _apply_pattern_verdicts_step(
     :func:`_apply_surface_metrics`: this step's synthetic findings are
     appended after the first contract-classification pass, so the verdict
     recomputation is where they must be classified (ADR-049 D9).
+
+    *old_public_entity_ids*/*new_public_entity_ids* pass through unchanged
+    to :func:`apply_pattern_verdicts` (ADR-063 Phase 3 D5).
     """
     from .pattern_verdicts import apply_pattern_verdicts
 
@@ -385,7 +405,13 @@ def _apply_pattern_verdicts_step(
         frozenset(policy_file.overrides) if policy_file is not None else frozenset()
     )
     pattern_modulations: list[dict[str, object]] = apply_pattern_verdicts(
-        kept, old, new, evidence_tier=evidence_tier, protected_kinds=protected_kinds
+        kept,
+        old,
+        new,
+        evidence_tier=evidence_tier,
+        protected_kinds=protected_kinds,
+        old_public_entity_ids=old_public_entity_ids,
+        new_public_entity_ids=new_public_entity_ids,
     )
 
     if suppression is not None and len(kept) > pre_pattern_count:
@@ -757,6 +783,8 @@ def compare(
     diagnostic_comparison: bool = False,
     contract_evaluation: bool = False,
     contract_mode: str | None = None,
+    old_public_entity_ids: frozenset[EntityId] | None = None,
+    new_public_entity_ids: frozenset[EntityId] | None = None,
 ) -> DiffResult:
     """Diff two AbiSnapshots and return a DiffResult with verdict.
 
@@ -781,12 +809,9 @@ def compare(
             default, a genuine ``contract`` mismatch between *old* and *new*
             (ADR-050 D1's profile/scope fingerprints) raises
             :class:`~abicheck.errors.ProfileMismatchError` or
-            :class:`~abicheck.errors.ScopeMismatchError` before any diff runs
-            — the two snapshots aren't provably comparable, so no verdict is
-            produced. Setting this True downgrades that hard-fail into an
-            ordinary diff whose ``DiffResult.assurance`` is stamped
-            ``"none"``, so the caller can still see *a* result but knows not
-            to trust it the way an ordinary comparable diff is trusted.
+            :class:`~abicheck.errors.ScopeMismatchError` before any diff runs.
+            Setting this True downgrades that hard-fail into an ordinary diff
+            whose ``DiffResult.assurance`` is stamped ``"none"`` instead.
         contract_evaluation: ADR-049 contract evaluation. When True, stamps
             every finding's ``Change.contract_relevance``/
             ``contract_reason_code``/``contract_assurance`` from
@@ -829,14 +854,16 @@ def compare(
             only -- which evidence a relevance decision is made against, not
             whether that decision is authoritative (it is, per
             *contract_evaluation* above).
+        old_public_entity_ids: ADR-063 Phase 3 (D5) -- *old*'s resolved
+            public-surface ``EntityId`` set; *new_public_entity_ids* is
+            *new*'s (never swap). ``None`` (default) preserves prior behavior.
 
     Raises:
         ProfileMismatchError: *old* and *new* were extracted under
             different, incompatible compile contexts (ADR-050 D1/D2), and
             *diagnostic_comparison* was not set.
         ScopeMismatchError: *old* and *new* do not cover the same declared
-            surface (ADR-050 D1/D2), and *diagnostic_comparison* was not
-            set.
+            surface (ADR-050 D1/D2), and *diagnostic_comparison* was not set.
         ValueError: *contract_mode* is not one of ``ContractMode``'s values.
             Only raised when *contract_evaluation* is set, since the mode is
             not consulted otherwise -- see the note below.
@@ -1058,6 +1085,8 @@ def compare(
             policy_file,
             verdict,
             stage,
+            old_public_entity_ids=old_public_entity_ids,
+            new_public_entity_ids=new_public_entity_ids,
         )
 
     # ADR-027 A4: pattern-aware verdict modulation. Runs after post-processing
@@ -1079,50 +1108,34 @@ def compare(
             evidence_tier,
             verdict,
             stage,
+            old_public_entity_ids=old_public_entity_ids,
+            new_public_entity_ids=new_public_entity_ids,
         )
 
-    # ADR-049 D9's closing half. Relevance itself was already decided above,
-    # ahead of compatibility policy; what is left here is to (a) classify the
-    # audit ledgers — findings that never reach `kept`, so no verdict
-    # computation would have classified them, but which are still rendered
-    # and are entitled to the same contract fields; (b) record each finding's
-    # own compatibility decision, now that policy (including the pattern-
-    # verdict modulations directly above) has finished; and (c) persist the
-    # Phase 4 context over every finding the stage saw.
+    # ADR-049 D9's closing half: relevance was already decided above; here we
+    # (a) classify the audit ledgers -- findings that never reach `kept` but
+    # are still rendered and owed the same contract fields; (b) record each
+    # finding's compatibility decision now that policy (incl. the pattern-
+    # verdict modulations above) has finished; and (c) persist the Phase 4
+    # context over every finding the stage saw. `kept` is passed again
+    # deliberately: `classify` is idempotent, so this only picks up a late
+    # step's additions, and no future step can slip in uncovered.
     #
-    # `kept` is passed again deliberately: `classify` is idempotent, so this
-    # only picks up anything a late step appended, and doing it here means no
-    # future step can be added between the last verdict and the receipt
-    # without its findings being covered.
+    # Each ledger below is here for its own reason (Codex, PR #658), not
+    # "everything in scope for symmetry": `pp_ctx.out_of_surface` already
+    # carries `surface_exclusion_reason` from FilterNonPublicSurface;
+    # `redundant_for_report` is restored into the report by
+    # `--show-redundant` long after this runs and would otherwise render
+    # unstamped; `suppressed` findings keep their contract relevance under
+    # the ADR-013 audit trail despite being gated; `reconciled` findings are
+    # cleared from `kept` by `--reconcile-build-context` before this point
+    # and would otherwise never be classified at all.
     #
-    # Each ledger is here for its own reason, every one a review finding
-    # (Codex, PR #658) that cost a cycle to discover — none of them is
-    # "everything in scope, for symmetry":
-    #
-    # - `pp_ctx.out_of_surface`: a private/system-header finding
-    #   `FilterNonPublicSurface` already demoted is exactly the
-    #   false-positive-reduction case contract evaluation exists to measure.
-    #   Each already carries that step's `surface_exclusion_reason`, which
-    #   `evaluate_change_contract_relevance` consults directly, resolving it
-    #   without needing fresh surface evidence for that finding.
-    # - `redundant_for_report`: a display-dedup finding is restored into the
-    #   rendered report by `--show-redundant`, entirely in the CLI layer
-    #   (`cli_helpers_compare._merge_redundant_changes`) and long after this
-    #   runs — so an unstamped one would render with none of the promised
-    #   contract fields despite `contract_evaluation=True`.
-    # - `suppressed`: suppression is a display/gate decision, not a reason to
-    #   erase the contract relevance of the finding underneath it, which the
-    #   ADR-013 audit trail still shows.
-    # - `reconciled`: `--reconcile-build-context` clears these from `kept`
-    #   *before* any of this, so they would otherwise never be classified at
-    #   all, while still being rendered in their own ledger.
-    #
-    # `pp_ctx.public_surface_allowlist` and `force_public_symbols` reach the
-    # decision through the stage itself (`build_contract_stage`): a `kept`
-    # finding committed by POST-manifest despite private-header provenance
-    # never gets a `surface_exclusion_reason`, so without them a from-scratch
-    # recomputation could reach PROVEN_OUT_OF_CONTRACT for a finding the
-    # manifest already proved committed.
+    # `pp_ctx.public_surface_allowlist`/`force_public_symbols` reach the
+    # decision through the stage itself (`build_contract_stage`): without
+    # them, a `kept` finding committed by POST-manifest despite
+    # private-header provenance could reach PROVEN_OUT_OF_CONTRACT even
+    # though the manifest already proved it committed.
     contract_context: object | None = None
     if stage is not None:
         stage.classify(
@@ -1148,49 +1161,36 @@ def compare(
 
     # `suppression.source_sha256` alone is `None` for a digest-less but
     # fully active list (the public constructor, ABICC's -skip-symbols
-    # lists, and SuppressionList.merge() all produce this shape) --
-    # `suppression_config_for`'s own rule_identities()-content-digest
-    # fallback is the established, already-tested primitive for exactly
-    # this case (Codex review, PR #803, fresh evidence).
+    # lists, SuppressionList.merge() all produce this shape) --
+    # `suppression_config_for`'s rule_identities()-content-digest fallback
+    # handles it (Codex review, PR #803).
     _suppression_config = suppression_config_for(suppression)
     suppression_source_sha256 = (
         _suppression_config.sha256 if _suppression_config is not None else None
     )
 
-    # Canonical content digest of every resolved explicit-scope input
-    # (Codex review, PR #803, fresh evidence -- generalized after an
-    # initial version covered only `force_public_symbols`): both
-    # `force_public_symbols` (from `--public-symbols-list`/`.abicheck.yml`'s
-    # `scope.public_symbols`) and `public_surface_allowlist` (from
-    # `--post-manifest`'s resolved `pp_*`/ufunc-loop allowlist,
-    # `_resolve_post_manifest_allowlist` one layer above this function) are
-    # already-resolved `set[str] | None` by the time they reach here, and
-    # both independently change which findings `compare()` retains -- so a
-    # digest of just one axis would let two runs differing only by the
-    # other collide. Keyed JSON (not a delimiter-joined string) keeps the
-    # two axes distinguishable and avoids the non-injective-join class of
-    # bug already fixed elsewhere in this same digest work.
+    # Canonical content digest of every resolved explicit-scope input (Codex
+    # review, PR #803): both `force_public_symbols` and
+    # `public_surface_allowlist` are already-resolved `set[str] | None` here
+    # and each independently changes which findings `compare()` retains, so
+    # a digest of just one axis would let two differing-only-by-the-other
+    # runs collide. Keyed JSON (not delimiter-joined) keeps the axes
+    # distinguishable, avoiding the non-injective-join bug class already
+    # fixed elsewhere in this digest work.
     #
     # `public_surface_allowlist` is gated on `is not None`, not truthiness
-    # (Codex review, PR #803, fresh evidence): an empty allowlist is a real,
-    # distinct, active configuration -- a POST manifest committing to zero
-    # exports -- and `scope_active` a few lines above this block already
-    # treats `public_surface_allowlist is not None` as "scoping is active"
-    # for exactly this reason (line ~1038). Collapsing `set()` to "no
-    # explicit scope at all" would let an absent manifest and a
-    # zero-export manifest hash identically while `FilterNonPublicSurface`
-    # filters every concrete export under the latter. `force_public_symbols`
-    # deliberately keeps the plain truthiness check: every other consumer of
-    # this parameter in the codebase (`contract_evaluation.py`,
-    # `contract_pipeline.py`, `service_compare_pipeline.py`, ...) already
-    # treats an empty set as equivalent to `None` for this specific axis --
-    # there is no "force nothing explicitly public" state distinct from "no
-    # forcing at all" anywhere else this parameter is consumed, so the two
-    # axes are intentionally not symmetric here.
+    # (Codex review, PR #803): an empty allowlist is a real, distinct,
+    # active configuration -- a POST manifest committing to zero exports --
+    # matching `scope_active`'s identical `is not None` check above (line
+    # ~1038); collapsing `set()` to "no scope" would hash an absent manifest
+    # identically to a zero-export one. `force_public_symbols` deliberately
+    # keeps plain truthiness: every other consumer in this codebase already
+    # treats an empty set as equivalent to `None` for that axis, so the two
+    # are intentionally asymmetric here.
+    #
     # `content_digest` is the same canonical-JSON-then-SHA-256 primitive
-    # `contract_context.py` already uses for overlay content digests
-    # (CodeRabbit review, PR #803, fresh evidence) -- reused here instead of
-    # a second, independently-hand-rolled hashing convention.
+    # `contract_context.py` uses for overlay digests (CodeRabbit, PR #803) --
+    # reused rather than a second hand-rolled hashing convention.
     from .contract_evidence_collect import content_digest
 
     _explicit_scope_sources: dict[str, list[str]] = {}

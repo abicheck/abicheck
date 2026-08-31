@@ -77,7 +77,79 @@
   alias-match reconciliation tier once `EntityId.key`'s cross-release
   stability is established). Those are the remaining items before Phase 2
   is complete.
-- **Phases 3–10** are still unimplemented design text.
+- **Phase 3** ("public surface as a graph query over one evidence graph,"
+  D5) has landed its plumbing across thirteen slices: `model/occurrence.py`
+  (`OccurrenceId`/`canonical_key`); a `SurfaceGraphLike` structural
+  `Protocol` (`model/graph_facts.py`); `AbiSnapshot.surface_graph:
+  SurfaceGraphLike | None` (unconditional, not nested under
+  `build_source`) and its `storage/surface_graph_codec.py` encode/decode
+  pair (`SCHEMA_VERSION` 28→29); `compare/surface_graph.py` (a new,
+  `compare/`-layer builder populating `declaration`/`type`/`header`/
+  `symbol` nodes and `declares`/`references`/`exports` edges from L0-L2
+  snapshot facts alone — `model.graph_facts.GraphNode`/`GraphEdge`
+  directly, never a second dataclass hierarchy); `policy/public_surface.py`
+  (`PublicSurfaceQuery`, whose `.resolve()` returns a
+  `frozenset[EntityId]` of both public function/variable roots and
+  reachable record/enum ids); `surface_graph.py`'s (root module)
+  `build_surface_graph()`/`compute_surface_metrics()` each gaining one
+  optional `public_entity_ids` parameter, narrowing (never expanding)
+  the legacy `Visibility.PUBLIC`-derived root set when given;
+  `pattern_verdicts.py`/`diff_surface_metrics.py` each gaining an
+  `old_public_entity_ids`/`new_public_entity_ids` pair threaded to their
+  own matching single-snapshot call; `checker.compare()` gaining the
+  identical optional pair (forwarded, never resolved — `compare()` stays
+  free of any `policy/` import) and `service.compare_snapshots()`
+  resolving each side's own set via `PublicSurfaceQuery().resolve()`
+  before forwarding into `compare()`, which `service_compare_pipeline.
+  classify_compare_pair` inherits for free since it already routes
+  through `compare_snapshots()` rather than `checker.compare()` directly;
+  and `service_header_graph_attach._attach_header_graph()` assigning the
+  *same* `SourceGraphSummary` instance `build_header_only_graph()` already
+  produces to both `AbiSnapshot.surface_graph` and `AbiSnapshot.
+  build_source.source_graph` — deliberately without also populating this
+  phase's own `compare/surface_graph.py` facts onto it there: that
+  builder runs unconditionally on essentially every real dump (G31 Phase
+  A), and doing the per-declaration walk speculatively, for a feature
+  nothing in this phase's own wiring reads back yet, regressed the
+  header-graph attach-cost perf gate by 47-96% at realistic sizes (caught
+  by CI on this phase's own PR). `build_public_surface_facts()` stays
+  available for a caller that does need those facts to populate onto the
+  same shared instance explicitly.
+  **Deliberately not landed, and recorded here rather than left for a
+  later phase to rediscover as a gap:** `surface.py`'s own closure-walk
+  traversal and `export_surface.py`'s independent one are **not**
+  deleted — `PublicSurfaceQuery` delegates to both unchanged rather than
+  reimplementing either as a literal graph traversal, a scoped,
+  documented risk decision given the demonstrated fragility of that exact
+  algorithm (see `docs/contribute/known-gaps.md`); consequently there is
+  no lazy, graph-reading legacy-snapshot backfill path either, since
+  `compute_public_surface()`'s signature was never changed to accept a
+  structured resolution. `compare/surface_graph.py`'s own node ids
+  (`canonical_key(occurrence_id)`/`approx::`/`typedef::` fallbacks) and
+  `buildsource/header_graph.py`'s pre-existing L5 node ids
+  (`decl://<identity>`/`type://<identity>`) are two independent
+  namespaces — sharing one `SourceGraphSummary` instance is real and
+  tested, but the two schemes do not currently dedup onto one node for a
+  declaration both builders see (see `compare/surface_graph.py`'s own
+  module docstring). `type_reachability.directly_referenced_stdlib_types()`
+  was not migrated into `policy/public_surface.py` either: doing so would
+  require reclassifying `type_reachability.py` into the `policy` layer,
+  which would introduce a genuine new `policy -> extract` architecture
+  violation (that module imports two already-`extract`-classified
+  siblings) — a real, separate migration, not attempted reactively here.
+  Two corrections to the implementation plan's own text, found during this
+  phase's implementation rather than assumed from the design prose: the
+  plan's Phase 3 section describes `surface.py`/`export_surface.py`/
+  `pattern_verdicts.py` as "still flat, top-level modules" for the
+  `policy -> compare` layering analysis — checked against the real
+  `architecture/modules.yaml` rather than trusted, all three (plus
+  several siblings) are already classified into the `policy` layer via
+  `legacy_paths`, an unrelated prior classification pass the plan's own
+  text predates; and `service_compare_pipeline.classify_compare_pair`
+  already calls `service.compare_snapshots()` (not `checker.compare()`
+  directly, as an earlier plan draft assumed), which is what let slice 11
+  wire both Tier-2 production paths from a single change.
+- **Phases 4–10** are still unimplemented design text.
 
 See the [implementation plan](../plans/one-semantic-pipeline.md) for the
 full phase-by-phase state, including every slice's own "Landed"/"What this

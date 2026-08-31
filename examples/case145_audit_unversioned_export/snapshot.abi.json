@@ -119,7 +119,7 @@
   "platform": null,
   "python_api": null,
   "python_ext": null,
-  "schema_version": 28,
+  "schema_version": 29,
   "scope_fallback": null,
   "source_mtime": null,
   "source_mtime_epoch": false,
