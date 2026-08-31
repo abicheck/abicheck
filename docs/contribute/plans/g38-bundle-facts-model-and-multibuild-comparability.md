@@ -2412,6 +2412,118 @@ test_fold_bundle_honors_the_bundle_result_own_policy_file` (confirmed to
 fail against the pre-fix code -- asserted exit 0 under the override,
 observed exit 4).
 
+### Phase 17 — Elevate the stored-facts/per-library CLI surface from known gap to a scoped phase (second independent real-world confirmation)
+
+**Origin:** [uxlfoundation/oneDAL#3693](https://github.com/uxlfoundation/oneDAL/pull/3693)
+— a *second*, fully independent real-world driver
+(`bundle_gate.py`, 475 lines, plus a 114-line `onedal_libraries.py`) hitting
+the identical "No CLI surface" known gap Phase 13's own table and Phase 13
+follow-up's item 1 already named, against the same 6-library,
+3-toolchain-lane oneDAL shape Phase 8's 2.5h/38.3GB measurement used. This
+is not a new gap — it is the same one, confirmed twice by two unrelated
+callers, which is itself the signal that it has outgrown "known gap"
+footnote status and should be tracked as real, scoped phase surface with
+concrete acceptance evidence rather than deferred indefinitely.
+
+**What the second driver needed, matched against what already exists:**
+
+| Need | Already shipped (Python API) | Missing (CLI/`.abicheck.yml`) |
+|---|---|---|
+| Compare a stored `BundleFacts` OLD-side baseline against a live NEW-side release without reopening the OLD `.so` files (the alternative plateaued at 2.5h/38GB per Phase 8's own measurement) | `bundle_facts.compare_bundle_from_facts()`, `bundle_side_input.compare_release_against_bundle_facts()` (Phase 13) | `abicheck compare`/`compare --release` cannot be told "OLD side is a facts file" at all |
+| Per-library header roots + per-library `CompileContext` for a bundle whose libraries don't share one toolchain (oneDAL: plain-C++ `daal`/`oneapi::dal` vs. `-fsycl`/`icpx` `dpc`) | `per_library_headers`/`per_library_includes`/`per_library_compile: dict[str, CompileContext]` on `compare_release_against_bundle_facts()` (Phase 13 follow-up item 3) | `action.yml` and `cli_compare_release.py` resolve exactly one bundle-wide `header`/`include`/compile-context set for the whole directory/package fan-out, and the Action explicitly rejects `ast-frontend`/`gcc-path`/`gcc-options`/`sysroot`/`nostdinc` outright for that operand shape (`action.yml`'s own "a directory/package compare rejects it with an error" wording on each of those inputs) |
+| `--policy custom.yaml` reclassify/override rules actually reaching the bundle-level verdict | **Now shipped** — the stored-facts path landed first (`compare_release_against_bundle_facts`/`compare_bundle_from_facts` forwarding `policy_file`, closing the exact silent-drop the second driver also hit), and Phase 16 above mirrors it into the live `compare-release` fan-out. Both callers now score `BUNDLE_*` kinds under a caller's real policy document, not the bare profile-name string alone | — |
+
+The third row is why this phase's own acceptance bar (below) doesn't need
+to re-litigate policy routing: it is independently confirmed done on both
+the stored-facts and live-release paths, by two unrelated real-world
+callers, before this phase's own CLI-surface work would even begin.
+
+**The file-size picture has changed since Phase 13's table was written —
+re-measured here rather than trusted from memory:**
+
+ADR-061 Phase 4 (`abicheck/frontends/AGENTS.md`) split `cli.py`'s dispatch
+logic out from under the file that used to host
+`_dispatch_release_compare` — `cli.py` itself dropped from 1959 lines to a
+128-line registration facade, and the release-fan-out dispatch now lives in
+`abicheck/frontends/cli/commands/compare.py` (717 lines), a module with
+**no `architecture/debt.yaml` no-growth pin at all** — real, uncapped room
+for a new CLI-facing dispatch branch. That changes one row of Phase 13's
+original blocking table from a hard blocker to a viable landing spot. The
+other rows have not moved and remain genuinely at capacity — re-measured
+directly against current `wc -l` and each file's own `architecture/
+debt.yaml` `no_growth` pin (a tighter, adoption-time-frozen baseline, not
+merely the generic 2000-line AI-readiness cap):
+
+| File | Lines / pinned baseline | Still blocking? |
+|---|---|---|
+| `abicheck/frontends/cli/commands/compare.py` (dispatch — successor to `cli.py`'s old `_dispatch_release_compare`) | 717, no pin | **No** — real room, this is where new dispatch branches for a facts-in flag belong |
+| `cli_compare_release.py` (the release fan-out's own Click entry point) | 1995 / 1995 (`no_growth`) | Yes — zero room for a new `@click.option` |
+| `cli_compare_helpers.py` (directory/package operand dispatch) | 1996 / 1996 (`no_growth`) | Yes — zero room |
+| `cli_options.py` (`release_options` — the shared flag-decorator family) | 1977 / 1977 (`no_growth`) | Yes — zero room |
+| `buildsource/inline.py` (`BuildConfig` — where a new `.abicheck.yml` top-level block would parse) | 1975 / 1975 (`no_growth`) | Yes — zero room |
+| `bundle.py` | 1999 / 2000 (`no_growth`) | Yes — one line of slack, not enough for a real block |
+| `cli_compare_release_helpers.py` | 1311 / 1311 (`no_growth`) | Yes — zero room, but not a dispatch site anyway |
+
+So the constraint is unchanged in substance: a literal new `--bundle-facts-in`-
+shaped Click option (and any `.abicheck.yml` block for per-library override
+maps) still cannot land without first splitting `cli_compare_release.py`
+and/or `cli_options.py` — each pinned at exactly its own current line
+count, with the pin itself, not merely the 2000-line hard cap, being the
+active blocker now. The one thing that *has* changed is that the dispatch
+*logic* this new surface would call into finally has a real, unpinned home
+(`frontends/cli/commands/compare.py`) to delegate to once the flag itself
+can be declared — narrowing this phase's actual blocking work to "split one
+pinned option/entry-point file," not "find somewhere for the whole feature
+to live."
+
+**Explicitly in scope for this phase, once unblocked:**
+
+- A CLI-reachable way to pass a stored `BundleFacts` path as the OLD side of
+  a `compare`/`compare --release` invocation, routed through the existing
+  `compare_release_against_bundle_facts()` — no new comparison logic, only
+  a new input-resolution branch next to the existing directory/package and
+  single-file operand kinds.
+- A CLI/`.abicheck.yml`-reachable way to declare
+  `per_library_headers`/`per_library_includes`/`per_library_compile`
+  overrides keyed by canonical library name, reaching the same function's
+  already-shipped parameters — most plausibly a small manifest file (YAML/
+  JSON) rather than a repeatable flag, since a `{library: [header, ...]}`
+  map does not fit Click's single-value option model cleanly.
+
+**Explicitly out of scope — do not port these from a driver like `bundle_gate.py`:**
+
+- **Any of a driver's own summary-JSON/Markdown/SARIF rendering.** A real
+  external driver built against this gap (`bundle_gate.py`, oneDAL#3693)
+  carries roughly half its own line count (~230 of 475 lines: functions
+  shaped like `_summarize`/`_markdown`/`_sarif`/`_relativize_uris`/
+  `_finalize_sarif_run`/`_report`) doing SARIF URI rewriting and a bespoke
+  summary/Markdown shape. abicheck already owns this surface end to end
+  (`reporter.py`, `sarif.py`, `html_report.py`, `junit_report.py`) — that
+  half of a driver is the driver author's own output-shaping preference,
+  not a gap in abicheck, and is deletable from the driver independent of
+  any CLI work landing here.
+- **A caller's own measurement harness.** Wrapper scripts that run a driver
+  under `/usr/bin/time -v` inside a pinned container to get reproducible
+  wall-clock/peak-RSS/exit-code numbers (e.g. oneDAL#3693's `mkvenv909.sh`/
+  `bg909.sh`/`bg909b.sh`) carry zero ABI content by design — they exist to
+  make a measurement reproducible, not to compare anything — and are not a
+  candidate for upstreaming under any phase of this plan.
+
+**Acceptance criteria:** a directory/package `compare` invocation against a
+real mixed-toolchain, multi-library release (oneDAL#3693's own 6-library,
+3-toolchain-lane shape is the concrete target, not a synthetic stand-in)
+can (a) consume a stored OLD-side `BundleFacts` baseline instead of
+reopening OLD `.so` files, and (b) give each library its own header root
+and compile context, entirely from `abicheck compare ...`/`.abicheck.yml` —
+with no committed driver script standing in for either capability.
+
+**Effort:** M — the Python-API and dispatch-destination halves are done;
+the remaining work is the vertical-slice split of one pinned option file
+(`cli_options.py` or `cli_compare_release.py`, whichever a concrete flag
+design touches less) plus the new flag/manifest declaration and its
+translation into `compare_release_against_bundle_facts()`'s existing
+keyword arguments.
+
 ---
 
 ## Out of scope
