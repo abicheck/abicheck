@@ -96,6 +96,18 @@
   wall-clock time, never a finding/verdict/exit code, and is
   indistinguishable at this point from the flag never having been given.
 
+  `--debug-info old=...`/`--devel-pkg old=...` are now rejected explicitly
+  too (only the NEW-side scope of each was previously checked), a package-
+  extraction failure that raises `SnapshotError` from inside extraction
+  itself (not from the later comparison call) is now translated to a clean
+  CLI error instead of leaking a raw traceback, and `.abicheck.yml`'s
+  `source.method` (s1-s6) field is rejected the same way `--depth build`/
+  `source` is (no channel for L3-L5 build/source evidence collection).
+  `compare_bundle_facts.py`'s growing list of unsupported-option guards was
+  split into a new sibling module, `compare_bundle_facts_rejections.py`,
+  once it pushed the dispatcher itself past the architecture no-growth
+  800-line cap.
+
   Separately, `run_plan.py`'s newline-join fix for `RunPlanCheck.header`
   (public_headers reaching a generated run-plan cell) missed the
   single-element case: `"\n".join([x])` for a one-item list contains no

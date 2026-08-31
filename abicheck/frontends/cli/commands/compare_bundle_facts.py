@@ -59,15 +59,11 @@ afterthought. ``--devel-pkg new=...`` is honored the same way.
 
 **Every other flag `dispatch()` doesn't explicitly wire through is rejected
 outright (``click.UsageError``, exit 64) rather than silently ignored** --
-the same "reject rather than silently diverge from the request" rule
-``--dry-run``/``--contract`` set as this module's precedent. Each rejection
-site below carries its own comment explaining exactly why that flag has no
-channel into ``compare_release_against_bundle_facts()`` (or, for the rare
-flag with a real channel elsewhere -- ``--show-only``/``--report-mode`` on
-``reporter.to_json()`` -- why honoring it only here would make this driver
-disagree with the live release fan-out's own identical, pre-existing gap);
-that reasoning is not restated here. A zero-match comparison (nothing in
-NEW_INPUT's canonical library keys overlaps OLD_FACTS's
+``compare_bundle_facts_rejections.reject_unsupported_options()``, a sibling
+module split out purely to keep this file under the architecture no-growth
+800-line cap as that guard list grew round over round; see that module's own
+docstring for the full list and reasoning. A zero-match comparison (nothing
+in NEW_INPUT's canonical library keys overlaps OLD_FACTS's
 ``per_library_snapshots``) is a ``ClickException``, not a ``NO_CHANGE``
 verdict -- exit 0 must mean a real comparison found nothing broken, not that
 nothing was compared at all.
@@ -141,409 +137,16 @@ def dispatch(*, compile_context: Any, **kwargs: Any) -> None:
     ).compare_release_against_bundle_facts
     from ....cli_compare_release_helpers import _exit_compare_release
     from ....cli_params import _load_suppression_and_policy
+    from .compare_bundle_facts_rejections import reject_unsupported_options
+
+    reject_unsupported_options(kwargs)
 
     old_facts_path: Path = kwargs["old_input"]
     new_dir: Path = kwargs["new_input"]
     fmt = kwargs.get("fmt", "json")
-    if fmt not in ("json", "markdown"):
-        raise click.UsageError(
-            f"--format {fmt} is not available with --old-bundle-facts: only "
-            "json/markdown are supported for a stored-bundle-facts "
-            "comparison. Choose one of: json, markdown."
-        )
     secondary_fmt = kwargs.get("secondary_fmt")
     secondary_output: Path | None = kwargs.get("secondary_output")
-    # dry_run=False: --dry-run is rejected outright for this mode below,
-    # regardless of --write, so only the output/secondary-output collision
-    # half of this shared check is relevant here.
-    from ....frontends.cli.options import reject_incoherent_secondary_output
-
-    reject_incoherent_secondary_output(
-        dry_run=False,
-        output=kwargs.get("output"),
-        secondary_fmt=secondary_fmt,
-        secondary_output=secondary_output,
-    )
-    if secondary_output is not None and secondary_fmt not in ("json", "markdown"):
-        # Codex review: --write FORMAT=PATH was accepted (Click's own
-        # --write validation allows every format the ordinary compare/
-        # compare-release paths render: sarif/html/junit/review too) but
-        # this dispatcher only ever renders json/markdown -- a secondary
-        # format outside that pair exited successfully without ever writing
-        # the promised second artifact. Rejected the same way an
-        # unsupported primary --format is, rather than silently skipped.
-        raise click.UsageError(
-            f"--write {secondary_fmt}=... is not available with "
-            "--old-bundle-facts: only json/markdown are supported for a "
-            "stored-bundle-facts comparison."
-        )
-    if kwargs.get("fail_on_removed"):
-        raise click.UsageError(
-            "--fail-on-removed-library is not supported together with "
-            "--old-bundle-facts: answering it would require re-scanning "
-            "OLD_FACTS a second time, defeating the point of handing in an "
-            "already-loaded facts document. Diff the stored facts' own "
-            "per_library_snapshots keys against the release directory "
-            "yourself if you need this accounting."
-        )
-    if kwargs.get("bundle_facts_out") is not None:
-        raise click.UsageError(
-            "--bundle-facts-out is not supported together with "
-            "--old-bundle-facts: the OLD side is already a stored facts "
-            "document, so there is nothing new to persist from it."
-        )
-    if kwargs.get("dry_run"):
-        # Codex review: without this, --dry-run silently ran the full
-        # comparison anyway (load OLD_FACTS, discover/extract every matching
-        # NEW library, diff, render, exit normally) -- the exact cost
-        # --dry-run promises to skip, and especially costly for the large
-        # bundles this whole flag exists for. Rejected rather than given a
-        # real resolve-and-validate-only rendering of its own in this PR.
-        raise click.UsageError(
-            "--dry-run is not supported together with --old-bundle-facts."
-        )
-    if kwargs.get("contract_mode") is not None:
-        # Codex review: compare_release_against_bundle_facts() has no
-        # contract-evaluation parameter at all, so --contract was silently
-        # accepted and ignored -- every per-library comparison ran with
-        # contract evaluation off regardless of the requested domain,
-        # producing a different finding set/verdict/exit code than asked
-        # for with no indication anything was skipped. Rejected rather than
-        # silently unscoped.
-        raise click.UsageError(
-            "--contract is not supported together with --old-bundle-facts."
-        )
-    if kwargs.get("severity_preset") is not None or kwargs.get("pack_paths"):
-        # Codex review: --severity-preset/--pack drive run_compare's
-        # _resolve_compare_config + pack-application path, neither of which
-        # this dispatcher calls -- compare_release_against_bundle_facts()
-        # has no severity/pack parameter to receive them, so every
-        # per-library comparison always exits through the legacy verdict
-        # mapping regardless of what was requested. Rejected rather than
-        # silently scoring/gating the run differently than asked.
-        # --exit-code-scheme is rejected below, by the same shared helper
-        # the live release fan-out uses for it.
-        raise click.UsageError(
-            "--severity-preset/--pack are not supported together with "
-            "--old-bundle-facts."
-        )
-    # Codex review: reuse the exact rejection the live release fan-out
-    # already applies to a directory/package operand -- this driver's own
-    # NEW_INPUT is exactly that kind of operand (now including a package,
-    # per the extraction fix below), and every one of these flags is
-    # equally unconsumed here (no per-library-pair scoping, no single
-    # suppression-audit/analysis-assurance result to attach, etc.). Not
-    # `_reject_flags_unsupported_for_set_inputs` (which also calls
-    # `_reject_evidence_flags_for_set_inputs`): that helper rejects
-    # `--depth` unconditionally, but `--depth binary` is a legitimate,
-    # supported combination here (see the depth handling above/below) --
-    # `--sources`/`--build-info`/`--dump-manifest` are rejected directly
-    # instead, matching that helper's reasoning without its `--depth`
-    # overreach.
-    from ....cli_compare_options import _reject_set_input_flags
-
-    _reject_set_input_flags(
-        kwargs.get("exit_code_scheme"),
-        bool(kwargs.get("reconcile_build_context", False)),
-        kwargs.get("env_matrix_path"),
-        used_by_apps=tuple(kwargs.get("used_by_apps") or ()),
-        required_symbols=(
-            tuple(kwargs.get("required_symbols_opt") or ())
-            or (
-                ("__file__",) if kwargs.get("required_symbols_file") is not None else ()
-            )
-        ),
-        use_cases_manifest=kwargs.get("use_cases_manifest"),
-        diagnostic_comparison=bool(kwargs.get("diagnostic_comparison", False)),
-        audit_suppressions=bool(kwargs.get("audit_suppressions", False)),
-        include_labels=kwargs.get("include_labels"),
-        require_complete_analysis=bool(kwargs.get("require_complete_analysis", False)),
-    )
-    if any(
-        kwargs.get(name) is not None
-        for name in (
-            "old_sources",
-            "new_sources",
-            "old_build_info",
-            "new_build_info",
-            "old_dump_manifest",
-            "new_dump_manifest",
-        )
-    ):
-        # Codex review, same root cause as the --depth build/source
-        # rejection below: this driver's NEW-side resolution never reads
-        # any of these, on either side, so inline build/source evidence (or
-        # a dump manifest) would be accepted and silently dropped -- no
-        # L3-L5 collected, no manifest-declared includes applied.
-        raise click.UsageError(
-            "--sources/--build-info/--dump-manifest are not supported "
-            "together with --old-bundle-facts: this driver has no channel "
-            "for inline build/source evidence on either side."
-        )
-    if (
-        kwargs.get("probe_matrix_old") is not None
-        or kwargs.get("probe_matrix_new") is not None
-    ):
-        # Codex review: the ordinary single-pair/release paths fold
-        # --probe-matrix's build-configuration-drift findings (e.g.
-        # CXX_STANDARD_FLOOR_RAISED) into the comparison and verdict, but
-        # this dispatch never loads or forwards probe_matrix_old/
-        # probe_matrix_new -- silently never folded.
-        raise click.UsageError(
-            "--probe-matrix is not supported together with --old-bundle-facts."
-        )
-    if kwargs.get("post_manifest_path") is not None:
-        # Codex review: --post-manifest's public_surface_allowlist is
-        # applied by passing post_manifest_path through to each
-        # service.compare_snapshots() call -- compare_release_against_
-        # bundle_facts() has no such parameter, so a private POST symbol
-        # the manifest would scope out of the surface stays in the finding
-        # set/verdict regardless.
-        raise click.UsageError(
-            "--post-manifest is not supported together with --old-bundle-facts."
-        )
-    if kwargs.get("scope_public_headers") is False:
-        # Codex review, same root cause: --no-scope-public-headers has no
-        # channel into compare_release_against_bundle_facts() either (the
-        # driver always scopes to the public surface via service.
-        # compare_snapshots's own default) -- rejected rather than silently
-        # ignored.
-        raise click.UsageError(
-            "--no-scope-public-headers is not supported together with "
-            "--old-bundle-facts."
-        )
-    if kwargs.get("debug_info2") is not None:
-        # Codex review, same root cause as the package-extraction fix below:
-        # compare_release_against_bundle_facts() resolves NEW-side ELF/DWARF
-        # facts directly from the binary itself (this driver's own docstring:
-        # "no debug-info package resolution, no PDB") and has no debug-dir
-        # parameter to receive a --debug-info package's extracted contents,
-        # so it was silently accepted and ignored. Rejected rather than
-        # silently dropped.
-        raise click.UsageError(
-            "--debug-info is not supported together with --old-bundle-facts."
-        )
-    if (
-        kwargs.get("pdb_path") is not None
-        or kwargs.get("old_pdb_path") is not None
-        or kwargs.get("new_pdb_path") is not None
-    ):
-        # Codex review: same root cause as --debug-info just above --
-        # compare_release_against_bundle_facts()'s per-library
-        # service.resolve_input() call has no pdb_path parameter to receive
-        # any of these (this driver's own docstring: "no debug-info package
-        # resolution, no PDB"), so a NEW-side PE DLL would always fall back
-        # to binary-only extraction regardless of what was given here.
-        raise click.UsageError(
-            "--pdb-path is not supported together with --old-bundle-facts."
-        )
-    if (
-        kwargs.get("follow_deps")
-        or kwargs.get("search_paths")
-        or kwargs.get("ld_library_path")
-    ):
-        # Codex review: --follow-deps's DT_NEEDED dependency-graph walk (and
-        # its --search-path/--ld-library-path resolution knobs) is computed
-        # inside run_compare's own dependency-traversal path --
-        # compare_release_against_bundle_facts() has no parameter for any of
-        # them, so the requested dependency graph/binding-status/dependency-
-        # change section would silently never be produced.
-        raise click.UsageError(
-            "--follow-deps/--search-path/--ld-library-path are not "
-            "supported together with --old-bundle-facts."
-        )
-    if (
-        kwargs.get("debug_format_opt") is not None
-        or kwargs.get("debug_format") is not None
-        or kwargs.get("dwarf_only") is True
-        or kwargs.get("debuginfod") is True
-        or kwargs.get("debuginfod_url") is not None
-        or kwargs.get("debug_roots")
-        or kwargs.get("debug_roots_old")
-        or kwargs.get("debug_roots_new")
-    ):
-        # Codex review: these control which NEW-side ELF/DWARF facts get
-        # extracted (--debug-format/--dwarf-only select the debug-info
-        # source; --debuginfod/--debuginfod-url and --debug-root locate
-        # separate debug files), but compare_release_against_bundle_facts()
-        # calls service.resolve_input() with none of them -- always its own
-        # defaults, regardless of what was requested here. Rejected rather
-        # than silently comparing a different ABI surface than asked for.
-        raise click.UsageError(
-            "--debug-format/--dwarf-only/--debuginfod/--debuginfod-url/"
-            "--debug-root are not supported together with --old-bundle-facts."
-        )
-    if (
-        kwargs.get("pattern_verdicts")
-        or kwargs.get("explain_patterns")
-        or kwargs.get("surface_metrics")
-    ):
-        # Codex review: pattern-verdict modulation and surface-metric
-        # findings are both computed inside service.compare_snapshots()
-        # (ADR-027), but compare_release_against_bundle_facts()'s
-        # per-library call never passes pattern_verdicts/surface_metrics --
-        # always False, so a requested modulation or metric-drift finding
-        # silently never happens even though the CLI accepted the flag.
-        raise click.UsageError(
-            "--pattern-verdicts/--explain-patterns/--surface-metrics are "
-            "not supported together with --old-bundle-facts."
-        )
     depth = kwargs.get("depth")
-    if depth in ("build", "source"):
-        # Codex review: run_compare's own --depth build/source dial collects
-        # L3-L5 build/source evidence from --sources/--build-info on either
-        # side -- compare_release_against_bundle_facts() has no parameter to
-        # receive either, on either side (the OLD side is already a resolved
-        # snapshot with no raw sources to replay, and this driver's NEW-side
-        # resolution never reads old_sources/new_sources/old_build_info/
-        # new_build_info at all), so the requested evidence was silently
-        # never collected. Rejected rather than silently downgraded to
-        # header-only depth.
-        raise click.UsageError(
-            f"--depth {depth} is not supported together with "
-            "--old-bundle-facts: this driver has no channel for L3-L5 "
-            "build/source evidence."
-        )
-    if kwargs.get("show_only"):
-        # Codex review: every nested per-library report here is rendered via
-        # reporter.to_json(diff) with no show_only argument, so the filter
-        # was accepted but every change stayed in the output regardless.
-        # Not implemented here either -- the live release fan-out
-        # (cli_compare_release.py) has this identical gap on its own
-        # per-library to_json() calls, so threading it through only in this
-        # newly-exposed mode would mean this driver's JSON output disagrees
-        # with what --show-only already does (nothing) on every other
-        # release-shaped comparison path. Rejected rather than partially
-        # honored ahead of that pre-existing gap.
-        raise click.UsageError(
-            "--show-only is not supported together with --old-bundle-facts."
-        )
-    if kwargs.get("report_mode") not in (None, "full") or kwargs.get("show_filtered"):
-        # Codex review: same root cause as --show-only above -- report_mode
-        # has no channel into to_json(diff) here (always "full"), and
-        # show_filtered needs the _finalize_compare_result merge step this
-        # dispatcher never calls. Same identical pre-existing gap on the
-        # live release fan-out's own per-library to_json() calls.
-        raise click.UsageError(
-            "--report-mode/--show-filtered are not supported together "
-            "with --old-bundle-facts."
-        )
-    if kwargs.get("jobs"):
-        # Codex review: compare_release_against_bundle_facts() processes
-        # every matched library in a synchronous loop -- an explicit
-        # -j/--jobs N request was silently dropped. The silent default (0,
-        # "auto-detect") is left alone: unlike every other flag here,
-        # --jobs never changes the finding set/verdict/exit code, only
-        # wall-clock time, and dispatch() has no way to tell a default 0
-        # apart from the flag never having been given at all.
-        raise click.UsageError(
-            "--jobs is not supported together with --old-bundle-facts."
-        )
-    if kwargs.get("no_bundle_analysis"):
-        # Codex review: compare_release_against_bundle_facts() has no
-        # parameter to skip the cross-library BUNDLE_* analysis
-        # (compare_bundle_from_facts always runs), so --no-bundle-analysis
-        # was silently accepted and ignored -- the run could report a
-        # different verdict/exit code than requested (bundle_verdict folds
-        # into result.verdict). Rejected rather than silently unscoped.
-        raise click.UsageError(
-            "--no-bundle-analysis is not supported together with --old-bundle-facts."
-        )
-    # Codex review: kwargs["config"] is compare.py's own resolved value --
-    # an explicit --config, or (since a later review round) the same
-    # cwd-upward auto-discovered .abicheck.yml run_compare's own cfg_path
-    # falls back to (discover_project_config()) when no --config was given
-    # at all. Either way it is consumed only as resolve_compile_context's
-    # build_config (compile: block merging) -- the same non-compile
-    # settings --severity-preset/--pack/--no-scope-public-headers are
-    # rejected for as explicit CLI flags (severity:/exit_code_scheme:/
-    # scope:/suppression:) can also be declared in the config file itself,
-    # with no CLI flag needed, and were silently unapplied through that
-    # channel too. Reject rather than silently diverge, the same bar every
-    # other flag/config combination in this dispatcher is held to.
-    config_path = kwargs.get("config")
-    if config_path is not None:
-        from ....workflows.extraction import load_build_config
-
-        try:
-            _bc = load_build_config(Path(config_path))
-        except ValueError as exc:
-            raise click.UsageError(
-                f"cannot parse build config {config_path}: {exc}"
-            ) from exc
-        _unsupported_config_blocks = []
-        if _bc.severity_preset is not None or any(
-            getattr(_bc, field) is not None
-            for field in (
-                "severity_abi_breaking",
-                "severity_potential_breaking",
-                "severity_quality_issues",
-                "severity_addition",
-            )
-        ):
-            _unsupported_config_blocks.append("severity:")
-        if (
-            _bc.scope_public is not None
-            or _bc.collapse_versioned_symbols is not None
-            or _bc.public_symbols
-            or _bc.scope_show_redundant is not None
-        ):
-            # Codex review, fresh evidence: BuildConfig's scope: block
-            # parses public/collapse_versioned_symbols/public_symbols/
-            # show_redundant as four independent fields -- a config setting
-            # only show_redundant (every other field left at its default)
-            # previously passed this check unrejected even though this
-            # driver's own JSON rendering never re-merges redundant_changes
-            # the way ordinary `compare` does.
-            _unsupported_config_blocks.append("scope:")
-        if (
-            _bc.suppression_strict is not None
-            or _bc.suppression_require_justification is not None
-        ):
-            _unsupported_config_blocks.append("suppression:")
-        if _bc.exit_code_scheme_explicit:
-            _unsupported_config_blocks.append("exit_code_scheme:")
-        if any(
-            getattr(_bc, field) is not None
-            for field in (
-                "debug_format",
-                "debug_dwarf_only",
-                "debug_debuginfod",
-                "debug_debuginfod_url",
-            )
-        ):
-            # Same root cause as the --debug-format/--dwarf-only/
-            # --debuginfod CLI-flag rejection above: CompileContext (what
-            # this driver actually threads through to service.resolve_input)
-            # has no debug-format/dwarf-only/debuginfod fields at all, CLI
-            # flag or config alike.
-            _unsupported_config_blocks.append("debug:")
-        if _unsupported_config_blocks:
-            raise click.UsageError(
-                f"{config_path} declares "
-                f"{', '.join(_unsupported_config_blocks)} settings, which "
-                "are not supported together with --old-bundle-facts: "
-                "compare_release_against_bundle_facts() has no channel to "
-                "honor them (same reason --severity-preset/--pack/"
-                "--no-scope-public-headers are rejected as explicit "
-                "flags). Use a --config that only sets compile: options."
-            )
-
-    if kwargs.get("old_headers_only") or kwargs.get("old_includes_only"):
-        # Codex review: normalize_sided_options puts an old=-scoped
-        # --header/--include into old_headers_only/old_includes_only, but
-        # _resolve_new_side_headers_includes only ever reads the new=-scoped
-        # /uniform fields (that function's own docstring: "the OLD side has
-        # no headers/includes of its own here"). The OLD side is already a
-        # resolved, stored snapshot -- it cannot be reparsed with a
-        # different header scope at this point -- so a requested OLD-side
-        # header/include operand was silently discarded rather than applied
-        # or rejected.
-        raise click.UsageError(
-            "--header old=.../--include old=... are not supported together "
-            "with --old-bundle-facts: OLD_FACTS is already a resolved, "
-            "stored snapshot with no header re-extraction available."
-        )
     headers, includes = _resolve_new_side_headers_includes(kwargs)
     if depth == "binary":
         # Codex review: run_compare's own --depth binary clears every header
@@ -602,21 +205,29 @@ def dispatch(*, compile_context: Any, **kwargs: Any) -> None:
         # runs, so a malformed/corrupt archive that matches a known
         # extension (a real format, bad content) raises *after* the temp
         # dir already exists; extracting outside this try/finally leaked it
-        # even without --keep-extracted.
-        lib_dir, _new_debug_dir, header_dir, _new_symbols_file = _extract_if_package(
-            new_dir,
-            None,
-            kwargs.get("devel_pkg2"),
-            _make_temp_dir,
-            is_package,
-            detect_extractor,
-        )
-        if header_dir is not None:
-            if not headers:
-                headers = [header_dir]
-            includes = includes + _discover_include_roots(header_dir)
-
+        # even without --keep-extracted. It also must be inside the
+        # except (SnapshotError, ValueError) boundary just below (Codex
+        # review, fresh evidence) -- _extract_if_package raises
+        # SnapshotError for a malformed-but-recognized archive, and that
+        # used to propagate past this function as a raw Python traceback
+        # instead of the clean CLI error every other SnapshotError here
+        # produces.
         try:
+            lib_dir, _new_debug_dir, header_dir, _new_symbols_file = (
+                _extract_if_package(
+                    new_dir,
+                    None,
+                    kwargs.get("devel_pkg2"),
+                    _make_temp_dir,
+                    is_package,
+                    detect_extractor,
+                )
+            )
+            if header_dir is not None:
+                if not headers:
+                    headers = [header_dir]
+                includes = includes + _discover_include_roots(header_dir)
+
             result = compare_release_against_bundle_facts(
                 old_facts_path,
                 lib_dir,
