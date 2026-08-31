@@ -520,7 +520,7 @@ def diff_embedded_build_source(
     old_graph = old_pack.source_graph if old_pack else None
     new_graph = new_pack.source_graph if new_pack else None
     if old_graph is not None and new_graph is not None:
-        from .source_graph import diff_source_graph_findings
+        from .source_graph_findings import diff_source_graph_findings
 
         # ``_src`` (the L4 surface diff, if both sides had one) lets the graph
         # diff correlate a public entry's own body/type_hash change with it

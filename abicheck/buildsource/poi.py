@@ -51,8 +51,8 @@ from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from ..model import AbiSnapshot, Function, Variable
+    from ..model.source_graph import SourceGraphSummary
     from .risk import RiskScore
-    from .source_graph import SourceGraphSummary
 
 #: POI fact-schema version. Independent of every other buildsource schema
 #: version (see ``buildsource/CLAUDE.md`` "Versioning").
@@ -473,7 +473,7 @@ def resolve_changed_paths_public_impact(
     Reuses :func:`~abicheck.buildsource.source_graph_findings._dependency_reachability`
     (already computed for the ``PUBLIC_API_INTERNAL_DEPENDENCY_ADDED``
     finding: entry → everything it reaches over
-    :data:`~abicheck.buildsource.source_graph.DEPENDENCY_EDGE_KINDS`) and
+    :data:`~abicheck.model.source_graph.DEPENDENCY_EDGE_KINDS`) and
     inverts it: a public entry is "impacted" when its own declaration lives
     in one of *changed_paths*, or its reachable set includes a decl/type
     declared there.
@@ -491,10 +491,8 @@ def resolve_changed_paths_public_impact(
     if not changed:
         return frozenset()
 
-    from .source_graph import (
-        DEPENDENCY_EDGE_KINDS,
-        is_public_dependency_node,
-    )
+    from ..model.source_graph import DEPENDENCY_EDGE_KINDS
+    from .source_graph import is_public_dependency_node
     from .source_graph_findings import _dependency_reachability
 
     # A public entry declared directly in a changed file is impacted even with

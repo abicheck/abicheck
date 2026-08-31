@@ -34,7 +34,7 @@ Architecture mirrors ``type_graph.py``/``call_graph.py`` deliberately:
   that shells out to ``clang`` for a translation unit. Only exercised on the
   ``integration`` lane; a missing compiler degrades gracefully.
 - :func:`augment_graph_with_templates` folds the resulting facts into a
-  :class:`~abicheck.buildsource.source_graph.SourceGraphSummary`.
+  :class:`~abicheck.model.source_graph.SourceGraphSummary`.
 
 This is a **third**, independent AST pass over the same TU (alongside the
 call and type graph passes) — the same tradeoff ``type_graph.py``'s own
@@ -213,7 +213,7 @@ from .template_graph_value_decls import (
 )
 
 if TYPE_CHECKING:
-    from .source_graph import SourceGraphSummary
+    from ..model.source_graph import SourceGraphSummary
 
 EDGE_DECL_INSTANTIATES_TEMPLATE = "DECL_INSTANTIATES_TEMPLATE"
 EDGE_TEMPLATE_USES_TYPE = "TEMPLATE_USES_TYPE"

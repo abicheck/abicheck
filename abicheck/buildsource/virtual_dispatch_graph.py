@@ -21,7 +21,7 @@ VIRTUAL_DISPATCH_EDGE_KINDS`).
 Unlike every sibling module in this family (``override_graph.py``,
 ``template_graph.py``, ``macro_graph.py``), this module runs **no new clang
 invocation at all** — both parts below are pure graph-transformation
-functions over a :class:`~abicheck.buildsource.source_graph.
+functions over a :class:`~abicheck.model.source_graph.
 SourceGraphSummary` that ``call_graph.py``/``type_graph.py``/
 ``override_graph.py`` already folded. They read already-collected facts and
 write more graph; nothing here shells out.
@@ -137,7 +137,7 @@ from ..model.mangled_name import itanium_scope_components, msvc_scope_components
 from .graph_facts import CONF_HIGH, CONF_REDUCED, GraphEdge, GraphNode
 
 if TYPE_CHECKING:
-    from .source_graph import SourceGraphSummary
+    from ..model.source_graph import SourceGraphSummary
 
 EDGE_VIRTUAL_CALL_MAY_DISPATCH_TO = "VIRTUAL_CALL_MAY_DISPATCH_TO"
 EDGE_TYPE_HAS_VTABLE = "TYPE_HAS_VTABLE"
@@ -398,7 +398,7 @@ def augment_graph_with_vtable_presence(
                 polymorphic.add(derived)
                 changed = True
 
-    from .source_graph import _vtable_node_id
+    from ..model.source_graph import _vtable_node_id
 
     for ident in sorted(polymorphic):
         record_node_id = record_identities.get(ident)

@@ -30,7 +30,7 @@ This module is split so the hard part stays testable:
   only run on the ``integration`` lane (it needs a real ``clang``); a missing
   compiler degrades gracefully, exactly like the L4 source extractors.
 - :func:`augment_graph_with_calls` folds the resulting edges into a
-  :class:`~abicheck.buildsource.source_graph.SourceGraphSummary`.
+  :class:`~abicheck.model.source_graph.SourceGraphSummary`.
 """
 
 from __future__ import annotations
@@ -48,18 +48,18 @@ from typing import TYPE_CHECKING, Any, TypeVar
 
 from .. import deadline
 from ..build_context import _extract_flags
-from .adapters.base import source_from_argv
-from .clang_ast_run import run_clang_ast_dump
-from .source_graph import (
+from ..model.graph_facts import (
     CONF_HIGH,
     CONF_REDUCED,
     CONF_UNKNOWN,
     GraphEdge,
     GraphNode,
-    _file_in_project,
-    function_decl_identity,
-    project_source_files,
 )
+from ..model.source_graph import function_decl_identity
+from .adapters.base import source_from_argv
+from .clang_ast_run import run_clang_ast_dump
+from .source_graph_build import project_source_files
+from .source_graph_build_source_abi import _file_in_project
 
 __all__ = ["_file_in_project", "project_source_files"]
 # _file_in_project/project_source_files are defined in source_graph.py (moved
@@ -72,8 +72,8 @@ __all__ = ["_file_in_project", "project_source_files"]
 # module-level import both still spell it `from .call_graph import ...`.
 
 if TYPE_CHECKING:
+    from ..model.source_graph import SourceGraphSummary
     from .build_evidence import BuildEvidence, CompileUnit as BuildEvidenceCompileUnit
-    from .source_graph import SourceGraphSummary
 
 _log = logging.getLogger(__name__)
 
@@ -221,7 +221,7 @@ def _normalize_mangled(mangled: str) -> str:
 
 def _function_identity(node: dict[str, Any], scope: list[str]) -> str:
     """Like :func:`_identity`, but falls back to
-    :func:`~abicheck.buildsource.source_graph.function_decl_identity` (ADR-041
+    :func:`~abicheck.model.source_graph.function_decl_identity` (ADR-041
     P1 #5) instead of the bare name when clang's ``mangledName`` doesn't
     distinguish the declaration (absent, or equal to ``name`` — the extern
     "C"/C-linkage case) — matching ``SourceEntity.identity()``'s own
@@ -922,7 +922,7 @@ def augment_graph_with_calls(
     project implementation helper (flag) from a third-party/system call target
     (don't), even when neither carries L4 visibility (ADR-035 D4 / Codex review).
     """
-    from .source_graph import _decl_node_id
+    from ..model.graph_facts import _decl_node_id
 
     # identity → the project source file its body is defined in. Both marks the
     # decl ``defined_in_project`` AND preserves the path so the cross-check's

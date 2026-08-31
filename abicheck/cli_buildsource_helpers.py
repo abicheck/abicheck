@@ -56,9 +56,9 @@ from .workflows.extraction import DEFAULT_REDACTION, pack_content_hash
 if TYPE_CHECKING:
     from .buildsource.build_evidence import BuildEvidence
     from .buildsource.source_abi import SourceAbiSurface
-    from .buildsource.source_graph import SourceGraphSummary
     from .checker_types import Change, DiffResult
     from .model import AbiSnapshot
+    from .model.source_graph import SourceGraphSummary
     from .policy_file import PolicyFile
 
 

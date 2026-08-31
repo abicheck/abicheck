@@ -38,10 +38,10 @@ from .model import AbiSnapshot, Visibility
 if TYPE_CHECKING:
     from collections.abc import Iterable
 
-    from .buildsource.source_graph import SourceGraphSummary
     from .elf_metadata import ElfMetadata
     from .impact.consumer_graph import ConsumerImpactPath
     from .macho_metadata import MachoMetadata
+    from .model.source_graph import SourceGraphSummary
     from .pe_metadata import PeMetadata
     from .policy_file import PolicyFile
     from .suppression import SuppressionList

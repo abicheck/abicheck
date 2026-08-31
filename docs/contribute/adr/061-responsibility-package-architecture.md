@@ -1,7 +1,7 @@
 # ADR-061: Responsibility-Package Architecture and Flat-Namespace Migration
 
 **Date:** 2026-08-24
-**Status:** Accepted — partially implemented (Phases 0-1 implemented; Phases 2-4 in progress; **Phase 5 is nearly complete, with one real residual** — the `model` package, the `*_metadata.py` dataclass/parser split, and three of D9's four Phase 5 items (the CastXML/Clang parser split, the change-catalog taxonomy repartition, and the cycle-exception/legacy-facade cleanup) are fully done; item 2 (source-graph separation)'s values/construction/comparison split is done, but D8 ("[a facade] is used by external callers, not new internal code") is not yet satisfied — dozens of internal production modules (`buildsource/call_graph.py`, `header_graph.py`, `poi.py`, and others) still import through the `buildsource/source_graph.py` compatibility facade rather than the real new owners, so Phase 5's own acceptance criteria are not yet fully met (Codex review on #965 correctly caught this; a follow-up round also caught that an earlier draft of this note cited an imprecise headline count from a substring grep rather than a real per-file import count — see item 2's own paragraph for the exact reproducible check rather than a number here, which would only go stale again); Phase 2's D9 item 4 gate-decision half is now closed via `policy/gate_decision.py`'s `gate_decision_for_result`, read by every JSON/SARIF/HTML/scan call site instead of each independently recomputing it (Markdown/HTML prose rewrite and per-finding verdict consolidation remain open, see Phase 2's own section); D9's change-catalog work (item 3) is fully done — all 4 registry-validation properties (unique identifiers, valid references, non-contradictory defaults, complete metadata) are enforced, and the 397 entries have been repartitioned into `model/change_catalog/{symbols,types,platform,build,source}.py` by taxonomy; the CastXML/Clang parser split (item 1) is fully closed on both backends, built on a real shared-context design proven on both backends — `extract/headers/{castxml,clang}/context.py` (plus castxml's own `location.py`/`type_resolution.py`) hold the parser state/node-inspection primitives an entity module needs, and `enums.py` is the first entity split out of each backend, both calling through their context object rather than `self`; `functions.py` is now the second entity module split out on BOTH backends — castxml's (plus `qualified_name`/`decl_is_public`/`visibility`/`access_level` promoted into `location.py` alongside it, since typedef/variable/constant parsing reads them too) and clang's (its `_virtual_mangled_names()`/`_record_index()`/`_specialization_record_index()`/`_base_lookup_index()` instance state moved into a new `RecordVtableIndex` class in `context.py` itself, since record-entity parsing reads it too, not a functions-only concern despite the name; `_id_index` taken as an explicit `default_value` parameter the same way `enums.py` already takes `evaluate_int`; `_target_triple` turned out to be a stateless pass-through needing no shared home at all); `records.py` is now the third entity module split out **on both backends** — castxml's first (`ctx.vtable_slot_root`/`ctx.vtable_slot_extra_roots` already lived on the shared context from the `functions.py` slice, so the move needed no context-shape change, only relocating `parse_types`/`build_record_type`/the vtable-slot walk (`collect_virtual_methods`/`vtable_slot_key`, the first functions in this package to mutate shared context state rather than only read it) as free functions taking `CastxmlParserContext` explicitly), then clang's (`extract/headers/clang/records.py` — `parse_types`/`_build_record`/`_parse_fields`/`_collect_fields`/`_make_field` plus five record-only helpers moved as free functions taking the categorized `_Decl` lists and explicit evaluators, the same shape `functions.py` established; `decl_is_public` — read by both record and constant parsing — promoted into `context.py` alongside it, and six previously-private `dumper_clang_qualifiers.py` helpers with exactly one external caller apiece were public-ized in place rather than moved, each keeping its old private spelling as a back-compat alias); `templates.py` closes out item 1 in full on both backends — castxml has no separate template-entity module at all (investigated and confirmed: castxml's XML resolves a class-template specialization down to an ordinary record node, so there is nothing `templates.py`-shaped to split out there), while clang's `extract/headers/clang/templates.py` now holds the whole template-parameter-kind/default/name reconstruction and specialization-spelling/indexing machinery moved out of `dumper_clang_vtable.py` (which, despite its name, always held two loosely related halves — record/vtable layout, which stayed, and this template half, which didn't), with `_SCOPE_NODE_KINDS`'s canonical definition also relocated there (out of `dumper_clang_expr.py`, which `extract` may not import) and `build_specialization_index` taking `is_record_definition` as an explicit parameter rather than importing it back from `dumper_clang_vtable.py`, avoiding a genuine two-way import edge between the two modules — **item 1 (the CastXML/Clang parser split) is now fully closed on both backends**; source-graph separation (item 2) is now split three ways: its values third moved to `abicheck/model/source_graph.py`; construction (`build_source_graph` and its private folding helpers) moved into `buildsource/source_graph_build.py` (classified `extract`) and `buildsource/source_graph_build_source_abi.py` (classified `extract`); comparison (`diff_source_graph`, `localize_symbol`) moved into `buildsource/source_graph_compare.py` (classified `compare`); a shared node/edge-classification predicate module neither half owns exclusively (`buildsource/source_graph_query.py`) stays unclassified, same as several of its own callers; `buildsource/source_graph.py` itself is now a 140-line re-export facade; the Phase 5 residual (`BuildSourcePack`'s persistence-vs-model split) is now closed too — `buildsource/pack.py` keeps only the dataclass and its pure methods, `buildsource/pack_io.py` (`storage`) holds `load`/`write`/`content_hash`/`verify_integrity`/`to_ref` as free functions, and `frontends`-layer callers reach `load`/`content_hash`/`to_ref` through `workflows/extraction.py`'s existing re-export facade rather than a new one (a first attempt used an unclassified `buildsource/pack_frontend.py` facade, which Codex review correctly flagged as a `frontends -> storage` layering bypass — an unclassified module's imports are never checked against `may_import`, so marking the bridge "unclassified" rather than routing it through the sanctioned `frontends -> workflows -> storage` path defeated the very gate this split exists to satisfy); item 4's `IMPORT_CYCLE_ALLOWLIST` audit (explicit maintainer sign-off) is also done — 12 of 15 entries were redundant subsets of the one big CLI-registration cluster and were pruned, no stale `legacy_paths` entries found. Phase 5's items 1, 3, and 4 are therefore fully done; item 2's internal-caller migration is the one piece keeping the phase open (see that item's own paragraph below for the closure plan); Phases 2-4 otherwise remain incremental).
+**Status:** Accepted — partially implemented (Phases 0-1 implemented; Phases 2-4 in progress; **Phase 5 is now closed in full** — the `model` package, the `*_metadata.py` dataclass/parser split, and three of D9's four Phase 5 items (the CastXML/Clang parser split, the change-catalog taxonomy repartition, and the cycle-exception/legacy-facade cleanup) are fully done; item 2 (source-graph separation)'s values/construction/comparison split is done, and its internal-caller migration off the `buildsource/source_graph.py` facade — the residual a Codex review on #965 caught (D8: "[a facade] is used by external callers, not new internal code") — is now closed too: every internal, first-party production caller imports the real owner directly, with a small, documented set of exceptions where a `debt-no-growth` line cap or a layer-boundary constraint left no clean path (see item 2's own paragraph below for the exact list); Phase 2's D9 item 4 gate-decision half is now closed via `policy/gate_decision.py`'s `gate_decision_for_result`, read by every JSON/SARIF/HTML/scan call site instead of each independently recomputing it (Markdown/HTML prose rewrite and per-finding verdict consolidation remain open, see Phase 2's own section); D9's change-catalog work (item 3) is fully done — all 4 registry-validation properties (unique identifiers, valid references, non-contradictory defaults, complete metadata) are enforced, and the 397 entries have been repartitioned into `model/change_catalog/{symbols,types,platform,build,source}.py` by taxonomy; the CastXML/Clang parser split (item 1) is fully closed on both backends, built on a real shared-context design proven on both backends — `extract/headers/{castxml,clang}/context.py` (plus castxml's own `location.py`/`type_resolution.py`) hold the parser state/node-inspection primitives an entity module needs, and `enums.py` is the first entity split out of each backend, both calling through their context object rather than `self`; `functions.py` is now the second entity module split out on BOTH backends — castxml's (plus `qualified_name`/`decl_is_public`/`visibility`/`access_level` promoted into `location.py` alongside it, since typedef/variable/constant parsing reads them too) and clang's (its `_virtual_mangled_names()`/`_record_index()`/`_specialization_record_index()`/`_base_lookup_index()` instance state moved into a new `RecordVtableIndex` class in `context.py` itself, since record-entity parsing reads it too, not a functions-only concern despite the name; `_id_index` taken as an explicit `default_value` parameter the same way `enums.py` already takes `evaluate_int`; `_target_triple` turned out to be a stateless pass-through needing no shared home at all); `records.py` is now the third entity module split out **on both backends** — castxml's first (`ctx.vtable_slot_root`/`ctx.vtable_slot_extra_roots` already lived on the shared context from the `functions.py` slice, so the move needed no context-shape change, only relocating `parse_types`/`build_record_type`/the vtable-slot walk (`collect_virtual_methods`/`vtable_slot_key`, the first functions in this package to mutate shared context state rather than only read it) as free functions taking `CastxmlParserContext` explicitly), then clang's (`extract/headers/clang/records.py` — `parse_types`/`_build_record`/`_parse_fields`/`_collect_fields`/`_make_field` plus five record-only helpers moved as free functions taking the categorized `_Decl` lists and explicit evaluators, the same shape `functions.py` established; `decl_is_public` — read by both record and constant parsing — promoted into `context.py` alongside it, and six previously-private `dumper_clang_qualifiers.py` helpers with exactly one external caller apiece were public-ized in place rather than moved, each keeping its old private spelling as a back-compat alias); `templates.py` closes out item 1 in full on both backends — castxml has no separate template-entity module at all (investigated and confirmed: castxml's XML resolves a class-template specialization down to an ordinary record node, so there is nothing `templates.py`-shaped to split out there), while clang's `extract/headers/clang/templates.py` now holds the whole template-parameter-kind/default/name reconstruction and specialization-spelling/indexing machinery moved out of `dumper_clang_vtable.py` (which, despite its name, always held two loosely related halves — record/vtable layout, which stayed, and this template half, which didn't), with `_SCOPE_NODE_KINDS`'s canonical definition also relocated there (out of `dumper_clang_expr.py`, which `extract` may not import) and `build_specialization_index` taking `is_record_definition` as an explicit parameter rather than importing it back from `dumper_clang_vtable.py`, avoiding a genuine two-way import edge between the two modules — **item 1 (the CastXML/Clang parser split) is now fully closed on both backends**; source-graph separation (item 2) is now split three ways: its values third moved to `abicheck/model/source_graph.py`; construction (`build_source_graph` and its private folding helpers) moved into `buildsource/source_graph_build.py` (classified `extract`) and `buildsource/source_graph_build_source_abi.py` (classified `extract`); comparison (`diff_source_graph`, `localize_symbol`) moved into `buildsource/source_graph_compare.py` (classified `compare`); a shared node/edge-classification predicate module neither half owns exclusively (`buildsource/source_graph_query.py`), later classified `compare` too; `buildsource/source_graph.py` itself is now a 140-line re-export facade; the Phase 5 residual (`BuildSourcePack`'s persistence-vs-model split) is now closed too — `buildsource/pack.py` keeps only the dataclass and its pure methods, `buildsource/pack_io.py` (`storage`) holds `load`/`write`/`content_hash`/`verify_integrity`/`to_ref` as free functions, and `frontends`-layer callers reach `load`/`content_hash`/`to_ref` through `workflows/extraction.py`'s existing re-export facade rather than a new one (a first attempt used an unclassified `buildsource/pack_frontend.py` facade, which Codex review correctly flagged as a `frontends -> storage` layering bypass — an unclassified module's imports are never checked against `may_import`, so marking the bridge "unclassified" rather than routing it through the sanctioned `frontends -> workflows -> storage` path defeated the very gate this split exists to satisfy); item 4's `IMPORT_CYCLE_ALLOWLIST` audit (explicit maintainer sign-off) is also done — 12 of 15 entries were redundant subsets of the one big CLI-registration cluster and were pruned, no stale `legacy_paths` entries found. all four of Phase 5's items are therefore fully done and **Phase 5 is closed in full**; Phases 2-4 remain in progress).
 **Decision maker:** abicheck maintainers
 
 ## Context
@@ -2990,8 +2990,8 @@ without promising a new export.
 
    **This closes ADR-061 Phase 5 item 1 (the CastXML/Clang parser split)
    in full, on both backends.**
-2. separate source-graph values, construction, and comparison. **Started,
-   not done.** The values third moved: `abicheck/model/source_graph.py`
+2. separate source-graph values, construction, and comparison. **Done.**
+   The values third moved: `abicheck/model/source_graph.py`
    now owns `SourceGraphSummary` (the ADR-031 D7 compact graph container
    and all its methods), `GraphSummaryDiff` (the structural-diff result
    shape), the node-id constructors (`_source_node_id` and its ten
@@ -3151,38 +3151,52 @@ without promising a new export.
    `abicheck/buildsource/source_graph.py` no-growth entry was removed (its
    rationale no longer applies at 140 lines) along with
    `tests/test_source_graph.py`'s own entry (1175 lines is now under the
-   1200-line cap, needing no debt tracking). **Not actually closed by this
-   reasoning** — a Codex review round on #965 (the PR recording Phase 5's
-   status as complete) correctly caught that the "migrating them
-   incrementally is exactly what the facade exists to allow" framing above
-   only holds for *external* callers under D8 ("[a facade] is used by
-   external callers, not new internal code"); these callers are internal,
-   first-party production modules, so D8 and this ADR's own migration rule 3
-   ("switch internal callers to the new implementation module in the same
-   PR") both actually require them to import from the real owners directly.
-   **The exact caller count is deliberately not restated as a number here**
-   — a second Codex review round caught that an earlier draft's headline
-   count came from a loose substring grep that also matched docstring
-   cross-references (Sphinx `:func:`/`:class:`/`:mod:` roles naming
-   `abicheck.buildsource.source_graph.X`) and real imports of the *other*,
-   already-correctly-named split modules (`source_graph_query.py` etc.),
-   overstating the true migration surface. Reproduce the real count instead
-   of trusting either historical figure — a real `from <N dots>source_graph
-   import ...` / `from <N dots>buildsource.source_graph import ...` / `from
-   abicheck.buildsource.source_graph import ...` statement, not a substring
-   match; a first correction to this note (Codex review, again) still
-   enumerated only three exact dot-counts and missed the fourth real
-   spelling root-package modules use (`from .buildsource.source_graph
-   import ...` — one dot — in `appcompat.py`/`analysis_assurance.py`/
-   `internal_leak.py` and others), which is why this is now phrased as "any
-   dot-count" rather than another fixed enumeration that the next new
-   caller's own directory depth can just as easily fall outside of again —
-   and excluding `buildsource/__init__.py`'s own package-level re-export
-   block (a public-surface aggregator, not internal-code coupling to the
-   facade — it re-exports every `buildsource` submodule's public names the
-   same way, `source_graph` included, and is not itself a migration
-   target). Item 2 stays open until that migration lands — see the closure
-   note at the end of this Phase for current status;
+   1200-line cap, needing no debt tracking).
+
+   **The internal-caller residual above is now closed too.** D8
+   ("[a facade] is used by external callers, not new internal code") and
+   this ADR's own migration rule 3 ("switch internal callers to the new
+   implementation module in the same PR") both required the internal,
+   first-party production modules the pass above deliberately left on the
+   facade (`call_graph.py`, `header_graph.py`, `poi.py`, and the other flat
+   `buildsource/` modules, plus root-level modules like `internal_leak.py`/
+   `appcompat.py`/`analysis_assurance.py`/`post_processing_reachability.py`
+   and `impact/consumer_graph.py`/`impact/use_cases.py` — see the
+   reproducible check two paragraphs above rather than a headline count
+   here, which has already been wrong twice on this same PR) to import from
+   the real owner directly rather than through `buildsource/source_graph.py`.
+   Every one of them now does — `model/source_graph.py`/`model/graph_facts.py`
+   for the values, `source_graph_build.py`/`source_graph_build_source_abi.py`
+   for construction, `source_graph_compare.py` for comparison, and
+   `source_graph_query.py` for the shared classification predicates — with
+   two kinds of documented, deliberate exception where a clean direct import
+   does not exist: (a) three `debt-no-growth`-tracked files
+   (`buildsource/graph_reconcile.py`, `buildsource/template_graph.py`,
+   `internal_leak.py`) at their adoption-baseline line count, where splitting
+   a single-line, two-name facade import across its two real owning modules
+   costs a line `check_architecture.py`'s `debt-no-growth` check rejects with
+   no equal-sized reduction available elsewhere in the file without touching
+   a function/class body; and (b) `buildsource/poi.py` (`extract`-classified,
+   which `modules.yaml` permits to import only `model`/`storage`) and the two
+   `frontends`-classified CLI modules `cli_buildsource_helpers.py`/
+   `cli_buildsource_merge.py` (permitted only `model`/`workflows`/`report`),
+   where the real owner of the one remaining name each still needs
+   (`source_graph_query.is_public_dependency_node`, and
+   `source_graph_build.build_source_graph`/`source_graph_build_source_abi.
+   mark_source_edges_extractor_coverage`) sits in a layer that caller's own
+   classification does not permit importing directly — confirmed by
+   `python scripts/check_architecture.py` itself flagging exactly this
+   `extract -> compare is forbidden` edge the first time it was tried.
+   Every other import statement across those exception files (their
+   `SourceGraphSummary`/model-layer names, and every doc cross-reference)
+   was still migrated to the real owner; only the one architecturally-blocked
+   name per file stays on the facade. `python scripts/check_architecture.py`
+   reports 0 errors with these exceptions in place; `mypy abicheck/` and
+   `ruff check abicheck/ tests/` are clean; the fast unit suite passes with
+   the same test count as before. **This closes ADR-061 Phase 5 item 2 in
+   full** — the facade now serves only external callers, the six documented
+   exception sites, and `tests/test_source_graph.py`'s own retained
+   facade-compatibility coverage;
 3. **Done.** Repartitioned the change catalog into D9's `model/change_catalog/
    {symbols,types,platform,build,source}.py` taxonomy — all four
    registry-validation properties (global uniqueness, valid references,
@@ -3241,6 +3255,15 @@ without promising a new export.
    `checker_types`/`model`). No stale `legacy_paths` entries were found in
    this same pass.
 
+**Closure note:** all four items are now done — item 1 (the CastXML/Clang
+parser split) is fully closed on both backends, item 2 (source-graph
+values/construction/comparison separation, including the internal-caller
+migration off the `buildsource/source_graph.py` facade) is fully closed per
+its own paragraph above, item 3 (the change-catalog taxonomy repartition) is
+done, and item 4 (the `IMPORT_CYCLE_ALLOWLIST` audit and stale-facade/legacy-
+edge cleanup) has landed both slices with no stale entries remaining.
+**ADR-061 Phase 5 is closed in full.**
+
 **Acceptance:** parser fixtures demonstrate byte/fact parity where
 applicable; catalog validation proves all four of D9's properties — global
 uniqueness, valid references, non-contradictory defaults, and complete
@@ -3248,21 +3271,6 @@ metadata — and item 3's taxonomy repartition (moving the 397 entries into
 `model/change_catalog/{symbols,types,platform,build,source}.py`) are both
 **done**; no parser imports policy/report/workflows/frontends; corresponding
 debt entries are removed.
-
-**Closure note:** three of four items are done — item 1 (the CastXML/Clang
-parser split) is fully closed on both backends, item 3 (the change-catalog
-taxonomy repartition) is done as above, and item 4 (the
-`IMPORT_CYCLE_ALLOWLIST` audit and stale-facade/legacy-edge cleanup) has
-landed both slices with no stale entries remaining. **Item 2 is not
-closed**: its values/construction/comparison split is done and
-`buildsource/source_graph.py` is reduced to a 140-line re-export facade, but
-dozens of internal production modules still import through that facade
-rather than the real new owners (see item 2's own paragraph above for the
-exact reproducible check — not a headline number, which has already been
-wrong once here), which D8 and this ADR's own migration rule 3
-both require for internal (non-external) callers — see item 2's own
-paragraph above for the exact list and the reasoning. Phase 5 stays open
-until that migration lands.
 
 ## Migration rules for every phase
 

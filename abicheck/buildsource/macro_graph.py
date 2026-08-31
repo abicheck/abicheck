@@ -63,7 +63,7 @@ than the declaration's own guard, which needs a source-range-aware walk of
 each edge's own call site, not the whole-declaration region join this slice
 performs. No new **node** kind is needed for any of this family — every edge
 above joins onto the ``macro``/``source_decl`` node kinds
-:mod:`~abicheck.buildsource.source_graph` already declares (populated from an
+:mod:`~abicheck.model.source_graph` already declares (populated from an
 L4 ``SourceAbiSurface``'s ``reachable_macros``/declarations, or a hand-built
 graph); this module never mints one that doesn't already exist (same
 "join-only-onto-an-existing-node" discipline as ADR-057 D1 and
@@ -214,8 +214,8 @@ from .type_graph import (
 )
 
 if TYPE_CHECKING:
+    from ..model.source_graph import SourceGraphSummary
     from .build_evidence import BuildEvidence, CompileUnit as BuildEvidenceCompileUnit
-    from .source_graph import SourceGraphSummary
 
 # ── edge kinds (reserved by graph_facts.MACRO_DEP_EDGE_KINDS) ──────────────
 EDGE_MACRO_CONTROLS_DECL = "MACRO_CONTROLS_DECL"
@@ -313,7 +313,7 @@ def _var_decl_identity(node: dict[str, Any], scope: list[str], name: str) -> str
     """A namespace/class-scope variable's identity, mirroring
     ``type_graph._emit_var_decl_edge``'s identity computation (that function
     only emits an edge, it doesn't expose the identity standalone)."""
-    from .source_graph import function_decl_identity
+    from ..model.source_graph import function_decl_identity
 
     return function_decl_identity(
         _normalize_mangled(str(node.get("mangledName") or "")),
@@ -878,8 +878,8 @@ def augment_graph_with_macro_dependencies(
     in), ``DECL_USES_MACRO`` is ``CONF_REDUCED`` (a textual heuristic — see
     :func:`find_decl_macro_uses`).
     """
+    from ..model.graph_facts import _decl_node_id
     from .redaction import DEFAULT_REDACTION
-    from .source_graph import _decl_node_id
 
     result = MacroGraphResult()
     if not decl_ranges:

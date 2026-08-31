@@ -34,7 +34,7 @@ from .model import ExtractorRecord
 from .virtual_dispatch_graph import augment_graph_with_virtual_dispatch
 
 if TYPE_CHECKING:
-    from .source_graph import SourceGraphSummary
+    from ..model.source_graph import SourceGraphSummary
 
 
 #: ADR-046 D3: the per-(kind, role) coverage matrix. ``type_graph.py``'s
