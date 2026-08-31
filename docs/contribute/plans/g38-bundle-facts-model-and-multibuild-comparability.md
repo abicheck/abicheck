@@ -2489,6 +2489,26 @@ serialization always carries a top-level `per_library_snapshots` key
 not — and needs regression coverage proving an ordinary JSON snapshot
 still classifies as `"file"`, not the new kind.
 
+**The content-shape check has its own decode-budget conflict (Codex
+review, next round, verified against source):** "check the decoded
+content's shape" as just written implies fully decoding the file through
+the same budgeted loader `load_bundle_facts()` uses — but classification
+runs before dispatch, with no way yet to know the caller's own
+`--max-json-object-nodes`-style override from this phase's decode-budget
+bullet above. A legitimately oversized plain-JSON `BundleFacts` file (the
+same SYCL/DPC++-heavy shape that override exists for) would then fail
+*classification* under the default budget, before the override the user
+actually supplied ever gets a chance to apply. The fix is a bounded,
+shape-only probe — checking for the `per_library_snapshots` key without
+materializing the full per-library snapshot tree the real budgeted decode
+would — not threading the override through every classifier call site
+(`classify_compare_operand()` is also called from `_profile_targets_
+set_input()`, which has no natural place to receive a per-invocation
+override at all). Regression coverage needs a legitimately-oversized
+*plain-JSON* baseline specifically, not only the archive-format case the
+earlier decode-budget bullet already named — the two paths can fail
+independently.
+
 **A second `classify_compare_operand()` consumer needs the same new kind
 (Codex review, next round, verified against source):** `cli_options.
 _profile_targets_set_input()` mirrors this same classifier to decide
@@ -2827,6 +2847,17 @@ that first revision (Codex review, both fixed here):
    driven tests) belongs in `cli_resolve.py`; editing `compare.py` alone
    would leave the positional facts operand classified as an ordinary
    `"file"` no matter what the new dispatch branch does with it.
+   **The two new options need an explicit-rejection guard, not just a
+   consumer (Codex review, next round, verified against source):** Click
+   declares both options on the whole `compare_cmd`, so passing either to
+   an ordinary single-pair comparison, or to a live-directory comparison
+   with no stored-facts OLD side, would otherwise be silently accepted and
+   ignored — `_dispatch_release_compare` only ever *consumes* them for the
+   stored-facts operand shape, it doesn't reject them for every other
+   shape on its own. This needs the same explicit-rejection treatment
+   `--bundle-facts-out` already gets for a single-pair operand (a
+   `UsageError`, not a silent no-op), plus a test asserting each option
+   fails loudly outside a stored-facts comparison.
    **Package extraction does *not* belong here**
    — unpacking an archive and managing its temporary-directory lifetime is
    release/extraction orchestration, the same category of work correction
