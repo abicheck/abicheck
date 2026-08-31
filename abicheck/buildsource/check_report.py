@@ -64,6 +64,7 @@ from ..checker_types import validate_check_id, validate_evidence_depth
 from ..evidence_depth import DEPTH_RANK, weaker_depth
 from ..schemas import REPORT_SCHEMA_VERSION, SCAN_SCHEMA_VERSION
 from .baseline_set import ALL_OUTCOMES, ResolveOutcome
+from .check_report_exit_backfill import backfill_exit_block_fields
 
 #: Safe identifier charset shared by every ``check_id`` component (ADR-047
 #: §7's delimiter-unambiguity fix) -- target/bundle names, profile ids, and
@@ -521,30 +522,6 @@ def _classify_verdict(
     ]
 
 
-#: ADR-064 stage 1b's five new `exit`-block keys (report schema 2.47/1.22).
-_ADR_064_EXIT_FIELDS = (
-    "operational_error_contribution", "evidence_contract_error_contribution",
-    "budget_overflow_contribution", "not_comparable_contribution", "removed_required_library_contribution",
-)
-
-
-def _backfill_exit_block_fields(out: dict[str, Any]) -> None:
-    """Backfill ADR-064's five keys (default 0) onto an older report's `exit`
-    block(s) before `_stamp_schema_version` bumps the schema version (Codex
-    review) -- else a pre-2.47/1.22 report claims the new version while its
-    `exit` lacks the now-`required` keys. Rebinds each container to a copy
-    first (`out = dict(report)` is shallow, so `out["exit"]`/`out["diff"]`
-    alias the caller's own dicts otherwise).
-    """
-    exit_block = out.get("exit")
-    if isinstance(exit_block, dict):
-        out["exit"] = {**exit_block, **{f: exit_block.get(f, 0) for f in _ADR_064_EXIT_FIELDS}}
-    diff = out.get("diff")
-    if isinstance(diff, dict) and isinstance(diff.get("exit"), dict):
-        diff_exit = diff["exit"]
-        out["diff"] = {**diff, "exit": {**diff_exit, **{f: diff_exit.get(f, 0) for f in _ADR_064_EXIT_FIELDS}}}
-
-
 def augment_report(
     report: dict[str, Any],
     *,
@@ -576,7 +553,7 @@ def augment_report(
     out = dict(report)
     check_id = build_check_id(name, profile_id, baseline_channel, requested_depth)
     effective_depth, coverage = derive_effective_depth(report, requested_depth)
-    _backfill_exit_block_fields(out)
+    backfill_exit_block_fields(out)
     _stamp_schema_version(out, report)
     out["check_id"] = check_id
     out["target_id"] = check_id

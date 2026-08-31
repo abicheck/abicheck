@@ -13,18 +13,22 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""ADR-064 stage 1b: `augment_report` backfills an older report's `exit`
-block with the five new keys before stamping the current schema version.
+"""ADR-064 stage 1b: `augment_report`/`check_report_exit_backfill` upgrade
+an older report's `exit` block(s) before stamping the current schema
+version, so a re-stamped report never claims a shape it doesn't satisfy.
 
 Split out of `tests/test_check_report.py` (a debt-tracked, no-growth test
 module -- see `architecture/debt.yaml`) rather than added there, so this
 regression didn't need to fight that file's frozen line budget.
 
-Codex review, fresh evidence: without the backfill, a report already on
-schema 2.41-2.46 (pre-ADR-064, missing all five keys on its `exit` block)
-would be re-stamped as schema 2.47 while its `exit` object still lacks the
-now-`required` keys -- claiming a shape it doesn't satisfy against the
-published JSON Schema.
+Two distinct gaps, both Codex review findings with fresh evidence:
+
+- A pre-2.47/1.22 report's `exit`/`diff.exit` is *present* but missing the
+  five new keys -- backfilled with their documented default (``0``).
+- A pre-1.22 `NOT_COMPARABLE` scan report's `diff` has *no* `exit` key at
+  all (`{"reason": ...}` was the whole shape before stage 1b) -- the
+  decision `scan_engine.py` itself now persists for that outcome is
+  synthesized instead of leaving the promised block absent.
 """
 
 from __future__ import annotations
@@ -95,3 +99,19 @@ def test_a_report_with_no_exit_block_at_all_is_unaffected() -> None:
     report = {"report_schema_version": "2.40", "verdict": "NO_CHANGE"}
     out = _augment(report)
     assert "exit" not in out
+
+
+def test_pre_1_22_not_comparable_scan_diff_gets_a_synthesized_exit_block() -> None:
+    """A pre-1.22 NOT_COMPARABLE scan report's `diff` never carried an
+    `exit` key at all -- augmenting it to 1.22 must still add one, matching
+    exactly what `scan_engine.py` itself now persists for this outcome.
+    """
+    diff = {"reason": "scope drift"}
+    report = {"scan_schema_version": "1.21", "exit_code": 6, "verdict": "NOT_COMPARABLE", "diff": diff}
+    out = _augment(report)
+    exit_block = out["diff"]["exit"]
+    assert exit_block["code"] == 6
+    assert exit_block["reasons"] == ["not_comparable"]
+    assert exit_block["not_comparable_contribution"] == 6
+    # The input report's nested diff dict is never mutated in place.
+    assert report["diff"] is diff and "exit" not in diff
