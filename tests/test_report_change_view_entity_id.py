@@ -84,33 +84,45 @@ def test_a_live_changes_entity_id_survives_the_report_round_trip() -> None:
     assert with_id.tier == without_id.tier
 
 
-_SCOPE_BOUNDARY_NODES = (
-    ast.FunctionDef,
-    ast.AsyncFunctionDef,
-    ast.Lambda,
-    ast.ClassDef,
-)
+_PARAM_SCOPE_NODES = (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)
 
 
-def _walk_own_scope(node: ast.AST) -> Iterator[ast.AST]:
-    """Like ``ast.walk``, but never descends into a nested function,
-    async function, lambda, or class body (Codex review, fresh evidence,
-    sixth round): a nested scope can declare its own parameter/attribute
-    of the same spelling as the one being tracked (``def nested(change):
-    return change.future_field`` inside the very function being walked),
-    and a plain ``ast.walk`` would misattribute that separately-scoped
-    read to the outer name. ``node`` itself is always walked regardless
-    of its own kind -- only nodes strictly *inside* it that open a new
-    scope are excluded, along with everything inside them.
+def _own_param_names(args: ast.arguments) -> frozenset[str]:
+    """Every name *args* binds as its own parameter -- positional-only,
+    regular, keyword-only, ``*args``, and ``**kwargs`` alike."""
+    names = {a.arg for a in (*args.posonlyargs, *args.args, *args.kwonlyargs)}
+    if args.vararg:
+        names.add(args.vararg.arg)
+    if args.kwarg:
+        names.add(args.kwarg.arg)
+    return frozenset(names)
+
+
+def _iter_scope_aware(node: ast.AST) -> Iterator[tuple[ast.AST, frozenset[str]]]:
+    """Like ``ast.walk``, but each yielded node also carries the set of
+    tracked names *shadowed* at that point -- names a nested function,
+    async function, or lambda strictly inside *node* rebinds as its own
+    parameter (Codex review, fresh evidence, seventh round: the sixth
+    round's fix skipped an entire nested scope outright, which also threw
+    away a genuine *closure* read of the outer name, e.g. ``def nested():
+    return change.future_field`` -- ``nested`` never rebinds ``change``,
+    so that read really is of the outer parameter and must still count).
+    Only a name a nested scope actually redeclares as its own parameter
+    is shadowed within that scope; every other name stays visible, the
+    same way Python's own closure lookup works. A nested class body is
+    walked with the *same* shadow set as its surroundings (classes have
+    no parameter list to rebind a name via) -- a name reassigned inside
+    it is a rarer, unmodeled edge matching this helper's existing "small,
+    targeted, not general-purpose" scope.
     """
-    stack = [node]
+    stack: list[tuple[ast.AST, frozenset[str]]] = [(node, frozenset())]
     while stack:
-        current = stack.pop()
-        yield current
+        current, shadowed = stack.pop()
+        yield current, shadowed
+        if current is not node and isinstance(current, _PARAM_SCOPE_NODES):
+            shadowed = shadowed | _own_param_names(current.args)
         for child in ast.iter_child_nodes(current):
-            if child is not node and isinstance(child, _SCOPE_BOUNDARY_NODES):
-                continue
-            stack.append(child)
+            stack.append((child, shadowed))
 
 
 def _change_attrs_read(
@@ -146,13 +158,15 @@ def _change_attrs_read(
     a general-purpose analyzer. ``visited`` is keyed on (function, param
     name) so the same helper reached under two different bindings is each
     still explored once, without infinite-looping on recursion. Alias
-    tracking is a single flat pass over the function body's direct
-    ``name = <tracked>`` assignments (in source order) -- an alias of an
-    alias is followed because the newly-discovered name is added to the
-    same tracked set before the body is re-scanned for reads, but a
+    tracking runs to a fixed point rather than a single pass (Codex
+    review, fresh evidence, seventh round: ``_iter_scope_aware``'s
+    stack-based traversal does not yield nodes in source order, so a
+    multi-hop chain like ``first = change; second = first`` could reach
+    ``second = first`` before ``first`` was itself tracked -- a fixed
+    point makes the result independent of traversal order entirely) -- a
     conditional reassignment or an alias shadowed by a later unrelated
-    rebinding is not modeled, matching this helper's existing "small,
-    targeted" scope.
+    rebinding is still not modeled, matching this helper's existing
+    "small, targeted" scope.
     """
     key = (func_name, param_name)
     if key in visited:
@@ -162,28 +176,37 @@ def _change_attrs_read(
     if func is None:
         return set()
     tracked = {param_name}
-    for node in _walk_own_scope(func):
-        if (
-            isinstance(node, ast.Assign)
-            and isinstance(node.value, ast.Name)
-            and node.value.id in tracked
-        ):
-            for target in node.targets:
-                if isinstance(target, ast.Name):
-                    tracked.add(target.id)
-        elif (
-            isinstance(node, ast.AnnAssign)
-            and isinstance(node.target, ast.Name)
-            and isinstance(node.value, ast.Name)
-            and node.value.id in tracked
-        ):
-            tracked.add(node.target.id)
+    changed = True
+    while changed:
+        changed = False
+        for node, shadowed in _iter_scope_aware(func):
+            if (
+                isinstance(node, ast.Assign)
+                and isinstance(node.value, ast.Name)
+                and node.value.id in tracked
+                and node.value.id not in shadowed
+            ):
+                for target in node.targets:
+                    if isinstance(target, ast.Name) and target.id not in tracked:
+                        tracked.add(target.id)
+                        changed = True
+            elif (
+                isinstance(node, ast.AnnAssign)
+                and isinstance(node.target, ast.Name)
+                and isinstance(node.value, ast.Name)
+                and node.value.id in tracked
+                and node.value.id not in shadowed
+                and node.target.id not in tracked
+            ):
+                tracked.add(node.target.id)
+                changed = True
     attrs: set[str] = set()
-    for node in _walk_own_scope(func):
+    for node, shadowed in _iter_scope_aware(func):
         if (
             isinstance(node, ast.Attribute)
             and isinstance(node.value, ast.Name)
             and node.value.id in tracked
+            and node.value.id not in shadowed
         ):
             attrs.add(node.attr)
         elif (
@@ -193,6 +216,7 @@ def _change_attrs_read(
             and len(node.args) >= 2
             and isinstance(node.args[0], ast.Name)
             and node.args[0].id in tracked
+            and node.args[0].id not in shadowed
             and isinstance(node.args[1], ast.Constant)
             and isinstance(node.args[1].value, str)
         ):
@@ -208,13 +232,19 @@ def _change_attrs_read(
                 if (
                     isinstance(arg, ast.Name)
                     and arg.id in tracked
+                    and arg.id not in shadowed
                     and i < len(arg_names)
                 ):
                     attrs |= _change_attrs_read(
                         node.func.id, arg_names[i], funcs_by_name, visited
                     )
             for kw in node.keywords:
-                if isinstance(kw.value, ast.Name) and kw.value.id in tracked and kw.arg:
+                if (
+                    isinstance(kw.value, ast.Name)
+                    and kw.value.id in tracked
+                    and kw.value.id not in shadowed
+                    and kw.arg
+                ):
                     attrs |= _change_attrs_read(
                         node.func.id, kw.arg, funcs_by_name, visited
                     )
@@ -380,3 +410,52 @@ def test_change_attrs_read_ignores_a_nested_functions_shadowed_parameter() -> No
         if isinstance(node, ast.FunctionDef)
     }
     assert _change_attrs_read("outer", "change", funcs_by_name, set()) == set()
+
+
+def test_change_attrs_read_follows_a_multi_hop_alias_chain() -> None:
+    """Codex review, fresh evidence, seventh round: `_iter_scope_aware`'s
+    stack-based traversal does not yield nodes in source order, so a
+    single forward pass over `first = change; second = first` could reach
+    `second = first` before `first` was itself tracked, silently dropping
+    the second hop. The fixed-point loop must resolve this regardless of
+    traversal order."""
+    source = (
+        "def outer(change):\n"
+        "    first = change\n"
+        "    second = first\n"
+        "    return second.future_field\n"
+    )
+    funcs_by_name = {
+        node.name: node
+        for node in ast.walk(ast.parse(source))
+        if isinstance(node, ast.FunctionDef)
+    }
+    assert _change_attrs_read("outer", "change", funcs_by_name, set()) == {
+        "future_field"
+    }
+
+
+def test_change_attrs_read_counts_a_genuine_closure_capture() -> None:
+    """Codex review, fresh evidence, seventh round: the sixth round's fix
+    skipped an entire nested scope outright to handle *shadowing*, but a
+    nested function that never rebinds the tracked name as its own
+    parameter is a genuine Python closure over the outer one (`def
+    nested(): return change.future_field` -- `nested` declares no
+    `change` parameter at all). That read really does reach the outer
+    `Change`, so it must still be found -- skipping it would let a field
+    `resolve_change_identity` actually reads slip past this guard
+    entirely."""
+    source = (
+        "def outer(change):\n"
+        "    def nested():\n"
+        "        return change.future_field\n"
+        "    return nested()\n"
+    )
+    funcs_by_name = {
+        node.name: node
+        for node in ast.walk(ast.parse(source))
+        if isinstance(node, ast.FunctionDef)
+    }
+    assert _change_attrs_read("outer", "change", funcs_by_name, set()) == {
+        "future_field"
+    }
