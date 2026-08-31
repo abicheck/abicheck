@@ -285,3 +285,41 @@ class TestEvidenceDepthAndSuppressionAuditJsonByteParity:
         old_text = json.dumps(payload, indent=2)
 
         assert new_text == old_text
+
+
+class TestSuppressionRuleLabelFallbacks:
+    """``suppression_rule_label``'s two remaining un-tested branches (Codecov
+    patch-coverage gap on PR #965): a rule may have a label with no matching
+    selectors at all, or neither a label/reason nor any selector -- distinct
+    from the already-covered "no label, has selectors" and "label and
+    selectors" cases exercised via the JSON round-trip tests above.
+
+    Both states are unreachable through ``Suppression.__init__`` directly --
+    its own ``__post_init__`` validation requires at least one of the exact
+    fields ``suppression_rule_label`` also reads as selectors (`symbol`,
+    `symbol_pattern`, `type_pattern`, `member_name`, `source_location`,
+    `namespace`, `finding_id`), so a validly *constructed* rule can never
+    have an empty ``parts`` list. ``suppression_rule_label`` itself reads
+    every field via ``getattr(rule, field, None)`` rather than direct
+    attribute access, though -- a deliberately duck-typed contract, not one
+    scoped to ``Suppression``'s current constructor invariant -- so these
+    branches are tested by clearing the validated field on an already-valid,
+    mutable ``Suppression`` after construction, the way a rule missing that
+    field entirely (e.g. loaded from an older or hand-built object) would
+    read to this function."""
+
+    def test_label_only_no_selectors_returns_bare_label(self) -> None:
+        from abicheck.reporter_contract_blocks import suppression_rule_label
+        from abicheck.suppression import Suppression
+
+        rule = Suppression(symbol="placeholder", label="workaround")
+        rule.symbol = None
+        assert suppression_rule_label(rule, 0) == "workaround"
+
+    def test_no_label_no_selectors_falls_back_to_bucket_index(self) -> None:
+        from abicheck.reporter_contract_blocks import suppression_rule_label
+        from abicheck.suppression import Suppression
+
+        rule = Suppression(symbol="placeholder")
+        rule.symbol = None
+        assert suppression_rule_label(rule, 2) == "rule#2"
