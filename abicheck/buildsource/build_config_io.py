@@ -15,19 +15,19 @@
 
 """Reading a ``.abicheck.yml`` when the *bytes* matter, not just the values.
 
-:func:`~abicheck.buildsource.inline.load_build_config` answers "what did the
-project configure"; this module answers "and from exactly which content",
-which is what an ADR-049 D6 receipt needs before it may claim a project
-config supplied a field (Codex review, fresh evidence: every
+:func:`~abicheck.buildsource.build_config.load_build_config` answers "what
+did the project configure"; this module answers "and from exactly which
+content", which is what an ADR-049 D6 receipt needs before it may claim a
+project config supplied a field (Codex review, fresh evidence: every
 project-derived provenance entry named the file but could not prove which
 revision of it produced the persisted values).
 
-Its own module rather than another function in ``inline.py``: that file is at
-its 2000-line hard cap, and this is a genuinely separate question about the
-same file. A **one-directional** dependency -- it imports
-:class:`~abicheck.buildsource.inline.BuildConfig`, and ``inline`` does not
-import this back -- so no import cycle forms and callers that only need the
-values keep using ``load_build_config`` unchanged.
+Its own module rather than another function in ``build_config.py``: this is
+a genuinely separate question about the same file. A **one-directional**
+dependency -- it imports :class:`~abicheck.buildsource.build_config.
+BuildConfig`, and ``build_config`` does not import this back -- so no import
+cycle forms and callers that only need the values keep using
+``load_build_config`` unchanged.
 """
 
 from __future__ import annotations
@@ -35,7 +35,7 @@ from __future__ import annotations
 import hashlib
 from pathlib import Path
 
-from .inline import BuildConfig
+from .build_config import BuildConfig
 
 
 def load_build_config_with_digest(path: Path) -> tuple[BuildConfig, str | None]:

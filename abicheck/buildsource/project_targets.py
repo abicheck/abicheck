@@ -30,7 +30,7 @@ run-plan generator here yet (that's G30 P1.4, which *consumes* this) and no
 ``abicheck project-targets init`` scaffolding either. Pure: parses a dict,
 never touches the filesystem beyond reading the one YAML file.
 
-``BuildConfig`` (:mod:`abicheck.buildsource.inline`) recognizes
+``BuildConfig`` (:mod:`abicheck.buildsource.build_config`) recognizes
 ``targets``/``bundles``/``profiles``/``baseline`` as known top-level
 ``.abicheck.yml`` keys (so their presence doesn't trip its own strict
 unknown-key error) but does not parse them itself — the same
@@ -72,7 +72,7 @@ its own baseline-channel/depth/gate policy just like a target's does; see
 :class:`BundleSpec`.
 
 ``ProjectTargetsConfig.from_dict`` validates every top-level key in the raw
-mapping against :data:`~.inline.KNOWN_TOP_LEVEL_KEYS` — the *full*
+mapping against :data:`~.build_config.KNOWN_TOP_LEVEL_KEYS` — the *full*
 ``.abicheck.yml`` key set, not just this module's four owned keys — so a
 misspelled block (``tagrets:``) is a hard error rather than silently
 parsing as an empty, all-default config. Every ``targets:``/``bundles:``/
@@ -95,7 +95,7 @@ from pathlib import Path
 from typing import Any
 
 from ..api_types import HEADER_AST_FRONTENDS
-from .inline import KNOWN_TOP_LEVEL_KEYS
+from .build_config import KNOWN_TOP_LEVEL_KEYS
 from .scan_levels import USER_DEPTHS, EvidenceDepth
 
 #: The identifier charset every target/bundle/profile/channel id must satisfy
@@ -656,7 +656,7 @@ def _safe_profile_atom(
 ) -> str:
     """Reject a compiler-option atom that could smuggle multiple flags/args.
 
-    Mirrors ``buildsource.inline.BuildConfig``'s own ``_safe_compile_atom``:
+    Mirrors ``buildsource.build_config.BuildConfig``'s own ``_safe_compile_atom``:
     a ``profiles:`` block is read from the same untrusted, auto-discovered
     ``.abicheck.yml`` as ``compile:``/``build.query`` (CLAUDE.md M1's trust
     boundary — see this module's docstring), and its ``compile.*`` overlay
@@ -933,7 +933,7 @@ class ProfileSpec:
     never gets a baseline (S17's point). The optional ``compile:`` overlay
     (:class:`ProfileCompileSpec`, P1 toolchain-profile audit) declares the
     compiler/dialect/ABI-macro axes this profile pins — additive over the
-    root ``compile:`` block (:class:`~abicheck.buildsource.inline.BuildConfig`);
+    root ``compile:`` block (:class:`~abicheck.buildsource.build_config.BuildConfig`);
     a run-plan consumer is expected to merge root-then-profile, same
     precedence as every other config layer in this project.
 
@@ -1254,7 +1254,7 @@ class ProjectTargetsConfig:
         is valid" will let e.g. ``depth: "banana"`` through unnoticed.
 
         Every key in *data* is checked against the *full* ``.abicheck.yml``
-        top-level key set (:data:`~.inline.KNOWN_TOP_LEVEL_KEYS`), not just
+        top-level key set (:data:`~.build_config.KNOWN_TOP_LEVEL_KEYS`), not just
         this module's own five owned keys — a misspelled block (e.g.
         ``tagrets:``) would otherwise be silently ignored as an unrecognized,
         unrelated key rather than caught as the typo it is (review finding).
@@ -1310,7 +1310,7 @@ def load_project_targets_config(path: Path) -> ProjectTargetsConfig:
     a ``.abicheck.yml`` at *path*.
 
     Tolerant of a missing/empty file (yields an all-empty config), matching
-    :func:`abicheck.buildsource.inline.load_build_config`'s same contract.
+    :func:`abicheck.buildsource.build_config.load_build_config`'s same contract.
     """
     if not path.is_file():
         return ProjectTargetsConfig()
