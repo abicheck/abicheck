@@ -41,4 +41,9 @@ it should read in CHANGELOG.md. Delete the other sections.
   different symbol rather than the same one's alternate positions): an
   unresolved competitor still always vetoes, but a competitor that resolved
   to its own key with no support beyond itself is dismissed instead of
-  blocking a real, well-supported substitution.
+  blocking a real, well-supported substitution. A competitor is also not
+  dismissible when its own raw candidacy under the resolved key reaches more
+  than one added identity (two masking positions of the same removed symbol
+  sharing identical key tokens but targeting different added identities) --
+  an `entries` row for the exact pairing in question is not by itself proof
+  the competitor is uniquely spoken for.

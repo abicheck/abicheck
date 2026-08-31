@@ -201,3 +201,35 @@ class TestAddedSideAmbiguityResolverProperties:
         # separate corroboration test, not this resolver), but it must not
         # be treated as blocking the other side, which this call alone
         # already confirms above.
+
+    def test_a_competitor_reaching_two_targets_under_the_same_key_still_vetoes(
+        self,
+    ) -> None:
+        """Codex review, second round (`tests/test_namespace_move_cross_
+        position_ambiguity.py`'s caller-level sibling of this test): an
+        `entries` row existing for the exact (competitor, added_id) pair is
+        not proof the competitor is uniquely resolved -- two DIFFERENT
+        masking positions of the SAME removed symbol can share the
+        IDENTICAL key tokens while targeting two DIFFERENT added
+        identities. `"q::q::f"` reaches both `"q::new::f"` (position 1) and
+        `"new::q::f"` (position 0) via the same key `("q", "new")`; an entry
+        exists for `("q::q::f", "q::new::f")`, but `"q::q::f"`'s own claim
+        under `("q", "new")` is not confined to that target, so it must
+        still veto `"p::new::f" -> "q::new::f"` rather than being dismissed
+        as an uncorroborated coincidence."""
+        entries, added_id_to_removed_symbols, raw_symbol_key_targets = _build(
+            [
+                (("p", "new", "f"), [(0, "q")]),  # p::new::f -> q::new::f
+                (("p", "new", "g"), [(0, "q")]),  # p::new::g -> q::new::g
+                (
+                    ("q", "q", "f"),
+                    [(1, "new"), (0, "new")],  # q::q::f -> q::new::f / new::q::f
+                ),
+            ]
+        )
+        _key_support, is_acceptable = added_side_ambiguity_resolver(
+            entries, added_id_to_removed_symbols, raw_symbol_key_targets
+        )
+        assert not is_acceptable("p::new::f", "q::new::f", ("p", "q"))
+        # The single-claimant target is untouched by the other's rejection.
+        assert is_acceptable("q::q::f", "new::q::f", ("q", "new"))

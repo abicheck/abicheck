@@ -52,6 +52,18 @@ itself locally ambiguous and never got its own ``entries`` row -- checking
 "has any resolved key at all" let an unrelated, resolved claim dismiss a
 genuinely live, unresolved threat on the target actually in question,
 fabricating a batch.
+
+A second, narrower gap of the same shape (Codex review, second round): even
+an ``entries`` row for the exact ``(competitor, added_id)`` pair is not
+proof the competitor is uniquely spoken for -- two DIFFERENT masking
+positions of the SAME removed symbol can share the identical
+``(old_segment, new_segment)`` key tokens while targeting two DIFFERENT
+added identities (e.g. ``Q::Q::f`` reaching both ``Q::new::f`` at position 1
+and ``new::Q::f`` at position 0 via the same key ``("Q", "new")``). Checking
+only that this one pairing resolved ignores that the competitor's own claim
+under that key is itself multi-target, so ``_competitor_is_dismissible``
+also requires the competitor's raw ``(competitor_id, resolved_key)`` target
+set to name only this ``added_id``.
 """
 
 from __future__ import annotations
@@ -111,6 +123,16 @@ def added_side_ambiguity_resolver(
     def _competitor_is_dismissible(competitor_id: str, added_id: str) -> bool:
         resolved_key = resolved_added_claims.get((competitor_id, added_id))
         if resolved_key is None:
+            return False
+        # The competitor's OWN candidacy under that key must itself be
+        # unambiguous and point only at this added_id -- the same removed
+        # symbol can reach a different added identity through an equally
+        # "resolved" entry sharing the identical key tokens (one masking
+        # position per differing scope segment), so an entry existing here
+        # is not yet proof this competitor is uniquely spoken for.
+        if raw_symbol_key_targets.get((competitor_id, resolved_key), set()) != {
+            added_id
+        }:
             return False
         # Resolved on this target; dismissible only if that key carries no
         # support from anyone besides this competitor itself.

@@ -348,3 +348,33 @@ class TestAddedSideCrossPositionAmbiguityAlsoResolvesViaGlobalSupport:
         assert groups.get(("P", "Q")) == [("P::new::g", "Q::new::g")]
         changes = emit_namespace_move_batches(groups)
         assert changes == [], "a red-herring resolved claim fabricated a batch"
+
+    def test_a_competitor_with_two_targets_under_the_same_key_still_vetoes(
+        self,
+    ) -> None:
+        """Codex review, second round: `_competitor_is_dismissible` treated
+        ANY `entries` row for the exact (competitor, added_id) pair as proof
+        the competitor was uniquely resolved -- but `Q::Q::f` has TWO
+        masking positions that happen to share the IDENTICAL key tokens
+        ("Q", "new"): position 1 targets `Q::new::f` and position 0 targets
+        `new::Q::f`. An entry existing for `(Q::Q::f, Q::new::f)` does not
+        mean `Q::Q::f`'s candidacy under key ("Q", "new") is unambiguous --
+        it also reaches `new::Q::f` under that same key, so it must still
+        veto `P::new::f -> Q::new::f` rather than being dismissed as an
+        uncorroborated coincidence (which would also let `Q::Q::f` resolve
+        to both `Q::new::f` and the single-claimant `new::Q::f` at once)."""
+        removed = {
+            "_ZN1P3new1fEv",
+            "_ZN1P3new1gEv",
+            "_ZN1Q1Q1fEv",
+        }
+        added = {
+            "_ZN1Q3new1fEv",
+            "_ZN1Q3new1gEv",
+            "_ZN3new1Q1fEv",
+        }
+        groups = find_namespace_move_groups(removed, added)
+        assert ("P::new::f", "Q::new::f") not in groups.get(("P", "Q"), [])
+        assert groups.get(("P", "Q")) == [("P::new::g", "Q::new::g")]
+        changes = emit_namespace_move_batches(groups)
+        assert changes == [], "a multi-target competitor key fabricated a batch"
