@@ -48,6 +48,7 @@ from __future__ import annotations
 import logging
 from collections.abc import Iterable
 from dataclasses import dataclass, field
+from typing import TYPE_CHECKING
 
 from .checker_policy import ChangeKind, EvidenceTier, ReachabilityState, Verdict
 from .checker_types import Change
@@ -61,6 +62,9 @@ from .idioms import (
 )
 from .model import AbiSnapshot
 from .surface_graph import SurfaceGraph, build_surface_graph
+
+if TYPE_CHECKING:
+    from .model.identity import EntityId
 
 logger = logging.getLogger(__name__)
 
@@ -175,6 +179,8 @@ def apply_pattern_verdicts(
     evidence_tier: EvidenceTier,
     enabled: bool = True,
     protected_kinds: frozenset[ChangeKind] = frozenset(),
+    old_public_entity_ids: frozenset[EntityId] | None = None,
+    new_public_entity_ids: frozenset[EntityId] | None = None,
 ) -> list[dict[str, object]]:
     """Modulate *changes* in place using idiom evidence; return the ledger.
 
@@ -189,12 +195,22 @@ def apply_pattern_verdicts(
     user override is authoritative and must win over an automated heuristic in
     **both** the aggregate verdict and per-finding classification (ADR-027
     review). Raises and annotations still apply — they never hide a finding.
+
+    *old_public_entity_ids*/*new_public_entity_ids* (ADR-063 Phase 3 D5):
+    each side's own already-resolved ``policy.public_surface.
+    PublicSurfaceQuery`` answer, threaded to its *matching*
+    ``build_surface_graph()`` call below — never the other side's set,
+    since old and new can genuinely have different public reachability (a
+    declaration crossing the public/private line is exactly the kind of
+    change this whole pipeline exists to detect). ``None`` (every call
+    site outside ``compare()``'s own pipeline) preserves the exact
+    pre-Phase-3 ``Visibility.PUBLIC``-derived behavior on that side.
     """
     if not enabled:
         return []
 
-    old_graph = build_surface_graph(old)
-    new_graph = build_surface_graph(new)
+    old_graph = build_surface_graph(old, public_entity_ids=old_public_entity_ids)
+    new_graph = build_surface_graph(new, public_entity_ids=new_public_entity_ids)
     old_idioms = recognise_idioms(old_graph)
     new_idioms = recognise_idioms(new_graph)
     old_aps = detect_antipatterns(old_graph)

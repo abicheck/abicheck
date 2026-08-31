@@ -24,11 +24,16 @@ roll-up signal, emitted only with ``--surface-metrics``.
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from .checker_policy import ChangeKind
 from .checker_types import Change
 from .diff_helpers import make_change
 from .model import AbiSnapshot
 from .surface_graph import SurfaceMetrics, compute_surface_metrics
+
+if TYPE_CHECKING:
+    from .model.identity import EntityId
 
 # Minimum rise in the undocumented-export fraction (in absolute ratio points)
 # before it is reported, so floating-point noise / a single symbol on a tiny
@@ -40,13 +45,27 @@ def _public_decl_count(m: SurfaceMetrics) -> int:
     return m.public_functions + m.public_variables + m.public_types + m.public_enums
 
 
-def diff_surface_metrics(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
+def diff_surface_metrics(
+    old: AbiSnapshot,
+    new: AbiSnapshot,
+    *,
+    old_public_entity_ids: frozenset[EntityId] | None = None,
+    new_public_entity_ids: frozenset[EntityId] | None = None,
+) -> list[Change]:
     """Return informational metric-drift findings between *old* and *new*.
 
     Deterministic and side-effect free. All emitted findings are COMPATIBLE.
+
+    *old_public_entity_ids*/*new_public_entity_ids* (ADR-063 Phase 3 D5):
+    each side's own already-resolved public-surface id set, threaded to
+    its *matching* ``compute_surface_metrics()`` call below — see
+    ``pattern_verdicts.apply_pattern_verdicts``'s identical parameter pair
+    for why old/new must never share one set. ``None`` (every call site
+    outside ``compare()``'s own pipeline) preserves the exact pre-Phase-3
+    ``Visibility.PUBLIC``-derived behavior on that side.
     """
-    om = compute_surface_metrics(old)
-    nm = compute_surface_metrics(new)
+    om = compute_surface_metrics(old, public_entity_ids=old_public_entity_ids)
+    nm = compute_surface_metrics(new, public_entity_ids=new_public_entity_ids)
     changes: list[Change] = []
 
     old_count = _public_decl_count(om)
