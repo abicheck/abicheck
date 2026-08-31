@@ -49,9 +49,21 @@ class ReportSideFacts:
     # plus any out-of-band ``--build-info``/``--sources`` pack (mirrors
     # ``analysis_assurance``'s own identical out-of-band-pack resolution).
     # ``None`` for every caller other than ``compare``'s own JSON path --
-    # nothing else populates these today.
-    old_evidence_depth: str | None = field(default=None, kw_only=True)
-    new_evidence_depth: str | None = field(default=None, kw_only=True)
+    # nothing else populates these today. ``compare=False``/``repr=False``
+    # (Codex review, PR #965): pure report annotation must not affect
+    # `DiffResult` equality/repr -- two comparisons of the same library
+    # pair that differ only in which out-of-band pack happened to be
+    # resolved for reporting purposes are still the same comparison
+    # result. `contract_context`/`analysis_assurance` (below on
+    # `DiffResult` itself) are the same shape of report-only fact and
+    # predate this exclusion -- retrofitting them is separate, unrelated
+    # scope, not something this addition should quietly also do.
+    old_evidence_depth: str | None = field(
+        default=None, kw_only=True, compare=False, repr=False
+    )
+    new_evidence_depth: str | None = field(
+        default=None, kw_only=True, compare=False, repr=False
+    )
     # The ``--audit-suppressions`` ledger (``suppression.SuppressionAudit``),
     # attached by ``cli_compare_helpers._attach_suppression_audit`` before
     # rendering. Typed ``object`` rather than the real type: ``suppression.py``
@@ -66,4 +78,6 @@ class ReportSideFacts:
     # ``--demangle`` markdown/review report is, which folding it into
     # ``reporter_markdown.to_markdown``'s own line list (ahead of that
     # function's single, whole-report demangle pass) cannot honor.
-    suppression_audit: object | None = field(default=None, kw_only=True)
+    suppression_audit: object | None = field(
+        default=None, kw_only=True, compare=False, repr=False
+    )

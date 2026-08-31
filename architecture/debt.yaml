@@ -133,12 +133,12 @@
     },
     {
       "path": "abicheck/buildsource/graph_reconcile.py",
-      "baseline_lines": 870,
+      "baseline_lines": 872,
       "target": "extract/build-or-source",
       "rule": "no_growth",
       "category": "legacy_extraction_monolith",
       "owner": "abicheck maintainers",
-      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice.",
+      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice. +2 lines (2026-08-31): Phase 5 item 2's internal-caller facade migration (PR #965) split two facade imports (a TYPE_CHECKING GraphNode/SourceGraphSummary pair, and a DEPENDENCY_EDGE_KINDS/is_public_dependency_node pair spanning model/source_graph.py and the compare-classified source_graph_query.py) into their real-owner modules, which D8 requires for an internal caller and which this frozen baseline had no equal-size reduction available to offset.",
       "review_by": "2026-11-30"
     },
     {
@@ -883,12 +883,12 @@
     },
     {
       "path": "abicheck/internal_leak.py",
-      "baseline_lines": 1650,
+      "baseline_lines": 1651,
       "target": "see ADR-061 ownership map",
       "rule": "no_growth",
       "category": "legacy_oversized_module",
       "owner": "abicheck maintainers",
-      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice.",
+      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice. +1 line (2026-08-31): Phase 5 item 2's internal-caller facade migration (PR #965) split a single two-name `from .buildsource.source_graph import GraphEdge, GraphNode, SourceGraphSummary` into two real-owner imports (`model/graph_facts.py`, `model/source_graph.py`), which D8 requires for an internal caller and which this frozen baseline had no equal-size reduction available to offset.",
       "review_by": "2026-11-30"
     },
     {

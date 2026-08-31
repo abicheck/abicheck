@@ -55,8 +55,9 @@ from .checker_types import Change
 from .impact.engine import assess_change
 
 if TYPE_CHECKING:
-    from .buildsource.source_graph import GraphEdge, GraphNode, SourceGraphSummary
     from .model import AbiSnapshot, RecordType
+    from .model.graph_facts import GraphEdge, GraphNode
+    from .model.source_graph import SourceGraphSummary
 
 #: Local copy of graph_facts._CONFIDENCE_RANK (module-private there) — same
 #: duplication pattern as buildsource/type_graph.py's own local rank dict.

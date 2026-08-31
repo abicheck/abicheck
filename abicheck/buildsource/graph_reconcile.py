@@ -111,7 +111,8 @@ from .entity_identity import (
 )
 
 if TYPE_CHECKING:
-    from .source_graph import GraphNode, SourceGraphSummary
+    from ..model.graph_facts import GraphNode
+    from ..model.source_graph import SourceGraphSummary
 
 #: Reconciliation outcomes (ADR-048 D2) — distinct from plain
 #: node-add/node-remove, so a consumer can tell "the same entity, under a
@@ -756,7 +757,8 @@ def _public_reachable_ids(graph: SourceGraphSummary) -> frozenset[str]:
     are different questions; only the latter matters for gating a finding's
     verdict impact.
     """
-    from .source_graph import DEPENDENCY_EDGE_KINDS, is_public_dependency_node
+    from ..model.source_graph import DEPENDENCY_EDGE_KINDS
+    from .source_graph_query import is_public_dependency_node
 
     adjacency: dict[str, list[str]] = {}
     for e in graph.edges:
