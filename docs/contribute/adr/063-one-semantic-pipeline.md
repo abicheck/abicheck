@@ -149,7 +149,48 @@
   already calls `service.compare_snapshots()` (not `checker.compare()`
   directly, as an earlier plan draft assumed), which is what let slice 11
   wire both Tier-2 production paths from a single change.
-- **Phases 4–10** are still unimplemented design text.
+- **Phase 4** (`AnalysisPlan`: pre-flight resolution, not mid-run discovery)
+  has landed `abicheck/workflows/plan.py`'s `AnalysisPlan`/`SidePlan`/
+  `AnalysisPlanner`, and a new `PlanningError` (`abicheck/errors.py`).
+  `AnalysisPlanner.resolve()` runs inside `resolve_compare_request`
+  (`service_compare_pipeline.py`) and `resolve_dump_request`
+  (`service_dump_pipeline.py`) — the one chokepoint every front end already
+  resolves a request through — before either function invokes a header-AST
+  backend or a build-info adapter. **One of this decision's two named
+  scenarios is closed; the other is named explicitly as out of scope for
+  this phase, not silently dropped.** The `--build-target` + pre-captured
+  Bazel `aquery`/`cquery` gap (`docs/contribute/known-gaps.md`) is real,
+  isolated, and previously undiagnosed at the request level — it now raises
+  `PlanningError` with the documented workaround in the message ("option 2"
+  from that known-gap entry). The known-gap entry names both `dump` and
+  `scan`; `scan --against`'s own candidate resolution
+  (`scan_engine._build_new_snapshot`) has no `CompareRequest`/`DumpRequest`
+  of its own to resolve through `AnalysisPlanner`, so it calls the
+  underlying check directly (`workflows.plan.bazel_target_scoping_failure`,
+  the free function `_check_bazel_target_scoping` wraps for the
+  `AnalysisPlanner` path) rather than being left as the one place this gap
+  stayed open — both halves of the named gap are closed, not only the
+  `resolve_compare_request`/`resolve_dump_request` half. This decision's second illustrative scenario,
+  "a `-H` flag accepted by a collect mode that cannot use it," does not
+  correspond to any isolated, currently-open known-gap entry once checked
+  against the real code: the one combination that literally matches it
+  (`--depth binary` combined with an explicit header list, which silently
+  clears the headers) is intentional, already-shipped, reviewed behavior
+  with its own dedicated regression tests — turning it into a hard
+  `PlanningError` would be an unreviewed behavior change to already-tested
+  surface, not a same-phase fix for a documented silent failure. See
+  `abicheck/workflows/plan.py`'s own module docstring for the full
+  reasoning and what a genuine second check would need. `AnalysisPlan`
+  itself is scoped exactly as D4 states: it carries each side's *requested*
+  toolchain/compile-context inputs, never the resolved P0.3 L3→L2
+  compile-context fold's output, and no resolved policy/pack/contract
+  state. The `scripts/check_ai_readiness.py` `cli-contract`/
+  `engine-cli-boundary` gates were not widened in this slice — every
+  `resolve_compare_request`/`resolve_dump_request` caller already reaches
+  `AnalysisPlanner.resolve()` through the two functions this phase changed
+  directly, so there is no second call site for those gates to newly
+  police yet; a future phase adding one should widen them then.
+- **Phases 5–10** are still unimplemented design text.
 
 See the [implementation plan](../plans/one-semantic-pipeline.md) for the
 full phase-by-phase state, including every slice's own "Landed"/"What this

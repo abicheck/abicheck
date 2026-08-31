@@ -279,11 +279,22 @@ def resolve_compare_request(
         ValidationError: If the request fails :meth:`CompareRequest.validate`,
             names a frontend with no extractor for its evidence, or requests a
             ``depth`` the resolved snapshots did not reach.
+        PlanningError: If :class:`~abicheck.workflows.plan.AnalysisPlanner`
+            finds a requested evidence input no resolved collector/backend
+            combination can satisfy (ADR-063 Phase 4) — e.g. ``--build-target``
+            combined with a pre-captured Bazel ``aquery``/``cquery`` jsonproto.
         SnapshotError: If either input cannot be loaded.
     """
     from . import service, service_compare_evidence as _sce
+    from .workflows.plan import AnalysisPlanner
 
     request.validate()
+    # ADR-063 Phase 4: reject a request no resolved collector/backend
+    # combination can satisfy before any extraction runs (PlanningError),
+    # rather than discovering the gap mid-run or not at all. See
+    # `abicheck.workflows.plan`'s own module docstring for exactly what this
+    # does and does not check.
+    AnalysisPlanner.resolve(request)
     # validate() accepts lang case-insensitively; the ELF dump path does
     # case-sensitive `lang == "c"` checks, so normalise here. `android` (no
     # header-AST path) falls back to "auto" for the binary dump.
@@ -582,6 +593,8 @@ def run_compare_request(request: CompareRequest) -> CompareResult:
 
     Raises:
         ValidationError: If the request fails :meth:`CompareRequest.validate`.
+        PlanningError: See :func:`resolve_compare_request` — raised from
+            inside its own call here.
         SnapshotError: If either input cannot be loaded.
 
     Moved here from ``service.py`` (CLI cleanup phase two, "PR B" slice 1,

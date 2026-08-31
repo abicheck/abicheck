@@ -47,6 +47,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from abicheck.buildsource.build_config_io import BuildConfig
 from abicheck.buildsource.l2_seed import (
     _l2_seed_config,
@@ -193,3 +195,78 @@ def test_seeded_includes_and_compile_context_forwards_input_spec_build_targets(
     # happened with the right build_config, same as its combined-function
     # sibling above.
     assert (includes, ctx, applied, cleanups) == ([], evidence.compile, False, [])
+
+
+# ── ADR-063 Phase 4 (Codex review): a deliberate usage error must not be ────
+# swallowed by the "best-effort" contract above ──────────────────────────────
+#
+# The RuntimeError test above confirms an ordinary collection failure (a
+# missing compiler, a corrupt pack, ...) correctly degrades to a no-op --
+# that is this layer's own documented contract (_l2_seed_config's docstring:
+# "a malformed/invalid config surfaces loudly elsewhere ... this is a
+# best-effort include-dir hint, so it degrades ... rather than raising
+# through"). But a Codex review round found that assumption false for one
+# specific input: at a depth whose collect_mode is "off" (e.g. `--depth
+# headers`), `embed_build_source` never even runs (it no-ops before ever
+# calling collect_inline_pack), so this L2 seed's own collect_inline_pack
+# call is the ONLY place `_maybe_collect_bazel_build_info`'s ValidationError
+# (--build-target/.abicheck.yml `build.targets` vs. a pre-captured Bazel
+# jsonproto) can fire at all -- and the broad `except Exception` here
+# swallowed it, so the run proceeded with no diagnostic and without the
+# build-derived context it should have had. Fixed by carving ValidationError
+# out of the broad except, mirroring the pre-existing
+# HeaderCompileContextAmbiguousError carve-out for the identical reason: a
+# deliberate usage error is not "best-effort collection failed."
+
+
+def _write_bazel_aquery(tmp_path: Path) -> Path:
+    import json
+
+    path = tmp_path / "aquery.json"
+    path.write_text(
+        json.dumps({"actions": [], "pathFragments": [], "artifacts": [], "targets": []})
+    )
+    return path
+
+
+def test_seed_includes_and_fold_compile_context_raises_on_bazel_scoping_mismatch(
+    tmp_path: Path,
+) -> None:
+    """The real (unmocked) reproduction: build_targets sourced only from
+    .abicheck.yml (no explicit --build-target), combined with a pre-captured
+    Bazel aquery jsonproto -- must raise ValidationError, not silently
+    degrade to a no-op with no diagnostic."""
+    from abicheck.errors import ValidationError
+
+    src = tmp_path / "src"
+    src.mkdir()
+    header = src / "api.h"
+    header.write_text("void f();\n", encoding="utf-8")
+    (src / ".abicheck.yml").write_text(
+        "build:\n  system: bazel\n  targets:\n    - //:math\n", encoding="utf-8"
+    )
+    aquery = _write_bazel_aquery(tmp_path)
+
+    with pytest.raises(ValidationError, match="pre-captured Bazel aquery"):
+        seed_includes_and_fold_compile_context(
+            headers=[header],
+            includes=[],
+            sources=src,
+            build_info=aquery,
+            build_config=None,
+            build_query=None,
+            build_compile_db=None,
+            build_targets=(),
+            collect_mode="off",
+            gcc_path=None,
+            gcc_prefix=None,
+            gcc_options=None,
+            gcc_option_tokens=(),
+            sysroot=None,
+            nostdinc=False,
+            frontend="auto",
+            frontend_context="host",
+            lang="c++",
+            lang_explicit=False,
+            pending_cleanups=[],
+        )

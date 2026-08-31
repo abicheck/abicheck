@@ -11189,6 +11189,177 @@ reasons stated above — named explicitly rather than left for a future
 reader to rediscover by re-checking D1's adapter list against the Files
 section.
 
+**Landed (first slice) — one of the two named gaps closed, the other named
+out of scope, not silently dropped.** `abicheck/workflows/plan.py`
+(`AnalysisPlan`/`SidePlan`/`PlanningFailure`/`AnalysisPlanner`) and a new
+`PlanningError` in `abicheck/errors.py`. `AnalysisPlanner.resolve()` is
+wired into `service_compare_pipeline.resolve_compare_request` and
+`service_dump_pipeline.resolve_dump_request` immediately after
+`request.validate()`, before either function invokes a header-AST backend
+or a build-info adapter — the pre-extraction point this phase's own Design
+section requires. The `--build-target` + pre-captured Bazel
+`aquery`/`cquery` gap is closed as "option 2" from its own known-gap entry
+(reject, don't silently scope-miss): `_check_bazel_target_scoping` fires
+when a side's `build_targets` is non-empty and its `build_info` sniffs as a
+Bazel jsonproto (`buildsource.inline.sniff_build_info_format`), and does
+**not** fire for the documented safe workaround (a live `bazel query`, no
+pre-captured file) or for an ordinary, non-Bazel `build_info`. Every
+`service.run_compare()`/`run_compare_request()` caller — the release/bundle
+fan-out's `_run_compare_pair` included, per this phase's own Files-section
+correction above — gets this guarantee for free through the shared
+resolver; `tests/test_analysis_plan.py`'s
+`test_reaches_through_the_shared_resolve_compare_request_chokepoint` proves
+it at that one chokepoint rather than needing a separate release-fan-out
+fixture, since `service.run_compare`'s own keyword surface has no
+parameter to even express `build_targets`/a Bazel `build_info` in the
+first place.
+
+**The known-gap entry names both `dump` and `scan`; both are now closed,
+not only the `resolve_compare_request`/`resolve_dump_request` half.**
+`scan --against`'s own candidate resolution (`scan_engine._build_new_snapshot`)
+builds a raw `InputSpec` directly rather than a `CompareRequest`/
+`DumpRequest`, so it has no `AnalysisPlan` of its own to resolve through —
+checked against the real code rather than assumed closed by the
+`AnalysisPlanner` wiring alone. The check itself is factored into a free
+function, `workflows.plan.bazel_target_scoping_failure(label, build_info,
+build_targets)`, which `_check_bazel_target_scoping` wraps for the
+`AnalysisPlanner` path and which `_build_new_snapshot` now calls directly.
+**Corrected after a first pass and two further Codex review rounds found
+problems with each fix in turn**: the first version raised `PlanningError`
+inside the existing `try`/`except AbicheckError` block, which maps every
+`AbicheckError` to `click.ClickException` — exit 1, not the exit-64 usage
+error this combination actually is (AGENTS.md: "64 = usage error ... applies
+across commands"). Fixed by raising `click.UsageError` directly at the point
+of detection instead: since `click.UsageError` is not an `AbicheckError`, it
+propagates straight past that `except` clause unmodified — no `PlanningError`
+intermediate, no second `except` clause, and (debt-no-growth is `no_growth`
+for this file) no added lines either. The *second* round found this check
+never even ran on `scan --dry-run`/`scan --artifact-set --dry-run`, both of
+which return their preview before `_build_new_snapshot` is ever called — a
+dry-run could claim success (single-binary: an "UNSCOPED"-but-informational
+estimate) for a request the real run then rejected. Fixed by running the
+identical `bazel_target_scoping_failure` check in `cli_scan.py` itself,
+before both dry-run renderers, raising the same `click.UsageError`.
+`tests/test_bazel_root_targets.py::test_scan_candidate_build_target_with_precaptured_aquery_raises_planning_error`
+pins the real-execution path; `tests/test_bazel_root_targets_scan.py`'s
+three new cases pin both dry-run shapes and the real-run parity case. The
+baseline side of `scan --against` was checked and found not to reach the
+Bazel adapter with `build_targets` at all (`--against` compares against an
+already-produced baseline, not a second live build), so it needed no
+equivalent call. **The *third* round found the "no `PlanningError`
+intermediate" shortcut from the first fix was itself wrong**: `_build_new_
+snapshot` also backs the typed `run_scan(ScanRequest(...))` API (`service_
+scan.run_scan`/`run_scan_set`), which has no Click context to catch a
+`click.UsageError` for — a library caller with no CLI in the picture would
+see a Click-framework exception leak out of a pure Python API, the same
+class of layering violation `PlanningError` exists to prevent for `dump`/
+`compare`. Fixed by raising `PlanningError` at the point of detection after
+all (moved to just *before* the `try`/`except AbicheckError` block, not
+inside it, so that pre-existing catch still can't recatch and remap it) and
+adding the missing translation at the one real CLI boundary: `cli_scan.py`'s
+`scan_cmd` now catches `PlanningError` around its `run_scan_core` call and
+raises `click.UsageError` there, mirroring the `cli_resolve.py`/
+`cli_buildsource.py` pattern `dump`/`compare` already use. (The
+`--artifact-set` path's own pre-flight `bazel_target_scoping_failure` call in
+`cli_scan.py` — a second, CLI-layer-only check that runs before `run_scan_set`
+— needed no change: it already raised `click.UsageError` directly from CLI
+code, never from the engine, and `run_scan_set`'s own `except (ArtifactSetError,
+ValueError)` around `run_scan_set(req)` already catches a `PlanningError`
+that reaches it too, since `PlanningError` is also a plain `ValueError`
+subclass.) This closed the debt-no-growth line-count budget in the same
+zero-net-growth way as the first fix: the check moved out of the `try` block
+line-for-line, with only the raised exception's name changing.
+`tests/test_bazel_root_targets.py`'s same test now asserts `PlanningError`
+instead of `click.UsageError` for the direct engine-level call, and a new
+`tests/test_bazel_root_targets_scan.py::
+test_run_scan_typed_api_raises_planning_error_not_click_usage_error` pins the
+typed-API guarantee end to end (`run_scan(ScanRequest(...))` raises
+`PlanningError`, never `click.UsageError`), alongside the pre-existing
+`test_scan_cli_real_run_rejects_the_identical_combination` pinning that the
+CLI path still exits 64.
+
+**A *fourth* round found the third fix's own placement inside
+`_build_new_snapshot` was still too late.** `run_scan_core` runs its S3
+pattern scan (`scan_files`) and points-of-interest build
+(`_build_scan_poi`, which reads both sides' L0 export tables) *before* ever
+calling `_build_new_snapshot` — real, if cheap, work a typed `run_scan()`/
+`run_scan_subprocess()` caller (no `cli_scan.py` pre-flight ahead of it) paid
+for on every rejected request. Fixed by moving the check to the very top of
+`run_scan_core`, before that work, guarded on `collection_for_ci_mode(
+collect_mode)[1]` being non-empty — the same condition, restated against the
+already-resolved `collect_mode` rather than a raw depth string, that
+`workflows.plan._check_bazel_target_scoping` uses for its own
+`depth="binary"` exemption. The check was then *removed* from
+`_build_new_snapshot` rather than left as a second copy: `run_scan_core` is
+its only production caller, so the check had become pure duplication once
+both were correctly guarded — and removing it caught a real, independent bug
+in the process. **The old `_build_new_snapshot`-only check had no
+`depth=binary` exemption at all**: the third round's own reasoning ("scan's
+own path was already immune") verified only that `cli_scan.py`'s
+`_normalize_depth_inputs` prunes `build_info` to `None` at that depth for the
+*CLI*, but never checked `service_scan.run_scan`, which does not prune it —
+so a typed `ScanRequest(depth="binary", build_info=<precaptured jsonproto>,
+build_targets=(...))` was wrongly rejected by the unguarded check, the exact
+false-positive class the `depth=binary` exemption exists to prevent.
+`tests/test_bazel_root_targets_scan.py` gained two more cases:
+`test_run_scan_rejects_before_wasted_pattern_scan_and_poi_work` (monkeypatches
+`scan_files` to raise if called, proving the check now runs first) and
+`test_run_scan_depth_binary_exempts_the_early_bazel_scoping_check`
+(monkeypatches `bazel_target_scoping_failure` itself to raise if called,
+proving the moved check's exemption actually fires rather than merely
+succeeding for some unrelated reason). `tests/test_bazel_root_targets.py`'s
+own scan-side test was retired to a comment pointing at these three, since
+`_build_new_snapshot` no longer performs the check that test exercised.
+`scan_engine.py`'s `no_growth` debt baseline moved 1483 → 1495 (`architecture/
+debt.yaml`'s own entry has the accounting) — the first fix's "no `PlanningError`
+intermediate" zero-cost trick doesn't apply here, since removing the old
+check's two lines is smaller than the ~14 lines the new guarded check plus
+its two module-level imports needed net; a smaller diff that still states
+both the check and why the old copy was removed was not found.
+
+**Not landed in this slice: the second named scenario, and the
+`cli-contract`/`engine-cli-boundary` gate widening.** Re-checked against
+the real code (not assumed from this section's own prose), "a `-H` flag
+accepted by a collect mode that cannot use it" does not correspond to any
+isolated, currently-open known-gap entry — the one real combination
+matching that description (`--depth binary` with an explicit header list,
+which silently clears the headers to `[]`) is intentional, already-shipped,
+reviewed behavior with its own dedicated regression tests
+(`tests/test_cli_scan.py::test_depth_binary_clears_headers_in_scan`,
+`tests/test_service_unit.py::test_depth_binary_clears_headers`,
+`tests/test_typed_dump_request.py`, `tests/test_depth_vocabulary.py`).
+Turning it into a hard `PlanningError` would be an unreviewed behavior
+change to already-tested surface, not a same-phase fix for a documented
+silent failure — named here explicitly, per this file's own governing
+"acknowledged gap over risky reactive patch" convention, rather than
+forced to fit or silently left for a future reader to rediscover. A
+genuinely new, currently-silent "input accepted by a collect mode that
+cannot use it" case would be `AnalysisPlanner`'s second check, whenever one
+is found. The `scripts/check_ai_readiness.py` `cli-contract`/
+`engine-cli-boundary` gate widening this phase's own Files section names is
+also not attempted in this slice: both functions this phase changed are
+already the sole callers `AnalysisPlanner.resolve()` needs to reach through,
+so there is no second, independent call site for either gate to newly
+police yet — a future phase adding one should widen them then, not this
+one preemptively.
+
+**Also not landed: `dump --dry-run`/`compare --dry-run`/`scan --dry-run`
+parity for a `.abicheck.yml`-only (no `--build-target` flag) root-target
+scope, a fourth Codex review round.** The known-gap entry's own new
+paragraph (see `docs/contribute/known-gaps.md`) has the full account: none
+of the three commands' dry-run renderers discover `.abicheck.yml` the way
+`embed_build_source` does at real-execution time, and `AnalysisPlanner`
+itself structurally cannot see this value — `DumpRequest`/`CompareRequest`/
+`InputSpec` carry no `build_config` field at all, so there is no seam to
+resolve it through even in principle. Closing it needs either a real API
+addition (a `build_config` field threaded onto the typed request objects)
+or an independent, duplicated slice of `embed_build_source`'s own
+discovery-then-merge logic inside three separate dry-run renderers, each
+needing the same depth-binary exemption `_check_bazel_target_scoping`
+applies — named explicitly as out of scope for this slice, per the same
+governing convention the paragraph above already invokes, rather than
+patched reactively under continued review pressure.
+
 ---
 
 ### Phase 5 — the fact/capability registry (generalizes `change_registry.py`)

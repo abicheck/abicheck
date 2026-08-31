@@ -593,7 +593,7 @@ def _resolve_compare_snapshots(
     this path always has.
     """
     from .api_types import CompareRequest, InputSpec
-    from .errors import SnapshotError, ValidationError
+    from .errors import PlanningError, SnapshotError, ValidationError
 
     def _side_compile(backend_override: str | None) -> CompileContext | None:
         # The per-side --ast-frontend old=/new= rides on that side's own
@@ -651,7 +651,7 @@ def _resolve_compare_snapshots(
         pair = service.resolve_compare_request(
             request, notify=_click_notify, allow_parallel=False
         )
-    except ValidationError as exc:
+    except (ValidationError, PlanningError) as exc:  # PlanningError: ADR-063 Phase 4
         raise click.UsageError(str(exc)) from exc
     except SnapshotError as exc:
         raise click.ClickException(str(exc)) from exc

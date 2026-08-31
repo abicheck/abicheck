@@ -338,6 +338,8 @@ def derive_l2_include_dirs(
     path. Purely best-effort: any failure drains the cleanups and returns
     ``([], [])`` so a scan that works today never regresses.
     """
+    from ..errors import ValidationError
+
     if sources is None and build_info is None:
         return [], []
     cleanups: list[Callable[[], None]] = []
@@ -387,6 +389,11 @@ def derive_l2_include_dirs(
             _run_cleanups(cleanups)
             return [], []
         return out, cleanups
+    except ValidationError:
+        # A deliberate usage error (ADR-063 Phase 4), not "best-effort hint
+        # failed" -- must propagate; mirrors the carve-out below.
+        _run_cleanups(cleanups)
+        raise
     except Exception:  # noqa: BLE001 — best-effort include hint, never fatal
         _run_cleanups(cleanups)
         return [], []
@@ -459,7 +466,7 @@ def derive_l2_compile_context(
     to hand the exception a value along with it, so the caller receives none
     and has nothing left to run.
     """
-    from ..errors import HeaderCompileContextAmbiguousError
+    from ..errors import HeaderCompileContextAmbiguousError, ValidationError
     from .header_compile_context import resolve_header_compile_context
 
     if (sources is None and build_info is None) or not headers:
@@ -503,9 +510,9 @@ def derive_l2_compile_context(
             _run_cleanups(cleanups)
             return None, []
         return resolution.context, cleanups
-    except HeaderCompileContextAmbiguousError:
-        # P0.3's fail-closed case: release any temp build dir this attempt
-        # created, then propagate — never resolved by silently guessing.
+    except (HeaderCompileContextAmbiguousError, ValidationError):
+        # P0.3's fail-closed case, or a deliberate usage error (ADR-063
+        # Phase 4) -- release any temp build dir, then propagate.
         _run_cleanups(cleanups)
         raise
     except Exception:  # noqa: BLE001 -- best-effort, mirrors derive_l2_include_dirs
@@ -822,7 +829,7 @@ def seed_includes_and_fold_compile_context(
     one of the documented ways to resolve exactly that -- and, before it was
     threaded here, the one the error message named without it working.
     """
-    from ..errors import HeaderCompileContextAmbiguousError
+    from ..errors import HeaderCompileContextAmbiguousError, ValidationError
     from ..header_utils import _context_tokens, _has_include_build_context
     from .header_compile_context import (
         filter_units_by_source,
@@ -939,9 +946,9 @@ def seed_includes_and_fold_compile_context(
         if cleanups:
             pending_cleanups.extend(cleanups)
         return incs, True, merged, dirs
-    except HeaderCompileContextAmbiguousError:
-        # P0.3's fail-closed case: release any temp build dir this attempt
-        # created, then propagate -- never resolved by silently guessing.
+    except (HeaderCompileContextAmbiguousError, ValidationError):
+        # P0.3's fail-closed case, or a deliberate usage error (ADR-063
+        # Phase 4) -- release any temp build dir, then propagate.
         _run_cleanups(cleanups)
         raise
     except Exception:  # noqa: BLE001 -- best-effort, mirrors derive_l2_include_dirs

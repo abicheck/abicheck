@@ -81,10 +81,11 @@ from .cli_scan_helpers import (
     resolve_effective_allow_query,
     scan_pattern_roots,
 )
-from .errors import ProfileMismatchError, ScopeMismatchError
+from .errors import PlanningError, ProfileMismatchError, ScopeMismatchError
 from .schemas import SCAN_SCHEMA_VERSION
 from .workflows.artifact.execute import SideResolution
 from .workflows.artifact.resolve import BaselineReuseContext
+from .workflows.plan import scan_bazel_scoping_failure
 
 if TYPE_CHECKING:
     from .environment_matrix import EnvironmentMatrix
@@ -343,6 +344,9 @@ def _build_new_snapshot(
         collect_mode=collect_mode,
         dump_manifest=None,
     )
+    # Bazel target-scoping is checked once, in run_scan_core (the only caller,
+    # before its S3/POI work) -- not repeated here as a second, unguarded copy
+    # that would reintroduce the depth=binary false positive (Codex review).
     try:
         return _resolve_side_snapshot_impl(
             side,
@@ -1095,6 +1099,13 @@ def run_scan_core(
     library and diverging from the baseline's own scoped evidence. Empty by
     default (the pre-existing, unscoped behavior).
     """
+    # ADR-063 Phase 4 (Codex review): checked before S3/POI work, since a typed
+    # run_scan()/run_scan_subprocess caller has no cli_scan.py pre-flight.
+    if _bf := scan_bazel_scoping_failure(
+        headers, eff_depth_enum, collect_mode, effective_build_info, build_targets
+    ):
+        raise PlanningError((_bf,))
+
     stage_timings: dict[str, float] = {}
 
     def _record_stage(name: str, started: float) -> None:
