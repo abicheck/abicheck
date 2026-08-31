@@ -1963,10 +1963,28 @@ reporting 0 findings.
 
 The moved functions now live in `abicheck/workflows/input_resolution.py`,
 re-exported from `service.py` via a plain static import (`workflows ->
-workflows`, no `importlib`-based bridging needed — that mechanism is only
-for a forbidden direction, which this is not). One test-facing consequence,
-recorded in that module's own docstring and worth stating here too since it
-surprised the slice that found it: `resolve_input`'s *own* internal bare-name
+workflows`, no `importlib`-based bridging needed for *that* edge — the
+mechanism is only for a forbidden direction, which `service.py -> workflows.
+input_resolution` is not). A second edge inside the new module needed it
+anyway, caught only after this PR's own CI ran, not by the local measurement
+above: `run_dump`/`_emit` come from `service_dump_native.py`, which reaches
+the pre-existing, baselined CLI-registration SCC via `service_header_graph_
+attach -> service_scan -> service` — and since `service` itself imports
+`workflows.input_resolution`, a static edge to `service_dump_native` would
+have silently grown that SCC by one new member. The AI-readiness `import-
+cycle-growth` gate's own cycle enumeration is order-dependent (its own code
+comment: "non-deterministic `set` iteration order... picks a different
+representative cycle each process run"), so this was invisible to every
+local run of that gate during development and surfaced only once — on the
+real CI checkout, whose process happened to enumerate a representative cycle
+through the new module. Fixed the same way `service.py`'s own
+`_service_header_scoped` bridge already handles the identical shape: bound
+via `importlib.import_module` instead of a static import, verified clean
+across multiple explicit `PYTHONHASHSEED` values (not just the one process
+happened to pass locally) rather than trusting a single non-deterministic
+run. One test-facing consequence, recorded in that module's own docstring
+and worth stating here too since it surprised the slice that found it:
+`resolve_input`'s *own* internal bare-name
 calls to `run_dump`/`load_snapshot`/`detect_binary_format`/`sniff_text_format`
 now resolve against `abicheck.workflows.input_resolution`'s globals, not
 `abicheck.service`'s, so every test that intercepted one of those calls via

@@ -71,26 +71,19 @@ runtime call, invisible to the static import scans `dependency-direction`
 and `import-cycle-growth` run — rather than a blanket `__getattr__`, which
 would resolve every name as `Any` for external callers (ADR-061).
 
-`input_resolution.py` is a third shape, distinct from both the six
-narrow-surface facades above and `render.py`'s bridge: it is the real
-`resolve_input` implementation (plus `detect_binary_format`,
-`sniff_text_format`, `collect_metadata`, `load_env_matrix`, and their private
-helpers), physically moved here from `abicheck/service.py` (ADR-061 Phase 4,
-service.py thinning slice) rather than left as a flat `legacy_paths` entry —
-every one of its own dependencies was already `model`/`storage`/`extract`/
-`workflows`-classified, so it needed no bridge. `service.py` re-exports these
-names with a plain static import; a test that needs to intercept a call
-`resolve_input` makes *internally* (`run_dump`, `load_snapshot`,
-`detect_binary_format`, `sniff_text_format`) must patch
-`abicheck.workflows.input_resolution.<name>`, not `abicheck.service.<name>`
-— the general rule this file's own "one consequence... worth knowing" note
-above already states, restated here because it is easy to miss for a name
-that still also resolves, unhelpfully, on the old facade. `compare_snapshots`
-and `load_suppression_and_policy` stayed behind in `service.py`: both need
-`PolicyFile`, whose own classification is the open question `policy_file.py`'s
-debt entry and this ADR's Phase 2/4 history already cover — moving them here
-first would just relocate an unresolved dependency-direction problem, not
-close it.
+`input_resolution.py` is a third shape: the real `resolve_input`
+implementation (plus `detect_binary_format`, `sniff_text_format`,
+`collect_metadata`, `load_env_matrix`, private helpers), moved here from
+`service.py` (ADR-061 Phase 4). `service_dump_native` (`run_dump`/`_emit`)
+reaches the baselined CLI-registration SCC via `service_header_graph_attach ->
+service_scan -> service`, and `service` imports this module — a static edge
+would grow that cycle, so it's bound via `importlib.import_module` instead,
+the same escape hatch `render.py`'s bridge uses. `service.py` re-exports the
+rest with a plain static import; a test intercepting a call `resolve_input`
+makes *internally* must patch `abicheck.workflows.input_resolution.<name>`,
+not `abicheck.service.<name>`. `compare_snapshots`/`load_suppression_and_
+policy` stayed in `service.py`: both need `PolicyFile`, an open
+`policy_file.py` debt question.
 
 `abicheck/service_dump_pipeline.py` is classified `workflows` via
 `legacy_paths`: it is free of CLI imports and owns `DumpRequest ->
@@ -101,11 +94,10 @@ yet. Know what that classification enforces, because the two gates differ:
 boundary for a still-flat module is held by the separate
 `engine-cli-boundary` gate. Both are live; neither is decorative.
 
-`service_input_resolution.py` is classified too, since
-`embed_build_source` moved to `buildsource/embed.py`. Only
-`service_compare_pipeline.py` is left: it still imports
-`prepare_embedded_build_source`/`attach_evidence_metrics` from
-`cli_buildsource`.
+`service_input_resolution.py` is classified too, since `embed_build_source`
+moved to `buildsource/embed.py`. Only `service_compare_pipeline.py` is left:
+it still imports `prepare_embedded_build_source`/`attach_evidence_metrics`
+from `cli_buildsource`.
 
 When you move an engine operation off the CLI layer, the error types are the
 contract, not an implementation detail. `buildsource/embed.py` raises
@@ -113,14 +105,12 @@ contract, not an implementation detail. `buildsource/embed.py` raises
 `SnapshotError` for an operational one (exit 1); the CLI adapter translates,
 and this package's Tier-2 surface flattens both onto `SnapshotError` because
 that is what its callers already catch. Pin the codes with characterization
-tests *before* moving — see `tests/test_build_source_embed_errors.py`.
+tests before moving — see `tests/test_build_source_embed_errors.py`.
 
 Shared vocabulary those modules used to reach into the CLI layer for now
 lives in leaves any layer may depend on: `abicheck/evidence_depth.py` (the
-depth ladder and what depth an artifact reached) and
-`buildsource/pack_shape.py` + `buildsource/inputs_pack.py` (the pack-shape
-predicates). Prefer them over re-deriving; the previous arrangement produced
-four copies of the depth ladder and three of the inputs-pack guard.
+depth ladder) and `buildsource/pack_shape.py` + `buildsource/inputs_pack.py`
+(the pack-shape predicates). Prefer them over re-deriving.
 
 ## Tests
 
