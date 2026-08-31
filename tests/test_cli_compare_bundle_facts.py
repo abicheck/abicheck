@@ -1051,3 +1051,99 @@ class TestCompareOldBundleFactsEarlyRejections:
 
         assert code == 64
         assert "--require-complete-analysis" in out
+
+    def test_dwarf_only_is_rejected(self, tmp_path: Path) -> None:
+        # Codex review: --dwarf-only/--debug-format/--debuginfod/
+        # --debug-root select or locate NEW-side debug info, but
+        # compare_release_against_bundle_facts()'s per-library
+        # service.resolve_input() call is never given any of them.
+        facts_path = tmp_path / "old.bundlefacts.json"
+        facts_path.write_text("{}")
+        new_dir = tmp_path / "new"
+        new_dir.mkdir()
+
+        code, out = _invoke(
+            "compare",
+            str(facts_path),
+            str(new_dir),
+            "--old-bundle-facts",
+            "--dwarf-only",
+            "--format",
+            "json",
+        )
+
+        assert code == 64
+        assert "--dwarf-only" in out
+
+    def test_pattern_verdicts_is_rejected(self, tmp_path: Path) -> None:
+        # Codex review: pattern-verdict modulation and surface-metric
+        # findings are both computed inside service.compare_snapshots(),
+        # but the per-library call here never passes pattern_verdicts/
+        # surface_metrics -- always False regardless of the flag.
+        facts_path = tmp_path / "old.bundlefacts.json"
+        facts_path.write_text("{}")
+        new_dir = tmp_path / "new"
+        new_dir.mkdir()
+
+        code, out = _invoke(
+            "compare",
+            str(facts_path),
+            str(new_dir),
+            "--old-bundle-facts",
+            "--pattern-verdicts",
+            "--format",
+            "json",
+        )
+
+        assert code == 64
+        assert "--pattern-verdicts" in out
+
+    def test_config_debug_block_is_rejected(self, tmp_path: Path) -> None:
+        facts_path = tmp_path / "old.bundlefacts.json"
+        facts_path.write_text("{}")
+        new_dir = tmp_path / "new"
+        new_dir.mkdir()
+        config_path = tmp_path / ".abicheck.yml"
+        config_path.write_text("debug:\n  dwarf_only: true\n")
+
+        code, out = _invoke(
+            "compare",
+            str(facts_path),
+            str(new_dir),
+            "--old-bundle-facts",
+            "--config",
+            str(config_path),
+            "--format",
+            "json",
+        )
+
+        assert code == 64
+        assert "debug:" in out
+
+    def test_auto_discovered_config_severity_block_is_rejected(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # Codex review: with no explicit --config at all, run_compare's own
+        # cfg_path still falls back to the cwd-upward auto-discovered
+        # .abicheck.yml (discover_project_config()) -- compare.py's
+        # --old-bundle-facts branch previously never did this, so an
+        # auto-discovered config's severity:/scope:/etc. blocks (and even
+        # its compile: block) were silently invisible to this mode.
+        facts_path = tmp_path / "old.bundlefacts.json"
+        facts_path.write_text("{}")
+        new_dir = tmp_path / "new"
+        new_dir.mkdir()
+        (tmp_path / ".abicheck.yml").write_text("severity:\n  preset: strict\n")
+        monkeypatch.chdir(tmp_path)
+
+        code, out = _invoke(
+            "compare",
+            str(facts_path),
+            str(new_dir),
+            "--old-bundle-facts",
+            "--format",
+            "json",
+        )
+
+        assert code == 64
+        assert "severity:" in out

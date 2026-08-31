@@ -48,9 +48,15 @@
   `--reconcile-build-context`, `--diagnostic-comparison`,
   `--audit-suppressions`, `--require-complete-analysis`) are now rejected
   explicitly, reusing the same guard the live release fan-out applies to a
-  directory/package operand. An explicit `--config` whose `severity:`/
-  `scope:`/`suppression:`/`exit_code_scheme:` blocks would otherwise be
-  silently unapplied (only `compile:` reaches this mode) is now rejected
-  too. A comparison where nothing in NEW_INPUT matches any library in
-  OLD_FACTS's stored facts is now a clean error instead of a `NO_CHANGE`
-  verdict for a comparison that never actually ran.
+  directory/package operand. A project config — an explicit `--config`, or
+  (matching `run_compare`'s own fallback) the nearest `.abicheck.yml`
+  auto-discovered upward from the current directory when no `--config` is
+  given at all — whose `severity:`/`scope:`/`suppression:`/
+  `exit_code_scheme:`/`debug:` blocks would otherwise be silently unapplied
+  (only `compile:` reaches this mode) is now rejected too, and so are
+  `--debug-format`/`--dwarf-only`/`--debuginfod`/`--debuginfod-url`/
+  `--debug-root` and `--pattern-verdicts`/`--explain-patterns`/
+  `--surface-metrics` as explicit CLI flags. A comparison where nothing in
+  NEW_INPUT matches any library in OLD_FACTS's stored facts is now a clean
+  error instead of a `NO_CHANGE` verdict for a comparison that never
+  actually ran.

@@ -68,14 +68,22 @@ release fan-out applies to a directory/package operand) are rejected
 explicitly rather than silently ignored, since none of them have a channel
 into ``compare_release_against_bundle_facts()`` -- the same "reject rather
 than silently diverge from the request" rule ``--dry-run``/``--contract``
-already follow below. An explicit ``--config`` is checked the same way: a
-``.abicheck.yml`` whose ``severity:``/``scope:``/``suppression:``/
-``exit_code_scheme:`` blocks would otherwise be silently unapplied (only its
-``compile:`` block reaches ``resolve_compile_context``) is rejected rather
-than partially honored. A zero-match comparison (nothing in NEW_INPUT's
-canonical library keys overlaps OLD_FACTS's ``per_library_snapshots``) is a
-``ClickException``, not a ``NO_CHANGE`` verdict -- exit 0 must mean a real
-comparison found nothing broken, not that nothing was compared at all.
+already follow below. ``--debug-format``/``--dwarf-only``/``--debuginfod``/
+``--debuginfod-url``/``--debug-root`` and ``--pattern-verdicts``/
+``--explain-patterns``/``--surface-metrics`` are rejected the same way --
+none of them have a parameter on ``compare_release_against_bundle_facts()``
+or its per-library ``service.resolve_input()``/``service.compare_snapshots()``
+calls either. ``kwargs["config"]`` -- an explicit ``--config``, or (since a
+later review round) the same cwd-upward auto-discovered ``.abicheck.yml``
+``run_compare``'s own ``cfg_path`` falls back to -- is checked the same way:
+a config whose ``severity:``/``scope:``/``suppression:``/
+``exit_code_scheme:``/``debug:`` blocks are set would otherwise be silently
+unapplied (only its ``compile:`` block reaches ``resolve_compile_context``)
+is rejected rather than partially honored. A zero-match comparison (nothing
+in NEW_INPUT's canonical library keys overlaps OLD_FACTS's
+``per_library_snapshots``) is a ``ClickException``, not a ``NO_CHANGE``
+verdict -- exit 0 must mean a real comparison found nothing broken, not that
+nothing was compared at all.
 """
 
 from __future__ import annotations
@@ -306,6 +314,42 @@ def dispatch(*, compile_context: Any, **kwargs: Any) -> None:
         raise click.UsageError(
             "--debug-info is not supported together with --old-bundle-facts."
         )
+    if (
+        kwargs.get("debug_format_opt") is not None
+        or kwargs.get("debug_format") is not None
+        or kwargs.get("dwarf_only") is True
+        or kwargs.get("debuginfod") is True
+        or kwargs.get("debuginfod_url") is not None
+        or kwargs.get("debug_roots")
+        or kwargs.get("debug_roots_old")
+        or kwargs.get("debug_roots_new")
+    ):
+        # Codex review: these control which NEW-side ELF/DWARF facts get
+        # extracted (--debug-format/--dwarf-only select the debug-info
+        # source; --debuginfod/--debuginfod-url and --debug-root locate
+        # separate debug files), but compare_release_against_bundle_facts()
+        # calls service.resolve_input() with none of them -- always its own
+        # defaults, regardless of what was requested here. Rejected rather
+        # than silently comparing a different ABI surface than asked for.
+        raise click.UsageError(
+            "--debug-format/--dwarf-only/--debuginfod/--debuginfod-url/"
+            "--debug-root are not supported together with --old-bundle-facts."
+        )
+    if (
+        kwargs.get("pattern_verdicts")
+        or kwargs.get("explain_patterns")
+        or kwargs.get("surface_metrics")
+    ):
+        # Codex review: pattern-verdict modulation and surface-metric
+        # findings are both computed inside service.compare_snapshots()
+        # (ADR-027), but compare_release_against_bundle_facts()'s
+        # per-library call never passes pattern_verdicts/surface_metrics --
+        # always False, so a requested modulation or metric-drift finding
+        # silently never happens even though the CLI accepted the flag.
+        raise click.UsageError(
+            "--pattern-verdicts/--explain-patterns/--surface-metrics are "
+            "not supported together with --old-bundle-facts."
+        )
     depth = kwargs.get("depth")
     if depth in ("build", "source"):
         # Codex review: run_compare's own --depth build/source dial collects
@@ -332,17 +376,20 @@ def dispatch(*, compile_context: Any, **kwargs: Any) -> None:
         raise click.UsageError(
             "--no-bundle-analysis is not supported together with --old-bundle-facts."
         )
+    # Codex review: kwargs["config"] is compare.py's own resolved value --
+    # an explicit --config, or (since a later review round) the same
+    # cwd-upward auto-discovered .abicheck.yml run_compare's own cfg_path
+    # falls back to (discover_project_config()) when no --config was given
+    # at all. Either way it is consumed only as resolve_compile_context's
+    # build_config (compile: block merging) -- the same non-compile
+    # settings --severity-preset/--pack/--no-scope-public-headers are
+    # rejected for as explicit CLI flags (severity:/exit_code_scheme:/
+    # scope:/suppression:) can also be declared in the config file itself,
+    # with no CLI flag needed, and were silently unapplied through that
+    # channel too. Reject rather than silently diverge, the same bar every
+    # other flag/config combination in this dispatcher is held to.
     config_path = kwargs.get("config")
     if config_path is not None:
-        # Codex review: an explicit --config is consumed only as
-        # resolve_compile_context's build_config (compile: block merging)
-        # -- the same non-compile settings --severity-preset/--pack/
-        # --no-scope-public-headers are rejected for as explicit CLI flags
-        # (severity:/exit_code_scheme:/scope:/suppression:) can also be
-        # declared in the config file itself, with no CLI flag needed, and
-        # were silently unapplied through that channel too. Reject rather
-        # than silently diverge, the same bar every other flag/config
-        # combination in this dispatcher is held to.
         from ....workflows.extraction import load_build_config
 
         try:
@@ -371,6 +418,21 @@ def dispatch(*, compile_context: Any, **kwargs: Any) -> None:
             _unsupported_config_blocks.append("suppression:")
         if _bc.exit_code_scheme_explicit:
             _unsupported_config_blocks.append("exit_code_scheme:")
+        if any(
+            getattr(_bc, field) is not None
+            for field in (
+                "debug_format",
+                "debug_dwarf_only",
+                "debug_debuginfod",
+                "debug_debuginfod_url",
+            )
+        ):
+            # Same root cause as the --debug-format/--dwarf-only/
+            # --debuginfod CLI-flag rejection above: CompileContext (what
+            # this driver actually threads through to service.resolve_input)
+            # has no debug-format/dwarf-only/debuginfod fields at all, CLI
+            # flag or config alike.
+            _unsupported_config_blocks.append("debug:")
         if _unsupported_config_blocks:
             raise click.UsageError(
                 f"{config_path} declares "

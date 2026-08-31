@@ -748,6 +748,7 @@ def compare_cmd(ctx: click.Context, /, **kwargs: Any) -> None:
     # compare_bundle_facts.py's module docstring for why this lives here
     # rather than as a branch inside cli_compare_helpers.run_compare itself.
     if kwargs.pop("old_bundle_facts", False):
+        from ....cli_helpers_compare import discover_project_config
         from ....cli_options import resolve_compile_context
         from .compare_bundle_facts import (
             _resolve_new_side_headers_includes,
@@ -758,18 +759,21 @@ def compare_cmd(ctx: click.Context, /, **kwargs: Any) -> None:
         _header_backend = (
             kwargs.get("new_header_backend") or kwargs.get("header_backend") or "auto"
         )
-        # Resolved here (not inside compare_bundle_facts.dispatch) so that
-        # sibling module never has to import cli_options itself -- see its
-        # own dispatch() docstring for why that import would otherwise pull
-        # it into the pre-existing, allowlisted CLI-registration import
-        # cycle.
+        # Codex review: mirror run_compare's own cwd-upward cfg_path fallback
+        # (_resolve_compare_config) -- resolve_compile_context alone never
+        # auto-discovers without a --sources tree. Overwriting kwargs
+        # ["config"] means dispatch()'s own config check (cli_options is
+        # kept out of that sibling module's own imports -- see its
+        # docstring) covers an auto-discovered .abicheck.yml too.
+        _cfg_path = kwargs.get("config") or discover_project_config()
+        kwargs["config"] = _cfg_path
         _compile_context, _merged_includes = resolve_compile_context(
             ctx,
             sysroot=kwargs.get("sysroot"),
             nostdinc=bool(kwargs.get("nostdinc", False)),
             header_backend=_header_backend,
             includes=tuple(_includes),
-            build_config=kwargs.get("config"),
+            build_config=_cfg_path,
             frontend_context=kwargs.get("frontend_context", "host"),
             compiler_path=kwargs.get("compiler_path"),
             compiler_prefix=kwargs.get("compiler_prefix"),
