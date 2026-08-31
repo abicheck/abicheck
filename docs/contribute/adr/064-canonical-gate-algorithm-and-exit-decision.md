@@ -396,15 +396,26 @@ lands in two stages rather than one atomic change:
       `"ERROR"` verdict and a native `not_comparable` result: two new
       sentinels (`_SCAN_BUDGET_OVERFLOW_VERDICT`/
       `_SCAN_EVIDENCE_CONTRACT_ERROR_VERDICT` in `workflows/aggregate/
-      contracts.py`) force a blocking `GateInfo` (exit 5/1,
-      `blocking_categories=("budget_overflow",)`/`("evidence_contract_
-      error",)`) before the generic verdict-parsing branch, the same
-      "real failure, never silently tolerated" treatment `_OPERATIONAL_
-      ERROR_VERDICT` already gets — unlike `_BOOTSTRAP_VERDICT`/
-      `_NEW_TARGET_VERDICT`, which are legitimately-tolerated fall-throughs.
-      Verified against the real end-to-end path this time, not just the two
-      readers: `tests/test_aggregate_migration_coverage.py` exercises
-      `_load_report_file` directly, and `tests/
+      contracts.py`) force a blocking `GateInfo` before the generic
+      verdict-parsing branch, the same "real failure, never silently
+      tolerated" treatment `_OPERATIONAL_ERROR_VERDICT` already gets —
+      unlike `_BOOTSTRAP_VERDICT`/`_NEW_TARGET_VERDICT`, which are
+      legitimately-tolerated fall-throughs. **A same-day follow-up caught
+      this forced gate's own `exit_code`:** the first cut hardcoded scan's
+      raw private code (5 for budget overflow) straight into the forced
+      `GateInfo`, bypassing `GateInfo.from_scan_report`'s own normalization
+      (every scan exit outside `{0, 2, 4}` folds to `1`,
+      `COVERAGE_INCOMPLETE_EXIT`) — the aggregate's own published contract
+      has no exit 5, so this leaked scan's numbering into
+      `AggregateResult.exit_code` (Codex review, fresh evidence: a legacy
+      scan payload with the same verdict already correctly returned 1,
+      while the new sentinel branch returned 5 for the identical failure).
+      Fixed by using `COVERAGE_INCOMPLETE_EXIT` for both abort verdicts'
+      gate `exit_code` (still `blocking_categories=("budget_overflow",)`/
+      `("evidence_contract_error",)`), matching `GateInfo.from_scan_report`'s
+      own rule exactly. Verified against the real end-to-end path this
+      time, not just the two readers: `tests/test_aggregate_migration_
+      coverage.py` exercises `_load_report_file` directly, and `tests/
       test_cli_scan_abort_report.py::TestAbortPayloadThroughRealAggregate`
       runs a real `scan --format json` abort through the real
       `aggregate_reports_dir`. Still open: the release fan-out's

@@ -38,6 +38,7 @@ from .contracts import (
     GateInfo,
 )
 from .gate import (
+    COVERAGE_INCOMPLETE_EXIT,
     _contract_coverage_declared,
     _contract_coverage_exit,
     _contract_coverage_incomplete,
@@ -237,26 +238,31 @@ def _load_report_file(path: Path, *, prefix: str) -> _LoadedReport:
     # verdictless report a required-target policy could silently tolerate
     # (Codex review, fresh evidence: neither string is a `Verdict` member,
     # so this function never even reached `GateInfo.from_scan_report` for
-    # these before this branch existed).
-    _scan_abort_gates = {
-        _SCAN_BUDGET_OVERFLOW_VERDICT: (5, "budget_overflow"),
-        _SCAN_EVIDENCE_CONTRACT_ERROR_VERDICT: (1, "evidence_contract_error"),
+    # these before this branch existed). The gate's own `exit_code` is
+    # `COVERAGE_INCOMPLETE_EXIT` (1), never scan's raw private code (5 for
+    # budget overflow) -- `GateInfo.from_scan_report` already normalizes
+    # every scan exit outside {0, 2, 4} to this same value, and the
+    # aggregate's own published contract has no exit 5 (Codex review, fresh
+    # evidence: this branch bypassed that reader and leaked scan's own
+    # numbering into `AggregateResult.exit_code`).
+    _scan_abort_categories = {
+        _SCAN_BUDGET_OVERFLOW_VERDICT: "budget_overflow",
+        _SCAN_EVIDENCE_CONTRACT_ERROR_VERDICT: "evidence_contract_error",
     }
     raw_scan_verdict = data.get("verdict")
-    scan_abort = (
-        _scan_abort_gates.get(raw_scan_verdict)
+    scan_abort_category = (
+        _scan_abort_categories.get(raw_scan_verdict)
         if isinstance(raw_scan_verdict, str)
         else None
     )
-    if scan_abort is not None:
-        abort_exit_code, abort_category = scan_abort
+    if scan_abort_category is not None:
         return _LoadedReport(
             target_id=target_id,
             verdict=Verdict.BREAKING,
             gate=GateInfo(
-                exit_code=abort_exit_code,
+                exit_code=COVERAGE_INCOMPLETE_EXIT,
                 blocking=True,
-                blocking_categories=(abort_category,),
+                blocking_categories=(scan_abort_category,),
                 from_report=True,
             ),
             library=data.get("library"),

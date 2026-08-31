@@ -298,7 +298,10 @@ class TestAbortPayloadThroughRealAggregate:
             reports_dir,
             expected=ExpectedTargets.from_lists(["linux-x86_64"], []),
         )
-        assert result.exit_code() == 5
+        # 1, not scan's own raw 5 -- the aggregate's published contract has
+        # no exit 5; GateInfo.from_scan_report normalizes every scan exit
+        # outside {0, 2, 4} to 1, and the forced abort gate must match.
+        assert result.exit_code() == 1
         assert "linux-x86_64" in result.blocking_targets
 
     def test_evidence_contract_error_report_blocks_a_required_target(

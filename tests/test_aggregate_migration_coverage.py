@@ -69,14 +69,14 @@ def test_not_comparable_report_preserves_declared_contract_coverage(
 
 
 @pytest.mark.parametrize(
-    ("verdict", "exit_code", "category"),
+    ("verdict", "report_exit_code", "category"),
     [
         ("BUDGET_OVERFLOW", 5, "budget_overflow"),
         ("EVIDENCE_CONTRACT_ERROR", 1, "evidence_contract_error"),
     ],
 )
 def test_scan_abort_verdicts_force_a_blocking_gate(
-    tmp_path: Path, verdict: str, exit_code: int, category: str
+    tmp_path: Path, verdict: str, report_exit_code: int, category: str
 ) -> None:
     """`scan`'s own two abort verdicts aren't `Verdict` members, so without
     dedicated handling `_load_report_file` never reaches `GateInfo.from_
@@ -84,6 +84,13 @@ def test_scan_abort_verdicts_force_a_blocking_gate(
     succeeds) -- the abort would read as an unavailable/verdictless report
     a required-target policy could silently tolerate, instead of the real
     failure it is (Codex review, fresh evidence).
+
+    The gate's own `exit_code` is always `1` (`COVERAGE_INCOMPLETE_EXIT`),
+    never *report_exit_code* itself -- `GateInfo.from_scan_report` already
+    normalizes every scan exit outside {0, 2, 4} to that value, and the
+    aggregate's own published contract has no exit 5 (Codex review, fresh
+    evidence: an earlier revision leaked scan's raw budget-overflow code
+    straight into the aggregate result).
     """
     report = tmp_path / "abi-report-linux.json"
     report.write_text(
@@ -91,8 +98,8 @@ def test_scan_abort_verdicts_force_a_blocking_gate(
             {
                 "scan_schema_version": "1.23",
                 "verdict": verdict,
-                "exit_code": exit_code,
-                "diff": {"exit": {"code": exit_code, "reasons": [category]}},
+                "exit_code": report_exit_code,
+                "diff": {"exit": {"code": report_exit_code, "reasons": [category]}},
             }
         ),
         encoding="utf-8",
@@ -106,5 +113,5 @@ def test_scan_abort_verdicts_force_a_blocking_gate(
     assert loaded.reason is None
     assert loaded.gate is not None
     assert loaded.gate.blocking is True
-    assert loaded.gate.exit_code == exit_code
+    assert loaded.gate.exit_code == 1
     assert loaded.gate.blocking_categories == (category,)
