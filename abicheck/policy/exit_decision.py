@@ -198,8 +198,11 @@ class ExitDecision:
     the two ADR-064 resolvers sets *at most one* of these four to a
     nonzero value (they are mutually exclusive by construction -- each
     corresponds to one precedence-ordered early-return branch, never two
-    at once, and never with `operational_error_contribution`), and that
-    value is always `code` itself: each of those axes' real numeric code
+    at once; a preserved, non-deciding `operational_error_contribution`
+    may still accompany one of them -- `resolve_release_exit_decision`'s
+    `not_comparable` and severity-scheme removed-library branches both do
+    this, see their own comments), and that value is always `code` itself:
+    each of those axes' real numeric code
     (`1`/`5`/`6`/`8`/`16`) is chosen large enough that it always exceeds
     whatever the other fields could independently contribute (`0`-`4`), so
     recording a "prior" or already-available value there alongside a

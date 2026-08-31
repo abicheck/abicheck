@@ -151,11 +151,14 @@ Today's contract (`docs/reference/exit-codes.md`'s release table,
 already encodes a real behavioural switch that `ExitDecision`'s resolver
 must reproduce exactly, not collapse into one row:
 
-- **Legacy scheme** (no severity map in effect): an ABI/API break or an
-  operational `ERROR` wins; removed-library (`8`) is checked only when
-  neither applies.
-- **Severity-aware scheme** (a severity map is in effect): removed-library
-  (`8`) takes precedence over the aggregated `0/1/2/4`.
+- **Legacy scheme** (the *resolved* scheme is compatibility-based for this
+  run — either no severity map is in effect, or, until stage 2 removes it,
+  `--exit-code-scheme legacy` was explicitly forced despite one): an
+  ABI/API break or an operational `ERROR` wins; removed-library (`8`) is
+  checked only when neither applies.
+- **Severity-aware scheme** (the *resolved* scheme is severity-based —
+  a severity map is in effect and nothing forced the other way):
+  removed-library (`8`) takes precedence over the aggregated `0/1/2/4`.
 
 An earlier draft of the plan this ADR formalizes gave removed-library a
 fixed rank; a review round against `scan_engine.py`/`cli_compare_release*.py`
@@ -252,10 +255,12 @@ alongside the flag deletion itself.
 
 - `ExitReason` gains members for the three new axes (naming to match
   `abicheck/scan_engine.py`'s existing verdict strings —
-  `EVIDENCE_CONTRACT_ERROR`, a budget-overflow reason, `NOT_COMPARABLE`) and
-  a `removed_required_library` reason whose precedence the resolver
-  computes according to the mode-dependent rule above, not a static
-  ordering table.
+  `EVIDENCE_CONTRACT_ERROR`, a budget-overflow reason, `NOT_COMPARABLE`), a
+  `removed_required_library` reason whose precedence the resolver computes
+  according to the mode-dependent rule above, not a static ordering table,
+  and an `operational_error` reason for a release's own independent,
+  tie-foldable axis (a library's dump/extract/compare failure, distinct
+  from a real compatibility-gate finding even when both happen to tie).
 - `docs/reference/exit-codes.md` is updated, once the atomic stage lands, to
   state precedence via a link to this ADR's table instead of the prose
   spread across the `compare` (multi-library), `scan`, and `scan --against`
