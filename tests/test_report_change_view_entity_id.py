@@ -390,10 +390,17 @@ def _change_attrs_read(
     stack-based traversal does not yield nodes in source order, so a
     multi-hop chain like ``first = change; second = first`` could reach
     ``second = first`` before ``first`` was itself tracked -- a fixed
-    point makes the result independent of traversal order entirely) -- a
+    point makes the result independent of traversal order entirely). Also
+    tracks a ``match``/``case`` bare capture pattern (Codex review, fresh
+    evidence, fourteenth round: ``match change: case candidate: return
+    candidate.future_field`` binds ``candidate`` to the whole subject
+    value -- a distinct binding form from ``Assign``/``AnnAssign``/
+    ``NamedExpr``, unconditional since a bare-name capture pattern always
+    matches) -- only the simple top-level ``case NAME:`` shape is
+    recognized, not a capture nested inside a class/sequence/mapping
+    pattern, matching this helper's existing "small, targeted" scope. A
     conditional reassignment or an alias shadowed by a later unrelated
-    rebinding is still not modeled, matching this helper's existing
-    "small, targeted" scope.
+    rebinding is still not modeled either.
     """
     key = (func_name, param_name)
     if key in visited:
@@ -438,6 +445,23 @@ def _change_attrs_read(
                 ):
                     tracked.add(node.target.id)
                     changed = True
+            elif isinstance(node, ast.Match):
+                match_subject = _unwrap_transparent(node.subject)
+                if (
+                    isinstance(match_subject, ast.Name)
+                    and match_subject.id in tracked
+                    and match_subject.id not in shadowed
+                ):
+                    for case in node.cases:
+                        pattern = case.pattern
+                        if (
+                            isinstance(pattern, ast.MatchAs)
+                            and pattern.pattern is None
+                            and pattern.name is not None
+                            and pattern.name not in tracked
+                        ):
+                            tracked.add(pattern.name)
+                            changed = True
     attrs: set[str] = set()
     for node, shadowed in _iter_scope_aware(func):
         if isinstance(node, ast.Attribute):
@@ -961,5 +985,28 @@ def test_change_attrs_read_tracks_a_walrus_alias_for_a_later_separate_read() -> 
         if isinstance(node, ast.FunctionDef)
     }
     assert _change_attrs_read("outer", "change", nested_funcs, set()) == {
+        "future_field"
+    }
+
+
+def test_change_attrs_read_tracks_a_match_case_capture_alias() -> None:
+    """Codex review, fresh evidence, fourteenth round: `match change: case
+    candidate: return candidate.future_field` binds `candidate` to the
+    whole subject value via a bare capture pattern -- a distinct binding
+    form the alias-tracking fixed-point pass didn't recognize at all
+    (only `Assign`/`AnnAssign`/`NamedExpr`), so this read was missed
+    entirely."""
+    source = (
+        "def outer(change):\n"
+        "    match change:\n"
+        "        case candidate:\n"
+        "            return candidate.future_field\n"
+    )
+    funcs_by_name = {
+        node.name: node
+        for node in ast.walk(ast.parse(source))
+        if isinstance(node, ast.FunctionDef)
+    }
+    assert _change_attrs_read("outer", "change", funcs_by_name, set()) == {
         "future_field"
     }
