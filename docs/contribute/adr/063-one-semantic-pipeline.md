@@ -617,7 +617,9 @@ ADR-061 Phase 5 migration to `model.graph_facts`/`graph_identity`/
 `graph_vocabulary`, with `buildsource/graph_facts.py` now a back-compat
 re-export shim (Status note above) — already is exactly the
 producer-agnostic node/edge/evidence-merge primitive this decision needs,
-today used only to build the optional L5 source/build-evidence graph. D5
+today used to build the optional L5 source/build-evidence graph and,
+independently, `impact/consumer_graph.py`'s/`impact/use_cases.py`'s own
+consumer-impact graph (CodeRabbit review, PR #958). D5
 reuses that already-relocated primitive directly (ADR-061's own
 task-routing table already names `model/` as owning "an ABI entity/value
 shared across stages") and builds the public-surface graph as
