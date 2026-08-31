@@ -69,11 +69,12 @@ explicitly rather than silently ignored, since none of them have a channel
 into ``compare_release_against_bundle_facts()`` -- the same "reject rather
 than silently diverge from the request" rule ``--dry-run``/``--contract``
 already follow below. ``--debug-format``/``--dwarf-only``/``--debuginfod``/
-``--debuginfod-url``/``--debug-root`` and ``--pattern-verdicts``/
-``--explain-patterns``/``--surface-metrics`` are rejected the same way --
-none of them have a parameter on ``compare_release_against_bundle_facts()``
-or its per-library ``service.resolve_input()``/``service.compare_snapshots()``
-calls either. ``kwargs["config"]`` -- an explicit ``--config``, or (since a
+``--debuginfod-url``/``--debug-root``, ``--pattern-verdicts``/
+``--explain-patterns``/``--surface-metrics``, ``--probe-matrix``, and
+``--post-manifest`` are rejected the same way -- none of them have a
+parameter on ``compare_release_against_bundle_facts()`` or its per-library
+``service.resolve_input()``/``service.compare_snapshots()`` calls either.
+``kwargs["config"]`` -- an explicit ``--config``, or (since a
 later review round) the same cwd-upward auto-discovered ``.abicheck.yml``
 ``run_compare``'s own ``cfg_path`` falls back to -- is checked the same way:
 a config whose ``severity:``/``scope:``/``suppression:``/
@@ -293,6 +294,28 @@ def dispatch(*, compile_context: Any, **kwargs: Any) -> None:
             "together with --old-bundle-facts: this driver has no channel "
             "for inline build/source evidence on either side."
         )
+    if (
+        kwargs.get("probe_matrix_old") is not None
+        or kwargs.get("probe_matrix_new") is not None
+    ):
+        # Codex review: the ordinary single-pair/release paths fold
+        # --probe-matrix's build-configuration-drift findings (e.g.
+        # CXX_STANDARD_FLOOR_RAISED) into the comparison and verdict, but
+        # this dispatch never loads or forwards probe_matrix_old/
+        # probe_matrix_new -- silently never folded.
+        raise click.UsageError(
+            "--probe-matrix is not supported together with --old-bundle-facts."
+        )
+    if kwargs.get("post_manifest_path") is not None:
+        # Codex review: --post-manifest's public_surface_allowlist is
+        # applied by passing post_manifest_path through to each
+        # service.compare_snapshots() call -- compare_release_against_
+        # bundle_facts() has no such parameter, so a private POST symbol
+        # the manifest would scope out of the surface stays in the finding
+        # set/verdict regardless.
+        raise click.UsageError(
+            "--post-manifest is not supported together with --old-bundle-facts."
+        )
     if kwargs.get("scope_public_headers") is False:
         # Codex review, same root cause: --no-scope-public-headers has no
         # channel into compare_release_against_bundle_facts() either (the
@@ -409,7 +432,16 @@ def dispatch(*, compile_context: Any, **kwargs: Any) -> None:
             )
         ):
             _unsupported_config_blocks.append("severity:")
-        if _bc.scope_public is not None:
+        if (
+            _bc.scope_public is not None
+            or _bc.collapse_versioned_symbols is not None
+            or _bc.public_symbols
+        ):
+            # Codex review, fresh evidence: BuildConfig's scope: block
+            # parses public/collapse_versioned_symbols/public_symbols as
+            # three independent fields -- a config setting only the latter
+            # two (scope_public left None) previously passed this check
+            # unrejected even though neither is applied here either.
             _unsupported_config_blocks.append("scope:")
         if (
             _bc.suppression_strict is not None

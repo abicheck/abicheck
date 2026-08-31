@@ -59,4 +59,10 @@
   `--surface-metrics` as explicit CLI flags. A comparison where nothing in
   NEW_INPUT matches any library in OLD_FACTS's stored facts is now a clean
   error instead of a `NO_CHANGE` verdict for a comparison that never
-  actually ran.
+  actually ran. `--probe-matrix` and `--post-manifest` are now rejected
+  explicitly too, for the same reason as the other single-pair-only/no-
+  channel flags above. The project-config `scope:` block rejection now
+  checks all three of its independent fields (`public`,
+  `collapse_versioned_symbols`, `public_symbols`) instead of only
+  `public` -- a config setting only the latter two previously passed the
+  check unrejected even though neither is applied in this mode either.
