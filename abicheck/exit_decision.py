@@ -21,6 +21,14 @@ Every name this module used to define is re-exported here by value -- see
 ``abicheck/severity.py``'s own shim docstring for why a plain static
 import, not a lazy ``__getattr__``, is the right shape here. New code
 should import from ``abicheck.policy.exit_decision`` directly.
+
+``resolve_scan_exit_decision``/``resolve_release_exit_decision`` did not
+exist at the time of that migration -- they were added directly to
+:mod:`abicheck.policy.exit_decision_precedence`, a sibling module ADR-064
+introduced later purely to keep the combined implementation under this
+package's 800-line production cap (see that module's own docstring). This
+shim still re-exports both, since a flat-path caller has no reason to know
+which of the two policy-package modules a given name physically lives in.
 """
 
 from __future__ import annotations
@@ -31,10 +39,16 @@ from .policy.exit_decision import (
     resolve_compare_exit_decision,
     resolve_exit_decision,
 )
+from .policy.exit_decision_precedence import (
+    resolve_release_exit_decision,
+    resolve_scan_exit_decision,
+)
 
 __all__ = [
     "ExitDecision",
     "ExitReason",
     "resolve_compare_exit_decision",
     "resolve_exit_decision",
+    "resolve_release_exit_decision",
+    "resolve_scan_exit_decision",
 ]
