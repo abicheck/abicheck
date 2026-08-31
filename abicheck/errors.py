@@ -124,6 +124,25 @@ class ManifestValidationError(AbicheckError, ValueError):
     """
 
 
+class AmbiguousLibraryMatchError(AbicheckError, ValueError):
+    """Raised by :func:`abicheck.binary_utils.build_match_map` when two or
+    more candidate files for one canonical library key are indistinguishable
+    except by storage encoding (e.g. a plain ``libfoo.abicheck.json`` and a
+    stale ``.gz``/``.zst`` sibling left over from a previous release, ADR-059)
+    -- there is no information left in the filename to break the tie
+    correctly, so this fails closed instead of guessing (Codex review, PR
+    #699, second round on the same fix).
+
+    A plain :class:`AbicheckError`/:class:`ValueError`, not a CLI-specific
+    exception: :func:`build_match_map` is a pure matching primitive with
+    callers outside any Click command (e.g. ``bundle_side_input.py``).
+    ``cli_helpers_compare._build_match_map`` -- the CLI-facing wrapper every
+    ``compare``/``compare-release`` call site already used before this
+    class existed -- catches this and re-raises ``click.ClickException``
+    with the identical message, so no existing CLI-facing behavior changes.
+    """
+
+
 class TuMergeError(SnapshotError):
     """Raised by :func:`abicheck.tu_merge.merge_fragments` when two
     translation-unit fragments from one manifest-driven dump declare the

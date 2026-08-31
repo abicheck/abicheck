@@ -19,4 +19,9 @@
   `suppress` parameter, forwarded to each per-library `service.
   compare_snapshots()` call — previously this driver had no way to honor a
   caller's suppression list at all, unlike every other comparison entry point
-  in this codebase.
+  in this codebase. `--old-bundle-facts` now also rejects `--dry-run` and
+  `--contract` explicitly (exit 64) instead of silently ignoring them, merges
+  `.abicheck.yml`'s `compile.include_dirs` into the NEW side's header search
+  the same way every other `compare` dispatch path does, and reports a
+  malformed `OLD_FACTS` document as a clean CLI error instead of a raw
+  traceback.

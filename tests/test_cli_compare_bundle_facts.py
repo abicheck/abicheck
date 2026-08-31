@@ -322,3 +322,115 @@ class TestCompareOldBundleFacts:
 
         assert code == 64
         assert "--bundle-facts-out" in out
+
+
+class TestCompareOldBundleFactsEarlyRejections:
+    """The four Codex-review fixes: checks that must fire before any real
+    facts loading/comparison happens, so none of them need a real gcc-built
+    bundle -- a placeholder OLD_INPUT/NEW_INPUT pair is enough to prove the
+    checks run early, unlike the ``TestCompareOldBundleFacts`` class above.
+    """
+
+    def test_dry_run_is_rejected(self, tmp_path: Path) -> None:
+        facts_path = tmp_path / "old.bundlefacts.json"
+        facts_path.write_text("{}")
+        new_dir = tmp_path / "new"
+        new_dir.mkdir()
+
+        code, out = _invoke(
+            "compare",
+            str(facts_path),
+            str(new_dir),
+            "--old-bundle-facts",
+            "--dry-run",
+            "--format",
+            "json",
+        )
+
+        assert code == 64
+        assert "--dry-run" in out
+
+    def test_contract_is_rejected(self, tmp_path: Path) -> None:
+        facts_path = tmp_path / "old.bundlefacts.json"
+        facts_path.write_text("{}")
+        new_dir = tmp_path / "new"
+        new_dir.mkdir()
+
+        code, out = _invoke(
+            "compare",
+            str(facts_path),
+            str(new_dir),
+            "--old-bundle-facts",
+            "--contract",
+            "public",
+            "--format",
+            "json",
+        )
+
+        assert code == 64
+        assert "--contract" in out
+
+    def test_malformed_old_facts_json_is_a_clean_error(self, tmp_path: Path) -> None:
+        facts_path = tmp_path / "malformed.json"
+        facts_path.write_text("not json{")
+        new_dir = tmp_path / "new"
+        new_dir.mkdir()
+
+        code, out = _invoke(
+            "compare",
+            str(facts_path),
+            str(new_dir),
+            "--old-bundle-facts",
+            "--format",
+            "json",
+        )
+
+        assert code == 1
+        assert "Traceback" not in out
+
+    def test_includes_from_config_are_merged_and_forwarded(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # Codex review: dispatch() used to re-derive `includes` from the raw
+        # CLI kwargs instead of the compile-context-resolved, config-merged
+        # list -- so a `.abicheck.yml` `compile.include_dirs` entry was
+        # silently dropped for --old-bundle-facts even though it reached
+        # every other compare dispatch path. Proven directly by monkeypatching
+        # the real dispatch() out and capturing what compare_cmd forwards to
+        # it, rather than indirectly through a full gcc-built bundle: what
+        # matters here is the kwargs handoff in compare.py, not
+        # compare_release_against_bundle_facts's own behavior (already
+        # covered by TestCompareOldBundleFacts above).
+        facts_path = tmp_path / "old.bundlefacts.json"
+        facts_path.write_text("{}")
+        new_dir = tmp_path / "new"
+        new_dir.mkdir()
+        config_path = tmp_path / ".abicheck.yml"
+        extra_include = tmp_path / "extra_include"
+        extra_include.mkdir()
+        config_path.write_text(f"compile:\n  include_dirs:\n    - {extra_include}\n")
+
+        from abicheck.frontends.cli.commands import compare_bundle_facts
+
+        captured: dict[str, object] = {}
+
+        def _fake_dispatch(*, compile_context: object, **kwargs: object) -> None:
+            captured["includes"] = kwargs.get("includes")
+
+        monkeypatch.setattr(compare_bundle_facts, "dispatch", _fake_dispatch)
+
+        code, _out = _invoke(
+            "compare",
+            str(facts_path),
+            str(new_dir),
+            "--old-bundle-facts",
+            "--config",
+            str(config_path),
+            "--format",
+            "json",
+        )
+
+        assert code == 0
+        forwarded_includes = captured.get("includes")
+        assert forwarded_includes is not None
+        assert extra_include in forwarded_includes  # type: ignore[operator]

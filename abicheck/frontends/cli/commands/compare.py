@@ -775,6 +775,15 @@ def compare_cmd(ctx: click.Context, /, **kwargs: Any) -> None:
             compiler_prefix=kwargs.get("compiler_prefix"),
             compiler_option_tokens=tuple(kwargs.get("compiler_option_tokens") or ()),
         )
+        # Forward the *merged* include list (Codex review), not the raw
+        # kwargs `resolve_compile_context` was given -- when `.abicheck.yml`
+        # supplies `compile.include_dirs`, `_merged_includes` is `_includes`
+        # extended with those config-derived roots, and the side-scoped
+        # `new_includes_only` override (already folded into `_includes`
+        # above) would otherwise make `dispatch()`'s own independent
+        # re-derivation from raw kwargs silently drop them.
+        kwargs["includes"] = tuple(_merged_includes)
+        kwargs["new_includes_only"] = ()
         dispatch_bundle_facts(compile_context=_compile_context, **kwargs)
         return
     kwargs.pop("max_json_object_nodes", None)

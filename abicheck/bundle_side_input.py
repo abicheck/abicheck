@@ -377,9 +377,9 @@ def compare_release_against_bundle_facts(
     from .bundle_facts import compare_bundle_from_facts
     from .bundle_manifest import load_manifest
     from .bundle_models import BundleSignatureEvidence
-    from .cli_helpers_compare import _build_match_map
     from .package import discover_shared_libraries
     from .serialization import load_bundle_facts
+    from .workflows.extraction import build_match_map
 
     old_facts = load_bundle_facts(old_facts_path, max_json_object_nodes=max_json_object_nodes)
 
@@ -388,12 +388,18 @@ def compare_release_against_bundle_facts(
     else:
         new_files = [new_dir]
     # Version-aware duplicate resolution (the same rule the live release
-    # fan-out uses -- `cli_compare_release.py`'s own `_build_match_map`
-    # call), rather than a plain last-write-wins dict build: a directory
-    # carrying more than one version of a library (e.g. `libfoo.so.9` and
-    # `libfoo.so.10`) must not silently resolve to whichever sorts last
-    # lexicographically (Codex review).
-    new_map, _match_warnings = _build_match_map(new_files)
+    # fan-out uses -- `cli_compare_release.py`'s own `_build_match_map`,
+    # itself now a thin `click.ClickException`-translating wrapper over this
+    # same `binary_utils.build_match_map` primitive), rather than a plain
+    # last-write-wins dict build: a directory carrying more than one version
+    # of a library (e.g. `libfoo.so.9` and `libfoo.so.10`) must not silently
+    # resolve to whichever sorts last lexicographically (Codex review). Calls
+    # the pure, Click-free primitive directly (ADR-061: this module is
+    # classified `workflows`, which may not import the `frontends`-legacy
+    # `cli_helpers_compare.py`) -- an `AmbiguousLibraryMatchError` here
+    # propagates as a plain Python exception, appropriate for a module with
+    # callers outside any Click command.
+    new_map, _match_warnings = build_match_map(new_files)
 
     per_library_results: list[DiffResult] = []
     new_signature_evidence: dict[str, BundleSignatureEvidence] = {}

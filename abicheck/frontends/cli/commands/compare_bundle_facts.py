@@ -99,20 +99,20 @@ def dispatch(*, compile_context: Any, **kwargs: Any) -> None:
     ``import-cycle-growth`` gate, AGENTS.md: never extend the allowlist
     reactively).
     """
-    # Resolved via importlib rather than a static `from ....bundle_side_input
-    # import ...` (mirroring cli_buildsource.py's own PEP 562 shim -- see its
-    # module comment): bundle_side_input transitively imports `service`,
+    # bundle_side_input.py is classified `workflows` (architecture/
+    # modules.yaml) -- `frontends -> workflows` is a legal edge
+    # (`may_import: [model, workflows, report]`), so this is no longer an
+    # architecture-boundary workaround. Resolved via importlib rather than a
+    # static `from ....bundle_side_input import ...` purely for the
+    # AI-readiness `import-cycle-growth` gate, which is unrelated to package
+    # classification: bundle_side_input transitively imports `service`,
     # which is itself already inside the pre-existing, allowlisted CLI-
     # registration import cycle (service -> ... -> cli_compare_helpers ->
     # frontends.cli.commands.compare). This call is already deferred to
-    # dispatch-time either way; importlib just keeps the AST-level scans
-    # (scripts/check_ai_readiness.py's import-cycle-growth gate and
-    # scripts/check_architecture.py's unclassified-import gate --
-    # bundle_side_input.py is a legacy, unclassified root module, so a
-    # static import here would also be a `frontends` package importing
-    # outside its `may_import: [model, workflows, report]` allowance -- both
-    # walk every import regardless of nesting) from registering a static
-    # edge for a dependency this call already only reaches at dispatch time.
+    # dispatch-time either way; importlib just keeps that AST-level scan
+    # (which walks every import regardless of nesting, static or lazy) from
+    # registering a static edge that would pull this module into that cycle
+    # (AGENTS.md: never extend that allowlist reactively).
     import importlib
 
     compare_release_against_bundle_facts = importlib.import_module(
@@ -144,6 +144,27 @@ def dispatch(*, compile_context: Any, **kwargs: Any) -> None:
             "--bundle-facts-out is not supported together with "
             "--old-bundle-facts: the OLD side is already a stored facts "
             "document, so there is nothing new to persist from it."
+        )
+    if kwargs.get("dry_run"):
+        # Codex review: without this, --dry-run silently ran the full
+        # comparison anyway (load OLD_FACTS, discover/extract every matching
+        # NEW library, diff, render, exit normally) -- the exact cost
+        # --dry-run promises to skip, and especially costly for the large
+        # bundles this whole flag exists for. Rejected rather than given a
+        # real resolve-and-validate-only rendering of its own in this PR.
+        raise click.UsageError(
+            "--dry-run is not supported together with --old-bundle-facts."
+        )
+    if kwargs.get("contract_mode") is not None:
+        # Codex review: compare_release_against_bundle_facts() has no
+        # contract-evaluation parameter at all, so --contract was silently
+        # accepted and ignored -- every per-library comparison ran with
+        # contract evaluation off regardless of the requested domain,
+        # producing a different finding set/verdict/exit code than asked
+        # for with no indication anything was skipped. Rejected rather than
+        # silently unscoped.
+        raise click.UsageError(
+            "--contract is not supported together with --old-bundle-facts."
         )
 
     headers, includes = _resolve_new_side_headers_includes(kwargs)
@@ -183,11 +204,20 @@ def dispatch(*, compile_context: Any, **kwargs: Any) -> None:
             include_dependencies=bool(kwargs.get("include_dependencies", False)),
             max_json_object_nodes=kwargs.get("max_json_object_nodes"),
         )
-    except SnapshotError as exc:
+    except (SnapshotError, ValueError) as exc:
         # Same CLI-boundary translation every other SnapshotError-raising
         # entry point uses (cli_resolve.py et al.) -- without this, a
         # container-node-budget rejection (or any other SnapshotError) would
         # surface as a raw Python traceback instead of a clean CLI error.
+        # Also catches ValueError (Codex review): a malformed-but-parseable
+        # OLD_FACTS document -- missing/wrong-shaped 'per_library_snapshots',
+        # a bad 'filesystem_aliases'/'library_filenames' entry
+        # (bundle_facts_serialization.bundle_facts_from_dict and
+        # storage.bundle_facts_validation's validators all raise plain
+        # ValueError, not SnapshotError, for these) -- would otherwise leak
+        # the same raw traceback. json.JSONDecodeError (genuinely malformed
+        # JSON, from the plain-JSON load path) is itself a ValueError
+        # subclass, so it's covered by the same clause.
         raise click.ClickException(str(exc)) from exc
 
     text = _render(result, fmt, old_facts_path=old_facts_path, new_dir=new_dir)

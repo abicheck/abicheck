@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import re
 import struct
+from functools import partial
 from pathlib import Path
 
 # ``strip_vendor_hash``'s real home is ``model/binary_naming.py`` (ADR-061
@@ -377,3 +378,121 @@ def _canonical_library_key(path: Path) -> str:
     if represented.endswith(".dylib"):
         return represented_cased
     return name
+
+
+def _version_sort_key(
+    path: Path, canonical_key: str
+) -> tuple[list[tuple[int, int | str]], str]:
+    """Build a version-aware sort key for ambiguous library candidates.
+
+    Uses the vendor-hash-stripped name (G9) so an auditwheel/delocate content
+    hash never enters the comparison — otherwise the hash's digits/letters can
+    outrank the real SONAME version tokens and :func:`build_match_map` picks a
+    stale duplicate over the newer one (Codex review, PR #551).
+
+    Lives here (not ``cli_helpers_compare.py``, which re-exports it for
+    back-compat, mirroring :func:`_canonical_library_key`'s own precedent) so
+    ``bundle_side_input.py``'s stored-facts driver (ADR-061: classified
+    ``workflows``, which may not import a ``frontends``-legacy module) can
+    use it directly.
+    """
+    lower = strip_vendor_hash(path.name.lower())
+    # ADR-059 (Codex review): strip a compressed snapshot's storage suffix
+    # (".json.gz"/".json.zst") up front, before anything else touches
+    # `lower` -- _canonical_library_key already groups a plain and a
+    # compressed snapshot of the same release under one bucket, but this
+    # function ranks candidates *within* that bucket to pick which one
+    # wins, and `lower` feeds both the token comparison below AND the
+    # raw-string tie-break returned at the end. Left unstripped, a ".gz"/
+    # ".zst" tail becomes an extra alphabetic sort token (and an
+    # alphabetically-later raw string) that always outranks a plain
+    # ".json" -- and ".zst" always outranks ".gz" -- regardless of which
+    # file is actually current. A stale compressed sibling left over from
+    # a previous release could then silently win over a freshly-written
+    # plain/differently-compressed snapshot. (Two candidates differing
+    # only by encoding now reduce to the same sort key -- genuinely
+    # ambiguous, indistinguishable from the filename alone, and already
+    # surfaced by `build_match_map`'s own "Ambiguous match" warning for
+    # any multi-candidate bucket.)
+    from .snapshot_io import _COMPRESSED_SUFFIXES
+
+    for suffix, _compression in _COMPRESSED_SUFFIXES:
+        if lower.endswith(suffix):
+            lower = lower[: -len(suffix[len(".json") :])]
+            break
+    remainder = lower
+    if canonical_key.endswith(".so") and canonical_key in lower:
+        remainder = lower[lower.find(canonical_key) + len(canonical_key) :]
+    # strip known wrapper extensions for snapshots/dumps
+    for suffix in (".json", ".pl", ".pm"):
+        if remainder.endswith(suffix):
+            remainder = remainder[: -len(suffix)]
+            break
+    remainder = remainder.lstrip("._-")
+    tokens = re.findall(r"\d+|[a-z]+", remainder)
+    parsed: list[tuple[int, int | str]] = []
+    for tok in tokens:
+        if tok.isdigit():
+            parsed.append((1, int(tok)))
+        else:
+            parsed.append((0, tok))
+    return parsed, lower
+
+
+def build_match_map(paths: list[Path]) -> tuple[dict[str, Path], list[str]]:
+    """Build key->path map with version-aware duplicate resolution.
+
+    Raises :class:`~abicheck.errors.AmbiguousLibraryMatchError` for a genuine
+    top-of-ranking tie (Codex review, PR #699, second round on the same fix):
+    stripping a compressed snapshot's storage suffix (ADR-059) from the sort
+    key makes two candidates differing *only* by encoding -- e.g. a plain
+    ``libfoo.abicheck.json`` and a stale ``libfoo.abicheck.json.zst`` left
+    over from a previous release -- reduce to an *identical* sort key, not
+    merely "multiple candidates present". ``sorted()``'s stability then
+    means the winner is decided by each candidate's position in the
+    original, lexically-sorted input list -- itself alphabetically biased
+    toward whichever compression suffix sorts last (``.zst`` after ``.gz``
+    after plain) -- so silently picking ``ordered[-1]`` and only warning
+    would deterministically prefer a stale compressed sibling over a newer
+    one every time. There is no information left in the filename to break a
+    genuine tie correctly, so this fails closed instead of guessing; a real
+    multi-version bucket (each candidate's sort key genuinely differs) is
+    unaffected and still resolves with a warning, exactly as before.
+
+    A plain, Click-free primitive (see :class:`~abicheck.errors.
+    AmbiguousLibraryMatchError`'s own docstring for why) -- lives here, not
+    ``cli_helpers_compare.py``, so ``bundle_side_input.py`` can call it
+    without a ``frontends``-legacy import (ADR-061: ``workflows`` may not
+    import ``frontends``). ``cli_helpers_compare._build_match_map`` is now a
+    thin wrapper translating :class:`AmbiguousLibraryMatchError` into
+    ``click.ClickException`` with the identical message, so every existing
+    CLI-facing caller (``compare``/``compare-release``) is unaffected.
+    """
+    from .errors import AmbiguousLibraryMatchError
+
+    buckets: dict[str, list[Path]] = {}
+    for p in paths:
+        buckets.setdefault(_canonical_library_key(p), []).append(p)
+
+    mapping: dict[str, Path] = {}
+    warnings: list[str] = []
+    for key, vals in buckets.items():
+        # `partial` binds this iteration's key rather than closing over the
+        # loop variable (the sort runs eagerly here, but the explicit binding
+        # keeps that independent of when the key function is called).
+        sort_key = partial(_version_sort_key, canonical_key=key)
+        ordered = sorted(vals, key=sort_key)
+        if len(ordered) > 1 and sort_key(ordered[-1]) == sort_key(ordered[-2]):
+            raise AmbiguousLibraryMatchError(
+                f"Ambiguous match for '{key}': {[v.name for v in ordered]} "
+                "are indistinguishable except by storage encoding -- cannot "
+                "tell which is current. Remove the stale duplicate(s), or "
+                "pass the intended file directly instead of a directory."
+            )
+        selected = ordered[-1]
+        mapping[key] = selected
+        if len(ordered) > 1:
+            warnings.append(
+                f"Ambiguous match for '{key}': {[v.name for v in ordered]}; using '{selected.name}'"
+            )
+    return mapping, warnings
