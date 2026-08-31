@@ -105,3 +105,15 @@
   discovery work before being rejected anyway (the CLI-level sibling of the
   `run_scan_set()` fix above). Moved to the top of the function, before any
   discovery work starts.
+- **`dump`/`compare`'s `AnalysisPlanner` check no longer exempts a genuine
+  ``"off"`` collect mode when real headers are present.** A `"off"` collect
+  mode (from raw `depth="binary"`, or an explicit `resolved_collect_mode="off"`
+  override) does not by itself mean `build_info` is never consulted: the L2
+  seed's own independent header-seeding pass
+  (`_seeded_includes_and_compile_context`/`collect_inline_pack`) still
+  consumes it whenever real headers are present, regardless of collect mode
+  — mirroring the identical gap already fixed for `scan_bazel_scoping_failure`.
+  `SidePlan` now carries the side's raw `headers`, and the check exempts
+  `"off"` only when there is no header-seeding consumer (`depth="binary"`
+  still clears headers to empty independent of any override, so that
+  clearing is folded in rather than re-derived).

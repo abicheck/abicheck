@@ -302,6 +302,27 @@ looked like the obvious fix and wasn't.
   test_scan_cli_artifact_set_rejects_bazel_scoping_mismatch_before_discovery`
   pins it, the CLI-level sibling of the eighth round's own
   `test_run_scan_set_rejects_bazel_scoping_mismatch_before_discovery`.
+  **An eleventh review round found the ninth round's own fix (the
+  `resolved_collect_mode` override) was itself incomplete.** Even a genuine
+  `"off"` collect mode — whether from raw `depth="binary"` or from an
+  explicit `resolved_collect_mode="off"` override — does not by itself mean
+  `build_info` is never consulted: the L2 seed's own independent
+  header-seeding pass (`_seeded_includes_and_compile_context`/
+  `collect_inline_pack`) still runs whenever real headers are present,
+  regardless of collect mode — the identical class of gap the seventh round
+  above already fixed for `scan_bazel_scoping_failure` (`headers or
+  collection_for_ci_mode(...)[1]`), just not yet ported to `dump`/`compare`'s
+  own check. Fixed by adding the side's raw `headers` to `SidePlan` and
+  exempting `"off"` only when there is no header-seeding consumer:
+  `depth="binary"` still clears headers to empty independent of any
+  override (`service_compare_evidence._headers` keys off raw depth alone),
+  so that clearing is folded into the effective-headers computation rather
+  than re-derived from collect mode. `tests/test_analysis_plan.py::
+  TestBazelBuildTargetScoping::test_resolved_collect_mode_off_does_not_exempt_real_headers`
+  pins the fixed case (an explicit `"off"` override with real headers and a
+  scoped pre-captured Bazel jsonproto); its sibling
+  `test_resolved_collect_mode_off_with_no_headers_stays_exempt` pins that the
+  headers check doesn't over-reject a genuinely headerless request.
   Historical analysis retained below for the record.
   `BazelAdapter.collect()`'s `self.targets` scoping is applied
   in exactly two places: gating whether a *live* `bazel query` subprocess

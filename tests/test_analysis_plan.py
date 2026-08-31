@@ -291,6 +291,56 @@ class TestBazelBuildTargetScoping:
         plan = AnalysisPlanner.resolve(request)
         assert isinstance(plan, AnalysisPlan)
 
+    def test_resolved_collect_mode_off_does_not_exempt_real_headers(
+        self, tmp_path: Path
+    ):
+        """Codex review, fresh evidence: even a genuine ``"off"`` collect mode
+        (here via an explicit override; ``depth="binary"`` would clear
+        headers to empty and stay exempt) is not enough on its own when real
+        headers are present -- the L2 seed's own independent header-seeding
+        pass (``_seeded_includes_and_compile_context``/``collect_inline_pack``)
+        still consumes ``build_info`` regardless of collect mode, mirroring
+        the identical gap already fixed for ``scan_bazel_scoping_failure``.
+        Exempting this on the strength of collect mode alone would let
+        resolution/``--dry-run`` succeed, then fail later inside
+        ``collect_inline_pack`` as a flattened ``ValidationError`` instead of
+        the promised pre-flight ``PlanningError``."""
+        header = tmp_path / "lib.h"
+        header.write_text("void f();\n", encoding="utf-8")
+        aquery = _write(tmp_path / "aquery.json", _EMPTY_AQUERY)
+        request = DumpRequest(
+            input=InputSpec.of(
+                path=None,
+                headers=[header],
+                sources=tmp_path,
+                build_info=aquery,
+                build_targets=["//:lib"],
+            ),
+            depth="headers",
+            resolved_collect_mode="off",
+        )
+        with pytest.raises(PlanningError):
+            AnalysisPlanner.resolve(request)
+
+    def test_resolved_collect_mode_off_with_no_headers_stays_exempt(
+        self, tmp_path: Path
+    ):
+        """Sibling of the test above: with no real headers, ``"off"`` still
+        exempts -- pins that the headers check above doesn't over-reject."""
+        aquery = _write(tmp_path / "aquery.json", _EMPTY_AQUERY)
+        request = DumpRequest(
+            input=InputSpec.of(
+                path=None,
+                sources=tmp_path,
+                build_info=aquery,
+                build_targets=["//:lib"],
+            ),
+            depth="headers",
+            resolved_collect_mode="off",
+        )
+        plan = AnalysisPlanner.resolve(request)
+        assert isinstance(plan, AnalysisPlan)
+
 
 class TestAnalysisPlanShape:
     def test_dump_plan_carries_one_side_labelled_input(self, tmp_path: Path):

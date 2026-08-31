@@ -157,6 +157,15 @@ class SidePlan:
     #: side, which has no such field) -- when set, it is what actually runs,
     #: overriding whatever ``requested_depth`` alone would resolve to.
     resolved_collect_mode: str | None = None
+    #: The raw, requested ``InputSpec.headers`` -- *not* the effective
+    #: (post depth=binary-clearing) list. Needed because a collect mode of
+    #: ``"off"`` (whether resolved from ``requested_depth`` alone or from an
+    #: explicit ``resolved_collect_mode`` override) does not by itself mean
+    #: ``build_info`` is never consulted: the L2 seed's own independent
+    #: header-seeding pass (``_seeded_includes_and_compile_context`` /
+    #: ``collect_inline_pack``) still runs whenever real headers are present,
+    #: regardless of collect mode.
+    headers: tuple[Path, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -194,6 +203,7 @@ def _side_plan(
         build_targets=side.build_targets,
         gcc_path=gcc_path,
         resolved_collect_mode=resolved_collect_mode,
+        headers=side.headers,
     )
 
 
@@ -307,10 +317,28 @@ def _check_bazel_target_scoping(side: SidePlan) -> PlanningFailure | None:
     # depth, decides whether `build_info` is ever consulted. `compare`
     # sides have no such field (`resolved_collect_mode` stays `None`),
     # so this only changes behavior for `dump`.
-    if side.resolved_collect_mode is not None:
-        if side.resolved_collect_mode == "off":
-            return None
-    elif side.requested_depth is not None and side.requested_depth.lower() == "binary":
+    #
+    # A further Codex round found that even a genuine "off" collect mode
+    # (raw depth=binary, or an explicit resolved_collect_mode="off"
+    # override) is not sufficient on its own: the L2 seed's own independent
+    # header-seeding pass (`_seeded_includes_and_compile_context` /
+    # `collect_inline_pack`) runs whenever real headers are present,
+    # regardless of collect mode -- mirroring `scan_bazel_scoping_failure`'s
+    # own `headers or collection_for_ci_mode(...)[1]` rule above.
+    # `depth="binary"` clears headers to empty before execution
+    # (`service_compare_evidence._headers`) independent of any
+    # `resolved_collect_mode` override, so that clearing is folded into
+    # `effective_headers` here rather than re-derived from collect mode.
+    is_binary = (
+        side.requested_depth is not None and side.requested_depth.lower() == "binary"
+    )
+    effective_headers = () if is_binary else side.headers
+    off = (
+        side.resolved_collect_mode == "off"
+        if side.resolved_collect_mode is not None
+        else is_binary
+    )
+    if off and not effective_headers:
         return None
     return bazel_target_scoping_failure(side.label, side.build_info, side.build_targets)
 
