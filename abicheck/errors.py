@@ -266,6 +266,36 @@ class PackManifestError(AbicheckError, ValueError):
     """
 
 
+class PlanningError(AbicheckError, ValueError):
+    """Raised by :func:`abicheck.workflows.plan.AnalysisPlanner.resolve` when a
+    request cannot be satisfied by any resolved collector/backend combination
+    (ADR-063 D4/Phase 4).
+
+    An :class:`~abicheck.workflows.plan.AnalysisPlan` is built *before* any
+    extraction runs — no collector or header-AST backend has been invoked yet
+    — precisely so a request that names an evidence input a resolved side
+    cannot use is rejected up front, with a named reason, instead of silently
+    accepted and then dropped somewhere inside extraction with no diagnostic
+    at all (the failure mode this decision exists to close; see
+    ``docs/contribute/known-gaps.md``'s ``--build-target`` + pre-captured
+    Bazel ``aquery``/``cquery`` entry for the motivating case).
+
+    Carries every failed requirement found for the request, not only the
+    first — :attr:`failures` is a non-empty tuple of
+    :class:`~abicheck.workflows.plan.PlanningFailure`, each naming what was
+    *requested* and *why* no resolved combination can honour it.
+
+    Inherits ``ValueError`` for the same backward-compatibility reason every
+    other error in this module does — a generic ``except ValueError`` around
+    request resolution still catches it.
+    """
+
+    def __init__(self, failures: tuple[object, ...]) -> None:
+        self.failures = failures
+        message = "; ".join(str(f) for f in failures)
+        super().__init__(f"request cannot be satisfied: {message}")
+
+
 class UseCaseManifestError(AbicheckError, ValueError):
     """Raised by :func:`abicheck.impact.use_cases.load_use_case_manifest` for
     a structurally malformed ``impact-use-cases.yaml`` document (G29 Phase 4

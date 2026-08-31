@@ -277,10 +277,11 @@ def _build_new_snapshot(
     ``run_scan_core``'s own docstring for the full rationale.
     """
     from .api_types import InputSpec
-    from .errors import AbicheckError
+    from .errors import AbicheckError, PlanningError
     from .header_utils import split_public_header_inputs
     from .service_compare_evidence import SideEvidence
     from .workflows.artifact.execute import _resolve_side_snapshot_impl
+    from .workflows.plan import bazel_target_scoping_failure
 
     # L4 replay's own public-header roots, kept deliberately WIDER than the
     # L2/crosscheck-origin provenance set (`public_headers`/`public_header_dirs`
@@ -344,6 +345,8 @@ def _build_new_snapshot(
         dump_manifest=None,
     )
     try:
+        if _bf := bazel_target_scoping_failure("candidate", build_info, build_targets):
+            raise PlanningError((_bf,))  # ADR-063 Phase 4: no AnalysisPlan here to reuse
         return _resolve_side_snapshot_impl(
             side,
             evidence,

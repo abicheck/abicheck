@@ -663,3 +663,41 @@ def test_layer_coverage_to_dict_carries_new_fields():
     assert d["link_units"] == 1
     restored = LayerCoverage.from_dict(d)
     assert restored == row
+
+
+def test_scan_candidate_build_target_with_precaptured_aquery_raises_planning_error(
+    tmp_path: Path,
+):
+    """ADR-063 Phase 4: ``scan --against``'s own candidate resolution
+    (``scan_engine._build_new_snapshot``) has no ``CompareRequest``/
+    ``DumpRequest`` of its own to resolve through ``AnalysisPlanner`` --
+    this pins that it still reuses the identical Bazel-scoping check
+    ``AnalysisPlanner`` runs for ``compare``/``dump``, closing the `scan`
+    half of ``docs/contribute/known-gaps.md``'s ``--build-target`` +
+    pre-captured Bazel jsonproto gap (the ``dump``/``compare`` half is
+    covered by ``tests/test_analysis_plan.py``). Surfaces as a clean
+    ``click.ClickException`` (not a raw ``PlanningError`` traceback), the
+    same translation this function's own ``except AbicheckError`` already
+    applies to every other resolution failure here."""
+    import json
+
+    import click
+
+    from abicheck.scan_engine import _build_new_snapshot
+
+    aquery = tmp_path / "aquery.json"
+    aquery.write_text(
+        json.dumps({"actions": [], "pathFragments": [], "artifacts": [], "targets": []})
+    )
+    with pytest.raises(click.ClickException, match="pre-captured Bazel aquery"):
+        _build_new_snapshot(
+            binary=tmp_path / "libfoo.so",
+            headers=[],
+            includes=[],
+            sources=tmp_path,
+            collect_mode="build",
+            lang="c++",
+            allow_build_query=False,
+            build_info=aquery,
+            build_targets=("//:lib",),
+        )

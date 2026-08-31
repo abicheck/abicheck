@@ -331,8 +331,15 @@ def resolve_dump_request(request: DumpRequest) -> ResolvedDumpRequest:
     from . import service, service_compare_evidence as _sce
     from .api_types import HEADER_AST_FRONTENDS
     from .header_utils import split_public_header_inputs
+    from .workflows.plan import AnalysisPlanner
 
     request.validate()
+    # ADR-063 Phase 4: reject a request no resolved collector/backend
+    # combination can satisfy before any extraction runs (PlanningError),
+    # rather than discovering the gap mid-run or not at all. See
+    # `abicheck.workflows.plan`'s own module docstring for exactly what this
+    # does and does not check.
+    AnalysisPlanner.resolve(request)
     # validate() accepts lang case-insensitively; the ELF dump path does
     # case-sensitive `lang == "c"` checks, so normalise here. `android` (no
     # header-AST path) falls back to "auto" for the binary dump.

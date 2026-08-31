@@ -11096,6 +11096,78 @@ reasons stated above — named explicitly rather than left for a future
 reader to rediscover by re-checking D1's adapter list against the Files
 section.
 
+**Landed (first slice) — one of the two named gaps closed, the other named
+out of scope, not silently dropped.** `abicheck/workflows/plan.py`
+(`AnalysisPlan`/`SidePlan`/`PlanningFailure`/`AnalysisPlanner`) and a new
+`PlanningError` in `abicheck/errors.py`. `AnalysisPlanner.resolve()` is
+wired into `service_compare_pipeline.resolve_compare_request` and
+`service_dump_pipeline.resolve_dump_request` immediately after
+`request.validate()`, before either function invokes a header-AST backend
+or a build-info adapter — the pre-extraction point this phase's own Design
+section requires. The `--build-target` + pre-captured Bazel
+`aquery`/`cquery` gap is closed as "option 2" from its own known-gap entry
+(reject, don't silently scope-miss): `_check_bazel_target_scoping` fires
+when a side's `build_targets` is non-empty and its `build_info` sniffs as a
+Bazel jsonproto (`buildsource.inline.sniff_build_info_format`), and does
+**not** fire for the documented safe workaround (a live `bazel query`, no
+pre-captured file) or for an ordinary, non-Bazel `build_info`. Every
+`service.run_compare()`/`run_compare_request()` caller — the release/bundle
+fan-out's `_run_compare_pair` included, per this phase's own Files-section
+correction above — gets this guarantee for free through the shared
+resolver; `tests/test_analysis_plan.py`'s
+`test_reaches_through_the_shared_resolve_compare_request_chokepoint` proves
+it at that one chokepoint rather than needing a separate release-fan-out
+fixture, since `service.run_compare`'s own keyword surface has no
+parameter to even express `build_targets`/a Bazel `build_info` in the
+first place.
+
+**The known-gap entry names both `dump` and `scan`; both are now closed,
+not only the `resolve_compare_request`/`resolve_dump_request` half.**
+`scan --against`'s own candidate resolution (`scan_engine._build_new_snapshot`)
+builds a raw `InputSpec` directly rather than a `CompareRequest`/
+`DumpRequest`, so it has no `AnalysisPlan` of its own to resolve through —
+checked against the real code rather than assumed closed by the
+`AnalysisPlanner` wiring alone. The check itself is factored into a free
+function, `workflows.plan.bazel_target_scoping_failure(label, build_info,
+build_targets)`, which `_check_bazel_target_scoping` wraps for the
+`AnalysisPlanner` path and which `_build_new_snapshot` now calls directly
+(inside its own existing `try`/`except AbicheckError` block, so a
+`PlanningError` here surfaces as the same clean `click.ClickException`
+every other resolution failure in that function already does) — one
+implementation, two call sites, rather than a second, independently
+maintained copy for `scan`.
+`tests/test_bazel_root_targets.py::test_scan_candidate_build_target_with_precaptured_aquery_raises_planning_error`
+pins this half; the baseline side of `scan --against` was checked and
+found not to reach the Bazel adapter with `build_targets` at all (`--against`
+compares against an already-produced baseline, not a second live build), so
+it needed no equivalent call.
+
+**Not landed in this slice: the second named scenario, and the
+`cli-contract`/`engine-cli-boundary` gate widening.** Re-checked against
+the real code (not assumed from this section's own prose), "a `-H` flag
+accepted by a collect mode that cannot use it" does not correspond to any
+isolated, currently-open known-gap entry — the one real combination
+matching that description (`--depth binary` with an explicit header list,
+which silently clears the headers to `[]`) is intentional, already-shipped,
+reviewed behavior with its own dedicated regression tests
+(`tests/test_cli_scan.py::test_depth_binary_clears_headers_in_scan`,
+`tests/test_service_unit.py::test_depth_binary_clears_headers`,
+`tests/test_typed_dump_request.py`, `tests/test_depth_vocabulary.py`).
+Turning it into a hard `PlanningError` would be an unreviewed behavior
+change to already-tested surface, not a same-phase fix for a documented
+silent failure — named here explicitly, per this file's own governing
+"acknowledged gap over risky reactive patch" convention, rather than
+forced to fit or silently left for a future reader to rediscover. A
+genuinely new, currently-silent "input accepted by a collect mode that
+cannot use it" case would be `AnalysisPlanner`'s second check, whenever one
+is found. The `scripts/check_ai_readiness.py` `cli-contract`/
+`engine-cli-boundary` gate widening this phase's own Files section names is
+also not attempted in this slice: both functions this phase changed are
+already the sole callers `AnalysisPlanner.resolve()` needs to reach through,
+so there is no second, independent call site for either gate to newly
+police yet — a future phase adding one should widen them then, not this
+one preemptively.
+
 ---
 
 ### Phase 5 — the fact/capability registry (generalizes `change_registry.py`)

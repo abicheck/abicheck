@@ -35,7 +35,23 @@ looked like the obvious fix and wasn't.
 - **`--build-target` silently does nothing when combined with a pre-captured
   Bazel `--build-info` (an `aquery`/`cquery` jsonproto), on both `dump` and
   `scan` — investigated, not fixed (Codex review, fresh evidence, P0.2
-  follow-up).** `BazelAdapter.collect()`'s `self.targets` scoping is applied
+  follow-up). Fixed (ADR-063 Phase 4, "option 2" below): the combination now
+  raises a clean usage error instead of silently collecting an unscoped
+  graph.** `abicheck.workflows.plan.bazel_target_scoping_failure()` is the
+  one check both `dump`/`compare` (via `AnalysisPlanner`, wired into
+  `service_dump_pipeline.resolve_dump_request`/`service_compare_pipeline.
+  resolve_compare_request`) and `scan --against`'s own candidate resolution
+  (`scan_engine._build_new_snapshot`, which has no `CompareRequest`/
+  `DumpRequest` of its own to resolve through `AnalysisPlanner` and so calls
+  the same free function directly) now run before collecting anything —
+  `PlanningError`/`click.ClickException` naming the mismatch and the
+  documented workaround, not a silent, unscoped collection. See
+  `abicheck/workflows/plan.py`'s own module docstring and
+  `docs/contribute/adr/063-one-semantic-pipeline.md`'s Phase 4 status entry
+  for what changed and what this fix deliberately does not attempt (option 1
+  below, teaching the adapter to filter an already-parsed graph, remains
+  unimplemented). Historical analysis retained below for the record.
+  `BazelAdapter.collect()`'s `self.targets` scoping is applied
   in exactly two places: gating whether a *live* `bazel query` subprocess
   runs at all (`_resolve`/`_run_bazel`, only reachable when `workspace` is
   given and no pre-captured `aquery=`/`cquery=` path was supplied), and
