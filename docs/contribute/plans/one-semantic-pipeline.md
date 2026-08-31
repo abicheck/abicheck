@@ -9609,6 +9609,34 @@ sibling:
   itself but picking `model.graph_facts` (the real current location) over
   the stale `model.graph` name wherever a later slice writes
   `from abicheck.model.graph import ...`.
+
+  **Applies to every other `model/graph.py` reference below in this same
+  Phase 3 section, not only this bullet's own text** (Codex review on
+  PR #958, catching that the correction above fixed only the one place it
+  was written and left the phase's own "Files" checklist and Phase 10's
+  cleanup-list row still instructing a future implementer to create a new
+  `model/graph.py` and migrate callers to it — actionable checklist items
+  a reader follows literally, unlike this bullet's own prose). Read every
+  `model/graph.py` elsewhere in this Phase 3 section, its own "Files" list,
+  and Phase 10's cleanup list below as `model.graph_facts` (for
+  `GraphNode`/`GraphEdge`/`GraphFact`/`FactConflict`/`merge_graph_facts`/
+  `ensure_facts_and_resolve`/`register_fact`/`edge_relation_key`/
+  `edge_occurrence_id`), `model.graph_identity` (node-id construction/
+  normalization, including `_normalize_if_decl_or_type`), or
+  `model.graph_vocabulary` (`NODE_KINDS`/`EDGE_KINDS`-family constants) as
+  the symbol requires — three already-existing modules, not one new file
+  to create. The "Files" section's own `abicheck/model/graph.py (new...)`
+  entry and its full-dependency-closure reasoning (which symbols must move
+  together) still correctly states what a from-scratch relocation would
+  need; only "new" and the single-file target are stale — every symbol it
+  names already lives in one of the three modules above, so nothing there
+  needs moving again. Phase 10's cleanup-list row is even further stale in
+  a second way: it describes `buildsource/graph_facts.py` as still holding
+  "the original, in-place copies," but that file is already the trimmed
+  re-export shim (confirmed above) — its own residual is narrower than
+  written, just "migrate each of the five listed callers to import from
+  `model.graph_facts` directly," not "wait for a relocation that already
+  happened."
 - **A third, pre-existing graph-shaped module already answers a
   public-surface question independently, and a first draft of this phase
   missed it entirely — `abicheck/surface_graph.py`'s `SurfaceGraph`/
