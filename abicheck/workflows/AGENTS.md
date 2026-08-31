@@ -71,6 +71,27 @@ runtime call, invisible to the static import scans `dependency-direction`
 and `import-cycle-growth` run — rather than a blanket `__getattr__`, which
 would resolve every name as `Any` for external callers (ADR-061).
 
+`input_resolution.py` is a third shape, distinct from both the six
+narrow-surface facades above and `render.py`'s bridge: it is the real
+`resolve_input` implementation (plus `detect_binary_format`,
+`sniff_text_format`, `collect_metadata`, `load_env_matrix`, and their private
+helpers), physically moved here from `abicheck/service.py` (ADR-061 Phase 4,
+service.py thinning slice) rather than left as a flat `legacy_paths` entry —
+every one of its own dependencies was already `model`/`storage`/`extract`/
+`workflows`-classified, so it needed no bridge. `service.py` re-exports these
+names with a plain static import; a test that needs to intercept a call
+`resolve_input` makes *internally* (`run_dump`, `load_snapshot`,
+`detect_binary_format`, `sniff_text_format`) must patch
+`abicheck.workflows.input_resolution.<name>`, not `abicheck.service.<name>`
+— the general rule this file's own "one consequence... worth knowing" note
+above already states, restated here because it is easy to miss for a name
+that still also resolves, unhelpfully, on the old facade. `compare_snapshots`
+and `load_suppression_and_policy` stayed behind in `service.py`: both need
+`PolicyFile`, whose own classification is the open question `policy_file.py`'s
+debt entry and this ADR's Phase 2/4 history already cover — moving them here
+first would just relocate an unresolved dependency-direction problem, not
+close it.
+
 `abicheck/service_dump_pipeline.py` is classified `workflows` via
 `legacy_paths`: it is free of CLI imports and owns `DumpRequest ->
 ResolvedDumpRequest -> DumpResult`, but has not moved into this directory

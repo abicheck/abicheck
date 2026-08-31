@@ -180,7 +180,7 @@ class TestResolveInput:
         p = tmp_path / "lib.so"
         p.write_bytes(b"\x7fELF" + b"\x00" * 100)
         snap = AbiSnapshot(library="test", version="1.0")
-        with patch("abicheck.service.run_dump", return_value=snap) as mock:
+        with patch("abicheck.workflows.input_resolution.run_dump", return_value=snap) as mock:
             result = resolve_input(p, is_elf=True)
         assert result is snap
         mock.assert_called_once()
@@ -189,7 +189,7 @@ class TestResolveInput:
         p = tmp_path / "lib.so"
         p.write_bytes(b"\x7fELF" + b"\x00" * 100)
         snap = AbiSnapshot(library="test", version="1.0")
-        with patch("abicheck.service.run_dump", return_value=snap) as mock:
+        with patch("abicheck.workflows.input_resolution.run_dump", return_value=snap) as mock:
             resolve_input(p, is_elf=True, include_dependencies=False)
         assert mock.call_args.kwargs["include_dependencies"] is False
 
@@ -197,7 +197,7 @@ class TestResolveInput:
         p = tmp_path / "lib.so"
         p.write_bytes(b"\x7fELF" + b"\x00" * 100)
         snap = AbiSnapshot(library="test", version="1.0")
-        with patch("abicheck.service.run_dump", return_value=snap) as mock:
+        with patch("abicheck.workflows.input_resolution.run_dump", return_value=snap) as mock:
             resolve_input(p, is_elf=True)
         assert mock.call_args.kwargs["include_dependencies"] is True
 
@@ -221,7 +221,7 @@ class TestResolveInput:
         p = tmp_path / "lib.so"
         p.write_bytes(b"\x7fELF" + b"\x00" * 100)
         snap = AbiSnapshot(library="test", version="1.0")
-        with patch("abicheck.service.run_dump", return_value=snap) as mock:
+        with patch("abicheck.workflows.input_resolution.run_dump", return_value=snap) as mock:
             resolve_input(p, is_elf=True)
         _, kwargs = mock.call_args
         assert "header_graph" not in kwargs
@@ -233,7 +233,7 @@ class TestResolveInput:
         p = tmp_path / "lib.so"
         p.write_bytes(b"\x7fELF" + b"\x00" * 100)
         snap = AbiSnapshot(library="test", version="1.0")
-        with patch("abicheck.service.run_dump", return_value=snap) as mock:
+        with patch("abicheck.workflows.input_resolution.run_dump", return_value=snap) as mock:
             resolve_input(p)
         _, kwargs = mock.call_args
         assert "header_graph" not in kwargs
@@ -251,7 +251,7 @@ class TestResolveInput:
         script = tmp_path / "libfoo.so"
         script.write_text("INPUT(libfoo.so.1)\n", encoding="utf-8")
         snap = AbiSnapshot(library="test", version="1.0")
-        with patch("abicheck.service.run_dump", return_value=snap) as mock:
+        with patch("abicheck.workflows.input_resolution.run_dump", return_value=snap) as mock:
             resolve_input(script)
         assert mock.call_count == 1
         _, kwargs = mock.call_args
@@ -269,7 +269,7 @@ class TestResolveInput:
         script = tmp_path / "libfoo.so"
         script.write_text("INPUT(libfoo.so.1)\n", encoding="utf-8")
         snap = AbiSnapshot(library="test", version="1.0")
-        with patch("abicheck.service.run_dump", return_value=snap) as mock:
+        with patch("abicheck.workflows.input_resolution.run_dump", return_value=snap) as mock:
             resolve_input(script, include_dependencies=False)
         assert mock.call_count == 1
         _, kwargs = mock.call_args
@@ -431,7 +431,7 @@ class TestResolveInput:
         p = tmp_path / "lib.so"
         p.write_bytes(b"\x7fELF" + b"\x00" * 100)
         snap = AbiSnapshot(library="test", version="1.0")
-        with patch("abicheck.service.run_dump", return_value=snap):
+        with patch("abicheck.workflows.input_resolution.run_dump", return_value=snap):
             result = resolve_input(p)
         assert result is snap
 
@@ -497,14 +497,14 @@ class TestResolveInput:
         p = tmp_path / "snap.json"
         snap = AbiSnapshot(library="test", version="1.0")
         p.write_text('{"library": "test"}')
-        with patch("abicheck.service.load_snapshot", return_value=snap):
+        with patch("abicheck.workflows.input_resolution.load_snapshot", return_value=snap):
             result = resolve_input(p, is_elf=False)
         assert result is snap
 
     def test_json_load_error_wraps_in_snapshot_error(self, tmp_path):
         p = tmp_path / "bad.json"
         p.write_text("{invalid json")
-        with patch("abicheck.service.load_snapshot", side_effect=ValueError("bad")):
+        with patch("abicheck.workflows.input_resolution.load_snapshot", side_effect=ValueError("bad")):
             with pytest.raises(SnapshotError, match="Failed to load JSON"):
                 resolve_input(p, is_elf=False)
 
@@ -512,8 +512,8 @@ class TestResolveInput:
         p = tmp_path / "dump.pl"
         p.write_text("$VAR1 = {};")
         snap = AbiSnapshot(library="test", version="1.0")
-        with patch("abicheck.service.detect_binary_format", return_value=None):
-            with patch("abicheck.service.sniff_text_format", return_value="perl"):
+        with patch("abicheck.workflows.input_resolution.detect_binary_format", return_value=None):
+            with patch("abicheck.workflows.input_resolution.sniff_text_format", return_value="perl"):
                 with patch(
                     "abicheck.compat.abicc_dump_import.import_abicc_perl_dump",
                     return_value=snap,
@@ -524,8 +524,8 @@ class TestResolveInput:
     def test_perl_import_error(self, tmp_path):
         p = tmp_path / "dump.pl"
         p.write_text("$VAR1 = {};")
-        with patch("abicheck.service.detect_binary_format", return_value=None):
-            with patch("abicheck.service.sniff_text_format", return_value="perl"):
+        with patch("abicheck.workflows.input_resolution.detect_binary_format", return_value=None):
+            with patch("abicheck.workflows.input_resolution.sniff_text_format", return_value="perl"):
                 with patch(
                     "abicheck.compat.abicc_dump_import.import_abicc_perl_dump",
                     side_effect=ValueError("parse fail"),
@@ -536,8 +536,8 @@ class TestResolveInput:
     def test_unknown_format_raises(self, tmp_path):
         p = tmp_path / "mystery"
         p.write_text("???")
-        with patch("abicheck.service.detect_binary_format", return_value=None):
-            with patch("abicheck.service.sniff_text_format", return_value="unknown"):
+        with patch("abicheck.workflows.input_resolution.detect_binary_format", return_value=None):
+            with patch("abicheck.workflows.input_resolution.sniff_text_format", return_value="unknown"):
                 with pytest.raises(ValidationError, match="Cannot detect format"):
                     resolve_input(p, is_elf=False)
 
@@ -1785,7 +1785,7 @@ class TestCollectMetadata:
     def test_binary_file(self, tmp_path):
         p = tmp_path / "lib.so"
         p.write_bytes(b"\x7fELF" + b"\x00" * 100)
-        with patch("abicheck.service.sniff_text_format", return_value="unknown"):
+        with patch("abicheck.workflows.input_resolution.sniff_text_format", return_value="unknown"):
             meta = collect_metadata(p)
         assert meta is not None
         assert meta.path == str(p)
@@ -5250,7 +5250,7 @@ class TestRunCompareRequestResolutionParity:
 
     def _stub_dump(self, monkeypatch) -> dict[str, dict[str, object]]:
         """Record resolve_input's debug kwargs per side, without a real parse."""
-        import abicheck.service as service_mod
+        import abicheck.workflows.input_resolution as input_resolution_mod
 
         seen: dict[str, dict] = {}
 
@@ -5261,7 +5261,7 @@ class TestRunCompareRequestResolutionParity:
             }
             return AbiSnapshot(library=Path(path).name, version="x")
 
-        monkeypatch.setattr(service_mod, "run_dump", _fake)
+        monkeypatch.setattr(input_resolution_mod, "run_dump", _fake)
         return seen
 
     def _request(self, tmp_path, **kwargs) -> CompareRequest:
@@ -5376,7 +5376,7 @@ class TestDebugFormatResolution:
         )
 
     def _spy(self, monkeypatch) -> dict[str, object]:
-        import abicheck.service as service_mod
+        import abicheck.workflows.input_resolution as input_resolution_mod
 
         seen: dict[str, object] = {}
 
@@ -5384,7 +5384,7 @@ class TestDebugFormatResolution:
             seen["debug_format"] = kwargs.get("debug_format")
             return AbiSnapshot(library=Path(path).name, version="x")
 
-        monkeypatch.setattr(service_mod, "run_dump", _fake)
+        monkeypatch.setattr(input_resolution_mod, "run_dump", _fake)
         return seen
 
     def test_auto_becomes_none_not_the_literal_string(self, tmp_path, monkeypatch):

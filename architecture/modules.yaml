@@ -392,7 +392,8 @@
     "abicheck.contract_gating",
     "abicheck.dumper_contract",
     "abicheck.errors",
-    "abicheck.reclassify"
+    "abicheck.reclassify",
+    "abicheck.serialization"
   ],
   "facades": [
     "abicheck.aggregate",
