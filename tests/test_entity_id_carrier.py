@@ -373,7 +373,11 @@ class TestCarrierIsPersisted:
     def test_schema_version_moved_to_28(self) -> None:
         from abicheck.serialization import SCHEMA_VERSION
 
-        assert SCHEMA_VERSION == 28
+        # >=, not ==: this pins the floor the entity_id carrier landed at,
+        # not the exact current schema version -- a later, unrelated bump
+        # (e.g. ADR-063 Phase 3's surface_graph field, schema v29) must not
+        # fail this test.
+        assert SCHEMA_VERSION >= 28
 
     def test_pre_v28_snapshot_loads_with_entity_id_none(self) -> None:
         # A legacy snapshot never wrote this key at all -- absence must

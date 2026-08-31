@@ -38,10 +38,14 @@ docstring), which is exactly what makes that key reduce to plain
 ``entity_id.key``. When a declaration's parse-time ``entity_id`` carrier
 is unpopulated (a pre-ADR-063-Phase-2 snapshot, or a kind the header-AST
 backends don't resolve one for yet — see AGENTS.md's own "exhaustive
-``entity_id`` population" open item), this builder falls back to an
-*approximate* identity synthesized from the flattened qualified-name
-string alone — the identical, already-accepted fidelity loss
-``policy.public_surface``'s legacy-snapshot backfill uses, not a new one.
+``entity_id`` population" open item), this builder falls back to a plain
+string node id derived directly from the flattened qualified-name string —
+**not** a synthesized ``EntityId``: ``entity_id_for_*`` may only be called
+by a header-AST producer, the only place a real, typed ``ScopePath``
+exists to build one from (``tests/test_entity_id_carrier.py::
+TestResolverIsOnlyCalledByAProducer`` enforces this repo-wide), and a
+post-parse module recomputing one from a bare string could only ever
+approximate it, which that invariant exists specifically to rule out.
 """
 
 from __future__ import annotations
@@ -50,12 +54,6 @@ import re
 from typing import TYPE_CHECKING
 
 from ..model.graph_facts import GraphEdge, GraphNode
-from ..model.identity import (
-    EntityId,
-    Namespace,
-    entity_id_for_type,
-    entity_id_for_typedef,
-)
 from ..model.occurrence import OccurrenceId, canonical_key
 
 if TYPE_CHECKING:
@@ -63,6 +61,7 @@ if TYPE_CHECKING:
     from ..model.entities import EnumType, RecordType
     from ..model.fact import Fact
     from ..model.graph_facts import SurfaceGraphLike
+    from ..model.identity import EntityId
     from ..model.snapshot import AbiSnapshot
 
 __all__ = ["build_public_surface_facts"]
@@ -126,21 +125,14 @@ def _type_identifiers(type_str: str | None) -> set[str]:
     return out
 
 
-def _approximate_entity_id(
-    qualified_name: str, *, is_typedef: bool = False
-) -> EntityId:
-    """``EntityId`` synthesized from a flattened qualified-name string alone
-    — every segment collapsed to a single untyped ``Namespace``-kind entry,
-    the closest-fitting existing segment type, matching the fidelity of
-    ``policy.public_surface``'s own legacy-snapshot approximate backfill."""
-    parts = [p for p in qualified_name.split("::") if p]
-    if not parts:
-        parts = [qualified_name]
-    leaf = parts[-1]
-    scope = tuple(Namespace(p) for p in parts[:-1])
-    if is_typedef:
-        return entity_id_for_typedef(scope, leaf)
-    return entity_id_for_type(scope, leaf)
+def _approximate_node_id(qualified_name: str, *, is_typedef: bool = False) -> str:
+    """Plain string node id for a declaration/type with no parse-time
+    ``entity_id`` -- the flattened qualified-name string itself, never a
+    synthesized ``EntityId`` (see this module's own docstring for why).
+    ``is_typedef`` namespaces typedef aliases into their own id space so a
+    typedef and an unrelated record/enum sharing one bare spelling (e.g. a
+    ``typedef struct Foo Foo;`` idiom) never collide on the same node id."""
+    return f"typedef::{qualified_name}" if is_typedef else f"approx::{qualified_name}"
 
 
 def _declaration_entity_id(decl: Function | Variable) -> EntityId | None:
@@ -161,6 +153,17 @@ def _fact_list(fact: Fact[list[str]] | None) -> list[str]:
 
 def _node_id(entity_id: EntityId) -> str:
     return canonical_key(OccurrenceId(entity_id))
+
+
+def _node_id_for(entity_id: EntityId | None, qualified_name: str) -> str:
+    """A declaration/type's node id: its real, parse-time ``entity_id`` when
+    populated, else the plain-string approximate fallback (never a
+    synthesized ``EntityId`` -- see this module's own docstring)."""
+    return (
+        _node_id(entity_id)
+        if entity_id is not None
+        else _approximate_node_id(qualified_name)
+    )
 
 
 def _header_node_id(header: str) -> str:
@@ -216,15 +219,13 @@ def _build_type_index(
 
     for rec in types:
         qname = rec.qualified_name or rec.name
-        eid = rec.entity_id or _approximate_entity_id(qname)
-        _register(qname, rec.name, _node_id(eid), qname)
+        _register(qname, rec.name, _node_id_for(rec.entity_id, qname), qname)
     for en in enums:
         qname = en.qualified_name or en.name
-        eid = en.entity_id or _approximate_entity_id(qname)
-        _register(qname, en.name, _node_id(eid), qname)
+        _register(qname, en.name, _node_id_for(en.entity_id, qname), qname)
     for alias in typedefs:
-        eid = _approximate_entity_id(alias, is_typedef=True)
-        _register(alias, alias.rsplit("::", 1)[-1], _node_id(eid), alias)
+        node_id = _approximate_node_id(alias, is_typedef=True)
+        _register(alias, alias.rsplit("::", 1)[-1], node_id, alias)
     return index
 
 
@@ -254,8 +255,7 @@ def build_public_surface_facts(snap: AbiSnapshot, graph: SurfaceGraphLike) -> No
     decl_node_ids: dict[str, str] = {}
 
     for fn in snap.functions:
-        eid = _declaration_entity_id(fn) or _approximate_entity_id(fn.name)
-        node_id = _node_id(eid)
+        node_id = _node_id_for(_declaration_entity_id(fn), fn.name)
         graph.add_node(GraphNode(id=node_id, kind=NODE_KIND_DECLARATION, label=fn.name))
         _add_header_declares(graph, fn.source_header, node_id)
         _add_references(
@@ -265,8 +265,7 @@ def build_public_surface_facts(snap: AbiSnapshot, graph: SurfaceGraphLike) -> No
             decl_node_ids[fn.mangled] = node_id
 
     for var in snap.variables:
-        eid = _declaration_entity_id(var) or _approximate_entity_id(var.name)
-        node_id = _node_id(eid)
+        node_id = _node_id_for(_declaration_entity_id(var), var.name)
         graph.add_node(
             GraphNode(id=node_id, kind=NODE_KIND_DECLARATION, label=var.name)
         )
@@ -277,8 +276,7 @@ def build_public_surface_facts(snap: AbiSnapshot, graph: SurfaceGraphLike) -> No
 
     for rec in snap.types:
         qname = rec.qualified_name or rec.name
-        eid = rec.entity_id or _approximate_entity_id(qname)
-        node_id = _node_id(eid)
+        node_id = _node_id_for(rec.entity_id, qname)
         _add_header_declares(graph, rec.source_header, node_id)
         _add_references(
             graph,
@@ -291,12 +289,10 @@ def build_public_surface_facts(snap: AbiSnapshot, graph: SurfaceGraphLike) -> No
 
     for en in snap.enums:
         qname = en.qualified_name or en.name
-        eid = en.entity_id or _approximate_entity_id(qname)
-        _add_header_declares(graph, en.source_header, _node_id(eid))
+        _add_header_declares(graph, en.source_header, _node_id_for(en.entity_id, qname))
 
     for alias, target in snap.typedefs.items():
-        eid = _approximate_entity_id(alias, is_typedef=True)
-        node_id = _node_id(eid)
+        node_id = _approximate_node_id(alias, is_typedef=True)
         _add_references(graph, node_id, type_index, target)
 
     _add_export_edges(graph, decl_node_ids)

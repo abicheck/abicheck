@@ -41,6 +41,7 @@ from .checker import compare
 from .checker_types import DiffResult
 from .errors import ValidationError
 from .model import AbiSnapshot
+from .policy.public_surface import PublicSurfaceQuery
 
 # `_attach_header_graph` moved to `service_header_graph_attach.py`, purely to
 # stay under the AI-readiness 2000-line hard cap -- the identical reason
@@ -285,6 +286,14 @@ def compare_snapshots(
     through here instead of importing ``checker.compare``; the kwargs mirror the
     core verb exactly so no capability is lost.
 
+    ADR-063 Phase 3 (D5): resolves each side's own public-surface
+    ``EntityId`` set via ``PublicSurfaceQuery().resolve()`` and forwards the
+    pair into :func:`~abicheck.checker.compare` as *old_public_entity_ids*/
+    *new_public_entity_ids* -- ``compare()`` itself never resolves this
+    (``policy/`` -> ``compare/`` stays a one-way edge), so this Tier-2
+    chokepoint is where it happens for every caller that reaches ``compare()``
+    through here, ``service_compare_pipeline.classify_compare_pair`` included.
+
     Raises:
         ValidationError: *contract_mode* is not one of ``public``/``exports``/
             ``all``, or is given without *contract_evaluation*. This is a
@@ -307,6 +316,7 @@ def compare_snapshots(
         public_surface_allowlist = set(
             public_surface_allowlist
         ) | _snapshot_contract_symbols(old)
+    query = PublicSurfaceQuery()
     return compare(
         old,
         new,
@@ -325,6 +335,8 @@ def compare_snapshots(
         diagnostic_comparison=diagnostic_comparison,
         contract_evaluation=contract_evaluation,
         contract_mode=contract_mode,
+        old_public_entity_ids=query.resolve(old),
+        new_public_entity_ids=query.resolve(new),
     )
 
 
