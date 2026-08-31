@@ -2495,12 +2495,26 @@ or version number that already has a fact owner elsewhere").
   resolution here too — not only a new operand-kind branch at the CLI
   layer — or the package-operand half of this phase's own acceptance
   criteria (below) cannot actually pass.
-- A CLI/`.abicheck.yml`-reachable way to declare
+- A CLI-reachable way to declare
   `per_library_headers`/`per_library_includes`/`per_library_compile`
   overrides keyed by canonical library name, reaching the same function's
-  already-shipped parameters — most plausibly a small manifest file (YAML/
-  JSON) rather than a repeatable flag, since a `{library: [header, ...]}`
-  map does not fit Click's single-value option model cleanly.
+  already-shipped parameters — a manifest file (YAML/JSON) named by a new
+  CLI flag, rather than a repeatable flag, since a `{library: [header,
+  ...]}` map does not fit Click's single-value option model cleanly.
+  **Deliberately CLI-only, not a new `.abicheck.yml` block (corrected —
+  Codex review, verified against source):** an earlier version of this
+  bullet said "CLI/`.abicheck.yml`-reachable," but `.abicheck.yml`'s typed
+  `BuildConfig` has a fixed, declared-field set and `resolve_compare_
+  config()` projects only those fields — a genuinely new top-level
+  `.abicheck.yml` block for this map would need real schema/model work,
+  loading and precedence plumbing, and (per `docs/AGENTS.md`'s topic-
+  registration rule for a new config namespace) a `docs/_meta/topics.yaml`
+  entry, none of which this phase scoped or needs to: a manifest *file*
+  named by a CLI flag (mirroring the existing `--manifest` option for the
+  ABI instantiation manifest a few lines below in the same command) covers
+  the same need without touching `BuildConfig` at all. The decode-budget
+  override named below is the same shape and is CLI-flag-only for the
+  identical reason.
 - **Two more corrections from the same review round, both about what sits
   between the new Click branch and `compare_release_against_bundle_facts()`
   — verified against source, both real:**
@@ -2515,11 +2529,32 @@ or version number that already has a fact owner elsewhere").
      unlisted `frontends -> `(flat module) edge the `engine-cli-boundary`
      AI-readiness check exists to catch — not a legacy exception to extend,
      a fresh violation to avoid. This phase's scope therefore includes a
-     new `abicheck.workflows`-owned typed entry point (mirroring how
-     `workflows/input_resolution.py`/`workflows/extraction.py` already
-     wrap other flat engine calls for frontend consumption) that the Click
+     new `abicheck.workflows`-owned typed entry point that the Click
      branch calls into, with the branch itself doing only operand/manifest
-     translation.
+     translation. **Correction, same layer, next review round (Codex,
+     verified against source):** "wrap" understates what this requires.
+     `bundle_side_input.py` is not merely unmigrated — it is architecturally
+     *unclassified* (absent from every `workflows.legacy_paths` list in
+     `architecture/modules.yaml`, and not one of `frontends/AGENTS.md`'s
+     named public-compatibility facades, `service.py`/`cli.py`/
+     `compat/cli.py`), so a new module physically placed under `abicheck/
+     workflows/` cannot import it either — that import is exactly what the
+     `unclassified-import` architecture gate (`scripts/
+     check_architecture.py`) rejects for a migrated layer reaching an
+     unclassified first-party module. `workflows/input_resolution.py`/
+     `workflows/extraction.py` are not a counterexample: they wrap
+     modules `architecture/modules.yaml` already classifies, which
+     `bundle_side_input.py` currently is not. The real fix is the pattern
+     this same codebase already established for an identical situation
+     (ADR-061 Phase 4/5's `serialization.py` → `bundle_facts_
+     serialization.py` split, cited earlier in this document): factor
+     `compare_release_against_bundle_facts()`'s actual implementation into
+     a new module physically inside `abicheck/workflows/`, and leave
+     `bundle_side_input.py`'s own function as a thin delegating shim for
+     existing callers — plus updating `architecture/modules.yaml`'s
+     inventory to record the move. A wrapper around an untouched flat
+     import is not implementable under the current architecture gate;
+     factoring the implementation itself is.
   2. **The release CLI's own exit-code contract must survive the new
      path, not just the comparison.** `compare_release_against_bundle_
      facts()` takes no `fail_on_removed` parameter and returns only a
@@ -2626,8 +2661,9 @@ real mixed-toolchain, multi-library release (oneDAL#3693's own 6-library,
 3-toolchain-lane shape is the concrete target, not a synthetic stand-in)
 can (a) consume a stored OLD-side `BundleFacts` baseline instead of
 reopening OLD `.so` files, and (b) give each library its own header root
-and compile context, entirely from `abicheck compare ...`/`.abicheck.yml` —
-with no committed driver script standing in for either capability. **Third
+and compile context, entirely from `abicheck compare ...` flags (CLI-only,
+per the correction above) — with no committed driver script standing in
+for either capability. **Third
 criterion, added per the review round above (Codex, verified against
 source) and corrected in a later round after the first version of this
 criterion named the wrong direction:** (c) `--fail-on-removed-library`
@@ -2673,9 +2709,10 @@ happy-path invocation:
   blob for a SYCL/DPC++-heavy library can legitimately need well over the
   default budget (`bundle_side_input.py:352-359`) — the same shape as this
   phase's own oneDAL target scenario. This phase's in-scope work therefore
-  includes a CLI flag/`.abicheck.yml` field forwarding that override, not
-  only a test proving the default budget is enforced; otherwise the new
-  CLI surface can reject a legitimate large baseline from exactly the
+  includes a CLI flag forwarding that override (CLI-only, same reasoning
+  as the per-library manifest above), not only a test proving the default
+  budget is enforced; otherwise the new CLI surface can reject a
+  legitimate large baseline from exactly the
   mixed-toolchain workload it exists to serve, with no way for a caller to
   raise the limit the way the Python API already lets them.
 - **Per-library override manifest:** a small-domain enumeration over
