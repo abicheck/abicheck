@@ -1275,20 +1275,16 @@ def _diff_param_defaults(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     the two backends' default VALUE representations are not cross-comparable
     (castxml keeps the real source expression; clang's is a placeholder/
     fingerprint for anything non-trivial), even between two pure
-    single-backend snapshots (a pure ``--ast-frontend clang`` run vs. a pure
-    ``--ast-frontend castxml`` run — ``fact_producer`` returns the producer
-    for those too). Requiring the SAME producer on both sides (not "castxml
-    on both sides", which would wrongly suppress a same-producer
+    single-backend snapshots. Requiring the SAME producer on both sides (not
+    "castxml on both sides", which would wrongly suppress a same-producer
     clang-vs-clang pair) avoids a false CHANGED/REMOVED from a
     representation mismatch while still catching a real change.
 
     The per-pair skip only fires when BOTH producers are POSITIVELY known
-    and DIFFER — never merely because one side's producer is unknown. An
+    and DIFFER, never merely because one side's producer is unknown: an
     unset ``ast_producer`` (a hand-built test snapshot, or a legacy
-    pre-provenance baseline) makes ``fact_producer(...) is None``, so
-    comparing it against a genuinely castxml-backed function is a legitimate
-    same-producer comparison that must not be silently dropped just because
-    one side lacks metadata it never had a chance to record.
+    pre-provenance baseline) must not be silently dropped as a mismatch
+    just because it lacks metadata it never had a chance to record.
 
     A separate, narrower gate protects the VALUE-CHANGED comparison alone
     (Codex review) — see :mod:`diff_default_value_reliability`'s docstring.
@@ -1322,6 +1318,7 @@ def _diff_param_defaults(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
                         detail=str(p_old.name or i),
                         old_value=p_old.default,
                         new_value=None,
+                        entity_id=f_old.entity_id or f_new.entity_id,
                     )
                 )
             elif (
@@ -1341,6 +1338,7 @@ def _diff_param_defaults(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
                         detail=str(p_old.name or i),
                         old_value=p_old.default,
                         new_value=p_new.default,
+                        entity_id=f_old.entity_id or f_new.entity_id,
                     )
                 )
 
@@ -1351,10 +1349,9 @@ def _diff_param_defaults(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
 def _diff_param_renames(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     """Detect parameter renames (same type+position, different name)."""
     changes: list[Change] = []
-    # Require *explicit* header provenance on both sides. A legacy snapshot
-    # predating the from_headers key has it inferred from a populated surface,
-    # which a DWARF-only dump also satisfies — trusting that inference here
-    # reintroduces PARAM_RENAMED/API_BREAK false positives on DWARF baselines.
+    # Require *explicit* header provenance on both sides -- a legacy snapshot's
+    # inferred-from-populated-surface fallback also matches a DWARF-only dump,
+    # which would reintroduce PARAM_RENAMED/API_BREAK false positives.
     if not (old.from_headers and new.from_headers):
         return changes
     if old.from_headers_inferred or new.from_headers_inferred:
@@ -1378,6 +1375,7 @@ def _diff_param_renames(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
                         detail=str(i),
                         old=p_old.name,
                         new=p_new.name,
+                        entity_id=f_old.entity_id or f_new.entity_id,
                     )
                 )
 
@@ -1414,6 +1412,7 @@ def _diff_pointer_levels(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
                     name=f_old.name,
                     old=str(f_old.return_pointer_depth),
                     new=str(f_new.return_pointer_depth),
+                    entity_id=f_old.entity_id or f_new.entity_id,
                 )
             )
 
@@ -1437,6 +1436,7 @@ def _diff_pointer_levels(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
                         detail=str(p_old.name or i),
                         old=str(p_old.pointer_depth),
                         new=str(p_new.pointer_depth),
+                        entity_id=f_old.entity_id or f_new.entity_id,
                     )
                 )
 
@@ -1447,9 +1447,7 @@ def _check_method_access_changes(
     old_map: dict[str, Function],
     new_map: dict[str, Function],
 ) -> list[Change]:
-    """Emit METHOD_ACCESS_CHANGED for narrowing method access transitions,
-    including a ctor/dtor pair only visible via synthetic-key format-drift
-    reconciliation (``iter_matched_function_pairs``, PR #761 finding 2)."""
+    """Emit METHOD_ACCESS_CHANGED for narrowing access transitions, including a ctor/dtor pair only visible via synthetic-key format-drift reconciliation (``iter_matched_function_pairs``, PR #761 finding 2)."""
     changes: list[Change] = []
     for mangled, f_old, f_new in iter_matched_function_pairs(old_map, new_map):
         if f_old.access != f_new.access and _is_access_narrowing(
@@ -1462,6 +1460,7 @@ def _check_method_access_changes(
                     name=f_old.name,
                     old=f_old.access.value,
                     new=f_new.access.value,
+                    entity_id=f_old.entity_id or f_new.entity_id,
                 )
             )
     return changes
@@ -1699,14 +1698,13 @@ def _diff_func_deprecated(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     :func:`fact_provenance.both_known_backed_fact` (not the narrower
     ``both_castxml_backed_fact``): both castxml and the direct-clang backend
     populate ``Function.deprecated`` today (G31 Phase C — see
-    ``dumper_clang._clang_deprecated_message``; the clang backend didn't
-    when this detector was first written for PR #582), and the two
-    backends' values are directly cross-comparable (a plain message string,
-    not a backend-specific encoding), so a clang-vs-clang or
-    clang-vs-castxml pair is just as comparable as a castxml-vs-castxml one.
-    A per-pair check (rather than a whole-snapshot gate) also correctly
-    handles a ``--ast-frontend hybrid`` snapshot (G28 Phase 3), where this
-    fact's producer is recorded per *declaration*, not uniformly across the
+    ``dumper_clang._clang_deprecated_message``), and the two backends'
+    values are directly cross-comparable (a plain message string, not a
+    backend-specific encoding), so a clang-vs-clang or clang-vs-castxml
+    pair is just as comparable as a castxml-vs-castxml one. A per-pair
+    check (rather than a whole-snapshot gate) also correctly handles a
+    ``--ast-frontend hybrid`` snapshot (G28 Phase 3), where this fact's
+    producer is recorded per *declaration*, not uniformly across the
     whole snapshot. Looks each side up under ITS OWN ``mangled`` (PR #761
     finding 3): a reconciled ctor/dtor pair's provenance lives under two
     different keys.
@@ -1728,6 +1726,7 @@ def _diff_func_deprecated(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
                     name=f_old.name,
                     detail=f_new.deprecated,
                     new_value=f_new.deprecated,
+                    entity_id=f_old.entity_id or f_new.entity_id,
                 )
             )
         elif f_old.deprecated is not None and f_new.deprecated is None:
@@ -1737,6 +1736,7 @@ def _diff_func_deprecated(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
                     symbol=mangled,
                     name=f_old.name,
                     old_value=f_old.deprecated,
+                    entity_id=f_old.entity_id or f_new.entity_id,
                 )
             )
     return changes
@@ -1753,11 +1753,10 @@ def _diff_func_override_specifier(old: AbiSnapshot, new: AbiSnapshot) -> list[Ch
     override". Gated per-pair on :func:`fact_provenance.both_known_backed_fact`
     (not the narrower ``both_castxml_backed_fact``): G31 Phase C wired real
     ``is_override`` extraction into the direct-clang backend too
-    (``dumper_clang._clang_method_is_override``, matching castxml's own "was
-    `override` written" semantics via clang's ``OverrideAttr`` child node),
-    so this is now a cross-producer, directly-comparable bool, the same
-    shape ``deprecated`` already has. A per-declaration check (not a
-    whole-snapshot gate) is what correctly supports ``--ast-frontend hybrid``.
+    (``dumper_clang._clang_method_is_override``), so this is now a
+    cross-producer, directly-comparable bool, the same shape ``deprecated``
+    already has. A per-declaration check (not a whole-snapshot gate) is
+    what correctly supports ``--ast-frontend hybrid``.
     """
     changes: list[Change] = []
     old_map = _public_functions(old)
@@ -1781,6 +1780,7 @@ def _diff_func_override_specifier(old: AbiSnapshot, new: AbiSnapshot) -> list[Ch
                     name=f_old.name,
                     old_value="no override",
                     new_value="override",
+                    entity_id=f_old.entity_id or f_new.entity_id,
                 )
             )
         else:
@@ -1791,6 +1791,7 @@ def _diff_func_override_specifier(old: AbiSnapshot, new: AbiSnapshot) -> list[Ch
                     name=f_old.name,
                     old_value="override",
                     new_value="no override",
+                    entity_id=f_old.entity_id or f_new.entity_id,
                 )
             )
     return changes

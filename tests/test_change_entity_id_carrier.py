@@ -24,12 +24,17 @@ these tests pin only that the field is populated correctly at emission.
 from __future__ import annotations
 
 from abicheck.checker import ChangeKind, compare
-from abicheck.model import AbiSnapshot, Function, Visibility
+from abicheck.model import AbiSnapshot, Function, Param, Visibility
 from abicheck.model.identity import entity_id_for_function
 
 
-def _snap(functions: list[Function] | None = None) -> AbiSnapshot:
-    return AbiSnapshot(library="libtest.so.1", version="1.0", functions=functions or [])
+def _snap(functions: list[Function] | None = None, **kwargs: object) -> AbiSnapshot:
+    return AbiSnapshot(
+        library="libtest.so.1",
+        version="1.0",
+        functions=functions or [],
+        **kwargs,  # type: ignore[arg-type]
+    )
 
 
 def _func(name: str, mangled: str, **kwargs: object) -> Function:
@@ -147,3 +152,137 @@ class TestChangeEntityIdCarrier:
         new_snap.types = [owner]
         r = compare(old_snap, new_snap)
         assert _change(r, ChangeKind.VIRTUAL_METHOD_ADDED).entity_id == eid  # type: ignore[attr-defined]
+
+    def test_param_default_removed_carries_old_side_entity_id(self) -> None:
+        # Codex review: the auxiliary param/deprecated/override detectors
+        # below (separate @registry.detector functions, not _check_*
+        # matched-pair sites) were fresh omissions from the same carrier
+        # contract -- each gets its own construction-site test here.
+        eid = entity_id_for_function((), "f", mangled_name="_Z1fii")
+        old = _func(
+            "f",
+            "_Z1fii",
+            params=[Param(name="x", type="int", default="1")],
+            entity_id=eid,
+        )
+        new = _func("f", "_Z1fii", params=[Param(name="x", type="int")])
+        r = compare(_snap([old], from_headers=True), _snap([new], from_headers=True))
+        assert _change(r, ChangeKind.PARAM_DEFAULT_VALUE_REMOVED).entity_id == eid  # type: ignore[attr-defined]
+
+    def test_param_default_changed_carries_old_side_entity_id(self) -> None:
+        eid = entity_id_for_function((), "f", mangled_name="_Z1fii")
+        old = _func(
+            "f",
+            "_Z1fii",
+            params=[Param(name="x", type="int", default="1")],
+            entity_id=eid,
+        )
+        new = _func("f", "_Z1fii", params=[Param(name="x", type="int", default="2")])
+        r = compare(_snap([old], from_headers=True), _snap([new], from_headers=True))
+        assert _change(r, ChangeKind.PARAM_DEFAULT_VALUE_CHANGED).entity_id == eid  # type: ignore[attr-defined]
+
+    def test_param_renamed_carries_old_side_entity_id(self) -> None:
+        eid = entity_id_for_function((), "f", mangled_name="_Z1fi")
+        old = _func("f", "_Z1fi", params=[Param(name="x", type="int")], entity_id=eid)
+        new = _func("f", "_Z1fi", params=[Param(name="y", type="int")])
+        r = compare(_snap([old], from_headers=True), _snap([new], from_headers=True))
+        assert _change(r, ChangeKind.PARAM_RENAMED).entity_id == eid  # type: ignore[attr-defined]
+
+    def test_return_pointer_level_changed_carries_old_side_entity_id(self) -> None:
+        eid = entity_id_for_function((), "f", mangled_name="_Z1fv")
+        old = _func(
+            "f", "_Z1fv", return_type="int", return_pointer_depth=1, entity_id=eid
+        )
+        new = _func("f", "_Z1fv", return_type="int", return_pointer_depth=2)
+        r = compare(_snap([old]), _snap([new]))
+        assert _change(r, ChangeKind.RETURN_POINTER_LEVEL_CHANGED).entity_id == eid  # type: ignore[attr-defined]
+
+    def test_param_pointer_level_changed_carries_old_side_entity_id(self) -> None:
+        eid = entity_id_for_function((), "f", mangled_name="_Z1fPi")
+        old = _func(
+            "f",
+            "_Z1fPi",
+            params=[Param(name="x", type="int", pointer_depth=1)],
+            entity_id=eid,
+        )
+        new = _func(
+            "f", "_Z1fPi", params=[Param(name="x", type="int", pointer_depth=2)]
+        )
+        r = compare(_snap([old]), _snap([new]))
+        assert _change(r, ChangeKind.PARAM_POINTER_LEVEL_CHANGED).entity_id == eid  # type: ignore[attr-defined]
+
+    def test_method_access_changed_carries_old_side_entity_id(self) -> None:
+        from abicheck.model import AccessLevel
+
+        eid = entity_id_for_function((), "f", mangled_name="_ZN1C1fEv")
+        old = _func(
+            "C::f",
+            "_ZN1C1fEv",
+            return_type="void",
+            access=AccessLevel.PUBLIC,
+            entity_id=eid,
+        )
+        new = _func("C::f", "_ZN1C1fEv", return_type="void", access=AccessLevel.PRIVATE)
+        r = compare(_snap([old]), _snap([new]))
+        assert _change(r, ChangeKind.METHOD_ACCESS_CHANGED).entity_id == eid  # type: ignore[attr-defined]
+
+    def test_func_deprecated_added_carries_old_side_entity_id(self) -> None:
+        # ast_producer="castxml" (not just from_headers) is what makes
+        # fact_producer() report a positively-known backend -- see its
+        # docstring in fact_provenance.py.
+        eid = entity_id_for_function((), "f", mangled_name="_Z1fv")
+        old = _func("f", "_Z1fv", entity_id=eid)
+        new = _func("f", "_Z1fv", deprecated="use g instead")
+        r = compare(
+            _snap([old], from_headers=True, ast_producer="castxml"),
+            _snap([new], from_headers=True, ast_producer="castxml"),
+        )
+        assert _change(r, ChangeKind.FUNC_DEPRECATED_ADDED).entity_id == eid  # type: ignore[attr-defined]
+
+    def test_func_deprecated_removed_carries_old_side_entity_id(self) -> None:
+        eid = entity_id_for_function((), "f", mangled_name="_Z1fv")
+        old = _func("f", "_Z1fv", deprecated="use g instead", entity_id=eid)
+        new = _func("f", "_Z1fv")
+        r = compare(
+            _snap([old], from_headers=True, ast_producer="castxml"),
+            _snap([new], from_headers=True, ast_producer="castxml"),
+        )
+        assert _change(r, ChangeKind.FUNC_DEPRECATED_REMOVED).entity_id == eid  # type: ignore[attr-defined]
+
+    def test_func_override_specifier_added_carries_old_side_entity_id(self) -> None:
+        eid = entity_id_for_function((), "f", mangled_name="_ZN1C1fEv")
+        old = _func(
+            "C::f",
+            "_ZN1C1fEv",
+            return_type="void",
+            is_virtual=True,
+            is_override=False,
+            entity_id=eid,
+        )
+        new = _func(
+            "C::f", "_ZN1C1fEv", return_type="void", is_virtual=True, is_override=True
+        )
+        r = compare(
+            _snap([old], from_headers=True, ast_producer="castxml"),
+            _snap([new], from_headers=True, ast_producer="castxml"),
+        )
+        assert _change(r, ChangeKind.FUNC_OVERRIDE_SPECIFIER_ADDED).entity_id == eid  # type: ignore[attr-defined]
+
+    def test_func_override_specifier_removed_carries_old_side_entity_id(self) -> None:
+        eid = entity_id_for_function((), "f", mangled_name="_ZN1C1fEv")
+        old = _func(
+            "C::f",
+            "_ZN1C1fEv",
+            return_type="void",
+            is_virtual=True,
+            is_override=True,
+            entity_id=eid,
+        )
+        new = _func(
+            "C::f", "_ZN1C1fEv", return_type="void", is_virtual=True, is_override=False
+        )
+        r = compare(
+            _snap([old], from_headers=True, ast_producer="castxml"),
+            _snap([new], from_headers=True, ast_producer="castxml"),
+        )
+        assert _change(r, ChangeKind.FUNC_OVERRIDE_SPECIFIER_REMOVED).entity_id == eid  # type: ignore[attr-defined]
