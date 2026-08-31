@@ -229,3 +229,73 @@ def test_malformed_prior_contribution_is_ignored_not_trusted(tmp_path: Path) -> 
 
     assert loaded.gate is not None
     assert loaded.gate.exit_code == 1
+
+
+def test_late_budget_overflow_preserves_orthogonal_axes_separately(
+    tmp_path: Path,
+) -> None:
+    """A late abort's preserved `contract_coverage_contribution`/
+    `analysis_assurance_contribution` must reach `_LoadedReport`'s own
+    orthogonal `contract_coverage_exit`/`analysis_assurance_exit` fields,
+    not just the folded gate `exit_code` -- `AggregateResult.
+    contract_coverage_exit`/`.analysis_assurance_exit` (and their own
+    `..._targets` lists) read *these* fields, never the gate, so folding
+    the preserved axes only into the gate left both reading `0` with an
+    empty target list for a report that genuinely declared `1` on each
+    (Codex review, fresh evidence).
+    """
+    report = tmp_path / "abi-report-linux.json"
+    report.write_text(
+        json.dumps(
+            {
+                "scan_schema_version": "1.23",
+                "verdict": "BUDGET_OVERFLOW",
+                "exit_code": 5,
+                "diff": {
+                    "exit": {
+                        "code": 5,
+                        "reasons": ["budget_overflow"],
+                        "budget_overflow_contribution": 5,
+                        "contract_coverage_contribution": 1,
+                        "analysis_assurance_contribution": 1,
+                    }
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    loaded = _load_report_file(report, prefix="abi-report-")
+
+    assert loaded.contract_coverage_exit == 1
+    assert loaded.contract_coverage_incomplete is True
+    assert loaded.contract_coverage_declared is True
+    assert loaded.analysis_assurance_exit == 1
+
+
+def test_late_budget_overflow_orthogonal_axes_default_to_zero_when_absent(
+    tmp_path: Path,
+) -> None:
+    """An early abort (no prior decision at all) must not fabricate a
+    declared contract-coverage/analysis-assurance contribution -- both
+    axes stay at their honest `0`/undeclared defaults, matching the
+    pre-existing behaviour this fix must not regress."""
+    report = tmp_path / "abi-report-linux.json"
+    report.write_text(
+        json.dumps(
+            {
+                "scan_schema_version": "1.23",
+                "verdict": "BUDGET_OVERFLOW",
+                "exit_code": 5,
+                "diff": {"exit": {"code": 5, "reasons": ["budget_overflow"]}},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    loaded = _load_report_file(report, prefix="abi-report-")
+
+    assert loaded.contract_coverage_exit == 0
+    assert loaded.contract_coverage_incomplete is False
+    assert loaded.contract_coverage_declared is False
+    assert loaded.analysis_assurance_exit == 0

@@ -456,7 +456,20 @@ lands in two stages rather than one atomic change:
       preserved contribution from `diff.exit` and folds it with `max()`
       against the coverage floor; an early abort (every contribution
       genuinely `0`) still floors at `1` unchanged, and a malformed/
-      out-of-scheme contribution is ignored rather than trusted. Still open:
+      out-of-scheme contribution is ignored rather than trusted. **(8) An
+      eighth round caught the preserved contract-coverage/analysis-
+      assurance contributions folded into the gate but dropped from their
+      own orthogonal reports:** `AggregateResult.contract_coverage_exit`/
+      `.analysis_assurance_exit` (and their `..._targets` lists) read
+      `_LoadedReport.contract_coverage_exit`/`.analysis_assurance_exit`
+      directly, never the gate -- and those two fields only ever read the
+      differently-named, older `contract_coverage_exit_contribution`/
+      `analysis_assurance_exit_contribution` fields a scan-abort payload
+      never carries, so a late abort that preserved a real `1` on either
+      axis silently reported `0` with an empty target list on both
+      (Codex review, fresh evidence). Fixed via a new `_scan_abort_exit_
+      axis` helper that reads each axis separately from `diff.exit` and
+      folds it into the corresponding `_LoadedReport` field. Still open:
       the release fan-out's `GateOptions` unification and a full
       cross-front-end parity pass (typed API, Action).
 2. **Atomic.** Once the report block agrees with today's real behaviour for

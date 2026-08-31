@@ -163,6 +163,19 @@ def _incomplete_findings(data: dict[str, Any]) -> ReportFindings:
     return replace(parse_report_findings(data), complete=False)
 
 
+def _scan_abort_exit_block(data: Mapping[str, Any]) -> Mapping[str, Any] | None:
+    """A scan abort's own ``diff.exit`` block, or ``None``.
+
+    Shared lookup for :func:`_scan_abort_prior_exit` and
+    :func:`_scan_abort_exit_axis` below -- both read the same
+    ``ExitDecision.to_dict()``-shaped block ``attach_prior_on_budget_
+    overflow`` preserves into a late abort's report.
+    """
+    diff = data.get("diff")
+    exit_block = diff.get("exit") if isinstance(diff, dict) else None
+    return exit_block if isinstance(exit_block, dict) else None
+
+
 def _scan_abort_prior_exit(data: Mapping[str, Any]) -> int:
     """The largest PR-G1 contribution preserved in a scan abort's own
     ``diff.exit``, or ``0``.
@@ -178,9 +191,8 @@ def _scan_abort_prior_exit(data: Mapping[str, Any]) -> int:
     break already found before the abort fired, instead of downgrading it
     to a bare coverage-incomplete ``1`` (Codex review, fresh evidence).
     """
-    diff = data.get("diff")
-    exit_block = diff.get("exit") if isinstance(diff, dict) else None
-    if not isinstance(exit_block, dict):
+    exit_block = _scan_abort_exit_block(data)
+    if exit_block is None:
         return 0
     best = 0
     for key in (
@@ -197,6 +209,28 @@ def _scan_abort_prior_exit(data: Mapping[str, Any]) -> int:
         ):
             best = max(best, raw)
     return best
+
+
+def _scan_abort_exit_axis(data: Mapping[str, Any], key: str) -> tuple[int, bool]:
+    """A single preserved ``0``/``1`` PR-G1 axis from a scan abort's own
+    ``diff.exit`` (*key* is ``"contract_coverage_contribution"`` or
+    ``"analysis_assurance_contribution"``) as ``(value, declared)``.
+
+    Sibling of :func:`_scan_abort_prior_exit`, which folds every preserved
+    axis into one gate-exit ceiling -- these two are reported separately
+    instead (as :attr:`_LoadedReport.contract_coverage_exit`/
+    :attr:`_LoadedReport.analysis_assurance_exit`, ADR-049 Phase 7/P0.4's
+    own orthogonal axes), so folding them into the gate alone left
+    :func:`_contract_coverage_exit`/:func:`_analysis_assurance_exit` reading
+    ``0`` with an empty target list for a late abort that preserved a real
+    ``1`` here -- those two only read the older, differently-named
+    ``contract_coverage_exit_contribution``/``analysis_assurance_exit_
+    contribution`` fields a scan-abort payload never carries at all (Codex
+    review, fresh evidence).
+    """
+    exit_block = _scan_abort_exit_block(data)
+    raw = exit_block.get(key) if exit_block is not None else None
+    return (raw, True) if _is_valid_contribution(raw) else (0, False)
 
 
 def _load_report_file(path: Path, *, prefix: str) -> _LoadedReport:
@@ -310,6 +344,12 @@ def _load_report_file(path: Path, *, prefix: str) -> _LoadedReport:
         else None
     )
     if scan_abort_category is not None:
+        contract_axis, contract_declared = _scan_abort_exit_axis(
+            data, "contract_coverage_contribution"
+        )
+        assurance_axis, _ = _scan_abort_exit_axis(
+            data, "analysis_assurance_contribution"
+        )
         return _LoadedReport(
             target_id=target_id,
             verdict=None,
@@ -323,10 +363,14 @@ def _load_report_file(path: Path, *, prefix: str) -> _LoadedReport:
             head_sha=head_sha,
             reason=f"scan aborted before completing a comparison ({scan_abort_category})",
             path=path,
-            contract_coverage_exit=_contract_coverage_exit(data),
-            contract_coverage_incomplete=_contract_coverage_incomplete(data),
-            contract_coverage_declared=_contract_coverage_declared(data),
-            analysis_assurance_exit=_analysis_assurance_exit(data),
+            contract_coverage_exit=max(_contract_coverage_exit(data), contract_axis),
+            contract_coverage_incomplete=(
+                _contract_coverage_incomplete(data) or contract_axis == 1
+            ),
+            contract_coverage_declared=(
+                _contract_coverage_declared(data) or contract_declared
+            ),
+            analysis_assurance_exit=max(_analysis_assurance_exit(data), assurance_axis),
             # No comparison ran at all -- unlike the operational-error branch
             # above, there is no partial finding set to preserve, and (unlike
             # that branch) this target is not "analyzed" for the finding

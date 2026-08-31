@@ -406,4 +406,45 @@ class TestAbortPayloadThroughRealAggregate:
         )
         assert result.exit_code() == 4
         assert "linux-x86_64" in result.blocking_targets
+
+    def test_late_budget_overflow_orthogonal_axes_through_the_real_aggregate(
+        self, tmp_path
+    ):
+        """A preserved `contract_coverage_contribution`/`analysis_assurance_
+        contribution` must reach `AggregateResult.contract_coverage_exit`/
+        `.analysis_assurance_exit` and their own `..._targets` lists, not
+        just the folded gate -- otherwise a matrix build with `--contract`/
+        `--require-complete-analysis` selected silently loses this target
+        from both orthogonal reports (Codex review, fresh evidence)."""
+        from abicheck.aggregate import ExpectedTargets, aggregate_reports_dir
+
+        reports_dir = tmp_path / "reports"
+        reports_dir.mkdir()
+        (reports_dir / "abi-report-linux-x86_64.json").write_text(
+            json.dumps(
+                {
+                    "scan_schema_version": "1.23",
+                    "verdict": "BUDGET_OVERFLOW",
+                    "exit_code": 5,
+                    "diff": {
+                        "exit": {
+                            "code": 5,
+                            "reasons": ["budget_overflow"],
+                            "budget_overflow_contribution": 5,
+                            "contract_coverage_contribution": 1,
+                            "analysis_assurance_contribution": 1,
+                        }
+                    },
+                }
+            )
+        )
+
+        result = aggregate_reports_dir(
+            reports_dir,
+            expected=ExpectedTargets.from_lists(["linux-x86_64"], []),
+        )
+        assert result.contract_coverage_exit == 1
+        assert "linux-x86_64" in result.contract_coverage_targets
+        assert result.analysis_assurance_exit == 1
+        assert "linux-x86_64" in result.analysis_assurance_targets
         assert result.compatibility_verdict is None
