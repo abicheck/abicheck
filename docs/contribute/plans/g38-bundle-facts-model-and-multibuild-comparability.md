@@ -2438,43 +2438,44 @@ to re-litigate policy routing: it is independently confirmed done on both
 the stored-facts and live-release paths, by two unrelated real-world
 callers, before this phase's own CLI-surface work would even begin.
 
-**The file-size picture has changed since Phase 13's table was written —
-re-measured here rather than trusted from memory:**
+**The file-size picture has changed since Phase 13's table was written, and
+the blocker it named no longer applies — corrected below (Codex review,
+verified against source) after this section's own first draft mis-scoped
+it by copying that stale conclusion forward instead of re-checking it
+against where Click options for `compare` are actually declared today.**
 
-ADR-061 Phase 4 (`abicheck/frontends/AGENTS.md`) split `cli.py`'s dispatch
-logic out from under the file that used to host
-`_dispatch_release_compare` — `cli.py` itself dropped from 1959 lines to a
-128-line registration facade, and the release-fan-out dispatch now lives in
-`abicheck/frontends/cli/commands/compare.py` (717 lines), a module with
-**no `architecture/debt.yaml` no-growth pin at all** — real, uncapped room
-for a new CLI-facing dispatch branch. That changes one row of Phase 13's
-original blocking table from a hard blocker to a viable landing spot. The
-other rows have not moved and remain genuinely at capacity — re-measured
-directly against current `wc -l` and each file's own `architecture/
-debt.yaml` `no_growth` pin (a tighter, adoption-time-frozen baseline, not
-merely the generic 2000-line AI-readiness cap):
+ADR-061 Phase 4 (`abicheck/frontends/AGENTS.md`) relocated `cli.py`'s
+dispatch logic — including what used to be `_dispatch_release_compare` —
+out of the file Phase 13's table named, into
+`abicheck/frontends/cli/commands/compare.py`, a module with **no
+`architecture/debt.yaml` no-growth pin**. Critically, this is also where
+the single `@main.command("compare")` entry point (`compare_cmd`) itself
+lives, and it already declares numerous command-specific `@click.option`s
+inline right there (`--dry-run`, `--diagnostic-comparison`, `--config`,
+`--exit-code-scheme`, and others) — not every option a directory/package
+compare needs comes from the shared, pinned `release_options` decorator in
+`cli_options.py`. A new stored-facts-path option (and a new per-library
+override manifest option) can be declared the same way, inline on
+`compare_cmd`, and read out of its `**kwargs` inside
+`_dispatch_release_compare` — which is defined in this same unpinned
+file — before ever reaching `cli_compare_release.py`'s pinned release
+engine at all. **Phase 13's original blocking table does not apply to this
+phase**: it was diagnosing where *dispatch logic* could live, not where a
+*new, self-contained option* can be declared, and those turned out to be
+the same unpinned file once ADR-061 Phase 4 landed. No file split is a
+prerequisite here.
 
-| File | Lines / pinned baseline | Still blocking? |
-|---|---|---|
-| `abicheck/frontends/cli/commands/compare.py` (dispatch — successor to `cli.py`'s old `_dispatch_release_compare`) | 717, no pin | **No** — real room, this is where new dispatch branches for a facts-in flag belong |
-| `cli_compare_release.py` (the release fan-out's own Click entry point) | 1995 / 1995 (`no_growth`) | Yes — zero room for a new `@click.option` |
-| `cli_compare_helpers.py` (directory/package operand dispatch) | 1996 / 1996 (`no_growth`) | Yes — zero room |
-| `cli_options.py` (`release_options` — the shared flag-decorator family) | 1977 / 1977 (`no_growth`) | Yes — zero room |
-| `buildsource/inline.py` (`BuildConfig` — where a new `.abicheck.yml` top-level block would parse) | 1975 / 1975 (`no_growth`) | Yes — zero room |
-| `bundle.py` | 1999 / 2000 (`no_growth`) | Yes — one line of slack, not enough for a real block |
-| `cli_compare_release_helpers.py` | 1311 / 1311 (`no_growth`) | Yes — zero room, but not a dispatch site anyway |
-
-So the constraint is unchanged in substance: a literal new `--bundle-facts-in`-
-shaped Click option (and any `.abicheck.yml` block for per-library override
-maps) still cannot land without first splitting `cli_compare_release.py`
-and/or `cli_options.py` — each pinned at exactly its own current line
-count, with the pin itself, not merely the 2000-line hard cap, being the
-active blocker now. The one thing that *has* changed is that the dispatch
-*logic* this new surface would call into finally has a real, unpinned home
-(`frontends/cli/commands/compare.py`) to delegate to once the flag itself
-can be declared — narrowing this phase's actual blocking work to "split one
-pinned option/entry-point file," not "find somewhere for the whole feature
-to live."
+The one artifact worth naming without duplicating it: `cli.py` itself is
+now a small registration facade (`abicheck/frontends/AGENTS.md` gives the
+current figure) rather than the ~1959-line file Phase 13's table measured
+— re-check `wc -l abicheck/cli.py` and `architecture/debt.yaml`'s entries
+for `cli_compare_release.py`/`cli_compare_helpers.py`/`cli_options.py`/
+`buildsource/inline.py`/`bundle.py` directly before relying on any
+specific line count here, rather than trusting a number copied into this
+paragraph — `debt.yaml` is the fact owner for every one of those pins, and
+duplicating its numbers into prose here is exactly what goes stale on the
+next unrelated split (`docs/AGENTS.md`'s "don't hand-copy a table, count,
+or version number that already has a fact owner elsewhere").
 
 **Explicitly in scope for this phase, once unblocked:**
 
@@ -2594,12 +2595,12 @@ to end; it does not by itself satisfy this bar, since by construction it
 only exercises the one manifest shape and one facts file that scenario
 happens to use.
 
-**Effort:** M — the Python-API and dispatch-destination halves are done;
-the remaining work is the vertical-slice split of one pinned option file
-(`cli_options.py` or `cli_compare_release.py`, whichever a concrete flag
-design touches less) plus the new flag/manifest declaration and its
-translation into `compare_release_against_bundle_facts()`'s existing
-keyword arguments.
+**Effort:** S/M — no file split is a prerequisite (corrected above); the
+Python-API half is done. Remaining work is contained to the unpinned
+`frontends/cli/commands/compare.py` (a new inline option or two, a new
+`_dispatch_release_compare` branch, a small manifest parser) plus the
+package-extraction fix and generalized tests named above — real work, but
+none of it blocked on a legacy-file refactor.
 
 ---
 
