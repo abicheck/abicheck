@@ -111,6 +111,7 @@ __all__ = [
     "PlanningFailure",
     "SidePlan",
     "bazel_target_scoping_failure",
+    "scan_bazel_scoping_failure",
 ]
 
 
@@ -245,6 +246,34 @@ def bazel_target_scoping_failure(
             "passing it as --build-info)"
         ),
     )
+
+
+def scan_bazel_scoping_failure(
+    headers: object,
+    eff_depth: object,
+    collect_mode: str,
+    build_info: Path | None,
+    build_targets: tuple[str, ...],
+) -> PlanningFailure | None:
+    """The shared ``scan`` pre-flight guard for :func:`bazel_target_scoping_failure`.
+
+    Used by both ``scan_engine.run_scan_core`` (per-member) and
+    ``service_scan.run_scan_set`` (once, before discovery) so the two share
+    one exemption rule, and the depth=binary header-clearing it depends on,
+    rather than two independently-maintained copies. Exempt only when
+    *neither* consumer can reach ``build_info`` at all: empty collection
+    layers (``embed_build_source`` no-ops) AND no headers (the L2 seed's own
+    independent ``collect_inline_pack`` call no-ops too -- ``--depth headers``
+    keeps real headers, so it stays unexempted despite its own ``collect_mode``
+    being ``"off"``, same as ``--depth binary``).
+    """
+    from ..buildsource.scan_levels import EvidenceDepth
+    from ..buildsource.source_replay import collection_for_ci_mode
+
+    effective_headers = [] if eff_depth is EvidenceDepth.BINARY else headers
+    if not effective_headers and not collection_for_ci_mode(collect_mode)[1]:
+        return None
+    return bazel_target_scoping_failure("candidate", build_info, build_targets)
 
 
 def _check_bazel_target_scoping(side: SidePlan) -> PlanningFailure | None:

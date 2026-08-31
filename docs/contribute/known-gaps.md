@@ -237,7 +237,29 @@ looked like the obvious fix and wasn't.
   pins the fixed (explicit `build_targets`) case; the pre-existing
   `test_run_scan_depth_headers_still_rejects_bazel_scoping_mismatch` was
   re-verified to still exercise the unaffected (`.abicheck.yml`-only) case
-  correctly. Historical analysis retained below for the record.
+  correctly.
+  **An eighth review round found the same class of gap on the plural entry
+  point.** `service_scan.run_scan_set` (`scan --artifact-set`'s typed API)
+  had no Bazel-scoping pre-flight of its own: an unsupported request
+  reached each member's own `run_scan_core` check only *after*
+  `discover_artifact_set()`, `check_artifact_set_soname_collisions()`, and
+  `artifact_set_member_exports()` had already run for every member, wasting
+  real discovery/parsing work before the request was ultimately rejected
+  anyway. Fixed by adding the same pre-flight check to the top of
+  `run_scan_set`, right after `_reject_comparison_only_fields(req)` and
+  before the shared budget clock starts or `discover_artifact_set()` runs.
+  Rather than duplicate `run_scan_core`'s exemption logic (the depth=binary
+  header-clearing rule two findings above) a second time, both call sites
+  now share one function, `workflows.plan.scan_bazel_scoping_failure()`, so
+  a future refinement to the exemption rule has exactly one implementation
+  to change instead of two independently-maintained copies.
+  `tests/test_bazel_root_targets_scan.py::
+  test_run_scan_set_rejects_bazel_scoping_mismatch_before_discovery` pins
+  the fix by asserting `discover_artifact_set()` is never even called for a
+  mismatched request; `test_run_scan_set_depth_binary_exempts_the_early_
+  bazel_scoping_check` pins the sibling depth=binary exemption for the
+  plural entry point.
+  Historical analysis retained below for the record.
   `BazelAdapter.collect()`'s `self.targets` scoping is applied
   in exactly two places: gating whether a *live* `bazel query` subprocess
   runs at all (`_resolve`/`_run_bazel`, only reachable when `workspace` is

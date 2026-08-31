@@ -237,6 +237,63 @@ def test_scan_request_build_targets_reaches_embed_build_source_via_run_scan_set(
     assert captured["build_targets"] == [("//:math",), ("//:math",)]
 
 
+def test_run_scan_set_rejects_bazel_scoping_mismatch_before_discovery(
+    monkeypatch, tmp_path: Path
+) -> None:
+    """Codex review, fresh evidence: a direct ``run_scan_set()`` caller has no
+    ``cli_scan.py`` pre-flight of its own (unlike `--artifact-set`'s CLI
+    path), and each member's own ``run_scan_core()`` check only fires after
+    ``discover_artifact_set()``/``check_artifact_set_soname_collisions()``/
+    ``artifact_set_member_exports()`` have already run for every member.
+    Pinned by asserting discovery never even starts."""
+    import abicheck.bundle as bundle_mod
+    from abicheck.errors import PlanningError
+
+    def _fail_if_called(*_a, **_kw):
+        raise AssertionError(
+            "discover_artifact_set() ran before the Bazel-scoping pre-flight "
+            "check rejected the request"
+        )
+
+    monkeypatch.setattr(bundle_mod, "discover_artifact_set", _fail_if_called)
+
+    aquery = _write_bazel_aquery(tmp_path)
+    req = ScanRequest(
+        binaries=[_artifact(tmp_path, "a"), _artifact(tmp_path, "b")],
+        sources=_sources(tmp_path),
+        build_info=aquery,
+        build_targets=("//:math",),
+    )
+    with pytest.raises(PlanningError, match="pre-captured Bazel aquery"):
+        run_scan_set(req)
+
+
+def test_run_scan_set_depth_binary_exempts_the_early_bazel_scoping_check(
+    monkeypatch, tmp_path: Path
+) -> None:
+    """The sibling of ``test_run_scan_depth_binary_exempts_the_early_bazel_
+    scoping_check`` for the plural entry point: ``run_scan_set``'s own
+    pre-flight check (see the test above) must not reintroduce the
+    depth=binary false positive for a typed ``--artifact-set`` caller
+    either."""
+    a = _artifact(tmp_path, "a")
+    b = _artifact(tmp_path, "b")
+    _bypass_discovery_validation(monkeypatch, a, b)
+
+    aquery = _write_bazel_aquery(tmp_path)
+    req = ScanRequest(
+        binaries=[a, b],
+        sources=_sources(tmp_path),
+        build_info=aquery,
+        build_targets=("//:math",),
+        depth="binary",
+    )
+    # Not, in particular, PlanningError -- depth=binary never consults
+    # build_info/build_targets, so the pre-flight check must exempt it.
+    result = run_scan_set(req)
+    assert result.verdict not in ("BUDGET_OVERFLOW", "EVIDENCE_CONTRACT_ERROR")
+
+
 def test_scan_request_default_build_targets_is_empty_tuple():
     """Additive default -- an existing ScanRequest() caller is unaffected."""
     assert ScanRequest().build_targets == ()
@@ -607,8 +664,10 @@ def test_run_scan_depth_binary_exempts_the_early_bazel_scoping_check(
     must not reintroduce the depth=binary false positive ``workflows.plan.
     _check_bazel_target_scoping`` already fixed: ``depth="binary"`` resolves
     to a ``collect_mode`` that never consults ``build_info``/``build_targets``
-    at all, so ``bazel_target_scoping_failure`` must not even be called."""
-    import abicheck.scan_engine as scan_engine_mod
+    at all, so the shared ``workflows.plan.scan_bazel_scoping_failure`` guard
+    must exempt it before ever calling the inner ``bazel_target_scoping_
+    failure``."""
+    import abicheck.workflows.plan as plan_mod
 
     def _fail_if_called(*_a, **_kw):
         raise AssertionError(
@@ -617,9 +676,7 @@ def test_run_scan_depth_binary_exempts_the_early_bazel_scoping_check(
             "build_targets"
         )
 
-    monkeypatch.setattr(
-        scan_engine_mod, "bazel_target_scoping_failure", _fail_if_called
-    )
+    monkeypatch.setattr(plan_mod, "bazel_target_scoping_failure", _fail_if_called)
 
     aquery = _write_bazel_aquery(tmp_path)
     req = ScanRequest(

@@ -74,3 +74,13 @@
   now raises the framework-neutral `PlanningError` up front (before any
   work), instead of only being caught later — and then leaking as
   `click.ClickException` — deep inside that L2-seed call.
+- **`service_scan.run_scan_set` (the typed `--artifact-set` entry point) now
+  runs the same Bazel-scoping pre-flight check before any per-member work
+  starts**, not only inside each member's own `run_scan_core` call. A
+  mismatched request previously incurred `discover_artifact_set()`,
+  `check_artifact_set_soname_collisions()`, and `artifact_set_member_exports()`
+  for every member before being rejected. The check's exemption logic (the
+  `depth=binary` header-clearing rule above) is now shared by both
+  `run_scan_core` and `run_scan_set` through one function,
+  `workflows.plan.scan_bazel_scoping_failure()`, instead of two
+  independently-maintained copies.

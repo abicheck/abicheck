@@ -68,7 +68,6 @@ from .buildsource.scan_levels import (
     SourceMethod,
     public_depth_value,
 )
-from .buildsource.source_replay import collection_for_ci_mode
 from .checker_policy import API_BREAK_KINDS, BREAKING_KINDS
 from .checker_types import validate_evidence_depth
 from .cli_scan_baseline import _expand_public_headers, _run_baseline_compare
@@ -86,7 +85,7 @@ from .errors import PlanningError, ProfileMismatchError, ScopeMismatchError
 from .schemas import SCAN_SCHEMA_VERSION
 from .workflows.artifact.execute import SideResolution
 from .workflows.artifact.resolve import BaselineReuseContext
-from .workflows.plan import bazel_target_scoping_failure
+from .workflows.plan import scan_bazel_scoping_failure
 
 if TYPE_CHECKING:
     from .environment_matrix import EnvironmentMatrix
@@ -1101,14 +1100,9 @@ def run_scan_core(
     default (the pre-existing, unscoped behavior).
     """
     # ADR-063 Phase 4 (Codex review): checked before S3/POI work, since a typed
-    # run_scan()/run_scan_subprocess caller has no cli_scan.py pre-flight. Only
-    # exempt when NEITHER embed_build_source NOR the L2 seed's own independent
-    # collect_inline_pack call can reach build_info: empty layers AND no
-    # headers -- depth=headers keeps real headers, so it stays unexempted.
-    if (headers or collection_for_ci_mode(collect_mode)[1]) and (
-        _bf := bazel_target_scoping_failure(
-            "candidate", effective_build_info, build_targets
-        )
+    # run_scan()/run_scan_subprocess caller has no cli_scan.py pre-flight.
+    if _bf := scan_bazel_scoping_failure(
+        headers, eff_depth_enum, collect_mode, effective_build_info, build_targets
     ):
         raise PlanningError((_bf,))
 
