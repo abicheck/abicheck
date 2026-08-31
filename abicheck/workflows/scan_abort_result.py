@@ -37,15 +37,36 @@ home left.
 modules.yaml`'s `public_root_surfaces` for this module -- the same "a
 genuinely public, stable surface reached from a migrated package" exemption
 `abicheck.serialization` already uses, per ADR-061's own precedent.
+
+`attach_prior_on_budget_overflow` closes ADR-064's "preserve prior
+contributions on a later budget overflow" follow-up (Codex review, PR #967):
+`scan_engine.run_scan_core`'s one *late* `_check_scan_budget` call site (the
+post-compare deadline check, which runs after a real gate/coverage/assurance
+decision may already exist) needs to attach that decision to the
+`_BudgetOverflow` it raises, so `scan_abort_result_fields` can thread it
+through instead of reporting a budget-only decision that discards real,
+already-computed contributions. It deliberately catches ``Exception`` and
+discriminates via ``hasattr`` rather than importing `_BudgetOverflow` to
+`isinstance`-check against: `scan_engine.py` is unclassified (`architecture/
+modules.yaml`'s `legacy_root_modules`), and `_BudgetOverflow` is a private,
+underscore-prefixed signal, not the kind of genuinely public, stable surface
+`public_root_surfaces` exists for (unlike `abicheck.schemas` above) -- so
+importing it here to satisfy a type check would misuse that exemption for a
+private cross-module coupling. Attribute-based duck typing needs no import
+at all, in either direction.
 """
 
 from __future__ import annotations
 
-from typing import Literal, TypedDict
+from contextlib import contextmanager
+from typing import TYPE_CHECKING, Any, Literal, TypedDict
 
 from ..policy.exit_decision import ExitDecision
 from ..policy.exit_decision_precedence import resolve_scan_exit_decision
 from ..schemas import SCAN_SCHEMA_VERSION
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator
 
 ScanAbortAxis = Literal["budget_overflow", "evidence_contract_error"]
 
@@ -70,8 +91,32 @@ class ScanAbortResultFields(TypedDict):
     report: dict[str, object]
 
 
+@contextmanager
+def attach_prior_on_budget_overflow(
+    diff_summary: dict[str, Any] | None,
+) -> Iterator[None]:
+    """Give a `_BudgetOverflow` raised inside this block its ``prior_decision``.
+
+    `scan_engine.run_scan_core`'s one *late* budget check
+    (``_check_scan_budget``'s single call site, after a baseline compare may
+    already have resolved a full gate/coverage/assurance decision into
+    *diff_summary*) wraps that call in ``with attach_prior_on_budget_overflow
+    (diff_summary):`` instead of threading a new parameter through
+    ``_check_scan_budget`` itself -- `scan_engine.py` carries its own tight
+    ADR-061 no-growth budget, and catching-and-annotating here costs this
+    module (uncapped) the lines instead. See this module's own docstring for
+    why ``hasattr`` rather than `isinstance` against `_BudgetOverflow`.
+    """
+    try:
+        yield
+    except Exception as exc:
+        if hasattr(exc, "prior_decision"):
+            exc.prior_decision = diff_summary.get("exit") if diff_summary else None
+        raise
+
+
 def scan_abort_result_fields(
-    axis: ScanAbortAxis, *, prior_decision: ExitDecision | None = None
+    axis: ScanAbortAxis, *, prior_decision: dict[str, Any] | None = None
 ) -> ScanAbortResultFields:
     """Every `ScanResult` field `service_scan.run_scan`/
     `_run_scan_one_member` need for one of `run_scan_core`'s two abort
@@ -86,23 +131,24 @@ def scan_abort_result_fields(
     nested ... report carry the same scan schema version marker" contract
     -- Codex review, PR #967).
 
-    *prior_decision* forwards to `resolve_scan_exit_decision`'s own
-    parameter of the same name (used only for the `budget_overflow` axis) --
-    a caller that already resolved a full gate/coverage/assurance decision
-    before `_BudgetOverflow` fired (e.g. the *later* of `scan_engine.py`'s
-    two raise sites, which runs after a comparable baseline compare) should
-    pass it so the persisted report still shows those contributions,
-    matching that resolver's own "budget discards, but preserves" contract.
-    Neither of `service_scan.py`'s current call sites has one available --
-    `run_scan_core` raises before returning anything they could recover a
-    prior decision from -- so both pass none today; carrying one across that
-    exception boundary is real, separate follow-up work, not something this
-    function's own shape can supply on its own (Codex review, PR #967).
+    *prior_decision* is the raw ``ExitDecision.to_dict()`` form (not the
+    dataclass itself) -- the only shape that survives the exception boundary
+    `_BudgetOverflow.prior_decision` crosses (`attach_prior_on_budget_
+    overflow`, above), since `scan_engine.py` cannot hold a typed
+    `ExitDecision` reference without importing the `policy` package as an
+    unclassified, legacy module (a real but separate cleanup). Reconstructed
+    here via `ExitDecision.from_dict` and forwarded to `resolve_scan_exit_
+    decision`'s own parameter of the same name (used only for the
+    `budget_overflow` axis) -- a caller that already resolved a full gate/
+    coverage/assurance decision before `_BudgetOverflow` fired should pass
+    it so the persisted report still shows those contributions, matching
+    that resolver's own "budget discards, but preserves" contract.
     """
+    prior = ExitDecision.from_dict(prior_decision) if prior_decision else None
     decision = resolve_scan_exit_decision(
         budget_overflow=axis == "budget_overflow",
         evidence_contract_error=axis == "evidence_contract_error",
-        prior_decision=prior_decision,
+        prior_decision=prior,
     )
     assert decision is not None  # axis always selects one of the two above
     verdict, exit_code = _SCAN_ABORT_VERDICTS[axis]

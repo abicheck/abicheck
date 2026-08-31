@@ -33,7 +33,10 @@ import pytest
 
 from abicheck.policy.exit_decision_precedence import resolve_scan_exit_decision
 from abicheck.schemas import SCAN_SCHEMA_VERSION
-from abicheck.workflows.scan_abort_result import scan_abort_result_fields
+from abicheck.workflows.scan_abort_result import (
+    attach_prior_on_budget_overflow,
+    scan_abort_result_fields,
+)
 
 
 class TestScanAbortResultFields:
@@ -85,11 +88,16 @@ class TestScanAbortResultFields:
         # A caller that already resolved a full decision before a *later*
         # budget overflow (scan_engine.py's post-compare deadline check) can
         # carry it through -- the persisted report keeps those contributions
-        # instead of showing every other axis as "never computed".
+        # instead of showing every other axis as "never computed". The prior
+        # decision crosses that exception boundary as a raw dict (`_BudgetOverflow.
+        # prior_decision`, set from `ExitDecision.to_dict()`), not the dataclass
+        # itself -- see `attach_prior_on_budget_overflow`'s own docstring for why.
         from abicheck.exit_decision import resolve_exit_decision
 
         prior = resolve_exit_decision(compatibility_contribution=2)
-        fields = scan_abort_result_fields("budget_overflow", prior_decision=prior)
+        fields = scan_abort_result_fields(
+            "budget_overflow", prior_decision=prior.to_dict()
+        )
         assert fields["report"]["exit"]["code"] == 5
         assert fields["report"]["exit"]["compatibility_contribution"] == 2
 
@@ -102,9 +110,73 @@ class TestScanAbortResultFields:
 
         prior = resolve_exit_decision(compatibility_contribution=2)
         fields = scan_abort_result_fields(
-            "evidence_contract_error", prior_decision=prior
+            "evidence_contract_error", prior_decision=prior.to_dict()
         )
         assert fields["report"]["exit"]["compatibility_contribution"] == 0
+
+
+class TestAttachPriorOnBudgetOverflow:
+    """`attach_prior_on_budget_overflow` gives a `_BudgetOverflow` raised
+    inside its block the caller's already-resolved decision, duck-typed via
+    ``hasattr`` rather than an `isinstance` check that would need to import
+    the private exception class from unclassified `scan_engine.py`.
+    """
+
+    class _FakeBudgetOverflow(Exception):
+        def __init__(self):
+            super().__init__("over budget")
+            self.prior_decision = None
+
+    def test_attaches_prior_decision_dict_from_diff_summary(self):
+        from abicheck.exit_decision import resolve_exit_decision
+
+        prior_dict = resolve_exit_decision(compatibility_contribution=2).to_dict()
+        diff_summary = {"exit": prior_dict}
+
+        with pytest.raises(self._FakeBudgetOverflow) as excinfo:
+            with attach_prior_on_budget_overflow(diff_summary):
+                raise self._FakeBudgetOverflow()
+
+        assert excinfo.value.prior_decision == prior_dict
+
+    def test_none_diff_summary_attaches_none(self):
+        with pytest.raises(self._FakeBudgetOverflow) as excinfo:
+            with attach_prior_on_budget_overflow(None):
+                raise self._FakeBudgetOverflow()
+
+        assert excinfo.value.prior_decision is None
+
+    def test_exception_without_prior_decision_attribute_passes_through(self):
+        # Duck typing via hasattr(): an exception that isn't shaped like
+        # `_BudgetOverflow` (no `prior_decision` attribute) must reraise
+        # completely untouched, not gain an attribute it never had.
+        with pytest.raises(ValueError) as excinfo:
+            with attach_prior_on_budget_overflow({"exit": {"code": 1}}):
+                raise ValueError("unrelated failure")
+
+        assert not hasattr(excinfo.value, "prior_decision")
+
+    def test_real_late_budget_overflow_carries_the_prior_decision(self):
+        # The actual scan_engine.py call site: `_check_scan_budget`'s single
+        # raise, wrapped in the real context manager, with a decision the
+        # baseline compare already resolved sitting in `diff_summary["exit"]`
+        # (as `_run_baseline_compare`/the NOT_COMPARABLE branch leave it).
+        from abicheck.exit_decision import resolve_exit_decision
+        from abicheck.scan_engine import _BudgetOverflow, _check_scan_budget
+
+        prior = resolve_exit_decision(compatibility_contribution=2)
+        diff_summary = {"exit": prior.to_dict()}
+
+        with pytest.raises(_BudgetOverflow) as excinfo:
+            with attach_prior_on_budget_overflow(diff_summary):
+                _check_scan_budget("10s", budget_s=10.0, elapsed=11.0)
+
+        assert excinfo.value.prior_decision == prior.to_dict()
+        fields = scan_abort_result_fields(
+            "budget_overflow", prior_decision=excinfo.value.prior_decision
+        )
+        assert fields["report"]["exit"]["code"] == 5
+        assert fields["report"]["exit"]["compatibility_contribution"] == 2
 
 
 class TestScanAbortExitReportWiring:

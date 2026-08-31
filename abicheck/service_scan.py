@@ -39,17 +39,16 @@ from .buildsource.build_query import (
 from .compile_context import CompileContext as CompileContext  # re-exported, ADR-055 D1
 
 # pair_wide_cxx20_std_override lives in the leaf `cxx20_pair_dialect` module
-# (no dependency on anything service_scan-specific, so it moved cleanly for
-# line-budget room -- Codex review, fresh evidence, see that module's own
-# docstring), re-exported here so every existing `from .service_scan import
-# pair_wide_cxx20_std_override` call site is unaffected.
+# (moved for line-budget room, see that module's own docstring), re-exported
+# here so every existing `from .service_scan import pair_wide_cxx20_std_override`
+# call site is unaffected.
 from .cxx20_pair_dialect import (
     pair_wide_cxx20_std_override as pair_wide_cxx20_std_override,
 )
 from .errors import ValidationError
 from .header_utils import HEADER_SUFFIXES, iter_directory_headers
 from .schemas import SCAN_SCHEMA_VERSION
-from .workflows.scan_abort_result import scan_abort_result_fields
+from .workflows.scan_abort_result import ScanAbortAxis, scan_abort_result_fields
 
 if TYPE_CHECKING:
     from .buildsource.scan_levels import EvidenceDepth, SourceMethod
@@ -807,8 +806,7 @@ class ScanResult:
     and library callers consume. ``findings`` are the raw cross-source
     :class:`Change` objects; ``layers`` is the per-layer coverage;
     ``confidence`` is the §6.8 provider-agreement matrix; ``estimate`` is the
-    projected per-layer cost for comparison against the actual run.
-    """
+    projected per-layer cost for comparison against the actual run."""
 
     verdict: str
     exit_code: int
@@ -829,6 +827,10 @@ class ScanResult:
             "estimate": [e.to_dict() for e in self.estimate],
             "report": dict(self.report),
         }
+
+    @staticmethod
+    def _from_abort(axis: ScanAbortAxis, p: dict[str, object] | None) -> ScanResult:
+        return ScanResult(**scan_abort_result_fields(axis, prior_decision=p))
 
 
 @dataclass(frozen=True)
@@ -1415,18 +1417,16 @@ def run_scan(req: ScanRequest) -> ScanResult:
             max_findings=req.max_findings,
             build_targets=req.build_targets,
         )
-    except _BudgetOverflow:
+    except _BudgetOverflow as exc:
         # The failure-guard contract: overflow is exit 5, never a shrunk scope.
-        return ScanResult(**scan_abort_result_fields("budget_overflow"))
+        return ScanResult._from_abort("budget_overflow", exc.prior_decision)
     except _EvidenceContractError:
         # A pinned depth that can't collect its evidence (auto-strict, ADR-037 D5):
-        # the programmatic API honors the same contract as the CLI (pinned_explicit
-        # above), so map the signal to a failed result rather than degrade silently.
-        return ScanResult(**scan_abort_result_fields("evidence_contract_error"))
+        # the programmatic API honors the same contract as the CLI (pinned_explicit).
+        return ScanResult._from_abort("evidence_contract_error", None)
     finally:
         # Remove the inferred cmake build dir(s) once all build-dir-dependent phases
-        # have run (or the scan aborted). Best-effort (each thunk is suppressed) so a
-        # removal/unlock error never aborts the rest nor masks the real outcome.
+        # have run/aborted. Best-effort: a removal/unlock error never masks the outcome.
         drain_build_dir_cleanups(build_dir_cleanups)
 
     outcome = core.outcome
@@ -1711,10 +1711,10 @@ def _run_scan_one_member(
             sibling_exported_symbols=sibling_exported_symbols,
             build_targets=req.build_targets,
         )
-    except _BudgetOverflow:
-        return ScanResult(**scan_abort_result_fields("budget_overflow"))
+    except _BudgetOverflow as exc:
+        return ScanResult._from_abort("budget_overflow", exc.prior_decision)
     except _EvidenceContractError:
-        return ScanResult(**scan_abort_result_fields("evidence_contract_error"))
+        return ScanResult._from_abort("evidence_contract_error", None)
     finally:
         drain_build_dir_cleanups(build_dir_cleanups)
 

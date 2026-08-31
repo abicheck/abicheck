@@ -85,6 +85,7 @@ from .errors import ProfileMismatchError, ScopeMismatchError
 from .schemas import SCAN_SCHEMA_VERSION
 from .workflows.artifact.execute import SideResolution
 from .workflows.artifact.resolve import BaselineReuseContext
+from .workflows.scan_abort_result import attach_prior_on_budget_overflow
 
 if TYPE_CHECKING:
     from .environment_matrix import EnvironmentMatrix
@@ -801,6 +802,7 @@ class _BudgetOverflow(Exception):
     def __init__(self, message: str) -> None:
         super().__init__(message)
         self.message = message
+        self.prior_decision: dict[str, object] | None = None
 
 
 class _EvidenceContractError(Exception):
@@ -1443,7 +1445,8 @@ def run_scan_core(
         verdict, exit_code = _audit_exit_code(cc.findings, severities)
 
     elapsed = time.monotonic() - start
-    _check_scan_budget(budget, budget_s, elapsed)
+    with attach_prior_on_budget_overflow(diff_summary):
+        _check_scan_budget(budget, budget_s, elapsed)
 
     outcome = ScanOutcome(
         mode=scan_mode.value,

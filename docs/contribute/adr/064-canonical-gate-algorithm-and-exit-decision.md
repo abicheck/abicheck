@@ -293,17 +293,22 @@ lands in two stages rather than one atomic change:
       is it reported" for a different layer, and an earlier revision had put
       it in `exit_decision_precedence.py` itself before a review round
       caught the boundary violation (PR #967). `SCAN_SCHEMA_VERSION` bumped
-      to `1.23` for the newly nonempty `report.exit` shape. **Still not
-      landed:** carrying a `prior_decision` across `scan_engine.py`'s own
-      *later* `_BudgetOverflow` raise site (the post-compare deadline check,
-      which runs after a real gate/coverage/assurance decision already
-      exists) — `scan_abort_result_fields` accepts an optional
-      `prior_decision` today, but neither `service_scan.py` call site has
-      one available, since `run_scan_core` raises before returning anything
-      they could recover one from; threading it across that exception
-      boundary needs a change to `_BudgetOverflow`'s own constructor and is
-      real, separate follow-up work (Codex review, PR #967). Also still
-      open: the native `scan` *CLI*'s own equivalent. `cli_scan.py`'s
+      to `1.23` for the newly nonempty `report.exit` shape. **Landed
+      (2026-08-31), prior-decision follow-up:** carrying a `prior_decision`
+      across `scan_engine.py`'s own *later* `_BudgetOverflow` raise site
+      (the post-compare deadline check, which runs after a real
+      gate/coverage/assurance decision already exists) — `_BudgetOverflow`
+      now carries a `prior_decision: dict[str, object] | None` attribute,
+      set by `abicheck.workflows.scan_abort_result.
+      attach_prior_on_budget_overflow` (a context manager wrapping that one
+      call site, catching via `hasattr` duck typing rather than importing
+      the private exception class into the unclassified `scan_engine.py`);
+      `service_scan.py`'s two catch sites forward `exc.prior_decision`
+      through to `scan_abort_result_fields`, which reconstructs it via
+      `ExitDecision.from_dict` before handing it to `resolve_scan_exit_
+      decision`'s own `prior_decision` parameter (`tests/
+      test_scan_abort_result.py::TestAttachPriorOnBudgetOverflow`). Also
+      still open: the native `scan` *CLI*'s own equivalent. `cli_scan.py`'s
       `scan_cmd` calls
       `run_scan_core` directly (not through `service_scan.run_scan`) and
       still only writes a stderr message plus `sys.exit`/`ClickException` at
