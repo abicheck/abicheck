@@ -328,6 +328,26 @@ class TestReleaseExitDecisionForReportAgreesWithRealExit:
         reason_values = {r.value for r in mine.reasons}
         assert {"compatibility_gate", "operational_error"} <= reason_values
 
+    def test_a_bundle_only_break_with_every_library_unchanged(self) -> None:
+        """Codex review, fresh evidence: a bundle/probe-matrix break can
+        raise the aggregate `worst_verdict` to `BREAKING` with every library
+        itself `NO_CHANGE` -- no library's own `"verdict"` names the break,
+        so scanning `library_results` alone (as the first cut of this
+        resolver did) found `0` while `_exit_compare_release` exits `4`
+        from the same `worst_verdict`.
+        """
+        from abicheck.cli_compare_release import _exit_compare_release
+        from abicheck.workflows.gate import resolve_release_exit_decision_for_report
+
+        real = _exit_code_of(
+            _exit_compare_release, "BREAKING", False, [], severity_exit_code=None
+        )
+        mine = resolve_release_exit_decision_for_report(
+            "BREAKING", False, [], None, 0,
+            [{"verdict": "NO_CHANGE"}, {"verdict": "NO_CHANGE"}],
+        )
+        assert mine.code == real == 4
+
 
 def test_compat_not_comparable_exit_code_is_9_and_distinct_from_compare() -> None:
     # ADR-050 D2: compat check's not_comparable code (9) is the one integer

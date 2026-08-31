@@ -394,9 +394,11 @@ def resolve_release_exit_decision(
 
 
 def _compute_release_legacy_exit_code(
+    worst_verdict: str,
     library_results: list[dict[str, object]],
 ) -> int:
-    """Worst legacy-scheme exit code among genuinely-compared libraries.
+    """Worst legacy-scheme exit code across libraries *and* release-global
+    (bundle/probe-matrix) findings.
 
     ADR-064 stage 1b. Mirrors ``cli_compare_release_helpers.
     _compute_release_severity_exit_code``'s per-library independence for
@@ -407,12 +409,17 @@ def _compute_release_legacy_exit_code(
     library's operational failure hide a real ``BREAKING``/``API_BREAK``
     verdict from a *different* library in the same release -- exactly the
     gap :func:`resolve_release_exit_decision`'s own docstring calls out as
-    "real, additional scope for stage 1b's wiring work." Only the
-    *reported contribution/reason* was ever affected -- see
-    :func:`resolve_release_exit_decision_for_report`'s own docstring for
-    why the real, already-shipped process exit code this feeds
-    (``cli_compare_release_helpers._exit_compare_release``) never actually
-    disagreed numerically.
+    "real, additional scope for stage 1b's wiring work." Scanning
+    *library_results* alone, though, misses the opposite case (Codex
+    review, fresh evidence): a bundle or probe-matrix break with every
+    library itself ``NO_CHANGE`` raises the *aggregate* ``worst_verdict``
+    (``cli_compare_release._collect_bundle_result``/``_collect_matrix_
+    result``) without ever setting any library's own ``"verdict"`` key, so
+    the per-library scan alone would find ``0``. Folding in *worst_verdict*
+    itself (when it names a real ``Verdict``, i.e. not ``"ERROR"``/
+    ``"not_comparable"``) via ``max()`` catches both: an aggregate real
+    verdict at least as bad as any library's own, and a library's own real
+    verdict the aggregate's ``"ERROR"`` collapse would otherwise hide.
     """
     from ..checker_policy import Verdict
     from .severity import legacy_exit_code
@@ -424,6 +431,8 @@ def _compute_release_legacy_exit_code(
         verdict_str = entry.get("verdict")
         if isinstance(verdict_str, str) and verdict_str in Verdict.__members__:
             worst = max(worst, legacy_exit_code(Verdict[verdict_str]))
+    if worst_verdict in Verdict.__members__:
+        worst = max(worst, legacy_exit_code(Verdict[worst_verdict]))
     return worst
 
 
@@ -471,6 +480,11 @@ def resolve_release_exit_decision_for_report(
     numeric-agreement claim across the same input matrix
     ``_exit_compare_release``'s own tests already cover.
 
+    *library_results* alone does not capture a bundle/probe-matrix-only
+    break (no library's own verdict changes) -- see
+    :func:`_compute_release_legacy_exit_code`'s own docstring for how the
+    legacy branch also folds in *worst_verdict* itself to cover that case.
+
     *severity_exit_code* being not ``None`` is what "severity scheme
     active" means, matching ``_exit_compare_release``'s own check.
     ``worst_verdict == "ERROR"`` is used directly as the operational-error
@@ -487,7 +501,7 @@ def resolve_release_exit_decision_for_report(
     verdict_or_severity_contribution = (
         (severity_exit_code or 0)
         if severity_scheme_active
-        else _compute_release_legacy_exit_code(library_results)
+        else _compute_release_legacy_exit_code(worst_verdict, library_results)
     )
     return resolve_release_exit_decision(
         not_comparable=not_comparable,
