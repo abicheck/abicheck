@@ -2519,10 +2519,29 @@ shape. The bounded probe needs the same magic-byte compression detection
 (or peek into) enough of the prefix to find the key, still without
 materializing the full snapshot tree. Regression coverage needs a
 gzip/zstd-compressed facts baseline in addition to the legitimately-
-oversized *plain-JSON* baseline named above — three distinct cases
-(plain, gzip/zstd, oversized), not only the archive-format budget case
-the earlier decode-budget bullet already named, since each can fail
-independently.
+oversized *plain-JSON* baseline named above.
+
+**The G40 archive format needs its own discriminator entirely — `per_
+library_snapshots` doesn't exist there (Codex review, next round, verified
+against source):** a `format="archive"` `BundleFacts` file is a ZIP
+container whose own `manifest.json` uses a completely different top-level
+schema — `bundle_facts.py`'s `container_manifest` carries
+`schema_version`/`bundle_facts_schema_version`/`variant_fingerprint`/
+`library_blobs`/`manifest_blob`/`filesystem_aliases`/`library_filenames`,
+never `per_library_snapshots` (that key exists only in the monolithic
+plain/gzip/zstd JSON encoding). A probe checking only for `per_library_
+snapshots` would misclassify a real `old.bundlefacts.archive.zip` baseline
+as an ordinary `"file"` — directly contradicting this same phase's
+archive-format decode-budget acceptance case, which presupposes the
+archive is recognized as bundle facts at all. The bounded probe therefore
+needs two independent discriminators, not one: the plain/gzip/zstd-JSON
+`per_library_snapshots` check already described, and a separate ZIP-
+envelope check for `library_blobs`/`bundle_facts_schema_version` in the
+archive's own `manifest.json` — each bounded the same way (peeking at the
+relevant container's own top-level keys, not materializing snapshots).
+Regression coverage needs a G40-archive-format operand-classification
+case alongside the plain/gzip/zstd/oversized ones already named — four
+distinct baseline shapes, not three.
 
 **A second `classify_compare_operand()` consumer needs the same new kind
 (Codex review, next round, verified against source):** `cli_options.
