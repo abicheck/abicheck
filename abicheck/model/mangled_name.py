@@ -13,19 +13,24 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Itanium mangled-name scope-component parsing (ADR-061 D1).
+"""Itanium and MSVC mangled-name scope-component parsing (ADR-061 D1, Phase
+2's "fourth, pre-existing tension" closure).
 
 Split out of ``diff_cxx_rules.py`` (a whole-file ``compare``-classified
 module) because this parsing chain -- :func:`itanium_scope_components` and
-the private helpers it's built from -- is pure string decoding with no I/O
-and no dependency on ``model``'s own entity types, needed by ``extract``
-(``dumper_clang_expr.py``'s own scope recovery, ``dumper_hybrid.py``'s
-CastXML/clang contract reconciliation) as well as by ``compare``'s
-``diff_cxx_rules.py`` itself (``owner_class_of``'s mangled-name fallback) --
-the same shared-leaf shape ``qualified_name_segments.py``, ``binary_naming.py``
-and ``cc_attributes.py`` already have, since ``extract`` may not import
-``compare``. ``diff_cxx_rules.py`` re-exports every name here by value for
-back-compat.
+the private helpers it's built from, plus :func:`msvc_scope_components` --
+is pure string decoding with no I/O and no dependency on ``model``'s own
+entity types, needed by ``extract`` (``dumper_clang_expr.py``'s own scope
+recovery, ``dumper_hybrid.py``'s CastXML/clang contract reconciliation) and
+by ``buildsource``'s own extract-destined modules (``ctor_export_match.py``'s
+export-table rescue, ``virtual_dispatch_graph.py``'s vtable-owner recovery)
+as well as by ``compare``'s ``diff_cxx_rules.py`` itself (``owner_class_of``'s
+mangled-name fallback) -- the same shared-leaf shape
+``qualified_name_segments.py``, ``binary_naming.py`` and ``cc_attributes.py``
+already have, since ``extract`` may not import ``compare``.
+:func:`msvc_scope_components` joined :func:`itanium_scope_components` here
+later than the rest of this module (the Itanium half moved first) --
+``diff_cxx_rules.py`` re-exports every name here by value for back-compat.
 """
 
 from __future__ import annotations
@@ -476,3 +481,57 @@ def itanium_scope_components(mangled: str) -> list[str] | None:
     """
     result = itanium_scope_components_with_template_positions(mangled)
     return result[0] if result is not None else None
+
+
+def msvc_scope_components(mangled: str) -> list[str] | None:
+    """Scope components of an MSVC-mangled C++ symbol, parsed structurally.
+
+    Direct-clang snapshots taken with ``clang-cl`` (or any ``--target=
+    *-windows-msvc`` invocation) record ``mangledName`` in the proprietary
+    Microsoft C++ ABI scheme, not Itanium — confirmed empirically::
+
+        ?run@Foo@@QEAAXXZ            -> ["Foo", "run"]        (Foo::run())
+        ?freefunc@ns@@YAXXZ          -> ["ns", "freefunc"]    (ns::freefunc())
+        ?method@Box@inner@outer@@... -> ["outer", "inner", "Box", "method"]
+        ?instantiate@@YAXXZ          -> ["instantiate"]       (free function)
+
+    The qualified name is written ``<leaf>@<scope1>@<scope2>...@@<type-enc>``
+    with scope components listed *innermost first*, terminated by the first
+    ``@@`` — the reverse order and terminator convention Itanium uses, so this
+    is a genuinely separate parser, not a reuse of ``itanium_scope_components``.
+
+    Returns ``None`` for forms it does not model, mirroring
+    ``itanium_scope_components``'s "return None, let the caller fall back"
+    contract:
+
+    * Special member functions and operators (constructors ``??0``,
+      destructors ``??1``/``??_D``, ``operator=`` ``??4``, ...) all mangle
+      with a *second* ``?`` immediately after the first — the "name" slot
+      is an operator code, not a plain identifier, so the simple
+      leaf/scope split below does not apply.
+    * Template classes/functions (``?$Name@Args@``) embed the template
+      argument list inside the same ``@``-delimited region as the scope
+      chain using the identical separator, and argument encodings can
+      themselves be arbitrary nested type strings — a naive split cannot
+      tell an argument token from a scope token, so any component
+      starting with ``?`` (the template marker ``?$`` or the anonymous-
+      namespace marker ``?A``) is rejected rather than mis-parsed.
+    * A bare-digit component is a name-backreference into MSVC's
+      per-symbol substitution table, not a literal identifier — no real
+      C++ identifier is all-digits, so this is an unambiguous signal to
+      bail rather than resolve it wrong.
+    """
+    if not mangled.startswith("?") or mangled[1:2] == "?":
+        return None
+    idx = mangled.find("@@")
+    if idx == -1:
+        return None
+    head = mangled[1:idx]
+    if not head:
+        return None
+    parts = head.split("@")
+    if any(not p or p.startswith("?") or p.isdigit() for p in parts):
+        return None
+    name = parts[0]
+    scope = list(reversed(parts[1:]))
+    return [*scope, name]

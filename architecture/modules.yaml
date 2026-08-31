@@ -62,6 +62,7 @@
         "abicheck/buildsource/clang_ast_run.py",
         "abicheck/buildsource/comdat_groups.py",
         "abicheck/buildsource/compiler_record.py",
+        "abicheck/buildsource/ctor_export_match.py",
         "abicheck/buildsource/embed.py",
         "abicheck/buildsource/export_accounting.py",
         "abicheck/buildsource/extractor.py",

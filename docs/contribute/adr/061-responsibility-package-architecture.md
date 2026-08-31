@@ -805,26 +805,38 @@ violation. `contract_evidence.py` stays **unclassified** until that
 "not yet actionable, treatment not destination" status this section already
 records for `policy_file.py` below.
 
-A fourth, pre-existing tension (not new to this ADR, only now made explicit):
-`buildsource/ctor_export_match.py` imports `diff_cxx_rules.itanium_scope_
-components` — a `compare`-classified module — from `buildsource/`, the same
-family `source_link.py` (`extract`) lives in. Classifying it `extract` would
-make that import a real `extract -> compare` violation; classifying it
-`compare` would just relocate the same violation to `source_link.py`'s own
-call into it. This is not new debt this module introduces: `dumper_hybrid.py`
-and `dumper_clang_expr.py` already depend on the identical
-`itanium_scope_components` parser and are themselves still unclassified
-(`frozen_root_families`'s `dumper_` family), and `export_accounting.py`
-(`extract`) sidesteps the same constraint by keeping its own narrower,
-purpose-built `_msvc_scope_components` rather than importing the shared one.
-`itanium_scope_components`/`msvc_scope_components` are validated Itanium/MSVC
-mangled-name parsers depended on by a dozen-plus modules across `compare`,
-still-frozen `dumper_*` files, and now `buildsource/`; relocating them into a
-shared inward-facing leaf module both `extract` and `compare` may import is
-the real fix, but it is a codebase-wide move affecting every one of those
-call sites, not something to attempt reactively from one `buildsource/`
-addition. `ctor_export_match.py` stays **unclassified** until that move
-happens.
+**A fourth, pre-existing tension is now closed.** `buildsource/
+ctor_export_match.py` imported `diff_cxx_rules.itanium_scope_components` — a
+`compare`-classified module — from `buildsource/`, the same family
+`source_link.py` (`extract`) lives in; classifying it `extract` would have
+made that import a real `extract -> compare` violation, and classifying it
+`compare` would just have relocated the same violation to `source_link.py`'s
+own call into it. `itanium_scope_components`/`msvc_scope_components` are
+validated Itanium/MSVC mangled-name parsers depended on by a dozen-plus
+modules across `compare`, `dumper_*` files, and `buildsource/` — the real
+fix was relocating both into a shared inward-facing leaf module both
+`extract` and `compare` may import, and this is now done for the full
+codebase-wide call-site set, not attempted reactively from one
+`buildsource/` addition. `itanium_scope_components` (and its
+`_with_template_positions` sibling) had already moved to
+`model/mangled_name.py`, with `dumper_hybrid.py`/`dumper_clang_expr.py`
+reclassified (`workflows`/`extract` respectively) and already importing it
+from there directly; `msvc_scope_components` has now joined it in the same
+module, and `diff_cxx_rules.py` re-exports both by value for back-compat, so
+every pre-existing `from .diff_cxx_rules import ...` call site is
+unaffected. `buildsource/ctor_export_match.py` and
+`buildsource/virtual_dispatch_graph.py` — the two remaining real callers
+still reaching either decoder through `diff_cxx_rules.py` — now import both
+directly from `model/mangled_name.py` instead, closing the `extract ->
+compare` edge; `export_accounting.py` (`extract`) still deliberately keeps
+its own narrower, purpose-built `_msvc_scope_components` rather than
+importing the shared one (an intentional, documented residual, not a gap
+this move needed to close — see `export_accounting.py`'s own docstring).
+With that edge gone, `ctor_export_match.py` is now classified `extract` in
+`architecture/modules.yaml` (the same family `source_link.py` lives in),
+verified against `check_architecture.py` reporting 0 findings.
+`virtual_dispatch_graph.py` stays unclassified for now — reclassifying it
+was not this closure's blocker and is left for its own pass.
 
 What this does **not** resolve: `DiffResult` still exposes policy-resolved
 verdict buckets from a `compare`-classified type, which is the underlying

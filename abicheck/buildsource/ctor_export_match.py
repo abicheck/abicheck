@@ -68,12 +68,12 @@ import re
 from collections.abc import Callable
 from typing import TYPE_CHECKING
 
-from ..diff_cxx_rules import itanium_scope_components
 from ..dumper_castxml import (
     SYNTHETIC_CTOR_KEY_PREFIX,
     is_synthetic_ctor_key,
     is_synthetic_dtor_key,
 )
+from ..model.mangled_name import itanium_scope_components
 
 if TYPE_CHECKING:
     from .source_abi import SourceEntity
