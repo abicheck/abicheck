@@ -95,18 +95,98 @@ def _own_param_names(args: ast.arguments) -> frozenset[str]:
     return frozenset(names)
 
 
+def _bind_target(target: ast.expr, names: set[str]) -> None:
+    """Record every ``Name`` *target* binds, unpacking tuple/list/starred
+    assignment targets recursively (``a, (b, *c) = ...``)."""
+    if isinstance(target, ast.Name):
+        names.add(target.id)
+    elif isinstance(target, (ast.Tuple, ast.List)):
+        for elt in target.elts:
+            _bind_target(elt, names)
+    elif isinstance(target, ast.Starred):
+        _bind_target(target.value, names)
+
+
+def _locally_bound_names(scope_node: ast.AST) -> frozenset[str]:
+    """Every name Python's own scoping rules make LOCAL to *scope_node*
+    (a nested function/async function/lambda) by ordinary body-level
+    binding -- assignment (including tuple/list/starred unpacking),
+    augmented/annotated assignment, a ``for``/``async for`` target, a
+    ``with``/``async with ... as`` target, an ``except ... as`` name, an
+    ``import``/``from ... import ... as`` alias, a walrus (``:=``)
+    target, or a ``global`` declaration (which severs the name from
+    *every* enclosing function scope, this one included) -- without
+    descending into a further-nested function/async function/lambda/
+    class (each computes its own local set independently).
+
+    A ``nonlocal`` declaration is deliberately NOT collected here: it
+    explicitly means the name resolves to the nearest enclosing function
+    scope instead of binding locally in *this* one, which is exactly the
+    genuine-capture case this whole module exists to still catch (Codex
+    review, fresh evidence, ninth round: the seventh/eighth rounds'
+    shadow set covered only *parameters* -- ``def nested(): change =
+    object(); return change.future_field`` rebinds ``change`` as a local
+    via ordinary assignment, no parameter involved at all, and was still
+    misattributed as an outer read).
+
+    A nested ``def``/``class`` statement itself binding a name equal to
+    the tracked one (``def nested(): def change(): ...``) is a rarer,
+    deliberately unmodeled edge beyond this fix's scope.
+    """
+    names: set[str] = set()
+    stack: list[ast.AST] = [scope_node]
+    is_root = True
+    while stack:
+        current = stack.pop()
+        if not is_root and isinstance(
+            current, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda, ast.ClassDef)
+        ):
+            continue
+        is_root = False
+        if isinstance(current, ast.Assign):
+            for assign_target in current.targets:
+                _bind_target(assign_target, names)
+        elif isinstance(current, (ast.AugAssign, ast.AnnAssign)):
+            _bind_target(current.target, names)
+        elif isinstance(current, (ast.For, ast.AsyncFor)):
+            _bind_target(current.target, names)
+        elif isinstance(current, (ast.With, ast.AsyncWith)):
+            for item in current.items:
+                if item.optional_vars is not None:
+                    _bind_target(item.optional_vars, names)
+        elif isinstance(current, ast.ExceptHandler) and current.name:
+            names.add(current.name)
+        elif isinstance(current, (ast.Import, ast.ImportFrom)):
+            for alias in current.names:
+                names.add(alias.asname or alias.name.split(".")[0])
+        elif isinstance(current, ast.NamedExpr) and isinstance(
+            current.target, ast.Name
+        ):
+            names.add(current.target.id)
+        elif isinstance(current, ast.Global):
+            names.update(current.names)
+        for child in ast.iter_child_nodes(current):
+            stack.append(child)
+    return frozenset(names)
+
+
 def _iter_scope_aware(node: ast.AST) -> Iterator[tuple[ast.AST, frozenset[str]]]:
     """Like ``ast.walk``, but each yielded node also carries the set of
     tracked names *shadowed* at that point -- names a nested function,
-    async function, or lambda strictly inside *node* rebinds as its own
-    parameter (Codex review, fresh evidence, seventh round: the sixth
-    round's fix skipped an entire nested scope outright, which also threw
-    away a genuine *closure* read of the outer name, e.g. ``def nested():
-    return change.future_field`` -- ``nested`` never rebinds ``change``,
-    so that read really is of the outer parameter and must still count).
-    Only a name a nested scope actually redeclares as its own parameter
-    is shadowed within that scope; every other name stays visible, the
-    same way Python's own closure lookup works.
+    async function, or lambda strictly inside *node* makes local to
+    itself, whether via its own parameter list (Codex review, fresh
+    evidence, seventh round: the sixth round's fix skipped an entire
+    nested scope outright, which also threw away a genuine *closure*
+    read of the outer name, e.g. ``def nested(): return change.
+    future_field`` -- ``nested`` never rebinds ``change``, so that read
+    really is of the outer parameter and must still count) or via an
+    ordinary body-level binding (Codex review, fresh evidence, ninth
+    round: ``def nested(): change = object(); return change.
+    future_field`` rebinds ``change`` with no parameter involved at all
+    -- see :func:`_locally_bound_names` for the full list of binding
+    forms recognized). Only a name a nested scope actually makes local
+    to itself is shadowed within that scope; every other name stays
+    visible, the same way Python's own closure lookup works.
 
     A nested scope's ``args`` (parameter defaults/annotations) and, for a
     real function, its ``decorator_list``/``returns`` are walked with the
@@ -130,7 +210,11 @@ def _iter_scope_aware(node: ast.AST) -> Iterator[tuple[ast.AST, frozenset[str]]]
         if current is not node and isinstance(
             current, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)
         ):
-            own_shadowed = shadowed | _own_param_names(current.args)
+            own_shadowed = (
+                shadowed
+                | _own_param_names(current.args)
+                | _locally_bound_names(current)
+            )
             stack.append((current.args, shadowed))
             if isinstance(current, ast.Lambda):
                 stack.append((current.body, own_shadowed))
@@ -495,6 +579,53 @@ def test_change_attrs_read_evaluates_a_nested_default_in_the_enclosing_scope() -
         "def outer(change):\n"
         "    def nested(change=change.future_field):\n"
         "        return change\n"
+        "    return nested()\n"
+    )
+    funcs_by_name = {
+        node.name: node
+        for node in ast.walk(ast.parse(source))
+        if isinstance(node, ast.FunctionDef)
+    }
+    assert _change_attrs_read("outer", "change", funcs_by_name, set()) == {
+        "future_field"
+    }
+
+
+def test_change_attrs_read_ignores_a_nested_functions_own_local_assignment() -> None:
+    """Codex review, fresh evidence, ninth round: the seventh/eighth
+    rounds' shadow set only ever covered a nested scope's own
+    *parameters* -- but Python also makes any name assigned inside a
+    function body local to that function, no parameter involved at all.
+    `def nested(): change = object(); return change.future_field` reads
+    `nested`'s own freshly-assigned local, never the outer `change`
+    parameter, and must not be misattributed as an outer read."""
+    source = (
+        "def outer(change):\n"
+        "    def nested():\n"
+        "        change = object()\n"
+        "        return change.future_field\n"
+        "    return nested()\n"
+    )
+    funcs_by_name = {
+        node.name: node
+        for node in ast.walk(ast.parse(source))
+        if isinstance(node, ast.FunctionDef)
+    }
+    assert _change_attrs_read("outer", "change", funcs_by_name, set()) == set()
+
+
+def test_change_attrs_read_treats_nonlocal_as_a_genuine_capture() -> None:
+    """`nonlocal change` explicitly means `change` inside `nested`
+    resolves to the *enclosing* function's binding rather than a new
+    local one -- unlike an ordinary assignment, this must NOT be
+    shadowed, or a real read through a `nonlocal`-declared name would be
+    wrongly hidden the same way plain closure capture almost was in the
+    seventh round."""
+    source = (
+        "def outer(change):\n"
+        "    def nested():\n"
+        "        nonlocal change\n"
+        "        return change.future_field\n"
         "    return nested()\n"
     )
     funcs_by_name = {
