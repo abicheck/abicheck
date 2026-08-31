@@ -626,8 +626,6 @@ def _detect_version_drift(
 
     # Build (symbol -> old default version) from old bundle.
     old_default_version: dict[str, str] = {}
-    for providers in old.resolution.provides.values():
-        pass  # symbols are keys
     for sym_name, providers in old.resolution.provides.items():
         for prov in providers:
             if prov.version:

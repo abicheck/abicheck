@@ -2753,34 +2753,50 @@ def _option_flag_and_default(call: ast.Call) -> tuple[str | None, str | None]:
     return flag, default_src
 
 
+def _shared_option_decorator_sources() -> list[Path]:
+    """Every file that can declare a shared ``@click.option(...)`` decorator
+    consumed by more than one command: ``cli_options.py`` itself plus every
+    sibling split out of it into ``frontends/cli/options/`` (``contract.py``/
+    ``profiles.py``/``secondary_output.py``/``release.py`` today) once each
+    grew past the 2000-line hard cap. A flag can be declared once in
+    ``cli_options.py`` and again in a sibling (e.g. ``--policy``,
+    ``--profile``) — a hardcoded single-file scan silently stopped seeing the
+    sibling's half of that comparison the moment the first split landed."""
+    paths = [PKG / "cli_options.py"]
+    options_dir = PKG / "frontends" / "cli" / "options"
+    if options_dir.is_dir():
+        paths.extend(sorted(options_dir.glob("*.py")))
+    return [p for p in paths if p.is_file()]
+
+
 def _check_one_default_per_flag(f: Findings) -> None:
     """ADR-037 D10.4: a flag declared in more than one shared decorator must not
     carry two different defaults (the historical ``--collect-mode`` trap)."""
-    path = PKG / "cli_options.py"
-    if not path.is_file():
-        return
-    rel = _rel(path)
-    try:
-        tree = ast.parse(_read(path), filename=rel)
-    except SyntaxError:
-        return
     defaults: dict[str, set[str]] = defaultdict(set)
-    for node in ast.walk(tree):
-        if (
-            isinstance(node, ast.Call)
-            and isinstance(node.func, ast.Attribute)
-            and node.func.attr == "option"
-        ):
-            flag, default_src = _option_flag_and_default(node)
-            if flag is not None and default_src is not None:
-                defaults[flag].add(default_src)
+    sites: dict[str, set[str]] = defaultdict(set)
+    for path in _shared_option_decorator_sources():
+        rel = _rel(path)
+        try:
+            tree = ast.parse(_read(path), filename=rel)
+        except SyntaxError:
+            continue
+        for node in ast.walk(tree):
+            if (
+                isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Attribute)
+                and node.func.attr == "option"
+            ):
+                flag, default_src = _option_flag_and_default(node)
+                if flag is not None and default_src is not None:
+                    defaults[flag].add(default_src)
+                    sites[flag].add(rel)
     for flag, seen in sorted(defaults.items()):
         if len(seen) > 1:
             f.err(
                 "cli-contract",
-                f"{rel}: flag `{flag}` is declared with conflicting defaults "
-                f"{sorted(seen)} across shared decorators (ADR-037 D10.4). "
-                "Give it one default.",
+                f"{', '.join(sorted(sites[flag]))}: flag `{flag}` is declared "
+                f"with conflicting defaults {sorted(seen)} across shared "
+                "decorators (ADR-037 D10.4). Give it one default.",
             )
 
 

@@ -161,6 +161,15 @@ module = [
     "abicheck.cli_aggregate",
     "abicheck.cli_appcompat",
     "abicheck.cli_compare_release",
+    # `cli_compare_release_matrix`/`cli_compare_release_pairwise` (G38 Phase
+    # 15 file-split prerequisite) declare no Click decorator of their own --
+    # unlike every other entry in this override, they need it only because
+    # they call `.cli`'s own helpers (`_normalize_binary_input`,
+    # `_safe_write_output`, ...), whose return types are themselves Any
+    # under `cli`'s identical override; without the same relaxation here,
+    # mypy reports `Any? not callable` (`misc`) at each call site (CodeRabbit
+    # review on PR #973 questioned this entry; reproduced by removing it and
+    # re-running mypy before restoring it).
     "abicheck.cli_compare_release_matrix",
     "abicheck.cli_compare_release_pairwise",
     "abicheck.cli_debian_symbols",
