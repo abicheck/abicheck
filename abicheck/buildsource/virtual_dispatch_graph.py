@@ -21,7 +21,7 @@ VIRTUAL_DISPATCH_EDGE_KINDS`).
 Unlike every sibling module in this family (``override_graph.py``,
 ``template_graph.py``, ``macro_graph.py``), this module runs **no new clang
 invocation at all** — both parts below are pure graph-transformation
-functions over a :class:`~abicheck.buildsource.source_graph.
+functions over a :class:`~abicheck.model.source_graph.
 SourceGraphSummary` that ``call_graph.py``/``type_graph.py``/
 ``override_graph.py`` already folded. They read already-collected facts and
 write more graph; nothing here shells out.
@@ -77,11 +77,11 @@ never seeded as polymorphic at all — nor was anything inheriting from it.
 Both seeds need an owning-class join ``override_graph.py``'s own folded
 edges/facts don't carry directly (they name methods, not owner types) —
 solved by decoding the method's own Itanium/MSVC mangled identity via
-:func:`~abicheck.diff_cxx_rules.itanium_scope_components`/
-:func:`~abicheck.diff_cxx_rules.msvc_scope_components` (the same structural,
-no-external-demangler decoders ``diff_cxx_rules.owner_class_of`` already uses
-elsewhere in this codebase for the identical "which class owns this mangled
-symbol" question) and dropping the method's own leaf component. This is
+:func:`~abicheck.model.mangled_name.itanium_scope_components`/
+:func:`~abicheck.model.mangled_name.msvc_scope_components` (the same
+structural, no-external-demangler decoders ``diff_cxx_rules.owner_class_of``
+already uses elsewhere in this codebase for the identical "which class owns
+this mangled symbol" question) and dropping the method's own leaf component. This is
 still a pure string transform over an already-mangled identity, not a new
 compiler pass.
 
@@ -133,11 +133,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from .. import diff_cxx_rules
+from ..model.mangled_name import itanium_scope_components, msvc_scope_components
 from .graph_facts import CONF_HIGH, CONF_REDUCED, GraphEdge, GraphNode
 
 if TYPE_CHECKING:
-    from .source_graph import SourceGraphSummary
+    from ..model.source_graph import SourceGraphSummary
 
 EDGE_VIRTUAL_CALL_MAY_DISPATCH_TO = "VIRTUAL_CALL_MAY_DISPATCH_TO"
 EDGE_TYPE_HAS_VTABLE = "TYPE_HAS_VTABLE"
@@ -284,9 +284,9 @@ def _owner_identity(method_identity: str) -> str | None:
     for a genuine C++ virtual method, whose mangled name is essentially
     always distinct from its bare name).
     """
-    comps = diff_cxx_rules.itanium_scope_components(
+    comps = itanium_scope_components(method_identity) or msvc_scope_components(
         method_identity
-    ) or diff_cxx_rules.msvc_scope_components(method_identity)
+    )
     if not comps or len(comps) < 2:
         return None
     return "::".join(comps[:-1])
@@ -398,7 +398,7 @@ def augment_graph_with_vtable_presence(
                 polymorphic.add(derived)
                 changed = True
 
-    from .source_graph import _vtable_node_id
+    from ..model.source_graph import _vtable_node_id
 
     for ident in sorted(polymorphic):
         record_node_id = record_identities.get(ident)

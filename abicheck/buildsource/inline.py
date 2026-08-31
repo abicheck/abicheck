@@ -79,9 +79,9 @@ from .pack_shape import is_pack_dir as is_pack_dir
 from .redaction import DEFAULT_REDACTION
 
 if TYPE_CHECKING:
+    from ..model.source_graph import SourceGraphSummary
     from .source_abi import SourceAbiSurface
     from .source_extractors import SourceAbiExtractor
-    from .source_graph import SourceGraphSummary
 
 #: Default places to look for a compile DB inside a source checkout, in order.
 logger = logging.getLogger(__name__)
@@ -1755,7 +1755,7 @@ def _build_inline_graph(
     has_build = bool(merged.compile_units or merged.targets or merged.link_units)
     if not has_build and surface is None:
         return None
-    from .source_graph import build_source_graph
+    from .source_graph_build import build_source_graph
 
     graph = build_source_graph(merged, source_abi=surface)
     if with_call_graph:

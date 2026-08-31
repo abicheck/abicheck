@@ -485,6 +485,34 @@ class TestJsonReport:
         payload = json.loads(result.stdout)
         assert "suppression_audit" not in payload
 
+    @pytest.mark.parametrize("report_mode", ["leaf", "root-cause"])
+    def test_present_under_every_report_mode(self, tmp_path, report_mode):
+        # ADR-061 Phase 2 item 5: the removed post-render fold applied
+        # unconditionally whenever fmt == "json", regardless of
+        # --report-mode -- reporter.to_json's own per-mode JSON builders
+        # (_to_json_leaf/_to_json_root_cause) must all carry the key now.
+        old_p, new_p = _write_pair(tmp_path)
+        suppress = _write_suppression(
+            tmp_path,
+            "version: 1\n"
+            "suppressions:\n"
+            "  - symbol: never_matches_anything\n"
+            "    reason: workaround\n",
+        )
+        result = CliRunner().invoke(
+            main,
+            [
+                "compare", str(old_p), str(new_p),
+                "--suppress", str(suppress), "--audit-suppressions",
+                "--format", "json", "--report-mode", report_mode,
+            ],
+        )
+        assert result.exit_code == 4, result.output
+        payload = json.loads(result.stdout)
+        audit = payload["suppression_audit"]
+        assert audit["total_rules"] == 1
+        assert audit["stale_rules"] == ["workaround (symbol=never_matches_anything)"]
+
 
 class TestMarkdownReport:
     def test_stale_rule_rendered(self, tmp_path):

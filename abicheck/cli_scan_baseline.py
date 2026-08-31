@@ -47,8 +47,8 @@ from .workflows.scan_config import RiskRules
 
 if TYPE_CHECKING:
     from .environment_matrix import EnvironmentMatrix
-    from .policy_file import PolicyFile
     from .service_scan import CompileContext
+    from .workflows.policy_file import PolicyFile
     from .workflows.suppression import SuppressionList
 
 

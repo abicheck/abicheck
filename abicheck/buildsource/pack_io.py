@@ -63,7 +63,7 @@ from .pack import BuildSourcePack
 from .source_abi import SourceAbiSurface
 
 if TYPE_CHECKING:
-    from .source_graph import SourceGraphSummary
+    from ..model.source_graph import SourceGraphSummary
 
 MANIFEST_NAME = "manifest.json"
 BUILD_EVIDENCE_REL = "build/build_evidence.json"
@@ -98,7 +98,7 @@ def load(root: Path | str) -> BuildSourcePack:
     source_graph: SourceGraphSummary | None = None
     sg_path = root / SOURCE_GRAPH_REL
     if sg_path.is_file():
-        from .source_graph import SourceGraphSummary
+        from ..model.source_graph import SourceGraphSummary
 
         source_graph = SourceGraphSummary.from_dict(_read_json(sg_path))
     return BuildSourcePack(

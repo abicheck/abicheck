@@ -56,10 +56,10 @@ from .workflows.extraction import DEFAULT_REDACTION, pack_content_hash
 if TYPE_CHECKING:
     from .buildsource.build_evidence import BuildEvidence
     from .buildsource.source_abi import SourceAbiSurface
-    from .buildsource.source_graph import SourceGraphSummary
     from .checker_types import Change, DiffResult
     from .model import AbiSnapshot
-    from .policy_file import PolicyFile
+    from .model.source_graph import SourceGraphSummary
+    from .workflows.policy_file import PolicyFile
 
 
 # ADR-061 Phase 3: these moved to `buildsource.evidence_report`, which is now
@@ -452,7 +452,7 @@ def _collect_source_graph(
     if source_graph != "summary":
         return None, ""
 
-    from .buildsource.source_graph import build_source_graph
+    from .workflows.extraction import build_source_graph
 
     # Fold the L4 surface in too when it was collected (--source-abi), so the
     # graph carries the public-reachability + source↔binary slices.

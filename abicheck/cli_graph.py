@@ -34,7 +34,7 @@ from typing import TYPE_CHECKING
 import click
 
 if TYPE_CHECKING:
-    from .buildsource.source_graph import SourceGraphSummary
+    from .model.source_graph import SourceGraphSummary
 
 
 def _load_source_graph(path: Path) -> SourceGraphSummary:
@@ -44,8 +44,8 @@ def _load_source_graph(path: Path) -> SourceGraphSummary:
     directory (the graph is read from its manifest layout). Raises a Click error
     when neither yields a graph so the failure is actionable.
     """
-    from .buildsource.source_graph import SourceGraphSummary
     from .errors import SnapshotError
+    from .model.source_graph import SourceGraphSummary
     from .workflows.extraction import load_pack_or_raise
 
     if path.is_dir():

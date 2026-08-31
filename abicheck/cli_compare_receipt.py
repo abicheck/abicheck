@@ -266,7 +266,7 @@ def _shadowed_inert_fields(policy_file_path: Any) -> frozenset[str]:
     if policy_file_path is None:
         return frozenset()
     from .compatibility_evaluation_wiring import policy_file_pins_internal_namespaces
-    from .policy_file import PolicyFile
+    from .workflows.policy_file import PolicyFile
 
     try:
         loaded = PolicyFile.load(policy_file_path)
@@ -555,7 +555,7 @@ def resolve_release_pack_application_from_ctx(
         PackConflictError,
     )
     from .errors import PackManifestError
-    from .policy_file import PolicyFile
+    from .workflows.policy_file import PolicyFile
 
     # A best-effort read purely to answer "does the real --policy-file
     # already state this ChangeKind override" (D8 precedence, mirroring

@@ -34,7 +34,7 @@ from .model import ExtractorRecord
 from .virtual_dispatch_graph import augment_graph_with_virtual_dispatch
 
 if TYPE_CHECKING:
-    from .source_graph import SourceGraphSummary
+    from ..model.source_graph import SourceGraphSummary
 
 
 #: ADR-046 D3: the per-(kind, role) coverage matrix. ``type_graph.py``'s
@@ -570,7 +570,7 @@ def fold_template_graph(
         narrowed_pass_confirmed,
         project_source_files,
     )
-    from .template_graph import augment_graph_with_templates
+    from .template_graph_fold import augment_graph_with_templates
 
     # Deliberately `template_graph.ClangTemplateGraphExtractor` (through the
     # module, not a direct `from .template_graph_extractor import ...`) --

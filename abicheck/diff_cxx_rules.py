@@ -28,11 +28,12 @@ from .checker_types import Change
 from .diff_helpers import make_change
 from .model import Function, RecordType
 
-# The Itanium mangled-name scope-component parser's real home is
+# The Itanium/MSVC mangled-name scope-component parsers' real home is
 # model/mangled_name.py (ADR-061 D1): pure string decoding with no I/O,
-# needed by extract (dumper_clang_expr.py, dumper_hybrid.py) as well as
-# by this module's own remaining name-derivation helpers below.
-# Re-exported by value for back-compat.
+# needed by extract (dumper_clang_expr.py, dumper_hybrid.py) and by
+# buildsource's own extract-destined modules (ctor_export_match.py,
+# virtual_dispatch_graph.py) as well as by this module's own remaining
+# name-derivation helpers below. Re-exported by value for back-compat.
 from .model.mangled_name import (
     _ASCII_DIGITS as _ASCII_DIGITS,
     _itanium_strip_prefix as _itanium_strip_prefix,
@@ -41,6 +42,7 @@ from .model.mangled_name import (
     _skip_template_args as _skip_template_args,
     itanium_scope_components as itanium_scope_components,
     itanium_scope_components_with_template_positions as itanium_scope_components_with_template_positions,
+    msvc_scope_components as msvc_scope_components,
 )
 
 
@@ -151,60 +153,6 @@ def itanium_ctor_dtor_marker_span(mangled: str) -> tuple[int, int] | None:
             return offset + i, offset + new_i
         return None  # an operator or other non-source-name, non-ctor/dtor form
     return None
-
-
-def msvc_scope_components(mangled: str) -> list[str] | None:
-    """Scope components of an MSVC-mangled C++ symbol, parsed structurally.
-
-    Direct-clang snapshots taken with ``clang-cl`` (or any ``--target=
-    *-windows-msvc`` invocation) record ``mangledName`` in the proprietary
-    Microsoft C++ ABI scheme, not Itanium — confirmed empirically::
-
-        ?run@Foo@@QEAAXXZ            -> ["Foo", "run"]        (Foo::run())
-        ?freefunc@ns@@YAXXZ          -> ["ns", "freefunc"]    (ns::freefunc())
-        ?method@Box@inner@outer@@... -> ["outer", "inner", "Box", "method"]
-        ?instantiate@@YAXXZ          -> ["instantiate"]       (free function)
-
-    The qualified name is written ``<leaf>@<scope1>@<scope2>...@@<type-enc>``
-    with scope components listed *innermost first*, terminated by the first
-    ``@@`` — the reverse order and terminator convention Itanium uses, so this
-    is a genuinely separate parser, not a reuse of ``itanium_scope_components``.
-
-    Returns ``None`` for forms it does not model, mirroring
-    ``itanium_scope_components``'s "return None, let the caller fall back"
-    contract:
-
-    * Special member functions and operators (constructors ``??0``,
-      destructors ``??1``/``??_D``, ``operator=`` ``??4``, ...) all mangle
-      with a *second* ``?`` immediately after the first — the "name" slot
-      is an operator code, not a plain identifier, so the simple
-      leaf/scope split below does not apply.
-    * Template classes/functions (``?$Name@Args@``) embed the template
-      argument list inside the same ``@``-delimited region as the scope
-      chain using the identical separator, and argument encodings can
-      themselves be arbitrary nested type strings — a naive split cannot
-      tell an argument token from a scope token, so any component
-      starting with ``?`` (the template marker ``?$`` or the anonymous-
-      namespace marker ``?A``) is rejected rather than mis-parsed.
-    * A bare-digit component is a name-backreference into MSVC's
-      per-symbol substitution table, not a literal identifier — no real
-      C++ identifier is all-digits, so this is an unambiguous signal to
-      bail rather than resolve it wrong.
-    """
-    if not mangled.startswith("?") or mangled[1:2] == "?":
-        return None
-    idx = mangled.find("@@")
-    if idx == -1:
-        return None
-    head = mangled[1:idx]
-    if not head:
-        return None
-    parts = head.split("@")
-    if any(not p or p.startswith("?") or p.isdigit() for p in parts):
-        return None
-    name = parts[0]
-    scope = list(reversed(parts[1:]))
-    return [*scope, name]
 
 
 def msvc_qualified_name(mangled: str) -> str | None:

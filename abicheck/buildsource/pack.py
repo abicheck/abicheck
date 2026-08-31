@@ -37,7 +37,7 @@ from .model import BuildSourceManifest
 from .source_abi import SourceAbiSurface
 
 if TYPE_CHECKING:
-    from .source_graph import SourceGraphSummary
+    from ..model.source_graph import SourceGraphSummary
 
 
 @dataclass
@@ -103,7 +103,7 @@ class BuildSourcePack:
         sg = data.get("source_graph")
         source_graph = None
         if sg:
-            from .source_graph import SourceGraphSummary
+            from ..model.source_graph import SourceGraphSummary
 
             source_graph = SourceGraphSummary.from_dict(sg)
         return cls(

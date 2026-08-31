@@ -15,7 +15,7 @@
 """Safe old/new graph-node reconciliation — rename/move disambiguation
 (G31 Phase B, ADR-048).
 
-:func:`~abicheck.buildsource.source_graph.diff_source_graph`'s structural
+:func:`~abicheck.buildsource.source_graph_compare.diff_source_graph`'s structural
 delta (``GraphSummaryDiff``) already tells "this node id vanished, that one
 appeared" — but a node's ``id`` today is whatever v1 identity scheme its
 producer happened to hash (ADR-046 §2's "identity fragmentation"). A bare
@@ -111,7 +111,8 @@ from .entity_identity import (
 )
 
 if TYPE_CHECKING:
-    from .source_graph import GraphNode, SourceGraphSummary
+    from ..model.graph_facts import GraphNode
+    from ..model.source_graph import SourceGraphSummary
 
 #: Reconciliation outcomes (ADR-048 D2) — distinct from plain
 #: node-add/node-remove, so a consumer can tell "the same entity, under a
@@ -726,10 +727,10 @@ def reconcile_graph_diff(
     old: SourceGraphSummary, new: SourceGraphSummary
 ) -> GraphReconciliation:
     """Convenience wrapper: structurally diff *old*/*new* (via
-    :func:`~.source_graph.diff_source_graph`) and reconcile the resulting
+    :func:`~.source_graph_compare.diff_source_graph`) and reconcile the resulting
     added/removed nodes in one call.
     """
-    from .source_graph import diff_source_graph
+    from .source_graph_compare import diff_source_graph
 
     diff = diff_source_graph(old, new)
     return reconcile_added_removed(diff.removed_nodes, diff.added_nodes, old, new)
@@ -756,7 +757,8 @@ def _public_reachable_ids(graph: SourceGraphSummary) -> frozenset[str]:
     are different questions; only the latter matters for gating a finding's
     verdict impact.
     """
-    from .source_graph import DEPENDENCY_EDGE_KINDS, is_public_dependency_node
+    from ..model.source_graph import DEPENDENCY_EDGE_KINDS
+    from .source_graph_query import is_public_dependency_node
 
     adjacency: dict[str, list[str]] = {}
     for e in graph.edges:
@@ -815,7 +817,7 @@ def diff_graph_reconciliation_findings(
     """
     from ..checker_policy import ChangeKind
     from ..checker_types import Change
-    from .source_graph import EVIDENCE_TIER_L5
+    from ..model.source_graph import EVIDENCE_TIER_L5
 
     kind_by_outcome = {
         OUTCOME_RENAMED: ChangeKind.DECLARATION_RENAMED,
