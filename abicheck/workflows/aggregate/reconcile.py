@@ -53,6 +53,7 @@ from typing import TYPE_CHECKING, Any, cast
 
 from abicheck.diff_cxx_rules import itanium_qualified_name, msvc_qualified_name
 from abicheck.finding_identity import FindingIdentity, resolve_change_identity
+from abicheck.model.identity import EntityId
 
 if TYPE_CHECKING:
     from abicheck.checker_types import Change
@@ -74,7 +75,7 @@ class _ReportChangeView:
     ``Change`` carries ~30 further fields (verdict modulation, reachability,
     impact assessment) that identity resolution never touches, and
     constructing one here would invite a future reader to assume those
-    fields mean something on the round-tripped side. Only the eight
+    fields mean something on the round-tripped side. Only the nine
     attributes below are consulted, all by plain attribute access
     (``resolve_change_identity`` reads ``kind`` through ``getattr(..., "value",
     kind)``, so a bare kind *slug* string works unchanged and an unknown
@@ -95,6 +96,13 @@ class _ReportChangeView:
     source_location: str | None
     affected_symbols: list[str] | None
     qualified_name: str | None
+    #: Never serialized by ``_change_to_dict`` either (Codex review, ADR-063
+    #: Phase 2 fresh evidence: an unconditional ``change.entity_id`` read in
+    #: ``resolve_change_identity`` raised ``AttributeError`` here and aborted
+    #: `aggregate_reports_dir` before this field existed) -- always ``None``,
+    #: consistent with ``qualified_name`` above rather than lossy, since
+    #: every report loses it the same way.
+    entity_id: EntityId | None
 
 
 def resolve_report_change_identity(entry: Mapping[str, Any]) -> FindingIdentity:
@@ -165,6 +173,7 @@ def resolve_report_change_identity(entry: Mapping[str, Any]) -> FindingIdentity:
         # docstring for why an absent value here is consistent rather than
         # lossy for the cross-report comparison it exists to serve.
         qualified_name=None,
+        entity_id=None,  # see _ReportChangeView's own field comment
     )
     return resolve_change_identity(cast("Change", view))
 
