@@ -9587,6 +9587,28 @@ sibling:
   location (mirroring the re-export shim `source_graph.py` already uses
   for its own split-out pieces), so every existing L5 caller is
   unaffected.
+
+  **Already landed independently, under a different name, before this
+  phase's own implementation began** — confirmed by reading
+  `abicheck/buildsource/CLAUDE.md`'s current module table and
+  `abicheck/model/graph_facts.py` directly, not assumed from this plan's
+  own stale text. ADR-061 Phase 5 item 2's own follow-up split
+  `buildsource/graph_facts.py` into three sibling `model/` modules rather
+  than the single `model/graph.py` this bullet names:
+  `model.graph_facts` (`GraphNode`/`GraphEdge`/`GraphFact`/`FactConflict`/
+  `merge_graph_facts`/`ensure_facts_and_resolve`/`register_fact`/
+  `edge_relation_key`/`edge_occurrence_id`), `model.graph_identity` (node-id
+  construction/normalization), and `model.graph_vocabulary` (the
+  `NODE_KINDS`/`EDGE_KINDS`-family constant blocks) — `buildsource/
+  graph_facts.py` is now itself the back-compat re-export shim this
+  bullet asked for, already exporting every original name (`X as X`)
+  rather than only what a repo-local usage scan could prove was called.
+  `GraphNode.id: str`/`label: str = ""` match this section's own later
+  design exactly (confirmed by reading the dataclass directly). This
+  bullet's own remaining, still-open work is therefore not the relocation
+  itself but picking `model.graph_facts` (the real current location) over
+  the stale `model.graph` name wherever a later slice writes
+  `from abicheck.model.graph import ...`.
 - **A third, pre-existing graph-shaped module already answers a
   public-surface question independently, and a first draft of this phase
   missed it entirely — `abicheck/surface_graph.py`'s `SurfaceGraph`/
@@ -9837,8 +9859,21 @@ sibling:
   it is injective *on identity*, never on full structure) — used by both
   `model/graph.py`'s `GraphNode.id` for a `declaration`/`type` node and any
   other consumer that needs a collision-free, equality-consistent key
-  (`kind`/`leaf_name`/`extra` plus each segment's identity-only fields),
-  while `storage/entity_ids.py`'s `to_dto()` stays the separate,
+  (`kind`/`leaf_name`/`extra` plus each segment's identity-only fields).
+  **Already landed, ahead of this phase, under a different name** —
+  Phase 2's own `resolve_change_identity`-consumer slice added exactly
+  this contract as `EntityId.key` (a property, not a free function; a
+  local `_packed`/`_segment_key` length-prefixing scheme, independently
+  arriving at the identical "exclude every `compare=False` payload field"
+  rule this paragraph states), confirmed by reading `model/identity.py`
+  directly: it already excludes `Record.access` and is built from
+  `scope`/`kind.value`/`leaf_name`/`extra` only. A future slice building
+  `model/graph.py`'s `GraphNode.id` construction should call `entity_id.key`
+  directly rather than adding a second, redundant `canonical_key(...)`
+  wrapper around it — one property, one name, per the Governing Invariant.
+  The internal-linkage `static` collision this section raises next is a
+  real, independent gap in `EntityId.key` too, not closed by its existing
+  tests, while `storage/entity_ids.py`'s `to_dto()` stays the separate,
   intentionally fuller encoding for its own persistence purpose —
   `GraphNode`'s own pre-existing `label: str` field (already documented as
   "human-readable name/path") is where the flattened, lossy `qualified_name`

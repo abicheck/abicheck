@@ -77,7 +77,22 @@
   alias-match reconciliation tier once `EntityId.key`'s cross-release
   stability is established). Those are the remaining items before Phase 2
   is complete.
-- **Phases 3–10** are still unimplemented design text.
+- **Phases 3–10** are still unimplemented design text, with one exception
+  found on inspection rather than assumed: Phase 3's own first bullet
+  (relocate the generic node/edge/merge graph primitive out of
+  `buildsource/`) and its `EntityId.key`/`canonical_key` requirement were
+  both already satisfied — the first by an unrelated ADR-061 Phase 5
+  migration (`model.graph_facts`/`graph_identity`/`graph_vocabulary`, not
+  the `model/graph.py` name this phase's own text uses), the second by
+  Phase 2's own eighth slice. The rest of Phase 3 — `compare/
+  surface_graph.py`, `PublicSurfaceQuery.resolve()`, threading resolved
+  public-`EntityId` sets through `checker.py`/`service.py`, and deleting
+  `surface.py`'s/`export_surface.py`'s independent traversal
+  implementations per its own acceptance criteria — remains unimplemented
+  and is a substantially larger, correctness-critical undertaking (its own
+  design section runs to some 1,250 lines and required numerous review
+  rounds to reach its current, internally-consistent shape) that has not
+  been started.
 
 See the [implementation plan](../plans/one-semantic-pipeline.md) for the
 full phase-by-phase state, including every slice's own "Landed"/"What this
