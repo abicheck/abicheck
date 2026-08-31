@@ -33,6 +33,7 @@ from __future__ import annotations
 import json
 import shutil
 import subprocess
+import sys
 import tempfile
 from pathlib import Path
 
@@ -92,7 +93,13 @@ class TestCompareOldBundleFactsEarlyRejections:
     facts loading/comparison happens, so none of them need a real gcc-built
     bundle -- a placeholder OLD_INPUT/NEW_INPUT pair is enough to prove the
     checks run early, unlike the ``TestCompareOldBundleFacts`` class in
-    ``test_cli_compare_bundle_facts.py``.
+    ``test_cli_compare_bundle_facts.py``. One exception:
+    ``test_output_dir_writes_per_library_reports`` proves ``--output-dir``
+    writes a *real* per-library report, which needs an actual matched
+    library pair -- marked ``@pytest.mark.integration`` + Linux-only
+    (Codex review, fresh evidence: a macOS CI unit-tests run failed on this
+    test's ``_build_so`` helper's GNU-only ``-Wl,-soname`` flag, since it
+    had none of ``TestCompareOldBundleFacts``'s own guard).
     """
 
     def test_dry_run_is_rejected(self, tmp_path: Path) -> None:
@@ -454,6 +461,13 @@ class TestCompareOldBundleFactsEarlyRejections:
         assert code == 1, out
         assert captured["headers"] is None
 
+    @pytest.mark.skipif(
+        sys.platform != "linux",
+        reason="Uses the GNU ld flag -Wl,-soname via _build_so; ELF/Linux-only "
+        "bundle analysis (matches TestCompareOldBundleFacts's identical guard "
+        "in test_cli_compare_bundle_facts.py).",
+    )
+    @pytest.mark.integration
     def test_output_dir_writes_per_library_reports(self, tmp_path: Path) -> None:
         # Codex review: --output-dir is a release-style artifact request
         # (one {library}.json per matched library, mirroring the live
