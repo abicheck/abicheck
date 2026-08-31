@@ -3464,14 +3464,15 @@ second top-level spelling of the same fact.
 
 ## PR 4 — one gate algorithm (`--exit-code-scheme` removal)
 
-> **Status (2026-08-30): the ADR landed; only its stage 1a has.**
+> **Status (2026-08-31): the ADR landed; stage 1a is complete and stage 1b
+> partially so.**
 > [ADR-064](../adr/064-canonical-gate-algorithm-and-exit-decision.md) is the
 > settled design this section's own analysis called for — precedence order,
 > the mode-dependent removed-required-library rank, the "numbers stay
 > per-command" constraint, the `GateOptions` reassignment, and a two-stage
 > landing plan whose first stage is itself split into 1a (pure resolvers)
-> and 1b (wiring), so a "landed" claim can't conflate the two. Stage 1a has
-> landed: `abicheck/policy/exit_decision.py` gained
+> and 1b (wiring). Stage 1a landed complete:
+> `abicheck/policy/exit_decision_precedence.py` gained
 > `resolve_scan_exit_decision` (evidence-contract-error / budget-overflow /
 > not-comparable, with the exact "budget discards an already-decided
 > not-comparable result" ordering) and `resolve_release_exit_decision`
@@ -3483,14 +3484,29 @@ second top-level spelling of the same fact.
 > both pure functions, verified against `scan_engine.py`/
 > `cli_compare_release_helpers.py` and unit-tested (`tests/
 > test_exit_decision.py`'s `TestResolveScanExitDecision`/
-> `TestResolveReleaseExitDecision`), and neither wired into any call site's
-> actually-returned exit code yet, same scoping as PR G1 itself. **Still
-> open:** stage 1b (wiring those two resolvers into `scan --against`'s
-> nested `diff.exit` block and the release fan-out's own summary — a real
-> schema-version bump and cross-front-end parity pass, not attempted in
-> this slice), the release fan-out's `GateOptions` typed-object rewrite,
-> and stage 2 (the atomic removal — deleting `--exit-code-scheme` and
-> updating CLI/API/Action/`aggregate` parity together).
+> `TestResolveReleaseExitDecision`).
+>
+> Stage 1b landed partially: `ExitDecision.to_dict` now serializes all five
+> ADR-064 fields (report schema 2.47/1.22); `scan`'s `NOT_COMPARABLE`
+> outcome persists a real `diff.exit` block, since that outcome already
+> builds and emits a report today; and the release fan-out's JSON summary
+> gains an unconditional `exit` block
+> (`resolve_release_exit_decision_for_report`, a new, report-only resolver
+> in `exit_decision_precedence.py`) reproducing `_exit_compare_release`'s
+> own precedence, including the legacy-scheme "worst verdict among
+> non-`ERROR`/non-`not_comparable` libraries" aggregation this section used
+> to flag as missing — landed as a separate resolver rather than a rewrite
+> of `_exit_compare_release` itself (that function's exact signature/output
+> is pinned by `tests/test_exit_code_integrity.py`, which CI gates depend
+> on), proven to always agree with it numerically
+> (`TestReleaseExitDecisionForReportAgreesWithRealExit`) rather than merely
+> assumed to. **Still open:** persisting a decision for `scan`'s
+> `_BudgetOverflow`/`_EvidenceContractError` abort points, which raise
+> *before* any report is ever built today (a real design decision this
+> slice deliberately did not make), the release fan-out's `GateOptions`
+> typed-object rewrite, a full cross-front-end parity pass (typed API,
+> Action), and stage 2 (the atomic removal — deleting `--exit-code-scheme`
+> and updating CLI/API/Action/`aggregate` parity together).
 
 **This is the item the original draft got wrong, and it gets its own ADR.**
 
@@ -4191,8 +4207,8 @@ PR F  trusted build config            = PR 3C — build.query executes only
                                        independently of the shared pipeline
       └─ then DELETE dump --build-query, dump --build-compile-db
 PR G2 canonical exit decision, part 2 = PR 4 — one automatic gate algorithm,
-      (ADR-064 accepted; additive         schema / report / Action parity
-       resolvers landed, not wired)
+      (ADR-064 accepted; stage 1a done,   schema / report / Action parity
+       stage 1b partially wired)
       └─ then DELETE --exit-code-scheme
 PR H  artifact-set semantics          = PR 5 — provider ownership, moved and
       (syntax slice DONE)               duplicated symbols, cost and dry-run;

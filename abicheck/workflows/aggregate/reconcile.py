@@ -57,6 +57,7 @@ from abicheck.model.identity import EntityId
 
 if TYPE_CHECKING:
     from abicheck.checker_types import Change
+    from abicheck.model.identity import EntityId
 
 #: :attr:`FindingMatrixEntry.scope` values — how one logical finding is
 #: distributed across the profiles that checked its target.
@@ -96,13 +97,14 @@ class _ReportChangeView:
     source_location: str | None
     affected_symbols: list[str] | None
     qualified_name: str | None
-    #: Never serialized by ``_change_to_dict`` either (Codex review, ADR-063
-    #: Phase 2 fresh evidence: an unconditional ``change.entity_id`` read in
-    #: ``resolve_change_identity`` raised ``AttributeError`` here and aborted
-    #: `aggregate_reports_dir` before this field existed) -- always ``None``,
-    #: consistent with ``qualified_name`` above rather than lossy, since
-    #: every report loses it the same way.
-    entity_id: EntityId | None
+    #: Never serialized by ``_change_to_dict`` (same as ``qualified_name``
+    #: above), so a report-derived view always reads this as absent rather
+    #: than lossy — ``resolve_change_identity`` only folds a set
+    #: ``change.entity_id`` in as an additional alias, never into
+    #: ``primary_id``/tier, so a permanently-``None`` value here degrades
+    #: identity precision but never raises or fabricates one (ADR-063
+    #: Phase 2's first real reader of ``Change.entity_id``).
+    entity_id: EntityId | None = None
 
 
 def resolve_report_change_identity(entry: Mapping[str, Any]) -> FindingIdentity:
@@ -173,7 +175,7 @@ def resolve_report_change_identity(entry: Mapping[str, Any]) -> FindingIdentity:
         # docstring for why an absent value here is consistent rather than
         # lossy for the cross-report comparison it exists to serve.
         qualified_name=None,
-        entity_id=None,  # see _ReportChangeView's own field comment
+        entity_id=None,
     )
     return resolve_change_identity(cast("Change", view))
 

@@ -144,6 +144,11 @@ class TestResolveExitDecision:
             "contract_coverage_contribution": 1,
             "analysis_assurance_contribution": 0,
             "crosscheck_promotion_contribution": 0,
+            "operational_error_contribution": 0,
+            "evidence_contract_error_contribution": 0,
+            "budget_overflow_contribution": 0,
+            "not_comparable_contribution": 0,
+            "removed_required_library_contribution": 0,
         }
 
     def test_crosscheck_promotion_is_a_real_contribution_not_a_patch(self) -> None:
@@ -668,12 +673,10 @@ class TestResolveReleaseExitDecision:
             decision.removed_required_library_contribution,
         )
 
-    def test_to_dict_deliberately_excludes_the_new_fields_for_now(self) -> None:
-        """Serializing ADR-064's four new fields into the report's `exit`
-        block is deferred to the (separately schema-versioned) wiring
-        stage -- see `ExitDecision`'s own docstring. Pin today's `to_dict()`
-        shape so a future change to include them is a deliberate decision,
-        not an accidental side effect of another edit.
+    def test_to_dict_now_includes_the_adr_064_fields(self) -> None:
+        """ADR-064 stage 1b (report schema 2.47/1.22): `to_dict()` now
+        serializes all five ADR-064 fields, so a real `exit` block can name
+        `not_comparable`/etc. See `ExitDecision.to_dict`'s own docstring.
         """
         decision = resolve_release_exit_decision(
             not_comparable=True,
@@ -681,7 +684,12 @@ class TestResolveReleaseExitDecision:
             verdict_or_severity_contribution=0,
         )
         assert decision.code == 16
-        assert "not_comparable_contribution" not in decision.to_dict()
+        d = decision.to_dict()
+        assert d["not_comparable_contribution"] == 16
+        assert d["evidence_contract_error_contribution"] == 0
+        assert d["budget_overflow_contribution"] == 0
+        assert d["removed_required_library_contribution"] == 0
+        assert d["operational_error_contribution"] == 0
 
 
 def _fn(name: str, mangled: str) -> Function:
@@ -741,6 +749,11 @@ class TestCompareExitDecisionIntegration:
             "contract_coverage_contribution": 0,
             "analysis_assurance_contribution": 0,
             "crosscheck_promotion_contribution": 0,
+            "operational_error_contribution": 0,
+            "evidence_contract_error_contribution": 0,
+            "budget_overflow_contribution": 0,
+            "not_comparable_contribution": 0,
+            "removed_required_library_contribution": 0,
         }
 
     def test_breaking_comparison_reports_the_compatibility_gate_reason(

@@ -691,6 +691,41 @@ BUG_CLASSES: tuple[BugClass, ...] = (
             ),
         ),
     ),
+    BugClass(
+        id="adapter.duck_typed_view_attribute_drift",
+        invariant=(
+            "A duck-typed read-back adapter presented to a consuming "
+            "function as a richer type (e.g. `_ReportChangeView` "
+            '`cast("Change", ...)`-ed into `resolve_change_identity`) '
+            "must expose every attribute that function actually reads on "
+            "the real type -- not just the attributes it read when the "
+            "adapter was written. Extending the consuming function's "
+            "attribute surface without extending every such adapter in "
+            "lockstep breaks it uniformly for any input at all, not a "
+            "corner case: the function's own read is unconditional, so "
+            "every call through the stale adapter raises the same "
+            "`AttributeError` regardless of what the caller passed."
+        ),
+        fixed_by=(961,),
+        seed_tests=("tests/test_report_change_view_entity_id.py",),
+        known_gaps=(
+            KnownGap(
+                description=(
+                    "This class is pinned for exactly one adapter/consumer "
+                    "pair (`_ReportChangeView` / `resolve_change_identity`). "
+                    "No structural check (e.g. comparing the adapter "
+                    "dataclass's fields against the consuming function's "
+                    "actual attribute reads via AST analysis, the way "
+                    "`scripts/fact_detector_misuse.py` does for a "
+                    "different attribute-access pattern) enforces the "
+                    "invariant generically across the codebase -- a future "
+                    "sibling adapter drifting the same way would not be "
+                    "caught until it also breaks every call through it."
+                ),
+                reference="https://github.com/abicheck/abicheck/pull/961",
+            ),
+        ),
+    ),
 )
 
 

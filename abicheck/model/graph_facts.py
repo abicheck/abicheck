@@ -39,8 +39,9 @@ from __future__ import annotations
 
 import hashlib
 import json
+from collections.abc import Sequence
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Protocol, runtime_checkable
 
 from .graph_identity import (
     _decl_node_id as _decl_node_id,
@@ -540,3 +541,54 @@ def _compute_occurrences(edge: GraphEdge) -> list[str]:
         if oid is not None and oid not in seen:
             seen.append(oid)
     return sorted(seen)
+
+
+@runtime_checkable
+class SurfaceGraphLike(Protocol):
+    """The read/write surface :class:`~abicheck.model.snapshot.AbiSnapshot.
+    surface_graph` needs (ADR-063 Phase 3 D5) — narrow and structural
+    (``Protocol``, not a base class) so ``model/snapshot.py`` can declare the
+    field's type with no import of ``buildsource.source_graph.
+    SourceGraphSummary`` at all, keeping the concrete L3-L5 evidence types out
+    of ``model``'s own dependency-free layer while ``SourceGraphSummary``
+    still satisfies this protocol structurally, unchanged.
+
+    Covers both directions a real consumer needs, not only the write side a
+    first draft of this protocol had: a graph *builder* (``compare/
+    surface_graph.py``'s public-surface builder, the existing L5 builder)
+    only ever calls :meth:`add_node`/:meth:`add_edge`; the *query* layer
+    (``policy/public_surface.py``'s ``PublicSurfaceQuery``) must read
+    :attr:`nodes`/:attr:`edges` back to traverse them, and check
+    :meth:`has_node` for O(1) membership rather than a linear scan.
+    ``Sequence``, not ``list`` — a read-only view is all traversal needs.
+    Declared as read-only ``@property`` getters, not plain attributes: a
+    plain ``Protocol`` attribute implies both read *and* write access, which
+    would require the concrete class's own ``nodes``/``edges`` to be
+    invariantly typed ``Sequence`` rather than the (mutable, appended-to)
+    ``list`` they actually are — a real static mismatch `mypy` correctly
+    catches, not a false positive to silence. A read-only getter only needs
+    covariance, which ``list[GraphNode]`` already satisfies.
+
+    A caller that needs ``SourceGraphSummary``-specific behavior
+    (``resolve_entities`` and the rest of its concrete API) narrows back to
+    the concrete class at its own call site via an ordinary
+    ``isinstance(graph, SourceGraphSummary)`` check against the imported
+    class — plain ``isinstance`` against a concrete class needs no
+    ``@runtime_checkable`` support at all; this protocol carries that
+    decorator only for the *other* direction, a caller that wants to confirm
+    structural conformance without importing ``buildsource`` at all.
+    """
+
+    @property
+    def nodes(self) -> Sequence[GraphNode]: ...
+
+    @property
+    def edges(self) -> Sequence[GraphEdge]: ...
+
+    def has_node(self, node_id: str) -> bool: ...
+
+    def add_node(self, node: GraphNode) -> None: ...
+
+    def add_edge(self, edge: GraphEdge) -> None: ...
+
+    def to_dict(self) -> dict[str, Any]: ...

@@ -64,6 +64,7 @@ from ..checker_types import validate_check_id, validate_evidence_depth
 from ..evidence_depth import DEPTH_RANK, weaker_depth
 from ..schemas import REPORT_SCHEMA_VERSION, SCAN_SCHEMA_VERSION
 from .baseline_set import ALL_OUTCOMES, ResolveOutcome
+from .check_report_exit_backfill import backfill_exit_block_fields
 
 #: Safe identifier charset shared by every ``check_id`` component (ADR-047
 #: §7's delimiter-unambiguity fix) -- target/bundle names, profile ids, and
@@ -360,13 +361,35 @@ def _neutralize_gate(report: dict[str, Any]) -> None:
         # a consumer adopting the new canonical field would read as
         # blocking). Replaced wholesale with the "clean" decision, the same
         # way the `severity` gate above is replaced rather than
-        # conditionally rewritten: advisory mode means every axis gates
-        # nothing, so the persisted explanation has to say so outright
-        # rather than being left to disagree with the axes it summarizes.
-        if isinstance(node.get("exit"), Mapping):
+        # conditionally rewritten: advisory mode means every *deferrable*
+        # axis gates nothing, so the persisted explanation has to say so
+        # outright rather than being left to disagree with the axes it
+        # summarizes. The four "comparison never completed" axes --
+        # operational_error/evidence_contract_error/budget_overflow/
+        # not_comparable_contribution (`_classify_verdict` treats those
+        # verdicts identically to an operational error; mutually exclusive
+        # per `resolve_scan_exit_decision`'s own docstring, so at most one
+        # is ever nonzero) -- are carried over, not zeroed with the rest
+        # (Codex review, fresh evidence, two rounds: round one only kept
+        # `operational_error_contribution`, leaving the same "exit.code: 0
+        # but the job still fails" gap for `NOT_COMPARABLE`). Every one of
+        # these fails every gate mode per `final_exit_code`, so zeroing any
+        # would make `exit.code` claim a clean pass the job doesn't give.
+        old_exit = node.get("exit")
+        if isinstance(old_exit, Mapping):
             from ..exit_decision import resolve_exit_decision
 
-            node["exit"] = resolve_exit_decision(compatibility_contribution=0).to_dict()
+            def _int_or_zero(key: str) -> int:
+                value = old_exit.get(key, 0)
+                return value if isinstance(value, int) else 0
+
+            node["exit"] = resolve_exit_decision(
+                compatibility_contribution=0,
+                operational_error_contribution=_int_or_zero("operational_error_contribution"),
+                evidence_contract_error_contribution=_int_or_zero("evidence_contract_error_contribution"),
+                budget_overflow_contribution=_int_or_zero("budget_overflow_contribution"),
+                not_comparable_contribution=_int_or_zero("not_comparable_contribution"),
+            ).to_dict()
 
 
 def _zero_nested_severity_gates(report: dict[str, Any]) -> None:
@@ -524,16 +547,9 @@ def _classify_verdict(
 def augment_report(
     report: dict[str, Any],
     *,
-    name: str,
-    profile_id: str,
-    baseline_channel: str,
-    requested_depth: str,
-    gate_mode: str,
-    project: str | None = None,
-    head_sha: str | None = None,
-    base_ref: str | None = None,
-    action_version: str | None = None,
-    analysis_exit_code: int | None = None,
+    name: str, profile_id: str, baseline_channel: str, requested_depth: str, gate_mode: str,
+    project: str | None = None, head_sha: str | None = None, base_ref: str | None = None,
+    action_version: str | None = None, analysis_exit_code: int | None = None,
 ) -> dict[str, Any]:
     """Layer ADR-047 §7's identity/new fields onto a real analysis report.
 
@@ -559,6 +575,7 @@ def augment_report(
     out = dict(report)
     check_id = build_check_id(name, profile_id, baseline_channel, requested_depth)
     effective_depth, coverage = derive_effective_depth(report, requested_depth)
+    backfill_exit_block_fields(out)
     _stamp_schema_version(out, report)
     out["check_id"] = check_id
     out["target_id"] = check_id

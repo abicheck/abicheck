@@ -1153,14 +1153,19 @@
     },
     "exit": {
       "type": "object",
-      "description": "CLI cleanup phase two, PR G1 (schema 2.41; PR E follow-up added crosscheck_promotion_contribution at schema 2.42): exit_decision.ExitDecision, the canonical resolution of every orthogonal exit-code axis for this comparison — code is exactly max(compatibility_contribution, contract_coverage_contribution, analysis_assurance_contribution, crosscheck_promotion_contribution), the identical value cli._exit_with_severity_or_verdict computes for the real process exit (crosscheck_promotion_contribution is always 0 for a native compare report — it has no meaning outside scan --against's own maintainer-promoted --crosscheck KEY=error finding). reasons names every axis tied for that maximum (a lower, non-winning contribution is excluded, since it did not determine the result). Unconditionally present on every real-verdict compare report — every comparison has a compatibility contribution, unlike contract_context which stays opt-in. Deliberately does not yet cover not_comparable/scan-budget/release-removed-library exits, which are raised through different code paths today.",
+      "description": "CLI cleanup phase two, PR G1 (schema 2.41; PR E follow-up added crosscheck_promotion_contribution at schema 2.42; ADR-064 stage 1b added the five operational_error_contribution..removed_required_library_contribution keys at schema 2.47): exit_decision.ExitDecision, the canonical resolution of every orthogonal exit-code axis for this comparison — code is exactly max(compatibility_contribution, contract_coverage_contribution, analysis_assurance_contribution, crosscheck_promotion_contribution, operational_error_contribution) for a native compare report (the four remaining ADR-064 dominant fields are early-return axes, not fold participants — see ExitDecision's own docstring), the identical value cli._exit_with_severity_or_verdict computes for the real process exit (every ADR-064 field is always 0 for a native compare report — none of them have meaning outside scan --against/the release fan-out). reasons names every axis tied for that maximum (a lower, non-winning contribution is excluded, since it did not determine the result). Unconditionally present on every real-verdict compare report — every comparison has a compatibility contribution, unlike contract_context which stays opt-in. compare's own code still never covers not_comparable/scan-budget/release-removed-library exits (raised through different code paths today) — the five new keys are always-0 placeholders here, shared shape with scan/release reports where they can be nonzero.",
       "required": [
         "code",
         "reasons",
         "compatibility_contribution",
         "contract_coverage_contribution",
         "analysis_assurance_contribution",
-        "crosscheck_promotion_contribution"
+        "crosscheck_promotion_contribution",
+        "operational_error_contribution",
+        "evidence_contract_error_contribution",
+        "budget_overflow_contribution",
+        "not_comparable_contribution",
+        "removed_required_library_contribution"
       ],
       "properties": {
         "code": {
@@ -1202,6 +1207,31 @@
           "type": "integer",
           "const": 0,
           "description": "schema 2.42: what a maintainer-promoted --crosscheck KEY=error finding contributes. This schema validates only native compare reports (scan's own report shape -- ScanOutcome.to_dict() -- is not validated against this file, see test_report_schema.py), where this axis has no meaning outside scan --against's own scan_engine._promote_published_gate and is therefore always 0 -- const, not just a floor, so a malformed compare report claiming a nonzero contribution fails validation instead of silently passing."
+        },
+        "operational_error_contribution": {
+          "type": "integer",
+          "const": 0,
+          "description": "schema 2.47 (ADR-064): a directory/package release comparison's operational-ERROR fold participant. Always 0 for a native compare report -- const, same rationale as crosscheck_promotion_contribution above."
+        },
+        "evidence_contract_error_contribution": {
+          "type": "integer",
+          "const": 0,
+          "description": "schema 2.47 (ADR-064): scan --against's evidence-contract-error dominant axis. Always 0 for a native compare report -- const, same rationale as crosscheck_promotion_contribution above."
+        },
+        "budget_overflow_contribution": {
+          "type": "integer",
+          "const": 0,
+          "description": "schema 2.47 (ADR-064): scan --against's budget-overflow dominant axis. Always 0 for a native compare report -- const, same rationale as crosscheck_promotion_contribution above."
+        },
+        "not_comparable_contribution": {
+          "type": "integer",
+          "const": 0,
+          "description": "schema 2.47 (ADR-064): the not-comparable dominant axis (scan --against/release fan-out). Always 0 for a native compare report, which has no ExitDecision at all for its own not_comparable outcome -- const, same rationale as crosscheck_promotion_contribution above."
+        },
+        "removed_required_library_contribution": {
+          "type": "integer",
+          "const": 0,
+          "description": "schema 2.47 (ADR-064): a directory/package release comparison's removed-required-library dominant axis. Always 0 for a native compare report -- const, same rationale as crosscheck_promotion_contribution above."
         }
       },
       "$comment": "exit_decision.resolve_compare_exit_decision (and, on scan --against's promotion path, exit_decision.resolve_exit_decision) is what builds this object; cli._exit_with_severity_or_verdict resolves the identical ExitDecision for compare's own real process exit, so the two cannot disagree."

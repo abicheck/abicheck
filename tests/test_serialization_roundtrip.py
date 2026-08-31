@@ -239,7 +239,7 @@ class TestHeaderCvFactsReliableRoundTrip:
     def test_fresh_dump_serializes_current_schema_version(self) -> None:
         snap = _make_snap()
         j = json.loads(snapshot_to_json(snap))
-        assert j["schema_version"] == SCHEMA_VERSION == 28
+        assert j["schema_version"] == SCHEMA_VERSION
 
     def test_legacy_castxml_header_snapshot_loads_as_unreliable(self) -> None:
         d = _minimal_dict(schema_version=8, from_headers=True, ast_producer="castxml")

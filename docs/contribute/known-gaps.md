@@ -5400,3 +5400,39 @@ looked like the obvious fix and wasn't.
   `scan_abi3_resolve.py` in its current, self-documenting flat-legacy
   placement (its own docstring already states the reason and the
   precedent it follows) as accepted debt until that slice is done.
+
+- **ADR-063 Phase 3 (D5) lands the public-surface-as-graph-query
+  infrastructure without migrating `surface.py`/`export_surface.py`'s own
+  traversal algorithms onto it, and without unifying the new graph
+  builder's node ids with the pre-existing L5 graph's — both deliberate,
+  documented scope boundaries, not oversights.** `policy/public_surface.py`'s
+  `PublicSurfaceQuery` delegates to `surface.compute_public_surface()`/
+  `export_surface.compute_export_surface()` unchanged rather than
+  reimplementing either as a literal graph traversal: both are exactly the
+  kind of intricate, multi-round-corrected logic this same page's
+  `_paired_stable_indices` incident (see "Primitive-level property tests"
+  in `AGENTS.md`) shows costs several review rounds to get right even once
+  already, and reimplementing one from scratch inside the same phase that
+  also had to build every piece of graph infrastructure underneath it was
+  judged materially higher-risk than landing the infrastructure now and
+  migrating the algorithm as its own later, narrowly-scoped phase.
+  Consequences: `compute_public_surface()`'s signature was never changed
+  to accept a structured `resolution` parameter, so there is no lazy,
+  graph-reading legacy-snapshot backfill path; `type_reachability.
+  directly_referenced_stdlib_types()` was not migrated into
+  `policy/public_surface.py` (doing so would reclassify `type_reachability.py`
+  into the `policy` layer, which would introduce a genuine new
+  `policy -> extract` architecture violation — that module imports two
+  already-`extract`-classified siblings); and `compare/surface_graph.py`'s
+  own node ids (`canonical_key(occurrence_id)`/`approx::`/`typedef::`
+  fallbacks) are a namespace fully independent of `buildsource/
+  header_graph.py`'s pre-existing L5 node ids (`decl://<identity>`/
+  `type://<identity>`) — one shared `SourceGraphSummary` instance carries
+  both builders' nodes (real, tested — `service_header_graph_attach.
+  _attach_header_graph()`), but the two schemes do not dedup onto a common
+  node for a declaration both builders see. Each of these is a real,
+  separate follow-up migration, not silently-abandoned scope — see
+  ADR-063's own Status block, the implementation plan's Phase 3 "Landed"
+  note (`docs/contribute/plans/one-semantic-pipeline.md`), and
+  `compare/surface_graph.py`'s/`policy/public_surface.py`'s own module
+  docstrings for the exact reasoning each carries.

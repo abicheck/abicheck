@@ -38,6 +38,7 @@ from .bundle import BundleDiffResult, render_bundle_findings_markdown
 from .bundle_models import BundleSignatureEvidence
 from .checker import DiffResult
 from .model import AbiSnapshot
+from .workflows.gate import resolve_release_exit_decision_for_report
 
 if TYPE_CHECKING:
     from .pack_application import PackApplication
@@ -59,6 +60,17 @@ _RELEASE_VERDICT_ORDER: dict[str, int] = {
     # in the same release, including a genuine crash.
     "not_comparable": 6,
 }
+
+
+def _release_global_verdict(bundle_result: BundleDiffResult | None, matrix_result: DiffResult | None) -> str:
+    """Release-global (bundle/probe-matrix) verdict alone -- unlike
+    ``worst_verdict``'s own fold of it, never masked by an unrelated
+    library's ``ERROR``/``not_comparable`` (Codex review, fresh evidence)."""
+    worst = "NO_CHANGE"
+    for v in (bundle_result.bundle_verdict.value if bundle_result else None, matrix_result.verdict.value if matrix_result else None):
+        if v is not None and _RELEASE_VERDICT_ORDER.get(v, 0) > _RELEASE_VERDICT_ORDER.get(worst, 0):
+            worst = v
+    return worst
 
 
 def _resolve_release_headers(
@@ -926,38 +938,25 @@ def _format_release_summary(
     new_map: dict[str, Path],
     warning_msgs: list[str],
     diff_pairs: list[tuple[DiffResult, AbiSnapshot]] | None = None,
-    bundle_result: BundleDiffResult | None = None,
-    matrix_result: DiffResult | None = None,
-    severity_config: SeverityConfig | None = None,
-    severity_exit_code: int | None = None,
-    contract_coverage_exit_contribution: int = 0,
-    contract_coverage_failure_count: int = 0,
+    bundle_result: BundleDiffResult | None = None, matrix_result: DiffResult | None = None,
+    severity_config: SeverityConfig | None = None, severity_exit_code: int | None = None,
+    contract_coverage_exit_contribution: int = 0, contract_coverage_failure_count: int = 0,
+    fail_on_removed: bool = False,
 ) -> str:
     """Format the release comparison summary as JSON, markdown, or JUnit XML."""
     if fmt == "junit":
         return _format_release_junit(
-            diff_pairs,
-            matrix_result,
-            library_results,
-            severity_config=severity_config,
+            diff_pairs, matrix_result, library_results, severity_config=severity_config,
         )
     if fmt == "json":
         return _format_release_json(
-            worst_verdict,
-            old_dir,
-            new_dir,
-            library_results,
-            removed_keys,
-            added_keys,
-            old_map,
-            new_map,
-            warning_msgs,
-            bundle_result,
-            matrix_result,
+            worst_verdict, old_dir, new_dir, library_results, removed_keys, added_keys,
+            old_map, new_map, warning_msgs, bundle_result, matrix_result,
             severity_config=severity_config,
             severity_exit_code=severity_exit_code,
             contract_coverage_exit_contribution=contract_coverage_exit_contribution,
             contract_coverage_failure_count=contract_coverage_failure_count,
+            fail_on_removed=fail_on_removed,
         )
     return _format_release_markdown(
         worst_verdict,
@@ -1033,8 +1032,8 @@ def _format_release_json(
     matrix_result: DiffResult | None,
     severity_config: SeverityConfig | None = None,
     severity_exit_code: int | None = None,
-    contract_coverage_exit_contribution: int = 0,
-    contract_coverage_failure_count: int = 0,
+    contract_coverage_exit_contribution: int = 0, contract_coverage_failure_count: int = 0,
+    fail_on_removed: bool = False,
 ) -> str:
     """Render the release summary as a JSON document."""
     changed_libraries = [
@@ -1051,6 +1050,7 @@ def _format_release_json(
         "unmatched_old": [old_map[k].name for k in removed_keys],
         "unmatched_new": [new_map[k].name for k in added_keys],
         "warnings": warning_msgs,
+        "exit": resolve_release_exit_decision_for_report(worst_verdict, fail_on_removed, removed_keys, severity_exit_code, contract_coverage_exit_contribution, library_results, _release_global_verdict(bundle_result, matrix_result)).to_dict(),
     }
     # Severity config block (present only when a severity setting was in effect), mirroring
     # compare mode so downstream consumers (e.g. the PR-comment renderer) can see

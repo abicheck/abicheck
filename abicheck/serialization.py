@@ -54,6 +54,7 @@ from .storage.fact_codec import (
     decode_record_facts,
     encode_fact_fields,
 )
+from .storage.surface_graph_codec import decode_surface_graph, encode_surface_graph
 
 # Current schema version for snapshot serialization.
 # Increment this whenever the snapshot format changes in a backward-incompatible way.
@@ -315,7 +316,7 @@ from .storage.fact_codec import (
 # doesn't hit any producer-specific threshold above stays silent, since every
 # CI baseline is *always* some number of versions behind and warning
 # regardless of relevance would just be noise.
-SCHEMA_VERSION: int = 28  # v28: entity_id carrier persisted, no reliability flag needed (genuinely optional even on a current snapshot); no consumer reads it yet -- see storage/entity_id_codec.py.
+SCHEMA_VERSION: int = 29  # v29: AbiSnapshot.surface_graph persisted (storage/surface_graph_codec.py); v28: entity_id carrier persisted (storage/entity_id_codec.py).
 
 # Schema version at which CastXML field CV facts became reliable (see v9 above).
 _MIN_SCHEMA_VERSION_FOR_CV_FACTS = 9
@@ -376,20 +377,20 @@ def _sets_to_lists(obj: Any) -> Any:
 
 
 def snapshot_to_dict(snap: AbiSnapshot) -> dict[str, Any]:
-    # asdict() would recursively copy the lazy lookup caches too (wasted work,
-    # and they're dropped below anyway). Clear them for the duration of the
-    # call and restore afterward so this function stays pure from the
-    # caller's perspective — snapshot_to_dict(snap) must not mutate `snap`,
-    # or invalidate an index a caller built and is still holding a reference
-    # to via the object it passed in.
-    saved_caches = (snap._func_by_mangled, snap._var_by_mangled, snap._type_by_name)
+    # asdict() would recursively copy the lazy lookup caches, and
+    # surface_graph's potentially-large nodes/edges, for nothing --
+    # encode_surface_graph() below unconditionally replaces the latter with
+    # its own to_dict(), never this recursion (Codex review, PR #962). Clear
+    # them for the call and restore after, so this stays pure from the caller.
+    caches = (snap._func_by_mangled, snap._var_by_mangled, snap._type_by_name)
+    graph = snap.surface_graph
     try:
-        snap._func_by_mangled = None
-        snap._var_by_mangled = None
-        snap._type_by_name = None
+        snap._func_by_mangled = snap._var_by_mangled = snap._type_by_name = None
+        snap.surface_graph = None
         d = asdict(snap)
     finally:
-        snap._func_by_mangled, snap._var_by_mangled, snap._type_by_name = saved_caches
+        snap._func_by_mangled, snap._var_by_mangled, snap._type_by_name = caches
+        snap.surface_graph = graph
     d.pop("_func_by_mangled", None)
     d.pop("_var_by_mangled", None)
     d.pop("_type_by_name", None)
@@ -397,10 +398,9 @@ def snapshot_to_dict(snap: AbiSnapshot) -> dict[str, Any]:
     d.pop("from_headers_inferred", None)
     # If ``from_headers`` was only *inferred* (a legacy snapshot loaded without
     # the explicit key), do not persist it as explicit provenance: drop the key
-    # so a reload re-runs the same inference and re-marks it inferred. Writing
-    # ``from_headers: true`` here would promote a guess to explicit header
-    # provenance on the next load, re-enabling source-level param-rename
-    # detection on DWARF-only baselines this is meant to suppress.
+    # so a reload re-runs the same inference and re-marks it inferred, rather
+    # than promoting a guess to explicit provenance and re-enabling source-level
+    # param-rename detection on DWARF-only baselines this is meant to suppress.
     if snap.from_headers_inferred:
         d.pop("from_headers", None)
 
@@ -424,13 +424,13 @@ def snapshot_to_dict(snap: AbiSnapshot) -> dict[str, Any]:
                 bm[k] = v.value if hasattr(v, "value") else str(v)
 
     # The inline embedded BuildSourcePack carries Path/enum/set-bearing nested
-    # models that asdict() cannot faithfully serialize; replace the raw asdict
-    # output with the pack's canonical inline form (single-artifact UX), or drop
-    # the key entirely when nothing was embedded.
+    # models asdict() cannot faithfully serialize; replace the raw asdict output
+    # with the pack's canonical inline form, or drop the key when nothing was embedded.
     if snap.build_source is not None:
         converted["build_source"] = snap.build_source.to_embedded_dict()
     else:
         converted.pop("build_source", None)
+    encode_surface_graph(converted, snap)  # storage/surface_graph_codec.py
 
     # Embed schema version for forward-compatibility.
     # Placed at top level so loaders can inspect it without parsing the full snapshot.
@@ -1075,11 +1075,10 @@ def snapshot_from_dict(d: dict[str, Any]) -> AbiSnapshot:
     build_mode = _build_mode_from_dict(d.get("build_mode"))
 
     # Build/source pack reference (schema v7, ADR-028). Optional: a missing key
-    # on an older snapshot loads as None. A malformed (non-dict) value is ignored
-    # rather than aborting the load, consistent with the rest of this loader.
-    # Back-compat: snapshots written before the evidence→buildsource rename store
-    # the ref under the legacy ``evidence_pack`` key. The ref shape is unchanged,
-    # so we fall back to it to keep existing ``.abi.json`` baselines readable.
+    # on an older snapshot loads as None; a malformed (non-dict) value is ignored
+    # rather than aborting the load. Back-compat: snapshots written before the
+    # evidence→buildsource rename store the (unchanged) ref shape under the
+    # legacy ``evidence_pack`` key, which this falls back to when present.
     ep_raw = d.get("build_source_pack")
     if ep_raw is None:
         ep_raw = d.get("evidence_pack")
@@ -1495,6 +1494,7 @@ def snapshot_from_dict(d: dict[str, Any]) -> AbiSnapshot:
         # ADR-050 D1 — extraction-contract fingerprints (v12).
         contract=contract,
     )
+    decode_surface_graph(d, snap)  # storage/surface_graph_codec.py (v29)
 
     # G14: derive the CPython extension surface for snapshots that predate the
     # key (or a `dump` path that didn't attach it), so a saved abi3 baseline is
