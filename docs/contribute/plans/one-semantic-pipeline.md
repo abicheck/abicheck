@@ -9997,13 +9997,20 @@ sibling:
   arriving at the identical "exclude every `compare=False` payload field"
   rule this paragraph states), confirmed by reading `model/identity.py`
   directly: it already excludes `Record.access` and is built from
-  `scope`/`kind.value`/`leaf_name`/`extra` only. A future slice building
-  `model/graph.py`'s `GraphNode.id` construction should call `entity_id.key`
-  directly rather than adding a second, redundant `canonical_key(...)`
-  wrapper around it — one property, one name, per the Governing Invariant.
-  The internal-linkage `static` collision this section raises next is a
-  real, independent gap in `EntityId.key` too, not closed by its existing
-  tests, while `storage/entity_ids.py`'s `to_dto()` stays the separate,
+  `scope`/`kind.value`/`leaf_name`/`extra` only. **Superseded by Phase 3's
+  actual landing, corrected here rather than left to mislead a future
+  reader (Codex review, PR #958):** the internal-linkage `static`
+  collision this section raises next is real, so `GraphNode.id` for a
+  `declaration`/`type` node does *not* call `entity_id.key` directly —
+  `model/occurrence.py`'s landed `canonical_key(EntityId | OccurrenceId)`
+  overload is what `compare/surface_graph.py`'s node-id construction
+  actually calls, with an `OccurrenceId`, exactly as the "still collides
+  for a real, ordinary case" paragraph below this one specifies and
+  requires. `EntityId.key` alone stays the everyday case (an empty
+  disambiguator reduces `canonical_key(occurrence_id)` to it), but the
+  wrapper this paragraph once called "redundant" is the landed, correct
+  design, not a mistake to avoid. `storage/entity_ids.py`'s `to_dto()`
+  stays the separate,
   intentionally fuller encoding for its own persistence purpose —
   `GraphNode`'s own pre-existing `label: str` field (already documented as
   "human-readable name/path") is where the flattened, lossy `qualified_name`
