@@ -47,8 +47,8 @@ the CLI's own ``compare`` kwargs against the equivalent
 - :func:`compare_request_inputs` -- the same semantic fields off a typed
   :class:`~abicheck.api_types.CompareRequest`.
 - :meth:`ProjectCompatibilityInputs.from_build_config` -- the project's own
-  ``.abicheck.yml`` (``buildsource.inline.BuildConfig``), contributing at
-  ``project_config`` tier.
+  ``.abicheck.yml`` (``buildsource.build_config.BuildConfig``), contributing
+  at ``project_config`` tier.
 
 **Still resolved to its built-in default, because no front end can state it
 today** (recorded here rather than silently defaulted):
@@ -114,7 +114,7 @@ from .severity import SEVERITY_PRESETS, SeverityConfig, SeverityLevel
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from .api_types import CompareRequest
-    from .buildsource.inline import BuildConfig
+    from .buildsource.build_config import BuildConfig
     from .policy_file import PolicyFile
 
 # Field names double as provenance-receipt keys. Declared once so the receipt
