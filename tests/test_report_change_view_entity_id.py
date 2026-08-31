@@ -51,6 +51,7 @@ from __future__ import annotations
 import ast
 import dataclasses
 import inspect
+from collections.abc import Iterator
 
 from abicheck import finding_identity
 from abicheck.checker_policy import ChangeKind
@@ -81,6 +82,35 @@ def test_a_live_changes_entity_id_survives_the_report_round_trip() -> None:
     without_id = resolve_report_change_identity(_change_to_dict(without_change))
     assert with_id.primary_id == without_id.primary_id
     assert with_id.tier == without_id.tier
+
+
+_SCOPE_BOUNDARY_NODES = (
+    ast.FunctionDef,
+    ast.AsyncFunctionDef,
+    ast.Lambda,
+    ast.ClassDef,
+)
+
+
+def _walk_own_scope(node: ast.AST) -> Iterator[ast.AST]:
+    """Like ``ast.walk``, but never descends into a nested function,
+    async function, lambda, or class body (Codex review, fresh evidence,
+    sixth round): a nested scope can declare its own parameter/attribute
+    of the same spelling as the one being tracked (``def nested(change):
+    return change.future_field`` inside the very function being walked),
+    and a plain ``ast.walk`` would misattribute that separately-scoped
+    read to the outer name. ``node`` itself is always walked regardless
+    of its own kind -- only nodes strictly *inside* it that open a new
+    scope are excluded, along with everything inside them.
+    """
+    stack = [node]
+    while stack:
+        current = stack.pop()
+        yield current
+        for child in ast.iter_child_nodes(current):
+            if child is not node and isinstance(child, _SCOPE_BOUNDARY_NODES):
+                continue
+            stack.append(child)
 
 
 def _change_attrs_read(
@@ -132,7 +162,7 @@ def _change_attrs_read(
     if func is None:
         return set()
     tracked = {param_name}
-    for node in ast.walk(func):
+    for node in _walk_own_scope(func):
         if (
             isinstance(node, ast.Assign)
             and isinstance(node.value, ast.Name)
@@ -149,7 +179,7 @@ def _change_attrs_read(
         ):
             tracked.add(node.target.id)
     attrs: set[str] = set()
-    for node in ast.walk(func):
+    for node in _walk_own_scope(func):
         if (
             isinstance(node, ast.Attribute)
             and isinstance(node.value, ast.Name)
@@ -328,3 +358,25 @@ def test_change_attrs_read_follows_a_positional_only_helper_parameter() -> None:
     assert _change_attrs_read("outer", "change", funcs_by_name, set()) == {
         "future_field"
     }
+
+
+def test_change_attrs_read_ignores_a_nested_functions_shadowed_parameter() -> None:
+    """Codex review, fresh evidence, sixth round: a nested function that
+    redeclares a parameter with the same spelling as the tracked one
+    (`def nested(change): return change.future_field`, defined inside the
+    very function being walked) opens its own separate scope -- a plain
+    `ast.walk` would misattribute that read to the *outer* `change`,
+    demanding a field `_ReportChangeView` never actually needs to carry
+    and failing a refactor that never touches the real parameter."""
+    source = (
+        "def outer(change):\n"
+        "    def nested(change):\n"
+        "        return change.future_field\n"
+        "    return nested(None)\n"
+    )
+    funcs_by_name = {
+        node.name: node
+        for node in ast.walk(ast.parse(source))
+        if isinstance(node, ast.FunctionDef)
+    }
+    assert _change_attrs_read("outer", "change", funcs_by_name, set()) == set()
