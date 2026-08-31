@@ -114,33 +114,58 @@ def _locally_bound_names(scope_node: ast.AST) -> frozenset[str]:
     augmented/annotated assignment, a ``for``/``async for`` target, a
     ``with``/``async with ... as`` target, an ``except ... as`` name, an
     ``import``/``from ... import ... as`` alias, a walrus (``:=``)
-    target, or a ``global`` declaration (which severs the name from
-    *every* enclosing function scope, this one included) -- without
-    descending into a further-nested function/async function/lambda/
-    class (each computes its own local set independently).
+    target, a ``global`` declaration (which severs the name from *every*
+    enclosing function scope, this one included), or a nested ``def
+    NAME(): ...``/``class NAME: ...`` statement (which binds ``NAME`` in
+    *this* scope exactly like any other statement, even though the
+    definition's own body is a further, separate scope this walk must
+    not descend into -- Codex review, fresh evidence, tenth round: ``def
+    nested(): def change(): ...; return change.future_field`` was missed
+    entirely, since binding a name and opening a new scope are two
+    different facts and only the second was modeled before this round).
+    Never descends into a further-nested function/async function/lambda/
+    class's own body (each computes its own local set independently).
 
-    A ``nonlocal`` declaration is deliberately NOT collected here: it
-    explicitly means the name resolves to the nearest enclosing function
-    scope instead of binding locally in *this* one, which is exactly the
-    genuine-capture case this whole module exists to still catch (Codex
-    review, fresh evidence, ninth round: the seventh/eighth rounds'
-    shadow set covered only *parameters* -- ``def nested(): change =
-    object(); return change.future_field`` rebinds ``change`` as a local
-    via ordinary assignment, no parameter involved at all, and was still
-    misattributed as an outer read).
-
-    A nested ``def``/``class`` statement itself binding a name equal to
-    the tracked one (``def nested(): def change(): ...``) is a rarer,
-    deliberately unmodeled edge beyond this fix's scope.
+    A ``nonlocal`` declaration is deliberately excluded from the returned
+    set (Codex review, fresh evidence, tenth round, second finding on the
+    same commit): it explicitly means the name resolves to the nearest
+    enclosing function scope instead of binding locally in *this* one --
+    exactly the genuine-capture case this whole module exists to still
+    catch -- even when that name is *also* the target of an ordinary
+    ``Assign`` later in the same body (``nonlocal change; change =
+    get_new_change()`` still rebinds the ENCLOSING scope's ``change``,
+    the whole point of declaring it ``nonlocal``, not a new local one
+    here; the first attempt at this exclusion only skipped collecting the
+    name from the ``Nonlocal`` statement itself, but never stopped the
+    sibling ``Assign`` from adding it back in). ``Global``/``Nonlocal``
+    declared names are tracked in two disjoint sets and only subtracted
+    from the local set at the very end, so declaration order relative to
+    the assignment it covers never matters (Codex review, fresh evidence,
+    ninth round: the seventh/eighth rounds' shadow set covered only
+    *parameters* -- ``def nested(): change = object(); return
+    change.future_field`` rebinds ``change`` as a local via ordinary
+    assignment, no parameter involved at all, and was still misattributed
+    as an outer read).
     """
     names: set[str] = set()
+    nonlocal_names: set[str] = set()
     stack: list[ast.AST] = [scope_node]
     is_root = True
     while stack:
         current = stack.pop()
         if not is_root and isinstance(
-            current, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda, ast.ClassDef)
+            current, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)
         ):
+            # A `def NAME(): ...`/`class NAME: ...` statement binds NAME in
+            # THIS scope (like any other statement) even though its own
+            # body is a separate scope this walk must not descend into
+            # (Codex review, fresh evidence, tenth round: `def nested():
+            # def change(): ...; return change.future_field` was missed
+            # entirely -- the name binding and the scope boundary are two
+            # different facts, and only the second was modeled before).
+            names.add(current.name)
+            continue
+        if not is_root and isinstance(current, ast.Lambda):
             continue
         is_root = False
         if isinstance(current, ast.Assign):
@@ -165,9 +190,16 @@ def _locally_bound_names(scope_node: ast.AST) -> frozenset[str]:
             names.add(current.target.id)
         elif isinstance(current, ast.Global):
             names.update(current.names)
+        elif isinstance(current, ast.Nonlocal):
+            # A name declared `nonlocal` still gets an `Assign`/`AugAssign`
+            # node recorded above when it's reassigned (that's the whole
+            # point of declaring it), but such an assignment rebinds the
+            # ENCLOSING scope's variable, not a new local one here (Codex
+            # review, fresh evidence, tenth round) -- excluded below.
+            nonlocal_names.update(current.names)
         for child in ast.iter_child_nodes(current):
             stack.append(child)
-    return frozenset(names)
+    return frozenset(names - nonlocal_names)
 
 
 def _iter_scope_aware(node: ast.AST) -> Iterator[tuple[ast.AST, frozenset[str]]]:
@@ -625,6 +657,54 @@ def test_change_attrs_read_treats_nonlocal_as_a_genuine_capture() -> None:
         "def outer(change):\n"
         "    def nested():\n"
         "        nonlocal change\n"
+        "        return change.future_field\n"
+        "    return nested()\n"
+    )
+    funcs_by_name = {
+        node.name: node
+        for node in ast.walk(ast.parse(source))
+        if isinstance(node, ast.FunctionDef)
+    }
+    assert _change_attrs_read("outer", "change", funcs_by_name, set()) == {
+        "future_field"
+    }
+
+
+def test_change_attrs_read_treats_a_nested_def_name_as_a_local_binding() -> None:
+    """Codex review, fresh evidence, tenth round: `def NAME(): ...` binds
+    `NAME` in the CONTAINING scope, exactly like an assignment would --
+    `def nested(): def change(): pass; return change.future_field` reads
+    `nested`'s own locally-defined `change` function, never the outer
+    `change` parameter, and must not be misattributed as an outer read."""
+    source = (
+        "def outer(change):\n"
+        "    def nested():\n"
+        "        def change():\n"
+        "            pass\n"
+        "        return change.future_field\n"
+        "    return nested()\n"
+    )
+    funcs_by_name = {
+        node.name: node
+        for node in ast.walk(ast.parse(source))
+        if isinstance(node, ast.FunctionDef)
+    }
+    assert _change_attrs_read("outer", "change", funcs_by_name, set()) == set()
+
+
+def test_change_attrs_read_keeps_a_nonlocal_capture_after_reassignment() -> None:
+    """Codex review, fresh evidence, tenth round, second finding on the
+    same commit: `nonlocal change` followed by an ordinary `Assign` to
+    `change` (the normal reason to declare it `nonlocal` at all) still
+    rebinds the *enclosing* scope's `change`, not a new local one here --
+    a later `change.future_field` genuinely reads the outer `Change` and
+    must still be found, even though the reassignment alone would
+    otherwise look exactly like the ninth round's local-shadowing case."""
+    source = (
+        "def outer(change):\n"
+        "    def nested():\n"
+        "        nonlocal change\n"
+        "        change = get_new_change()\n"
         "        return change.future_field\n"
         "    return nested()\n"
     )
