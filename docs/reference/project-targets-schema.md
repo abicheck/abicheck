@@ -91,7 +91,7 @@ Common optional fields for `kind: library`:
 
 | Field | Type | Meaning |
 |-------|------|---------|
-| `public_headers` | list of string | Public header roots for this target. |
+| `public_headers` | list of string | Public header roots for this target, forwarded as `check-target`'s own `header` input for this target's generated cells (space-joined) — see [`run-plan-schema.md`](run-plan-schema.md#runplancheck-fields)'s `header` field and [`reusable-workflows.md`](reusable-workflows.md#shared-analysis-options)'s per-cell-override exception. Not yet honored for a `kind: bundle` member (no per-bundle-member header staging exists). |
 | `bundle` | string | The `bundles:` entry this target belongs to. Must be declared under `bundles:`, and that bundle's own `targets:` list must include this target back (the two must agree). |
 | `bundle_only` | boolean, default `false` | When `true`, this target is checked only as a bundle member, never standalone. Requires `bundle` to be set, and must **not** declare its own `checks:` — a `bundle_only` target's own checks would never run standalone, so declare the policy under `bundles:<id>.checks` instead. |
 | `checks` | list of check tuple | See [`checks:`](#checks) below. |

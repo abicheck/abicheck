@@ -146,11 +146,23 @@ from .project_targets import (
     TARGET_KIND_LIBRARY,
     BundleSpec,
     CheckSpec,
-    ProfileCompileSpec,
     ProjectTargetsConfig,
     TargetSpec,
-    runner_label_for_os,
-    unroutable_os_message,
+)
+
+# _compose_gcc_options/_scheduling_fields_for_profile are re-exported into
+# this module's own namespace (not just used internally) -- see
+# run_plan_profile_fields.py's own module docstring for why this split
+# exists and why every pre-existing `from .run_plan import _compose_gcc_
+# options, ...` call site (this package's own tests included) still works.
+from .run_plan_profile_fields import (  # noqa: F401
+    _compile_ast_frontend_for_profile,
+    _compile_fields_for_profile,
+    _compose_gcc_options,
+    _consumer_compile_active_for_profile,
+    _consumer_compile_ast_frontend_for_profile,
+    _consumer_compile_fields_for_profile,
+    _scheduling_fields_for_profile,
 )
 
 #: Schema discriminator stamped into every ``run-plan.json`` (mirrors
@@ -270,44 +282,6 @@ def _parse_run_plan_gate(d: dict[str, Any]) -> tuple[str | None, str | None]:
     return missing_required, unexpected_target
 
 
-def _compose_gcc_options(compile_spec: ProfileCompileSpec) -> str:
-    """Compose ``compile_spec``'s standard/stdlib/target/abi_macros/args axes
-    into one space-joined extra-flags string, forwarded verbatim as
-    ``check-target``'s ``gcc-options`` input (P1 toolchain-profile audit).
-
-    Every atom was already whitespace-validated by
-    ``ProfileCompileSpec.from_dict`` (``_safe_profile_atom`` -- no argv
-    smuggling), so plain space-joining is safe here. A consequence of that
-    validation: no atom -- including an ``abi_macros`` value -- may itself
-    contain a space, since this function has no further escaping step to
-    fall back on. ``abi_macros`` are emitted sorted by name for
-    deterministic output; ``args`` are appended verbatim, in declared
-    order, last -- the operator's own explicit escape hatch wins over the
-    structured axes this function derives flags from.
-
-    **Deliberately not family-aware.** A P0 audit round had this function
-    drop ``-stdlib=``/``--target=`` for ``compiler_family: gcc``; a later
-    round found the real consumer here is always Clang, never a literal
-    GCC binary, and dropping ``--target=`` broke direct-clang cross-
-    compilation correctness. Reverted; both flags are emitted
-    unconditionally regardless of ``compiler_family``. See AGENTS.md's
-    "Toolchain-profile compiler-family rendering" entry for the full
-    account -- not a per-flag heuristic to re-derive here.
-    """
-    parts: list[str] = []
-    if compile_spec.standard:
-        parts.append(f"-std={compile_spec.standard}")
-    if compile_spec.stdlib:
-        parts.append(f"-stdlib={compile_spec.stdlib}")
-    if compile_spec.target:
-        parts.append(f"--target={compile_spec.target}")
-    for name in sorted(compile_spec.abi_macros):
-        value = compile_spec.abi_macros[name]
-        parts.append(f"-D{name}={value}" if value else f"-D{name}")
-    parts.extend(compile_spec.args)
-    return " ".join(parts)
-
-
 @dataclass
 class RunPlanCheck:
     """One resolved ``(target-or-bundle, profile, checks[] entry)`` cell.
@@ -340,6 +314,19 @@ class RunPlanCheck:
     #: app-consumer``/``plugin-contract`` this is the *redirected library's*
     #: pattern, never the contract target's own (it doesn't have one).
     binary_pattern: str = ""
+    #: This target's ``public_headers:`` (``TargetSpec.public_headers``),
+    #: space-joined to match ``check-target``'s own ``header`` input format
+    #: (ADR-047's own worked example declares this per target, but nothing
+    #: downstream read it until this field existed -- see
+    #: ``docs/reference/reusable-workflows.md``'s "Shared analysis options"
+    #: section for the per-cell-override precedent this follows, identical
+    #: in shape to :attr:`compile_ast_frontend`). Empty when the target
+    #: declares no ``public_headers:`` (a caller then falls back to its own
+    #: workflow-global ``header`` input, unchanged from before this field
+    #: existed). ``kind: bundle`` cells never set this -- see
+    #: ``BUNDLE_CHECK_DEPTHS``'s own docstring in ``project_targets.py`` for
+    #: why per-bundle-member header staging doesn't exist yet.
+    header: str = ""
     #: ``target_kind: app-consumer`` only.
     consumer_binary_pattern: str = ""
     #: ``target_kind: plugin-contract`` only.
@@ -431,6 +418,8 @@ class RunPlanCheck:
                 d["baseline_target"] = self.baseline_target
             if self.binary_pattern:
                 d["binary_pattern"] = self.binary_pattern
+            if self.header:
+                d["header"] = self.header
             if self.consumer_binary_pattern:
                 d["consumer_binary_pattern"] = self.consumer_binary_pattern
             if self.contract_file:
@@ -478,6 +467,7 @@ class RunPlanCheck:
             gate_mode=_opt_str(d.get("gate_mode"), "local"),
             baseline_target=_opt_str(d.get("baseline_target")),
             binary_pattern=_opt_str(d.get("binary_pattern")),
+            header=_opt_str(d.get("header")),
             consumer_binary_pattern=_opt_str(d.get("consumer_binary_pattern")),
             contract_file=_opt_str(d.get("contract_file")),
             bundle_members=[
@@ -658,123 +648,30 @@ def _resolve_profile_ids(
     return [p.id for p in config.profiles.values() if p.contract], False
 
 
-def _resolved_compile_fields(
-    compile_spec: ProfileCompileSpec | None,
-    resolved_bindings: Mapping[str, str] | None,
-) -> tuple[str, str]:
-    """Returns ``(gcc_path, gcc_options)`` for one already-resolved
-    :class:`ProfileCompileSpec` (either a profile's ``compile:`` or its
-    ``consumer_compile:`` overlay, G34 Phase 0) -- ``("", "")`` when
-    *compile_spec* is ``None``."""
-    if compile_spec is None:
-        return "", ""
-    gcc_path = ""
-    if compile_spec.binding and resolved_bindings is not None:
-        gcc_path = resolved_bindings.get(compile_spec.binding, "")
-    return gcc_path, _compose_gcc_options(compile_spec)
-
-
-def _compile_fields_for_profile(
-    config: ProjectTargetsConfig,
-    profile_id: str,
-    resolved_bindings: Mapping[str, str] | None,
-) -> tuple[str, str]:
-    """Returns ``(compile_gcc_path, compile_gcc_options)`` for *profile_id*
-    (P1 toolchain-profile audit) -- ``("", "")`` when the profile has no
-    ``compile:`` overlay, is unknown, or declares no ``binding``/no
-    resolvable-flags fields."""
-    profile = config.profiles.get(profile_id)
-    compile_spec = profile.compile if profile is not None else None
-    return _resolved_compile_fields(compile_spec, resolved_bindings)
-
-
-def _consumer_compile_fields_for_profile(
-    config: ProjectTargetsConfig,
-    profile_id: str,
-    resolved_bindings: Mapping[str, str] | None,
-) -> tuple[str, str]:
-    """Returns ``(consumer_compile_gcc_path, consumer_compile_gcc_options)``
-    for *profile_id* (G34 Phase 0) -- ``("", "")`` when the profile has no
-    ``consumer_compile:`` overlay, is unknown, or declares no ``binding``/no
-    resolvable-flags fields. Mirrors :func:`_compile_fields_for_profile`
-    exactly, resolved from the profile's separate consumer-toolchain overlay
-    instead of its producer ``compile:`` block."""
-    profile = config.profiles.get(profile_id)
-    consumer_compile_spec = profile.consumer_compile if profile is not None else None
-    return _resolved_compile_fields(consumer_compile_spec, resolved_bindings)
-
-
-def _compile_ast_frontend_for_profile(
-    config: ProjectTargetsConfig, profile_id: str
-) -> str:
-    """Returns *profile_id*'s ``compile.frontend`` (G34 Phase B) -- ``""``
-    when the profile has no ``compile:`` overlay, is unknown, or sets no
-    ``frontend``."""
-    profile = config.profiles.get(profile_id)
-    compile_spec = profile.compile if profile is not None else None
-    return compile_spec.frontend if compile_spec is not None else ""
-
-
-def _consumer_compile_active_for_profile(
-    config: ProjectTargetsConfig, profile_id: str
-) -> bool:
-    """True iff *profile_id* declares a non-empty ``consumer_compile:`` overlay."""
-    profile = config.profiles.get(profile_id)
-    if profile is None or profile.consumer_compile is None:
-        return False
-    return not profile.consumer_compile.is_empty
-
-
-def _consumer_compile_ast_frontend_for_profile(
-    config: ProjectTargetsConfig, profile_id: str
-) -> str:
-    """Returns *profile_id*'s ``consumer_compile.frontend`` (G34 Phase B),
-    resolved the same way :func:`_compile_ast_frontend_for_profile` is, from
-    the profile's separate consumer-toolchain overlay (G34 Phase 0)."""
-    profile = config.profiles.get(profile_id)
-    consumer_compile_spec = profile.consumer_compile if profile is not None else None
-    return consumer_compile_spec.frontend if consumer_compile_spec is not None else ""
-
-
-def _scheduling_fields_for_profile(
-    config: ProjectTargetsConfig, profile_id: str
-) -> tuple[str, str]:
-    """Returns ``(runs_on, dependency_source)`` for *profile_id* (G34 Phase C).
-
-    An unknown profile resolves to the same defaults an ``os:``-less one
-    does, matching how every other ``*_for_profile`` helper here treats a
-    profile it cannot find — the cell is generated either way, and a missing
-    profile is a separate, already-reported error.
-
-    An ``os:`` that names nothing schedulable raises instead of defaulting:
-    quietly sending it to a Linux runner would produce a green cell that
-    checked the wrong platform. :func:`~abicheck.buildsource.project_targets.
-    _profile_issues` reports the same condition at ``project validate`` time,
-    so reaching this raise means validation was skipped, not that the message
-    is new.
-    """
-    profile = config.profiles.get(profile_id)
-    if profile is None:
-        return DEFAULT_PROFILE_RUNNER_LABEL, ""
-    label = runner_label_for_os(profile.os)
-    if label is None:
-        raise ValueError(unroutable_os_message("profiles", profile_id, profile.os))
-    return label, profile.dependency_source
-
-
 def _library_lookup_and_pattern(
     config: ProjectTargetsConfig, target: TargetSpec
-) -> tuple[str, str]:
-    """Returns ``(lookup_id, binary_pattern)`` -- the id to look up in a
-    profile's ``build-output.json`` ``targets[]`` and the pattern a caller
-    globs for the candidate binary. For ``kind: library`` both come from
-    *target* itself; for ``app-consumer``/``plugin-contract`` both are
-    redirected through *target*'s own ``library`` field (ADR-047 §3)."""
+) -> tuple[str, str, str]:
+    """Returns ``(lookup_id, binary_pattern, header)`` -- the id to look up
+    in a profile's ``build-output.json`` ``targets[]``, the pattern a caller
+    globs for the candidate binary, and the space-joined ``public_headers:``
+    to forward as ``check-target``'s own ``header`` input (RunPlanCheck.
+    header's own docstring). For ``kind: library`` all three come from
+    *target* itself; for ``app-consumer``/``plugin-contract`` all three are
+    redirected through *target*'s own ``library`` field (ADR-047 §3) -- an
+    app-consumer/plugin-contract target carries no ``public_headers:`` of
+    its own (``TargetSpec.to_dict()`` only ever emits that key for ``kind:
+    library``), so its header scoping is necessarily the redirected
+    library's."""
     if target.kind == TARGET_KIND_LIBRARY:
-        return target.id, target.binary_pattern
+        return target.id, target.binary_pattern, " ".join(target.public_headers)
     referenced = config.targets.get(target.library)
-    pattern = referenced.binary_pattern if referenced is not None else ""
-    return target.library, pattern
+    if referenced is None:
+        return target.library, "", ""
+    return (
+        target.library,
+        referenced.binary_pattern,
+        " ".join(referenced.public_headers),
+    )
 
 
 def _generate_target_checks(
@@ -790,7 +687,7 @@ def _generate_target_checks(
         # config per its own docstring rather than re-deriving that rule --
         # skip defensively instead of emitting a check no caller asked for.
         return []
-    lookup_id, binary_pattern = _library_lookup_and_pattern(config, target)
+    lookup_id, binary_pattern, header = _library_lookup_and_pattern(config, target)
     baseline_target = target.library if target.kind != TARGET_KIND_LIBRARY else ""
     out: list[RunPlanCheck] = []
     for check in target.checks:
@@ -849,6 +746,7 @@ def _generate_target_checks(
                     gate_mode=check.gate_mode,
                     baseline_target=baseline_target,
                     binary_pattern=binary_pattern,
+                    header=header,
                     consumer_binary_pattern=(
                         target.consumer_binary_pattern
                         if target.kind != TARGET_KIND_LIBRARY

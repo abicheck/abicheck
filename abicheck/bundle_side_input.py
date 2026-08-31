@@ -81,6 +81,7 @@ if TYPE_CHECKING:
     from .compile_context import CompileContext
     from .model import AbiSnapshot
     from .policy_file import PolicyFile
+    from .workflows.suppression import SuppressionList
 
 
 @dataclass(frozen=True)
@@ -244,6 +245,7 @@ def compare_release_against_bundle_facts(
     cohorts: list[str] | None = None,
     policy: str = "strict_abi",
     policy_file: PolicyFile | None = None,
+    suppress: SuppressionList | None = None,
     include_dependencies: bool = False,
     max_json_object_nodes: int | None = None,
 ) -> BundleDiffResult:
@@ -357,6 +359,19 @@ def compare_release_against_bundle_facts(
     ``bundle_facts.read_bundle_facts_archive``'s own docstring. ``None``
     (the default) uses the library default, matching this driver's
     pre-existing behavior.
+
+    *suppress*, when given, is forwarded to each per-library
+    ``service.compare_snapshots()`` call as its own *suppression* argument
+    -- the same object the native ``compare``/``compare-release`` CLIs pass
+    (``--suppress``). Previously this driver had no way to honor a caller's
+    suppression list at all: every matched library was scored with every
+    known/intentional change still live, unlike every other comparison
+    entry point in this codebase. Omitted (the default): behavior is
+    unchanged from before this parameter existed. Not applied to
+    *bundle_findings* (the cross-library ``BUNDLE_*`` aggregate) -- the
+    native release fan-out does not apply per-library suppression there
+    either, since a suppression rule is authored against one library's own
+    symbol/type identity, not a cross-library relationship.
     """
     from . import service
     from .bundle_facts import compare_bundle_from_facts
@@ -406,7 +421,7 @@ def compare_release_against_bundle_facts(
             include_dependencies=include_dependencies,
         )
         diff = service.compare_snapshots(
-            old_snapshot, new_snapshot, policy=policy, policy_file=policy_file
+            old_snapshot, new_snapshot, suppress, policy=policy, policy_file=policy_file
         )
         per_library_results.append(diff)
         new_signature_evidence[key] = BundleSignatureEvidence.from_snapshot(new_snapshot)

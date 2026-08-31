@@ -28,6 +28,7 @@ import sys
 from pathlib import Path
 
 import pytest
+from _cli_option_set_snapshot import OPTION_SET_SNAPSHOT as _OPTION_SET_SNAPSHOT
 
 # Import the gate from scripts/ — the AI-readiness module is pure stdlib.
 _REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -1051,106 +1052,12 @@ def test_project_config_flag_is_config_not_build_config(name: str) -> None:
 
 
 # ── Resolved option-set snapshot (catches an accidental flag drop in review) ──
-
-# Frozen sets of every option spelling each verdict-emitting command exposes.
-# A diff here in review means a flag was added or dropped — update deliberately.
-_OPTION_SET_SNAPSHOT: dict[str, tuple[str, ...]] = {
-    "compare": (
-        "--allow-ast-frontend-fallback",
-        "--allow-unsupported-castxml",
-        "--ast-frontend",
-        "--audit-suppressions",
-        "--btf",
-        "--bundle-cohort",
-        "--bundle-facts-out",
-        "--bundle-system-providers",
-        "--compiler",
-        "--compiler-option",
-        "--compiler-prefix",
-        "--config",
-        "--contract",
-        "--ctf",
-        "--debug-format",
-        "--debug-root",
-        "--debuginfod",
-        "--debuginfod-url",
-        "--build-info",
-        "--debug-info",
-        "--demangle",
-        "--depth",
-        "--devel-pkg",
-        "--diagnostic-comparison",
-        "--dry-run",
-        "--dso-only",
-        "--dump-manifest",
-        "--dwarf",
-        "--dwarf-only",
-        "--env-matrix",
-        "--exit-code-scheme",
-        "--explain-patterns",
-        "--fail-on-removed-library",
-        "--follow-deps",
-        "--format",
-        "--frontend-context",
-        "--header",
-        "--header-graph",
-        "--header-graph-includes",
-        "--help",
-        "--help-all",
-        "--include",
-        "--include-system-declarations",
-        "--include-private-dso",
-        "--jobs",
-        "--keep-extracted",
-        "--lang",
-        "--ld-library-path",
-        "--manifest",
-        "--no-bundle-analysis",
-        "--no-debuginfod",
-        "--no-demangle",
-        "--no-dwarf-only",
-        "--no-fail-on-removed-library",
-        "--no-nostdinc",
-        "--no-pattern-verdicts",
-        "--no-scope-public-headers",
-        "--nostdinc",
-        "--output",
-        "--output-dir",
-        "--pack",
-        "--pattern-verdicts",
-        "--pdb-path",
-        "--policy",
-        "--post-manifest",
-        "--probe-matrix",
-        "--profile",
-        "--reconcile-build-context",
-        "--report-mode",
-        "--require-complete-analysis",
-        "--required-symbol",
-        "--required-symbols",
-        "--scope-public-headers",
-        "--search-path",
-        "--severity-preset",
-        "--show-filtered",
-        "--show-only",
-        "--sources",
-        "--suppress",
-        "--surface-metrics",
-        "--sysroot",
-        "--use-cases",
-        "--used-by",
-        "--verbose",
-        "--write",
-        "--version",
-        "-H",
-        "-I",
-        "-j",
-        "-o",
-        "-v",
-    ),
-    # `appcompat` folded into `compare --used-by` (ADR-043); it no longer has
-    # its own registered command/option-set snapshot.
-}
+#
+# Frozen sets of every option spelling each verdict-emitting command exposes
+# (_OPTION_SET_SNAPSHOT, imported above from _cli_option_set_snapshot.py — a
+# plain data fixture, not a test module, split out purely to keep this
+# debt.yaml no_growth-tracked file under its recorded baseline). A diff
+# there in review means a flag was added or dropped — update deliberately.
 
 
 @pytest.mark.parametrize("cmd_name", sorted(_OPTION_SET_SNAPSHOT))
