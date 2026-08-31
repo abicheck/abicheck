@@ -50,6 +50,19 @@ re-scanning ``old_facts_path`` a second time only to read back
 ``per_library_snapshots.keys()``, defeating the entire point of a caller
 handing in an already-loaded, potentially huge (SYCL/DPC++-scale) facts
 document just to avoid re-parsing it.
+
+NEW_INPUT is extracted with the same ``_extract_if_package`` primitive the
+live release fan-out uses when it is a package (wheel/deb/rpm/tar), not just
+a directory -- the option's own help text promises "a live release
+directory/package", so a package operand is a supported input, not an
+afterthought. ``--devel-pkg new=...`` is honored the same way (its extracted
+header root/include roots feed the NEW side's header search); ``--debug-
+info``, ``--severity-preset``/``--pack``/``--exit-code-scheme``, and
+``--no-scope-public-headers`` are rejected explicitly rather than silently
+ignored, since none of them have a channel into
+``compare_release_against_bundle_facts()`` -- the same "reject rather than
+silently diverge from the request" rule ``--dry-run``/``--contract`` already
+follow below.
 """
 
 from __future__ import annotations
@@ -130,6 +143,32 @@ def dispatch(*, compile_context: Any, **kwargs: Any) -> None:
             "json/markdown are supported for a stored-bundle-facts "
             "comparison. Choose one of: json, markdown."
         )
+    secondary_fmt = kwargs.get("secondary_fmt")
+    secondary_output: Path | None = kwargs.get("secondary_output")
+    # dry_run=False: --dry-run is rejected outright for this mode below,
+    # regardless of --write, so only the output/secondary-output collision
+    # half of this shared check is relevant here.
+    from ....frontends.cli.options import reject_incoherent_secondary_output
+
+    reject_incoherent_secondary_output(
+        dry_run=False,
+        output=kwargs.get("output"),
+        secondary_fmt=secondary_fmt,
+        secondary_output=secondary_output,
+    )
+    if secondary_output is not None and secondary_fmt not in ("json", "markdown"):
+        # Codex review: --write FORMAT=PATH was accepted (Click's own
+        # --write validation allows every format the ordinary compare/
+        # compare-release paths render: sarif/html/junit/review too) but
+        # this dispatcher only ever renders json/markdown -- a secondary
+        # format outside that pair exited successfully without ever writing
+        # the promised second artifact. Rejected the same way an
+        # unsupported primary --format is, rather than silently skipped.
+        raise click.UsageError(
+            f"--write {secondary_fmt}=... is not available with "
+            "--old-bundle-facts: only json/markdown are supported for a "
+            "stored-bundle-facts comparison."
+        )
     if kwargs.get("fail_on_removed"):
         raise click.UsageError(
             "--fail-on-removed-library is not supported together with "
@@ -166,6 +205,44 @@ def dispatch(*, compile_context: Any, **kwargs: Any) -> None:
         raise click.UsageError(
             "--contract is not supported together with --old-bundle-facts."
         )
+    if (
+        kwargs.get("severity_preset") is not None
+        or kwargs.get("pack_paths")
+        or kwargs.get("exit_code_scheme") is not None
+    ):
+        # Codex review: --severity-preset/--pack/--exit-code-scheme drive
+        # run_compare's _resolve_compare_config + pack-application path,
+        # neither of which this dispatcher calls --
+        # compare_release_against_bundle_facts() has no severity/exit-code-
+        # scheme/pack parameter to receive them, so every per-library
+        # comparison always exits through the legacy verdict mapping
+        # regardless of what was requested. Rejected rather than silently
+        # scoring/gating the run differently than asked.
+        raise click.UsageError(
+            "--severity-preset/--pack/--exit-code-scheme are not supported "
+            "together with --old-bundle-facts."
+        )
+    if kwargs.get("scope_public_headers") is False:
+        # Codex review, same root cause: --no-scope-public-headers has no
+        # channel into compare_release_against_bundle_facts() either (the
+        # driver always scopes to the public surface via service.
+        # compare_snapshots's own default) -- rejected rather than silently
+        # ignored.
+        raise click.UsageError(
+            "--no-scope-public-headers is not supported together with "
+            "--old-bundle-facts."
+        )
+    if kwargs.get("debug_info2") is not None:
+        # Codex review, same root cause as the package-extraction fix below:
+        # compare_release_against_bundle_facts() resolves NEW-side ELF/DWARF
+        # facts directly from the binary itself (this driver's own docstring:
+        # "no debug-info package resolution, no PDB") and has no debug-dir
+        # parameter to receive a --debug-info package's extracted contents,
+        # so it was silently accepted and ignored. Rejected rather than
+        # silently dropped.
+        raise click.UsageError(
+            "--debug-info is not supported together with --old-bundle-facts."
+        )
 
     headers, includes = _resolve_new_side_headers_includes(kwargs)
     header_backend = (
@@ -182,43 +259,96 @@ def dispatch(*, compile_context: Any, **kwargs: Any) -> None:
         if s.strip()
     ]
 
+    # Codex review: NEW_INPUT is documented ("a live release directory/
+    # package") to accept a package archive (wheel/deb/rpm/tar), but
+    # compare_release_against_bundle_facts() treats any non-directory path
+    # as a single library file -- a package operand silently produced zero
+    # matches instead of the shared libraries inside it. Extract it first,
+    # the same way the live release fan-out does (_extract_if_package),
+    # sharing that primitive rather than re-implementing package detection
+    # here. --devel-pkg new=... is honored the same way too (its header_dir
+    # becomes the NEW-side header root when no explicit --new-header was
+    # given, and its discovered include roots are appended) -- --debug-info
+    # is rejected above rather than silently dropped, since this driver has
+    # no debug-dir parameter to forward it to.
+    from ....cli_compare_release_helpers import (
+        _discover_include_roots,
+        _extract_if_package,
+    )
     from ....errors import SnapshotError
+    from ....workflows.extraction import detect_extractor, is_package
+
+    _temp_dir_paths: list[str] = []
+
+    def _make_temp_dir(prefix: str) -> Path:
+        import tempfile
+
+        path = tempfile.mkdtemp(prefix=prefix)
+        _temp_dir_paths.append(path)
+        return Path(path)
+
+    lib_dir, _new_debug_dir, header_dir, _new_symbols_file = _extract_if_package(
+        new_dir,
+        None,
+        kwargs.get("devel_pkg2"),
+        _make_temp_dir,
+        is_package,
+        detect_extractor,
+    )
+    if header_dir is not None:
+        if not headers:
+            headers = [header_dir]
+        includes = includes + _discover_include_roots(header_dir)
 
     try:
-        result = compare_release_against_bundle_facts(
-            old_facts_path,
-            new_dir,
-            headers=headers or None,
-            includes=includes or None,
-            header_backend=header_backend,
-            compile=compile_context,
-            new_version=kwargs.get("new_version", "new"),
-            lang=kwargs.get("lang", "c++"),
-            include_private_dso=bool(kwargs.get("include_private_dso", False)),
-            manifest_path=kwargs.get("manifest_path"),
-            system_providers=bundle_system_providers or None,
-            cohorts=list(kwargs.get("bundle_cohorts") or ()) or None,
-            policy=kwargs["policy"],
-            policy_file=policy_file,
-            suppress=suppression,
-            include_dependencies=bool(kwargs.get("include_dependencies", False)),
-            max_json_object_nodes=kwargs.get("max_json_object_nodes"),
-        )
-    except (SnapshotError, ValueError) as exc:
-        # Same CLI-boundary translation every other SnapshotError-raising
-        # entry point uses (cli_resolve.py et al.) -- without this, a
-        # container-node-budget rejection (or any other SnapshotError) would
-        # surface as a raw Python traceback instead of a clean CLI error.
-        # Also catches ValueError (Codex review): a malformed-but-parseable
-        # OLD_FACTS document -- missing/wrong-shaped 'per_library_snapshots',
-        # a bad 'filesystem_aliases'/'library_filenames' entry
-        # (bundle_facts_serialization.bundle_facts_from_dict and
-        # storage.bundle_facts_validation's validators all raise plain
-        # ValueError, not SnapshotError, for these) -- would otherwise leak
-        # the same raw traceback. json.JSONDecodeError (genuinely malformed
-        # JSON, from the plain-JSON load path) is itself a ValueError
-        # subclass, so it's covered by the same clause.
-        raise click.ClickException(str(exc)) from exc
+        try:
+            result = compare_release_against_bundle_facts(
+                old_facts_path,
+                lib_dir,
+                headers=headers or None,
+                includes=includes or None,
+                header_backend=header_backend,
+                compile=compile_context,
+                new_version=kwargs.get("new_version", "new"),
+                lang=kwargs.get("lang", "c++"),
+                include_private_dso=bool(kwargs.get("include_private_dso", False)),
+                manifest_path=kwargs.get("manifest_path"),
+                system_providers=bundle_system_providers or None,
+                cohorts=list(kwargs.get("bundle_cohorts") or ()) or None,
+                policy=kwargs["policy"],
+                policy_file=policy_file,
+                suppress=suppression,
+                include_dependencies=bool(kwargs.get("include_dependencies", False)),
+                max_json_object_nodes=kwargs.get("max_json_object_nodes"),
+            )
+        except (SnapshotError, ValueError) as exc:
+            # Same CLI-boundary translation every other SnapshotError-raising
+            # entry point uses (cli_resolve.py et al.) -- without this, a
+            # container-node-budget rejection (or any other SnapshotError) would
+            # surface as a raw Python traceback instead of a clean CLI error.
+            # Also catches ValueError (Codex review): a malformed-but-parseable
+            # OLD_FACTS document -- missing/wrong-shaped 'per_library_snapshots',
+            # a bad 'filesystem_aliases'/'library_filenames' entry
+            # (bundle_facts_serialization.bundle_facts_from_dict and
+            # storage.bundle_facts_validation's validators all raise plain
+            # ValueError, not SnapshotError, for these) -- would otherwise leak
+            # the same raw traceback. json.JSONDecodeError (genuinely malformed
+            # JSON, from the plain-JSON load path) is itself a ValueError
+            # subclass, so it's covered by the same clause.
+            raise click.ClickException(str(exc)) from exc
+    finally:
+        # Mirrors the live release fan-out's own --keep-extracted handling
+        # (_cleanup_temp_dirs): remove the package-extraction tempdir unless
+        # the caller asked to keep it for debugging.
+        import shutil as _shutil
+
+        if not kwargs.get("keep_extracted"):
+            for _td in _temp_dir_paths:
+                _shutil.rmtree(_td, ignore_errors=True)
+        elif _temp_dir_paths:
+            click.echo(
+                f"Extracted files kept in: {', '.join(_temp_dir_paths)}", err=True
+            )
 
     text = _render(result, fmt, old_facts_path=old_facts_path, new_dir=new_dir)
     output = kwargs.get("output")
@@ -226,6 +356,16 @@ def dispatch(*, compile_context: Any, **kwargs: Any) -> None:
         Path(output).write_text(text)
     else:
         click.echo(text)
+    if secondary_output is not None:
+        # Codex review: render and write the promised second artifact
+        # (validated to be json/markdown above) rather than silently
+        # dropping it -- re-rendering rather than reusing `text` since a
+        # secondary format can legitimately differ from the primary one.
+        assert secondary_fmt is not None
+        secondary_text = _render(
+            result, secondary_fmt, old_facts_path=old_facts_path, new_dir=new_dir
+        )
+        secondary_output.write_text(secondary_text)
 
     _exit_compare_release(result.verdict.value, fail_on_removed=False, removed_keys=[])
 

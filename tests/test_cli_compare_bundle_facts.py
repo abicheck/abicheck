@@ -323,6 +323,83 @@ class TestCompareOldBundleFacts:
         assert code == 64
         assert "--bundle-facts-out" in out
 
+    def test_new_input_package_is_extracted(self, tmp_path: Path) -> None:
+        # Codex review: NEW_INPUT's own help text promises "a live release
+        # directory/package", but compare_release_against_bundle_facts()
+        # treated any non-directory path as a single library file --
+        # a package archive silently produced zero matches instead of the
+        # shared library inside it. Packs a real gcc-built .so into a
+        # .tar.gz and points --old-bundle-facts's NEW_INPUT at the archive
+        # itself, proving the breaking change is still detected once the
+        # archive is extracted first.
+        import tarfile
+
+        old_dir = tmp_path / "old"
+        new_dir = tmp_path / "new"
+        old_dir.mkdir()
+        new_dir.mkdir()
+        _build_so(old_dir, "libreal.so", "int add(int a, int b) { return a + b; }\n")
+        _build_so(
+            new_dir,
+            "libreal.so",
+            "int add(int a, int b, int c) { return a + b + c; }\n",
+        )
+        facts_path = _write_old_facts(
+            tmp_path, old_dir, old_dir / "libreal.so", "libreal.so"
+        )
+        archive_path = tmp_path / "release.tar.gz"
+        with tarfile.open(archive_path, "w:gz") as tf:
+            tf.add(new_dir / "libreal.so", arcname="libreal.so")
+
+        code, out = _invoke(
+            "compare",
+            str(facts_path),
+            str(archive_path),
+            "--old-bundle-facts",
+            "--include-system-declarations",
+            "--format",
+            "json",
+        )
+
+        assert code == 4, out
+        payload = json.loads(out)
+        assert payload["verdict"] == "BREAKING"
+        lib = payload["libraries"]["libreal.so"]
+        assert lib["verdict"] == "BREAKING"
+        assert any(c["kind"] == "func_params_changed" for c in lib["changes"])
+
+    def test_write_secondary_output_renders_and_writes(self, tmp_path: Path) -> None:
+        # Codex review: --write FORMAT=PATH was accepted but this dispatcher
+        # never read secondary_fmt/secondary_output, so the command exited
+        # successfully without ever creating the promised second artifact.
+        old_dir = tmp_path / "old"
+        new_dir = tmp_path / "new"
+        old_dir.mkdir()
+        new_dir.mkdir()
+        body = "int add(int a, int b) { return a + b; }\n"
+        _build_so(old_dir, "libreal.so", body)
+        _build_so(new_dir, "libreal.so", body)
+        facts_path = _write_old_facts(
+            tmp_path, old_dir, old_dir / "libreal.so", "libreal.so"
+        )
+        secondary_path = tmp_path / "secondary.md"
+
+        code, out = _invoke(
+            "compare",
+            str(facts_path),
+            str(new_dir),
+            "--old-bundle-facts",
+            "--write",
+            f"markdown={secondary_path}",
+            "--format",
+            "json",
+        )
+
+        assert code == 0, out
+        json.loads(out)
+        assert secondary_path.exists()
+        assert "Bundle-facts comparison" in secondary_path.read_text()
+
 
 class TestCompareOldBundleFactsEarlyRejections:
     """The four Codex-review fixes: checks that must fire before any real
@@ -434,3 +511,144 @@ class TestCompareOldBundleFactsEarlyRejections:
         forwarded_includes = captured.get("includes")
         assert forwarded_includes is not None
         assert extra_include in forwarded_includes  # type: ignore[operator]
+
+    def test_severity_preset_is_rejected(self, tmp_path: Path) -> None:
+        # Codex review: --severity-preset drives run_compare's
+        # _resolve_compare_config, which this dispatcher never calls --
+        # compare_release_against_bundle_facts() has no severity parameter,
+        # so the run always exited through the legacy verdict mapping
+        # regardless of what was requested.
+        facts_path = tmp_path / "old.bundlefacts.json"
+        facts_path.write_text("{}")
+        new_dir = tmp_path / "new"
+        new_dir.mkdir()
+
+        code, out = _invoke(
+            "compare",
+            str(facts_path),
+            str(new_dir),
+            "--old-bundle-facts",
+            "--severity-preset",
+            "strict",
+            "--format",
+            "json",
+        )
+
+        assert code == 64
+        assert "--severity-preset" in out
+
+    def test_exit_code_scheme_is_rejected(self, tmp_path: Path) -> None:
+        facts_path = tmp_path / "old.bundlefacts.json"
+        facts_path.write_text("{}")
+        new_dir = tmp_path / "new"
+        new_dir.mkdir()
+
+        code, out = _invoke(
+            "compare",
+            str(facts_path),
+            str(new_dir),
+            "--old-bundle-facts",
+            "--exit-code-scheme",
+            "severity",
+            "--format",
+            "json",
+        )
+
+        assert code == 64
+        assert "--exit-code-scheme" in out
+
+    def test_pack_is_rejected(self, tmp_path: Path) -> None:
+        # Codex review: --pack drives run_compare's pack-application path,
+        # which this dispatcher never calls.
+        facts_path = tmp_path / "old.bundlefacts.json"
+        facts_path.write_text("{}")
+        new_dir = tmp_path / "new"
+        new_dir.mkdir()
+        pack_path = tmp_path / "pack.yaml"
+        pack_path.write_text("id: x\nversion: 1\nkind: policy\nassignments: {}\n")
+
+        code, out = _invoke(
+            "compare",
+            str(facts_path),
+            str(new_dir),
+            "--old-bundle-facts",
+            "--pack",
+            str(pack_path),
+            "--format",
+            "json",
+        )
+
+        assert code == 64
+        assert "--pack" in out
+
+    def test_no_scope_public_headers_is_rejected(self, tmp_path: Path) -> None:
+        # Codex review: --no-scope-public-headers has no channel into
+        # compare_release_against_bundle_facts() -- the driver always scopes
+        # to the public surface via service.compare_snapshots's own default.
+        facts_path = tmp_path / "old.bundlefacts.json"
+        facts_path.write_text("{}")
+        new_dir = tmp_path / "new"
+        new_dir.mkdir()
+
+        code, out = _invoke(
+            "compare",
+            str(facts_path),
+            str(new_dir),
+            "--old-bundle-facts",
+            "--no-scope-public-headers",
+            "--format",
+            "json",
+        )
+
+        assert code == 64
+        assert "--no-scope-public-headers" in out
+
+    def test_debug_info_is_rejected(self, tmp_path: Path) -> None:
+        # Codex review: this driver resolves NEW-side ELF/DWARF facts
+        # directly from the binary itself and has no debug-dir parameter to
+        # forward a --debug-info package's extracted contents to.
+        facts_path = tmp_path / "old.bundlefacts.json"
+        facts_path.write_text("{}")
+        new_dir = tmp_path / "new"
+        new_dir.mkdir()
+        debug_pkg = tmp_path / "libreal-dbg.tar"
+        debug_pkg.write_bytes(b"")
+
+        code, out = _invoke(
+            "compare",
+            str(facts_path),
+            str(new_dir),
+            "--old-bundle-facts",
+            "--debug-info",
+            f"new={debug_pkg}",
+            "--format",
+            "json",
+        )
+
+        assert code == 64
+        assert "--debug-info" in out
+
+    def test_write_secondary_output_unsupported_format_is_rejected(
+        self, tmp_path: Path
+    ) -> None:
+        # Codex review: --write sarif=... was accepted but this dispatcher
+        # only ever renders json/markdown, so the secondary artifact was
+        # silently never written.
+        facts_path = tmp_path / "old.bundlefacts.json"
+        facts_path.write_text("{}")
+        new_dir = tmp_path / "new"
+        new_dir.mkdir()
+
+        code, out = _invoke(
+            "compare",
+            str(facts_path),
+            str(new_dir),
+            "--old-bundle-facts",
+            "--write",
+            f"sarif={tmp_path / 'out.sarif'}",
+            "--format",
+            "json",
+        )
+
+        assert code == 64
+        assert "--write" in out

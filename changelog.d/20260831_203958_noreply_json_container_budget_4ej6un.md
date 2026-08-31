@@ -24,4 +24,13 @@
   `.abicheck.yml`'s `compile.include_dirs` into the NEW side's header search
   the same way every other `compare` dispatch path does, and reports a
   malformed `OLD_FACTS` document as a clean CLI error instead of a raw
-  traceback.
+  traceback. NEW_INPUT now accepts a package archive (wheel/deb/rpm/tar), not
+  just a directory, extracted with the same primitive the live release
+  fan-out uses — `--devel-pkg new=...` is honored the same way (its header
+  root/include roots feed the NEW side's header search) and `--write
+  FORMAT=PATH` now renders and writes the promised second artifact instead of
+  being silently accepted and ignored. `--debug-info`,
+  `--severity-preset`/`--pack`/`--exit-code-scheme`, and
+  `--no-scope-public-headers` are rejected explicitly (exit 64) rather than
+  silently ignored, since none of them have a channel into
+  `compare_release_against_bundle_facts()`.
