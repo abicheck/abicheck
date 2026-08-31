@@ -2793,12 +2793,18 @@ corrected twice more in the same round for two self-consistency errors in
 that first revision (Codex review, both fixed here):
 
 1. `frontends/cli/commands/compare.py` — presentation translation only:
-   extending `classify_compare_operand()` with the new stored-facts kind
-   (no new option — a positional-operand change, per the correction
-   above), two new inline options (the per-library manifest path, the
-   decode-budget override), and a new `_dispatch_release_compare` branch
-   that builds a request object from all three. **Package extraction does
-   *not* belong here**
+   two new inline options (the per-library manifest path, the decode-
+   budget override), and a new `_dispatch_release_compare` branch that
+   builds a request object from those plus the classified operand.
+   **The operand-kind extension lives elsewhere (Codex review, next
+   round, verified against source):** `classify_compare_operand()` is
+   defined in `cli_resolve.py` and called from `cli_compare_helpers.py`
+   (before `_dispatch_release_compare` even runs) — not in `frontends/cli/
+   commands/compare.py`. The new stored-facts kind (and its own table-
+   driven tests) belongs in `cli_resolve.py`; editing `compare.py` alone
+   would leave the positional facts operand classified as an ordinary
+   `"file"` no matter what the new dispatch branch does with it.
+   **Package extraction does *not* belong here**
    — unpacking an archive and managing its temporary-directory lifetime is
    release/extraction orchestration, the same category of work correction
    1 above already ruled out of the frontend; it moves to (2). **The
@@ -2851,7 +2857,19 @@ that first revision (Codex review, both fixed here):
    `new_public_entity_ids`; `contract_mode`/`contract_evaluation` pairing
    validation). This is more work than "swap one function call for
    another," and is named here so it isn't rediscovered as a surprise
-   mid-implementation.
+   mid-implementation. **`compare_snapshots()` is not the only forbidden
+   edge in this loop (Codex review, next round, verified against
+   source):** the same function also calls `service.resolve_input()`
+   directly, and imports `_build_match_map` from `cli_helpers_compare.py`
+   — a frontend-classified module, not a `compare`/`model`/`storage`/
+   `extract`/`policy` one `workflows` may import. Both need replacing too:
+   `service.resolve_input()` with `workflows.input_resolution.
+   resolve_input` (already the migrated owner, per this same document's
+   Phase-4-thinning references), and the release-matching primitive
+   (`_build_match_map`) relocated somewhere a `workflows`-classified
+   module can actually reach it — not left as a second untouched
+   frontend-facing import alongside the `service.compare_snapshots()` one
+   already named.
 3. Adapting the workflow result into `_format_release_summary()`'s
    existing rendering shape.
 4. A `docs/_meta/topics.yaml` registration for the new CLI flags
