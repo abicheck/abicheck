@@ -17,4 +17,8 @@
   end (CLI, the typed Python API, the release/bundle fan-out) already
   resolves a request through — and `scan --against`'s own candidate
   resolution reuses the identical check directly, so all three commands get
-  the same pre-flight guarantee.
+  the same pre-flight guarantee. A root-target scope declared in
+  `.abicheck.yml`'s own `build.targets:` (rather than an explicit
+  `--build-target`) is covered too, via a second check at the one place
+  both sources are already merged into a single value
+  (`buildsource.inline._maybe_collect_bazel_build_info`).

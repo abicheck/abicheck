@@ -772,7 +772,9 @@ def collect_inline_pack(
 
         if merged.compile_units:
             compile_db = None  # already seeded from a build-info pack
-        elif _maybe_collect_bazel_build_info(build_info, merged, extractors, sources):
+        elif _maybe_collect_bazel_build_info(
+            build_info, merged, extractors, sources, tuple(cfg.targets)
+        ):
             # A pre-captured Bazel aquery/cquery jsonproto produces BuildEvidence
             # directly (no compile_commands.json to load) — ADR-037 D5 #5 sniffing.
             compile_db = None
@@ -1133,6 +1135,7 @@ def _maybe_collect_bazel_build_info(
     merged: BuildEvidence,
     extractors: list[ExtractorRecord],
     sources: Path | None = None,
+    configured_targets: tuple[str, ...] = (),
 ) -> bool:
     """Route a pre-captured Bazel aquery/cquery ``--build-info`` to the adapter.
 
@@ -1160,6 +1163,12 @@ def _maybe_collect_bazel_build_info(
     fmt = sniff_build_info_format(build_info)
     if fmt not in ("bazel_aquery", "bazel_cquery"):
         return False
+    if configured_targets:  # ADR-063 Phase 4: no `targets` param on this adapter
+        from ..errors import ValidationError
+
+        raise ValidationError(
+            f"build_targets={list(configured_targets)!r} requested, but --build-info is a pre-captured Bazel {fmt.removeprefix('bazel_')} jsonproto ({build_info}); root-target scoping only applies to a *live* `bazel query` (pass --sources/a workspace with no --build-info, or pre-capture the jsonproto already scoped to the desired targets first)"
+        )
     from .adapters.bazel import BazelAdapter
 
     if fmt == "bazel_aquery":

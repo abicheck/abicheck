@@ -49,7 +49,32 @@ looked like the obvious fix and wasn't.
   `click.UsageError` directly (no `PlanningError` intermediate, since it has
   no typed-API caller to preserve that type for) — both name the mismatch
   and the documented workaround, exit 64, not a silent, unscoped collection.
-  See
+  **A second Codex review round found this only covered `InputSpec.
+  build_targets` (the `--build-target` CLI flag/typed-API field) — a root-
+  target scope declared in `.abicheck.yml`'s own `build.targets:` instead
+  reaches `BuildConfig.targets` through `embed_build_source`'s own CLI-
+  overrides-config merge, a value none of the request-level pre-flight
+  checks above can see (no config is discovered yet at that point).** Fixed
+  at the one place both sources are already unified into a single value:
+  `buildsource.inline._maybe_collect_bazel_build_info()` itself, which every
+  `embed_build_source` caller (`dump`/`compare`/`scan` alike) goes through —
+  it now raises `ValidationError` when given a non-empty `configured_targets`
+  and a pre-captured jsonproto. Note this closes the *silent* half
+  everywhere, but the *exit code* still varies by front end because of a
+  pre-existing, deliberate design choice one layer up:
+  `workflows.artifact.execute.embed_side_build_source` (the shared
+  primitive `dump`'s typed request, `compare`, and `scan` all resolve
+  through) already flattens any `ValidationError` from `embed_build_source`
+  into `SnapshotError` ("this surface has always flattened both onto
+  SnapshotError" — see that function's own comment), so those three paths
+  now fail loudly with a correctly-typed error at exit 1, not exit 64;
+  only the `dump --sources <tree>` (no `SO_PATH`) source-only path, which
+  calls `cli_buildsource.embed_build_source`'s own adapter directly and
+  was never routed through that flattening primitive, gets the full exit
+  64. Changing the shared primitive's flattening behavior to recover
+  exit-64 uniformly is a separate, riskier change (that comment's own
+  "has always" — other `ValidationError`s reaching it likely already rely
+  on the flattened exit 1) and was not attempted here. See
   `abicheck/workflows/plan.py`'s own module docstring and
   `docs/contribute/adr/063-one-semantic-pipeline.md`'s Phase 4 status entry
   for what changed and what this fix deliberately does not attempt (option 1

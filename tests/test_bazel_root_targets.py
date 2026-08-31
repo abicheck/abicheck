@@ -706,3 +706,83 @@ def test_scan_candidate_build_target_with_precaptured_aquery_raises_planning_err
             build_info=aquery,
             build_targets=("//:lib",),
         )
+
+
+# ── ADR-063 Phase 4 follow-up (Codex review): `.abicheck.yml`-sourced scope ──
+#
+# The AnalysisPlanner/scan_engine checks above only see InputSpec.
+# build_targets, populated from an explicit --build-target. A root-target
+# scope declared in .abicheck.yml's own `build.targets:` instead reaches
+# BuildConfig.targets through a different fold (embed_build_source's own
+# CLI-overrides-config merge) that those request-level pre-flight checks
+# have no seam for -- config discovery hasn't run yet at that point. Fixed
+# at the one place both sources are already unified: _maybe_collect_bazel_
+# build_info() itself, which every embed_build_source caller (dump/compare/
+# scan alike) goes through.
+
+
+def test_maybe_collect_bazel_build_info_rejects_configured_targets(tmp_path: Path):
+    from abicheck.buildsource.build_evidence import BuildEvidence
+    from abicheck.buildsource.inline import _maybe_collect_bazel_build_info
+
+    aquery = tmp_path / "aquery.json"
+    aquery.write_text(
+        json.dumps({"actions": [], "pathFragments": [], "artifacts": [], "targets": []})
+    )
+    with pytest.raises(ValueError, match="pre-captured Bazel aquery"):
+        _maybe_collect_bazel_build_info(
+            aquery, BuildEvidence(), [], tmp_path, ("//:from_config",)
+        )
+
+
+def test_maybe_collect_bazel_build_info_no_configured_targets_is_unaffected(
+    tmp_path: Path,
+):
+    from abicheck.buildsource.build_evidence import BuildEvidence
+    from abicheck.buildsource.inline import _maybe_collect_bazel_build_info
+
+    aquery = tmp_path / "aquery.json"
+    aquery.write_text(
+        json.dumps({"actions": [], "pathFragments": [], "artifacts": [], "targets": []})
+    )
+    assert _maybe_collect_bazel_build_info(aquery, BuildEvidence(), [], tmp_path, ())
+
+
+def test_dot_abicheck_yml_build_targets_with_precaptured_aquery_rejected(
+    tmp_path: Path,
+):
+    """End to end: `.abicheck.yml`'s `build.targets:` alone (no
+    `--build-target`) combined with a pre-captured `--build-info` jsonproto
+    must reject exactly like the explicit-flag case, not silently collect
+    the unscoped graph."""
+    from click.testing import CliRunner
+
+    from abicheck.cli import main
+
+    src = tmp_path / "src"
+    src.mkdir()
+    (src / "a.cpp").write_text("int f() { return 0; }\n", encoding="utf-8")
+    (src / ".abicheck.yml").write_text(
+        "build:\n  system: bazel\n  targets:\n    - //:from_config\n",
+        encoding="utf-8",
+    )
+    aquery = tmp_path / "aquery.json"
+    aquery.write_text(
+        json.dumps({"actions": [], "pathFragments": [], "artifacts": [], "targets": []})
+    )
+
+    runner = CliRunner()
+    result = runner.invoke(
+        main,
+        [
+            "dump",
+            "--sources",
+            str(src),
+            "--build-info",
+            str(aquery),
+            "-o",
+            str(tmp_path / "out.json"),
+        ],
+    )
+    assert result.exit_code == 64, result.output
+    assert "pre-captured Bazel aquery" in result.output

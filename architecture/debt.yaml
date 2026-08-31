@@ -153,12 +153,12 @@
     },
     {
       "path": "abicheck/buildsource/inline.py",
-      "baseline_lines": 1975,
+      "baseline_lines": 1984,
       "target": "extract/build-or-source",
       "rule": "no_growth",
       "category": "legacy_extraction_monolith",
       "owner": "abicheck maintainers",
-      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice.",
+      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice. Baseline raised by 9 lines (ADR-063 Phase 4, Codex review): _maybe_collect_bazel_build_info() needed a configured_targets parameter and a short-circuit ValidationError (not a bare ValueError -- needed a same-module import to reach the existing usage-error translation instead of propagating as a raw, untranslated exception) to close a real correctness gap (--build-target/--build-info scoping silently ignored for a pre-captured Bazel jsonproto, including the .abicheck.yml-sourced case a request-level pre-flight check cannot see) -- already minimized to a single-paragraph docstring and a one-line message; no smaller diff was found that still states the failure clearly.",
       "review_by": "2026-11-30"
     },
     {
