@@ -9565,7 +9565,14 @@ resolving and forwarding the pair (which `service_compare_pipeline.
 classify_compare_pair` inherits for free — see below); and
 `service_header_graph_attach._attach_header_graph()` sharing one
 `SourceGraphSummary` instance between `AbiSnapshot.surface_graph` and
-`AbiSnapshot.build_source.source_graph`.
+`AbiSnapshot.build_source.source_graph` -- deliberately without also
+populating `compare/surface_graph.py`'s own facts onto it there, since a
+first version that did regressed the header-graph attach-cost perf gate by
+47-96% at realistic sizes (this builder runs unconditionally on
+essentially every real dump, and nothing in this phase's own wiring reads
+those facts back yet); `build_public_surface_facts()` stays available for
+a caller that does need them to populate the same shared instance
+explicitly.
 
 **Deliberately not landed.** `surface.py`'s closure-walk traversal and
 `export_surface.py`'s independent one are **not deleted** —

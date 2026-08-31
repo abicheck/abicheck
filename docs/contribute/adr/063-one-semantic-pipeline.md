@@ -103,10 +103,18 @@
   before forwarding into `compare()`, which `service_compare_pipeline.
   classify_compare_pair` inherits for free since it already routes
   through `compare_snapshots()` rather than `checker.compare()` directly;
-  and `service_header_graph_attach._attach_header_graph()` folding this
-  phase's own facts into the *same* `SourceGraphSummary` instance
-  `build_header_only_graph()` already produces, assigned to both
-  `AbiSnapshot.surface_graph` and `AbiSnapshot.build_source.source_graph`.
+  and `service_header_graph_attach._attach_header_graph()` assigning the
+  *same* `SourceGraphSummary` instance `build_header_only_graph()` already
+  produces to both `AbiSnapshot.surface_graph` and `AbiSnapshot.
+  build_source.source_graph` — deliberately without also populating this
+  phase's own `compare/surface_graph.py` facts onto it there: that
+  builder runs unconditionally on essentially every real dump (G31 Phase
+  A), and doing the per-declaration walk speculatively, for a feature
+  nothing in this phase's own wiring reads back yet, regressed the
+  header-graph attach-cost perf gate by 47-96% at realistic sizes (caught
+  by CI on this phase's own PR). `build_public_surface_facts()` stays
+  available for a caller that does need those facts to populate onto the
+  same shared instance explicitly.
   **Deliberately not landed, and recorded here rather than left for a
   later phase to rediscover as a gap:** `surface.py`'s own closure-walk
   traversal and `export_surface.py`'s independent one are **not**
