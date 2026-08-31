@@ -375,8 +375,8 @@ alongside the flag deletion itself.
 - [cli-cleanup-phase-two.md](../plans/cli-cleanup-phase-two.md) — "PR 4 —
   one gate algorithm (`--exit-code-scheme` removal)" is this ADR's source
   material; the plan's "Ordering" table tracks PR G1 (done, #789) and PR G2
-  (this ADR — stage 1a landed, stage 1b/stage 2 not yet implemented) as a
-  pair.
+  (this ADR — stage 1a landed, stage 1b partially landed per this ADR's own
+  status header above, stage 2 not yet implemented) as a pair.
 - [ADR-049](049-contract-relevance-and-compatibility-configuration.md) —
   contract-coverage's own orthogonal exit contribution, folded on top of
   this ADR's precedence, never lowering it.
