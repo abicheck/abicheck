@@ -241,11 +241,13 @@ def test_run_scan_set_rejects_bazel_scoping_mismatch_before_discovery(
     monkeypatch, tmp_path: Path
 ) -> None:
     """Codex review, fresh evidence: a direct ``run_scan_set()`` caller has no
-    ``cli_scan.py`` pre-flight of its own (unlike `--artifact-set`'s CLI
-    path), and each member's own ``run_scan_core()`` check only fires after
-    ``discover_artifact_set()``/``check_artifact_set_soname_collisions()``/
+    ``cli_scan.py`` pre-flight of its own, and each member's own
+    ``run_scan_core()`` check only fires after ``discover_artifact_set()``/
+    ``check_artifact_set_soname_collisions()``/
     ``artifact_set_member_exports()`` have already run for every member.
-    Pinned by asserting discovery never even starts."""
+    Pinned by asserting discovery never even starts. (A later round found
+    `--artifact-set`'s own CLI path had the identical gap -- see
+    ``test_scan_cli_artifact_set_rejects_bazel_scoping_mismatch_before_discovery``.)"""
     import abicheck.bundle as bundle_mod
     from abicheck.errors import PlanningError
 
@@ -266,6 +268,50 @@ def test_run_scan_set_rejects_bazel_scoping_mismatch_before_discovery(
     )
     with pytest.raises(PlanningError, match="pre-captured Bazel aquery"):
         run_scan_set(req)
+
+
+def test_scan_cli_artifact_set_rejects_bazel_scoping_mismatch_before_discovery(
+    monkeypatch, tmp_path: Path
+) -> None:
+    """Codex review, fresh evidence: the `--artifact-set` CLI's own pre-flight
+    check (`cli_scan._run_artifact_set`) previously ran only *after*
+    `_resolve_artifact_set_paths()`/`discover_artifact_set()` -- so a
+    directory got traversed and every explicit member statted/format-
+    validated before an unsupported request was ultimately rejected anyway,
+    and an invalid member's own error could mask the intended usage error.
+    Pinned by asserting discovery never even starts, the CLI-level sibling of
+    `test_run_scan_set_rejects_bazel_scoping_mismatch_before_discovery`
+    above."""
+    import abicheck.bundle as bundle_mod
+
+    def _fail_if_called(*_a, **_kw):
+        raise AssertionError(
+            "discover_artifact_set() ran before the Bazel-scoping pre-flight "
+            "check rejected the request"
+        )
+
+    monkeypatch.setattr(bundle_mod, "discover_artifact_set", _fail_if_called)
+
+    aquery = _write_bazel_aquery(tmp_path)
+    runner = CliRunner()
+    result = runner.invoke(
+        main,
+        [
+            "scan",
+            "--artifact-set",
+            str(_artifact(tmp_path, "a")),
+            "--artifact-set",
+            str(_artifact(tmp_path, "b")),
+            "--sources",
+            str(_sources(tmp_path)),
+            "--build-info",
+            str(aquery),
+            "--build-target",
+            "//:math",
+        ],
+    )
+    assert result.exit_code == 64, result.output
+    assert "pre-captured Bazel aquery" in result.output
 
 
 def test_run_scan_set_depth_binary_exempts_the_early_bazel_scoping_check(

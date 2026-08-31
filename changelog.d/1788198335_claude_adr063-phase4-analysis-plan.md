@@ -96,3 +96,12 @@
   override first when present, falling back to the raw-depth-only rule only
   when it's unset — `compare` is unaffected, since `CompareRequest` has no
   such field.
+- **`scan --artifact-set`'s own CLI pre-flight check now runs before
+  discovery, not after.** `cli_scan._run_artifact_set` ran its Bazel-scoping
+  check only after `_resolve_artifact_set_paths()`/`discover_artifact_set()`
+  had already traversed a directory and statted/format-validated every
+  explicit member — so an invalid member's own error could mask the
+  request's intended usage error, and a mismatched request paid for real
+  discovery work before being rejected anyway (the CLI-level sibling of the
+  `run_scan_set()` fix above). Moved to the top of the function, before any
+  discovery work starts.

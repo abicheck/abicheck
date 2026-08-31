@@ -285,6 +285,23 @@ looked like the obvious fix and wasn't.
   `test_resolved_collect_mode_off_override_is_exempt_even_at_other_depths`
   pins the converse (an explicit `"off"` override exempts even at a depth,
   e.g. `"build"`, that the raw-depth-only rule would otherwise reject).
+  **A tenth review round found the eighth round's fix (moving `run_scan_set`'s
+  own check before discovery) had a CLI-level sibling gap.**
+  `cli_scan._run_artifact_set` (`scan --artifact-set`'s own CLI entry point)
+  has its own pre-flight check, separate from `run_scan_set`'s — but it ran
+  only *after* `_resolve_artifact_set_paths()`/`discover_artifact_set()` had
+  already traversed a directory and statted/format-validated every explicit
+  member. An invalid member's own error could therefore mask the request's
+  intended `PlanningError`/usage error, and a mismatched request paid for
+  real discovery work before `run_scan_set`'s own (already-fixed) check
+  rejected it anyway. Fixed by moving the check to the very top of
+  `_run_artifact_set`, before any discovery work starts — every value the
+  check needs (`depth`, `build_info`, `build_targets`) is already a raw
+  function parameter, so no reordering of the rest of the function was
+  needed. `tests/test_bazel_root_targets_scan.py::
+  test_scan_cli_artifact_set_rejects_bazel_scoping_mismatch_before_discovery`
+  pins it, the CLI-level sibling of the eighth round's own
+  `test_run_scan_set_rejects_bazel_scoping_mismatch_before_discovery`.
   Historical analysis retained below for the record.
   `BazelAdapter.collect()`'s `self.targets` scoping is applied
   in exactly two places: gating whether a *live* `bazel query` subprocess

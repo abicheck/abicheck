@@ -679,6 +679,21 @@ def _run_artifact_set(
     from .service import Budget, ScanRequest
     from .service_scan import run_scan_set
 
+    # ADR-063 Phase 4 (Codex review, fresh evidence): checked before
+    # discovery, not only inside run_scan_set() below -- discover_artifact_set()
+    # traverses a directory and stats/format-validates every explicit member,
+    # and an invalid member could otherwise mask the request's own
+    # PlanningError. Same check as the single-binary path's own, including
+    # its depth=binary exemption -- that depth resolves to a collect_mode
+    # that never consults build_info/build_targets at all, matching
+    # workflows.plan._check_bazel_target_scoping.
+    from .workflows.plan import bazel_target_scoping_failure
+
+    if (depth or "").lower() != "binary" and (
+        _bf := bazel_target_scoping_failure("candidate", build_info, build_targets)
+    ):
+        raise click.UsageError(str(_bf))
+
     paths, explicit = _resolve_artifact_set_paths(artifact_set)
     try:
         discovered = discover_artifact_set(paths, explicit=explicit)
@@ -759,17 +774,6 @@ def _run_artifact_set(
         changed_src=changed_src,
         build_targets=build_targets,
     )
-    # ADR-063 Phase 4 (Codex review, fresh evidence): same pre-flight check as
-    # the single-binary path's own, including its depth=binary exemption (a
-    # later Codex/CodeRabbit round found this copy lacked it) -- that depth
-    # resolves to a collect_mode that never consults build_info/build_targets
-    # at all, matching workflows.plan._check_bazel_target_scoping.
-    from .workflows.plan import bazel_target_scoping_failure
-
-    if (depth or "").lower() != "binary" and (
-        _bf := bazel_target_scoping_failure("candidate", build_info, build_targets)
-    ):
-        raise click.UsageError(str(_bf))
 
     if dry_run:
         from .bundle import check_artifact_set_soname_collisions
