@@ -332,8 +332,18 @@ def _attach_header_graph(
     # is the same object `pack.source_graph` already holds; the codec (
     # `storage/surface_graph_codec.py`) relies on that identity to dedup the
     # embedded copy on encode and restore it on decode.
-    from .compare.surface_graph import build_public_surface_facts
-
-    build_public_surface_facts(snap, graph)
+    #
+    # Deliberately NOT populated with compare/surface_graph.py's own
+    # declaration/type/header/symbol facts here: `_attach_header_graph` runs
+    # unconditionally on essentially every real dump (G31 Phase A), and
+    # nothing in this phase's own wiring reads those facts back yet --
+    # `PublicSurfaceQuery.resolve()` reads each declaration's `.entity_id`
+    # directly and delegates domain resolution to `surface.compute_public_
+    # surface()` unchanged (see that module's own docstring for the full
+    # scoping decision). Paying `build_public_surface_facts`'s per-
+    # declaration walk on every dump for a feature with no current reader
+    # regressed the header-graph attach-cost perf gate by 47-96% at
+    # realistic sizes (caught by CI on this phase's own PR) -- populating
+    # it is deferred to whichever later phase actually queries the graph.
     snap.surface_graph = graph
     return snap

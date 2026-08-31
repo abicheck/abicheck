@@ -73,14 +73,13 @@ def test_surface_graph_is_the_same_object_as_build_source_source_graph(
     assert snap.surface_graph is snap.build_source.source_graph
 
 
-def test_surface_graph_carries_both_builders_own_facts(
+def test_surface_graph_carries_the_l5_builders_own_facts(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     """The L5 builder's own ``source_decl``/``header`` nodes (from
-    ``build_header_only_graph``) and this phase's own ``declaration``/
-    ``header`` nodes (from ``build_public_surface_facts``) both land in the
-    one shared graph -- proving the assembly step actually threads the same
-    instance into both builders, not just constructs one and discards it."""
+    ``build_header_only_graph``) land in the shared graph -- proving the
+    assembly step actually threads a real, populated instance into
+    ``AbiSnapshot.surface_graph``, not an empty placeholder."""
     monkeypatch.setattr(dumper_clang, "_clang_available", lambda *a, **k: False)
     header = tmp_path / "api.h"
     header.write_text("void f(void);\n")
@@ -102,9 +101,79 @@ def test_surface_graph_carries_both_builders_own_facts(
     kinds = {node.kind for node in graph.nodes}
     # header_graph.py's own L5 seeding (flat-snapshot fallback, clang unavailable).
     assert "source_decl" in kinds
-    # compare/surface_graph.py's own Phase 3 facts.
-    assert "declaration" in kinds
+
+
+def test_compare_surface_graph_facts_are_not_populated_eagerly(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """``compare/surface_graph.py``'s own ``declaration``/``type``/
+    ``header``/``symbol`` facts are deliberately NOT added by
+    ``_attach_header_graph`` itself -- this step runs unconditionally on
+    essentially every real dump (G31 Phase A), and nothing in this phase's
+    own wiring reads those facts back yet (``PublicSurfaceQuery.resolve()``
+    reads each declaration's ``.entity_id`` directly, never the graph).
+    Paying that per-declaration walk on every dump for a feature with no
+    current reader regressed the header-graph attach-cost perf gate by
+    47-96% at realistic sizes; this test pins the fix. The shared instance
+    is still there for a future consumer to populate explicitly -- see the
+    companion test below."""
+    monkeypatch.setattr(dumper_clang, "_clang_available", lambda *a, **k: False)
+    header = tmp_path / "api.h"
+    header.write_text("void f(void);\n")
+
+    snap = _attach_header_graph(
+        _snap_with_public_function(),
+        header_graph=True,
+        header_graph_includes=False,
+        headers=[header],
+        includes=[],
+        lang="c",
+        compile=None,
+        public_headers=None,
+        public_header_dirs=None,
+    )
+    graph = snap.surface_graph
+    assert graph is not None
+
+    kinds = {node.kind for node in graph.nodes}
+    assert "declaration" not in kinds
+    assert "symbol" not in kinds
+
+
+def test_compare_surface_graph_facts_can_still_be_populated_on_the_shared_instance(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A caller that does need this phase's facts can still populate them
+    onto the exact same shared graph instance ``_attach_header_graph``
+    already produced -- the deferred-population fix does not orphan
+    ``compare/surface_graph.py``'s builder, it only stops calling it from
+    inside the always-on dump path."""
+    from abicheck.compare.surface_graph import build_public_surface_facts
+
+    monkeypatch.setattr(dumper_clang, "_clang_available", lambda *a, **k: False)
+    header = tmp_path / "api.h"
+    header.write_text("void f(void);\n")
+
+    snap = _attach_header_graph(
+        _snap_with_public_function(),
+        header_graph=True,
+        header_graph_includes=False,
+        headers=[header],
+        includes=[],
+        lang="c",
+        compile=None,
+        public_headers=None,
+        public_header_dirs=None,
+    )
+    graph = snap.surface_graph
+    assert graph is not None
+
+    build_public_surface_facts(snap, graph)
+
     assert any(node.label == "f" and node.kind == "declaration" for node in graph.nodes)
+    # Still the same shared instance -- populating it explicitly doesn't
+    # fork it away from AbiSnapshot.build_source.source_graph.
+    assert snap.surface_graph is snap.build_source.source_graph
 
 
 def test_no_op_when_header_graph_not_requested(tmp_path: Path) -> None:
