@@ -62,6 +62,17 @@ _RELEASE_VERDICT_ORDER: dict[str, int] = {
 }
 
 
+def _release_global_verdict(bundle_result: BundleDiffResult | None, matrix_result: DiffResult | None) -> str:
+    """Release-global (bundle/probe-matrix) verdict alone -- unlike
+    ``worst_verdict``'s own fold of it, never masked by an unrelated
+    library's ``ERROR``/``not_comparable`` (Codex review, fresh evidence)."""
+    worst = "NO_CHANGE"
+    for v in (bundle_result.bundle_verdict.value if bundle_result else None, matrix_result.verdict.value if matrix_result else None):
+        if v is not None and _RELEASE_VERDICT_ORDER.get(v, 0) > _RELEASE_VERDICT_ORDER.get(worst, 0):
+            worst = v
+    return worst
+
+
 def _resolve_release_headers(
     headers: tuple[Path, ...],
     old_headers_only: tuple[Path, ...],
@@ -1039,7 +1050,7 @@ def _format_release_json(
         "unmatched_old": [old_map[k].name for k in removed_keys],
         "unmatched_new": [new_map[k].name for k in added_keys],
         "warnings": warning_msgs,
-        "exit": resolve_release_exit_decision_for_report(worst_verdict, fail_on_removed, removed_keys, severity_exit_code, contract_coverage_exit_contribution, library_results).to_dict(),
+        "exit": resolve_release_exit_decision_for_report(worst_verdict, fail_on_removed, removed_keys, severity_exit_code, contract_coverage_exit_contribution, library_results, _release_global_verdict(bundle_result, matrix_result)).to_dict(),
     }
     # Severity config block (present only when a severity setting was in effect), mirroring
     # compare mode so downstream consumers (e.g. the PR-comment renderer) can see

@@ -115,3 +115,42 @@ def test_pre_1_22_not_comparable_scan_diff_gets_a_synthesized_exit_block() -> No
     assert exit_block["not_comparable_contribution"] == 6
     # The input report's nested diff dict is never mutated in place.
     assert report["diff"] is diff and "exit" not in diff
+
+
+def test_advisory_preserves_operational_error_contribution_in_the_exit_block() -> None:
+    """Codex review: `_neutralize_gate`'s advisory rewrite must not wipe
+    `operational_error_contribution` -- `final_exit_code`'s own docstring
+    says operational errors fail every gate mode, including `advisory`, so
+    zeroing this axis in the persisted `exit` block would make it falsely
+    claim a clean pass while the job's real exit code still fails.
+    """
+    report = {
+        "report_schema_version": "2.47",
+        "verdict": "ERROR",
+        "exit": {
+            "code": 4,
+            "reasons": ["operational_error"],
+            "compatibility_contribution": 0,
+            "contract_coverage_contribution": 0,
+            "analysis_assurance_contribution": 0,
+            "crosscheck_promotion_contribution": 0,
+            "operational_error_contribution": 4,
+            "evidence_contract_error_contribution": 0,
+            "budget_overflow_contribution": 0,
+            "not_comparable_contribution": 0,
+            "removed_required_library_contribution": 0,
+        },
+    }
+    out = augment_report(
+        report,
+        name="libfoo",
+        profile_id="p",
+        baseline_channel="c",
+        requested_depth="headers",
+        gate_mode="advisory",
+    )
+    exit_block = out["exit"]
+    assert exit_block["code"] == 4
+    assert exit_block["operational_error_contribution"] == 4
+    assert exit_block["compatibility_contribution"] == 0
+    assert "operational_error" in exit_block["reasons"]

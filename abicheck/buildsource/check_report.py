@@ -361,13 +361,28 @@ def _neutralize_gate(report: dict[str, Any]) -> None:
         # a consumer adopting the new canonical field would read as
         # blocking). Replaced wholesale with the "clean" decision, the same
         # way the `severity` gate above is replaced rather than
-        # conditionally rewritten: advisory mode means every axis gates
-        # nothing, so the persisted explanation has to say so outright
-        # rather than being left to disagree with the axes it summarizes.
-        if isinstance(node.get("exit"), Mapping):
+        # conditionally rewritten: advisory mode means every *deferrable*
+        # axis gates nothing, so the persisted explanation has to say so
+        # outright rather than being left to disagree with the axes it
+        # summarizes. `operational_error_contribution` is carried over
+        # rather than zeroed with the rest (Codex review, fresh evidence):
+        # `final_exit_code`'s own docstring states operational errors fail
+        # every gate mode including `advisory`, so wiping this axis here
+        # would make the persisted `exit.code` claim a clean pass while the
+        # job's real exit code still fails.
+        old_exit = node.get("exit")
+        if isinstance(old_exit, Mapping):
             from ..exit_decision import resolve_exit_decision
 
-            node["exit"] = resolve_exit_decision(compatibility_contribution=0).to_dict()
+            operational_error_contribution = old_exit.get(
+                "operational_error_contribution", 0
+            )
+            if not isinstance(operational_error_contribution, int):
+                operational_error_contribution = 0
+            node["exit"] = resolve_exit_decision(
+                compatibility_contribution=0,
+                operational_error_contribution=operational_error_contribution,
+            ).to_dict()
 
 
 def _zero_nested_severity_gates(report: dict[str, Any]) -> None:

@@ -1,0 +1,4 @@
+### Fixed
+
+- **`check-target`'s `gate-mode: advisory` no longer wipes a genuine operational error from the persisted `exit` block.** `_neutralize_gate` was replacing the whole `exit` block with a clean decision, but `final_exit_code` still fails every gate mode on an operational error — the persisted decision now preserves `operational_error_contribution` while zeroing the deferrable axes, so it can't disagree with the job's real exit code.
+- **`compare-release`'s persisted `exit` block no longer loses a release-global (bundle/probe-matrix) `BREAKING`/`API_BREAK` finding behind an unrelated library's operational `ERROR`.** The legacy-scheme exit-code resolver now takes the bundle/probe-matrix verdict as its own uncollapsed input instead of trying to recover it from `worst_verdict`, which the `ERROR`/`not_comparable` sentinels can mask.

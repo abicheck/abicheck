@@ -24,6 +24,9 @@ never drift apart. The `compat` flow uses a deliberately different scheme
 
 from __future__ import annotations
 
+from types import SimpleNamespace
+from typing import Any, cast
+
 import pytest
 
 from abicheck.checker import compare
@@ -386,6 +389,67 @@ class TestReleaseExitDecisionForReportAgreesWithRealExit:
             ["not-a-dict", {"verdict": "BREAKING"}],  # type: ignore[list-item]
         )
         assert mine.code == 4
+
+    def test_release_global_break_is_preserved_under_an_unrelated_error(self) -> None:
+        """Codex review, fresh evidence, second round: a release-global
+        (bundle/probe-matrix) `BREAKING` finding never appears in
+        `library_results` (see `_compute_release_legacy_exit_code`'s own
+        docstring) -- it only ever reaches this resolver through the
+        already-collapsed `worst_verdict`. When an unrelated library's
+        `"ERROR"` outranks that same `BREAKING` in `_RELEASE_VERDICT_ORDER`,
+        `worst_verdict` becomes `"ERROR"` and the release-global break is
+        gone from both inputs. `.code` still comes out `4` either way (the
+        `ERROR` floor), but without `release_global_verdict` passed through
+        separately, `compatibility_contribution` silently reads `0` and
+        `reasons` omits `compatibility_gate` entirely -- an explainable
+        decision that hides a real, independently-tied compatibility break.
+        """
+        from abicheck.workflows.gate import resolve_release_exit_decision_for_report
+
+        mine = resolve_release_exit_decision_for_report(
+            "ERROR", False, [], None, 0,
+            [{"verdict": "NO_CHANGE"}, {"verdict": "ERROR"}],
+            "BREAKING",
+        )
+        assert mine.code == 4
+        assert mine.compatibility_contribution == 4
+        assert mine.operational_error_contribution == 4
+        assert "compatibility_gate" in mine.reasons
+        assert "operational_error" in mine.reasons
+
+
+class TestReleaseGlobalVerdict:
+    """`cli_compare_release_helpers._release_global_verdict` -- the
+    uncollapsed bundle/probe-matrix verdict `resolve_release_exit_decision_
+    for_report` needs independently of `worst_verdict` (Codex review, fresh
+    evidence, second round)."""
+
+    def test_no_bundle_or_matrix_is_no_change(self) -> None:
+        from abicheck.cli_compare_release_helpers import _release_global_verdict
+
+        assert _release_global_verdict(None, None) == "NO_CHANGE"
+
+    def test_bundle_verdict_alone(self) -> None:
+        from abicheck.checker_policy import Verdict
+        from abicheck.cli_compare_release_helpers import _release_global_verdict
+
+        bundle = cast(Any, SimpleNamespace(bundle_verdict=Verdict.BREAKING))
+        assert _release_global_verdict(bundle, None) == "BREAKING"
+
+    def test_matrix_verdict_alone(self) -> None:
+        from abicheck.checker_policy import Verdict
+        from abicheck.cli_compare_release_helpers import _release_global_verdict
+
+        matrix = cast(Any, SimpleNamespace(verdict=Verdict.API_BREAK))
+        assert _release_global_verdict(None, matrix) == "API_BREAK"
+
+    def test_the_worse_of_bundle_and_matrix_wins(self) -> None:
+        from abicheck.checker_policy import Verdict
+        from abicheck.cli_compare_release_helpers import _release_global_verdict
+
+        bundle = cast(Any, SimpleNamespace(bundle_verdict=Verdict.COMPATIBLE))
+        matrix = cast(Any, SimpleNamespace(verdict=Verdict.BREAKING))
+        assert _release_global_verdict(bundle, matrix) == "BREAKING"
 
 
 def test_compat_not_comparable_exit_code_is_9_and_distinct_from_compare() -> None:
