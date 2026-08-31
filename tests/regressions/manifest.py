@@ -691,6 +691,40 @@ BUG_CLASSES: tuple[BugClass, ...] = (
             ),
         ),
     ),
+    BugClass(
+        id="adapter.readback_field_parity",
+        invariant=(
+            "When a shared consumer function starts reading a new field "
+            "unconditionally off its typed parameter, every independently-"
+            "constructed adapter/view type standing in for that parameter "
+            "(a read-back reconstruction from serialized JSON, a partial "
+            "reconstruction of the same logical object built elsewhere) "
+            "carries a value for that field too -- present verbatim when "
+            "the adapter's own source actually captures it, explicitly "
+            "and permanently absent (never a missing attribute) when it "
+            "structurally cannot."
+        ),
+        fixed_by=(960,),
+        seed_tests=("tests/test_aggregate_migration_coverage.py",),
+        known_gaps=(
+            KnownGap(
+                description=(
+                    "Only one adapter/consumer pair is covered here -- "
+                    "`workflows.aggregate.reconcile._ReportChangeView` "
+                    "against `finding_identity.resolve_change_identity`'s "
+                    "unconditional `change.entity_id` read. No mechanical "
+                    "sweep checks every other report-derived read-back "
+                    "adapter in the codebase (or any other independently-"
+                    "constructed stand-in for a `Change`/similar producer "
+                    "type) against every field its own consumer function "
+                    "actually reads, so a sibling adapter gaining the same "
+                    "kind of gap would not be caught until it, too, "
+                    "crashes in production."
+                ),
+                reference="abicheck/abicheck#960",
+            ),
+        ),
+    ),
 )
 
 
