@@ -487,17 +487,22 @@ def resolve_release_exit_decision_for_report(
 
     *severity_exit_code* being not ``None`` is what "severity scheme
     active" means, matching ``_exit_compare_release``'s own check.
-    ``worst_verdict == "ERROR"`` is used directly as the operational-error
-    signal rather than re-scanning *library_results* -- ``"ERROR"`` ranks
-    second only to ``"not_comparable"`` in ``_RELEASE_VERDICT_ORDER``, and
-    bundle/matrix results never themselves set an ``"ERROR"`` verdict, so
-    once ``not_comparable`` is ruled out, ``worst_verdict == "ERROR"`` is
-    exactly equivalent to "at least one library entry is `'ERROR'`."
+    *operational_error_contribution* scans *library_results* directly
+    (Codex review, fresh evidence) rather than checking ``worst_verdict ==
+    "ERROR"`` -- an earlier revision did the latter, which reads ``0``
+    whenever a *different* library's ``"not_comparable"`` verdict outranks
+    ``"ERROR"`` in ``_RELEASE_VERDICT_ORDER`` and becomes the aggregate
+    ``worst_verdict``, even though a real operational failure still
+    happened elsewhere in the release and `resolve_release_exit_decision`'s
+    own ``not_comparable`` branch already preserves this value for exactly
+    that explainability case.
     """
     not_comparable = worst_verdict == "not_comparable"
     severity_scheme_active = severity_exit_code is not None
     removed_required_library = fail_on_removed and bool(removed_keys)
-    operational_error_contribution = 4 if worst_verdict == "ERROR" else 0
+    operational_error_contribution = 4 if any(
+        isinstance(e, dict) and e.get("verdict") == "ERROR" for e in library_results
+    ) else 0
     verdict_or_severity_contribution = (
         (severity_exit_code or 0)
         if severity_scheme_active

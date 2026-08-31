@@ -348,6 +348,28 @@ class TestReleaseExitDecisionForReportAgreesWithRealExit:
         )
         assert mine.code == real == 4
 
+    def test_operational_error_is_preserved_under_a_not_comparable_release(
+        self,
+    ) -> None:
+        """Codex review, fresh evidence: one library `not_comparable` and a
+        *different* library `ERROR` collapses `worst_verdict` to
+        `"not_comparable"` (it outranks `"ERROR"` in
+        `_RELEASE_VERDICT_ORDER`). `.code` is correctly `16` either way, but
+        an earlier revision computed `operational_error_contribution` from
+        `worst_verdict == "ERROR"` alone, reading `0` and silently dropping
+        the real operational failure from the persisted decision even
+        though `resolve_release_exit_decision`'s own `not_comparable`
+        branch already preserves a passed-in value for exactly this case.
+        """
+        from abicheck.workflows.gate import resolve_release_exit_decision_for_report
+
+        mine = resolve_release_exit_decision_for_report(
+            "not_comparable", False, [], None, 0,
+            [{"verdict": "not_comparable"}, {"verdict": "ERROR"}],
+        )
+        assert mine.code == 16
+        assert mine.operational_error_contribution == 4
+
 
 def test_compat_not_comparable_exit_code_is_9_and_distinct_from_compare() -> None:
     # ADR-050 D2: compat check's not_comparable code (9) is the one integer
