@@ -50,14 +50,14 @@ from __future__ import annotations
 
 from typing import Any
 
-from .source_graph import (
+from ..model.graph_facts import (
     CONF_REDUCED,
     GraphEdge,
     GraphNode,
-    SourceGraphSummary,
     _decl_node_id,
     _type_node_id,
 )
+from ..model.source_graph import SourceGraphSummary
 
 #: Kythe edge-kind prefixes we care about, mapped to abicheck edge kinds.
 _KYTHE_CALL_PREFIX = "/kythe/edge/ref/call"

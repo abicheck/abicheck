@@ -285,7 +285,7 @@ class GraphEdge:
     def key(self) -> tuple[str, str, str]:
         """Identity for diffing/de-dup: (src, dst, kind) — ADR-046 D1's
         coarsest (role-blind) projection. Still used by
-        :func:`~abicheck.buildsource.source_graph.diff_source_graph`'s
+        :func:`~abicheck.buildsource.source_graph_compare.diff_source_graph`'s
         edge-set comparison (deliberately role-blind there); no longer used
         by ``SourceGraphSummary.add_edge``, which dedups on
         :meth:`relation_key` instead (a follow-up fix — see that method's
@@ -548,7 +548,7 @@ class SurfaceGraphLike(Protocol):
     """The read/write surface :class:`~abicheck.model.snapshot.AbiSnapshot.
     surface_graph` needs (ADR-063 Phase 3 D5) — narrow and structural
     (``Protocol``, not a base class) so ``model/snapshot.py`` can declare the
-    field's type with no import of ``buildsource.source_graph.
+    field's type with no import of ``model.source_graph.
     SourceGraphSummary`` at all, keeping the concrete L3-L5 evidence types out
     of ``model``'s own dependency-free layer while ``SourceGraphSummary``
     still satisfies this protocol structurally, unchanged.

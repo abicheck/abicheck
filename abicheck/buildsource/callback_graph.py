@@ -327,8 +327,8 @@ from .clang_ast_run import run_clang_ast_dump
 from .graph_facts import CONF_HIGH, CONF_REDUCED, GraphEdge, GraphNode, register_fact
 
 if TYPE_CHECKING:
+    from ..model.source_graph import SourceGraphSummary
     from .build_evidence import BuildEvidence, CompileUnit as BuildEvidenceCompileUnit
-    from .source_graph import SourceGraphSummary
 
 EDGE_DECL_TAKES_ADDRESS_OF = "DECL_TAKES_ADDRESS_OF"
 EDGE_DECL_REGISTERS_CALLBACK = "DECL_REGISTERS_CALLBACK"
@@ -918,7 +918,7 @@ def augment_graph_with_callback_registrations(
     node's own (possibly higher) confidence via the standard evidence-
     preserving fold when one is already present.
     """
-    from .source_graph import _decl_node_id
+    from ..model.graph_facts import _decl_node_id
 
     result = CallbackRegistrationResult()
 

@@ -60,7 +60,7 @@ from ..buildsource.graph_facts import (
 if TYPE_CHECKING:
     from collections.abc import Iterable
 
-    from ..buildsource.source_graph import SourceGraphSummary
+    from ..model.source_graph import SourceGraphSummary
 
 
 class ConsumerRequirements(Protocol):
@@ -147,7 +147,7 @@ def build_consumer_graph(
     requirement points at, which is a ``DT_NEEDED`` soname string rather than
     a resolved artifact.
     """
-    from ..buildsource.source_graph import SourceGraphSummary
+    from ..model.source_graph import SourceGraphSummary
 
     graph = SourceGraphSummary()
     consumer_id = consumer_node_id(consumer_name)
@@ -238,7 +238,7 @@ def join_consumer_graph(
     are carried over from *library_graph* unchanged — the consumer side adds
     no source-extraction coverage of its own, and rewriting those would make
     the library's own honesty flags describe a pass that never ran.
-    Deliberately not :meth:`~abicheck.buildsource.source_graph.SourceGraphSummary.finalize`\\ d
+    Deliberately not :meth:`~abicheck.model.source_graph.SourceGraphSummary.finalize`\\ d
     either: the result is a transient analysis graph (it is walked and
     rendered, never serialized into a pack or a report), so recomputing a
     ``graph_id``/``coverage`` block for it would only produce a second,
@@ -348,7 +348,7 @@ def explain_required_symbols(
     # import cycle (root CLAUDE.md's "What NOT to do" — prefer a
     # function-local import over extending IMPORT_CYCLE_ALLOWLIST).
     from ..buildsource.graph_impact import select_preferred_graph_path
-    from ..buildsource.source_graph import (
+    from ..buildsource.source_graph_query import (
         PUBLIC_VISIBILITIES,
         is_consumer_compiled_public_entry,
     )

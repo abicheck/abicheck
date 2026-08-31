@@ -42,9 +42,9 @@ from .workflows.gate import resolve_release_exit_decision_for_report
 
 if TYPE_CHECKING:
     from .pack_application import PackApplication
-    from .policy_file import PolicyFile
     from .workflows.extraction import PackageExtractor
     from .workflows.gate import SeverityConfig
+    from .workflows.policy_file import PolicyFile
 
 
 _RELEASE_VERDICT_ORDER: dict[str, int] = {

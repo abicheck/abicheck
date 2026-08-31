@@ -54,6 +54,7 @@ types, so `from abicheck.elf_metadata import ElfMetadata` still resolves.
 | An L5 confidence label or `*_NODE_KINDS`/`*_EDGE_KINDS` family vocabulary set | `graph_vocabulary.py` |
 | A decl/type node-id normalization rule | `graph_identity.py` |
 | A `EntityResolver`/canonical-identity resolution rule | `entity_resolver.py`, `entity_identity.py` |
+| An already-built L5 graph node/edge public/internal/consumer-compiled classification predicate | `source_graph_query.py` |
 
 `__init__.py` is the supported import surface and stays a re-export list
 with `__all__` — no logic, no new names that are not owned by a submodule.

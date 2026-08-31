@@ -96,12 +96,8 @@ def embed_build_source(
     non-CLI caller (``service.run_compare_request``) with no stream to write
     to and no way to suppress it otherwise.
     """
-    from .inline import (
-        collect_inline_pack,
-        discover_build_config,
-        is_pack_dir,
-        load_build_config,
-    )
+    from .build_config import discover_build_config, load_build_config
+    from .inline import collect_inline_pack, is_pack_dir
     from .source_replay import collection_for_ci_mode
 
     scope, layers = collection_for_ci_mode(collect_mode)
@@ -177,7 +173,7 @@ def embed_build_source(
         ):
             import dataclasses
 
-            from .inline import BuildConfig
+            from .build_config import BuildConfig
 
             cfg = cfg or BuildConfig()
             cfg = dataclasses.replace(

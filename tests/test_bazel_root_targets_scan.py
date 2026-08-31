@@ -39,6 +39,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
 from click.testing import CliRunner
 
 from abicheck.buildsource import embed as embed_mod
@@ -236,6 +237,109 @@ def test_scan_request_build_targets_reaches_embed_build_source_via_run_scan_set(
     assert captured["build_targets"] == [("//:math",), ("//:math",)]
 
 
+def test_run_scan_set_rejects_bazel_scoping_mismatch_before_discovery(
+    monkeypatch, tmp_path: Path
+) -> None:
+    """Codex review, fresh evidence: a direct ``run_scan_set()`` caller has no
+    ``cli_scan.py`` pre-flight of its own, and each member's own
+    ``run_scan_core()`` check only fires after ``discover_artifact_set()``/
+    ``check_artifact_set_soname_collisions()``/
+    ``artifact_set_member_exports()`` have already run for every member.
+    Pinned by asserting discovery never even starts. (A later round found
+    `--artifact-set`'s own CLI path had the identical gap -- see
+    ``test_scan_cli_artifact_set_rejects_bazel_scoping_mismatch_before_discovery``.)"""
+    import abicheck.bundle as bundle_mod
+    from abicheck.errors import PlanningError
+
+    def _fail_if_called(*_a, **_kw):
+        raise AssertionError(
+            "discover_artifact_set() ran before the Bazel-scoping pre-flight "
+            "check rejected the request"
+        )
+
+    monkeypatch.setattr(bundle_mod, "discover_artifact_set", _fail_if_called)
+
+    aquery = _write_bazel_aquery(tmp_path)
+    req = ScanRequest(
+        binaries=[_artifact(tmp_path, "a"), _artifact(tmp_path, "b")],
+        sources=_sources(tmp_path),
+        build_info=aquery,
+        build_targets=("//:math",),
+    )
+    with pytest.raises(PlanningError, match="pre-captured Bazel aquery"):
+        run_scan_set(req)
+
+
+def test_scan_cli_artifact_set_rejects_bazel_scoping_mismatch_before_discovery(
+    monkeypatch, tmp_path: Path
+) -> None:
+    """Codex review, fresh evidence: the `--artifact-set` CLI's own pre-flight
+    check (`cli_scan._run_artifact_set`) previously ran only *after*
+    `_resolve_artifact_set_paths()`/`discover_artifact_set()` -- so a
+    directory got traversed and every explicit member statted/format-
+    validated before an unsupported request was ultimately rejected anyway,
+    and an invalid member's own error could mask the intended usage error.
+    Pinned by asserting discovery never even starts, the CLI-level sibling of
+    `test_run_scan_set_rejects_bazel_scoping_mismatch_before_discovery`
+    above."""
+    import abicheck.bundle as bundle_mod
+
+    def _fail_if_called(*_a, **_kw):
+        raise AssertionError(
+            "discover_artifact_set() ran before the Bazel-scoping pre-flight "
+            "check rejected the request"
+        )
+
+    monkeypatch.setattr(bundle_mod, "discover_artifact_set", _fail_if_called)
+
+    aquery = _write_bazel_aquery(tmp_path)
+    runner = CliRunner()
+    result = runner.invoke(
+        main,
+        [
+            "scan",
+            "--artifact-set",
+            str(_artifact(tmp_path, "a")),
+            "--artifact-set",
+            str(_artifact(tmp_path, "b")),
+            "--sources",
+            str(_sources(tmp_path)),
+            "--build-info",
+            str(aquery),
+            "--build-target",
+            "//:math",
+        ],
+    )
+    assert result.exit_code == 64, result.output
+    assert "pre-captured Bazel aquery" in result.output
+
+
+def test_run_scan_set_depth_binary_exempts_the_early_bazel_scoping_check(
+    monkeypatch, tmp_path: Path
+) -> None:
+    """The sibling of ``test_run_scan_depth_binary_exempts_the_early_bazel_
+    scoping_check`` for the plural entry point: ``run_scan_set``'s own
+    pre-flight check (see the test above) must not reintroduce the
+    depth=binary false positive for a typed ``--artifact-set`` caller
+    either."""
+    a = _artifact(tmp_path, "a")
+    b = _artifact(tmp_path, "b")
+    _bypass_discovery_validation(monkeypatch, a, b)
+
+    aquery = _write_bazel_aquery(tmp_path)
+    req = ScanRequest(
+        binaries=[a, b],
+        sources=_sources(tmp_path),
+        build_info=aquery,
+        build_targets=("//:math",),
+        depth="binary",
+    )
+    # Not, in particular, PlanningError -- depth=binary never consults
+    # build_info/build_targets, so the pre-flight check must exempt it.
+    result = run_scan_set(req)
+    assert result.verdict not in ("BUDGET_OVERFLOW", "EVIDENCE_CONTRACT_ERROR")
+
+
 def test_scan_request_default_build_targets_is_empty_tuple():
     """Additive default -- an existing ScanRequest() caller is unaffected."""
     assert ScanRequest().build_targets == ()
@@ -400,3 +504,316 @@ def test_estimate_scan_flags_unscoped_l4_l5_rows_too(tmp_path: Path) -> None:
     l5_rows = [e for e in estimates if e.layer == "L5_source_graph"]
     assert "UNSCOPED" in l4.note
     assert l5_rows and all("UNSCOPED" in e.note for e in l5_rows)
+
+
+# ── ADR-063 Phase 4: `--build-target` + pre-captured Bazel jsonproto ───────
+#
+# docs/contribute/known-gaps.md's named gap, closed via
+# workflows.plan.bazel_target_scoping_failure: previously the combination
+# silently ran an unscoped workspace-wide query with no diagnostic at all.
+# Codex review (fresh evidence) found the real-execution check
+# (scan_engine._build_new_snapshot) never ran on either dry-run path, so a
+# `--dry-run` preview claimed success (and, for the single-binary path, an
+# "UNSCOPED" estimate that reads as informational rather than rejected) for
+# a request the real run would then reject -- fixed by running the identical
+# check in cli_scan.py before either dry-run renderer, not only at execution.
+
+
+def _write_bazel_aquery(tmp_path: Path) -> Path:
+    import json
+
+    path = tmp_path / "aquery.json"
+    path.write_text(
+        json.dumps({"actions": [], "pathFragments": [], "artifacts": [], "targets": []})
+    )
+    return path
+
+
+def test_scan_cli_dry_run_rejects_build_target_with_precaptured_aquery(
+    tmp_path: Path,
+) -> None:
+    aquery = _write_bazel_aquery(tmp_path)
+    runner = CliRunner()
+    result = runner.invoke(
+        main,
+        [
+            "scan",
+            str(_artifact(tmp_path)),
+            "--dry-run",
+            "--sources",
+            str(_sources(tmp_path)),
+            "--build-info",
+            str(aquery),
+            "--build-target",
+            "//:math",
+        ],
+    )
+    assert result.exit_code == 64, result.output
+    assert "pre-captured Bazel aquery" in result.output
+
+
+def test_scan_cli_real_run_rejects_the_identical_combination(tmp_path: Path) -> None:
+    """The non-dry-run invocation of the exact same request must reject
+    identically -- pins that the dry-run fix above did not accidentally
+    make the two paths disagree."""
+    aquery = _write_bazel_aquery(tmp_path)
+    runner = CliRunner()
+    result = runner.invoke(
+        main,
+        [
+            "scan",
+            str(_artifact(tmp_path)),
+            "--sources",
+            str(_sources(tmp_path)),
+            "--build-info",
+            str(aquery),
+            "--build-target",
+            "//:math",
+        ],
+    )
+    assert result.exit_code == 64, result.output
+    assert "pre-captured Bazel aquery" in result.output
+
+
+def test_scan_cli_artifact_set_dry_run_rejects_build_target_with_precaptured_aquery(
+    monkeypatch, tmp_path: Path
+) -> None:
+    aquery = _write_bazel_aquery(tmp_path)
+    a = _artifact(tmp_path, "a")
+    b = _artifact(tmp_path, "b")
+    _bypass_discovery_validation(monkeypatch, a, b)
+
+    runner = CliRunner()
+    result = runner.invoke(
+        main,
+        [
+            "scan",
+            "--artifact-set",
+            str(a),
+            "--artifact-set",
+            str(b),
+            "--dry-run",
+            "--sources",
+            str(_sources(tmp_path)),
+            "--build-info",
+            str(aquery),
+            "--build-target",
+            "//:math",
+        ],
+    )
+    assert result.exit_code == 64, result.output
+    assert "pre-captured Bazel aquery" in result.output
+
+
+def test_scan_cli_artifact_set_depth_binary_exempts_the_bazel_scoping_check(
+    monkeypatch, tmp_path: Path
+) -> None:
+    """Codex/CodeRabbit review, fresh evidence: the `--artifact-set` path's
+    own pre-flight check (mirroring the single-binary path's own) had no
+    depth=binary exemption at all, unlike the single-binary path (whose
+    `_normalize_depth_inputs` prunes `build_info` to `None` at that depth
+    before this same check runs) -- so a valid `--depth binary` request was
+    wrongly rejected. `--depth binary` resolves to a collect_mode that never
+    consults build_info/build_targets at all."""
+    aquery = _write_bazel_aquery(tmp_path)
+    a = _artifact(tmp_path, "a")
+    b = _artifact(tmp_path, "b")
+    _bypass_discovery_validation(monkeypatch, a, b)
+
+    runner = CliRunner()
+    result = runner.invoke(
+        main,
+        [
+            "scan",
+            "--artifact-set",
+            str(a),
+            "--artifact-set",
+            str(b),
+            "--dry-run",
+            "--depth",
+            "binary",
+            "--sources",
+            str(_sources(tmp_path)),
+            "--build-info",
+            str(aquery),
+            "--build-target",
+            "//:math",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    assert "pre-captured Bazel aquery" not in result.output
+
+
+def test_run_scan_typed_api_raises_planning_error_not_click_usage_error(
+    tmp_path: Path,
+) -> None:
+    """Codex review: ``scan_engine._build_new_snapshot`` backs the typed
+    ``run_scan(ScanRequest(...))`` API too, which has no Click context to
+    catch a ``click.UsageError`` -- a caller importing abicheck as a library
+    must see the framework-neutral ``PlanningError`` instead. Only
+    ``cli_scan.py``'s own ``scan_cmd`` (see
+    ``test_scan_cli_real_run_rejects_the_identical_combination`` above)
+    translates it to a usage error at the actual CLI boundary."""
+    import click
+
+    from abicheck.errors import PlanningError
+
+    aquery = _write_bazel_aquery(tmp_path)
+    req = ScanRequest(
+        binaries=[_artifact(tmp_path)],
+        sources=_sources(tmp_path),
+        build_info=aquery,
+        build_targets=("//:math",),
+    )
+    with pytest.raises(PlanningError, match="pre-captured Bazel aquery"):
+        run_scan(req)
+    # Not, in particular, a click.UsageError -- PlanningError is a plain
+    # ValueError subclass with no Click dependency.
+    assert not issubclass(PlanningError, click.UsageError)
+
+
+def test_run_scan_rejects_before_wasted_pattern_scan_and_poi_work(
+    monkeypatch, tmp_path: Path
+) -> None:
+    """Codex review, fresh evidence: a typed ``run_scan(ScanRequest(...))``
+    caller has no ``cli_scan.py`` pre-flight ahead of ``run_scan_core`` the
+    way the CLI does, so the Bazel-scoping ``PlanningError`` must be raised
+    by ``run_scan_core`` itself, before its S3 pattern scan/POI work runs --
+    not only inside ``_build_new_snapshot``, which those two stages already
+    precede. Pinned by asserting the S3 pass never even starts."""
+    import abicheck.scan_engine as scan_engine_mod
+    from abicheck.errors import PlanningError
+
+    def _fail_if_called(*_a, **_kw):
+        raise AssertionError(
+            "scan_files() (S3 pattern scan) ran before the Bazel-scoping "
+            "pre-flight check rejected the request"
+        )
+
+    monkeypatch.setattr(scan_engine_mod, "scan_files", _fail_if_called)
+
+    aquery = _write_bazel_aquery(tmp_path)
+    req = ScanRequest(
+        binaries=[_artifact(tmp_path)],
+        sources=_sources(tmp_path),
+        build_info=aquery,
+        build_targets=("//:math",),
+    )
+    with pytest.raises(PlanningError, match="pre-captured Bazel aquery"):
+        run_scan(req)
+
+
+def test_run_scan_depth_binary_exempts_the_early_bazel_scoping_check(
+    monkeypatch, tmp_path: Path
+) -> None:
+    """The pre-flight check added to ``run_scan_core`` (see the test above)
+    must not reintroduce the depth=binary false positive ``workflows.plan.
+    _check_bazel_target_scoping`` already fixed: ``depth="binary"`` resolves
+    to a ``collect_mode`` that never consults ``build_info``/``build_targets``
+    at all, so the shared ``workflows.plan.scan_bazel_scoping_failure`` guard
+    must exempt it before ever calling the inner ``bazel_target_scoping_
+    failure``."""
+    import abicheck.workflows.plan as plan_mod
+
+    def _fail_if_called(*_a, **_kw):
+        raise AssertionError(
+            "bazel_target_scoping_failure() was called despite depth=binary "
+            "resolving to a collect_mode that never consults build_info/"
+            "build_targets"
+        )
+
+    monkeypatch.setattr(plan_mod, "bazel_target_scoping_failure", _fail_if_called)
+
+    aquery = _write_bazel_aquery(tmp_path)
+    req = ScanRequest(
+        binaries=[_artifact(tmp_path)],
+        sources=_sources(tmp_path),
+        build_info=aquery,
+        build_targets=("//:math",),
+        depth="binary",
+    )
+    result = run_scan(req)
+    assert result.verdict not in ("BUDGET_OVERFLOW", "EVIDENCE_CONTRACT_ERROR")
+
+
+def test_run_scan_depth_headers_still_rejects_bazel_scoping_mismatch(
+    tmp_path: Path,
+) -> None:
+    """Codex review, fresh evidence: unlike depth=binary, `--depth headers`
+    keeps real headers, so a headers-only scan still runs the L2-seed's own
+    independent `collect_inline_pack` call to derive include dirs/compile
+    context, which *does* consult `build_info`/`build_targets`. Before the
+    l2_seed.py fix (see test_bazel_root_targets_l2_seed.py), that mismatch's
+    ValidationError was silently swallowed there and the scan returned a
+    clean COMPATIBLE result (exit 0) -- now it fails loudly instead.
+
+    This case is specifically the `.abicheck.yml`-sourced target scope (no
+    explicit `build_targets` on the request), which `run_scan_core`'s own
+    early pre-flight check (widened below to also fire for depth=headers,
+    see the sibling test using an explicit `build_targets=`) cannot see at
+    all -- the same structural gap `docs/contribute/known-gaps.md` already
+    documents as deferred for `--dry-run`. So it surfaces as
+    `click.ClickException` here, not the framework-neutral `PlanningError`:
+    `scan_engine._build_new_snapshot`'s own `except AbicheckError: raise
+    click.ClickException(...)` is a pre-existing wart predating ADR-063
+    entirely (see that module's own docstring) that leaks a Click-specific
+    exception into the typed API for *any* `AbicheckError` this call chain
+    raises, not just this new one -- out of scope for this fix; see
+    docs/contribute/known-gaps.md's own note on this exact case."""
+    import click
+
+    aquery = _write_bazel_aquery(tmp_path)
+    src = tmp_path / "src"
+    src.mkdir()
+    header = src / "api.h"
+    header.write_text("void f();\n", encoding="utf-8")
+    (src / ".abicheck.yml").write_text(
+        "build:\n  system: bazel\n  targets:\n    - //:math\n", encoding="utf-8"
+    )
+
+    req = ScanRequest(
+        binaries=[_artifact(tmp_path)],
+        headers=[header],
+        sources=src,
+        build_info=aquery,
+        depth="headers",
+    )
+    with pytest.raises(click.ClickException, match="pre-captured Bazel aquery"):
+        run_scan(req)
+
+
+def test_run_scan_depth_headers_with_explicit_build_target_raises_planning_error(
+    tmp_path: Path,
+) -> None:
+    """Codex review, fresh evidence: when `build_targets` is given explicitly
+    on the request (not just via `.abicheck.yml`), `run_scan_core`'s own
+    early pre-flight check *can* see it -- so this shape must raise the
+    framework-neutral `PlanningError` before ever reaching
+    `_build_new_snapshot`'s `except AbicheckError` translation, unlike the
+    `.abicheck.yml`-only sibling test above. This is what closes the actual
+    Codex finding: the original guard (`collection_for_ci_mode(collect_mode)
+    [1]` alone) wrongly treated `--depth headers` the same as `--depth
+    binary` -- both resolve to collect_mode "off", but only `--depth binary`
+    also clears `headers` to `()`, which is the real reason
+    `--depth binary` never consumes `build_info` anywhere. Widened to
+    `headers or collection_for_ci_mode(...)[1]` so `--depth headers` (real
+    headers, so the L2 seed can still consume build_info) is no longer
+    wrongly exempted."""
+    from abicheck.errors import PlanningError
+
+    aquery = _write_bazel_aquery(tmp_path)
+    src = tmp_path / "src"
+    src.mkdir()
+    header = src / "api.h"
+    header.write_text("void f();\n", encoding="utf-8")
+
+    req = ScanRequest(
+        binaries=[_artifact(tmp_path)],
+        headers=[header],
+        sources=src,
+        build_info=aquery,
+        build_targets=("//:lib",),
+        depth="headers",
+    )
+    with pytest.raises(PlanningError, match="pre-captured Bazel aquery"):
+        run_scan(req)

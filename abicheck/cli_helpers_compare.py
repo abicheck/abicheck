@@ -47,10 +47,10 @@ if TYPE_CHECKING:
     from .checker_types import Change, DiffResult
     from .compatibility_evaluation_frontend import PublicSymbolsList
     from .model import AbiSnapshot
-    from .policy_file import PolicyFile
     from .service_scan import CompileContext
     from .workflows.extraction import BuildConfig
     from .workflows.gate import SeverityConfig
+    from .workflows.policy_file import PolicyFile
 
 
 def _provenance_timestamp(source_date_epoch: str | None) -> str:

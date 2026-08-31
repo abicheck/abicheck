@@ -45,7 +45,7 @@ from .compile_context import CompileContext as CompileContext  # re-exported, AD
 from .cxx20_pair_dialect import (
     pair_wide_cxx20_std_override as pair_wide_cxx20_std_override,
 )
-from .errors import ValidationError
+from .errors import PlanningError, ValidationError
 from .header_utils import HEADER_SUFFIXES, iter_directory_headers
 from .schemas import SCAN_SCHEMA_VERSION
 from .workflows.scan_abort_result import ScanAbortAxis, scan_abort_result_fields
@@ -1793,6 +1793,13 @@ def run_scan_set(req: ScanRequest) -> ScanSetResult:
     # flags only mean anything with --against" guard -- req.mode is already forced to "audit" above, so this always
     # applies here (unlike run_scan, where it's conditional on baseline/mode).
     _reject_comparison_only_fields(req)
+
+    from .workflows.plan import scan_bazel_scoping_failure  # ADR-063 Phase 4
+
+    _, _, _, _, _, _, ed, cm = _resolve_member_scan_level(req)
+    _bi = req.compile_db or req.build_info
+    if _bf := scan_bazel_scoping_failure(req.headers, ed, cm, _bi, req.build_targets):
+        raise PlanningError((_bf,))
 
     # Start the shared budget clock *before* set discovery/validation, not after (Codex review):
     # discover_artifact_set() stats every candidate path and parses each one's ELF program/dynamic table to classify

@@ -15,8 +15,8 @@
 # limitations under the License.
 
 """gen_config_reference.py — exhaustive `.abicheck.yml` key/type reference,
-generated from `abicheck.buildsource.inline.BuildConfig`'s own strict-schema
-registries instead of hand-copied.
+generated from `abicheck.buildsource.build_config.BuildConfig`'s own
+strict-schema registries instead of hand-copied.
 
 `BuildConfig._KNOWN_TOP_KEYS`/`_KNOWN_BLOCK_KEYS` (which top-level/block keys
 are recognized) and the module-level `_BOOL_SUBKEYS`/`_STR_SUBKEYS`/
@@ -66,7 +66,7 @@ def render() -> str:
     # fails there without this.
     if str(REPO_DIR) not in sys.path:
         sys.path.insert(0, str(REPO_DIR))
-    from abicheck.buildsource.inline import (
+    from abicheck.buildsource.build_config import (
         _BOOL_SUBKEYS,
         _LIST_SUBKEYS,
         _STR_SUBKEYS,
@@ -86,7 +86,7 @@ def render() -> str:
         "# Config Keys Reference",
         "",
         "Every `.abicheck.yml` top-level key and block sub-key that "
-        "`abicheck.buildsource.inline.BuildConfig` itself validates, with "
+        "`abicheck.buildsource.build_config.BuildConfig` itself validates, with "
         "its exact required YAML type — generated directly from "
         "`BuildConfig`'s strict-schema registries (an unknown key or a "
         'wrong-typed value is a hard error, ADR-043). "Other recognized '

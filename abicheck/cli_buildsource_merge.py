@@ -181,11 +181,12 @@ def _relink_combined_against_exports(
         and not (combined.source_abi.roots.get("exported_symbols"))
     ):
         from .buildsource.build_evidence import BuildEvidence
-        from .buildsource.source_graph import (
+        from .workflows.extraction import (
+            build_inline_coverage,
             build_source_graph,
             mark_source_edges_extractor_coverage,
+            relink_surface_exports,
         )
-        from .workflows.extraction import build_inline_coverage, relink_surface_exports
 
         relink_surface_exports(combined.source_abi, base_exports)
         # L5: rebuild source graph so L5 mapping/localization is not inert.

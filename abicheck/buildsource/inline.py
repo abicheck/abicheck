@@ -41,6 +41,13 @@ analyse it.
 Everything here is best-effort (ADR-028 D3): a missing tool or unreadable input
 degrades L3/L4/L5 to partial/not-collected coverage and never aborts the dump —
 the artifact tiers (L0/L1/L2) stay authoritative.
+
+The ``.abicheck.yml`` config *schema* itself (``BuildConfig``,
+``load_build_config``, ``discover_build_config``) now lives in
+:mod:`abicheck.buildsource.build_config` — split out (G38 Phase 15 file-split
+prerequisite) because that schema has no dependency on the collection
+pipeline below, and this file was within a couple of lines of the
+AI-readiness 2000-line hard cap. Re-exported here for back-compat.
 """
 
 from __future__ import annotations
@@ -53,18 +60,15 @@ import shlex
 import subprocess
 import time
 from collections.abc import Callable
-from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
-from typing import TYPE_CHECKING, Any, ClassVar
+from typing import TYPE_CHECKING, Any
 
 from .. import deadline
-from ..config_paths import discover_build_config as _discover_build_config
-from .build_config_schema import (
-    BOOL_SUBKEYS as _BOOL_SUBKEYS,
-    LIST_SUBKEYS as _LIST_SUBKEYS,
-    STR_SUBKEYS as _STR_SUBKEYS,
-    TOP_LEVEL_INT_KEYS as _TOP_LEVEL_INT_KEYS,
-    TOP_LEVEL_STR_KEYS as _TOP_LEVEL_STR_KEYS,
+from .build_config import (
+    KNOWN_TOP_LEVEL_KEYS as KNOWN_TOP_LEVEL_KEYS,
+    BuildConfig as BuildConfig,
+    discover_build_config as discover_build_config,
+    load_build_config as load_build_config,
 )
 from .build_evidence import BuildEvidence, comdat_scan_requested, l3_coverage_fields
 from .model import (
@@ -79,9 +83,9 @@ from .pack_shape import is_pack_dir as is_pack_dir
 from .redaction import DEFAULT_REDACTION
 
 if TYPE_CHECKING:
+    from ..model.source_graph import SourceGraphSummary
     from .source_abi import SourceAbiSurface
     from .source_extractors import SourceAbiExtractor
-    from .source_graph import SourceGraphSummary
 
 #: Default places to look for a compile DB inside a source checkout, in order.
 logger = logging.getLogger(__name__)
@@ -106,578 +110,14 @@ _BUILD_QUERY_DIAG_STATUSES = ("failed", "skipped", "partial")
 # the L3 coverage row so an inferred-query-only run keeps its explanation.
 _BUILD_QUERY_DIAG_NAMES = ("build_query", "build_query_auto")
 
-
-#: Valid per-category severity levels (ADR-037 D4 ``severity:`` block).
-_SEVERITY_LEVELS = ("error", "warning", "info")
-#: Valid severity presets (mirror of ``severity.SEVERITY_PRESETS`` spelling).
-_SEVERITY_PRESETS = ("default", "strict", "info-only")
-#: Valid exit-code schemes (ADR-037 D12 ``exit_code_scheme:``).
-_EXIT_CODE_SCHEMES = ("auto", "legacy", "severity")
-
-# ── strict-schema knowledge (ADR-043 CLI reset: no separate `config validate`
-# command — every real ingestion path enforces this) ─────────────────────────
+# ``BuildConfig``/``load_build_config``/``discover_build_config`` are
+# re-exported above (``import ... as ...``) for the callers that have always
+# imported them from here — the ``.abicheck.yml`` config schema itself now
+# lives in :mod:`abicheck.buildsource.build_config` (split out purely to
+# keep this file under the AI-readiness line-count cap; see that module's
+# own docstring).
 #
-# The subkey-type tables (_BOOL_SUBKEYS/_STR_SUBKEYS/_LIST_SUBKEYS/
-# _TOP_LEVEL_STR_KEYS/_TOP_LEVEL_INT_KEYS) are imported at module top from
-# `build_config_schema.py` (split out purely to stay under the AI-readiness
-# 2000-line hard cap).
-
-
-def _block(data: dict[str, object], key: str) -> dict[str, object]:
-    """One top-level config block as a mapping (``{}`` when absent or wrong-typed).
-
-    A wrong type here is never silently accepted -- :meth:`BuildConfig.
-    _validate_structure` already rejected it -- so falling back to ``{}`` only
-    covers a caller that bypassed validation with a non-dict payload.
-    """
-    value = data.get(key)
-    return value if isinstance(value, dict) else {}
-
-
-def _str(d: dict[str, object], key: str, default: str = "") -> str:
-    v = d.get(key)
-    return v if isinstance(v, str) else default
-
-
-def _opt_str(d: dict[str, object], key: str) -> str | None:
-    v = d.get(key)
-    return v if isinstance(v, str) else None
-
-
-def _opt_bool(d: dict[str, object], key: str) -> bool | None:
-    v = d.get(key)
-    return v if isinstance(v, bool) else None
-
-
-def _strs(d: dict[str, object], key: str) -> list[str]:
-    v = d.get(key)
-    if isinstance(v, list):
-        return [str(x) for x in v]
-    if isinstance(v, str):
-        return [v]
-    return []
-
-
-def _lowered(value: str | None) -> str | None:
-    """Case-normalize an optional enum-ish config scalar."""
-    return value.lower() if value is not None else None
-
-
-def _one_of(
-    value: str | None, allowed: tuple[str, ...] | frozenset[str], where: str
-) -> str | None:
-    """*value* if it is ``None`` or a member of *allowed*, else ``ValueError``."""
-    if value is not None and value not in allowed:
-        raise ValueError(f"{where} must be one of {allowed}, got {value!r}")
-    return value
-
-
-def _safe_compile_atom(key: str, value: str) -> str:
-    """One ``compile.*`` scalar, rejected unless it is a single argv atom.
-
-    Values from auto-discovered source-tree configs are later embedded in
-    individual compiler flags (``-std=<value>``/``-D<value>``) and flow through
-    legacy shlex-split ``gcc_options`` plumbing. Reject whitespace so one
-    config scalar cannot become multiple compiler arguments such as
-    ``-Xclang -load ./evil.so``.
-    """
-    if not value or any(ch.isspace() for ch in value):
-        raise ValueError(
-            f"compile.{key} must be a single compiler option atom, got {value!r}"
-        )
-    return value
-
-
-@dataclass
-class BuildConfig:
-    """Parsed ``.abicheck.yml`` project config (ADR-028 amendment D4 + ADR-037 D4).
-
-    All fields are optional; an absent file yields the all-defaults config. The
-    ``build:`` / ``sources:`` blocks drive inline build/source collection
-    (``system`` is advisory; ``query`` runs only with an explicit config +
-    ``--allow-build-query``; ``compile_db`` is where it lands).
-
-    ADR-037 D4 adds the project-contract blocks consumed by ``compare`` — the
-    settings that are stable, reviewed-in-a-PR properties rather than per-run
-    invocation flags: ``severity:`` (per-category levels + preset), ``scope:``
-    (public-surface FP tuning), ``suppression:`` (hygiene policy), ``source:``
-    (precise S-axis), plus the top-level ``exit_code_scheme:`` and ``version:``.
-    CLI flags override these; see :func:`abicheck.cli_helpers_compare.resolve_compare_config`
-    for the precedence resolver (CLI > config > built-in default).
-
-    A field left at its ``None`` / ``""`` / empty default means "unset — inherit
-    the next level down", which is what makes the precedence merge unambiguous.
-    """
-
-    system: str = "auto"
-    query: str = ""
-    compile_db: str = ""
-    targets: list[str] = field(
-        default_factory=list
-    )  # build.targets (P0.2): root target(s) scoping L3 collection (Bazel only). Empty = unscoped.
-    public_headers: list[str] = field(default_factory=list)
-    exclude: list[str] = field(default_factory=list)
-    #: L5 source-graph detail cap (ADR-037 D6): ``summary`` (default — changed
-    #: scope, the cheap CI graph) or ``full`` (full replay scope). The user no
-    #: longer selects a ``graph-*`` mode on the CLI; ``--depth source`` builds the
-    #: graph at this configured detail.
-    graph_detail: str = "summary"
-
-    # ── ADR-037 D4: project-contract blocks (consumed by `compare`) ───────────
-    #: ``severity:`` — preset + per-category overrides. ``None`` = unset.
-    severity_preset: str | None = None
-    severity_abi_breaking: str | None = None
-    severity_potential_breaking: str | None = None
-    severity_quality_issues: str | None = None
-    severity_addition: str | None = None
-    #: ``scope:`` — public-surface FP tuning. ``scope_public``/``collapse_*``
-    #: are ``None`` when unset so the CLI flag can override either way.
-    scope_public: bool | None = None
-    collapse_versioned_symbols: bool | None = None
-    public_symbols: list[str] = field(default_factory=list)
-    #: ``scope.show_redundant`` — a reporting/FP-tuning toggle demoted off the CLI
-    #: (ADR-040 Lever 2). ``None`` = unset. The ``--show-filtered`` debugging view
-    #: stays a visible CLI flag.
-    scope_show_redundant: bool | None = None
-    #: ``suppression:`` — hygiene policy (a project rule, not a per-run flag).
-    suppression_strict: bool | None = None
-    suppression_require_justification: bool | None = None
-    #: ``source:`` — precise S-axis for power users (``s0``..``s6``/``auto``).
-    source_method: str | None = None
-    #: ``compile:`` — the stable half of the L2 header compile context (ADR-035
-    #: D6.1 / ADR-037 D4). The project's reviewed include roots / dialect / feature
-    #: macros / frontend; per-invocation cross-compile flags stay CLI overrides
-    #: (CLI > config). ``None``/empty = unset, so the CLI flag wins unambiguously.
-    compile_frontend: str | None = None
-    compile_std: str | None = None
-    compile_include_dirs: list[str] = field(default_factory=list)
-    compile_defines: list[str] = field(default_factory=list)
-    compile_sysroot: str | None = None
-    compile_nostdinc: bool | None = None
-    #: ``debug:`` — separate-debug-file resolution (ADR-021a) demoted off the CLI
-    #: (ADR-040 Lever 2). These are stable per-project debug-artifact knobs; the
-    #: coarse per-run ``--debug-root`` stays a visible CLI override, while the
-    #: format/debuginfod/dwarf-only knobs move here. ``None`` = unset.
-    debug_format: str | None = None
-    debug_dwarf_only: bool | None = None
-    debug_debuginfod: bool | None = None
-    debug_debuginfod_url: str | None = None
-    #: ``exit_code_scheme:`` — ADR-037 D12; CI keys on it, so it lives in config.
-    exit_code_scheme: str = "auto"
-    #: Whether ``exit_code_scheme:`` was literally present -- it defaults to
-    #: ``"auto"`` either way, so this lets a stated ``auto`` outrank a pack.
-    exit_code_scheme_explicit: bool = False
-    #: ``version:`` — config schema version (forward-compat; Phase 7 wires the
-    #: unknown-key warning). ``0`` = unset.
-    version: int = 0
-
-    #: ADR-037 §Backward-compat (G22 Phase 7): recognized ``.abicheck.yml`` keys.
-    #: ``version:`` makes the config forward-compatible — an *unknown* key (a
-    #: newer schema read by an older abicheck) **warns**, never errors, so a
-    #: project can adopt a future key without breaking older installs. Keys parsed
-    #: by sibling modules (``risk_rules`` → ``risk.py``, ``crosschecks`` →
-    #: ``crosscheck.py``, ``targets``/``bundles``/``profiles``/``baseline``/
-    #: ``aggregate`` → ``project_targets.py``, ADR-047 §3/G30 P1.5; CLI cleanup
-    #: phase two, PR 2 follow-up for ``aggregate``) are listed so they don't
-    #: trip the warning.
-    _KNOWN_TOP_KEYS: ClassVar[frozenset[str]] = frozenset(
-        {
-            "build",
-            "sources",
-            "severity",
-            "scope",
-            "suppression",
-            "source",
-            "compile",
-            "debug",
-            "exit_code_scheme",
-            "version",
-            "risk_rules",
-            "crosschecks",
-            "targets",
-            "bundles",
-            "profiles",
-            "baseline",
-            "aggregate",
-        }
-    )
-    _KNOWN_BLOCK_KEYS: ClassVar[dict[str, frozenset[str]]] = {
-        "build": frozenset({"system", "query", "compile_db", "targets"}),
-        "sources": frozenset({"public_headers", "exclude", "graph"}),
-        "severity": frozenset(
-            {
-                "preset",
-                "abi_breaking",
-                "potential_breaking",
-                "quality_issues",
-                "addition",
-            }
-        ),
-        "scope": frozenset(
-            {"public", "collapse_versioned_symbols", "public_symbols", "show_redundant"}
-        ),
-        "suppression": frozenset({"strict", "require_justification"}),
-        "source": frozenset({"method"}),
-        "compile": frozenset(
-            {
-                "frontend",
-                "std",
-                "include_dirs",
-                "defines",
-                "sysroot",
-                "nostdinc",
-            }
-        ),
-        "debug": frozenset({"format", "dwarf_only", "debuginfod", "debuginfod_url"}),
-    }
-
-    @classmethod
-    def _scalar_findings(cls, key: str, value: object) -> list[str]:
-        """Type findings for a recognized top-level *scalar* key.
-
-        ``risk_rules``/``crosschecks`` are deliberately excluded:
-        :meth:`from_dict` never parses them at all (they are consumed by
-        ``risk.py``/``crosscheck.py`` instead), so there is no from_dict-level
-        type contract to enforce for them here.
-        """
-        if value is None:
-            return []
-        if key in _TOP_LEVEL_STR_KEYS and not isinstance(value, str):
-            return [f"{key} must be a string, got {type(value).__name__}: {value!r}"]
-        if key in _TOP_LEVEL_INT_KEYS and (
-            not isinstance(value, int) or isinstance(value, bool)
-        ):
-            return [f"{key} must be an integer, got {type(value).__name__}: {value!r}"]
-        return []
-
-    @classmethod
-    def _subkey_findings(cls, key: str, sub: str, sub_value: object) -> list[str]:
-        """Type findings for one ``<block>.<subkey>`` entry."""
-        if sub in _BOOL_SUBKEYS.get(key, ()) and not isinstance(sub_value, bool):
-            return [
-                f"{key}.{sub} must be a boolean, got "
-                f"{type(sub_value).__name__}: {sub_value!r}"
-            ]
-        if sub in _STR_SUBKEYS.get(key, ()) and not isinstance(sub_value, str):
-            return [
-                f"{key}.{sub} must be a string, got "
-                f"{type(sub_value).__name__}: {sub_value!r}"
-            ]
-        if sub not in _LIST_SUBKEYS.get(key, ()):
-            return []
-        if not isinstance(sub_value, (list, str)):
-            return [
-                f"{key}.{sub} must be a string or list of strings, "
-                f"got {type(sub_value).__name__}: {sub_value!r}"
-            ]
-        # `_strs()` accepts a list container but a non-string element must be
-        # rejected outright, not coerced via `str(x)`.
-        bad = (
-            [x for x in sub_value if not isinstance(x, str)]
-            if isinstance(sub_value, list)
-            else []
-        )
-        if bad:
-            return [
-                f"{key}.{sub} must be a list of strings, got "
-                f"non-string element(s): {bad!r}"
-            ]
-        return []
-
-    @classmethod
-    def _block_findings(cls, key: str, value: object, known_block: object) -> list[str]:
-        """Type findings for one recognized top-level *block* key."""
-        if value is None:
-            return []
-        if not isinstance(value, dict):
-            return [f"{key} must be a mapping, got {type(value).__name__}: {value!r}"]
-        findings: list[str] = []
-        for sub, sub_value in value.items():
-            if sub not in known_block:  # type: ignore[operator]
-                findings.append(f"unknown .abicheck.yml key {key}.{sub!r}")
-                continue
-            findings += cls._subkey_findings(key, sub, sub_value)
-        return findings
-
-    @classmethod
-    def _validate_structure(cls, data: dict[str, object]) -> None:
-        """Raise ``ValueError`` for every structural problem in a raw ``.abicheck.yml``.
-
-        ADR-043 (pre-1.0 CLI reset): unknown keys and wrong-typed values used
-        to only ``warnings.warn`` (forward-compat) or be silently
-        coerced/dropped, which is what the now-removed ``abicheck config
-        validate`` command existed to catch as a separate, easy-to-skip step.
-        That strictness now lives here, so it fires on every real dump/
-        compare/scan ingestion of a project config — no opt-in step needed.
-        Collects every finding (not just the first) so a single bad file
-        reports everything wrong with it at once.
-        """
-        findings: list[str] = []
-        for key, value in data.items():
-            if key not in cls._KNOWN_TOP_KEYS:
-                findings.append(f"unknown .abicheck.yml key {key!r}")
-                continue
-            known_block = cls._KNOWN_BLOCK_KEYS.get(key)
-            if known_block is None:
-                findings += cls._scalar_findings(key, value)
-            else:
-                findings += cls._block_findings(key, value, known_block)
-        if findings:
-            raise ValueError("; ".join(findings))
-
-    @classmethod
-    def from_dict(cls, data: dict[str, object]) -> BuildConfig:
-        if isinstance(data, dict):
-            cls._validate_structure(data)
-        top = data if isinstance(data, dict) else {}
-        build = _block(top, "build")
-        sources = _block(top, "sources")
-        severity = _block(top, "severity")
-        scope = _block(top, "scope")
-        suppression = _block(top, "suppression")
-        source = _block(top, "source")
-        compile_blk = _block(top, "compile")
-        debug = _block(top, "debug")
-
-        def _safe_compile_atoms(key: str) -> list[str]:
-            return [_safe_compile_atom(key, item) for item in _strs(compile_blk, key)]
-
-        def _level(key: str) -> str | None:
-            return _one_of(_opt_str(severity, key), _SEVERITY_LEVELS, f"severity.{key}")
-
-        version_raw = top.get("version")
-        return cls(
-            system=_str(build, "system", "auto") or "auto",
-            query=_str(build, "query"),
-            compile_db=_str(build, "compile_db"),
-            targets=_strs(build, "targets"),
-            public_headers=_strs(sources, "public_headers"),
-            exclude=_strs(sources, "exclude"),
-            graph_detail=_one_of(
-                _str(sources, "graph", "summary") or "summary",
-                ("summary", "full"),
-                "sources.graph",
-            )
-            or "summary",
-            severity_preset=_one_of(
-                _opt_str(severity, "preset"), _SEVERITY_PRESETS, "severity.preset"
-            ),
-            severity_abi_breaking=_level("abi_breaking"),
-            severity_potential_breaking=_level("potential_breaking"),
-            severity_quality_issues=_level("quality_issues"),
-            severity_addition=_level("addition"),
-            scope_public=_opt_bool(scope, "public"),
-            collapse_versioned_symbols=_opt_bool(scope, "collapse_versioned_symbols"),
-            public_symbols=_strs(scope, "public_symbols"),
-            scope_show_redundant=_opt_bool(scope, "show_redundant"),
-            suppression_strict=_opt_bool(suppression, "strict"),
-            suppression_require_justification=_opt_bool(
-                suppression, "require_justification"
-            ),
-            source_method=_opt_str(source, "method"),
-            # The CLI accepts the frontend case-insensitively (Click Choice
-            # case_sensitive=False); normalize the config value to match.
-            compile_frontend=_one_of(
-                _lowered(_opt_str(compile_blk, "frontend")),
-                ("auto", "castxml", "clang", "hybrid"),
-                "compile.frontend",
-            ),
-            compile_std=(
-                _safe_compile_atom("std", std)
-                if (std := _opt_str(compile_blk, "std")) is not None
-                else None
-            ),
-            compile_include_dirs=_strs(compile_blk, "include_dirs"),
-            compile_defines=_safe_compile_atoms("defines"),
-            compile_sysroot=_opt_str(compile_blk, "sysroot"),
-            compile_nostdinc=_opt_bool(compile_blk, "nostdinc"),
-            debug_format=_one_of(
-                _lowered(_opt_str(debug, "format")),
-                ("auto", "dwarf", "btf", "ctf"),
-                "debug.format",
-            ),
-            debug_dwarf_only=_opt_bool(debug, "dwarf_only"),
-            debug_debuginfod=_opt_bool(debug, "debuginfod"),
-            debug_debuginfod_url=_opt_str(debug, "debuginfod_url"),
-            exit_code_scheme=_one_of(
-                _str(top, "exit_code_scheme", "auto") or "auto",
-                _EXIT_CODE_SCHEMES,
-                "exit_code_scheme",
-            )
-            or "auto",
-            exit_code_scheme_explicit="exit_code_scheme" in top,
-            version=(
-                version_raw
-                if isinstance(version_raw, int) and not isinstance(version_raw, bool)
-                else 0
-            ),
-        )
-
-    def _build_block(self) -> dict[str, Any]:
-        """Non-default ``build:`` keys (empty when the block is all-defaults)."""
-        build: dict[str, Any] = {}
-        if self.system and self.system != "auto":
-            build["system"] = self.system
-        if self.query:
-            build["query"] = self.query
-        if self.compile_db:
-            build["compile_db"] = self.compile_db
-        if self.targets:
-            build["targets"] = list(self.targets)
-        return build
-
-    def _sources_block(self) -> dict[str, Any]:
-        """Non-default ``sources:`` keys (headers/excludes/graph detail)."""
-        sources: dict[str, Any] = {}
-        if self.public_headers:
-            sources["public_headers"] = list(self.public_headers)
-        if self.exclude:
-            sources["exclude"] = list(self.exclude)
-        if self.graph_detail and self.graph_detail != "summary":
-            sources["graph"] = self.graph_detail
-        return sources
-
-    def _severity_block(self) -> dict[str, Any]:
-        """Non-default ``severity:`` keys (preset + per-category levels)."""
-        severity: dict[str, Any] = {}
-        if self.severity_preset is not None:
-            severity["preset"] = self.severity_preset
-        for key in ("abi_breaking", "potential_breaking", "quality_issues", "addition"):
-            val = getattr(self, f"severity_{key}")
-            if val is not None:
-                severity[key] = val
-        return severity
-
-    def _scope_block(self) -> dict[str, Any]:
-        """Non-default ``scope:`` keys (public-surface FP tuning)."""
-        scope: dict[str, Any] = {}
-        if self.scope_public is not None:
-            scope["public"] = self.scope_public
-        if self.collapse_versioned_symbols is not None:
-            scope["collapse_versioned_symbols"] = self.collapse_versioned_symbols
-        if self.public_symbols:
-            scope["public_symbols"] = list(self.public_symbols)
-        if self.scope_show_redundant is not None:
-            scope["show_redundant"] = self.scope_show_redundant
-        return scope
-
-    def _suppression_block(self) -> dict[str, Any]:
-        """Non-default ``suppression:`` keys (hygiene policy)."""
-        suppression: dict[str, Any] = {}
-        if self.suppression_strict is not None:
-            suppression["strict"] = self.suppression_strict
-        if self.suppression_require_justification is not None:
-            suppression["require_justification"] = (
-                self.suppression_require_justification
-            )
-        return suppression
-
-    def _source_block(self) -> dict[str, Any]:
-        """``source:`` block (``method`` only; empty when unset)."""
-        if self.source_method is not None:
-            return {"method": self.source_method}
-        return {}
-
-    def _compile_block(self) -> dict[str, Any]:
-        """Non-default ``compile:`` keys (stable L2 header compile context)."""
-        compile_blk: dict[str, Any] = {}
-        if self.compile_frontend is not None:
-            compile_blk["frontend"] = self.compile_frontend
-        if self.compile_std is not None:
-            compile_blk["std"] = self.compile_std
-        if self.compile_include_dirs:
-            compile_blk["include_dirs"] = list(self.compile_include_dirs)
-        if self.compile_defines:
-            compile_blk["defines"] = list(self.compile_defines)
-        if self.compile_sysroot is not None:
-            compile_blk["sysroot"] = self.compile_sysroot
-        if self.compile_nostdinc is not None:
-            compile_blk["nostdinc"] = self.compile_nostdinc
-        return compile_blk
-
-    def _debug_block(self) -> dict[str, Any]:
-        """Non-default ``debug:`` keys (separate-debug-file resolution; ADR-040 L2)."""
-        debug: dict[str, Any] = {}
-        if self.debug_format is not None:
-            debug["format"] = self.debug_format
-        if self.debug_dwarf_only is not None:
-            debug["dwarf_only"] = self.debug_dwarf_only
-        if self.debug_debuginfod is not None:
-            debug["debuginfod"] = self.debug_debuginfod
-        if self.debug_debuginfod_url is not None:
-            debug["debuginfod_url"] = self.debug_debuginfod_url
-        return debug
-
-    def to_dict(self) -> dict[str, Any]:
-        """Serialize back to a ``.abicheck.yml`` mapping (round-trips via from_dict).
-
-        Only non-default blocks/keys are emitted so a dumped config stays minimal
-        and a reload reproduces the same :class:`BuildConfig` (ADR-037 D4
-        round-trip contract, ``test_config_roundtrip``).
-        """
-        out: dict[str, Any] = {}
-        # Insertion order is the stable dump order: block by block, then the
-        # top-level scalars — keep it in sync with the dataclass field order.
-        for key, block in (
-            ("build", self._build_block()),
-            ("sources", self._sources_block()),
-            ("severity", self._severity_block()),
-            ("scope", self._scope_block()),
-            ("suppression", self._suppression_block()),
-            ("source", self._source_block()),
-            ("compile", self._compile_block()),
-            ("debug", self._debug_block()),
-        ):
-            if block:
-                out[key] = block
-
-        # An explicit `auto` round-trips too, not just a non-`auto` value.
-        if self.exit_code_scheme and (
-            self.exit_code_scheme != "auto" or self.exit_code_scheme_explicit
-        ):
-            out["exit_code_scheme"] = self.exit_code_scheme
-        if self.version:
-            out["version"] = self.version
-        return out
-
-
-#: Public re-export of every recognized ``.abicheck.yml`` top-level key —
-#: including the four ``project_targets.py``-owned ones. That sibling module
-#: reuses this (rather than its own partial guess) to reject a misspelled
-#: top-level key (e.g. ``tagrets:``) even though it only *parses* four of
-#: these keys itself — a key outside this whole set is unknown to every
-#: ``.abicheck.yml`` consumer, not just this one, so the strictness belongs
-#: to one shared source of truth.
-KNOWN_TOP_LEVEL_KEYS: frozenset[str] = BuildConfig._KNOWN_TOP_KEYS
-
-
-def load_build_config(path: Path) -> BuildConfig:
-    """Load a ``.abicheck.yml`` build config; tolerant of a missing/empty file."""
-    if not path.is_file():
-        return BuildConfig()
-    import yaml  # hard dep; imported out of the try so the except can name it
-
-    try:
-        raw = yaml.safe_load(path.read_text(encoding="utf-8"))
-    except (OSError, ValueError, yaml.YAMLError) as exc:
-        # yaml.YAMLError (e.g. ParserError) is not a ValueError; catch it so a
-        # malformed .abicheck.yml surfaces as a wrapped error (→ ClickException in
-        # embed_build_source) instead of a raw traceback (Codex review).
-        raise ValueError(f"cannot read build config {path}: {exc}") from exc
-    if not isinstance(raw, dict):
-        return BuildConfig()
-    return BuildConfig.from_dict(raw)
-
-
-#: Re-exported for back-compat — the implementation now lives in
-#: :mod:`abicheck.config_paths` (shared with `compare`'s own
-#: ``discover_project_config()``), since both must agree on the same set of
-#: recognized ``.abicheck.yml`` locations. See that module's docstring.
-discover_build_config = _discover_build_config
-
-
-# ``is_pack_dir`` is re-exported above (``import ... as ...``) for the callers
-# that have always imported it from here. It is owned by
+# ``is_pack_dir`` is re-exported above the same way. It is owned by
 # :mod:`abicheck.buildsource.pack_shape` since ADR-061 Phase 3: it has no
 # first-party dependencies, so keeping it in this (oversized) module forced
 # every engine-side consumer to import `inline` for a filesystem predicate.
@@ -772,7 +212,9 @@ def collect_inline_pack(
 
         if merged.compile_units:
             compile_db = None  # already seeded from a build-info pack
-        elif _maybe_collect_bazel_build_info(build_info, merged, extractors, sources):
+        elif _maybe_collect_bazel_build_info(
+            build_info, merged, extractors, sources, tuple(cfg.targets)
+        ):
             # A pre-captured Bazel aquery/cquery jsonproto produces BuildEvidence
             # directly (no compile_commands.json to load) — ADR-037 D5 #5 sniffing.
             compile_db = None
@@ -1133,6 +575,7 @@ def _maybe_collect_bazel_build_info(
     merged: BuildEvidence,
     extractors: list[ExtractorRecord],
     sources: Path | None = None,
+    configured_targets: tuple[str, ...] = (),
 ) -> bool:
     """Route a pre-captured Bazel aquery/cquery ``--build-info`` to the adapter.
 
@@ -1160,6 +603,12 @@ def _maybe_collect_bazel_build_info(
     fmt = sniff_build_info_format(build_info)
     if fmt not in ("bazel_aquery", "bazel_cquery"):
         return False
+    if configured_targets:  # ADR-063 Phase 4: no `targets` param on this adapter
+        from ..errors import ValidationError
+
+        raise ValidationError(
+            f"build_targets={list(configured_targets)!r} requested, but --build-info is a pre-captured Bazel {fmt.removeprefix('bazel_')} jsonproto ({build_info}); root-target scoping only applies to a *live* `bazel query` (pass --sources/a workspace with no --build-info, or pre-capture the jsonproto already scoped to the desired targets first)"
+        )
     from .adapters.bazel import BazelAdapter
 
     if fmt == "bazel_aquery":
@@ -1755,7 +1204,7 @@ def _build_inline_graph(
     has_build = bool(merged.compile_units or merged.targets or merged.link_units)
     if not has_build and surface is None:
         return None
-    from .source_graph import build_source_graph
+    from .source_graph_build import build_source_graph
 
     graph = build_source_graph(merged, source_abi=surface)
     if with_call_graph:

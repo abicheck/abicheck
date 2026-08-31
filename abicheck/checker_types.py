@@ -42,7 +42,8 @@ from .detectors import DetectorResult
 from .impact.model import ImpactAssessment
 from .model import AbiSnapshot
 from .model.identity import EntityId
-from .policy_file import PolicyFile
+from .model.policy_file_protocol import PolicyFileProtocol
+from .report_side_facts import ReportSideFacts
 
 # Marker appended to a ``SYMBOL_VERSION_ALIAS_CHANGED`` description when the old
 # default symbol version is NOT retained as a non-default alias (so consumers of
@@ -54,12 +55,10 @@ from .policy_file import PolicyFile
 SYMBOL_VERSION_ALIAS_NOT_RETAINED_MARKER = "old version NOT retained as alias"
 
 # The public evidence-depth ladder (ADR-043 D2/ADR-047 §7): exactly the four
-# user-facing rungs, matching the public CLI's ``--depth`` and
-# ``abicheck/mcp_server.py``'s own ``_PUBLIC_DEPTHS`` (kept as a separate,
-# self-contained copy here rather than importing mcp_server — that module
-# sits above this one in the dependency graph). Shared by
-# DiffResult.requested_depth/effective_depth and ScanOutcome's matching
-# fields (G30 P0.3) so both validate against the same set.
+# user-facing rungs, matching the public CLI's ``--depth`` (the now-removed
+# MCP server mirrored this as its own ``_PUBLIC_DEPTHS``, per ADR-021).
+# Shared by DiffResult.requested_depth/effective_depth and ScanOutcome's
+# matching fields (G30 P0.3) so both validate against the same set.
 EVIDENCE_DEPTH_VALUES = frozenset({"binary", "headers", "build", "source"})
 
 
@@ -74,9 +73,7 @@ def validate_evidence_depth(field_name: str, value: str) -> None:
     for any future caller (G30 P1.3) that sets it from a less-validated
     source, since a bad value would otherwise only be caught by the JSON
     Schema — which production code never runs against (only opt-in tests
-    do). Matches
-    ``mcp_server._validate_public_depth``'s same check on the same set.
-    Shared by ``reporter._add_check_identity`` (compare) and
+    do). Shared by ``reporter._add_check_identity`` (compare) and
     ``ScanOutcome.to_dict`` (scan) so both validate identically.
     """
     if value not in EVIDENCE_DEPTH_VALUES:
@@ -403,7 +400,7 @@ class LibraryMetadata:
 
 
 @dataclass
-class DiffResult:
+class DiffResult(ReportSideFacts):
     old_version: str
     new_version: str
     library: str
@@ -418,7 +415,7 @@ class DiffResult:
     policy: str = (
         "strict_abi"  # active policy profile; drives breaking/source_breaks/compatible
     )
-    policy_file: PolicyFile | None = None  # custom policy with overrides (Bug 4)
+    policy_file: PolicyFileProtocol | None = None  # custom policy w/ overrides (Bug 4)
     old_metadata: LibraryMetadata | None = None
     new_metadata: LibraryMetadata | None = None
     redundant_changes: list[Change] = field(

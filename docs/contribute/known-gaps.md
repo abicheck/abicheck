@@ -35,7 +35,323 @@ looked like the obvious fix and wasn't.
 - **`--build-target` silently does nothing when combined with a pre-captured
   Bazel `--build-info` (an `aquery`/`cquery` jsonproto), on both `dump` and
   `scan` — investigated, not fixed (Codex review, fresh evidence, P0.2
-  follow-up).** `BazelAdapter.collect()`'s `self.targets` scoping is applied
+  follow-up). Fixed (ADR-063 Phase 4, "option 2" below): the combination now
+  raises a clean usage error instead of silently collecting an unscoped
+  graph.** `abicheck.workflows.plan.bazel_target_scoping_failure()` is the
+  one check both `dump`/`compare` (via `AnalysisPlanner`, wired into
+  `service_dump_pipeline.resolve_dump_request`/`service_compare_pipeline.
+  resolve_compare_request`) and `scan --against`'s own candidate resolution
+  (which has no `CompareRequest`/`DumpRequest` of its own to resolve through
+  `AnalysisPlanner` and so calls the same free function directly) now run
+  before collecting anything — `dump`/`compare`/`scan` alike raise
+  `PlanningError` (framework-neutral) from the engine layer, translated to
+  `click.UsageError` at each CLI boundary (`cli_resolve.py`/
+  `cli_buildsource.py` for `dump`/`compare`; `cli_scan.py`'s own `scan_cmd`,
+  around its `run_scan_core` call, for `scan`). `scan_engine._build_new_
+  snapshot` originally raised `click.UsageError` directly instead — cheaper
+  in lines, but it leaked a Click-specific exception type out of the same
+  engine function the typed `run_scan(ScanRequest(...))` API calls, with no
+  Click context to catch it in (a third Codex review round, fresh evidence).
+  Fixed by raising `PlanningError` there instead and adding the translation
+  at `cli_scan.py`'s boundary, matching the `dump`/`compare` pattern. **A
+  fourth Codex review round found that placement itself was still wrong**:
+  `_build_new_snapshot` runs *after* `run_scan_core`'s own S3 pattern-scan and
+  points-of-interest work, so a typed `run_scan()`/`run_scan_subprocess()`
+  caller — which has no `cli_scan.py` pre-flight ahead of `run_scan_core` the
+  way the CLI does — paid for that (cheap but real) work before the
+  rejection fired. Fixed by moving the check to the very top of
+  `run_scan_core`, guarded on the same `collection_for_ci_mode(collect_mode)`
+  emptiness `workflows.plan._check_bazel_target_scoping` already uses for its
+  `depth=binary` exemption, and removing it from `_build_new_snapshot`
+  entirely rather than leaving a second, independently-maintained copy —
+  which is exactly what the removed copy was: **testing the move found the
+  old `_build_new_snapshot`-only check had no `depth=binary` exemption at
+  all**, a real, separate bug the earlier "scan's own path was already
+  immune" note only verified for the CLI (whose `_normalize_depth_inputs`
+  prunes `build_info` to `None` at that depth) and never checked for the
+  typed API (`service_scan.run_scan` does not prune it). `tests/
+  test_bazel_root_targets_scan.py`'s `test_run_scan_typed_api_raises_
+  planning_error_not_click_usage_error` (raises `PlanningError`, not
+  `click.UsageError`), `test_run_scan_rejects_before_wasted_pattern_scan_
+  and_poi_work` (fires before the S3 pass, monkeypatch-verified), and
+  `test_run_scan_depth_binary_exempts_the_early_bazel_scoping_check` (the
+  exemption holds at the new call site) pin all three properties together.
+  All three CLIs still name the mismatch and the documented workaround, exit
+  64, not a silent, unscoped collection. **The same fourth round also found
+  `scan --artifact-set`'s own pre-flight check (`cli_scan.py`'s
+  `_run_artifact_set`) had never had the `depth=binary` exemption at all** —
+  unlike the single-binary path, whose `_normalize_depth_inputs` prunes
+  `build_info` to `None` at that depth before its own copy of the check runs,
+  `_run_artifact_set` checked the raw, unpruned inputs directly. Fixed by
+  adding the same `(depth or "").lower() != "binary"` guard used elsewhere;
+  `tests/test_bazel_root_targets_scan.py::
+  test_scan_cli_artifact_set_depth_binary_exempts_the_bazel_scoping_check`
+  pins it.
+  **A second Codex review round found this only covered `InputSpec.
+  build_targets` (the `--build-target` CLI flag/typed-API field) — a root-
+  target scope declared in `.abicheck.yml`'s own `build.targets:` instead
+  reaches `BuildConfig.targets` through `embed_build_source`'s own CLI-
+  overrides-config merge, a value none of the request-level pre-flight
+  checks above can see (no config is discovered yet at that point).** Fixed
+  at the one place both sources are already unified into a single value:
+  `buildsource.inline._maybe_collect_bazel_build_info()` itself, which every
+  `embed_build_source` caller (`dump`/`compare`/`scan` alike) goes through —
+  it now raises `ValidationError` when given a non-empty `configured_targets`
+  and a pre-captured jsonproto. Note this closes the *silent* half
+  everywhere, but the *exit code* still varies by front end because of a
+  pre-existing, deliberate design choice one layer up:
+  `workflows.artifact.execute.embed_side_build_source` (the shared
+  primitive `dump`'s typed request, `compare`, and `scan` all resolve
+  through) already flattens any `ValidationError` from `embed_build_source`
+  into `SnapshotError` ("this surface has always flattened both onto
+  SnapshotError" — see that function's own comment), so those three paths
+  now fail loudly with a correctly-typed error at exit 1, not exit 64;
+  only the `dump --sources <tree>` (no `SO_PATH`) source-only path, which
+  calls `cli_buildsource.embed_build_source`'s own adapter directly and
+  was never routed through that flattening primitive, gets the full exit
+  64. Changing the shared primitive's flattening behavior to recover
+  exit-64 uniformly is a separate, riskier change (that comment's own
+  "has always" — other `ValidationError`s reaching it likely already rely
+  on the flattened exit 1) and was not attempted here. See
+  `abicheck/workflows/plan.py`'s own module docstring and
+  `docs/contribute/adr/063-one-semantic-pipeline.md`'s Phase 4 status entry
+  for what changed and what this fix deliberately does not attempt (option 1
+  below, teaching the adapter to filter an already-parsed graph, remains
+  unimplemented).
+  **A third Codex review round found a remaining dry-run/execution parity
+  gap for this same `.abicheck.yml` case, investigated and deliberately left
+  open rather than fixed reactively.** `dump --dry-run` (`cli_dump_helpers.
+  render_dump_dry_run`) never calls `collect_inline_pack`/
+  `_maybe_collect_bazel_build_info` at all — a dry-run resolves and renders
+  purely from `resolve_dump_request`'s `ResolvedDumpRequest`, which stops
+  well before `execute_dump_request` ever reaches `embed_build_source`. So
+  when the root-target scope comes *only* from `.abicheck.yml`'s
+  `build.targets:` (no `--build-target` flag, the case the fix above
+  covers), the dry-run preview reports success for a request the real run
+  then rejects — the same shape of parity gap the earlier `scan --dry-run`/
+  `scan --artifact-set --dry-run` fix (above, in the first Codex round)
+  closed for the CLI-flag case, just not yet closed for the config-sourced
+  one, and not yet checked on `compare --dry-run`/`scan --dry-run` either
+  (neither discovers `.abicheck.yml`'s build config during their own dry-run
+  preview today). Not fixed here: `AnalysisPlanner` cannot see this value at
+  all — `DumpRequest`/`CompareRequest`/`InputSpec` carry no `build_config`
+  field, so `.abicheck.yml` discovery only ever happens inside
+  `embed_build_source` itself, deep inside real execution. Closing the gap
+  correctly needs one of two real designs, not a quick patch: (a) thread a
+  resolved `build_config` path onto the typed request objects so
+  `AnalysisPlanner` can discover+load it too — a real API surface addition
+  touching `InputSpec`/`DumpRequest`/`CompareRequest`, not a leaf-module
+  fix; or (b) duplicate a *scoped* slice of `embed_build_source`'s own
+  discovery-then-CLI-overrides-config merge (`config_paths.
+  discover_build_config`, `buildsource.inline.load_build_config`, the same
+  `targets=list(build_targets) if build_targets else cfg.targets`
+  precedence) independently inside each of the (at least three) dry-run
+  renderers, each needing the identical `requested_depth == "binary"`
+  exemption `_check_bazel_target_scoping` already applies — a second,
+  independently-maintained copy of that merge logic in three more places,
+  exactly the drift risk ADR-063 Phase 4 exists to avoid, not reduce. Either
+  is a real, multi-call-site feature needing its own design and test
+  coverage, not a same-session reactive patch under continued review
+  pressure (this file's own governing convention, and the same standard the
+  exit-code-variance paragraph above and D4's second scenario already apply
+  in this document). Until fixed, the workaround is unchanged from the
+  general one: pre-capture the Bazel jsonproto already scoped to the desired
+  targets, or use a live `bazel query`; a dry-run preview's silence on a
+  root-target scope declared only in `.abicheck.yml` is not evidence the
+  real run will succeed.
+  **A later Codex/CodeRabbit review round found the `.abicheck.yml` fix
+  itself had a second, distinct gap — not deferrable the way the dry-run
+  parity gap above was, since this one had a direct, bounded fix.** At
+  `--depth headers`, `embed_build_source`'s own real check never runs at all
+  (that depth's `collect_mode` is `"off"`, the identical condition the
+  `depth=binary` exemption elsewhere in this entry relies on) — but
+  `buildsource.l2_seed`'s three L2-seed/compile-context helpers
+  (`derive_l2_include_dirs`, `derive_l2_compile_context`,
+  `seed_includes_and_fold_compile_context`) each run their *own*,
+  independent `collect_inline_pack` call regardless of `collect_mode` (they
+  exist to seed useful `-I` dirs and fold build context into the header
+  parse even for a headers-only scan), each wrapped in a broad best-effort
+  `except Exception` that swallows any failure and degrades to "no seeded
+  context" — by design, documented in `_l2_seed_config`'s own docstring ("a
+  malformed/invalid config surfaces loudly elsewhere ... this is a
+  best-effort include-dir hint"). That documented assumption is false for
+  this one input: at `--depth headers`, this L2-seed call is the *only*
+  place the Bazel-scoping `ValidationError` can fire at all, so the broad
+  catch silently swallowed it, with the run proceeding with no diagnostic
+  and without the build-derived context it should have used. Fixed by
+  extending the file's own pre-existing carve-out for
+  `HeaderCompileContextAmbiguousError` (raised for the identical reason — a
+  deliberate, fail-closed error is not "best-effort collection failed") to
+  cover `ValidationError` too, in all three helpers. `tests/
+  test_bazel_root_targets_l2_seed.py::
+  test_seed_includes_and_fold_compile_context_raises_on_bazel_scoping_mismatch`
+  reproduces it end-to-end with a real (unmocked) pre-captured jsonproto and
+  a `.abicheck.yml`-only (no `--build-target`) target scope, pinning that it
+  now raises instead of degrading silently. **Verified against `scan`
+  specifically (a sixth review round asked for it by name, for the typed
+  `run_scan(ScanRequest(depth="headers", ...))` shape)**: the silent
+  `COMPATIBLE`/exit-0 outcome is gone — the request now fails loudly with the
+  same clear diagnostic — but the exit code inherits the identical front-end
+  variance already noted above for the sibling `embed_build_source` case, via
+  a different, independently pre-existing mechanism: `scan_engine.
+  _build_new_snapshot`'s own `except AbicheckError: raise click.
+  ClickException(...)` (documented in this module's own header as a
+  pre-existing wart predating ADR-063 entirely, deliberately left alone) maps
+  the `ValidationError` to exit 1 for the CLI, and — since `click.
+  ClickException` is not itself caught anywhere further out — leaks that same
+  Click-specific exception type to a typed `run_scan()` caller too. Fixing
+  that leak means touching the same pre-existing, out-of-scope `except
+  AbicheckError` clause the module docstring already flags for a future
+  cleanup, not a new regression this phase introduced — left alone here for
+  the same reason.
+  **A seventh review round found that "verified" claim itself rested on a
+  false premise, and had a real, bounded fix — unlike the sibling
+  `click.ClickException` leak just above.** `run_scan_core`'s own early
+  pre-flight check (added for the "run scan planning before pattern and POI
+  extraction" fix elsewhere in this entry) exempted `--depth headers` the
+  same way it exempts `--depth binary`, on the theory that both resolve to a
+  `collect_mode` with no collection layers. That theory is only half
+  right: `--depth binary` *also* clears the header list to empty
+  (`service_scan.run_scan`'s `eff_headers = [] if eff_depth is
+  EvidenceDepth.BINARY else ...`, mirrored by the CLI's own
+  `_normalize_depth_inputs`), which is the actual reason `build_info` is
+  never consulted anywhere for that depth — `--depth headers` keeps real
+  headers, so the L2-seed's own independent `build_info`-consuming pass
+  (the one this whole round's fix concerns) still runs, and the early check
+  was wrongly skipping it. Concretely: `run_scan(ScanRequest(depth=
+  "headers", build_targets=("//:lib",), build_info=<precaptured jsonproto>))`
+  reached the `.abicheck.yml`-only code path's own `click.ClickException`
+  leak instead of the framework-neutral `PlanningError` an *explicit*
+  `build_targets` should get. Fixed by widening the exemption from
+  `collection_for_ci_mode(collect_mode)[1]` alone to `headers or
+  collection_for_ci_mode(collect_mode)[1]` — exempt only when *neither*
+  consumer (`embed_build_source` nor the L2 seed) can reach `build_info` at
+  all. This closes the gap for every case `AnalysisPlanner`/`run_scan_core`'s
+  own inputs can see (an explicit `--build-target`/`ScanRequest.
+  build_targets`); the `.abicheck.yml`-only case above is unaffected by this
+  fix and remains the already-documented `click.ClickException` leak, since
+  neither `run_scan_core` nor `AnalysisPlanner` can see a value that
+  isn't discovered until deep inside `collect_inline_pack`.
+  `tests/test_bazel_root_targets_scan.py::
+  test_run_scan_depth_headers_with_explicit_build_target_raises_planning_error`
+  pins the fixed (explicit `build_targets`) case; the pre-existing
+  `test_run_scan_depth_headers_still_rejects_bazel_scoping_mismatch` was
+  re-verified to still exercise the unaffected (`.abicheck.yml`-only) case
+  correctly.
+  **An eighth review round found the same class of gap on the plural entry
+  point.** `service_scan.run_scan_set` (`scan --artifact-set`'s typed API)
+  had no Bazel-scoping pre-flight of its own: an unsupported request
+  reached each member's own `run_scan_core` check only *after*
+  `discover_artifact_set()`, `check_artifact_set_soname_collisions()`, and
+  `artifact_set_member_exports()` had already run for every member, wasting
+  real discovery/parsing work before the request was ultimately rejected
+  anyway. Fixed by adding the same pre-flight check to the top of
+  `run_scan_set`, right after `_reject_comparison_only_fields(req)` and
+  before the shared budget clock starts or `discover_artifact_set()` runs.
+  Rather than duplicate `run_scan_core`'s exemption logic (the depth=binary
+  header-clearing rule two findings above) a second time, both call sites
+  now share one function, `workflows.plan.scan_bazel_scoping_failure()`, so
+  a future refinement to the exemption rule has exactly one implementation
+  to change instead of two independently-maintained copies.
+  `tests/test_bazel_root_targets_scan.py::
+  test_run_scan_set_rejects_bazel_scoping_mismatch_before_discovery` pins
+  the fix by asserting `discover_artifact_set()` is never even called for a
+  mismatched request; `test_run_scan_set_depth_binary_exempts_the_early_
+  bazel_scoping_check` pins the sibling depth=binary exemption for the
+  plural entry point.
+  **A ninth review round found that raw depth alone is not the whole story
+  for `dump`/`compare`'s own `AnalysisPlanner` check either.**
+  `_check_bazel_target_scoping` exempted `depth="binary"` purely by reading
+  the request's raw, requested depth — but `DumpRequest.resolved_collect_mode`
+  (a private CLI hook: `compare`'s own implicit-dump path resolves collect
+  mode from the *pair* and forwards it in, so the real run doesn't re-derive
+  a possibly-different mode from `depth` in isolation), when set, overrides
+  what `depth` alone would resolve to, and `resolve_dump_request_evidence`
+  honors that override. A `DumpRequest(depth="binary",
+  resolved_collect_mode="build", ...)` therefore still runs
+  `collect_inline_pack` for real at execution time — the override, not the
+  raw depth, decides whether `build_info` is ever consulted — so the
+  pre-flight check's exemption on raw depth alone let an unsupported request
+  reach `resolve()`, then fail later inside `collect_inline_pack` as a
+  flattened `SnapshotError` instead of the promised `PlanningError`. Fixed
+  by adding `resolved_collect_mode` to `SidePlan` (populated only for `dump`
+  sides — `CompareRequest` has no such field, so every `compare` side keeps
+  `None` and this changes nothing for `compare`) and checking it first: when
+  set, it alone decides the exemption (`"off"` exempts, anything else
+  doesn't, regardless of raw depth); only when unset does the check fall
+  back to the pre-existing raw-depth-only rule. `tests/test_analysis_plan.py::
+  TestBazelBuildTargetScoping::test_resolved_collect_mode_override_defeats_the_binary_exemption`
+  pins the fixed case; its sibling
+  `test_resolved_collect_mode_off_override_is_exempt_even_at_other_depths`
+  pins the converse (an explicit `"off"` override exempts even at a depth,
+  e.g. `"build"`, that the raw-depth-only rule would otherwise reject).
+  **A tenth review round found the eighth round's fix (moving `run_scan_set`'s
+  own check before discovery) had a CLI-level sibling gap.**
+  `cli_scan._run_artifact_set` (`scan --artifact-set`'s own CLI entry point)
+  has its own pre-flight check, separate from `run_scan_set`'s — but it ran
+  only *after* `_resolve_artifact_set_paths()`/`discover_artifact_set()` had
+  already traversed a directory and statted/format-validated every explicit
+  member. An invalid member's own error could therefore mask the request's
+  intended `PlanningError`/usage error, and a mismatched request paid for
+  real discovery work before `run_scan_set`'s own (already-fixed) check
+  rejected it anyway. Fixed by moving the check to the very top of
+  `_run_artifact_set`, before any discovery work starts — every value the
+  check needs (`depth`, `build_info`, `build_targets`) is already a raw
+  function parameter, so no reordering of the rest of the function was
+  needed. `tests/test_bazel_root_targets_scan.py::
+  test_scan_cli_artifact_set_rejects_bazel_scoping_mismatch_before_discovery`
+  pins it, the CLI-level sibling of the eighth round's own
+  `test_run_scan_set_rejects_bazel_scoping_mismatch_before_discovery`.
+  **An eleventh review round found the ninth round's own fix (the
+  `resolved_collect_mode` override) was itself incomplete.** Even a genuine
+  `"off"` collect mode — whether from raw `depth="binary"` or from an
+  explicit `resolved_collect_mode="off"` override — does not by itself mean
+  `build_info` is never consulted: the L2 seed's own independent
+  header-seeding pass (`_seeded_includes_and_compile_context`/
+  `collect_inline_pack`) still runs whenever real headers are present,
+  regardless of collect mode — the identical class of gap the seventh round
+  above already fixed for `scan_bazel_scoping_failure` (`headers or
+  collection_for_ci_mode(...)[1]`), just not yet ported to `dump`/`compare`'s
+  own check. Fixed by adding the side's raw `headers` to `SidePlan` and
+  exempting `"off"` only when there is no header-seeding consumer:
+  `depth="binary"` still clears headers to empty independent of any
+  override (`service_compare_evidence._headers` keys off raw depth alone),
+  so that clearing is folded into the effective-headers computation rather
+  than re-derived from collect mode. `tests/test_analysis_plan.py::
+  TestBazelBuildTargetScoping::test_resolved_collect_mode_off_does_not_exempt_real_headers`
+  pins the fixed case (an explicit `"off"` override with real headers and a
+  scoped pre-captured Bazel jsonproto); its sibling
+  `test_resolved_collect_mode_off_with_no_headers_stays_exempt` pins that the
+  headers check doesn't over-reject a genuinely headerless request.
+  **A twelfth review round found the eleventh round's own fix introduced a
+  new false positive it didn't have before.** The no-override branch only
+  ever equated collect mode `"off"` with `depth="binary"` -- but
+  `depth="headers"` resolves to `"off"` too (`_resolve_depth_collect_mode`'s
+  mapping: only `"build"`/`"source"` resolve to something else). A
+  headerless `dump`/`compare` request at `depth="headers"` combined with an
+  explicit `build_targets` and a scoped pre-captured Bazel jsonproto was
+  therefore wrongly rejected: neither `embed_build_source` (collect mode
+  `"off"`) nor the L2 seed (nothing to seed, no real headers) would ever
+  have consulted `build_info`, yet the planner still raised `PlanningError`.
+  Fixed by adding `_depth_implied_collect_mode()` -- mirroring
+  `service_compare_evidence._resolve_depth_collect_mode`'s explicit-depth
+  mapping (duplicated, not imported, for the same leaf-module reason that
+  function's own docstring states) -- and using it for any explicit depth
+  in the no-override branch, rather than special-casing `"binary"` alone.
+  `depth="headers"` with *real* headers still correctly stays rejected,
+  since only `"binary"` clears headers to empty before this check runs;
+  `"headers"` keeps them, so the L2 seed still runs.
+  `tests/test_analysis_plan.py::TestBazelBuildTargetScoping::
+  test_headerless_depth_headers_is_exempt` pins the fixed case; its sibling
+  `test_depth_headers_with_real_headers_is_still_rejected` pins that real
+  headers at that same depth still correctly reject. The pre-existing
+  `test_other_depths_still_rejected_alongside_binary` was narrowed from
+  `("headers", "build", "source")` to `("build", "source")` accordingly --
+  `"headers"` alone (headerless) is no longer part of the always-rejected
+  set, which is the corrected behavior this round establishes, not a
+  weakening of the test.
+  Historical analysis retained below for the record.
+  `BazelAdapter.collect()`'s `self.targets` scoping is applied
   in exactly two places: gating whether a *live* `bazel query` subprocess
   runs at all (`_resolve`/`_run_bazel`, only reachable when `workspace` is
   given and no pre-captured `aquery=`/`cquery=` path was supplied), and

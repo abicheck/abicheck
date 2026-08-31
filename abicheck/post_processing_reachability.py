@@ -335,7 +335,9 @@ class MarkReachability:
             # private-header decl would still count there) -- require the
             # walk's own actual seed predicate to find a match (Codex
             # review, two passes).
-            from .buildsource.source_graph import is_consumer_compiled_public_entry
+            from .buildsource.source_graph_query import (
+                is_consumer_compiled_public_entry,
+            )
 
             node_by_id = {n.id: n for n in graph.nodes}
             exported_decls = {

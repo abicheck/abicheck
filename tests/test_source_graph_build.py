@@ -33,16 +33,13 @@ from abicheck.buildsource.source_abi import (
     SourceEntity,
     SourceLocation,
 )
-from abicheck.buildsource.source_graph import (
-    EDGE_KINDS,
-    NODE_KINDS,
-    GraphEdge,
-    GraphNode,
-    SourceGraphSummary,
-    build_source_graph,
+from abicheck.buildsource.source_graph_build import build_source_graph
+from abicheck.buildsource.source_graph_build_source_abi import (
     fold_source_edges,
     mark_source_edges_extractor_coverage,
 )
+from abicheck.model.graph_facts import GraphEdge, GraphNode
+from abicheck.model.source_graph import EDGE_KINDS, NODE_KINDS, SourceGraphSummary
 
 
 def _sample_build() -> BuildEvidence:

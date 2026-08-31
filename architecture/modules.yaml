@@ -26,6 +26,7 @@
         "abicheck/evidence_depth.py",
         "abicheck/fact_provenance.py",
         "abicheck/name_classification.py",
+        "abicheck/report_side_facts.py",
         "abicheck/stable_abi_data.py",
         "abicheck/errors.py"
       ]
@@ -62,6 +63,7 @@
         "abicheck/buildsource/clang_ast_run.py",
         "abicheck/buildsource/comdat_groups.py",
         "abicheck/buildsource/compiler_record.py",
+        "abicheck/buildsource/ctor_export_match.py",
         "abicheck/buildsource/embed.py",
         "abicheck/buildsource/export_accounting.py",
         "abicheck/buildsource/extractor.py",
@@ -170,7 +172,6 @@
         "abicheck/buildsource/graph_reconcile.py",
         "abicheck/buildsource/source_diff.py",
         "abicheck/buildsource/source_graph_compare.py",
-        "abicheck/buildsource/source_graph_query.py",
         "abicheck/confidence.py",
         "abicheck/detector_registry.py",
         "abicheck/diff_abi_tags.py",
@@ -241,6 +242,7 @@
         "abicheck/export_surface.py",
         "abicheck/idioms.py",
         "abicheck/pattern_verdicts.py",
+        "abicheck/policy_file.py",
         "abicheck/post_processing.py",
         "abicheck/post_processing_context.py",
         "abicheck/post_processing_reachability.py",

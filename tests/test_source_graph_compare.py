@@ -31,11 +31,8 @@ from abicheck.buildsource.source_abi import (
     SourceEntity,
     SourceLocation,
 )
-from abicheck.buildsource.source_graph import (
-    build_source_graph,
-    diff_source_graph,
-    localize_symbol,
-)
+from abicheck.buildsource.source_graph_build import build_source_graph
+from abicheck.buildsource.source_graph_compare import diff_source_graph, localize_symbol
 
 
 def _sample_build() -> BuildEvidence:

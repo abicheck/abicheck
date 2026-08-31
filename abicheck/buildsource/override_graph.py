@@ -52,7 +52,7 @@ Architecture mirrors ``call_graph.py``/``type_graph.py`` deliberately:
   Only exercised on the ``integration`` lane; a missing compiler degrades
   gracefully.
 - :func:`augment_graph_with_overrides` folds the resulting edges into a
-  :class:`~abicheck.buildsource.source_graph.SourceGraphSummary`.
+  :class:`~abicheck.model.source_graph.SourceGraphSummary`.
 
 Deliberately scoped OUT of this first slice (documented gaps, not silent
 omissions):
@@ -127,20 +127,20 @@ from functools import partial
 from typing import TYPE_CHECKING, Any
 
 from .. import deadline
-from .clang_ast_run import run_clang_ast_dump
-from .source_graph import (
+from ..model.graph_facts import (
     CONF_HIGH,
     CONF_REDUCED,
     GraphEdge,
     GraphNode,
     _decl_node_id,
-    function_decl_identity,
 )
+from ..model.source_graph import function_decl_identity
+from .clang_ast_run import run_clang_ast_dump
 from .type_graph import EDGE_TYPE_INHERITS, _normalize_mangled, parse_clang_ast_types
 
 if TYPE_CHECKING:
+    from ..model.source_graph import SourceGraphSummary
     from .build_evidence import BuildEvidence, CompileUnit as BuildEvidenceCompileUnit
-    from .source_graph import SourceGraphSummary
 
 # ── edge kind (reserved by source_graph.EDGE_KINDS) ────────────────────────
 EDGE_METHOD_POSSIBLE_OVERRIDE = "METHOD_POSSIBLE_OVERRIDE"
@@ -663,7 +663,7 @@ def augment_graph_with_overrides(
     # stamped directly on the owning class's own record_type node, which
     # (unlike a bare, uncalled destructor's own decl:// node) always exists
     # once type_graph.py has walked the class at all.
-    from .source_graph import _type_node_id
+    from ..model.graph_facts import _type_node_id
 
     for owner in virtual_destructor_owners:
         type_id = _type_node_id(owner)

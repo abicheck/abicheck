@@ -78,7 +78,7 @@ so this is a low-cost simplification, not a hidden accuracy gap the way
 skipping type layouts would be. `service._attach_header_graph` (G29 Phase
 A, always-on by default -- `_HEADER_GRAPH_ENABLED`) separately embeds a
 semantic header-only graph (`snap.build_source.source_graph`, a
-`buildsource.source_graph.SourceGraphSummary`) built from the *same*
+`model.source_graph.SourceGraphSummary`) built from the *same*
 unscoped header AST; this module leaves it untouched for the same reasons
 the previous (now-superseded) public-surface design documented: a correct
 filter needs its own closure walk over `GraphNode`/`GraphEdge` (each

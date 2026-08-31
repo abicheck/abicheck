@@ -35,7 +35,7 @@ from __future__ import annotations
 from collections.abc import Callable, Collection
 from typing import Any
 
-from .source_graph import function_decl_identity
+from ..model.source_graph import function_decl_identity
 
 
 def index_value_decls(
@@ -55,7 +55,7 @@ def index_value_decls(
     own clang node id -> its ``SourceEntity``-compatible identity string (a
     mangled name, or the ``qualified_name#sha256:<type-hash>`` fallback),
     computed by
-    :func:`~abicheck.buildsource.source_graph.function_decl_identity` -- the
+    :func:`~abicheck.model.source_graph.function_decl_identity` -- the
     exact same computation ``call_graph._function_identity``/
     ``type_graph._var_decl_ident`` already use for their own ``decl://``
     node identity, so a resolved TEMPLATE_USES_DECL target lands on the

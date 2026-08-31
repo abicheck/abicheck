@@ -523,10 +523,12 @@ def resolve_dump_request_for_cli(request: DumpRequest) -> ResolvedDumpRequest:
     CLI's error contract.
 
     The Tier-2 pipeline signals a bad request as
-    :class:`~abicheck.errors.ValidationError`; a Click front end owes the user
-    a ``UsageError`` (exit 64) instead. Translated here, at the boundary,
-    rather than inside the pipeline — the same Tier-1/Tier-2 separation
-    ``embed_side_build_source`` observes in the other direction.
+    :class:`~abicheck.errors.ValidationError` or, since ADR-063 Phase 4's
+    pre-flight `AnalysisPlan` check, :class:`~abicheck.errors.PlanningError`;
+    a Click front end owes the user a ``UsageError`` (exit 64) for either
+    instead. Translated here, at the boundary, rather than inside the
+    pipeline — the same Tier-1/Tier-2 separation ``embed_side_build_source``
+    observes in the other direction.
 
     Worth being explicit about what this can newly reject on the ``--dry-run``
     path, since that path's own contract is "never raises on anything but a
@@ -545,12 +547,14 @@ def resolve_dump_request_for_cli(request: DumpRequest) -> ResolvedDumpRequest:
     (`IMPORT_CYCLE_ALLOWLIST` in `scripts/check_ai_readiness.py`), which
     `cli_buildsource` already is.
     """
-    from .errors import ValidationError
+    from .errors import PlanningError, ValidationError
     from .service_dump_pipeline import resolve_dump_request
 
     try:
         return resolve_dump_request(request)
-    except ValidationError as exc:
+    except (ValidationError, PlanningError) as exc:
+        # PlanningError (ADR-063 Phase 4) is a bad-input combination, the
+        # same usage-error contract as ValidationError.
         raise click.UsageError(str(exc)) from exc
 
 

@@ -19,9 +19,10 @@
 (``validate``/``show-effective``) are removed entirely — no aliases, no
 deprecation warnings. The structural strictness ``config validate`` used to
 provide as a separate, easy-to-skip step now lives in
-``BuildConfig.from_dict`` itself (``abicheck/buildsource/inline.py``), so it
-fires on every real ``dump``/``compare``/``scan`` config load. This module
-proves:
+``BuildConfig.from_dict`` itself (``abicheck/buildsource/build_config.py`` —
+split out of ``inline.py``, G38 Phase 15 file-split prerequisite; this test
+module moved with it), so it fires on every real ``dump``/``compare``/
+``scan`` config load. This module proves:
 
 * ``BuildConfig.from_dict`` raises ``ValueError`` for every structural
   problem (unknown top-level key, unknown block subkey, non-mapping block,
@@ -40,7 +41,7 @@ from pathlib import Path
 import pytest
 from click.testing import CliRunner
 
-from abicheck.buildsource.inline import BuildConfig
+from abicheck.buildsource.build_config import BuildConfig
 from abicheck.cli import main
 from abicheck.model import AbiSnapshot, Function, Visibility
 from abicheck.serialization import snapshot_to_json

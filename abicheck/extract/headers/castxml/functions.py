@@ -148,7 +148,7 @@ def ctor_or_dtor_visibility(
     default to PUBLIC — the same "declared public in a public header,
     without contrary evidence" principle already used for source-graph
     public-surface classification
-    (:data:`abicheck.buildsource.source_graph.PUBLIC_VISIBILITIES`).
+    (:data:`abicheck.buildsource.source_graph_query.PUBLIC_VISIBILITIES`).
     Compiler-generated implicit constructors/destructors (marked
     ``artificial="1"``) are excluded: they have no source declaration of
     their own to compare across versions, so promoting them would treat

@@ -9666,6 +9666,79 @@ sibling:
   location (mirroring the re-export shim `source_graph.py` already uses
   for its own split-out pieces), so every existing L5 caller is
   unaffected.
+
+  **Already landed independently, under a different name, before this
+  phase's own implementation began** — confirmed by reading
+  `abicheck/buildsource/CLAUDE.md`'s current module table and
+  `abicheck/model/graph_facts.py` directly, not assumed from this plan's
+  own stale text. ADR-061 Phase 5 item 2's own follow-up split
+  `buildsource/graph_facts.py` into three sibling `model/` modules rather
+  than the single `model/graph.py` this bullet names:
+  `model.graph_facts` (`GraphNode`/`GraphEdge`/`GraphFact`/`FactConflict`/
+  `merge_graph_facts`/`ensure_facts_and_resolve`/`register_fact`/
+  `edge_relation_key`/`edge_occurrence_id`), `model.graph_identity` (node-id
+  construction/normalization), and `model.graph_vocabulary` (the
+  `NODE_KINDS`/`EDGE_KINDS`-family constant blocks) — `buildsource/
+  graph_facts.py` is now itself the back-compat re-export shim this
+  bullet asked for, already exporting every original name (`X as X`)
+  rather than only what a repo-local usage scan could prove was called.
+  `GraphNode.id: str`/`label: str = ""` match this section's own later
+  design exactly (confirmed by reading the dataclass directly). This
+  bullet's own remaining, still-open work is therefore not the relocation
+  itself but picking `model.graph_facts` (the real current location) over
+  the stale `model.graph` name wherever a later slice writes
+  `from abicheck.model.graph import ...`.
+
+  **Applies to every other `model/graph.py` reference below in this same
+  Phase 3 section, not only this bullet's own text** (Codex review on
+  PR #958, catching that the correction above fixed only the one place it
+  was written and left the phase's own "Files" checklist and Phase 10's
+  cleanup-list row still instructing a future implementer to create a new
+  `model/graph.py` and migrate callers to it — actionable checklist items
+  a reader follows literally, unlike this bullet's own prose). Read every
+  `model/graph.py` elsewhere in this Phase 3 section, its own "Files" list,
+  and Phase 10's cleanup list below as `model.graph_facts` (for
+  `GraphNode`/`GraphEdge`/`GraphFact`/`FactConflict`/`merge_graph_facts`/
+  `ensure_facts_and_resolve`/`register_fact`/`edge_relation_key`/
+  `edge_occurrence_id`), `model.graph_identity` (node-id construction/
+  normalization, including `_normalize_if_decl_or_type`), or
+  `model.graph_vocabulary` (`NODE_KINDS`/`EDGE_KINDS`-family constants) as
+  the symbol requires — three already-existing modules, not one new file
+  to create. The "Files" section's own `abicheck/model/graph.py (new...)`
+  entry and its full-dependency-closure reasoning (which symbols must move
+  together) still correctly states what a from-scratch relocation would
+  need; only "new" and the single-file target are stale — every symbol it
+  names already lives in one of the three modules above, so nothing there
+  needs moving again. Phase 10's cleanup-list row is even further stale in
+  a second way: it describes `buildsource/graph_facts.py` as still holding
+  "the original, in-place copies," but that file is already the trimmed
+  re-export shim (confirmed above) — its own residual is narrower than
+  written, just "every real importer of the shim migrates to
+  `model.graph_facts`/`graph_identity`/`graph_vocabulary` directly." **Not
+  the "five named readers" the very next, separate row lists** (Codex
+  review on PR #958, catching a conflation in an earlier revision of this
+  same correction) — those five (`internal_leak.py`, `buildsource/
+  crosscheck.py`, `buildsource/evidence_report.py`, `evidence_depth.py`,
+  `cli_graph.py`) are that other row's own `BuildSourcePack.source_graph`
+  →`AbiSnapshot.surface_graph` migration, a different attribute path on a
+  different object; this row's own real importer set was never enumerated
+  in the original text. **Confirmed here by resolving every relative
+  `ImportFrom` node's actual target module via a real AST walk, not a
+  text grep for the string `graph_facts`** — a second review round on
+  this same commit correctly caught that the grep-based first attempt
+  counted a bare `from .graph_facts import ...` in `model/source_graph.py`/
+  `model/entity_resolver.py`/`model/entity_identity.py` as the shim
+  (Python resolves that relative import within `model/` itself, to the
+  already-canonical `model.graph_facts` — no migration needed), likewise
+  `buildsource/source_graph_findings.py`'s `from ..model.graph_facts
+  import GraphEdge` (already canonical), and a bare code-comment mention
+  in `checker_types.py` with no import at all. The real, resolved set is
+  ten files: `buildsource/archive_graph.py`, `buildsource/callback_graph.py`,
+  `buildsource/graph_impact.py`, `buildsource/macro_graph.py`,
+  `buildsource/template_graph.py`, `buildsource/type_graph.py`,
+  `buildsource/virtual_dispatch_graph.py`, `impact/consumer_graph.py`,
+  `impact/use_cases.py`, and `internal_leak.py` (also one of the *other*
+  row's five, since one module can need both migrations independently).
 - **A third, pre-existing graph-shaped module already answers a
   public-surface question independently, and a first draft of this phase
   missed it entirely — `abicheck/surface_graph.py`'s `SurfaceGraph`/
@@ -9916,8 +9989,28 @@ sibling:
   it is injective *on identity*, never on full structure) — used by both
   `model/graph.py`'s `GraphNode.id` for a `declaration`/`type` node and any
   other consumer that needs a collision-free, equality-consistent key
-  (`kind`/`leaf_name`/`extra` plus each segment's identity-only fields),
-  while `storage/entity_ids.py`'s `to_dto()` stays the separate,
+  (`kind`/`leaf_name`/`extra` plus each segment's identity-only fields).
+  **Already landed, ahead of this phase, under a different name** —
+  Phase 2's own `resolve_change_identity`-consumer slice added exactly
+  this contract as `EntityId.key` (a property, not a free function; a
+  local `_packed`/`_segment_key` length-prefixing scheme, independently
+  arriving at the identical "exclude every `compare=False` payload field"
+  rule this paragraph states), confirmed by reading `model/identity.py`
+  directly: it already excludes `Record.access` and is built from
+  `scope`/`kind.value`/`leaf_name`/`extra` only. **Superseded by Phase 3's
+  actual landing, corrected here rather than left to mislead a future
+  reader (Codex review, PR #958):** the internal-linkage `static`
+  collision this section raises next is real, so `GraphNode.id` for a
+  `declaration`/`type` node does *not* call `entity_id.key` directly —
+  `model/occurrence.py`'s landed `canonical_key(EntityId | OccurrenceId)`
+  overload is what `compare/surface_graph.py`'s node-id construction
+  actually calls, with an `OccurrenceId`, exactly as the "still collides
+  for a real, ordinary case" paragraph below this one specifies and
+  requires. `EntityId.key` alone stays the everyday case (an empty
+  disambiguator reduces `canonical_key(occurrence_id)` to it), but the
+  wrapper this paragraph once called "redundant" is the landed, correct
+  design, not a mistake to avoid. `storage/entity_ids.py`'s `to_dto()`
+  stays the separate,
   intentionally fuller encoding for its own persistence purpose —
   `GraphNode`'s own pre-existing `label: str` field (already documented as
   "human-readable name/path") is where the flattened, lossy `qualified_name`
@@ -11095,6 +11188,177 @@ adapters and the Action remain out of this phase's direct scope for the
 reasons stated above — named explicitly rather than left for a future
 reader to rediscover by re-checking D1's adapter list against the Files
 section.
+
+**Landed (first slice) — one of the two named gaps closed, the other named
+out of scope, not silently dropped.** `abicheck/workflows/plan.py`
+(`AnalysisPlan`/`SidePlan`/`PlanningFailure`/`AnalysisPlanner`) and a new
+`PlanningError` in `abicheck/errors.py`. `AnalysisPlanner.resolve()` is
+wired into `service_compare_pipeline.resolve_compare_request` and
+`service_dump_pipeline.resolve_dump_request` immediately after
+`request.validate()`, before either function invokes a header-AST backend
+or a build-info adapter — the pre-extraction point this phase's own Design
+section requires. The `--build-target` + pre-captured Bazel
+`aquery`/`cquery` gap is closed as "option 2" from its own known-gap entry
+(reject, don't silently scope-miss): `_check_bazel_target_scoping` fires
+when a side's `build_targets` is non-empty and its `build_info` sniffs as a
+Bazel jsonproto (`buildsource.inline.sniff_build_info_format`), and does
+**not** fire for the documented safe workaround (a live `bazel query`, no
+pre-captured file) or for an ordinary, non-Bazel `build_info`. Every
+`service.run_compare()`/`run_compare_request()` caller — the release/bundle
+fan-out's `_run_compare_pair` included, per this phase's own Files-section
+correction above — gets this guarantee for free through the shared
+resolver; `tests/test_analysis_plan.py`'s
+`test_reaches_through_the_shared_resolve_compare_request_chokepoint` proves
+it at that one chokepoint rather than needing a separate release-fan-out
+fixture, since `service.run_compare`'s own keyword surface has no
+parameter to even express `build_targets`/a Bazel `build_info` in the
+first place.
+
+**The known-gap entry names both `dump` and `scan`; both are now closed,
+not only the `resolve_compare_request`/`resolve_dump_request` half.**
+`scan --against`'s own candidate resolution (`scan_engine._build_new_snapshot`)
+builds a raw `InputSpec` directly rather than a `CompareRequest`/
+`DumpRequest`, so it has no `AnalysisPlan` of its own to resolve through —
+checked against the real code rather than assumed closed by the
+`AnalysisPlanner` wiring alone. The check itself is factored into a free
+function, `workflows.plan.bazel_target_scoping_failure(label, build_info,
+build_targets)`, which `_check_bazel_target_scoping` wraps for the
+`AnalysisPlanner` path and which `_build_new_snapshot` now calls directly.
+**Corrected after a first pass and two further Codex review rounds found
+problems with each fix in turn**: the first version raised `PlanningError`
+inside the existing `try`/`except AbicheckError` block, which maps every
+`AbicheckError` to `click.ClickException` — exit 1, not the exit-64 usage
+error this combination actually is (AGENTS.md: "64 = usage error ... applies
+across commands"). Fixed by raising `click.UsageError` directly at the point
+of detection instead: since `click.UsageError` is not an `AbicheckError`, it
+propagates straight past that `except` clause unmodified — no `PlanningError`
+intermediate, no second `except` clause, and (debt-no-growth is `no_growth`
+for this file) no added lines either. The *second* round found this check
+never even ran on `scan --dry-run`/`scan --artifact-set --dry-run`, both of
+which return their preview before `_build_new_snapshot` is ever called — a
+dry-run could claim success (single-binary: an "UNSCOPED"-but-informational
+estimate) for a request the real run then rejected. Fixed by running the
+identical `bazel_target_scoping_failure` check in `cli_scan.py` itself,
+before both dry-run renderers, raising the same `click.UsageError`.
+`tests/test_bazel_root_targets.py::test_scan_candidate_build_target_with_precaptured_aquery_raises_planning_error`
+pins the real-execution path; `tests/test_bazel_root_targets_scan.py`'s
+three new cases pin both dry-run shapes and the real-run parity case. The
+baseline side of `scan --against` was checked and found not to reach the
+Bazel adapter with `build_targets` at all (`--against` compares against an
+already-produced baseline, not a second live build), so it needed no
+equivalent call. **The *third* round found the "no `PlanningError`
+intermediate" shortcut from the first fix was itself wrong**: `_build_new_
+snapshot` also backs the typed `run_scan(ScanRequest(...))` API (`service_
+scan.run_scan`/`run_scan_set`), which has no Click context to catch a
+`click.UsageError` for — a library caller with no CLI in the picture would
+see a Click-framework exception leak out of a pure Python API, the same
+class of layering violation `PlanningError` exists to prevent for `dump`/
+`compare`. Fixed by raising `PlanningError` at the point of detection after
+all (moved to just *before* the `try`/`except AbicheckError` block, not
+inside it, so that pre-existing catch still can't recatch and remap it) and
+adding the missing translation at the one real CLI boundary: `cli_scan.py`'s
+`scan_cmd` now catches `PlanningError` around its `run_scan_core` call and
+raises `click.UsageError` there, mirroring the `cli_resolve.py`/
+`cli_buildsource.py` pattern `dump`/`compare` already use. (The
+`--artifact-set` path's own pre-flight `bazel_target_scoping_failure` call in
+`cli_scan.py` — a second, CLI-layer-only check that runs before `run_scan_set`
+— needed no change: it already raised `click.UsageError` directly from CLI
+code, never from the engine, and `run_scan_set`'s own `except (ArtifactSetError,
+ValueError)` around `run_scan_set(req)` already catches a `PlanningError`
+that reaches it too, since `PlanningError` is also a plain `ValueError`
+subclass.) This closed the debt-no-growth line-count budget in the same
+zero-net-growth way as the first fix: the check moved out of the `try` block
+line-for-line, with only the raised exception's name changing.
+`tests/test_bazel_root_targets.py`'s same test now asserts `PlanningError`
+instead of `click.UsageError` for the direct engine-level call, and a new
+`tests/test_bazel_root_targets_scan.py::
+test_run_scan_typed_api_raises_planning_error_not_click_usage_error` pins the
+typed-API guarantee end to end (`run_scan(ScanRequest(...))` raises
+`PlanningError`, never `click.UsageError`), alongside the pre-existing
+`test_scan_cli_real_run_rejects_the_identical_combination` pinning that the
+CLI path still exits 64.
+
+**A *fourth* round found the third fix's own placement inside
+`_build_new_snapshot` was still too late.** `run_scan_core` runs its S3
+pattern scan (`scan_files`) and points-of-interest build
+(`_build_scan_poi`, which reads both sides' L0 export tables) *before* ever
+calling `_build_new_snapshot` — real, if cheap, work a typed `run_scan()`/
+`run_scan_subprocess()` caller (no `cli_scan.py` pre-flight ahead of it) paid
+for on every rejected request. Fixed by moving the check to the very top of
+`run_scan_core`, before that work, guarded on `collection_for_ci_mode(
+collect_mode)[1]` being non-empty — the same condition, restated against the
+already-resolved `collect_mode` rather than a raw depth string, that
+`workflows.plan._check_bazel_target_scoping` uses for its own
+`depth="binary"` exemption. The check was then *removed* from
+`_build_new_snapshot` rather than left as a second copy: `run_scan_core` is
+its only production caller, so the check had become pure duplication once
+both were correctly guarded — and removing it caught a real, independent bug
+in the process. **The old `_build_new_snapshot`-only check had no
+`depth=binary` exemption at all**: the third round's own reasoning ("scan's
+own path was already immune") verified only that `cli_scan.py`'s
+`_normalize_depth_inputs` prunes `build_info` to `None` at that depth for the
+*CLI*, but never checked `service_scan.run_scan`, which does not prune it —
+so a typed `ScanRequest(depth="binary", build_info=<precaptured jsonproto>,
+build_targets=(...))` was wrongly rejected by the unguarded check, the exact
+false-positive class the `depth=binary` exemption exists to prevent.
+`tests/test_bazel_root_targets_scan.py` gained two more cases:
+`test_run_scan_rejects_before_wasted_pattern_scan_and_poi_work` (monkeypatches
+`scan_files` to raise if called, proving the check now runs first) and
+`test_run_scan_depth_binary_exempts_the_early_bazel_scoping_check`
+(monkeypatches `bazel_target_scoping_failure` itself to raise if called,
+proving the moved check's exemption actually fires rather than merely
+succeeding for some unrelated reason). `tests/test_bazel_root_targets.py`'s
+own scan-side test was retired to a comment pointing at these three, since
+`_build_new_snapshot` no longer performs the check that test exercised.
+`scan_engine.py`'s `no_growth` debt baseline moved 1483 → 1495 (`architecture/
+debt.yaml`'s own entry has the accounting) — the first fix's "no `PlanningError`
+intermediate" zero-cost trick doesn't apply here, since removing the old
+check's two lines is smaller than the ~14 lines the new guarded check plus
+its two module-level imports needed net; a smaller diff that still states
+both the check and why the old copy was removed was not found.
+
+**Not landed in this slice: the second named scenario, and the
+`cli-contract`/`engine-cli-boundary` gate widening.** Re-checked against
+the real code (not assumed from this section's own prose), "a `-H` flag
+accepted by a collect mode that cannot use it" does not correspond to any
+isolated, currently-open known-gap entry — the one real combination
+matching that description (`--depth binary` with an explicit header list,
+which silently clears the headers to `[]`) is intentional, already-shipped,
+reviewed behavior with its own dedicated regression tests
+(`tests/test_cli_scan.py::test_depth_binary_clears_headers_in_scan`,
+`tests/test_service_unit.py::test_depth_binary_clears_headers`,
+`tests/test_typed_dump_request.py`, `tests/test_depth_vocabulary.py`).
+Turning it into a hard `PlanningError` would be an unreviewed behavior
+change to already-tested surface, not a same-phase fix for a documented
+silent failure — named here explicitly, per this file's own governing
+"acknowledged gap over risky reactive patch" convention, rather than
+forced to fit or silently left for a future reader to rediscover. A
+genuinely new, currently-silent "input accepted by a collect mode that
+cannot use it" case would be `AnalysisPlanner`'s second check, whenever one
+is found. The `scripts/check_ai_readiness.py` `cli-contract`/
+`engine-cli-boundary` gate widening this phase's own Files section names is
+also not attempted in this slice: both functions this phase changed are
+already the sole callers `AnalysisPlanner.resolve()` needs to reach through,
+so there is no second, independent call site for either gate to newly
+police yet — a future phase adding one should widen them then, not this
+one preemptively.
+
+**Also not landed: `dump --dry-run`/`compare --dry-run`/`scan --dry-run`
+parity for a `.abicheck.yml`-only (no `--build-target` flag) root-target
+scope, a fourth Codex review round.** The known-gap entry's own new
+paragraph (see `docs/contribute/known-gaps.md`) has the full account: none
+of the three commands' dry-run renderers discover `.abicheck.yml` the way
+`embed_build_source` does at real-execution time, and `AnalysisPlanner`
+itself structurally cannot see this value — `DumpRequest`/`CompareRequest`/
+`InputSpec` carry no `build_config` field at all, so there is no seam to
+resolve it through even in principle. Closing it needs either a real API
+addition (a `build_config` field threaded onto the typed request objects)
+or an independent, duplicated slice of `embed_build_source`'s own
+discovery-then-merge logic inside three separate dry-run renderers, each
+needing the same depth-binary exemption `_check_bazel_target_scoping`
+applies — named explicitly as out of scope for this slice, per the same
+governing convention the paragraph above already invokes, rather than
+patched reactively under continued review pressure.
 
 ---
 

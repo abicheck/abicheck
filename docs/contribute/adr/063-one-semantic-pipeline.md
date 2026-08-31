@@ -149,7 +149,48 @@
   already calls `service.compare_snapshots()` (not `checker.compare()`
   directly, as an earlier plan draft assumed), which is what let slice 11
   wire both Tier-2 production paths from a single change.
-- **Phases 4–10** are still unimplemented design text.
+- **Phase 4** (`AnalysisPlan`: pre-flight resolution, not mid-run discovery)
+  has landed `abicheck/workflows/plan.py`'s `AnalysisPlan`/`SidePlan`/
+  `AnalysisPlanner`, and a new `PlanningError` (`abicheck/errors.py`).
+  `AnalysisPlanner.resolve()` runs inside `resolve_compare_request`
+  (`service_compare_pipeline.py`) and `resolve_dump_request`
+  (`service_dump_pipeline.py`) — the one chokepoint every front end already
+  resolves a request through — before either function invokes a header-AST
+  backend or a build-info adapter. **One of this decision's two named
+  scenarios is closed; the other is named explicitly as out of scope for
+  this phase, not silently dropped.** The `--build-target` + pre-captured
+  Bazel `aquery`/`cquery` gap (`docs/contribute/known-gaps.md`) is real,
+  isolated, and previously undiagnosed at the request level — it now raises
+  `PlanningError` with the documented workaround in the message ("option 2"
+  from that known-gap entry). The known-gap entry names both `dump` and
+  `scan`; `scan --against`'s own candidate resolution
+  (`scan_engine._build_new_snapshot`) has no `CompareRequest`/`DumpRequest`
+  of its own to resolve through `AnalysisPlanner`, so it calls the
+  underlying check directly (`workflows.plan.bazel_target_scoping_failure`,
+  the free function `_check_bazel_target_scoping` wraps for the
+  `AnalysisPlanner` path) rather than being left as the one place this gap
+  stayed open — both halves of the named gap are closed, not only the
+  `resolve_compare_request`/`resolve_dump_request` half. This decision's second illustrative scenario,
+  "a `-H` flag accepted by a collect mode that cannot use it," does not
+  correspond to any isolated, currently-open known-gap entry once checked
+  against the real code: the one combination that literally matches it
+  (`--depth binary` combined with an explicit header list, which silently
+  clears the headers) is intentional, already-shipped, reviewed behavior
+  with its own dedicated regression tests — turning it into a hard
+  `PlanningError` would be an unreviewed behavior change to already-tested
+  surface, not a same-phase fix for a documented silent failure. See
+  `abicheck/workflows/plan.py`'s own module docstring for the full
+  reasoning and what a genuine second check would need. `AnalysisPlan`
+  itself is scoped exactly as D4 states: it carries each side's *requested*
+  toolchain/compile-context inputs, never the resolved P0.3 L3→L2
+  compile-context fold's output, and no resolved policy/pack/contract
+  state. The `scripts/check_ai_readiness.py` `cli-contract`/
+  `engine-cli-boundary` gates were not widened in this slice — every
+  `resolve_compare_request`/`resolve_dump_request` caller already reaches
+  `AnalysisPlanner.resolve()` through the two functions this phase changed
+  directly, so there is no second call site for those gates to newly
+  police yet; a future phase adding one should widen them then.
+- **Phases 5–10** are still unimplemented design text.
 
 See the [implementation plan](../plans/one-semantic-pipeline.md) for the
 full phase-by-phase state, including every slice's own "Landed"/"What this
@@ -611,13 +652,18 @@ reconstruction of the same relationships from the flat snapshot — closing
 the class of bugs AGENTS.md documents under the namespace-collision and
 partial-qualification findings in `type_reachability.py`.
 
-**This graph is not a new primitive.** `buildsource.graph_facts.
-GraphNode`/`GraphEdge`/`merge_graph_facts` (ADR-031 D2, ADR-046 D1/D2)
-already is exactly the producer-agnostic node/edge/evidence-merge
-primitive this decision needs — today used only to build the optional L5
-source/build-evidence graph. D5 relocates that primitive to `model/graph.py`
-(ADR-061's own task-routing table already names `model/` as owning "an ABI
-entity/value shared across stages") and builds the public-surface graph as
+**This graph is not a new primitive.** `GraphNode`/`GraphEdge`/
+`merge_graph_facts` (ADR-031 D2, ADR-046 D1/D2) — relocated by an unrelated
+ADR-061 Phase 5 migration to `model.graph_facts`/`graph_identity`/
+`graph_vocabulary`, with `buildsource/graph_facts.py` now a back-compat
+re-export shim (Status note above) — already is exactly the
+producer-agnostic node/edge/evidence-merge primitive this decision needs,
+today used to build the optional L5 source/build-evidence graph and,
+independently, `impact/consumer_graph.py`'s/`impact/use_cases.py`'s own
+consumer-impact graph (CodeRabbit review, PR #958). D5
+reuses that already-relocated primitive directly (ADR-061's own
+task-routing table already names `model/` as owning "an ABI entity/value
+shared across stages") and builds the public-surface graph as
 a second set of node/edge *kinds* over the same primitive, available
 unconditionally rather than gated on L3-L5 evidence — not a second
 dataclass hierarchy. A first draft of this decision proposed exactly such
@@ -629,13 +675,13 @@ Building the graph and deciding relevance from it are two different
 responsibilities under ADR-061's own task-routing table ("match... a raw
 change" vs. "decide relevance"): the public-surface graph *builder* —
 the code that walks a snapshot and populates node/edge instances of the
-shared `model/graph.py` primitive D5 already relocates above — lands in
-`compare/` (a reconciliation of raw facts, not a policy decision; **not
-the shared `GraphNode`/`GraphEdge`/`merge_graph_facts` primitive itself,
-which stays in `model/graph.py` per the relocation two paragraphs above —
-a first draft of this sentence said "the graph substrate lands in
-`compare/`," contradicting that same relocation within this decision's
-own text**), and the relevance
+shared `model.graph_facts`/`graph_identity`/`graph_vocabulary` primitive
+D5 reuses above — lands in `compare/` (a reconciliation of raw facts, not
+a policy decision; **not the shared `GraphNode`/`GraphEdge`/
+`merge_graph_facts` primitive itself, which stays under `model.graph_facts`
+per the relocation two paragraphs above — a first draft of this sentence
+said "the graph substrate lands in `compare/`," contradicting that same
+relocation within this decision's own text**), and the relevance
 query itself — what `compute_public_surface()` actually decides — lands in
 `policy/`, which may import from `compare/` under ADR-061's fixed
 dependency direction. D5 does not move a relevance decision into
