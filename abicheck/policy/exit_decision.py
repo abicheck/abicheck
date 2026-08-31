@@ -335,6 +335,9 @@ def resolve_exit_decision(
     analysis_assurance_contribution: int = 0,
     crosscheck_promotion_contribution: int = 0,
     operational_error_contribution: int = 0,
+    evidence_contract_error_contribution: int = 0,
+    budget_overflow_contribution: int = 0,
+    not_comparable_contribution: int = 0,
     compatibility_reason: ExitReason = ExitReason.COMPATIBILITY_GATE,
 ) -> ExitDecision:
     """Fold the axis contributions below into one explainable decision.
@@ -377,6 +380,16 @@ def resolve_exit_decision(
     `is_operational_error` boolean) hid a real, independently-computed
     compatibility-gate finding whenever both happened to tie (Codex
     review, fresh evidence).
+    *evidence_contract_error_contribution*/*budget_overflow_contribution*/
+    *not_comparable_contribution* default to ``0`` (every caller but
+    ``buildsource.check_report._neutralize_gate``, which preserves
+    whichever single one of these "the comparison never completed" axes a
+    report's own pre-existing decision already carried, alongside
+    *operational_error_contribution* -- ADR-064's ``resolve_scan_exit_
+    decision`` treats them as mutually exclusive abort paths, so at most
+    one is ever nonzero on a real persisted decision; folded here the same
+    tie-inclusive way as every other axis purely so a caller preserving one
+    does not have to duplicate this function's own fold logic).
     """
     contributions = {
         compatibility_reason: compatibility_contribution,
@@ -384,6 +397,9 @@ def resolve_exit_decision(
         ExitReason.ANALYSIS_ASSURANCE: analysis_assurance_contribution,
         ExitReason.PROMOTED_CROSSCHECK: crosscheck_promotion_contribution,
         ExitReason.OPERATIONAL_ERROR: operational_error_contribution,
+        ExitReason.EVIDENCE_CONTRACT_ERROR: evidence_contract_error_contribution,
+        ExitReason.BUDGET_OVERFLOW: budget_overflow_contribution,
+        ExitReason.NOT_COMPARABLE: not_comparable_contribution,
     }
     code = max(contributions.values())
     if code == 0:
@@ -402,6 +418,9 @@ def resolve_exit_decision(
         analysis_assurance_contribution=analysis_assurance_contribution,
         crosscheck_promotion_contribution=crosscheck_promotion_contribution,
         operational_error_contribution=operational_error_contribution,
+        evidence_contract_error_contribution=evidence_contract_error_contribution,
+        budget_overflow_contribution=budget_overflow_contribution,
+        not_comparable_contribution=not_comparable_contribution,
     )
 
 

@@ -364,24 +364,31 @@ def _neutralize_gate(report: dict[str, Any]) -> None:
         # conditionally rewritten: advisory mode means every *deferrable*
         # axis gates nothing, so the persisted explanation has to say so
         # outright rather than being left to disagree with the axes it
-        # summarizes. `operational_error_contribution` is carried over
-        # rather than zeroed with the rest (Codex review, fresh evidence):
-        # `final_exit_code`'s own docstring states operational errors fail
-        # every gate mode including `advisory`, so wiping this axis here
-        # would make the persisted `exit.code` claim a clean pass while the
-        # job's real exit code still fails.
+        # summarizes. The four "comparison never completed" axes --
+        # operational_error/evidence_contract_error/budget_overflow/
+        # not_comparable_contribution (`_classify_verdict` treats those
+        # verdicts identically to an operational error; mutually exclusive
+        # per `resolve_scan_exit_decision`'s own docstring, so at most one
+        # is ever nonzero) -- are carried over, not zeroed with the rest
+        # (Codex review, fresh evidence, two rounds: round one only kept
+        # `operational_error_contribution`, leaving the same "exit.code: 0
+        # but the job still fails" gap for `NOT_COMPARABLE`). Every one of
+        # these fails every gate mode per `final_exit_code`, so zeroing any
+        # would make `exit.code` claim a clean pass the job doesn't give.
         old_exit = node.get("exit")
         if isinstance(old_exit, Mapping):
             from ..exit_decision import resolve_exit_decision
 
-            operational_error_contribution = old_exit.get(
-                "operational_error_contribution", 0
-            )
-            if not isinstance(operational_error_contribution, int):
-                operational_error_contribution = 0
+            def _int_or_zero(key: str) -> int:
+                value = old_exit.get(key, 0)
+                return value if isinstance(value, int) else 0
+
             node["exit"] = resolve_exit_decision(
                 compatibility_contribution=0,
-                operational_error_contribution=operational_error_contribution,
+                operational_error_contribution=_int_or_zero("operational_error_contribution"),
+                evidence_contract_error_contribution=_int_or_zero("evidence_contract_error_contribution"),
+                budget_overflow_contribution=_int_or_zero("budget_overflow_contribution"),
+                not_comparable_contribution=_int_or_zero("not_comparable_contribution"),
             ).to_dict()
 
 

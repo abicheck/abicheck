@@ -13,7 +13,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""`check_report.augment_report`'s ADR-064 exit-block upgrade path.
+"""`check_report.augment_report`'s exit-block upgrade path.
 
 Split out of `check_report.py` (Codex review: that module sits at the
 800-line production cap; a new helper here couldn't otherwise fit) --
@@ -24,29 +24,41 @@ implementation.
 `_stamp_schema_version` bumps an older report's `report_schema_version`/
 `scan_schema_version` to the current value unconditionally, but `augment_
 report` only shallow-copies the report otherwise -- a report produced
-before ADR-064 stage 1b would then claim the current schema while its
-`exit` block(s) don't actually satisfy it. Two distinct gaps, both fixed
-here:
+before the current schema would then claim it while its `exit` block(s)
+don't actually satisfy it. Two distinct gaps, both fixed here:
 
-- A pre-2.47/1.22 report's `exit`/`diff.exit` is *present* but missing the
-  five new keys -- backfill them with their documented default (``0``).
+- An older report's `exit`/`diff.exit` is *present* but missing one or
+  more keys the current schema requires -- backfill every missing
+  `*_contribution` key with its documented default (``0``). The field set
+  is read from :class:`~abicheck.policy.exit_decision.ExitDecision` itself
+  rather than hand-copied here (Codex review, fresh evidence: an earlier
+  revision's own hand-copied five-field list already missed
+  `crosscheck_promotion_contribution`, added one schema version *before*
+  those five -- report_schema_version 2.41 introduced the block itself
+  with only the first three PR G1 fields, so a genuine 2.41 report is
+  missing six keys total, not five) -- deriving it from the dataclass
+  means a sixth future field can never be missed here again the same way.
 - A pre-1.22 `NOT_COMPARABLE` scan report's `diff` has *no* `exit` key at
-  all (`{"reason": ...}` was the whole shape before stage 1b wired that
-  outcome) -- synthesize the same decision `scan_engine.py` itself now
-  persists for it, rather than leaving the promised block absent.
+  all (`{"reason": ...}` was the whole shape before ADR-064 stage 1b wired
+  that outcome) -- synthesize the same decision `scan_engine.py` itself
+  now persists for it, rather than leaving the promised block absent.
 """
 
 from __future__ import annotations
 
+import dataclasses
 from typing import Any
 
-#: ADR-064 stage 1b's five new `exit`-block keys (report schema 2.47/1.22).
-_ADR_064_EXIT_FIELDS = (
-    "operational_error_contribution",
-    "evidence_contract_error_contribution",
-    "budget_overflow_contribution",
-    "not_comparable_contribution",
-    "removed_required_library_contribution",
+from ..policy.exit_decision import ExitDecision
+
+#: Every `exit`-block key an older report's block can be missing, derived
+#: from `ExitDecision`'s own fields rather than hand-copied (see this
+#: module's own docstring for why a hand-copied list already went stale
+#: once). `code`/`reasons` are excluded -- they are never independently
+#: backfilled as `0`; a block missing either of those is malformed, not
+#: merely old.
+_EXIT_CONTRIBUTION_FIELDS = tuple(
+    f.name for f in dataclasses.fields(ExitDecision) if f.name.endswith("_contribution")
 )
 
 
@@ -63,7 +75,7 @@ def backfill_exit_block_fields(out: dict[str, Any]) -> None:
     if isinstance(exit_block, dict):
         out["exit"] = {
             **exit_block,
-            **{f: exit_block.get(f, 0) for f in _ADR_064_EXIT_FIELDS},
+            **{f: exit_block.get(f, 0) for f in _EXIT_CONTRIBUTION_FIELDS},
         }
     diff = out.get("diff")
     if not isinstance(diff, dict):
@@ -74,7 +86,7 @@ def backfill_exit_block_fields(out: dict[str, Any]) -> None:
             **diff,
             "exit": {
                 **diff_exit,
-                **{f: diff_exit.get(f, 0) for f in _ADR_064_EXIT_FIELDS},
+                **{f: diff_exit.get(f, 0) for f in _EXIT_CONTRIBUTION_FIELDS},
             },
         }
     elif "exit" not in diff and "reason" in diff:

@@ -80,6 +80,30 @@ def test_older_nested_scan_exit_block_is_backfilled() -> None:
     assert "not_comparable_contribution" not in old_exit
 
 
+def test_a_pre_2_42_exit_block_also_backfills_crosscheck_promotion() -> None:
+    """Codex review, fresh evidence, second round: report_schema_version
+    2.41 introduced the `exit` block itself with only three fields
+    (`compatibility_contribution`/`contract_coverage_contribution`/
+    `analysis_assurance_contribution`) -- `crosscheck_promotion_
+    contribution` was schema 2.42's own addition, one version *before*
+    the five ADR-064 fields. A genuine 2.41 report is missing six keys
+    total, not five; backfilling only the five ADR-064 ones left this
+    sixth one silently absent from a document now claiming schema 2.47."""
+    old_exit = {
+        "code": 0,
+        "reasons": ["clean"],
+        "compatibility_contribution": 0,
+        "contract_coverage_contribution": 0,
+        "analysis_assurance_contribution": 0,
+    }
+    report = {"report_schema_version": "2.41", "verdict": "NO_CHANGE", "exit": old_exit}
+    out = _augment(report)
+    assert out["exit"]["crosscheck_promotion_contribution"] == 0
+    for field in _ADR_064_EXIT_FIELDS:
+        assert out["exit"][field] == 0
+    assert "crosscheck_promotion_contribution" not in old_exit
+
+
 def test_a_report_already_on_the_current_schema_is_left_alone() -> None:
     full_exit = {
         "code": 0,
@@ -154,3 +178,50 @@ def test_advisory_preserves_operational_error_contribution_in_the_exit_block() -
     assert exit_block["operational_error_contribution"] == 4
     assert exit_block["compatibility_contribution"] == 0
     assert "operational_error" in exit_block["reasons"]
+
+
+def test_advisory_preserves_not_comparable_contribution_in_a_scan_diff_exit_block() -> (
+    None
+):
+    """Codex review, fresh evidence, second round: `_classify_verdict`
+    treats a `NOT_COMPARABLE` scan verdict identically to a genuine
+    operational error (both fail every gate mode per `final_exit_code`),
+    but the first advisory-preservation fix only carried over
+    `operational_error_contribution` -- a `NOT_COMPARABLE` report's own
+    signal lives in `not_comparable_contribution` instead, so it was still
+    wiped to a claimed-clean `exit.code: 0`."""
+    diff = {
+        "verdict": "NOT_COMPARABLE",
+        "exit": {
+            "code": 6,
+            "reasons": ["not_comparable"],
+            "compatibility_contribution": 0,
+            "contract_coverage_contribution": 0,
+            "analysis_assurance_contribution": 0,
+            "crosscheck_promotion_contribution": 0,
+            "operational_error_contribution": 0,
+            "evidence_contract_error_contribution": 0,
+            "budget_overflow_contribution": 0,
+            "not_comparable_contribution": 6,
+            "removed_required_library_contribution": 0,
+        },
+    }
+    report = {
+        "scan_schema_version": "1.22",
+        "exit_code": 6,
+        "verdict": "NOT_COMPARABLE",
+        "diff": diff,
+    }
+    out = augment_report(
+        report,
+        name="libfoo",
+        profile_id="p",
+        baseline_channel="c",
+        requested_depth="headers",
+        gate_mode="advisory",
+    )
+    exit_block = out["diff"]["exit"]
+    assert exit_block["code"] == 6
+    assert exit_block["not_comparable_contribution"] == 6
+    assert exit_block["compatibility_contribution"] == 0
+    assert "not_comparable" in exit_block["reasons"]
