@@ -34,8 +34,6 @@ just physically split for the line-count cap.
 
 from __future__ import annotations
 
-from typing import Literal, TypedDict
-
 from .exit_decision import ExitDecision, ExitReason, resolve_exit_decision
 
 #: Which of :class:`ExitDecision`'s four ADR-064 fields corresponds to each
@@ -230,55 +228,6 @@ def resolve_scan_exit_decision(
     if not_comparable:
         return _dominant_decision(not_comparable_code, ExitReason.NOT_COMPARABLE)
     return None
-
-
-ScanAbortAxis = Literal["budget_overflow", "evidence_contract_error"]
-#: `run_scan_core`'s two abort exceptions -> the verdict/exit_code pair
-#: `service_scan.ScanResult` already used before it carried a `report` too.
-_SCAN_ABORT_VERDICTS: dict[ScanAbortAxis, tuple[str, int]] = {
-    "budget_overflow": ("BUDGET_OVERFLOW", 5),
-    "evidence_contract_error": ("EVIDENCE_CONTRACT_ERROR", 1),
-}
-
-
-class ScanAbortResultFields(TypedDict):
-    """``ScanResult(**scan_abort_result_fields(axis))`` -- a `TypedDict`
-    (not a plain ``dict[str, object]``) so mypy checks each field's type
-    against `service_scan.ScanResult`'s own constructor when ``**``-unpacked,
-    instead of rejecting the unpack outright the way it does for an untyped
-    dict (whose values it cannot attribute to individual parameters).
-    """
-
-    verdict: str
-    exit_code: int
-    report: dict[str, object]
-
-
-def scan_abort_result_fields(axis: ScanAbortAxis) -> ScanAbortResultFields:
-    """ADR-064 stage 1b: every `ScanResult` field `service_scan.run_scan`/
-    `_run_scan_one_member` need for one of `run_scan_core`'s two abort
-    exceptions, so the verdict/exit_code pairing stays next to the
-    `ExitDecision` that now explains it, instead of duplicated at each
-    `except` site. `report` mirrors what `scan_engine.py`'s own
-    ``NOT_COMPARABLE`` outcome already persists via ``resolve_scan_exit_
-    decision(not_comparable=True)``.
-
-    Both exceptions abort before a `DiffResult` exists, so there is never a
-    `prior_decision` to carry through, and the caller already knows which
-    single exception fired (mutually exclusive at runtime) -- `resolve_scan_
-    exit_decision`'s finer "before vs. after the evidence-contract check"
-    distinction between the two `_BudgetOverflow` raise sites doesn't matter
-    here, since both map to the same code/reason.
-    """
-    decision = resolve_scan_exit_decision(
-        budget_overflow=axis == "budget_overflow",
-        evidence_contract_error=axis == "evidence_contract_error",
-    )
-    assert decision is not None  # axis always selects one of the two above
-    verdict, exit_code = _SCAN_ABORT_VERDICTS[axis]
-    return ScanAbortResultFields(
-        verdict=verdict, exit_code=exit_code, report={"exit": decision.to_dict()}
-    )
 
 
 def resolve_release_exit_decision(

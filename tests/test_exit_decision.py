@@ -27,12 +27,13 @@ new ``exit`` block agrees with the real process exit.
 ADR-064's additive extension: pure resolvers for the three axes PR G1
 deliberately left unmodeled (evidence-contract error, budget overflow,
 not-comparable, and a release's mode-dependent removed-required-library
-rank). `TestScanAbortResultFields`/`TestScanAbortExitReportWiring` cover a
-later stage-1b slice: `service_scan.run_scan`/`_run_scan_one_member`'s own
-`_BudgetOverflow`/`_EvidenceContractError` catches persisting a decision into
-`ScanResult.report["exit"]` -- homed here rather than in
-`tests/test_service_unit.py` because that module is under an ADR-061
-no-growth debt entry. See
+rank). `tests/test_scan_abort_result.py` covers a later stage-1b slice built
+on top of `resolve_scan_exit_decision`: `abicheck.workflows.scan_abort_
+result.scan_abort_result_fields`, which `service_scan.run_scan`/
+`_run_scan_one_member`'s own `_BudgetOverflow`/`_EvidenceContractError`
+catches use to persist a decision into `ScanResult.report["exit"]` -- a
+separate module/test file since shaping a `ScanResult` is `workflows`
+responsibility, not `policy`'s (`abicheck/policy/AGENTS.md`). See
 ``docs/contribute/adr/064-canonical-gate-algorithm-and-exit-decision.md``
 and `abicheck/policy/exit_decision_precedence.py`'s own module docstring
 for what remains open.
@@ -53,7 +54,6 @@ from abicheck.model import AbiSnapshot, Function, Visibility
 from abicheck.policy.exit_decision_precedence import (
     resolve_release_exit_decision,
     resolve_scan_exit_decision,
-    scan_abort_result_fields,
 )
 from abicheck.reporter import to_json
 from abicheck.schemas import load_compare_report_schema
@@ -388,126 +388,6 @@ class TestResolveScanExitDecision:
                 budget_overflow_code=5,
                 prior_decision=prior,
             )
-
-
-class TestScanAbortResultFields:
-    """ADR-064 stage 1b: `service_scan.run_scan`/`_run_scan_one_member`'s
-    `_BudgetOverflow`/`_EvidenceContractError` catches now build their
-    `ScanResult` from `scan_abort_result_fields`, so `report["exit"]` carries
-    a real `ExitDecision` -- the same explanatory block `scan_engine.py`'s own
-    `NOT_COMPARABLE` outcome already persists -- instead of leaving `report`
-    at its default empty dict. This module (not `service_scan.py`, which is
-    under an ADR-061 no-growth debt entry) is this function's own test home;
-    `tests/test_service_unit.py` covers `run_scan`/`_run_scan_one_member`
-    wiring it in via `ScanResult(**scan_abort_result_fields(axis))`.
-    """
-
-    def test_budget_overflow_fields(self):
-        fields = scan_abort_result_fields("budget_overflow")
-        assert fields["verdict"] == "BUDGET_OVERFLOW"
-        assert fields["exit_code"] == 5
-        exit_block = fields["report"]["exit"]
-        assert exit_block["code"] == 5
-        assert exit_block["reasons"] == ["budget_overflow"]
-        assert exit_block["budget_overflow_contribution"] == 5
-        # Every other axis stayed at its "never computed" default -- nothing
-        # ran before the abort.
-        assert exit_block["compatibility_contribution"] == 0
-        assert exit_block["evidence_contract_error_contribution"] == 0
-        assert exit_block["not_comparable_contribution"] == 0
-
-    def test_evidence_contract_error_fields(self):
-        fields = scan_abort_result_fields("evidence_contract_error")
-        assert fields["verdict"] == "EVIDENCE_CONTRACT_ERROR"
-        assert fields["exit_code"] == 1
-        exit_block = fields["report"]["exit"]
-        assert exit_block["code"] == 1
-        assert exit_block["reasons"] == ["evidence_contract_error"]
-        assert exit_block["evidence_contract_error_contribution"] == 1
-        assert exit_block["budget_overflow_contribution"] == 0
-
-    def test_report_matches_resolve_scan_exit_decision_directly(self):
-        # Parity with the shape scan_engine.py's own NOT_COMPARABLE outcome
-        # already persists -- same ExitDecision.to_dict(), same key set, not
-        # a bespoke, differently-shaped dict for these two axes.
-        fields = scan_abort_result_fields("budget_overflow")
-        expected = resolve_scan_exit_decision(budget_overflow=True)
-        assert expected is not None
-        assert fields["report"] == {"exit": expected.to_dict()}
-
-
-class TestScanAbortExitReportWiring:
-    """`service_scan.run_scan`/`_run_scan_one_member` build their
-    `ScanResult` via ``ScanResult(**scan_abort_result_fields(axis))`` on
-    `_BudgetOverflow`/`_EvidenceContractError` -- these tests exercise the
-    real catch sites (not just `scan_abort_result_fields` in isolation
-    above) to prove the wiring itself, not only the pure function it calls.
-    """
-
-    @pytest.mark.parametrize(
-        ("exc_name", "depth", "verdict", "exit_code", "reason"),
-        [
-            ("_BudgetOverflow", "binary", "BUDGET_OVERFLOW", 5, "budget_overflow"),
-            (
-                "_EvidenceContractError",
-                "source",
-                "EVIDENCE_CONTRACT_ERROR",
-                1,
-                "evidence_contract_error",
-            ),
-        ],
-    )
-    def test_run_scan(self, monkeypatch, exc_name, depth, verdict, exit_code, reason):
-        from abicheck import scan_engine as _se, service_scan as _ss
-
-        exc = getattr(_se, exc_name)
-
-        def raising_core(**kw):
-            raise exc("aborted for this test")
-
-        monkeypatch.setattr(_ss, "estimate_scan", lambda req: [])
-        monkeypatch.setattr("abicheck.scan_engine.run_scan_core", raising_core)
-
-        req = _ss.ScanRequest(binaries=[Path("libfoo.so")], depth=depth)
-        res = _ss.run_scan(req)
-
-        assert res.verdict == verdict
-        assert res.exit_code == exit_code
-        assert res.report["exit"]["reasons"] == [reason]
-
-    @pytest.mark.parametrize(
-        ("exc_name", "depth", "verdict", "exit_code", "reason"),
-        [
-            ("_BudgetOverflow", "binary", "BUDGET_OVERFLOW", 5, "budget_overflow"),
-            (
-                "_EvidenceContractError",
-                "source",
-                "EVIDENCE_CONTRACT_ERROR",
-                1,
-                "evidence_contract_error",
-            ),
-        ],
-    )
-    def test_run_scan_one_member(
-        self, monkeypatch, exc_name, depth, verdict, exit_code, reason
-    ):
-        from abicheck import scan_engine as _se, service_scan as _ss
-
-        exc = getattr(_se, exc_name)
-
-        def raising_core(**kw):
-            raise exc("aborted for this test")
-
-        monkeypatch.setattr("abicheck.scan_engine.run_scan_core", raising_core)
-
-        req = _ss.ScanRequest(binaries=[Path("libfoo.so")], depth=depth)
-        res = _ss._run_scan_one_member(
-            req, Path("libfoo.so"), start=0.0, budget_s=None, changed_src="none"
-        )
-
-        assert res.verdict == verdict
-        assert res.exit_code == exit_code
-        assert res.report["exit"]["reasons"] == [reason]
 
 
 class TestResolveReleaseExitDecision:

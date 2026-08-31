@@ -8,10 +8,12 @@
   `scan_engine.py`'s own `NOT_COMPARABLE` outcome already carried was simply
   never computed for these two abort exceptions. `ScanResult.report["exit"]`
   now carries a real `ExitDecision` for both
-  (`abicheck.policy.exit_decision_precedence.scan_abort_result_fields`),
+  (`abicheck.workflows.scan_abort_result.scan_abort_result_fields`),
   giving a report reader the same `code`/`reasons`/per-axis contributions
   breakdown for these two outcomes as every other scan/compare exit path.
   No exit code or verdict string changes for any existing caller.
+  `SCAN_SCHEMA_VERSION` bumps to `1.23` for the new nonempty `report.exit`
+  shape.
 
 ### Notes
 

@@ -48,8 +48,8 @@ from .cxx20_pair_dialect import (
 )
 from .errors import ValidationError
 from .header_utils import HEADER_SUFFIXES, iter_directory_headers
-from .policy.exit_decision_precedence import scan_abort_result_fields
 from .schemas import SCAN_SCHEMA_VERSION
+from .workflows.scan_abort_result import scan_abort_result_fields
 
 if TYPE_CHECKING:
     from .buildsource.scan_levels import EvidenceDepth, SourceMethod

@@ -23,7 +23,12 @@ diverge). **Update (2026-08-31):** the programmatic `ScanResult` API's own
 `_BudgetOverflow`/`_EvidenceContractError` catches
 (`service_scan.run_scan`/`_run_scan_one_member`) now also persist a real
 `ExitDecision` into `ScanResult.report["exit"]`
-(`abicheck.policy.exit_decision_precedence.scan_abort_result_fields`),
+(`abicheck.workflows.scan_abort_result.scan_abort_result_fields` — a
+`workflows`-classified module, not `policy`, since shaping `ScanResult`'s
+own fields is report-shape work `abicheck/policy/AGENTS.md` reserves for a
+different layer than the gate decision itself, which still resolves through
+`abicheck.policy.exit_decision_precedence.resolve_scan_exit_decision`
+unchanged; Codex review, PR #967),
 closing that half of the gap this section used to describe as fully open —
 these two abort exceptions previously left `report` at its default empty
 dict, unlike `NOT_COMPARABLE`, which already built one. **Still not
@@ -275,14 +280,31 @@ lands in two stages rather than one atomic change:
       `_EvidenceContractError` catches (`service_scan.run_scan`/
       `_run_scan_one_member`) now persist a real `ExitDecision` into
       `ScanResult.report["exit"]`
-      (`abicheck.policy.exit_decision_precedence.scan_abort_result_fields`,
-      `tests/test_service_unit.py`'s `TestScanAbortExitReport`) — `ScanResult`
-      already existed as a real return value at these two abort points (it
-      is what `run_scan`'s docstring calls "the single object the CLI and
-      library callers consume"), so giving its already-present, always-empty
-      `report` field real content needed no new design decision, only the
-      same wiring `NOT_COMPARABLE` already got. **Still not landed:** the
-      native `scan` *CLI*'s own equivalent. `cli_scan.py`'s `scan_cmd` calls
+      (`abicheck.workflows.scan_abort_result.scan_abort_result_fields`,
+      `tests/test_scan_abort_result.py`) — `ScanResult` already existed as a
+      real return value at these two abort points (it is what `run_scan`'s
+      docstring calls "the single object the CLI and library callers
+      consume"), so giving its already-present, always-empty `report` field
+      real content needed no new design decision, only the same wiring
+      `NOT_COMPARABLE` already got. The shaping logic (the verdict/exit_code
+      pairing and the `{"exit": ...}` wrapping) lives in this new
+      `workflows` module rather than the `policy` package that resolves the
+      underlying `ExitDecision` — `abicheck/policy/AGENTS.md` reserves "how
+      is it reported" for a different layer, and an earlier revision had put
+      it in `exit_decision_precedence.py` itself before a review round
+      caught the boundary violation (PR #967). `SCAN_SCHEMA_VERSION` bumped
+      to `1.23` for the newly nonempty `report.exit` shape. **Still not
+      landed:** carrying a `prior_decision` across `scan_engine.py`'s own
+      *later* `_BudgetOverflow` raise site (the post-compare deadline check,
+      which runs after a real gate/coverage/assurance decision already
+      exists) — `scan_abort_result_fields` accepts an optional
+      `prior_decision` today, but neither `service_scan.py` call site has
+      one available, since `run_scan_core` raises before returning anything
+      they could recover one from; threading it across that exception
+      boundary needs a change to `_BudgetOverflow`'s own constructor and is
+      real, separate follow-up work (Codex review, PR #967). Also still
+      open: the native `scan` *CLI*'s own equivalent. `cli_scan.py`'s
+      `scan_cmd` calls
       `run_scan_core` directly (not through `service_scan.run_scan`) and
       still only writes a stderr message plus `sys.exit`/`ClickException` at
       these two abort points — no `ScanOutcome`/report is ever constructed

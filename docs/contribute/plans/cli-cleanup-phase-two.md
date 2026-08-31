@@ -3506,18 +3506,26 @@ second top-level spelling of the same fact.
 > `_BudgetOverflow`/`_EvidenceContractError` catches (`service_scan.
 > run_scan`/`_run_scan_one_member`) now persist a real `ExitDecision` into
 > `ScanResult.report["exit"]` too
-> (`scan_abort_result_fields`, `exit_decision_precedence.py`) — `ScanResult`
-> was already a real, always-returned object at these two abort points, so
-> this needed no new design decision, only the same wiring `NOT_COMPARABLE`
-> already got (`tests/test_service_unit.py`'s `TestScanAbortExitReport`).
-> **Still open:** the native `scan` *CLI*'s own equivalent — `cli_scan.py`
-> calls `run_scan_core` directly and still builds no report at all at these
-> two abort points (stderr message + `sys.exit`/`ClickException` only),
-> which is a genuinely different, real design decision (should a
-> machine-readable `--format json` invocation get a minimal JSON report on
-> abort instead of empty stdout, and from what partial state?) than the
-> typed-API wiring just landed — see ADR-064's own updated "Stage 1b,
-> further split" section. Also still open: the release fan-out's
+> (`scan_abort_result_fields`, `abicheck/workflows/scan_abort_result.py` —
+> a `workflows` module, not `policy`, since a review round (Codex, PR #967)
+> caught that shaping `ScanResult`'s own fields is report-shape work
+> `abicheck/policy/AGENTS.md` reserves for a different layer than the gate
+> decision itself) — `ScanResult` was already a real, always-returned object
+> at these two abort points, so this needed no new design decision, only
+> the same wiring `NOT_COMPARABLE` already got
+> (`tests/test_scan_abort_result.py`). `SCAN_SCHEMA_VERSION` bumped to
+> `1.23` for the newly nonempty `report.exit` shape. **Still open:**
+> threading a `prior_decision` across `scan_engine.py`'s own *later*
+> `_BudgetOverflow` raise site (needs a change to that exception's own
+> constructor -- real, separate follow-up); the native `scan` *CLI*'s own
+> equivalent — `cli_scan.py` calls `run_scan_core` directly and still builds
+> no report at all at these two abort points (stderr message + `sys.exit`/
+> `ClickException` only), which is a genuinely different, real design
+> decision (should a machine-readable `--format json` invocation get a
+> minimal JSON report on abort instead of empty stdout, and from what
+> partial state?) than the typed-API wiring just landed — see ADR-064's own
+> updated "Stage 1b, further split" section. Also still open: the release
+> fan-out's
 > `GateOptions` typed-object rewrite, a full cross-front-end parity pass
 > (typed API, Action), and stage 2 (the atomic removal — deleting
 > `--exit-code-scheme` and updating CLI/API/Action/`aggregate` parity
