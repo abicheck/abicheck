@@ -2506,15 +2506,20 @@ or version number that already has a fact owner elsewhere").
   bullet said "CLI/`.abicheck.yml`-reachable," but `.abicheck.yml`'s typed
   `BuildConfig` has a fixed, declared-field set and `resolve_compare_
   config()` projects only those fields — a genuinely new top-level
-  `.abicheck.yml` block for this map would need real schema/model work,
-  loading and precedence plumbing, and (per `docs/AGENTS.md`'s topic-
-  registration rule for a new config namespace) a `docs/_meta/topics.yaml`
-  entry, none of which this phase scoped or needs to: a manifest *file*
-  named by a CLI flag (mirroring the existing `--manifest` option for the
-  ABI instantiation manifest a few lines below in the same command) covers
-  the same need without touching `BuildConfig` at all. The decode-budget
-  override named below is the same shape and is CLI-flag-only for the
-  identical reason.
+  `.abicheck.yml` block for this map would need real schema/model work and
+  loading/precedence plumbing that going CLI-only avoids entirely: a
+  manifest *file* named by a CLI flag (mirroring the existing `--manifest`
+  option for the ABI instantiation manifest a few lines below in the same
+  command) covers the same need without touching `BuildConfig` at all. The
+  decode-budget override named below is the same shape and is CLI-flag-
+  only for the identical reason. **What going CLI-only does *not* avoid
+  (second correction, same review round):** `docs/AGENTS.md`'s topic-
+  registration rule applies to "a new CLI command/flag family," not only a
+  new config namespace — these flags still need a `docs/_meta/topics.yaml`
+  entry (`canonical_page`, `fact_sources` pointing at the new flags'
+  implementation) in the same PR that adds them, same as any other new
+  public CLI surface. Only the `BuildConfig` schema/precedence work is
+  avoided, not the documentation-contract registration.
 - **Two more corrections from the same review round, both about what sits
   between the new Click branch and `compare_release_against_bundle_facts()`
   — verified against source, both real:**
@@ -2772,6 +2777,11 @@ that first revision (Codex review, both fixed here):
    signature is frozen.
 3. Adapting the workflow result into `_format_release_summary()`'s
    existing rendering shape.
+4. A `docs/_meta/topics.yaml` registration for the new CLI flags
+   (`canonical_page`, `fact_sources`) — required for any new public CLI
+   flag family per `docs/AGENTS.md`, regardless of the CLI-only-vs-
+   `.abicheck.yml` correction above (that correction avoids the
+   `BuildConfig` schema work, not this).
 
 ---
 
