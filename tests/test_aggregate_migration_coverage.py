@@ -11,6 +11,7 @@ import pytest
 
 from abicheck.workflows.aggregate.gate import scan_severity_gate_paths
 from abicheck.workflows.aggregate.load import _load_report_file
+from abicheck.workflows.aggregate.reconcile import resolve_report_change_identity
 
 
 def test_aggregate_findings_facade_executes_after_test_collection() -> None:
@@ -66,3 +67,41 @@ def test_not_comparable_report_preserves_declared_contract_coverage(
     loaded = _load_report_file(report, prefix="abi-report-")
 
     assert loaded.contract_coverage_declared
+
+
+def test_report_entry_carries_no_entity_id_but_still_resolves() -> None:
+    """``resolve_change_identity`` reads ``change.entity_id`` unconditionally
+    for every non-batch-shaped finding (ADR-063 Phase 2's "resolve_change_identity
+    consumes Change.entity_id" change) -- a report-derived ``_ReportChangeView``
+    carries no such field, since ``_change_to_dict`` never serializes it. This
+    must degrade gracefully (no ``entity:`` alias, since none was ever supplied)
+    rather than raising ``AttributeError`` -- regression test for the field
+    being entirely absent from ``_ReportChangeView``, which crashed every one
+    of these report-derived lookups."""
+    for entry in (
+        {
+            "kind": "func_removed",
+            "symbol": "_ZN3lib3addEii",
+            "description": "Function removed",
+        },
+        {
+            "kind": "type_size_changed",
+            "symbol": "Foo",
+            "description": "size 8 -> 16",
+            "old_value": "8",
+            "new_value": "16",
+        },
+    ):
+        identity = resolve_report_change_identity(dict(entry))
+        assert identity.primary_id
+        assert not any(a.startswith("entity:") for a in identity.aliases)
+
+
+def test_batch_shaped_report_entry_never_needed_entity_id() -> None:
+    """Negative control for the test above: a batch-shaped kind clears
+    ``entity_id`` to ``None`` before ``change.entity_id`` would ever be read,
+    so it was never exposed to the missing-field bug regardless of whether
+    ``_ReportChangeView`` carried the attribute."""
+    entry = {"kind": "visibility_leak", "symbol": "SomeType", "description": "d"}
+    identity = resolve_report_change_identity(dict(entry))
+    assert identity.primary_id
