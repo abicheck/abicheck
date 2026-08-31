@@ -1062,7 +1062,7 @@ table asks for.
 - **Shipped:** `bundle_intra_dep_signature_unverified`'s positive/negative
   cases (Phase 4) — see `tests/test_bundle_signature_evidence.py`, listed in
   the Phase 4 implementation-status note above.
-- New `tests/test_bundle_multibuild.py` — `variant_fingerprint` determinism
+- **Shipped:** `tests/test_bundle_multibuild.py` — `variant_fingerprint` determinism
   and sensitivity: two builds differing only in an ABI-irrelevant flag, or
   only in `-std=`/build-derived defines, fingerprint **identically** (Phase
   3's own point — that drift is corroborated-comparable build state, not
