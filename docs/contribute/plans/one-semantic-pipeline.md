@@ -9484,6 +9484,63 @@ post-parse consumer migrations -- exhaustive `Change.entity_id` population
 beyond the function-diff path is a separate, larger follow-on this
 sequencing does not schedule.
 
+**Landed (eighth slice, 2026-08-31): exhaustive function-diff population,
+plus `resolve_change_identity` consuming `Change.entity_id` -- the true
+completion of (c2).** Two parts, landed together since the first is what
+made the second worth doing. First, the same old-else-new `entity_id`
+fallback reached every remaining function-backed `Change` construction
+site the seventh slice's own scoping investigation had found but not yet
+wired: `diff_hidden_friends.py` (`HIDDEN_FRIEND_ADDED`/`REMOVED`, both the
+matched-pair `bool_transition` call and the two single-sided `make_change()`
+sites), `diff_param_qualifiers.py` (`PARAM_RESTRICT_CHANGED`,
+`PARAM_BECAME_VA_LIST`/`LOST_VA_LIST`), `diff_symbols.py`'s own
+`_diff_ctor_overload_ambiguity` (`CTOR_OVERLOAD_AMBIGUITY_RISK`, a
+single-sided new-side-only site), and the auxiliary
+`param_defaults`/`param_renames`/`pointer_levels`/`method_access`/
+`func_deprecated`/`func_override_specifier` detectors -- ten sites in
+total, found and fixed across four review rounds (each fix drew a fresh
+"still missing a sibling site" finding until a full audit of every
+`make_change()`/`Change()` call in `diff_symbols.py` and its split-out
+sibling modules, not just the named sites, actually closed the class).
+Second, `EntityId` gained its own `.key` property (`model/identity.py`) --
+a flat, collision-safe string (`_packed`, a local duplicate of
+`storage.entity_ids._packed`'s own audited length-prefixing scheme, since
+`model` may not import `storage`), excluding every `compare=False` payload
+field (`Record.access`) so two `==` segments produce the same key.
+`finding_identity.resolve_change_identity` folds `change.entity_id.key` in
+as a new `entity:<key>\x1f<discriminator>` alias, qualified with the
+discriminator like every other alias there so two distinct findings on the
+same entity never collide -- **additive only**: never promoted to
+`primary_id`/tier, so every existing suppression rule and canonical finding
+ID is bit-for-bit unchanged (`tests/test_canonical_finding_id*.py` pin
+that). Deliberately conservative rather than replacing the CANONICAL tier's
+mangled-name basis outright: `EntityId.key`'s cross-release stability is
+not yet established the way a persisted wire identity would need to be
+(`Anonymous`/`LocalToFunction`'s own ordinals are parse-order-only, not
+cross-revision, by their own documented design), so promoting it to
+`primary_id` now would risk silently reshaping every stored suppression
+rule's matching behavior -- exactly the class of risk this slice's own
+scoping investigation flagged as needing a separate, explicit design
+decision rather than a rushed migration. Tests: `tests/
+test_model_identity.py::TestEntityIdKey` (collision-safety across sibling
+scope-segment variants, the `extra`-tuple boundary-forgery case in the same
+spirit as `storage.entity_ids`'s own audited collision test, `Record.
+access` exclusion, `LocalToFunction` recursion) and `tests/
+test_change_entity_id_carrier.py::TestResolveChangeIdentityConsumesEntityId`
+(the alias's presence/absence and non-collision, through `compare()` +
+`resolve_change_identity` end to end) plus one regression test per newly-
+wired site in `tests/test_change_entity_id_carrier.py`, each confirmed to
+fail against the pre-fix code. Full fast unit suite green; `mypy
+abicheck/` and `ruff check`/`ruff format --check` clean;
+`check_architecture.py` 0 errors (`finding_identity.py`, `diff_symbols.py`,
+and `model/identity.py` all land at or under their `debt.yaml`/general
+800-line baselines, each requiring the same "condense existing verbose
+docstrings to make room" treatment prior slices needed). Remaining Phase 2
+items unchanged by this slice: exhaustive `entity_id` population beyond
+the function-diff path, the post-parse consumer migrations, and promoting
+the new `entity:` alias into a real alias-match reconciliation tier once
+`EntityId.key`'s stability question above is resolved.
+
 ---
 
 ### Phase 3 — public surface as a graph query over one evidence graph (D5)

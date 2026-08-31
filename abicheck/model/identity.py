@@ -15,34 +15,28 @@
 
 """``ScopePath``/``EntityId`` — the one identity primitive (ADR-063 Phase 2).
 
-See ``docs/contribute/plans/one-semantic-pipeline.md``'s "Phase 2 —
-EntityId/ScopePath as the one identity primitive" section for the full
-design and landed-slice history; that ADR/plan pair, not this docstring, is
-the authoritative status record — this docstring only orients a reader
-already in the file. Landed so far: the ``ScopePath``/``EntityId`` shape
-itself; both header-AST backends deriving a typed ``ScopePath`` at parse
-time and populating a resolved ``entity_id`` carrier on
-``RecordType``/``EnumType``/``Function``/``Variable`` (the plan's "carrier
-field" question resolved as option (a) — computed once at parse time, not
-recomputed on demand); that carrier persisting through ``serialization.py``
-(schema v28); and, as a first, bounded step of the
-``finding_identity.py`` algorithm migration,
-``finding_identity.resolve_function_identity`` now canonicalizing each
-parameter via this module's own ``signature_normalization.
-canonicalize_function_signature_param_type`` (the identical primitive
-``entity_id_for_function``'s own "sig" fallback branch uses) instead of a
-second, independently-maintained copy. Still open: the mangled-name-is-
-genuine determination stays owned by ``finding_identity.
-is_real_mangled_name``/``normalize_mangled_name`` (``compare -> model``
-stays the only allowed edge, and that validation logic is not a dependency
-this module needs); giving ``Change`` an ``EntityId`` to key on; and the
-post-parse consumer migrations (``diff_filtering.py``/
-``type_reachability.py``'s string-based ambiguity machinery) — **no
-consumer may read the ``entity_id`` carrier field itself yet**.
+See ``docs/contribute/plans/one-semantic-pipeline.md``'s "Phase 2" section
+for the full design and landed-slice history -- that ADR/plan pair, not
+this docstring, is the authoritative status record. Landed: the
+``ScopePath``/``EntityId`` shape; both header-AST backends populating a
+parse-time ``entity_id`` carrier on ``RecordType``/``EnumType``/
+``Function``/``Variable``, persisted through ``serialization.py`` (schema
+v28); ``finding_identity.resolve_function_identity`` sharing this module's
+own signature canonicalization; ``Change`` gaining its own ``entity_id``
+carrier, populated across the function-diff path; and, as this module's own
+``EntityId.key`` property, the first read of that carrier by a real
+consumer (``finding_identity.resolve_change_identity``'s new alias --
+additive only, no existing primary/canonical id changes). Still open:
+the mangled-name-is-genuine determination stays owned by
+``finding_identity.is_real_mangled_name``/``normalize_mangled_name``
+(``compare -> model`` stays the only allowed edge); exhaustive
+``entity_id`` population beyond the function-diff path; and the post-parse
+consumer migrations (``diff_filtering.py``/``type_reachability.py``'s
+string-based ambiguity machinery).
 
 ``EntityKind``/``ObservationKind`` relocated here from ``storage.
 entity_ids`` (domain vocabulary belongs in ``model``, not the storage wire
-layer, per ADR-061's ``storage -> model`` import direction) —
+layer, per ADR-061's ``storage -> model`` import direction) --
 ``storage.entity_ids`` now imports these two enums rather than redefining
 them.
 
@@ -184,11 +178,9 @@ class Anonymous:
     whole ``EntityId``, even though nothing about those later declarations
     changed. No stable across-snapshot discriminator is adopted here -- see
     the plan's Phase 2 Design section for why (a source-location anchor and
-    a structural fingerprint of the anonymous scope's own members were both
-    considered and are each independently documented elsewhere in this
-    codebase's AGENTS.md as unreliable for this exact purpose). This is an
-    accepted, documented limitation of ``Anonymous`` identity specifically,
-    not a silent gap.
+    a structural fingerprint were both considered and are each documented
+    elsewhere in AGENTS.md as unreliable for this purpose). Accepted,
+    documented limitation of ``Anonymous`` identity, not a silent gap.
     """
 
     kind: str
@@ -199,33 +191,22 @@ class Anonymous:
 class LocalToFunction:
     """A scope local to one function body.
 
-    Both fields are identity, deliberately, for exactly the reason
-    :class:`Anonymous` gives for its own ``ordinal``: ``owner`` alone
-    disambiguates two same-named locals across *different* functions, but
-    not two same-named locals in *sibling compound blocks of the same
-    function* (``void f() { { struct A {}; } { struct A {}; } }`` -- two
-    distinct declarations, same ``owner``, same leaf name). ``block_ordinal``
-    closes that gap the same way ``Anonymous.ordinal`` closes its sibling
-    case: a deterministic per-function sequence number assigned at parse
-    time, stable *within one parse*, not across revisions -- the identical
-    accepted, documented limitation :class:`Anonymous` already states (an
-    edit that adds or removes an earlier local block shifts every later
-    sibling's ordinal and therefore its whole ``EntityId``, even though
-    nothing about those later declarations changed). No default is given,
-    matching :class:`Anonymous.ordinal` for the same reason: a caller must
-    supply a real value rather than silently under-specifying identity by
-    relying on an unwired default.
+    Both fields are identity. ``owner`` alone disambiguates two same-named
+    locals across *different* functions, but not two in *sibling compound
+    blocks of the same function* (``void f() { { struct A {}; } { struct A
+    {}; } }`` -- two distinct declarations, same ``owner``, same leaf name);
+    ``block_ordinal`` closes that gap the same way ``Anonymous.ordinal``
+    closes its sibling case -- same per-parse-only stability, same no-default
+    rule, see that class's own docstring rather than restating both here.
 
     ``owner`` is the *owning function's own* :class:`EntityId`, not a bare
     string -- a plain function name collides two overloads that each
     declare a same-named local in their (corresponding) block
     (``f(int) { struct A {}; }`` vs. ``f(double) { struct A {}; }`` --
-    identical ``owner="f"`` string, identical leaf name, so the two locals
-    would wrongly merge under an unconstrained-string owner; Codex review,
-    PR #941). Recursion is intentional and safe: `EntityId` is frozen/
-    hashable, so an `EntityId` naming a function whose own scope path
-    happens to include an outer `LocalToFunction` nests exactly as deep as
-    the real declaration does, with no special-casing needed here.
+    identical ``owner="f"`` string, identical leaf name; Codex review, PR
+    #941). Recursion is intentional and safe: ``EntityId`` is frozen/
+    hashable, so one naming a function whose own scope path includes an
+    outer ``LocalToFunction`` nests exactly as deep as the real declaration.
     """
 
     owner: EntityId
@@ -263,14 +244,49 @@ class EntityId:
     leaf_name: str
     extra: tuple[str, ...] = ()
 
+    @property
+    def key(self) -> str:
+        """Flat, collision-safe string (ADR-063 Phase 2, closing (c2)'s
+        ``resolve_change_identity`` consumer step) -- length-prefixed parts
+        (``_packed``, a local duplicate of ``storage.entity_ids.EntityId.
+        key``'s own audited scheme, since this module may not import
+        ``storage``), excluding every ``compare=False`` field (``Record.
+        access``) so two ``==`` segments produce the same key. Stable only
+        within one process's lifetime (``Anonymous``/``LocalToFunction``'s
+        own ordinals aren't cross-revision)."""
+        return _packed(
+            *(_segment_key(s) for s in self.scope),
+            self.kind.value,
+            self.leaf_name,
+            *self.extra,
+        )
+
+
+def _packed(*parts: str) -> str:
+    """Length-prefix each part (``"<len>:<part>"``); nesting is safe since a
+    ``_packed`` result is just another opaque part. Local dup of ``storage.
+    entity_ids._packed`` (``storage -> model`` is the only allowed edge)."""
+    return "".join(f"{len(part)}:{part}" for part in parts)
+
+
+def _segment_key(segment: ScopeSegment) -> str:
+    """``EntityId.key``'s per-segment encoder -- one tagged part per variant
+    so no two sharing a bare field can collide."""
+    if isinstance(segment, Namespace):
+        return _packed("ns", segment.name)
+    if isinstance(segment, Record):
+        return _packed("rec", segment.name)
+    if isinstance(segment, InlineNamespace):
+        return _packed("ins", segment.name, segment.version_tag)
+    if isinstance(segment, Anonymous):
+        return _packed("anon", segment.kind, str(segment.ordinal))
+    return _packed("local", segment.owner.key, str(segment.block_ordinal))
+
 
 def _scope_path(scope: ScopePath) -> ScopePath:
-    """Normalize *scope* to a real ``tuple`` regardless of what iterable a
-    caller passed, so two calls built from value-equal-but-not-identical
-    scope sequences (e.g. a list vs. a tuple) produce ``EntityId``s that
-    compare equal -- "computed once" here means one algorithm producing one
-    answer for one input, not object identity of the scope argument.
-    """
+    """Normalize *scope* to a real ``tuple`` regardless of the iterable a
+    caller passed, so value-equal-but-not-identical scope sequences (a list
+    vs. a tuple) produce ``EntityId``s that compare equal."""
     return tuple(scope)
 
 
@@ -378,17 +394,14 @@ def entity_id_for_variable(
 
     When either *mangled_name* or *is_extern_c* applies, the resulting
     ``EntityId.scope`` is always ``()``, regardless of the caller-supplied
-    *scope*. A genuine mangled name already fully and deterministically
-    encodes scope, so folding a caller-supplied *scope* in on top adds
-    nothing when it is available and actively fragments identity when it
-    is not: a header/DWARF-derived observation may supply a real
-    ``ScopePath`` for the identical symbol an export-table-only snapshot
-    observes with no scope at all (Codex review, PR #941 -- the same
-    evidence-tier-fragmentation mechanism :func:`entity_id_for_function`'s
-    own *is_extern_c* branch already guards against, generalized here to
-    every name-based -- as opposed to signature-based -- discriminator,
-    mangled included). Only the genuinely mangling-free, non-``extern
-    "C"`` degenerate case keeps *scope* as given.
+    *scope*: a genuine mangled name already fully encodes scope, so folding
+    a caller-supplied one in adds nothing when available and fragments
+    identity when not (an export-table-only observation of the identical
+    symbol has no scope at all -- Codex review, PR #941, the same
+    evidence-tier mechanism :func:`entity_id_for_function`'s *is_extern_c*
+    branch guards against, generalized to every name-based discriminator).
+    Only the genuinely mangling-free, non-``extern "C"`` case keeps *scope*
+    as given.
 
     When *mangled_name* is present, *leaf_name* is likewise ignored, for
     a confirmed, not merely hypothetical, reason: the ELF-only fallback
@@ -585,30 +598,21 @@ def entity_id_for_function(
     function's ``extra`` tuple is unchanged byte-for-byte.
 
     Both the *mangled* and *is_extern_c* branches' resulting
-    ``EntityId.scope`` are always ``()``, regardless of *scope*.
-    ``resolve_symbol_identity`` deliberately bases a real-mangled or
-    extern-"C" identity on the raw name alone (``mangled:...``) rather
-    than a qualified name, precisely because scope availability varies by
-    evidence tier -- a header/DWARF-derived observation of a namespaced
-    function (mangled or ``extern "C"``) may supply a real ``ScopePath``,
-    while an export-table-only snapshot of the identical binary symbol
-    knows only the bare exported/mangled name. Folding a caller-supplied
-    *scope* into the id would fragment one entity's identity across those
-    two evidence tiers even though the name already, on its own,
-    unambiguously identifies the declaration -- for a genuine mangled
-    name this holds losslessly (the mangling itself fully encodes scope);
-    for ``extern "C"`` it holds because the symbol *is* that bare name at
-    the ABI level, so no namespace is even recoverable from an export
-    table alone. (An earlier revision of this docstring claimed the
-    *mangled* branch's redundant `scope` was merely harmless rather than
-    actively fragmenting -- Codex review on PR #941 caught that this is
-    the identical mechanism the *is_extern_c* branch already guards
-    against, not a different, safe case; corrected here.) The *sig*
-    fallback is the one branch that keeps *scope* as given -- a DWARF-only,
-    mangling-free, non-``extern "C"`` function has no authoritative,
-    scope-independent name to fall back on, and scope is exactly what
-    makes two same-named, same-signature sibling declarations in
-    different scopes distinct.
+    ``EntityId.scope`` are always ``()``, regardless of *scope* --
+    mirroring ``resolve_symbol_identity``'s own raw-name-only
+    (``mangled:...``) basis, since scope availability varies by evidence
+    tier (a header/DWARF observation may supply a real ``ScopePath``; an
+    export-table-only one knows only the bare name) and folding a
+    caller-supplied *scope* in would fragment one entity's identity across
+    tiers even though the name alone already, losslessly, identifies it
+    (for ``extern "C"`` because the symbol *is* that bare name at the ABI
+    level -- Codex review, PR #941, correcting an earlier revision that
+    called the *mangled* branch's redundant ``scope`` merely harmless
+    rather than the identical fragmentation the *is_extern_c* branch
+    already guards against). The *sig* fallback is the one branch that
+    keeps *scope* as given -- a DWARF-only, mangling-free, non-``extern
+    "C"`` function has no scope-independent name to fall back on, and scope
+    is exactly what makes two same-named, same-signature siblings distinct.
 
     *param_types* are canonicalized via the sibling
     ``signature_normalization.canonicalize_function_signature_param_type``

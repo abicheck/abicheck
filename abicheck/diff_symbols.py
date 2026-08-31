@@ -1116,6 +1116,7 @@ def _diff_ctor_overload_ambiguity(old: AbiSnapshot, new: AbiSnapshot) -> list[Ch
                     symbol=f.mangled,
                     name=cls,
                     new=f"{cls}({', '.join(sig)})",
+                    entity_id=f.entity_id,
                 )
             )
     return changes
