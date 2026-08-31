@@ -2705,20 +2705,36 @@ happens to use.
 
 **Effort:** M — revised up from the S/M first written here (Codex review:
 that estimate named only the unpinned frontend module and omitted the
-workflow layer the architecture-boundary correction itself requires).
-No file split is a prerequisite (corrected above), but the remaining work
-spans three layers, not one: (1) `frontends/cli/commands/compare.py` — a
-new inline option or two, a new `_dispatch_release_compare` branch, a
-small manifest parser, package extraction; (2) a new `abicheck.workflows`-
-owned request/result pair and its own execution function, reaching full
-verdict/exit-code parity with `compare_release_cmd` (contract evaluation,
-suppression, severity/exit-code-scheme, `--fail-on-removed-library`,
-policy — the systemic requirement above) — its own module plus its own
-request/result contract tests; (3) adapting that typed result into
-`_format_release_summary()`'s existing rendering shape. The Python-API
-comparison primitive (`compare_release_against_bundle_facts()` itself) is
-genuinely done; parity with everything *around* it on the live path is
-the newly-scoped remainder.
+workflow layer the architecture-boundary correction itself requires), then
+corrected twice more in the same round for two self-consistency errors in
+that first revision (Codex review, both fixed here):
+
+1. `frontends/cli/commands/compare.py` — presentation translation only: a
+   new inline option or two, a new `_dispatch_release_compare` branch that
+   builds a request object, a small manifest parser. **Package extraction
+   does *not* belong here** — unpacking an archive and managing its
+   temporary-directory lifetime is release/extraction orchestration, the
+   same category of work correction 1 above already ruled out of the
+   frontend; it moves to (2).
+2. A new `abicheck.workflows`-owned request/result pair and its own
+   execution function — package extraction (moved from (1)), and reaching
+   full verdict/exit-code/rendering parity with `compare_release_cmd`
+   (contract evaluation, suppression, severity/exit-code-scheme,
+   `--fail-on-removed-library`, policy, and the maps/keys
+   `_format_release_summary()` needs — the systemic requirement above) —
+   its own module plus its own request/result contract tests. **This is
+   not a thin wrapper around an unchanged primitive** — `compare_release_
+   against_bundle_facts()` itself cannot forward contract evaluation or
+   suppression into its `service.compare_snapshots()` call, or return the
+   removed/added keys and per-library data the exit-gating and rendering
+   correction above both require, without gaining those parameters and
+   return fields itself. Extending or factoring that primitive is
+   therefore part of this layer's work, not a prerequisite already
+   finished — the "no new comparison logic" scoping note earlier means no
+   new *matching/diffing* algorithm, not that the primitive's own
+   signature is frozen.
+3. Adapting the workflow result into `_format_release_summary()`'s
+   existing rendering shape.
 
 ---
 
