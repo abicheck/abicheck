@@ -3155,15 +3155,22 @@ without promising a new export.
    `abicheck.buildsource.source_graph.X`) and real imports of the *other*,
    already-correctly-named split modules (`source_graph_query.py` etc.),
    overstating the true migration surface. Reproduce the real count instead
-   of trusting either historical figure: a real `from .source_graph import
-   ...` / `from ..buildsource.source_graph import ...` / `from
+   of trusting either historical figure — a real `from <N dots>source_graph
+   import ...` / `from <N dots>buildsource.source_graph import ...` / `from
    abicheck.buildsource.source_graph import ...` statement, not a substring
-   match, and excluding `buildsource/__init__.py`'s own package-level
-   re-export block (a public-surface aggregator, not internal-code coupling
-   to the facade — it re-exports every `buildsource` submodule's public
-   names the same way, `source_graph` included, and is not itself a
-   migration target). Item 2 stays open until that migration lands — see
-   the closure note at the end of this Phase for current status;
+   match; a first correction to this note (Codex review, again) still
+   enumerated only three exact dot-counts and missed the fourth real
+   spelling root-package modules use (`from .buildsource.source_graph
+   import ...` — one dot — in `appcompat.py`/`analysis_assurance.py`/
+   `internal_leak.py` and others), which is why this is now phrased as "any
+   dot-count" rather than another fixed enumeration that the next new
+   caller's own directory depth can just as easily fall outside of again —
+   and excluding `buildsource/__init__.py`'s own package-level re-export
+   block (a public-surface aggregator, not internal-code coupling to the
+   facade — it re-exports every `buildsource` submodule's public names the
+   same way, `source_graph` included, and is not itself a migration
+   target). Item 2 stays open until that migration lands — see the closure
+   note at the end of this Phase for current status;
 3. **Done.** Repartitioned the change catalog into D9's `model/change_catalog/
    {symbols,types,platform,build,source}.py` taxonomy — all four
    registry-validation properties (global uniqueness, valid references,
