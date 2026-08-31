@@ -19,12 +19,24 @@ block reproducing `_exit_compare_release`'s own precedence — verified,
 never assumed, to always agree numerically with that (deliberately
 untouched) function's real, independently-tested output (see "Stage 1b,
 further split" below for exactly what landed and why the numbers can never
-diverge). **Still not implemented:** persisting a decision for `scan`'s
-`_BudgetOverflow`/`_EvidenceContractError` abort points, which raise
-*before* any report exists today and therefore need a genuine new design
-decision this stage deliberately did not make; the release fan-out's
-`GateOptions` unification; and **stage 2**, the `--exit-code-scheme`
-removal itself. See
+diverge). **Update (2026-08-31):** the programmatic `ScanResult` API's own
+`_BudgetOverflow`/`_EvidenceContractError` catches
+(`service_scan.run_scan`/`_run_scan_one_member`) now also persist a real
+`ExitDecision` into `ScanResult.report["exit"]`
+(`abicheck.policy.exit_decision_precedence.scan_abort_result_fields`),
+closing that half of the gap this section used to describe as fully open —
+these two abort exceptions previously left `report` at its default empty
+dict, unlike `NOT_COMPARABLE`, which already built one. **Still not
+implemented:** the native `scan` CLI's own equivalent — `cli_scan.py` calls
+`run_scan_core` directly and still only writes a stderr message plus
+`sys.exit`/`ClickException` at these two abort points, building no report
+at all (unlike the typed API, which always returns a `ScanResult`); giving
+it one is a real, user-visible CLI output-shape decision (should a
+`--format json` invocation get a minimal JSON report on abort instead of
+empty stdout?) this update deliberately left to a dedicated design pass
+rather than forcing through as a side effect of the typed-API wiring above.
+Also still open: the release fan-out's `GateOptions` unification; and
+**stage 2**, the `--exit-code-scheme` removal itself. See
 [cli-cleanup-phase-two.md](../plans/cli-cleanup-phase-two.md)'s "PR 4 — one
 gate algorithm" section, which this ADR formalizes rather than restates.
 **Decision maker:** Nikolay Petrov
@@ -258,16 +270,32 @@ lands in two stages rather than one atomic change:
       legacy-scheme code the new resolver can produce caps at the same `4`
       the real function's own operational-`"ERROR"` floor does, so the two
       cannot diverge on `code`, only on which `reasons`/contributions a
-      report reader sees). **Still not landed:** `scan`'s
-      `_BudgetOverflow`/`_EvidenceContractError` abort points
-      (`scan_engine.py`) raise *before* any report is ever constructed
-      today (unlike `NOT_COMPARABLE`, which already builds one) — a real
-      design decision (should the CLI construct a minimal report at those
-      abort points at all, and if so, what does it contain?) that this
-      stage deliberately declined to make as a side effect of wiring
-      already-designed resolvers. Also still open: the release fan-out's
-      `GateOptions` unification and a full cross-front-end parity pass
-      (typed API, Action).
+      report reader sees). **Landed (2026-08-31), typed-API half:** the
+      programmatic `ScanResult` API's own `_BudgetOverflow`/
+      `_EvidenceContractError` catches (`service_scan.run_scan`/
+      `_run_scan_one_member`) now persist a real `ExitDecision` into
+      `ScanResult.report["exit"]`
+      (`abicheck.policy.exit_decision_precedence.scan_abort_result_fields`,
+      `tests/test_service_unit.py`'s `TestScanAbortExitReport`) — `ScanResult`
+      already existed as a real return value at these two abort points (it
+      is what `run_scan`'s docstring calls "the single object the CLI and
+      library callers consume"), so giving its already-present, always-empty
+      `report` field real content needed no new design decision, only the
+      same wiring `NOT_COMPARABLE` already got. **Still not landed:** the
+      native `scan` *CLI*'s own equivalent. `cli_scan.py`'s `scan_cmd` calls
+      `run_scan_core` directly (not through `service_scan.run_scan`) and
+      still only writes a stderr message plus `sys.exit`/`ClickException` at
+      these two abort points — no `ScanOutcome`/report is ever constructed
+      on this path at all, unlike `NOT_COMPARABLE`, which the CLI's own code
+      path already builds one for. Genuinely a different, still-open design
+      question from the typed-API half just landed: should a machine-readable
+      `--format json` scan invocation get a minimal JSON report on this abort
+      path too, instead of empty stdout, and if so, from what partial state
+      (most of `ScanOutcome`'s fields are never computed at the earliest,
+      candidate-collection-stage budget overflow)? Left to a dedicated design
+      pass rather than forced through as a side effect of the typed-API wiring
+      above. Also still open: the release fan-out's `GateOptions` unification
+      and a full cross-front-end parity pass (typed API, Action).
 2. **Atomic.** Once the report block agrees with today's real behaviour for
    every axis and every mode (verified by the axis-separated tests this ADR
    requires below), remove `--exit-code-scheme` from `compare` and `scan`,

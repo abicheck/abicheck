@@ -49,6 +49,7 @@ from .cxx20_pair_dialect import (
 )
 from .errors import ValidationError
 from .header_utils import HEADER_SUFFIXES, iter_directory_headers
+from .policy.exit_decision_precedence import scan_abort_result_fields
 from .schemas import SCAN_SCHEMA_VERSION
 
 if TYPE_CHECKING:
@@ -1417,12 +1418,14 @@ def run_scan(req: ScanRequest) -> ScanResult:
         )
     except _BudgetOverflow:
         # The failure-guard contract: overflow is exit 5, never a shrunk scope.
-        return ScanResult(verdict="BUDGET_OVERFLOW", exit_code=5)
+        verdict, exit_code, report = scan_abort_result_fields("budget_overflow")
+        return ScanResult(verdict=verdict, exit_code=exit_code, report=report)
     except _EvidenceContractError:
         # A pinned depth that can't collect its evidence (auto-strict, ADR-037 D5):
         # the programmatic API honors the same contract as the CLI (pinned_explicit
         # above), so map the signal to a failed result rather than degrade silently.
-        return ScanResult(verdict="EVIDENCE_CONTRACT_ERROR", exit_code=1)
+        verdict, exit_code, report = scan_abort_result_fields("evidence_contract_error")
+        return ScanResult(verdict=verdict, exit_code=exit_code, report=report)
     finally:
         # Remove the inferred cmake build dir(s) once all build-dir-dependent phases
         # have run (or the scan aborted). Best-effort (each thunk is suppressed) so a
@@ -1712,9 +1715,11 @@ def _run_scan_one_member(
             build_targets=req.build_targets,
         )
     except _BudgetOverflow:
-        return ScanResult(verdict="BUDGET_OVERFLOW", exit_code=5)
+        verdict, exit_code, report = scan_abort_result_fields("budget_overflow")
+        return ScanResult(verdict=verdict, exit_code=exit_code, report=report)
     except _EvidenceContractError:
-        return ScanResult(verdict="EVIDENCE_CONTRACT_ERROR", exit_code=1)
+        verdict, exit_code, report = scan_abort_result_fields("evidence_contract_error")
+        return ScanResult(verdict=verdict, exit_code=exit_code, report=report)
     finally:
         drain_build_dir_cleanups(build_dir_cleanups)
 

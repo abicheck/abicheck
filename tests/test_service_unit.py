@@ -4788,6 +4788,122 @@ def test_run_scan_runs_deferred_build_dir_cleanup(monkeypatch):
     assert ran["n"] == 1  # finally still ran the cleanup on the raise path
 
 
+class TestScanAbortExitReport:
+    """ADR-064 stage 1b: `run_scan`/`_run_scan_one_member`'s `_BudgetOverflow`/
+    `_EvidenceContractError` catches now persist a real `ExitDecision` into
+    `ScanResult.report["exit"]`, the same explanatory block `scan_engine.py`'s
+    own `NOT_COMPARABLE` outcome already carries -- these two abort exceptions
+    previously left `ScanResult.report` at its default empty dict, so a report
+    reader had no way to see *why* the exit code was 5/1 beyond the bare
+    verdict string.
+    """
+
+    def test_run_scan_budget_overflow_persists_an_exit_decision(self, monkeypatch):
+        from abicheck import service_scan as _ss
+        from abicheck.scan_engine import _BudgetOverflow
+
+        def raising_core(**kw):
+            raise _BudgetOverflow("over budget")
+
+        monkeypatch.setattr(_ss, "estimate_scan", lambda req: [])
+        monkeypatch.setattr("abicheck.scan_engine.run_scan_core", raising_core)
+
+        req = _ss.ScanRequest(binaries=[Path("libfoo.so")], depth="binary")
+        res = _ss.run_scan(req)
+
+        assert res.verdict == "BUDGET_OVERFLOW"
+        assert res.exit_code == 5
+        exit_block = res.report["exit"]
+        assert exit_block["code"] == 5
+        assert exit_block["reasons"] == ["budget_overflow"]
+        assert exit_block["budget_overflow_contribution"] == 5
+        # Every other axis stayed at its "never computed" default -- nothing
+        # ran before the abort.
+        assert exit_block["compatibility_contribution"] == 0
+        assert exit_block["evidence_contract_error_contribution"] == 0
+        assert exit_block["not_comparable_contribution"] == 0
+
+    def test_run_scan_evidence_contract_error_persists_an_exit_decision(
+        self, monkeypatch
+    ):
+        from abicheck import service_scan as _ss
+        from abicheck.scan_engine import _EvidenceContractError
+
+        def raising_core(**kw):
+            raise _EvidenceContractError("no source evidence for the pinned depth")
+
+        monkeypatch.setattr(_ss, "estimate_scan", lambda req: [])
+        monkeypatch.setattr("abicheck.scan_engine.run_scan_core", raising_core)
+
+        req = _ss.ScanRequest(binaries=[Path("libfoo.so")], depth="source")
+        res = _ss.run_scan(req)
+
+        assert res.verdict == "EVIDENCE_CONTRACT_ERROR"
+        assert res.exit_code == 1
+        exit_block = res.report["exit"]
+        assert exit_block["code"] == 1
+        assert exit_block["reasons"] == ["evidence_contract_error"]
+        assert exit_block["evidence_contract_error_contribution"] == 1
+        assert exit_block["budget_overflow_contribution"] == 0
+
+    def test_run_scan_one_member_budget_overflow_persists_an_exit_decision(
+        self, monkeypatch
+    ):
+        from abicheck import service_scan as _ss
+        from abicheck.scan_engine import _BudgetOverflow
+
+        def raising_core(**kw):
+            raise _BudgetOverflow("over budget")
+
+        monkeypatch.setattr("abicheck.scan_engine.run_scan_core", raising_core)
+
+        req = _ss.ScanRequest(binaries=[Path("libfoo.so")], depth="binary")
+        res = _ss._run_scan_one_member(
+            req, Path("libfoo.so"), start=0.0, budget_s=None, changed_src="none"
+        )
+
+        assert res.verdict == "BUDGET_OVERFLOW"
+        assert res.exit_code == 5
+        assert res.report["exit"]["reasons"] == ["budget_overflow"]
+
+    def test_run_scan_one_member_evidence_contract_error_persists_an_exit_decision(
+        self, monkeypatch
+    ):
+        from abicheck import service_scan as _ss
+        from abicheck.scan_engine import _EvidenceContractError
+
+        def raising_core(**kw):
+            raise _EvidenceContractError("no source evidence for the pinned depth")
+
+        monkeypatch.setattr("abicheck.scan_engine.run_scan_core", raising_core)
+
+        req = _ss.ScanRequest(binaries=[Path("libfoo.so")], depth="source")
+        res = _ss._run_scan_one_member(
+            req, Path("libfoo.so"), start=0.0, budget_s=None, changed_src="none"
+        )
+
+        assert res.verdict == "EVIDENCE_CONTRACT_ERROR"
+        assert res.exit_code == 1
+        assert res.report["exit"]["reasons"] == ["evidence_contract_error"]
+
+    def test_exit_report_matches_scan_engines_own_not_comparable_shape(self):
+        # The whole point of this stage 1b slice is parity with the shape
+        # scan_engine.py's own NOT_COMPARABLE outcome already persists --
+        # same ExitDecision.to_dict(), same key set -- not a bespoke,
+        # differently-shaped dict for these two axes.
+        from abicheck.exit_decision import resolve_scan_exit_decision
+        from abicheck.policy.exit_decision_precedence import (
+            scan_abort_result_fields,
+        )
+
+        fields = scan_abort_result_fields("budget_overflow")
+        expected = resolve_scan_exit_decision(budget_overflow=True)
+        assert expected is not None
+        assert fields.verdict == "BUDGET_OVERFLOW"
+        assert fields.exit_code == 5
+        assert fields.report == {"exit": expected.to_dict()}
+
+
 def test_run_scan_rejects_comparison_only_fields_without_baseline():
     # Codex review on PR #657: ScanRequest's policy/suppression/scope/
     # force-public/pattern-verdict/env-matrix fields only mean anything for

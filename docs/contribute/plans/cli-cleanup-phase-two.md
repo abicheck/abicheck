@@ -3500,13 +3500,28 @@ second top-level spelling of the same fact.
 > is pinned by `tests/test_exit_code_integrity.py`, which CI gates depend
 > on), proven to always agree with it numerically
 > (`TestReleaseExitDecisionForReportAgreesWithRealExit`) rather than merely
-> assumed to. **Still open:** persisting a decision for `scan`'s
-> `_BudgetOverflow`/`_EvidenceContractError` abort points, which raise
-> *before* any report is ever built today (a real design decision this
-> slice deliberately did not make), the release fan-out's `GateOptions`
-> typed-object rewrite, a full cross-front-end parity pass (typed API,
-> Action), and stage 2 (the atomic removal — deleting `--exit-code-scheme`
-> and updating CLI/API/Action/`aggregate` parity together).
+> assumed to.
+>
+> **Update (2026-08-31):** the programmatic `ScanResult` API's own
+> `_BudgetOverflow`/`_EvidenceContractError` catches (`service_scan.
+> run_scan`/`_run_scan_one_member`) now persist a real `ExitDecision` into
+> `ScanResult.report["exit"]` too
+> (`scan_abort_result_fields`, `exit_decision_precedence.py`) — `ScanResult`
+> was already a real, always-returned object at these two abort points, so
+> this needed no new design decision, only the same wiring `NOT_COMPARABLE`
+> already got (`tests/test_service_unit.py`'s `TestScanAbortExitReport`).
+> **Still open:** the native `scan` *CLI*'s own equivalent — `cli_scan.py`
+> calls `run_scan_core` directly and still builds no report at all at these
+> two abort points (stderr message + `sys.exit`/`ClickException` only),
+> which is a genuinely different, real design decision (should a
+> machine-readable `--format json` invocation get a minimal JSON report on
+> abort instead of empty stdout, and from what partial state?) than the
+> typed-API wiring just landed — see ADR-064's own updated "Stage 1b,
+> further split" section. Also still open: the release fan-out's
+> `GateOptions` typed-object rewrite, a full cross-front-end parity pass
+> (typed API, Action), and stage 2 (the atomic removal — deleting
+> `--exit-code-scheme` and updating CLI/API/Action/`aggregate` parity
+> together).
 
 **This is the item the original draft got wrong, and it gets its own ADR.**
 
