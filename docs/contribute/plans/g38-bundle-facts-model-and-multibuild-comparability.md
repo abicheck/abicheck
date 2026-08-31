@@ -2587,11 +2587,17 @@ reopening OLD `.so` files, and (b) give each library its own header root
 and compile context, entirely from `abicheck compare ...`/`.abicheck.yml` —
 with no committed driver script standing in for either capability. **Third
 criterion, added per the review round above (Codex, verified against
-source):** (c) `--fail-on-removed-library` against a stored-facts baseline
-missing a library the NEW side still has produces the same documented exit
-8 a live release comparison would — not the bundle finding's ordinary exit
-4 — proving the new workflow entry point actually shares the release exit-
-code gating fold rather than only the comparison itself.
+source) and corrected in a later round after the first version of this
+criterion named the wrong direction:** (c) `--fail-on-removed-library`
+against a stored-facts baseline where the OLD side's facts name a library
+the live NEW side no longer has — a true removal, `set(old_map) -
+set(new_map)` in `cli_compare_release_helpers._match_release_keys()`'s own
+terms, not a library present in NEW but absent from OLD (that direction is
+an *addition*, `added_keys`, and must not trigger this flag at all) —
+produces the same documented exit 8 a live release comparison would, not
+the bundle finding's ordinary exit 4, proving the new workflow entry point
+actually shares the release exit-code gating fold rather than only the
+comparison itself.
 
 **Testing bar — one real-world fixture is a demo, not a test suite (root
 `AGENTS.md`'s "a bug fix's regression test targets the bug class, not the
