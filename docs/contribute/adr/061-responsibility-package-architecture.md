@@ -3407,16 +3407,18 @@ without promising a new export.
    `checker_types`/`model`). No stale `legacy_paths` entries were found in
    this same pass.
 
-**Closure note:** items 1, 3, and 4 are done — item 1 (the CastXML/Clang
+**Closure note:** all four Phase 5 items are done — item 1 (the CastXML/Clang
 parser split) is fully closed on both backends, item 3 (the change-catalog
-taxonomy repartition) is done, and item 4 (the `IMPORT_CYCLE_ALLOWLIST`
-audit and stale-facade/legacy-edge cleanup) has landed both slices with no
-stale entries remaining. **Item 2 is closed for every internal caller
-except four** (`buildsource/template_graph.py`, `buildsource/poi.py`,
-`cli_buildsource_helpers.py`, `cli_buildsource_merge.py`) with real,
-separately-tracked architectural blockers — see item 2's own paragraph
-above for exactly what each needs. **Phase 5 is not yet closed in full**
-on a strict reading of D8.
+taxonomy repartition) is done, item 4 (the `IMPORT_CYCLE_ALLOWLIST` audit
+and stale-facade/legacy-edge cleanup) has landed both slices with no stale
+entries remaining, and item 2's internal-caller migration is now closed for
+every caller — `buildsource/poi.py`, `cli_buildsource_helpers.py`, and
+`cli_buildsource_merge.py` via a physical relocation of the shared
+node/edge-classification predicates into `model/source_graph_query.py` plus
+the sanctioned `frontends -> workflows -> extract` indirection, and
+`buildsource/template_graph.py` last, via a follow-up split into
+`template_graph_fold.py` — see item 2's own paragraph above for the full
+closure account. **Phase 5 is fully closed** on a strict reading of D8.
 
 **Acceptance:** parser fixtures demonstrate byte/fact parity where
 applicable; catalog validation proves all four of D9's properties — global
