@@ -2480,9 +2480,20 @@ to live."
 
 - A CLI-reachable way to pass a stored `BundleFacts` path as the OLD side of
   a `compare`/`compare --release` invocation, routed through the existing
-  `compare_release_against_bundle_facts()` — no new comparison logic, only
-  a new input-resolution branch next to the existing directory/package and
-  single-file operand kinds.
+  `compare_release_against_bundle_facts()` — no new comparison logic for
+  the directory-NEW-side case. **Correction (Codex review, verified
+  against source):** the function's NEW-side handling is narrower than
+  "directory/package" as first written here — `bundle_side_input.py:371-374`
+  only branches on `new_dir.is_dir()`; anything else (an RPM/wheel/tar
+  archive) falls to the `else` branch and is passed straight to
+  `service.resolve_input` as if it were a single `.so`, with none of
+  `cli_compare_release_helpers._extract_if_package()`'s archive-extraction
+  step that `cli_compare_release.py`'s own directory/package fan-out
+  already runs for both live sides. This phase's in-scope work therefore
+  includes threading that same extraction step in front of the NEW-side
+  resolution here too — not only a new operand-kind branch at the CLI
+  layer — or the package-operand half of this phase's own acceptance
+  criteria (below) cannot actually pass.
 - A CLI/`.abicheck.yml`-reachable way to declare
   `per_library_headers`/`per_library_includes`/`per_library_compile`
   overrides keyed by canonical library name, reaching the same function's
@@ -2492,16 +2503,38 @@ to live."
 
 **Explicitly out of scope — do not port these from a driver like `bundle_gate.py`:**
 
-- **Any of a driver's own summary-JSON/Markdown/SARIF rendering.** A real
+- **A driver's own summary-JSON/Markdown rendering, but not blanket SARIF —
+  corrected below (Codex review, verified against source).** A real
   external driver built against this gap (`bundle_gate.py`, oneDAL#3693)
   carries roughly half its own line count (~230 of 475 lines: functions
   shaped like `_summarize`/`_markdown`/`_sarif`/`_relativize_uris`/
-  `_finalize_sarif_run`/`_report`) doing SARIF URI rewriting and a bespoke
-  summary/Markdown shape. abicheck already owns this surface end to end
-  (`reporter.py`, `sarif.py`, `html_report.py`, `junit_report.py`) — that
-  half of a driver is the driver author's own output-shaping preference,
-  not a gap in abicheck, and is deletable from the driver independent of
-  any CLI work landing here.
+  `_finalize_sarif_run`/`_report`) doing summary/Markdown rendering and
+  SARIF URI rewriting. The Markdown/summary half of that claim holds:
+  `_RELEASE_FORMATS` (`frontends/cli/commands/compare.py`) already
+  includes `"markdown"` for a directory/package operand, rendered via
+  `bundle.render_bundle_findings_markdown()` — a driver's own bespoke
+  Markdown/summary shape there is genuinely the driver author's output
+  preference, not a gap.
+
+  **The SARIF half of that claim was wrong.** `_RELEASE_FORMATS` is
+  exactly `{"json", "markdown", "junit"}` — SARIF is rejected outright for
+  any directory/package (bundle/release) comparison (`frontends/cli/
+  commands/compare.py`'s own `UsageError`: "sarif/html/review require a
+  single-pair (non-directory, non-package) comparison"), and `sarif.
+  to_sarif()`/`write_sarif()` consume a single `DiffResult`, not the
+  `BundleDiffResult` a release/bundle comparison produces. So a caller
+  needing one consolidated SARIF run across every library in a bundle (for
+  a CI code-scanning upload, this driver's own use case) has no abicheck
+  CLI path today, at any single-library or bundle granularity, for a
+  directory/package operand — the driver's own `_sarif`/
+  `_relativize_uris`/`_finalize_sarif_run` are compensating for a real,
+  separate, currently-undocumented gap, not reimplementing something
+  abicheck already provides. That gap is real but is its own scoped
+  question (does release-mode SARIF emit one run per library or one merged
+  run; how uri-relativization should work for a multi-library root) and is
+  explicitly **not** folded into this phase — recorded here so a future
+  phase proposal doesn't have to rediscover it, and so this phase is not
+  mistaken for having closed it.
 - **A caller's own measurement harness.** Wrapper scripts that run a driver
   under `/usr/bin/time -v` inside a pinned container to get reproducible
   wall-clock/peak-RSS/exit-code numbers (e.g. oneDAL#3693's `mkvenv909.sh`/
