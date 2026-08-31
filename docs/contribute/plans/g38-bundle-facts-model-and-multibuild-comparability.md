@@ -2474,11 +2474,20 @@ new-release/`, matching how `compare`'s existing `OLD_INPUT NEW_INPUT`
 operand pair already dispatches on operand *kind* rather than a mode flag.
 `cli_resolve.classify_compare_operand()` already returns one of
 `"package"`/`"directory"`/`"app"`/`"file"` for `OLD_INPUT`; this phase's
-CLI-facing work is extending that function with a new kind (recognizing a
-`BundleFacts` file — by format sniff, the same way `bundle_facts.py`'s own
-plain-JSON-vs-archive detection already works) and adding the matching
-dispatch branch, not declaring a separate path-valued option that would
-either have to duplicate the positional operand or require a dummy one.
+CLI-facing work is extending that function with a new kind and adding the
+matching dispatch branch, not declaring a separate path-valued option that
+would either have to duplicate the positional operand or require a dummy
+one. **Correction on how that new kind is actually detected (Codex
+review, next round, verified against source):** an archive-vs-plain-JSON
+envelope sniff alone is not enough — `BundleFacts`'s own plain-JSON
+encoding and an ordinary single-file `AbiSnapshot` JSON dump are both
+plain JSON, so an envelope-only check would misclassify every existing
+single-file `compare` operand as stored bundle facts. The new kind must
+additionally check the decoded content's shape — `BundleFacts`'s own
+serialization always carries a top-level `per_library_snapshots` key
+(`bundle_facts_serialization.py`), which a plain `AbiSnapshot` dump does
+not — and needs regression coverage proving an ordinary JSON snapshot
+still classifies as `"file"`, not the new kind.
 
 The one artifact worth naming without duplicating it: `cli.py` itself is
 now a small registration facade (`abicheck/frontends/AGENTS.md` gives the
