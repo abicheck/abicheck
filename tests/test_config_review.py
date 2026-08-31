@@ -928,7 +928,7 @@ class TestCompareReleaseParallelOrdering:
     def test_parallel_results_in_matched_keys_order(self, monkeypatch):
         from pathlib import Path as _P
 
-        import abicheck.cli_compare_release as _cr
+        import abicheck.cli_compare_release_pairwise as _cr
 
         monkeypatch.setattr(
             _cr,

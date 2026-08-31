@@ -45,7 +45,7 @@ class TestCompareReleaseErrorPaths:
         new_path.write_bytes(b"\x7fELF")
 
         with patch(
-            "abicheck.cli_compare_release._run_compare_pair",
+            "abicheck.cli_compare_release_pairwise._run_compare_pair",
             side_effect=RuntimeError("boom"),
         ):
             entry = _compare_one_library(
@@ -78,7 +78,7 @@ class TestCompareReleaseErrorPaths:
         new_path.write_bytes(b"\x7fELF")
 
         with patch(
-            "abicheck.cli_compare_release._run_compare_pair",
+            "abicheck.cli_compare_release_pairwise._run_compare_pair",
             side_effect=click.ClickException("nope"),
         ):
             entry = _compare_one_library(
@@ -111,7 +111,7 @@ class TestCompareReleaseErrorPaths:
         new_path.write_bytes(b"\x7fELF")
 
         with patch(
-            "abicheck.cli_compare_release._run_compare_pair",
+            "abicheck.cli_compare_release_pairwise._run_compare_pair",
             side_effect=ScopeMismatchError("scope drift"),
         ):
             entry = _compare_one_library(
@@ -146,7 +146,7 @@ class TestCompareReleaseErrorPaths:
         output_dir.mkdir()
 
         with patch(
-            "abicheck.cli_compare_release._run_compare_pair",
+            "abicheck.cli_compare_release_pairwise._run_compare_pair",
             side_effect=ProfileMismatchError("profile drift"),
         ):
             _compare_one_library(

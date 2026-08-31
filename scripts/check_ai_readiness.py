@@ -1395,6 +1395,22 @@ IMPORT_CYCLE_ALLOWLIST: frozenset[frozenset[str]] = frozenset(
                 # cluster). No init deadlock: it imports only `click`/
                 # `errors` (a leaf) at module load.
                 "frontends.cli.dump_execute",
+                # G38 Phase 15 file-split prerequisite: `cli_compare_release`
+                # (already a member, above) split its per-pair/per-library
+                # comparison engine and its matrix-result/output/gating
+                # engine into two new siblings, `cli_compare_release_
+                # pairwise`/`cli_compare_release_matrix`, purely to stay
+                # under the AI-readiness 2000-line hard cap. Same rename-
+                # follows-member case as `service_header_graph_attach`/
+                # `workflows.artifact.execute` above: both new modules'
+                # `from .cli import (...)` edge is the identical edge
+                # `cli_compare_release` already carried before the split,
+                # moved rather than added, and `cli_compare_release` itself
+                # imports each back at its own top -- so this closes the
+                # same cluster of cycles through already-member modules,
+                # not a new dependency direction.
+                "cli_compare_release_matrix",
+                "cli_compare_release_pairwise",
             }
         ),
         # TYPE_CHECKING-only typing cycle (no runtime import): AbiSnapshot

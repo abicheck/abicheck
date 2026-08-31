@@ -161,6 +161,8 @@ module = [
     "abicheck.cli_aggregate",
     "abicheck.cli_appcompat",
     "abicheck.cli_compare_release",
+    "abicheck.cli_compare_release_matrix",
+    "abicheck.cli_compare_release_pairwise",
     "abicheck.cli_debian_symbols",
     "abicheck.cli_baseline",
     "abicheck.cli_buildsource",

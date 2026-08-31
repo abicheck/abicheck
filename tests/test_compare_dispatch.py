@@ -1035,7 +1035,7 @@ class TestCompareDispatch:
             seen.append(bool(kwargs.get("include_dependencies")))
             return real_run_compare_pair(*args, **kwargs)
 
-        monkeypatch.setattr("abicheck.cli_compare_release._run_compare_pair", _capture)
+        monkeypatch.setattr("abicheck.cli_compare_release_pairwise._run_compare_pair", _capture)
 
         extra = [flag] if flag else []
         code, _, _ = _invoke("compare", str(old_dir), str(new_dir), *extra)
@@ -1150,7 +1150,7 @@ class TestCompareDispatch:
             verdict=Verdict.API_BREAK,
         )
         monkeypatch.setattr(
-            "abicheck.cli_compare_release._run_compare_pair",
+            "abicheck.cli_compare_release_pairwise._run_compare_pair",
             lambda *a, **kw: CompareResult(api_break_diff, _SNAP, _SNAP),
         )
 
