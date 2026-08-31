@@ -31,6 +31,7 @@ from .declarations import Function, Variable
 from .entities import EnumType, RecordType
 from .extraction_contract import DependencyInfo, ExtractionContract
 from .first_wins_index import build_first_wins_index, describe_dropped
+from .graph_facts import SurfaceGraphLike
 
 if TYPE_CHECKING:
     from ..buildsource.model import BuildSourceRef
@@ -522,6 +523,24 @@ class AbiSnapshot:
     # are authoritative for the compare and `build_source_pack` is the matching
     # provenance reference.
     build_source: BuildSourcePack | None = field(default=None, kw_only=True)
+
+    # ADR-063 Phase 3 (D5, schema v29) — the one evidence graph
+    # `compare/surface_graph.py`'s public-surface builder and (when present)
+    # the L5 builder both write into, unconditionally: unlike `build_source`
+    # above, this is never gated on `--sources`/`--build-info` evidence —
+    # every freshly extracted snapshot whose headers were parsed gets one.
+    # `None` only for a snapshot predating this field, or one whose headers
+    # were never parsed at all (a pure binary-only L0/L1 dump); a query over
+    # such a snapshot goes through `policy.public_surface.
+    # resolve_public_surface()`'s lazy, in-memory approximate backfill
+    # instead — never through `PublicSurfaceQuery.resolve()` directly, and
+    # never persisted back onto the loaded object. `SurfaceGraphLike`
+    # (`model/graph_facts.py`), not the concrete `SourceGraphSummary`, so
+    # this module needs no `buildsource` import — `build_source.
+    # source_graph` stays a live alias to the identical object whenever both
+    # are populated (one graph, two attribute paths), never a second,
+    # independently-built copy.
+    surface_graph: SurfaceGraphLike | None = field(default=None, kw_only=True)
 
     # ADR-029 — True when this snapshot's public-header AST was parsed using the
     # real build context (a compile_commands.json supplied to `dump -p`), so the

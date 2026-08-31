@@ -560,8 +560,14 @@ class SurfaceGraphLike(Protocol):
     (``policy/public_surface.py``'s ``PublicSurfaceQuery``) must read
     :attr:`nodes`/:attr:`edges` back to traverse them, and check
     :meth:`has_node` for O(1) membership rather than a linear scan.
-    ``Sequence``, not ``list`` — a read-only view is all traversal needs, and
-    ``Protocol`` is exactly the place to ask for the narrower type.
+    ``Sequence``, not ``list`` — a read-only view is all traversal needs.
+    Declared as read-only ``@property`` getters, not plain attributes: a
+    plain ``Protocol`` attribute implies both read *and* write access, which
+    would require the concrete class's own ``nodes``/``edges`` to be
+    invariantly typed ``Sequence`` rather than the (mutable, appended-to)
+    ``list`` they actually are — a real static mismatch `mypy` correctly
+    catches, not a false positive to silence. A read-only getter only needs
+    covariance, which ``list[GraphNode]`` already satisfies.
 
     A caller that needs ``SourceGraphSummary``-specific behavior
     (``resolve_entities`` and the rest of its concrete API) narrows back to
@@ -573,8 +579,11 @@ class SurfaceGraphLike(Protocol):
     structural conformance without importing ``buildsource`` at all.
     """
 
-    nodes: Sequence[GraphNode]
-    edges: Sequence[GraphEdge]
+    @property
+    def nodes(self) -> Sequence[GraphNode]: ...
+
+    @property
+    def edges(self) -> Sequence[GraphEdge]: ...
 
     def has_node(self, node_id: str) -> bool: ...
 

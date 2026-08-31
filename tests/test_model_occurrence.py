@@ -99,4 +99,5 @@ class TestOccurrenceIdEquality:
 
     def test_hashable(self) -> None:
         eid = entity_id_for_type((), "Foo")
-        {OccurrenceId(eid, "x"), OccurrenceId(eid, "y")}
+        s = {OccurrenceId(eid, "x"), OccurrenceId(eid, "y")}
+        assert len(s) == 2
