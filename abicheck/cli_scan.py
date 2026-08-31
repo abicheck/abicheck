@@ -53,7 +53,7 @@ import time
 from collections.abc import Callable
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import click
 
@@ -148,6 +148,9 @@ from .workflows.extraction import (  # noqa: F401 - re-exported for tests
     scan_files,
 )
 from .workflows.scan_config import RiskScore, score_changed_paths
+
+if TYPE_CHECKING:
+    from .workflows.scan_abort_result import ScanAbortAxis
 
 #: Back-compat alias — the resolver moved to ``cli_options`` (ADR-037 D3: one
 #: resolver shared by compare/dump/scan). Kept importable from here for existing
@@ -482,6 +485,41 @@ def _emit_scan_report(
 
     if outcome.exit_code != 0:
         sys.exit(outcome.exit_code)
+
+
+def _emit_scan_abort_report(
+    axis: ScanAbortAxis,
+    fmt: str,
+    output: Path | None,
+    *,
+    prior_decision: dict[str, object] | None = None,
+) -> None:
+    """Give ``scan --format json`` a real report on a `_BudgetOverflow`/
+    `_EvidenceContractError` abort, instead of empty stdout (ADR-064 stage
+    1b, native-CLI half). Before this, a ``--format json`` invocation that
+    aborted here produced no stdout content at all -- so a consumer parsing
+    it as JSON was already broken; this only adds content where none
+    existed, it does not change either abort's exit code or its existing
+    stderr message. `--format text` is unchanged: `bo.message`/`ce.message`
+    already read as the human-facing explanation, and there is no
+    `ScanOutcome` to feed `_render_text` (most of its fields were never
+    computed at this point) -- inventing prose for that gap is a separate,
+    genuinely open design question ADR-064 leaves unresolved. Reuses
+    `abicheck.workflows.scan_abort_result.scan_abort_result_fields`, the
+    exact function the typed `ScanResult` API now builds its own
+    `report["exit"]` from, so the CLI and library JSON payloads agree.
+    """
+    if fmt != "json":
+        return
+    from .workflows.scan_abort_result import scan_abort_result_fields
+
+    report = scan_abort_result_fields(axis, prior_decision=prior_decision)["report"]
+    text = json.dumps(report, indent=2)
+    if output:
+        _safe_write_output(output, text)
+        click.echo(f"Report written to {output}", err=True)
+    else:
+        click.echo(text)
 
 
 def _resolve_artifact_set_paths(spec: tuple[str, ...]) -> tuple[list[Path], bool]:
@@ -1848,11 +1886,15 @@ def scan_cmd(
         )
     except _BudgetOverflow as bo:
         click.echo(bo.message, err=True)
+        _emit_scan_abort_report(
+            "budget_overflow", fmt, output, prior_decision=bo.prior_decision
+        )
         sys.exit(_EXIT_BUDGET_OVERFLOW)
     except _EvidenceContractError as ce:
         # A pinned depth that can't collect its evidence is a usage contract
         # violation → a clean CLI error (exit 1), distinct from the verdict codes
         # (2/4) and the budget code (5).
+        _emit_scan_abort_report("evidence_contract_error", fmt, output)
         raise click.ClickException(ce.message) from ce
     finally:
         # Remove the inferred cmake build dir(s) now that every build-dir-dependent
