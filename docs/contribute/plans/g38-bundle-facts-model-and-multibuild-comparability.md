@@ -2517,6 +2517,50 @@ reopening OLD `.so` files, and (b) give each library its own header root
 and compile context, entirely from `abicheck compare ...`/`.abicheck.yml` —
 with no committed driver script standing in for either capability.
 
+**Testing bar — one real-world fixture is a demo, not a test suite (root
+`AGENTS.md`'s "a bug fix's regression test targets the bug class, not the
+one reported input" applies equally to new surface, not only fixes; the
+Python-API layer this phase sits on top of already sets the right
+precedent — `test_header_backend_and_compile_are_forwarded` and
+`test_per_library_overrides_win_over_the_uniform_fallback`, Phase 13
+follow-up above, are pinned kwarg/fallback checks, not single golden-path
+runs). The new CLI-facing layer this phase adds is two things — an operand
+parser (facts-in path recognition) and a manifest parser (per-library
+override maps) — and both need the generalized treatment, not a single
+happy-path invocation:
+
+- **Facts-in operand resolution:** parametrized/table-driven tests over
+  the operand-kind decision itself (a stored facts path vs. a directory vs.
+  a package vs. a single `.so`), not just "one facts file resolves
+  correctly" — including a facts file that fails `read_bundle_facts_archive`/
+  `load_bundle_facts` validation (version-skew, an archive over the
+  `max_json_object_nodes` budget) surfacing as a real Click usage error
+  rather than an unhandled exception.
+- **Per-library override manifest:** a small-domain enumeration over
+  manifest shapes — an empty map (uniform fallback for every library,
+  already covered at the Python-API layer but not yet at the manifest-
+  parsing layer), a manifest naming a library absent from the actual bundle
+  (must error, not silently no-op), a manifest covering only *some*
+  libraries (the documented fallback-per-library behavior, exercised
+  through the CLI/manifest parser this time, not only through
+  `compare_release_against_bundle_facts()`'s own keyword arguments), and a
+  malformed manifest (bad YAML, wrong value type per key) rejected with a
+  usage error naming the offending key — mirroring how `bundle_variants_
+  config.parse_bundle_variants_config()` already validates its own
+  declarative block eagerly and by name.
+- **At least one real, non-mocked end-to-end run** against actual compiled
+  `.so` fixtures under two genuinely different compile contexts in one
+  bundle (the repo's own "third-party-boundary tests must exercise the
+  real public API at realistic scale" principle, applied here to two
+  *different* toolchains rather than two copies of the same one) —
+  `@pytest.mark.integration`, following `TestCompareReleaseAgainstBundleFacts`'s
+  precedent of a real `gcc`-compiled fixture rather than a mock.
+
+A single oneDAL-shaped acceptance run (above) proves the feature works end
+to end; it does not by itself satisfy this bar, since by construction it
+only exercises the one manifest shape and one facts file that scenario
+happens to use.
+
 **Effort:** M — the Python-API and dispatch-destination halves are done;
 the remaining work is the vertical-slice split of one pinned option file
 (`cli_options.py` or `cli_compare_release.py`, whichever a concrete flag
