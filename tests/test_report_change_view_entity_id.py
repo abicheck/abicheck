@@ -108,24 +108,40 @@ def _bind_target(target: ast.expr, names: set[str]) -> None:
 
 
 def _unwrap_transparent(expr: ast.expr) -> ast.expr:
-    """Unwrap a ``typing.cast(<type>, <value>)`` call to the value it
-    forwards unchanged at runtime (Codex review, fresh evidence, eleventh
-    round: ``helper(cast("Change", change))`` forwards ``change`` as-is,
-    but the AST shows an ``ast.Call`` to ``cast``, not a bare ``ast.Name``,
-    so the existing call-argument match missed it entirely). Recognizes
-    both the bare ``cast(...)`` and qualified ``typing.cast(...)`` call
-    forms; any other expression is returned unchanged.
+    """Unwrap a ``typing.cast(<type>, <value>)`` call, or a walrus
+    (``:=``) assignment expression, to the value each forwards unchanged
+    at runtime -- looping so the two compose in either order (``cast("Change",
+    (x := change))`` or ``(x := cast("Change", change))``).
+
+    The ``cast`` case (Codex review, fresh evidence, eleventh round):
+    ``helper(cast("Change", change))`` forwards ``change`` as-is, but the
+    AST shows an ``ast.Call`` to ``cast``, not a bare ``ast.Name``, so the
+    existing call-argument match missed it entirely. Recognizes both the
+    bare ``cast(...)`` and qualified ``typing.cast(...)`` call forms.
+
+    The walrus case (Codex review, fresh evidence, thirteenth round):
+    ``(candidate := change).future_field`` accesses the attribute on the
+    walrus expression's *value*, an ``ast.NamedExpr`` node, not a bare
+    ``ast.Name`` -- every existing name-match check missed this
+    immediate-use shape the same way it missed ``cast(...)``.
+
+    Any other expression is returned unchanged.
     """
-    if (
-        isinstance(expr, ast.Call)
-        and len(expr.args) == 2
-        and (
-            (isinstance(expr.func, ast.Name) and expr.func.id == "cast")
-            or (isinstance(expr.func, ast.Attribute) and expr.func.attr == "cast")
-        )
-    ):
-        return expr.args[1]
-    return expr
+    while True:
+        if isinstance(expr, ast.NamedExpr):
+            expr = expr.value
+            continue
+        if (
+            isinstance(expr, ast.Call)
+            and len(expr.args) == 2
+            and (
+                (isinstance(expr.func, ast.Name) and expr.func.id == "cast")
+                or (isinstance(expr.func, ast.Attribute) and expr.func.attr == "cast")
+            )
+        ):
+            expr = expr.args[1]
+            continue
+        return expr
 
 
 def _locally_bound_names(scope_node: ast.AST) -> frozenset[str]:
@@ -233,7 +249,8 @@ def _locally_bound_names(scope_node: ast.AST) -> frozenset[str]:
         elif isinstance(current, ast.NamedExpr) and isinstance(
             current.target, ast.Name
         ):
-            names.add(current.target.id)
+            if not isinstance(_unwrap_transparent(current.value), ast.Name):
+                names.add(current.target.id)
         elif isinstance(current, ast.Global):
             names.update(current.names)
         elif isinstance(current, ast.Nonlocal):
@@ -407,6 +424,16 @@ def _change_attrs_read(
                     isinstance(ann_value, ast.Name)
                     and ann_value.id in tracked
                     and ann_value.id not in shadowed
+                    and node.target.id not in tracked
+                ):
+                    tracked.add(node.target.id)
+                    changed = True
+            elif isinstance(node, ast.NamedExpr) and isinstance(node.target, ast.Name):
+                walrus_value = _unwrap_transparent(node.value)
+                if (
+                    isinstance(walrus_value, ast.Name)
+                    and walrus_value.id in tracked
+                    and walrus_value.id not in shadowed
                     and node.target.id not in tracked
                 ):
                     tracked.add(node.target.id)
@@ -880,3 +907,59 @@ def test_change_attrs_read_still_shadows_an_unrelated_local_via_augassign() -> N
         if isinstance(node, ast.FunctionDef)
     }
     assert _change_attrs_read("outer", "change", funcs_by_name, set()) == set()
+
+
+def test_change_attrs_read_unwraps_a_walrus_wrapped_direct_attribute() -> None:
+    """Codex review, fresh evidence, thirteenth round: `(candidate :=
+    change).future_field` accesses the attribute directly on the walrus
+    expression's value -- an `ast.NamedExpr` node, not a bare `ast.Name` --
+    which every existing name-match check missed the same way it missed
+    `cast(...)`."""
+    source = "def outer(change):\n    return (candidate := change).future_field\n"
+    funcs_by_name = {
+        node.name: node
+        for node in ast.walk(ast.parse(source))
+        if isinstance(node, ast.FunctionDef)
+    }
+    assert _change_attrs_read("outer", "change", funcs_by_name, set()) == {
+        "future_field"
+    }
+
+
+def test_change_attrs_read_tracks_a_walrus_alias_for_a_later_separate_read() -> None:
+    """A walrus target used to introduce an alias for a *later*, separate
+    read (`if (candidate := change): pass; return candidate.future_field`)
+    needs the alias itself tracked, not just the immediate-use shape above
+    -- covers a nested closure too, where `_locally_bound_names` must not
+    shadow a walrus target whose value is itself a tracked alias, mirroring
+    the twelfth round's fix for ordinary `Assign`/`AnnAssign`."""
+    top_level_source = (
+        "def outer(change):\n"
+        "    if (candidate := change):\n"
+        "        pass\n"
+        "    return candidate.future_field\n"
+    )
+    top_level_funcs = {
+        node.name: node
+        for node in ast.walk(ast.parse(top_level_source))
+        if isinstance(node, ast.FunctionDef)
+    }
+    assert _change_attrs_read("outer", "change", top_level_funcs, set()) == {
+        "future_field"
+    }
+    nested_source = (
+        "def outer(change):\n"
+        "    def nested():\n"
+        "        if (candidate := change):\n"
+        "            pass\n"
+        "        return candidate.future_field\n"
+        "    return nested()\n"
+    )
+    nested_funcs = {
+        node.name: node
+        for node in ast.walk(ast.parse(nested_source))
+        if isinstance(node, ast.FunctionDef)
+    }
+    assert _change_attrs_read("outer", "change", nested_funcs, set()) == {
+        "future_field"
+    }
