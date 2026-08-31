@@ -20,4 +20,5 @@
   without updating this call site's report-derived adapter. Verified: on
   `main` before this fix, `tests/test_aggregate.py`/
   `tests/test_aggregate_findings.py` fail with 105 `AttributeError`s; this
-  fix brings the same run back to 306 passed.
+  fix brings the same run back to 308 passed (two new regression tests
+  added in `tests/test_aggregate_migration_coverage.py`).
