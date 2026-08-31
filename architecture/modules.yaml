@@ -395,6 +395,7 @@
     "abicheck.dumper_contract",
     "abicheck.errors",
     "abicheck.reclassify",
+    "abicheck.schemas",
     "abicheck.serialization"
   ],
   "facades": [

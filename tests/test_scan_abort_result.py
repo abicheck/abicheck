@@ -32,6 +32,7 @@ from pathlib import Path
 import pytest
 
 from abicheck.policy.exit_decision_precedence import resolve_scan_exit_decision
+from abicheck.schemas import SCAN_SCHEMA_VERSION
 from abicheck.workflows.scan_abort_result import scan_abort_result_fields
 
 
@@ -47,6 +48,7 @@ class TestScanAbortResultFields:
         fields = scan_abort_result_fields("budget_overflow")
         assert fields["verdict"] == "BUDGET_OVERFLOW"
         assert fields["exit_code"] == 5
+        assert fields["report"]["scan_schema_version"] == SCAN_SCHEMA_VERSION
         exit_block = fields["report"]["exit"]
         assert exit_block["code"] == 5
         assert exit_block["reasons"] == ["budget_overflow"]
@@ -74,7 +76,10 @@ class TestScanAbortResultFields:
         fields = scan_abort_result_fields("budget_overflow")
         expected = resolve_scan_exit_decision(budget_overflow=True)
         assert expected is not None
-        assert fields["report"] == {"exit": expected.to_dict()}
+        assert fields["report"] == {
+            "scan_schema_version": SCAN_SCHEMA_VERSION,
+            "exit": expected.to_dict(),
+        }
 
     def test_prior_decision_is_preserved_for_budget_overflow(self):
         # A caller that already resolved a full decision before a *later*
@@ -140,6 +145,9 @@ class TestScanAbortExitReportWiring:
         assert res.verdict == verdict
         assert res.exit_code == exit_code
         assert res.report["exit"]["reasons"] == [reason]
+        assert res.report["scan_schema_version"] == SCAN_SCHEMA_VERSION
+        # Reaches the real to_dict() envelope, not just the dataclass field.
+        assert res.to_dict()["report"]["scan_schema_version"] == SCAN_SCHEMA_VERSION
 
     @pytest.mark.parametrize(
         ("exc_name", "depth", "verdict", "exit_code", "reason"),

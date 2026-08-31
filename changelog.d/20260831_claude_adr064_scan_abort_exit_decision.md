@@ -11,7 +11,9 @@
   (`abicheck.workflows.scan_abort_result.scan_abort_result_fields`),
   giving a report reader the same `code`/`reasons`/per-axis contributions
   breakdown for these two outcomes as every other scan/compare exit path.
-  No exit code or verdict string changes for any existing caller.
+  No exit code or verdict string changes for any existing caller. The
+  nested `report` also carries its own `scan_schema_version`, matching
+  every real (non-abort) `ScanResult.report`'s existing convention.
   `SCAN_SCHEMA_VERSION` bumps to `1.23` for the new nonempty `report.exit`
   shape.
 

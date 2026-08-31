@@ -32,6 +32,11 @@ debt entry (`architecture/debt.yaml`), so this could not be inlined at
 either of their two `_BudgetOverflow`/`_EvidenceContractError` catch sites
 either -- a new, small `workflows` leaf module is the only budget-neutral
 home left.
+
+`abicheck.schemas` (for `SCAN_SCHEMA_VERSION`) joined `architecture/
+modules.yaml`'s `public_root_surfaces` for this module -- the same "a
+genuinely public, stable surface reached from a migrated package" exemption
+`abicheck.serialization` already uses, per ADR-061's own precedent.
 """
 
 from __future__ import annotations
@@ -40,6 +45,7 @@ from typing import Literal, TypedDict
 
 from ..policy.exit_decision import ExitDecision
 from ..policy.exit_decision_precedence import resolve_scan_exit_decision
+from ..schemas import SCAN_SCHEMA_VERSION
 
 ScanAbortAxis = Literal["budget_overflow", "evidence_contract_error"]
 
@@ -71,9 +77,14 @@ def scan_abort_result_fields(
     `_run_scan_one_member` need for one of `run_scan_core`'s two abort
     exceptions, so the verdict/exit_code pairing stays next to the
     `ExitDecision` that now explains it, instead of duplicated at each
-    `except` site. `report` mirrors what `scan_engine.py`'s own
+    `except` site. `report["exit"]` mirrors what `scan_engine.py`'s own
     ``NOT_COMPARABLE`` outcome already persists via ``resolve_scan_exit_
-    decision(not_comparable=True)``.
+    decision(not_comparable=True)``; `report["scan_schema_version"]`
+    mirrors the same key every real (non-abort) `ScanResult.report` already
+    carries (`ScanOutcome.to_dict()`'s own top-level stamp, per `tests/
+    test_scan_estimate.py`'s documented "both the service envelope and the
+    nested ... report carry the same scan schema version marker" contract
+    -- Codex review, PR #967).
 
     *prior_decision* forwards to `resolve_scan_exit_decision`'s own
     parameter of the same name (used only for the `budget_overflow` axis) --
@@ -95,6 +106,8 @@ def scan_abort_result_fields(
     )
     assert decision is not None  # axis always selects one of the two above
     verdict, exit_code = _SCAN_ABORT_VERDICTS[axis]
-    return ScanAbortResultFields(
-        verdict=verdict, exit_code=exit_code, report={"exit": decision.to_dict()}
-    )
+    report: dict[str, object] = {
+        "scan_schema_version": SCAN_SCHEMA_VERSION,
+        "exit": decision.to_dict(),
+    }
+    return ScanAbortResultFields(verdict=verdict, exit_code=exit_code, report=report)
