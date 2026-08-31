@@ -864,3 +864,100 @@ class TestCompareOldBundleFactsEarlyRejections:
 
         assert code == 64
         assert "scope:" in out
+
+    def test_pdb_path_is_rejected(self, tmp_path: Path) -> None:
+        # Codex review: --pdb-path has no channel into
+        # compare_release_against_bundle_facts()'s per-library
+        # service.resolve_input() call -- a NEW-side PE DLL would always
+        # fall back to binary-only extraction regardless of what was given.
+        facts_path = tmp_path / "old.bundlefacts.json"
+        facts_path.write_text("{}")
+        new_dir = tmp_path / "new"
+        new_dir.mkdir()
+        pdb_path = tmp_path / "new.pdb"
+        pdb_path.write_text("")
+
+        code, out = _invoke(
+            "compare",
+            str(facts_path),
+            str(new_dir),
+            "--old-bundle-facts",
+            "--pdb-path",
+            f"new={pdb_path}",
+            "--format",
+            "json",
+        )
+
+        assert code == 64
+        assert "--pdb-path" in out
+
+    def test_follow_deps_is_rejected(self, tmp_path: Path) -> None:
+        # Codex review: --follow-deps's DT_NEEDED dependency-graph walk has
+        # no parameter on compare_release_against_bundle_facts() either.
+        facts_path = tmp_path / "old.bundlefacts.json"
+        facts_path.write_text("{}")
+        new_dir = tmp_path / "new"
+        new_dir.mkdir()
+
+        code, out = _invoke(
+            "compare",
+            str(facts_path),
+            str(new_dir),
+            "--old-bundle-facts",
+            "--follow-deps",
+            "--format",
+            "json",
+        )
+
+        assert code == 64
+        assert "--follow-deps" in out
+
+    def test_show_only_is_rejected(self, tmp_path: Path) -> None:
+        # Codex review: every nested per-library report is rendered via
+        # reporter.to_json(diff) with no show_only argument -- the filter
+        # was accepted but every change stayed in the output regardless.
+        facts_path = tmp_path / "old.bundlefacts.json"
+        facts_path.write_text("{}")
+        new_dir = tmp_path / "new"
+        new_dir.mkdir()
+
+        code, out = _invoke(
+            "compare",
+            str(facts_path),
+            str(new_dir),
+            "--old-bundle-facts",
+            "--show-only",
+            "breaking",
+            "--format",
+            "json",
+        )
+
+        assert code == 64
+        assert "--show-only" in out
+
+    def test_config_scope_show_redundant_is_rejected(self, tmp_path: Path) -> None:
+        # Codex review: BuildConfig's scope: block parses show_redundant as
+        # a fourth independent field -- a config setting only that field
+        # (every other scope field left at its default) previously passed
+        # this check unrejected even though this driver's own JSON
+        # rendering never re-merges redundant_changes.
+        facts_path = tmp_path / "old.bundlefacts.json"
+        facts_path.write_text("{}")
+        new_dir = tmp_path / "new"
+        new_dir.mkdir()
+        config_path = tmp_path / ".abicheck.yml"
+        config_path.write_text("scope:\n  show_redundant: true\n")
+
+        code, out = _invoke(
+            "compare",
+            str(facts_path),
+            str(new_dir),
+            "--old-bundle-facts",
+            "--config",
+            str(config_path),
+            "--format",
+            "json",
+        )
+
+        assert code == 64
+        assert "scope:" in out

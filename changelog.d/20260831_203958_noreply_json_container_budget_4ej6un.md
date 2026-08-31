@@ -61,8 +61,17 @@
   error instead of a `NO_CHANGE` verdict for a comparison that never
   actually ran. `--probe-matrix` and `--post-manifest` are now rejected
   explicitly too, for the same reason as the other single-pair-only/no-
-  channel flags above. The project-config `scope:` block rejection now
-  checks all three of its independent fields (`public`,
-  `collapse_versioned_symbols`, `public_symbols`) instead of only
-  `public` -- a config setting only the latter two previously passed the
-  check unrejected even though neither is applied in this mode either.
+  channel flags above. `--pdb-path`, `--follow-deps`/`--search-path`/
+  `--ld-library-path`, and `--show-only` are now rejected explicitly too --
+  the first two have no channel into
+  `compare_release_against_bundle_facts()` either, and `--show-only`, while
+  `reporter.to_json()` does accept it directly, is rejected rather than
+  implemented since the live release fan-out's own per-library `to_json()`
+  calls have this identical gap and threading it through only here would
+  make this driver disagree with every other release-shaped comparison
+  path on what `--show-only` does. The project-config `scope:` block
+  rejection now checks all four of its independent fields (`public`,
+  `collapse_versioned_symbols`, `public_symbols`, `show_redundant`)
+  instead of only `public` -- a config setting only one of the other three
+  previously passed the check unrejected even though none of them is
+  applied in this mode either.

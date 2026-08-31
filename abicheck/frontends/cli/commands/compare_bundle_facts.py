@@ -70,17 +70,26 @@ into ``compare_release_against_bundle_facts()`` -- the same "reject rather
 than silently diverge from the request" rule ``--dry-run``/``--contract``
 already follow below. ``--debug-format``/``--dwarf-only``/``--debuginfod``/
 ``--debuginfod-url``/``--debug-root``, ``--pattern-verdicts``/
-``--explain-patterns``/``--surface-metrics``, ``--probe-matrix``, and
-``--post-manifest`` are rejected the same way -- none of them have a
-parameter on ``compare_release_against_bundle_facts()`` or its per-library
-``service.resolve_input()``/``service.compare_snapshots()`` calls either.
-``kwargs["config"]`` -- an explicit ``--config``, or (since a
-later review round) the same cwd-upward auto-discovered ``.abicheck.yml``
-``run_compare``'s own ``cfg_path`` falls back to -- is checked the same way:
-a config whose ``severity:``/``scope:``/``suppression:``/
-``exit_code_scheme:``/``debug:`` blocks are set would otherwise be silently
-unapplied (only its ``compile:`` block reaches ``resolve_compile_context``)
-is rejected rather than partially honored. A zero-match comparison (nothing
+``--explain-patterns``/``--surface-metrics``, ``--probe-matrix``,
+``--post-manifest``, ``--pdb-path``, ``--follow-deps``/``--search-path``/
+``--ld-library-path``, and ``--show-only`` are rejected the same way -- none
+of them have a parameter on ``compare_release_against_bundle_facts()`` or
+its per-library ``service.resolve_input()``/``service.compare_snapshots()``
+calls (``--show-only`` is the one exception with a real channel --
+``reporter.to_json()`` accepts it directly -- but is still rejected rather
+than implemented, since the live release fan-out's own per-library
+``to_json()`` calls have this identical gap and threading it through only
+here would make this driver disagree with every other release-shaped
+comparison path on what ``--show-only`` does). ``kwargs["config"]`` -- an
+explicit ``--config``, or (since a later review round) the same cwd-upward
+auto-discovered ``.abicheck.yml`` ``run_compare``'s own ``cfg_path`` falls
+back to -- is checked the same way: a config whose ``severity:``/``scope:``/
+``suppression:``/``exit_code_scheme:``/``debug:`` blocks are set would
+otherwise be silently unapplied (only its ``compile:`` block reaches
+``resolve_compile_context``) is rejected rather than partially honored --
+``scope:`` covers all four of ``BuildConfig``'s independent scope fields
+(``public``/``collapse_versioned_symbols``/``public_symbols``/
+``show_redundant``), not just ``public``. A zero-match comparison (nothing
 in NEW_INPUT's canonical library keys overlaps OLD_FACTS's
 ``per_library_snapshots``) is a ``ClickException``, not a ``NO_CHANGE``
 verdict -- exit 0 must mean a real comparison found nothing broken, not that
@@ -338,6 +347,35 @@ def dispatch(*, compile_context: Any, **kwargs: Any) -> None:
             "--debug-info is not supported together with --old-bundle-facts."
         )
     if (
+        kwargs.get("pdb_path") is not None
+        or kwargs.get("old_pdb_path") is not None
+        or kwargs.get("new_pdb_path") is not None
+    ):
+        # Codex review: same root cause as --debug-info just above --
+        # compare_release_against_bundle_facts()'s per-library
+        # service.resolve_input() call has no pdb_path parameter to receive
+        # any of these (this driver's own docstring: "no debug-info package
+        # resolution, no PDB"), so a NEW-side PE DLL would always fall back
+        # to binary-only extraction regardless of what was given here.
+        raise click.UsageError(
+            "--pdb-path is not supported together with --old-bundle-facts."
+        )
+    if (
+        kwargs.get("follow_deps")
+        or kwargs.get("search_paths")
+        or kwargs.get("ld_library_path")
+    ):
+        # Codex review: --follow-deps's DT_NEEDED dependency-graph walk (and
+        # its --search-path/--ld-library-path resolution knobs) is computed
+        # inside run_compare's own dependency-traversal path --
+        # compare_release_against_bundle_facts() has no parameter for any of
+        # them, so the requested dependency graph/binding-status/dependency-
+        # change section would silently never be produced.
+        raise click.UsageError(
+            "--follow-deps/--search-path/--ld-library-path are not "
+            "supported together with --old-bundle-facts."
+        )
+    if (
         kwargs.get("debug_format_opt") is not None
         or kwargs.get("debug_format") is not None
         or kwargs.get("dwarf_only") is True
@@ -389,6 +427,20 @@ def dispatch(*, compile_context: Any, **kwargs: Any) -> None:
             "--old-bundle-facts: this driver has no channel for L3-L5 "
             "build/source evidence."
         )
+    if kwargs.get("show_only"):
+        # Codex review: every nested per-library report here is rendered via
+        # reporter.to_json(diff) with no show_only argument, so the filter
+        # was accepted but every change stayed in the output regardless.
+        # Not implemented here either -- the live release fan-out
+        # (cli_compare_release.py) has this identical gap on its own
+        # per-library to_json() calls, so threading it through only in this
+        # newly-exposed mode would mean this driver's JSON output disagrees
+        # with what --show-only already does (nothing) on every other
+        # release-shaped comparison path. Rejected rather than partially
+        # honored ahead of that pre-existing gap.
+        raise click.UsageError(
+            "--show-only is not supported together with --old-bundle-facts."
+        )
     if kwargs.get("no_bundle_analysis"):
         # Codex review: compare_release_against_bundle_facts() has no
         # parameter to skip the cross-library BUNDLE_* analysis
@@ -436,12 +488,15 @@ def dispatch(*, compile_context: Any, **kwargs: Any) -> None:
             _bc.scope_public is not None
             or _bc.collapse_versioned_symbols is not None
             or _bc.public_symbols
+            or _bc.scope_show_redundant is not None
         ):
             # Codex review, fresh evidence: BuildConfig's scope: block
-            # parses public/collapse_versioned_symbols/public_symbols as
-            # three independent fields -- a config setting only the latter
-            # two (scope_public left None) previously passed this check
-            # unrejected even though neither is applied here either.
+            # parses public/collapse_versioned_symbols/public_symbols/
+            # show_redundant as four independent fields -- a config setting
+            # only show_redundant (every other field left at its default)
+            # previously passed this check unrejected even though this
+            # driver's own JSON rendering never re-merges redundant_changes
+            # the way ordinary `compare` does.
             _unsupported_config_blocks.append("scope:")
         if (
             _bc.suppression_strict is not None
