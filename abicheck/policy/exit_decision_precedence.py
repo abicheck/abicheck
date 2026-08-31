@@ -475,7 +475,7 @@ def resolve_release_exit_decision_for_report(
     fires first, while this function still finds it via
     :func:`_compute_release_legacy_exit_code` and names both
     ``COMPATIBILITY_GATE`` and ``OPERATIONAL_ERROR`` in ``reasons`` -- both
-    tied at ``4``. `tests/test_exit_decision.py`'s
+    tied at ``4``. `tests/test_exit_code_integrity.py`'s
     `TestReleaseExitDecisionForReportAgreesWithRealExit` proves the
     numeric-agreement claim across the same input matrix
     ``_exit_compare_release``'s own tests already cover.

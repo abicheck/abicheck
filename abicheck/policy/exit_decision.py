@@ -70,7 +70,7 @@ persists a real `diff.exit` block via `resolve_scan_exit_decision`, and the
 release fan-out's JSON summary gains an `exit` block via
 `resolve_release_exit_decision`, verified to always agree numerically with
 `cli_compare_release_helpers._exit_compare_release`'s own, independently
-computed and heavily pinned exit code (`tests/test_exit_decision.py`'s
+computed and heavily pinned exit code (`tests/test_exit_code_integrity.py`'s
 `TestReleaseExitDecisionForReportAgreesWithRealExit`) without changing that
 function itself. **Still open:** `scan`'s `_BudgetOverflow`/
 `_EvidenceContractError` abort points (`scan_engine.py`), which raise
