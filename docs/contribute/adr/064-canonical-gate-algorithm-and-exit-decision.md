@@ -34,23 +34,31 @@ these two abort exceptions previously left `report` at its default empty
 dict, unlike `NOT_COMPARABLE`, which already built one. Prior contributions
 across a *late* `_BudgetOverflow` (the post-compare deadline check, which
 can fire after a real gate/coverage/assurance decision already exists) are
-preserved too, via `_BudgetOverflow.prior_decision` and
-`abicheck.workflows.scan_abort_result.attach_prior_on_budget_overflow`,
-rather than discarded in favor of a budget-only decision. **Landed
-(2026-08-31): the native `scan` CLI's own equivalent.** `cli_scan.py`'s two
-abort catches now call the new `_emit_scan_abort_report` helper, which
-prints the same `scan_abort_result_fields(...)["report"]` shape the typed
-API persists — but only for `--format json`; before this, a `--format json`
-invocation that hit either abort produced empty stdout, so a consumer
-trying to parse it as JSON was already broken, and adding real content on
-that path changes no exit code and adds no output where any consumer could
-have depended on emptiness of a *working* JSON path. `--format text` is
-deliberately unchanged: `bo.message`/`ce.message` already read as the
-human-facing explanation, and there is no `ScanOutcome` to feed
-`_render_text` at this point (most of its fields were never computed) —
-inventing prose for that gap remains a separate, open question this update
-does not attempt. Still open: the release fan-out's `GateOptions`
-unification; and **stage 2**, the `--exit-code-scheme` removal itself. See
+preserved too (in both the baseline-compare and audit-only branches), via
+`_BudgetOverflow.prior_decision`/`abicheck.workflows.scan_abort_result.
+attach_prior_on_budget_overflow`/`audit_prior_decision`, rather than
+discarded in favor of a budget-only decision. **Landed (2026-08-31): the
+native `scan` CLI's own equivalent.** `cli_scan.py`'s two abort catches now
+call the new `_emit_scan_abort_report` helper — but only for `--format
+json` (or a `--write json=...` secondary output); before this, such an
+invocation that hit either abort produced empty stdout/no secondary file,
+so a consumer trying to parse it was already broken, and adding real
+content on that path changes no exit code and adds no output where any
+consumer could have depended on emptiness of a *working* JSON path. The
+payload is a minimal `ScanOutcome.to_dict()`-*compatible* envelope
+(top-level `verdict`/`exit_code`, the exit decision under `diff.exit`) —
+deliberately **not** `scan_abort_result_fields(...)["report"]`'s own shape,
+which is the *typed API's* `ScanResult.report` nesting, a different
+envelope; `workflows/aggregate/gate.py`'s `GateInfo.from_scan_report`
+requires a top-level `exit_code` and would raise `_MalformedGate` without
+one (Codex review, fresh evidence) — an earlier revision of this fix used
+that wrong shape before the gap was caught. `--format text` is deliberately
+unchanged: `bo.message`/`ce.message` already read as the human-facing
+explanation, and there is no `ScanOutcome` to feed `_render_text` at this
+point (most of its fields were never computed) — inventing prose for that
+gap remains a separate, open question this update does not attempt. Still
+open: the release fan-out's `GateOptions` unification; and **stage 2**, the
+`--exit-code-scheme` removal itself. See
 [cli-cleanup-phase-two.md](../plans/cli-cleanup-phase-two.md)'s "PR 4 — one
 gate algorithm" section, which this ADR formalizes rather than restates.
 **Decision maker:** Nikolay Petrov
@@ -328,19 +336,20 @@ lands in two stages rather than one atomic change:
       and from what partial state (most of `ScanOutcome`'s fields are never
       computed at the earliest, candidate-collection-stage budget overflow).
       Resolved narrowly rather than by constructing a partial `ScanOutcome`:
-      a new `_emit_scan_abort_report` helper prints exactly
-      `scan_abort_result_fields(...)["report"]` — the same minimal
-      `{scan_schema_version, exit}` shape the typed API now persists, prior
-      decision included for a late budget overflow — but only when
-      `fmt == "json"`; a `--format json` invocation on this path previously
-      produced empty stdout, which was already unusable to any consumer
-      parsing it as JSON, so this adds content only where none existed and
-      changes neither exit code (`tests/test_cli_scan_abort_report.py`).
-      `--format text` is unchanged: `bo.message`/`ce.message` already read
-      as the human-facing explanation, and inventing prose to fill
-      `ScanOutcome`'s missing fields for a text rendering remains a
-      separate, unaddressed question. **Landed (2026-08-31), two follow-up
-      fixes found by review on the two slices above:** (1) the *audit* path
+      a new `_emit_scan_abort_report` helper prints a minimal
+      `ScanOutcome.to_dict()`-*compatible* envelope (top-level
+      `verdict`/`exit_code`/`scan_schema_version`, the exit decision nested
+      under `diff.exit`, matching where `NOT_COMPARABLE`/a baseline compare
+      already publish theirs) — but only when `fmt == "json"`; a `--format
+      json` invocation on this path previously produced empty stdout, which
+      was already unusable to any consumer parsing it as JSON, so this adds
+      content only where none existed and changes neither exit code
+      (`tests/test_cli_scan_abort_report.py`). `--format text` is
+      unchanged: `bo.message`/`ce.message` already read as the human-facing
+      explanation, and inventing prose to fill `ScanOutcome`'s missing
+      fields for a text rendering remains a separate, unaddressed question.
+      **Landed (2026-08-31), three follow-up fixes found by review on the
+      slices above:** (1) the *audit* path
       (`run_scan_core`'s no-baseline branch) had the same late-budget-
       overflow gap the baseline-compare branch's own fix closed —
       `_audit_exit_code` never built a `diff_summary`, so a late overflow in
@@ -360,9 +369,23 @@ lands in two stages rather than one atomic change:
       It now also writes to `secondary_output` whenever `secondary_fmt ==
       "json"`, independent of the primary format (`tests/
       test_scan_abort_result.py::TestAuditPriorDecision`, `tests/
-      test_cli_scan_abort_report.py`'s secondary-output tests). Still open:
-      the release fan-out's `GateOptions` unification and a full
-      cross-front-end parity pass (typed API, Action).
+      test_cli_scan_abort_report.py`'s secondary-output tests). (3) The
+      first cut of `_emit_scan_abort_report` reused
+      `scan_abort_result_fields(...)["report"]` directly — the *typed API's*
+      `ScanResult.report` nesting, `{scan_schema_version, exit}` with no
+      top-level `verdict`/`exit_code` — which is a different envelope from
+      the CLI's own `ScanOutcome.to_dict()` contract. A saved `--format
+      json` abort report fed to `workflows/aggregate/gate.py`'s
+      `GateInfo.from_scan_report` (which requires a top-level `exit_code`)
+      would have raised `_MalformedGate` rather than reading the budget/
+      evidence decision it carries (Codex review, fresh evidence). Fixed by
+      building the envelope-compatible payload described above instead
+      (`TestAbortPayloadIsAggregateCompatible` in `tests/
+      test_cli_scan_abort_report.py`, exercising `GateInfo.from_scan_report`
+      and `workflows/aggregate/load.parse_report_verdict` directly against a
+      real abort payload). Still open: the release fan-out's `GateOptions`
+      unification and a full cross-front-end parity pass (typed API,
+      Action).
 2. **Atomic.** Once the report block agrees with today's real behaviour for
    every axis and every mode (verified by the axis-separated tests this ADR
    requires below), remove `--exit-code-scheme` from `compare` and `scan`,

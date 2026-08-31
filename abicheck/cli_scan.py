@@ -506,10 +506,20 @@ def _emit_scan_abort_report(
     already read as the human-facing explanation, and there is no
     `ScanOutcome` to feed `_render_text` (most of its fields were never
     computed at this point) -- inventing prose for that gap is a separate,
-    genuinely open design question ADR-064 leaves unresolved. Reuses
-    `abicheck.workflows.scan_abort_result.scan_abort_result_fields`, the
-    exact function the typed `ScanResult` API now builds its own
-    `report["exit"]` from, so the CLI and library JSON payloads agree.
+    genuinely open design question ADR-064 leaves unresolved.
+
+    Shaped as a real (if minimal) ``ScanOutcome.to_dict()``-compatible
+    envelope -- top-level ``verdict``/``exit_code``, the exit decision under
+    ``diff.exit`` -- rather than `scan_abort_result_fields`'s own ``report``
+    nesting (that shape is the *typed API's* ``ScanResult.report`` field,
+    a different envelope): `workflows/aggregate/gate.py`'s
+    `GateInfo.from_scan_report` requires a top-level `exit_code` and raises
+    `_MalformedGate` without one, so a consumer that saved this abort's
+    `--format json` output and fed it to `aggregate` would crash rather than
+    read the budget/evidence decision it carries (Codex review, fresh
+    evidence). `diff.exit` matches where `NOT_COMPARABLE`/a baseline compare
+    already publish theirs, so a severity-unaware reader's raw-`exit_code`
+    fallback path applies unchanged.
 
     *secondary_fmt*/*secondary_output* cover ``--format text --write
     json=...`` (Codex review, fresh evidence): the GitHub Action's own text
@@ -521,8 +531,14 @@ def _emit_scan_abort_report(
         return
     from .workflows.scan_abort_result import scan_abort_result_fields
 
-    report = scan_abort_result_fields(axis, prior_decision=prior_decision)["report"]
-    text = json.dumps(report, indent=2)
+    fields = scan_abort_result_fields(axis, prior_decision=prior_decision)
+    payload = {
+        "scan_schema_version": fields["report"]["scan_schema_version"],
+        "verdict": fields["verdict"],
+        "exit_code": fields["exit_code"],
+        "diff": {"exit": fields["report"]["exit"]},
+    }
+    text = json.dumps(payload, indent=2)
     if fmt == "json":
         if output:
             _safe_write_output(output, text)

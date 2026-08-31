@@ -3514,22 +3514,23 @@ second top-level spelling of the same fact.
 > at these two abort points, so this needed no new design decision, only
 > the same wiring `NOT_COMPARABLE` already got
 > (`tests/test_scan_abort_result.py`). `SCAN_SCHEMA_VERSION` bumped to
-> `1.23` for the newly nonempty `report.exit` shape. **Still open:**
-> threading a `prior_decision` across `scan_engine.py`'s own *later*
-> `_BudgetOverflow` raise site (needs a change to that exception's own
-> constructor -- real, separate follow-up); the native `scan` *CLI*'s own
-> equivalent — `cli_scan.py` calls `run_scan_core` directly and still builds
-> no report at all at these two abort points (stderr message + `sys.exit`/
-> `ClickException` only), which is a genuinely different, real design
-> decision (should a machine-readable `--format json` invocation get a
-> minimal JSON report on abort instead of empty stdout, and from what
-> partial state?) than the typed-API wiring just landed — see ADR-064's own
-> updated "Stage 1b, further split" section. Also still open: the release
-> fan-out's
-> `GateOptions` typed-object rewrite, a full cross-front-end parity pass
-> (typed API, Action), and stage 2 (the atomic removal — deleting
-> `--exit-code-scheme` and updating CLI/API/Action/`aggregate` parity
-> together).
+> `1.23` for the newly nonempty `report.exit` shape. **Update (2026-08-31,
+> continued):** `_BudgetOverflow` now carries a `prior_decision` across
+> `scan_engine.py`'s own *later* raise site (the post-compare deadline
+> check, and the audit-only branch's own late check) via
+> `attach_prior_on_budget_overflow`, so a late overflow after a real gate/
+> coverage/assurance/audit decision already exists preserves those
+> contributions instead of reporting a bare budget-only one. The native
+> `scan` *CLI*'s own equivalent has also landed: `cli_scan._emit_scan_
+> abort_report` gives `--format json` (and a `--write json=...` secondary
+> output) a real, `ScanOutcome`-envelope-compatible payload on either abort
+> — top-level `verdict`/`exit_code`, the exit decision nested under
+> `diff.exit` so `workflows/aggregate/gate.py`'s `GateInfo.from_scan_report`
+> reads it without raising `_MalformedGate` — instead of empty stdout.
+> Still open: the release fan-out's `GateOptions` typed-object rewrite, a
+> full cross-front-end parity pass (typed API, Action), and stage 2 (the
+> atomic removal — deleting `--exit-code-scheme` and updating CLI/API/
+> Action/`aggregate` parity together).
 
 **This is the item the original draft got wrong, and it gets its own ADR.**
 

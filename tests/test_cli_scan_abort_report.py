@@ -20,6 +20,17 @@ sits at its own ADR-061 no-growth debt budget with zero line slack
 exists as its own file instead of extending an existing one. Reuses that
 module's `runner`/`new_snap_compatible` fixtures and `_payload` helper via a
 plain import rather than duplicating their snapshot-fixture setup.
+
+The abort payload is shaped as a minimal ``ScanOutcome.to_dict()``-compatible
+envelope (top-level ``verdict``/``exit_code``, the exit decision nested under
+``diff.exit``) rather than `scan_abort_result_fields`'s own ``report`` shape
+(the *typed API's* `ScanResult.report` nesting, a different envelope) --
+`TestAbortPayloadIsAggregateCompatible` proves a saved abort report reads
+back through `workflows.aggregate.gate.GateInfo.from_scan_report`/
+`workflows.aggregate.load.parse_report_verdict` instead of raising
+`_MalformedGate` (Codex review, fresh evidence: `GateInfo.from_scan_report`
+requires a top-level `exit_code` and would have crashed on the old
+`{"exit": ...}`-only shape).
 """
 
 from __future__ import annotations
@@ -58,9 +69,11 @@ def test_budget_overflow_json_report_has_exit_block(runner, new_snap_compatible)
     assert res.exit_code == 5, res.output
     payload = _abort_payload(res)
     assert payload["scan_schema_version"] == SCAN_SCHEMA_VERSION
-    assert payload["exit"]["code"] == 5
-    assert payload["exit"]["reasons"] == ["budget_overflow"]
-    assert payload["exit"]["budget_overflow_contribution"] == 5
+    assert payload["verdict"] == "BUDGET_OVERFLOW"
+    assert payload["exit_code"] == 5
+    assert payload["diff"]["exit"]["code"] == 5
+    assert payload["diff"]["exit"]["reasons"] == ["budget_overflow"]
+    assert payload["diff"]["exit"]["budget_overflow_contribution"] == 5
 
 
 def test_budget_overflow_text_format_has_no_json_report(runner, new_snap_compatible):
@@ -92,8 +105,10 @@ def test_evidence_contract_error_json_report_has_exit_block(
     assert res.exit_code != 0, res.output
     payload = _abort_payload(res)
     assert payload["scan_schema_version"] == SCAN_SCHEMA_VERSION
-    assert payload["exit"]["code"] == 1
-    assert payload["exit"]["reasons"] == ["evidence_contract_error"]
+    assert payload["verdict"] == "EVIDENCE_CONTRACT_ERROR"
+    assert payload["exit_code"] == 1
+    assert payload["diff"]["exit"]["code"] == 1
+    assert payload["diff"]["exit"]["reasons"] == ["evidence_contract_error"]
 
 
 def test_evidence_contract_error_text_format_has_no_json_report(
@@ -130,8 +145,9 @@ def test_budget_overflow_writes_secondary_json_report(
     assert "{" not in res.output
     payload = json.loads(secondary.read_text())
     assert payload["scan_schema_version"] == SCAN_SCHEMA_VERSION
-    assert payload["exit"]["code"] == 5
-    assert payload["exit"]["reasons"] == ["budget_overflow"]
+    assert payload["verdict"] == "BUDGET_OVERFLOW"
+    assert payload["exit_code"] == 5
+    assert payload["diff"]["exit"]["reasons"] == ["budget_overflow"]
 
 
 def test_evidence_contract_error_writes_secondary_json_report(
@@ -152,8 +168,9 @@ def test_evidence_contract_error_writes_secondary_json_report(
     assert res.exit_code != 0, res.output
     payload = json.loads(secondary.read_text())
     assert payload["scan_schema_version"] == SCAN_SCHEMA_VERSION
-    assert payload["exit"]["code"] == 1
-    assert payload["exit"]["reasons"] == ["evidence_contract_error"]
+    assert payload["verdict"] == "EVIDENCE_CONTRACT_ERROR"
+    assert payload["exit_code"] == 1
+    assert payload["diff"]["exit"]["reasons"] == ["evidence_contract_error"]
 
 
 def test_budget_overflow_json_primary_and_secondary_both_written(
@@ -179,4 +196,63 @@ def test_budget_overflow_json_primary_and_secondary_both_written(
     stdout_payload = _abort_payload(res)
     secondary_payload = json.loads(secondary.read_text())
     assert stdout_payload == secondary_payload
-    assert stdout_payload["exit"]["reasons"] == ["budget_overflow"]
+    assert stdout_payload["diff"]["exit"]["reasons"] == ["budget_overflow"]
+
+
+class TestAbortPayloadIsAggregateCompatible:
+    """The abort JSON must read back as a real scan report, not just be
+    *some* valid JSON -- `workflows.aggregate.gate.GateInfo.from_scan_report`
+    raises `_MalformedGate` on a scan-shaped document with no top-level
+    `exit_code` (Codex review, fresh evidence), which the earlier
+    `{"exit": ...}`-only payload was.
+    """
+
+    def test_gate_info_reads_the_budget_overflow_payload(
+        self, runner, new_snap_compatible
+    ):
+        from abicheck.workflows.aggregate.gate import GateInfo
+
+        res = runner.invoke(
+            main,
+            ["scan", str(new_snap_compatible), "--budget", "0s", "--format", "json"],
+        )
+        payload = _abort_payload(res)
+        gate = GateInfo.from_scan_report(payload)
+        assert gate is not None
+        assert gate.blocking is True
+
+    def test_gate_info_reads_the_evidence_contract_error_payload(
+        self, runner, new_snap_compatible
+    ):
+        from abicheck.workflows.aggregate.gate import GateInfo
+
+        res = runner.invoke(
+            main,
+            [
+                "scan",
+                str(new_snap_compatible),
+                "--depth",
+                "source",
+                "--format",
+                "json",
+            ],
+        )
+        payload = _abort_payload(res)
+        gate = GateInfo.from_scan_report(payload)
+        assert gate is not None
+        assert gate.blocking is True
+
+    def test_parse_report_verdict_does_not_raise_on_the_payload(
+        self, runner, new_snap_compatible
+    ):
+        from abicheck.workflows.aggregate.load import parse_report_verdict
+
+        res = runner.invoke(
+            main,
+            ["scan", str(new_snap_compatible), "--budget", "0s", "--format", "json"],
+        )
+        payload = _abort_payload(res)
+        # "BUDGET_OVERFLOW" isn't a compatibility Verdict member (that enum has
+        # no abort states) -- parse_report_verdict must fail closed (None),
+        # not raise, same as it already does for any other unrecognized string.
+        assert parse_report_verdict(payload) is None
