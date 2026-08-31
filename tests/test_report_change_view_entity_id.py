@@ -92,6 +92,11 @@ def _change_attrs_read(
     """Every ``<param_name>.<attr>`` read reachable from ``func_name``,
     following calls (by position or keyword) into other functions defined
     in the same module that receive the same object under a new name.
+    Also catches an *indirect* read via the ``getattr(<param_name>,
+    "attr", ...)`` builtin (Codex review, fresh evidence: a literal-only
+    walk stays green if a future reader switches to this form) -- a
+    non-literal attribute name (computed at runtime) is out of reach for a
+    static check like this one and is not attempted.
 
     Deliberately module-scoped and name-based (no real type inference) --
     a small, targeted static check for this one adapter/consumer pair, not
@@ -114,6 +119,17 @@ def _change_attrs_read(
             and node.value.id == param_name
         ):
             attrs.add(node.attr)
+        elif (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Name)
+            and node.func.id == "getattr"
+            and len(node.args) >= 2
+            and isinstance(node.args[0], ast.Name)
+            and node.args[0].id == param_name
+            and isinstance(node.args[1], ast.Constant)
+            and isinstance(node.args[1].value, str)
+        ):
+            attrs.add(node.args[1].value)
         elif (
             isinstance(node, ast.Call)
             and isinstance(node.func, ast.Name)
@@ -167,3 +183,27 @@ def test_report_change_view_covers_every_attribute_resolve_change_identity_reads
         "_ReportChangeView has no matching field(s) -- add them (see "
         "adapter.duck_typed_view_attribute_drift in tests/regressions/manifest.py)"
     )
+
+
+def test_change_attrs_read_catches_an_indirect_getattr_field_read() -> None:
+    """Codex review, fresh evidence, second round: an unconditional read
+    written as `getattr(change, "future_field")` -- literally, not through
+    a runtime-computed name, which no static check can follow -- must be
+    found too, including through a followed helper call, or the structural
+    guard above would stay green while `_ReportChangeView` silently lacks
+    the field a future `resolve_change_identity` revision starts reading
+    this way instead of via `change.future_field`."""
+    source = (
+        "def outer(change):\n"
+        "    return helper(change)\n"
+        "def helper(c):\n"
+        "    return getattr(c, 'future_field', None)\n"
+    )
+    funcs_by_name = {
+        node.name: node
+        for node in ast.walk(ast.parse(source))
+        if isinstance(node, ast.FunctionDef)
+    }
+    assert _change_attrs_read("outer", "change", funcs_by_name, set()) == {
+        "future_field"
+    }
