@@ -631,3 +631,45 @@ def test_run_scan_depth_binary_exempts_the_early_bazel_scoping_check(
     )
     result = run_scan(req)
     assert result.verdict not in ("BUDGET_OVERFLOW", "EVIDENCE_CONTRACT_ERROR")
+
+
+def test_run_scan_depth_headers_still_rejects_bazel_scoping_mismatch(
+    tmp_path: Path,
+) -> None:
+    """Codex review, fresh evidence: unlike depth=binary, `--depth headers`
+    resolves to a `collect_mode` the early `run_scan_core` check correctly
+    treats as exempt (`collection_for_ci_mode("off")[1]` is empty too) -- but
+    a headers-only scan still runs the L2-seed's own independent
+    `collect_inline_pack` call to derive include dirs/compile context, which
+    *does* consult `build_info`/`build_targets`. Before the l2_seed.py fix
+    (see test_bazel_root_targets_l2_seed.py), that mismatch's ValidationError
+    was silently swallowed there and the scan returned a clean COMPATIBLE
+    result (exit 0) -- now it fails loudly instead.
+
+    Surfaces as `click.ClickException` here, not `ValidationError` directly:
+    `scan_engine._build_new_snapshot`'s own `except AbicheckError: raise
+    click.ClickException(...)` is a pre-existing wart predating ADR-063
+    entirely (see that module's own docstring) that leaks a Click-specific
+    exception into the typed API for *any* `AbicheckError` this call chain
+    raises, not just this new one -- out of scope for this fix; see
+    docs/contribute/known-gaps.md's own note on this exact case."""
+    import click
+
+    aquery = _write_bazel_aquery(tmp_path)
+    src = tmp_path / "src"
+    src.mkdir()
+    header = src / "api.h"
+    header.write_text("void f();\n", encoding="utf-8")
+    (src / ".abicheck.yml").write_text(
+        "build:\n  system: bazel\n  targets:\n    - //:math\n", encoding="utf-8"
+    )
+
+    req = ScanRequest(
+        binaries=[_artifact(tmp_path)],
+        headers=[header],
+        sources=src,
+        build_info=aquery,
+        depth="headers",
+    )
+    with pytest.raises(click.ClickException, match="pre-captured Bazel aquery"):
+        run_scan(req)

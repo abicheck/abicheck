@@ -187,8 +187,23 @@ looked like the obvious fix and wasn't.
   test_seed_includes_and_fold_compile_context_raises_on_bazel_scoping_mismatch`
   reproduces it end-to-end with a real (unmocked) pre-captured jsonproto and
   a `.abicheck.yml`-only (no `--build-target`) target scope, pinning that it
-  now raises instead of degrading silently. Historical analysis retained
-  below for the record.
+  now raises instead of degrading silently. **Verified against `scan`
+  specifically (a sixth review round asked for it by name, for the typed
+  `run_scan(ScanRequest(depth="headers", ...))` shape)**: the silent
+  `COMPATIBLE`/exit-0 outcome is gone — the request now fails loudly with the
+  same clear diagnostic — but the exit code inherits the identical front-end
+  variance already noted above for the sibling `embed_build_source` case, via
+  a different, independently pre-existing mechanism: `scan_engine.
+  _build_new_snapshot`'s own `except AbicheckError: raise click.
+  ClickException(...)` (documented in this module's own header as a
+  pre-existing wart predating ADR-063 entirely, deliberately left alone) maps
+  the `ValidationError` to exit 1 for the CLI, and — since `click.
+  ClickException` is not itself caught anywhere further out — leaks that same
+  Click-specific exception type to a typed `run_scan()` caller too. Fixing
+  that leak means touching the same pre-existing, out-of-scope `except
+  AbicheckError` clause the module docstring already flags for a future
+  cleanup, not a new regression this phase introduced — left alone here for
+  the same reason. Historical analysis retained below for the record.
   `BazelAdapter.collect()`'s `self.targets` scoping is applied
   in exactly two places: gating whether a *live* `bazel query` subprocess
   runs at all (`_resolve`/`_run_bazel`, only reachable when `workspace` is
