@@ -72,13 +72,18 @@ release fan-out's JSON summary gains an `exit` block via
 `cli_compare_release_helpers._exit_compare_release`'s own, independently
 computed and heavily pinned exit code (`tests/test_exit_code_integrity.py`'s
 `TestReleaseExitDecisionForReportAgreesWithRealExit`) without changing that
-function itself. **Still open:** `scan`'s `_BudgetOverflow`/
-`_EvidenceContractError` abort points (`scan_engine.py`), which raise
-*before* any report exists today -- persisting a decision for them needs a
-genuine new design decision (should the CLI construct a minimal report at
-those abort points at all?) that this stage deliberately did not make; see
-ADR-064's own "Stage 1b, further split" section. The atomic
-`--exit-code-scheme` removal remains stage 2.
+function itself. `scan`'s `_BudgetOverflow`/`_EvidenceContractError` abort
+points (`scan_engine.py`), which raise before any report exists, have since
+landed too: the typed `service_scan.ScanResult` API persists a real
+`ExitDecision` into `report["exit"]` for both
+(`abicheck.workflows.scan_abort_result.scan_abort_result_fields`, prior
+gate/coverage/assurance contributions preserved across a *late*
+`_BudgetOverflow` via `attach_prior_on_budget_overflow`), and the native
+`scan` CLI's own `--format json` invocation gets the same report shape on
+either abort via `cli_scan._emit_scan_abort_report` (`--format text` is
+unaffected, per that design's own account of what remained genuinely open).
+See ADR-064's own "Stage 1b, further split" section for the full account.
+The atomic `--exit-code-scheme` removal remains stage 2.
 """
 
 from __future__ import annotations
