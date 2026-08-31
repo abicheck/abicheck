@@ -1187,7 +1187,7 @@ def test_against_not_comparable_exits_6(
     assert res.exit_code == 6, res.output
     payload = _payload(res)
     assert payload["verdict"] == "NOT_COMPARABLE"
-    assert payload["diff"]["reason"] == "scope drift"
+    assert payload["diff"]["reason"] == "scope drift" and payload["diff"]["exit"]["not_comparable_contribution"] == 6  # ADR-064 1b
     # Pinned to the live constant, not a literal, so a future additive schema
     # bump (ADR-049 Phase 5's 1.4, adding suppressed_count/suppressed) doesn't
     # need this unrelated NOT_COMPARABLE-envelope assertion touched too.

@@ -1,0 +1,4 @@
+### Fixed
+
+- **A pre-2.42 report's `exit` block now backfills `crosscheck_promotion_contribution`, not just the five ADR-064 fields.** Report schema 2.41 introduced the `exit` block with only three fields; `crosscheck_promotion_contribution` was schema 2.42's own addition, one version before the five ADR-064 fields. The backfill's field list is now derived from `ExitDecision`'s own dataclass fields instead of a hand-copied tuple, so a sixth future field can't be missed the same way again.
+- **`check-target`'s `gate-mode: advisory` no longer wipes a `NOT_COMPARABLE` scan's exit signal.** The previous fix only preserved `operational_error_contribution`; `_classify_verdict` treats `NOT_COMPARABLE`/`BUDGET_OVERFLOW`/`EVIDENCE_CONTRACT_ERROR` identically to a genuine operational error, so all four "the comparison never completed" contributions are now preserved together, matching `final_exit_code`'s per-gate-mode contract.

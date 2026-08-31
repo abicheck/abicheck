@@ -5,16 +5,26 @@
 core (compatibility gate, contract coverage, analysis assurance) shipped
 additively as PR G1 (#789, `abicheck/policy/exit_decision.py`) before this
 ADR was written. Of this ADR's own two-stage plan (see "Staged landing,
-additive first" below), only **stage 1a** has landed:
-`resolve_scan_exit_decision`/`resolve_release_exit_decision` are pure
-functions reproducing the remaining axes' full precedence (evidence-contract
-error, budget overflow, not-comparable, the mode-dependent
+additive first" below), **stage 1a** landed complete:
+`resolve_scan_exit_decision`/`resolve_release_exit_decision`
+(`abicheck/policy/exit_decision_precedence.py`) are pure functions
+reproducing the remaining axes' full precedence (evidence-contract error,
+budget overflow, not-comparable, the mode-dependent
 removed-required-library rank, and a release's independent operational-error
-axis), unit-tested against the real code they model. Not yet implemented:
-**stage 1b**, wiring those two resolvers into any command's persisted report
-or actually-returned exit code (a real report-schema version bump), the
-release fan-out's `GateOptions` unification, and **stage 2**, the
-`--exit-code-scheme` removal itself. See
+axis), unit-tested against the real code they model. **Stage 1b landed
+partially:** `ExitDecision.to_dict` now serializes all five ADR-064 fields
+(report schema 2.47/1.22), `scan`'s `NOT_COMPARABLE` outcome persists a real
+`diff.exit` block, and the release fan-out's JSON summary gains an `exit`
+block reproducing `_exit_compare_release`'s own precedence — verified,
+never assumed, to always agree numerically with that (deliberately
+untouched) function's real, independently-tested output (see "Stage 1b,
+further split" below for exactly what landed and why the numbers can never
+diverge). **Still not implemented:** persisting a decision for `scan`'s
+`_BudgetOverflow`/`_EvidenceContractError` abort points, which raise
+*before* any report exists today and therefore need a genuine new design
+decision this stage deliberately did not make; the release fan-out's
+`GateOptions` unification; and **stage 2**, the `--exit-code-scheme`
+removal itself. See
 [cli-cleanup-phase-two.md](../plans/cli-cleanup-phase-two.md)'s "PR 4 — one
 gate algorithm" section, which this ADR formalizes rather than restates.
 **Decision maker:** Nikolay Petrov
@@ -131,11 +141,16 @@ budget checks (the baseline compare's own deadline scope, and the final,
 unconditional `_check_scan_budget` call after the comparison completes)
 run after the evidence-contract check has already had its chance to fire,
 and it is only against *those* that evidence-contract error legitimately
-wins. `abicheck/policy/exit_decision.py`'s `resolve_scan_exit_decision`
-models this as two separate boolean inputs (`budget_overflow_before_
-evidence_check` and `budget_overflow`) rather than one, precisely so a
-future caller cannot collapse them back into a single, incorrectly-ordered
-axis.
+wins. (`_EvidenceContractError` also has a second, earlier raise site —
+`scan_engine.py:852`'s abi3 precondition check inside `_run_abi3_audit`,
+which still runs after the candidate-collection budget guard — mapping to
+the same `evidence_contract_error=True` input as the `:1229` site,
+consistent with this precedence; named here so the two raise sites are not
+mistaken for one.) `abicheck/policy/exit_decision_precedence.py`'s
+`resolve_scan_exit_decision` models this as two separate boolean inputs
+(`budget_overflow_before_evidence_check` and `budget_overflow`) rather
+than one, precisely so a future caller cannot collapse them back into a
+single, incorrectly-ordered axis.
 
 **`auto`'s existing inference rule is the policy, restated, not changed:**
 a severity preset, an explicit `--severity-*` flag, a `.abicheck.yml`
@@ -217,22 +232,42 @@ lands in two stages rather than one atomic change:
       `scan`'s and the release fan-out's own report `exit` block for
       explanatory purposes — every existing call site's *actually
       returned* exit code stays bit-for-bit unchanged, exactly as PR G1
-      did for the first three axes. This sub-step needs its own
-      report-schema version bump and cross-front-end parity pass (CLI,
-      typed API, Action), so it is reviewed and merged separately from 1a
-      rather than bundled with it. It also needs one small piece of new
-      aggregation logic in `cli_compare_release.py` for the legacy scheme
-      specifically: `resolve_release_exit_decision`'s own docstring records
-      that today's real `worst_verdict` rollup (the `_RELEASE_VERDICT_ORDER`
-      loop) ranks `"ERROR"` above `"BREAKING"` and collapses the release to
-      one scalar, so a `BREAKING` library and a separate, unrelated
-      library that failed to compare cannot both be supplied to the
-      resolver today the way severity mode's `_compute_release_severity_
-      exit_code` already supplies both axes independently — stage 1b
-      should add the legacy-scheme equivalent (a "worst verdict among
-      non-`ERROR`/non-`not_comparable` libraries", iterating
-      `library_results` the same way) so the resolver's own already-correct
-      tie-handling has real inputs to preserve.
+      did for the first three axes. **Landed partially:**
+      `ExitDecision.to_dict` now serializes all five ADR-064 fields
+      (report schema 2.47/1.22, both `compare` and `scan`); `scan`'s
+      `NOT_COMPARABLE` outcome (`ProfileMismatchError`/`ScopeMismatchError`)
+      persists a real `diff.exit` block via `resolve_scan_exit_decision`,
+      since that outcome already builds and emits a report today; and the
+      release fan-out's JSON summary gains an unconditional `exit` block
+      (`resolve_release_exit_decision_for_report`,
+      `abicheck/policy/exit_decision_precedence.py`) reproducing
+      `_exit_compare_release`'s own precedence, including the legacy-scheme
+      aggregation gap this section used to describe as open (a
+      `_compute_release_legacy_exit_code` helper, the "worst verdict among
+      non-`ERROR`/non-`not_comparable` libraries" this paragraph called
+      for) — but landed as a **separate, report-only** resolver rather than
+      a rewrite of `_exit_compare_release` itself, since that function's
+      exact signature and numeric outputs are pinned directly by
+      `tests/test_exit_code_integrity.py`, which CI gates depend on;
+      rewriting it in place to delegate to the new resolver risked exactly
+      the kind of silent exit-code regression this ADR exists to prevent
+      for a function with that much test weight resting on its current
+      shape. The two are proven, not merely assumed, to always agree
+      numerically (`tests/test_exit_code_integrity.py`'s
+      `TestReleaseExitDecisionForReportAgreesWithRealExit` — every
+      legacy-scheme code the new resolver can produce caps at the same `4`
+      the real function's own operational-`"ERROR"` floor does, so the two
+      cannot diverge on `code`, only on which `reasons`/contributions a
+      report reader sees). **Still not landed:** `scan`'s
+      `_BudgetOverflow`/`_EvidenceContractError` abort points
+      (`scan_engine.py`) raise *before* any report is ever constructed
+      today (unlike `NOT_COMPARABLE`, which already builds one) — a real
+      design decision (should the CLI construct a minimal report at those
+      abort points at all, and if so, what does it contain?) that this
+      stage deliberately declined to make as a side effect of wiring
+      already-designed resolvers. Also still open: the release fan-out's
+      `GateOptions` unification and a full cross-front-end parity pass
+      (typed API, Action).
 2. **Atomic.** Once the report block agrees with today's real behaviour for
    every axis and every mode (verified by the axis-separated tests this ADR
    requires below), remove `--exit-code-scheme` from `compare` and `scan`,
@@ -275,11 +310,11 @@ alongside the flag deletion itself.
   alias or transition window ships — the old spelling errors with
   `No such option`, exit `64`, matching every other removal in this
   cleanup.
-- The release fan-out gains the `exit`/reasons block parity `compare`'s
-  release path currently lacks in **stage 1b** (wiring
-  `resolve_release_exit_decision` into `cli_compare_release_helpers.py`,
-  per "Staged landing" above) — not the atomic stage; that block is
-  additive and needs no algorithm-selector decision to exist. Only the
+- The release fan-out gains the `exit`/reasons block parity with `compare`
+  via **stage 1b** (`resolve_release_exit_decision_for_report`,
+  `abicheck/policy/exit_decision_precedence.py`, per "Staged landing"
+  above) — not the atomic stage; that block is additive and needs no
+  algorithm-selector decision to exist. Only the
   release fan-out's *internal* severity/exit-code representation changing
   shape (raw strings → `GateOptions`-shaped object) is atomic-stage work,
   since it is the same rewrite that removes `--exit-code-scheme`. Neither
