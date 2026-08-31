@@ -22,7 +22,11 @@ directly, bypassing ``CompareRequest``/``run_compare_request`` — see
 ``tests/test_cli_coverage.py::TestCompareApiBreakExitCode``'s pattern of
 monkeypatching ``abicheck.workflows.input_resolution.load_snapshot``/``compare_snapshots``
 instead of driving a real dump, since the gate's own logic is already
-covered end-to-end by ``tests/test_checker_comparability_gate.py``."""
+covered end-to-end by ``tests/test_checker_comparability_gate.py``.
+
+``load_snapshot`` is patched via ``abicheck.workflows.input_resolution``
+(where ``resolve_input`` now lives); ``compare_snapshots`` stays patched via
+``abicheck.service`` (it did not move — see ADR-061 Phase 4)."""
 
 from __future__ import annotations
 

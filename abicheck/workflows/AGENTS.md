@@ -39,7 +39,7 @@ worse than two implementations kept in sync by hand, because nothing fails
 when they drift. `abicheck/service_input_resolution.py` remains as a
 delegating facade; import the owners.
 
-Three narrow re-export surfaces exist so a frontend can reach an operation
+Six narrow re-export surfaces exist so a frontend can reach an operation
 without importing a ring it may not (`frontends` may import only `model`,
 `workflows`, `report`):
 
