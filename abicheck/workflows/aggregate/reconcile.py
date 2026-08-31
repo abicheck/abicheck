@@ -174,6 +174,7 @@ def resolve_report_change_identity(entry: Mapping[str, Any]) -> FindingIdentity:
         # docstring for why an absent value here is consistent rather than
         # lossy for the cross-report comparison it exists to serve.
         qualified_name=None,
+        entity_id=None,
     )
     return resolve_change_identity(cast("Change", view))
 

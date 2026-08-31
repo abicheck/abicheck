@@ -1378,21 +1378,22 @@ def run_scan_core(
         except deadline.DeadlineExceeded as exc:
             elapsed = time.monotonic() - start
             raise _BudgetOverflow(
-                f"error: --budget {budget} exceeded ({elapsed:.1f}s > "
-                f"{budget_s:.0f}s) while parsing the --against baseline "
-                "(header/build/source parse). Pin a shallower level or raise "
-                "the budget; a budget never silently shrinks the pinned scope."
+                f"error: --budget {budget} exceeded ({elapsed:.1f}s > {budget_s:.0f}s) "
+                "while parsing the --against baseline (header/build/source parse). "
+                "Pin a shallower level or raise the budget; a budget never silently "
+                "shrinks the pinned scope."
             ) from exc
         except (ProfileMismatchError, ScopeMismatchError) as exc:
-            # ADR-050 D2: the candidate and --against baseline were not
-            # extracted under a comparable profile/scope contract -- a hard
-            # gate result, not a soft-launch RISK finding, so it is never
-            # something a promoted cross-check finding (below) can soften or
-            # override.
+            # ADR-050 D2: not a comparable profile/scope contract -- a hard gate
+            # result no promoted cross-check finding (below) can soften/override.
             not_comparable = True
             verdict = "NOT_COMPARABLE"
             exit_code = 6
-            diff_summary = {"reason": str(exc)}
+            from .exit_decision import resolve_scan_exit_decision  # ADR-064 stage 1b
+
+            nc_decision = resolve_scan_exit_decision(not_comparable=True)
+            assert nc_decision is not None  # always set when not_comparable=True
+            diff_summary = {"reason": str(exc), "exit": nc_decision.to_dict()}
         if not not_comparable:
             # A cross-check the maintainer promoted to `error` (D6) gates the exit
             # even when the baseline diff itself is clean.

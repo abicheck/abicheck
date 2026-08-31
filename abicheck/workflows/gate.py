@@ -60,7 +60,11 @@ from ..policy.contract_coverage_exit import (
     coverage_exit_for_context,
     fold_coverage_exit,
 )
-from ..policy.exit_decision import resolve_compare_exit_decision
+from ..policy.exit_decision import ExitDecision, resolve_compare_exit_decision
+from ..policy.exit_decision_precedence import (
+    resolve_release_exit_decision,
+    resolve_release_exit_decision_for_report,
+)
 from ..policy.gate_decision import gate_decision_for_result
 from ..policy.severity import (
     PRESET_DEFAULT,
@@ -78,6 +82,7 @@ from ..policy.severity import (
 
 __all__ = [
     "PRESET_DEFAULT",
+    "ExitDecision",
     "IssueCategory",
     "SeverityConfig",
     "SeverityLevel",
@@ -100,5 +105,7 @@ __all__ = [
     "missing_contract_exit_code",
     "note_if_same_binary_compared",
     "resolve_compare_exit_decision",
+    "resolve_release_exit_decision",
+    "resolve_release_exit_decision_for_report",
     "resolve_severity_config",
 ]

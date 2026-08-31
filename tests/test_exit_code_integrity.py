@@ -24,6 +24,9 @@ never drift apart. The `compat` flow uses a deliberately different scheme
 
 from __future__ import annotations
 
+from types import SimpleNamespace
+from typing import Any, cast
+
 import pytest
 
 from abicheck.checker import compare
@@ -209,6 +212,244 @@ class TestReleaseContractCoverageFold:
             contract_coverage_exit_contribution=0,
         )
         assert code == legacy_exit_code(Verdict[worst])
+
+
+class TestReleaseExitDecisionForReportAgreesWithRealExit:
+    """ADR-064 stage 1b: `resolve_release_exit_decision_for_report`'s
+    `.code` must always equal what `_exit_compare_release` actually
+    `sys.exit`s with, for the exact same inputs -- these two are
+    independently computed (the real function was deliberately left
+    unmodified rather than rewritten to delegate here, see that resolver's
+    own docstring), so nothing but a test proves they cannot silently
+    diverge.
+    """
+
+    @pytest.mark.parametrize(
+        "worst", ["BREAKING", "API_BREAK", "COMPATIBLE", "NO_CHANGE"]
+    )
+    def test_agrees_for_each_verdict_legacy_scheme(self, worst: str) -> None:
+        from abicheck.cli_compare_release import _exit_compare_release
+        from abicheck.workflows.gate import resolve_release_exit_decision_for_report
+
+        real = _exit_code_of(
+            _exit_compare_release, worst, False, [], severity_exit_code=None
+        )
+        mine = resolve_release_exit_decision_for_report(
+            worst, False, [], None, 0, [{"verdict": worst}]
+        )
+        assert mine.code == real
+
+    def test_agrees_removed_library_wins_over_coverage_only(self) -> None:
+        from abicheck.cli_compare_release import _exit_compare_release
+        from abicheck.workflows.gate import resolve_release_exit_decision_for_report
+
+        real = _exit_code_of(
+            _exit_compare_release,
+            "NO_CHANGE", True, ["removed_lib"],
+            severity_exit_code=None,
+            contract_coverage_exit_contribution=1,
+        )
+        mine = resolve_release_exit_decision_for_report(
+            "NO_CHANGE", True, ["removed_lib"], None, 1, [{"verdict": "NO_CHANGE"}]
+        )
+        assert mine.code == real == 8
+
+    def test_agrees_error_verdict_floors_at_four_with_coverage(self) -> None:
+        from abicheck.cli_compare_release import _exit_compare_release
+        from abicheck.workflows.gate import resolve_release_exit_decision_for_report
+
+        real = _exit_code_of(
+            _exit_compare_release,
+            "ERROR", False, [],
+            severity_exit_code=None,
+            contract_coverage_exit_contribution=1,
+        )
+        mine = resolve_release_exit_decision_for_report(
+            "ERROR", False, [], None, 1, [{"verdict": "ERROR"}]
+        )
+        assert mine.code == real == 4
+
+    def test_agrees_severity_scheme_folds_coverage(self) -> None:
+        from abicheck.cli_compare_release import _exit_compare_release
+        from abicheck.workflows.gate import resolve_release_exit_decision_for_report
+
+        real = _exit_code_of(
+            _exit_compare_release,
+            "COMPATIBLE", False, [],
+            severity_exit_code=0,
+            contract_coverage_exit_contribution=1,
+        )
+        mine = resolve_release_exit_decision_for_report(
+            "COMPATIBLE", False, [], 0, 1, [{"verdict": "COMPATIBLE"}]
+        )
+        assert mine.code == real == 1
+
+    def test_agrees_severity_scheme_removed_library_wins(self) -> None:
+        from abicheck.cli_compare_release import _exit_compare_release
+        from abicheck.workflows.gate import resolve_release_exit_decision_for_report
+
+        real = _exit_code_of(
+            _exit_compare_release,
+            "COMPATIBLE", True, ["removed_lib"],
+            severity_exit_code=0,
+            contract_coverage_exit_contribution=1,
+        )
+        mine = resolve_release_exit_decision_for_report(
+            "COMPATIBLE", True, ["removed_lib"], 0, 1, [{"verdict": "COMPATIBLE"}]
+        )
+        assert mine.code == real == 8
+
+    def test_agrees_not_comparable(self) -> None:
+        from abicheck.cli_compare_release import _exit_compare_release
+        from abicheck.workflows.gate import resolve_release_exit_decision_for_report
+
+        real = _exit_code_of(_exit_compare_release, "not_comparable", False, [])
+        mine = resolve_release_exit_decision_for_report(
+            "not_comparable", False, [], None, 0, []
+        )
+        assert mine.code == real == 16
+
+    def test_a_breaking_library_ties_with_an_unrelated_error_library(self) -> None:
+        """The exact gap `resolve_release_exit_decision`'s own docstring
+        names: today's collapsed `worst_verdict` scalar reads "ERROR" (it
+        outranks "BREAKING"), so `_exit_compare_release` never even computes
+        the BREAKING library's own code -- but the numeric result (4) is
+        identical either way, since ERROR's floor and BREAKING's own code
+        both cap at 4. This resolver additionally names both reasons.
+        """
+        from abicheck.cli_compare_release import _exit_compare_release
+        from abicheck.workflows.gate import resolve_release_exit_decision_for_report
+
+        real = _exit_code_of(
+            _exit_compare_release, "ERROR", False, [], severity_exit_code=None
+        )
+        mine = resolve_release_exit_decision_for_report(
+            "ERROR", False, [], None, 0,
+            [{"verdict": "BREAKING"}, {"verdict": "ERROR"}],
+        )
+        assert mine.code == real == 4
+        reason_values = {r.value for r in mine.reasons}
+        assert {"compatibility_gate", "operational_error"} <= reason_values
+
+    def test_a_bundle_only_break_with_every_library_unchanged(self) -> None:
+        """Codex review, fresh evidence: a bundle/probe-matrix break can
+        raise the aggregate `worst_verdict` to `BREAKING` with every library
+        itself `NO_CHANGE` -- no library's own `"verdict"` names the break,
+        so scanning `library_results` alone (as the first cut of this
+        resolver did) found `0` while `_exit_compare_release` exits `4`
+        from the same `worst_verdict`.
+        """
+        from abicheck.cli_compare_release import _exit_compare_release
+        from abicheck.workflows.gate import resolve_release_exit_decision_for_report
+
+        real = _exit_code_of(
+            _exit_compare_release, "BREAKING", False, [], severity_exit_code=None
+        )
+        mine = resolve_release_exit_decision_for_report(
+            "BREAKING", False, [], None, 0,
+            [{"verdict": "NO_CHANGE"}, {"verdict": "NO_CHANGE"}],
+        )
+        assert mine.code == real == 4
+
+    def test_operational_error_is_preserved_under_a_not_comparable_release(
+        self,
+    ) -> None:
+        """Codex review, fresh evidence: one library `not_comparable` and a
+        *different* library `ERROR` collapses `worst_verdict` to
+        `"not_comparable"` (it outranks `"ERROR"` in
+        `_RELEASE_VERDICT_ORDER`). `.code` is correctly `16` either way, but
+        an earlier revision computed `operational_error_contribution` from
+        `worst_verdict == "ERROR"` alone, reading `0` and silently dropping
+        the real operational failure from the persisted decision even
+        though `resolve_release_exit_decision`'s own `not_comparable`
+        branch already preserves a passed-in value for exactly this case.
+        """
+        from abicheck.workflows.gate import resolve_release_exit_decision_for_report
+
+        mine = resolve_release_exit_decision_for_report(
+            "not_comparable", False, [], None, 0,
+            [{"verdict": "not_comparable"}, {"verdict": "ERROR"}],
+        )
+        assert mine.code == 16
+        assert mine.operational_error_contribution == 4
+
+    def test_a_malformed_non_dict_library_result_is_skipped_not_raised(self) -> None:
+        """`_compute_release_legacy_exit_code` scans `library_results` for
+        each entry's own `verdict` -- a non-dict entry (a malformed/foreign
+        release JSON) must be skipped, not crash the whole report, and a
+        real `BREAKING` sibling entry must still be found."""
+        from abicheck.workflows.gate import resolve_release_exit_decision_for_report
+
+        mine = resolve_release_exit_decision_for_report(
+            "BREAKING",
+            False,
+            [],
+            None,
+            0,
+            ["not-a-dict", {"verdict": "BREAKING"}],  # type: ignore[list-item]
+        )
+        assert mine.code == 4
+
+    def test_release_global_break_is_preserved_under_an_unrelated_error(self) -> None:
+        """Codex review, fresh evidence, second round: a release-global
+        (bundle/probe-matrix) `BREAKING` finding never appears in
+        `library_results` (see `_compute_release_legacy_exit_code`'s own
+        docstring) -- it only ever reaches this resolver through the
+        already-collapsed `worst_verdict`. When an unrelated library's
+        `"ERROR"` outranks that same `BREAKING` in `_RELEASE_VERDICT_ORDER`,
+        `worst_verdict` becomes `"ERROR"` and the release-global break is
+        gone from both inputs. `.code` still comes out `4` either way (the
+        `ERROR` floor), but without `release_global_verdict` passed through
+        separately, `compatibility_contribution` silently reads `0` and
+        `reasons` omits `compatibility_gate` entirely -- an explainable
+        decision that hides a real, independently-tied compatibility break.
+        """
+        from abicheck.workflows.gate import resolve_release_exit_decision_for_report
+
+        mine = resolve_release_exit_decision_for_report(
+            "ERROR", False, [], None, 0,
+            [{"verdict": "NO_CHANGE"}, {"verdict": "ERROR"}],
+            "BREAKING",
+        )
+        assert mine.code == 4
+        assert mine.compatibility_contribution == 4
+        assert mine.operational_error_contribution == 4
+        assert "compatibility_gate" in mine.reasons
+        assert "operational_error" in mine.reasons
+
+
+class TestReleaseGlobalVerdict:
+    """`cli_compare_release_helpers._release_global_verdict` -- the
+    uncollapsed bundle/probe-matrix verdict `resolve_release_exit_decision_
+    for_report` needs independently of `worst_verdict` (Codex review, fresh
+    evidence, second round)."""
+
+    def test_no_bundle_or_matrix_is_no_change(self) -> None:
+        from abicheck.cli_compare_release_helpers import _release_global_verdict
+
+        assert _release_global_verdict(None, None) == "NO_CHANGE"
+
+    def test_bundle_verdict_alone(self) -> None:
+        from abicheck.checker_policy import Verdict
+        from abicheck.cli_compare_release_helpers import _release_global_verdict
+
+        bundle = cast(Any, SimpleNamespace(bundle_verdict=Verdict.BREAKING))
+        assert _release_global_verdict(bundle, None) == "BREAKING"
+
+    def test_matrix_verdict_alone(self) -> None:
+        from abicheck.checker_policy import Verdict
+        from abicheck.cli_compare_release_helpers import _release_global_verdict
+
+        matrix = cast(Any, SimpleNamespace(verdict=Verdict.API_BREAK))
+        assert _release_global_verdict(None, matrix) == "API_BREAK"
+
+    def test_the_worse_of_bundle_and_matrix_wins(self) -> None:
+        from abicheck.checker_policy import Verdict
+        from abicheck.cli_compare_release_helpers import _release_global_verdict
+
+        bundle = cast(Any, SimpleNamespace(bundle_verdict=Verdict.COMPATIBLE))
+        matrix = cast(Any, SimpleNamespace(verdict=Verdict.BREAKING))
+        assert _release_global_verdict(bundle, matrix) == "BREAKING"
 
 
 def test_compat_not_comparable_exit_code_is_9_and_distinct_from_compare() -> None:
