@@ -113,7 +113,7 @@ class TestResolveInputErrors:
         f.write_text("{invalid json", encoding="utf-8")
 
         monkeypatch.setattr(
-            "abicheck.service.load_snapshot",
+            "abicheck.workflows.input_resolution.load_snapshot",
             lambda _p: (_ for _ in ()).throw(ValueError("bad json")),
         )
         with pytest.raises(click.ClickException, match="Failed to load JSON snapshot"):
@@ -271,7 +271,7 @@ class TestCompareApiBreakExitCode:
         new_p.write_text("{}", encoding="utf-8")
 
         snap = AbiSnapshot(library="lib.so", version="1.0")
-        monkeypatch.setattr("abicheck.service.load_snapshot", lambda _: snap)
+        monkeypatch.setattr("abicheck.workflows.input_resolution.load_snapshot", lambda _: snap)
         monkeypatch.setattr(
             "abicheck.service.compare_snapshots",
             lambda *_a, **_kw: DiffResult(

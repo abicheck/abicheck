@@ -1930,6 +1930,91 @@ implementation module belongs inside a real package directory, not as
 another flat sibling, which `workflows/render.py`'s actual final location
 is.
 
+**A second `service.py`-thinning slice, following the same "measure, don't
+assume" method, closed the `resolve_input` half of the split the previous
+slice's own analysis above already predicted.** That analysis named
+`resolve_input`/`collect_metadata`/`load_env_matrix` (plus `detect_binary_
+format`, `sniff_text_format`, and their private helpers) as `workflows`-shaped
+— exactly where `service.py` already sits — while only `compare_snapshots`/
+`load_suppression_and_policy` stay blocked on `PolicyFile`. A fresh AST scan
+confirmed every one of that first group's own transitive dependencies is
+already classified (`model`/`storage`/`extract`/`workflows`), with one
+exception: `serialization.py` (needed for `load_snapshot`) was still
+unclassified, for the reason its own debt entry above already records —
+`storage`-shaped but blocked by real `frontends -> storage`/`compare ->
+storage` edges nothing in this slice touches. Moving `resolve_input` into a
+real package directory (required — `service_` is a frozen prefix family, so
+a new flat `service_resolve_input.py`-shaped sibling is not an option, per
+the `service_render_compat.py` rejection above) makes the destination file
+*itself* `migrated_source`, which `check_architecture.py`'s `unclassified-
+import` check enforces unconditionally, unlike `service.py`'s own flat,
+`legacy_paths`-classified copy of the identical import. Reclassifying
+`serialization.py` outright was rejected again here for the same reason its
+debt entry gives: it would just relocate this slice's one new edge onto the
+five already-known, already-investigated blocker sites (`cli_buildsource.py`,
+`cli_buildsource_merge.py`, `cli_compare_release_helpers.py`, `compat/cli.py`,
+`probe_harness.py`) rather than close anything. `architecture/modules.yaml`'s
+`public_root_surfaces` list is the exemption built for exactly this shape — a
+genuinely public, stable surface (`serialization.py`'s own docstring already
+calls `load_snapshot`/`save_snapshot`/`write_snapshot` "the public
+compatibility surface") reached from a migrated package — so `abicheck.
+serialization` joined it instead, verified with `check_architecture.py`
+reporting 0 findings.
+
+The moved functions now live in `abicheck/workflows/input_resolution.py`,
+re-exported from `service.py` via a plain static import (`workflows ->
+workflows`, no `importlib`-based bridging needed for *that* edge — the
+mechanism is only for a forbidden direction, which `service.py -> workflows.
+input_resolution` is not). A second edge inside the new module needed it
+anyway, caught only after this PR's own CI ran, not by the local measurement
+above: `run_dump`/`_emit` come from `service_dump_native.py`, which reaches
+the pre-existing, baselined CLI-registration SCC via `service_header_graph_
+attach -> service_scan -> service` — and since `service` itself imports
+`workflows.input_resolution`, a static edge to `service_dump_native` would
+have silently grown that SCC by one new member. The AI-readiness `import-
+cycle-growth` gate's own cycle enumeration is order-dependent (its own code
+comment: "non-deterministic `set` iteration order... picks a different
+representative cycle each process run"), so this was invisible to every
+local run of that gate during development and surfaced only once — on the
+real CI checkout, whose process happened to enumerate a representative cycle
+through the new module. Fixed the same way `service.py`'s own
+`_service_header_scoped` bridge already handles the identical shape: bound
+via `importlib.import_module` instead of a static import, verified clean
+across multiple explicit `PYTHONHASHSEED` values (not just the one process
+happened to pass locally) rather than trusting a single non-deterministic
+run. One test-facing consequence, recorded in that module's own docstring
+and worth stating here too since it surprised the slice that found it:
+`resolve_input`'s *own* internal bare-name
+calls to `run_dump`/`load_snapshot`/`detect_binary_format`/`sniff_text_format`
+now resolve against `abicheck.workflows.input_resolution`'s globals, not
+`abicheck.service`'s, so every test that intercepted one of those calls via
+`monkeypatch.setattr(service, "run_dump", ...)` (or the `unittest.mock.patch`
+equivalent) had to be repointed at `abicheck.workflows.input_resolution.
+<name>` — the identical rule `service_dump_native.py`'s own re-export block
+already documents for its split, just newly relevant here because
+`resolve_input` itself moved rather than one of its callees. `service.py`
+dropped from 886 to 439 lines; it no longer needs an `architecture/debt.yaml`
+entry at all (439 is under the 800-line production floor that ledger's schema
+requires an entry to exceed).
+
+**Honest accounting against this Phase's own acceptance criterion.** `cli.py`
+(128 lines) meets "below 150 lines, `__all__`-declared, no product logic"
+outright. `service.py` does not — it sits at 439 lines, well above 150 —
+but the shortfall is entirely the `PolicyFile`/`ChangeKind` blocker this
+section's earlier passes already investigated at length and left open, not
+unfinished work in this slice: `compare_snapshots`, `load_suppression_and_
+policy`, `_validate_contract_mode`, and `dedup_policy_override_warnings`
+cannot move without either resolving that classification question or typing
+their `PolicyFile`/`SuppressionList` parameters as `Any` to dodge it — the
+latter rejected on the same type-safety grounds the two Codex-caught
+`__getattr__` mistakes above were rejected. What remains in `service.py`
+today is otherwise exactly what the criterion asks for: `__all__`-declared,
+no product logic of its own (every function is either a re-export or a thin
+wrapper delegating to a leaf module), and every re-export block already
+documents where its real implementation lives. Below 150 lines is reachable
+only after `policy_file.py`'s ownership question resolves — tracked there,
+not re-opened here.
+
 1. Move command input translation into `frontends/cli/commands` and reusable
    Click-only option declaration into `frontends/cli/options`.
 2. Make workflows the sole operation owners and reports the sole rendering
