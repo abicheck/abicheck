@@ -3018,6 +3018,32 @@ without promising a new export.
    `source_graph_findings.py`) are already in, since no single ADR-061
    responsibility package owns this cross-cutting vocabulary yet and
    forcing a classification decision wasn't asked for by this slice.
+
+   **Later resolved, in a follow-up pass measured the same way every
+   classification in this document is meant to be.** `source_graph_query.py`
+   itself imports only `model.graph_facts`/`model.source_graph` — nothing
+   about its own body forced the "unclassified" state; that was a decision
+   left open, not a real dependency-direction blocker. Its predicates
+   *classify* nodes/edges an already-built graph carries (public vs.
+   internal, consumer-compiled or not) rather than *deciding* anything about
+   relevance, suppression, or severity — this document's own task-routing
+   table puts "match old/new entities or identify a raw change" under
+   `compare`, and "decide relevance, suppression, classification, severity,
+   or gating" under `policy`; these predicates classify structure, not
+   policy, so `compare` is the better fit even though two of its callers
+   (`surface.py`, `post_processing_reachability.py`) are themselves
+   `policy`-classified — `policy -> compare` is an allowed edge, so that is
+   not a blocker either. Classified `compare` in `architecture/modules.yaml`;
+   `python scripts/check_architecture.py` reports 0 findings, verified
+   additionally across eight explicit `PYTHONHASHSEED` values against the
+   AI-readiness `import-cycle-growth` gate's own order-dependent cycle
+   enumeration (see that check's own code comment on why a single process
+   run is not sufficient evidence — the exact gap a prior PR in this same
+   phase's line of work was caught by CI on, not by any local run). No
+   caller's import path changed: every existing `from .source_graph_query
+   import ...`/`from .source_graph import ...` (the facade) site keeps
+   resolving unchanged, since classification is bookkeeping in
+   `architecture/modules.yaml`, not a physical move.
    `buildsource/source_graph.py` itself is now a pure re-export facade
    (1352 → 140 lines, under the 150-line facade cap), re-exporting every
    name from all four new modules plus the two `model` modules, via the
