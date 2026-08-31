@@ -2604,6 +2604,21 @@ or version number that already has a fact owner elsewhere").
   affecting parameters and asserting each one reaches the new workflow
   entry point identically — rather than relying on an enumerated checklist
   that a future review round can always find one more gap in.
+  **A verdict/exit-code-only sweep is not the whole parity contract
+  either (Codex review, next round):** an existing release option that
+  changes neither — `--output-dir` (per-library report files), the
+  ordinary `--bundle-facts-out` (a *different* facts-out capture than this
+  phase's facts-*in* consumer, still meaningful on the NEW side of a
+  stored-facts run) — produces a real side effect the live fan-out
+  performs and the new workflow/rendering-adapter pair, as scoped so far,
+  would not. Silently dropping such an option is not acceptable merely
+  because it happens to pass a verdict/exit-code-scoped test: for each
+  release option outside the verdict/exit-code set, this phase must either
+  implement the equivalent side effect on the stored-facts path or reject
+  the option explicitly for that operand shape (mirroring how `ast-
+  frontend`/`gcc-path`/etc. are already explicitly rejected for a
+  directory/package operand today, rather than silently ignored) — the
+  acceptance sweep above covers both categories, not only the gating one.
   - **Separately, the *result* also needs adapting, not only the
     *inputs*.** `_format_release_summary()` (`cli_compare_release_
     helpers.py`) — the one function that renders JSON/Markdown/JUnit for
@@ -2774,7 +2789,26 @@ that first revision (Codex review, both fixed here):
    therefore part of this layer's work, not a prerequisite already
    finished — the "no new comparison logic" scoping note earlier means no
    new *matching/diffing* algorithm, not that the primitive's own
-   signature is frozen.
+   signature is frozen. **Correction, same review round (Codex, verified
+   against source): factoring the loop into `abicheck/workflows/` does not
+   mean it can keep calling `service.compare_snapshots()`.** `abicheck/
+   workflows/AGENTS.md`'s own "Permitted imports" section is explicit:
+   "workflow code must never import through `abicheck.cli`, `abicheck.
+   service`, or another compatibility facade." `service.compare_snapshots()`
+   is exactly that facade — its own docstring calls itself "a thin wrapper
+   over the Tier-1 core (`abicheck.checker.compare`)... so that front-ends
+   never call the core directly," which is guidance for `frontends`, not
+   for `workflows` (which the same `AGENTS.md` explicitly permits to import
+   `abicheck.compare` directly). The factored implementation must therefore
+   call `checker.compare()` itself — the canonical `compare`-classified
+   core `service.compare_snapshots()` already wraps — and replicate the
+   handful of things that wrapper centralizes before delegating (per its
+   own docstring: `PublicSurfaceQuery().resolve()` for each side's public-
+   surface `EntityId` set, forwarded as `old_public_entity_ids`/
+   `new_public_entity_ids`; `contract_mode`/`contract_evaluation` pairing
+   validation). This is more work than "swap one function call for
+   another," and is named here so it isn't rediscovered as a surprise
+   mid-implementation.
 3. Adapting the workflow result into `_format_release_summary()`'s
    existing rendering shape.
 4. A `docs/_meta/topics.yaml` registration for the new CLI flags
