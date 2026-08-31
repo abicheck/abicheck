@@ -720,3 +720,62 @@ class TestComputeSurfaceMetricsThreading:
 
         metrics = compute_surface_metrics(snap, public_entity_ids=frozenset({eid_rec}))
         assert metrics.public_types == 1
+
+
+class TestPublicEntityIdsKindFilter:
+    """A resolved ``public_entity_ids`` set legitimately mixes function/
+    variable ids with record/enum/typedef ids (``PublicSurfaceQuery.
+    resolve()`` collects both) -- ``public_roots()`` must still return a
+    clean ``frozenset[str]`` of only function/variable spellings, silently
+    excluding the type-kind ids rather than mapping them onto a bogus root
+    name. Confirmed to fail against a naive version of ``public_roots()``
+    that iterated every id in the set instead of only ever consulting
+    ``_root_seed_types`` (built from functions/variables alone)."""
+
+    def test_type_kind_id_in_the_resolved_set_is_not_a_root(self) -> None:
+        from abicheck.model.identity import entity_id_for_function, entity_id_for_type
+
+        eid_f = entity_id_for_function((), "f", mangled_name="_Z1fv")
+        # A public function's own return type, itself resolved into the set
+        # -- exactly PublicSurfaceQuery.resolve()'s documented shape (roots
+        # AND reachable record/enum ids together).
+        eid_widget = entity_id_for_type((), "Widget")
+        fn_f = _fn_with_id("f", "_Z1fv", eid_f, ret="Widget*")
+        rec = RecordType(name="Widget", kind="struct", entity_id=eid_widget)
+        snap = AbiSnapshot(library="l", version="1", functions=[fn_f], types=[rec])
+
+        graph = build_surface_graph(
+            snap, public_entity_ids=frozenset({eid_f, eid_widget})
+        )
+        # Only "f" -- never "Widget" (a record, not a root-eligible name),
+        # even though its EntityId is present in the same resolved set.
+        assert graph.public_roots() == frozenset({"f"})
+        assert "Widget" in graph.reachable_types("f")
+
+
+def test_surface_graph_module_imports_nothing_from_policy() -> None:
+    """``surface_graph.py`` (root module) stays a leaf the ``policy/``
+    layer's ``PublicSurfaceQuery`` calls *into* -- never the reverse. Not
+    structurally enforced by ``scripts/check_architecture.py`` (this module
+    is unclassified in ``architecture/modules.yaml``, so the layer-boundary
+    gate does not evaluate it at all), so this is asserted directly against
+    the module's own real, parsed import statements."""
+    import ast
+    from pathlib import Path
+
+    import abicheck.surface_graph as surface_graph_module
+
+    src = Path(surface_graph_module.__file__).read_text(encoding="utf-8")
+    tree = ast.parse(src)
+    imported_modules: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom) and node.module:
+            imported_modules.add(node.module)
+        elif isinstance(node, ast.Import):
+            for alias in node.names:
+                imported_modules.add(alias.name)
+
+    assert not any(
+        m == "policy" or m.startswith("policy.") or ".policy" in m
+        for m in imported_modules
+    ), f"surface_graph.py must not import policy/: found {sorted(imported_modules)}"
