@@ -324,4 +324,16 @@ def _attach_header_graph(
         ),
     ]
     snap.build_source = pack
+    # ADR-063 Phase 3 (D5): one shared SourceGraphSummary instance for both
+    # the L5 builder above (`graph`, already `pack.source_graph`) and the
+    # public-surface evidence graph -- never two independently-constructed
+    # summary objects that happen to agree, which is exactly the drift this
+    # phase's shared-assembly design exists to rule out. `snap.surface_graph`
+    # is the same object `pack.source_graph` already holds; the codec (
+    # `storage/surface_graph_codec.py`) relies on that identity to dedup the
+    # embedded copy on encode and restore it on decode.
+    from .compare.surface_graph import build_public_surface_facts
+
+    build_public_surface_facts(snap, graph)
+    snap.surface_graph = graph
     return snap

@@ -46,6 +46,25 @@ exists to build one from (``tests/test_entity_id_carrier.py::
 TestResolverIsOnlyCalledByAProducer`` enforces this repo-wide), and a
 post-parse module recomputing one from a bare string could only ever
 approximate it, which that invariant exists specifically to rule out.
+
+**Known gap, deliberately not closed this slice**: ``buildsource.
+header_graph.build_header_only_graph`` (the pre-existing L2/L5 builder this
+module's own facts now share one ``SourceGraphSummary`` instance with —
+see ``service_header_graph_attach.py``'s assembly step) mints its own
+``source_decl``/``record_type``/``enum_type`` nodes under a *different* id
+scheme entirely: ``decl://<normalized identity>``/``type://<normalized
+identity>`` (``model.graph_facts._decl_node_id``/``_type_node_id``, a
+mangled-or-qualified-name string), never this module's
+``canonical_key(occurrence_id)``/``approx::``/``typedef::`` ids. Sharing
+one graph instance is real (both builders' nodes/edges coexist in it,
+verified by
+``tests/test_service_header_graph_attach_surface_graph.py``), but the two
+id namespaces do not currently collide or dedup onto one node for a
+declaration both builders happen to see — reconciling them is a real,
+separate, deeper migration (either this module adopts ``header_graph.py``'s
+``decl://``/``type://`` scheme, or that already-multi-round-hardened,
+mangled-identity-based module adopts this one), left for a later phase
+rather than attempted reactively here.
 """
 
 from __future__ import annotations
