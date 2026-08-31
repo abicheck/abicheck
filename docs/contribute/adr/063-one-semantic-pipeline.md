@@ -611,13 +611,18 @@ reconstruction of the same relationships from the flat snapshot — closing
 the class of bugs AGENTS.md documents under the namespace-collision and
 partial-qualification findings in `type_reachability.py`.
 
-**This graph is not a new primitive.** `buildsource.graph_facts.
-GraphNode`/`GraphEdge`/`merge_graph_facts` (ADR-031 D2, ADR-046 D1/D2)
-already is exactly the producer-agnostic node/edge/evidence-merge
-primitive this decision needs — today used only to build the optional L5
-source/build-evidence graph. D5 relocates that primitive to `model/graph.py`
-(ADR-061's own task-routing table already names `model/` as owning "an ABI
-entity/value shared across stages") and builds the public-surface graph as
+**This graph is not a new primitive.** `GraphNode`/`GraphEdge`/
+`merge_graph_facts` (ADR-031 D2, ADR-046 D1/D2) — relocated by an unrelated
+ADR-061 Phase 5 migration to `model.graph_facts`/`graph_identity`/
+`graph_vocabulary`, with `buildsource/graph_facts.py` now a back-compat
+re-export shim (Status note above) — already is exactly the
+producer-agnostic node/edge/evidence-merge primitive this decision needs,
+today used to build the optional L5 source/build-evidence graph and,
+independently, `impact/consumer_graph.py`'s/`impact/use_cases.py`'s own
+consumer-impact graph (CodeRabbit review, PR #958). D5
+reuses that already-relocated primitive directly (ADR-061's own
+task-routing table already names `model/` as owning "an ABI entity/value
+shared across stages") and builds the public-surface graph as
 a second set of node/edge *kinds* over the same primitive, available
 unconditionally rather than gated on L3-L5 evidence — not a second
 dataclass hierarchy. A first draft of this decision proposed exactly such
@@ -629,13 +634,13 @@ Building the graph and deciding relevance from it are two different
 responsibilities under ADR-061's own task-routing table ("match... a raw
 change" vs. "decide relevance"): the public-surface graph *builder* —
 the code that walks a snapshot and populates node/edge instances of the
-shared `model/graph.py` primitive D5 already relocates above — lands in
-`compare/` (a reconciliation of raw facts, not a policy decision; **not
-the shared `GraphNode`/`GraphEdge`/`merge_graph_facts` primitive itself,
-which stays in `model/graph.py` per the relocation two paragraphs above —
-a first draft of this sentence said "the graph substrate lands in
-`compare/`," contradicting that same relocation within this decision's
-own text**), and the relevance
+shared `model.graph_facts`/`graph_identity`/`graph_vocabulary` primitive
+D5 reuses above — lands in `compare/` (a reconciliation of raw facts, not
+a policy decision; **not the shared `GraphNode`/`GraphEdge`/
+`merge_graph_facts` primitive itself, which stays under `model.graph_facts`
+per the relocation two paragraphs above — a first draft of this sentence
+said "the graph substrate lands in `compare/`," contradicting that same
+relocation within this decision's own text**), and the relevance
 query itself — what `compute_public_surface()` actually decides — lands in
 `policy/`, which may import from `compare/` under ADR-061's fixed
 dependency direction. D5 does not move a relevance decision into

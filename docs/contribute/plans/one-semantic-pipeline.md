@@ -9666,6 +9666,79 @@ sibling:
   location (mirroring the re-export shim `source_graph.py` already uses
   for its own split-out pieces), so every existing L5 caller is
   unaffected.
+
+  **Already landed independently, under a different name, before this
+  phase's own implementation began** — confirmed by reading
+  `abicheck/buildsource/CLAUDE.md`'s current module table and
+  `abicheck/model/graph_facts.py` directly, not assumed from this plan's
+  own stale text. ADR-061 Phase 5 item 2's own follow-up split
+  `buildsource/graph_facts.py` into three sibling `model/` modules rather
+  than the single `model/graph.py` this bullet names:
+  `model.graph_facts` (`GraphNode`/`GraphEdge`/`GraphFact`/`FactConflict`/
+  `merge_graph_facts`/`ensure_facts_and_resolve`/`register_fact`/
+  `edge_relation_key`/`edge_occurrence_id`), `model.graph_identity` (node-id
+  construction/normalization), and `model.graph_vocabulary` (the
+  `NODE_KINDS`/`EDGE_KINDS`-family constant blocks) — `buildsource/
+  graph_facts.py` is now itself the back-compat re-export shim this
+  bullet asked for, already exporting every original name (`X as X`)
+  rather than only what a repo-local usage scan could prove was called.
+  `GraphNode.id: str`/`label: str = ""` match this section's own later
+  design exactly (confirmed by reading the dataclass directly). This
+  bullet's own remaining, still-open work is therefore not the relocation
+  itself but picking `model.graph_facts` (the real current location) over
+  the stale `model.graph` name wherever a later slice writes
+  `from abicheck.model.graph import ...`.
+
+  **Applies to every other `model/graph.py` reference below in this same
+  Phase 3 section, not only this bullet's own text** (Codex review on
+  PR #958, catching that the correction above fixed only the one place it
+  was written and left the phase's own "Files" checklist and Phase 10's
+  cleanup-list row still instructing a future implementer to create a new
+  `model/graph.py` and migrate callers to it — actionable checklist items
+  a reader follows literally, unlike this bullet's own prose). Read every
+  `model/graph.py` elsewhere in this Phase 3 section, its own "Files" list,
+  and Phase 10's cleanup list below as `model.graph_facts` (for
+  `GraphNode`/`GraphEdge`/`GraphFact`/`FactConflict`/`merge_graph_facts`/
+  `ensure_facts_and_resolve`/`register_fact`/`edge_relation_key`/
+  `edge_occurrence_id`), `model.graph_identity` (node-id construction/
+  normalization, including `_normalize_if_decl_or_type`), or
+  `model.graph_vocabulary` (`NODE_KINDS`/`EDGE_KINDS`-family constants) as
+  the symbol requires — three already-existing modules, not one new file
+  to create. The "Files" section's own `abicheck/model/graph.py (new...)`
+  entry and its full-dependency-closure reasoning (which symbols must move
+  together) still correctly states what a from-scratch relocation would
+  need; only "new" and the single-file target are stale — every symbol it
+  names already lives in one of the three modules above, so nothing there
+  needs moving again. Phase 10's cleanup-list row is even further stale in
+  a second way: it describes `buildsource/graph_facts.py` as still holding
+  "the original, in-place copies," but that file is already the trimmed
+  re-export shim (confirmed above) — its own residual is narrower than
+  written, just "every real importer of the shim migrates to
+  `model.graph_facts`/`graph_identity`/`graph_vocabulary` directly." **Not
+  the "five named readers" the very next, separate row lists** (Codex
+  review on PR #958, catching a conflation in an earlier revision of this
+  same correction) — those five (`internal_leak.py`, `buildsource/
+  crosscheck.py`, `buildsource/evidence_report.py`, `evidence_depth.py`,
+  `cli_graph.py`) are that other row's own `BuildSourcePack.source_graph`
+  →`AbiSnapshot.surface_graph` migration, a different attribute path on a
+  different object; this row's own real importer set was never enumerated
+  in the original text. **Confirmed here by resolving every relative
+  `ImportFrom` node's actual target module via a real AST walk, not a
+  text grep for the string `graph_facts`** — a second review round on
+  this same commit correctly caught that the grep-based first attempt
+  counted a bare `from .graph_facts import ...` in `model/source_graph.py`/
+  `model/entity_resolver.py`/`model/entity_identity.py` as the shim
+  (Python resolves that relative import within `model/` itself, to the
+  already-canonical `model.graph_facts` — no migration needed), likewise
+  `buildsource/source_graph_findings.py`'s `from ..model.graph_facts
+  import GraphEdge` (already canonical), and a bare code-comment mention
+  in `checker_types.py` with no import at all. The real, resolved set is
+  ten files: `buildsource/archive_graph.py`, `buildsource/callback_graph.py`,
+  `buildsource/graph_impact.py`, `buildsource/macro_graph.py`,
+  `buildsource/template_graph.py`, `buildsource/type_graph.py`,
+  `buildsource/virtual_dispatch_graph.py`, `impact/consumer_graph.py`,
+  `impact/use_cases.py`, and `internal_leak.py` (also one of the *other*
+  row's five, since one module can need both migrations independently).
 - **A third, pre-existing graph-shaped module already answers a
   public-surface question independently, and a first draft of this phase
   missed it entirely — `abicheck/surface_graph.py`'s `SurfaceGraph`/
@@ -9916,8 +9989,28 @@ sibling:
   it is injective *on identity*, never on full structure) — used by both
   `model/graph.py`'s `GraphNode.id` for a `declaration`/`type` node and any
   other consumer that needs a collision-free, equality-consistent key
-  (`kind`/`leaf_name`/`extra` plus each segment's identity-only fields),
-  while `storage/entity_ids.py`'s `to_dto()` stays the separate,
+  (`kind`/`leaf_name`/`extra` plus each segment's identity-only fields).
+  **Already landed, ahead of this phase, under a different name** —
+  Phase 2's own `resolve_change_identity`-consumer slice added exactly
+  this contract as `EntityId.key` (a property, not a free function; a
+  local `_packed`/`_segment_key` length-prefixing scheme, independently
+  arriving at the identical "exclude every `compare=False` payload field"
+  rule this paragraph states), confirmed by reading `model/identity.py`
+  directly: it already excludes `Record.access` and is built from
+  `scope`/`kind.value`/`leaf_name`/`extra` only. **Superseded by Phase 3's
+  actual landing, corrected here rather than left to mislead a future
+  reader (Codex review, PR #958):** the internal-linkage `static`
+  collision this section raises next is real, so `GraphNode.id` for a
+  `declaration`/`type` node does *not* call `entity_id.key` directly —
+  `model/occurrence.py`'s landed `canonical_key(EntityId | OccurrenceId)`
+  overload is what `compare/surface_graph.py`'s node-id construction
+  actually calls, with an `OccurrenceId`, exactly as the "still collides
+  for a real, ordinary case" paragraph below this one specifies and
+  requires. `EntityId.key` alone stays the everyday case (an empty
+  disambiguator reduces `canonical_key(occurrence_id)` to it), but the
+  wrapper this paragraph once called "redundant" is the landed, correct
+  design, not a mistake to avoid. `storage/entity_ids.py`'s `to_dto()`
+  stays the separate,
   intentionally fuller encoding for its own persistence purpose —
   `GraphNode`'s own pre-existing `label: str` field (already documented as
   "human-readable name/path") is where the flattened, lossy `qualified_name`
