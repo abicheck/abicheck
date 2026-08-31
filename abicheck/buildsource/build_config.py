@@ -33,11 +33,12 @@ mirroring how ``build_config_schema.py``/``build_config_io.py`` were already
 split out of the same file for the identical reason.
 
 :mod:`abicheck.buildsource.inline` re-exports :class:`BuildConfig`,
-:func:`load_build_config`, and :func:`discover_build_config` for back-compat
-(``BuildConfig as BuildConfig`` — the same explicit-re-export spelling
-``checker_policy.py`` uses for ``ChangeKind``), so every existing
-``from abicheck.buildsource.inline import BuildConfig`` call site keeps
-working unchanged; new code should import from here directly.
+:func:`load_build_config`, :func:`discover_build_config`, and
+:data:`KNOWN_TOP_LEVEL_KEYS` for back-compat (``BuildConfig as BuildConfig``
+— the same explicit-re-export spelling ``checker_policy.py`` uses for
+``ChangeKind``), so every existing ``from abicheck.buildsource.inline import
+BuildConfig`` (or ``KNOWN_TOP_LEVEL_KEYS``) call site keeps working
+unchanged; new code should import from here directly.
 """
 
 from __future__ import annotations

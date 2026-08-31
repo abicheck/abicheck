@@ -65,6 +65,7 @@ from typing import TYPE_CHECKING, Any
 
 from .. import deadline
 from .build_config import (
+    KNOWN_TOP_LEVEL_KEYS as KNOWN_TOP_LEVEL_KEYS,
     BuildConfig as BuildConfig,
     discover_build_config as discover_build_config,
     load_build_config as load_build_config,
