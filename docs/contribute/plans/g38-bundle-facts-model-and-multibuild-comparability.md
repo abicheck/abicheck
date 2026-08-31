@@ -2415,9 +2415,11 @@ observed exit 4).
 ### Phase 17 — Elevate the stored-facts/per-library CLI surface from known gap to a scoped phase (second independent real-world confirmation)
 
 **Origin:** [uxlfoundation/oneDAL#3693](https://github.com/uxlfoundation/oneDAL/pull/3693)
-— a *second*, fully independent real-world driver
-(`bundle_gate.py`, 475 lines, plus a 114-line `onedal_libraries.py`) hitting
-the identical "No CLI surface" known gap Phase 13's own table and Phase 13
+— a *second*, fully independent real-world driver (`bundle_gate.py` plus
+`onedal_libraries.py` — see the linked PR for current sizes rather than a
+count copied here, since neither file is owned by this plan and both can
+change independently of it) hitting the identical "No CLI surface" known
+gap Phase 13's own table and Phase 13
 follow-up's item 1 already named, against the same 6-library,
 3-toolchain-lane oneDAL shape Phase 8's 2.5h/38.3GB measurement used. This
 is not a new gap — it is the same one, confirmed twice by two unrelated
@@ -2454,16 +2456,29 @@ lives, and it already declares numerous command-specific `@click.option`s
 inline right there (`--dry-run`, `--diagnostic-comparison`, `--config`,
 `--exit-code-scheme`, and others) — not every option a directory/package
 compare needs comes from the shared, pinned `release_options` decorator in
-`cli_options.py`. A new stored-facts-path option (and a new per-library
-override manifest option) can be declared the same way, inline on
-`compare_cmd`, and read out of its `**kwargs` inside
-`_dispatch_release_compare` — which is defined in this same unpinned
-file — before ever reaching `cli_compare_release.py`'s pinned release
-engine at all. **Phase 13's original blocking table does not apply to this
-phase**: it was diagnosing where *dispatch logic* could live, not where a
-*new, self-contained option* can be declared, and those turned out to be
-the same unpinned file once ADR-061 Phase 4 landed. No file split is a
-prerequisite here.
+`cli_options.py`. A new per-library override manifest option can be
+declared the same way, inline on `compare_cmd`, and read out of its
+`**kwargs` inside `_dispatch_release_compare` — which is defined in this
+same unpinned file — before ever reaching `cli_compare_release.py`'s
+pinned release engine at all. **Phase 13's original blocking table does
+not apply to this phase**: it was diagnosing where *dispatch logic* could
+live, not where a *new, self-contained option* can be declared, and those
+turned out to be the same unpinned file once ADR-061 Phase 4 landed. No
+file split is a prerequisite here.
+
+**Correction on how the facts path itself is reached — not a new option
+at all (Codex review, next round, verified against source):** the stored
+`BundleFacts` path is not a flag; Phase 13's own text already establishes
+the target shape as a plain positional invocation, `compare old.bundlefacts
+new-release/`, matching how `compare`'s existing `OLD_INPUT NEW_INPUT`
+operand pair already dispatches on operand *kind* rather than a mode flag.
+`cli_resolve.classify_compare_operand()` already returns one of
+`"package"`/`"directory"`/`"app"`/`"file"` for `OLD_INPUT`; this phase's
+CLI-facing work is extending that function with a new kind (recognizing a
+`BundleFacts` file — by format sniff, the same way `bundle_facts.py`'s own
+plain-JSON-vs-archive detection already works) and adding the matching
+dispatch branch, not declaring a separate path-valued option that would
+either have to duplicate the positional operand or require a dummy one.
 
 The one artifact worth naming without duplicating it: `cli.py` itself is
 now a small registration facade (`abicheck/frontends/AGENTS.md` gives the
@@ -2650,10 +2665,11 @@ or version number that already has a fact owner elsewhere").
 - **A driver's own summary-JSON/Markdown rendering, but not blanket SARIF —
   corrected below (Codex review, verified against source).** A real
   external driver built against this gap (`bundle_gate.py`, oneDAL#3693)
-  carries roughly half its own line count (~230 of 475 lines: functions
-  shaped like `_summarize`/`_markdown`/`_sarif`/`_relativize_uris`/
-  `_finalize_sarif_run`/`_report`) doing summary/Markdown rendering and
-  SARIF URI rewriting. The Markdown/summary half of that claim holds:
+  devotes a substantial share of its own code (functions shaped like
+  `_summarize`/`_markdown`/`_sarif`/`_relativize_uris`/`_finalize_sarif_run`/
+  `_report` — see the linked PR for current proportions rather than a
+  count copied here) to summary/Markdown rendering and SARIF URI
+  rewriting. The Markdown/summary half of that claim holds:
   `_RELEASE_FORMATS` (`frontends/cli/commands/compare.py`) already
   includes `"markdown"` for a directory/package operand, rendered via
   `bundle.render_bundle_findings_markdown()` — a driver's own bespoke
