@@ -9643,17 +9643,23 @@ sibling:
   `cli_graph.py`) are that other row's own `BuildSourcePack.source_graph`
   →`AbiSnapshot.surface_graph` migration, a different attribute path on a
   different object; this row's own real importer set was never enumerated
-  in the original text and is confirmed here by a repo-wide grep for
-  `graph_facts` imports outside the shim itself, not assumed: fifteen
-  files today, including `impact/consumer_graph.py`,
-  `buildsource/archive_graph.py`, `buildsource/callback_graph.py`,
+  in the original text. **Confirmed here by resolving every relative
+  `ImportFrom` node's actual target module via a real AST walk, not a
+  text grep for the string `graph_facts`** — a second review round on
+  this same commit correctly caught that the grep-based first attempt
+  counted a bare `from .graph_facts import ...` in `model/source_graph.py`/
+  `model/entity_resolver.py`/`model/entity_identity.py` as the shim
+  (Python resolves that relative import within `model/` itself, to the
+  already-canonical `model.graph_facts` — no migration needed), likewise
+  `buildsource/source_graph_findings.py`'s `from ..model.graph_facts
+  import GraphEdge` (already canonical), and a bare code-comment mention
+  in `checker_types.py` with no import at all. The real, resolved set is
+  ten files: `buildsource/archive_graph.py`, `buildsource/callback_graph.py`,
+  `buildsource/graph_impact.py`, `buildsource/macro_graph.py`,
   `buildsource/template_graph.py`, `buildsource/type_graph.py`,
-  `buildsource/macro_graph.py`, `buildsource/virtual_dispatch_graph.py`,
-  `buildsource/source_graph_findings.py`, `buildsource/graph_impact.py`,
-  `model/source_graph.py`, `model/entity_resolver.py`,
-  `model/entity_identity.py`, `checker_types.py`, `impact/use_cases.py`,
-  and `internal_leak.py` itself (also one of the *other* row's five,
-  since one module can need both migrations independently).
+  `buildsource/virtual_dispatch_graph.py`, `impact/consumer_graph.py`,
+  `impact/use_cases.py`, and `internal_leak.py` (also one of the *other*
+  row's five, since one module can need both migrations independently).
 - **A third, pre-existing graph-shaped module already answers a
   public-surface question independently, and a first draft of this phase
   missed it entirely — `abicheck/surface_graph.py`'s `SurfaceGraph`/
