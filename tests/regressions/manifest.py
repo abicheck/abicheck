@@ -706,6 +706,15 @@ BUG_CLASSES: tuple[BugClass, ...] = (
         ),
         fixed_by=(956,),
         seed_tests=("tests/test_report_change_view_entity_id.py",),
+        axes={
+            "change_shape": (
+                "symbol_level",
+                "type_level_scalar_value",
+                "list_valued_value",
+                "batch_shaped",
+                "entity_id_set",
+            )
+        },
         known_gaps=(
             KnownGap(
                 description=(
