@@ -92,6 +92,19 @@ class TestChangeEntityIdCarrier:
         r = compare(_snap([old]), _snap([new]))
         assert _change(r, ChangeKind.FUNC_RETURN_CHANGED).entity_id == eid  # type: ignore[attr-defined]
 
+    def test_visibility_changed_carries_old_side_entity_id(self) -> None:
+        # A function that goes public -> hidden (still present, not removed)
+        # is a separate _check_removed_function construction site from the
+        # true-removal one above -- its own entity_id=old-or-new fallback
+        # line was untested (codecov flagged it as a patch-coverage gap).
+        from abicheck.model import Visibility
+
+        eid = entity_id_for_function((), "f", mangled_name="_Z1fi")
+        old = _func("f", "_Z1fi", visibility=Visibility.PUBLIC, entity_id=eid)
+        new = _func("f", "_Z1fi", visibility=Visibility.HIDDEN)
+        r = compare(_snap([old]), _snap([new]))
+        assert _change(r, ChangeKind.FUNC_VISIBILITY_CHANGED).entity_id == eid  # type: ignore[attr-defined]
+
     def test_entity_id_excluded_from_change_equality(self) -> None:
         # Codex review: entity_id must be compare=False -- two otherwise-
         # identical Changes (e.g. a legacy baseline without an ID vs a
