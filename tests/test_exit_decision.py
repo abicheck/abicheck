@@ -29,8 +29,8 @@ deliberately left unmodeled (evidence-contract error, budget overflow,
 not-comparable, and a release's mode-dependent removed-required-library
 rank). Neither resolver is wired into a real call site yet -- see
 ``docs/contribute/adr/064-canonical-gate-algorithm-and-exit-decision.md``
-and `abicheck/policy/exit_decision.py`'s own module docstring for what
-remains open.
+and `abicheck/policy/exit_decision_precedence.py`'s own module docstring
+for what remains open.
 """
 
 from __future__ import annotations
@@ -45,7 +45,7 @@ from abicheck.checker import compare
 from abicheck.cli import main
 from abicheck.exit_decision import ExitDecision, ExitReason, resolve_exit_decision
 from abicheck.model import AbiSnapshot, Function, Visibility
-from abicheck.policy.exit_decision import (
+from abicheck.policy.exit_decision_precedence import (
     resolve_release_exit_decision,
     resolve_scan_exit_decision,
 )
