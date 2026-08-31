@@ -671,7 +671,12 @@ sizes:
    time. Routing them through a JSON-shaped document is a real rewrite of
    both modules against their golden output, i.e. its own vertical slice
    (plausibly one per format), not a follow-on edit to a serialization
-   change.
+   change. **Not a fresh design question**: [`duplication-and-convergence-
+   assessment.md`'s Phase 4](../plans/duplication-and-convergence-assessment.md#phase-4-introduce-the-canonical-report-model)
+   already plans this exact migration (its `ReportEnvelope` generalizes this
+   phase's `ReportDocument`; that plan's Phase 4 items 2-4 are this list's
+   Markdown/HTML rewrite plus the render-parse-patch-render deletion below)
+   — implement it there rather than reinventing a second design here.
 2. *Items 4 and 5 — decisions and post-render mutation.* Item 4's **gate
    decision** half is now closed: `abicheck.policy.gate_decision.
    gate_decision_for_result(result, severity_config)` is the one call site
@@ -720,7 +725,13 @@ sizes:
    modules at once; attempting it as a drive-by inside this gate-decision
    slice would risk exactly the "wrong abstraction, forced through" failure
    mode this ADR warns against elsewhere. It remains its own follow-up
-   slice.
+   slice. **The design decision itself is not open**: hold the resolved
+   verdict on `ReportFinding` (`duplication-and-convergence-assessment.md`'s
+   Phase 4 item 1) rather than a separate cache keyed by `Change` identity —
+   `Change` is not hashable, so build the `ReportFinding` tuple by resolving
+   each verdict once while iterating `DiffResult.changes` during envelope
+   construction instead. See that plan's Phase 4 section for the full
+   rationale; what remains open here is only the implementation slice.
 
    Item 5 (post-render mutation) is untouched by this slice, for the
    original reason: `cli_compare_fold.py`'s
@@ -730,7 +741,11 @@ sizes:
    rendered Markdown) to add facts the workflow result should have carried
    in the first place. That is a behavior-visible change across every
    format at once, so it does not belong in a slice whose parity argument
-   is byte-identical output.
+   is byte-identical output. This is the identical problem
+   `duplication-and-convergence-assessment.md`'s "P1 — Reporting composes
+   too late" finding names (independently, almost word-for-word) as the
+   motivation for that plan's `ReportEnvelope`/Phase 4 — fold it into that
+   migration rather than solving it a second time in isolation.
 
 **The `compare -> policy` blocker this section previously recorded is
 closed**, and how it was re-measured is worth keeping: the earlier note
