@@ -107,6 +107,27 @@ def _bind_target(target: ast.expr, names: set[str]) -> None:
         _bind_target(target.value, names)
 
 
+def _unwrap_transparent(expr: ast.expr) -> ast.expr:
+    """Unwrap a ``typing.cast(<type>, <value>)`` call to the value it
+    forwards unchanged at runtime (Codex review, fresh evidence, eleventh
+    round: ``helper(cast("Change", change))`` forwards ``change`` as-is,
+    but the AST shows an ``ast.Call`` to ``cast``, not a bare ``ast.Name``,
+    so the existing call-argument match missed it entirely). Recognizes
+    both the bare ``cast(...)`` and qualified ``typing.cast(...)`` call
+    forms; any other expression is returned unchanged.
+    """
+    if (
+        isinstance(expr, ast.Call)
+        and len(expr.args) == 2
+        and (
+            (isinstance(expr.func, ast.Name) and expr.func.id == "cast")
+            or (isinstance(expr.func, ast.Attribute) and expr.func.attr == "cast")
+        )
+    ):
+        return expr.args[1]
+    return expr
+
+
 def _locally_bound_names(scope_node: ast.AST) -> frozenset[str]:
     """Every name Python's own scoping rules make LOCAL to *scope_node*
     (a nested function/async function/lambda) by ordinary body-level
@@ -234,6 +255,16 @@ def _iter_scope_aware(node: ast.AST) -> Iterator[tuple[ast.AST, frozenset[str]]]
     surroundings (classes have no parameter list to rebind a name via) --
     a name reassigned inside it is a rarer, unmodeled edge matching this
     helper's existing "small, targeted, not general-purpose" scope.
+
+    A list/set/dict comprehension or generator expression also opens its
+    own scope for its ``for`` targets in real Python 3 (Codex review,
+    fresh evidence, eleventh round): ``[change.future_field for change in
+    candidates]`` reads only the comprehension-local ``change``, never
+    the outer parameter, so its targets are shadowed the same way a
+    nested function's parameters are -- except the *first* ``for``
+    clause's own iterable expression, which Python evaluates in the
+    *enclosing* scope (mirroring the eighth round's default-value
+    treatment), so a genuine outer read there still counts.
     """
     stack: list[tuple[ast.AST, frozenset[str]]] = [(node, frozenset())]
     while stack:
@@ -257,6 +288,23 @@ def _iter_scope_aware(node: ast.AST) -> Iterator[tuple[ast.AST, frozenset[str]]]
                     stack.append((current.returns, shadowed))
                 for stmt in current.body:
                     stack.append((stmt, own_shadowed))
+            continue
+        if isinstance(
+            current, (ast.ListComp, ast.SetComp, ast.GeneratorExp, ast.DictComp)
+        ):
+            comp_names: set[str] = set()
+            for generator in current.generators:
+                _bind_target(generator.target, comp_names)
+            comp_shadowed = shadowed | comp_names
+            for i, generator in enumerate(current.generators):
+                stack.append((generator.iter, shadowed if i == 0 else comp_shadowed))
+                for if_expr in generator.ifs:
+                    stack.append((if_expr, comp_shadowed))
+            if isinstance(current, ast.DictComp):
+                stack.append((current.key, comp_shadowed))
+                stack.append((current.value, comp_shadowed))
+            else:
+                stack.append((current.elt, comp_shadowed))
             continue
         for child in ast.iter_child_nodes(current):
             stack.append((child, shadowed))
@@ -317,43 +365,47 @@ def _change_attrs_read(
     while changed:
         changed = False
         for node, shadowed in _iter_scope_aware(func):
-            if (
-                isinstance(node, ast.Assign)
-                and isinstance(node.value, ast.Name)
-                and node.value.id in tracked
-                and node.value.id not in shadowed
-            ):
-                for target in node.targets:
-                    if isinstance(target, ast.Name) and target.id not in tracked:
-                        tracked.add(target.id)
-                        changed = True
-            elif (
-                isinstance(node, ast.AnnAssign)
-                and isinstance(node.target, ast.Name)
-                and isinstance(node.value, ast.Name)
-                and node.value.id in tracked
-                and node.value.id not in shadowed
-                and node.target.id not in tracked
-            ):
-                tracked.add(node.target.id)
-                changed = True
+            if isinstance(node, ast.Assign):
+                assign_value = _unwrap_transparent(node.value)
+                if (
+                    isinstance(assign_value, ast.Name)
+                    and assign_value.id in tracked
+                    and assign_value.id not in shadowed
+                ):
+                    for target in node.targets:
+                        if isinstance(target, ast.Name) and target.id not in tracked:
+                            tracked.add(target.id)
+                            changed = True
+            elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
+                ann_value = node.value and _unwrap_transparent(node.value)
+                if (
+                    isinstance(ann_value, ast.Name)
+                    and ann_value.id in tracked
+                    and ann_value.id not in shadowed
+                    and node.target.id not in tracked
+                ):
+                    tracked.add(node.target.id)
+                    changed = True
     attrs: set[str] = set()
     for node, shadowed in _iter_scope_aware(func):
-        if (
-            isinstance(node, ast.Attribute)
-            and isinstance(node.value, ast.Name)
-            and node.value.id in tracked
-            and node.value.id not in shadowed
-        ):
-            attrs.add(node.attr)
+        if isinstance(node, ast.Attribute):
+            attr_value = _unwrap_transparent(node.value)
+            if (
+                isinstance(attr_value, ast.Name)
+                and attr_value.id in tracked
+                and attr_value.id not in shadowed
+            ):
+                attrs.add(node.attr)
         elif (
             isinstance(node, ast.Call)
             and isinstance(node.func, ast.Name)
             and node.func.id == "getattr"
             and len(node.args) >= 2
-            and isinstance(node.args[0], ast.Name)
-            and node.args[0].id in tracked
-            and node.args[0].id not in shadowed
+            and isinstance(
+                getattr_target := _unwrap_transparent(node.args[0]), ast.Name
+            )
+            and getattr_target.id in tracked
+            and getattr_target.id not in shadowed
             and isinstance(node.args[1], ast.Constant)
             and isinstance(node.args[1].value, str)
         ):
@@ -365,7 +417,8 @@ def _change_attrs_read(
         ):
             callee = funcs_by_name[node.func.id]
             arg_names = [a.arg for a in (*callee.args.posonlyargs, *callee.args.args)]
-            for i, arg in enumerate(node.args):
+            for i, raw_arg in enumerate(node.args):
+                arg = _unwrap_transparent(raw_arg)
                 if (
                     isinstance(arg, ast.Name)
                     and arg.id in tracked
@@ -376,10 +429,11 @@ def _change_attrs_read(
                         node.func.id, arg_names[i], funcs_by_name, visited
                     )
             for kw in node.keywords:
+                kw_value = _unwrap_transparent(kw.value)
                 if (
-                    isinstance(kw.value, ast.Name)
-                    and kw.value.id in tracked
-                    and kw.value.id not in shadowed
+                    isinstance(kw_value, ast.Name)
+                    and kw_value.id in tracked
+                    and kw_value.id not in shadowed
                     and kw.arg
                 ):
                     attrs |= _change_attrs_read(
@@ -707,6 +761,46 @@ def test_change_attrs_read_keeps_a_nonlocal_capture_after_reassignment() -> None
         "        change = get_new_change()\n"
         "        return change.future_field\n"
         "    return nested()\n"
+    )
+    funcs_by_name = {
+        node.name: node
+        for node in ast.walk(ast.parse(source))
+        if isinstance(node, ast.FunctionDef)
+    }
+    assert _change_attrs_read("outer", "change", funcs_by_name, set()) == {
+        "future_field"
+    }
+
+
+def test_change_attrs_read_ignores_a_comprehension_local_target() -> None:
+    """Codex review, fresh evidence, eleventh round: a comprehension opens
+    its own scope for its `for` target in real Python 3 -- `[change.
+    future_field for change in candidates]` reads only the comprehension-
+    local `change`, never the outer parameter, and must not be
+    misattributed as an outer read."""
+    source = (
+        "def outer(change):\n"
+        "    return [change.future_field for change in candidates]\n"
+    )
+    funcs_by_name = {
+        node.name: node
+        for node in ast.walk(ast.parse(source))
+        if isinstance(node, ast.FunctionDef)
+    }
+    assert _change_attrs_read("outer", "change", funcs_by_name, set()) == set()
+
+
+def test_change_attrs_read_unwraps_a_cast_wrapped_helper_argument() -> None:
+    """Codex review, fresh evidence, eleventh round: `helper(cast("Change",
+    change))` forwards `change` unchanged at runtime, but the AST shows an
+    `ast.Call` to `cast`, not a bare `ast.Name`, so the existing call-
+    argument match missed it entirely -- must still be found through the
+    followed helper."""
+    source = (
+        "def outer(change):\n"
+        "    return helper(cast('Change', change))\n"
+        "def helper(c):\n"
+        "    return c.future_field\n"
     )
     funcs_by_name = {
         node.name: node
