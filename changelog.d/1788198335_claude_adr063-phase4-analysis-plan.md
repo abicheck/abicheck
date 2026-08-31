@@ -84,3 +84,15 @@
   `run_scan_core` and `run_scan_set` through one function,
   `workflows.plan.scan_bazel_scoping_failure()`, instead of two
   independently-maintained copies.
+- **`dump`/`compare`'s own `AnalysisPlanner` pre-flight check no longer
+  wrongly exempts `depth="binary"` when `DumpRequest.resolved_collect_mode`
+  overrides what that depth alone would resolve to.** `resolved_collect_mode`
+  (a private CLI hook `compare`'s own implicit-dump path uses so a real run
+  doesn't re-derive a possibly-different collect mode than the one already
+  resolved for the pair) wins over `depth` at execution time
+  (`resolve_dump_request_evidence`), so a request combining `depth="binary"`
+  with an explicit override to a real collection mode (e.g. `"build"`) still
+  consults `build_info` for real. The pre-flight check now consults the
+  override first when present, falling back to the raw-depth-only rule only
+  when it's unset — `compare` is unaffected, since `CompareRequest` has no
+  such field.

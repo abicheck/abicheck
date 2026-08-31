@@ -243,6 +243,54 @@ class TestBazelBuildTargetScoping:
             with pytest.raises(PlanningError):
                 AnalysisPlanner.resolve(request)
 
+    def test_resolved_collect_mode_override_defeats_the_binary_exemption(
+        self, tmp_path: Path
+    ):
+        """Codex review, fresh evidence: raw ``depth="binary"`` alone is not
+        the whole story. ``DumpRequest.resolved_collect_mode``, when set,
+        overrides what ``depth`` alone would resolve to, and
+        ``resolve_dump_request_evidence`` honors that override -- so a
+        request with ``depth="binary"`` but ``resolved_collect_mode="build"``
+        still runs ``collect_inline_pack`` for real. Exempting it here on the
+        strength of the raw depth alone would let this request reach
+        ``resolve``, then fail deep inside ``collect_inline_pack`` as a
+        flattened ``SnapshotError`` instead of the promised ``PlanningError``."""
+        aquery = _write(tmp_path / "aquery.json", _EMPTY_AQUERY)
+        request = DumpRequest(
+            input=InputSpec.of(
+                path=None,
+                sources=tmp_path,
+                build_info=aquery,
+                build_targets=["//:lib"],
+            ),
+            depth="binary",
+            resolved_collect_mode="build",
+        )
+        with pytest.raises(PlanningError):
+            AnalysisPlanner.resolve(request)
+
+    def test_resolved_collect_mode_off_override_is_exempt_even_at_other_depths(
+        self, tmp_path: Path
+    ):
+        """The converse: an explicit ``resolved_collect_mode="off"`` override
+        means ``build_info`` is never consulted regardless of what ``depth``
+        alone would otherwise resolve to (the raw-depth-only check would
+        wrongly reject this, since ``depth="build"`` alone is in the
+        "still rejected" set above)."""
+        aquery = _write(tmp_path / "aquery.json", _EMPTY_AQUERY)
+        request = DumpRequest(
+            input=InputSpec.of(
+                path=None,
+                sources=tmp_path,
+                build_info=aquery,
+                build_targets=["//:lib"],
+            ),
+            depth="build",
+            resolved_collect_mode="off",
+        )
+        plan = AnalysisPlanner.resolve(request)
+        assert isinstance(plan, AnalysisPlan)
+
 
 class TestAnalysisPlanShape:
     def test_dump_plan_carries_one_side_labelled_input(self, tmp_path: Path):

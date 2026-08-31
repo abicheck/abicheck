@@ -259,6 +259,32 @@ looked like the obvious fix and wasn't.
   mismatched request; `test_run_scan_set_depth_binary_exempts_the_early_
   bazel_scoping_check` pins the sibling depth=binary exemption for the
   plural entry point.
+  **A ninth review round found that raw depth alone is not the whole story
+  for `dump`/`compare`'s own `AnalysisPlanner` check either.**
+  `_check_bazel_target_scoping` exempted `depth="binary"` purely by reading
+  the request's raw, requested depth — but `DumpRequest.resolved_collect_mode`
+  (a private CLI hook: `compare`'s own implicit-dump path resolves collect
+  mode from the *pair* and forwards it in, so the real run doesn't re-derive
+  a possibly-different mode from `depth` in isolation), when set, overrides
+  what `depth` alone would resolve to, and `resolve_dump_request_evidence`
+  honors that override. A `DumpRequest(depth="binary",
+  resolved_collect_mode="build", ...)` therefore still runs
+  `collect_inline_pack` for real at execution time — the override, not the
+  raw depth, decides whether `build_info` is ever consulted — so the
+  pre-flight check's exemption on raw depth alone let an unsupported request
+  reach `resolve()`, then fail later inside `collect_inline_pack` as a
+  flattened `SnapshotError` instead of the promised `PlanningError`. Fixed
+  by adding `resolved_collect_mode` to `SidePlan` (populated only for `dump`
+  sides — `CompareRequest` has no such field, so every `compare` side keeps
+  `None` and this changes nothing for `compare`) and checking it first: when
+  set, it alone decides the exemption (`"off"` exempts, anything else
+  doesn't, regardless of raw depth); only when unset does the check fall
+  back to the pre-existing raw-depth-only rule. `tests/test_analysis_plan.py::
+  TestBazelBuildTargetScoping::test_resolved_collect_mode_override_defeats_the_binary_exemption`
+  pins the fixed case; its sibling
+  `test_resolved_collect_mode_off_override_is_exempt_even_at_other_depths`
+  pins the converse (an explicit `"off"` override exempts even at a depth,
+  e.g. `"build"`, that the raw-depth-only rule would otherwise reject).
   Historical analysis retained below for the record.
   `BazelAdapter.collect()`'s `self.targets` scoping is applied
   in exactly two places: gating whether a *live* `bazel query` subprocess

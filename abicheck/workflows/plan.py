@@ -153,6 +153,10 @@ class SidePlan:
     build_info: Path | None
     build_targets: tuple[str, ...]
     gcc_path: str | None
+    #: ``DumpRequest.resolved_collect_mode`` (``None`` for every ``compare``
+    #: side, which has no such field) -- when set, it is what actually runs,
+    #: overriding whatever ``requested_depth`` alone would resolve to.
+    resolved_collect_mode: str | None = None
 
 
 @dataclass(frozen=True)
@@ -168,7 +172,12 @@ class AnalysisPlan:
     sides: tuple[SidePlan, ...]
 
 
-def _side_plan(label: str, side: InputSpec, depth: str | None) -> SidePlan:
+def _side_plan(
+    label: str,
+    side: InputSpec,
+    depth: str | None,
+    resolved_collect_mode: str | None = None,
+) -> SidePlan:
     gcc_path = side.compile.gcc_path if side.compile is not None else None
     frontend = (
         side.compile.frontend
@@ -184,6 +193,7 @@ def _side_plan(label: str, side: InputSpec, depth: str | None) -> SidePlan:
         build_info=side.build_info,
         build_targets=side.build_targets,
         gcc_path=gcc_path,
+        resolved_collect_mode=resolved_collect_mode,
     )
 
 
@@ -286,7 +296,21 @@ def _check_bazel_target_scoping(side: SidePlan) -> PlanningFailure | None:
     # `build_info` to `None` for this same depth on the `scan` side, which
     # is why this same false positive can't reach `scan_engine.py`'s call
     # to the free `bazel_target_scoping_failure` function below).
-    if side.requested_depth is not None and side.requested_depth.lower() == "binary":
+    #
+    # A later Codex round found that raw depth alone is not the whole
+    # story for `dump`: `DumpRequest.resolved_collect_mode`, when set,
+    # overrides what `depth` alone would resolve to (Codex review, PR 3A
+    # blocker 5 -- see that field's own docstring), and
+    # `resolve_dump_request_evidence` honors the override. A request with
+    # `depth="binary"` but `resolved_collect_mode="build"` therefore still
+    # runs `collect_inline_pack` for real -- the override, not the raw
+    # depth, decides whether `build_info` is ever consulted. `compare`
+    # sides have no such field (`resolved_collect_mode` stays `None`),
+    # so this only changes behavior for `dump`.
+    if side.resolved_collect_mode is not None:
+        if side.resolved_collect_mode == "off":
+            return None
+    elif side.requested_depth is not None and side.requested_depth.lower() == "binary":
         return None
     return bazel_target_scoping_failure(side.label, side.build_info, side.build_targets)
 
@@ -320,7 +344,12 @@ class AnalysisPlanner:
             operation = "dump"
             sides = (
                 _replace_lang_frontend(
-                    _side_plan("input", request.input, request.depth),
+                    _side_plan(
+                        "input",
+                        request.input,
+                        request.depth,
+                        request.resolved_collect_mode,
+                    ),
                     request.lang,
                     request.frontend,
                 ),
