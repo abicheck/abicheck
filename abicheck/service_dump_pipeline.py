@@ -308,6 +308,8 @@ def run_dump_request(
         ValidationError: If the request fails :meth:`DumpRequest.validate`,
             names a frontend with no extractor for its evidence, or requests a
             ``depth`` the resolved snapshot did not reach.
+        PlanningError: See :func:`resolve_dump_request` — raised from inside
+            its own call here.
         SnapshotError: If the input cannot be loaded.
     """
     return execute_dump_request(resolve_dump_request(request), notify=notify).snapshot
@@ -327,6 +329,10 @@ def resolve_dump_request(request: DumpRequest) -> ResolvedDumpRequest:
     Raises:
         ValidationError: If the request fails :meth:`DumpRequest.validate`
             or names a frontend with no extractor for its evidence.
+        PlanningError: If :class:`~abicheck.workflows.plan.AnalysisPlanner`
+            finds a requested evidence input no resolved collector/backend
+            combination can satisfy (ADR-063 Phase 4) — e.g. ``--build-target``
+            combined with a pre-captured Bazel ``aquery``/``cquery`` jsonproto.
     """
     from . import service, service_compare_evidence as _sce
     from .api_types import HEADER_AST_FRONTENDS

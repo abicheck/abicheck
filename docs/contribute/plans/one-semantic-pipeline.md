@@ -11130,17 +11130,30 @@ checked against the real code rather than assumed closed by the
 `AnalysisPlanner` wiring alone. The check itself is factored into a free
 function, `workflows.plan.bazel_target_scoping_failure(label, build_info,
 build_targets)`, which `_check_bazel_target_scoping` wraps for the
-`AnalysisPlanner` path and which `_build_new_snapshot` now calls directly
-(inside its own existing `try`/`except AbicheckError` block, so a
-`PlanningError` here surfaces as the same clean `click.ClickException`
-every other resolution failure in that function already does) — one
-implementation, two call sites, rather than a second, independently
-maintained copy for `scan`.
+`AnalysisPlanner` path and which `_build_new_snapshot` now calls directly.
+**Corrected after a first pass and a second Codex review round found both
+wrong**: the first version raised `PlanningError` inside the existing
+`try`/`except AbicheckError` block, which maps every `AbicheckError` to
+`click.ClickException` — exit 1, not the exit-64 usage error this
+combination actually is (AGENTS.md: "64 = usage error ... applies across
+commands"). Fixed by raising `click.UsageError` directly at the point of
+detection instead: since `click.UsageError` is not an `AbicheckError`, it
+propagates straight past that `except` clause unmodified — no `PlanningError`
+intermediate, no second `except` clause, and (debt-no-growth is `no_growth`
+for this file) no added lines either. The *second* round found this check
+never even ran on `scan --dry-run`/`scan --artifact-set --dry-run`, both of
+which return their preview before `_build_new_snapshot` is ever called — a
+dry-run could claim success (single-binary: an "UNSCOPED"-but-informational
+estimate) for a request the real run then rejected. Fixed by running the
+identical `bazel_target_scoping_failure` check in `cli_scan.py` itself,
+before both dry-run renderers, raising the same `click.UsageError`.
 `tests/test_bazel_root_targets.py::test_scan_candidate_build_target_with_precaptured_aquery_raises_planning_error`
-pins this half; the baseline side of `scan --against` was checked and
-found not to reach the Bazel adapter with `build_targets` at all (`--against`
-compares against an already-produced baseline, not a second live build), so
-it needed no equivalent call.
+pins the real-execution path; `tests/test_bazel_root_targets_scan.py`'s
+three new cases pin both dry-run shapes and the real-run parity case. The
+baseline side of `scan --against` was checked and found not to reach the
+Bazel adapter with `build_targets` at all (`--against` compares against an
+already-produced baseline, not a second live build), so it needed no
+equivalent call.
 
 **Not landed in this slice: the second named scenario, and the
 `cli-contract`/`engine-cli-boundary` gate widening.** Re-checked against

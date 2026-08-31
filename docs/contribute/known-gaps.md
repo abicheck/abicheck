@@ -44,8 +44,12 @@ looked like the obvious fix and wasn't.
   (`scan_engine._build_new_snapshot`, which has no `CompareRequest`/
   `DumpRequest` of its own to resolve through `AnalysisPlanner` and so calls
   the same free function directly) now run before collecting anything —
-  `PlanningError`/`click.ClickException` naming the mismatch and the
-  documented workaround, not a silent, unscoped collection. See
+  `dump`/`compare` raise `PlanningError`, translated to `click.UsageError`
+  at each CLI boundary; `scan`'s own CLI-only call site raises
+  `click.UsageError` directly (no `PlanningError` intermediate, since it has
+  no typed-API caller to preserve that type for) — both name the mismatch
+  and the documented workaround, exit 64, not a silent, unscoped collection.
+  See
   `abicheck/workflows/plan.py`'s own module docstring and
   `docs/contribute/adr/063-one-semantic-pipeline.md`'s Phase 4 status entry
   for what changed and what this fix deliberately does not attempt (option 1
