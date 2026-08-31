@@ -91,8 +91,13 @@ def _change_attrs_read(
 ) -> set[str]:
     """Every ``<param_name>.<attr>`` read reachable from ``func_name``,
     following calls (by position or keyword) into other functions defined
-    in the same module that receive the same object under a new name, and
-    following simple local-variable aliases of ``param_name`` within the
+    in the same module that receive the same object under a new name --
+    positional binding counts a callee's positional-only parameters ahead
+    of its regular ones (Codex review, fresh evidence, fifth round: a
+    callee declaring the forwarded object positional-only, e.g. ``def
+    helper(candidate, /)``, was invisible to a walk that only read
+    ``args.args``, the same way it excludes that parameter at runtime) --
+    and following simple local-variable aliases of ``param_name`` within the
     same function body -- both a plain ``candidate = change`` (Codex
     review, fresh evidence, third round: a parameter-only walk stays green
     for a read written after a refactor like ``candidate = change;
@@ -168,7 +173,7 @@ def _change_attrs_read(
             and node.func.id in funcs_by_name
         ):
             callee = funcs_by_name[node.func.id]
-            arg_names = [a.arg for a in callee.args.args]
+            arg_names = [a.arg for a in (*callee.args.posonlyargs, *callee.args.args)]
             for i, arg in enumerate(node.args):
                 if (
                     isinstance(arg, ast.Name)
@@ -290,6 +295,29 @@ def test_change_attrs_read_catches_an_annotated_local_alias_read() -> None:
     source = (
         "def outer(change):\n"
         "    candidate: object = change\n"
+        "    return candidate.future_field\n"
+    )
+    funcs_by_name = {
+        node.name: node
+        for node in ast.walk(ast.parse(source))
+        if isinstance(node, ast.FunctionDef)
+    }
+    assert _change_attrs_read("outer", "change", funcs_by_name, set()) == {
+        "future_field"
+    }
+
+
+def test_change_attrs_read_follows_a_positional_only_helper_parameter() -> None:
+    """Codex review, fresh evidence, fifth round: a followed helper that
+    declares the forwarded object positional-only (`def helper(candidate,
+    /)`) puts `candidate` in `args.posonlyargs`, not `args.args` -- a
+    walker that only reads the latter can never resolve the binding for
+    a call like `helper(change)`, the same way that parameter is excluded
+    from `args.args` at runtime."""
+    source = (
+        "def outer(change):\n"
+        "    return helper(change)\n"
+        "def helper(candidate, /):\n"
         "    return candidate.future_field\n"
     )
     funcs_by_name = {
