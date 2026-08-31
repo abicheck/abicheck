@@ -2504,9 +2504,24 @@ materializing the full per-library snapshot tree the real budgeted decode
 would — not threading the override through every classifier call site
 (`classify_compare_operand()` is also called from `_profile_targets_
 set_input()`, which has no natural place to receive a per-invocation
-override at all). Regression coverage needs a legitimately-oversized
-*plain-JSON* baseline specifically, not only the archive-format case the
-earlier decode-budget bullet already named — the two paths can fail
+override at all). **The probe must also be compression-aware (Codex
+review, next round, verified against source):** `save_bundle_facts()`
+already supports `compression="auto"` (gzip/zstd, suffix-driven, the
+same scheme `snapshot_io.py` establishes generally), and `--bundle-
+facts-out` already produces such files today — so a real
+`old.bundlefacts.json.gz`/`.zst` baseline is not a hypothetical input. A
+probe that only scans a plain-JSON prefix for `per_library_snapshots`
+would classify a compressed facts file as an ordinary `"file"`, sending
+it into the single-snapshot loader instead of the stored-facts path,
+where it would then fail once that loader hit the bundle container
+shape. The bounded probe needs the same magic-byte compression detection
+`snapshot_io.py` already does before checking content shape — decompress
+(or peek into) enough of the prefix to find the key, still without
+materializing the full snapshot tree. Regression coverage needs a
+gzip/zstd-compressed facts baseline in addition to the legitimately-
+oversized *plain-JSON* baseline named above — three distinct cases
+(plain, gzip/zstd, oversized), not only the archive-format budget case
+the earlier decode-budget bullet already named, since each can fail
 independently.
 
 **A second `classify_compare_operand()` consumer needs the same new kind
