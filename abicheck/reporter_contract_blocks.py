@@ -28,6 +28,8 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 from .impact.use_case_impact import add_use_case_impact
+from .report.document import ReportDocument
+from .report.render_json import render_json
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -235,6 +237,173 @@ def add_effective_config_digest(
     )
     d["effective_config_digest"] = effective_config_digest(ec_fields)
     d["effective_config_fields"] = ec_fields
+
+
+def suppression_rule_label(rule: Any, index: int) -> str:
+    """A human-readable identifier for a suppression rule with no index of
+    its own (``SuppressionAudit``'s per-bucket lists don't carry the rule's
+    position in the original file, so *index* is only this bucket's own
+    position -- misleading as a rule identifier, e.g. the second rule in
+    the file being the only stale one renders as ``rule#0`` -- Codex/
+    CodeRabbit review, fresh evidence).
+
+    Always appends the rule's own matching selectors (every populated one,
+    not just the first -- ``Suppression`` selectors combine conjunctively)
+    alongside ``label``/``reason`` when either is set, not only as a
+    fallback for an unlabeled rule (Codex review, fresh evidence, third
+    round): a ``label``/``reason`` is a free-form grouping tag with no
+    uniqueness guarantee, so two distinct rules sharing one would otherwise
+    still render as the identical, ambiguous identifier. Falls back to
+    *index* only for a rule with none of label/reason/any selector set at
+    all.
+
+    ADR-061 Phase 2 item 5: shared by :func:`add_suppression_audit` below
+    (the JSON ``suppression_audit`` key) and
+    ``cli_compare_fold._fold_suppression_audit_into_text``'s markdown/text/
+    review append -- lives here (not ``reporter.py``, which is at its own
+    debt-ledger no-growth cap) so both a ``report``-classified caller
+    (``reporter.py``) and a ``frontends``-classified caller
+    (``cli_compare_fold.py``, which may import ``report`` but not the
+    reverse) can reach it from one place.
+    """
+    label: str | None = getattr(rule, "label", None) or getattr(rule, "reason", None)
+    parts = [
+        f"{field}={value}"
+        for field in (
+            "symbol",
+            "symbol_pattern",
+            "type_pattern",
+            "member_name",
+            "change_kind",
+            "source_location",
+            "namespace",
+            "entity_namespace",
+            "cause_namespace",
+            # Canonical (backend-independent) identity selector (Codex
+            # review, fresh evidence, PR #753): a finding_id-only rule with
+            # no label/reason previously rendered as a bare `rule#<index>`,
+            # indistinguishable from every other unlabeled rule in the same
+            # bucket -- the exact ambiguity every other selector here
+            # already avoids.
+            "finding_id",
+            # Symbol-linkage selector (Codex review, fresh evidence): two
+            # rules sharing every other selector but differing on `binding`
+            # (e.g. one `weak`, one `global`) match disjoint findings and
+            # must not render identically -- same reasoning as every other
+            # selector in this tuple.
+            "binding",
+            # ADR-044 D2 reachability gates (Codex review, fresh evidence):
+            # these affect which findings a rule matches exactly like the
+            # selectors above -- two rules sharing every selector but
+            # differing on reachability (e.g. "public-only" vs.
+            # "unreachable-only") match disjoint findings and must not
+            # render identically. allow_public_break/allow_unknown_reachability
+            # default False, so they're omitted (same "if truthy" convention
+            # as every other field here) unless a rule actually opted in.
+            "reachability",
+            "allow_public_break",
+            "allow_unknown_reachability",
+        )
+        if (value := getattr(rule, field, None))
+    ]
+    # expires (Codex review, fresh evidence) is not a matching selector --
+    # two rules with identical selectors but different expiry dates match
+    # the exact same findings -- but it's exactly what distinguishes them
+    # in the expired_rules/near_expiry_rules buckets themselves, where an
+    # otherwise-identical pair would otherwise render as the same label
+    # with no way to tell which deadline belongs to which rule.
+    expires = getattr(rule, "expires", None)
+    if expires is not None:
+        parts.append(f"expires={expires.isoformat()}")
+    selectors = ", ".join(parts)
+    if label and selectors:
+        return f"{label} ({selectors})"
+    if label:
+        return label
+    if selectors:
+        return selectors
+    return f"rule#{index}"
+
+
+def add_suppression_audit(d: dict[str, Any], result: DiffResult) -> None:
+    """Add the ``--audit-suppressions`` ledger as a real JSON key, when present.
+
+    ADR-061 Phase 2 item 5 (post-render mutation): ``result.suppression_
+    audit`` is attached by ``cli_compare_helpers._attach_suppression_audit``
+    before rendering -- this reads it directly during document
+    construction, so the key is part of the JSON the first time it is
+    rendered rather than ``cli_compare_fold._fold_suppression_audit_into_
+    text`` re-parsing already-rendered JSON text to splice it in
+    afterwards. ``None`` (the default, and every run that did not pass
+    ``--audit-suppressions``) omits the key entirely, matching the
+    pre-existing behavior exactly.
+    """
+    from .suppression import SuppressionAudit
+
+    audit = result.suppression_audit
+    if not isinstance(audit, SuppressionAudit):
+        return
+    d["suppression_audit"] = {
+        "total_rules": audit.total_rules,
+        "stale_rules": [
+            suppression_rule_label(r, i) for i, r in enumerate(audit.stale_rules)
+        ],
+        "high_risk_matches": [
+            {
+                "rule": suppression_rule_label(rule, i),
+                "kind": change.kind.value,
+                "symbol": change.symbol,
+            }
+            for i, (rule, change) in enumerate(audit.high_risk_matches)
+        ],
+        "expired_rules": [
+            suppression_rule_label(r, i) for i, r in enumerate(audit.expired_rules)
+        ],
+        "near_expiry_rules": [
+            suppression_rule_label(r, i)
+            for i, r in enumerate(audit.near_expiry_rules)
+        ],
+    }
+
+
+def add_evidence_depth(d: dict[str, Any], result: DiffResult) -> None:
+    """Add ``old_evidence_depth``/``new_evidence_depth``, when resolved.
+
+    ADR-061 Phase 2 item 5 (post-render mutation): ``result.old_evidence_
+    depth``/``result.new_evidence_depth`` are resolved once by
+    ``cli_compare_helpers`` (mirroring ``analysis_assurance``'s identical
+    out-of-band-pack resolution) and attached before rendering -- this
+    reads them directly during document construction instead of
+    ``cli_compare_helpers._fold_evidence_depth_into_json`` re-parsing
+    already-rendered JSON text afterwards. ``None`` (the default -- every
+    caller other than ``compare``'s own JSON path) omits both keys
+    entirely, matching the pre-existing behavior exactly.
+    """
+    if result.old_evidence_depth is not None:
+        d["old_evidence_depth"] = result.old_evidence_depth
+    if result.new_evidence_depth is not None:
+        d["new_evidence_depth"] = result.new_evidence_depth
+
+
+def render_json_with_side_facts(
+    d: dict[str, Any], result: DiffResult, *, indent: int
+) -> str:
+    """The one shared tail of every ``reporter.py`` JSON builder: fold in
+    the two ADR-061 Phase 2 item 5 facts (:func:`add_suppression_audit`,
+    :func:`add_evidence_depth`), then render.
+
+    ``reporter.py`` itself is on the architecture debt ledger's no-growth
+    list (see this module's own docstring) -- its three JSON builders
+    (``to_json``, ``_to_json_leaf``, ``_to_json_root_cause``) each already
+    end with ``return render_json(ReportDocument.from_mapping(d),
+    indent=indent)``; swapping that line for ``return
+    render_json_with_side_facts(d, result, indent=indent)`` adds the two
+    facts to all three without growing the file by a net line, instead of
+    each site carrying its own two-line call (which would).
+    """
+    add_suppression_audit(d, result)
+    add_evidence_depth(d, result)
+    return render_json(ReportDocument.from_mapping(d), indent=indent)
 
 
 def add_annotations(

@@ -24,6 +24,7 @@ from typing import TYPE_CHECKING, Any, cast
 
 if TYPE_CHECKING:
     from .severity import GateDecision, KindSets, SeverityConfig
+from . import reporter_contract_blocks as _reporter_contract_blocks
 from .checker import (
     Change,
     DiffResult,
@@ -563,7 +564,7 @@ def _to_json_leaf(
     scope = _scope_dict(result)
     if scope is not None:
         d["scope"] = scope
-    return render_json(ReportDocument.from_mapping(d), indent=indent)
+    return _reporter_contract_blocks.render_json_with_side_facts(d, result, indent=indent)
 
 
 def _add_entries_to_root_causes(
@@ -771,7 +772,7 @@ def _to_json_root_cause(
     scope = _scope_dict(result)
     if scope is not None:
         d["scope"] = scope
-    return render_json(ReportDocument.from_mapping(d), indent=indent)
+    return _reporter_contract_blocks.render_json_with_side_facts(d, result, indent=indent)
 
 
 def _metadata_dict(meta: object | None) -> dict[str, object] | None:
@@ -1217,7 +1218,7 @@ def to_json(
     _add_confidence_evidence(d, result)
     _add_policy_overrides(d, result)
     _add_trailing_fields(d, result, show_impact, show_only)
-    return render_json(ReportDocument.from_mapping(d), indent=indent)
+    return _reporter_contract_blocks.render_json_with_side_facts(d, result, indent=indent)
 
 
 _VERDICT_TO_RECOMMENDED_ACTION: dict[Verdict, str] = {

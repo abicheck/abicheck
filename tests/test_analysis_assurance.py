@@ -1379,8 +1379,8 @@ class TestAnalysisAssuranceOutOfBandPack:
     so a genuinely partial/failed out-of-band pack was invisible to it --
     ``status`` could read ``"complete"`` and ``--require-complete-analysis``
     would exit 0 despite the real evidence being incomplete. Regression
-    coverage mirrors ``TestFoldEvidenceDepthOutOfBandPack`` in
-    ``tests/test_cov95_cli.py``, the existing test for the identical class of
+    coverage mirrors ``TestEvidenceDepthOutOfBandPack`` in
+    ``tests/test_reporter_side_facts.py``, the existing test for the identical class of
     gap on the ``old_evidence_depth``/``new_evidence_depth`` JSON fields.
     """
 
