@@ -469,8 +469,23 @@ lands in two stages rather than one atomic change:
       axis silently reported `0` with an empty target list on both
       (Codex review, fresh evidence). Fixed via a new `_scan_abort_exit_
       axis` helper that reads each axis separately from `diff.exit` and
-      folds it into the corresponding `_LoadedReport` field. Still open:
-      the release fan-out's `GateOptions` unification and a full
+      folds it into the corresponding `_LoadedReport` field. **(9) A ninth
+      round caught the same two helpers missing `scan --artifact-set`'s own
+      abort shape entirely:** `ScanSetResult.to_dict()` has no `diff` key at
+      all -- its own top-level `verdict` can equally read `"BUDGET_
+      OVERFLOW"` (`_aggregate_scan_set_verdict`: any member overflowing
+      makes the whole set report one), but each member's own preserved
+      decision nests instead at `per_artifact[i].report.exit`
+      (`ScanArtifactResult.to_dict()` wrapping the typed API's own
+      `ScanResult.report` envelope, not `ScanOutcome`'s `diff.exit`) (Codex
+      review, fresh evidence). Reading only the single-binary shape silently
+      downgraded a real member break to the generic abort floor and omitted
+      the coverage/assurance axes for a set-level abort. Fixed by
+      generalizing `_scan_abort_exit_block` into `_scan_abort_exit_blocks`,
+      which returns every exit-decision block a report may carry (the
+      single `diff.exit`, plus every `per_artifact[i].report.exit`); both
+      consumers now fold `max()` across all of them instead of reading one.
+      Still open: the release fan-out's `GateOptions` unification and a full
       cross-front-end parity pass (typed API, Action).
 2. **Atomic.** Once the report block agrees with today's real behaviour for
    every axis and every mode (verified by the axis-separated tests this ADR

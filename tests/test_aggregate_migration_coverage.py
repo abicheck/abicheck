@@ -299,3 +299,77 @@ def test_late_budget_overflow_orthogonal_axes_default_to_zero_when_absent(
     assert loaded.contract_coverage_incomplete is False
     assert loaded.contract_coverage_declared is False
     assert loaded.analysis_assurance_exit == 0
+
+
+def test_artifact_set_budget_overflow_preserves_a_member_s_prior_break(
+    tmp_path: Path,
+) -> None:
+    """A `scan --artifact-set` abort report (`ScanSetResult.to_dict()`) has
+    no `diff` key at all -- its own top-level `verdict` reads
+    `"BUDGET_OVERFLOW"` whenever any member overflows
+    (`_aggregate_scan_set_verdict`), but each member's own preserved
+    decision nests at `per_artifact[i].report.exit` instead
+    (`ScanArtifactResult.to_dict()` wrapping the typed API's `ScanResult.
+    report` envelope) -- a different shape than the single-binary `scan`
+    CLI's `diff.exit`. Reading only the single-binary shape silently
+    dropped every member's preserved contribution for a set-level abort
+    (Codex review, fresh evidence).
+    """
+    report = tmp_path / "abi-report-bundle.json"
+    report.write_text(
+        json.dumps(
+            {
+                "scan_schema_version": "1.23",
+                "verdict": "BUDGET_OVERFLOW",
+                "exit_code": 5,
+                "per_artifact": [
+                    {
+                        "artifact": "libclean.so",
+                        "scan_schema_version": "1.23",
+                        "verdict": "COMPATIBLE",
+                        "exit_code": 0,
+                        "findings": 0,
+                        "layers": [],
+                        "confidence": {},
+                        "estimate": [],
+                        "report": {},
+                    },
+                    {
+                        "artifact": "libbroken.so",
+                        "scan_schema_version": "1.23",
+                        "verdict": "BUDGET_OVERFLOW",
+                        "exit_code": 5,
+                        "findings": 0,
+                        "layers": [],
+                        "confidence": {},
+                        "estimate": [],
+                        "report": {
+                            "scan_schema_version": "1.23",
+                            "exit": {
+                                "code": 5,
+                                "reasons": ["budget_overflow"],
+                                "budget_overflow_contribution": 5,
+                                "compatibility_contribution": 4,
+                                "contract_coverage_contribution": 1,
+                                "analysis_assurance_contribution": 1,
+                            },
+                        },
+                    },
+                ],
+                "bundle_findings": [],
+                "bundle_finding_count": 0,
+                "bundle_verdict": None,
+                "bundle_incomplete": False,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    loaded = _load_report_file(report, prefix="abi-report-")
+
+    assert loaded.verdict is None
+    assert loaded.gate is not None
+    assert loaded.gate.exit_code == 4
+    assert loaded.contract_coverage_exit == 1
+    assert loaded.contract_coverage_declared is True
+    assert loaded.analysis_assurance_exit == 1

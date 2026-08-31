@@ -163,51 +163,70 @@ def _incomplete_findings(data: dict[str, Any]) -> ReportFindings:
     return replace(parse_report_findings(data), complete=False)
 
 
-def _scan_abort_exit_block(data: Mapping[str, Any]) -> Mapping[str, Any] | None:
-    """A scan abort's own ``diff.exit`` block, or ``None``.
+def _scan_abort_exit_blocks(data: Mapping[str, Any]) -> list[Mapping[str, Any]]:
+    """Every ``ExitDecision.to_dict()``-shaped ``exit`` block a scan abort's
+    report may preserve.
 
-    Shared lookup for :func:`_scan_abort_prior_exit` and
-    :func:`_scan_abort_exit_axis` below -- both read the same
-    ``ExitDecision.to_dict()``-shaped block ``attach_prior_on_budget_
-    overflow`` preserves into a late abort's report.
+    A single-binary ``scan``/``ScanOutcome`` abort report nests its one
+    preserved decision at ``diff.exit`` (``ScanOutcome.to_dict()``'s own
+    shape). A ``scan --artifact-set``/``ScanSetResult`` abort report has no
+    ``diff`` key at all -- its own top-level ``verdict`` can equally read
+    ``"BUDGET_OVERFLOW"`` (``_aggregate_scan_set_verdict``: any member
+    overflowing makes the whole set report one), but each member's own
+    preserved decision nests instead at ``per_artifact[i].report.exit``
+    (``ScanArtifactResult.to_dict()`` wrapping ``ScanResult.to_dict()``'s
+    ``report`` field -- the *typed API's* envelope, not ``ScanOutcome``'s).
+    Reading only the first shape silently dropped every member's preserved
+    contribution for a set-level abort, downgrading a real exit `2`/`4` to
+    the generic abort floor and omitting the coverage/assurance target axes
+    entirely (Codex review, fresh evidence). Shared lookup for
+    :func:`_scan_abort_prior_exit` and :func:`_scan_abort_exit_axis` below,
+    both of which fold ``max()`` across every block this returns.
     """
     diff = data.get("diff")
-    exit_block = diff.get("exit") if isinstance(diff, dict) else None
-    return exit_block if isinstance(exit_block, dict) else None
+    single = diff.get("exit") if isinstance(diff, dict) else None
+    blocks: list[Mapping[str, Any]] = [single] if isinstance(single, dict) else []
+    per_artifact = data.get("per_artifact")
+    if isinstance(per_artifact, list):
+        for member in per_artifact:
+            report = member.get("report") if isinstance(member, dict) else None
+            member_exit = report.get("exit") if isinstance(report, dict) else None
+            if isinstance(member_exit, dict):
+                blocks.append(member_exit)
+    return blocks
 
 
 def _scan_abort_prior_exit(data: Mapping[str, Any]) -> int:
-    """The largest PR-G1 contribution preserved in a scan abort's own
-    ``diff.exit``, or ``0``.
+    """The largest PR-G1 contribution preserved across a scan abort's own
+    ``exit`` block(s) (see :func:`_scan_abort_exit_blocks`), or ``0``.
 
     A *late* ``_BudgetOverflow``/``_EvidenceContractError``
     (``attach_prior_on_budget_overflow``) carries the ordinary
     compatibility/contract-coverage/analysis-assurance/crosscheck-promotion
-    contributions through into ``diff.exit``'s own ``*_contribution`` fields
-    even though none of them decided ``code`` there (``code`` is always the
-    dominant budget/evidence-contract-error code, chosen large enough to
-    exceed them -- see ``ExitDecision``'s own docstring). Reading them here
-    is what lets this target's forced gate still reflect a real ABI/API
-    break already found before the abort fired, instead of downgrading it
-    to a bare coverage-incomplete ``1`` (Codex review, fresh evidence).
+    contributions through into an ``exit`` block's own ``*_contribution``
+    fields even though none of them decided ``code`` there (``code`` is
+    always the dominant budget/evidence-contract-error code, chosen large
+    enough to exceed them -- see ``ExitDecision``'s own docstring). Reading
+    them here is what lets this target's forced gate still reflect a real
+    ABI/API break already found before the abort fired, instead of
+    downgrading it to a bare coverage-incomplete ``1`` (Codex review, fresh
+    evidence).
     """
-    exit_block = _scan_abort_exit_block(data)
-    if exit_block is None:
-        return 0
     best = 0
-    for key in (
-        "compatibility_contribution",
-        "contract_coverage_contribution",
-        "analysis_assurance_contribution",
-        "crosscheck_promotion_contribution",
-    ):
-        raw = exit_block.get(key)
-        if (
-            isinstance(raw, int)
-            and not isinstance(raw, bool)
-            and raw in _VALID_GATE_EXIT
+    for exit_block in _scan_abort_exit_blocks(data):
+        for key in (
+            "compatibility_contribution",
+            "contract_coverage_contribution",
+            "analysis_assurance_contribution",
+            "crosscheck_promotion_contribution",
         ):
-            best = max(best, raw)
+            raw = exit_block.get(key)
+            if (
+                isinstance(raw, int)
+                and not isinstance(raw, bool)
+                and raw in _VALID_GATE_EXIT
+            ):
+                best = max(best, raw)
     return best
 
 
@@ -228,9 +247,14 @@ def _scan_abort_exit_axis(data: Mapping[str, Any], key: str) -> tuple[int, bool]
     contribution`` fields a scan-abort payload never carries at all (Codex
     review, fresh evidence).
     """
-    exit_block = _scan_abort_exit_block(data)
-    raw = exit_block.get(key) if exit_block is not None else None
-    return (raw, True) if _is_valid_contribution(raw) else (0, False)
+    best = 0
+    declared = False
+    for exit_block in _scan_abort_exit_blocks(data):
+        raw = exit_block.get(key)
+        if _is_valid_contribution(raw):
+            best = max(best, raw)
+            declared = True
+    return best, declared
 
 
 def _load_report_file(path: Path, *, prefix: str) -> _LoadedReport:
