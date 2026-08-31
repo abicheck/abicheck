@@ -2546,7 +2546,7 @@ or version number that already has a fact owner elsewhere").
      flat module directly. A `_dispatch_release_compare` branch calling
      `compare_release_against_bundle_facts()` straight from
      `frontends/cli/commands/compare.py` would be exactly the kind of new,
-     unlisted `frontends -> `(flat module) edge the `engine-cli-boundary`
+     unlisted `frontends -> (flat module)` edge the `engine-cli-boundary`
      AI-readiness check exists to catch — not a legacy exception to extend,
      a fresh violation to avoid. This phase's scope therefore includes a
      new `abicheck.workflows`-owned typed entry point that the Click
@@ -2792,9 +2792,13 @@ workflow layer the architecture-boundary correction itself requires), then
 corrected twice more in the same round for two self-consistency errors in
 that first revision (Codex review, both fixed here):
 
-1. `frontends/cli/commands/compare.py` — presentation translation only: a
-   new inline option or two, a new `_dispatch_release_compare` branch that
-   builds a request object. **Package extraction does *not* belong here**
+1. `frontends/cli/commands/compare.py` — presentation translation only:
+   extending `classify_compare_operand()` with the new stored-facts kind
+   (no new option — a positional-operand change, per the correction
+   above), two new inline options (the per-library manifest path, the
+   decode-budget override), and a new `_dispatch_release_compare` branch
+   that builds a request object from all three. **Package extraction does
+   *not* belong here**
    — unpacking an archive and managing its temporary-directory lifetime is
    release/extraction orchestration, the same category of work correction
    1 above already ruled out of the frontend; it moves to (2). **The
