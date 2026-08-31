@@ -2616,8 +2616,26 @@ happy-path invocation:
   a package vs. a single `.so`), not just "one facts file resolves
   correctly" — including a facts file that fails `read_bundle_facts_archive`/
   `load_bundle_facts` validation (version-skew, an archive over the
-  `max_json_object_nodes` budget) surfacing as a real Click usage error
-  rather than an unhandled exception.
+  `max_json_object_nodes` budget) surfacing as a handled operational error
+  rather than an unhandled exception. **Corrected (Codex review, verified
+  against source):** that failure raises `SnapshotError`
+  (`bundle_facts.py`), which `cli_resolve.py`'s own established mapping
+  turns into `click.ClickException`/**exit 1** — not `UsageError`/exit 64,
+  which is reserved for `ValidationError` (unrecognized/unusable input).
+  The test requirement is a handled exit-1 operational error consistent
+  with every other persisted-snapshot-loading failure in this codebase,
+  not a usage error, and not an unhandled exception.
+- **The decode-budget override must be forwardable, not only enforced.**
+  `compare_release_against_bundle_facts()` already accepts
+  `max_json_object_nodes` specifically because a real per-library facts
+  blob for a SYCL/DPC++-heavy library can legitimately need well over the
+  default budget (`bundle_side_input.py:352-359`) — the same shape as this
+  phase's own oneDAL target scenario. This phase's in-scope work therefore
+  includes a CLI flag/`.abicheck.yml` field forwarding that override, not
+  only a test proving the default budget is enforced; otherwise the new
+  CLI surface can reject a legitimate large baseline from exactly the
+  mixed-toolchain workload it exists to serve, with no way for a caller to
+  raise the limit the way the Python API already lets them.
 - **Per-library override manifest:** a small-domain enumeration over
   manifest shapes — an empty map (uniform fallback for every library,
   already covered at the Python-API layer but not yet at the manifest-
