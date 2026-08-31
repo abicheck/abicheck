@@ -146,11 +146,11 @@ wins. (`_EvidenceContractError` also has a second, earlier raise site —
 which still runs after the candidate-collection budget guard — mapping to
 the same `evidence_contract_error=True` input as the `:1229` site,
 consistent with this precedence; named here so the two raise sites are not
-mistaken for one.) `abicheck/policy/exit_decision.py`'s `resolve_scan_exit_decision`
-models this as two separate boolean inputs (`budget_overflow_before_
-evidence_check` and `budget_overflow`) rather than one, precisely so a
-future caller cannot collapse them back into a single, incorrectly-ordered
-axis.
+mistaken for one.) `abicheck/policy/exit_decision_precedence.py`'s
+`resolve_scan_exit_decision` models this as two separate boolean inputs
+(`budget_overflow_before_evidence_check` and `budget_overflow`) rather
+than one, precisely so a future caller cannot collapse them back into a
+single, incorrectly-ordered axis.
 
 **`auto`'s existing inference rule is the policy, restated, not changed:**
 a severity preset, an explicit `--severity-*` flag, a `.abicheck.yml`
