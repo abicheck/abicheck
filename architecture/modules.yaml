@@ -394,6 +394,7 @@
     "abicheck.contract_gating",
     "abicheck.dumper_contract",
     "abicheck.errors",
+    "abicheck.qualified_name_segments",
     "abicheck.reclassify",
     "abicheck.serialization"
   ],

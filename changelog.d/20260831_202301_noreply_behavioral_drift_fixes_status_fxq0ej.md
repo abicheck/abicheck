@@ -21,11 +21,10 @@ it should read in CHANGELOG.md. Delete the other sections.
   manufactured a spurious `type_removed`/`func_removed` plus
   `type_added`/`func_added` pair purely from the encoding difference.
   `snapshot_from_dict` now calls the new
-  `qualified_name_segments.rewrite_anonymous_type_spellings` with
-  `name_classification.strip_anonymous_type_location` immediately before
-  renumbering, closing the "raw pre-strip baseline vs. fresh dump" gap in
-  the `scan --against`/`publish-baseline` workflow this tool exists to
-  serve.
+  `storage.snapshot_load_normalization.normalize_anonymous_type_spellings_on_load`
+  immediately before renumbering, closing the "raw pre-strip baseline vs.
+  fresh dump" gap in the `scan --against`/`publish-baseline` workflow this
+  tool exists to serve.
 - **A namespace-move batch (`SYMBOL_RENAMED_BATCH`) could silently drop a
   well-supported member, or fall entirely below its 2+-pair reporting
   threshold, whenever an unrelated, isolated removed symbol happened to

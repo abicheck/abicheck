@@ -732,13 +732,9 @@ def defer_closure_identity_renumbering() -> _Iterator[None]:
 def _lambda_identity_containers_and_strings(
     snapshot: object,
 ) -> tuple[list[object], list[str]] | None:
-    """Collect :data:`_LAMBDA_IDENTITY_FIELDS`' containers and every string
-    reachable from them, or ``None`` as soon as none of those strings even
-    mentions ``"(lambda"``/``"(unnamed "`` -- the cheap, shared no-op gate
-    both :func:`renumber_anonymous_closure_identities` and
-    :func:`rewrite_anonymous_type_spellings` use, factored out so the two
-    don't each walk *snapshot* separately when a caller runs both back to
-    back (as ``serialization.snapshot_from_dict`` does)."""
+    """Collect :data:`_LAMBDA_IDENTITY_FIELDS`' containers and strings, or
+    ``None`` once none mentions ``"(lambda"``/``"(unnamed "`` -- shared with
+    ``storage.snapshot_load_normalization``, an importer of this helper."""
     containers = [getattr(snapshot, name) for name in _LAMBDA_IDENTITY_FIELDS]
     strings: list[str] = []
     for container in containers:
@@ -746,43 +742,6 @@ def _lambda_identity_containers_and_strings(
     if not any("(lambda" in s or "(unnamed " in s for s in strings):
         return None
     return containers, strings
-
-
-def rewrite_anonymous_type_spellings(
-    snapshot: _SnapshotT, rewrite: _Callable[[str], str]
-) -> _SnapshotT:
-    """Apply *rewrite* to every string reachable from the same
-    :data:`_LAMBDA_IDENTITY_FIELDS` :func:`renumber_anonymous_closure_
-    identities` scans, mutating *snapshot* in place. Returns *snapshot*
-    unchanged (for chaining at a call site's own ``return`` statement), and
-    is a cheap no-op under the identical fast-path gate that function uses.
-
-    Exists so a caller needing a normalization pass BEFORE renumbering --
-    :func:`~abicheck.name_classification.strip_anonymous_type_location`,
-    applied to a snapshot just loaded from disk that may still carry a
-    closure marker in its raw, un-stripped ``(lambda at
-    <path>:<line>:<col>)`` form -- can drive that normalization over the
-    identical field set without this module importing the normalizer
-    itself (this module stays a leaf, no imports from the rest of
-    ``abicheck`` -- see its own module docstring; the normalizer is passed
-    in by the caller instead). *rewrite* must be idempotent on text it has
-    already normalized, the same way ``strip_anonymous_type_location`` is a
-    no-op on a marker that no longer contains ``" at "`` -- this function
-    applies it unconditionally to every matched string, including one that
-    needs no change, so a repeat call (or a call on an already-normalized
-    snapshot) must stay safe.
-    """
-    if getattr(_defer_renumber, "active", False):
-        return snapshot
-    collected = _lambda_identity_containers_and_strings(snapshot)
-    if collected is None:
-        return snapshot
-    containers, _strings = collected
-    for field_name, container in zip(_LAMBDA_IDENTITY_FIELDS, containers):
-        new_container = _walk_rewrite_strings(container, rewrite)
-        if new_container is not container:
-            setattr(snapshot, field_name, new_container)
-    return snapshot
 
 
 def renumber_anonymous_closure_identities(snapshot: _SnapshotT) -> _SnapshotT:
@@ -802,35 +761,20 @@ def renumber_anonymous_closure_identities(snapshot: _SnapshotT) -> _SnapshotT:
     ``getattr(snapshot, field)`` rather than importing ``AbiSnapshot``, to
     keep this module import-free -- see its own docstring.
 
-    ``serialization.snapshot_from_dict`` calls
-    :func:`rewrite_anonymous_type_spellings` with
-    ``name_classification.strip_anonymous_type_location`` right before this
-    function, so a snapshot loaded from disk always reaches this function
-    with any raw ``(lambda at <path>:<line>:<col>)`` spelling already
-    reduced to the stripped ``(lambda:<basename>:<line>:<col>)`` form this
-    function's own marker regex requires -- this function's regex never
-    matched the raw ``" at "`` spelling on its own (fixed after being found
-    to leave a pre-strip-era on-disk baseline's closures completely
-    unrenumbered on load, silently comparing them against a freshly-dumped
-    snapshot's ordinal-form spellings as if the two were unrelated
-    declarations).
+    The marker regex requires the stripped spelling, never a raw
+    ``(lambda at <path>:<line>:<col>)`` one --
+    ``storage.snapshot_load_normalization`` strips it first on load.
 
-    Known, accepted residual (Codex review, fresh evidence): a snapshot
-    written by a version of abicheck *older* than this function's own
-    introduction never carries an ordinal-form marker, and a reader
-    *older* than this function that later loads a snapshot written by a
-    *newer* abicheck (which already carries the ordinal form) has no code
-    path that renumbers it back -- ``serialization.SCHEMA_VERSION`` was not
-    bumped for this representation change, so that older reader has no
-    signal that the identity format it's comparing against differs from
-    what its own dumper would have produced. The reverse direction (an
-    older-format on-disk baseline compared by a current reader) is closed
-    by ``snapshot_from_dict``'s unconditional strip-and-renumber-on-load
-    (see above). Closing the "older reader, newer baseline" direction too
-    needs a real schema bump, which ripples into ``docs/`` (the
-    doc-count-sync AI-readiness check) and every test fixture pinning the
-    current schema version -- a real, separate change, not folded into this
-    fix.
+    Known, accepted residual (Codex review, fresh evidence): a reader
+    *older* than this function that loads a snapshot written by a *newer*
+    abicheck (already in ordinal form) has no code path renumbering it
+    back -- ``serialization.SCHEMA_VERSION`` was not bumped for this
+    representation change, so that older reader has no signal the identity
+    format differs from what its own dumper would produce. The reverse
+    direction (an older-format baseline, current reader) is closed by the
+    strip-then-renumber load path above; closing this one too needs a real
+    schema bump, rippling into ``docs/`` and every fixture pinning the
+    schema version -- separate, not folded into this fix.
 
     A no-op, returning *snapshot* untouched, inside
     :func:`defer_closure_identity_renumbering`'s context.

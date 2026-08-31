@@ -312,3 +312,39 @@ class TestAddedSideCrossPositionAmbiguityAlsoResolvesViaGlobalSupport:
         assert groups.get(("old", "new")) == [("R::old::h", "R::new::h")]
         changes = emit_namespace_move_batches(groups)
         assert changes == []
+
+    def test_a_competitor_resolved_elsewhere_does_not_dismiss_an_unrelated_unresolved_claim(
+        self,
+    ) -> None:
+        """Code review (fresh evidence): the first version of this fix
+        scoped dismissibility per COMPETITOR only ("did this removed
+        symbol resolve to any key at all"), not per (competitor, added
+        identity) pair. `Q::old::f` has TWO masking positions: position 0
+        resolves cleanly to `S::old::f` (key ("Q", "S"), uncorroborated but
+        genuinely resolved -- an entirely unrelated target), while
+        position 1 -- its actual competing claim on `Q::new::f`, the
+        target `P::new::f` wants -- is itself locally ambiguous (it
+        matches BOTH `Q::new::f` and `Q::alt::f`) and never gets its own
+        `entries` row. The unrelated, resolved ("Q", "S") claim must not
+        vouch for the unresolved, still-live ("old", "new") rivalry on
+        `Q::new::f` -- doing so fabricated a 2-pair `P` -> `Q` batch that
+        should not exist (the `Q::old::f` -> `Q::new::f` question is
+        genuinely unresolved, exactly the round-4 scenario's shape, just
+        with the unresolved claim now hidden behind a red-herring resolved
+        one on a different target)."""
+        removed = {
+            "_ZN1P3new1fEv",
+            "_ZN1P3new1gEv",
+            "_ZN1Q3old1fEv",
+        }
+        added = {
+            "_ZN1Q3new1fEv",
+            "_ZN1Q3new1gEv",
+            "_ZN1Q3alt1fEv",
+            "_ZN1S3old1fEv",
+        }
+        groups = find_namespace_move_groups(removed, added)
+        assert ("P::new::f", "Q::new::f") not in groups.get(("P", "Q"), [])
+        assert groups.get(("P", "Q")) == [("P::new::g", "Q::new::g")]
+        changes = emit_namespace_move_batches(groups)
+        assert changes == [], "a red-herring resolved claim fabricated a batch"

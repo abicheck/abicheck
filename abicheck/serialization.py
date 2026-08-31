@@ -46,7 +46,6 @@ from .model import (
     Variable,
     Visibility,
 )
-from .name_classification import strip_anonymous_type_location
 from .storage.entity_id_codec import decode_entity_ids, encode_entity_ids
 from .storage.enum_codec import encode_platform_enums
 from .storage.fact_codec import (
@@ -54,6 +53,10 @@ from .storage.fact_codec import (
     decode_fact,
     decode_record_facts,
     encode_fact_fields,
+)
+from .storage.snapshot_load_normalization import (
+    backfill_missing_elf_binding,
+    normalize_anonymous_type_spellings_on_load,
 )
 from .storage.surface_graph_codec import decode_surface_graph, encode_surface_graph
 
@@ -799,41 +802,6 @@ def _sub_block(parser: Callable[[dict[str, Any]], _T], raw: Any) -> _T | None:
     one guard keeps a dozen call sites from each spelling it out.
     """
     return parser(raw) if isinstance(raw, dict) else None
-
-
-def _backfill_missing_elf_binding(snap: AbiSnapshot) -> None:
-    """Backfill Function/Variable.elf_binding from an already-loaded
-    ``elf.symbols`` for a snapshot serialized before this field existed
-    (Codex review, fresh evidence).
-
-    A pre-this-PR snapshot's own ``elf`` block already carries the exact
-    same fact ``dumper_elf_symbols._populate_elf_visibility`` reads it
-    from at dump time -- only the newer per-declaration ``elf_binding``
-    key was never written at serialization time, so loading it as ``None``
-    (the ordinary missing-key convention) would make a fresh ``binding:``
-    suppression selector fail closed against *every* already-archived
-    baseline, not just genuinely-unknown-binding cases, until each one is
-    regenerated -- which is not always possible for an archived release.
-    Only fills a ``None``: an explicitly serialized value from a v16+
-    writer is preserved untouched, never recomputed.
-
-    Deliberately scoped to ``elf_binding`` alone -- ``elf_visibility`` has
-    the identical legacy-backfill gap but predates this PR, is unrelated to
-    the field this PR adds, and is left as it already was.
-    """
-    if snap.elf is None:
-        return
-    sym_map = snap.elf.symbol_map
-    for func in snap.functions:
-        if func.elf_binding is None:
-            elf_sym = sym_map.get(func.mangled)
-            if elf_sym is not None:
-                func.elf_binding = elf_sym.binding
-    for var in snap.variables:
-        if var.elf_binding is None:
-            elf_sym = sym_map.get(var.mangled)
-            if elf_sym is not None:
-                var.elf_binding = elf_sym.binding
 
 
 def snapshot_from_dict(d: dict[str, Any]) -> AbiSnapshot:
@@ -1644,19 +1612,8 @@ def snapshot_from_dict(d: dict[str, Any]) -> AbiSnapshot:
             stacklevel=2,
         )
 
-    _backfill_missing_elf_binding(snap)
-    # A baseline written by a pre-normalization abicheck can still carry a
-    # closure/anonymous-type marker in its raw ``(lambda at
-    # <path>:<line>:<col>)`` form -- the two header-mode dumpers only ever
-    # call strip_anonymous_type_location at extraction time, never on this
-    # load path, so without this step renumber_anonymous_closure_identities
-    # below (whose marker regex requires the already-stripped
-    # ``(lambda:<basename>:<line>:<col>)`` spelling) leaves such a baseline's
-    # closures completely unrenumbered, comparing them against a freshly
-    # dumped snapshot's ordinal-form spellings as if unrelated declarations.
-    qualified_name_segments.rewrite_anonymous_type_spellings(
-        snap, strip_anonymous_type_location
-    )
+    backfill_missing_elf_binding(snap)
+    normalize_anonymous_type_spellings_on_load(snap)
     return qualified_name_segments.renumber_anonymous_closure_identities(snap)
 
 
