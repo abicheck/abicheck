@@ -597,3 +597,126 @@ def test_metrics_json_empty_surface() -> None:
     data = compute_surface_metrics(_bare_snap()).to_dict()
     assert data["top_fan_in"] == []
     assert data["header_coverage"] == []
+
+
+# --------------------------------------------------------------------------- #
+# ADR-063 Phase 3 D5 -- public_entity_ids threading
+# --------------------------------------------------------------------------- #
+
+
+def _fn_with_id(name, mangled, eid, vis=Visibility.PUBLIC, ret="void", params=()):
+    return Function(
+        name=name,
+        mangled=mangled,
+        return_type=ret,
+        params=[Param(name=f"a{i}", type=t) for i, t in enumerate(params)],
+        visibility=vis,
+        entity_id=eid,
+    )
+
+
+class TestPublicEntityIdsDefaultIsUnchanged:
+    """``public_entity_ids=None`` (every call site outside ``compare()``'s
+    own pipeline) must reproduce the exact pre-Phase-3 behavior -- pinned
+    directly against the real, non-trivial fixture the rest of this file
+    already exercises, not just an empty snapshot."""
+
+    def test_public_roots_unaffected(self) -> None:
+        snap = _snap()
+        assert (
+            build_surface_graph(snap).public_roots()
+            == build_surface_graph(snap, public_entity_ids=None).public_roots()
+        )
+
+    def test_metrics_unaffected(self) -> None:
+        snap = _snap()
+        assert compute_surface_metrics(snap) == compute_surface_metrics(
+            snap, public_entity_ids=None
+        )
+
+
+class TestPublicEntityIdsNarrowsPublicRoots:
+    def test_only_matching_id_is_a_root(self) -> None:
+        from abicheck.model.identity import entity_id_for_function
+
+        eid_f = entity_id_for_function((), "f", mangled_name="_Z1fv")
+        eid_g = entity_id_for_function((), "g", mangled_name="_Z1gv")
+        fn_f = _fn_with_id("f", "_Z1fv", eid_f)
+        fn_g = _fn_with_id("g", "_Z1gv", eid_g)
+        snap = AbiSnapshot(library="l", version="1", functions=[fn_f, fn_g])
+
+        graph = build_surface_graph(snap, public_entity_ids=frozenset({eid_f}))
+        assert graph.public_roots() == frozenset({"f"})
+
+    def test_declaration_with_no_matching_id_drops_out_even_if_visibility_public(
+        self,
+    ) -> None:
+        # The two-sided correction this phase exists for: a declaration
+        # that IS Visibility.PUBLIC on this snapshot but whose entity_id is
+        # not in the resolved set (e.g. removed from the public-header set
+        # on the OTHER side of a real compare()) must not be a root.
+        from abicheck.model.identity import entity_id_for_function
+
+        eid_f = entity_id_for_function((), "f", mangled_name="_Z1fv")
+        fn_f = _fn_with_id("f", "_Z1fv", eid_f)
+        snap = AbiSnapshot(library="l", version="1", functions=[fn_f])
+
+        graph = build_surface_graph(snap, public_entity_ids=frozenset())
+        assert graph.public_roots() == frozenset()
+
+    def test_reachable_types_still_work_for_a_narrowed_root(self) -> None:
+        from abicheck.model.identity import entity_id_for_function
+
+        eid_f = entity_id_for_function((), "f", mangled_name="_Z1fv")
+        rec = RecordType(name="Widget", kind="struct")
+        fn_f = _fn_with_id("f", "_Z1fv", eid_f, ret="Widget*")
+        snap = AbiSnapshot(library="l", version="1", functions=[fn_f], types=[rec])
+
+        graph = build_surface_graph(snap, public_entity_ids=frozenset({eid_f}))
+        assert graph.public_roots() == frozenset({"f"})
+        assert "Widget" in graph.reachable_types("f")
+
+
+class TestComputeSurfaceMetricsThreading:
+    def test_public_functions_counts_by_entity_id_membership(self) -> None:
+        from abicheck.model.identity import entity_id_for_function
+
+        eid_f = entity_id_for_function((), "f", mangled_name="_Z1fv")
+        eid_g = entity_id_for_function((), "g", mangled_name="_Z1gv")
+        fn_f = _fn_with_id("f", "_Z1fv", eid_f)
+        fn_g = _fn_with_id("g", "_Z1gv", eid_g)
+        snap = AbiSnapshot(library="l", version="1", functions=[fn_f, fn_g])
+
+        metrics = compute_surface_metrics(snap, public_entity_ids=frozenset({eid_f}))
+        assert metrics.public_functions == 1
+        assert metrics.exported_symbols == 1
+
+    def test_declared_counts_stay_unfiltered_regardless(self) -> None:
+        # declared_counts (HeaderCoverage.declared) is never filtered --
+        # only exported_counts is. Both functions are declared in "a.h"
+        # even though only one is in the resolved public set.
+        from abicheck.model.identity import entity_id_for_function
+
+        eid_f = entity_id_for_function((), "f", mangled_name="_Z1fv")
+        eid_g = entity_id_for_function((), "g", mangled_name="_Z1gv")
+        fn_f = _fn_with_id("f", "_Z1fv", eid_f)
+        fn_f.source_header = "a.h"
+        fn_g = _fn_with_id("g", "_Z1gv", eid_g)
+        fn_g.source_header = "a.h"
+        snap = AbiSnapshot(library="l", version="1", functions=[fn_f, fn_g])
+
+        metrics = compute_surface_metrics(snap, public_entity_ids=frozenset({eid_f}))
+        coverage = {h.header: h for h in metrics.header_coverage}
+        assert coverage["a.h"].declared == 2
+        assert coverage["a.h"].exported == 1
+
+    def test_public_types_counts_via_entity_id_when_given(self) -> None:
+        from abicheck.model.identity import entity_id_for_type
+
+        eid_rec = entity_id_for_type((), "Widget")
+        rec = RecordType(name="Widget", kind="struct", entity_id=eid_rec)
+        rec_hidden = RecordType(name="Hidden", kind="struct")
+        snap = AbiSnapshot(library="l", version="1", types=[rec, rec_hidden])
+
+        metrics = compute_surface_metrics(snap, public_entity_ids=frozenset({eid_rec}))
+        assert metrics.public_types == 1

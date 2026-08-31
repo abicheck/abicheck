@@ -17,7 +17,7 @@
 
 from __future__ import annotations
 
-from abicheck.model import AbiSnapshot, Function, Variable, Visibility
+from abicheck.model import AbiSnapshot, Function, RecordType, Variable, Visibility
 from abicheck.model.identity import entity_id_for_function, entity_id_for_variable
 from abicheck.policy.public_surface import PublicSurfaceQuery, resolve_public_surface
 from abicheck.surface import PublicSurface
@@ -102,6 +102,28 @@ class TestPublicSurfaceQueryResolve:
         var = _var("g", "_ZN1gE", entity_id=eid_g)
         snap = _snapshot(functions=[fn], variables=[var])
         assert PublicSurfaceQuery.resolve(snap) == frozenset({eid_f, eid_g})
+
+    def test_publicly_reachable_type_is_included_too(self) -> None:
+        # resolve() is NOT function/variable-only -- a record reachable from
+        # a public function's return type is part of the same resolved set,
+        # per PublicSurfaceQuery's own contract (surface_graph.py's
+        # public_roots() is what later filters this down to roots only).
+        from abicheck.model.identity import entity_id_for_type
+
+        eid_fn = entity_id_for_function((), "make", mangled_name="_Z4makev")
+        eid_rec = entity_id_for_type((), "Widget")
+        fn = Function(
+            name="make",
+            mangled="_Z4makev",
+            return_type="Widget*",
+            visibility=Visibility.PUBLIC,
+            entity_id=eid_fn,
+        )
+        rec = RecordType(name="Widget", kind="struct", entity_id=eid_rec)
+        snap = _snapshot(functions=[fn], types=[rec])
+        ids = PublicSurfaceQuery.resolve(snap)
+        assert eid_fn in ids
+        assert eid_rec in ids
 
 
 class TestPublicSurfaceQueryResolvePublicDomain:

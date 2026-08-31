@@ -32,10 +32,14 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass, field
+from typing import TYPE_CHECKING
 
 from .checker_policy import EvidenceTier
-from .model import AbiSnapshot, Function, RecordType, ScopeOrigin, Visibility
+from .model import AbiSnapshot, Function, RecordType, ScopeOrigin, Variable, Visibility
 from .surface import _type_identifiers
+
+if TYPE_CHECKING:
+    from .model.identity import EntityId
 
 
 @dataclass(frozen=True)
@@ -59,10 +63,31 @@ class SurfaceGraph:
     by_header: Mapping[str, frozenset[str]]
     # public root symbol -> the type names its signature directly references
     _root_seed_types: Mapping[str, frozenset[str]] = field(default_factory=dict)
+    # declaration name -> every entity_id resolved for a function/variable
+    # under that name (plural: C++ overloads share one demangled name).
+    _entity_ids_by_name: Mapping[str, frozenset[EntityId]] = field(default_factory=dict)
+    # ADR-063 Phase 3 D5 -- when given, narrows public_roots() to declarations
+    # whose own resolved EntityId is a member; None preserves the exact
+    # pre-Phase-3 Visibility.PUBLIC-only behavior (see build_surface_graph).
+    _public_entity_ids: frozenset[EntityId] | None = None
 
     def public_roots(self) -> frozenset[str]:
-        """Names of ``Visibility.PUBLIC`` functions and variables."""
-        return frozenset(self._root_seed_types)
+        """Names of ``Visibility.PUBLIC`` functions and variables -- or,
+        when this graph was built with a resolved ``public_entity_ids`` set
+        (ADR-063 Phase 3 D5), names of exactly the declarations whose own
+        ``EntityId`` is a member of that set instead. The latter can only
+        ever *narrow* the former: every name it can return already has
+        seed types recorded below (``_root_seed_types`` is always built
+        from every ``Visibility.PUBLIC`` declaration, unconditionally), so
+        :meth:`reachable_types` never sees a root with no known seeds.
+        """
+        if self._public_entity_ids is None:
+            return frozenset(self._root_seed_types)
+        return frozenset(
+            name
+            for name in self._root_seed_types
+            if self._entity_ids_by_name.get(name, frozenset()) & self._public_entity_ids
+        )
 
     def reachable_types(self, root: str) -> frozenset[str]:
         """Known types transitively reachable from public *root*'s signature."""
@@ -183,6 +208,23 @@ def _build_root_seed_types(snap: AbiSnapshot) -> dict[str, frozenset[str]]:
     return root_seed_types
 
 
+def _build_entity_ids_by_name(snap: AbiSnapshot) -> dict[str, frozenset[EntityId]]:
+    """Every function/variable's resolved ``entity_id``, grouped by its own
+    demangled name (plural: two overloads share one name). A declaration
+    with no resolved identity (an older snapshot, or a kind no producer
+    resolves one for yet) contributes nothing here — ``public_roots()``'s
+    own ``None``-set fallback stays the only answer for such a snapshot.
+    """
+    out: dict[str, set[EntityId]] = {}
+    for fn in snap.functions:
+        if fn.entity_id is not None:
+            out.setdefault(fn.name, set()).add(fn.entity_id)
+    for var in snap.variables:
+        if var.entity_id is not None:
+            out.setdefault(var.name, set()).add(var.entity_id)
+    return {k: frozenset(v) for k, v in out.items()}
+
+
 def _build_by_header(snap: AbiSnapshot) -> dict[str, set[str]]:
     """Map each source header to the declaration names defined there."""
     by_header: dict[str, set[str]] = {}
@@ -210,12 +252,23 @@ def _build_reached_by(graph: SurfaceGraph) -> dict[str, frozenset[str]]:
     return {k: frozenset(v) for k, v in sorted(reached_by.items())}
 
 
-def build_surface_graph(snap: AbiSnapshot) -> SurfaceGraph:
-    """Construct the deterministic :class:`SurfaceGraph` for *snap*."""
+def build_surface_graph(
+    snap: AbiSnapshot, *, public_entity_ids: frozenset[EntityId] | None = None
+) -> SurfaceGraph:
+    """Construct the deterministic :class:`SurfaceGraph` for *snap*.
+
+    *public_entity_ids* (ADR-063 Phase 3 D5) narrows :meth:`SurfaceGraph.
+    public_roots` to declarations resolved as public by
+    ``policy.public_surface.PublicSurfaceQuery`` for *this side* of a real
+    two-snapshot comparison, instead of re-deriving ``Visibility.PUBLIC``
+    from *snap* alone. ``None`` (every call site outside ``compare()``'s
+    own pipeline) preserves the exact pre-Phase-3 behavior.
+    """
     functions_by_name = _build_functions_by_name(snap)
     types_by_name = _build_types_by_name(snap)
     type_refs = _build_type_refs(snap)
     root_seed_types = _build_root_seed_types(snap)
+    entity_ids_by_name = _build_entity_ids_by_name(snap)
     by_header = _build_by_header(snap)
 
     graph = SurfaceGraph(
@@ -226,6 +279,8 @@ def build_surface_graph(snap: AbiSnapshot) -> SurfaceGraph:
         reached_by={},  # filled below
         by_header={k: frozenset(v) for k, v in sorted(by_header.items())},
         _root_seed_types=dict(sorted(root_seed_types.items())),
+        _entity_ids_by_name=dict(sorted(entity_ids_by_name.items())),
+        _public_entity_ids=public_entity_ids,
     )
 
     # Inverse closure: type name -> roots that reach it.
@@ -301,16 +356,38 @@ def _evidence_tier(snap: AbiSnapshot) -> str:
     return EvidenceTier.ELF_ONLY.value
 
 
-def _public_type_counts(snap: AbiSnapshot) -> tuple[int, int]:
-    """Count public record types and enums via the reachability+provenance closure.
+def _public_type_counts(
+    snap: AbiSnapshot, *, public_entity_ids: frozenset[EntityId] | None = None
+) -> tuple[int, int]:
+    """Count public record types and enums.
 
-    ``snap.types``/``snap.enums`` is the *full parsed universe* — when headers
-    are scoped it includes private and transitively-included declarations, so
-    raw ``len()`` would inflate the public-surface counts (ADR-025 A1). Reuse
-    the ADR-024 public-surface resolver: when it cannot resolve a surface (no
-    header-derived visibility, e.g. ELF-only), fall back to the raw counts,
-    which are then correct because nothing was scoped.
+    When *public_entity_ids* is given (ADR-063 Phase 3 D5), counts
+    directly from it — the caller already resolved this once
+    (``compute_surface_metrics``'s own two-snapshot caller), so a second,
+    independent resolution here would be exactly the redundant
+    recomputation this phase's design elsewhere avoids. Otherwise (every
+    call site outside ``compare()``'s own pipeline, ``None``'s the only
+    case reachable): ``snap.types``/``snap.enums`` is the *full parsed
+    universe* — when headers are scoped it includes private and
+    transitively-included declarations, so raw ``len()`` would inflate the
+    public-surface counts (ADR-025 A1). Reuse the ADR-024 public-surface
+    resolver: when it cannot resolve a surface (no header-derived
+    visibility, e.g. ELF-only), fall back to the raw counts, which are then
+    correct because nothing was scoped.
     """
+    if public_entity_ids is not None:
+        public_records = sum(
+            1
+            for r in snap.types
+            if r.entity_id is not None and r.entity_id in public_entity_ids
+        )
+        public_enums = sum(
+            1
+            for e in snap.enums
+            if e.entity_id is not None and e.entity_id in public_entity_ids
+        )
+        return public_records, public_enums
+
     from .surface import compute_public_surface
 
     psurf = compute_public_surface(snap)
@@ -366,27 +443,56 @@ def _header_cohesion_clusters(graph: SurfaceGraph, decls: frozenset[str]) -> int
     return len({find(n) for n in nodes})
 
 
-def compute_surface_metrics(snap: AbiSnapshot, *, top_n: int = 10) -> SurfaceMetrics:
-    """Compute the A1 descriptive metrics for *snap*."""
-    graph = build_surface_graph(snap)
+def _is_public(
+    decl: Function | Variable, public_entity_ids: frozenset[EntityId] | None
+) -> bool:
+    """Whether *decl* counts as public for this function's *public-only*
+    tallies — ``public_entity_ids`` membership when given (ADR-063 Phase 3
+    D5), else the pre-Phase-3 ``Visibility.PUBLIC`` check, unchanged."""
+    if public_entity_ids is None:
+        return decl.visibility == Visibility.PUBLIC
+    return decl.entity_id is not None and decl.entity_id in public_entity_ids
+
+
+def compute_surface_metrics(
+    snap: AbiSnapshot,
+    *,
+    top_n: int = 10,
+    public_entity_ids: frozenset[EntityId] | None = None,
+) -> SurfaceMetrics:
+    """Compute the A1 descriptive metrics for *snap*.
+
+    *public_entity_ids* (ADR-063 Phase 3 D5): when given, every *public-only*
+    tally below (``public_functions``/``public_variables``/
+    ``exported_symbols``/``undocumented_export_ratio``/``exported_counts``/
+    ``public_types``/``public_enums``) counts a declaration as public when
+    its own resolved ``EntityId`` is a member, instead of re-deriving
+    ``Visibility.PUBLIC`` from *snap* alone -- matching
+    ``build_surface_graph``'s identical parameter. ``declared_counts``
+    stays unfiltered in every case, ``None`` or not: it counts declarations
+    physically defined in a header regardless of visibility, and
+    ``exported_counts`` is measured *against* it as a denominator, so
+    filtering it too would misreport header coverage rather than fix it.
+    """
+    graph = build_surface_graph(snap, public_entity_ids=public_entity_ids)
 
     public_functions = sum(
-        1 for f in snap.functions if f.visibility == Visibility.PUBLIC
+        1 for f in snap.functions if _is_public(f, public_entity_ids)
     )
     public_variables = sum(
-        1 for v in snap.variables if v.visibility == Visibility.PUBLIC
+        1 for v in snap.variables if _is_public(v, public_entity_ids)
     )
     exported_symbols = public_functions + public_variables
 
     undocumented = sum(
         1
         for f in snap.functions
-        if f.visibility == Visibility.PUBLIC and f.origin == ScopeOrigin.EXPORT_ONLY
+        if _is_public(f, public_entity_ids) and f.origin == ScopeOrigin.EXPORT_ONLY
     )
     undocumented += sum(
         1
         for v in snap.variables
-        if v.visibility == Visibility.PUBLIC and v.origin == ScopeOrigin.EXPORT_ONLY
+        if _is_public(v, public_entity_ids) and v.origin == ScopeOrigin.EXPORT_ONLY
     )
     ratio = (undocumented / exported_symbols) if exported_symbols else 0.0
 
@@ -411,11 +517,11 @@ def compute_surface_metrics(snap: AbiSnapshot, *, top_n: int = 10) -> SurfaceMet
 
     for fn in snap.functions:
         _bump(declared_counts, fn.source_header)
-        if fn.visibility == Visibility.PUBLIC:
+        if _is_public(fn, public_entity_ids):
             _bump(exported_counts, fn.source_header)
     for var in snap.variables:
         _bump(declared_counts, var.source_header)
-        if var.visibility == Visibility.PUBLIC:
+        if _is_public(var, public_entity_ids):
             _bump(exported_counts, var.source_header)
     for rec in snap.types:
         _bump(declared_counts, rec.source_header)
@@ -437,7 +543,9 @@ def compute_surface_metrics(snap: AbiSnapshot, *, top_n: int = 10) -> SurfaceMet
             )
         )
 
-    public_types, public_enums = _public_type_counts(snap)
+    public_types, public_enums = _public_type_counts(
+        snap, public_entity_ids=public_entity_ids
+    )
 
     return SurfaceMetrics(
         library=snap.library,

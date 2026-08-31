@@ -76,11 +76,16 @@ class PublicSurfaceQuery:
     def resolve(snapshot: AbiSnapshot) -> frozenset[EntityId]:
         """Which declarations' resolved ``EntityId`` are on *snapshot*'s
         public surface — the bare-membership convenience a caller that
-        only needs set membership (e.g. ``surface_graph.py``'s
-        ``public_roots()`` mapping) reaches for, never
-        :meth:`resolve_public_domain`'s richer result. Function/variable
-        roots only, matching ``compute_public_surface()``'s own root set —
-        a type-kind id is never part of this particular return value.
+        only needs set membership reaches for, never
+        :meth:`resolve_public_domain`'s richer result. **Not** a
+        function/variable-only set — it genuinely includes record/enum
+        ``EntityId``s too (a public function's return type, a publicly
+        reachable struct), matching ``PublicSurface.public_symbols``
+        *and* ``public_types`` alike. A downstream consumer that wants
+        only roots (e.g. ``surface_graph.py``'s ``public_roots()``)
+        filters this set to ``kind in (FUNCTION, VARIABLE)`` itself — a
+        type-kind id here is correct data for that consumer to drop, not
+        something this method should pre-filter away for every caller.
 
         A declaration whose parse-time ``entity_id`` carrier is
         unpopulated (a pre-ADR-063-Phase-2 snapshot, or a kind the
@@ -103,6 +108,18 @@ class PublicSurfaceQuery:
                 var.mangled in surf.public_symbols or var.name in surf.public_symbols
             ):
                 ids.add(var.entity_id)
+        for rec in snapshot.types:
+            if rec.entity_id is not None and (
+                rec.name in surf.public_types
+                or (rec.qualified_name or "") in surf.public_types
+            ):
+                ids.add(rec.entity_id)
+        for en in snapshot.enums:
+            if en.entity_id is not None and (
+                en.name in surf.public_types
+                or (en.qualified_name or "") in surf.public_types
+            ):
+                ids.add(en.entity_id)
         return frozenset(ids)
 
     @staticmethod
