@@ -1144,4 +1144,5 @@ def virtual_method_addition(
         symbol=f_new.mangled,
         detail=owner,
         new=f_new.name,
+        entity_id=f_new.entity_id,
     )

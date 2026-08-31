@@ -110,6 +110,11 @@ _CALLING_CONVENTION_KEYWORD_RE = re.compile(
     r"\s*(?:__cdecl|__stdcall|__fastcall|__thiscall|__vectorcall)\b"
 )
 
+# Bounds the recursion below (Codex review, PR #952): unbounded nested-
+# declarator recursion raises an uncaught RecursionError on an
+# adversarial/corrupt snapshot's parameter type, crashing compare().
+_MAX_PARAM_TYPE_NESTING_DEPTH = 64
+
 # A leading `::` (explicit global-namespace lookup) is DELIBERATELY left
 # untouched, genuinely distinguishing -- despite a nineteenth-round
 # attempt (`_GLOBAL_SCOPE_RE`, since reverted) to strip it unconditionally
@@ -275,7 +280,7 @@ def _find_matching_paren(s: str, open_idx: int) -> int:
     return len(s)
 
 
-def _normalize_param_list_contents(inner: str) -> str:
+def _normalize_param_list_contents(inner: str, depth: int) -> str:
     """Canonicalize each individual parameter inside one parameter list's
     raw ``(...)`` content -- the by-value cv rule this whole module exists
     to apply is not unique to this function's own top-level parameter; a
@@ -299,12 +304,12 @@ def _normalize_param_list_contents(inner: str) -> str:
         normalized.append(
             p
             if (p == "" or p == "...")
-            else canonicalize_function_signature_param_type(p)
+            else canonicalize_function_signature_param_type(p, _depth=depth + 1)
         )
     return ", ".join(normalized)
 
 
-def _normalize_nested_param_lists(s: str) -> str:
+def _normalize_nested_param_lists(s: str, depth: int) -> str:
     """Canonicalize the contents of the one top-level ``(...)`` parameter
     list *s* is -- a declarator's own trailing parameter list, e.g. the
     ``(int)`` in ``void (*)(int)`` or ``void (C::*)(int)``. *s* is always
@@ -325,10 +330,10 @@ def _normalize_nested_param_lists(s: str) -> str:
     identical adjusted callback type -- canonicalized to two different
     strings).
     """
-    return "(" + _normalize_param_list_contents(s[1:-1]) + ")"
+    return "(" + _normalize_param_list_contents(s[1:-1], depth) + ")"
 
 
-def canonicalize_function_signature_param_type(name: str) -> str:
+def canonicalize_function_signature_param_type(name: str, *, _depth: int = 0) -> str:
     """The canonical form of a function *parameter* type, for
     identity/overload-discriminator purposes -- as opposed to
     ``canonicalize_type_name``, which normalizes only cross-producer
@@ -652,6 +657,8 @@ def canonicalize_function_signature_param_type(name: str) -> str:
     >>> canonicalize_function_signature_param_type("(anonymous namespace)::Foo *")
     '(anonymous namespace)::Foo *'
     """
+    if _depth > _MAX_PARAM_TYPE_NESTING_DEPTH:
+        return name
     canonical = canonicalize_type_name(
         _decay_top_level_array(canonicalize_type_name(name))
     )
@@ -756,7 +763,7 @@ def canonicalize_function_signature_param_type(name: str) -> str:
         head, params_and_after = split
         head = _strip_cv_tokens_outside_nesting(head)
         close = _find_matching_paren(params_and_after, 0)
-        params = _normalize_nested_param_lists(params_and_after[: close + 1])
+        params = _normalize_nested_param_lists(params_and_after[: close + 1], _depth)
         tail = params_and_after[close + 1 :]
         # Clang's trailing `__attribute__((cdecl))`-style calling-
         # convention spelling (see `_CALLING_CONVENTION_ATTR_RE`'s own

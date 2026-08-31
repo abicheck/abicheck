@@ -26,7 +26,7 @@
   path (`handle_non_elf_dump`)** — no PE/Mach-O toolchain was available to
   verify a migration against; see that same known-gaps entry.
 - **Phase 2** ("`EntityId`/`ScopePath` as the one identity primitive") has
-  landed five slices: the `ScopePath`/`EntityId` primitive itself
+  landed seven slices: the `ScopePath`/`EntityId` primitive itself
   (`abicheck/model/identity.py`); both header-AST backends (`dumper_clang.py`/
   `dumper_castxml.py`) tracking scope as typed segments at parse time;
   `RecordType`/`EnumType`/`Function`/`Variable` gaining a parse-time-resolved
@@ -34,12 +34,41 @@
   carrier-field question resolved as option (a)); a `storage/entity_ids.py`
   wire-schema-v2 bridge (`domain_entity_id_to_dto`/`_from_dto`) that encodes
   `ScopePath` losslessly (a rendered `qualified_name` string cannot — two
-  distinct `ScopePath`s can render identically); and that carrier now
-  persisting through `serialization.py` (`SCHEMA_VERSION` 28). **No
-  consumer may read the carrier field yet** — the `finding_identity.py`
-  algorithm migration and the post-parse consumer migrations
+  distinct `ScopePath`s can render identically); that carrier now
+  persisting through `serialization.py` (`SCHEMA_VERSION` 28); a first,
+  bounded piece of the `finding_identity.py` algorithm migration (c2) —
+  `finding_identity.resolve_function_identity` now canonicalizes each
+  parameter through the same
+  `model.signature_normalization.canonicalize_function_signature_param_type`
+  primitive `entity_id_for_function`'s own signature-fallback branch uses,
+  rather than a second, independently-maintained
+  `canonicalize_type_name`-only pass — a real behavior fix (a top-level
+  by-value cv-qualifier no longer fragments identity, matching the C++
+  standard's own linkage rules), not only a dedup; and, as the seventh
+  slice, `Change` (`checker_types.py`) gaining its own `entity_id` carrier
+  field, wired at every `diff_symbols.py` function-diff call site
+  (`_check_removed_function`/`_check_return_type_change`/
+  `_check_params_change`/`_check_ref_qualifier_change`/
+  `_check_linkage_change`/the `bool_transition`-backed noexcept/virtual/
+  explicit/variadic checks/`_check_contract_attributes_change`/
+  `_check_exception_spec_change`/`_check_vtable_index_change`/
+  `_check_inline_transitions`/the `FUNC_ADDED` site/
+  `_detect_newly_deleted_functions`) — the old side's `Function.entity_id`
+  when it exists, else the new side's, mirroring `Change.symbol_binding`'s
+  own old-side convention. **Still not landed: the mangled-name-is-genuine
+  determination** (`finding_identity.is_real_mangled_name`/
+  `normalize_mangled_name` stay finding_identity's own — `model/identity.py`'s
+  own docstring records why moving them would reverse the required
+  `compare -> model` import direction); **`resolve_change_identity`/
+  `_change_discriminator` actually consuming `Change.entity_id`** (the
+  carrier is populated but has no reader yet — mirrors the earlier
+  `Function.entity_id`/`Variable.entity_id` "carrier before consumer"
+  staging); **exhaustive population beyond the function-diff path**
+  (variable/type/enum/platform detectors construct `Change` from
+  `RecordType`/`EnumType`/`Variable` objects that also carry `.entity_id`,
+  but aren't wired yet); **and every post-parse consumer migration**
   (`diff_filtering.py`/`type_reachability.py`'s string-based ambiguity
-  machinery) are the two remaining items before Phase 2 is complete.
+  machinery). Those are the remaining items before Phase 2 is complete.
 - **Phases 3–10** are still unimplemented design text.
 
 See the [implementation plan](../plans/one-semantic-pipeline.md) for the

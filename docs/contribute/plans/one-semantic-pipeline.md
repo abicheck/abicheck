@@ -9375,6 +9375,115 @@ further still to stay at the 800-line production cap after this
 addition. `mypy abicheck/` clean, `ruff check`/`ruff format --check`
 clean, `check_architecture.py` 0 errors.
 
+**Landed (sixth slice, 2026-08-30): a first, bounded piece of (c2), not
+all of it.** (c2) has two stated deliverables (see the fourth slice's own
+"Next slice" note above): the `finding_identity.py` algorithm migration
+itself, and giving `Change` an `EntityId` to key on. This slice lands only
+the first half of the first deliverable. `finding_identity.
+resolve_function_identity`'s per-parameter canonicalization -- previously
+a second, independently-maintained `canonicalize_type_name(p.type)` call,
+duplicating rather than reusing the cross-producer-spelling/cv-qualifier
+logic `entity_id_for_function`'s own `"sig"` fallback branch already
+established -- now calls `model.signature_normalization.
+canonicalize_function_signature_param_type` directly, the same primitive.
+Not a pure refactor: that primitive additionally drops a top-level
+BY-VALUE cv-qualifier (`void f(int)`/`void f(const int)` name the same
+function per the C++ standard's own linkage rules), which
+`canonicalize_type_name` deliberately does not -- so a DWARF-only,
+non-mangled function whose parameter merely gained or lost a top-level
+`const` no longer fragments into two NORMALIZED-tier identities. A
+*pointee* cv-qualifier (`char *` vs. `const char *`) remains genuinely
+distinguishing either way; both directions are pinned by new tests in
+`tests/test_finding_identity.py`
+(`test_by_value_cv_qualifier_no_longer_distinguishes_overloads`,
+`test_pointee_cv_qualifier_still_distinguishes_overloads`). The
+mangled-name-is-genuine determination (`is_real_mangled_name`/
+`normalize_mangled_name`) stays owned by `finding_identity.py`, unchanged
+-- `model/identity.py`'s own docstring already records why moving it would
+reverse the required `compare -> model` import direction (`entity_id_for_
+function`'s contract only ever needs an already-vetted mangled name as
+input, never `finding_identity`'s own validation logic). Full fast unit
+suite green; `mypy abicheck/` and `ruff check`/`ruff format --check`
+clean.
+
+**What this slice deliberately does not attempt.** `resolve_variable_
+identity` takes no `param_types` argument at all, so it has nothing
+equivalent to delegate (variables have no signature-shaped discriminator
+to canonicalize). Giving `Change` an `EntityId` to key on -- (c2)'s other,
+larger deliverable, which touches `checker_types.Change`,
+`resolve_change_identity`, and the `diff_symbols.py`/`diff_filtering.py`
+call sites that construct a `Change` -- is not attempted here; neither is
+(b), the post-parse consumer migrations (`diff_filtering.py`'s
+`_find_opaque_types`/`_find_by_value_types`/`_root_type_name` and
+`type_reachability.py`'s ambiguity machinery). Both remain open, and
+**no consumer may read the `entity_id` carrier field itself yet** --
+this slice recomputes the signature discriminator from `Function`'s own
+raw fields on every call, the same "one algorithm, not a cached value"
+discipline the carrier's own design note states, rather than reading the
+carrier `Function.entity_id` may already hold. Next slice, in order:
+give `Change` an `EntityId` (closing (c2)), then the post-parse consumer
+migrations (b), per the fourth slice's own sequencing note above, which
+this slice does not otherwise revise.
+
+**Landed (seventh slice, 2026-08-30): `Change` gains its own `entity_id`
+carrier, populated at every `diff_symbols.py` function-diff call site --
+not yet the exhaustive-population or consumer halves of (c2)/(b).**
+`checker_types.Change` gains `entity_id: EntityId | None = field(default=
+None, kw_only=True)`, appended last per the file's own established
+per-field-`kw_only` convention (`Change` is public API; see that
+convention's own comment, condensed in the same commit to make room under
+`checker_types.py`'s zero-slack `debt.yaml` `no_growth` pin). Semantics:
+the OLD side's `Function.entity_id` when it exists, else the NEW side's --
+mirroring `Change.symbol_binding`'s own already-documented old-side
+convention, rather than inventing a new rule. Wired at every
+function-level call site in `diff_symbols.py` where the producing
+`Function` object(s) are already in scope: `_check_removed_function` (both
+branches), `_check_return_type_change`, `_check_params_change`,
+`_check_ref_qualifier_change`, `_check_linkage_change`, the
+`_check_contract_attributes_change`'s three sites, `_check_exception_spec_
+change`, `_check_vtable_index_change`, `_check_inline_transitions`'s two
+sites, the `FUNC_ADDED` site in `_diff_functions` (new side, since there is
+no old side), and `_detect_newly_deleted_functions` (old side's, via
+`f_old_any.entity_id or f_new.entity_id`, since `f_old_any` -- present only
+when the symbol persisted before gaining `= delete` -- can be `None`).
+`diff_helpers.bool_transition` (backing the noexcept/virtual/explicit/
+variadic checks) gains a matching `entity_id: EntityId | None = None`
+parameter, passed through to both `Change(...)` constructions unchanged --
+it has no declaration of its own to derive one from, so resolving it stays
+the caller's job.
+
+**What this slice deliberately does not attempt**, named explicitly rather
+than left to be discovered: (1) the *other* family of `Change(...)`/
+`make_change(...)` construction sites -- variable-diff, type/enum/platform/
+versioning detectors -- even though several of those already construct
+`Change` from a `RecordType`/`EnumType`/`Variable` that also carries its
+own `.entity_id` (a ~400-site total population, per the scoping
+investigation this slice's own PR ran before implementing); (2)
+`finding_identity.resolve_change_identity`/`_change_discriminator` reading
+`Change.entity_id` at all -- both functions still key entirely on
+`change.symbol`/`change.qualified_name`/flat value fields, unchanged by
+this slice, so **no consumer may read this carrier field yet**, the
+identical staging the model-layer `entity_id` carriers (`Function.
+entity_id` et al.) already went through. Verified via a new, real
+`compare()`-level regression suite (`tests/test_change_entity_id_carrier.py`)
+rather than only unit-testing the private `_check_*` helpers directly:
+FUNC_RETURN_CHANGED/FUNC_REMOVED/FUNC_ADDED/FUNC_NOEXCEPT_ADDED each pin the
+carrier's value end to end, plus a no-producer-`entity_id` case confirming
+`Change.entity_id` stays honestly `None` rather than fabricating one. Full
+fast unit suite green; `mypy abicheck/` and `ruff check`/`ruff format
+--check` clean; `check_architecture.py` 0 new errors (`checker_types.py`
+and `diff_symbols.py` both land at or under their existing `debt.yaml`
+baselines; `diff_helpers.py` -- not itself debt-tracked, but sitting
+exactly at the architecture gate's general 800-line production ceiling --
+required the identical "trim existing verbose comments to make room"
+treatment `checker_types.py` needed, condensing `TypeMap`'s and
+`type_map_key`'s own pre-existing docstrings rather than growing past it).
+Next slice, in order: `resolve_change_identity`/`_change_discriminator`
+consuming `Change.entity_id` (the true completion of (c2)), then (b), the
+post-parse consumer migrations -- exhaustive `Change.entity_id` population
+beyond the function-diff path is a separate, larger follow-on this
+sequencing does not schedule.
+
 ---
 
 ### Phase 3 — public surface as a graph query over one evidence graph (D5)

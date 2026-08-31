@@ -632,6 +632,25 @@ class TestNestedCallbackParametersAreNormalizedRecursively:
         )
 
 
+class TestNestingDepthIsBounded:
+    """Codex review, PR #952: the recursion above terminates eventually
+    (each call operates on a strictly shorter substring) but not before
+    exhausting Python's call stack for a deep-enough input -- an
+    adversarial/corrupt snapshot's parameter type could crash a whole
+    compare() with an uncaught RecursionError. A safe (unnormalized
+    passthrough) fallback beyond a generous depth bound fixes the crash
+    without touching any real, non-adversarial signature's result."""
+
+    def test_pathologically_nested_callback_does_not_crash(self) -> None:
+        pathological = "void (*)(" * 500 + "int" + ")" * 500
+        assert canon(pathological)  # must not raise RecursionError
+
+    def test_ordinary_nesting_is_unaffected_by_the_bound(self) -> None:
+        assert canon("void (*)(void (*)(const int))") == canon(
+            "void (*)(void (*)(int))"
+        )
+
+
 class TestIdempotence:
     """Canonicalizing an already-canonical form is a no-op -- a basic
     sanity property any normalization function should hold."""

@@ -41,6 +41,7 @@ from .contract_relevance_types import (
 from .detectors import DetectorResult
 from .impact.model import ImpactAssessment
 from .model import AbiSnapshot
+from .model.identity import EntityId
 from .policy_file import PolicyFile
 
 # Marker appended to a ``SYMBOL_VERSION_ALIAS_CHANGED`` description when the old
@@ -332,25 +333,15 @@ class Change:
     # evidence" entry for the full account). ``False`` for every ordinary
     # TYPE_VTABLE_CHANGED and every other finding kind.
     #
-    # ``field(kw_only=True)``, per-field rather than the ``dataclasses.
-    # KW_ONLY`` sentinel (Codex review, fresh evidence): ``Change`` is
-    # documented as a public Python-API type (checker_types.py's own module
-    # docstring; CLAUDE.md: "changing their public surface is a breaking
-    # change to the Python API — coordinate it"), and a whole-class
-    # ``KW_ONLY`` marker placed after ``description`` would make every
-    # pre-existing optional field keyword-only too — breaking any external
-    # caller that previously passed ``old_value``/``new_value``/etc.
-    # positionally, which this codebase cannot audit (only its own call
-    # sites, all of which already pass every field beyond the first three by
-    # keyword). Appended at the very end of the dataclass instead of
-    # mid-list, for the same reason `field(kw_only=True)` alone doesn't
-    # already make position irrelevant: a plain field inserted anywhere
-    # earlier still shifts every later *positional* argument for a
-    # hypothetical caller reaching that far — appending keeps every
-    # pre-existing field's position, and therefore every pre-existing
-    # positional caller's behavior, completely unchanged. Mirrors
-    # ``AbiSnapshot``'s identical per-field fix in PR #582 exactly (that
-    # precedent predates this dataclass's own instance of the same bug).
+    # ``field(kw_only=True)`` per-field, not the whole-class ``dataclasses.
+    # KW_ONLY`` sentinel (Codex review): ``Change`` is public API (CLAUDE.md:
+    # "changing their public surface is a breaking change... coordinate
+    # it"), and a class-wide ``KW_ONLY`` marker after ``description`` would
+    # make every pre-existing optional field keyword-only too, breaking an
+    # external caller that passed one positionally. Appended at the very
+    # end, not mid-list, since ``kw_only=True`` alone doesn't stop a later
+    # *positional* argument from shifting — only position preserves that.
+    # Mirrors ``AbiSnapshot``'s identical fix in PR #582.
     vtable_covers_unverifiable_layout_gap: bool = field(default=False, kw_only=True)
     # ELF symbol linkage (Function.elf_binding / Variable.elf_binding's value
     # string — "global"/"weak"/"local"/"unique"/"other") of the removed (or
@@ -380,6 +371,15 @@ class Change:
     # contract_evidence_refs. Same field(kw_only=True)-appended-last
     # convention as symbol_binding above (Change is public API).
     evidence_provenance: tuple[str, ...] | None = field(default=None, kw_only=True)
+    # ADR-063 Phase 2 (finding_identity.py algorithm migration, second half):
+    # the compare-time EntityId this finding is about -- the OLD side's when
+    # it exists (REMOVED-shaped finding has none), else the NEW side's
+    # (ADDED-shaped), mirroring symbol_binding's own old-side convention
+    # above. None when unresolved; not yet read by any consumer.
+    # `compare=False` like the declaration-side carriers -- identical-content
+    # findings stay equal regardless of identity coverage (Codex review).
+    # Same field(kw_only=True)-appended-last convention as evidence_provenance.
+    entity_id: EntityId | None = field(default=None, kw_only=True, compare=False)
 
 
 @dataclass
