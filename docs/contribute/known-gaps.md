@@ -89,7 +89,49 @@ looked like the obvious fix and wasn't.
   `docs/contribute/adr/063-one-semantic-pipeline.md`'s Phase 4 status entry
   for what changed and what this fix deliberately does not attempt (option 1
   below, teaching the adapter to filter an already-parsed graph, remains
-  unimplemented). Historical analysis retained below for the record.
+  unimplemented).
+  **A third Codex review round found a remaining dry-run/execution parity
+  gap for this same `.abicheck.yml` case, investigated and deliberately left
+  open rather than fixed reactively.** `dump --dry-run` (`cli_dump_helpers.
+  render_dump_dry_run`) never calls `collect_inline_pack`/
+  `_maybe_collect_bazel_build_info` at all — a dry-run resolves and renders
+  purely from `resolve_dump_request`'s `ResolvedDumpRequest`, which stops
+  well before `execute_dump_request` ever reaches `embed_build_source`. So
+  when the root-target scope comes *only* from `.abicheck.yml`'s
+  `build.targets:` (no `--build-target` flag, the case the fix above
+  covers), the dry-run preview reports success for a request the real run
+  then rejects — the same shape of parity gap the earlier `scan --dry-run`/
+  `scan --artifact-set --dry-run` fix (above, in the first Codex round)
+  closed for the CLI-flag case, just not yet closed for the config-sourced
+  one, and not yet checked on `compare --dry-run`/`scan --dry-run` either
+  (neither discovers `.abicheck.yml`'s build config during their own dry-run
+  preview today). Not fixed here: `AnalysisPlanner` cannot see this value at
+  all — `DumpRequest`/`CompareRequest`/`InputSpec` carry no `build_config`
+  field, so `.abicheck.yml` discovery only ever happens inside
+  `embed_build_source` itself, deep inside real execution. Closing the gap
+  correctly needs one of two real designs, not a quick patch: (a) thread a
+  resolved `build_config` path onto the typed request objects so
+  `AnalysisPlanner` can discover+load it too — a real API surface addition
+  touching `InputSpec`/`DumpRequest`/`CompareRequest`, not a leaf-module
+  fix; or (b) duplicate a *scoped* slice of `embed_build_source`'s own
+  discovery-then-CLI-overrides-config merge (`config_paths.
+  discover_build_config`, `buildsource.inline.load_build_config`, the same
+  `targets=list(build_targets) if build_targets else cfg.targets`
+  precedence) independently inside each of the (at least three) dry-run
+  renderers, each needing the identical `requested_depth == "binary"`
+  exemption `_check_bazel_target_scoping` already applies — a second,
+  independently-maintained copy of that merge logic in three more places,
+  exactly the drift risk ADR-063 Phase 4 exists to avoid, not reduce. Either
+  is a real, multi-call-site feature needing its own design and test
+  coverage, not a same-session reactive patch under continued review
+  pressure (this file's own governing convention, and the same standard the
+  exit-code-variance paragraph above and D4's second scenario already apply
+  in this document). Until fixed, the workaround is unchanged from the
+  general one: pre-capture the Bazel jsonproto already scoped to the desired
+  targets, or use a live `bazel query`; a dry-run preview's silence on a
+  root-target scope declared only in `.abicheck.yml` is not evidence the
+  real run will succeed. Historical analysis retained below for the
+  record.
   `BazelAdapter.collect()`'s `self.targets` scoping is applied
   in exactly two places: gating whether a *live* `bazel query` subprocess
   runs at all (`_resolve`/`_run_bazel`, only reachable when `workspace` is

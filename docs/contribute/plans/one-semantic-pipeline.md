@@ -11211,6 +11211,23 @@ so there is no second, independent call site for either gate to newly
 police yet — a future phase adding one should widen them then, not this
 one preemptively.
 
+**Also not landed: `dump --dry-run`/`compare --dry-run`/`scan --dry-run`
+parity for a `.abicheck.yml`-only (no `--build-target` flag) root-target
+scope, a fourth Codex review round.** The known-gap entry's own new
+paragraph (see `docs/contribute/known-gaps.md`) has the full account: none
+of the three commands' dry-run renderers discover `.abicheck.yml` the way
+`embed_build_source` does at real-execution time, and `AnalysisPlanner`
+itself structurally cannot see this value — `DumpRequest`/`CompareRequest`/
+`InputSpec` carry no `build_config` field at all, so there is no seam to
+resolve it through even in principle. Closing it needs either a real API
+addition (a `build_config` field threaded onto the typed request objects)
+or an independent, duplicated slice of `embed_build_source`'s own
+discovery-then-merge logic inside three separate dry-run renderers, each
+needing the same depth-binary exemption `_check_bazel_target_scoping`
+applies — named explicitly as out of scope for this slice, per the same
+governing convention the paragraph above already invokes, rather than
+patched reactively under continued review pressure.
+
 ---
 
 ### Phase 5 — the fact/capability registry (generalizes `change_registry.py`)
