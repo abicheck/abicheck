@@ -531,6 +531,21 @@ def dispatch(*, compile_context: Any, **kwargs: Any) -> None:
                 "flags). Use a --config that only sets compile: options."
             )
 
+    if kwargs.get("old_headers_only") or kwargs.get("old_includes_only"):
+        # Codex review: normalize_sided_options puts an old=-scoped
+        # --header/--include into old_headers_only/old_includes_only, but
+        # _resolve_new_side_headers_includes only ever reads the new=-scoped
+        # /uniform fields (that function's own docstring: "the OLD side has
+        # no headers/includes of its own here"). The OLD side is already a
+        # resolved, stored snapshot -- it cannot be reparsed with a
+        # different header scope at this point -- so a requested OLD-side
+        # header/include operand was silently discarded rather than applied
+        # or rejected.
+        raise click.UsageError(
+            "--header old=.../--include old=... are not supported together "
+            "with --old-bundle-facts: OLD_FACTS is already a resolved, "
+            "stored snapshot with no header re-extraction available."
+        )
     headers, includes = _resolve_new_side_headers_includes(kwargs)
     if depth == "binary":
         # Codex review: run_compare's own --depth binary clears every header

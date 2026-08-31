@@ -145,6 +145,32 @@ class TestPublicHeadersProjection:
             "headers/foo",
         ]
 
+    def test_single_whitespace_containing_header_still_gets_a_newline(self) -> None:
+        # Codex review, fresh evidence: "\n".join([x]) for a single-element
+        # list is just x with no internal separator, so add_flag() still
+        # took its legacy whitespace-splitting branch (its own check is
+        # `[[ "$value" == *$'\n'* ]]`) even after the two-element fix above.
+        # A trailing newline forces the multi-line branch for this case too.
+        raw = {
+            "targets": {
+                "libfoo": {
+                    "kind": "library",
+                    "binary_pattern": "build/libfoo*.so",
+                    "public_headers": ["C:/Program Files/SDK/include"],
+                    "checks": [
+                        {"channel": "release", "depth": "headers", "required": True},
+                    ],
+                },
+            },
+            "profiles": {"linux": {"contract": True}},
+        }
+        config = _parsed(raw)
+        plan, report = generate_run_plan(config, {"linux": _bo("libfoo")})
+        assert report.ok
+        [check] = [c for c in plan.checks if c.name == "libfoo"]
+        assert "\n" in check.header
+        assert check.header.split("\n") == ["C:/Program Files/SDK/include", ""]
+
     def test_bundle_checks_never_project_a_header(self) -> None:
         """kind: bundle cells stay header-empty (RunPlanCheck.header's own
         docstring) -- per-bundle-member header staging doesn't exist yet, the

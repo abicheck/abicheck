@@ -961,3 +961,52 @@ class TestCompareOldBundleFactsEarlyRejections:
 
         assert code == 64
         assert "scope:" in out
+
+    def test_old_side_header_operand_is_rejected(self, tmp_path: Path) -> None:
+        # Codex review: normalize_sided_options puts an old=-scoped --header
+        # into old_headers_only, but _resolve_new_side_headers_includes only
+        # ever reads the new=-scoped/uniform fields -- OLD_FACTS is already
+        # a resolved, stored snapshot with no header re-extraction
+        # available, so this was silently discarded rather than applied.
+        facts_path = tmp_path / "old.bundlefacts.json"
+        facts_path.write_text("{}")
+        new_dir = tmp_path / "new"
+        new_dir.mkdir()
+        old_header_dir = tmp_path / "old_headers"
+        old_header_dir.mkdir()
+
+        code, out = _invoke(
+            "compare",
+            str(facts_path),
+            str(new_dir),
+            "--old-bundle-facts",
+            "--header",
+            f"old={old_header_dir}",
+            "--format",
+            "json",
+        )
+
+        assert code == 64
+        assert "--header" in out
+
+    def test_old_side_include_operand_is_rejected(self, tmp_path: Path) -> None:
+        facts_path = tmp_path / "old.bundlefacts.json"
+        facts_path.write_text("{}")
+        new_dir = tmp_path / "new"
+        new_dir.mkdir()
+        old_include_dir = tmp_path / "old_includes"
+        old_include_dir.mkdir()
+
+        code, out = _invoke(
+            "compare",
+            str(facts_path),
+            str(new_dir),
+            "--old-bundle-facts",
+            "--include",
+            f"old={old_include_dir}",
+            "--format",
+            "json",
+        )
+
+        assert code == 64
+        assert "--include" in out

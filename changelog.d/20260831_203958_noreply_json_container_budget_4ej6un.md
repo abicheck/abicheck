@@ -74,4 +74,20 @@
   `collapse_versioned_symbols`, `public_symbols`, `show_redundant`)
   instead of only `public` -- a config setting only one of the other three
   previously passed the check unrejected even though none of them is
-  applied in this mode either.
+  applied in this mode either. An `old=`-scoped `--header`/`--include`
+  operand is now rejected explicitly too -- `_resolve_new_side_headers_
+  includes` only ever reads the `new=`-scoped/uniform fields, and OLD_FACTS
+  is already a resolved, stored snapshot with no header re-extraction
+  available, so a requested OLD-side header/include scope was previously
+  discarded rather than applied. This surface is now registered in
+  `docs/_meta/topics.yaml`'s `bundle-analysis` topic (`fact_sources` +
+  `reference_page`), and `docs/use/multi-binary.md`'s "Comparing against a
+  stored bundle baseline" section now documents the landed `--old-bundle-
+  facts` flag instead of describing it as future work.
+
+  Separately, `run_plan.py`'s newline-join fix for `RunPlanCheck.header`
+  (public_headers reaching a generated run-plan cell) missed the
+  single-element case: `"\n".join([x])` for a one-item list contains no
+  newline, so `action/run.sh`'s `add_flag()` still took its legacy
+  whitespace-splitting branch for a lone header root containing whitespace.
+  A trailing newline now forces the multi-line branch for that case too.

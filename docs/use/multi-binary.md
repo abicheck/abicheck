@@ -547,16 +547,21 @@ abicheck compare release-1.0/ release-2.0/ -H include/ \
 
 # Later, get a bundle-level verdict for release-1.0 -> release-3.0 without
 # ever reopening release-1.0's binaries.
+abicheck compare release-1.0.bundlefacts.json release-3.0/ --old-bundle-facts
 ```
 
-The stored facts are consumed programmatically via
-`abicheck.bundle_facts.compare_bundle_from_facts()` (see
-[Programmatic API](#programmatic-api) below) — a `compare` CLI flag that
-takes a `BundleFacts` file as its old-side operand is expected to land once
-the CLI-cleanup-phase-two convergence settles on where directory/package
-`compare` should route a non-directory old-side input; this is deliberately
-scoped in this phase to the *producer* half and the tested Python API, not a
-CLI *consumer* half, per G38's own phased design.
+`--old-bundle-facts` is the CLI consumer half of this workflow: it treats
+`OLD_INPUT` as a stored `BundleFacts` document (from a prior
+`--bundle-facts-out` run) instead of a live directory/package, while
+`NEW_INPUT` stays a live release directory or package (extracted the same
+way the ordinary release fan-out extracts one). Only `--format json`/
+`markdown` are available in this mode, and most of the ~44 flags the live
+release fan-out accepts have no channel into a stored-facts comparison and
+are rejected explicitly (exit 64) rather than silently ignored — see
+`abicheck compare --help-all` for the full, current list. Internally it
+routes through `abicheck.bundle_side_input.
+compare_release_against_bundle_facts()`, the same driver the paragraph
+below describes.
 
 `compare_bundle_from_facts()` reconstructs a live-equivalent
 `BundleSnapshot` from the stored per-library `AbiSnapshot.elf` metadata (no

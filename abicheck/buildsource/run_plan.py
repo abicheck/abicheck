@@ -657,6 +657,27 @@ def _resolve_profile_ids(
     return [p.id for p in config.profiles.values() if p.contract], False
 
 
+def _newline_join_headers(headers: list[str]) -> str:
+    """Newline-join *headers* for ``action/run.sh``'s ``add_flag()`` multi-
+    value convention (``RunPlanCheck.header``'s own docstring).
+
+    A single-element list needs special handling (Codex review, fresh
+    evidence): ``"\\n".join([x])`` is just ``x`` with no internal separator,
+    so ``add_flag()``'s ``[[ "$value" == *$'\\n'* ]]`` newline check reads
+    false and it falls through to the legacy branch that splits on IFS
+    whitespace -- exactly the whitespace-mis-splitting bug the newline-join
+    fix was meant to close, for the one-element case specifically. A
+    trailing newline forces the multi-line branch without changing what any
+    *multi*-element join already produces (no existing caller reads a
+    trailing newline off a 2+-element ``header`` value)."""
+    if not headers:
+        return ""
+    joined = "\n".join(headers)
+    if len(headers) == 1:
+        joined += "\n"
+    return joined
+
+
 def _library_lookup_and_pattern(
     config: ProjectTargetsConfig, target: TargetSpec
 ) -> tuple[str, str, str]:
@@ -674,14 +695,18 @@ def _library_lookup_and_pattern(
     library``), so its header scoping is necessarily the redirected
     library's."""
     if target.kind == TARGET_KIND_LIBRARY:
-        return target.id, target.binary_pattern, "\n".join(target.public_headers)
+        return (
+            target.id,
+            target.binary_pattern,
+            _newline_join_headers(target.public_headers),
+        )
     referenced = config.targets.get(target.library)
     if referenced is None:
         return target.library, "", ""
     return (
         target.library,
         referenced.binary_pattern,
-        "\n".join(referenced.public_headers),
+        _newline_join_headers(referenced.public_headers),
     )
 
 
