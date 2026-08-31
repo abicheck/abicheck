@@ -33,21 +33,38 @@ attribute, ``_ReportChangeView`` must be updated in lockstep or every
 report-based aggregation call breaks the same way, unconditionally, for any
 finding at all -- which is exactly what happened here (105 tests failed on
 ``main`` from this one gap).
+
+``test_report_change_view_covers_every_attribute_resolve_change_identity_reads``
+below is the generalized half (Codex review, fresh evidence): the concrete
+``entity_id`` round trip above only pins the one attribute that was
+actually missing, so it would stay green if some *other* attribute went
+missing next. The structural test instead statically discovers every
+``change.<attr>`` read reachable from ``resolve_change_identity`` (walking
+into any same-module helper it calls with the same object) and asserts
+``_ReportChangeView``'s own field set is a superset -- registered as this
+PR's ``adapter.duck_typed_view_attribute_drift`` bug class in
+``tests/regressions/manifest.py``.
 """
 
 from __future__ import annotations
 
+import ast
+import dataclasses
+import inspect
+
+from abicheck import finding_identity
 from abicheck.checker_policy import ChangeKind
 from abicheck.checker_types import Change
 from abicheck.model.identity import EntityId, EntityKind
 from abicheck.reporter import _change_to_dict
-from abicheck.workflows.aggregate.reconcile import resolve_report_change_identity
+from abicheck.workflows.aggregate.reconcile import (
+    _ReportChangeView,
+    resolve_report_change_identity,
+)
 
-_KWARGS = {
-    "kind": ChangeKind.FUNC_REMOVED,
-    "symbol": "_ZN3lib3addEii",
-    "description": "Function removed",
-}
+_KIND = ChangeKind.FUNC_REMOVED
+_SYMBOL = "_ZN3lib3addEii"
+_DESCRIPTION = "Function removed"
 
 
 def test_a_live_changes_entity_id_survives_the_report_round_trip() -> None:
@@ -56,9 +73,97 @@ def test_a_live_changes_entity_id_survives_the_report_round_trip() -> None:
     `_change_to_dict`) must not change the round-tripped identity relative
     to an otherwise-identical finding that never had one."""
     eid = EntityId(scope=(), kind=EntityKind.FUNCTION, leaf_name="add")
-    with_id = resolve_report_change_identity(
-        _change_to_dict(Change(entity_id=eid, **_KWARGS))
+    with_change = Change(
+        kind=_KIND, symbol=_SYMBOL, description=_DESCRIPTION, entity_id=eid
     )
-    without_id = resolve_report_change_identity(_change_to_dict(Change(**_KWARGS)))
+    without_change = Change(kind=_KIND, symbol=_SYMBOL, description=_DESCRIPTION)
+    with_id = resolve_report_change_identity(_change_to_dict(with_change))
+    without_id = resolve_report_change_identity(_change_to_dict(without_change))
     assert with_id.primary_id == without_id.primary_id
     assert with_id.tier == without_id.tier
+
+
+def _change_attrs_read(
+    func_name: str,
+    param_name: str,
+    funcs_by_name: dict[str, ast.FunctionDef],
+    visited: set[tuple[str, str]],
+) -> set[str]:
+    """Every ``<param_name>.<attr>`` read reachable from ``func_name``,
+    following calls (by position or keyword) into other functions defined
+    in the same module that receive the same object under a new name.
+
+    Deliberately module-scoped and name-based (no real type inference) --
+    a small, targeted static check for this one adapter/consumer pair, not
+    a general-purpose analyzer. ``visited`` is keyed on (function, param
+    name) so the same helper reached under two different bindings is each
+    still explored once, without infinite-looping on recursion.
+    """
+    key = (func_name, param_name)
+    if key in visited:
+        return set()
+    visited.add(key)
+    func = funcs_by_name.get(func_name)
+    if func is None:
+        return set()
+    attrs: set[str] = set()
+    for node in ast.walk(func):
+        if (
+            isinstance(node, ast.Attribute)
+            and isinstance(node.value, ast.Name)
+            and node.value.id == param_name
+        ):
+            attrs.add(node.attr)
+        elif (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Name)
+            and node.func.id in funcs_by_name
+        ):
+            callee = funcs_by_name[node.func.id]
+            arg_names = [a.arg for a in callee.args.args]
+            for i, arg in enumerate(node.args):
+                if (
+                    isinstance(arg, ast.Name)
+                    and arg.id == param_name
+                    and i < len(arg_names)
+                ):
+                    attrs |= _change_attrs_read(
+                        node.func.id, arg_names[i], funcs_by_name, visited
+                    )
+            for kw in node.keywords:
+                if (
+                    isinstance(kw.value, ast.Name)
+                    and kw.value.id == param_name
+                    and kw.arg
+                ):
+                    attrs |= _change_attrs_read(
+                        node.func.id, kw.arg, funcs_by_name, visited
+                    )
+    return attrs
+
+
+def test_report_change_view_covers_every_attribute_resolve_change_identity_reads() -> (
+    None
+):
+    """Structural enforcement of this module's own stated bug class: parse
+    `finding_identity.py`'s real source (not a hand-copied attribute list
+    that could itself go stale) and fail if `resolve_change_identity` --
+    transitively, through its own same-module helpers -- reads any `Change`
+    attribute `_ReportChangeView` does not declare."""
+    tree = ast.parse(inspect.getsource(finding_identity))
+    funcs_by_name = {
+        node.name: node for node in ast.walk(tree) if isinstance(node, ast.FunctionDef)
+    }
+    attrs_read = _change_attrs_read(
+        "resolve_change_identity", "change", funcs_by_name, set()
+    )
+    assert attrs_read, (
+        "AST walk found no change.<attr> reads -- the walker itself is broken"
+    )
+    view_fields = {f.name for f in dataclasses.fields(_ReportChangeView)}
+    missing = attrs_read - view_fields
+    assert not missing, (
+        f"resolve_change_identity reads Change.{sorted(missing)} but "
+        "_ReportChangeView has no matching field(s) -- add them (see "
+        "adapter.duck_typed_view_attribute_drift in tests/regressions/manifest.py)"
+    )
