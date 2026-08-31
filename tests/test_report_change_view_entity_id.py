@@ -84,6 +84,28 @@ def test_a_live_changes_entity_id_survives_the_report_round_trip() -> None:
     assert with_id.tier == without_id.tier
 
 
+def _group_funcs_by_name(tree: ast.AST) -> dict[str, list[ast.FunctionDef]]:
+    """Every ``ast.FunctionDef`` in *tree*, grouped by name -- a *list*
+    per name rather than the single-function ``dict[str, FunctionDef]``
+    this module used through the fourteenth round (Codex review, fresh
+    evidence, fifteenth round): two functions sharing a name in unrelated
+    scopes (a module-level helper and a same-named nested function
+    defined somewhere else entirely) silently collapsed onto whichever
+    ``ast.walk`` visited last, so a real read living in the DISCARDED
+    function could vanish from this guard entirely. Following every
+    same-named candidate and unioning their results trades a small
+    chance of also following an unrelated function of the same name (a
+    spurious extra field demand) for never silently dropping the real
+    one -- this module's established favor-false-positives-over-false-
+    negatives choice, extended to name resolution itself.
+    """
+    grouped: dict[str, list[ast.FunctionDef]] = {}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.FunctionDef):
+            grouped.setdefault(node.name, []).append(node)
+    return grouped
+
+
 def _own_param_names(args: ast.arguments) -> frozenset[str]:
     """Every name *args* binds as its own parameter -- positional-only,
     regular, keyword-only, ``*args``, and ``**kwargs`` alike."""
@@ -202,8 +224,22 @@ def _locally_bound_names(scope_node: ast.AST) -> frozenset[str]:
     latter. ``AugAssign`` is excluded from this exemption unconditionally
     (``change += 1`` combines with something else by construction, never
     a pure alias).
+
+    The exemption applies to a name for its *whole* scope, not just the
+    specific alias-shaped binding (Codex review, fresh evidence,
+    fifteenth round): ``candidate = change; value = candidate.
+    future_field; candidate = object()`` still leaves ``candidate``
+    unshadowed even after that later, non-alias rebind, since this
+    module has no real per-statement control-flow ordering to know a
+    given read happened before or after it. Widening the exemption this
+    way is the same favor-false-positives trade-off stated above, taken
+    one step further rather than reverted -- a name that was ever a
+    genuine alias in this scope never risks hiding a real outer read
+    here again, at the cost of also over-reporting its later, truly
+    unrelated uses.
     """
     names: set[str] = set()
+    alias_shaped_names: set[str] = set()
     nonlocal_names: set[str] = set()
     stack: list[ast.AST] = [scope_node]
     is_root = True
@@ -225,16 +261,19 @@ def _locally_bound_names(scope_node: ast.AST) -> frozenset[str]:
             continue
         is_root = False
         if isinstance(current, ast.Assign):
-            if not isinstance(_unwrap_transparent(current.value), ast.Name):
+            for assign_target in current.targets:
+                _bind_target(assign_target, names)
+            if isinstance(_unwrap_transparent(current.value), ast.Name):
                 for assign_target in current.targets:
-                    _bind_target(assign_target, names)
+                    _bind_target(assign_target, alias_shaped_names)
         elif isinstance(current, ast.AugAssign):
             _bind_target(current.target, names)
         elif isinstance(current, ast.AnnAssign):
-            if current.value is None or not isinstance(
+            _bind_target(current.target, names)
+            if current.value is not None and isinstance(
                 _unwrap_transparent(current.value), ast.Name
             ):
-                _bind_target(current.target, names)
+                _bind_target(current.target, alias_shaped_names)
         elif isinstance(current, (ast.For, ast.AsyncFor)):
             _bind_target(current.target, names)
         elif isinstance(current, (ast.With, ast.AsyncWith)):
@@ -249,8 +288,9 @@ def _locally_bound_names(scope_node: ast.AST) -> frozenset[str]:
         elif isinstance(current, ast.NamedExpr) and isinstance(
             current.target, ast.Name
         ):
-            if not isinstance(_unwrap_transparent(current.value), ast.Name):
-                names.add(current.target.id)
+            names.add(current.target.id)
+            if isinstance(_unwrap_transparent(current.value), ast.Name):
+                alias_shaped_names.add(current.target.id)
         elif isinstance(current, ast.Global):
             names.update(current.names)
         elif isinstance(current, ast.Nonlocal):
@@ -262,7 +302,7 @@ def _locally_bound_names(scope_node: ast.AST) -> frozenset[str]:
             nonlocal_names.update(current.names)
         for child in ast.iter_child_nodes(current):
             stack.append(child)
-    return frozenset(names - nonlocal_names)
+    return frozenset(names - nonlocal_names - alias_shaped_names)
 
 
 def _iter_scope_aware(node: ast.AST) -> Iterator[tuple[ast.AST, frozenset[str]]]:
@@ -355,12 +395,41 @@ def _iter_scope_aware(node: ast.AST) -> Iterator[tuple[ast.AST, frozenset[str]]]
 def _change_attrs_read(
     func_name: str,
     param_name: str,
-    funcs_by_name: dict[str, ast.FunctionDef],
-    visited: set[tuple[str, str]],
+    funcs_by_name: dict[str, list[ast.FunctionDef]],
+    visited: set[tuple[int, str]],
 ) -> set[str]:
-    """Every ``<param_name>.<attr>`` read reachable from ``func_name``,
-    following calls (by position or keyword) into other functions defined
-    in the same module that receive the same object under a new name --
+    """Every ``<param_name>.<attr>`` read reachable from *any* function
+    named ``func_name`` -- unioned across every same-named candidate
+    ``funcs_by_name`` groups under that key (Codex review, fresh
+    evidence, fifteenth round: see :func:`_group_funcs_by_name`'s own
+    docstring for why a name can legitimately resolve to more than one
+    function here, and why following all of them is the safe choice).
+    ``visited`` is keyed on ``(id(function), param_name)`` rather than
+    ``(name, param_name)`` so two distinct same-named functions are each
+    still explored independently.
+    """
+    attrs: set[str] = set()
+    for func in funcs_by_name.get(func_name, ()):
+        key = (id(func), param_name)
+        if key in visited:
+            continue
+        visited.add(key)
+        attrs |= _change_attrs_read_in_function(
+            func, param_name, funcs_by_name, visited
+        )
+    return attrs
+
+
+def _change_attrs_read_in_function(
+    func: ast.FunctionDef,
+    param_name: str,
+    funcs_by_name: dict[str, list[ast.FunctionDef]],
+    visited: set[tuple[int, str]],
+) -> set[str]:
+    """Every ``<param_name>.<attr>`` read reachable from *this specific*
+    ``func``, following calls (by position or keyword) into other
+    functions defined in the same module that receive the same object
+    under a new name --
     positional binding counts a callee's positional-only parameters ahead
     of its regular ones (Codex review, fresh evidence, fifth round: a
     callee declaring the forwarded object positional-only, e.g. ``def
@@ -382,9 +451,9 @@ def _change_attrs_read(
 
     Deliberately module-scoped and name-based (no real type inference) --
     a small, targeted static check for this one adapter/consumer pair, not
-    a general-purpose analyzer. ``visited`` is keyed on (function, param
-    name) so the same helper reached under two different bindings is each
-    still explored once, without infinite-looping on recursion. Alias
+    a general-purpose analyzer. Visited-tracking against infinite
+    recursion is the caller's (:func:`_change_attrs_read`'s) job, keyed
+    on this specific function object rather than its name. Alias
     tracking runs to a fixed point rather than a single pass (Codex
     review, fresh evidence, seventh round: ``_iter_scope_aware``'s
     stack-based traversal does not yield nodes in source order, so a
@@ -402,13 +471,6 @@ def _change_attrs_read(
     conditional reassignment or an alias shadowed by a later unrelated
     rebinding is still not modeled either.
     """
-    key = (func_name, param_name)
-    if key in visited:
-        return set()
-    visited.add(key)
-    func = funcs_by_name.get(func_name)
-    if func is None:
-        return set()
     tracked = {param_name}
     changed = True
     while changed:
@@ -491,30 +553,38 @@ def _change_attrs_read(
             and isinstance(node.func, ast.Name)
             and node.func.id in funcs_by_name
         ):
-            callee = funcs_by_name[node.func.id]
-            arg_names = [a.arg for a in (*callee.args.posonlyargs, *callee.args.args)]
-            for i, raw_arg in enumerate(node.args):
-                arg = _unwrap_transparent(raw_arg)
-                if (
-                    isinstance(arg, ast.Name)
-                    and arg.id in tracked
-                    and arg.id not in shadowed
-                    and i < len(arg_names)
-                ):
-                    attrs |= _change_attrs_read(
-                        node.func.id, arg_names[i], funcs_by_name, visited
-                    )
-            for kw in node.keywords:
-                kw_value = _unwrap_transparent(kw.value)
-                if (
-                    isinstance(kw_value, ast.Name)
-                    and kw_value.id in tracked
-                    and kw_value.id not in shadowed
-                    and kw.arg
-                ):
-                    attrs |= _change_attrs_read(
-                        node.func.id, kw.arg, funcs_by_name, visited
-                    )
+            # Every same-named candidate is followed independently (Codex
+            # review, fresh evidence, fifteenth round) -- their parameter
+            # lists can differ, so position `i` may map to a different
+            # name per candidate; `_change_attrs_read` itself fans back
+            # out over all candidates again for that mapped name, which
+            # is redundant but not incorrect.
+            for callee in funcs_by_name[node.func.id]:
+                arg_names = [
+                    a.arg for a in (*callee.args.posonlyargs, *callee.args.args)
+                ]
+                for i, raw_arg in enumerate(node.args):
+                    arg = _unwrap_transparent(raw_arg)
+                    if (
+                        isinstance(arg, ast.Name)
+                        and arg.id in tracked
+                        and arg.id not in shadowed
+                        and i < len(arg_names)
+                    ):
+                        attrs |= _change_attrs_read(
+                            node.func.id, arg_names[i], funcs_by_name, visited
+                        )
+                for kw in node.keywords:
+                    kw_value = _unwrap_transparent(kw.value)
+                    if (
+                        isinstance(kw_value, ast.Name)
+                        and kw_value.id in tracked
+                        and kw_value.id not in shadowed
+                        and kw.arg
+                    ):
+                        attrs |= _change_attrs_read(
+                            node.func.id, kw.arg, funcs_by_name, visited
+                        )
     return attrs
 
 
@@ -527,9 +597,7 @@ def test_report_change_view_covers_every_attribute_resolve_change_identity_reads
     transitively, through its own same-module helpers -- reads any `Change`
     attribute `_ReportChangeView` does not declare."""
     tree = ast.parse(inspect.getsource(finding_identity))
-    funcs_by_name = {
-        node.name: node for node in ast.walk(tree) if isinstance(node, ast.FunctionDef)
-    }
+    funcs_by_name = _group_funcs_by_name(tree)
     attrs_read = _change_attrs_read(
         "resolve_change_identity", "change", funcs_by_name, set()
     )
@@ -559,11 +627,7 @@ def test_change_attrs_read_catches_an_indirect_getattr_field_read() -> None:
         "def helper(c):\n"
         "    return getattr(c, 'future_field', None)\n"
     )
-    funcs_by_name = {
-        node.name: node
-        for node in ast.walk(ast.parse(source))
-        if isinstance(node, ast.FunctionDef)
-    }
+    funcs_by_name = _group_funcs_by_name(ast.parse(source))
     assert _change_attrs_read("outer", "change", funcs_by_name, set()) == {
         "future_field"
     }
@@ -581,11 +645,7 @@ def test_change_attrs_read_catches_a_direct_local_alias_read() -> None:
         "    candidate = change\n"
         "    return candidate.future_field\n"
     )
-    funcs_by_name = {
-        node.name: node
-        for node in ast.walk(ast.parse(source))
-        if isinstance(node, ast.FunctionDef)
-    }
+    funcs_by_name = _group_funcs_by_name(ast.parse(source))
     assert _change_attrs_read("outer", "change", funcs_by_name, set()) == {
         "future_field"
     }
@@ -604,11 +664,7 @@ def test_change_attrs_read_catches_a_local_alias_forwarded_to_a_helper() -> None
         "def helper(c):\n"
         "    return c.future_field2\n"
     )
-    funcs_by_name = {
-        node.name: node
-        for node in ast.walk(ast.parse(source))
-        if isinstance(node, ast.FunctionDef)
-    }
+    funcs_by_name = _group_funcs_by_name(ast.parse(source))
     assert _change_attrs_read("outer", "change", funcs_by_name, set()) == {
         "future_field2"
     }
@@ -624,11 +680,7 @@ def test_change_attrs_read_catches_an_annotated_local_alias_read() -> None:
         "    candidate: object = change\n"
         "    return candidate.future_field\n"
     )
-    funcs_by_name = {
-        node.name: node
-        for node in ast.walk(ast.parse(source))
-        if isinstance(node, ast.FunctionDef)
-    }
+    funcs_by_name = _group_funcs_by_name(ast.parse(source))
     assert _change_attrs_read("outer", "change", funcs_by_name, set()) == {
         "future_field"
     }
@@ -647,11 +699,7 @@ def test_change_attrs_read_follows_a_positional_only_helper_parameter() -> None:
         "def helper(candidate, /):\n"
         "    return candidate.future_field\n"
     )
-    funcs_by_name = {
-        node.name: node
-        for node in ast.walk(ast.parse(source))
-        if isinstance(node, ast.FunctionDef)
-    }
+    funcs_by_name = _group_funcs_by_name(ast.parse(source))
     assert _change_attrs_read("outer", "change", funcs_by_name, set()) == {
         "future_field"
     }
@@ -671,11 +719,7 @@ def test_change_attrs_read_ignores_a_nested_functions_shadowed_parameter() -> No
         "        return change.future_field\n"
         "    return nested(None)\n"
     )
-    funcs_by_name = {
-        node.name: node
-        for node in ast.walk(ast.parse(source))
-        if isinstance(node, ast.FunctionDef)
-    }
+    funcs_by_name = _group_funcs_by_name(ast.parse(source))
     assert _change_attrs_read("outer", "change", funcs_by_name, set()) == set()
 
 
@@ -692,11 +736,7 @@ def test_change_attrs_read_follows_a_multi_hop_alias_chain() -> None:
         "    second = first\n"
         "    return second.future_field\n"
     )
-    funcs_by_name = {
-        node.name: node
-        for node in ast.walk(ast.parse(source))
-        if isinstance(node, ast.FunctionDef)
-    }
+    funcs_by_name = _group_funcs_by_name(ast.parse(source))
     assert _change_attrs_read("outer", "change", funcs_by_name, set()) == {
         "future_field"
     }
@@ -718,11 +758,7 @@ def test_change_attrs_read_counts_a_genuine_closure_capture() -> None:
         "        return change.future_field\n"
         "    return nested()\n"
     )
-    funcs_by_name = {
-        node.name: node
-        for node in ast.walk(ast.parse(source))
-        if isinstance(node, ast.FunctionDef)
-    }
+    funcs_by_name = _group_funcs_by_name(ast.parse(source))
     assert _change_attrs_read("outer", "change", funcs_by_name, set()) == {
         "future_field"
     }
@@ -743,11 +779,7 @@ def test_change_attrs_read_evaluates_a_nested_default_in_the_enclosing_scope() -
         "        return change\n"
         "    return nested()\n"
     )
-    funcs_by_name = {
-        node.name: node
-        for node in ast.walk(ast.parse(source))
-        if isinstance(node, ast.FunctionDef)
-    }
+    funcs_by_name = _group_funcs_by_name(ast.parse(source))
     assert _change_attrs_read("outer", "change", funcs_by_name, set()) == {
         "future_field"
     }
@@ -768,11 +800,7 @@ def test_change_attrs_read_ignores_a_nested_functions_own_local_assignment() -> 
         "        return change.future_field\n"
         "    return nested()\n"
     )
-    funcs_by_name = {
-        node.name: node
-        for node in ast.walk(ast.parse(source))
-        if isinstance(node, ast.FunctionDef)
-    }
+    funcs_by_name = _group_funcs_by_name(ast.parse(source))
     assert _change_attrs_read("outer", "change", funcs_by_name, set()) == set()
 
 
@@ -790,11 +818,7 @@ def test_change_attrs_read_treats_nonlocal_as_a_genuine_capture() -> None:
         "        return change.future_field\n"
         "    return nested()\n"
     )
-    funcs_by_name = {
-        node.name: node
-        for node in ast.walk(ast.parse(source))
-        if isinstance(node, ast.FunctionDef)
-    }
+    funcs_by_name = _group_funcs_by_name(ast.parse(source))
     assert _change_attrs_read("outer", "change", funcs_by_name, set()) == {
         "future_field"
     }
@@ -814,11 +838,7 @@ def test_change_attrs_read_treats_a_nested_def_name_as_a_local_binding() -> None
         "        return change.future_field\n"
         "    return nested()\n"
     )
-    funcs_by_name = {
-        node.name: node
-        for node in ast.walk(ast.parse(source))
-        if isinstance(node, ast.FunctionDef)
-    }
+    funcs_by_name = _group_funcs_by_name(ast.parse(source))
     assert _change_attrs_read("outer", "change", funcs_by_name, set()) == set()
 
 
@@ -838,11 +858,7 @@ def test_change_attrs_read_keeps_a_nonlocal_capture_after_reassignment() -> None
         "        return change.future_field\n"
         "    return nested()\n"
     )
-    funcs_by_name = {
-        node.name: node
-        for node in ast.walk(ast.parse(source))
-        if isinstance(node, ast.FunctionDef)
-    }
+    funcs_by_name = _group_funcs_by_name(ast.parse(source))
     assert _change_attrs_read("outer", "change", funcs_by_name, set()) == {
         "future_field"
     }
@@ -858,11 +874,7 @@ def test_change_attrs_read_ignores_a_comprehension_local_target() -> None:
         "def outer(change):\n"
         "    return [change.future_field for change in candidates]\n"
     )
-    funcs_by_name = {
-        node.name: node
-        for node in ast.walk(ast.parse(source))
-        if isinstance(node, ast.FunctionDef)
-    }
+    funcs_by_name = _group_funcs_by_name(ast.parse(source))
     assert _change_attrs_read("outer", "change", funcs_by_name, set()) == set()
 
 
@@ -878,11 +890,7 @@ def test_change_attrs_read_unwraps_a_cast_wrapped_helper_argument() -> None:
         "def helper(c):\n"
         "    return c.future_field\n"
     )
-    funcs_by_name = {
-        node.name: node
-        for node in ast.walk(ast.parse(source))
-        if isinstance(node, ast.FunctionDef)
-    }
+    funcs_by_name = _group_funcs_by_name(ast.parse(source))
     assert _change_attrs_read("outer", "change", funcs_by_name, set()) == {
         "future_field"
     }
@@ -902,11 +910,7 @@ def test_change_attrs_read_keeps_a_closure_local_alias_of_the_tracked_object() -
         "        return candidate.future_field\n"
         "    return nested()\n"
     )
-    funcs_by_name = {
-        node.name: node
-        for node in ast.walk(ast.parse(source))
-        if isinstance(node, ast.FunctionDef)
-    }
+    funcs_by_name = _group_funcs_by_name(ast.parse(source))
     assert _change_attrs_read("outer", "change", funcs_by_name, set()) == {
         "future_field"
     }
@@ -925,11 +929,7 @@ def test_change_attrs_read_still_shadows_an_unrelated_local_via_augassign() -> N
         "        return change.future_field\n"
         "    return nested()\n"
     )
-    funcs_by_name = {
-        node.name: node
-        for node in ast.walk(ast.parse(source))
-        if isinstance(node, ast.FunctionDef)
-    }
+    funcs_by_name = _group_funcs_by_name(ast.parse(source))
     assert _change_attrs_read("outer", "change", funcs_by_name, set()) == set()
 
 
@@ -940,11 +940,7 @@ def test_change_attrs_read_unwraps_a_walrus_wrapped_direct_attribute() -> None:
     which every existing name-match check missed the same way it missed
     `cast(...)`."""
     source = "def outer(change):\n    return (candidate := change).future_field\n"
-    funcs_by_name = {
-        node.name: node
-        for node in ast.walk(ast.parse(source))
-        if isinstance(node, ast.FunctionDef)
-    }
+    funcs_by_name = _group_funcs_by_name(ast.parse(source))
     assert _change_attrs_read("outer", "change", funcs_by_name, set()) == {
         "future_field"
     }
@@ -963,11 +959,7 @@ def test_change_attrs_read_tracks_a_walrus_alias_for_a_later_separate_read() -> 
         "        pass\n"
         "    return candidate.future_field\n"
     )
-    top_level_funcs = {
-        node.name: node
-        for node in ast.walk(ast.parse(top_level_source))
-        if isinstance(node, ast.FunctionDef)
-    }
+    top_level_funcs = _group_funcs_by_name(ast.parse(top_level_source))
     assert _change_attrs_read("outer", "change", top_level_funcs, set()) == {
         "future_field"
     }
@@ -979,11 +971,7 @@ def test_change_attrs_read_tracks_a_walrus_alias_for_a_later_separate_read() -> 
         "        return candidate.future_field\n"
         "    return nested()\n"
     )
-    nested_funcs = {
-        node.name: node
-        for node in ast.walk(ast.parse(nested_source))
-        if isinstance(node, ast.FunctionDef)
-    }
+    nested_funcs = _group_funcs_by_name(ast.parse(nested_source))
     assert _change_attrs_read("outer", "change", nested_funcs, set()) == {
         "future_field"
     }
@@ -1002,11 +990,51 @@ def test_change_attrs_read_tracks_a_match_case_capture_alias() -> None:
         "        case candidate:\n"
         "            return candidate.future_field\n"
     )
-    funcs_by_name = {
-        node.name: node
-        for node in ast.walk(ast.parse(source))
-        if isinstance(node, ast.FunctionDef)
+    funcs_by_name = _group_funcs_by_name(ast.parse(source))
+    assert _change_attrs_read("outer", "change", funcs_by_name, set()) == {
+        "future_field"
     }
+
+
+def test_change_attrs_read_reads_an_alias_before_a_later_unrelated_rebind() -> None:
+    """Codex review, fresh evidence, fifteenth round: `candidate = change;
+    value = candidate.future_field; candidate = object()` reads `candidate`
+    as the tracked alias BEFORE it is later rebound to something unrelated
+    -- this module has no per-statement control-flow ordering, so the
+    alias exemption must cover the name for its whole scope rather than
+    silently dropping this genuine earlier read."""
+    source = (
+        "def outer(change):\n"
+        "    def nested():\n"
+        "        candidate = change\n"
+        "        value = candidate.future_field\n"
+        "        candidate = object()\n"
+        "        return value\n"
+        "    return nested()\n"
+    )
+    funcs_by_name = _group_funcs_by_name(ast.parse(source))
+    assert _change_attrs_read("outer", "change", funcs_by_name, set()) == {
+        "future_field"
+    }
+
+
+def test_change_attrs_read_follows_every_same_named_helper_candidate() -> None:
+    """Codex review, fresh evidence, fifteenth round: a name collision
+    between a real helper and an unrelated, differently-scoped function
+    sharing that name must not silently discard the real one --
+    `_group_funcs_by_name` groups every candidate, and `_change_attrs_read`
+    must follow all of them, unioning their results."""
+    source = (
+        "def outer(change):\n"
+        "    return helper(change)\n"
+        "def helper(c):\n"
+        "    return c.future_field\n"
+        "def unrelated():\n"
+        "    def helper(x):\n"
+        "        return None\n"
+    )
+    funcs_by_name = _group_funcs_by_name(ast.parse(source))
+    assert len(funcs_by_name["helper"]) == 2
     assert _change_attrs_read("outer", "change", funcs_by_name, set()) == {
         "future_field"
     }
