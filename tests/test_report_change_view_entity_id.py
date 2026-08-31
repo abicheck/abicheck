@@ -84,9 +84,6 @@ def test_a_live_changes_entity_id_survives_the_report_round_trip() -> None:
     assert with_id.tier == without_id.tier
 
 
-_PARAM_SCOPE_NODES = (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)
-
-
 def _own_param_names(args: ast.arguments) -> frozenset[str]:
     """Every name *args* binds as its own parameter -- positional-only,
     regular, keyword-only, ``*args``, and ``**kwargs`` alike."""
@@ -109,18 +106,42 @@ def _iter_scope_aware(node: ast.AST) -> Iterator[tuple[ast.AST, frozenset[str]]]
     so that read really is of the outer parameter and must still count).
     Only a name a nested scope actually redeclares as its own parameter
     is shadowed within that scope; every other name stays visible, the
-    same way Python's own closure lookup works. A nested class body is
-    walked with the *same* shadow set as its surroundings (classes have
-    no parameter list to rebind a name via) -- a name reassigned inside
-    it is a rarer, unmodeled edge matching this helper's existing "small,
-    targeted, not general-purpose" scope.
+    same way Python's own closure lookup works.
+
+    A nested scope's ``args`` (parameter defaults/annotations) and, for a
+    real function, its ``decorator_list``/``returns`` are walked with the
+    *enclosing* scope's shadow set, not the nested one (Codex review,
+    fresh evidence, eighth round): Python evaluates defaults, decorators,
+    and the return annotation in the enclosing scope at definition time,
+    before the nested scope even exists, so ``def nested(change=change.
+    future_field): ...`` reads the *outer* ``change`` in its default value
+    even though ``nested`` itself redeclares that name as its own
+    parameter. Only ``body`` runs inside the new, shadowed scope.
+
+    A nested class body is walked with the *same* shadow set as its
+    surroundings (classes have no parameter list to rebind a name via) --
+    a name reassigned inside it is a rarer, unmodeled edge matching this
+    helper's existing "small, targeted, not general-purpose" scope.
     """
     stack: list[tuple[ast.AST, frozenset[str]]] = [(node, frozenset())]
     while stack:
         current, shadowed = stack.pop()
         yield current, shadowed
-        if current is not node and isinstance(current, _PARAM_SCOPE_NODES):
-            shadowed = shadowed | _own_param_names(current.args)
+        if current is not node and isinstance(
+            current, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)
+        ):
+            own_shadowed = shadowed | _own_param_names(current.args)
+            stack.append((current.args, shadowed))
+            if isinstance(current, ast.Lambda):
+                stack.append((current.body, own_shadowed))
+            else:
+                for decorator in current.decorator_list:
+                    stack.append((decorator, shadowed))
+                if current.returns is not None:
+                    stack.append((current.returns, shadowed))
+                for stmt in current.body:
+                    stack.append((stmt, own_shadowed))
+            continue
         for child in ast.iter_child_nodes(current):
             stack.append((child, shadowed))
 
@@ -449,6 +470,31 @@ def test_change_attrs_read_counts_a_genuine_closure_capture() -> None:
         "def outer(change):\n"
         "    def nested():\n"
         "        return change.future_field\n"
+        "    return nested()\n"
+    )
+    funcs_by_name = {
+        node.name: node
+        for node in ast.walk(ast.parse(source))
+        if isinstance(node, ast.FunctionDef)
+    }
+    assert _change_attrs_read("outer", "change", funcs_by_name, set()) == {
+        "future_field"
+    }
+
+
+def test_change_attrs_read_evaluates_a_nested_default_in_the_enclosing_scope() -> None:
+    """Codex review, fresh evidence, eighth round: Python evaluates a
+    nested function's parameter defaults in the *enclosing* scope, at
+    definition time, before that function's own scope exists -- so `def
+    nested(change=change.future_field): ...` reads the *outer* `change`
+    in its default value even though `nested` redeclares that same name
+    as its own parameter. Applying the nested scope's shadow set to its
+    own `args` (as the seventh round's fix did uniformly) would wrongly
+    hide this read."""
+    source = (
+        "def outer(change):\n"
+        "    def nested(change=change.future_field):\n"
+        "        return change\n"
         "    return nested()\n"
     )
     funcs_by_name = {
