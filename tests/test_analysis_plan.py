@@ -190,6 +190,59 @@ class TestBazelBuildTargetScoping:
         plan = AnalysisPlanner.resolve(request)
         assert isinstance(plan, AnalysisPlan)
 
+    def test_depth_binary_is_unaffected(self, tmp_path: Path):
+        """Codex review, fresh evidence: ``depth="binary"`` resolves to
+        collect_mode ``"off"``, and ``embed_build_source`` no-ops before
+        ever calling ``collect_inline_pack`` at that mode -- ``build_info``/
+        ``build_targets`` are never actually consulted, so rejecting them
+        here would be a false positive against an otherwise-valid request
+        (e.g. one that also carries ``--sources``/``--build-info`` for a
+        *different* depth the caller might switch to later)."""
+        aquery = _write(tmp_path / "aquery.json", _EMPTY_AQUERY)
+        request = DumpRequest(
+            input=InputSpec.of(
+                path=None,
+                sources=tmp_path,
+                build_info=aquery,
+                build_targets=["//:lib"],
+            ),
+            depth="binary",
+        )
+        plan = AnalysisPlanner.resolve(request)
+        assert isinstance(plan, AnalysisPlan)
+
+    def test_depth_binary_case_insensitive_is_unaffected(self, tmp_path: Path):
+        aquery = _write(tmp_path / "aquery.json", _EMPTY_AQUERY)
+        request = DumpRequest(
+            input=InputSpec.of(
+                path=None,
+                sources=tmp_path,
+                build_info=aquery,
+                build_targets=["//:lib"],
+            ),
+            depth="BINARY",
+        )
+        plan = AnalysisPlanner.resolve(request)
+        assert isinstance(plan, AnalysisPlan)
+
+    def test_other_depths_still_rejected_alongside_binary(self, tmp_path: Path):
+        """A depth other than ``binary`` still triggers the check -- pins
+        that the fix above is scoped to the one depth that actually
+        no-ops the collection, not a blanket exemption."""
+        aquery = _write(tmp_path / "aquery.json", _EMPTY_AQUERY)
+        for depth in ("headers", "build", "source"):
+            request = DumpRequest(
+                input=InputSpec.of(
+                    path=None,
+                    sources=tmp_path,
+                    build_info=aquery,
+                    build_targets=["//:lib"],
+                ),
+                depth=depth,
+            )
+            with pytest.raises(PlanningError):
+                AnalysisPlanner.resolve(request)
+
 
 class TestAnalysisPlanShape:
     def test_dump_plan_carries_one_side_labelled_input(self, tmp_path: Path):

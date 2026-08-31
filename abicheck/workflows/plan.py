@@ -248,6 +248,17 @@ def bazel_target_scoping_failure(
 
 
 def _check_bazel_target_scoping(side: SidePlan) -> PlanningFailure | None:
+    # ADR-063 Phase 4 (Codex review, fresh evidence): `depth="binary"`
+    # resolves to collect_mode "off", and `embed_build_source` itself
+    # no-ops before ever calling `collect_inline_pack` at that mode -- so
+    # `build_info`/`build_targets` are never actually consulted regardless
+    # of what they name, and rejecting them here would be a false positive
+    # (`cli_scan.py`'s own `_normalize_depth_inputs` already prunes
+    # `build_info` to `None` for this same depth on the `scan` side, which
+    # is why this same false positive can't reach `scan_engine.py`'s call
+    # to the free `bazel_target_scoping_failure` function below).
+    if side.requested_depth is not None and side.requested_depth.lower() == "binary":
+        return None
     return bazel_target_scoping_failure(side.label, side.build_info, side.build_targets)
 
 
