@@ -370,6 +370,23 @@ class TestReleaseExitDecisionForReportAgreesWithRealExit:
         assert mine.code == 16
         assert mine.operational_error_contribution == 4
 
+    def test_a_malformed_non_dict_library_result_is_skipped_not_raised(self) -> None:
+        """`_compute_release_legacy_exit_code` scans `library_results` for
+        each entry's own `verdict` -- a non-dict entry (a malformed/foreign
+        release JSON) must be skipped, not crash the whole report, and a
+        real `BREAKING` sibling entry must still be found."""
+        from abicheck.workflows.gate import resolve_release_exit_decision_for_report
+
+        mine = resolve_release_exit_decision_for_report(
+            "BREAKING",
+            False,
+            [],
+            None,
+            0,
+            ["not-a-dict", {"verdict": "BREAKING"}],  # type: ignore[list-item]
+        )
+        assert mine.code == 4
+
 
 def test_compat_not_comparable_exit_code_is_9_and_distinct_from_compare() -> None:
     # ADR-050 D2: compat check's not_comparable code (9) is the one integer
