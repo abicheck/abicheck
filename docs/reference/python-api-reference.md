@@ -373,7 +373,7 @@ Load suppression list and policy file from paths.
 
 ## `render_output`
 
-Render comparison result in the requested output format.
+Render comparison result in the requested output format. See :func:`abicheck.service_render.render_output`.
 
 | Parameter | Type | Default |
 |---|---|---|

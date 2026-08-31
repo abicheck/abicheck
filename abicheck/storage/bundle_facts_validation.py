@@ -15,25 +15,28 @@
 
 """Persisted ``BundleFacts`` field validators, its JSON container-node
 budget check, and ``load_bundle_facts``'s full dispatch body, split out of
-``bundle_facts.py``/``serialization.py`` (both flat, not-yet-ADR-061-
-migrated root modules) purely to stay under ``bundle_facts.py``'s 800-line
-production cap and ``serialization.py``'s ADR-061 no-growth debt entry
-(``architecture/debt.yaml``). Fits `storage/`'s own ADR-061 D1 remit
-("serialize snapshots/baselines, own their schemas") and its `model`-only
-dependency rule: every function here depends on nothing first-party but
-``errors`` (a `public_root_surfaces` exemption) and `storage.json_budget`
-(same package) -- ``load_bundle_facts_dispatch`` takes its `bundle_facts.py`/
-`snapshot_io.py`/`serialization.py` collaborators as injected callables
-instead of importing them, since none of those three is classified into a
-layer yet and this module, migrated into `storage/`, may not import an
-unclassified first-party module directly. A leaf itself: no import of
-``bundle_facts.py`` or ``serialization.py``, so importing it introduces no
-cycle either way.
+``bundle_facts.py``/``bundle_facts_serialization.py`` purely to stay under
+``bundle_facts.py``'s 800-line production cap and
+``bundle_facts_serialization.py``'s own leaf-module simplicity. Fits
+`storage/`'s own ADR-061 D1 remit ("serialize snapshots/baselines, own
+their schemas") and its `model`-only dependency rule: every function here
+depends on nothing first-party but ``errors`` (a `public_root_surfaces`
+exemption) and `storage.json_budget` (same package) --
+``load_bundle_facts_dispatch`` takes its `bundle_facts.py`/`snapshot_io.py`/
+`serialization.py` collaborators as injected callables instead of importing
+them, since `storage`'s own `may_import: [model]` forbids importing any of
+those three directly (each is `workflows`/unclassified, never `model`),
+regardless of whether they are themselves classified. A leaf itself: no
+import of ``bundle_facts.py``/``bundle_facts_serialization.py``/
+``serialization.py``, so importing it introduces no cycle either way.
 
-``validated_alias_map``/``validated_filename_map`` are duplicated from
-(not imported from) ``serialization._validated_alias_map``/
-``_validated_filename_map`` -- see ``bundle_facts.py``'s own module-level
-comment for why importing that module directly isn't an option.
+``validated_alias_map``/``validated_filename_map`` are the canonical
+implementations -- ``bundle_facts_serialization.bundle_facts_from_dict``
+imports them directly (ADR-061: `bundle_facts_serialization.py` is
+`workflows`-classified, and `workflows -> storage` is allowed) rather than
+keeping its own duplicate, which is what ``serialization.py``'s own
+now-removed ``_validated_alias_map``/``_validated_filename_map`` used to be
+before this module existed.
 """
 
 from __future__ import annotations

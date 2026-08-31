@@ -49,7 +49,7 @@ if TYPE_CHECKING:
     from .environment_matrix import EnvironmentMatrix
     from .policy_file import PolicyFile
     from .service_scan import CompileContext
-    from .suppression import SuppressionList
+    from .workflows.suppression import SuppressionList
 
 
 def _public_provenance_set(
