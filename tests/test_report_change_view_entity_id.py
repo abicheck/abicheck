@@ -167,6 +167,25 @@ def _locally_bound_names(scope_node: ast.AST) -> frozenset[str]:
     change.future_field`` rebinds ``change`` as a local via ordinary
     assignment, no parameter involved at all, and was still misattributed
     as an outer read).
+
+    A plain ``Assign``/``AnnAssign`` whose value (after unwrapping a
+    transparent ``cast(...)``) is a bare ``Name`` is deliberately NOT
+    added here at all (Codex review, fresh evidence, twelfth round): the
+    ninth round's blanket rule made ``def nested(): candidate = change;
+    return candidate.future_field`` shadow ``candidate`` in ``nested``'s
+    own scope, discarding the exact alias `_change_attrs_read`'s
+    fixed-point pass had *just* established -- the two mechanisms were
+    fighting each other. Deferring an alias-*shaped* assignment to that
+    fixed-point pass instead accepts a narrower, safer trade-off: a
+    genuinely unrelated rebind through a bare name the fixed-point pass
+    never tracks (``change = some_other_local``) is no longer shadowed
+    either, so a subsequent read is over-reported as an outer one rather
+    than silently dropped -- a spurious extra field demand is a nuisance,
+    a missed real read is the actual bug class this module exists to
+    catch, and this module has consistently favored the former over the
+    latter. ``AugAssign`` is excluded from this exemption unconditionally
+    (``change += 1`` combines with something else by construction, never
+    a pure alias).
     """
     names: set[str] = set()
     nonlocal_names: set[str] = set()
@@ -190,10 +209,16 @@ def _locally_bound_names(scope_node: ast.AST) -> frozenset[str]:
             continue
         is_root = False
         if isinstance(current, ast.Assign):
-            for assign_target in current.targets:
-                _bind_target(assign_target, names)
-        elif isinstance(current, (ast.AugAssign, ast.AnnAssign)):
+            if not isinstance(_unwrap_transparent(current.value), ast.Name):
+                for assign_target in current.targets:
+                    _bind_target(assign_target, names)
+        elif isinstance(current, ast.AugAssign):
             _bind_target(current.target, names)
+        elif isinstance(current, ast.AnnAssign):
+            if current.value is None or not isinstance(
+                _unwrap_transparent(current.value), ast.Name
+            ):
+                _bind_target(current.target, names)
         elif isinstance(current, (ast.For, ast.AsyncFor)):
             _bind_target(current.target, names)
         elif isinstance(current, (ast.With, ast.AsyncWith)):
@@ -810,3 +835,48 @@ def test_change_attrs_read_unwraps_a_cast_wrapped_helper_argument() -> None:
     assert _change_attrs_read("outer", "change", funcs_by_name, set()) == {
         "future_field"
     }
+
+
+def test_change_attrs_read_keeps_a_closure_local_alias_of_the_tracked_object() -> None:
+    """Codex review, fresh evidence, twelfth round: `def nested(): candidate
+    = change; return candidate.future_field` aliases the *captured* outer
+    `change` to a name local to `nested`'s own scope -- the ninth round's
+    blanket local-shadowing rule was discarding this exact alias the
+    fixed-point pass had just established, fighting its own alias-tracking
+    mechanism. The read must still be found."""
+    source = (
+        "def outer(change):\n"
+        "    def nested():\n"
+        "        candidate = change\n"
+        "        return candidate.future_field\n"
+        "    return nested()\n"
+    )
+    funcs_by_name = {
+        node.name: node
+        for node in ast.walk(ast.parse(source))
+        if isinstance(node, ast.FunctionDef)
+    }
+    assert _change_attrs_read("outer", "change", funcs_by_name, set()) == {
+        "future_field"
+    }
+
+
+def test_change_attrs_read_still_shadows_an_unrelated_local_via_augassign() -> None:
+    """`AugAssign` is deliberately excluded from the alias exemption above
+    -- `change += 1` always combines with something else, never a pure
+    alias, and must still be shadowed the way the ninth round established
+    for ordinary local rebinding."""
+    source = (
+        "def outer(change):\n"
+        "    def nested():\n"
+        "        change = get()\n"
+        "        change += 1\n"
+        "        return change.future_field\n"
+        "    return nested()\n"
+    )
+    funcs_by_name = {
+        node.name: node
+        for node in ast.walk(ast.parse(source))
+        if isinstance(node, ast.FunctionDef)
+    }
+    assert _change_attrs_read("outer", "change", funcs_by_name, set()) == set()
