@@ -41,8 +41,6 @@ from .checker_policy import (
 from .checker_types import validate_check_id, validate_evidence_depth
 from .impact import assess_change
 from .policy.gate_decision import gate_decision_for_result
-from .report.document import ReportDocument
-from .report.render_json import render_json
 from .report_model import VERDICT_TO_SEVERITY_LABEL as _VERDICT_TO_SEVERITY_LABEL
 from .report_summary import build_summary, surface_breakdown
 from .reporter_contract_blocks import add_contract_context as _add_contract_context
@@ -231,7 +229,7 @@ def to_stat_json(
     # summary. `compare` rejects `--stat --use-cases` outright rather than
     # dropping the manifest silently; this keeps the same promise for a
     # direct caller of the renderer (Codex review).
-    return render_json(ReportDocument.from_mapping(d), indent=indent)
+    return _reporter_contract_blocks.render_json_with_side_facts(d, result, indent=indent)
 
 
 def _add_surface_scope(d: dict[str, object], result: DiffResult) -> None:

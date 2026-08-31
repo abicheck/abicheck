@@ -287,6 +287,58 @@ class TestEvidenceDepthAndSuppressionAuditJsonByteParity:
         assert new_text == old_text
 
 
+class TestStatJsonIncludesSideFacts:
+    """``to_stat_json`` (``--stat --format json``) is a fourth JSON builder
+    with its own separate ``return`` -- CodeRabbit review on #965 found it
+    still called ``render_json`` directly, so it was the one JSON mode
+    silently omitting ``suppression_audit``/``old_evidence_depth``/
+    ``new_evidence_depth`` while the other three already emitted them.
+    """
+
+    def _base_result(self) -> DiffResult:
+        return DiffResult(old_version="1.0", new_version="2.0", library="libfoo.so")
+
+    def test_evidence_depth_present_in_stat_json(self) -> None:
+        from abicheck.reporter import to_stat_json
+
+        result = self._base_result()
+        result.old_evidence_depth = "build"
+        result.new_evidence_depth = "source"
+        payload = json.loads(to_stat_json(result))
+
+        assert payload["old_evidence_depth"] == "build"
+        assert payload["new_evidence_depth"] == "source"
+
+    def test_suppression_audit_present_in_stat_json(self) -> None:
+        from abicheck.reporter import to_stat_json
+        from abicheck.suppression import Suppression, SuppressionAudit
+
+        result = self._base_result()
+        rule = Suppression(symbol="never_matches_anything", reason="workaround")
+        result.suppression_audit = SuppressionAudit(
+            stale_rules=[rule],
+            high_risk_matches=[],
+            expired_rules=[],
+            near_expiry_rules=[],
+            match_counts={},
+            total_rules=1,
+        )
+        payload = json.loads(to_stat_json(result))
+
+        assert payload["suppression_audit"]["total_rules"] == 1
+
+    def test_absent_by_default(self) -> None:
+        """Negative control: neither field set -> neither key present,
+        matching the other three JSON builders' pre-existing behavior."""
+        from abicheck.reporter import to_stat_json
+
+        payload = json.loads(to_stat_json(self._base_result()))
+
+        assert "old_evidence_depth" not in payload
+        assert "new_evidence_depth" not in payload
+        assert "suppression_audit" not in payload
+
+
 class TestSuppressionRuleLabelFallbacks:
     """``suppression_rule_label``'s two remaining un-tested branches (Codecov
     patch-coverage gap on PR #965): a rule may have a label with no matching

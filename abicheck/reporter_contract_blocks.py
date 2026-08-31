@@ -393,13 +393,19 @@ def render_json_with_side_facts(
     :func:`add_evidence_depth`), then render.
 
     ``reporter.py`` itself is on the architecture debt ledger's no-growth
-    list (see this module's own docstring) -- its three JSON builders
-    (``to_json``, ``_to_json_leaf``, ``_to_json_root_cause``) each already
-    end with ``return render_json(ReportDocument.from_mapping(d),
-    indent=indent)``; swapping that line for ``return
+    list (see this module's own docstring) -- its four JSON builders
+    (``to_json``, ``_to_json_leaf``, ``_to_json_root_cause``, ``to_stat_
+    json``) each already end with ``return render_json(ReportDocument.
+    from_mapping(d), indent=indent)``; swapping that line for ``return
     render_json_with_side_facts(d, result, indent=indent)`` adds the two
-    facts to all three without growing the file by a net line, instead of
-    each site carrying its own two-line call (which would).
+    facts to all four without growing the file by a net line, instead of
+    each site carrying its own two-line call (which would). ``to_stat_
+    json`` joined the other three later (Codex review, fresh evidence) --
+    ``--stat --format json`` had been the one JSON mode still silently
+    omitting both facts, an oversight rather than a deliberate scope
+    decision (it already carries several other side-fact-shaped blocks:
+    ``severity``, ``analysis_assurance``, ``confidence``, the effective-
+    config digest).
     """
     add_suppression_audit(d, result)
     add_evidence_depth(d, result)
