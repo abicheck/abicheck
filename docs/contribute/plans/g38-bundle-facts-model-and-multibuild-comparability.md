@@ -2782,6 +2782,19 @@ that first revision (Codex review, both fixed here):
    flag family per `docs/AGENTS.md`, regardless of the CLI-only-vs-
    `.abicheck.yml` correction above (that correction avoids the
    `BuildConfig` schema work, not this).
+5. **Updating the one existing page that actively tells users this
+   doesn't exist (Codex review, verified against source).**
+   `docs/use/multi-binary.md`'s stored-facts section says outright: "a
+   `compare` CLI flag that takes a `BundleFacts` file as its old-side
+   operand is expected to land once the CLI-cleanup-phase-two convergence
+   settles... this is deliberately scoped in this phase to the *producer*
+   half and the tested Python API, not a CLI *consumer* half." Shipping
+   this phase's flags without updating that passage (and its CLI
+   reference) would leave the canonical user-facing page explicitly
+   denying the existence of a feature that just shipped — this phase's
+   own docs work is incomplete without that update, same page item (4)'s
+   `docs/_meta/topics.yaml` registration would otherwise cite as its
+   `canonical_page`.
 
 ---
 
