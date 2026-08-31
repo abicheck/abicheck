@@ -2607,18 +2607,28 @@ or version number that already has a fact owner elsewhere").
   **A verdict/exit-code-only sweep is not the whole parity contract
   either (Codex review, next round):** an existing release option that
   changes neither — `--output-dir` (per-library report files), the
-  ordinary `--bundle-facts-out` (a *different* facts-out capture than this
-  phase's facts-*in* consumer, still meaningful on the NEW side of a
-  stored-facts run) — produces a real side effect the live fan-out
-  performs and the new workflow/rendering-adapter pair, as scoped so far,
-  would not. Silently dropping such an option is not acceptable merely
-  because it happens to pass a verdict/exit-code-scoped test: for each
-  release option outside the verdict/exit-code set, this phase must either
-  implement the equivalent side effect on the stored-facts path or reject
-  the option explicitly for that operand shape (mirroring how `ast-
-  frontend`/`gcc-path`/etc. are already explicitly rejected for a
+  ordinary `--bundle-facts-out` — produces a real side effect the live
+  fan-out performs and the new workflow/rendering-adapter pair, as scoped
+  so far, would not. Silently dropping such an option is not acceptable
+  merely because it happens to pass a verdict/exit-code-scoped test: for
+  each release option outside the verdict/exit-code set, this phase must
+  either implement the equivalent side effect on the stored-facts path or
+  reject the option explicitly for that operand shape (mirroring how
+  `ast-frontend`/`gcc-path`/etc. are already explicitly rejected for a
   directory/package operand today, rather than silently ignored) — the
   acceptance sweep above covers both categories, not only the gating one.
+  **Correction on `--bundle-facts-out` specifically (Codex review, next
+  round after that):** the first version of this bullet called it "still
+  meaningful on the NEW side" — backwards. `write_bundle_facts_out()`'s
+  own docstring is explicit: it "persist[s] the OLD side's per-library
+  snapshots," built from `old_map`/`(DiffResult, old_snapshot)` pairs
+  (`cli_compare_release_helpers.py`). On a stored-facts run the OLD side
+  is *already* a `BundleFacts` file, not a live directory of `.so`s — so
+  `--bundle-facts-out` on that path means either OLD-side semantics
+  (copying/re-encoding the supplied baseline, not capturing anything from
+  the NEW side) or an explicit rejection for this operand shape; treating
+  it as if it captured NEW would silently change which release the flag
+  captures depending on which side happens to be the stored one.
   - **Separately, the *result* also needs adapting, not only the
     *inputs*.** `_format_release_summary()` (`cli_compare_release_
     helpers.py`) — the one function that renders JSON/Markdown/JUnit for
@@ -2768,11 +2778,24 @@ that first revision (Codex review, both fixed here):
 
 1. `frontends/cli/commands/compare.py` — presentation translation only: a
    new inline option or two, a new `_dispatch_release_compare` branch that
-   builds a request object, a small manifest parser. **Package extraction
-   does *not* belong here** — unpacking an archive and managing its
-   temporary-directory lifetime is release/extraction orchestration, the
-   same category of work correction 1 above already ruled out of the
-   frontend; it moves to (2).
+   builds a request object. **Package extraction does *not* belong here**
+   — unpacking an archive and managing its temporary-directory lifetime is
+   release/extraction orchestration, the same category of work correction
+   1 above already ruled out of the frontend; it moves to (2). **The
+   manifest/facts-file parser doesn't belong solely inside `_dispatch_
+   release_compare` either (Codex review, verified against source):**
+   `cli_compare_helpers.py`'s own dispatch calls `emit_dry_run()` and
+   returns *before* the `{old_kind, new_kind} & {"directory", "package"}`
+   branch that reaches `_dispatch_release_compare` at all — so parsing/
+   validating the facts path and per-library manifest only inside that
+   branch means `--dry-run` can report success on a malformed manifest or
+   a corrupt facts archive that then fails on the real run. This needs the
+   `Request -> ResolvedPlan -> Result` shape `workflows/AGENTS.md` already
+   names as this package's own convention (mirroring `workflows/artifact`'s
+   `resolve.py`/`execute.py` split): a resolve step that validates the
+   facts path and manifest *before* the dry-run branch, producing one
+   `ResolvedPlan` that both dry-run rendering and real execution consume
+   unchanged — not two independent validation paths that can drift.
 2. A new `abicheck.workflows`-owned request/result pair and its own
    execution function — package extraction (moved from (1)), and reaching
    full verdict/exit-code/rendering parity with `compare_release_cmd`
