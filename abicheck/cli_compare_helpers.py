@@ -111,8 +111,8 @@ from .workflows.gate import announce_coverage_floor, fold_coverage_exit
 if TYPE_CHECKING:
     from .cli_helpers_compare import ResolvedCompareConfig
     from .model import AbiSnapshot
-    from .policy_file import PolicyFile
     from .workflows.extraction import DumpManifest
+    from .workflows.policy_file import PolicyFile
 
 
 def _resolve_compare_config(

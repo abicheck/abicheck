@@ -121,6 +121,7 @@ re-exports all three, so no caller (in this repo or out of it) moved.
 from __future__ import annotations
 
 import importlib
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import date, datetime
 from typing import Any, cast
@@ -136,6 +137,7 @@ from .checker_policy import (
     effective_category,
     policy_kind_sets,
 )
+from .model.policy_file_protocol import ReclassifyRuleProtocol
 
 #: The four verdicts a `to:` value is allowed to resolve to -- the exact set
 #: `policy_file.parse_severity_value`'s `break`/`warn`/`risk`/`ignore`
@@ -412,8 +414,8 @@ def first_matching_reclassify_verdict(
 
 
 def active_reclassify_rules(
-    rules: list[ReclassifyRule], today: date | None = None
-) -> list[ReclassifyRule]:
+    rules: Sequence[ReclassifyRuleProtocol], today: date | None = None
+) -> list[ReclassifyRuleProtocol]:
     """Return the subset of *rules* not yet past their ``expires`` date.
 
     Every report renderer disclosing the *active* rule set (``reporter.py``'s
@@ -422,6 +424,15 @@ def active_reclassify_rules(
     rule verbatim (Codex review) -- an expired rule can never actually match
     (:meth:`ReclassifyRule.matches`), so disclosing it as active claims a
     downgrade is in effect when it no longer is.
+
+    Typed against :class:`~abicheck.model.policy_file_protocol.
+    ReclassifyRuleProtocol`/``Sequence`` rather than the concrete
+    ``ReclassifyRule``/``list`` (ADR-061 Phase 4's ``PolicyFile``
+    investigation): a real ``list[ReclassifyRule]`` still satisfies this
+    signature structurally (``Sequence`` is covariant), but so does the
+    ``Sequence[ReclassifyRuleProtocol]`` a ``DiffResult.policy_file.
+    reclassify`` read now yields once that field is typed against
+    ``PolicyFileProtocol``.
     """
     return [r for r in rules if not r.is_expired(today)]
 

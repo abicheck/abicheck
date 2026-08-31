@@ -242,6 +242,7 @@
         "abicheck/export_surface.py",
         "abicheck/idioms.py",
         "abicheck/pattern_verdicts.py",
+        "abicheck/policy_file.py",
         "abicheck/post_processing.py",
         "abicheck/post_processing_context.py",
         "abicheck/post_processing_reachability.py",

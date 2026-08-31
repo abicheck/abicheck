@@ -23,7 +23,7 @@ from typing import TYPE_CHECKING, Any, cast
 import click
 
 if TYPE_CHECKING:
-    from .policy_file import PolicyFile
+    from .workflows.policy_file import PolicyFile
     from .workflows.suppression import SuppressionList
 
 
@@ -52,7 +52,7 @@ class PolicyFileParam(click.ParamType):
 
     def convert(self, value: Any, param: Any, ctx: Any) -> Path:
         from .policies import builtin_policy_names
-        from .policy_file import builtin_policy_path
+        from .workflows.policy_file import builtin_policy_path
 
         value_str = str(value)
         builtin = builtin_policy_path(value_str)
@@ -379,7 +379,7 @@ def _load_suppression_and_policy(
     plugin command — kept here, next to ``POLICY_FILE_PARAM``, rather than in the
     oversized ``cli.py`` so the cross-command resolution logic has one home.
     """
-    from .policy_file import PolicyFile, pending_validate_overrides_warnings
+    from .workflows.policy_file import PolicyFile, pending_validate_overrides_warnings
     from .workflows.suppression import SuppressionList
 
     suppression: SuppressionList | None = None

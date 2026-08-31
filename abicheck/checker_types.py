@@ -42,7 +42,7 @@ from .detectors import DetectorResult
 from .impact.model import ImpactAssessment
 from .model import AbiSnapshot
 from .model.identity import EntityId
-from .policy_file import PolicyFile
+from .model.policy_file_protocol import PolicyFileProtocol
 from .report_side_facts import ReportSideFacts
 
 # Marker appended to a ``SYMBOL_VERSION_ALIAS_CHANGED`` description when the old
@@ -415,7 +415,7 @@ class DiffResult(ReportSideFacts):
     policy: str = (
         "strict_abi"  # active policy profile; drives breaking/source_breaks/compatible
     )
-    policy_file: PolicyFile | None = None  # custom policy with overrides (Bug 4)
+    policy_file: PolicyFileProtocol | None = None  # custom policy w/ overrides (Bug 4)
     old_metadata: LibraryMetadata | None = None
     new_metadata: LibraryMetadata | None = None
     redundant_changes: list[Change] = field(

@@ -59,7 +59,7 @@ if TYPE_CHECKING:
     from .checker_types import Change, DiffResult
     from .model import AbiSnapshot
     from .model.source_graph import SourceGraphSummary
-    from .policy_file import PolicyFile
+    from .workflows.policy_file import PolicyFile
 
 
 # ADR-061 Phase 3: these moved to `buildsource.evidence_report`, which is now

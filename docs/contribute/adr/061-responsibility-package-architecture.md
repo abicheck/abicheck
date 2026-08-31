@@ -891,9 +891,19 @@ design tension rather than the import edge. Moving those properties off
 Python API (`abicheck/CLAUDE.md`: "Changing their public surface is a
 breaking change to the Python API — coordinate it") across ~20 first-party
 modules and ~30 test modules, so it is not folded into a reporting slice.
-The same applies to `policy_file.py`, which `checker_types.py` imports at
-module scope: whichever layer eventually owns it has to answer the same
-question.
+The same applied to `policy_file.py`, which `checker_types.py` imported at
+module scope — **since resolved for the field-typing edge specifically**,
+see Phase 4's "PolicyFile" investigation below for the mechanism
+(`model/policy_file_protocol.py`'s structural `PolicyFileProtocol`) and its
+own honest accounting of what it does and does not close. The broader
+"`DiffResult` exposes policy-resolved verdict buckets from a
+`compare`-classified type" tension this paragraph opens with is **not**
+resolved by that fix: `DiffResult._effective_kind_sets`/
+`_effective_verdict_for_change` still execute real policy-resolution
+algorithms as their own methods (module-level/lazy imports of
+`checker_policy`/`reclassify`, not the field's declared type), which Phase
+4's own "twenty-second Codex review round" paragraph records as a real,
+unaudited known gap rather than something the Protocol pair touches.
 
 1. Define immutable `ReportDocument` contracts from existing report-model
    behavior rather than inventing a second schema.
@@ -1713,6 +1723,36 @@ should read this as: no physical move is safe today, no `may_import` edge
 exists for it yet, and the co-prerequisite above is what unblocks
 deciding its owner, not a settled classification to build on.
 
+**Update: the "Not decided" status above is now decided and closed, for the
+scope this investigation actually covers.** The one co-prerequisite this
+paragraph named — `checker_policy.py`'s split, moving `ChangeKind`
+somewhere a `model`-owned module can import — landed independently of this
+investigation (`ChangeKind`/`Verdict` now live in
+`model/change_catalog/kinds.py`/`registry.py`, re-exported from
+`checker_policy.py` unchanged). With that satisfied, the Protocol pair this
+section spent twenty-plus Codex rounds designing was built for real:
+`model/policy_file_protocol.py`'s `PolicyFileProtocol`/
+`ReclassifyRuleProtocol`, exactly the five-plus-five-member shape the
+seventeenth-through-eighteenth rounds above verified — `checker_types.py`'s
+`DiffResult.policy_file` field is typed against `PolicyFileProtocol | None`
+today, not the concrete `PolicyFile`, and `reclassify.
+active_reclassify_rules` widened to `Sequence[ReclassifyRuleProtocol] ->
+list[ReclassifyRuleProtocol]` per the twentieth round's own finding.
+`PolicyFile`/`ReclassifyRule` themselves are unmoved and unmodified, exactly
+as the fifth and seventeenth rounds predicted. `abicheck/policy_file.py` is
+classified `policy` in `architecture/modules.yaml` today, with
+`python scripts/check_architecture.py` reporting 0 findings against the
+real tree — not a scratch experiment. **What this does not close, stated
+precisely so it isn't mistaken for more than it is**: the twenty-second
+round's own gap — `DiffResult._effective_kind_sets`/
+`_effective_verdict_for_change` executing real policy-resolution algorithms
+as `model`-owned methods — is unaffected by this closure and remains open,
+exactly as that round scoped it. See this section's own "`policy_file.py` -> `policy`: done, in a later
+pass" bullet (part of the `service.py`-thinning re-measurement list) and
+`architecture/debt.yaml`'s entry for `policy_file.py` for the measured
+closure, and the "Still open: `service.py`" discussion's own later update
+for what this unblocked there.
+
 **A tenth Codex review round named the risk every number in this whole
 investigation shares, worth stating once rather than re-litigating per
 figure: nothing here is gated.** The module lists, line counts, and site
@@ -1762,12 +1802,39 @@ classification, run the checker, read the real output) rather than grouped,
 because grouping is exactly what produced this section's earlier "67", "two
 dozen", and "three sites" overclaims:
 
-- **`policy_file.py` -> `policy`**: blocked by the identical `model -> policy`
-  edge this whole section already spent nine paragraphs on — `checker_types.py`
-  imports `PolicyFile` for `DiffResult.policy_file`'s field type. Not a new
-  finding, just today's confirmation that the standing blocker still applies
-  unchanged; see `architecture/debt.yaml`'s own entry for this file for the
-  measured rationale.
+- **`policy_file.py` -> `policy`: done, in a later pass.** At the time this
+  bullet was written, blocked by the identical `model -> policy` edge this
+  whole section already spent nine paragraphs on — `checker_types.py`
+  imports `PolicyFile` for `DiffResult.policy_file`'s field type — with no
+  new finding beyond confirming the standing blocker still applied. A
+  subsequent pass re-measured it one more time and found the picture had
+  changed on two fronts, neither previously recorded here: (1) the
+  `checker_policy.py` model-vs-policy split this section's own "PolicyFile"
+  investigation named as the Protocol mechanism's one real co-prerequisite
+  (`ChangeKind` classified somewhere a `model`-owned module can import) had
+  already landed independently — `ChangeKind`/`Verdict` live in
+  `model/change_catalog/kinds.py`/`registry.py` today — so the Protocol pair
+  that investigation designed and left "decided, but not yet actionable"
+  was actually buildable; and (2) a full re-measurement surfaced 8 real
+  `frontends -> policy` edges this file's own debt entry had never recorded
+  (only `suppression.py`'s narrower 3-site version below was), all
+  `TYPE_CHECKING`-only or function-local imports of `PolicyFile`/its loader
+  helpers. Both closed: `model/policy_file_protocol.py`'s
+  `PolicyFileProtocol`/`ReclassifyRuleProtocol` (the exact mechanism the
+  "PolicyFile" investigation below selected — a model-owned structural
+  Protocol pair, `PolicyFile`/`ReclassifyRule` unmoved and unmodified) is
+  what `checker_types.py`'s `DiffResult.policy_file` field is typed against
+  now, and the 8 frontends sites route through a new sibling facade,
+  `workflows/policy_file.py`, the same shape `workflows/suppression.py`
+  already established. `python scripts/check_architecture.py` reports 0
+  findings with `abicheck/policy_file.py` classified `policy` in
+  `architecture/modules.yaml` today (not a scratch experiment); see
+  `architecture/debt.yaml`'s own entry for this file for the full measured
+  rationale, and the "PolicyFile" investigation's own paragraphs below for
+  what the Protocol mechanism does and — importantly — does not close
+  (`DiffResult`'s own `_effective_kind_sets`/`_effective_verdict_for_change`
+  methods still execute real policy algorithms; that gap is unaffected by
+  this closure).
 - **`suppression.py` -> `policy`**: a *different*, smaller, previously
   unrecorded blocker — a real `frontends -> policy` edge at
   `cli_params.py:27,383` and `cli_scan_baseline.py:52`, which import
@@ -2085,6 +2152,58 @@ wrapper delegating to a leaf module), and every re-export block already
 documents where its real implementation lives. Below 150 lines is reachable
 only after `policy_file.py`'s ownership question resolves — tracked there,
 not re-opened here.
+
+**Update: that blocker resolved, and here is where `service.py` actually
+lands — real progress, not full closure.** `policy_file.py`'s ownership
+question is answered (see the "Update: the 'Not decided' status above is
+now decided and closed" paragraph earlier in this section): it is `policy`
+in `architecture/modules.yaml`, via the `PolicyFileProtocol`/
+`ReclassifyRuleProtocol` pair in `model/policy_file_protocol.py`. That
+unblocked the physical move this paragraph's own "cannot move without
+either resolving that classification question..." sentence named:
+`compare_snapshots`/`load_suppression_and_policy`/
+`_validate_contract_mode`/`dedup_policy_override_warnings` moved into a
+new leaf module, `workflows/compare_policy.py` (physically inside the
+`workflows` package, so `migrated_source` and subject to
+`unclassified-import` the same way `workflows/input_resolution.py` already
+is), with `service.py` re-exporting all four via a plain static import —
+the identical `workflows -> workflows` shape `input_resolution` uses, not
+the `importlib`-bridge `render.py` needed, since nothing
+`compare_policy.py` imports reaches back into `service.py` or the
+pre-existing CLI-registration SCC. `service.py` dropped from 451 lines (at
+the time of this update) to **283** — no `PolicyFile`/`SuppressionList`
+import remains in it at all. `python scripts/check_architecture.py`
+reports 0 findings; `mypy abicheck/` is clean; the targeted `service`/
+`policy_file` tests (590) all pass, and the full fast suite shows the
+identical 5 pre-existing, unrelated failures this split found before it
+too (verified against the unmodified tree) and no new ones — every real
+caller reaches these functions through `service.<name>(...)` dotted access
+or a fresh per-call import, so every existing `monkeypatch.setattr(service,
+"compare_snapshots", ...)`-shaped test keeps resolving exactly as it did
+before this split, the same property `input_resolution`'s own move
+established and verified again here).
+
+**Still not below 150, and that is a real, stated gap, not a claim of full
+Phase 4 closure.** 283 lines is not "below 150 lines" — the acceptance
+criterion is not met. What is left is nine distinct re-export blocks
+(`_attach_header_graph`, `input_resolution`, the `service_header_scoped`
+`importlib` bridge, `service_dump_native`, `service_metadata_attach`,
+`compare_policy`, `service_compare_pipeline`, `service_dump_pipeline`,
+`service_scan`, `workflows.render`, plus `__all__` itself) each carrying a
+multi-sentence comment explaining *why* the re-export exists and which test
+gotchas it carries — the same institutional-memory style this whole
+document and `AGENTS.md` both hold to, not incidental bulk. Shrinking
+further would mean cutting that documentation or collapsing several
+distinct leaf-module owners' re-exports into fewer, less-precise blocks,
+neither of which this update attempts: `AGENTS.md`'s own "line-count
+reduction without ownership transfer does not satisfy a phase" principle
+cuts the other way too — trimming comments to hit a line count without
+transferring any further ownership would not satisfy the criterion either,
+it would just hide the same information. Whether 150 lines is reachable at
+all for a facade re-exporting nine leaf modules' worth of typed public
+surface, or whether the criterion itself should read differently for a
+facade with this many real tenants, is not decided here and is left as the
+next question for whoever revisits this acceptance bar.
 
 1. Move command input translation into `frontends/cli/commands` and reusable
    Click-only option declaration into `frontends/cli/options`.
