@@ -80,11 +80,17 @@
 - **Phases 3–10** are still unimplemented design text, with one exception
   found on inspection rather than assumed: Phase 3's own first bullet
   (relocate the generic node/edge/merge graph primitive out of
-  `buildsource/`) and its `EntityId.key`/`canonical_key` requirement were
-  both already satisfied — the first by an unrelated ADR-061 Phase 5
+  `buildsource/`) was already satisfied — by an unrelated ADR-061 Phase 5
   migration (`model.graph_facts`/`graph_identity`/`graph_vocabulary`, not
-  the `model/graph.py` name this phase's own text uses), the second by
-  Phase 2's own eighth slice. The rest of Phase 3 — `compare/
+  the `model/graph.py` name this phase's own text uses). Phase 2's own
+  eighth slice separately satisfies only the `EntityId`-only half of
+  Phase 3's `canonical_key` requirement, as `EntityId.key`; Phase 3's own
+  text also needs a second, distinct `canonical_key(occurrence_id)`
+  overload (a model-level `OccurrenceId` disambiguator, for two
+  internal-linkage declarations that share one `EntityId`) that does not
+  exist yet and is **not** satisfied by this landing (Codex review on
+  PR #958, catching an overclaim in an earlier revision of this same
+  paragraph that read as covering both). The rest of Phase 3 — `compare/
   surface_graph.py`, `PublicSurfaceQuery.resolve()`, threading resolved
   public-`EntityId` sets through `checker.py`/`service.py`, and deleting
   `surface.py`'s/`export_surface.py`'s independent traversal
