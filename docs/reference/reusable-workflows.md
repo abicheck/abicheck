@@ -301,7 +301,7 @@ still decides, exactly as before.
 **Exception: `header` also gets a per-cell override**, on the same
 precedence rule. A `kind: library` target's own `public_headers:`
 ([`project-targets-schema.md`](project-targets-schema.md#targets)) —
-space-joined into `run_plan.RunPlanCheck.header` — wins over this workflow's
+newline-joined into `run_plan.RunPlanCheck.header` — wins over this workflow's
 `header` input for that target's cells only, so a project whose libraries
 each have their own header tree gets that scoping automatically once
 declared, instead of every cell sharing one workflow-global `header` value.

@@ -39,6 +39,18 @@
   evidence in this mode). `--no-bundle-analysis` is rejected explicitly
   rather than silently ignored. `--output-dir` now writes one
   `{library}.json` report per matched library, mirroring the live release
-  fan-out's own layout. A package-extraction failure (a malformed archive
-  with a recognized extension) no longer leaks its temporary extraction
-  directory.
+  fan-out's own layout, with the library name sanitized to a basename (it
+  originates in the OLD_FACTS document, not a path this process resolved
+  itself). A package-extraction failure (a malformed archive with a
+  recognized extension) no longer leaks its temporary extraction directory.
+  `--sources`/`--build-info`/`--dump-manifest` and the single-pair-only flag
+  family (`--used-by`, `--required-symbol`, `--use-cases`, `--env-matrix`,
+  `--reconcile-build-context`, `--diagnostic-comparison`,
+  `--audit-suppressions`, `--require-complete-analysis`) are now rejected
+  explicitly, reusing the same guard the live release fan-out applies to a
+  directory/package operand. An explicit `--config` whose `severity:`/
+  `scope:`/`suppression:`/`exit_code_scheme:` blocks would otherwise be
+  silently unapplied (only `compile:` reaches this mode) is now rejected
+  too. A comparison where nothing in NEW_INPUT matches any library in
+  OLD_FACTS's stored facts is now a clean error instead of a `NO_CHANGE`
+  verdict for a comparison that never actually ran.

@@ -401,6 +401,79 @@ class TestCompareOldBundleFacts:
         assert secondary_path.exists()
         assert "Bundle-facts comparison" in secondary_path.read_text()
 
+    def test_zero_matched_libraries_is_rejected(self, tmp_path: Path) -> None:
+        # Codex review: an empty NEW_INPUT means nothing matches any key in
+        # OLD_FACTS's per_library_snapshots, so compare_release_against_
+        # bundle_facts() returns an empty per_library list -- previously
+        # this scored NO_CHANGE (exit 0), reporting a clean bill of health
+        # for a comparison that never actually ran.
+        old_dir = tmp_path / "old"
+        new_dir = tmp_path / "new"
+        old_dir.mkdir()
+        new_dir.mkdir()
+        _build_so(old_dir, "libreal.so", "int add(int a, int b) { return a + b; }\n")
+        facts_path = _write_old_facts(
+            tmp_path, old_dir, old_dir / "libreal.so", "libreal.so"
+        )
+
+        code, out = _invoke(
+            "compare",
+            str(facts_path),
+            str(new_dir),
+            "--old-bundle-facts",
+            "--format",
+            "json",
+        )
+
+        assert code == 1, out
+        assert "matched" in out
+        assert "Traceback" not in out
+
+    def test_output_dir_sanitizes_a_malicious_library_name(
+        self, tmp_path: Path
+    ) -> None:
+        # Codex review: DiffResult.library is copied from the OLD
+        # snapshot's own `library` field (checker.py: `library=old.library`)
+        # -- a value independent of the per_library_snapshots dict key used
+        # for matching, and fully attacker-controlled in a hand-crafted
+        # OLD_FACTS document. An unsanitized f"{diff.library}.json" could
+        # escape --output-dir entirely.
+        old_dir = tmp_path / "old"
+        new_dir = tmp_path / "new"
+        old_dir.mkdir()
+        new_dir.mkdir()
+        body = "int add(int a, int b) { return a + b; }\n"
+        _build_so(old_dir, "libreal.so", body)
+        _build_so(new_dir, "libreal.so", body)
+
+        old_snapshot = _resolve_input(
+            old_dir / "libreal.so", [], [], "old", "c++", include_dependencies=True
+        )
+        # The dict key ("libreal.so") is what matches the real NEW-side
+        # canonical key; the snapshot's own `.library` attribute is a
+        # separate, independently-controlled field -- tampered here to
+        # simulate a malicious OLD_FACTS document.
+        old_snapshot.library = "../../evil"
+        facts = capture_bundle_facts({"libreal.so": old_snapshot})
+        facts_path = tmp_path / "old.bundlefacts.json"
+        save_bundle_facts(facts, facts_path)
+        output_dir = tmp_path / "out_dir"
+
+        code, out = _invoke(
+            "compare",
+            str(facts_path),
+            str(new_dir),
+            "--old-bundle-facts",
+            "--output-dir",
+            str(output_dir),
+            "--format",
+            "json",
+        )
+
+        assert code == 0, out
+        assert not (tmp_path / "evil.json").exists()
+        assert (output_dir / "evil.json").exists()
+
 
 class TestCompareOldBundleFactsEarlyRejections:
     """The four Codex-review fixes: checks that must fire before any real
@@ -828,3 +901,153 @@ class TestCompareOldBundleFactsEarlyRejections:
         after = set(Path(tempfile.gettempdir()).iterdir())
         leaked = {p for p in (after - before) if p.name.startswith("abicheck_pkg_")}
         assert not leaked, f"leaked extraction temp dir(s): {leaked}"
+
+    def test_config_severity_block_is_rejected(self, tmp_path: Path) -> None:
+        # Codex review: an explicit --config is consumed only for its
+        # compile: block (resolve_compile_context) -- a severity: block
+        # would otherwise be silently unapplied, the same silent-divergence
+        # bug --severity-preset is rejected for as an explicit CLI flag.
+        facts_path = tmp_path / "old.bundlefacts.json"
+        facts_path.write_text("{}")
+        new_dir = tmp_path / "new"
+        new_dir.mkdir()
+        config_path = tmp_path / ".abicheck.yml"
+        config_path.write_text("severity:\n  preset: strict\n")
+
+        code, out = _invoke(
+            "compare",
+            str(facts_path),
+            str(new_dir),
+            "--old-bundle-facts",
+            "--config",
+            str(config_path),
+            "--format",
+            "json",
+        )
+
+        assert code == 64
+        assert "severity:" in out
+
+    def test_config_scope_block_is_rejected(self, tmp_path: Path) -> None:
+        facts_path = tmp_path / "old.bundlefacts.json"
+        facts_path.write_text("{}")
+        new_dir = tmp_path / "new"
+        new_dir.mkdir()
+        config_path = tmp_path / ".abicheck.yml"
+        config_path.write_text("scope:\n  public: false\n")
+
+        code, out = _invoke(
+            "compare",
+            str(facts_path),
+            str(new_dir),
+            "--old-bundle-facts",
+            "--config",
+            str(config_path),
+            "--format",
+            "json",
+        )
+
+        assert code == 64
+        assert "scope:" in out
+
+    def test_config_with_only_compile_block_is_accepted(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # A compile:-only config must NOT be rejected -- only the
+        # non-compile blocks (severity/scope/suppression/exit_code_scheme)
+        # are unsupported here.
+        facts_path = tmp_path / "old.bundlefacts.json"
+        facts_path.write_text("{}")
+        new_dir = tmp_path / "new"
+        new_dir.mkdir()
+        config_path = tmp_path / ".abicheck.yml"
+        config_path.write_text("compile:\n  std: c++17\n")
+
+        from abicheck.frontends.cli.commands import compare_bundle_facts
+
+        def _fake_dispatch(*, compile_context: object, **kwargs: object) -> None:
+            pass
+
+        monkeypatch.setattr(compare_bundle_facts, "dispatch", _fake_dispatch)
+
+        code, _out = _invoke(
+            "compare",
+            str(facts_path),
+            str(new_dir),
+            "--old-bundle-facts",
+            "--config",
+            str(config_path),
+            "--format",
+            "json",
+        )
+
+        assert code == 0
+
+    def test_sources_is_rejected(self, tmp_path: Path) -> None:
+        # Codex review: this driver never reads --sources/--build-info on
+        # either side, so inline build/source evidence was silently
+        # dropped.
+        facts_path = tmp_path / "old.bundlefacts.json"
+        facts_path.write_text("{}")
+        new_dir = tmp_path / "new"
+        new_dir.mkdir()
+        src_dir = tmp_path / "src"
+        src_dir.mkdir()
+
+        code, out = _invoke(
+            "compare",
+            str(facts_path),
+            str(new_dir),
+            "--old-bundle-facts",
+            "--sources",
+            f"new={src_dir}",
+            "--format",
+            "json",
+        )
+
+        assert code == 64
+        assert "--sources" in out
+
+    def test_used_by_is_rejected(self, tmp_path: Path) -> None:
+        # Codex review: this short-circuit bypasses
+        # _reject_flags_unsupported_for_set_inputs, so a single-pair-only
+        # flag like --used-by was accepted but never consumed.
+        facts_path = tmp_path / "old.bundlefacts.json"
+        facts_path.write_text("{}")
+        new_dir = tmp_path / "new"
+        new_dir.mkdir()
+        app_path = tmp_path / "app"
+        app_path.write_bytes(b"")
+
+        code, out = _invoke(
+            "compare",
+            str(facts_path),
+            str(new_dir),
+            "--old-bundle-facts",
+            "--used-by",
+            str(app_path),
+            "--format",
+            "json",
+        )
+
+        assert code == 64
+        assert "--used-by" in out
+
+    def test_require_complete_analysis_is_rejected(self, tmp_path: Path) -> None:
+        facts_path = tmp_path / "old.bundlefacts.json"
+        facts_path.write_text("{}")
+        new_dir = tmp_path / "new"
+        new_dir.mkdir()
+
+        code, out = _invoke(
+            "compare",
+            str(facts_path),
+            str(new_dir),
+            "--old-bundle-facts",
+            "--require-complete-analysis",
+            "--format",
+            "json",
+        )
+
+        assert code == 64
+        assert "--require-complete-analysis" in out

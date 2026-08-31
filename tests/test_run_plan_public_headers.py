@@ -56,8 +56,9 @@ def _parsed(raw: dict) -> ProjectTargetsConfig:
 
 class TestPublicHeadersProjection:
     """RunPlanCheck.header: TargetSpec.public_headers reaching the generated
-    run plan, space-joined to match check-target's own `header` input
-    format."""
+    run plan, newline-joined to match action/run.sh's add_flag() multi-value
+    input convention (Codex review: a space-joined value silently mis-split
+    a header path containing whitespace, e.g. under `Program Files`)."""
 
     _RAW = {
         "targets": {
@@ -93,7 +94,7 @@ class TestPublicHeadersProjection:
         plan, report = generate_run_plan(config, {"linux": _bo("libfoo", "libbare")})
         assert report.ok
         [check] = [c for c in plan.checks if c.name == "libfoo"]
-        assert check.header == "headers/foo headers/foo_compat"
+        assert check.header == "headers/foo\nheaders/foo_compat"
 
     def test_library_target_with_no_public_headers_leaves_header_empty(self) -> None:
         config = _parsed(self._RAW)
@@ -109,7 +110,40 @@ class TestPublicHeadersProjection:
         plan, report = generate_run_plan(config, {"linux": _bo("libfoo", "libbare")})
         assert report.ok
         [check] = [c for c in plan.checks if c.name == "consumer"]
-        assert check.header == "headers/foo headers/foo_compat"
+        assert check.header == "headers/foo\nheaders/foo_compat"
+
+    def test_public_header_containing_whitespace_survives_intact(self) -> None:
+        # Codex review: action/run.sh's add_flag() splits a single-line
+        # value on IFS whitespace, so a space-joined header list silently
+        # mis-split a header root containing whitespace (e.g. a Windows SDK
+        # path under "Program Files") into two malformed --header operands.
+        # Newline-joining makes add_flag() treat each declared header as
+        # already one full, space-safe token.
+        raw = {
+            "targets": {
+                "libfoo": {
+                    "kind": "library",
+                    "binary_pattern": "build/libfoo*.so",
+                    "public_headers": [
+                        "C:/Program Files/SDK/include",
+                        "headers/foo",
+                    ],
+                    "checks": [
+                        {"channel": "release", "depth": "headers", "required": True},
+                    ],
+                },
+            },
+            "profiles": {"linux": {"contract": True}},
+        }
+        config = _parsed(raw)
+        plan, report = generate_run_plan(config, {"linux": _bo("libfoo")})
+        assert report.ok
+        [check] = [c for c in plan.checks if c.name == "libfoo"]
+        assert check.header == "C:/Program Files/SDK/include\nheaders/foo"
+        assert check.header.split("\n") == [
+            "C:/Program Files/SDK/include",
+            "headers/foo",
+        ]
 
     def test_bundle_checks_never_project_a_header(self) -> None:
         """kind: bundle cells stay header-empty (RunPlanCheck.header's own

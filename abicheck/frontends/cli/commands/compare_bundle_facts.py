@@ -57,12 +57,25 @@ a directory -- the option's own help text promises "a live release
 directory/package", so a package operand is a supported input, not an
 afterthought. ``--devel-pkg new=...`` is honored the same way (its extracted
 header root/include roots feed the NEW side's header search); ``--debug-
-info``, ``--severity-preset``/``--pack``/``--exit-code-scheme``, and
-``--no-scope-public-headers`` are rejected explicitly rather than silently
-ignored, since none of them have a channel into
-``compare_release_against_bundle_facts()`` -- the same "reject rather than
-silently diverge from the request" rule ``--dry-run``/``--contract`` already
-follow below.
+info``, ``--severity-preset``/``--pack``/``--exit-code-scheme``,
+``--no-scope-public-headers``, ``--sources``/``--build-info``/
+``--dump-manifest``, and the single-pair-only flag family
+(``--used-by``/``--required-symbol``/``--use-cases``/``--env-matrix``/
+``--reconcile-build-context``/``--diagnostic-comparison``/
+``--audit-suppressions``/``--require-complete-analysis``, reusing
+``cli_compare_options._reject_set_input_flags``, the same guard the live
+release fan-out applies to a directory/package operand) are rejected
+explicitly rather than silently ignored, since none of them have a channel
+into ``compare_release_against_bundle_facts()`` -- the same "reject rather
+than silently diverge from the request" rule ``--dry-run``/``--contract``
+already follow below. An explicit ``--config`` is checked the same way: a
+``.abicheck.yml`` whose ``severity:``/``scope:``/``suppression:``/
+``exit_code_scheme:`` blocks would otherwise be silently unapplied (only its
+``compile:`` block reaches ``resolve_compile_context``) is rejected rather
+than partially honored. A zero-match comparison (nothing in NEW_INPUT's
+canonical library keys overlaps OLD_FACTS's ``per_library_snapshots``) is a
+``ClickException``, not a ``NO_CHANGE`` verdict -- exit 0 must mean a real
+comparison found nothing broken, not that nothing was compared at all.
 """
 
 from __future__ import annotations
@@ -205,22 +218,72 @@ def dispatch(*, compile_context: Any, **kwargs: Any) -> None:
         raise click.UsageError(
             "--contract is not supported together with --old-bundle-facts."
         )
-    if (
-        kwargs.get("severity_preset") is not None
-        or kwargs.get("pack_paths")
-        or kwargs.get("exit_code_scheme") is not None
-    ):
-        # Codex review: --severity-preset/--pack/--exit-code-scheme drive
-        # run_compare's _resolve_compare_config + pack-application path,
-        # neither of which this dispatcher calls --
-        # compare_release_against_bundle_facts() has no severity/exit-code-
-        # scheme/pack parameter to receive them, so every per-library
-        # comparison always exits through the legacy verdict mapping
-        # regardless of what was requested. Rejected rather than silently
-        # scoring/gating the run differently than asked.
+    if kwargs.get("severity_preset") is not None or kwargs.get("pack_paths"):
+        # Codex review: --severity-preset/--pack drive run_compare's
+        # _resolve_compare_config + pack-application path, neither of which
+        # this dispatcher calls -- compare_release_against_bundle_facts()
+        # has no severity/pack parameter to receive them, so every
+        # per-library comparison always exits through the legacy verdict
+        # mapping regardless of what was requested. Rejected rather than
+        # silently scoring/gating the run differently than asked.
+        # --exit-code-scheme is rejected below, by the same shared helper
+        # the live release fan-out uses for it.
         raise click.UsageError(
-            "--severity-preset/--pack/--exit-code-scheme are not supported "
-            "together with --old-bundle-facts."
+            "--severity-preset/--pack are not supported together with "
+            "--old-bundle-facts."
+        )
+    # Codex review: reuse the exact rejection the live release fan-out
+    # already applies to a directory/package operand -- this driver's own
+    # NEW_INPUT is exactly that kind of operand (now including a package,
+    # per the extraction fix below), and every one of these flags is
+    # equally unconsumed here (no per-library-pair scoping, no single
+    # suppression-audit/analysis-assurance result to attach, etc.). Not
+    # `_reject_flags_unsupported_for_set_inputs` (which also calls
+    # `_reject_evidence_flags_for_set_inputs`): that helper rejects
+    # `--depth` unconditionally, but `--depth binary` is a legitimate,
+    # supported combination here (see the depth handling above/below) --
+    # `--sources`/`--build-info`/`--dump-manifest` are rejected directly
+    # instead, matching that helper's reasoning without its `--depth`
+    # overreach.
+    from ....cli_compare_options import _reject_set_input_flags
+
+    _reject_set_input_flags(
+        kwargs.get("exit_code_scheme"),
+        bool(kwargs.get("reconcile_build_context", False)),
+        kwargs.get("env_matrix_path"),
+        used_by_apps=tuple(kwargs.get("used_by_apps") or ()),
+        required_symbols=(
+            tuple(kwargs.get("required_symbols_opt") or ())
+            or (
+                ("__file__",) if kwargs.get("required_symbols_file") is not None else ()
+            )
+        ),
+        use_cases_manifest=kwargs.get("use_cases_manifest"),
+        diagnostic_comparison=bool(kwargs.get("diagnostic_comparison", False)),
+        audit_suppressions=bool(kwargs.get("audit_suppressions", False)),
+        include_labels=kwargs.get("include_labels"),
+        require_complete_analysis=bool(kwargs.get("require_complete_analysis", False)),
+    )
+    if any(
+        kwargs.get(name) is not None
+        for name in (
+            "old_sources",
+            "new_sources",
+            "old_build_info",
+            "new_build_info",
+            "old_dump_manifest",
+            "new_dump_manifest",
+        )
+    ):
+        # Codex review, same root cause as the --depth build/source
+        # rejection below: this driver's NEW-side resolution never reads
+        # any of these, on either side, so inline build/source evidence (or
+        # a dump manifest) would be accepted and silently dropped -- no
+        # L3-L5 collected, no manifest-declared includes applied.
+        raise click.UsageError(
+            "--sources/--build-info/--dump-manifest are not supported "
+            "together with --old-bundle-facts: this driver has no channel "
+            "for inline build/source evidence on either side."
         )
     if kwargs.get("scope_public_headers") is False:
         # Codex review, same root cause: --no-scope-public-headers has no
@@ -269,6 +332,55 @@ def dispatch(*, compile_context: Any, **kwargs: Any) -> None:
         raise click.UsageError(
             "--no-bundle-analysis is not supported together with --old-bundle-facts."
         )
+    config_path = kwargs.get("config")
+    if config_path is not None:
+        # Codex review: an explicit --config is consumed only as
+        # resolve_compile_context's build_config (compile: block merging)
+        # -- the same non-compile settings --severity-preset/--pack/
+        # --no-scope-public-headers are rejected for as explicit CLI flags
+        # (severity:/exit_code_scheme:/scope:/suppression:) can also be
+        # declared in the config file itself, with no CLI flag needed, and
+        # were silently unapplied through that channel too. Reject rather
+        # than silently diverge, the same bar every other flag/config
+        # combination in this dispatcher is held to.
+        from ....workflows.extraction import load_build_config
+
+        try:
+            _bc = load_build_config(Path(config_path))
+        except ValueError as exc:
+            raise click.UsageError(
+                f"cannot parse build config {config_path}: {exc}"
+            ) from exc
+        _unsupported_config_blocks = []
+        if _bc.severity_preset is not None or any(
+            getattr(_bc, field) is not None
+            for field in (
+                "severity_abi_breaking",
+                "severity_potential_breaking",
+                "severity_quality_issues",
+                "severity_addition",
+            )
+        ):
+            _unsupported_config_blocks.append("severity:")
+        if _bc.scope_public is not None:
+            _unsupported_config_blocks.append("scope:")
+        if (
+            _bc.suppression_strict is not None
+            or _bc.suppression_require_justification is not None
+        ):
+            _unsupported_config_blocks.append("suppression:")
+        if _bc.exit_code_scheme_explicit:
+            _unsupported_config_blocks.append("exit_code_scheme:")
+        if _unsupported_config_blocks:
+            raise click.UsageError(
+                f"{config_path} declares "
+                f"{', '.join(_unsupported_config_blocks)} settings, which "
+                "are not supported together with --old-bundle-facts: "
+                "compare_release_against_bundle_facts() has no channel to "
+                "honor them (same reason --severity-preset/--pack/"
+                "--no-scope-public-headers are rejected as explicit "
+                "flags). Use a --config that only sets compile: options."
+            )
 
     headers, includes = _resolve_new_side_headers_includes(kwargs)
     if depth == "binary":
@@ -391,6 +503,23 @@ def dispatch(*, compile_context: Any, **kwargs: Any) -> None:
                 f"Extracted files kept in: {', '.join(_temp_dir_paths)}", err=True
             )
 
+    if not result.per_library:
+        # Codex review: an empty NEW_INPUT (or one whose canonical library
+        # keys match none of OLD_FACTS's per_library_snapshots) makes
+        # compare_release_against_bundle_facts() return with an empty
+        # per_library list -- nothing was actually compared, yet
+        # _exit_compare_release below would score that as NO_CHANGE (exit
+        # 0), reporting a successful compatibility result for a comparison
+        # that never ran. Fail loudly instead: this is a usage/operational
+        # error (a wrong NEW_INPUT, a canonical-key mismatch), not a clean
+        # bill of health.
+        raise click.ClickException(
+            f"No library in {new_dir} matched any library in "
+            f"{old_facts_path}'s stored per_library_snapshots -- nothing "
+            "was compared. Check that NEW_INPUT and OLD_FACTS reference "
+            "the same release."
+        )
+
     text = _render(result, fmt, old_facts_path=old_facts_path, new_dir=new_dir)
     output = kwargs.get("output")
     if output is not None:
@@ -420,7 +549,18 @@ def dispatch(*, compile_context: Any, **kwargs: Any) -> None:
         output_dir = Path(output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
         for diff in result.per_library:
-            (output_dir / f"{diff.library}.json").write_text(to_json(diff))
+            # Codex review: `diff.library` originates in OLD_FACTS -- a
+            # user-supplied document, not a path this process resolved
+            # itself -- so an absolute or `../`-laden value must not reach
+            # the filesystem unsanitized (unlike the live release fan-out's
+            # `old_path.stem`, which is always derived from a real,
+            # already-resolved Path). `Path(...).name` is the same
+            # basename-only normalization that driver's own `.stem`
+            # provides: it yields only the final path component regardless
+            # of how many `/`/`..` segments precede it, so it can never
+            # escape `output_dir` on this platform's own separator rules.
+            safe_name = Path(diff.library).name or "library"
+            (output_dir / f"{safe_name}.json").write_text(to_json(diff))
 
     _exit_compare_release(result.verdict.value, fail_on_removed=False, removed_keys=[])
 

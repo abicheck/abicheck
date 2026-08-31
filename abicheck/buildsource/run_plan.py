@@ -315,13 +315,22 @@ class RunPlanCheck:
     #: pattern, never the contract target's own (it doesn't have one).
     binary_pattern: str = ""
     #: This target's ``public_headers:`` (``TargetSpec.public_headers``),
-    #: space-joined to match ``check-target``'s own ``header`` input format
-    #: (ADR-047's own worked example declares this per target, but nothing
-    #: downstream read it until this field existed -- see
-    #: ``docs/reference/reusable-workflows.md``'s "Shared analysis options"
-    #: section for the per-cell-override precedent this follows, identical
-    #: in shape to :attr:`compile_ast_frontend`). Empty when the target
-    #: declares no ``public_headers:`` (a caller then falls back to its own
+    #: newline-joined to match ``action/run.sh``'s ``add_flag()`` multi-value
+    #: input convention (ADR-047's own worked example declares this per
+    #: target, but nothing downstream read it until this field existed --
+    #: see ``docs/reference/reusable-workflows.md``'s "Shared analysis
+    #: options" section for the per-cell-override precedent this follows,
+    #: identical in shape to :attr:`compile_ast_frontend`). Newline-joined
+    #: rather than space-joined (Codex review, fresh evidence) -- a
+    #: space-joined value put a declared header root containing whitespace
+    #: (e.g. a Windows SDK path under ``Program Files``) through
+    #: ``add_flag()``'s single-line legacy branch, which splits on IFS
+    #: whitespace and silently produced two malformed ``--header`` operands
+    #: instead of one; ``add_flag()`` treats a multi-line value as
+    #: already-tokenized (one full, space-safe item per line), the same
+    #: convention every other multi-value Action input (``old-header``,
+    #: ``new-header``, …) already relies on. Empty when the target declares
+    #: no ``public_headers:`` (a caller then falls back to its own
     #: workflow-global ``header`` input, unchanged from before this field
     #: existed). ``kind: bundle`` cells never set this -- see
     #: ``BUNDLE_CHECK_DEPTHS``'s own docstring in ``project_targets.py`` for
@@ -653,24 +662,26 @@ def _library_lookup_and_pattern(
 ) -> tuple[str, str, str]:
     """Returns ``(lookup_id, binary_pattern, header)`` -- the id to look up
     in a profile's ``build-output.json`` ``targets[]``, the pattern a caller
-    globs for the candidate binary, and the space-joined ``public_headers:``
+    globs for the candidate binary, and the newline-joined ``public_headers:``
     to forward as ``check-target``'s own ``header`` input (RunPlanCheck.
-    header's own docstring). For ``kind: library`` all three come from
-    *target* itself; for ``app-consumer``/``plugin-contract`` all three are
-    redirected through *target*'s own ``library`` field (ADR-047 §3) -- an
-    app-consumer/plugin-contract target carries no ``public_headers:`` of
-    its own (``TargetSpec.to_dict()`` only ever emits that key for ``kind:
+    header's own docstring -- newline-joined, not space-joined, so a header
+    root containing whitespace survives ``action/run.sh``'s ``add_flag()``
+    intact). For ``kind: library`` all three come from *target* itself; for
+    ``app-consumer``/``plugin-contract`` all three are redirected through
+    *target*'s own ``library`` field (ADR-047 §3) -- an app-consumer/
+    plugin-contract target carries no ``public_headers:`` of its own
+    (``TargetSpec.to_dict()`` only ever emits that key for ``kind:
     library``), so its header scoping is necessarily the redirected
     library's."""
     if target.kind == TARGET_KIND_LIBRARY:
-        return target.id, target.binary_pattern, " ".join(target.public_headers)
+        return target.id, target.binary_pattern, "\n".join(target.public_headers)
     referenced = config.targets.get(target.library)
     if referenced is None:
         return target.library, "", ""
     return (
         target.library,
         referenced.binary_pattern,
-        " ".join(referenced.public_headers),
+        "\n".join(referenced.public_headers),
     )
 
 
