@@ -59,6 +59,23 @@ def normalize_anonymous_type_spellings_on_load(snapshot: AbiSnapshot) -> AbiSnap
     declarations. Idempotent: ``strip_anonymous_type_location`` is a no-op
     on text with no ``" at "`` left to strip, so this is safe to call
     unconditionally on every load, including an already-normalized one.
+
+    Known, accepted limitation shared with ``renumber_anonymous_closure_
+    identities`` (Codex review; see ``docs/contribute/known-gaps.md``'s "The
+    L5 source graph's own node identities are never renumbered..." entry,
+    Codex review on PR #868): this only rewrites
+    :data:`~abicheck.qualified_name_segments._LAMBDA_IDENTITY_FIELDS` on the
+    flat snapshot. A schema-v29+ document's ``AbiSnapshot.surface_graph`` is
+    decoded earlier in ``snapshot_from_dict`` (``decode_surface_graph``) and
+    is not touched here, so a loaded raw-marker baseline's attached graph
+    keeps its own un-stripped node/edge identities even after the flat
+    fields are normalized -- the identical flat-vs-graph mismatch the
+    existing entry documents for dump-time renumbering, now also reachable
+    from this load-time path. Not fixed here for the same reason: closing it
+    needs the graph's own node/edge strings folded into the same
+    strip-and-renumber pass, verified against a case mixing flat-visible and
+    graph-only closures -- a real, cross-cutting change, not a same-PR
+    reactive patch.
     """
     collected = _lambda_identity_containers_and_strings(snapshot)
     if collected is None:
