@@ -756,6 +756,11 @@ class TestAugmentReport:
             "contract_coverage_contribution": 0,
             "analysis_assurance_contribution": 0,
             "crosscheck_promotion_contribution": 0,
+            "operational_error_contribution": 0,
+            "evidence_contract_error_contribution": 0,
+            "budget_overflow_contribution": 0,
+            "not_comparable_contribution": 0,
+            "removed_required_library_contribution": 0,
         }
 
     def test_advisory_neutralizes_a_scan_reports_nested_exit_block(self):
@@ -793,6 +798,11 @@ class TestAugmentReport:
             "contract_coverage_contribution": 0,
             "analysis_assurance_contribution": 0,
             "crosscheck_promotion_contribution": 0,
+            "operational_error_contribution": 0,
+            "evidence_contract_error_contribution": 0,
+            "budget_overflow_contribution": 0,
+            "not_comparable_contribution": 0,
+            "removed_required_library_contribution": 0,
         }
 
     def test_neutralization_covers_every_block_the_aggregate_reads(self):

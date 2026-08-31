@@ -688,7 +688,7 @@ from typing import Any
 #:       settings previously published an identical
 #:       ``surface.scope_to_public_surface`` value despite retaining
 #:       genuinely different findings.
-REPORT_SCHEMA_VERSION = "2.46"
+REPORT_SCHEMA_VERSION = "2.47"  #: ADR-064 stage 1b: ``ExitDecision.to_dict`` gains five additive always-``0`` keys (``operational_error_contribution``, ``evidence_contract_error_contribution``, ``budget_overflow_contribution``, ``not_comparable_contribution``, ``removed_required_library_contribution``) to every ``exit`` block.
 
 #: SemVer-style (MAJOR.MINOR) version of the ``scan`` JSON output, emitted as
 #: ``scan_schema_version`` at the top level of both public scan dict shapes:
@@ -1011,7 +1011,7 @@ REPORT_SCHEMA_VERSION = "2.46"
 #:        more: ``surface.scope_to_public_surface_requested`` was added,
 #:        same round as `compare`'s report_schema_version 2.46 entry.
 #: 1.21 -- ``scan --against``'s baseline summary gains ``coverage_warnings`` (Codex review), mirroring `compare`'s own top-level field of the same name/shape -- e.g. a byte-identical-binaries warning. Additive key, omitted when empty.
-SCAN_SCHEMA_VERSION = "1.21"
+SCAN_SCHEMA_VERSION = "1.22"  #: ADR-064 stage 1b, mirrors `compare`'s 2.47 entry: ``ExitDecision.to_dict``'s five new keys reach ``diff.exit`` too, and a ``NOT_COMPARABLE`` baseline outcome now persists a real ``diff.exit`` block (previously ``diff`` was only ``{"reason": <message>}``).
 
 _SCHEMA_DIR = Path(__file__).resolve().parent
 COMPARE_REPORT_SCHEMA_PATH = _SCHEMA_DIR / "compare_report.schema.json"

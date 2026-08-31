@@ -391,3 +391,109 @@ def resolve_release_exit_decision(
         compatibility_contribution=0,
         contract_coverage_contribution=contract_coverage_contribution,
     )
+
+
+def _compute_release_legacy_exit_code(
+    library_results: list[dict[str, object]],
+) -> int:
+    """Worst legacy-scheme exit code among genuinely-compared libraries.
+
+    ADR-064 stage 1b. Mirrors ``cli_compare_release_helpers.
+    _compute_release_severity_exit_code``'s per-library independence for
+    the *legacy* scheme: ``_RELEASE_VERDICT_ORDER``'s collapsed
+    ``worst_verdict`` ranks ``"ERROR"``/``"not_comparable"`` above every
+    real :class:`~abicheck.checker_policy.Verdict`, so using it directly as
+    the legacy compatibility-gate contribution would let an unrelated
+    library's operational failure hide a real ``BREAKING``/``API_BREAK``
+    verdict from a *different* library in the same release -- exactly the
+    gap :func:`resolve_release_exit_decision`'s own docstring calls out as
+    "real, additional scope for stage 1b's wiring work." Only the
+    *reported contribution/reason* was ever affected -- see
+    :func:`resolve_release_exit_decision_for_report`'s own docstring for
+    why the real, already-shipped process exit code this feeds
+    (``cli_compare_release_helpers._exit_compare_release``) never actually
+    disagreed numerically.
+    """
+    from ..checker_policy import Verdict
+    from .severity import legacy_exit_code
+
+    worst = 0
+    for entry in library_results:
+        if not isinstance(entry, dict):
+            continue
+        verdict_str = entry.get("verdict")
+        if isinstance(verdict_str, str) and verdict_str in Verdict.__members__:
+            worst = max(worst, legacy_exit_code(Verdict[verdict_str]))
+    return worst
+
+
+def resolve_release_exit_decision_for_report(
+    worst_verdict: str,
+    fail_on_removed: bool,
+    removed_keys: list[str],
+    severity_exit_code: int | None,
+    contract_coverage_exit_contribution: int,
+    library_results: list[dict[str, object]],
+) -> ExitDecision:
+    """ADR-064 stage 1b: the release fan-out's persisted, explainable
+    ``exit`` block.
+
+    Reproduces ``cli_compare_release_helpers._exit_compare_release``'s own
+    precedence via :func:`resolve_release_exit_decision`, for **report
+    purposes only** -- this function never calls ``sys.exit`` and is not
+    itself called from ``_exit_compare_release``, which keeps computing the
+    real process exit code exactly the way it always has (`tests/
+    test_exit_code_integrity.py` pins that function's own signature and
+    numeric outputs; rewriting it in place to delegate here risked exactly
+    the kind of silent exit-code regression ADR-064 exists to prevent, for
+    a function CI gates directly depend on).
+
+    ``.code`` is nonetheless *provably* always equal to what
+    ``_exit_compare_release`` sys.exits with, given the same inputs -- not
+    merely "expected to agree": every legacy-scheme code
+    :func:`_compute_release_legacy_exit_code` can produce caps at ``4``
+    (``legacy_exit_code(BREAKING)``), which is also the fixed floor
+    ``_exit_compare_release`` applies for an operational ``"ERROR"``
+    sentinel (``max(4, ...)``), so the two can never diverge numerically --
+    only in which reasons/contributions the returned :class:`ExitDecision`
+    records. Concretely, a release with one ``BREAKING`` library and a
+    second, unrelated library that failed to compare (an ``"ERROR"``
+    verdict) collapses to ``worst_verdict == "ERROR"`` in today's
+    ``_RELEASE_VERDICT_ORDER`` rollup (ADR-050 D2's ``"not_comparable"``
+    ranks higher still, but is handled by its own dominant branch below) --
+    ``_exit_compare_release`` never even computes the ``BREAKING``
+    library's own code in that case, since its ``ERROR`` short-circuit
+    fires first, while this function still finds it via
+    :func:`_compute_release_legacy_exit_code` and names both
+    ``COMPATIBILITY_GATE`` and ``OPERATIONAL_ERROR`` in ``reasons`` -- both
+    tied at ``4``. `tests/test_exit_decision.py`'s
+    `TestReleaseExitDecisionForReportAgreesWithRealExit` proves the
+    numeric-agreement claim across the same input matrix
+    ``_exit_compare_release``'s own tests already cover.
+
+    *severity_exit_code* being not ``None`` is what "severity scheme
+    active" means, matching ``_exit_compare_release``'s own check.
+    ``worst_verdict == "ERROR"`` is used directly as the operational-error
+    signal rather than re-scanning *library_results* -- ``"ERROR"`` ranks
+    second only to ``"not_comparable"`` in ``_RELEASE_VERDICT_ORDER``, and
+    bundle/matrix results never themselves set an ``"ERROR"`` verdict, so
+    once ``not_comparable`` is ruled out, ``worst_verdict == "ERROR"`` is
+    exactly equivalent to "at least one library entry is `'ERROR'`."
+    """
+    not_comparable = worst_verdict == "not_comparable"
+    severity_scheme_active = severity_exit_code is not None
+    removed_required_library = fail_on_removed and bool(removed_keys)
+    operational_error_contribution = 4 if worst_verdict == "ERROR" else 0
+    verdict_or_severity_contribution = (
+        (severity_exit_code or 0)
+        if severity_scheme_active
+        else _compute_release_legacy_exit_code(library_results)
+    )
+    return resolve_release_exit_decision(
+        not_comparable=not_comparable,
+        severity_scheme_active=severity_scheme_active,
+        verdict_or_severity_contribution=verdict_or_severity_contribution,
+        removed_required_library=removed_required_library,
+        contract_coverage_contribution=contract_coverage_exit_contribution,
+        operational_error_contribution=operational_error_contribution,
+    )

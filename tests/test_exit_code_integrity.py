@@ -211,6 +211,124 @@ class TestReleaseContractCoverageFold:
         assert code == legacy_exit_code(Verdict[worst])
 
 
+class TestReleaseExitDecisionForReportAgreesWithRealExit:
+    """ADR-064 stage 1b: `resolve_release_exit_decision_for_report`'s
+    `.code` must always equal what `_exit_compare_release` actually
+    `sys.exit`s with, for the exact same inputs -- these two are
+    independently computed (the real function was deliberately left
+    unmodified rather than rewritten to delegate here, see that resolver's
+    own docstring), so nothing but a test proves they cannot silently
+    diverge.
+    """
+
+    @pytest.mark.parametrize(
+        "worst", ["BREAKING", "API_BREAK", "COMPATIBLE", "NO_CHANGE"]
+    )
+    def test_agrees_for_each_verdict_legacy_scheme(self, worst: str) -> None:
+        from abicheck.cli_compare_release import _exit_compare_release
+        from abicheck.workflows.gate import resolve_release_exit_decision_for_report
+
+        real = _exit_code_of(
+            _exit_compare_release, worst, False, [], severity_exit_code=None
+        )
+        mine = resolve_release_exit_decision_for_report(
+            worst, False, [], None, 0, [{"verdict": worst}]
+        )
+        assert mine.code == real
+
+    def test_agrees_removed_library_wins_over_coverage_only(self) -> None:
+        from abicheck.cli_compare_release import _exit_compare_release
+        from abicheck.workflows.gate import resolve_release_exit_decision_for_report
+
+        real = _exit_code_of(
+            _exit_compare_release,
+            "NO_CHANGE", True, ["removed_lib"],
+            severity_exit_code=None,
+            contract_coverage_exit_contribution=1,
+        )
+        mine = resolve_release_exit_decision_for_report(
+            "NO_CHANGE", True, ["removed_lib"], None, 1, [{"verdict": "NO_CHANGE"}]
+        )
+        assert mine.code == real == 8
+
+    def test_agrees_error_verdict_floors_at_four_with_coverage(self) -> None:
+        from abicheck.cli_compare_release import _exit_compare_release
+        from abicheck.workflows.gate import resolve_release_exit_decision_for_report
+
+        real = _exit_code_of(
+            _exit_compare_release,
+            "ERROR", False, [],
+            severity_exit_code=None,
+            contract_coverage_exit_contribution=1,
+        )
+        mine = resolve_release_exit_decision_for_report(
+            "ERROR", False, [], None, 1, [{"verdict": "ERROR"}]
+        )
+        assert mine.code == real == 4
+
+    def test_agrees_severity_scheme_folds_coverage(self) -> None:
+        from abicheck.cli_compare_release import _exit_compare_release
+        from abicheck.workflows.gate import resolve_release_exit_decision_for_report
+
+        real = _exit_code_of(
+            _exit_compare_release,
+            "COMPATIBLE", False, [],
+            severity_exit_code=0,
+            contract_coverage_exit_contribution=1,
+        )
+        mine = resolve_release_exit_decision_for_report(
+            "COMPATIBLE", False, [], 0, 1, [{"verdict": "COMPATIBLE"}]
+        )
+        assert mine.code == real == 1
+
+    def test_agrees_severity_scheme_removed_library_wins(self) -> None:
+        from abicheck.cli_compare_release import _exit_compare_release
+        from abicheck.workflows.gate import resolve_release_exit_decision_for_report
+
+        real = _exit_code_of(
+            _exit_compare_release,
+            "COMPATIBLE", True, ["removed_lib"],
+            severity_exit_code=0,
+            contract_coverage_exit_contribution=1,
+        )
+        mine = resolve_release_exit_decision_for_report(
+            "COMPATIBLE", True, ["removed_lib"], 0, 1, [{"verdict": "COMPATIBLE"}]
+        )
+        assert mine.code == real == 8
+
+    def test_agrees_not_comparable(self) -> None:
+        from abicheck.cli_compare_release import _exit_compare_release
+        from abicheck.workflows.gate import resolve_release_exit_decision_for_report
+
+        real = _exit_code_of(_exit_compare_release, "not_comparable", False, [])
+        mine = resolve_release_exit_decision_for_report(
+            "not_comparable", False, [], None, 0, []
+        )
+        assert mine.code == real == 16
+
+    def test_a_breaking_library_ties_with_an_unrelated_error_library(self) -> None:
+        """The exact gap `resolve_release_exit_decision`'s own docstring
+        names: today's collapsed `worst_verdict` scalar reads "ERROR" (it
+        outranks "BREAKING"), so `_exit_compare_release` never even computes
+        the BREAKING library's own code -- but the numeric result (4) is
+        identical either way, since ERROR's floor and BREAKING's own code
+        both cap at 4. This resolver additionally names both reasons.
+        """
+        from abicheck.cli_compare_release import _exit_compare_release
+        from abicheck.workflows.gate import resolve_release_exit_decision_for_report
+
+        real = _exit_code_of(
+            _exit_compare_release, "ERROR", False, [], severity_exit_code=None
+        )
+        mine = resolve_release_exit_decision_for_report(
+            "ERROR", False, [], None, 0,
+            [{"verdict": "BREAKING"}, {"verdict": "ERROR"}],
+        )
+        assert mine.code == real == 4
+        reason_values = {r.value for r in mine.reasons}
+        assert {"compatibility_gate", "operational_error"} <= reason_values
+
+
 def test_compat_not_comparable_exit_code_is_9_and_distinct_from_compare() -> None:
     # ADR-050 D2: compat check's not_comparable code (9) is the one integer
     # the 3-11 range documented no meaning for, and deliberately different

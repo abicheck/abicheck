@@ -63,8 +63,22 @@ itself used for the three axes above. Split into its own module purely for
 this package's 800-line production cap (Codex review: the combined module
 reached 824 lines) -- both modules implement the identical stage 1a scope.
 Wiring these into the report's `exit` block (`scan --against`'s nested
-`diff.exit`, the release fan-out's own summary) is stage 1b, and the
-atomic `--exit-code-scheme` removal is stage 2; both remain open.
+`diff.exit`, the release fan-out's own summary) is stage 1b. Stage 1b
+landed *partially*: :meth:`ExitDecision.to_dict` now serializes all five
+ADR-064 fields (report schema 2.47/1.22), `scan`'s `NOT_COMPARABLE` outcome
+persists a real `diff.exit` block via `resolve_scan_exit_decision`, and the
+release fan-out's JSON summary gains an `exit` block via
+`resolve_release_exit_decision`, verified to always agree numerically with
+`cli_compare_release_helpers._exit_compare_release`'s own, independently
+computed and heavily pinned exit code (`tests/test_exit_decision.py`'s
+`TestReleaseExitDecisionForReportAgreesWithRealExit`) without changing that
+function itself. **Still open:** `scan`'s `_BudgetOverflow`/
+`_EvidenceContractError` abort points (`scan_engine.py`), which raise
+*before* any report exists today -- persisting a decision for them needs a
+genuine new design decision (should the CLI construct a minimal report at
+those abort points at all?) that this stage deliberately did not make; see
+ADR-064's own "Stage 1b, further split" section. The atomic
+`--exit-code-scheme` removal remains stage 2.
 """
 
 from __future__ import annotations
@@ -215,16 +229,17 @@ class ExitDecision:
     recording a "prior" or already-available value there alongside a
     nonzero dominant field can never change which one is the maximum.
 
-    **Deliberately not yet in :meth:`to_dict`.** ``operational_error_
-    contribution`` and the four ADR-064 dominant fields exist so the
-    *Python object* is self-consistent and testable today; serializing
-    them into the report's persisted ``exit`` block is real, further work
-    (wiring the ADR-064 resolvers into `scan_engine.py`/
-    `cli_compare_release_helpers.py`) that also needs its own report-schema
-    version bump -- adding always-`0` keys to the shape `to_dict()`
-    produces today would itself be an unreviewed, unversioned change to the
-    already-shipped `exit` block every existing `compare`/`scan --against`
-    report emits.
+    **Now serialized by :meth:`to_dict` (ADR-064 stage 1b, report schema
+    2.47/1.22).** All five fields default to ``0`` and stay ``0`` for every
+    decision built by :func:`resolve_exit_decision`/
+    :func:`resolve_compare_exit_decision` (every pre-existing `compare`/
+    `scan --against` call site), so a report produced by an already-shipped
+    code path gains five always-``0`` keys and nothing else changes -- the
+    additive bump this class's own field docstrings anticipated. A decision
+    built by :func:`~abicheck.policy.exit_decision_precedence.
+    resolve_scan_exit_decision`/:func:`~abicheck.policy.
+    exit_decision_precedence.resolve_release_exit_decision` sets at most one
+    of the four dominant fields nonzero, per those fields' own docstrings.
     """
 
     code: int
@@ -286,7 +301,14 @@ class ExitDecision:
     removed_required_library_contribution: int = 0
 
     def to_dict(self) -> dict[str, object]:
-        """JSON-serializable form, for the report's ``exit`` block."""
+        """JSON-serializable form, for the report's ``exit`` block.
+
+        The five ADR-064 fields (``operational_error_contribution`` through
+        ``removed_required_library_contribution``) joined this shape in
+        report schema 2.47/1.22 (stage 1b) -- see this class's own
+        docstring for why every pre-existing decision emits them as ``0``
+        rather than omitting them.
+        """
         return {
             "code": self.code,
             "reasons": [r.value for r in self.reasons],
@@ -294,6 +316,15 @@ class ExitDecision:
             "contract_coverage_contribution": self.contract_coverage_contribution,
             "analysis_assurance_contribution": self.analysis_assurance_contribution,
             "crosscheck_promotion_contribution": self.crosscheck_promotion_contribution,
+            "operational_error_contribution": self.operational_error_contribution,
+            "evidence_contract_error_contribution": (
+                self.evidence_contract_error_contribution
+            ),
+            "budget_overflow_contribution": self.budget_overflow_contribution,
+            "not_comparable_contribution": self.not_comparable_contribution,
+            "removed_required_library_contribution": (
+                self.removed_required_library_contribution
+            ),
         }
 
 

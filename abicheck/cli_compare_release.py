@@ -871,6 +871,7 @@ def _finalize_release_output(
         severity_exit_code=severity_exit_code,
         contract_coverage_exit_contribution=contract_coverage_exit_contribution,
         contract_coverage_failure_count=contract_coverage_failure_count,
+        fail_on_removed=fail_on_removed,
     )
     _write_or_echo(output, text)
 
@@ -1830,6 +1831,7 @@ def compare_release_cmd(
                     severity_exit_code=severity_exit_code,
                     contract_coverage_exit_contribution=contract_coverage_exit_contribution,
                     contract_coverage_failure_count=contract_coverage_failure_count,
+                    fail_on_removed=fail_on_removed,
                 )
                 _write_or_echo(secondary_output, secondary_text)
 

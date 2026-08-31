@@ -1188,6 +1188,14 @@ def test_against_not_comparable_exits_6(
     payload = _payload(res)
     assert payload["verdict"] == "NOT_COMPARABLE"
     assert payload["diff"]["reason"] == "scope drift"
+    # ADR-064 stage 1b: this outcome now persists a real `exit` block too,
+    # rather than leaving `diff` as bare `{"reason": ...}` with no exit
+    # explanation of its own (schema 1.22).
+    exit_block = payload["diff"]["exit"]
+    assert exit_block["code"] == 6
+    assert exit_block["reasons"] == ["not_comparable"]
+    assert exit_block["not_comparable_contribution"] == 6
+    assert exit_block["compatibility_contribution"] == 0
     # Pinned to the live constant, not a literal, so a future additive schema
     # bump (ADR-049 Phase 5's 1.4, adding suppressed_count/suppressed) doesn't
     # need this unrelated NOT_COMPARABLE-envelope assertion touched too.
