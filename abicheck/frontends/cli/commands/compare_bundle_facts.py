@@ -243,8 +243,43 @@ def dispatch(*, compile_context: Any, **kwargs: Any) -> None:
         raise click.UsageError(
             "--debug-info is not supported together with --old-bundle-facts."
         )
+    depth = kwargs.get("depth")
+    if depth in ("build", "source"):
+        # Codex review: run_compare's own --depth build/source dial collects
+        # L3-L5 build/source evidence from --sources/--build-info on either
+        # side -- compare_release_against_bundle_facts() has no parameter to
+        # receive either, on either side (the OLD side is already a resolved
+        # snapshot with no raw sources to replay, and this driver's NEW-side
+        # resolution never reads old_sources/new_sources/old_build_info/
+        # new_build_info at all), so the requested evidence was silently
+        # never collected. Rejected rather than silently downgraded to
+        # header-only depth.
+        raise click.UsageError(
+            f"--depth {depth} is not supported together with "
+            "--old-bundle-facts: this driver has no channel for L3-L5 "
+            "build/source evidence."
+        )
+    if kwargs.get("no_bundle_analysis"):
+        # Codex review: compare_release_against_bundle_facts() has no
+        # parameter to skip the cross-library BUNDLE_* analysis
+        # (compare_bundle_from_facts always runs), so --no-bundle-analysis
+        # was silently accepted and ignored -- the run could report a
+        # different verdict/exit code than requested (bundle_verdict folds
+        # into result.verdict). Rejected rather than silently unscoped.
+        raise click.UsageError(
+            "--no-bundle-analysis is not supported together with --old-bundle-facts."
+        )
 
     headers, includes = _resolve_new_side_headers_includes(kwargs)
+    if depth == "binary":
+        # Codex review: run_compare's own --depth binary clears every header
+        # operand (_normalize_compare_options) so the comparison stays pure
+        # L0/L1 symbol/debug-info evidence with no L2 header AST at all --
+        # this dispatcher independently re-derives `headers` from the same
+        # raw kwargs that flag feeds, so without this it silently kept
+        # whatever --header/--new-header was given and ran L2 extraction
+        # anyway, reporting findings outside the requested depth.
+        headers = []
     header_backend = (
         kwargs.get("new_header_backend") or kwargs.get("header_backend") or "auto"
     )
@@ -287,20 +322,26 @@ def dispatch(*, compile_context: Any, **kwargs: Any) -> None:
         _temp_dir_paths.append(path)
         return Path(path)
 
-    lib_dir, _new_debug_dir, header_dir, _new_symbols_file = _extract_if_package(
-        new_dir,
-        None,
-        kwargs.get("devel_pkg2"),
-        _make_temp_dir,
-        is_package,
-        detect_extractor,
-    )
-    if header_dir is not None:
-        if not headers:
-            headers = [header_dir]
-        includes = includes + _discover_include_roots(header_dir)
-
     try:
+        # Codex review: extraction itself must be inside this scope --
+        # make_temp_dir() records the directory before extractor.extract()
+        # runs, so a malformed/corrupt archive that matches a known
+        # extension (a real format, bad content) raises *after* the temp
+        # dir already exists; extracting outside this try/finally leaked it
+        # even without --keep-extracted.
+        lib_dir, _new_debug_dir, header_dir, _new_symbols_file = _extract_if_package(
+            new_dir,
+            None,
+            kwargs.get("devel_pkg2"),
+            _make_temp_dir,
+            is_package,
+            detect_extractor,
+        )
+        if header_dir is not None:
+            if not headers:
+                headers = [header_dir]
+            includes = includes + _discover_include_roots(header_dir)
+
         try:
             result = compare_release_against_bundle_facts(
                 old_facts_path,
@@ -366,6 +407,20 @@ def dispatch(*, compile_context: Any, **kwargs: Any) -> None:
             result, secondary_fmt, old_facts_path=old_facts_path, new_dir=new_dir
         )
         secondary_output.write_text(secondary_text)
+    output_dir = kwargs.get("output_dir")
+    if output_dir is not None:
+        # Codex review: NEW_INPUT is a release-style operand here, so
+        # --output-dir's own per-library-report contract applies -- the
+        # live release fan-out writes one `{library}.json` per matched
+        # library (cli_compare_release.py's own output_dir handling); mirror
+        # that layout exactly rather than silently accepting the flag and
+        # producing nothing.
+        from ....reporter import to_json
+
+        output_dir = Path(output_dir)
+        output_dir.mkdir(parents=True, exist_ok=True)
+        for diff in result.per_library:
+            (output_dir / f"{diff.library}.json").write_text(to_json(diff))
 
     _exit_compare_release(result.verdict.value, fail_on_removed=False, removed_keys=[])
 

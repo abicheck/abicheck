@@ -29,6 +29,7 @@ import json
 import shutil
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 import pytest
@@ -652,3 +653,178 @@ class TestCompareOldBundleFactsEarlyRejections:
 
         assert code == 64
         assert "--write" in out
+
+    def test_depth_build_is_rejected(self, tmp_path: Path) -> None:
+        # Codex review: --depth build/source collect L3-L5 evidence from
+        # --sources/--build-info, which this dispatcher never reads on
+        # either side.
+        facts_path = tmp_path / "old.bundlefacts.json"
+        facts_path.write_text("{}")
+        new_dir = tmp_path / "new"
+        new_dir.mkdir()
+
+        code, out = _invoke(
+            "compare",
+            str(facts_path),
+            str(new_dir),
+            "--old-bundle-facts",
+            "--depth",
+            "build",
+            "--format",
+            "json",
+        )
+
+        assert code == 64
+        assert "--depth" in out
+
+    def test_depth_source_is_rejected(self, tmp_path: Path) -> None:
+        facts_path = tmp_path / "old.bundlefacts.json"
+        facts_path.write_text("{}")
+        new_dir = tmp_path / "new"
+        new_dir.mkdir()
+
+        code, out = _invoke(
+            "compare",
+            str(facts_path),
+            str(new_dir),
+            "--old-bundle-facts",
+            "--depth",
+            "source",
+            "--format",
+            "json",
+        )
+
+        assert code == 64
+        assert "--depth" in out
+
+    def test_no_bundle_analysis_is_rejected(self, tmp_path: Path) -> None:
+        # Codex review: compare_release_against_bundle_facts() has no
+        # parameter to skip compare_bundle_from_facts's cross-library
+        # analysis, so --no-bundle-analysis was silently accepted and
+        # ignored.
+        facts_path = tmp_path / "old.bundlefacts.json"
+        facts_path.write_text("{}")
+        new_dir = tmp_path / "new"
+        new_dir.mkdir()
+
+        code, out = _invoke(
+            "compare",
+            str(facts_path),
+            str(new_dir),
+            "--old-bundle-facts",
+            "--no-bundle-analysis",
+            "--format",
+            "json",
+        )
+
+        assert code == 64
+        assert "--no-bundle-analysis" in out
+
+    def test_depth_binary_clears_headers(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # Codex review: run_compare's own --depth binary clears every header
+        # operand (_normalize_compare_options) so the run stays pure L0/L1
+        # evidence -- this dispatcher independently re-derives `headers`
+        # from the same raw kwargs, so without the fix it silently kept a
+        # given --header and ran L2 extraction anyway. Proven by
+        # monkeypatching compare_release_against_bundle_facts and capturing
+        # what dispatch() forwards to it, rather than through a real gcc
+        # build: what matters here is whether `headers` reaches the call
+        # cleared, not the L2 extraction behavior itself (already covered
+        # elsewhere).
+        import abicheck.bundle_side_input as bundle_side_input
+
+        facts_path = tmp_path / "old.bundlefacts.json"
+        facts_path.write_text("{}")
+        new_dir = tmp_path / "new"
+        new_dir.mkdir()
+        header_file = tmp_path / "foo.h"
+        header_file.write_text("")
+
+        captured: dict[str, object] = {}
+
+        def _fake_compare(*args: object, **kwargs: object) -> None:
+            captured["headers"] = kwargs.get("headers")
+            raise ValueError("stop-here")
+
+        monkeypatch.setattr(
+            bundle_side_input, "compare_release_against_bundle_facts", _fake_compare
+        )
+
+        code, out = _invoke(
+            "compare",
+            str(facts_path),
+            str(new_dir),
+            "--old-bundle-facts",
+            "--depth",
+            "binary",
+            "--header",
+            f"new={header_file}",
+            "--format",
+            "json",
+        )
+
+        assert code == 1, out
+        assert captured["headers"] is None
+
+    def test_output_dir_writes_per_library_reports(self, tmp_path: Path) -> None:
+        # Codex review: --output-dir is a release-style artifact request
+        # (one {library}.json per matched library, mirroring the live
+        # release fan-out's own layout) that this dispatcher only ever
+        # accepted, never fulfilled.
+        old_dir = tmp_path / "old"
+        new_dir = tmp_path / "new"
+        old_dir.mkdir()
+        new_dir.mkdir()
+        body = "int add(int a, int b) { return a + b; }\n"
+        _build_so(old_dir, "libreal.so", body)
+        _build_so(new_dir, "libreal.so", body)
+        facts_path = _write_old_facts(
+            tmp_path, old_dir, old_dir / "libreal.so", "libreal.so"
+        )
+        output_dir = tmp_path / "out_dir"
+
+        code, out = _invoke(
+            "compare",
+            str(facts_path),
+            str(new_dir),
+            "--old-bundle-facts",
+            "--output-dir",
+            str(output_dir),
+            "--format",
+            "json",
+        )
+
+        assert code == 0, out
+        lib_report = output_dir / "libreal.so.json"
+        assert lib_report.exists()
+        payload = json.loads(lib_report.read_text())
+        assert payload["library"] == "libreal.so"
+
+    def test_extraction_failure_does_not_leak_temp_dir(self, tmp_path: Path) -> None:
+        # Codex review: a malformed archive (a real recognized extension,
+        # bad content) raised from inside _extract_if_package *after*
+        # make_temp_dir() had already recorded the directory -- when
+        # extraction sat outside the try/finally, that directory was never
+        # cleaned up even without --keep-extracted.
+        facts_path = tmp_path / "old.bundlefacts.json"
+        facts_path.write_text("{}")
+        malformed_archive = tmp_path / "release.tar.gz"
+        malformed_archive.write_bytes(b"not a real gzip/tar stream")
+
+        before = set(Path(tempfile.gettempdir()).iterdir())
+
+        code, out = _invoke(
+            "compare",
+            str(facts_path),
+            str(malformed_archive),
+            "--old-bundle-facts",
+            "--format",
+            "json",
+        )
+
+        assert code != 0, out
+        after = set(Path(tempfile.gettempdir()).iterdir())
+        leaked = {p for p in (after - before) if p.name.startswith("abicheck_pkg_")}
+        assert not leaked, f"leaked extraction temp dir(s): {leaked}"

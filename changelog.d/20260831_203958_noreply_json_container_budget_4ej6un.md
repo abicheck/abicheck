@@ -33,4 +33,12 @@
   `--severity-preset`/`--pack`/`--exit-code-scheme`, and
   `--no-scope-public-headers` are rejected explicitly (exit 64) rather than
   silently ignored, since none of them have a channel into
-  `compare_release_against_bundle_facts()`.
+  `compare_release_against_bundle_facts()`. `--depth binary` now clears the
+  NEW side's headers the same way `run_compare` does, and `--depth
+  build`/`--depth source` are rejected explicitly (no channel for L3-L5
+  evidence in this mode). `--no-bundle-analysis` is rejected explicitly
+  rather than silently ignored. `--output-dir` now writes one
+  `{library}.json` report per matched library, mirroring the live release
+  fan-out's own layout. A package-extraction failure (a malformed archive
+  with a recognized extension) no longer leaks its temporary extraction
+  directory.
