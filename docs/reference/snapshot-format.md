@@ -89,10 +89,19 @@ continued) that closes a bare-name collision between two member typedefs
 sharing a spelling in different classes/namespaces — needs no reliability
 flag, since an empty dict degrades identically to "no typedefs at all" for
 a pre-v25 snapshot, unlike the real-but-wrong scalar defaults v19-v23 above
-guard against, and (v29) `AbiSnapshot.surface_graph` — the unconditional
-public-surface/L5 evidence graph (ADR-063 Phase 3 D5, see "Fields" below)
-persisted through its own `to_dict()` encoding, not `asdict()`'s naive
-recursion.
+guard against, (v26) `Fact[T]` siblings for `RecordType.bases_fact`/
+`virtual_bases_fact`/`vtable_fact`/`vptr_offset_bits_fact` and
+`Param.is_va_list_fact` (ADR-063 Phase 0, see `storage/fact_codec.py`),
+(v27) `Function.is_compiler_generated` — closes a castxml L4 extractor bug
+where a compiler-synthesized implicit special member leaked into the source
+graph as if it were genuine public API; needs no reliability flag, since
+`None` (a pre-v27 snapshot's default) degrades cleanly to today's inclusive
+behavior rather than being misread as "confirmed user-written", (v28) each
+declaration's `entity_id` carrier persisted through its own codec
+(`storage/entity_id_codec.py`), and (v29) `AbiSnapshot.surface_graph` — the
+unconditional public-surface/L5 evidence graph (ADR-063 Phase 3 D5, see
+"Fields" below) persisted through its own `to_dict()` encoding, not
+`asdict()`'s naive recursion.
 
 ### Forward / backward compatibility
 
@@ -282,7 +291,7 @@ gets backfilled, only report on it.
 |-----|------|---------|
 | `build_source_pack` | object \| null | Reference to an out-of-band build/source pack (ADR-028). Older snapshots may store this under the legacy key `evidence_pack`, which the loader still reads. |
 | `build_source` | object \| null | Inline-embedded build/source facts for single-artifact workflows. Omitted when nothing was embedded. |
-| `surface_graph` | object \| null | (v29, ADR-063 Phase 3 D5) The unconditional public-surface/L5 evidence graph — never gated on `build_source`, unlike the row above. `null` for a snapshot predating this field, or one whose headers were never parsed. When `build_source.source_graph` is the identical object, it is omitted from `build_source`'s own encoding rather than written twice; the loader restores that alias on read. |
+| `surface_graph` | object \| omitted | (v29, ADR-063 Phase 3 D5) The unconditional public-surface/L5 evidence graph — never gated on `build_source`, unlike the row above. The key is omitted entirely (not written as `null`) for a snapshot predating this field, a binary-only snapshot, or one whose headers were never parsed — `encode_surface_graph()` pops the key rather than writing a null placeholder. When `build_source.source_graph` is the identical object, it is omitted from `build_source`'s own encoding rather than written twice; the loader restores that alias on read. |
 | `build_context_defines` | array of strings | The build's active `-D` macro set, harvested from a compile database (ADR-039). Empty when no compile database was supplied. |
 | `conditional_fields` | object | `{type: {field: {guard, type, is_bitfield, ...}}}` registry of record fields guarded by a single positive `#ifdef`/`#if defined(...)`, including fields a context-free header parse pruned from `types[].fields` (ADR-039). Feeds the opt-in `--reconcile-build-context` diff pass; empty when no compile database was supplied at dump time. |
 

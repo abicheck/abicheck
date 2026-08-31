@@ -63,31 +63,22 @@ class SurfaceGraph:
     by_header: Mapping[str, frozenset[str]]
     # public root symbol -> the type names its signature directly references
     _root_seed_types: Mapping[str, frozenset[str]] = field(default_factory=dict)
-    # declaration name -> every entity_id resolved for a function/variable
-    # under that name (plural: C++ overloads share one demangled name).
-    _entity_ids_by_name: Mapping[str, frozenset[EntityId]] = field(default_factory=dict)
-    # ADR-063 Phase 3 D5 -- when given, narrows public_roots() to declarations
-    # whose own resolved EntityId is a member; None preserves the exact
-    # pre-Phase-3 Visibility.PUBLIC-only behavior (see build_surface_graph).
-    _public_entity_ids: frozenset[EntityId] | None = None
 
     def public_roots(self) -> frozenset[str]:
-        """Names of ``Visibility.PUBLIC`` functions and variables -- or,
-        when this graph was built with a resolved ``public_entity_ids`` set
-        (ADR-063 Phase 3 D5), names of exactly the declarations whose own
-        ``EntityId`` is a member of that set instead. The latter can only
-        ever *narrow* the former: every name it can return already has
-        seed types recorded below (``_root_seed_types`` is always built
-        from every ``Visibility.PUBLIC`` declaration, unconditionally), so
-        :meth:`reachable_types` never sees a root with no known seeds.
+        """Names of the declarations ``_root_seed_types`` was built from --
+        ``Visibility.PUBLIC`` functions/variables by default, or, when this
+        graph was built with a resolved ``public_entity_ids`` set (ADR-063
+        Phase 3 D5), exactly the declarations whose own ``EntityId`` is a
+        member of that set instead. The filtering happens once, per
+        declaration, in :func:`_build_root_seed_types` itself -- **not**
+        here as a post-hoc name-level narrowing: a narrowing pass over
+        already-unioned per-name seed types cannot un-union a specific
+        excluded overload's own seeds back out of a name two-or-more
+        overloads share, which is exactly the bug a review round caught
+        (Codex/CodeRabbit, PR #962) in an earlier version of this design
+        that filtered here instead of at seed-collection time.
         """
-        if self._public_entity_ids is None:
-            return frozenset(self._root_seed_types)
-        return frozenset(
-            name
-            for name in self._root_seed_types
-            if self._entity_ids_by_name.get(name, frozenset()) & self._public_entity_ids
-        )
+        return frozenset(self._root_seed_types)
 
     def reachable_types(self, root: str) -> frozenset[str]:
         """Known types transitively reachable from public *root*'s signature."""
@@ -185,15 +176,27 @@ def _build_type_refs(snap: AbiSnapshot) -> dict[str, frozenset[str]]:
     return type_refs
 
 
-def _build_root_seed_types(snap: AbiSnapshot) -> dict[str, frozenset[str]]:
+def _build_root_seed_types(
+    snap: AbiSnapshot, *, public_entity_ids: frozenset[EntityId] | None = None
+) -> dict[str, frozenset[str]]:
     """Map each public root symbol to the type names its signature touches.
 
     C++ overloads share a demangled name but reference different types; their
-    seed sets are unioned so no overload's types are lost by overwrite.
+    seed sets are unioned so no overload's types are lost by overwrite --
+    but each overload's own seeds are only unioned in when *that overload
+    itself* passes :func:`_is_public` (``public_entity_ids`` membership when
+    given, else the legacy ``Visibility.PUBLIC`` check). Filtering per
+    declaration here, before the union, is what keeps a name-level narrowing
+    pass unnecessary and correct: unioning first and narrowing by name
+    afterward (an earlier version of this design) could not un-union one
+    excluded overload's seeds back out of a name a still-included sibling
+    overload shares — a resolved-entity-id exclusion for `f(double)` leaked
+    its referenced types into `f`'s reachable set whenever `f(int)` stayed
+    included (Codex/CodeRabbit review, PR #962).
     """
     root_seed_types: dict[str, frozenset[str]] = {}
     for fn in snap.functions:
-        if fn.visibility != Visibility.PUBLIC:
+        if not _is_public(fn, public_entity_ids):
             continue
         seeds = set(_type_identifiers(fn.return_type))
         for p in fn.params:
@@ -202,27 +205,12 @@ def _build_root_seed_types(snap: AbiSnapshot) -> dict[str, frozenset[str]]:
             fn.name, frozenset()
         ) | frozenset(seeds)
     for var in snap.variables:
-        if var.visibility != Visibility.PUBLIC:
+        if not _is_public(var, public_entity_ids):
             continue
-        root_seed_types[var.name] = frozenset(_type_identifiers(var.type))
+        root_seed_types[var.name] = root_seed_types.get(
+            var.name, frozenset()
+        ) | frozenset(_type_identifiers(var.type))
     return root_seed_types
-
-
-def _build_entity_ids_by_name(snap: AbiSnapshot) -> dict[str, frozenset[EntityId]]:
-    """Every function/variable's resolved ``entity_id``, grouped by its own
-    demangled name (plural: two overloads share one name). A declaration
-    with no resolved identity (an older snapshot, or a kind no producer
-    resolves one for yet) contributes nothing here — ``public_roots()``'s
-    own ``None``-set fallback stays the only answer for such a snapshot.
-    """
-    out: dict[str, set[EntityId]] = {}
-    for fn in snap.functions:
-        if fn.entity_id is not None:
-            out.setdefault(fn.name, set()).add(fn.entity_id)
-    for var in snap.variables:
-        if var.entity_id is not None:
-            out.setdefault(var.name, set()).add(var.entity_id)
-    return {k: frozenset(v) for k, v in out.items()}
 
 
 def _build_by_header(snap: AbiSnapshot) -> dict[str, set[str]]:
@@ -267,8 +255,7 @@ def build_surface_graph(
     functions_by_name = _build_functions_by_name(snap)
     types_by_name = _build_types_by_name(snap)
     type_refs = _build_type_refs(snap)
-    root_seed_types = _build_root_seed_types(snap)
-    entity_ids_by_name = _build_entity_ids_by_name(snap)
+    root_seed_types = _build_root_seed_types(snap, public_entity_ids=public_entity_ids)
     by_header = _build_by_header(snap)
 
     graph = SurfaceGraph(
@@ -279,8 +266,6 @@ def build_surface_graph(
         reached_by={},  # filled below
         by_header={k: frozenset(v) for k, v in sorted(by_header.items())},
         _root_seed_types=dict(sorted(root_seed_types.items())),
-        _entity_ids_by_name=dict(sorted(entity_ids_by_name.items())),
-        _public_entity_ids=public_entity_ids,
     )
 
     # Inverse closure: type name -> roots that reach it.

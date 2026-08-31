@@ -377,20 +377,20 @@ def _sets_to_lists(obj: Any) -> Any:
 
 
 def snapshot_to_dict(snap: AbiSnapshot) -> dict[str, Any]:
-    # asdict() would recursively copy the lazy lookup caches too (wasted work,
-    # and they're dropped below anyway). Clear them for the duration of the
-    # call and restore afterward so this function stays pure from the
-    # caller's perspective — snapshot_to_dict(snap) must not mutate `snap`,
-    # or invalidate an index a caller built and is still holding a reference
-    # to via the object it passed in.
-    saved_caches = (snap._func_by_mangled, snap._var_by_mangled, snap._type_by_name)
+    # asdict() would recursively copy the lazy lookup caches, and
+    # surface_graph's potentially-large nodes/edges, for nothing --
+    # encode_surface_graph() below unconditionally replaces the latter with
+    # its own to_dict(), never this recursion (Codex review, PR #962). Clear
+    # them for the call and restore after, so this stays pure from the caller.
+    caches = (snap._func_by_mangled, snap._var_by_mangled, snap._type_by_name)
+    graph = snap.surface_graph
     try:
-        snap._func_by_mangled = None
-        snap._var_by_mangled = None
-        snap._type_by_name = None
+        snap._func_by_mangled = snap._var_by_mangled = snap._type_by_name = None
+        snap.surface_graph = None
         d = asdict(snap)
     finally:
-        snap._func_by_mangled, snap._var_by_mangled, snap._type_by_name = saved_caches
+        snap._func_by_mangled, snap._var_by_mangled, snap._type_by_name = caches
+        snap.surface_graph = graph
     d.pop("_func_by_mangled", None)
     d.pop("_var_by_mangled", None)
     d.pop("_type_by_name", None)

@@ -68,12 +68,48 @@ def resolve_public_surface(
     return compute_public_surface(snapshot)
 
 
+def _linker_key_is_public(mangled: str, name: str, public_symbols: set[str]) -> bool:
+    """Whether a function/variable counts as public per *public_symbols*,
+    preferring its own mangled linker identity (unambiguous per overload)
+    over its bare demangled name whenever the two genuinely differ.
+
+    When two C++ overloads share one demangled name and only one is
+    public, ``surface.py``'s own ``_seed_public_roots`` unions *both* the
+    mangled name and the bare name into ``public_symbols`` for the public
+    overload alone -- but a plain ``mangled in ... or name in ...`` check
+    still matches the *other*, non-public overload via that shared bare
+    name, since nothing about the bare-name membership test can tell which
+    specific overload it was recorded for (Codex review, PR #962). Falling
+    back to the bare name is only safe when it *is* the linker identity
+    (``mangled == name``, e.g. C code or an unmangled backend) -- there the
+    two checks are equivalent and no ambiguity exists.
+    """
+    if mangled and mangled != name:
+        return mangled in public_symbols
+    return mangled in public_symbols or name in public_symbols
+
+
+def _has_any_entity_id(snapshot: AbiSnapshot) -> bool:
+    """Whether *any* function/variable/type/enum on *snapshot* carries a
+    resolved ``entity_id`` -- the whole-snapshot availability signal
+    :meth:`PublicSurfaceQuery.resolve` needs to distinguish "entity-id
+    resolution is unavailable on this snapshot" (fall back to ``None``)
+    from "resolution ran and genuinely found zero public declarations"
+    (a real, non-``None`` empty ``frozenset``)."""
+    return (
+        any(fn.entity_id is not None for fn in snapshot.functions)
+        or any(var.entity_id is not None for var in snapshot.variables)
+        or any(rec.entity_id is not None for rec in snapshot.types)
+        or any(en.entity_id is not None for en in snapshot.enums)
+    )
+
+
 class PublicSurfaceQuery:
     """Bare-membership and structured relevance queries over one
     snapshot's public/exports surface (ADR-063 Phase 3 D5)."""
 
     @staticmethod
-    def resolve(snapshot: AbiSnapshot) -> frozenset[EntityId]:
+    def resolve(snapshot: AbiSnapshot) -> frozenset[EntityId] | None:
         """Which declarations' resolved ``EntityId`` are on *snapshot*'s
         public surface — the bare-membership convenience a caller that
         only needs set membership reaches for, never
@@ -87,25 +123,42 @@ class PublicSurfaceQuery:
         type-kind id here is correct data for that consumer to drop, not
         something this method should pre-filter away for every caller.
 
-        A declaration whose parse-time ``entity_id`` carrier is
-        unpopulated (a pre-ADR-063-Phase-2 snapshot, or a kind the
-        header-AST backends don't resolve one for yet) is silently
-        excluded, not attempted-and-failed — the identical, already-
-        accepted degradation ``public_roots()``'s own ``Visibility.PUBLIC``
-        fallback already uses when no resolved id set is available at all.
+        Returns ``None`` — not an empty ``frozenset`` — whenever this
+        snapshot cannot support a real ``EntityId``-based answer: either
+        ``resolve_public_surface()`` itself is unresolvable (``surf.
+        resolvable`` is ``False`` — no header-derived visibility exists at
+        all, per :class:`~abicheck.surface.PublicSurface`'s own docstring,
+        "scoping is skipped entirely"), or *snapshot* carries no
+        ``entity_id``-bearing declaration at all (a pre-ADR-063-Phase-2
+        snapshot, schema < 28, or a header-AST backend gap wide enough that
+        nothing on the whole snapshot resolved one). Every
+        ``*_public_entity_ids`` consumer downstream (``build_
+        surface_graph``/``compute_surface_metrics``/``compare()``) treats
+        ``None`` as "fall back to the legacy ``Visibility.PUBLIC``-only
+        answer" — collapsing either unavailability case to an empty
+        ``frozenset`` instead would make every one of them read a real,
+        non-empty public surface as confirmed-empty, silently zeroing
+        ``--surface-metrics``/``--pattern-verdicts`` output whenever this
+        query cannot actually answer (Codex review, PR #962). A single
+        declaration missing its own ``entity_id`` while siblings have
+        theirs is a different, already-accepted degradation — that
+        declaration alone drops out of the (non-``None``) set below,
+        unchanged.
         """
         surf = resolve_public_surface(snapshot)
         if not surf.resolvable:
-            return frozenset()
+            return None
+        if not _has_any_entity_id(snapshot):
+            return None
         ids: set[EntityId] = set()
         for fn in snapshot.functions:
-            if fn.entity_id is not None and (
-                fn.mangled in surf.public_symbols or fn.name in surf.public_symbols
+            if fn.entity_id is not None and _linker_key_is_public(
+                fn.mangled, fn.name, surf.public_symbols
             ):
                 ids.add(fn.entity_id)
         for var in snapshot.variables:
-            if var.entity_id is not None and (
-                var.mangled in surf.public_symbols or var.name in surf.public_symbols
+            if var.entity_id is not None and _linker_key_is_public(
+                var.mangled, var.name, surf.public_symbols
             ):
                 ids.add(var.entity_id)
         for rec in snapshot.types:

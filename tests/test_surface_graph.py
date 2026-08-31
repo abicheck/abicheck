@@ -676,6 +676,44 @@ class TestPublicEntityIdsNarrowsPublicRoots:
         assert graph.public_roots() == frozenset({"f"})
         assert "Widget" in graph.reachable_types("f")
 
+    def test_excluded_overloads_own_types_do_not_leak_through_an_included_sibling(
+        self,
+    ) -> None:
+        # Two overloads share the demangled name "f": f(Included*) stays in
+        # the resolved public set, f(Excluded*) does not (e.g. narrowed out
+        # on this side of a real compare() the same way
+        # test_declaration_with_no_matching_id_drops_out_even_if_visibility_public
+        # exercises for a single declaration). _build_root_seed_types unions
+        # overload seed types by name -- unioning first and narrowing the
+        # name afterward would leak Excluded's own type through the still-
+        # included f(Included*) overload; filtering per-overload before the
+        # union (what _build_root_seed_types actually does) must not
+        # (Codex/CodeRabbit review, PR #962).
+        from abicheck.model.identity import entity_id_for_function
+
+        eid_included = entity_id_for_function((), "f", mangled_name="_Z1fP8Included")
+        eid_excluded = entity_id_for_function((), "f", mangled_name="_Z1fP8Excluded")
+        fn_included = _fn_with_id(
+            "f", "_Z1fP8Included", eid_included, params=["Included*"]
+        )
+        fn_excluded = _fn_with_id(
+            "f", "_Z1fP8Excluded", eid_excluded, params=["Excluded*"]
+        )
+        rec_included = RecordType(name="Included", kind="struct")
+        rec_excluded = RecordType(name="Excluded", kind="struct")
+        snap = AbiSnapshot(
+            library="l",
+            version="1",
+            functions=[fn_included, fn_excluded],
+            types=[rec_included, rec_excluded],
+        )
+
+        graph = build_surface_graph(snap, public_entity_ids=frozenset({eid_included}))
+        assert graph.public_roots() == frozenset({"f"})
+        reachable = graph.reachable_types("f")
+        assert "Included" in reachable
+        assert "Excluded" not in reachable
+
 
 class TestComputeSurfaceMetricsThreading:
     def test_public_functions_counts_by_entity_id_membership(self) -> None:

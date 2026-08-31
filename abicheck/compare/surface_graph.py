@@ -39,8 +39,10 @@ docstring), which is exactly what makes that key reduce to plain
 is unpopulated (a pre-ADR-063-Phase-2 snapshot, or a kind the header-AST
 backends don't resolve one for yet — see AGENTS.md's own "exhaustive
 ``entity_id`` population" open item), this builder falls back to a plain
-string node id derived directly from the flattened qualified-name string —
-**not** a synthesized ``EntityId``: ``entity_id_for_*`` may only be called
+string node id derived from the flattened qualified-name string, namespaced
+by entity kind (``declaration::``/``type::``/``typedef::``) so a function
+and an unrelated record/enum/typedef sharing one bare spelling never
+collide onto one node — **not** a synthesized ``EntityId``: ``entity_id_for_*`` may only be called
 by a header-AST producer, the only place a real, typed ``ScopePath``
 exists to build one from (``tests/test_entity_id_carrier.py::
 TestResolverIsOnlyCalledByAProducer`` enforces this repo-wide), and a
@@ -55,9 +57,9 @@ see ``service_header_graph_attach.py``'s assembly step) mints its own
 scheme entirely: ``decl://<normalized identity>``/``type://<normalized
 identity>`` (``model.graph_facts._decl_node_id``/``_type_node_id``, a
 mangled-or-qualified-name string), never this module's
-``canonical_key(occurrence_id)``/``approx::``/``typedef::`` ids. Sharing
-one graph instance is real (both builders' nodes/edges coexist in it,
-verified by
+``canonical_key(occurrence_id)``/``declaration::``/``type::``/``typedef::``
+ids. Sharing one graph instance is real (both builders' nodes/edges coexist
+in it, verified by
 ``tests/test_service_header_graph_attach_surface_graph.py``), but the two
 id namespaces do not currently collide or dedup onto one node for a
 declaration both builders happen to see — reconciling them is a real,
@@ -144,14 +146,18 @@ def _type_identifiers(type_str: str | None) -> set[str]:
     return out
 
 
-def _approximate_node_id(qualified_name: str, *, is_typedef: bool = False) -> str:
+def _approximate_node_id(qualified_name: str, *, kind: str) -> str:
     """Plain string node id for a declaration/type with no parse-time
     ``entity_id`` -- the flattened qualified-name string itself, never a
     synthesized ``EntityId`` (see this module's own docstring for why).
-    ``is_typedef`` namespaces typedef aliases into their own id space so a
-    typedef and an unrelated record/enum sharing one bare spelling (e.g. a
-    ``typedef struct Foo Foo;`` idiom) never collide on the same node id."""
-    return f"typedef::{qualified_name}" if is_typedef else f"approx::{qualified_name}"
+    *kind* (``"declaration"``/``"type"``/``"typedef"``) namespaces the
+    fallback id space per entity kind, so a function and an unrelated
+    record/enum/typedef sharing one bare spelling (legal C: ``struct stat``
+    alongside a function named ``stat``, or the ``typedef struct Foo Foo;``
+    idiom) never collide onto the same node id when neither side has a
+    resolved ``entity_id`` -- confirmed to fail without this discriminator
+    (Codex review, PR #962)."""
+    return f"{kind}::{qualified_name}"
 
 
 def _declaration_entity_id(decl: Function | Variable) -> EntityId | None:
@@ -174,14 +180,16 @@ def _node_id(entity_id: EntityId) -> str:
     return canonical_key(OccurrenceId(entity_id))
 
 
-def _node_id_for(entity_id: EntityId | None, qualified_name: str) -> str:
+def _node_id_for(entity_id: EntityId | None, qualified_name: str, *, kind: str) -> str:
     """A declaration/type's node id: its real, parse-time ``entity_id`` when
     populated, else the plain-string approximate fallback (never a
-    synthesized ``EntityId`` -- see this module's own docstring)."""
+    synthesized ``EntityId`` -- see this module's own docstring). *kind* is
+    forwarded to :func:`_approximate_node_id` and ignored when a real
+    ``entity_id`` is present (that id is already kind-disambiguated)."""
     return (
         _node_id(entity_id)
         if entity_id is not None
-        else _approximate_node_id(qualified_name)
+        else _approximate_node_id(qualified_name, kind=kind)
     )
 
 
@@ -226,25 +234,38 @@ def _build_type_index(
 ) -> dict[str, str]:
     """Register every declared record/enum/typedef as a ``type`` node,
     returning a name → node-id index (both the bare leaf and the qualified
-    spelling, mirroring ``surface.py``'s own alias-index convention) for
+    spelling, mirroring ``surface.py``'s own alias-index convention -- bare
+    names included, but never a silent first-wins pick: a bare name shared
+    by more than one type (``ns1::Foo``/``ns2::Foo``) is ambiguous, exactly
+    what ``surface.py``'s own ``ambiguous_type_names`` tracks and every one
+    of its consumers checks before trusting a bare match, so this index
+    drops that bare key entirely rather than resolving it arbitrarily) for
     :func:`_add_references` to resolve a signature/field type string
     against."""
     index: dict[str, str] = {}
+    ambiguous_bare: set[str] = set()
 
     def _register(qname: str, bare: str, node_id: str, label: str) -> None:
         graph.add_node(GraphNode(id=node_id, kind=NODE_KIND_TYPE, label=label))
         index.setdefault(qname, node_id)
-        index.setdefault(bare, node_id)
+        if bare in index and index[bare] != node_id:
+            ambiguous_bare.add(bare)
+        else:
+            index.setdefault(bare, node_id)
 
     for rec in types:
         qname = rec.qualified_name or rec.name
-        _register(qname, rec.name, _node_id_for(rec.entity_id, qname), qname)
+        node_id = _node_id_for(rec.entity_id, qname, kind="type")
+        _register(qname, rec.name, node_id, qname)
     for en in enums:
         qname = en.qualified_name or en.name
-        _register(qname, en.name, _node_id_for(en.entity_id, qname), qname)
+        node_id = _node_id_for(en.entity_id, qname, kind="type")
+        _register(qname, en.name, node_id, qname)
     for alias in typedefs:
-        node_id = _approximate_node_id(alias, is_typedef=True)
+        node_id = _approximate_node_id(alias, kind="typedef")
         _register(alias, alias.rsplit("::", 1)[-1], node_id, alias)
+    for bare in ambiguous_bare:
+        index.pop(bare, None)
     return index
 
 
@@ -274,7 +295,7 @@ def build_public_surface_facts(snap: AbiSnapshot, graph: SurfaceGraphLike) -> No
     decl_node_ids: dict[str, str] = {}
 
     for fn in snap.functions:
-        node_id = _node_id_for(_declaration_entity_id(fn), fn.name)
+        node_id = _node_id_for(_declaration_entity_id(fn), fn.name, kind="declaration")
         graph.add_node(GraphNode(id=node_id, kind=NODE_KIND_DECLARATION, label=fn.name))
         _add_header_declares(graph, fn.source_header, node_id)
         _add_references(
@@ -284,7 +305,9 @@ def build_public_surface_facts(snap: AbiSnapshot, graph: SurfaceGraphLike) -> No
             decl_node_ids[fn.mangled] = node_id
 
     for var in snap.variables:
-        node_id = _node_id_for(_declaration_entity_id(var), var.name)
+        node_id = _node_id_for(
+            _declaration_entity_id(var), var.name, kind="declaration"
+        )
         graph.add_node(
             GraphNode(id=node_id, kind=NODE_KIND_DECLARATION, label=var.name)
         )
@@ -295,7 +318,7 @@ def build_public_surface_facts(snap: AbiSnapshot, graph: SurfaceGraphLike) -> No
 
     for rec in snap.types:
         qname = rec.qualified_name or rec.name
-        node_id = _node_id_for(rec.entity_id, qname)
+        node_id = _node_id_for(rec.entity_id, qname, kind="type")
         _add_header_declares(graph, rec.source_header, node_id)
         _add_references(
             graph,
@@ -308,10 +331,11 @@ def build_public_surface_facts(snap: AbiSnapshot, graph: SurfaceGraphLike) -> No
 
     for en in snap.enums:
         qname = en.qualified_name or en.name
-        _add_header_declares(graph, en.source_header, _node_id_for(en.entity_id, qname))
+        node_id = _node_id_for(en.entity_id, qname, kind="type")
+        _add_header_declares(graph, en.source_header, node_id)
 
     for alias, target in snap.typedefs.items():
-        node_id = _approximate_node_id(alias, is_typedef=True)
+        node_id = _approximate_node_id(alias, kind="typedef")
         _add_references(graph, node_id, type_index, target)
 
     _add_export_edges(graph, decl_node_ids)

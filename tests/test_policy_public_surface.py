@@ -78,22 +78,65 @@ class TestPublicSurfaceQueryResolve:
         assert ids == frozenset({eid})
 
     def test_non_public_declaration_is_excluded(self) -> None:
-        eid = entity_id_for_function((), "f", mangled_name="_Z1fv")
-        fn = _fn("f", "_Z1fv", vis=Visibility.HIDDEN, entity_id=eid)
-        snap = _snapshot(functions=[fn])
-        assert PublicSurfaceQuery.resolve(snap) == frozenset()
+        # A second, genuinely public declaration keeps the snapshot
+        # resolvable (has_public=True) -- isolating the assertion to "the
+        # hidden one's id is excluded," not the separate whole-snapshot
+        # unresolvable case covered below.
+        eid_hidden = entity_id_for_function((), "f", mangled_name="_Z1fv")
+        eid_public = entity_id_for_function((), "g", mangled_name="_Z1gv")
+        fn_hidden = _fn("f", "_Z1fv", vis=Visibility.HIDDEN, entity_id=eid_hidden)
+        fn_public = _fn("g", "_Z1gv", entity_id=eid_public)
+        snap = _snapshot(functions=[fn_hidden, fn_public])
+        assert PublicSurfaceQuery.resolve(snap) == frozenset({eid_public})
 
     def test_declaration_with_unpopulated_entity_id_is_silently_excluded(self) -> None:
-        # A public function whose entity_id carrier is None (a pre-ADR-063-
-        # Phase-2 snapshot, or a kind no producer resolves one for) must not
-        # raise or be mistakenly included -- it degrades the same way
-        # public_roots()'s own Visibility.PUBLIC fallback already does.
+        # One public declaration has a resolved entity_id, a sibling public
+        # declaration's carrier is None (a kind no producer resolves one
+        # for yet) -- entity-id resolution is genuinely *available* on this
+        # snapshot (a further declaration has one), so this is the
+        # per-declaration degradation, not the whole-snapshot None case
+        # covered by test_snapshot_with_no_entity_id_data_returns_none.
+        eid = entity_id_for_function((), "f", mangled_name="_Z1fv")
+        fn_with_id = _fn("f", "_Z1fv", entity_id=eid)
+        fn_without_id = _fn("g", "_Z1gv", entity_id=None)
+        snap = _snapshot(functions=[fn_with_id, fn_without_id])
+        assert PublicSurfaceQuery.resolve(snap) == frozenset({eid})
+
+    def test_snapshot_with_no_entity_id_data_returns_none(self) -> None:
+        # A public function whose entity_id carrier is None, and no other
+        # declaration on the snapshot has one either (a pre-ADR-063-Phase-2
+        # snapshot) -- entity-id resolution is wholesale *unavailable* here,
+        # which every *_public_entity_ids consumer must read as "fall back
+        # to the legacy Visibility.PUBLIC-only answer," not "confirmed
+        # empty public surface" (Codex review, PR #962).
         fn = _fn("f", "_Z1fv", entity_id=None)
         snap = _snapshot(functions=[fn])
-        assert PublicSurfaceQuery.resolve(snap) == frozenset()
+        assert PublicSurfaceQuery.resolve(snap) is None
 
-    def test_unresolvable_snapshot_returns_empty_set(self) -> None:
-        assert PublicSurfaceQuery.resolve(_snapshot()) == frozenset()
+    def test_unresolvable_snapshot_returns_none(self) -> None:
+        # No declarations at all -> compute_public_surface() itself is
+        # unresolvable (surf.resolvable is False) -- same "fall back to
+        # legacy behavior" answer as the no-entity-id-data case above, for
+        # the same reason: this query genuinely cannot answer, so it must
+        # not claim a confirmed-empty public surface.
+        assert PublicSurfaceQuery.resolve(_snapshot()) is None
+
+    def test_hidden_overload_does_not_inherit_a_public_siblings_bare_name(
+        self,
+    ) -> None:
+        # Two overloads share the demangled name "f": f(int) is public,
+        # f(double) is hidden. surface.py's own _seed_public_roots unions
+        # BOTH the mangled name and the bare name into public_symbols for
+        # the public overload alone -- a plain "mangled in ... or name in
+        # ..." check on the hidden overload still matches via that shared
+        # bare name, since nothing about a bare-name hit says which
+        # specific overload it came from (Codex review, PR #962).
+        eid_public = entity_id_for_function((), "f", mangled_name="_Z1fi")
+        eid_hidden = entity_id_for_function((), "f", mangled_name="_Z1fd")
+        fn_public = _fn("f", "_Z1fi", vis=Visibility.PUBLIC, entity_id=eid_public)
+        fn_hidden = _fn("f", "_Z1fd", vis=Visibility.HIDDEN, entity_id=eid_hidden)
+        snap = _snapshot(functions=[fn_public, fn_hidden])
+        assert PublicSurfaceQuery.resolve(snap) == frozenset({eid_public})
 
     def test_two_public_declarations_both_included(self) -> None:
         eid_f = entity_id_for_function((), "f", mangled_name="_Z1fv")

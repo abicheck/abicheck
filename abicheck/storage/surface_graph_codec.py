@@ -75,7 +75,7 @@ def encode_surface_graph(d: dict[str, Any], snap: AbiSnapshot) -> None:
     if graph is None:
         d.pop("surface_graph", None)
         return
-    d["surface_graph"] = graph.to_dict()  # type: ignore[attr-defined]
+    d["surface_graph"] = graph.to_dict()
     bs_dict = d.get("build_source")
     bs = snap.build_source
     if isinstance(bs_dict, dict) and bs is not None and bs.source_graph is graph:
@@ -85,11 +85,22 @@ def encode_surface_graph(d: dict[str, Any], snap: AbiSnapshot) -> None:
 def decode_surface_graph(d: dict[str, Any], snap: AbiSnapshot) -> None:
     """In-place: set ``snap.surface_graph`` from ``d``'s own top-level
     ``surface_graph`` key, when present, and rebind ``snap.build_source.
-    source_graph`` to that same decoded instance. A legacy document with no
-    such key leaves both untouched — ``snap.surface_graph`` stays whatever
-    the caller already set (``None``, by construction), and
-    ``snap.build_source.source_graph`` keeps whatever it already decoded
-    from its own nested key.
+    source_graph`` to that same decoded instance -- but only when the
+    encoder's own dedup actually ran, i.e. ``d["build_source"]`` carries no
+    ``source_graph`` key of its own (the encoder popped it specifically
+    because ``bs.source_graph is graph`` held). When a nested
+    ``source_graph`` key is still present in *d*, the encoder deliberately
+    kept two independently-encoded, genuinely distinct graphs (module
+    docstring's "not two independently-encoded blobs" case does not apply)
+    -- ``snap.build_source.source_graph`` was already correctly decoded
+    from that nested key before this function runs, and rebinding it here
+    unconditionally would silently discard that real L3-L5 evidence graph
+    in favor of the unrelated public-surface one (Codex review, PR #962).
+
+    A legacy document with no top-level key leaves both untouched —
+    ``snap.surface_graph`` stays whatever the caller already set (``None``,
+    by construction), and ``snap.build_source.source_graph`` keeps whatever
+    it already decoded from its own nested key.
     """
     raw = d.get("surface_graph")
     if not isinstance(raw, dict):
@@ -98,5 +109,9 @@ def decode_surface_graph(d: dict[str, Any], snap: AbiSnapshot) -> None:
 
     graph = SourceGraphSummary.from_dict(raw)
     snap.surface_graph = graph
-    if snap.build_source is not None:
+    bs_dict = d.get("build_source")
+    nested_source_graph_present = (
+        isinstance(bs_dict, dict) and "source_graph" in bs_dict
+    )
+    if snap.build_source is not None and not nested_source_graph_present:
         snap.build_source.source_graph = graph

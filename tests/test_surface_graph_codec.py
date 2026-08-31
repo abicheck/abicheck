@@ -86,7 +86,8 @@ class TestPopulatedGraphRoundTrip:
         s = AbiSnapshot(
             library="libfoo.so", version="1.0", surface_graph=_graph_with_one_node()
         )
-        json.dumps(snapshot_to_dict(s))
+        text = json.dumps(snapshot_to_dict(s))
+        assert "decl://x" in text
 
 
 class TestSharedInstanceIdentity:
@@ -136,13 +137,19 @@ class TestSharedInstanceIdentity:
         reloaded = snapshot_from_dict(d)
         assert reloaded.surface_graph is not None
         assert reloaded.build_source is not None
-        # Decode always rebinds build_source.source_graph to the top-level
-        # instance (restoring the intended alias) -- a document with two
-        # genuinely different graphs is not a shape this codec's own writer
-        # ever produces, so it collapses to one on the way back in rather
-        # than silently keeping the second, orphaned copy nothing else in
-        # this codebase would ever read.
-        assert reloaded.build_source.source_graph is reloaded.surface_graph
+        # The encoder's own dedup is identity-gated (module docstring:
+        # "only dedup an actual identity match") -- when the two graphs
+        # genuinely differ, both are independently encoded, and decode
+        # must not collapse them into one: that would silently discard
+        # every node/edge the nested (L3-L5) graph carries in favor of the
+        # unrelated top-level (public-surface) one (Codex review, PR #962).
+        assert reloaded.build_source.source_graph is not reloaded.surface_graph
+        assert {n.id for n in reloaded.surface_graph.nodes} == {
+            n.id for n in surface_only.nodes
+        }
+        assert {n.id for n in reloaded.build_source.source_graph.nodes} == {
+            n.id for n in l5_only.nodes
+        }
 
 
 class TestLegacyDocumentNeverAliasesForward:

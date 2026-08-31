@@ -144,6 +144,37 @@ class TestReferencesEdges:
         for e in graph.edges:
             assert e.src != e.dst
 
+    def test_ambiguous_bare_name_resolves_to_neither_candidate(self) -> None:
+        # ns1::Foo and ns2::Foo both register the bare key "Foo" -- a naive
+        # first-wins index would silently pick whichever type happened to
+        # iterate first, making an unqualified "Foo*" reference edge order-
+        # dependent and possibly wrong (Codex review, PR #962). Mirroring
+        # surface.py's own ambiguous_type_names convention: the bare key is
+        # dropped entirely rather than resolved arbitrarily, so a signature
+        # naming only "Foo" (never "ns1::Foo"/"ns2::Foo") produces no
+        # references edge at all instead of a wrong one.
+        foo1 = RecordType(name="Foo", kind="struct", qualified_name="ns1::Foo")
+        foo2 = RecordType(name="Foo", kind="struct", qualified_name="ns2::Foo")
+        fn = Function(name="make", mangled="_Z4makev", return_type="Foo*")
+        snap = _snapshot(functions=[fn], types=[foo1, foo2])
+        graph = SourceGraphSummary()
+        build_public_surface_facts(snap, graph)
+        refs = [e for e in graph.edges if e.kind == EDGE_KIND_REFERENCES]
+        assert refs == []
+
+    def test_ambiguous_bare_name_does_not_affect_the_qualified_reference(self) -> None:
+        # The exact same ambiguous pair, but the referencing signature names
+        # the qualified spelling directly -- that must still resolve, since
+        # only the bare key is ambiguous, not the qualified one.
+        foo1 = RecordType(name="Foo", kind="struct", qualified_name="ns1::Foo")
+        foo2 = RecordType(name="Foo", kind="struct", qualified_name="ns2::Foo")
+        fn = Function(name="make", mangled="_Z4makev", return_type="ns1::Foo*")
+        snap = _snapshot(functions=[fn], types=[foo1, foo2])
+        graph = SourceGraphSummary()
+        build_public_surface_facts(snap, graph)
+        refs = [e for e in graph.edges if e.kind == EDGE_KIND_REFERENCES]
+        assert len(refs) == 1
+
 
 class TestExportsEdges:
     def test_symbol_node_and_exports_edge(self) -> None:
@@ -208,3 +239,21 @@ class TestApproximateFallbackWhenEntityIdUnpopulated:
         build_public_surface_facts(snap, graph)
         decl_nodes = [n for n in graph.nodes if n.kind == NODE_KIND_DECLARATION]
         assert len({n.id for n in decl_nodes}) == 2
+
+    def test_a_function_and_a_record_sharing_one_bare_name_do_not_collide(
+        self,
+    ) -> None:
+        # Legal C: `struct stat { ... };` alongside a function `int stat(...)`.
+        # Both share the qualified name "stat"; without a per-kind namespace
+        # in the approximate-fallback id, both would resolve to the same
+        # node id and silently merge into one (Codex review, PR #962).
+        fn = Function(name="stat", mangled="stat", return_type="int")
+        rec = RecordType(name="stat", kind="struct", qualified_name="stat")
+        snap = _snapshot(functions=[fn], types=[rec])
+        graph = SourceGraphSummary()
+        build_public_surface_facts(snap, graph)
+        decl_nodes = [n for n in graph.nodes if n.kind == NODE_KIND_DECLARATION]
+        type_nodes = [n for n in graph.nodes if n.kind == NODE_KIND_TYPE]
+        assert len(decl_nodes) == 1
+        assert len(type_nodes) == 1
+        assert decl_nodes[0].id != type_nodes[0].id
