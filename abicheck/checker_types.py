@@ -372,14 +372,14 @@ class Change:
     # convention as symbol_binding above (Change is public API).
     evidence_provenance: tuple[str, ...] | None = field(default=None, kw_only=True)
     # ADR-063 Phase 2 (finding_identity.py algorithm migration, second half):
-    # the compare-time EntityId of the declaration this finding is about --
-    # the OLD side's when it exists (REMOVED-shaped finding has none), else
-    # the NEW side's (ADDED-shaped), mirroring symbol_binding's own old-side
-    # convention above. None when the producer never resolved one, or for a
-    # synthetic/batch finding with no single declaration. Not yet read by
-    # any consumer. Same field(kw_only=True)-appended-last convention as
-    # evidence_provenance above (Change is public API).
-    entity_id: EntityId | None = field(default=None, kw_only=True)
+    # the compare-time EntityId this finding is about -- the OLD side's when
+    # it exists (REMOVED-shaped finding has none), else the NEW side's
+    # (ADDED-shaped), mirroring symbol_binding's own old-side convention
+    # above. None when unresolved; not yet read by any consumer.
+    # `compare=False` like the declaration-side carriers -- identical-content
+    # findings stay equal regardless of identity coverage (Codex review).
+    # Same field(kw_only=True)-appended-last convention as evidence_provenance.
+    entity_id: EntityId | None = field(default=None, kw_only=True, compare=False)
 
 
 @dataclass

@@ -92,6 +92,24 @@ class TestChangeEntityIdCarrier:
         r = compare(_snap([old]), _snap([new]))
         assert _change(r, ChangeKind.FUNC_RETURN_CHANGED).entity_id == eid  # type: ignore[attr-defined]
 
+    def test_entity_id_excluded_from_change_equality(self) -> None:
+        # Codex review: entity_id must be compare=False -- two otherwise-
+        # identical Changes (e.g. a legacy baseline without an ID vs a
+        # current snapshot with one) must still compare equal, or the
+        # changelog's "excluded from equality" promise is false and
+        # public-API callers comparing expected findings can break.
+        eid = entity_id_for_function((), "f", mangled_name="_Z1fi")
+        old_with_id = _func("f", "_Z1fi", return_type="int", entity_id=eid)
+        old_without_id = _func("f", "_Z1fi", return_type="int")
+        new = _func("f", "_Z1fi", return_type="long")
+        r_with_id = compare(_snap([old_with_id]), _snap([new]))
+        r_without_id = compare(_snap([old_without_id]), _snap([new]))
+        c_with_id = _change(r_with_id, ChangeKind.FUNC_RETURN_CHANGED)
+        c_without_id = _change(r_without_id, ChangeKind.FUNC_RETURN_CHANGED)
+        assert c_with_id.entity_id == eid  # type: ignore[attr-defined]
+        assert c_without_id.entity_id is None  # type: ignore[attr-defined]
+        assert c_with_id == c_without_id
+
     def test_added_virtual_method_carries_new_side_entity_id(self) -> None:
         # Codex review: an added virtual method routes through
         # diff_cxx_rules.virtual_method_addition's own VIRTUAL_METHOD_ADDED
