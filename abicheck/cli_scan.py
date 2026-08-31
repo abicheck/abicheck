@@ -759,6 +759,13 @@ def _run_artifact_set(
         changed_src=changed_src,
         build_targets=build_targets,
     )
+    # ADR-063 Phase 4 (Codex review, fresh evidence): same pre-flight check
+    # as the single-binary path's own -- see that call site's comment.
+    from .workflows.plan import bazel_target_scoping_failure
+
+    if _bf := bazel_target_scoping_failure("candidate", build_info, build_targets):
+        raise click.UsageError(str(_bf))
+
     if dry_run:
         from .bundle import check_artifact_set_soname_collisions
         from .dry_run import emit_dry_run
@@ -1702,6 +1709,18 @@ def scan_cmd(
         eff_depth_enum, headers, baseline_header, sources, build_info,
     )
     effective_build_info = build_info
+
+    # ADR-063 Phase 4 (Codex review, fresh evidence): validate the same
+    # --build-target + pre-captured Bazel jsonproto combination
+    # `_build_new_snapshot` rejects during real execution -- run here too,
+    # before the dry-run preview below can render an unscoped-but-claimed-
+    # scoped estimate for a request the real run would then reject.
+    from .workflows.plan import bazel_target_scoping_failure
+
+    if _bf := bazel_target_scoping_failure(
+        "candidate", effective_build_info, build_targets
+    ):
+        raise click.UsageError(str(_bf))
 
     if dry_run:
         from .dry_run import emit_dry_run

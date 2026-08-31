@@ -400,3 +400,102 @@ def test_estimate_scan_flags_unscoped_l4_l5_rows_too(tmp_path: Path) -> None:
     l5_rows = [e for e in estimates if e.layer == "L5_source_graph"]
     assert "UNSCOPED" in l4.note
     assert l5_rows and all("UNSCOPED" in e.note for e in l5_rows)
+
+
+# ── ADR-063 Phase 4: `--build-target` + pre-captured Bazel jsonproto ───────
+#
+# docs/contribute/known-gaps.md's named gap, closed via
+# workflows.plan.bazel_target_scoping_failure: previously the combination
+# silently ran an unscoped workspace-wide query with no diagnostic at all.
+# Codex review (fresh evidence) found the real-execution check
+# (scan_engine._build_new_snapshot) never ran on either dry-run path, so a
+# `--dry-run` preview claimed success (and, for the single-binary path, an
+# "UNSCOPED" estimate that reads as informational rather than rejected) for
+# a request the real run would then reject -- fixed by running the identical
+# check in cli_scan.py before either dry-run renderer, not only at execution.
+
+
+def _write_bazel_aquery(tmp_path: Path) -> Path:
+    import json
+
+    path = tmp_path / "aquery.json"
+    path.write_text(
+        json.dumps({"actions": [], "pathFragments": [], "artifacts": [], "targets": []})
+    )
+    return path
+
+
+def test_scan_cli_dry_run_rejects_build_target_with_precaptured_aquery(
+    tmp_path: Path,
+) -> None:
+    aquery = _write_bazel_aquery(tmp_path)
+    runner = CliRunner()
+    result = runner.invoke(
+        main,
+        [
+            "scan",
+            str(_artifact(tmp_path)),
+            "--dry-run",
+            "--sources",
+            str(_sources(tmp_path)),
+            "--build-info",
+            str(aquery),
+            "--build-target",
+            "//:math",
+        ],
+    )
+    assert result.exit_code == 64, result.output
+    assert "pre-captured Bazel aquery" in result.output
+
+
+def test_scan_cli_real_run_rejects_the_identical_combination(tmp_path: Path) -> None:
+    """The non-dry-run invocation of the exact same request must reject
+    identically -- pins that the dry-run fix above did not accidentally
+    make the two paths disagree."""
+    aquery = _write_bazel_aquery(tmp_path)
+    runner = CliRunner()
+    result = runner.invoke(
+        main,
+        [
+            "scan",
+            str(_artifact(tmp_path)),
+            "--sources",
+            str(_sources(tmp_path)),
+            "--build-info",
+            str(aquery),
+            "--build-target",
+            "//:math",
+        ],
+    )
+    assert result.exit_code == 64, result.output
+    assert "pre-captured Bazel aquery" in result.output
+
+
+def test_scan_cli_artifact_set_dry_run_rejects_build_target_with_precaptured_aquery(
+    monkeypatch, tmp_path: Path
+) -> None:
+    aquery = _write_bazel_aquery(tmp_path)
+    a = _artifact(tmp_path, "a")
+    b = _artifact(tmp_path, "b")
+    _bypass_discovery_validation(monkeypatch, a, b)
+
+    runner = CliRunner()
+    result = runner.invoke(
+        main,
+        [
+            "scan",
+            "--artifact-set",
+            str(a),
+            "--artifact-set",
+            str(b),
+            "--dry-run",
+            "--sources",
+            str(_sources(tmp_path)),
+            "--build-info",
+            str(aquery),
+            "--build-target",
+            "//:math",
+        ],
+    )
+    assert result.exit_code == 64, result.output
+    assert "pre-captured Bazel aquery" in result.output
