@@ -2538,6 +2538,48 @@ or version number that already has a fact owner elsewhere").
      the same exit-code gating a live release comparison gets — not only
      the same `BundleDiffResult`/verdict.
 
+  **This turned out not to be a two-item list — it is one systemic
+  requirement, confirmed by two more independently-verified instances of
+  the identical pattern in the very next review round, and stated here as
+  such instead of continuing to grow item-by-item:**
+  `compare_release_against_bundle_facts()` is a narrower function than the
+  live release path in more ways than the two corrections above named —
+  it accepts no `contract_evaluation`/`contract_mode` (a caller's
+  `--contract ...` would silently retain findings the selected contract
+  should have excluded, and skip the contract-coverage exit floor
+  entirely, per root `AGENTS.md`'s contract-pipeline contract), and no
+  `suppression` (a caller's `--suppress` document, or project-config
+  suppression, would never reach `service.compare_snapshots()` at all,
+  so a suppressed break silently reappears — verified: neither parameter
+  exists on the function's signature, and its one `service.
+  compare_snapshots()` call site passes only `policy=`/`policy_file=`).
+  **The general requirement, not an exhaustive enumeration:** the new
+  workflow entry point from correction 1 must reach full parity with
+  `compare_release_cmd`'s own inputs for every flag that can change a
+  verdict or exit code — contract evaluation, suppression, severity/
+  exit-code-scheme, policy (already true), and `--fail-on-removed-library`
+  (already named above) are the four confirmed so far, not the complete
+  set. Acceptance testing for this phase must therefore include a
+  systematic check — walking `compare_release_cmd`'s own verdict/exit-
+  affecting parameters and asserting each one reaches the new workflow
+  entry point identically — rather than relying on an enumerated checklist
+  that a future review round can always find one more gap in.
+  - **Separately, the *result* also needs adapting, not only the
+    *inputs*.** `_format_release_summary()` (`cli_compare_release_
+    helpers.py`) — the one function that renders JSON/Markdown/JUnit for
+    a release comparison — takes named `library_results`/`old_map`/
+    `new_map`/`removed_keys`/`added_keys`/`warning_msgs` plus severity/
+    coverage fields, none of which a bare `BundleDiffResult` carries;
+    `bundle.render_bundle_findings_markdown()` (cited above as covering
+    the Markdown/summary redundancy claim) renders only the cross-library
+    bundle findings, not the per-library release report shape. This
+    phase's in-scope work therefore includes adapting the new workflow
+    entry point's typed result into `_format_release_summary()`'s
+    existing input shape — the acceptance criteria's directory/package
+    `compare` invocation is expected to produce the same JSON/Markdown/
+    JUnit release report a live comparison does, not merely a bare bundle
+    verdict.
+
 **Explicitly out of scope — do not port these from a driver like `bundle_gate.py`:**
 
 - **A driver's own summary-JSON/Markdown rendering, but not blanket SARIF —
@@ -2661,12 +2703,22 @@ to end; it does not by itself satisfy this bar, since by construction it
 only exercises the one manifest shape and one facts file that scenario
 happens to use.
 
-**Effort:** S/M — no file split is a prerequisite (corrected above); the
-Python-API half is done. Remaining work is contained to the unpinned
-`frontends/cli/commands/compare.py` (a new inline option or two, a new
-`_dispatch_release_compare` branch, a small manifest parser) plus the
-package-extraction fix and generalized tests named above — real work, but
-none of it blocked on a legacy-file refactor.
+**Effort:** M — revised up from the S/M first written here (Codex review:
+that estimate named only the unpinned frontend module and omitted the
+workflow layer the architecture-boundary correction itself requires).
+No file split is a prerequisite (corrected above), but the remaining work
+spans three layers, not one: (1) `frontends/cli/commands/compare.py` — a
+new inline option or two, a new `_dispatch_release_compare` branch, a
+small manifest parser, package extraction; (2) a new `abicheck.workflows`-
+owned request/result pair and its own execution function, reaching full
+verdict/exit-code parity with `compare_release_cmd` (contract evaluation,
+suppression, severity/exit-code-scheme, `--fail-on-removed-library`,
+policy — the systemic requirement above) — its own module plus its own
+request/result contract tests; (3) adapting that typed result into
+`_format_release_summary()`'s existing rendering shape. The Python-API
+comparison primitive (`compare_release_against_bundle_facts()` itself) is
+genuinely done; parity with everything *around* it on the live path is
+the newly-scoped remainder.
 
 ---
 
