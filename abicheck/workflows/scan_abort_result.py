@@ -54,6 +54,15 @@ underscore-prefixed signal, not the kind of genuinely public, stable surface
 importing it here to satisfy a type check would misuse that exemption for a
 private cross-module coupling. Attribute-based duck typing needs no import
 at all, in either direction.
+
+`audit_prior_decision` closes the sibling gap the same review found: a late
+budget overflow with no baseline at all (`run_scan_core`'s ``else`` branch,
+audit mode) had nothing in `diff_summary` to attach either, since that
+branch never builds one -- `scan_engine._audit_exit_code` now returns this
+dict as a third element alongside its existing verdict/exit_code, fed to
+`attach_prior_on_budget_overflow` the same way the baseline-compare branch's
+own `diff_summary` is, without changing audit mode's real (non-aborting)
+report shape.
 """
 
 from __future__ import annotations
@@ -61,7 +70,7 @@ from __future__ import annotations
 from contextlib import contextmanager
 from typing import TYPE_CHECKING, Any, Literal, TypedDict
 
-from ..policy.exit_decision import ExitDecision
+from ..policy.exit_decision import ExitDecision, resolve_exit_decision
 from ..policy.exit_decision_precedence import resolve_scan_exit_decision
 from ..schemas import SCAN_SCHEMA_VERSION
 
@@ -157,3 +166,27 @@ def scan_abort_result_fields(
         "exit": decision.to_dict(),
     }
     return ScanAbortResultFields(verdict=verdict, exit_code=exit_code, report=report)
+
+
+def audit_prior_decision(has_api_break: bool, crosscheck_exit: int) -> dict[str, Any]:
+    """`scan_engine._audit_exit_code`'s own compatibility/crosscheck
+    contributions, shaped as the ``{"exit": ...}`` dict
+    `attach_prior_on_budget_overflow` expects -- so a *later* budget overflow
+    in audit mode (no baseline at all, `run_scan_core`'s own ``else`` branch)
+    preserves what the audit already found instead of reporting a bare
+    budget-only decision (Codex review, PR #967, fresh evidence: the earlier
+    fix only threaded a prior decision through the baseline-compare branch).
+
+    Deliberately not persisted into `ScanOutcome.diff_summary` itself --
+    audit mode's real report keeps ``diff: null`` on every non-aborting run,
+    matching every consumer that treats its presence as "a baseline
+    comparison ran" (`cli_scan_helpers.py`'s text renderer keys off exactly
+    that, and would `KeyError` on the baseline-compare-shaped keys it reads
+    once past that check). This dict exists only to feed the late-abort
+    context manager, never the success-path outcome.
+    """
+    decision = resolve_exit_decision(
+        compatibility_contribution=2 if has_api_break else 0,
+        crosscheck_promotion_contribution=crosscheck_exit,
+    )
+    return {"exit": decision.to_dict()}

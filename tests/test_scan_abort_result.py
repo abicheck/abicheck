@@ -179,6 +179,83 @@ class TestAttachPriorOnBudgetOverflow:
         assert fields["report"]["exit"]["compatibility_contribution"] == 2
 
 
+class TestAuditPriorDecision:
+    """`audit_prior_decision` gives `run_scan_core`'s no-baseline (audit) path
+    the same late-budget-overflow preservation the baseline-compare path has
+    -- that branch never builds a `diff_summary`, so without this,
+    `attach_prior_on_budget_overflow` had nothing to attach and a late
+    overflow in audit mode silently dropped an already-computed API-break/
+    crosscheck contribution (Codex review, PR #967, fresh evidence).
+    """
+
+    def test_shapes_the_compatibility_and_crosscheck_contributions(self):
+        from abicheck.workflows.scan_abort_result import audit_prior_decision
+
+        prior = audit_prior_decision(has_api_break=True, crosscheck_exit=0)
+        assert prior["exit"]["code"] == 2
+        assert prior["exit"]["compatibility_contribution"] == 2
+        assert prior["exit"]["crosscheck_promotion_contribution"] == 0
+
+    def test_crosscheck_promotion_alone_can_dominate(self):
+        from abicheck.workflows.scan_abort_result import audit_prior_decision
+
+        prior = audit_prior_decision(has_api_break=False, crosscheck_exit=2)
+        assert prior["exit"]["code"] == 2
+        assert prior["exit"]["compatibility_contribution"] == 0
+        assert prior["exit"]["crosscheck_promotion_contribution"] == 2
+
+    def test_no_findings_is_a_clean_zero_decision(self):
+        from abicheck.workflows.scan_abort_result import audit_prior_decision
+
+        prior = audit_prior_decision(has_api_break=False, crosscheck_exit=0)
+        assert prior["exit"]["code"] == 0
+
+    def test_audit_exit_code_returns_a_matching_prior_decision(self):
+        # `_audit_exit_code` itself, not just the helper it now calls -- an
+        # API_BREAK_KINDS finding must produce the same third element
+        # `audit_prior_decision` would, computed from the same inputs.
+        from types import SimpleNamespace
+
+        from abicheck.checker_policy import ChangeKind
+        from abicheck.scan_engine import _audit_exit_code
+        from abicheck.workflows.scan_abort_result import audit_prior_decision
+
+        findings = [SimpleNamespace(kind=ChangeKind.HEADER_BUILD_CONTEXT_MISMATCH)]
+        verdict, exit_code, prior = _audit_exit_code(findings, severities={})
+
+        assert verdict == "API_BREAK"
+        assert exit_code == 2
+        assert prior == audit_prior_decision(has_api_break=True, crosscheck_exit=0)
+
+    def test_real_late_audit_budget_overflow_carries_the_prior_decision(self):
+        # The actual scan_engine.py call site: run_scan_core's no-baseline
+        # branch feeds `_audit_exit_code`'s third element to
+        # attach_prior_on_budget_overflow via `diff_summary or audit_prior`
+        # -- exercised here through the real `_check_scan_budget` raise.
+        from types import SimpleNamespace
+
+        from abicheck.checker_policy import ChangeKind
+        from abicheck.scan_engine import (
+            _audit_exit_code,
+            _BudgetOverflow,
+            _check_scan_budget,
+        )
+
+        findings = [SimpleNamespace(kind=ChangeKind.HEADER_BUILD_CONTEXT_MISMATCH)]
+        _verdict, _exit_code, audit_prior = _audit_exit_code(findings, severities={})
+
+        with pytest.raises(_BudgetOverflow) as excinfo:
+            with attach_prior_on_budget_overflow(None or audit_prior):
+                _check_scan_budget("10s", budget_s=10.0, elapsed=11.0)
+
+        assert excinfo.value.prior_decision == audit_prior["exit"]
+        fields = scan_abort_result_fields(
+            "budget_overflow", prior_decision=excinfo.value.prior_decision
+        )
+        assert fields["report"]["exit"]["code"] == 5
+        assert fields["report"]["exit"]["compatibility_contribution"] == 2
+
+
 class TestScanAbortExitReportWiring:
     """`service_scan.run_scan`/`_run_scan_one_member` build their
     `ScanResult` via ``ScanResult(**scan_abort_result_fields(axis))`` on

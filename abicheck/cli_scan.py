@@ -493,6 +493,8 @@ def _emit_scan_abort_report(
     output: Path | None,
     *,
     prior_decision: dict[str, object] | None = None,
+    secondary_fmt: str | None = None,
+    secondary_output: Path | None = None,
 ) -> None:
     """Give ``scan --format json`` a real report on a `_BudgetOverflow`/
     `_EvidenceContractError` abort, instead of empty stdout (ADR-064 stage
@@ -508,18 +510,28 @@ def _emit_scan_abort_report(
     `abicheck.workflows.scan_abort_result.scan_abort_result_fields`, the
     exact function the typed `ScanResult` API now builds its own
     `report["exit"]` from, so the CLI and library JSON payloads agree.
+
+    *secondary_fmt*/*secondary_output* cover ``--format text --write
+    json=...`` (Codex review, fresh evidence): the GitHub Action's own text
+    primary + JSON secondary combination gets the same abort payload the
+    secondary artifact would have carried had the scan completed, instead
+    of a missing file just because the primary renderer wasn't JSON.
     """
-    if fmt != "json":
+    if fmt != "json" and secondary_fmt != "json":
         return
     from .workflows.scan_abort_result import scan_abort_result_fields
 
     report = scan_abort_result_fields(axis, prior_decision=prior_decision)["report"]
     text = json.dumps(report, indent=2)
-    if output:
-        _safe_write_output(output, text)
-        click.echo(f"Report written to {output}", err=True)
-    else:
-        click.echo(text)
+    if fmt == "json":
+        if output:
+            _safe_write_output(output, text)
+            click.echo(f"Report written to {output}", err=True)
+        else:
+            click.echo(text)
+    if secondary_fmt == "json" and secondary_output:
+        _safe_write_output(secondary_output, text)
+        click.echo(f"Secondary report written to {secondary_output}", err=True)
 
 
 def _resolve_artifact_set_paths(spec: tuple[str, ...]) -> tuple[list[Path], bool]:
@@ -1887,14 +1899,25 @@ def scan_cmd(
     except _BudgetOverflow as bo:
         click.echo(bo.message, err=True)
         _emit_scan_abort_report(
-            "budget_overflow", fmt, output, prior_decision=bo.prior_decision
+            "budget_overflow",
+            fmt,
+            output,
+            prior_decision=bo.prior_decision,
+            secondary_fmt=secondary_fmt,
+            secondary_output=secondary_output,
         )
         sys.exit(_EXIT_BUDGET_OVERFLOW)
     except _EvidenceContractError as ce:
         # A pinned depth that can't collect its evidence is a usage contract
         # violation → a clean CLI error (exit 1), distinct from the verdict codes
         # (2/4) and the budget code (5).
-        _emit_scan_abort_report("evidence_contract_error", fmt, output)
+        _emit_scan_abort_report(
+            "evidence_contract_error",
+            fmt,
+            output,
+            secondary_fmt=secondary_fmt,
+            secondary_output=secondary_output,
+        )
         raise click.ClickException(ce.message) from ce
     finally:
         # Remove the inferred cmake build dir(s) now that every build-dir-dependent

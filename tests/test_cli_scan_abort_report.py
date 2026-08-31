@@ -105,3 +105,78 @@ def test_evidence_contract_error_text_format_has_no_json_report(
     )
     assert res.exit_code != 0, res.output
     assert "{" not in res.output
+
+
+def test_budget_overflow_writes_secondary_json_report(
+    runner, new_snap_compatible, tmp_path
+):
+    # --format text (default) + --write json=... (the documented GitHub
+    # Action combination, Codex review, fresh evidence): the secondary JSON
+    # artifact must still be written on abort, not silently skipped just
+    # because the primary renderer isn't JSON.
+    secondary = tmp_path / "abort.json"
+    res = runner.invoke(
+        main,
+        [
+            "scan",
+            str(new_snap_compatible),
+            "--budget",
+            "0s",
+            "--write",
+            f"json={secondary}",
+        ],
+    )
+    assert res.exit_code == 5, res.output
+    assert "{" not in res.output
+    payload = json.loads(secondary.read_text())
+    assert payload["scan_schema_version"] == SCAN_SCHEMA_VERSION
+    assert payload["exit"]["code"] == 5
+    assert payload["exit"]["reasons"] == ["budget_overflow"]
+
+
+def test_evidence_contract_error_writes_secondary_json_report(
+    runner, new_snap_compatible, tmp_path
+):
+    secondary = tmp_path / "abort.json"
+    res = runner.invoke(
+        main,
+        [
+            "scan",
+            str(new_snap_compatible),
+            "--depth",
+            "source",
+            "--write",
+            f"json={secondary}",
+        ],
+    )
+    assert res.exit_code != 0, res.output
+    payload = json.loads(secondary.read_text())
+    assert payload["scan_schema_version"] == SCAN_SCHEMA_VERSION
+    assert payload["exit"]["code"] == 1
+    assert payload["exit"]["reasons"] == ["evidence_contract_error"]
+
+
+def test_budget_overflow_json_primary_and_secondary_both_written(
+    runner, new_snap_compatible, tmp_path
+):
+    # Both renderers are "json" here (--format json --write json=...) -- the
+    # same abort payload must reach stdout *and* the secondary file.
+    secondary = tmp_path / "abort.json"
+    res = runner.invoke(
+        main,
+        [
+            "scan",
+            str(new_snap_compatible),
+            "--budget",
+            "0s",
+            "--format",
+            "json",
+            "--write",
+            f"json={secondary}",
+        ],
+    )
+    assert res.exit_code == 5, res.output
+    stdout_payload = _abort_payload(res)
+    secondary_payload = json.loads(secondary.read_text())
+    assert stdout_payload == secondary_payload
+    assert stdout_payload["exit"]["reasons"] == ["budget_overflow"]

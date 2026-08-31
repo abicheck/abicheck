@@ -339,9 +339,30 @@ lands in two stages rather than one atomic change:
       `--format text` is unchanged: `bo.message`/`ce.message` already read
       as the human-facing explanation, and inventing prose to fill
       `ScanOutcome`'s missing fields for a text rendering remains a
-      separate, unaddressed question. Still open: the release fan-out's
-      `GateOptions` unification and a full cross-front-end parity pass
-      (typed API, Action).
+      separate, unaddressed question. **Landed (2026-08-31), two follow-up
+      fixes found by review on the two slices above:** (1) the *audit* path
+      (`run_scan_core`'s no-baseline branch) had the same late-budget-
+      overflow gap the baseline-compare branch's own fix closed —
+      `_audit_exit_code` never built a `diff_summary`, so a late overflow in
+      audit mode had nothing to preserve either. `_audit_exit_code` now
+      returns a third element, `abicheck.workflows.scan_abort_result.
+      audit_prior_decision`'s ``{"exit": ...}`` shape built from the same
+      compatibility/crosscheck contributions it already computes, fed to
+      `attach_prior_on_budget_overflow` via `diff_summary or audit_prior` —
+      without changing audit mode's own (non-aborting) report, which still
+      carries `diff: null` (`cli_scan_helpers.py`'s text renderer keys off
+      exactly that presence/absence, so populating it unconditionally would
+      have been a real regression, not merely a schema-version bump).
+      (2) `cli_scan._emit_scan_abort_report` only wrote to the *primary*
+      `--format`/`--output`; the documented `--format text --write
+      json=...` combination (the GitHub Action's own text-primary/JSON-
+      secondary pattern) silently produced no secondary artifact on abort.
+      It now also writes to `secondary_output` whenever `secondary_fmt ==
+      "json"`, independent of the primary format (`tests/
+      test_scan_abort_result.py::TestAuditPriorDecision`, `tests/
+      test_cli_scan_abort_report.py`'s secondary-output tests). Still open:
+      the release fan-out's `GateOptions` unification and a full
+      cross-front-end parity pass (typed API, Action).
 2. **Atomic.** Once the report block agrees with today's real behaviour for
    every axis and every mode (verified by the axis-separated tests this ADR
    requires below), remove `--exit-code-scheme` from `compare` and `scan`,

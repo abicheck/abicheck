@@ -771,25 +771,24 @@ def _promote_published_gate(diff_summary: dict[str, Any] | None, sev_exit: int) 
 
 def _audit_exit_code(
     findings: list[Any], severities: dict[str, str]
-) -> tuple[str, int]:
-    """Verdict/exit for the no-baseline path from cross-source finding tiers.
+) -> tuple[str, int, dict[str, Any]]:
+    """Verdict/exit/prior-decision dict for the no-baseline path (cross-source tiers).
 
     Cross-source findings are never ``BREAKING`` on their own (authority rule), so
-    an audit can reach at most ``API_BREAK`` (exit 2); ``RISK`` stays advisory
-    (exit 0) unless the maintainer promoted that check to ``error`` (D6).
-    Adoption never starts by blocking merges (ADR-035 UX step 7).
+    an audit can reach at most ``API_BREAK`` (exit 2); ``RISK`` stays advisory (exit
+    0) unless the maintainer promoted that check to ``error`` (D6). The dict lets a
+    *later* budget overflow preserve these contributions instead of discarding them.
     """
-    # Defensive: a mis-partitioned kind would be caught by the import-time
-    # assertion, but never let a cross-source finding gate a BREAKING verdict.
     assert not any(f.kind in BREAKING_KINDS for f in findings), (
         "cross-source findings must never be BREAKING (ADR-035 D1 authority rule)"
     )
     has_api_break = any(f.kind in API_BREAK_KINDS for f in findings)
-    exit_code = max(
-        2 if has_api_break else 0,
-        _crosscheck_severity_exit(findings, severities),
-    )
-    return ("API_BREAK" if exit_code >= 2 else "COMPATIBLE"), exit_code
+    crosscheck_exit = _crosscheck_severity_exit(findings, severities)
+    exit_code = max(2 if has_api_break else 0, crosscheck_exit)
+    from .workflows.scan_abort_result import audit_prior_decision
+
+    verdict = "API_BREAK" if exit_code >= 2 else "COMPATIBLE"
+    return verdict, exit_code, audit_prior_decision(has_api_break, crosscheck_exit)
 
 
 class _BudgetOverflow(Exception):
@@ -1293,6 +1292,7 @@ def run_scan_core(
 
     # --- pinned-level baseline comparison (if any) ----------------------------
     diff_summary: dict[str, Any] | None = None
+    audit_prior: dict[str, Any] | None = None
     if baseline is not None and scan_mode is not ScanMode.AUDIT:
         _stage = time.monotonic()
         not_comparable = False
@@ -1442,10 +1442,10 @@ def run_scan_core(
             click.echo(
                 "note: --audit ignores --baseline (intra-version scan).", err=True
             )
-        verdict, exit_code = _audit_exit_code(cc.findings, severities)
+        verdict, exit_code, audit_prior = _audit_exit_code(cc.findings, severities)
 
     elapsed = time.monotonic() - start
-    with attach_prior_on_budget_overflow(diff_summary):
+    with attach_prior_on_budget_overflow(diff_summary or audit_prior):
         _check_scan_budget(budget, budget_s, elapsed)
 
     outcome = ScanOutcome(
