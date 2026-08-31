@@ -2489,6 +2489,20 @@ serialization always carries a top-level `per_library_snapshots` key
 not — and needs regression coverage proving an ordinary JSON snapshot
 still classifies as `"file"`, not the new kind.
 
+**A second `classify_compare_operand()` consumer needs the same new kind
+(Codex review, next round, verified against source):** `cli_options.
+_profile_targets_set_input()` mirrors this same classifier to decide
+whether `--profile` targets a set input, but its own check is hardcoded to
+`kinds & {"directory", "package"}` — the new stored-facts kind is neither,
+so a `--profile` combined with a stored-facts OLD operand would silently
+fall through to single-pair profile defaults instead of the established
+"profiles are not supported for set inputs" error `_profile_targets_
+set_input()` exists to produce. This phase's `cli_resolve.py` work
+therefore includes updating this pre-dispatch consumer's set membership
+too, with its own stored-facts-plus-`--profile` regression test — adding
+the kind to the classifier alone is not sufficient everywhere the
+classifier's output is consumed.
+
 The one artifact worth naming without duplicating it: `cli.py` itself is
 now a small registration facade (`abicheck/frontends/AGENTS.md` gives the
 current figure) rather than the ~1959-line file Phase 13's table measured
