@@ -1611,7 +1611,7 @@ def scan_cmd(
         contract_mode, click.get_current_context()
     )
 
-    from .errors import AbicheckError
+    from .errors import AbicheckError, PlanningError
     from .service import load_env_matrix
 
     try:
@@ -1873,6 +1873,11 @@ def scan_cmd(
         # violation → a clean CLI error (exit 1), distinct from the verdict codes
         # (2/4) and the budget code (5).
         raise click.ClickException(ce.message) from ce
+    except PlanningError as exc:
+        # ADR-063 Phase 4: scan_engine.py raises this framework-neutral (it also
+        # backs run_scan()'s typed API) -- translate to a usage error here, the
+        # one CLI boundary that actually knows about Click.
+        raise click.UsageError(str(exc)) from exc
     finally:
         # Remove the inferred cmake build dir(s) now that every build-dir-dependent
         # phase has run (or the scan aborted). Best-effort (each thunk is suppressed)

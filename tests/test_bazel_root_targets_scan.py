@@ -39,6 +39,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
 from click.testing import CliRunner
 
 from abicheck.buildsource import embed as embed_mod
@@ -499,3 +500,31 @@ def test_scan_cli_artifact_set_dry_run_rejects_build_target_with_precaptured_aqu
     )
     assert result.exit_code == 64, result.output
     assert "pre-captured Bazel aquery" in result.output
+
+
+def test_run_scan_typed_api_raises_planning_error_not_click_usage_error(
+    tmp_path: Path,
+) -> None:
+    """Codex review: ``scan_engine._build_new_snapshot`` backs the typed
+    ``run_scan(ScanRequest(...))`` API too, which has no Click context to
+    catch a ``click.UsageError`` -- a caller importing abicheck as a library
+    must see the framework-neutral ``PlanningError`` instead. Only
+    ``cli_scan.py``'s own ``scan_cmd`` (see
+    ``test_scan_cli_real_run_rejects_the_identical_combination`` above)
+    translates it to a usage error at the actual CLI boundary."""
+    import click
+
+    from abicheck.errors import PlanningError
+
+    aquery = _write_bazel_aquery(tmp_path)
+    req = ScanRequest(
+        binaries=[_artifact(tmp_path)],
+        sources=_sources(tmp_path),
+        build_info=aquery,
+        build_targets=("//:math",),
+    )
+    with pytest.raises(PlanningError, match="pre-captured Bazel aquery"):
+        run_scan(req)
+    # Not, in particular, a click.UsageError -- PlanningError is a plain
+    # ValueError subclass with no Click dependency.
+    assert not issubclass(PlanningError, click.UsageError)

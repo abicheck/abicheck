@@ -22,3 +22,14 @@
   `--build-target`) is covered too, via a second check at the one place
   both sources are already merged into a single value
   (`buildsource.inline._maybe_collect_bazel_build_info`).
+
+### Fixed
+
+- **The typed `run_scan(ScanRequest(...))`/`run_scan_set(...)` API no longer
+  raises a Click-specific `click.UsageError` for the `--build-target` +
+  pre-captured Bazel jsonproto mismatch above.** `scan`'s own candidate
+  resolution (`scan_engine._build_new_snapshot`) now raises the
+  framework-neutral `PlanningError` at that point, same as `dump`/`compare`;
+  `cli_scan.py`'s CLI front end translates it to a usage error (exit 64) at
+  its own boundary. A caller using the Python API directly previously saw a
+  web-framework-specific exception type leak out of a pure engine call.

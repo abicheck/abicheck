@@ -44,11 +44,21 @@ looked like the obvious fix and wasn't.
   (`scan_engine._build_new_snapshot`, which has no `CompareRequest`/
   `DumpRequest` of its own to resolve through `AnalysisPlanner` and so calls
   the same free function directly) now run before collecting anything —
-  `dump`/`compare` raise `PlanningError`, translated to `click.UsageError`
-  at each CLI boundary; `scan`'s own CLI-only call site raises
-  `click.UsageError` directly (no `PlanningError` intermediate, since it has
-  no typed-API caller to preserve that type for) — both name the mismatch
-  and the documented workaround, exit 64, not a silent, unscoped collection.
+  `dump`/`compare`/`scan` alike raise `PlanningError` (framework-neutral) from
+  the engine layer, translated to `click.UsageError` at each CLI boundary
+  (`cli_resolve.py`/`cli_buildsource.py` for `dump`/`compare`; `cli_scan.py`'s
+  own `scan_cmd`, around its `run_scan_core` call, for `scan`). `scan_engine.
+  _build_new_snapshot` originally raised `click.UsageError` directly instead
+  — cheaper in lines, but it leaked a Click-specific exception type out of the
+  same engine function the typed `run_scan(ScanRequest(...))` API calls, with
+  no Click context to catch it in (a third Codex review round, fresh
+  evidence). Fixed by raising `PlanningError` there instead and adding the
+  translation at `cli_scan.py`'s boundary, matching the `dump`/`compare`
+  pattern; `test_run_scan_typed_api_raises_planning_error_not_click_usage_
+  error` (`tests/test_bazel_root_targets_scan.py`) pins that a typed-API
+  caller now sees `PlanningError`, not `click.UsageError`. All three CLIs
+  still name the mismatch and the documented workaround, exit 64, not a
+  silent, unscoped collection.
   **A second Codex review round found this only covered `InputSpec.
   build_targets` (the `--build-target` CLI flag/typed-API field) — a root-
   target scope declared in `.abicheck.yml`'s own `build.targets:` instead

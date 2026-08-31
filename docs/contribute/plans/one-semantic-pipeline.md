@@ -11131,13 +11131,13 @@ checked against the real code rather than assumed closed by the
 function, `workflows.plan.bazel_target_scoping_failure(label, build_info,
 build_targets)`, which `_check_bazel_target_scoping` wraps for the
 `AnalysisPlanner` path and which `_build_new_snapshot` now calls directly.
-**Corrected after a first pass and a second Codex review round found both
-wrong**: the first version raised `PlanningError` inside the existing
-`try`/`except AbicheckError` block, which maps every `AbicheckError` to
-`click.ClickException` — exit 1, not the exit-64 usage error this
-combination actually is (AGENTS.md: "64 = usage error ... applies across
-commands"). Fixed by raising `click.UsageError` directly at the point of
-detection instead: since `click.UsageError` is not an `AbicheckError`, it
+**Corrected after a first pass and two further Codex review rounds found
+problems with each fix in turn**: the first version raised `PlanningError`
+inside the existing `try`/`except AbicheckError` block, which maps every
+`AbicheckError` to `click.ClickException` — exit 1, not the exit-64 usage
+error this combination actually is (AGENTS.md: "64 = usage error ... applies
+across commands"). Fixed by raising `click.UsageError` directly at the point
+of detection instead: since `click.UsageError` is not an `AbicheckError`, it
 propagates straight past that `except` clause unmodified — no `PlanningError`
 intermediate, no second `except` clause, and (debt-no-growth is `no_growth`
 for this file) no added lines either. The *second* round found this check
@@ -11153,7 +11153,37 @@ three new cases pin both dry-run shapes and the real-run parity case. The
 baseline side of `scan --against` was checked and found not to reach the
 Bazel adapter with `build_targets` at all (`--against` compares against an
 already-produced baseline, not a second live build), so it needed no
-equivalent call.
+equivalent call. **The *third* round found the "no `PlanningError`
+intermediate" shortcut from the first fix was itself wrong**: `_build_new_
+snapshot` also backs the typed `run_scan(ScanRequest(...))` API (`service_
+scan.run_scan`/`run_scan_set`), which has no Click context to catch a
+`click.UsageError` for — a library caller with no CLI in the picture would
+see a Click-framework exception leak out of a pure Python API, the same
+class of layering violation `PlanningError` exists to prevent for `dump`/
+`compare`. Fixed by raising `PlanningError` at the point of detection after
+all (moved to just *before* the `try`/`except AbicheckError` block, not
+inside it, so that pre-existing catch still can't recatch and remap it) and
+adding the missing translation at the one real CLI boundary: `cli_scan.py`'s
+`scan_cmd` now catches `PlanningError` around its `run_scan_core` call and
+raises `click.UsageError` there, mirroring the `cli_resolve.py`/
+`cli_buildsource.py` pattern `dump`/`compare` already use. (The
+`--artifact-set` path's own pre-flight `bazel_target_scoping_failure` call in
+`cli_scan.py` — a second, CLI-layer-only check that runs before `run_scan_set`
+— needed no change: it already raised `click.UsageError` directly from CLI
+code, never from the engine, and `run_scan_set`'s own `except (ArtifactSetError,
+ValueError)` around `run_scan_set(req)` already catches a `PlanningError`
+that reaches it too, since `PlanningError` is also a plain `ValueError`
+subclass.) This closed the debt-no-growth line-count budget in the same
+zero-net-growth way as the first fix: the check moved out of the `try` block
+line-for-line, with only the raised exception's name changing.
+`tests/test_bazel_root_targets.py`'s same test now asserts `PlanningError`
+instead of `click.UsageError` for the direct engine-level call, and a new
+`tests/test_bazel_root_targets_scan.py::
+test_run_scan_typed_api_raises_planning_error_not_click_usage_error` pins the
+typed-API guarantee end to end (`run_scan(ScanRequest(...))` raises
+`PlanningError`, never `click.UsageError`), alongside the pre-existing
+`test_scan_cli_real_run_rejects_the_identical_combination` pinning that the
+CLI path still exits 64.
 
 **Not landed in this slice: the second named scenario, and the
 `cli-contract`/`engine-cli-boundary` gate widening.** Re-checked against

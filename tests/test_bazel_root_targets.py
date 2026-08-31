@@ -675,26 +675,24 @@ def test_scan_candidate_build_target_with_precaptured_aquery_raises_planning_err
     ``AnalysisPlanner`` runs for ``compare``/``dump``, closing the `scan`
     half of ``docs/contribute/known-gaps.md``'s ``--build-target`` +
     pre-captured Bazel jsonproto gap (the ``dump``/``compare`` half is
-    covered by ``tests/test_analysis_plan.py``). Surfaces as a clean
-    ``click.UsageError`` (not a raw ``PlanningError`` traceback) -- a bad
-    input combination is a usage error (AGENTS.md: "64 = usage error ...
-    applies across commands"), which the root CLI group remaps from click's
-    own default exit 2 to abicheck's documented exit 64
-    (``frontends.cli.runtime._AbicheckGroup.main``), not the operational-
-    failure ``click.ClickException`` (exit 1) this function's own
-    ``except AbicheckError`` applies to every other resolution failure
-    here."""
+    covered by ``tests/test_analysis_plan.py``). Raises the framework-neutral
+    ``PlanningError`` directly (Codex review: this engine function also backs
+    the typed ``run_scan(ScanRequest(...))`` API, which has no Click context
+    to translate a ``click.UsageError`` for) -- ``cli_scan.py``'s own
+    ``scan_cmd`` is the actual CLI boundary that maps it to a usage error
+    (exit 64); see
+    ``test_scan_cli_real_run_rejects_the_identical_combination`` in
+    ``test_bazel_root_targets_scan.py`` for that end-to-end translation."""
     import json
 
-    import click
-
+    from abicheck.errors import PlanningError
     from abicheck.scan_engine import _build_new_snapshot
 
     aquery = tmp_path / "aquery.json"
     aquery.write_text(
         json.dumps({"actions": [], "pathFragments": [], "artifacts": [], "targets": []})
     )
-    with pytest.raises(click.UsageError, match="pre-captured Bazel aquery"):
+    with pytest.raises(PlanningError, match="pre-captured Bazel aquery"):
         _build_new_snapshot(
             binary=tmp_path / "libfoo.so",
             headers=[],
