@@ -24,9 +24,8 @@ incomplete report's findings are still read: seeing a finding proves it is
 there, whereas not seeing one proves nothing.
 
 The helpers here are deliberately local rather than imported from
-``test_aggregate.py``: they are a few lines of report-writing each, and a
-cross-test-module import would couple two files that otherwise share only
-the subject under test.
+``test_aggregate.py``: a few lines of report-writing each, not worth
+coupling two files that otherwise share only the subject under test.
 """
 
 from __future__ import annotations
@@ -64,15 +63,10 @@ LINUX = "linux-x86_64"
 
 def _change_entry(**fields: object) -> dict:
     """A `changes[]` entry carrying every field `compare_report.schema.json`
-    marks *required* on one, defaulted the way a real `reporter.to_json`
-    emits them.
-
-    Hand-written fixtures are how this module's validation drifted from
-    producer reality in the first place (Codex review): an entry that merely
-    *looks* plausible but omits a required field exercises the malformed
-    path, not the ordinary one. Building them through one helper keeps a
-    fixture testing what its name says.
-    """
+    marks *required*, defaulted the way a real `reporter.to_json` emits
+    them -- hand-written fixtures are how this module's validation drifted
+    from producer reality before (Codex review); this helper keeps a
+    fixture testing what its name says."""
     return {"old_value": None, "new_value": None, "severity": "error", **fields}
 
 
@@ -164,12 +158,10 @@ def _write_findings_report(
 
 
 class TestFindingMatrix:
-    """G34 Phase D: per-finding cross-profile reconciliation.
-
-    ``profile_matrix`` says *which profiles* are affected; this says *which
-    finding* differs between them, and never claims a profile is clean of a
-    finding it was never checked for.
-    """
+    """G34 Phase D: per-finding cross-profile reconciliation. ``profile_matrix``
+    says *which profiles* are affected; this says *which finding* differs
+    between them, and never claims a profile is clean of a finding it was
+    never checked for."""
 
     def test_same_finding_on_every_profile_is_one_entry(self, tmp_path: Path) -> None:
         for tid in (GCC, CLANG, MSVC):
@@ -503,6 +495,14 @@ class TestReportFindingIdentity:
 
     def test_empty_entry_degrades_to_reduced_tier(self) -> None:
         assert resolve_report_change_identity({}).tier == "reduced"
+
+    def test_resolves_a_real_finding_shape_without_raising(self) -> None:
+        """Regression test for #958: ``resolve_change_identity``'s
+        unconditional ``entity_id`` read (#957) must not assume
+        ``_ReportChangeView`` carries a live ``Change``'s full fields."""
+        identity = resolve_report_change_identity(dict(_REMOVED_RICH))
+        assert identity.primary_id
+        assert identity.tier == "canonical"
 
 
 class TestParseReportFindingsUnit:
