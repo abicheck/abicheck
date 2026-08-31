@@ -1010,3 +1010,91 @@ class TestCompareOldBundleFactsEarlyRejections:
 
         assert code == 64
         assert "--include" in out
+
+    def test_report_mode_is_rejected(self, tmp_path: Path) -> None:
+        # Codex review: every nested per-library report is rendered via
+        # reporter.to_json(diff) with no report_mode argument -- always the
+        # "full" default, regardless of what was requested.
+        facts_path = tmp_path / "old.bundlefacts.json"
+        facts_path.write_text("{}")
+        new_dir = tmp_path / "new"
+        new_dir.mkdir()
+
+        code, out = _invoke(
+            "compare",
+            str(facts_path),
+            str(new_dir),
+            "--old-bundle-facts",
+            "--report-mode",
+            "leaf",
+            "--format",
+            "json",
+        )
+
+        assert code == 64
+        assert "--report-mode" in out
+
+    def test_show_filtered_is_rejected(self, tmp_path: Path) -> None:
+        facts_path = tmp_path / "old.bundlefacts.json"
+        facts_path.write_text("{}")
+        new_dir = tmp_path / "new"
+        new_dir.mkdir()
+
+        code, out = _invoke(
+            "compare",
+            str(facts_path),
+            str(new_dir),
+            "--old-bundle-facts",
+            "--show-filtered",
+            "--format",
+            "json",
+        )
+
+        assert code == 64
+        assert "--show-filtered" in out
+
+    def test_explicit_jobs_is_rejected(self, tmp_path: Path) -> None:
+        # Codex review: compare_release_against_bundle_facts() processes
+        # every matched library in a synchronous loop -- an explicit
+        # -j/--jobs N request was silently dropped.
+        facts_path = tmp_path / "old.bundlefacts.json"
+        facts_path.write_text("{}")
+        new_dir = tmp_path / "new"
+        new_dir.mkdir()
+
+        code, out = _invoke(
+            "compare",
+            str(facts_path),
+            str(new_dir),
+            "--old-bundle-facts",
+            "--jobs",
+            "4",
+            "--format",
+            "json",
+        )
+
+        assert code == 64
+        assert "--jobs" in out
+
+    def test_default_jobs_is_not_rejected_by_itself(self, tmp_path: Path) -> None:
+        # The silent default (0, "auto-detect") is indistinguishable here
+        # from the flag never having been given, so it must not trip the
+        # --jobs rejection on its own -- confirmed via a malformed OLD_FACTS
+        # document that fails for an unrelated reason first.
+        facts_path = tmp_path / "old.bundlefacts.json"
+        facts_path.write_text("not json")
+        new_dir = tmp_path / "new"
+        new_dir.mkdir()
+
+        code, out = _invoke(
+            "compare",
+            str(facts_path),
+            str(new_dir),
+            "--old-bundle-facts",
+            "--jobs",
+            "0",
+            "--format",
+            "json",
+        )
+
+        assert code != 64 or "--jobs" not in out

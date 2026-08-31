@@ -55,42 +55,19 @@ NEW_INPUT is extracted with the same ``_extract_if_package`` primitive the
 live release fan-out uses when it is a package (wheel/deb/rpm/tar), not just
 a directory -- the option's own help text promises "a live release
 directory/package", so a package operand is a supported input, not an
-afterthought. ``--devel-pkg new=...`` is honored the same way (its extracted
-header root/include roots feed the NEW side's header search); ``--debug-
-info``, ``--severity-preset``/``--pack``/``--exit-code-scheme``,
-``--no-scope-public-headers``, ``--sources``/``--build-info``/
-``--dump-manifest``, and the single-pair-only flag family
-(``--used-by``/``--required-symbol``/``--use-cases``/``--env-matrix``/
-``--reconcile-build-context``/``--diagnostic-comparison``/
-``--audit-suppressions``/``--require-complete-analysis``, reusing
-``cli_compare_options._reject_set_input_flags``, the same guard the live
-release fan-out applies to a directory/package operand) are rejected
-explicitly rather than silently ignored, since none of them have a channel
-into ``compare_release_against_bundle_facts()`` -- the same "reject rather
-than silently diverge from the request" rule ``--dry-run``/``--contract``
-already follow below. ``--debug-format``/``--dwarf-only``/``--debuginfod``/
-``--debuginfod-url``/``--debug-root``, ``--pattern-verdicts``/
-``--explain-patterns``/``--surface-metrics``, ``--probe-matrix``,
-``--post-manifest``, ``--pdb-path``, ``--follow-deps``/``--search-path``/
-``--ld-library-path``, and ``--show-only`` are rejected the same way -- none
-of them have a parameter on ``compare_release_against_bundle_facts()`` or
-its per-library ``service.resolve_input()``/``service.compare_snapshots()``
-calls (``--show-only`` is the one exception with a real channel --
-``reporter.to_json()`` accepts it directly -- but is still rejected rather
-than implemented, since the live release fan-out's own per-library
-``to_json()`` calls have this identical gap and threading it through only
-here would make this driver disagree with every other release-shaped
-comparison path on what ``--show-only`` does). ``kwargs["config"]`` -- an
-explicit ``--config``, or (since a later review round) the same cwd-upward
-auto-discovered ``.abicheck.yml`` ``run_compare``'s own ``cfg_path`` falls
-back to -- is checked the same way: a config whose ``severity:``/``scope:``/
-``suppression:``/``exit_code_scheme:``/``debug:`` blocks are set would
-otherwise be silently unapplied (only its ``compile:`` block reaches
-``resolve_compile_context``) is rejected rather than partially honored --
-``scope:`` covers all four of ``BuildConfig``'s independent scope fields
-(``public``/``collapse_versioned_symbols``/``public_symbols``/
-``show_redundant``), not just ``public``. A zero-match comparison (nothing
-in NEW_INPUT's canonical library keys overlaps OLD_FACTS's
+afterthought. ``--devel-pkg new=...`` is honored the same way.
+
+**Every other flag `dispatch()` doesn't explicitly wire through is rejected
+outright (``click.UsageError``, exit 64) rather than silently ignored** --
+the same "reject rather than silently diverge from the request" rule
+``--dry-run``/``--contract`` set as this module's precedent. Each rejection
+site below carries its own comment explaining exactly why that flag has no
+channel into ``compare_release_against_bundle_facts()`` (or, for the rare
+flag with a real channel elsewhere -- ``--show-only``/``--report-mode`` on
+``reporter.to_json()`` -- why honoring it only here would make this driver
+disagree with the live release fan-out's own identical, pre-existing gap);
+that reasoning is not restated here. A zero-match comparison (nothing in
+NEW_INPUT's canonical library keys overlaps OLD_FACTS's
 ``per_library_snapshots``) is a ``ClickException``, not a ``NO_CHANGE``
 verdict -- exit 0 must mean a real comparison found nothing broken, not that
 nothing was compared at all.
@@ -440,6 +417,27 @@ def dispatch(*, compile_context: Any, **kwargs: Any) -> None:
         # honored ahead of that pre-existing gap.
         raise click.UsageError(
             "--show-only is not supported together with --old-bundle-facts."
+        )
+    if kwargs.get("report_mode") not in (None, "full") or kwargs.get("show_filtered"):
+        # Codex review: same root cause as --show-only above -- report_mode
+        # has no channel into to_json(diff) here (always "full"), and
+        # show_filtered needs the _finalize_compare_result merge step this
+        # dispatcher never calls. Same identical pre-existing gap on the
+        # live release fan-out's own per-library to_json() calls.
+        raise click.UsageError(
+            "--report-mode/--show-filtered are not supported together "
+            "with --old-bundle-facts."
+        )
+    if kwargs.get("jobs"):
+        # Codex review: compare_release_against_bundle_facts() processes
+        # every matched library in a synchronous loop -- an explicit
+        # -j/--jobs N request was silently dropped. The silent default (0,
+        # "auto-detect") is left alone: unlike every other flag here,
+        # --jobs never changes the finding set/verdict/exit code, only
+        # wall-clock time, and dispatch() has no way to tell a default 0
+        # apart from the flag never having been given at all.
+        raise click.UsageError(
+            "--jobs is not supported together with --old-bundle-facts."
         )
     if kwargs.get("no_bundle_analysis"):
         # Codex review: compare_release_against_bundle_facts() has no

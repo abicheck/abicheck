@@ -85,6 +85,17 @@
   stored bundle baseline" section now documents the landed `--old-bundle-
   facts` flag instead of describing it as future work.
 
+  `--report-mode`/`--show-filtered` and an explicit, non-default `--jobs`
+  are now rejected too -- the first two have no channel into the per-library
+  `to_json()` calls this driver renders through (the live release fan-out
+  has this identical gap on its own per-library `to_json()` calls), and
+  `compare_release_against_bundle_facts()` processes matched libraries in a
+  synchronous loop with no parallelism parameter for an explicit worker
+  count. `--jobs`'s silent default (`0`, "auto-detect") is deliberately
+  left un-rejected -- unlike every other flag here it changes only
+  wall-clock time, never a finding/verdict/exit code, and is
+  indistinguishable at this point from the flag never having been given.
+
   Separately, `run_plan.py`'s newline-join fix for `RunPlanCheck.header`
   (public_headers reaching a generated run-plan cell) missed the
   single-element case: `"\n".join([x])` for a one-item list contains no
