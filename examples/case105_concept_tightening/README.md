@@ -51,6 +51,7 @@ EOF
 python3 <<'PYEOF'
 import dataclasses
 from pathlib import Path
+from abicheck.buildsource import pack_io
 from abicheck.buildsource.inline import collect_inline_pack
 
 for v in ("v1", "v2"):
@@ -60,7 +61,7 @@ for v in ("v1", "v2"):
         public_header_roots=(f"{v}.h",),
         extractor="clang",
     )
-    dataclasses.replace(pack, root=Path(f"{v}.evidence")).write()
+    pack_io.write(dataclasses.replace(pack, root=Path(f"{v}.evidence")))
 PYEOF
 
 abicheck dump libtpl_v1.so -H v1.h -p v1.compile_commands.json --build-info v1.evidence --ast-frontend clang -o v1.abi.json
