@@ -27,9 +27,20 @@
 
 - **The typed `run_scan(ScanRequest(...))`/`run_scan_set(...)` API no longer
   raises a Click-specific `click.UsageError` for the `--build-target` +
-  pre-captured Bazel jsonproto mismatch above.** `scan`'s own candidate
-  resolution (`scan_engine._build_new_snapshot`) now raises the
-  framework-neutral `PlanningError` at that point, same as `dump`/`compare`;
+  pre-captured Bazel jsonproto mismatch above.** `scan`'s own pre-flight check
+  now raises the framework-neutral `PlanningError`, same as `dump`/`compare`;
   `cli_scan.py`'s CLI front end translates it to a usage error (exit 64) at
   its own boundary. A caller using the Python API directly previously saw a
   web-framework-specific exception type leak out of a pure engine call.
+- **The same check now runs once, at the top of `scan_engine.run_scan_core`,
+  before its S3 pattern-scan/points-of-interest work** — not only inside
+  `_build_new_snapshot`, which that work already precedes. A typed
+  `run_scan()`/`run_scan_subprocess()` caller has no `cli_scan.py` pre-flight
+  ahead of `run_scan_core` the way the CLI does, so an unsupported request
+  previously paid for that (cheap but real) work before being rejected.
+  Moving the check also surfaced and fixed a real bug: the old
+  `_build_new_snapshot`-only check had no `depth=binary` exemption at all, so
+  a typed `ScanRequest(depth="binary", ...)` combined with `build_targets`
+  and a pre-captured jsonproto was wrongly rejected even though that depth's
+  `collect_mode` never consults either value (the same false-positive class
+  already fixed for `dump`/`compare`'s `AnalysisPlanner` check).

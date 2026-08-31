@@ -528,3 +528,67 @@ def test_run_scan_typed_api_raises_planning_error_not_click_usage_error(
     # Not, in particular, a click.UsageError -- PlanningError is a plain
     # ValueError subclass with no Click dependency.
     assert not issubclass(PlanningError, click.UsageError)
+
+
+def test_run_scan_rejects_before_wasted_pattern_scan_and_poi_work(
+    monkeypatch, tmp_path: Path
+) -> None:
+    """Codex review, fresh evidence: a typed ``run_scan(ScanRequest(...))``
+    caller has no ``cli_scan.py`` pre-flight ahead of ``run_scan_core`` the
+    way the CLI does, so the Bazel-scoping ``PlanningError`` must be raised
+    by ``run_scan_core`` itself, before its S3 pattern scan/POI work runs --
+    not only inside ``_build_new_snapshot``, which those two stages already
+    precede. Pinned by asserting the S3 pass never even starts."""
+    import abicheck.scan_engine as scan_engine_mod
+    from abicheck.errors import PlanningError
+
+    def _fail_if_called(*_a, **_kw):
+        raise AssertionError(
+            "scan_files() (S3 pattern scan) ran before the Bazel-scoping "
+            "pre-flight check rejected the request"
+        )
+
+    monkeypatch.setattr(scan_engine_mod, "scan_files", _fail_if_called)
+
+    aquery = _write_bazel_aquery(tmp_path)
+    req = ScanRequest(
+        binaries=[_artifact(tmp_path)],
+        sources=_sources(tmp_path),
+        build_info=aquery,
+        build_targets=("//:math",),
+    )
+    with pytest.raises(PlanningError, match="pre-captured Bazel aquery"):
+        run_scan(req)
+
+
+def test_run_scan_depth_binary_exempts_the_early_bazel_scoping_check(
+    monkeypatch, tmp_path: Path
+) -> None:
+    """The pre-flight check added to ``run_scan_core`` (see the test above)
+    must not reintroduce the depth=binary false positive ``workflows.plan.
+    _check_bazel_target_scoping`` already fixed: ``depth="binary"`` resolves
+    to a ``collect_mode`` that never consults ``build_info``/``build_targets``
+    at all, so ``bazel_target_scoping_failure`` must not even be called."""
+    import abicheck.scan_engine as scan_engine_mod
+
+    def _fail_if_called(*_a, **_kw):
+        raise AssertionError(
+            "bazel_target_scoping_failure() was called despite depth=binary "
+            "resolving to a collect_mode that never consults build_info/"
+            "build_targets"
+        )
+
+    monkeypatch.setattr(
+        scan_engine_mod, "bazel_target_scoping_failure", _fail_if_called
+    )
+
+    aquery = _write_bazel_aquery(tmp_path)
+    req = ScanRequest(
+        binaries=[_artifact(tmp_path)],
+        sources=_sources(tmp_path),
+        build_info=aquery,
+        build_targets=("//:math",),
+        depth="binary",
+    )
+    result = run_scan(req)
+    assert result.verdict not in ("BUDGET_OVERFLOW", "EVIDENCE_CONTRACT_ERROR")

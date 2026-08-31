@@ -665,45 +665,28 @@ def test_layer_coverage_to_dict_carries_new_fields():
     assert restored == row
 
 
-def test_scan_candidate_build_target_with_precaptured_aquery_raises_planning_error(
-    tmp_path: Path,
-):
-    """ADR-063 Phase 4: ``scan --against``'s own candidate resolution
-    (``scan_engine._build_new_snapshot``) has no ``CompareRequest``/
-    ``DumpRequest`` of its own to resolve through ``AnalysisPlanner`` --
-    this pins that it still reuses the identical Bazel-scoping check
-    ``AnalysisPlanner`` runs for ``compare``/``dump``, closing the `scan`
-    half of ``docs/contribute/known-gaps.md``'s ``--build-target`` +
-    pre-captured Bazel jsonproto gap (the ``dump``/``compare`` half is
-    covered by ``tests/test_analysis_plan.py``). Raises the framework-neutral
-    ``PlanningError`` directly (Codex review: this engine function also backs
-    the typed ``run_scan(ScanRequest(...))`` API, which has no Click context
-    to translate a ``click.UsageError`` for) -- ``cli_scan.py``'s own
-    ``scan_cmd`` is the actual CLI boundary that maps it to a usage error
-    (exit 64); see
-    ``test_scan_cli_real_run_rejects_the_identical_combination`` in
-    ``test_bazel_root_targets_scan.py`` for that end-to-end translation."""
-    import json
-
-    from abicheck.errors import PlanningError
-    from abicheck.scan_engine import _build_new_snapshot
-
-    aquery = tmp_path / "aquery.json"
-    aquery.write_text(
-        json.dumps({"actions": [], "pathFragments": [], "artifacts": [], "targets": []})
-    )
-    with pytest.raises(PlanningError, match="pre-captured Bazel aquery"):
-        _build_new_snapshot(
-            binary=tmp_path / "libfoo.so",
-            headers=[],
-            includes=[],
-            sources=tmp_path,
-            collect_mode="build",
-            lang="c++",
-            allow_build_query=False,
-            build_info=aquery,
-            build_targets=("//:lib",),
-        )
+# `scan --against`'s own candidate resolution has no `CompareRequest`/
+# `DumpRequest` of its own to resolve through `AnalysisPlanner`, so it reuses
+# the identical Bazel-scoping check directly -- closing the `scan` half of
+# docs/contribute/known-gaps.md's `--build-target` + pre-captured Bazel
+# jsonproto gap (the `dump`/`compare` half is covered by
+# tests/test_analysis_plan.py above). That check used to be pinned here via a
+# direct `scan_engine._build_new_snapshot()` call, but a second Codex review
+# round found it needed to run once, earlier, at the top of `scan_engine.
+# run_scan_core` (before its S3 pattern scan/POI work) rather than only inside
+# `_build_new_snapshot` -- a typed `run_scan(ScanRequest(...))`/
+# `run_scan_subprocess` caller has no `cli_scan.py` pre-flight ahead of
+# `run_scan_core` the way the CLI does, so the original placement let it pay
+# for that work before being rejected. The scenario is now pinned end-to-end
+# via the typed API in tests/test_bazel_root_targets_scan.py instead:
+# `test_run_scan_typed_api_raises_planning_error_not_click_usage_error`
+# (raises `PlanningError`, not `click.UsageError`),
+# `test_run_scan_rejects_before_wasted_pattern_scan_and_poi_work` (fires
+# before the S3 pass), and
+# `test_run_scan_depth_binary_exempts_the_early_bazel_scoping_check` (the
+# depth=binary exemption still holds at the new call site). See
+# `test_scan_cli_real_run_rejects_the_identical_combination` in that same
+# file for the CLI's exit-64 translation.
 
 
 # ── ADR-063 Phase 4 follow-up (Codex review): `.abicheck.yml`-sourced scope ──

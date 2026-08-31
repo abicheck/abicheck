@@ -68,6 +68,7 @@ from .buildsource.scan_levels import (
     SourceMethod,
     public_depth_value,
 )
+from .buildsource.source_replay import collection_for_ci_mode
 from .checker_policy import API_BREAK_KINDS, BREAKING_KINDS
 from .checker_types import validate_evidence_depth
 from .cli_scan_baseline import _expand_public_headers, _run_baseline_compare
@@ -81,10 +82,11 @@ from .cli_scan_helpers import (
     resolve_effective_allow_query,
     scan_pattern_roots,
 )
-from .errors import ProfileMismatchError, ScopeMismatchError
+from .errors import PlanningError, ProfileMismatchError, ScopeMismatchError
 from .schemas import SCAN_SCHEMA_VERSION
 from .workflows.artifact.execute import SideResolution
 from .workflows.artifact.resolve import BaselineReuseContext
+from .workflows.plan import bazel_target_scoping_failure
 
 if TYPE_CHECKING:
     from .environment_matrix import EnvironmentMatrix
@@ -277,11 +279,10 @@ def _build_new_snapshot(
     ``run_scan_core``'s own docstring for the full rationale.
     """
     from .api_types import InputSpec
-    from .errors import AbicheckError, PlanningError
+    from .errors import AbicheckError
     from .header_utils import split_public_header_inputs
     from .service_compare_evidence import SideEvidence
     from .workflows.artifact.execute import _resolve_side_snapshot_impl
-    from .workflows.plan import bazel_target_scoping_failure
 
     # L4 replay's own public-header roots, kept deliberately WIDER than the
     # L2/crosscheck-origin provenance set (`public_headers`/`public_header_dirs`
@@ -344,8 +345,9 @@ def _build_new_snapshot(
         collect_mode=collect_mode,
         dump_manifest=None,
     )
-    if _bf := bazel_target_scoping_failure("candidate", build_info, build_targets):
-        raise PlanningError((_bf,))  # framework-neutral; cli_scan.py maps to 64
+    # Bazel target-scoping is checked once, in run_scan_core (the only caller,
+    # before its S3/POI work) -- not repeated here as a second, unguarded copy
+    # that would reintroduce the depth=binary false positive (Codex review).
     try:
         return _resolve_side_snapshot_impl(
             side,
@@ -1098,6 +1100,16 @@ def run_scan_core(
     library and diverging from the baseline's own scoped evidence. Empty by
     default (the pre-existing, unscoped behavior).
     """
+    # ADR-063 Phase 4 (Codex review): checked before S3/POI work, since a typed
+    # run_scan()/run_scan_subprocess caller has no cli_scan.py pre-flight of its
+    # own. Empty layers (depth=binary) exempts it, as _check_bazel_target_scoping does.
+    if collection_for_ci_mode(collect_mode)[1] and (
+        _bf := bazel_target_scoping_failure(
+            "candidate", effective_build_info, build_targets
+        )
+    ):
+        raise PlanningError((_bf,))
+
     stage_timings: dict[str, float] = {}
 
     def _record_stage(name: str, started: float) -> None:

@@ -41,24 +41,43 @@ looked like the obvious fix and wasn't.
   one check both `dump`/`compare` (via `AnalysisPlanner`, wired into
   `service_dump_pipeline.resolve_dump_request`/`service_compare_pipeline.
   resolve_compare_request`) and `scan --against`'s own candidate resolution
-  (`scan_engine._build_new_snapshot`, which has no `CompareRequest`/
-  `DumpRequest` of its own to resolve through `AnalysisPlanner` and so calls
-  the same free function directly) now run before collecting anything —
-  `dump`/`compare`/`scan` alike raise `PlanningError` (framework-neutral) from
-  the engine layer, translated to `click.UsageError` at each CLI boundary
-  (`cli_resolve.py`/`cli_buildsource.py` for `dump`/`compare`; `cli_scan.py`'s
-  own `scan_cmd`, around its `run_scan_core` call, for `scan`). `scan_engine.
-  _build_new_snapshot` originally raised `click.UsageError` directly instead
-  — cheaper in lines, but it leaked a Click-specific exception type out of the
-  same engine function the typed `run_scan(ScanRequest(...))` API calls, with
-  no Click context to catch it in (a third Codex review round, fresh
-  evidence). Fixed by raising `PlanningError` there instead and adding the
-  translation at `cli_scan.py`'s boundary, matching the `dump`/`compare`
-  pattern; `test_run_scan_typed_api_raises_planning_error_not_click_usage_
-  error` (`tests/test_bazel_root_targets_scan.py`) pins that a typed-API
-  caller now sees `PlanningError`, not `click.UsageError`. All three CLIs
-  still name the mismatch and the documented workaround, exit 64, not a
-  silent, unscoped collection.
+  (which has no `CompareRequest`/`DumpRequest` of its own to resolve through
+  `AnalysisPlanner` and so calls the same free function directly) now run
+  before collecting anything — `dump`/`compare`/`scan` alike raise
+  `PlanningError` (framework-neutral) from the engine layer, translated to
+  `click.UsageError` at each CLI boundary (`cli_resolve.py`/
+  `cli_buildsource.py` for `dump`/`compare`; `cli_scan.py`'s own `scan_cmd`,
+  around its `run_scan_core` call, for `scan`). `scan_engine._build_new_
+  snapshot` originally raised `click.UsageError` directly instead — cheaper
+  in lines, but it leaked a Click-specific exception type out of the same
+  engine function the typed `run_scan(ScanRequest(...))` API calls, with no
+  Click context to catch it in (a third Codex review round, fresh evidence).
+  Fixed by raising `PlanningError` there instead and adding the translation
+  at `cli_scan.py`'s boundary, matching the `dump`/`compare` pattern. **A
+  fourth Codex review round found that placement itself was still wrong**:
+  `_build_new_snapshot` runs *after* `run_scan_core`'s own S3 pattern-scan and
+  points-of-interest work, so a typed `run_scan()`/`run_scan_subprocess()`
+  caller — which has no `cli_scan.py` pre-flight ahead of `run_scan_core` the
+  way the CLI does — paid for that (cheap but real) work before the
+  rejection fired. Fixed by moving the check to the very top of
+  `run_scan_core`, guarded on the same `collection_for_ci_mode(collect_mode)`
+  emptiness `workflows.plan._check_bazel_target_scoping` already uses for its
+  `depth=binary` exemption, and removing it from `_build_new_snapshot`
+  entirely rather than leaving a second, independently-maintained copy —
+  which is exactly what the removed copy was: **testing the move found the
+  old `_build_new_snapshot`-only check had no `depth=binary` exemption at
+  all**, a real, separate bug the earlier "scan's own path was already
+  immune" note only verified for the CLI (whose `_normalize_depth_inputs`
+  prunes `build_info` to `None` at that depth) and never checked for the
+  typed API (`service_scan.run_scan` does not prune it). `tests/
+  test_bazel_root_targets_scan.py`'s `test_run_scan_typed_api_raises_
+  planning_error_not_click_usage_error` (raises `PlanningError`, not
+  `click.UsageError`), `test_run_scan_rejects_before_wasted_pattern_scan_
+  and_poi_work` (fires before the S3 pass, monkeypatch-verified), and
+  `test_run_scan_depth_binary_exempts_the_early_bazel_scoping_check` (the
+  exemption holds at the new call site) pin all three properties together.
+  All three CLIs still name the mismatch and the documented workaround, exit
+  64, not a silent, unscoped collection.
   **A second Codex review round found this only covered `InputSpec.
   build_targets` (the `--build-target` CLI flag/typed-API field) — a root-
   target scope declared in `.abicheck.yml`'s own `build.targets:` instead

@@ -11185,6 +11185,45 @@ typed-API guarantee end to end (`run_scan(ScanRequest(...))` raises
 `test_scan_cli_real_run_rejects_the_identical_combination` pinning that the
 CLI path still exits 64.
 
+**A *fourth* round found the third fix's own placement inside
+`_build_new_snapshot` was still too late.** `run_scan_core` runs its S3
+pattern scan (`scan_files`) and points-of-interest build
+(`_build_scan_poi`, which reads both sides' L0 export tables) *before* ever
+calling `_build_new_snapshot` — real, if cheap, work a typed `run_scan()`/
+`run_scan_subprocess()` caller (no `cli_scan.py` pre-flight ahead of it) paid
+for on every rejected request. Fixed by moving the check to the very top of
+`run_scan_core`, before that work, guarded on `collection_for_ci_mode(
+collect_mode)[1]` being non-empty — the same condition, restated against the
+already-resolved `collect_mode` rather than a raw depth string, that
+`workflows.plan._check_bazel_target_scoping` uses for its own
+`depth="binary"` exemption. The check was then *removed* from
+`_build_new_snapshot` rather than left as a second copy: `run_scan_core` is
+its only production caller, so the check had become pure duplication once
+both were correctly guarded — and removing it caught a real, independent bug
+in the process. **The old `_build_new_snapshot`-only check had no
+`depth=binary` exemption at all**: the third round's own reasoning ("scan's
+own path was already immune") verified only that `cli_scan.py`'s
+`_normalize_depth_inputs` prunes `build_info` to `None` at that depth for the
+*CLI*, but never checked `service_scan.run_scan`, which does not prune it —
+so a typed `ScanRequest(depth="binary", build_info=<precaptured jsonproto>,
+build_targets=(...))` was wrongly rejected by the unguarded check, the exact
+false-positive class the `depth=binary` exemption exists to prevent.
+`tests/test_bazel_root_targets_scan.py` gained two more cases:
+`test_run_scan_rejects_before_wasted_pattern_scan_and_poi_work` (monkeypatches
+`scan_files` to raise if called, proving the check now runs first) and
+`test_run_scan_depth_binary_exempts_the_early_bazel_scoping_check`
+(monkeypatches `bazel_target_scoping_failure` itself to raise if called,
+proving the moved check's exemption actually fires rather than merely
+succeeding for some unrelated reason). `tests/test_bazel_root_targets.py`'s
+own scan-side test was retired to a comment pointing at these three, since
+`_build_new_snapshot` no longer performs the check that test exercised.
+`scan_engine.py`'s `no_growth` debt baseline moved 1483 → 1495 (`architecture/
+debt.yaml`'s own entry has the accounting) — the first fix's "no `PlanningError`
+intermediate" zero-cost trick doesn't apply here, since removing the old
+check's two lines is smaller than the ~14 lines the new guarded check plus
+its two module-level imports needed net; a smaller diff that still states
+both the check and why the old copy was removed was not found.
+
 **Not landed in this slice: the second named scenario, and the
 `cli-contract`/`engine-cli-boundary` gate widening.** Re-checked against
 the real code (not assumed from this section's own prose), "a `-H` flag
