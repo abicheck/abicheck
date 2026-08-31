@@ -173,6 +173,23 @@ class TestBazelBuildTargetScoping:
         plan = AnalysisPlanner.resolve(request)
         assert isinstance(plan, AnalysisPlan)
 
+    def test_nonexistent_build_info_path_is_unaffected(self, tmp_path: Path):
+        """A ``build_info`` path that does not exist on disk cannot be
+        sniffed as a Bazel jsonproto -- this check must not raise (or crash
+        trying to read it), leaving that failure to whatever later step
+        actually needs the file to exist."""
+        request = DumpRequest(
+            input=InputSpec.of(
+                path=None,
+                sources=tmp_path,
+                build_info=tmp_path / "does-not-exist.json",
+                build_targets=["//:lib"],
+            ),
+            depth="build",
+        )
+        plan = AnalysisPlanner.resolve(request)
+        assert isinstance(plan, AnalysisPlan)
+
 
 class TestAnalysisPlanShape:
     def test_dump_plan_carries_one_side_labelled_input(self, tmp_path: Path):
@@ -209,6 +226,28 @@ class TestAnalysisPlanShape:
                     gcc_path="/opt/my-gcc/bin/gcc", frontend="clang"
                 ),
             ),
+        )
+        plan = AnalysisPlanner.resolve(request)
+        side = plan.sides[0]
+        assert side.gcc_path == "/opt/my-gcc/bin/gcc"
+        assert side.frontend == "clang"
+
+    def test_side_compile_context_left_at_auto_falls_back_to_request_frontend(
+        self, tmp_path: Path
+    ):
+        """A side's own ``compile`` context left at the default ``"auto"``
+        frontend carries no per-side override -- the plan's ``frontend``
+        falls back to the request-level value, exactly like a side with no
+        ``compile`` context at all."""
+        from abicheck.compile_context import CompileContext
+
+        request = DumpRequest(
+            input=InputSpec.of(
+                path=None,
+                sources=tmp_path,
+                compile=CompileContext(gcc_path="/opt/my-gcc/bin/gcc"),
+            ),
+            frontend="clang",
         )
         plan = AnalysisPlanner.resolve(request)
         side = plan.sides[0]
