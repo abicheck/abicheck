@@ -93,11 +93,14 @@ def _change_attrs_read(
     following calls (by position or keyword) into other functions defined
     in the same module that receive the same object under a new name, and
     following simple local-variable aliases of ``param_name`` within the
-    same function body (Codex review, fresh evidence, third round: a
-    parameter-only walk stays green for a read written after a refactor
-    like ``candidate = change; candidate.future_field``, or a helper call
-    forwarding the alias instead of the original name). Also catches an
-    *indirect* read via the ``getattr(<param_name>, "attr", ...)`` builtin
+    same function body -- both a plain ``candidate = change`` (Codex
+    review, fresh evidence, third round: a parameter-only walk stays green
+    for a read written after a refactor like ``candidate = change;
+    candidate.future_field``, or a helper call forwarding the alias
+    instead of the original name) and an annotated ``candidate: Change =
+    change`` (Codex review, fresh evidence, fourth round: an ``AnnAssign``
+    is a distinct AST node from ``Assign`` and was not recognized at all).
+    Also catches an *indirect* read via the ``getattr(<param_name>, "attr", ...)`` builtin
     (Codex review, fresh evidence, second round: a literal-only walk stays
     green if a future reader switches to this form) -- a non-literal
     attribute name (computed at runtime) is out of reach for a static
@@ -133,6 +136,13 @@ def _change_attrs_read(
             for target in node.targets:
                 if isinstance(target, ast.Name):
                     tracked.add(target.id)
+        elif (
+            isinstance(node, ast.AnnAssign)
+            and isinstance(node.target, ast.Name)
+            and isinstance(node.value, ast.Name)
+            and node.value.id in tracked
+        ):
+            tracked.add(node.target.id)
     attrs: set[str] = set()
     for node in ast.walk(func):
         if (
@@ -269,4 +279,24 @@ def test_change_attrs_read_catches_a_local_alias_forwarded_to_a_helper() -> None
     }
     assert _change_attrs_read("outer", "change", funcs_by_name, set()) == {
         "future_field2"
+    }
+
+
+def test_change_attrs_read_catches_an_annotated_local_alias_read() -> None:
+    """Codex review, fresh evidence, fourth round: an *annotated* alias
+    assignment (`candidate: Change = change`) is a distinct `ast.AnnAssign`
+    node, not `ast.Assign` -- a walker that only recognizes the latter
+    stays green for this equally common, equally real refactor shape."""
+    source = (
+        "def outer(change):\n"
+        "    candidate: object = change\n"
+        "    return candidate.future_field\n"
+    )
+    funcs_by_name = {
+        node.name: node
+        for node in ast.walk(ast.parse(source))
+        if isinstance(node, ast.FunctionDef)
+    }
+    assert _change_attrs_read("outer", "change", funcs_by_name, set()) == {
+        "future_field"
     }
