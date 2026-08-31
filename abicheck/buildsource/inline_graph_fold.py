@@ -570,7 +570,7 @@ def fold_template_graph(
         narrowed_pass_confirmed,
         project_source_files,
     )
-    from .template_graph import augment_graph_with_templates
+    from .template_graph_fold import augment_graph_with_templates
 
     # Deliberately `template_graph.ClangTemplateGraphExtractor` (through the
     # module, not a direct `from .template_graph_extractor import ...`) --

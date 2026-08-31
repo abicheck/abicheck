@@ -654,7 +654,7 @@ def test_template_instantiation_node_id_strips_checkout_directory_from_lambda_ar
     # (Codex review, fresh evidence, twelfth round) -- template_instantiation:// was
     # excluded from the normalization gate entirely, so two builds of the identical
     # instantiation under different checkout roots still produced different node ids.
-    from abicheck.buildsource.template_graph import template_instantiation_node_id
+    from abicheck.buildsource.template_graph_fold import template_instantiation_node_id
 
     old = template_instantiation_node_id(
         "Wrapper<(lambda at /old/checkout/foo.cpp:2:20)>"
@@ -675,7 +675,7 @@ def test_template_instantiation_node_id_strips_checkout_directory_from_lambda_ar
 def test_template_decl_node_id_strips_checkout_directory_from_default_argument() -> (
     None
 ):
-    from abicheck.buildsource.template_graph import template_decl_node_id
+    from abicheck.buildsource.template_graph_fold import template_decl_node_id
 
     old = template_decl_node_id(
         "Outer", "type-parameter-0-0 (lambda at /old/checkout/foo.cpp:2:20)"
@@ -696,7 +696,7 @@ def test_template_instantiation_node_loaded_from_persisted_pack_migrates_and_nor
     # (ensure_facts_and_resolve), the same choke points every other decl/type kind
     # already routes through.
     from abicheck.buildsource.graph_facts import GraphNode
-    from abicheck.buildsource.template_graph import template_instantiation_node_id
+    from abicheck.buildsource.template_graph_fold import template_instantiation_node_id
 
     raw_label = "Wrapper<(lambda at /old/checkout/foo.cpp:2:20)>"
     node = GraphNode.from_dict(

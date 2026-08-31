@@ -31,13 +31,15 @@ import pytest
 
 from abicheck.buildsource.source_graph import SourceGraphSummary
 from abicheck.buildsource.template_graph import (
+    TemplateArgUse,
+    TemplateInstantiation,
+    parse_clang_ast_templates,
+)
+from abicheck.buildsource.template_graph_fold import (
     EDGE_TEMPLATE_USES_DECL,
     EDGE_TEMPLATE_USES_TYPE,
     NODE_SOURCE_DECL,
-    TemplateArgUse,
-    TemplateInstantiation,
     augment_graph_with_templates,
-    parse_clang_ast_templates,
     template_instantiation_node_id,
 )
 
