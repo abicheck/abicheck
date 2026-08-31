@@ -3206,14 +3206,16 @@ uniqueness, valid references, non-contradictory defaults, and complete
 metadata — and item 3's taxonomy repartition (moving the 397 entries into
 `model/change_catalog/{symbols,types,platform,build,source}.py`) are both
 **done**; no parser imports policy/report/workflows/frontends; corresponding
-debt entries are removed. **All four items are now done** — item 1 (the
-CastXML/Clang parser split) is fully closed on both backends, item 2
-(source-graph values/construction/comparison separation) is fully split with
+debt entries are removed.
+
+**Closure note:** all four items are now done — item 1 (the CastXML/Clang
+parser split) is fully closed on both backends, item 2 (source-graph
+values/construction/comparison separation) is fully split with
 `buildsource/source_graph.py` reduced to a 140-line re-export facade, item 3
 (the change-catalog taxonomy repartition) is done as above, and item 4 (the
 `IMPORT_CYCLE_ALLOWLIST` audit and stale-facade/legacy-edge cleanup) has
 landed both slices with no stale entries remaining — closing Phase 5 in
-full, satisfying every clause of this acceptance criterion.
+full, satisfying every clause of the acceptance criterion above.
 
 ## Migration rules for every phase
 
