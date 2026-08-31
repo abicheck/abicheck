@@ -38,6 +38,7 @@ from .contracts import (
     GateInfo,
 )
 from .gate import (
+    _VALID_GATE_EXIT,
     COVERAGE_INCOMPLETE_EXIT,
     _contract_coverage_declared,
     _contract_coverage_exit,
@@ -162,6 +163,42 @@ def _incomplete_findings(data: dict[str, Any]) -> ReportFindings:
     return replace(parse_report_findings(data), complete=False)
 
 
+def _scan_abort_prior_exit(data: Mapping[str, Any]) -> int:
+    """The largest PR-G1 contribution preserved in a scan abort's own
+    ``diff.exit``, or ``0``.
+
+    A *late* ``_BudgetOverflow``/``_EvidenceContractError``
+    (``attach_prior_on_budget_overflow``) carries the ordinary
+    compatibility/contract-coverage/analysis-assurance/crosscheck-promotion
+    contributions through into ``diff.exit``'s own ``*_contribution`` fields
+    even though none of them decided ``code`` there (``code`` is always the
+    dominant budget/evidence-contract-error code, chosen large enough to
+    exceed them -- see ``ExitDecision``'s own docstring). Reading them here
+    is what lets this target's forced gate still reflect a real ABI/API
+    break already found before the abort fired, instead of downgrading it
+    to a bare coverage-incomplete ``1`` (Codex review, fresh evidence).
+    """
+    diff = data.get("diff")
+    exit_block = diff.get("exit") if isinstance(diff, dict) else None
+    if not isinstance(exit_block, dict):
+        return 0
+    best = 0
+    for key in (
+        "compatibility_contribution",
+        "contract_coverage_contribution",
+        "analysis_assurance_contribution",
+        "crosscheck_promotion_contribution",
+    ):
+        raw = exit_block.get(key)
+        if (
+            isinstance(raw, int)
+            and not isinstance(raw, bool)
+            and raw in _VALID_GATE_EXIT
+        ):
+            best = max(best, raw)
+    return best
+
+
 def _load_report_file(path: Path, *, prefix: str) -> _LoadedReport:
     try:
         data = json.loads(path.read_text())
@@ -252,10 +289,16 @@ def _load_report_file(path: Path, *, prefix: str) -> _LoadedReport:
     # `AggregateResult._forced_gate_targets` folds in exactly this shape
     # (unavailable, but carrying a non-`None` gate) alongside the analyzed
     # targets, the same way the now-removed synthetic verdict used to. The
-    # gate's own `exit_code` is `COVERAGE_INCOMPLETE_EXIT` (1), never scan's
-    # raw private code (5 for budget overflow) -- `GateInfo.from_scan_report`
-    # already normalizes every scan exit outside {0, 2, 4} to this same
-    # value, and the aggregate's own published contract has no exit 5.
+    # gate's own `exit_code` is `max(COVERAGE_INCOMPLETE_EXIT, prior
+    # contribution)`, never scan's raw private code (5 for budget overflow)
+    # -- `GateInfo.from_scan_report` already normalizes every scan exit
+    # outside {0, 2, 4} to `COVERAGE_INCOMPLETE_EXIT`, and the aggregate's
+    # own published contract has no exit 5 -- but a *late* `_BudgetOverflow`
+    # (`attach_prior_on_budget_overflow`) preserves whatever gate/coverage/
+    # assurance/crosscheck decision already existed in `diff.exit`'s own
+    # `*_contribution` fields, and downgrading a real ABI/API break already
+    # found before the abort to a bare coverage-incomplete `1` would hide it
+    # from a severity-aware consumer (Codex review, fresh evidence).
     _scan_abort_categories = {
         _SCAN_BUDGET_OVERFLOW_VERDICT: "budget_overflow",
         _SCAN_EVIDENCE_CONTRACT_ERROR_VERDICT: "evidence_contract_error",
@@ -271,7 +314,7 @@ def _load_report_file(path: Path, *, prefix: str) -> _LoadedReport:
             target_id=target_id,
             verdict=None,
             gate=GateInfo(
-                exit_code=COVERAGE_INCOMPLETE_EXIT,
+                exit_code=max(COVERAGE_INCOMPLETE_EXIT, _scan_abort_prior_exit(data)),
                 blocking=True,
                 blocking_categories=(scan_abort_category,),
                 from_report=True,

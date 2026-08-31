@@ -368,3 +368,42 @@ class TestAbortPayloadThroughRealAggregate:
         )
         assert result.exit_code() == 1
         assert "linux-x86_64" in result.blocking_targets
+
+    def test_late_budget_overflow_preserves_a_real_break_through_the_real_aggregate(
+        self, tmp_path
+    ):
+        """A hand-crafted late-abort report (the shape `attach_prior_on_
+        budget_overflow` produces once a real break was already found)
+        must raise the real `AggregateResult.exit_code()` to that break's
+        own severity, not just the bare coverage floor -- covering the same
+        review finding as `test_aggregate_migration_coverage.py`'s unit
+        tests, but through the real `aggregate_reports_dir` pipeline."""
+        from abicheck.aggregate import ExpectedTargets, aggregate_reports_dir
+
+        reports_dir = tmp_path / "reports"
+        reports_dir.mkdir()
+        (reports_dir / "abi-report-linux-x86_64.json").write_text(
+            json.dumps(
+                {
+                    "scan_schema_version": "1.23",
+                    "verdict": "BUDGET_OVERFLOW",
+                    "exit_code": 5,
+                    "diff": {
+                        "exit": {
+                            "code": 5,
+                            "reasons": ["budget_overflow"],
+                            "budget_overflow_contribution": 5,
+                            "compatibility_contribution": 4,
+                        }
+                    },
+                }
+            )
+        )
+
+        result = aggregate_reports_dir(
+            reports_dir,
+            expected=ExpectedTargets.from_lists(["linux-x86_64"], []),
+        )
+        assert result.exit_code() == 4
+        assert "linux-x86_64" in result.blocking_targets
+        assert result.compatibility_verdict is None

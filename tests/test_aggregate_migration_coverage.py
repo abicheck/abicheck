@@ -121,3 +121,111 @@ def test_scan_abort_verdicts_force_a_blocking_gate(
     assert loaded.gate.blocking is True
     assert loaded.gate.exit_code == 1
     assert loaded.gate.blocking_categories == (category,)
+
+
+@pytest.mark.parametrize("prior_contribution", [2, 4])
+def test_late_budget_overflow_preserves_a_real_prior_break_in_the_gate_exit_code(
+    tmp_path: Path, prior_contribution: int
+) -> None:
+    """A *late* `_BudgetOverflow` (`attach_prior_on_budget_overflow`) carries
+    the ordinary compatibility contribution already computed before the
+    abort fired through into `diff.exit`'s own `compatibility_contribution`
+    field, even though `code` itself is always the dominant budget-overflow
+    code (5) by `ExitDecision`'s own design. Downgrading that preserved
+    contribution to a bare `COVERAGE_INCOMPLETE_EXIT` (1) would hide a real
+    ABI/API break already found before the abort from a severity-aware
+    aggregate consumer (Codex review, fresh evidence).
+    """
+    report = tmp_path / "abi-report-linux.json"
+    report.write_text(
+        json.dumps(
+            {
+                "scan_schema_version": "1.23",
+                "verdict": "BUDGET_OVERFLOW",
+                "exit_code": 5,
+                "diff": {
+                    "exit": {
+                        "code": 5,
+                        "reasons": ["budget_overflow"],
+                        "budget_overflow_contribution": 5,
+                        "compatibility_contribution": prior_contribution,
+                    }
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    loaded = _load_report_file(report, prefix="abi-report-")
+
+    assert loaded.verdict is None
+    assert loaded.gate is not None
+    assert loaded.gate.exit_code == prior_contribution
+    assert loaded.gate.blocking is True
+    assert loaded.gate.blocking_categories == ("budget_overflow",)
+
+
+def test_early_budget_overflow_with_no_prior_contribution_stays_at_the_coverage_floor(
+    tmp_path: Path,
+) -> None:
+    """An early abort (no baseline compare ran yet, so every PR-G1
+    contribution is genuinely `0`) must not be inflated -- the floor stays
+    `COVERAGE_INCOMPLETE_EXIT` (1), matching the pre-existing behaviour this
+    fix must not regress."""
+    report = tmp_path / "abi-report-linux.json"
+    report.write_text(
+        json.dumps(
+            {
+                "scan_schema_version": "1.23",
+                "verdict": "BUDGET_OVERFLOW",
+                "exit_code": 5,
+                "diff": {
+                    "exit": {
+                        "code": 5,
+                        "reasons": ["budget_overflow"],
+                        "budget_overflow_contribution": 5,
+                        "compatibility_contribution": 0,
+                        "contract_coverage_contribution": 0,
+                        "analysis_assurance_contribution": 0,
+                        "crosscheck_promotion_contribution": 0,
+                    }
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    loaded = _load_report_file(report, prefix="abi-report-")
+
+    assert loaded.gate is not None
+    assert loaded.gate.exit_code == 1
+
+
+def test_malformed_prior_contribution_is_ignored_not_trusted(tmp_path: Path) -> None:
+    """A `compatibility_contribution` outside the aggregate's own valid gate
+    scheme ({0, 1, 2, 4}) -- a corrupt or hand-edited report -- must not be
+    passed straight through; fail closed to the coverage floor instead of
+    manufacturing an exit code the aggregate's own contract doesn't allow."""
+    report = tmp_path / "abi-report-linux.json"
+    report.write_text(
+        json.dumps(
+            {
+                "scan_schema_version": "1.23",
+                "verdict": "BUDGET_OVERFLOW",
+                "exit_code": 5,
+                "diff": {
+                    "exit": {
+                        "code": 5,
+                        "reasons": ["budget_overflow"],
+                        "compatibility_contribution": 3,
+                    }
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    loaded = _load_report_file(report, prefix="abi-report-")
+
+    assert loaded.gate is not None
+    assert loaded.gate.exit_code == 1

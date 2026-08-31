@@ -443,9 +443,22 @@ lands in two stages rather than one atomic change:
       into its own leaf module for the same no-growth-budget reason as the
       scan-engine helpers above), giving the abort the identical single
       blocking "analysis incomplete" `Finding` treatment `NOT_COMPARABLE`
-      already gets. Still open: the release fan-out's `GateOptions`
-      unification and a full cross-front-end parity pass (typed API,
-      Action).
+      already gets. **(7) A seventh round caught the aggregate gate
+      downgrading a real prior break:** a *late* `_BudgetOverflow`
+      preserves the ordinary compatibility/coverage/assurance/crosscheck
+      contributions already computed before it fired in the report's
+      `diff.exit` (`attach_prior_on_budget_overflow`, (4) above) -- but
+      `_load_report_file`'s forced-blocking branch never read them,
+      unconditionally floor-setting the gate to `COVERAGE_INCOMPLETE_EXIT`
+      (1) even when `compatibility_contribution` was `4` (a real ABI break
+      already found) (Codex review, fresh evidence). Fixed via a new
+      `_scan_abort_prior_exit` helper that reads the largest valid
+      preserved contribution from `diff.exit` and folds it with `max()`
+      against the coverage floor; an early abort (every contribution
+      genuinely `0`) still floors at `1` unchanged, and a malformed/
+      out-of-scheme contribution is ignored rather than trusted. Still open:
+      the release fan-out's `GateOptions` unification and a full
+      cross-front-end parity pass (typed API, Action).
 2. **Atomic.** Once the report block agrees with today's real behaviour for
    every axis and every mode (verified by the axis-separated tests this ADR
    requires below), remove `--exit-code-scheme` from `compare` and `scan`,
