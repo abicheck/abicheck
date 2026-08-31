@@ -22,10 +22,14 @@ py``), and are shared well beyond either half: ``crosscheck.py``'s intra-
 version checks, ``graph_reconcile.py``, ``internal_leak.py``,
 ``impact/use_cases.py``/``impact/consumer_graph.py``, ``surface.py``, and
 ``post_processing_reachability.py`` all import from here (via the
-``source_graph.py`` facade). Left unclassified in ``architecture/
-modules.yaml`` for the same reason several of those callers are — no
-single ADR-061 responsibility package owns this cross-cutting
-classification vocabulary yet; see that ADR's Phase 5 item 2 status notes.
+``source_graph.py`` facade). Classified ``compare`` in ``architecture/
+modules.yaml``: these predicates classify structure on an already-built
+graph rather than deciding relevance/suppression/severity, which fits
+``compare``'s task-routing role better than ``policy``'s — see that ADR's
+Phase 5 item 2 status notes for the full reasoning, including why the two
+``policy``-classified callers above (``surface.py``,
+``post_processing_reachability.py``) aren't blocked (``policy -> compare``
+is an allowed edge).
 """
 
 from __future__ import annotations
