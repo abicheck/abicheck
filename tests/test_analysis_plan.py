@@ -279,3 +279,48 @@ class TestPlanningErrorShape:
         message = str(exc_info.value)
         assert "//:old" in message
         assert "//:new" in message
+
+
+class TestPlanningErrorCliTranslation:
+    def test_native_compare_cli_maps_planning_error_to_usage_error(self, monkeypatch):
+        """The native ``compare`` CLI's own resolution boundary
+        (``cli_resolve._resolve_compare_snapshots``) must translate a
+        ``PlanningError`` from ``service.resolve_compare_request`` into a
+        ``click.UsageError`` (exit 64, AGENTS.md's documented usage-error
+        contract) -- not let it propagate as a raw, untranslated exception,
+        and not the operational-failure ``click.ClickException`` (exit 1)
+        the same boundary maps a ``SnapshotError`` to. No real Bazel input
+        is needed here: the boundary's own translation is what's under
+        test, so ``service.resolve_compare_request`` is monkeypatched to
+        raise directly."""
+        import click
+
+        from abicheck import service
+        from abicheck.cli_resolve import _resolve_compare_snapshots
+
+        def _raise(*args, **kwargs):
+            raise PlanningError((PlanningFailure("build_targets=['//:lib']", "boom"),))
+
+        monkeypatch.setattr(service, "resolve_compare_request", _raise)
+        with pytest.raises(click.UsageError, match="boom"):
+            _resolve_compare_snapshots(
+                old_input=Path("old.so"),
+                new_input=Path("new.so"),
+                old_fmt="elf",
+                new_fmt="elf",
+                old_h=[],
+                new_h=[],
+                old_inc=[],
+                new_inc=[],
+                old_version="",
+                new_version="",
+                lang="c++",
+                pdb_path=None,
+                old_pdb_path=None,
+                new_pdb_path=None,
+                dwarf_only=False,
+                debug_format=None,
+                follow_deps=False,
+                search_paths=(),
+                ld_library_path="",
+            )

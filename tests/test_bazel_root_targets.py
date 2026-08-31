@@ -676,9 +676,14 @@ def test_scan_candidate_build_target_with_precaptured_aquery_raises_planning_err
     half of ``docs/contribute/known-gaps.md``'s ``--build-target`` +
     pre-captured Bazel jsonproto gap (the ``dump``/``compare`` half is
     covered by ``tests/test_analysis_plan.py``). Surfaces as a clean
-    ``click.ClickException`` (not a raw ``PlanningError`` traceback), the
-    same translation this function's own ``except AbicheckError`` already
-    applies to every other resolution failure here."""
+    ``click.UsageError`` (not a raw ``PlanningError`` traceback) -- a bad
+    input combination is a usage error (AGENTS.md: "64 = usage error ...
+    applies across commands"), which the root CLI group remaps from click's
+    own default exit 2 to abicheck's documented exit 64
+    (``frontends.cli.runtime._AbicheckGroup.main``), not the operational-
+    failure ``click.ClickException`` (exit 1) this function's own
+    ``except AbicheckError`` applies to every other resolution failure
+    here."""
     import json
 
     import click
@@ -689,7 +694,7 @@ def test_scan_candidate_build_target_with_precaptured_aquery_raises_planning_err
     aquery.write_text(
         json.dumps({"actions": [], "pathFragments": [], "artifacts": [], "targets": []})
     )
-    with pytest.raises(click.ClickException, match="pre-captured Bazel aquery"):
+    with pytest.raises(click.UsageError, match="pre-captured Bazel aquery"):
         _build_new_snapshot(
             binary=tmp_path / "libfoo.so",
             headers=[],

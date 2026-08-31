@@ -277,7 +277,7 @@ def _build_new_snapshot(
     ``run_scan_core``'s own docstring for the full rationale.
     """
     from .api_types import InputSpec
-    from .errors import AbicheckError, PlanningError
+    from .errors import AbicheckError
     from .header_utils import split_public_header_inputs
     from .service_compare_evidence import SideEvidence
     from .workflows.artifact.execute import _resolve_side_snapshot_impl
@@ -346,7 +346,7 @@ def _build_new_snapshot(
     )
     try:
         if _bf := bazel_target_scoping_failure("candidate", build_info, build_targets):
-            raise PlanningError((_bf,))  # ADR-063 Phase 4: no AnalysisPlan here to reuse
+            raise click.UsageError(str(_bf))  # a usage error (AGENTS.md), not exit 1
         return _resolve_side_snapshot_impl(
             side,
             evidence,
