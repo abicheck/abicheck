@@ -340,6 +340,61 @@ class TestAbortPayloadThroughRealAggregate:
         assert result.coverage_blocking is False
         assert result.compatibility_verdict is None
 
+    def test_budget_overflow_report_blocks_an_unexpected_target_by_default(
+        self, runner, new_snap_compatible, tmp_path
+    ):
+        """`AggregateResult._forced_gate_targets` respects
+        `on_unexpected_target` for the unexpected half exactly like
+        `_gated_unexpected` does -- the default policy (`include`) still
+        gates an abort report for a target that isn't in the expected set
+        at all, not just an expected-but-optional one."""
+        from abicheck.aggregate import ExpectedTargets, aggregate_reports_dir
+
+        res = runner.invoke(
+            main,
+            ["scan", str(new_snap_compatible), "--budget", "0s", "--format", "json"],
+        )
+        reports_dir = tmp_path / "reports"
+        reports_dir.mkdir()
+        (reports_dir / "abi-report-linux-x86_64.json").write_text(
+            _abort_payload_text(res)
+        )
+
+        result = aggregate_reports_dir(
+            reports_dir,
+            expected=ExpectedTargets.from_lists(["macos-arm64"], []),
+        )
+        assert "linux-x86_64" not in {t.target_id for t in result.targets}
+        assert result.exit_code() == 1
+        assert "linux-x86_64" in result.blocking_targets
+
+    def test_budget_overflow_report_on_unexpected_warn_does_not_block(
+        self, runner, new_snap_compatible, tmp_path
+    ):
+        """The `warn` unexpected-target policy never fails the gate on an
+        unexpected report -- an abort report is no exception, matching
+        `_gated_unexpected`'s own `(INCLUDE, FAIL)` check."""
+        from abicheck.aggregate import ExpectedTargets, aggregate_reports_dir
+        from abicheck.workflows.aggregate.resolve import OnUnexpectedTarget
+
+        res = runner.invoke(
+            main,
+            ["scan", str(new_snap_compatible), "--budget", "0s", "--format", "json"],
+        )
+        reports_dir = tmp_path / "reports"
+        reports_dir.mkdir()
+        (reports_dir / "abi-report-linux-x86_64.json").write_text(
+            _abort_payload_text(res)
+        )
+
+        result = aggregate_reports_dir(
+            reports_dir,
+            expected=ExpectedTargets.from_lists([], ["macos-arm64"]),
+            on_unexpected_target=OnUnexpectedTarget.WARN,
+        )
+        assert result.exit_code() == 0
+        assert "linux-x86_64" not in result.blocking_targets
+
     def test_evidence_contract_error_report_blocks_a_required_target(
         self, runner, new_snap_compatible, tmp_path
     ):
@@ -447,4 +502,31 @@ class TestAbortPayloadThroughRealAggregate:
         assert "linux-x86_64" in result.contract_coverage_targets
         assert result.analysis_assurance_exit == 1
         assert "linux-x86_64" in result.analysis_assurance_targets
+
+    def test_budget_overflow_text_rendering_shows_the_forced_gate(
+        self, runner, new_snap_compatible, tmp_path
+    ):
+        """`AggregateResult.render_text()`'s "unavailable" line for a scan
+        abort must say it still gates the CI decision, not just note the
+        reason -- otherwise the text output reads like a plain, advisory
+        coverage gap even though the target is genuinely blocking."""
+        from abicheck.aggregate import ExpectedTargets, aggregate_reports_dir
+
+        res = runner.invoke(
+            main,
+            ["scan", str(new_snap_compatible), "--budget", "0s", "--format", "json"],
+        )
+        reports_dir = tmp_path / "reports"
+        reports_dir.mkdir()
+        (reports_dir / "abi-report-linux-x86_64.json").write_text(
+            _abort_payload_text(res)
+        )
+
+        result = aggregate_reports_dir(
+            reports_dir,
+            expected=ExpectedTargets.from_lists(["linux-x86_64"], []),
+        )
+        text = result.render_text()
+        assert "⚠ unavailable" in text
+        assert "[gate: blocking (budget_overflow)]" in text
         assert result.compatibility_verdict is None
