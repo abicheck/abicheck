@@ -55,20 +55,28 @@
   `_check_inline_transitions`/the `FUNC_ADDED` site/
   `_detect_newly_deleted_functions`) — the old side's `Function.entity_id`
   when it exists, else the new side's, mirroring `Change.symbol_binding`'s
-  own old-side convention. **Still not landed: the mangled-name-is-genuine
-  determination** (`finding_identity.is_real_mangled_name`/
-  `normalize_mangled_name` stay finding_identity's own — `model/identity.py`'s
-  own docstring records why moving them would reverse the required
-  `compare -> model` import direction); **`resolve_change_identity`/
-  `_change_discriminator` actually consuming `Change.entity_id`** (the
-  carrier is populated but has no reader yet — mirrors the earlier
-  `Function.entity_id`/`Variable.entity_id` "carrier before consumer"
-  staging); **exhaustive population beyond the function-diff path**
+  own old-side convention; an eighth slice extended that wiring to every
+  remaining function-backed site (`diff_hidden_friends.py`,
+  `diff_param_qualifiers.py`, `_diff_ctor_overload_ambiguity`, and the
+  auxiliary param/deprecated/override-specifier detectors), and gave
+  `EntityId` its own `.key` property (`model/identity.py`, a flat,
+  collision-safe string) so `finding_identity.resolve_change_identity`
+  could fold `Change.entity_id` in as a new `entity:` alias — the first
+  real consumer read, additive only, never promoted to `primary_id`/tier
+  (existing suppression-rule/canonical-id compatibility is unaffected).
+  **Still not landed: the mangled-name-is-genuine determination**
+  (`finding_identity.is_real_mangled_name`/`normalize_mangled_name` stay
+  finding_identity's own — `model/identity.py`'s own docstring records why
+  moving them would reverse the required `compare -> model` import
+  direction); **exhaustive population beyond the function-diff path**
   (variable/type/enum/platform detectors construct `Change` from
   `RecordType`/`EnumType`/`Variable` objects that also carry `.entity_id`,
   but aren't wired yet); **and every post-parse consumer migration**
   (`diff_filtering.py`/`type_reachability.py`'s string-based ambiguity
-  machinery). Those are the remaining items before Phase 2 is complete.
+  machinery, plus actually promoting the new `entity:` alias into a real
+  alias-match reconciliation tier once `EntityId.key`'s cross-release
+  stability is established). Those are the remaining items before Phase 2
+  is complete.
 - **Phases 3–10** are still unimplemented design text.
 
 See the [implementation plan](../plans/one-semantic-pipeline.md) for the

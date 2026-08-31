@@ -14,16 +14,23 @@
 
 """ADR-063 Phase 2: ``Change.entity_id`` carrier — the function-diff
 producer wiring in ``diff_symbols.py`` (the "finding_identity.py algorithm
-migration"'s second half, giving ``Change`` an ``EntityId`` to key on).
-
-No consumer reads ``Change.entity_id`` yet (same "carrier lands before
-consumer" discipline as ``Function.entity_id``/``Variable.entity_id``) --
-these tests pin only that the field is populated correctly at emission.
+migration"'s second half, giving ``Change`` an ``EntityId`` to key on) --
+and, as of ``TestResolveChangeIdentityConsumesEntityId`` below, the first
+real consumer read: ``finding_identity.resolve_change_identity`` folds it
+in as an additional ``entity:`` alias (additive only, never promoted to
+``primary_id``/tier). Every other test in this file still pins only that
+the carrier is populated correctly at emission, the same "carrier lands
+before consumer" discipline ``Function.entity_id``/``Variable.entity_id``
+went through first.
 """
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 from abicheck.checker import ChangeKind, compare
+from abicheck.checker_types import Change
+from abicheck.finding_identity import IDENTITY_TIER_CANONICAL, resolve_change_identity
 from abicheck.model import AbiSnapshot, Function, Param, Visibility
 from abicheck.model.identity import entity_id_for_function
 
@@ -362,3 +369,29 @@ class TestChangeEntityIdCarrier:
         new_snap.types = [owner]
         r = compare(old_snap, new_snap, scope_to_public_surface=False)
         assert _change(r, ChangeKind.CTOR_OVERLOAD_AMBIGUITY_RISK).entity_id == eid  # type: ignore[attr-defined]
+
+
+class TestResolveChangeIdentityConsumesEntityId:
+    """ADR-063 Phase 2, the true completion of (c2): the first real
+    consumer read of ``Change.entity_id``, via ``resolve_change_identity``'s
+    new ``entity:`` alias -- additive only (qualified with the discriminator
+    like every other alias there), never promoted to ``primary_id``/tier."""
+
+    _eid = entity_id_for_function((), "f", mangled_name="_Z1fi")
+    _ret = Change(ChangeKind.FUNC_RETURN_CHANGED, "_Z1fi", "c", "int", "long")
+    _params = Change(ChangeKind.FUNC_PARAMS_CHANGED, "_Z1fi", "c", "(int)", "(long)")
+
+    def test_entity_id_alias_present_iff_entity_id_set(self) -> None:
+        a = resolve_change_identity(replace(self._ret, entity_id=self._eid))
+        b = resolve_change_identity(self._ret)
+        assert any(x.startswith(f"entity:{self._eid.key}\x1f") for x in a.aliases)
+        assert not any(x.startswith("entity:") for x in b.aliases)
+        assert a.primary_id == b.primary_id
+        assert a.tier == b.tier == IDENTITY_TIER_CANONICAL
+
+    def test_entity_id_alias_distinguishes_findings_on_same_entity(self) -> None:
+        a = resolve_change_identity(replace(self._ret, entity_id=self._eid))
+        b = resolve_change_identity(replace(self._params, entity_id=self._eid))
+        ea = {x for x in a.aliases if x.startswith("entity:")}
+        eb = {x for x in b.aliases if x.startswith("entity:")}
+        assert ea and eb and ea.isdisjoint(eb)

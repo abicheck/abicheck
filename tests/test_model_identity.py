@@ -710,6 +710,80 @@ class TestVariableMangledDiscriminator:
 
 
 # --------------------------------------------------------------------------
+# EntityId.key -- the first real consumer read (ADR-063 Phase 2, closing
+# (c2)'s finding_identity.resolve_change_identity consumer step)
+# --------------------------------------------------------------------------
+
+
+class TestEntityIdKey:
+    """``EntityId.key``'s own contract: a pure function of the object's
+    identity fields, collision-safe the same way ``storage.entity_ids.
+    EntityId.key`` is audited to be (this module may not import that one,
+    so ``_packed``/``_segment_key`` are a local duplicate of the algorithm,
+    not the object)."""
+
+    @given(name_a=_names, name_b=_names)
+    def test_distinct_scopes_never_collide(self, name_a: str, name_b: str) -> None:
+        if name_a == name_b:
+            return
+        a = entity_id_for_type((Namespace(name_a),), "Widget")
+        b = entity_id_for_type((Namespace(name_b),), "Widget")
+        assert a.key != b.key
+
+    def test_record_nested_in_record_vs_namespace(self) -> None:
+        # Mirrors TestDistinctScopesNeverCollide's own object-equality case,
+        # through .key specifically -- both scopes render to the identical
+        # "A::B" qualified-name string, so a naive string-based key would
+        # collide them.
+        in_record = entity_id_for_type((Record("A"), Record("B")), "C")
+        in_namespace = entity_id_for_type((Namespace("A"), Namespace("B")), "C")
+        assert in_record.key != in_namespace.key
+
+    def test_sibling_segment_variants_never_collide(self) -> None:
+        # Same bare name, different segment kind at the same position --
+        # _segment_key's own per-variant tag is what this pins.
+        keys = {
+            entity_id_for_type((Namespace("a"),), "X").key,
+            entity_id_for_type((Record("a"),), "X").key,
+            entity_id_for_type((InlineNamespace("a"),), "X").key,
+        }
+        assert len(keys) == 3
+
+    def test_record_access_does_not_change_key(self) -> None:
+        # access is compare=False (payload, not identity) -- .key must
+        # honor that exclusion or an alias join could miss a real match
+        # between two snapshots that only differ in a member's access.
+        public = entity_id_for_type((Record("A", access="public"),), "B")
+        private = entity_id_for_type((Record("A", access="private"),), "B")
+        assert public == private
+        assert public.key == private.key
+
+    def test_extra_tuple_boundary_does_not_collide_with_leaf_name(self) -> None:
+        # Adversarial case in the same spirit as the storage module's own
+        # audited _packed collision test: two EntityIds whose (leaf_name,
+        # extra) split differently but might concatenate to the same raw
+        # text must still produce distinct keys.
+        a = entity_id_for_function((), "f", mangled_name="ab")
+        b = entity_id_for_function((), "fa", mangled_name="b")
+        assert a.key != b.key
+
+    def test_local_to_function_recursion_terminates_and_differs(self) -> None:
+        owner_f = entity_id_for_function((), "f", param_types=("int",))
+        owner_g = entity_id_for_function((), "g", param_types=("int",))
+        a = entity_id_for_type((LocalToFunction(owner_f, 0),), "A")
+        b = entity_id_for_type((LocalToFunction(owner_g, 0),), "A")
+        c = entity_id_for_type((LocalToFunction(owner_f, 1),), "A")
+        assert a.key != b.key  # different owning function
+        assert a.key != c.key  # same owner, different sibling block
+
+    @given(name=_names, kind=_kinds, ordinal=_ordinals)
+    def test_key_never_raises(self, name: str, kind: str, ordinal: int) -> None:
+        scope = (Namespace(name), Anonymous(kind, ordinal))
+        key = entity_id_for_type(scope, name).key
+        assert isinstance(key, str) and key
+
+
+# --------------------------------------------------------------------------
 # "Computed once" == one algorithm, not cached identity
 # --------------------------------------------------------------------------
 
