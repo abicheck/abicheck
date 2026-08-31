@@ -39,6 +39,7 @@ identical ordinal to the identical closure.
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 
@@ -65,7 +66,7 @@ from abicheck.qualified_name_segments import (
     renumber_anonymous_closure_identities,
     rewrite_anonymous_type_spellings,
 )
-from abicheck.serialization import snapshot_from_dict
+from abicheck.serialization import load_snapshot, snapshot_from_dict
 
 
 # Frozen/mutable fixtures for TestFrozenDataclassesReachableFromTheWalkAreRebuilt
@@ -558,6 +559,26 @@ class TestRawPreStripBaselinesAreNormalizedOnLoad:
 
     def test_loading_a_raw_pre_strip_snapshot_strips_and_renumbers_it(self) -> None:
         loaded = snapshot_from_dict(self._raw_legacy_dict(522))
+        qualified = loaded.types[0].qualified_name
+        assert qualified is not None
+        assert "#" in qualified
+        assert " at " not in qualified
+
+    def test_loading_a_raw_pre_strip_snapshot_from_a_real_json_file_on_disk(
+        self, tmp_path: Path
+    ) -> None:
+        """Same fixture as above, but through the REAL public loading
+        boundary (`load_snapshot` -> `snapshot_io.read_snapshot_text` ->
+        `json.loads` -> `snapshot_from_dict`) against an actual file on
+        disk, not a hand-built Python dict handed directly to the internal
+        function -- the exact "real dependency" gap ADR-059 SS12 warns
+        about for a serialization-boundary fix (a test against only the
+        in-memory shortcut can pass identically before and after the bug)."""
+        path = tmp_path / "onetbb_old.abi.json"
+        path.write_text(json.dumps(self._raw_legacy_dict(522)), encoding="utf-8")
+
+        loaded = load_snapshot(path)
+
         qualified = loaded.types[0].qualified_name
         assert qualified is not None
         assert "#" in qualified
