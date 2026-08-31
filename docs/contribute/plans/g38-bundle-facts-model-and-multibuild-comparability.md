@@ -2501,6 +2501,42 @@ or version number that already has a fact owner elsewhere").
   already-shipped parameters — most plausibly a small manifest file (YAML/
   JSON) rather than a repeatable flag, since a `{library: [header, ...]}`
   map does not fit Click's single-value option model cleanly.
+- **Two more corrections from the same review round, both about what sits
+  between the new Click branch and `compare_release_against_bundle_facts()`
+  — verified against source, both real:**
+  1. **A workflow-owned wrapper, not a direct call.** `bundle_side_input.py`
+     is a flat, unmigrated module (`architecture/modules.yaml` — not under
+     `abicheck/workflows/`), and `frontends/AGENTS.md`'s own "Permitted
+     imports" rule is explicit: frontend code reaches real comparison/
+     extraction behavior "only through a workflow's typed result," never a
+     flat module directly. A `_dispatch_release_compare` branch calling
+     `compare_release_against_bundle_facts()` straight from
+     `frontends/cli/commands/compare.py` would be exactly the kind of new,
+     unlisted `frontends -> `(flat module) edge the `engine-cli-boundary`
+     AI-readiness check exists to catch — not a legacy exception to extend,
+     a fresh violation to avoid. This phase's scope therefore includes a
+     new `abicheck.workflows`-owned typed entry point (mirroring how
+     `workflows/input_resolution.py`/`workflows/extraction.py` already
+     wrap other flat engine calls for frontend consumption) that the Click
+     branch calls into, with the branch itself doing only operand/manifest
+     translation.
+  2. **The release CLI's own exit-code contract must survive the new
+     path, not just the comparison.** `compare_release_against_bundle_
+     facts()` takes no `fail_on_removed` parameter and returns only a
+     `BundleDiffResult` — but `cli_compare_release.py`'s documented exit 8
+     ("Library removed", only under `--fail-on-removed-library`) is derived
+     from `removed_keys` inside `compare_release_cmd`'s own gating fold
+     (`resolve_release_exit_decision_for_report`), which the stored-facts
+     path never reaches. Naively wiring the new branch straight to a bare
+     `BundleDiffResult` would silently downgrade a removed-library case
+     from the documented exit 8 to the bundle finding's ordinary exit 4 —
+     passing this phase's own acceptance criteria (below, as first written)
+     while quietly breaking the release CLI's exit-code contract for this
+     one input shape. The new workflow entry point from correction 1 must
+     therefore also surface removed/added library keys (or fold
+     `--fail-on-removed-library` itself) so the stored-facts branch shares
+     the same exit-code gating a live release comparison gets — not only
+     the same `BundleDiffResult`/verdict.
 
 **Explicitly out of scope — do not port these from a driver like `bundle_gate.py`:**
 
@@ -2549,7 +2585,13 @@ real mixed-toolchain, multi-library release (oneDAL#3693's own 6-library,
 can (a) consume a stored OLD-side `BundleFacts` baseline instead of
 reopening OLD `.so` files, and (b) give each library its own header root
 and compile context, entirely from `abicheck compare ...`/`.abicheck.yml` —
-with no committed driver script standing in for either capability.
+with no committed driver script standing in for either capability. **Third
+criterion, added per the review round above (Codex, verified against
+source):** (c) `--fail-on-removed-library` against a stored-facts baseline
+missing a library the NEW side still has produces the same documented exit
+8 a live release comparison would — not the bundle finding's ordinary exit
+4 — proving the new workflow entry point actually shares the release exit-
+code gating fold rather than only the comparison itself.
 
 **Testing bar — one real-world fixture is a demo, not a test suite (root
 `AGENTS.md`'s "a bug fix's regression test targets the bug class, not the
