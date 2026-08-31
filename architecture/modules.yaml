@@ -400,8 +400,7 @@
   "facades": [
     "abicheck.aggregate",
     "abicheck.aggregate_findings",
-    "abicheck.aggregate_manifest",
-    "abicheck.buildsource.pack_frontend"
+    "abicheck.aggregate_manifest"
   ],
   "frozen_root_families": {
     "cli_": [

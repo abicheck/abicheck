@@ -30,7 +30,6 @@ from typing import TYPE_CHECKING
 
 import click
 
-from .buildsource import pack_frontend
 from .buildsource.merge_support import (
     _combine_packs,
     _layer_value,
@@ -246,11 +245,13 @@ def _merge_attach_combined(
     output: Path,
 ) -> None:
     """Relink source-ABI surface against binary exports (A1) and attach combined to base."""
+    from .workflows.extraction import pack_to_ref
+
     base_exports = _exported_symbols_from_snapshot(base)
     _relink_combined_against_exports(combined, base_exports)
     _warn_if_source_surface_empty(combined, base_exports)
     base.build_source = combined
-    base.build_source_pack = pack_frontend.to_ref(combined, path_hint=str(output))
+    base.build_source_pack = pack_to_ref(combined, path_hint=str(output))
 
 
 def embed_inputs_pack(
@@ -263,6 +264,8 @@ def embed_inputs_pack(
     command, with no frontend re-run: combine its L3/L4/L5 facts into *snap*,
     and relink the source surface against the binary's exports.
     """
+    from .workflows.extraction import pack_to_ref
+
     ingested = _ingest_inputs_pack_snapshot(inputs_path)
     combined = _combine_packs(snap.build_source, ingested.build_source)
     if combined is None:
@@ -271,7 +274,7 @@ def embed_inputs_pack(
     _relink_combined_against_exports(combined, base_exports)
     _warn_if_source_surface_empty(combined, base_exports)
     snap.build_source = combined
-    snap.build_source_pack = pack_frontend.to_ref(
+    snap.build_source_pack = pack_to_ref(
         combined, path_hint=str(output) if output else ""
     )
 

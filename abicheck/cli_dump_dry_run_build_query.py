@@ -335,19 +335,19 @@ def _pack_dir_build_evidence(path: Path) -> BuildEvidence | None:
     narrow except), so this function's existing load call already matches
     it exactly.
     """
-    from .workflows.extraction import is_pack_dir, validate_inputs_pack
+    from .workflows.extraction import is_pack_dir, load_pack_or_raise
 
     if is_pack_dir(path):
-        from .buildsource import pack_frontend
-
-        return pack_frontend.load(path).build_evidence
-    from .workflows.extraction import _load_build_evidence, load_inputs_manifest
+        return load_pack_or_raise(path).build_evidence
+    from .workflows.extraction import validate_inputs_pack
 
     report = validate_inputs_pack(path)
     if report.errors:
         raise ValueError(
             f"{len(report.errors)} validation error(s): " + "; ".join(report.errors)
         )
+    from .workflows.extraction import _load_build_evidence, load_inputs_manifest
+
     manifest = load_inputs_manifest(path)
     return _load_build_evidence(path, manifest, [])
 

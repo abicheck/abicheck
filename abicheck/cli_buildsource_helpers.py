@@ -30,7 +30,7 @@ from typing import TYPE_CHECKING
 
 import click
 
-from .buildsource import evidence_report as _evidence_report, pack_frontend
+from .buildsource import evidence_report as _evidence_report
 from .buildsource.build_evidence import l3_coverage_fields
 from .buildsource.model import (
     CoverageStatus,
@@ -51,7 +51,7 @@ from .cli_buildsource_merge import (
     _merge_print_summary as _merge_print_summary,
 )
 from .errors import SnapshotError
-from .workflows.extraction import DEFAULT_REDACTION
+from .workflows.extraction import DEFAULT_REDACTION, pack_content_hash
 
 if TYPE_CHECKING:
     from .buildsource.build_evidence import BuildEvidence
@@ -578,7 +578,7 @@ def _echo_collection_summary(
 ) -> None:
     """Print the per-layer summary for a successfully written evidence pack."""
     click.echo(f"Evidence pack written to {output}")
-    click.echo(f"  content hash: {pack_frontend.content_hash(pack)}")
+    click.echo(f"  content hash: {pack_content_hash(pack)}")
     if has_build:
         click.echo(
             f"  L3 build context: {len(merged.compile_units)} compile units, "

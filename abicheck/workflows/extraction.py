@@ -96,6 +96,10 @@ from ..buildsource.inputs_pack import (
 )
 from ..buildsource.inputs_validate import validate_inputs_pack
 from ..buildsource.l2_seed import seed_includes_and_fold_compile_context
+from ..buildsource.pack_io import (
+    content_hash as pack_content_hash,
+    to_ref as pack_to_ref,
+)
 from ..buildsource.pack_load import load_inputs_pack_or_raise, load_pack_or_raise
 from ..buildsource.pattern_scan import scan_files
 from ..buildsource.poi import build_points_of_interest, resolve_symbol_tus
@@ -235,6 +239,8 @@ __all__ = [
     "looks_like_perl_dump",
     "looks_like_symvers",
     "normalize_binary_input",
+    "pack_content_hash",
+    "pack_to_ref",
     "parse_dwarf",
     "parse_elf_metadata",
     "relink_surface_exports",

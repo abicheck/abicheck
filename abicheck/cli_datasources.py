@@ -41,8 +41,7 @@ def print_data_sources(
         dwarf_meta, _ = parse_dwarf(normalized_path)
 
     if build_source_path is not None or sources_path is not None:
-        from .buildsource import pack_frontend
-        from .workflows.extraction import is_pack_dir
+        from .workflows.extraction import is_pack_dir, load_pack_or_raise
 
         def load_pack(path: Path, label: str) -> BuildSourcePack | None:
             """Load a build-source pack when the input is already collected."""
@@ -55,7 +54,7 @@ def print_data_sources(
                 )
                 return None
             try:
-                return pack_frontend.load(path)
+                return load_pack_or_raise(path)
             except Exception as exc:
                 raise click.ClickException(
                     f"Invalid {label} build-source pack: {exc}"
