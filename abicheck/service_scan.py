@@ -39,10 +39,9 @@ from .buildsource.build_query import (
 from .compile_context import CompileContext as CompileContext  # re-exported, ADR-055 D1
 
 # pair_wide_cxx20_std_override lives in the leaf `cxx20_pair_dialect` module
-# (no dependency on anything service_scan-specific, so it moved cleanly to
-# make line-budget room for the L4/L5 `_TU_UNKNOWN_NOTE_SUFFIX` propagation
-# fix, Codex review, fresh evidence -- see that module's own docstring),
-# re-exported here so every existing `from .service_scan import
+# (no dependency on anything service_scan-specific, so it moved cleanly for
+# line-budget room -- Codex review, fresh evidence, see that module's own
+# docstring), re-exported here so every existing `from .service_scan import
 # pair_wide_cxx20_std_override` call site is unaffected.
 from .cxx20_pair_dialect import (
     pair_wide_cxx20_std_override as pair_wide_cxx20_std_override,
@@ -1418,14 +1417,12 @@ def run_scan(req: ScanRequest) -> ScanResult:
         )
     except _BudgetOverflow:
         # The failure-guard contract: overflow is exit 5, never a shrunk scope.
-        verdict, exit_code, report = scan_abort_result_fields("budget_overflow")
-        return ScanResult(verdict=verdict, exit_code=exit_code, report=report)
+        return ScanResult(**scan_abort_result_fields("budget_overflow"))
     except _EvidenceContractError:
         # A pinned depth that can't collect its evidence (auto-strict, ADR-037 D5):
         # the programmatic API honors the same contract as the CLI (pinned_explicit
         # above), so map the signal to a failed result rather than degrade silently.
-        verdict, exit_code, report = scan_abort_result_fields("evidence_contract_error")
-        return ScanResult(verdict=verdict, exit_code=exit_code, report=report)
+        return ScanResult(**scan_abort_result_fields("evidence_contract_error"))
     finally:
         # Remove the inferred cmake build dir(s) once all build-dir-dependent phases
         # have run (or the scan aborted). Best-effort (each thunk is suppressed) so a
@@ -1715,11 +1712,9 @@ def _run_scan_one_member(
             build_targets=req.build_targets,
         )
     except _BudgetOverflow:
-        verdict, exit_code, report = scan_abort_result_fields("budget_overflow")
-        return ScanResult(verdict=verdict, exit_code=exit_code, report=report)
+        return ScanResult(**scan_abort_result_fields("budget_overflow"))
     except _EvidenceContractError:
-        verdict, exit_code, report = scan_abort_result_fields("evidence_contract_error")
-        return ScanResult(verdict=verdict, exit_code=exit_code, report=report)
+        return ScanResult(**scan_abort_result_fields("evidence_contract_error"))
     finally:
         drain_build_dir_cleanups(build_dir_cleanups)
 

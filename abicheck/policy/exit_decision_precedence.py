@@ -34,7 +34,7 @@ just physically split for the line-count cap.
 
 from __future__ import annotations
 
-from typing import Literal, NamedTuple
+from typing import Literal, TypedDict
 
 from .exit_decision import ExitDecision, ExitReason, resolve_exit_decision
 
@@ -241,11 +241,12 @@ _SCAN_ABORT_VERDICTS: dict[ScanAbortAxis, tuple[str, int]] = {
 }
 
 
-class ScanAbortResultFields(NamedTuple):
-    """A typed, unpackable ``(verdict, exit_code, report)`` triple -- so a
-    caller building ``service_scan.ScanResult`` from :func:`scan_abort_
-    result_fields` gets mypy field-by-field checking, unlike unpacking an
-    untyped dict into a dataclass constructor with ``**``.
+class ScanAbortResultFields(TypedDict):
+    """``ScanResult(**scan_abort_result_fields(axis))`` -- a `TypedDict`
+    (not a plain ``dict[str, object]``) so mypy checks each field's type
+    against `service_scan.ScanResult`'s own constructor when ``**``-unpacked,
+    instead of rejecting the unpack outright the way it does for an untyped
+    dict (whose values it cannot attribute to individual parameters).
     """
 
     verdict: str
@@ -275,7 +276,9 @@ def scan_abort_result_fields(axis: ScanAbortAxis) -> ScanAbortResultFields:
     )
     assert decision is not None  # axis always selects one of the two above
     verdict, exit_code = _SCAN_ABORT_VERDICTS[axis]
-    return ScanAbortResultFields(verdict, exit_code, {"exit": decision.to_dict()})
+    return ScanAbortResultFields(
+        verdict=verdict, exit_code=exit_code, report={"exit": decision.to_dict()}
+    )
 
 
 def resolve_release_exit_decision(
