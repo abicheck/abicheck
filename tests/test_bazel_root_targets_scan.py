@@ -502,6 +502,45 @@ def test_scan_cli_artifact_set_dry_run_rejects_build_target_with_precaptured_aqu
     assert "pre-captured Bazel aquery" in result.output
 
 
+def test_scan_cli_artifact_set_depth_binary_exempts_the_bazel_scoping_check(
+    monkeypatch, tmp_path: Path
+) -> None:
+    """Codex/CodeRabbit review, fresh evidence: the `--artifact-set` path's
+    own pre-flight check (mirroring the single-binary path's own) had no
+    depth=binary exemption at all, unlike the single-binary path (whose
+    `_normalize_depth_inputs` prunes `build_info` to `None` at that depth
+    before this same check runs) -- so a valid `--depth binary` request was
+    wrongly rejected. `--depth binary` resolves to a collect_mode that never
+    consults build_info/build_targets at all."""
+    aquery = _write_bazel_aquery(tmp_path)
+    a = _artifact(tmp_path, "a")
+    b = _artifact(tmp_path, "b")
+    _bypass_discovery_validation(monkeypatch, a, b)
+
+    runner = CliRunner()
+    result = runner.invoke(
+        main,
+        [
+            "scan",
+            "--artifact-set",
+            str(a),
+            "--artifact-set",
+            str(b),
+            "--dry-run",
+            "--depth",
+            "binary",
+            "--sources",
+            str(_sources(tmp_path)),
+            "--build-info",
+            str(aquery),
+            "--build-target",
+            "//:math",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    assert "pre-captured Bazel aquery" not in result.output
+
+
 def test_run_scan_typed_api_raises_planning_error_not_click_usage_error(
     tmp_path: Path,
 ) -> None:

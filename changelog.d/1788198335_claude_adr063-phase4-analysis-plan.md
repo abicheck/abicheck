@@ -44,3 +44,22 @@
   and a pre-captured jsonproto was wrongly rejected even though that depth's
   `collect_mode` never consults either value (the same false-positive class
   already fixed for `dump`/`compare`'s `AnalysisPlanner` check).
+- **`scan --artifact-set`'s own pre-flight check gained the identical
+  `depth=binary` exemption its single-binary sibling already had.** Unlike
+  the single-binary path (whose `_normalize_depth_inputs` prunes `build_info`
+  to `None` at that depth before the check runs), `_run_artifact_set` checked
+  the raw, unpruned inputs directly, so `scan --artifact-set --depth binary
+  --build-target ... --build-info <precaptured jsonproto>` was wrongly
+  rejected even though that depth never consults either value.
+- **A `--build-target`/`.abicheck.yml` `build.targets:` scoping mismatch
+  against a pre-captured Bazel jsonproto is no longer silently swallowed at
+  `--depth headers`.** `buildsource.l2_seed`'s three L2-seed/compile-context
+  helpers each wrap their own `collect_inline_pack` call in a broad
+  best-effort `except Exception` (by design, for an ordinary collection
+  failure) — but at `--depth headers`, `embed_build_source`'s own real check
+  never even runs (that depth's `collect_mode` is `"off"`), making this
+  L2-seed call the *only* place the mismatch could be detected at all, and
+  the broad catch swallowed it with no diagnostic. Fixed by carving the new
+  `ValidationError` out of the catch-all in all three helpers, mirroring
+  their pre-existing `HeaderCompileContextAmbiguousError` carve-out for the
+  same reason: a deliberate usage error must propagate, not degrade silently.

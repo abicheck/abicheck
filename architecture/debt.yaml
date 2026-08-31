@@ -173,12 +173,12 @@
     },
     {
       "path": "abicheck/buildsource/l2_seed.py",
-      "baseline_lines": 1030,
+      "baseline_lines": 1037,
       "target": "extract/build-or-source",
       "rule": "no_growth",
       "category": "legacy_extraction_monolith",
       "owner": "abicheck maintainers",
-      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice.",
+      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice. Baseline raised by 7 lines (ADR-063 Phase 4, Codex review): derive_l2_include_dirs/derive_l2_compile_context/seed_includes_and_fold_compile_context each wrap their own collect_inline_pack call in a broad best-effort except Exception, which silently swallowed the new Bazel target-scoping ValidationError (e.g. at --depth headers, where embed_build_source's own real check never even runs, making this L2-seed call the only place the error could fire at all) -- a real, silent-failure regression the ADR-063 Phase 4 slice itself introduced. Fixed by carving ValidationError out of the catch-all, mirroring the file's pre-existing HeaderCompileContextAmbiguousError carve-out for the identical reason (a deliberate usage error, not a best-effort collection failure). Comments already minimized to two lines each; no smaller diff was found that still states both the exception and why it must propagate.",
       "review_by": "2026-11-30"
     },
     {

@@ -77,7 +77,16 @@ looked like the obvious fix and wasn't.
   `test_run_scan_depth_binary_exempts_the_early_bazel_scoping_check` (the
   exemption holds at the new call site) pin all three properties together.
   All three CLIs still name the mismatch and the documented workaround, exit
-  64, not a silent, unscoped collection.
+  64, not a silent, unscoped collection. **The same fourth round also found
+  `scan --artifact-set`'s own pre-flight check (`cli_scan.py`'s
+  `_run_artifact_set`) had never had the `depth=binary` exemption at all** —
+  unlike the single-binary path, whose `_normalize_depth_inputs` prunes
+  `build_info` to `None` at that depth before its own copy of the check runs,
+  `_run_artifact_set` checked the raw, unpruned inputs directly. Fixed by
+  adding the same `(depth or "").lower() != "binary"` guard used elsewhere;
+  `tests/test_bazel_root_targets_scan.py::
+  test_scan_cli_artifact_set_depth_binary_exempts_the_bazel_scoping_check`
+  pins it.
   **A second Codex review round found this only covered `InputSpec.
   build_targets` (the `--build-target` CLI flag/typed-API field) — a root-
   target scope declared in `.abicheck.yml`'s own `build.targets:` instead
@@ -149,8 +158,37 @@ looked like the obvious fix and wasn't.
   general one: pre-capture the Bazel jsonproto already scoped to the desired
   targets, or use a live `bazel query`; a dry-run preview's silence on a
   root-target scope declared only in `.abicheck.yml` is not evidence the
-  real run will succeed. Historical analysis retained below for the
-  record.
+  real run will succeed.
+  **A later Codex/CodeRabbit review round found the `.abicheck.yml` fix
+  itself had a second, distinct gap — not deferrable the way the dry-run
+  parity gap above was, since this one had a direct, bounded fix.** At
+  `--depth headers`, `embed_build_source`'s own real check never runs at all
+  (that depth's `collect_mode` is `"off"`, the identical condition the
+  `depth=binary` exemption elsewhere in this entry relies on) — but
+  `buildsource.l2_seed`'s three L2-seed/compile-context helpers
+  (`derive_l2_include_dirs`, `derive_l2_compile_context`,
+  `seed_includes_and_fold_compile_context`) each run their *own*,
+  independent `collect_inline_pack` call regardless of `collect_mode` (they
+  exist to seed useful `-I` dirs and fold build context into the header
+  parse even for a headers-only scan), each wrapped in a broad best-effort
+  `except Exception` that swallows any failure and degrades to "no seeded
+  context" — by design, documented in `_l2_seed_config`'s own docstring ("a
+  malformed/invalid config surfaces loudly elsewhere ... this is a
+  best-effort include-dir hint"). That documented assumption is false for
+  this one input: at `--depth headers`, this L2-seed call is the *only*
+  place the Bazel-scoping `ValidationError` can fire at all, so the broad
+  catch silently swallowed it, with the run proceeding with no diagnostic
+  and without the build-derived context it should have used. Fixed by
+  extending the file's own pre-existing carve-out for
+  `HeaderCompileContextAmbiguousError` (raised for the identical reason — a
+  deliberate, fail-closed error is not "best-effort collection failed") to
+  cover `ValidationError` too, in all three helpers. `tests/
+  test_bazel_root_targets_l2_seed.py::
+  test_seed_includes_and_fold_compile_context_raises_on_bazel_scoping_mismatch`
+  reproduces it end-to-end with a real (unmocked) pre-captured jsonproto and
+  a `.abicheck.yml`-only (no `--build-target`) target scope, pinning that it
+  now raises instead of degrading silently. Historical analysis retained
+  below for the record.
   `BazelAdapter.collect()`'s `self.targets` scoping is applied
   in exactly two places: gating whether a *live* `bazel query` subprocess
   runs at all (`_resolve`/`_run_bazel`, only reachable when `workspace` is

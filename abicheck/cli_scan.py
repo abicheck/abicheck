@@ -759,11 +759,16 @@ def _run_artifact_set(
         changed_src=changed_src,
         build_targets=build_targets,
     )
-    # ADR-063 Phase 4 (Codex review, fresh evidence): same pre-flight check
-    # as the single-binary path's own -- see that call site's comment.
+    # ADR-063 Phase 4 (Codex review, fresh evidence): same pre-flight check as
+    # the single-binary path's own, including its depth=binary exemption (a
+    # later Codex/CodeRabbit round found this copy lacked it) -- that depth
+    # resolves to a collect_mode that never consults build_info/build_targets
+    # at all, matching workflows.plan._check_bazel_target_scoping.
     from .workflows.plan import bazel_target_scoping_failure
 
-    if _bf := bazel_target_scoping_failure("candidate", build_info, build_targets):
+    if (depth or "").lower() != "binary" and (
+        _bf := bazel_target_scoping_failure("candidate", build_info, build_targets)
+    ):
         raise click.UsageError(str(_bf))
 
     if dry_run:
