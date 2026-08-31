@@ -37,6 +37,7 @@
       ],
       "legacy_paths": [
         "abicheck/buildsource/build_cache.py",
+        "abicheck/buildsource/pack_io.py",
         "abicheck/dumper_cache.py",
         "abicheck/snapshot_io.py"
       ]

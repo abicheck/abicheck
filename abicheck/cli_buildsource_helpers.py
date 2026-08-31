@@ -51,7 +51,7 @@ from .cli_buildsource_merge import (
     _merge_print_summary as _merge_print_summary,
 )
 from .errors import SnapshotError
-from .workflows.extraction import DEFAULT_REDACTION
+from .workflows.extraction import DEFAULT_REDACTION, pack_content_hash
 
 if TYPE_CHECKING:
     from .buildsource.build_evidence import BuildEvidence
@@ -578,7 +578,7 @@ def _echo_collection_summary(
 ) -> None:
     """Print the per-layer summary for a successfully written evidence pack."""
     click.echo(f"Evidence pack written to {output}")
-    click.echo(f"  content hash: {pack.content_hash()}")
+    click.echo(f"  content hash: {pack_content_hash(pack)}")
     if has_build:
         click.echo(
             f"  L3 build context: {len(merged.compile_units)} compile units, "
@@ -879,7 +879,7 @@ def _run_external_extractors(
         # Reject output kinds collect cannot fold yet — only
         # build_evidence is wired into the pack here. A manifest that advertises
         # a source_abi / source_graph_summary output would otherwise be recorded
-        # ok while its evidence is silently dropped (and pack.write() removes the
+        # ok while its evidence is silently dropped (and pack_io.write() removes the
         # canonical source/graph files), so the requested evidence is absent even
         # though the extractor "succeeded" (Codex P2). Fail loudly instead.
         unsupported = sorted(

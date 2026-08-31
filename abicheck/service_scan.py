@@ -499,12 +499,12 @@ def _count_pack_tus(path: Path) -> int | None:
     if not path.is_dir():
         return None
     try:
+        from .buildsource import pack_io
         from .buildsource.inline import is_pack_dir
-        from .buildsource.pack import BuildSourcePack
 
         if not is_pack_dir(path):
             return None
-        pack = BuildSourcePack.load(path)
+        pack = pack_io.load(path)
     except Exception:  # noqa: BLE001 - estimate is advisory; never raise on a bad pack
         return None
     be = pack.build_evidence

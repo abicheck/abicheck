@@ -827,8 +827,10 @@ def _collect_ast_build_source_pack(
         return None, f"{case}/{version}: collect_inline_pack failed: {exc}"
     if pack is None:
         return None, f"{case}/{version}: no build/source evidence collected"
+    from abicheck.buildsource import pack_io  # noqa: PLC0415
+
     out_dir = root / f"{version}.ast_buildsource"
-    dataclasses.replace(pack, root=out_dir).write()
+    pack_io.write(dataclasses.replace(pack, root=out_dir))
     return out_dir, ""
 
 

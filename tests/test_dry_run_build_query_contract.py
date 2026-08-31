@@ -329,7 +329,7 @@ class TestDumpDryRunBuildQueryTrust:
         # since it only checked build_info's raw (pre-pack-normalization)
         # value, not whether embed_build_source's own dispatch is reachable
         # at all.
-        from abicheck.buildsource.pack import BuildSourcePack
+        from abicheck.buildsource import BuildSourcePack, pack_io
 
         so_path = tmp_path / "lib.so"
         so_path.write_bytes(b"")
@@ -338,7 +338,7 @@ class TestDumpDryRunBuildQueryTrust:
         cfg = self._write_config(tmp_path)
         pack_dir = tmp_path / "pack"
         pack_dir.mkdir()
-        BuildSourcePack(root=pack_dir).write()
+        pack_io.write(BuildSourcePack(root=pack_dir))
 
         result = CliRunner().invoke(
             main,
@@ -368,7 +368,7 @@ class TestDumpDryRunBuildQueryTrust:
         # short-circuit the second invocation via --build-info's own path --
         # this is the SAME deterministic shape as no --build-info at all,
         # not a genuine once-or-twice ambiguity.
-        from abicheck.buildsource.pack import BuildSourcePack
+        from abicheck.buildsource import BuildSourcePack, pack_io
 
         so_path = tmp_path / "lib.so"
         so_path.write_bytes(b"")
@@ -377,7 +377,7 @@ class TestDumpDryRunBuildQueryTrust:
         cfg = self._write_config(tmp_path)
         pack_dir = tmp_path / "pack"
         pack_dir.mkdir()
-        BuildSourcePack(root=pack_dir).write()
+        pack_io.write(BuildSourcePack(root=pack_dir))
 
         result = CliRunner().invoke(
             main,
@@ -489,7 +489,7 @@ class TestDumpDryRunBuildQueryTrust:
         # (non-dry) run exits 0 and the marker is never created, even
         # though the pre-fix dry run reported "will run (trusted --
         # explicit --build-query)".
-        from abicheck.buildsource.pack import BuildSourcePack
+        from abicheck.buildsource import BuildSourcePack, pack_io
 
         so_path = tmp_path / "lib.so"
         so_path.write_bytes(b"")
@@ -499,7 +499,7 @@ class TestDumpDryRunBuildQueryTrust:
         build_dir.mkdir()
         src_pack = tmp_path / "srcpack"
         src_pack.mkdir()
-        BuildSourcePack(root=src_pack).write()
+        pack_io.write(BuildSourcePack(root=src_pack))
         (src_pack / ".abicheck.yml").write_text("build: [not, a, mapping\n", encoding="utf-8")
 
         result = CliRunner().invoke(
@@ -525,7 +525,7 @@ class TestDumpDryRunBuildQueryTrust:
         # way that raises TypeError rather than OSError/ValueError --
         # BuildSourceManifest.from_dict's `dict(d.get("source_root", ...))`
         # raises TypeError for a real (JSON null) "source_root": null,
-        # confirmed directly against BuildSourcePack.load(). The prior
+        # confirmed directly against pack_io.load(). The prior
         # `except (OSError, ValueError)` never caught this, so `dump
         # --depth headers --dry-run` crashed with a raw traceback instead
         # of a report. The real (non-dry) run completes successfully under
@@ -534,7 +534,7 @@ class TestDumpDryRunBuildQueryTrust:
         # failure. Confirmed empirically against a real gcc-compiled
         # library and a marker-writing query: the real run exits 0 with the
         # marker never created.
-        from abicheck.buildsource.pack import BuildSourcePack
+        from abicheck.buildsource import BuildSourcePack, pack_io
 
         so_path = tmp_path / "lib.so"
         so_path.write_bytes(b"")
@@ -542,7 +542,7 @@ class TestDumpDryRunBuildQueryTrust:
         header.write_text("int foo(int x);\n", encoding="utf-8")
         src_pack = tmp_path / "srcpack"
         src_pack.mkdir()
-        BuildSourcePack(root=src_pack).write()
+        pack_io.write(BuildSourcePack(root=src_pack))
         manifest_path = src_pack / "manifest.json"
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
         manifest["source_root"] = None
@@ -591,8 +591,8 @@ class TestDumpDryRunBuildQueryTrust:
         # _resolve_compile_db is even considered -- the query never runs,
         # and this is a case the plain-file/dir _compile_db_at check cannot
         # catch (a pack directory has no top-level compile_commands.json).
+        from abicheck.buildsource import BuildSourcePack, pack_io
         from abicheck.buildsource.build_evidence import BuildEvidence, CompileUnit
-        from abicheck.buildsource.pack import BuildSourcePack
 
         so_path = tmp_path / "lib.so"
         so_path.write_bytes(b"")
@@ -605,7 +605,7 @@ class TestDumpDryRunBuildQueryTrust:
         be.compile_units.append(
             CompileUnit(id="cu://api.c", source="api.c", directory=str(tmp_path))
         )
-        BuildSourcePack(root=pack_dir, build_evidence=be).write()
+        pack_io.write(BuildSourcePack(root=pack_dir, build_evidence=be))
 
         result = CliRunner().invoke(
             main,
@@ -625,7 +625,7 @@ class TestDumpDryRunBuildQueryTrust:
         # The counterpart: an empty (e.g. source_abi-only) pack does not
         # short-circuit resolution -- --build-info becomes effectively
         # absent and the trusted query still resolves to "will run".
-        from abicheck.buildsource.pack import BuildSourcePack
+        from abicheck.buildsource import BuildSourcePack, pack_io
 
         so_path = tmp_path / "lib.so"
         so_path.write_bytes(b"")
@@ -634,7 +634,7 @@ class TestDumpDryRunBuildQueryTrust:
         cfg = self._write_config(tmp_path)
         pack_dir = tmp_path / "pack"
         pack_dir.mkdir()
-        BuildSourcePack(root=pack_dir).write()
+        pack_io.write(BuildSourcePack(root=pack_dir))
 
         result = CliRunner().invoke(
             main,
@@ -676,8 +676,8 @@ class TestDumpDryRunBuildQueryTrust:
         # Codex review: a --sources tree that is itself a pack folds into
         # base_build the same way a --build-info pack does, but only when
         # no --build-info was also given.
+        from abicheck.buildsource import BuildSourcePack, pack_io
         from abicheck.buildsource.build_evidence import BuildEvidence, CompileUnit
-        from abicheck.buildsource.pack import BuildSourcePack
 
         so_path = tmp_path / "lib.so"
         so_path.write_bytes(b"")
@@ -689,7 +689,7 @@ class TestDumpDryRunBuildQueryTrust:
         be.compile_units.append(
             CompileUnit(id="cu://api.c", source="api.c", directory=str(src_pack))
         )
-        BuildSourcePack(root=src_pack, build_evidence=be).write()
+        pack_io.write(BuildSourcePack(root=src_pack, build_evidence=be))
 
         result = CliRunner().invoke(
             main,
@@ -712,7 +712,7 @@ class TestDumpDryRunBuildQueryTrust:
         # therefore runs with the process's own cwd, not the pack directory,
         # once resolution falls through the pack-compile-units check (no
         # compile units, headers present).
-        from abicheck.buildsource.pack import BuildSourcePack
+        from abicheck.buildsource import BuildSourcePack, pack_io
 
         so_path = tmp_path / "lib.so"
         so_path.write_bytes(b"")
@@ -720,7 +720,7 @@ class TestDumpDryRunBuildQueryTrust:
         header.write_text("int foo(int x);\n", encoding="utf-8")
         src_pack = tmp_path / "srcpack"
         src_pack.mkdir()
-        BuildSourcePack(root=src_pack).write()
+        pack_io.write(BuildSourcePack(root=src_pack))
 
         result = CliRunner().invoke(
             main,
@@ -761,13 +761,13 @@ class TestDumpDryRunBuildQueryTrust:
         # both collapse to None unconditionally here (build_info is a pack,
         # no --sources given) -- its dispatch guard fails regardless of
         # collect mode, leaving only the headers-gated L2 seed path.
-        from abicheck.buildsource.pack import BuildSourcePack
+        from abicheck.buildsource import BuildSourcePack, pack_io
 
         so_path = tmp_path / "lib.so"
         so_path.write_bytes(b"")
         pack_dir = tmp_path / "pack"
         pack_dir.mkdir()
-        BuildSourcePack(root=pack_dir).write()
+        pack_io.write(BuildSourcePack(root=pack_dir))
 
         result = CliRunner().invoke(
             main,
@@ -959,7 +959,7 @@ class TestDumpDryRunBuildQueryTrust:
         self, tmp_path: Path
     ) -> None:
         # Codex review, fresh evidence: `l2_seed._l2_seed_pack_inputs` only
-        # attempts `BuildSourcePack.load(sources)` when `build_info is
+        # attempts `pack_io.load(sources)` when `build_info is
         # None` -- with a raw (non-pack) --build-info given, it nulls
         # `raw_sources` unconditionally but never loads the pack at all, so
         # a malformed --sources pack manifest is genuinely irrelevant: the
@@ -1001,13 +1001,13 @@ class TestDumpDryRunBuildQueryTrust:
         # --build-info given at all, so the elif chain lands here rather
         # than the --build-info-is-a-pack branch): an empty pack with no
         # headers gives no other route to collect_inline_pack.
-        from abicheck.buildsource.pack import BuildSourcePack
+        from abicheck.buildsource import BuildSourcePack, pack_io
 
         so_path = tmp_path / "lib.so"
         so_path.write_bytes(b"")
         src_pack = tmp_path / "srcpack"
         src_pack.mkdir()
-        BuildSourcePack(root=src_pack).write()
+        pack_io.write(BuildSourcePack(root=src_pack))
 
         result = CliRunner().invoke(
             main,
@@ -1145,16 +1145,16 @@ class TestDumpDryRunBuildQueryTrust:
         # the real run, so embed_build_source's dispatch guard fails and
         # the headerless L2 seed returns immediately; the query can never
         # run.
-        from abicheck.buildsource.pack import BuildSourcePack
+        from abicheck.buildsource import BuildSourcePack, pack_io
 
         so_path = tmp_path / "lib.so"
         so_path.write_bytes(b"")
         bi_pack = tmp_path / "bipack"
         bi_pack.mkdir()
-        BuildSourcePack(root=bi_pack).write()
+        pack_io.write(BuildSourcePack(root=bi_pack))
         src_pack = tmp_path / "srcpack"
         src_pack.mkdir()
-        BuildSourcePack(root=src_pack).write()
+        pack_io.write(BuildSourcePack(root=src_pack))
 
         result = CliRunner().invoke(
             main,
@@ -1175,7 +1175,7 @@ class TestDumpDryRunBuildQueryTrust:
         # tree -- with an empty --sources pack (normalizes to None), it
         # never globs or auto-discovers a compile DB regardless of what's
         # configured, so this module must not promise a specific path.
-        from abicheck.buildsource.pack import BuildSourcePack
+        from abicheck.buildsource import BuildSourcePack, pack_io
 
         so_path = tmp_path / "lib.so"
         so_path.write_bytes(b"")
@@ -1183,7 +1183,7 @@ class TestDumpDryRunBuildQueryTrust:
         header.write_text("int foo(int x);\n", encoding="utf-8")
         src_pack = tmp_path / "srcpack"
         src_pack.mkdir()
-        BuildSourcePack(root=src_pack).write()
+        pack_io.write(BuildSourcePack(root=src_pack))
 
         result = CliRunner().invoke(
             main,
@@ -1209,7 +1209,7 @@ class TestDumpDryRunBuildQueryTrust:
         # --build-info/--sources are packs. A --build-info that is an
         # empty pack (embed_build_source's own dispatch guard fails) must
         # not suppress reading a real, explicit --config's own query.
-        from abicheck.buildsource.pack import BuildSourcePack
+        from abicheck.buildsource import BuildSourcePack, pack_io
 
         so_path = tmp_path / "lib.so"
         so_path.write_bytes(b"")
@@ -1217,7 +1217,7 @@ class TestDumpDryRunBuildQueryTrust:
         header.write_text("int foo(int x);\n", encoding="utf-8")
         bi_pack = tmp_path / "bipack"
         bi_pack.mkdir()
-        BuildSourcePack(root=bi_pack).write()
+        pack_io.write(BuildSourcePack(root=bi_pack))
         cfg = tmp_path / "config.yml"
         cfg.write_text(
             "build:\n  query: cmake -S . -B build -DCMAKE_EXPORT_COMPILE_COMMANDS=ON\n",
@@ -1273,7 +1273,7 @@ class TestDumpDryRunBuildQueryTrust:
         # here via headers + a real artifact) even though
         # `effective_sources` alone (None, since --sources is a pack) would
         # report "(none configured)".
-        from abicheck.buildsource.pack import BuildSourcePack
+        from abicheck.buildsource import BuildSourcePack, pack_io
 
         so_path = tmp_path / "lib.so"
         so_path.write_bytes(b"")
@@ -1281,7 +1281,7 @@ class TestDumpDryRunBuildQueryTrust:
         header.write_text("int foo(int x);\n", encoding="utf-8")
         src_pack = tmp_path / "srcpack"
         src_pack.mkdir()
-        BuildSourcePack(root=src_pack).write()
+        pack_io.write(BuildSourcePack(root=src_pack))
         (src_pack / ".abicheck.yml").write_text(
             "build:\n  query: cmake -S . -B build -DCMAKE_EXPORT_COMPILE_COMMANDS=ON\n",
             encoding="utf-8",
@@ -1543,7 +1543,7 @@ class TestDumpDryRunBuildQueryTrust:
         # also present. An earlier revision raised click.UsageError (exit 64)
         # here purely because `raw_operand_present` was true via the
         # unrelated --build-info clause.
-        from abicheck.buildsource.pack import BuildSourcePack
+        from abicheck.buildsource import BuildSourcePack, pack_io
 
         so_path = tmp_path / "lib.so"
         so_path.write_bytes(b"")
@@ -1551,7 +1551,7 @@ class TestDumpDryRunBuildQueryTrust:
         header.write_text("int foo(int x);\n", encoding="utf-8")
         src_pack = tmp_path / "srcpack"
         src_pack.mkdir()
-        BuildSourcePack(root=src_pack).write()
+        pack_io.write(BuildSourcePack(root=src_pack))
         (src_pack / ".abicheck.yml").write_text("build: [unterminated\n", encoding="utf-8")
         build_info = tmp_path / "not_a_compile_db.txt"
         build_info.write_text("not a compile database\n", encoding="utf-8")
@@ -1587,7 +1587,7 @@ class TestDumpDryRunBuildQueryTrust:
         # gcc-compiled library and a marker-writing query: the run completes
         # with "requested evidence layer(s) not collected: L3_build,
         # L4_source_abi" and the marker file is never created.
-        from abicheck.buildsource.pack import BuildSourcePack
+        from abicheck.buildsource import BuildSourcePack, pack_io
 
         so_path = tmp_path / "lib.so"
         so_path.write_bytes(b"")
@@ -1595,7 +1595,7 @@ class TestDumpDryRunBuildQueryTrust:
         header.write_text("int foo(int x);\n", encoding="utf-8")
         src_pack = tmp_path / "srcpack"
         src_pack.mkdir()
-        BuildSourcePack(root=src_pack).write()
+        pack_io.write(BuildSourcePack(root=src_pack))
         (src_pack / ".abicheck.yml").write_text("build: [unterminated\n", encoding="utf-8")
 
         result = CliRunner().invoke(
@@ -1636,7 +1636,7 @@ class TestDumpDryRunBuildQueryTrust:
         # ("the user pointed straight at it"), so a raw --build-info file
         # would always short-circuit through that unrelated precedence
         # branch instead of reaching the code path this test targets.
-        from abicheck.buildsource.pack import BuildSourcePack
+        from abicheck.buildsource import BuildSourcePack, pack_io
 
         so_path = tmp_path / "lib.so"
         so_path.write_bytes(b"")
@@ -1644,7 +1644,7 @@ class TestDumpDryRunBuildQueryTrust:
         header.write_text("int foo(int x);\n", encoding="utf-8")
         src_pack = tmp_path / "srcpack"
         src_pack.mkdir()
-        BuildSourcePack(root=src_pack).write()
+        pack_io.write(BuildSourcePack(root=src_pack))
         (src_pack / ".abicheck.yml").write_text("build: [unterminated\n", encoding="utf-8")
         build_info = tmp_path / "emptybuilddir"
         build_info.mkdir()

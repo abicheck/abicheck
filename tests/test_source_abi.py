@@ -28,6 +28,7 @@ from abicheck.buildsource import (
     SourceLocation,
     diff_source_abi,
     link_source_abi,
+    pack_io,
 )
 from abicheck.buildsource.source_abi import EVIDENCE_TIER_L4
 from abicheck.checker_policy import (
@@ -2064,9 +2065,9 @@ def test_pack_roundtrips_source_abi(tmp_path: object) -> None:
     )
     pack = BuildSourcePack.empty(tmp_path)  # type: ignore[arg-type]
     pack.source_abi = surface
-    pack.write()
+    pack_io.write(pack)
 
-    loaded = BuildSourcePack.load(tmp_path)  # type: ignore[arg-type]
+    loaded = pack_io.load(tmp_path)  # type: ignore[arg-type]
     assert loaded.source_abi is not None
     assert [e.qualified_name for e in loaded.source_abi.reachable_macros] == ["FOO"]
     # The source surface contributes to the content hash (it is a normalized payload).
@@ -2076,11 +2077,11 @@ def test_pack_roundtrips_source_abi(tmp_path: object) -> None:
 def test_pack_removes_stale_source_abi(tmp_path: object) -> None:
     pack = BuildSourcePack.empty(tmp_path)  # type: ignore[arg-type]
     pack.source_abi = link_source_abi([SourceAbiTu(macros=[_entity("FOO", "macro")])])
-    pack.write()
+    pack_io.write(pack)
     # A later collection with no source ABI must drop the stale file.
     pack.source_abi = None
-    pack.write()
-    reloaded = BuildSourcePack.load(tmp_path)  # type: ignore[arg-type]
+    pack_io.write(pack)
+    reloaded = pack_io.load(tmp_path)  # type: ignore[arg-type]
     assert reloaded.source_abi is None
 
 

@@ -503,7 +503,7 @@ def _write_compile_db(tmp_path, src, extra_args):
 
 def _write_corrupt_pack(pack_dir):
     """A directory ``is_pack_dir()`` recognizes as a (corrupt) pack -- a
-    ``manifest.json`` present but unparseable, so ``BuildSourcePack.load()``
+    ``manifest.json`` present but unparseable, so ``pack_io.load()``
     raises decoding it."""
     pack_dir.mkdir(parents=True, exist_ok=True)
     (pack_dir / "manifest.json").write_text("{not valid json", encoding="utf-8")

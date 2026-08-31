@@ -49,13 +49,13 @@ import pytest
 from click.testing import CliRunner
 
 from abicheck import __version__ as _abicheck_version
+from abicheck.buildsource import BuildSourcePack, pack_io
 from abicheck.buildsource.build_evidence import BuildEvidence
 from abicheck.buildsource.merge_support import (
     _combine_packs,
     _detect_merge_layer_conflicts,
 )
 from abicheck.buildsource.model import ExtractorRecord
-from abicheck.buildsource.pack import BuildSourcePack
 from abicheck.buildsource.redaction import DEFAULT_REDACTION
 from abicheck.cli import main
 from abicheck.cli_buildsource import (
@@ -446,7 +446,7 @@ def _collect(
     pack.manifest.coverage = _build_coverage(
         merged, has_build, surface, source_detail, graph, graph_detail
     )
-    pack.write()
+    pack_io.write(pack)
 
     _enforce_strict_mode(extractors, merged, collection_mode)
     _echo_collection_summary(
@@ -507,7 +507,7 @@ def test_collect_evidence_creates_pack(tmp_path, capsys):
     out = tmp_path / "libfoo.evidence"
     pack = _collect(out, compile_db=cdb)
     assert "Evidence pack written" in capsys.readouterr().out
-    pack = BuildSourcePack.load(out)
+    pack = pack_io.load(out)
     assert pack.build_evidence is not None
     assert len(pack.build_evidence.compile_units) == 1
     cov = pack.manifest.coverage_for("L3_build")
@@ -939,15 +939,15 @@ def test_dump_attach_evidence_ref(tmp_path):
     # Attach it to an existing snapshot via dump on a JSON snapshot is not
     # supported (dump takes a binary), so attach directly through the helper
     # path exercised by `dump --evidence`: load pack and to_ref.
-    pack = BuildSourcePack.load(ev_dir)
+    pack = pack_io.load(ev_dir)
     snap = AbiSnapshot(library="libfoo.so", version="1.0")
-    snap.build_source_pack = pack.to_ref(path_hint=str(ev_dir))
+    snap.build_source_pack = pack_io.to_ref(pack, path_hint=str(ev_dir))
     out = tmp_path / "snap.json"
     save_snapshot(snap, out)
 
     reloaded = load_snapshot(out)
     assert reloaded.build_source_pack is not None
-    assert reloaded.build_source_pack.content_hash == pack.content_hash()
+    assert reloaded.build_source_pack.content_hash == pack_io.content_hash(pack)
 
 
 def test_dump_empty_build_info_dir_is_noop(tmp_path):
@@ -1001,8 +1001,8 @@ def test_compare_with_source_graph_packs_runs_graph_diff(tmp_path):
     runner = CliRunner()
     _collect(ev_old, compile_db=old_cdb, source_graph="summary")
     _collect(ev_new, compile_db=new_cdb, source_graph="summary")
-    assert BuildSourcePack.load(ev_old).source_graph is not None
-    assert BuildSourcePack.load(ev_new).source_graph is not None
+    assert pack_io.load(ev_old).source_graph is not None
+    assert pack_io.load(ev_new).source_graph is not None
 
     old_snap = _make_snap(tmp_path, "old.json", "1.0")
     new_snap = _make_snap(tmp_path, "new.json", "2.0")
@@ -1556,7 +1556,7 @@ def test_dump_collect_mode_build_filters_pre_captured_pack(tmp_path):
     cdb = _write_cdb(tmp_path, "c++17")
     ev = tmp_path / "full.ev"
     _collect(ev, compile_db=cdb, source_graph="summary")
-    assert BuildSourcePack.load(ev).source_graph is not None  # full pack
+    assert pack_io.load(ev).source_graph is not None  # full pack
     out = tmp_path / "s.json"
     result = runner.invoke(
         main,
@@ -1704,7 +1704,7 @@ def test_collect_evidence_source_abi_graceful_without_tool(
         clang_bin="clang-definitely-not-installed-xyz",
     )
     assert "source-only checks disabled" in capsys.readouterr().out
-    pack = BuildSourcePack.load(out)
+    pack = pack_io.load(out)
     cov = pack.manifest.coverage_for("L4_source_abi")
     # Replay ran but the tool was absent → partial, not present (and not silent).
     assert cov is not None and cov.status.value == "partial"
@@ -1737,7 +1737,7 @@ def test_collect_evidence_source_abi_android_dump(tmp_path):
         source_abi_extractor="android",
         android_dump=dump,
     )
-    pack = BuildSourcePack.load(out)
+    pack = pack_io.load(out)
     assert pack.source_abi is not None
     assert any(e.qualified_name == "Foo" for e in pack.source_abi.reachable_types)
     cov = pack.manifest.coverage_for("L4_source_abi")
@@ -1778,7 +1778,7 @@ def _ev_with_default_arg(tmp_path, name, default):
     )
     pack = BuildSourcePack.empty(tmp_path / name)
     pack.source_abi = link_source_abi([tu], library="libfoo.so")
-    pack.write()
+    pack_io.write(pack)
     return tmp_path / name
 
 
@@ -1882,7 +1882,7 @@ def test_collect_evidence_source_abi_success(tmp_path, monkeypatch, capsys):
         source_abi_cache=tmp_path / "cache",
     )
     assert "L4 source ABI replay: clang extractor" in capsys.readouterr().out
-    pack = BuildSourcePack.load(out)
+    pack = pack_io.load(out)
     assert pack.source_abi is not None
     assert any(
         e.qualified_name == "add" for e in pack.source_abi.reachable_declarations
@@ -1957,7 +1957,7 @@ def test_collect_evidence_source_abi_uses_include_graph(tmp_path, monkeypatch):
         source_abi=True,
         source_abi_scope="headers-only",
     )
-    pack = BuildSourcePack.load(out)
+    pack = pack_io.load(out)
     assert pack.source_abi is not None
     assert pack.source_abi.coverage.get("include_graph_used") is True
 
@@ -1983,7 +1983,7 @@ def test_collect_evidence_source_abi_changed_source_skips_include_graph(
         source_abi_scope="changed",
         changed_paths=("src/foo.cpp",),
     )
-    pack = BuildSourcePack.load(out)
+    pack = pack_io.load(out)
     assert pack.source_abi is not None
     assert pack.source_abi.coverage.get("include_graph_used") is False
 
@@ -2009,7 +2009,7 @@ def test_collect_evidence_source_abi_changed_header_uses_include_graph(
         source_abi_scope="changed",
         changed_paths=("include/foo.h",),
     )
-    pack = BuildSourcePack.load(out)
+    pack = pack_io.load(out)
     assert pack.source_abi is not None
     assert pack.source_abi.coverage.get("include_graph_used") is True
 
@@ -2038,7 +2038,7 @@ def test_collect_evidence_source_abi_changed_non_source_paths_use_include_graph(
             source_abi_scope="changed",
             changed_paths=(changed_path,),
         )
-        pack = BuildSourcePack.load(out)
+        pack = pack_io.load(out)
         assert pack.source_abi is not None
         assert pack.source_abi.coverage.get("include_graph_used") is True
         assert pack.source_abi.coverage.get("compile_units_selected") == 1
@@ -2051,7 +2051,7 @@ def test_collect_evidence_source_abi_castxml_unavailable(tmp_path):
     _collect(out, compile_db=cdb, source_abi=True, source_abi_extractor="castxml")
     # Either castxml ran (present) or it was unavailable (graceful) — both fine,
     # but the run must not crash and must record an L4 row.
-    pack = BuildSourcePack.load(out)
+    pack = pack_io.load(out)
     cov = pack.manifest.coverage_for("L4_source_abi")
     assert cov is not None and cov.status.value in ("present", "partial")
 
@@ -2204,9 +2204,9 @@ def test_embed_build_info_preserves_preexisting_header_only_graph(tmp_path):
 
 def test_embed_build_info_backfilled_graph_changes_content_hash(tmp_path):
     """The backfilled source_graph must actually be reflected in
-    build_source.content_hash() (via snap.build_source_pack), not silently
+    pack_io.content_hash(snap.build_source) (via snap.build_source_pack), not silently
     excluded because merged.manifest.artifacts still lists only the
-    pre-backfill (graph-less) digests. BuildSourcePack.content_hash() prefers
+    pre-backfill (graph-less) digests. pack_io.content_hash() prefers
     a non-empty manifest.artifacts over recomputing it, so two otherwise-
     identical embeds that backfill genuinely different graphs must not
     collide on the same content hash (Codex review)."""
@@ -2224,7 +2224,7 @@ def test_embed_build_info_backfilled_graph_changes_content_hash(tmp_path):
         embed_build_source(snap, cdb, None, collect_mode="build")
         assert snap.build_source is not None
         assert snap.build_source.source_graph is graph
-        return snap.build_source.content_hash()
+        return pack_io.content_hash(snap.build_source)
 
     hash_a = _embed_with_graph("d:foo")
     hash_b = _embed_with_graph("d:bar")
@@ -3029,8 +3029,8 @@ def test_mixed_build_pack_and_raw_sources_hash_distinguishes_trees(tmp_path):
     ev = BuildEvidence()
     ev.compile_units.append(CompileUnit(id="cu://x", source="x.cpp"))
     bi.build_evidence = ev
-    bi.write()
-    bi = BuildSourcePack.load(tmp_path / "bi")
+    pack_io.write(bi)
+    bi = pack_io.load(tmp_path / "bi")
 
     def _inline_with(library: str) -> BuildSourcePack:
         return BuildSourcePack(
@@ -3040,10 +3040,10 @@ def test_mixed_build_pack_and_raw_sources_hash_distinguishes_trees(tmp_path):
     a = _combine_packs(bi, None, _inline_with("tree_a"))
     b = _combine_packs(bi, None, _inline_with("tree_b"))
     assert a is not None and b is not None
-    assert a.content_hash() != b.content_hash()
+    assert pack_io.content_hash(a) != pack_io.content_hash(b)
     # And the build evidence still participates (same pack → shared component).
     same = _combine_packs(bi, None, _inline_with("tree_a"))
-    assert a.content_hash() == same.content_hash()
+    assert pack_io.content_hash(a) == pack_io.content_hash(same)
 
 
 def test_combined_pack_content_hash_stable_across_source_abi_coverage_timing(
@@ -3068,8 +3068,8 @@ def test_combined_pack_content_hash_stable_across_source_abi_coverage_timing(
     ev = BuildEvidence()
     ev.compile_units.append(CompileUnit(id="cu://x", source="x.cpp"))
     bi.build_evidence = ev
-    bi.write()
-    bi = BuildSourcePack.load(tmp_path / "bi")
+    pack_io.write(bi)
+    bi = pack_io.load(tmp_path / "bi")
 
     def _inline_with(coverage: dict) -> BuildSourcePack:
         return BuildSourcePack(
@@ -3106,7 +3106,7 @@ def test_combined_pack_content_hash_stable_across_source_abi_coverage_timing(
         ),
     )
     assert a is not None and b is not None
-    assert a.content_hash() == b.content_hash()
+    assert pack_io.content_hash(a) == pack_io.content_hash(b)
 
 
 def test_combined_coverage_honors_supplier_present_row():
@@ -3851,7 +3851,7 @@ def test_embedded_source_graph_l5_roundtrips(tmp_path):
     cdb = _write_cdb(tmp_path, "c++17")
     pack_dir = tmp_path / "ev"
     _collect(pack_dir, compile_db=cdb, source_graph="summary")
-    assert BuildSourcePack.load(pack_dir).source_graph is not None
+    assert pack_io.load(pack_dir).source_graph is not None
 
     snap = AbiSnapshot(library="libfoo.so", version="1")
     embed_build_source(snap, pack_dir, None)
@@ -4034,7 +4034,7 @@ def test_merge_relink_rebuilds_l5_graph_and_refreshes_hash(tmp_path):
     edge_kinds = {e.kind for e in g.edges}
     assert any("SYMBOL" in k for k in edge_kinds), edge_kinds
     # content_hash recomputes from the updated payloads (no stale artifacts).
-    assert merged.build_source.content_hash()
+    assert pack_io.content_hash(merged.build_source)
 
 
 def test_a4_redacted_absolute_source_uses_basename(tmp_path):
