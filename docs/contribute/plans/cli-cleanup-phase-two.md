@@ -581,10 +581,19 @@ gate` now also raises `diff.exit.code` and re-stamps `diff.exit.reasons` to
 a new `ExitReason.PROMOTED_CROSSCHECK` (a scan-only reason;
 `resolve_compare_exit_decision` itself never emits it) whenever a promotion
 actually fires — never lowering, never firing when the existing code already
-dominates. Budget overflow and `NOT_COMPARABLE` remain unmodeled by this
-block, matching `exit_decision.py`'s own explicit scope (no `DiffResult`
-exists for `NOT_COMPARABLE`; budget overflow aborts before a report is
-built) — see that module's own docstring for the reasoning.
+dominates. Budget overflow and `NOT_COMPARABLE` remain unmodeled by *this
+specific block* — `_promote_published_gate` only patches an already-built
+`diff_summary["exit"]`, and the earliest, candidate-collection-stage
+`_BudgetOverflow` still raises before one exists to patch (no `DiffResult`
+exists for `NOT_COMPARABLE` either) — see `exit_decision.py`'s own
+docstring for the reasoning. This is narrower than "budget overflow gets no
+report at all": ADR-064's own status (below) documents the separate,
+minimal abort envelope both the typed API and the native CLI now build for
+every `_BudgetOverflow`/`_EvidenceContractError` abort, late ones included
+— that envelope is not `_promote_published_gate`'s `diff.exit` block, it is
+built by `scan_abort_result_fields`/`cli_scan._emit_scan_abort_report`
+instead, and a *late* budget overflow's prior contributions reach it via
+`attach_prior_on_budget_overflow`, not this crosscheck-promotion path.
 
 **The persistence prerequisite's single-library half is now also landed**
 (schema 2.43): every `compare --format json` report carries a top-level

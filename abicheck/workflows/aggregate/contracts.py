@@ -217,6 +217,20 @@ DEFAULT_REPORT_PREFIX = "abi-report-"
 #: fan-in preserves it as a blocking gate rather than a verdictless report.
 _OPERATIONAL_ERROR_VERDICT = "ERROR"
 
+#: ``scan``'s own two abort verdicts (ADR-064 stage 1b's native-CLI abort
+#: report, ``cli_scan._emit_scan_abort_report``) -- neither is a
+#: :class:`Verdict` enum member, so like ``_OPERATIONAL_ERROR_VERDICT`` above
+#: (and unlike ``_BOOTSTRAP_VERDICT``/``_NEW_TARGET_VERDICT`` below, which are
+#: legitimately tolerated) both must force a blocking gate rather than fall
+#: through to an unavailable/verdictless report: an unfinished scan is a real
+#: failure a required-target policy must not silently treat as "nothing to
+#: compare yet" (Codex review, fresh evidence -- the earlier envelope fix made
+#: `GateInfo.from_scan_report` accept these payloads in isolation, but
+#: `_load_report_file` never reaches it, since it only calls that after
+#: `parse_report_verdict` succeeds, and neither string is a `Verdict` member).
+_SCAN_BUDGET_OVERFLOW_VERDICT = "BUDGET_OVERFLOW"
+_SCAN_EVIDENCE_CONTRACT_ERROR_VERDICT = "EVIDENCE_CONTRACT_ERROR"
+
 #: ``actions/check-target``'s two advisory, never-a-compatibility-verdict
 #: sentinels (``check_report.BOOTSTRAP_VERDICT``/``NEW_TARGET_VERDICT`` —
 #: duplicated as bare strings here rather than imported, same as

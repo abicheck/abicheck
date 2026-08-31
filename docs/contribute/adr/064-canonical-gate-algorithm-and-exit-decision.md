@@ -348,7 +348,7 @@ lands in two stages rather than one atomic change:
       unchanged: `bo.message`/`ce.message` already read as the human-facing
       explanation, and inventing prose to fill `ScanOutcome`'s missing
       fields for a text rendering remains a separate, unaddressed question.
-      **Landed (2026-08-31), three follow-up fixes found by review on the
+      **Landed (2026-08-31), four follow-up fixes found by review on the
       slices above:** (1) the *audit* path
       (`run_scan_core`'s no-baseline branch) had the same late-budget-
       overflow gap the baseline-compare branch's own fix closed —
@@ -383,9 +383,33 @@ lands in two stages rather than one atomic change:
       (`TestAbortPayloadIsAggregateCompatible` in `tests/
       test_cli_scan_abort_report.py`, exercising `GateInfo.from_scan_report`
       and `workflows/aggregate/load.parse_report_verdict` directly against a
-      real abort payload). Still open: the release fan-out's `GateOptions`
-      unification and a full cross-front-end parity pass (typed API,
-      Action).
+      real abort payload). (4) That fix alone was still not enough for the
+      real `aggregate` pipeline: `workflows/aggregate/load._load_report_file`
+      only calls `GateInfo.from_scan_report` *after*
+      `parse_report_verdict` succeeds, and neither `"BUDGET_OVERFLOW"` nor
+      `"EVIDENCE_CONTRACT_ERROR"` is a `Verdict` enum member, so the abort
+      still read as an unavailable/verdictless report a warn/optional/
+      discovered-target policy could silently tolerate, exactly the
+      "unmodeled" gap the review caught by exercising `_load_report_file`
+      itself rather than its two callees in isolation. Fixed the same way
+      `_load_report_file` already handles a compare-release operational
+      `"ERROR"` verdict and a native `not_comparable` result: two new
+      sentinels (`_SCAN_BUDGET_OVERFLOW_VERDICT`/
+      `_SCAN_EVIDENCE_CONTRACT_ERROR_VERDICT` in `workflows/aggregate/
+      contracts.py`) force a blocking `GateInfo` (exit 5/1,
+      `blocking_categories=("budget_overflow",)`/`("evidence_contract_
+      error",)`) before the generic verdict-parsing branch, the same
+      "real failure, never silently tolerated" treatment `_OPERATIONAL_
+      ERROR_VERDICT` already gets — unlike `_BOOTSTRAP_VERDICT`/
+      `_NEW_TARGET_VERDICT`, which are legitimately-tolerated fall-throughs.
+      Verified against the real end-to-end path this time, not just the two
+      readers: `tests/test_aggregate_migration_coverage.py` exercises
+      `_load_report_file` directly, and `tests/
+      test_cli_scan_abort_report.py::TestAbortPayloadThroughRealAggregate`
+      runs a real `scan --format json` abort through the real
+      `aggregate_reports_dir`. Still open: the release fan-out's
+      `GateOptions` unification and a full cross-front-end parity pass
+      (typed API, Action).
 2. **Atomic.** Once the report block agrees with today's real behaviour for
    every axis and every mode (verified by the axis-separated tests this ADR
    requires below), remove `--exit-code-scheme` from `compare` and `scan`,

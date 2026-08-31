@@ -66,3 +66,45 @@ def test_not_comparable_report_preserves_declared_contract_coverage(
     loaded = _load_report_file(report, prefix="abi-report-")
 
     assert loaded.contract_coverage_declared
+
+
+@pytest.mark.parametrize(
+    ("verdict", "exit_code", "category"),
+    [
+        ("BUDGET_OVERFLOW", 5, "budget_overflow"),
+        ("EVIDENCE_CONTRACT_ERROR", 1, "evidence_contract_error"),
+    ],
+)
+def test_scan_abort_verdicts_force_a_blocking_gate(
+    tmp_path: Path, verdict: str, exit_code: int, category: str
+) -> None:
+    """`scan`'s own two abort verdicts aren't `Verdict` members, so without
+    dedicated handling `_load_report_file` never reaches `GateInfo.from_
+    scan_report` for them (it only calls that after `parse_report_verdict`
+    succeeds) -- the abort would read as an unavailable/verdictless report
+    a required-target policy could silently tolerate, instead of the real
+    failure it is (Codex review, fresh evidence).
+    """
+    report = tmp_path / "abi-report-linux.json"
+    report.write_text(
+        json.dumps(
+            {
+                "scan_schema_version": "1.23",
+                "verdict": verdict,
+                "exit_code": exit_code,
+                "diff": {"exit": {"code": exit_code, "reasons": [category]}},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    loaded = _load_report_file(report, prefix="abi-report-")
+
+    from abicheck.change_registry_types import Verdict
+
+    assert loaded.verdict is Verdict.BREAKING
+    assert loaded.reason is None
+    assert loaded.gate is not None
+    assert loaded.gate.blocking is True
+    assert loaded.gate.exit_code == exit_code
+    assert loaded.gate.blocking_categories == (category,)

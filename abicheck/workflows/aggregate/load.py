@@ -32,6 +32,8 @@ from .contracts import (
     _BOOTSTRAP_VERDICT,
     _NEW_TARGET_VERDICT,
     _OPERATIONAL_ERROR_VERDICT,
+    _SCAN_BUDGET_OVERFLOW_VERDICT,
+    _SCAN_EVIDENCE_CONTRACT_ERROR_VERDICT,
     DEFAULT_REPORT_PREFIX,
     GateInfo,
 )
@@ -225,6 +227,48 @@ def _load_report_file(path: Path, *, prefix: str) -> _LoadedReport:
             # complete, though — a run that errored cannot account for
             # everything, so these findings can convict their own profile and
             # clear no other.
+            findings=_incomplete_findings(data),
+            effective_config_digest=effective_config_digest,
+        )
+    # `scan`'s own two abort verdicts (ADR-064 stage 1b's native-CLI abort
+    # report) carry no comparison at all -- a budget overflow or a pinned
+    # depth's evidence-contract violation -- but must still gate like the
+    # operational failure above, not fall through as an unavailable/
+    # verdictless report a required-target policy could silently tolerate
+    # (Codex review, fresh evidence: neither string is a `Verdict` member,
+    # so this function never even reached `GateInfo.from_scan_report` for
+    # these before this branch existed).
+    _scan_abort_gates = {
+        _SCAN_BUDGET_OVERFLOW_VERDICT: (5, "budget_overflow"),
+        _SCAN_EVIDENCE_CONTRACT_ERROR_VERDICT: (1, "evidence_contract_error"),
+    }
+    raw_scan_verdict = data.get("verdict")
+    scan_abort = (
+        _scan_abort_gates.get(raw_scan_verdict)
+        if isinstance(raw_scan_verdict, str)
+        else None
+    )
+    if scan_abort is not None:
+        abort_exit_code, abort_category = scan_abort
+        return _LoadedReport(
+            target_id=target_id,
+            verdict=Verdict.BREAKING,
+            gate=GateInfo(
+                exit_code=abort_exit_code,
+                blocking=True,
+                blocking_categories=(abort_category,),
+                from_report=True,
+            ),
+            library=data.get("library"),
+            head_sha=head_sha,
+            reason=None,
+            path=path,
+            contract_coverage_exit=_contract_coverage_exit(data),
+            contract_coverage_incomplete=_contract_coverage_incomplete(data),
+            contract_coverage_declared=_contract_coverage_declared(data),
+            analysis_assurance_exit=_analysis_assurance_exit(data),
+            # No comparison ran at all -- unlike the operational-error branch
+            # above, there are no partial findings to preserve.
             findings=_incomplete_findings(data),
             effective_config_digest=effective_config_digest,
         )

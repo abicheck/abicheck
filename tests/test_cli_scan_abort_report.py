@@ -61,6 +61,15 @@ def _abort_payload(res) -> dict:  # type: ignore[no-untyped-def]
     return json.JSONDecoder().raw_decode(out[i:])[0]
 
 
+def _abort_payload_text(res) -> str:  # type: ignore[no-untyped-def]
+    """Like `_abort_payload`, but returns the raw JSON substring (to write
+    to a file) instead of the parsed object."""
+    out = res.output
+    i = out.find("{")
+    _, end = json.JSONDecoder().raw_decode(out[i:])
+    return out[i : i + end]
+
+
 def test_budget_overflow_json_report_has_exit_block(runner, new_snap_compatible):
     res = runner.invoke(
         main,
@@ -256,3 +265,67 @@ class TestAbortPayloadIsAggregateCompatible:
         # no abort states) -- parse_report_verdict must fail closed (None),
         # not raise, same as it already does for any other unrecognized string.
         assert parse_report_verdict(payload) is None
+
+
+class TestAbortPayloadThroughRealAggregate:
+    """The exact scenario the review finding named: saving a real `scan
+    --format json` abort report to disk and feeding it to `aggregate`, not
+    just the two reader functions in isolation. `GateInfo.from_scan_report`
+    accepting the payload was not sufficient on its own --
+    `workflows.aggregate.load._load_report_file` only calls it after
+    `parse_report_verdict` succeeds, and neither abort verdict is a
+    `Verdict` member, so the full pipeline still read the abort as an
+    unavailable/verdictless report until `_load_report_file` gained
+    dedicated handling for both (Codex review, fresh evidence).
+    """
+
+    def test_budget_overflow_report_blocks_a_required_target(
+        self, runner, new_snap_compatible, tmp_path
+    ):
+        from abicheck.aggregate import ExpectedTargets, aggregate_reports_dir
+
+        res = runner.invoke(
+            main,
+            ["scan", str(new_snap_compatible), "--budget", "0s", "--format", "json"],
+        )
+        reports_dir = tmp_path / "reports"
+        reports_dir.mkdir()
+        (reports_dir / "abi-report-linux-x86_64.json").write_text(
+            _abort_payload_text(res)
+        )
+
+        result = aggregate_reports_dir(
+            reports_dir,
+            expected=ExpectedTargets.from_lists(["linux-x86_64"], []),
+        )
+        assert result.exit_code() == 5
+        assert "linux-x86_64" in result.blocking_targets
+
+    def test_evidence_contract_error_report_blocks_a_required_target(
+        self, runner, new_snap_compatible, tmp_path
+    ):
+        from abicheck.aggregate import ExpectedTargets, aggregate_reports_dir
+
+        res = runner.invoke(
+            main,
+            [
+                "scan",
+                str(new_snap_compatible),
+                "--depth",
+                "source",
+                "--format",
+                "json",
+            ],
+        )
+        reports_dir = tmp_path / "reports"
+        reports_dir.mkdir()
+        (reports_dir / "abi-report-linux-x86_64.json").write_text(
+            _abort_payload_text(res)
+        )
+
+        result = aggregate_reports_dir(
+            reports_dir,
+            expected=ExpectedTargets.from_lists(["linux-x86_64"], []),
+        )
+        assert result.exit_code() == 1
+        assert "linux-x86_64" in result.blocking_targets
