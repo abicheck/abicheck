@@ -46,7 +46,10 @@ import pathlib
 #: Phase 3's `surface_graph_codec`, the identical shape for
 #: `AbiSnapshot.surface_graph`) — a third, independent body of work in this
 #: package, unrelated to either ADR-062's Phase 0 primitives or G40's
-#: container.
+#: container. `snapshot_load_normalization` is a fourth, equally unrelated
+#: body of work: `serialization.snapshot_from_dict`'s on-load legacy-format
+#: migrations (ADR-061 D1's storage-owns-migrations rule), not a Phase 0
+#: identity/availability/versioning primitive.
 NON_ADR062_MODULES = frozenset(
     {
         "bundle_archive",
@@ -59,6 +62,7 @@ NON_ADR062_MODULES = frozenset(
         "enum_codec",
         "entity_id_codec",
         "surface_graph_codec",
+        "snapshot_load_normalization",
     }
 )
 
