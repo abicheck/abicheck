@@ -1470,6 +1470,26 @@ touching them — a breaking change to the documented public Python API) and
 should stay computed the way they are today; `ReportFinding.verdict` is a
 new, additional field, not a replacement for them.
 
+**A bare `verdict` field is not enough by itself — a Codex review round on
+this same PR caught that a pre-resolved `Verdict` alone still leaves
+`junit_report.py` unable to become a pure projection.** When a
+`SeverityConfig` is active, `_is_failure`/`_failure_type` decide pass/fail
+and the reported failure `type` from `classify_effective_change`'s
+`IssueCategory` — a distinct axis from `Verdict` (it separately
+distinguishes, e.g., a compatible addition from a compatible quality issue,
+and a demoted preset can make even a BREAKING/API_BREAK verdict pass) — not
+from `effective_verdict_for_change`'s `Verdict` alone. A `ReportFinding`
+carrying only `verdict` would still force JUnit to call
+`classify_effective_change` itself under a `SeverityConfig`, which is
+exactly the per-renderer re-resolution this envelope exists to eliminate,
+and risks the renderer's own category resolution silently disagreeing with
+whatever the envelope's `verdict` implies. `ReportFinding` therefore needs a
+second field alongside `verdict` — the resolved `IssueCategory` (or
+equivalently, both branches' final failure classification) — computed the
+same way, once per `Change`, in the same envelope-construction pass; every
+renderer reads both pre-resolved fields instead of any one of them
+re-deriving the other.
+
 ### Phase 5 — Migrate compatibility and multi-artifact operations
 
 1. Make ABICC descriptors adapters into typed requests.
