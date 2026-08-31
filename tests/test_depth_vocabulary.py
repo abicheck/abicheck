@@ -621,6 +621,7 @@ def test_dump_depth_source_hybrid_frontend_not_rejected_for_prebuilt_pack(tmp_pa
     instead of failing for the unrelated "--depth source not satisfied"
     reason -- an empty pack would make this test pass even if the hybrid
     rejection fired but got masked by that other failure first."""
+    from abicheck.buildsource import pack_io
     from abicheck.buildsource.build_evidence import BuildEvidence, CompileUnit
     from abicheck.buildsource.pack import BuildSourcePack
     from abicheck.buildsource.source_abi import SourceAbiSurface, SourceEntity
@@ -633,7 +634,7 @@ def test_dump_depth_source_hybrid_frontend_not_rejected_for_prebuilt_pack(tmp_pa
             reachable_declarations=[SourceEntity(id="foo", kind="function")]
         ),
     )
-    pack.write()
+    pack_io.write(pack)
     res = CliRunner().invoke(
         main,
         [
@@ -650,10 +651,11 @@ def test_dump_depth_source_hybrid_frontend_rejected_for_mixed_raw_and_pack(tmp_p
     pack must not skip the rejection -- the other (raw) side still reaches
     collect_inline_pack with extractor=hybrid, so the unsupported L4 path
     can still run for it."""
+    from abicheck.buildsource import pack_io
     from abicheck.buildsource.pack import BuildSourcePack
 
     pack_dir = tmp_path / "prebuilt-pack"
-    BuildSourcePack.empty(pack_dir).write()
+    pack_io.write(BuildSourcePack.empty(pack_dir))
     src = tmp_path / "raw-src"
     src.mkdir()
     res = CliRunner().invoke(
@@ -682,6 +684,7 @@ def test_dump_depth_source_hybrid_frontend_not_rejected_for_pack_sources_raw_bui
     hybrid has no effect here and must not be rejected, matching the
     prebuilt-pack case above rather than the mixed-raw-and-pack one (which
     has the raw side on --sources, not --build-info)."""
+    from abicheck.buildsource import pack_io
     from abicheck.buildsource.build_evidence import BuildEvidence, CompileUnit
     from abicheck.buildsource.pack import BuildSourcePack
     from abicheck.buildsource.source_abi import SourceAbiSurface, SourceEntity
@@ -694,7 +697,7 @@ def test_dump_depth_source_hybrid_frontend_not_rejected_for_pack_sources_raw_bui
             reachable_declarations=[SourceEntity(id="foo", kind="function")]
         ),
     )
-    pack.write()
+    pack_io.write(pack)
     build_info_tree = tmp_path / "raw-build-info"
     build_info_tree.mkdir()
     res = CliRunner().invoke(

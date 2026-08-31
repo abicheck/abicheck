@@ -30,7 +30,7 @@ from typing import TYPE_CHECKING
 
 import click
 
-from .buildsource import evidence_report as _evidence_report
+from .buildsource import evidence_report as _evidence_report, pack_frontend
 from .buildsource.build_evidence import l3_coverage_fields
 from .buildsource.model import (
     CoverageStatus,
@@ -578,7 +578,7 @@ def _echo_collection_summary(
 ) -> None:
     """Print the per-layer summary for a successfully written evidence pack."""
     click.echo(f"Evidence pack written to {output}")
-    click.echo(f"  content hash: {pack.content_hash()}")
+    click.echo(f"  content hash: {pack_frontend.content_hash(pack)}")
     if has_build:
         click.echo(
             f"  L3 build context: {len(merged.compile_units)} compile units, "
@@ -879,7 +879,7 @@ def _run_external_extractors(
         # Reject output kinds collect cannot fold yet — only
         # build_evidence is wired into the pack here. A manifest that advertises
         # a source_abi / source_graph_summary output would otherwise be recorded
-        # ok while its evidence is silently dropped (and pack.write() removes the
+        # ok while its evidence is silently dropped (and pack_io.write() removes the
         # canonical source/graph files), so the requested evidence is absent even
         # though the extractor "succeeded" (Codex P2). Fail loudly instead.
         unsupported = sorted(

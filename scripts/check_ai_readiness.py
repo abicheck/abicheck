@@ -1103,25 +1103,20 @@ def _find_cycles(graph: dict[str, set[str]]) -> list[list[str]]:
 IMPORT_CYCLE_ALLOWLIST: frozenset[frozenset[str]] = frozenset(
     {
         # cli.py imports cli_compare_release / cli_baseline / cli_debian_symbols /
-        # cli_appcompat / cli_stack / cli_suggest at module-load tail to register
-        # their @main.command(...) decorators; those sub-modules import `main`
-        # and shared helpers back from cli.
-        frozenset({"cli", "cli_compare_release"}),
-        frozenset({"cli", "cli_baseline"}),
-        frozenset({"cli", "cli_debian_symbols"}),
-        frozenset({"cli", "cli_appcompat"}),
-        frozenset({"cli", "cli_plugin"}),
-        frozenset({"cli", "cli_pr_comment"}),
-        frozenset({"cli", "cli_probe"}),
-        frozenset({"cli", "cli_stack"}),
-        frozenset({"cli", "cli_suggest"}),
-        frozenset({"cli", "cli_surface"}),
-        # `scan` (cli_scan) reuses `embed_build_source` from cli_buildsource to
-        # collect L3/L4/L5 inline; cli_buildsource imports `main`/helpers from cli;
-        # cli imports cli_scan at its tail to register the command. All three edges
-        # are the by-design sibling-registration / helper-reuse pattern, not a
-        # true initialization cycle (the reuse import is function-local).
-        frozenset({"cli", "cli_scan", "cli_buildsource"}),
+        # cli_appcompat / cli_plugin / cli_pr_comment / cli_probe / cli_stack /
+        # cli_suggest / cli_surface / cli_scan / cli_buildsource at module-load
+        # tail to register their @main.command(...) decorators; those
+        # sub-modules import `main` and shared helpers back from cli. Each of
+        # these once had its own standalone `{"cli", "cli_X"}` (or, for
+        # cli_scan/cli_buildsource, three-item) entry here; all twelve were
+        # removed (2026-08-31 IMPORT_CYCLE_ALLOWLIST audit) once confirmed
+        # redundant — every module they name is already a member of the one
+        # big cluster below, so `short <= allowed` already matches any
+        # detected cycle naming a subset of them via that cluster entry alone,
+        # exactly the reasoning the cluster's own `cli_config`/`cli_doctor`/
+        # `cli_graph` comment already relied on for never having standalone
+        # entries of their own. Confirmed empirically: removing all twelve
+        # produces zero new `check_import_cycles` findings.
         # ADR-035 D10 typed scan engine cluster: the typed engine
         # (`ScanRequest`/`run_scan`/`estimate_scan`) lives in the leaf module
         # `service_scan`, which `service` re-exports for the public Python API.

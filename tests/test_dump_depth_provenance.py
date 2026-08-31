@@ -158,11 +158,12 @@ def test_gated_source_label_without_a_pack_but_with_compile_db_context_is_build(
 
 
 def test_dump_will_attempt_hybrid_l4_extraction_false_for_prebuilt_pack(tmp_path) -> None:
+    from abicheck.buildsource import pack_io
     from abicheck.buildsource.pack import BuildSourcePack
     from abicheck.cli_dump_helpers import _dump_will_attempt_hybrid_l4_extraction
 
     pack_dir = tmp_path / "pack"
-    BuildSourcePack.empty(pack_dir).write()
+    pack_io.write(BuildSourcePack.empty(pack_dir))
     assert _dump_will_attempt_hybrid_l4_extraction(pack_dir) is False
 
 

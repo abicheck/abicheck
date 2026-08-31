@@ -296,7 +296,7 @@ def _pack_dir_build_evidence(path: Path) -> BuildEvidence | None:
     """The ``BuildEvidence`` a pack directory at *path* would fold in.
 
     Mirrors whichever of the two real loaders the production pack-precedence
-    resolvers use for *path*: a classic ``BuildSourcePack.load(path).
+    resolvers use for *path*: a classic ``pack_io.load(path).
     build_evidence`` for the ``is_pack_dir`` shape, or -- for a Flow-2
     ``abicheck_inputs/`` pack -- ``validate_inputs_pack``'s hard validation
     followed by the lighter ``load_inputs_manifest`` + ``_load_build_
@@ -331,16 +331,16 @@ def _pack_dir_build_evidence(path: Path) -> BuildEvidence | None:
     makes for a large pre-captured Bazel jsonproto. Deliberately **not**
     applied to the classic-``BuildSourcePack`` branch above: that shape has
     no equivalent separate "validate" step in production
-    (``_load_pack_or_raise`` is just ``BuildSourcePack.load`` wrapped in a
+    (``_load_pack_or_raise`` is just ``pack_io.load`` wrapped in a
     narrow except), so this function's existing load call already matches
     it exactly.
     """
     from .workflows.extraction import is_pack_dir, validate_inputs_pack
 
     if is_pack_dir(path):
-        from .buildsource.pack import BuildSourcePack
+        from .buildsource import pack_frontend
 
-        return BuildSourcePack.load(path).build_evidence
+        return pack_frontend.load(path).build_evidence
     from .workflows.extraction import _load_build_evidence, load_inputs_manifest
 
     report = validate_inputs_pack(path)

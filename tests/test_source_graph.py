@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import json
 
+from abicheck.buildsource import pack_io
 from abicheck.buildsource.build_evidence import (
     BuildEvidence,
     CompileUnit,
@@ -940,8 +941,8 @@ def test_to_dict_fills_graph_id_when_unset() -> None:
 def test_pack_round_trips_source_graph(tmp_path) -> None:
     pack = BuildSourcePack.empty(tmp_path / "p.evidence")
     pack.source_graph = build_source_graph(_sample_build())
-    pack.write()
-    loaded = BuildSourcePack.load(tmp_path / "p.evidence")
+    pack_io.write(pack)
+    loaded = pack_io.load(tmp_path / "p.evidence")
     assert loaded.source_graph is not None
     assert loaded.source_graph.graph_id == pack.source_graph.graph_id
 
@@ -950,13 +951,13 @@ def test_pack_drops_stale_graph_when_recollected(tmp_path) -> None:
     root = tmp_path / "p.evidence"
     pack = BuildSourcePack.empty(root)
     pack.source_graph = build_source_graph(_sample_build())
-    pack.write()
+    pack_io.write(pack)
     # Re-write without a graph: the stale file must be removed.
-    pack2 = BuildSourcePack.load(root)
+    pack2 = pack_io.load(root)
     pack2.source_graph = None
-    pack2.write()
+    pack_io.write(pack2)
     assert not (root / "graph" / "source_graph_summary.json").is_file()
-    assert BuildSourcePack.load(root).source_graph is None
+    assert pack_io.load(root).source_graph is None
 
 
 def _collect_graph_pack(
@@ -1045,14 +1046,14 @@ def _collect_graph_pack(
     pack.manifest.coverage = _build_coverage(
         merged, has_build, None, "", graph, graph_detail
     )
-    pack.write()
+    pack_io.write(pack)
     return pack, out
 
 
 def test_collect_evidence_summary_writes_graph_and_coverage(tmp_path) -> None:
     pack, out = _collect_graph_pack(tmp_path, "foo")
     assert (out / "graph" / "source_graph_summary.json").is_file()
-    reloaded = BuildSourcePack.load(out)
+    reloaded = pack_io.load(out)
     assert reloaded.source_graph is not None
     l5 = reloaded.manifest.coverage_for(DataLayer.L5_SOURCE_GRAPH)
     assert l5 is not None

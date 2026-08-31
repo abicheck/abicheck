@@ -37,6 +37,7 @@ from typing import Any
 
 from .._compiler_options import split_gcc_options
 from ..compile_context import CompileContext
+from . import pack_io
 from .inline import (
     BuildConfig,
     _run_cleanups,
@@ -45,7 +46,6 @@ from .inline import (
     is_pack_dir,
     load_build_config,
 )
-from .pack import BuildSourcePack
 
 logger = logging.getLogger(__name__)
 
@@ -128,7 +128,7 @@ def _l2_seed_pack_build_evidence(path: Path) -> Any:
     function does not need its own catch.
     """
     if is_pack_dir(path):
-        return BuildSourcePack.load(path).build_evidence
+        return pack_io.load(path).build_evidence
     from .inputs_pack import _load_build_evidence, load_inputs_manifest
 
     manifest = load_inputs_manifest(path)

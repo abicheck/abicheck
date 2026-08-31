@@ -416,6 +416,7 @@ class TestDumpDryRun:
         # genuinely succeed for real. The blocker above must not fire for
         # this case -- unlike a raw compile database, checked via
         # buildsource.inline.is_pack_dir (cheap manifest-shape read).
+        from abicheck.buildsource import pack_io
         from abicheck.buildsource.pack import BuildSourcePack
         from abicheck.buildsource.source_abi import SourceAbiSurface
 
@@ -426,7 +427,7 @@ class TestDumpDryRun:
         surface = SourceAbiSurface()
         surface.coverage["compile_units_selected"] = 1
         surface.coverage["compile_units_parsed"] = 1
-        BuildSourcePack(root=pack_dir, source_abi=surface).write()
+        pack_io.write(BuildSourcePack(root=pack_dir, source_abi=surface))
         result = CliRunner().invoke(
             main,
             [
@@ -474,6 +475,7 @@ class TestDumpDryRun:
         # A dry run must not load the pack to verify (real I/O), so this
         # stays a soft warning -- "possibly satisfiable" -- not a blocker,
         # mirroring the sibling --depth build/some-compile-database warning.
+        from abicheck.buildsource import pack_io
         from abicheck.buildsource.pack import BuildSourcePack
         from abicheck.buildsource.source_abi import SourceAbiSurface
 
@@ -484,7 +486,7 @@ class TestDumpDryRun:
         surface = SourceAbiSurface()
         surface.coverage["compile_units_selected"] = 1
         surface.coverage["compile_units_parsed"] = 1
-        BuildSourcePack(root=pack_dir, source_abi=surface).write()
+        pack_io.write(BuildSourcePack(root=pack_dir, source_abi=surface))
         result = CliRunner().invoke(
             main,
             [

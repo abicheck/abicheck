@@ -1,7 +1,7 @@
 # ADR-061: Responsibility-Package Architecture and Flat-Namespace Migration
 
 **Date:** 2026-08-24
-**Status:** Accepted — partially implemented (Phases 0-1 implemented; Phases 2-4 in progress; Phase 5 begun — the `model` package and the `*_metadata.py` dataclass/parser split have landed; Phase 2's D9 item 4 gate-decision half is now closed via `policy/gate_decision.py`'s `gate_decision_for_result`, read by every JSON/SARIF/HTML/scan call site instead of each independently recomputing it (Markdown/HTML prose rewrite and per-finding verdict consolidation remain open, see Phase 2's own section); D9's change-catalog work (item 3) is fully done — all 4 registry-validation properties (unique identifiers, valid references, non-contradictory defaults, complete metadata) are enforced, and the 397 entries have been repartitioned into `model/change_catalog/{symbols,types,platform,build,source}.py` by taxonomy; the CastXML/Clang parser split (item 1) is now underway with a real shared-context design proven on both backends — `extract/headers/{castxml,clang}/context.py` (plus castxml's own `location.py`/`type_resolution.py`) hold the parser state/node-inspection primitives an entity module needs, and `enums.py` is the first entity split out of each backend, both calling through their context object rather than `self`; `functions.py` is now the second entity module split out on BOTH backends — castxml's (plus `qualified_name`/`decl_is_public`/`visibility`/`access_level` promoted into `location.py` alongside it, since typedef/variable/constant parsing reads them too) and clang's (its `_virtual_mangled_names()`/`_record_index()`/`_specialization_record_index()`/`_base_lookup_index()` instance state moved into a new `RecordVtableIndex` class in `context.py` itself, since record-entity parsing reads it too, not a functions-only concern despite the name; `_id_index` taken as an explicit `default_value` parameter the same way `enums.py` already takes `evaluate_int`; `_target_triple` turned out to be a stateless pass-through needing no shared home at all); `records.py` is now the third entity module split out **on both backends** — castxml's first (`ctx.vtable_slot_root`/`ctx.vtable_slot_extra_roots` already lived on the shared context from the `functions.py` slice, so the move needed no context-shape change, only relocating `parse_types`/`build_record_type`/the vtable-slot walk (`collect_virtual_methods`/`vtable_slot_key`, the first functions in this package to mutate shared context state rather than only read it) as free functions taking `CastxmlParserContext` explicitly), then clang's (`extract/headers/clang/records.py` — `parse_types`/`_build_record`/`_parse_fields`/`_collect_fields`/`_make_field` plus five record-only helpers moved as free functions taking the categorized `_Decl` lists and explicit evaluators, the same shape `functions.py` established; `decl_is_public` — read by both record and constant parsing — promoted into `context.py` alongside it, and six previously-private `dumper_clang_qualifiers.py` helpers with exactly one external caller apiece were public-ized in place rather than moved, each keeping its old private spelling as a back-compat alias); `templates.py` closes out item 1 in full on both backends — castxml has no separate template-entity module at all (investigated and confirmed: castxml's XML resolves a class-template specialization down to an ordinary record node, so there is nothing `templates.py`-shaped to split out there), while clang's `extract/headers/clang/templates.py` now holds the whole template-parameter-kind/default/name reconstruction and specialization-spelling/indexing machinery moved out of `dumper_clang_vtable.py` (which, despite its name, always held two loosely related halves — record/vtable layout, which stayed, and this template half, which didn't), with `_SCOPE_NODE_KINDS`'s canonical definition also relocated there (out of `dumper_clang_expr.py`, which `extract` may not import) and `build_specialization_index` taking `is_record_definition` as an explicit parameter rather than importing it back from `dumper_clang_vtable.py`, avoiding a genuine two-way import edge between the two modules — **item 1 (the CastXML/Clang parser split) is now fully closed on both backends**; source-graph separation (item 2) is now split three ways: its values third moved to `abicheck/model/source_graph.py`; construction (`build_source_graph` and its private folding helpers) moved into `buildsource/source_graph_build.py` (classified `extract`) and `buildsource/source_graph_build_source_abi.py` (classified `extract`); comparison (`diff_source_graph`, `localize_symbol`) moved into `buildsource/source_graph_compare.py` (classified `compare`); a shared node/edge-classification predicate module neither half owns exclusively (`buildsource/source_graph_query.py`) stays unclassified, same as several of its own callers; `buildsource/source_graph.py` itself is now a 140-line re-export facade — and the bulk of item 4's cycle-exception cleanup also remains — and otherwise incremental).
+**Status:** Accepted — partially implemented (Phases 0-1 implemented; Phases 2-4 in progress; Phase 5 begun — the `model` package and the `*_metadata.py` dataclass/parser split have landed; Phase 2's D9 item 4 gate-decision half is now closed via `policy/gate_decision.py`'s `gate_decision_for_result`, read by every JSON/SARIF/HTML/scan call site instead of each independently recomputing it (Markdown/HTML prose rewrite and per-finding verdict consolidation remain open, see Phase 2's own section); D9's change-catalog work (item 3) is fully done — all 4 registry-validation properties (unique identifiers, valid references, non-contradictory defaults, complete metadata) are enforced, and the 397 entries have been repartitioned into `model/change_catalog/{symbols,types,platform,build,source}.py` by taxonomy; the CastXML/Clang parser split (item 1) is now underway with a real shared-context design proven on both backends — `extract/headers/{castxml,clang}/context.py` (plus castxml's own `location.py`/`type_resolution.py`) hold the parser state/node-inspection primitives an entity module needs, and `enums.py` is the first entity split out of each backend, both calling through their context object rather than `self`; `functions.py` is now the second entity module split out on BOTH backends — castxml's (plus `qualified_name`/`decl_is_public`/`visibility`/`access_level` promoted into `location.py` alongside it, since typedef/variable/constant parsing reads them too) and clang's (its `_virtual_mangled_names()`/`_record_index()`/`_specialization_record_index()`/`_base_lookup_index()` instance state moved into a new `RecordVtableIndex` class in `context.py` itself, since record-entity parsing reads it too, not a functions-only concern despite the name; `_id_index` taken as an explicit `default_value` parameter the same way `enums.py` already takes `evaluate_int`; `_target_triple` turned out to be a stateless pass-through needing no shared home at all); `records.py` is now the third entity module split out **on both backends** — castxml's first (`ctx.vtable_slot_root`/`ctx.vtable_slot_extra_roots` already lived on the shared context from the `functions.py` slice, so the move needed no context-shape change, only relocating `parse_types`/`build_record_type`/the vtable-slot walk (`collect_virtual_methods`/`vtable_slot_key`, the first functions in this package to mutate shared context state rather than only read it) as free functions taking `CastxmlParserContext` explicitly), then clang's (`extract/headers/clang/records.py` — `parse_types`/`_build_record`/`_parse_fields`/`_collect_fields`/`_make_field` plus five record-only helpers moved as free functions taking the categorized `_Decl` lists and explicit evaluators, the same shape `functions.py` established; `decl_is_public` — read by both record and constant parsing — promoted into `context.py` alongside it, and six previously-private `dumper_clang_qualifiers.py` helpers with exactly one external caller apiece were public-ized in place rather than moved, each keeping its old private spelling as a back-compat alias); `templates.py` closes out item 1 in full on both backends — castxml has no separate template-entity module at all (investigated and confirmed: castxml's XML resolves a class-template specialization down to an ordinary record node, so there is nothing `templates.py`-shaped to split out there), while clang's `extract/headers/clang/templates.py` now holds the whole template-parameter-kind/default/name reconstruction and specialization-spelling/indexing machinery moved out of `dumper_clang_vtable.py` (which, despite its name, always held two loosely related halves — record/vtable layout, which stayed, and this template half, which didn't), with `_SCOPE_NODE_KINDS`'s canonical definition also relocated there (out of `dumper_clang_expr.py`, which `extract` may not import) and `build_specialization_index` taking `is_record_definition` as an explicit parameter rather than importing it back from `dumper_clang_vtable.py`, avoiding a genuine two-way import edge between the two modules — **item 1 (the CastXML/Clang parser split) is now fully closed on both backends**; source-graph separation (item 2) is now split three ways: its values third moved to `abicheck/model/source_graph.py`; construction (`build_source_graph` and its private folding helpers) moved into `buildsource/source_graph_build.py` (classified `extract`) and `buildsource/source_graph_build_source_abi.py` (classified `extract`); comparison (`diff_source_graph`, `localize_symbol`) moved into `buildsource/source_graph_compare.py` (classified `compare`); a shared node/edge-classification predicate module neither half owns exclusively (`buildsource/source_graph_query.py`) stays unclassified, same as several of its own callers; `buildsource/source_graph.py` itself is now a 140-line re-export facade; the Phase 5 residual (`BuildSourcePack`'s persistence-vs-model split) is now closed too — `buildsource/pack.py` keeps only the dataclass and its pure methods, `buildsource/pack_io.py` (`storage`) holds `load`/`write`/`content_hash`/`verify_integrity`/`to_ref` as free functions, and `buildsource/pack_frontend.py` is a pure facade for `frontends`-layer callers; item 4's `IMPORT_CYCLE_ALLOWLIST` audit (explicit maintainer sign-off) is also done — 12 of 15 entries were redundant subsets of the one big CLI-registration cluster and were pruned, no stale `legacy_paths` entries found — and otherwise incremental).
 **Decision maker:** abicheck maintainers
 
 ## Context
@@ -2073,16 +2073,44 @@ Hypothesis invariants — the treatment `AGENTS.md` prescribes for a reusable
 merge/dedupe/grouping helper, and the reason a de-duplication like this is
 worth doing at all rather than leaving three loops that can drift.
 
-**One residual, recorded rather than papered over.** `AbiSnapshot.build_source`
-is typed `BuildSourcePack`, whose class is five data fields plus `load`/
-`write`/`content_hash`/`verify_integrity` — persistence, which ADR-061 assigns
-to `storage`, and `model` may not import `storage`. `buildsource/pack.py` and
-`buildsource/model.py` are therefore classified `model` in
-`architecture/modules.yaml`'s `legacy_paths` (target owner, per that field's
-meaning) even though `pack.py`'s persistence half is a `storage` split still
-owed. Splitting it means separating a dataclass from its own load/write
-methods without changing what `BuildSourcePack(...)` constructs for callers
-this repository cannot see, which is its own slice.
+**The one residual recorded above is now closed.** `AbiSnapshot.build_source`
+is typed `BuildSourcePack`; its class used to carry both the five data fields
+and `load`/`write`/`content_hash`/`verify_integrity` — persistence, which
+ADR-061 assigns to `storage`, while `model` may not import `storage`. The
+split kept `buildsource/pack.py`'s `BuildSourcePack` dataclass unchanged in
+place (still `model`-classified via `legacy_paths`, still five fields plus
+the pure `empty()`/`to_embedded_dict()`/`from_embedded_dict()`) and moved
+every I/O-bearing method to a new `buildsource/pack_io.py` module of free
+functions taking `pack: BuildSourcePack` as an explicit argument
+(`load(root)`, `write(pack)`, `content_hash(pack)`, `verify_integrity(pack)`,
+`to_ref(pack, path_hint=...)`), classified `storage` via `legacy_paths`
+(physically flat, matching `build_cache.py`'s existing precedent). A third
+module, `buildsource/pack_frontend.py`, is a pure facade re-exporting only
+`pack_io.load`/`content_hash`/`to_ref` — registered in `architecture/
+modules.yaml`'s `facades` list rather than classified into any layer (the
+same treatment `source_graph.py` already had) — so `frontends`-layer CLI
+modules that read a pack for display or provenance stamping have a legal
+path to `pack_io.py` without `frontends` importing `storage` on its own
+account. This is a genuine, source-incompatible Python API change:
+`BuildSourcePack.load(path)`/`pack.write()`/`pack.content_hash()`/
+`pack.verify_integrity()`/`pack.to_ref(...)` no longer exist as methods on
+the class — callers use the `pack_io`/`pack_frontend` free functions
+instead. `BuildSourcePack` was never part of `service.__all__`'s tracked
+Python API surface, and `verify_integrity()` had zero call sites anywhere in
+the repository (dead code, not even exercised by a test), which lowered the
+stakes of the move. Rejected alternatives, in order: physically relocating
+the dataclass into a real `model/build_source_pack.py` (blocked by the same
+`unclassified-import` check firing once the file becomes `migrated_source`
+and references unclassified `BuildEvidence`/`SourceAbiSurface` — and
+`BuildEvidence` cannot itself move to `model` either, since it imports the
+`extract`-classified `comdat_groups`, which would create a `model -> extract`
+cycle); a subclass-based back-compat shim (model base + storage subclass);
+monkeypatching methods onto the class from a facade module; hiding the
+`storage` import behind `TYPE_CHECKING` (`check_architecture.py`'s AST walk
+is not guard-aware); and a `.pyi` stub smuggling the type past the checker
+(unlike `kinds.pyi`'s legitimate different justification — a dynamically
+built enum unresolvable to mypy — this would have been dishonest
+circumvention of the architecture rules themselves).
 
 **Item 3 is now fully closed.** D9 specifies two separable things: the
 target file shape (declarative modules named by taxonomy — `symbols.py`,
@@ -3117,12 +3145,26 @@ without promising a new export.
    in `architecture/debt.yaml` was removed — its own rationale ("cannot
    move safely without a behavior-preserving vertical slice") no longer
    applied once this migration *was* that slice.
-   The rest of item 4 (the CLI-registration `IMPORT_CYCLE_ALLOWLIST` in
-   `scripts/check_ai_readiness.py` and any other stale `legacy_paths`
-   entries) is unstarted — that allowlist is a large, deliberately
-   pre-existing, by-design cluster this file's own AGENTS.md instructs not
-   to touch without an ADR or explicit maintainer sign-off, so auditing it
-   is out of scope for an incremental cleanup pass.
+   The CLI-registration `IMPORT_CYCLE_ALLOWLIST` in
+   `scripts/check_ai_readiness.py` has now been audited (2026-08-31,
+   explicit maintainer sign-off, per this file's own AGENTS.md bar) — not
+   blindly extended, only pruned. Of the allowlist's then-15 entries, 12
+   were standalone `{"cli", "cli_X"}` (or, for `cli_scan`/`cli_buildsource`,
+   three-item) entries whose every named module was independently confirmed
+   to already be a member of the one big by-design CLI-registration cluster
+   entry — the exact reasoning the cluster's own comment already relied on
+   for never giving `cli_config`/`cli_doctor`/`cli_graph` standalone entries
+   of their own (a detected cycle naming any subset of the cluster's members
+   matches the cluster entry via `short <= allowed` regardless of which
+   specific representative cycle `_find_cycles`' DFS happens to report).
+   Removed and confirmed to produce zero new `check_import_cycles` findings
+   before and after (`tests/test_ai_readiness.py::
+   test_no_unapproved_import_cycle_growth` also still passes). The allowlist
+   is now 4 entries: the one big cluster plus the three independent, genuinely
+   separate `TYPE_CHECKING`-only cycles (`model`/`python_api`,
+   `model`/`python_ext`, and `buildsource.pack`/`buildsource.source_graph`/
+   `checker_types`/`model`). No stale `legacy_paths` entries were found in
+   this same pass.
 
 **Acceptance:** parser fixtures demonstrate byte/fact parity where
 applicable; catalog validation proves all four of D9's properties — global

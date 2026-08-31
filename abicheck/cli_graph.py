@@ -44,12 +44,12 @@ def _load_source_graph(path: Path) -> SourceGraphSummary:
     directory (the graph is read from its manifest layout). Raises a Click error
     when neither yields a graph so the failure is actionable.
     """
-    from .buildsource.pack import BuildSourcePack
+    from .buildsource import pack_frontend
     from .buildsource.source_graph import SourceGraphSummary
 
     if path.is_dir():
         try:
-            pack = BuildSourcePack.load(path)
+            pack = pack_frontend.load(path)
         except (FileNotFoundError, ValueError) as exc:
             raise click.ClickException(
                 f"Invalid evidence pack at {path}: {exc}"

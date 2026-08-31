@@ -42,6 +42,7 @@ from .merge_support import (
 )
 from .model import DataLayer
 from .pack import BuildSourcePack
+from .pack_io import to_ref
 from .pack_load import load_inputs_pack_or_raise, load_pack_or_raise
 from .snapshot_exports import exported_symbols_from_snapshot
 
@@ -305,7 +306,7 @@ def embed_build_source(
             coverage.append(graph_row)
         # merged.manifest.artifacts (if any) was precomputed from the
         # pre-backfill payloads and does not include a digest for the
-        # newly-adopted source_graph. BuildSourcePack.content_hash() prefers
+        # newly-adopted source_graph. pack_io.content_hash() prefers
         # a non-empty manifest.artifacts over recomputing it, so a stale list
         # here would let two packs with genuinely different header-only
         # graphs (but identical L3 facts) hash identically. Clear it so
@@ -324,4 +325,4 @@ def embed_build_source(
     snap.build_source = merged
     # Provenance hint: prefer the source input, else build-info.
     hint = str(sources) if sources is not None else str(build_info)
-    snap.build_source_pack = merged.to_ref(path_hint=hint)
+    snap.build_source_pack = to_ref(merged, path_hint=hint)

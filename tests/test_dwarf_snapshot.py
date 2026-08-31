@@ -8,9 +8,9 @@ from pathlib import Path
 
 import pytest
 
+from abicheck.buildsource import BuildSourcePack, pack_io
 from abicheck.buildsource.build_evidence import BuildEvidence, CompileUnit, Target
 from abicheck.buildsource.model import CoverageStatus, DataLayer, LayerCoverage
-from abicheck.buildsource.pack import BuildSourcePack
 from abicheck.buildsource.source_abi import SourceAbiSurface, SourceEntity
 from abicheck.buildsource.source_graph import GraphNode, SourceGraphSummary
 from abicheck.dwarf_advanced import AdvancedDwarfMetadata
@@ -1494,7 +1494,7 @@ class TestPrintDataSourcesDirect:
             targets=[Target(id="target://libtest", name="libtest")],
             compile_units=[CompileUnit(id="cu://lib.c", source="lib.c")],
         )
-        pack.write()
+        pack_io.write(pack)
 
         from abicheck.cli_datasources import print_data_sources
 
@@ -1517,7 +1517,7 @@ class TestPrintDataSourcesDirect:
             targets=[Target(id="target://libtest", name="libtest")],
             compile_units=[CompileUnit(id="cu://lib.c", source="lib.c")],
         )
-        build_pack.write()
+        pack_io.write(build_pack)
         source_pack = BuildSourcePack.empty(tmp_path / "source-pack")
         source_pack.source_abi = SourceAbiSurface(
             reachable_declarations=[
@@ -1527,7 +1527,7 @@ class TestPrintDataSourcesDirect:
         source_pack.source_graph = SourceGraphSummary(
             nodes=[GraphNode(id="file://lib.c", kind="file", label="lib.c")]
         )
-        source_pack.write()
+        pack_io.write(source_pack)
 
         from abicheck.cli_datasources import print_data_sources
 
@@ -1562,9 +1562,9 @@ class TestPrintDataSourcesDirect:
                 SourceEntity(id="source://bar", kind="function", qualified_name="bar")
             ]
         )
-        full_pack.write()
+        pack_io.write(full_pack)
         manifest_only = BuildSourcePack.empty(tmp_path / "manifest-only")
-        manifest_only.write()
+        pack_io.write(manifest_only)
 
         from abicheck.cli_datasources import print_data_sources
 

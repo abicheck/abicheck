@@ -1333,12 +1333,12 @@
     },
     {
       "path": "tests/test_build_source_pack.py",
-      "baseline_lines": 1953,
+      "baseline_lines": 1954,
       "target": "tests/unit-or-contract ownership matching production migration",
       "rule": "no_growth",
       "category": "legacy_oversized_test_module",
       "owner": "abicheck maintainers",
-      "rationale": "Existing test module predates ADR-061 and will split by behavior or contract axis with its production migration.",
+      "rationale": "Existing test module predates ADR-061 and will split by behavior or contract axis with its production migration. +1 line (2026-08-31): the BuildSourcePack storage/model split (Phase 5 residual) moved load/write/content_hash/verify_integrity/to_ref off the class into abicheck.buildsource.pack_io free functions; this module's pervasive module-level pack_io usage needs one more imported symbol, already merged onto an existing import line where a same-module merge was available.",
       "review_by": "2026-11-30"
     },
     {
@@ -2113,12 +2113,12 @@
     },
     {
       "path": "tests/test_source_abi.py",
-      "baseline_lines": 2167,
+      "baseline_lines": 2168,
       "target": "tests/unit-or-contract ownership matching production migration",
       "rule": "no_growth",
       "category": "legacy_oversized_test_module",
       "owner": "abicheck maintainers",
-      "rationale": "Existing test module predates ADR-061 and will split by behavior or contract axis with its production migration.",
+      "rationale": "Existing test module predates ADR-061 and will split by behavior or contract axis with its production migration. +1 line (2026-08-31): the BuildSourcePack storage/model split (Phase 5 residual) moved load/write/content_hash/verify_integrity/to_ref off the class into abicheck.buildsource.pack_io free functions; this module's existing BuildSourcePack import already comes from the already-exploded abicheck.buildsource package block, leaving no same-module single line to merge the new pack_io symbol onto without growth.",
       "review_by": "2026-11-30"
     },
     {
@@ -2263,12 +2263,12 @@
     },
     {
       "path": "tests/validate_examples.py",
-      "baseline_lines": 1700,
+      "baseline_lines": 1701,
       "target": "tests/unit-or-contract ownership matching production migration",
       "rule": "no_growth",
       "category": "legacy_oversized_test_module",
       "owner": "abicheck maintainers",
-      "rationale": "Existing test module predates ADR-061 and will split by behavior or contract axis with its production migration.",
+      "rationale": "Existing test module predates ADR-061 and will split by behavior or contract axis with its production migration. +1 line (2026-08-31): the BuildSourcePack storage/model split (Phase 5 residual) moved load/write/content_hash/verify_integrity/to_ref off the class into abicheck.buildsource.pack_io free functions; this module has no existing BuildSourcePack import to merge the new pack_io symbol onto.",
       "review_by": "2026-11-30"
     }
   ]

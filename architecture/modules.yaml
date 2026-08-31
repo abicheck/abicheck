@@ -37,6 +37,7 @@
       ],
       "legacy_paths": [
         "abicheck/buildsource/build_cache.py",
+        "abicheck/buildsource/pack_io.py",
         "abicheck/dumper_cache.py",
         "abicheck/snapshot_io.py"
       ]
@@ -399,7 +400,8 @@
   "facades": [
     "abicheck.aggregate",
     "abicheck.aggregate_findings",
-    "abicheck.aggregate_manifest"
+    "abicheck.aggregate_manifest",
+    "abicheck.buildsource.pack_frontend"
   ],
   "frozen_root_families": {
     "cli_": [
