@@ -452,7 +452,7 @@ def _collect_source_graph(
     if source_graph != "summary":
         return None, ""
 
-    from .buildsource.source_graph import build_source_graph
+    from .workflows.extraction import build_source_graph
 
     # Fold the L4 surface in too when it was collected (--source-abi), so the
     # graph carries the public-reachability + source↔binary slices.

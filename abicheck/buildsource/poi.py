@@ -492,7 +492,7 @@ def resolve_changed_paths_public_impact(
         return frozenset()
 
     from ..model.source_graph import DEPENDENCY_EDGE_KINDS
-    from .source_graph import is_public_dependency_node
+    from ..model.source_graph_query import is_public_dependency_node
     from .source_graph_findings import _dependency_reachability
 
     # A public entry declared directly in a changed file is impacted even with

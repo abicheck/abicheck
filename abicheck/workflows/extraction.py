@@ -106,6 +106,10 @@ from ..buildsource.poi import build_points_of_interest, resolve_symbol_tus
 from ..buildsource.preprocessor_scan import run_preprocessor_scan
 from ..buildsource.redaction import DEFAULT_REDACTION
 from ..buildsource.snapshot_exports import exported_symbols_from_snapshot
+from ..buildsource.source_graph_build import build_source_graph
+from ..buildsource.source_graph_build_source_abi import (
+    mark_source_edges_extractor_coverage,
+)
 from ..buildsource.source_link import relink_surface_exports
 from ..buildsource.source_replay import collection_for_ci_mode
 from ..buildsource.toolchain_bindings import (
@@ -188,6 +192,7 @@ __all__ = [
     "attach_clang_layout",
     "build_inline_coverage",
     "build_points_of_interest",
+    "build_source_graph",
     "check_profile_bindings_resolve",
     "check_profile_toolchain_identity",
     "collection_for_ci_mode",
@@ -238,6 +243,7 @@ __all__ = [
     "load_pack_or_raise",
     "looks_like_perl_dump",
     "looks_like_symvers",
+    "mark_source_edges_extractor_coverage",
     "normalize_binary_input",
     "pack_content_hash",
     "pack_to_ref",
