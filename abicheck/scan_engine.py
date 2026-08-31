@@ -1101,9 +1101,11 @@ def run_scan_core(
     default (the pre-existing, unscoped behavior).
     """
     # ADR-063 Phase 4 (Codex review): checked before S3/POI work, since a typed
-    # run_scan()/run_scan_subprocess caller has no cli_scan.py pre-flight of its
-    # own. Empty layers (depth=binary) exempts it, as _check_bazel_target_scoping does.
-    if collection_for_ci_mode(collect_mode)[1] and (
+    # run_scan()/run_scan_subprocess caller has no cli_scan.py pre-flight. Only
+    # exempt when NEITHER embed_build_source NOR the L2 seed's own independent
+    # collect_inline_pack call can reach build_info: empty layers AND no
+    # headers -- depth=headers keeps real headers, so it stays unexempted.
+    if (headers or collection_for_ci_mode(collect_mode)[1]) and (
         _bf := bazel_target_scoping_failure(
             "candidate", effective_build_info, build_targets
         )

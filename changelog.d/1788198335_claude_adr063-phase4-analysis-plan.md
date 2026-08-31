@@ -63,3 +63,14 @@
   `ValidationError` out of the catch-all in all three helpers, mirroring
   their pre-existing `HeaderCompileContextAmbiguousError` carve-out for the
   same reason: a deliberate usage error must propagate, not degrade silently.
+- **`run_scan_core`'s own pre-flight check no longer wrongly exempts
+  `--depth headers`.** The check's exemption (added above) was keyed only on
+  the resolved `collect_mode` mapping to no collection layers — true for both
+  `--depth binary` and `--depth headers`, but only `--depth binary` also
+  clears the header list, which is the actual reason `build_info` is never
+  consulted anywhere for that depth. A headers-only scan still runs the
+  L2-seed's own independent `build_info`-consuming pass, so an explicit
+  `build_targets` combined with a pre-captured jsonproto at `--depth headers`
+  now raises the framework-neutral `PlanningError` up front (before any
+  work), instead of only being caught later — and then leaking as
+  `click.ClickException` — deep inside that L2-seed call.

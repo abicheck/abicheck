@@ -203,7 +203,41 @@ looked like the obvious fix and wasn't.
   that leak means touching the same pre-existing, out-of-scope `except
   AbicheckError` clause the module docstring already flags for a future
   cleanup, not a new regression this phase introduced — left alone here for
-  the same reason. Historical analysis retained below for the record.
+  the same reason.
+  **A seventh review round found that "verified" claim itself rested on a
+  false premise, and had a real, bounded fix — unlike the sibling
+  `click.ClickException` leak just above.** `run_scan_core`'s own early
+  pre-flight check (added for the "run scan planning before pattern and POI
+  extraction" fix elsewhere in this entry) exempted `--depth headers` the
+  same way it exempts `--depth binary`, on the theory that both resolve to a
+  `collect_mode` with no collection layers. That theory is only half
+  right: `--depth binary` *also* clears the header list to empty
+  (`service_scan.run_scan`'s `eff_headers = [] if eff_depth is
+  EvidenceDepth.BINARY else ...`, mirrored by the CLI's own
+  `_normalize_depth_inputs`), which is the actual reason `build_info` is
+  never consulted anywhere for that depth — `--depth headers` keeps real
+  headers, so the L2-seed's own independent `build_info`-consuming pass
+  (the one this whole round's fix concerns) still runs, and the early check
+  was wrongly skipping it. Concretely: `run_scan(ScanRequest(depth=
+  "headers", build_targets=("//:lib",), build_info=<precaptured jsonproto>))`
+  reached the `.abicheck.yml`-only code path's own `click.ClickException`
+  leak instead of the framework-neutral `PlanningError` an *explicit*
+  `build_targets` should get. Fixed by widening the exemption from
+  `collection_for_ci_mode(collect_mode)[1]` alone to `headers or
+  collection_for_ci_mode(collect_mode)[1]` — exempt only when *neither*
+  consumer (`embed_build_source` nor the L2 seed) can reach `build_info` at
+  all. This closes the gap for every case `AnalysisPlanner`/`run_scan_core`'s
+  own inputs can see (an explicit `--build-target`/`ScanRequest.
+  build_targets`); the `.abicheck.yml`-only case above is unaffected by this
+  fix and remains the already-documented `click.ClickException` leak, since
+  neither `run_scan_core` nor `AnalysisPlanner` can see a value that
+  isn't discovered until deep inside `collect_inline_pack`.
+  `tests/test_bazel_root_targets_scan.py::
+  test_run_scan_depth_headers_with_explicit_build_target_raises_planning_error`
+  pins the fixed (explicit `build_targets`) case; the pre-existing
+  `test_run_scan_depth_headers_still_rejects_bazel_scoping_mismatch` was
+  re-verified to still exercise the unaffected (`.abicheck.yml`-only) case
+  correctly. Historical analysis retained below for the record.
   `BazelAdapter.collect()`'s `self.targets` scoping is applied
   in exactly two places: gating whether a *live* `bazel query` subprocess
   runs at all (`_resolve`/`_run_bazel`, only reachable when `workspace` is
