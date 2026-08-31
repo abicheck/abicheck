@@ -91,6 +91,14 @@ def test_scan_abort_verdicts_force_a_blocking_gate(
     aggregate's own published contract has no exit 5 (Codex review, fresh
     evidence: an earlier revision leaked scan's raw budget-overflow code
     straight into the aggregate result).
+
+    `verdict` stays `None` (unavailable), never a synthetic `BREAKING`: a
+    scan that aborted before comparing never produced an ABI-break finding,
+    so a compatibility verdict/analyzed-target count must not be invented for
+    it (Codex review, fresh evidence: an earlier revision reported
+    `compatibility.verdict: "BREAKING"` and a complete analyzed-target count
+    for a comparison that never ran) -- the gate still counts toward the CI
+    decision via `AggregateResult._forced_gate_targets` instead.
     """
     report = tmp_path / "abi-report-linux.json"
     report.write_text(
@@ -107,10 +115,8 @@ def test_scan_abort_verdicts_force_a_blocking_gate(
 
     loaded = _load_report_file(report, prefix="abi-report-")
 
-    from abicheck.change_registry_types import Verdict
-
-    assert loaded.verdict is Verdict.BREAKING
-    assert loaded.reason is None
+    assert loaded.verdict is None
+    assert loaded.reason == f"scan aborted before completing a comparison ({category})"
     assert loaded.gate is not None
     assert loaded.gate.blocking is True
     assert loaded.gate.exit_code == 1

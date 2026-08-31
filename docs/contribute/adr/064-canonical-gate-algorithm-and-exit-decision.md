@@ -418,9 +418,34 @@ lands in two stages rather than one atomic change:
       coverage.py` exercises `_load_report_file` directly, and `tests/
       test_cli_scan_abort_report.py::TestAbortPayloadThroughRealAggregate`
       runs a real `scan --format json` abort through the real
-      `aggregate_reports_dir`. Still open: the release fan-out's
-      `GateOptions` unification and a full cross-front-end parity pass
-      (typed API, Action).
+      `aggregate_reports_dir`. **(5) A further review round caught the
+      forced gate itself inventing a compatibility verdict:** setting
+      `compatibility_verdict=Verdict.BREAKING` for the forced abort gate
+      (mirroring `_OPERATIONAL_ERROR_VERDICT`) made `AggregateResult.
+      to_dict()` report `compatibility.verdict: "BREAKING"`, a complete
+      `analyzed_targets` count, and an affected profile for a scan that
+      never actually compared anything (Codex review, fresh evidence).
+      Fixed by keeping the target `compatibility_verdict=None` (unavailable)
+      for a scan abort specifically, while its forced gate still counts
+      toward `AggregateResult.exit_code()`/`blocking_targets` regardless of
+      required/optional declaration via a new `AggregateResult.
+      _forced_gate_targets` fold — the unavailable-but-gated shape
+      `operational_error`/`not_comparable` don't need, since those keep the
+      synthetic `BREAKING` verdict this fix removes only for scan aborts.
+      **(6) A sixth round caught the sticky PR comment reading the same
+      abort envelope as a clean, zero-findings comparison:**
+      `pr_comment_scan.from_scan` only special-cased `NOT_COMPARABLE`'s
+      `{"reason": ...}` shape, so the abort envelope's empty `findings`/
+      `additions`/`quality` buckets rendered "No ABI changes" — under
+      `--on=changes` this could delete a prior sticky failure comment
+      (Codex review, fresh evidence). Fixed via a new
+      `pr_comment_scan_abort.scan_abort_incomplete_reason` helper (split
+      into its own leaf module for the same no-growth-budget reason as the
+      scan-engine helpers above), giving the abort the identical single
+      blocking "analysis incomplete" `Finding` treatment `NOT_COMPARABLE`
+      already gets. Still open: the release fan-out's `GateOptions`
+      unification and a full cross-front-end parity pass (typed API,
+      Action).
 2. **Atomic.** Once the report block agrees with today's real behaviour for
    every axis and every mode (verified by the axis-separated tests this ADR
    requires below), remove `--exit-code-scheme` from `compare` and `scan`,

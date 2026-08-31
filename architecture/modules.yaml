@@ -330,6 +330,7 @@
         "abicheck/pr_comment.py",
         "abicheck/pr_comment_base.py",
         "abicheck/pr_comment_scan.py",
+        "abicheck/pr_comment_scan_abort.py",
         "abicheck/report_classifications.py",
         "abicheck/report_correlation.py",
         "abicheck/report_model.py",

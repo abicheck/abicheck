@@ -228,6 +228,16 @@ _OPERATIONAL_ERROR_VERDICT = "ERROR"
 #: `GateInfo.from_scan_report` accept these payloads in isolation, but
 #: `_load_report_file` never reaches it, since it only calls that after
 #: `parse_report_verdict` succeeds, and neither string is a `Verdict` member).
+#: Unlike `_OPERATIONAL_ERROR_VERDICT`, though, the target stays *unavailable*
+#: for the compatibility axis (`compatibility_verdict=None`) rather than a
+#: synthetic `Verdict.BREAKING` -- a scan that aborted before comparing never
+#: produced an ABI-break finding, so counting it as one, or as an "analyzed"
+#: target, fabricates information a reader would reasonably trust (Codex
+#: review, fresh evidence: `AggregateResult.to_dict()` reported
+#: `compatibility.verdict: "BREAKING"` and a complete `analyzed_targets` count
+#: for a comparison that never ran). See `TargetReport`'s own docstring and
+#: `AggregateResult._forced_gate_targets` for how the gate still counts
+#: without inventing that verdict.
 _SCAN_BUDGET_OVERFLOW_VERDICT = "BUDGET_OVERFLOW"
 _SCAN_EVIDENCE_CONTRACT_ERROR_VERDICT = "EVIDENCE_CONTRACT_ERROR"
 
@@ -268,10 +278,11 @@ class TargetReport:
     """One target's contribution to the aggregate.
 
     ``compatibility_verdict`` is ``None`` exactly when the target is
-    *unavailable* — its report was expected but never arrived or was
-    unreadable — in which case ``gate`` is also ``None`` and ``reason``
-    explains why. ``unexpected`` marks a report whose target was not in the
-    expected set (a new/not-yet-declared matrix target).
+    *unavailable* — its report was expected but never arrived, was
+    unreadable, or (see below) ran but never reached a comparison. ``gate``
+    is usually also ``None`` in that case, with ``reason`` explaining why.
+    ``unexpected`` marks a report whose target was not in the expected set
+    (a new/not-yet-declared matrix target).
 
     ``reason`` is also populated (with ``compatibility_verdict`` forced to
     ``BREAKING`` and ``gate`` a synthetic blocking one,
@@ -281,6 +292,18 @@ class TargetReport:
     genuine break checks ``gate.blocking_categories`` for
     ``"not_comparable"``, the same way an operational-error report
     (``blocking_categories=("operational_error",)``) is already told apart.
+
+    A *third* shape exists for ``scan``'s own two abort verdicts
+    (``BUDGET_OVERFLOW``/``EVIDENCE_CONTRACT_ERROR``): unlike not_comparable/
+    operational-error, these carry a non-``None`` ``gate`` while
+    ``compatibility_verdict`` stays ``None`` — the target remains
+    *unavailable* for compatibility-reporting purposes (no comparison ever
+    ran, so no verdict/analyzed-target count is invented for it), while its
+    forced ``gate`` still counts toward :meth:`AggregateResult.exit_code`/
+    :attr:`AggregateResult.blocking_targets` regardless of the target's own
+    required/optional declaration (Codex review: the earlier synthetic
+    ``BREAKING`` verdict made an aborted scan read as an analyzed ABI break).
+    See :attr:`AggregateResult._forced_gate_targets`.
     """
 
     target_id: str

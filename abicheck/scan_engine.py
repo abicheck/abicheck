@@ -798,8 +798,7 @@ def _audit_exit_code(
 class _BudgetOverflow(Exception):
     """Raised by ``run_scan_core`` when the scan exceeds ``--budget`` (ADR-035 D3).
 
-    A scan-engine signal (not a click concern): the budget is a *failure guard*
-    that never shrinks scope, so the core raises and the CLI maps it onto exit 5.
+    A scan-engine signal (not a click concern): the budget is a *failure guard* that never shrinks scope, so the core raises and the CLI maps it onto exit 5.
     """
 
     def __init__(self, message: str) -> None:
@@ -811,12 +810,7 @@ class _BudgetOverflow(Exception):
 class _EvidenceContractError(Exception):
     """Raised by ``run_scan_core`` when a *pinned* depth can't collect its evidence.
 
-    ADR-037 D5 (#2 auto-strict): an explicitly-pinned ``--depth``/``--source-method``
-    is a contract — if the requested source/build evidence is unavailable the scan
-    fails loudly rather than silently degrading to a shallower one. Like
-    :class:`_BudgetOverflow`, it is an engine signal the CLI maps onto an error
-    exit (a clean ``ClickException``, exit 1) and ``service.run_scan`` maps onto a
-    failed :class:`ScanResult`. The implicit ``auto`` default never raises it.
+    ADR-037 D5 (#2 auto-strict): an explicitly-pinned ``--depth``/``--source-method`` is a contract -- if the requested source/build evidence is unavailable the scan fails loudly rather than silently degrading to a shallower one. Like :class:`_BudgetOverflow`, it is an engine signal the CLI maps onto an error exit (a clean ``ClickException``, exit 1) and ``service.run_scan`` maps onto a failed :class:`ScanResult`. The implicit ``auto`` default never raises it.
     """
 
     def __init__(self, message: str) -> None:

@@ -27,13 +27,7 @@ module adapts that shape into the same :class:`~abicheck.pr_comment.CommentModel
 (``_SEVERITY_BUCKET``/``_finding_category``) rather than duplicating it, so a
 finding renders identically whichever command produced it.
 
-Imports only from the dependency-free leaf module ``pr_comment_base`` (never
-from ``pr_comment`` itself, which would form a real import cycle — see
-``pr_comment_base``'s own module docstring). ``pr_comment`` imports
-``from_scan``/``scan_note`` from here inside function bodies
-(``build_model``/``_body_sections``) purely for readability at the call
-site, not to break a cycle — there is none, since the dependency runs one
-way (``pr_comment`` → ``pr_comment_scan`` → ``pr_comment_base``).
+Imports only from the dependency-free leaf modules ``pr_comment_base`` and ``pr_comment_scan_abort`` (never from ``pr_comment`` itself, which would form a real import cycle -- see ``pr_comment_base``'s own module docstring). ``pr_comment`` imports ``from_scan``/``scan_note`` from here inside function bodies (``build_model``/``_body_sections``) purely for readability at the call site, not to break a cycle -- there is none, since the dependency runs one way (``pr_comment`` -> ``pr_comment_scan`` -> ``pr_comment_base``).
 """
 
 from __future__ import annotations
@@ -55,6 +49,7 @@ from .pr_comment_base import (
     _normalize_location,
     _severity_levels,
 )
+from .pr_comment_scan_abort import scan_abort_incomplete_reason
 
 #: `scan`'s finding dicts (`cli_scan_baseline._baseline_finding_dicts`) carry
 #: a `bucket` field ("breaking"/"api_break"/"risk"/"compatible") instead of
@@ -727,16 +722,7 @@ def _scan_crosscheck_findings(
     since ``diff["findings"]``/``diff["additions"]`` never carry cross-check
     results at all -- they're a wholly separate top-level report key.
 
-    ``CrosscheckResult.to_dict()`` (``report["crosscheck"]``) carries no
-    itemized finding detail (symbol/location) -- only
-    ``counts_by_check`` (``ChangeKind`` value -> count) -- so each kind
-    renders as one aggregate row rather than one row per instance, coarser
-    than compare's own per-symbol findings. Still the difference between an
-    accurate "N cross-check finding(s)" review section and total silence
-    next to a red check. A follow-up review found the aggregate-row count
-    itself leaking into the exact summary total (``len(findings)`` counting
-    "1" for a kind with 7 real occurrences) -- callers must use this
-    function's own returned total, not ``len()`` of the itemized list.
+    ``CrosscheckResult.to_dict()`` (``report["crosscheck"]``) carries no itemized finding detail (symbol/location) -- only ``counts_by_check`` (``ChangeKind`` value -> count) -- so each kind renders as one aggregate row rather than one row per instance, coarser than compare's own per-symbol findings. Still the difference between an accurate "N cross-check finding(s)" review section and total silence next to a red check. A follow-up review found the aggregate-row count itself leaking into the exact summary total (``len(findings)`` counting "1" for a kind with 7 real occurrences) -- callers must use this function's own returned total, not ``len()`` of the itemized list.
     """
     from .checker_policy import API_BREAK_KINDS, RISK_KINDS
 
@@ -811,13 +797,17 @@ def from_scan(
     """Build a :class:`~abicheck.pr_comment.CommentModel` from a ``scan``
     JSON report.
 
-    Three shapes of ``report["diff"]`` all degrade gracefully rather than
+    Four shapes of ``report["diff"]`` all degrade gracefully rather than
     raising:
 
     * a normal baseline comparison -- ``dict`` with ``findings``/``additions``;
     * a scope/profile mismatch (``NOT_COMPARABLE``) -- ``{"reason": "..."}``,
       surfaced as a single blocking "analysis incomplete" finding (there is
       nothing to itemize: the two sides couldn't even be compared);
+    * a ``scan`` abort (``BUDGET_OVERFLOW``/``EVIDENCE_CONTRACT_ERROR``) --
+      the same treatment, via :func:`~abicheck.pr_comment_scan_abort.
+      scan_abort_incomplete_reason` (see its own docstring for the shape
+      and the bug this closes);
     * an audit-only run (no ``--against`` at all) -- ``None``, so every
       bucket stays empty; ``scan_audit_only`` flags this so the headline
       doesn't misreport "no ABI changes" as if a comparison had actually run.
@@ -828,10 +818,13 @@ def from_scan(
     additions_raw: object = None
     quality_raw: object = None
     not_comparable_reason: str | None = None
+    scan_abort_reason: str | None = None
     audit_only = diff is None
     if isinstance(diff, dict):
         if "reason" in diff:
             not_comparable_reason = str(diff.get("reason", "") or "not comparable")
+        elif (reason := scan_abort_incomplete_reason(diff, report)) is not None:
+            scan_abort_reason = reason
         else:
             findings_raw = diff.get("findings")
             additions_raw = diff.get("additions")
@@ -883,19 +876,22 @@ def from_scan(
     # than letting a promotion move it into Breaking next to the real,
     # unconditional NOT_COMPARABLE block below -- which would headline
     # "Source API break blocks this PR" for what is really a scope mismatch.
-    if gate_api_break and not_comparable_reason is None:
+    if gate_api_break and not_comparable_reason is None and scan_abort_reason is None:
         breaking = breaking + crosscheck_findings
     else:
         review = review + crosscheck_findings
 
     incomplete: list[Finding] = list(evidence_incomplete)
     incomplete_blocking = False
-    if not_comparable_reason is not None:
+    # Mutually exclusive (same `diff`-shape dispatch above); unified since
+    # both render as one blocking "analysis incomplete" `Finding`.
+    incomplete_reason = not_comparable_reason or scan_abort_reason
+    if incomplete_reason is not None:
         incomplete.append(
             Finding(
-                kind="scan_not_comparable",
+                kind="scan_not_comparable" if not_comparable_reason else "scan_aborted",
                 symbol="Baseline comparison",
-                detail=not_comparable_reason,
+                detail=incomplete_reason,
                 severity="unknown",
             )
         )
@@ -989,11 +985,11 @@ def from_scan(
         # `crosscheck_total` is the exact summed occurrence count across
         # every gating kind, never `len(crosscheck_findings)` (one
         # aggregate row per kind, which undercounts a kind with more than
-        # one real occurrence -- Codex review). Same NOT_COMPARABLE
-        # exclusion as the itemized-list fold above -- a promoted
-        # cross-check's severity was never actually folded into this run's
-        # real exit code (Codex review, follow-up).
-        if gate_api_break and not_comparable_reason is None:
+        # one real occurrence -- Codex review). Same NOT_COMPARABLE/
+        # scan-abort exclusion as the itemized-list fold above -- neither's
+        # promoted cross-check severity was ever actually folded into this
+        # run's real exit code (Codex review, follow-up).
+        if gate_api_break and not_comparable_reason is None and scan_abort_reason is None:
             true_counts = (true_counts[0] + crosscheck_total, true_counts[1])
         else:
             true_counts = (true_counts[0], true_counts[1] + crosscheck_total)

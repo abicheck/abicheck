@@ -233,18 +233,29 @@ def _load_report_file(path: Path, *, prefix: str) -> _LoadedReport:
         )
     # `scan`'s own two abort verdicts (ADR-064 stage 1b's native-CLI abort
     # report) carry no comparison at all -- a budget overflow or a pinned
-    # depth's evidence-contract violation -- but must still gate like the
-    # operational failure above, not fall through as an unavailable/
-    # verdictless report a required-target policy could silently tolerate
-    # (Codex review, fresh evidence: neither string is a `Verdict` member,
-    # so this function never even reached `GateInfo.from_scan_report` for
-    # these before this branch existed). The gate's own `exit_code` is
-    # `COVERAGE_INCOMPLETE_EXIT` (1), never scan's raw private code (5 for
-    # budget overflow) -- `GateInfo.from_scan_report` already normalizes
-    # every scan exit outside {0, 2, 4} to this same value, and the
-    # aggregate's own published contract has no exit 5 (Codex review, fresh
-    # evidence: this branch bypassed that reader and leaked scan's own
-    # numbering into `AggregateResult.exit_code`).
+    # depth's evidence-contract violation -- but must still gate, not fall
+    # through as an unavailable/verdictless report a required-target policy
+    # could silently tolerate (Codex review, fresh evidence: neither string
+    # is a `Verdict` member, so this function never even reached
+    # `GateInfo.from_scan_report` for these before this branch existed).
+    #
+    # Unlike the operational-error branch above, `verdict` stays `None` here
+    # rather than a synthetic `Verdict.BREAKING`: a scan that aborted before
+    # comparing never produced an ABI-break finding, so forcing one invents
+    # both a compatibility verdict and an "analyzed" target count for a
+    # comparison that never ran (Codex review, fresh evidence --
+    # `AggregateResult.to_dict()` reported `compatibility.verdict:
+    # "BREAKING"` and complete `analyzed_targets`/required-coverage for this
+    # exact case). The gate is still attached and still counts toward
+    # `AggregateResult.exit_code()`/`blocking_targets` regardless of the
+    # target's own required/optional declaration --
+    # `AggregateResult._forced_gate_targets` folds in exactly this shape
+    # (unavailable, but carrying a non-`None` gate) alongside the analyzed
+    # targets, the same way the now-removed synthetic verdict used to. The
+    # gate's own `exit_code` is `COVERAGE_INCOMPLETE_EXIT` (1), never scan's
+    # raw private code (5 for budget overflow) -- `GateInfo.from_scan_report`
+    # already normalizes every scan exit outside {0, 2, 4} to this same
+    # value, and the aggregate's own published contract has no exit 5.
     _scan_abort_categories = {
         _SCAN_BUDGET_OVERFLOW_VERDICT: "budget_overflow",
         _SCAN_EVIDENCE_CONTRACT_ERROR_VERDICT: "evidence_contract_error",
@@ -258,7 +269,7 @@ def _load_report_file(path: Path, *, prefix: str) -> _LoadedReport:
     if scan_abort_category is not None:
         return _LoadedReport(
             target_id=target_id,
-            verdict=Verdict.BREAKING,
+            verdict=None,
             gate=GateInfo(
                 exit_code=COVERAGE_INCOMPLETE_EXIT,
                 blocking=True,
@@ -267,16 +278,18 @@ def _load_report_file(path: Path, *, prefix: str) -> _LoadedReport:
             ),
             library=data.get("library"),
             head_sha=head_sha,
-            reason=None,
+            reason=f"scan aborted before completing a comparison ({scan_abort_category})",
             path=path,
             contract_coverage_exit=_contract_coverage_exit(data),
             contract_coverage_incomplete=_contract_coverage_incomplete(data),
             contract_coverage_declared=_contract_coverage_declared(data),
             analysis_assurance_exit=_analysis_assurance_exit(data),
             # No comparison ran at all -- unlike the operational-error branch
-            # above, there are no partial findings to preserve.
-            findings=_incomplete_findings(data),
-            effective_config_digest=effective_config_digest,
+            # above, there is no partial finding set to preserve, and (unlike
+            # that branch) this target is not "analyzed" for the finding
+            # matrix either.
+            findings=None,
+            effective_config_digest=None,
         )
     # ADR-050 D2: a native compare/compare-release not_comparable report
     # carries a real ``verdict: null`` (JSON null, not a missing key) plus a

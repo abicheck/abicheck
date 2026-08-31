@@ -303,6 +303,42 @@ class TestAbortPayloadThroughRealAggregate:
         # outside {0, 2, 4} to 1, and the forced abort gate must match.
         assert result.exit_code() == 1
         assert "linux-x86_64" in result.blocking_targets
+        # No fabricated compatibility verdict/analyzed-target count for a
+        # comparison that never ran (Codex review, fresh evidence: an
+        # earlier revision reported `compatibility.verdict: "BREAKING"` and
+        # a complete analyzed-target count here).
+        assert result.compatibility_verdict is None
+        as_dict = result.to_dict()
+        assert as_dict["compatibility"]["verdict"] is None
+        assert as_dict["compatibility"]["analyzed_targets"] == 0
+
+    def test_budget_overflow_report_blocks_even_an_optional_target(
+        self, runner, new_snap_compatible, tmp_path
+    ):
+        """The forced gate must not depend on the target being *required* --
+        the same reason an operational-error/not-comparable report already
+        blocks regardless of required-ness (Codex review: the fix must
+        preserve this while dropping the synthetic BREAKING verdict)."""
+        from abicheck.aggregate import ExpectedTargets, aggregate_reports_dir
+
+        res = runner.invoke(
+            main,
+            ["scan", str(new_snap_compatible), "--budget", "0s", "--format", "json"],
+        )
+        reports_dir = tmp_path / "reports"
+        reports_dir.mkdir()
+        (reports_dir / "abi-report-linux-x86_64.json").write_text(
+            _abort_payload_text(res)
+        )
+
+        result = aggregate_reports_dir(
+            reports_dir,
+            expected=ExpectedTargets.from_lists([], ["linux-x86_64"]),
+        )
+        assert result.exit_code() == 1
+        assert "linux-x86_64" in result.blocking_targets
+        assert result.coverage_blocking is False
+        assert result.compatibility_verdict is None
 
     def test_evidence_contract_error_report_blocks_a_required_target(
         self, runner, new_snap_compatible, tmp_path
