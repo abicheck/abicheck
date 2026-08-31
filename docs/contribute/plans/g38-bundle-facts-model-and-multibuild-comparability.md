@@ -2543,19 +2543,58 @@ Regression coverage needs a G40-archive-format operand-classification
 case alongside the plain/gzip/zstd/oversized ones already named — four
 distinct baseline shapes, not three.
 
-**A second `classify_compare_operand()` consumer needs the same new kind
-(Codex review, next round, verified against source):** `cli_options.
-_profile_targets_set_input()` mirrors this same classifier to decide
-whether `--profile` targets a set input, but its own check is hardcoded to
-`kinds & {"directory", "package"}` — the new stored-facts kind is neither,
-so a `--profile` combined with a stored-facts OLD operand would silently
-fall through to single-pair profile defaults instead of the established
-"profiles are not supported for set inputs" error `_profile_targets_
-set_input()` exists to produce. This phase's `cli_resolve.py` work
-therefore includes updating this pre-dispatch consumer's set membership
-too, with its own stored-facts-plus-`--profile` regression test — adding
-the kind to the classifier alone is not sufficient everywhere the
-classifier's output is consumed.
+**This is one instance of a systemic pattern, not an isolated fix (Codex
+review, confirmed by a second, independent instance in the very next
+round — restated as one requirement instead of growing item-by-item, the
+same lesson the parity-requirement bullet above already drew):**
+`{old_kind, new_kind} & {"directory", "package"}` (or the equivalent
+`kinds & {...}`) is a hardcoded set-input membership test repeated at
+multiple call sites, none of which know about the new stored-facts kind
+by construction:
+
+- `cli_options._profile_targets_set_input()` — decides whether `--profile`
+  targets a set input (already named above): silently falls through to
+  single-pair profile defaults instead of the established "profiles are
+  not supported for set inputs" error.
+- `cli_compare_helpers.py`'s own release-pack-resolution/flag-rejection
+  site (guards both `_reject_flags_unsupported_for_set_inputs()` and
+  whether `release_pack_application` gets resolved ahead of the
+  `--dry-run` emit): a stored-facts run with `--pack` would silently skip
+  pack application, and flags this repo already treats as unsupported for
+  a set input would silently pass validation instead of being rejected.
+- `_render_compare_dry_run()`'s own identical check: a stored-facts
+  `--dry-run` would omit reporting the release-fan-out dispatch the real
+  run will actually perform, understating what `--dry-run` promises to
+  preview.
+
+**The general requirement:** every one of these set-input membership
+checks must recognize the new kind, and — matching this document's own
+earlier "systematic check" principle rather than an enumerated list a
+future review round can keep finding one more instance in — this phase's
+`cli_resolve.py`/`cli_compare_helpers.py`/`cli_options.py` work includes a
+grep-verified sweep for every `{"directory", "package"}` (or `{old_kind,
+new_kind}` /`kinds`) membership test in these three files, updating each
+one found, with a regression test per site (a stored-facts-plus-`--profile`
+case, a stored-facts-plus-`--pack` case, a stored-facts `--dry-run` output
+case) — not only the three instances named here, which are themselves the
+result of two independent review passes finding a new one each time.
+
+**A second, orthogonal gap in the same area: `_classify_and_reject_
+operands()` has no directional guard for the new kind (Codex review, same
+round, verified against source).** This function classifies *both*
+operands and only rejects the `"app"` kind on either side
+(`_reject_application_operand`) — it has no equivalent rejection for the
+new stored-facts kind appearing on the *NEW* side, or on both sides at
+once. The new kind is only meaningful as an OLD-side baseline paired with
+a live NEW release; `compare LIVE_DIR NEW.bundlefacts` or `compare
+OLD.bundlefacts NEW.bundlefacts` must fail with an explicit usage error at
+this same classification step — mirroring the existing `_reject_
+application_operand` precedent in the same function — not reach a
+dispatch branch that treats the wrong operand as `old_facts_path`, or fall
+through to the single-snapshot loader and fail opaquely. Regression
+coverage needs both misdirection cases (facts-on-NEW, facts-on-both) as
+explicit usage-error tests, not just the correct OLD-side case the
+acceptance criteria already cover.
 
 The one artifact worth naming without duplicating it: `cli.py` itself is
 now a small registration facade (`abicheck/frontends/AGENTS.md` gives the
