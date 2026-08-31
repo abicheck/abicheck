@@ -1458,9 +1458,13 @@ like `junit_report.py`, call it twice for the same `Change` from
 `_is_failure` and `_failure_type`). `ReportFinding` (the sketch above) is the
 right place to hold that verdict pre-resolved, exactly as this phase's item 1
 already says — but the one implementation hazard the ADR names is real and
-applies here unchanged: `Change` is not hashable, so a naive "cache resolved
-verdicts in a dict keyed by `Change`" design does not type-check, and a
-`ReportFinding` built once per `Change` during envelope construction (rather
+applies here unchanged: `Change` is a mutable dataclass and is not hashable
+(its own `__hash__` is `None`), so a naive "cache resolved verdicts in a
+dict keyed by `Change`" design type-checks fine but raises `TypeError` the
+first time a real `Change` instance is used as a key — `mypy` does not
+enforce `Hashable` on `dict`'s key type, so this is a runtime failure, not
+a caught-at-review-time one. A `ReportFinding` built once per `Change`
+during envelope construction (rather
 than a separate cache keyed off identity) sidesteps the problem entirely —
 build the tuple of `ReportFinding` by iterating `DiffResult.changes` once,
 resolving each verdict inline, with no separate cache/index structure

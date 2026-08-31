@@ -34,7 +34,6 @@ with their implementation" -- these are the ones whose implementation moved.
 
 from __future__ import annotations
 
-from abicheck.buildsource.source_graph import GraphNode, SourceGraphSummary
 from abicheck.buildsource.template_graph import TemplateArgUse, TemplateInstantiation
 from abicheck.buildsource.template_graph_fold import (
     EDGE_DECL_INSTANTIATES_TEMPLATE,
@@ -46,6 +45,8 @@ from abicheck.buildsource.template_graph_fold import (
     template_decl_node_id,
     template_instantiation_node_id,
 )
+from abicheck.model.graph_facts import GraphNode
+from abicheck.model.source_graph import SourceGraphSummary
 
 # ── graph augmentation tests ─────────────────────────────────────────────────
 

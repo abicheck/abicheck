@@ -8,17 +8,18 @@
   from its real owner instead — `abicheck.model.source_graph`/
   `abicheck.model.graph_facts` for the graph values, `abicheck.buildsource.
   source_graph_build`/`source_graph_build_source_abi` for construction,
-  `source_graph_compare` for comparison, and `source_graph_query` for the
-  shared node/edge-classification predicates. A small, explained set of
-  callers stays on the facade where a real architectural constraint left no
-  clean path: three `debt-no-growth`-tracked files at their adoption-baseline
-  line count (`buildsource/graph_reconcile.py`, `buildsource/template_graph.py`,
-  `internal_leak.py`), and three files whose own `architecture/modules.yaml`
-  classification (`extract`, or `frontends`) does not permit importing the
-  real owner's layer directly (`buildsource/poi.py`, `cli_buildsource_helpers.py`,
-  `cli_buildsource_merge.py`). `buildsource/source_graph.py` itself is
-  untouched — it remains the facade for external callers and the exceptions
-  above.
+  `source_graph_compare` for comparison, and `abicheck.model.
+  source_graph_query` for the shared node/edge-classification predicates.
+  Two follow-up commits in this same PR closed the remaining six exceptions
+  this fragment originally recorded as blocked (`buildsource/
+  graph_reconcile.py`/`internal_leak.py` via an explicit debt-baseline bump;
+  `buildsource/poi.py`/`cli_buildsource_helpers.py`/`cli_buildsource_merge.py`
+  via a physical relocation of the shared predicates into `model/
+  source_graph_query.py` plus a sanctioned `workflows` indirection;
+  `buildsource/template_graph.py` last, via a split into
+  `template_graph_fold.py`) — no internal exception remains.
+  `buildsource/source_graph.py` itself is untouched — it remains the facade
+  for external callers only.
 
 ### Notes
 
