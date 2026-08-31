@@ -96,12 +96,14 @@ class _ReportChangeView:
     source_location: str | None
     affected_symbols: list[str] | None
     qualified_name: str | None
-    #: ADR-063 Phase 2's ``Change.entity_id`` -- like ``qualified_name``,
-    #: ``_change_to_dict`` never serializes it, so it always round-trips as
-    #: ``None`` here (see :func:`resolve_report_change_identity`'s docstring
-    #: on why a consistent loss across every report is fine for the
-    #: cross-report comparison this view exists for).
-    entity_id: EntityId | None
+    #: Never serialized by ``_change_to_dict`` (same as ``qualified_name``
+    #: above), so a report-derived view always reads this as absent rather
+    #: than lossy — ``resolve_change_identity`` only folds a set
+    #: ``change.entity_id`` in as an additional alias, never into
+    #: ``primary_id``/tier, so a permanently-``None`` value here degrades
+    #: identity precision but never raises or fabricates one (ADR-063
+    #: Phase 2's first real reader of ``Change.entity_id``).
+    entity_id: EntityId | None = None
 
 
 def resolve_report_change_identity(entry: Mapping[str, Any]) -> FindingIdentity:

@@ -83,6 +83,7 @@ def param_restrict_changes(
                         old=str(p_old.name or i),
                         old_value=f"restrict={p_old.is_restrict}",
                         new_value=f"restrict={p_new.is_restrict}",
+                        entity_id=f_old.entity_id or f_new.entity_id,
                     )
                 )
     return changes
@@ -137,6 +138,7 @@ def param_va_list_changes(
                         detail=str(p_old.name or i),
                         old_value=p_old.type,
                         new_value="va_list",
+                        entity_id=f_old.entity_id or f_new.entity_id,
                     )
                 )
             elif p_old.is_va_list and not p_new.is_va_list:
@@ -148,6 +150,7 @@ def param_va_list_changes(
                         detail=str(p_old.name or i),
                         old_value="va_list",
                         new_value=p_new.type,
+                        entity_id=f_old.entity_id or f_new.entity_id,
                     )
                 )
     return changes

@@ -169,6 +169,7 @@
         "abicheck/buildsource/graph_reconcile.py",
         "abicheck/buildsource/source_diff.py",
         "abicheck/buildsource/source_graph_compare.py",
+        "abicheck/buildsource/source_graph_query.py",
         "abicheck/confidence.py",
         "abicheck/detector_registry.py",
         "abicheck/diff_abi_tags.py",
@@ -392,7 +393,8 @@
     "abicheck.contract_gating",
     "abicheck.dumper_contract",
     "abicheck.errors",
-    "abicheck.reclassify"
+    "abicheck.reclassify",
+    "abicheck.serialization"
   ],
   "facades": [
     "abicheck.aggregate",
