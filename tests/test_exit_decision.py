@@ -546,6 +546,41 @@ class TestResolveReleaseExitDecision:
         assert decision.code == 4
         assert decision.reasons == (ExitReason.OPERATIONAL_ERROR,)
 
+    def test_legacy_scheme_would_preserve_a_tie_given_both_contributions(
+        self,
+    ) -> None:
+        """Codex review, fresh evidence: today's real `worst_verdict`
+        aggregation (`cli_compare_release.py`'s `_RELEASE_VERDICT_ORDER`
+        loop) collapses a release's outcome to one scalar ranked with
+        `"ERROR"` *above* `"BREAKING"`, so a release with one `BREAKING`
+        library and a second, unrelated library that failed to compare
+        loses the `BREAKING` finding entirely once `worst_verdict` becomes
+        `"ERROR"` -- unlike severity mode, where `_compute_release_severity_
+        exit_code` already iterates `library_results` independently of
+        `worst_verdict` and never discards a real finding this way. That is
+        a gap in the real release fan-out's *legacy* aggregation (closing
+        it means iterating `library_results` for a legacy-scheme "worst
+        verdict among non-`ERROR`/non-`not_comparable` libraries", the same
+        way `_compute_release_severity_exit_code` already does for
+        severity) -- not a limitation of this resolver, which this test
+        proves already preserves such a tie correctly *if* a future,
+        enhanced caller supplies both contributions. Recorded as explicit
+        stage-1b scope in `resolve_release_exit_decision`'s own docstring
+        and ADR-064, rather than fixed here, since it requires new
+        aggregation logic in `cli_compare_release.py` no code path
+        computes today.
+        """
+        decision = resolve_release_exit_decision(
+            not_comparable=False,
+            severity_scheme_active=False,
+            verdict_or_severity_contribution=4,
+            operational_error_contribution=4,
+        )
+        assert decision.code == 4
+        assert set(decision.reasons) == {
+            ExitReason.COMPATIBILITY_GATE, ExitReason.OPERATIONAL_ERROR,
+        }
+
     def test_severity_scheme_clean_with_no_removed_library_is_clean(self) -> None:
         decision = resolve_release_exit_decision(
             not_comparable=False,

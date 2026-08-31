@@ -724,6 +724,28 @@ def resolve_release_exit_decision(
     `resolve_compare_exit_decision`'s own convention of taking
     already-resolved contributions rather than re-deriving them.
 
+    **Legacy scheme, known gap in today's real caller, not in this
+    resolver (Codex review, fresh evidence).** This function already
+    preserves a genuine tie between *verdict_or_severity_contribution* and
+    *operational_error_contribution* for the legacy scheme exactly as it
+    does for severity (both fold through :func:`resolve_exit_decision`'s
+    tie-inclusive logic below) -- but today's real `worst_verdict`
+    aggregation (`cli_compare_release.py`'s `_RELEASE_VERDICT_ORDER` loop)
+    ranks `"ERROR"` *above* `"BREAKING"` and collapses the whole release to
+    one scalar, so a release with one `BREAKING` library and a second,
+    unrelated library that failed to compare never gets to *supply* a
+    nonzero legacy `verdict_or_severity_contribution` alongside a nonzero
+    `operational_error_contribution` in the first place -- unlike severity
+    mode, where `_compute_release_severity_exit_code` already iterates
+    `library_results` independently of `worst_verdict` and so never
+    discards a real per-library finding this way. Closing this needs new
+    aggregation logic in `cli_compare_release.py` (a legacy-scheme "worst
+    verdict among non-`ERROR`/non-`not_comparable` libraries", mirroring
+    `_compute_release_severity_exit_code`'s existing per-library loop) --
+    real, additional scope for stage 1b's wiring work, not something this
+    pure resolver can manufacture from an input its real caller does not
+    yet compute.
+
     Pure, additive logic (ADR-064's first stage): not yet called from
     `cli_compare_release_helpers.py`, so no existing release comparison's
     actually-returned exit code changes because this function exists. As

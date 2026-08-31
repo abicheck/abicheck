@@ -217,7 +217,19 @@ lands in two stages rather than one atomic change:
       did for the first three axes. This sub-step needs its own
       report-schema version bump and cross-front-end parity pass (CLI,
       typed API, Action), so it is reviewed and merged separately from 1a
-      rather than bundled with it.
+      rather than bundled with it. It also needs one small piece of new
+      aggregation logic in `cli_compare_release.py` for the legacy scheme
+      specifically: `resolve_release_exit_decision`'s own docstring records
+      that today's real `worst_verdict` rollup (the `_RELEASE_VERDICT_ORDER`
+      loop) ranks `"ERROR"` above `"BREAKING"` and collapses the release to
+      one scalar, so a `BREAKING` library and a separate, unrelated
+      library that failed to compare cannot both be supplied to the
+      resolver today the way severity mode's `_compute_release_severity_
+      exit_code` already supplies both axes independently — stage 1b
+      should add the legacy-scheme equivalent (a "worst verdict among
+      non-`ERROR`/non-`not_comparable` libraries", iterating
+      `library_results` the same way) so the resolver's own already-correct
+      tie-handling has real inputs to preserve.
 2. **Atomic.** Once the report block agrees with today's real behaviour for
    every axis and every mode (verified by the axis-separated tests this ADR
    requires below), remove `--exit-code-scheme` from `compare` and `scan`,
@@ -258,11 +270,15 @@ alongside the flag deletion itself.
   alias or transition window ships — the old spelling errors with
   `No such option`, exit `64`, matching every other removal in this
   cleanup.
-- The release fan-out's internal severity/exit-code representation changes
-  shape (raw strings → `GateOptions`-shaped object) as part of the atomic
-  stage; its externally observable exit codes and report fields do not
-  change, other than gaining the `exit`/reasons block parity `compare`'s
-  release path currently lacks.
+- The release fan-out gains the `exit`/reasons block parity `compare`'s
+  release path currently lacks in **stage 1b** (wiring
+  `resolve_release_exit_decision` into `cli_compare_release_helpers.py`,
+  per "Staged landing" above) — not the atomic stage; that block is
+  additive and needs no algorithm-selector decision to exist. Only the
+  release fan-out's *internal* severity/exit-code representation changing
+  shape (raw strings → `GateOptions`-shaped object) is atomic-stage work,
+  since it is the same rewrite that removes `--exit-code-scheme`. Neither
+  step changes the release's externally observable exit codes.
 
 ## Cross-references
 
