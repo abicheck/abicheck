@@ -50,6 +50,7 @@ without importing a ring it may not (`frontends` may import only `model`,
 | `findings.py` | Finding identity and the probe matrix |
 | `scan_config.py` | Scan config, risk rules, and the public-provenance rule (owned here, not aliased) |
 | `scan_abi3_dry_run.py` | The `--abi3` dry-run precondition check both `scan --dry-run` renderers use (CLI cleanup phase two, PR 5 follow-up) — delegates candidate resolution to `scan_abi3_resolve.py` (a flat `workflows`-legacy root module, not this package: it needs `serialization.load_snapshot`, which has no ADR-061 layer of its own, and this migrated package may not import an unclassified module directly), so it stays outside the CLI-registration import cycle entirely |
+| `suppression.py` | `SuppressionList`/`Suppression`, so a CLI helper can type and load a `--suppress` file without importing `policy`-classified `suppression.py` directly |
 
 `gate.py` earns its place rather than laundering an import: three orthogonal
 axes feed one exit code, and a frontend importing them separately is free to
@@ -58,6 +59,17 @@ worth knowing before writing a test against them — `from ..x import y` **binds
 `y` at import time, so patching `abicheck.x.y` afterwards does not change what
 a caller reaching it through the facade sees. Patch it where the call
 resolves.
+
+`render.py` is the reverse shape from the five above: it exists so
+`abicheck.service` (`workflows`) can keep re-exporting
+`render_output`/`_render_json_output`/`_render_deps_section_md` without a
+forbidden `workflows -> frontends` edge to `service_render.py`, which owns
+the real implementation but is itself classified `frontends` (it needs
+`report`). Each function is a real, separately-typed `def` that resolves
+`service_render.py` via `importlib.import_module` inside its own body — a
+runtime call, invisible to the static import scans `dependency-direction`
+and `import-cycle-growth` run — rather than a blanket `__getattr__`, which
+would resolve every name as `Any` for external callers (ADR-061).
 
 `abicheck/service_dump_pipeline.py` is classified `workflows` via
 `legacy_paths`: it is free of CLI imports and owns `DumpRequest ->

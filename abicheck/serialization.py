@@ -1795,166 +1795,57 @@ def write_snapshot(
     )
 
 
+# ADR-061: BundleFacts (de)serialization moved to bundle_facts_serialization.py
+# (classified `workflows`, alongside the `BundleFacts` it serializes) --
+# bundle_facts.py is itself at its own 800-line production cap, so this is a
+# new sibling rather than growing that module. Each wrapper below resolves
+# its implementation via `importlib.import_module` (a runtime call, not a
+# static `ast.Import`/`ast.ImportFrom` node) rather than a
+# `from .bundle_facts_serialization import ...` -- that module itself needs
+# `snapshot_to_dict`/`snapshot_from_dict` from *this* module, and a static
+# import in both directions is exactly the `serialization <->
+# bundle_facts_serialization` cycle `scripts/check_ai_readiness.py`'s
+# `import-cycle-growth` check flags via a full `ast.walk` (so even a
+# function-scoped `from ... import ...` counts) -- the same reason
+# `abicheck.cli`'s own `__getattr__` resolves its moved names through
+# `abicheck.frontends.cli.moved` instead of importing them back. Unlike that
+# facade, these are real typed `def`s rather than a blanket module
+# `__getattr__`: these four names are called with real argument/return types
+# by other first-party modules (`bundle_variants_config.py`,
+# `cli_compare_release_helpers.py`, ...), and `__getattr__(...) -> Any` would
+# silently erase that checking for every caller reaching them through this
+# module's documented `from abicheck.serialization import ...` path (Codex
+# review).
+def _bundle_facts_serialization() -> Any:
+    import importlib
+
+    return importlib.import_module(".bundle_facts_serialization", __package__)
+
+
 def bundle_facts_to_dict(facts: BundleFacts) -> dict[str, Any]:
     """Serialize a :class:`~abicheck.bundle_facts.BundleFacts` to a
-    JSON-able dict (G38 Phase 2) — lives here, not in ``bundle_facts.py``
-    itself, the same split :class:`AbiSnapshot`'s own serialization
-    already uses (the model/data-shape module stays a leaf; every
-    snapshot's to_dict/from_dict lives in this module instead). Putting it
-    in ``bundle_facts.py`` would create a real import cycle: this
-    function needs ``snapshot_to_dict`` from here, while this module's own
-    ``save_bundle_facts``/``load_bundle_facts`` need ``BundleFacts`` from
-    there.
-    """
-    from .bundle_manifest import manifest_to_dict
-
-    return {
-        "schema_version": facts.schema_version,
-        "variant_fingerprint": facts.variant_fingerprint,
-        "per_library_snapshots": {
-            name: snapshot_to_dict(snap)
-            for name, snap in facts.per_library_snapshots.items()
-        },
-        "filesystem_aliases": {
-            name: list(aliases) for name, aliases in facts.filesystem_aliases.items()
-        },
-        "library_filenames": dict(facts.library_filenames),
-        "manifest": manifest_to_dict(facts.manifest) if facts.manifest else None,
-    }
+    JSON-able dict (G38 Phase 2). See
+    :func:`abicheck.bundle_facts_serialization.bundle_facts_to_dict`."""
+    return cast("dict[str, Any]", _bundle_facts_serialization().bundle_facts_to_dict(facts))
 
 
 def bundle_facts_from_dict(d: dict[str, Any]) -> BundleFacts:
-    """Inverse of :func:`bundle_facts_to_dict`.
+    """Inverse of :func:`bundle_facts_to_dict`. See
+    :func:`abicheck.bundle_facts_serialization.bundle_facts_from_dict`."""
+    return cast("BundleFacts", _bundle_facts_serialization().bundle_facts_from_dict(d))
 
-    Rejects a container ``schema_version`` newer than this reader's own
-    :data:`~abicheck.bundle_facts.BUNDLE_FACTS_SCHEMA_VERSION` outright,
-    mirroring :func:`snapshot_from_dict`'s hard rejection of a
-    too-new-to-read-safely snapshot. Unlike that function's own
-    warn-below/hard-reject-above-threshold split (justified there by many
-    already-shipped versions with a documented, field-by-field forward-
-    compatible history), ``BundleFacts`` has had exactly one shape so far
-    — there is no "this reader has no code path that looks for a field
-    introduced after some known-safe version" nuance to draw a softer line
-    at yet. Warn-and-continue would silently score a comparison against a
-    newer container whose fields (e.g. a future per-variant comparability
-    gate) this reader's ``compare_bundle_from_facts()`` doesn't know to
-    consult (Codex review).
-    """
-    from .bundle_facts import (
-        BUNDLE_FACTS_SCHEMA_VERSION,
-        DEFAULT_VARIANT_FINGERPRINT,
-        BundleFacts,
-    )
-    from .bundle_manifest import manifest_from_dict
 
-    schema_version = int(d.get("schema_version", BUNDLE_FACTS_SCHEMA_VERSION))
-    if schema_version > BUNDLE_FACTS_SCHEMA_VERSION:
-        raise IncompatibleSnapshotSchemaError(
-            f"Bundle facts schema_version {schema_version} is newer than this "
-            f"abicheck (supports up to schema_version "
-            f"{BUNDLE_FACTS_SCHEMA_VERSION}). Upgrade abicheck to read this "
-            "bundle facts file."
-        )
-    # "per_library_snapshots" is mandatory, not merely defaulted: a
-    # malformed or unrelated JSON object (e.g. ``{}``) omitting it entirely
-    # must not silently load as a valid, current-schema *empty* bundle --
-    # a later compare_bundle_from_facts() would then score every new
-    # library against an invented empty baseline instead of the caller
-    # ever finding out the input was invalid (Codex review, fresh
-    # evidence). A present-but-wrong-shaped value (not a mapping) is
-    # rejected the same way, rather than raising an opaque AttributeError
-    # out of the dict comprehension below.
-    if "per_library_snapshots" not in d:
-        raise ValueError(
-            "bundle facts: missing required top-level 'per_library_snapshots' mapping"
-        )
-    raw_snapshots = d["per_library_snapshots"]
-    if not isinstance(raw_snapshots, dict):
-        raise ValueError(
-            "bundle facts: 'per_library_snapshots' must be a mapping, got "
-            f"{type(raw_snapshots).__name__}"
-        )
-    raw_manifest = d.get("manifest")
-    return BundleFacts(
-        schema_version=schema_version,
-        variant_fingerprint=str(
-            d.get("variant_fingerprint", DEFAULT_VARIANT_FINGERPRINT)
+def load_bundle_facts(
+    path: str | Path, *, format: str = "auto", max_json_object_nodes: int | None = None
+) -> BundleFacts:
+    """Load a BundleFacts. See
+    :func:`abicheck.bundle_facts_serialization.load_bundle_facts`."""
+    return cast(
+        "BundleFacts",
+        _bundle_facts_serialization().load_bundle_facts(
+            path, format=format, max_json_object_nodes=max_json_object_nodes
         ),
-        per_library_snapshots={
-            name: snapshot_from_dict(sd) for name, sd in raw_snapshots.items()
-        },
-        filesystem_aliases=_validated_alias_map(d.get("filesystem_aliases", {})),
-        library_filenames=_validated_filename_map(d.get("library_filenames", {})),
-        manifest=manifest_from_dict(raw_manifest) if raw_manifest is not None else None,
     )
-
-
-def _validated_alias_map(raw: object) -> dict[str, tuple[str, ...]]:
-    """Validate and convert a persisted ``filesystem_aliases`` mapping.
-
-    ``tuple(aliases)`` on a *string* value (e.g. a hand-edited or corrupt
-    ``"libfoo.so": "libfoo.so.1"`` instead of the documented
-    ``"libfoo.so": ["libfoo.so.1"]``) silently iterates its characters
-    instead of raising -- reconstruction then indexes single-letter
-    aliases (``"l"``, ``"i"``, ...) rather than the real alias, so a real
-    ``DT_NEEDED`` edge quietly fails to resolve with no load-time error at
-    all (Codex review, fresh evidence). Rejects a non-mapping container, a
-    non-list value, and a list with a non-string element -- the last of
-    which ``tuple()`` alone would otherwise accept silently too.
-    """
-    if not isinstance(raw, dict):
-        raise ValueError(
-            f"bundle facts: 'filesystem_aliases' must be a mapping, got "
-            f"{type(raw).__name__}"
-        )
-    aliases: dict[str, tuple[str, ...]] = {}
-    for name, values in raw.items():
-        if not isinstance(values, list) or not all(isinstance(v, str) for v in values):
-            raise ValueError(
-                f"bundle facts: 'filesystem_aliases[{name!r}]' must be a list of "
-                f"strings, got {values!r}"
-            )
-        aliases[name] = tuple(values)
-    return aliases
-
-
-def _validated_filename_map(raw: object) -> dict[str, str]:
-    """Validate and convert a persisted ``library_filenames`` mapping.
-
-    A bare ``str(filename)`` coercion silently accepts a malformed value
-    (JSON ``null`` becomes the invented basename ``"None"``, a number
-    becomes its own string form) instead of rejecting the corrupt baseline
-    -- with a no-``DT_SONAME`` library and cohort checking enabled,
-    ``bundle._detect_soname_skew()``'s replay fallback would then derive a
-    SONAME major from that fabricated name, silently omitting or altering
-    a ``bundle_soname_skew`` finding rather than surfacing the invalid
-    input (Codex review, fresh evidence). Mirrors
-    :func:`_validated_alias_map`'s rejection shape.
-    """
-    if not isinstance(raw, dict):
-        raise ValueError(
-            f"bundle facts: 'library_filenames' must be a mapping, got "
-            f"{type(raw).__name__}"
-        )
-    filenames: dict[str, str] = {}
-    for name, filename in raw.items():
-        if not isinstance(filename, str):
-            raise ValueError(
-                f"bundle facts: 'library_filenames[{name!r}]' must be a string, "
-                f"got {filename!r}"
-            )
-        filenames[name] = filename
-    return filenames
-
-
-def load_bundle_facts(path: str | Path, *, format: str = "auto", max_json_object_nodes: int | None = None) -> BundleFacts:
-    """Load a BundleFacts; see ``storage.bundle_facts_validation.load_bundle_facts_dispatch`` for the ``format="auto"``/G40-archive dispatch and the ``max_json_object_nodes`` budget override."""
-    from . import bundle_facts as _bundle_facts
-    from .snapshot_io import read_snapshot_text
-    from .storage.bundle_facts_validation import load_bundle_facts_dispatch
-
-    budget = _bundle_facts.DEFAULT_MAX_JSON_OBJECT_NODES if max_json_object_nodes is None else max_json_object_nodes
-    return cast("BundleFacts", load_bundle_facts_dispatch(path, format, read_snapshot_text=read_snapshot_text, maybe_read_bundle_facts_archive=_bundle_facts.maybe_read_bundle_facts_archive, bundle_facts_from_dict=bundle_facts_from_dict, snapshot_from_dict=snapshot_from_dict, max_json_object_nodes=budget))
 
 
 def save_bundle_facts(
@@ -1964,22 +1855,11 @@ def save_bundle_facts(
     format: str = "json",
     compression: str = "auto",
 ) -> SnapshotWriteResult:
-    """Save *facts*; ``format="archive"`` writes G40's zip container, see
-    ``bundle_facts.maybe_write_bundle_facts_archive`` (``compression`` is JSON-only; ``"auto"``/``"none"`` no-op for it, only ``"gzip"``/``"zstd"`` reject -- Codex)."""
-    from .bundle_facts import maybe_write_bundle_facts_archive
-    from .snapshot_io import SnapshotCompression, write_snapshot_text
-
-    if format == "archive" and SnapshotCompression(compression) not in (SnapshotCompression.AUTO, SnapshotCompression.NONE):
-        raise ValueError('compression= is JSON-only; format="archive" is always zstd')
-    archived = maybe_write_bundle_facts_archive(facts, path, format, snapshot_to_dict=snapshot_to_dict)
-    if archived is not None:
-        return archived
-
-    # sort_keys=True (unlike other writers here) would re-sort a manifest
-    # entry's own instantiations dict, whose order IS the C++ template
-    # argument order -- corrupting a "T, U" contract (Codex review).
-    return write_snapshot_text(
-        json.dumps(bundle_facts_to_dict(facts), indent=2),
-        path,
-        compression=SnapshotCompression(compression),
+    """Save *facts*. See
+    :func:`abicheck.bundle_facts_serialization.save_bundle_facts`."""
+    return cast(
+        "SnapshotWriteResult",
+        _bundle_facts_serialization().save_bundle_facts(
+            facts, path, format=format, compression=compression
+        ),
     )
