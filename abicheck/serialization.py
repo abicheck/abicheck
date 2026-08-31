@@ -46,6 +46,7 @@ from .model import (
     Variable,
     Visibility,
 )
+from .name_classification import strip_anonymous_type_location
 from .storage.entity_id_codec import decode_entity_ids, encode_entity_ids
 from .storage.enum_codec import encode_platform_enums
 from .storage.fact_codec import (
@@ -1644,6 +1645,18 @@ def snapshot_from_dict(d: dict[str, Any]) -> AbiSnapshot:
         )
 
     _backfill_missing_elf_binding(snap)
+    # A baseline written by a pre-normalization abicheck can still carry a
+    # closure/anonymous-type marker in its raw ``(lambda at
+    # <path>:<line>:<col>)`` form -- the two header-mode dumpers only ever
+    # call strip_anonymous_type_location at extraction time, never on this
+    # load path, so without this step renumber_anonymous_closure_identities
+    # below (whose marker regex requires the already-stripped
+    # ``(lambda:<basename>:<line>:<col>)`` spelling) leaves such a baseline's
+    # closures completely unrenumbered, comparing them against a freshly
+    # dumped snapshot's ordinal-form spellings as if unrelated declarations.
+    qualified_name_segments.rewrite_anonymous_type_spellings(
+        snap, strip_anonymous_type_location
+    )
     return qualified_name_segments.renumber_anonymous_closure_identities(snap)
 
 

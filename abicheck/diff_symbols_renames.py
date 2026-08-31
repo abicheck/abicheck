@@ -1056,6 +1056,31 @@ def find_namespace_move_groups(
     # 0) AND "old::new::f" (position 1) both key as ("old", "new") -- a
     # shared key must not be treated as agreement. Keyed by (symbol_id, key), not merged into `raw_symbol_keys`, so a single-target key is unaffected.
     raw_symbol_key_targets: dict[tuple[str, tuple[str, str]], set[str]] = {}
+    # Added-side mirrors of `raw_symbol_keys`/`raw_symbol_key_targets`
+    # (item 6 follow-up): the corroboration logic Phase 2 already applies
+    # when ONE removed symbol has multiple candidate added targets
+    # (`removed_id_to_added_symbols`) was never extended to the symmetric
+    # case -- ONE added symbol claimed by multiple distinct removed
+    # identities (`added_id_to_removed_symbols`) was rejected outright,
+    # unconditionally, with no attempt to see whether one of the competing
+    # claims is corroborated elsewhere in the same comparison while the
+    # other is an isolated coincidence. Real-world effect: a genuine
+    # namespace-move batch that is overwhelmingly well-supported can still
+    # lose a handful of its own members purely because an unrelated,
+    # uncorroborated removed identity happens to coincidentally collide
+    # with one of the batch's added targets -- those members' underlying
+    # evidence is silently dropped from the group's supporting-pairs list
+    # even though the roll-up they belong to is real (`emit_namespace_move_
+    # batches`'s "additive" per-symbol removals/additions still cover the
+    # symbol elsewhere, but the batch's own supporting-pairs count and
+    # description under-represent it). `raw_added_keys`/
+    # `raw_added_key_targets` are keyed by ADDED identity exactly the way
+    # `raw_symbol_keys`/`raw_symbol_key_targets` are keyed by removed
+    # identity, so an analogous corroboration test can run in this
+    # direction too -- see Phase 2 below for why it cannot be the exact
+    # same test, just mirrored.
+    raw_added_keys: dict[str, set[tuple[str, str]]] = {}
+    raw_added_key_targets: dict[tuple[str, tuple[str, str]], set[str]] = {}
     for r_sym in sorted(removed):
         r_resolved = _scope_components(r_sym)
         if r_resolved is None:
@@ -1080,6 +1105,8 @@ def find_namespace_move_groups(
                 rkey = (r_comps[i], cand_comps[i])
                 raw_symbol_keys.setdefault(symbol_id, set()).add(rkey)
                 raw_symbol_key_targets.setdefault((symbol_id, rkey), set()).add(cand_id)
+                raw_added_keys.setdefault(cand_id, set()).add(rkey)
+                raw_added_key_targets.setdefault((cand_id, rkey), set()).add(symbol_id)
             # Reject an AMBIGUOUS substitution at the source (Codex review,
             # fresh evidence): when the SAME masked context (this removed
             # symbol's scope chain with position `i` blanked out) matches
@@ -1169,19 +1196,72 @@ def find_namespace_move_groups(
     # come from `raw_symbol_keys` instead, so a key raised at a
     # locally-ambiguous position still counts as a competitor even without
     # its own entry. A genuine tie (both/neither corroborated) still rejects.
+    #
+    # The SAME idea -- don't let an unresolved-but-uncorroborated coincidence
+    # veto a well-supported pairing -- also applies on the added side (item 6
+    # follow-up): `added_id_to_removed_symbols[added_id] > 1` -- this added
+    # declaration is claimed by more than one distinct removed identity --
+    # used to be rejected outright, unconditionally, unlike its removed-side
+    # mirror just above. That asymmetry silently dropped a well-supported
+    # namespace-move batch member whenever an unrelated, uncorroborated
+    # removed identity happened to coincidentally collide with one of the
+    # batch's own added targets: the real member's evidence never reached
+    # `groups[key]` even though the substitution it supports is otherwise
+    # heavily corroborated elsewhere in the same comparison.
+    #
+    # This CANNOT reuse the removed-side test's exact shape, though: there,
+    # every competing key belongs to the SAME symbol (its own alternate
+    # masking positions), so subtracting that one `symbol_id` from a key's
+    # supporter set is enough to ask "does anyone ELSE back this option".
+    # Here, each competing key belongs to a DIFFERENT removed identity, and
+    # that competitor may itself never have resolved to any single key at
+    # all -- exactly the round-4 scenario `TestFindNamespaceMoveGroupsRetains
+    # LocallyAmbiguousCandidatesGlobally` pins (`p1::old::f` is itself stuck
+    # between two candidates at its only masking position and so never gets
+    # an `entries` row for either): such a competitor is a live, irreducible
+    # threat, not a dismissible coincidence, and must still veto -- there is
+    # no key of its own whose support could be checked. Only a competitor
+    # that DID resolve to its own key(s) (via `entries`) can be assessed and
+    # potentially dismissed, and only when NONE of ITS resolved keys carry
+    # support from anyone other than that competitor itself.
     key_support: dict[tuple[str, str], set[str]] = {}
+    symbol_entries_keys: dict[str, set[tuple[str, str]]] = {}
     for masked, r_comps, i, a_comps in entries:
         sid = "::".join(r_comps)
         k = (r_comps[i], a_comps[i])
         key_support.setdefault(k, set()).add(sid)
+        symbol_entries_keys.setdefault(sid, set()).add(k)
+
+    def _added_side_competitor_is_dismissible(competitor_id: str) -> bool:
+        resolved_keys = symbol_entries_keys.get(competitor_id)
+        if not resolved_keys:
+            # Never resolved to any key of its own -- an irreducible,
+            # unresolved rival that cannot be ruled out. Always vetoes.
+            return False
+        # Resolved, but only dismissible if NONE of its own keys are
+        # independently backed by anyone besides itself.
+        return not any(
+            key_support.get(ok, set()) - {competitor_id} for ok in resolved_keys
+        )
+
     for masked, r_comps, i, a_comps in entries:
         if len(masked_to_old_segments[masked]) != 1:
             continue
         added_id = "::".join(a_comps)
         symbol_id = "::".join(r_comps)
-        if len(added_id_to_removed_symbols[added_id]) != 1:
-            continue
         key = (r_comps[i], a_comps[i])
+        if len(added_id_to_removed_symbols[added_id]) != 1:
+            # This key itself may be reachable from >1 distinct removed
+            # symbol for this SAME added identity (the added-side mirror of
+            # raw_symbol_key_targets's repeated-segment collision, just
+            # below) -- reject before considering corroboration.
+            if len(raw_added_key_targets[(added_id, key)]) != 1:
+                continue
+            if not key_support[key] - {symbol_id}:
+                continue
+            competitors = added_id_to_removed_symbols[added_id] - {symbol_id}
+            if not all(_added_side_competitor_is_dismissible(c) for c in competitors):
+                continue
         if len(removed_id_to_added_symbols[symbol_id]) != 1:
             # This key itself may resolve to >1 distinct target for this
             # symbol (see raw_symbol_key_targets's docstring) -- reject

@@ -43,6 +43,7 @@ from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 import pytest
+from hypothesis import given, settings, strategies as st
 
 from abicheck.buildsource.graph_facts import GraphEdge, GraphNode
 from abicheck.buildsource.pack import BuildSourcePack
@@ -62,6 +63,7 @@ from abicheck.qualified_name_segments import (
     apply_anonymous_type_ordinals,
     collect_anonymous_type_ordinals,
     renumber_anonymous_closure_identities,
+    rewrite_anonymous_type_spellings,
 )
 from abicheck.serialization import snapshot_from_dict
 
@@ -492,6 +494,220 @@ class TestLegacyPersistedSnapshotsAreRenumberedOnLoad:
         }
         loaded = snapshot_from_dict(already_ordinal)
         assert loaded.types[0].name == "raii_guard<(lambda:task_group.h#1)>"
+
+
+def _raw_closure(
+    header: str, line: int, col: int, root: str = "/home/build/src"
+) -> str:
+    """A genuinely RAW, pre-``strip_anonymous_type_location`` closure marker
+    -- what a baseline written before that normalizer existed (or one
+    produced by a dumper build that predates it) actually carries on disk,
+    unlike this file's own ``_closure`` helper above which already applies
+    the strip before the fixture is ever built."""
+    return f"(lambda at {root}/{header}:{line}:{col})"
+
+
+class TestRawPreStripBaselinesAreNormalizedOnLoad:
+    """A baseline persisted by an abicheck build from *before*
+    ``strip_anonymous_type_location`` existed (or a dumper build that never
+    called it) still carries the fully raw ``(lambda at
+    <checkout-root>/<header>:<line>:<col>)`` spelling on disk -- not the
+    intermediate ``(lambda:<basename>:<line>:<col>)`` form every other
+    "legacy" fixture in this file already starts from.
+
+    Bug: ``renumber_anonymous_closure_identities``'s own marker regex
+    (``_ANON_TYPE_MARKER_PREFIX_RE = r"\\((lambda|unnamed\\s+\\w+):"``)
+    requires the colon that only the STRIPPED spelling has right after the
+    marker keyword -- ``"(lambda at "`` never matches it. Since
+    ``strip_anonymous_type_location`` was called only from the two
+    header-mode dumpers' extraction-time code paths and never from
+    ``snapshot_from_dict``, loading such a baseline left its closures
+    completely unrenumbered: still absolute-path-and-line-tainted, while a
+    freshly dumped snapshot of the identical, unedited declaration is
+    fully stripped and ordinal-renumbered -- a spurious
+    type/func removed+added pair purely from where/when the baseline was
+    produced, not from any real ABI change. Fixed by
+    ``snapshot_from_dict`` calling ``rewrite_anonymous_type_spellings(snap,
+    strip_anonymous_type_location)`` immediately before renumbering.
+    """
+
+    def _raw_legacy_dict(
+        self, line: int, header: str = "task_group.h", root: str = "/home/build/src"
+    ) -> dict:
+        owner = f"tbb::detail::d1::raii_guard<{_raw_closure(header, line, 26, root)}>"
+        return {
+            "library": "libtbb.so",
+            "version": "2021.13.0",
+            "schema_version": 25,
+            "types": [
+                {
+                    "name": owner.rsplit("::", 1)[-1],
+                    "qualified_name": owner,
+                    "kind": "class",
+                    "size_bits": 8,
+                }
+            ],
+            "functions": [
+                {
+                    "name": "raii_guard::raii_guard",
+                    "mangled": f"__abicheck_ctor__{owner}()",
+                    "return_type": "void",
+                }
+            ],
+        }
+
+    def test_loading_a_raw_pre_strip_snapshot_strips_and_renumbers_it(self) -> None:
+        loaded = snapshot_from_dict(self._raw_legacy_dict(522))
+        qualified = loaded.types[0].qualified_name
+        assert qualified is not None
+        assert "#" in qualified
+        assert " at " not in qualified
+        assert "/home/build/src" not in qualified
+        assert ":522:" not in qualified
+
+    def test_raw_pre_strip_baseline_agrees_with_a_fresh_dump_across_line_and_root_drift(
+        self,
+    ) -> None:
+        legacy_baseline = snapshot_from_dict(self._raw_legacy_dict(522))
+
+        # A fresh dump: checked out to a DIFFERENT root, with an unrelated
+        # earlier edit shifting the same, unedited closure to a new line --
+        # exactly what the real dumper produces (strip, then renumber),
+        # simulated the same way this file's own `_closure` helper does for
+        # the intermediate-form fixtures above.
+        fresh_bare_name = (
+            "raii_guard<"
+            f"{_raw_closure('task_group.h', 539, 26, root='/ci/checkout/src')}>"
+        )
+        fresh_owner = f"tbb::detail::d1::{fresh_bare_name}"
+        fresh = AbiSnapshot(
+            library="libtbb.so",
+            version="2022.3.0",
+            types=[_record(fresh_bare_name, qualified=fresh_owner)],
+            functions=[
+                Function(
+                    name="raii_guard::raii_guard",
+                    mangled=f"__abicheck_ctor__{fresh_owner}()",
+                    return_type="void",
+                )
+            ],
+        )
+        rewrite_anonymous_type_spellings(fresh, strip_anonymous_type_location)
+        renumber_anonymous_closure_identities(fresh)
+
+        assert legacy_baseline.types[0].qualified_name == fresh.types[0].qualified_name
+        assert legacy_baseline.functions[0].mangled == fresh.functions[0].mangled
+
+        result = compare(legacy_baseline, fresh)
+        noisy_kinds = {
+            ChangeKind.FUNC_REMOVED,
+            ChangeKind.FUNC_ADDED,
+            ChangeKind.TYPE_REMOVED,
+            ChangeKind.TYPE_ADDED,
+        }
+        assert not ({c.kind for c in result.changes} & noisy_kinds)
+
+    @given(
+        old_line=st.integers(min_value=1, max_value=5000),
+        new_line=st.integers(min_value=1, max_value=5000),
+        old_root=st.sampled_from(["/home/build/src", "/home/alice/onetbb", "/a"]),
+        new_root=st.sampled_from(["/ci/checkout/src", "/home/bob/onetbb-2", "/b/c/d"]),
+        header=st.sampled_from(["task_group.h", "flow_graph.h", "concurrent_queue.h"]),
+    )
+    @settings(max_examples=50)
+    def test_property_no_phantom_findings_for_any_line_or_root_drift(
+        self, old_line: int, new_line: int, old_root: str, new_root: str, header: str
+    ) -> None:
+        """General invariant (not just the one reported line/root pair
+        above): a raw pre-strip baseline compared against a fresh dump of
+        the identical, unedited closure-parameterized declaration must
+        never manufacture a removed/added pair, regardless of which lines
+        or checkout roots either side happens to use."""
+        owner_old = f"raii_guard<{_raw_closure(header, old_line, 26, old_root)}>"
+        legacy_dict = {
+            "library": "libtbb.so",
+            "version": "2021.13.0",
+            "schema_version": 25,
+            "types": [{"name": owner_old, "kind": "class", "size_bits": 8}],
+        }
+        legacy_baseline = snapshot_from_dict(legacy_dict)
+
+        owner_new = f"raii_guard<{_raw_closure(header, new_line, 26, new_root)}>"
+        fresh = AbiSnapshot(
+            library="libtbb.so",
+            version="2022.3.0",
+            types=[_record(owner_new)],
+        )
+        rewrite_anonymous_type_spellings(fresh, strip_anonymous_type_location)
+        renumber_anonymous_closure_identities(fresh)
+
+        assert legacy_baseline.types[0].name == fresh.types[0].name
+
+        result = compare(legacy_baseline, fresh)
+        noisy_kinds = {ChangeKind.TYPE_REMOVED, ChangeKind.TYPE_ADDED}
+        assert not ({c.kind for c in result.changes} & noisy_kinds)
+
+    def test_rewrite_is_idempotent_on_an_already_stripped_snapshot(self) -> None:
+        """`rewrite_anonymous_type_spellings` is applied unconditionally on
+        every load, including a snapshot that was already fully normalized
+        (the overwhelmingly common case) -- it must be a true no-op there,
+        not just harmless-by-luck."""
+        already_stripped = AbiSnapshot(
+            library="libtbb.so",
+            version="2022.3.0",
+            types=[_record(f"raii_guard<{_closure('task_group.h', 539, 26)}>")],
+        )
+        before = already_stripped.types[0].name
+        rewrite_anonymous_type_spellings(
+            already_stripped, strip_anonymous_type_location
+        )
+        assert already_stripped.types[0].name == before
+
+        already_ordinal = AbiSnapshot(
+            library="libtbb.so",
+            version="2022.3.0",
+            types=[_record("raii_guard<(lambda:task_group.h#1)>")],
+        )
+        before = already_ordinal.types[0].name
+        rewrite_anonymous_type_spellings(already_ordinal, strip_anonymous_type_location)
+        assert already_ordinal.types[0].name == before
+
+    def test_multiple_raw_lambdas_in_one_header_still_get_distinct_ordinals(
+        self,
+    ) -> None:
+        """Mirrors the real report's shape (thousands of raw markers in one
+        baseline, not just one): several distinct raw closures in the same
+        header must each survive stripping with their own identity and
+        still be renumbered by RELATIVE SOURCE ORDER, exactly as a snapshot
+        that was already stripped at dump time would be."""
+        raw_names = [
+            f"raii_guard<{_raw_closure('task_group.h', line, 26)}>"
+            for line in (522, 520, 539, 528)
+        ]
+        legacy_dict = {
+            "library": "libtbb.so",
+            "version": "2021.13.0",
+            "schema_version": 25,
+            "types": [{"name": n, "kind": "class"} for n in raw_names],
+        }
+        loaded = snapshot_from_dict(legacy_dict)
+        loaded_names = [t.name for t in loaded.types]
+
+        stripped_then_renumbered = [
+            f"raii_guard<{_closure('task_group.h', line, 26)}>"
+            for line in (522, 520, 539, 528)
+        ]
+        expected_snapshot = AbiSnapshot(
+            library="libtbb.so",
+            version="2021.13.0",
+            types=[_record(n) for n in stripped_then_renumbered],
+        )
+        renumber_anonymous_closure_identities(expected_snapshot)
+        expected_names = [t.name for t in expected_snapshot.types]
+
+        assert loaded_names == expected_names
+        # Every entry actually got an ordinal -- none left in :line:col form.
+        assert all("#" in n for n in loaded_names)
 
 
 class TestKnownLimitationDifferentFilesSharingABasename:
