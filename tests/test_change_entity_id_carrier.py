@@ -286,3 +286,79 @@ class TestChangeEntityIdCarrier:
             _snap([new], from_headers=True, ast_producer="castxml"),
         )
         assert _change(r, ChangeKind.FUNC_OVERRIDE_SPECIFIER_REMOVED).entity_id == eid  # type: ignore[attr-defined]
+
+    def test_hidden_friend_added_transition_carries_old_side_entity_id(self) -> None:
+        # Codex review (2nd round): diff_hidden_friends.py/diff_param_qualifiers.py
+        # are separate modules from diff_symbols.py's own detectors -- the
+        # same carrier omission, in files split out for the file-size cap.
+        eid = entity_id_for_function((), "f", mangled_name="_Z1fv")
+        old = _func("f", "_Z1fv", is_hidden_friend=False, entity_id=eid)
+        new = _func("f", "_Z1fv", is_hidden_friend=True)
+        r = compare(_snap([old]), _snap([new]))
+        assert _change(r, ChangeKind.HIDDEN_FRIEND_ADDED).entity_id == eid  # type: ignore[attr-defined]
+
+    def test_hidden_friend_removed_with_symbol_carries_old_side_entity_id(self) -> None:
+        # diff_inline_hidden_friends' own single-sided removal path (symbol
+        # gone entirely, not just a flag flip on a matched pair).
+        eid = entity_id_for_function((), "f", mangled_name="_Z1fv")
+        old = _func("f", "_Z1fv", is_hidden_friend=True, entity_id=eid)
+        r = compare(_snap([old]), _snap([]))
+        assert _change(r, ChangeKind.HIDDEN_FRIEND_REMOVED).entity_id == eid  # type: ignore[attr-defined]
+
+    def test_param_restrict_changed_carries_old_side_entity_id(self) -> None:
+        eid = entity_id_for_function((), "f", mangled_name="_Z1fPi")
+        old = _func(
+            "f",
+            "_Z1fPi",
+            params=[Param(name="x", type="int*", is_restrict=False)],
+            entity_id=eid,
+        )
+        new = _func(
+            "f", "_Z1fPi", params=[Param(name="x", type="int*", is_restrict=True)]
+        )
+        r = compare(_snap([old], from_headers=True), _snap([new], from_headers=True))
+        assert _change(r, ChangeKind.PARAM_RESTRICT_CHANGED).entity_id == eid  # type: ignore[attr-defined]
+
+    def test_param_became_va_list_carries_old_side_entity_id(self) -> None:
+        eid = entity_id_for_function((), "f", mangled_name="_Z1fz")
+        old = _func(
+            "f",
+            "_Z1fz",
+            params=[Param(name="x", type="...", is_va_list=False)],
+            entity_id=eid,
+        )
+        new = _func(
+            "f", "_Z1fz", params=[Param(name="x", type="va_list", is_va_list=True)]
+        )
+        r = compare(
+            _snap([old], from_headers=True, ast_producer="clang"),
+            _snap([new], from_headers=True, ast_producer="clang"),
+        )
+        assert _change(r, ChangeKind.PARAM_BECAME_VA_LIST).entity_id == eid  # type: ignore[attr-defined]
+
+    def test_ctor_overload_ambiguity_risk_carries_entity_id(self) -> None:
+        # Single-sided (new-side-only) construction site -- no old/new
+        # fallback pair, just the new ctor's own entity_id.
+        from abicheck.model import RecordType
+
+        eid = entity_id_for_function((), "C::C", mangled_name="_ZN1CC1Ej")
+        owner = RecordType(name="C", kind="class", size_bits=64)
+        old_ctor = _func(
+            "C::C", "_ZN1CC1Ei", params=[Param(name="x", type="int")], is_explicit=False
+        )
+        new_ctor1 = _func(
+            "C::C", "_ZN1CC1Ei", params=[Param(name="x", type="int")], is_explicit=False
+        )
+        new_ctor2 = _func(
+            "C::C",
+            "_ZN1CC1Ej",
+            params=[Param(name="x", type="unsigned int")],
+            is_explicit=False,
+            entity_id=eid,
+        )
+        old_snap = _snap([old_ctor])
+        old_snap.types = [owner]
+        new_snap = _snap([new_ctor1, new_ctor2])
+        new_snap.types = [owner]
+        r = compare(old_snap, new_snap, scope_to_public_surface=False)
+        assert _change(r, ChangeKind.CTOR_OVERLOAD_AMBIGUITY_RISK).entity_id == eid  # type: ignore[attr-defined]
