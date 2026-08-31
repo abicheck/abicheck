@@ -117,3 +117,14 @@
   `"off"` only when there is no header-seeding consumer (`depth="binary"`
   still clears headers to empty independent of any override, so that
   clearing is folded in rather than re-derived).
+- **A headerless `dump`/`compare` request at `depth="headers"` is no longer
+  wrongly rejected.** `depth="headers"` resolves to collect mode `"off"`
+  too, same as `depth="binary"` — but the check's no-override branch only
+  ever equated `"off"` with `depth="binary"`, so a `depth="headers"` request
+  with no real headers (where neither `embed_build_source` nor the L2 seed
+  would ever consult `build_info`) was wrongly rejected. Fixed by deriving
+  the depth-implied collect mode for any explicit depth
+  (`_depth_implied_collect_mode`, mirroring `service_compare_evidence`'s own
+  mapping) instead of special-casing `"binary"` alone. `depth="headers"`
+  with real headers still correctly stays rejected, since it keeps those
+  headers (only `"binary"` clears them) and the L2 seed still runs.

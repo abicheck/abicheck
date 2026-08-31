@@ -323,6 +323,33 @@ looked like the obvious fix and wasn't.
   scoped pre-captured Bazel jsonproto); its sibling
   `test_resolved_collect_mode_off_with_no_headers_stays_exempt` pins that the
   headers check doesn't over-reject a genuinely headerless request.
+  **A twelfth review round found the eleventh round's own fix introduced a
+  new false positive it didn't have before.** The no-override branch only
+  ever equated collect mode `"off"` with `depth="binary"` -- but
+  `depth="headers"` resolves to `"off"` too (`_resolve_depth_collect_mode`'s
+  mapping: only `"build"`/`"source"` resolve to something else). A
+  headerless `dump`/`compare` request at `depth="headers"` combined with an
+  explicit `build_targets` and a scoped pre-captured Bazel jsonproto was
+  therefore wrongly rejected: neither `embed_build_source` (collect mode
+  `"off"`) nor the L2 seed (nothing to seed, no real headers) would ever
+  have consulted `build_info`, yet the planner still raised `PlanningError`.
+  Fixed by adding `_depth_implied_collect_mode()` -- mirroring
+  `service_compare_evidence._resolve_depth_collect_mode`'s explicit-depth
+  mapping (duplicated, not imported, for the same leaf-module reason that
+  function's own docstring states) -- and using it for any explicit depth
+  in the no-override branch, rather than special-casing `"binary"` alone.
+  `depth="headers"` with *real* headers still correctly stays rejected,
+  since only `"binary"` clears headers to empty before this check runs;
+  `"headers"` keeps them, so the L2 seed still runs.
+  `tests/test_analysis_plan.py::TestBazelBuildTargetScoping::
+  test_headerless_depth_headers_is_exempt` pins the fixed case; its sibling
+  `test_depth_headers_with_real_headers_is_still_rejected` pins that real
+  headers at that same depth still correctly reject. The pre-existing
+  `test_other_depths_still_rejected_alongside_binary` was narrowed from
+  `("headers", "build", "source")` to `("build", "source")` accordingly --
+  `"headers"` alone (headerless) is no longer part of the always-rejected
+  set, which is the corrected behavior this round establishes, not a
+  weakening of the test.
   Historical analysis retained below for the record.
   `BazelAdapter.collect()`'s `self.targets` scoping is applied
   in exactly two places: gating whether a *live* `bazel query` subprocess

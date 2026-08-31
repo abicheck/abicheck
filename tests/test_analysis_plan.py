@@ -226,11 +226,14 @@ class TestBazelBuildTargetScoping:
         assert isinstance(plan, AnalysisPlan)
 
     def test_other_depths_still_rejected_alongside_binary(self, tmp_path: Path):
-        """A depth other than ``binary`` still triggers the check -- pins
-        that the fix above is scoped to the one depth that actually
-        no-ops the collection, not a blanket exemption."""
+        """A depth other than ``binary``/headerless ``headers`` still
+        triggers the check -- pins that the fix above is scoped to the
+        depths that actually no-op the collection, not a blanket exemption.
+        ``headers`` is excluded here (see the pair of tests below): unlike
+        ``binary``, it doesn't clear headers, so whether it's exempt depends
+        on whether real headers are present."""
         aquery = _write(tmp_path / "aquery.json", _EMPTY_AQUERY)
-        for depth in ("headers", "build", "source"):
+        for depth in ("build", "source"):
             request = DumpRequest(
                 input=InputSpec.of(
                     path=None,
@@ -242,6 +245,46 @@ class TestBazelBuildTargetScoping:
             )
             with pytest.raises(PlanningError):
                 AnalysisPlanner.resolve(request)
+
+    def test_headerless_depth_headers_is_exempt(self, tmp_path: Path):
+        """Codex review, fresh evidence: ``depth="headers"`` resolves to
+        collect mode ``"off"`` too (not just ``"binary"``), and with no real
+        headers, neither ``embed_build_source`` (collect mode ``"off"``) nor
+        the L2 seed (nothing to seed) would ever consult ``build_info`` --
+        so this must be exempt, unlike the always-rejected depths above."""
+        aquery = _write(tmp_path / "aquery.json", _EMPTY_AQUERY)
+        request = DumpRequest(
+            input=InputSpec.of(
+                path=None,
+                sources=tmp_path,
+                build_info=aquery,
+                build_targets=["//:lib"],
+            ),
+            depth="headers",
+        )
+        plan = AnalysisPlanner.resolve(request)
+        assert isinstance(plan, AnalysisPlan)
+
+    def test_depth_headers_with_real_headers_is_still_rejected(self, tmp_path: Path):
+        """The converse of the test above: real headers at ``depth="headers"``
+        mean the L2 seed's own independent header-seeding pass still runs
+        regardless of the "off" collect mode, so this stays rejected --
+        unlike ``depth="binary"``, which clears headers before this point."""
+        header = tmp_path / "lib.h"
+        header.write_text("void f();\n", encoding="utf-8")
+        aquery = _write(tmp_path / "aquery.json", _EMPTY_AQUERY)
+        request = DumpRequest(
+            input=InputSpec.of(
+                path=None,
+                headers=[header],
+                sources=tmp_path,
+                build_info=aquery,
+                build_targets=["//:lib"],
+            ),
+            depth="headers",
+        )
+        with pytest.raises(PlanningError):
+            AnalysisPlanner.resolve(request)
 
     def test_resolved_collect_mode_override_defeats_the_binary_exemption(
         self, tmp_path: Path

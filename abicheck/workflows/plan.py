@@ -296,6 +296,34 @@ def scan_bazel_scoping_failure(
     return bazel_target_scoping_failure("candidate", build_info, build_targets)
 
 
+def _depth_implied_collect_mode(depth: str) -> str:
+    """The collect mode an *explicit* ``depth`` value resolves to on its own.
+
+    Mirrors ``service_compare_evidence._resolve_depth_collect_mode``'s
+    explicit-depth branch (duplicated, not imported, for the same
+    leaf-module reason that function's own docstring states) -- with an
+    explicit depth, both ``dump``'s and ``compare``'s own resolvers ignore
+    their differing "omitted depth" defaults and compute identically, so
+    there is exactly one mapping to mirror. ``"binary"`` and ``"headers"``
+    both resolve to ``"off"``; only ``"binary"`` additionally clears headers
+    (see :func:`_check_bazel_target_scoping`'s own comment).
+    """
+    from ..buildsource.scan_levels import (
+        EvidenceDepth,
+        SourceScope,
+        depth_to_method,
+        level_to_collect_mode,
+    )
+
+    evidence_depth = EvidenceDepth(depth.lower())
+    method = depth_to_method(evidence_depth)
+    if method is None:
+        return "off"
+    return level_to_collect_mode(
+        method, evidence_depth, source_scope=SourceScope.TARGET
+    )
+
+
 def _check_bazel_target_scoping(side: SidePlan) -> PlanningFailure | None:
     # ADR-063 Phase 4 (Codex review, fresh evidence): `depth="binary"`
     # resolves to collect_mode "off", and `embed_build_source` itself
@@ -329,15 +357,25 @@ def _check_bazel_target_scoping(side: SidePlan) -> PlanningFailure | None:
     # (`service_compare_evidence._headers`) independent of any
     # `resolved_collect_mode` override, so that clearing is folded into
     # `effective_headers` here rather than re-derived from collect mode.
+    #
+    # A yet further Codex round found this still only equated "off" with
+    # `depth="binary"` in the no-override branch -- but `depth="headers"`
+    # resolves to collect mode "off" too (see `_depth_implied_collect_mode`).
+    # A headerless `depth="headers"` request was therefore wrongly rejected:
+    # neither `embed_build_source` (collect_mode "off") nor the L2 seed (no
+    # headers to seed) would ever have consulted `build_info`. Only
+    # `depth="binary"` additionally clears headers to empty; `depth="headers"`
+    # keeps real headers, so `effective_headers` must still reflect them.
     is_binary = (
         side.requested_depth is not None and side.requested_depth.lower() == "binary"
     )
     effective_headers = () if is_binary else side.headers
-    off = (
-        side.resolved_collect_mode == "off"
-        if side.resolved_collect_mode is not None
-        else is_binary
-    )
+    if side.resolved_collect_mode is not None:
+        off = side.resolved_collect_mode == "off"
+    elif side.requested_depth is not None:
+        off = _depth_implied_collect_mode(side.requested_depth) == "off"
+    else:
+        off = False
     if off and not effective_headers:
         return None
     return bazel_target_scoping_failure(side.label, side.build_info, side.build_targets)
