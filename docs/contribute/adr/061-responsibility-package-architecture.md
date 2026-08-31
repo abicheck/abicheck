@@ -718,20 +718,18 @@ sizes:
    sits directly upstream of `DiffResult`'s own public `breaking`/
    `source_breaks`/`compatible`/`risk` properties — which this ADR has
    already ruled out moving, as a breaking change to the documented public
-   Python API (see above). Consolidating it correctly needs a real design
-   decision (a per-change decision cache keyed off `Change` identity, most
-   plausibly on `DiffResult` itself, given `Change` is not hashable) that
-   affects heavily-reviewed, scar-tissue-dense logic in three format
-   modules at once; attempting it as a drive-by inside this gate-decision
-   slice would risk exactly the "wrong abstraction, forced through" failure
-   mode this ADR warns against elsewhere. It remains its own follow-up
-   slice. **The design decision itself is not open**: hold the resolved
-   verdict on `ReportFinding` (`duplication-and-convergence-assessment.md`'s
-   Phase 4 item 1) rather than a separate cache keyed by `Change` identity —
-   `Change` is not hashable, so build the `ReportFinding` tuple by resolving
-   each verdict once while iterating `DiffResult.changes` during envelope
-   construction instead. See that plan's Phase 4 section for the full
-   rationale; what remains open here is only the implementation slice.
+   Python API (see above). Consolidating it correctly affects
+   heavily-reviewed, scar-tissue-dense logic in three format modules at
+   once; attempting it as a drive-by inside this gate-decision slice would
+   risk exactly the "wrong abstraction, forced through" failure mode this
+   ADR warns against elsewhere. It remains its own follow-up slice, and the
+   design for it is owned by, and stated in full only in,
+   `duplication-and-convergence-assessment.md`'s Phase 4 item 1 (hold the
+   resolved verdict on `ReportFinding`, built once per `Change` while
+   iterating `DiffResult.changes` during envelope construction — not a
+   separate cache keyed by `Change` identity, since `Change` is not
+   hashable) — see that plan's Phase 4 section rather than restating the
+   rationale here a second time.
 
    Item 5 (post-render mutation) is untouched by this slice, for the
    original reason: `cli_compare_fold.py`'s
