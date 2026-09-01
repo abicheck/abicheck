@@ -243,6 +243,67 @@ def test_evidence_contract_error_still_fails_the_step():
     assert "FINAL_EXIT=1" in result.stdout
 
 
+def _run_real_gated_pipeline(
+    tmp_path: Path, verdict: str
+) -> subprocess.CompletedProcess:
+    """Execute the real, unmodified ``_is_path_already_qualified``/
+    ``_report_query``/``_evidence_contract_gated`` pipeline (extracted
+    verbatim from run.sh) against a JSON report whose ``verdict`` field is
+    *verdict* -- prints ``GATED=1``/``GATED=0`` depending on the outcome.
+    Shared by the exact-sentinel positive test and the hostile-value
+    negative test below, so both exercise the identical real pipeline
+    rather than two independently-drifting copies of the harness."""
+    report = tmp_path / "report.json"
+    report.write_text(json.dumps({"verdict": verdict}), encoding="utf-8")
+
+    py_safe_dir = tmp_path / "py-safe"
+    py_safe_dir.mkdir()
+    # Forward-slash form of every interpolated filesystem path -- harmless
+    # either way once `_run_bash_script` writes this script to a real file
+    # (a literal backslash inside a double-quoted bash string is passed
+    # through unchanged), but kept for readability/consistency with the
+    # rest of this file's Windows-path handling.
+    py_bin = Path(sys.executable).as_posix()
+    py_safe_dir_posix = py_safe_dir.as_posix()
+    report_posix = report.as_posix()
+    script = (
+        _report_query_and_gated_fragment()
+        + f"""
+_RUNNING_ON_WINDOWS="false"
+_PY_BIN="{py_bin}"
+_PY_SAFE_DIR="{py_safe_dir_posix}"
+_json_report_src() {{ echo "{report_posix}"; }}
+if _evidence_contract_gated; then
+  echo "GATED=1"
+else
+  echo "GATED=0"
+fi
+"""
+    )
+    return _run_bash_script(script)
+
+
+def test_evidence_contract_gated_matches_the_real_sentinel(tmp_path):
+    """The positive case the exit-1 dispatch tests above all stub away:
+    every one of ``test_exit_1_evidence_contract_error_maps_to_its_own_
+    verdict``/``test_exit_1_plain_cli_error_still_maps_to_error``/
+    ``test_exit_1_severity_error_unaffected`` replaces
+    ``_evidence_contract_gated`` with a stub, and the hostile-value test
+    below only proves a near-miss does *not* gate -- none of the five
+    tests in this module would fail if the real
+    ``_report_query``/``_evidence_contract_gated`` pipeline were broken to
+    always return false (a regression that would silently restore the
+    exact pre-fix misclassification for every genuine
+    ``EVIDENCE_CONTRACT_ERROR`` report), since that pipeline's *positive*
+    path was never executed anywhere in this module (Codex review, fresh
+    evidence). Runs the identical real pipeline as the hostile-value test,
+    via the shared ``_run_real_gated_pipeline`` helper, with the exact
+    sentinel string a real ``_emit_scan_abort_report`` envelope carries."""
+    result = _run_real_gated_pipeline(tmp_path, "EVIDENCE_CONTRACT_ERROR")
+    assert result.returncode == 0, result.stderr
+    assert "GATED=1" in result.stdout
+
+
 def test_evidence_contract_gated_treats_hostile_json_verdict_as_inert_data(tmp_path):
     """``_evidence_contract_gated`` reads a JSON report's ``verdict`` field
     and compares it against a fixed literal — proven here by *executing*
@@ -270,34 +331,7 @@ def test_evidence_contract_gated_treats_hostile_json_verdict_as_inert_data(tmp_p
     hostile_verdict = (
         f"EVIDENCE_CONTRACT_ERROR`touch {marker}`$(touch {marker}); touch {marker} #"
     )
-    report = tmp_path / "report.json"
-    report.write_text(json.dumps({"verdict": hostile_verdict}), encoding="utf-8")
-
-    py_safe_dir = tmp_path / "py-safe"
-    py_safe_dir.mkdir()
-    # Forward-slash form of every interpolated filesystem path -- harmless
-    # either way once `_run_bash_script` writes this script to a real file
-    # (a literal backslash inside a double-quoted bash string is passed
-    # through unchanged), but kept for readability/consistency with the
-    # rest of this file's Windows-path handling.
-    py_bin = Path(sys.executable).as_posix()
-    py_safe_dir_posix = py_safe_dir.as_posix()
-    report_posix = report.as_posix()
-    script = (
-        _report_query_and_gated_fragment()
-        + f"""
-_RUNNING_ON_WINDOWS="false"
-_PY_BIN="{py_bin}"
-_PY_SAFE_DIR="{py_safe_dir_posix}"
-_json_report_src() {{ echo "{report_posix}"; }}
-if _evidence_contract_gated; then
-  echo "GATED=1"
-else
-  echo "GATED=0"
-fi
-"""
-    )
-    result = _run_bash_script(script)
+    result = _run_real_gated_pipeline(tmp_path, hostile_verdict)
     assert result.returncode == 0, result.stderr
     # A near-miss (extra trailing content) must not compare equal to the
     # real sentinel -- only an exact match may gate.
