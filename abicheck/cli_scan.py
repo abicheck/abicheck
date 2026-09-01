@@ -746,23 +746,25 @@ def _run_artifact_set(
     from .service_scan import _resolve_member_scan_level, run_scan_set
     from .workflows.plan import scan_bazel_scoping_failure
 
-    # ADR-063 Phase 4 (Codex review): checked before discovery, via the real
-    # resolved eff_depth/collect_mode (same primitive estimate_artifact_set's
-    # --dry-run totals use), not a raw --depth approximation (both
-    # over/under-rejected in earlier rounds).
+    # Checked before discovery, via the real resolved eff_depth/collect_mode
+    # (same primitive estimate_artifact_set's --dry-run totals use), not a
+    # raw --depth approximation (both over/under-rejected in earlier rounds).
     changed, changed_src, seeded = _resolve_changed_seed(
         changed_paths_opt, since, sources
     )
-    _, _, _, _, _, _, eff_depth, collect_mode = _resolve_member_scan_level(
-        ScanRequest(
-            mode="audit",
-            source_method=SourceMethod.AUTO.value if depth is None else None,
-            depth=depth,
-            changed_paths=changed,
-            seeded=seeded,
-            risk_rules_path=risk_rules_path,
+    try:
+        _, _, _, _, _, _, eff_depth, collect_mode = _resolve_member_scan_level(
+            ScanRequest(
+                mode="audit",
+                source_method=SourceMethod.AUTO.value if depth is None else None,
+                depth=depth,
+                changed_paths=changed,
+                seeded=seeded,
+                risk_rules_path=risk_rules_path,
+            )
         )
-    )
+    except ValueError as exc:
+        raise click.UsageError(str(exc)) from exc
     if _bf := scan_bazel_scoping_failure(
         header_pairs,
         eff_depth,
@@ -1796,9 +1798,8 @@ def scan_cmd(
     )
     effective_build_info = build_info
 
-    # Validate the same --build-target + pre-captured Bazel jsonproto combo
-    # `_build_new_snapshot` rejects during real execution, before the
-    # dry-run preview below can claim an unscoped request is scoped.
+    # Validate the same combo `_build_new_snapshot` rejects during real
+    # execution, before the dry-run preview claims an unscoped request is scoped.
     from .workflows.plan import scan_bazel_scoping_failure
 
     if _bf := scan_bazel_scoping_failure(
@@ -1979,8 +1980,7 @@ def scan_cmd(
         )
         raise click.ClickException(ce.message) from ce
     except PlanningError as exc:
-        # scan_engine.py raises this framework-neutral (also backs run_scan()'s
-        # typed API) -- translate here, the one boundary that knows Click.
+        # scan_engine.py raises this framework-neutral; translate here.
         raise click.UsageError(str(exc)) from exc
     finally:
         # Remove the inferred cmake build dir(s) now that every build-dir-dependent

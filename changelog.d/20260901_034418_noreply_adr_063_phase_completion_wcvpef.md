@@ -28,3 +28,9 @@
   primitive `--dry-run` cost estimation already uses), so a request that
   would ultimately be rejected is rejected up front, consistently, whether
   or not `--depth` is given.
+- **`scan --artifact-set` with a malformed `--risk-rules` file no longer
+  crashes with an unhandled traceback.** The new pre-flight resolution
+  above ran ahead of this command's existing `try`/`except` translation,
+  so a malformed profile's `ValueError` leaked past it (exit 1) instead of
+  the established clean usage error (exit 64) every other malformed-input
+  path in this command already gives.

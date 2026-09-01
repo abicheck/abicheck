@@ -428,6 +428,22 @@ looked like the obvious fix and wasn't.
   pins the risky case (a high-risk `--changed-path`, e.g. a public header,
   seeds a non-`"off"` `collect_mode`, so the same config-sourced scope is
   still enforced and rejects with exit 64).
+  **A fourteenth review round found the thirteenth round's own fix had no
+  error translation of its own.** `_resolve_member_scan_level()` raises a
+  plain `ValueError` for a malformed `--risk-rules` profile (via
+  `_load_risk_rules_for_service`, which converts the single-binary path's
+  `click.ClickException` into exactly that so a direct typed-API caller
+  never sees a Click-flavored exception) -- but the thirteenth round's new
+  resolution call sat ahead of both of `_run_artifact_set`'s existing
+  `try`/`except (ArtifactSetError, ValueError)` blocks, so that `ValueError`
+  now leaked past them (exit 1, an unhandled traceback) for both a real run
+  and `--dry-run` alike, instead of the established clean usage error (exit
+  64) `TestArtifactSetMalformedRiskRules::
+  test_malformed_risk_rules_yaml_is_usage_error` already pinned for this
+  exact class of input (a ninth-round-era regression, per that test's own
+  docstring). Fixed by wrapping the new resolution call in its own
+  `try`/`except ValueError`, translating to `click.UsageError` the same way
+  the two pre-existing blocks below it already do.
   Historical analysis retained below for the record.
   `BazelAdapter.collect()`'s `self.targets` scoping is applied
   in exactly two places: gating whether a *live* `bazel query` subprocess
