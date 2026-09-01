@@ -237,7 +237,7 @@ linker, transitive), but a newcomer meets a break as a **symptom**:
 | crash or silent corruption after upgrade, no rebuild | layout / vtable / calling convention (3, 4) | L1 |
 | compile error after upgrade | source-only API break: rename, access, `explicit`, a default argument removed (6) | L2 |
 | a call silently binds to a different value | default-argument *value* changed (6) | L2 |
-| behaviour changed, nothing else did | inline body, macro, `constexpr` value (6) | L4 |
+| the source you compile against changed, but no binary did | public macro or inline function removed, template signature moved (6) | L4 |
 | works on the build box, fails on the customer's distro | dependency floor / toolchain drift | L0 + `--env-matrix` |
 | works for the app, breaks for the plugin / sibling library | consumer model, bundle contract | `--used-by`, directory compare |
 

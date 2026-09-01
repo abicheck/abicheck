@@ -205,7 +205,7 @@ sentinel-splice pattern ADR-051 established for `gen_platform_matrix.py`.
 | Inputs | `docs/_meta/learning-ladder.yaml`; the front matter (`level`, `title` if present, else the first H1) of every page it names |
 | Output | Replaces the block between `<!-- BEGIN GENERATED: learning-ladder -->` and `<!-- END GENERATED: learning-ladder -->` in `docs/learn/abi-api-handling.md` with one table per sequence: Tier · Level badge · Pages (members as links; branches indented with "go deeper"; links marked "(on the Concepts tab)" / "(tool guide)") |
 | `--check` | Regenerates in memory and diffs against the file (drift), then runs A1's four rules; exit 1 on any violation with one line per violation naming the page and the rule |
-| Wiring | `scripts/verify.py` gains a `learning-ladder` step in the `pr` profile (calls `--check`); `docs/AGENTS.md` "Regenerating generated docs" gains one line; `scripts/CLAUDE.md`'s inventory table gains the script (the `script-inventory` AI-readiness check warns otherwise) |
+| Wiring | `docs/AGENTS.md` "Regenerating generated docs" gains one line and `scripts/CLAUDE.md`'s inventory table gains the script when the generator lands (P1); `scripts/verify.py` gains a `learning-ladder` step in the `pr` profile only once every page carries `level:` (P2) — wiring it earlier would fail its own gate on the 16 blank pages |
 | Tests | `tests/test_gen_learning_ladder.py`: a fixture tree with (a) a page missing from the ladder, (b) a level regression inside a sequence, (c) a branch below its parent, (d) a link that is nowhere a member, (e) the concepts sequence restarting at `intermediate` after `educational` ends at `advanced` — which must *pass*; plus a round-trip test that `gen` then `--check` is clean |
 | Not in scope | Reordering `mkdocs.yml` nav (that stays hand-edited; the separate nav-order test in A2b covers it) |
 
@@ -426,15 +426,19 @@ name the code that produces what each page teaches, so
 
   policies:
     allowed_summaries:
+      # existing entries stay (the skills-src fragment declares `summarizes`); add:
       - learn/rollout-and-governance.md
   suppressions:
     allowed_summaries:
+      # existing entries stay; add:
       - learn/rollout-and-governance.md
   github-actions-surface:
     allowed_summaries:
+      # existing entries stay; add:
       - learn/where-in-the-pipeline.md
   project-integration:
     allowed_summaries:
+      # no entries today; add:
       - learn/where-in-the-pipeline.md
       - learn/products-not-libraries.md
   impact-analysis:
@@ -443,9 +447,13 @@ name the code that produces what each page teaches, so
     # canonical stays learn/build-source-data.md (the workflow half, C9)
 ```
 
-Two things the fragments do not do, on purpose: they never register a
-second `canonical_page` for a topic (the gate rejects it), and they keep
-`baseline-lifecycle` on `use/baseline-management.md` (plan §4.6 case 1).
+Every `allowed_summaries` fragment above is an *addition* to the list the
+topic already has — a page currently registered (several `skills-src/`
+fragments declare a matching `summarizes`) must stay, or the front-matter
+round trip fails. Two more things the fragments do not do, on purpose:
+they never register a second `canonical_page` for a topic (the gate
+rejects it), and they keep `baseline-lifecycle` on
+`use/baseline-management.md` (plan §4.6 case 1).
 Exact `fact_sources` paths are to be confirmed against the tree when each
 page is written; a wrong path is a hard error in `check_docs_contract.py`,
 so it cannot ship silently.
@@ -543,7 +551,12 @@ Sections:
    - compile error after an upgrade → Part 6, L2, `case123`
    - a call silently binds to a different value → Part 6, L2 (`case124`
      for the header-constant variant)
-   - behaviour changed, nothing else did → Part 6, L4, `case122`
+   - the source you compile against changed, but no binary did → Part 6,
+     L4: a public macro or inline function disappeared (`case156`,
+     `case157`), or an uninstantiated template's signature moved
+     (`case122`). A *silent* behavioural change inside an inline body has
+     no catalog fixture today; the page says so rather than pointing at
+     a case that shows something else
    - works on the build box, fails on the customer's distro → dependency
      floors, `--env-matrix`, `case170`
    - works for the app, breaks the plugin or a sibling library → consumer
@@ -555,7 +568,7 @@ Sections:
    headers", "you cannot see the sixth from any binary" — each a link to
    the level's row on `what-each-level-sees.md`.
 
-Runs: none on purpose (Tier 0 is pre-tool). Cases: the eight above.
+Runs: none on purpose (Tier 0 is pre-tool). Cases: the ten above.
 Links, not restatements: the trio for the levels; the Parts for the
 mechanisms. Done when: every row of the table links one Part, one level
 anchor and one case; the page is under 150 lines; no `ChangeKind` names
@@ -569,7 +582,7 @@ appear (they belong to the cheat sheet).
 | Ownership | new cross-cutting topic `compatibility-pipeline`; `allowed_summaries` of `baseline-lifecycle`, `github-actions-surface`, `project-integration` |
 | Reader can… | place the four moments a check can run (PR, merge to main, nightly, release cut), say what each one catches and costs, and explain why a break caught after merge re-fails every unrelated PR until re-baselined |
 | Prerequisites | Tier 4; `use/baseline-management.md` (linked from Tier 5) |
-| Footer | ← Baselines as contracts (tool guide) · Tier 5 · Report the surface → |
+| Footer | ← Assurance Beyond Static Checking (Tier 4's last member; the baseline page is a Tier 5 link, not a member) · Tier 5 · Report the surface → |
 
 Sections:
 
@@ -1158,17 +1171,21 @@ its sources).
 ## D. Reading paths by role, as ladder subsequences
 
 The hub's role table is rewritten so each path is a walk *up* the ladder.
-A path may skip tiers; it never jumps to a page the ladder does not reach.
+A path may skip tiers but never steps back to a lower one, and within a
+tier it follows member order; a path that continues into the Concepts
+sequence does so only after its educational tiers are done, since the
+two sequences are ordered independently (A1). It never jumps to a page
+the ladder does not reach.
 
 | Role | Path (tier · page) |
 |---|---|
 | New C/C++ library author | 0 · Five minutes → 0 · How a break shows up → 1 · Part 0 → 1 · Part 1 → 2 · Part 2 → 2 · Part 3 → 6 · Part 7 |
-| C++ library maintainer | 1 · Part 1 → 2 · Part 4 (+ class layout branch) → 2 · Part 6 → 7 · Template-heavy libraries → 6 · Part 7 |
-| CI / release engineer | 0 · How a break shows up → 3 · Compatibility Direction → 4 · Detecting Breaks → 5 · Where in the pipeline → 5 · Report the surface → 5 · Rollout and governance → c1 · Verdicts |
-| Distribution / package maintainer | 2 · Part 5 → 7 · System libraries → 7 · Dependency floors → 7 · Packages and consumers → 7 · Products, not libraries |
-| Product / SDK owner (several binaries) | 1 · Part 0 → 3 · Consumer models → 7 · Products, not libraries → 7 · Template-heavy libraries → 5 · Where in the pipeline |
-| Plugin / SDK author | 2 · Part 2 → 3 · Compatibility Direction → 3 · Consumer models → 6 · Part 7 → 5 · Rollout and governance |
-| AI agent / automated reviewer | 0 · How a break shows up → c1 · Verdicts → c2 · Evidence & Detectability → 5 · Triage a suspicious finding → (tool track) `use/output-formats.md` |
+| C++ library maintainer | 1 · Part 1 → 2 · Part 4 (+ class layout branch) → 2 · Part 6 → 6 · Part 7 → 7 · Template-heavy libraries |
+| CI / release engineer | 0 · How a break shows up → 3 · Compatibility Direction → 4 · Detecting Breaks → 5 · Where in the pipeline → 5 · Report the surface → 5 · Rollout and governance → then the Concepts sequence from c1 · Verdicts |
+| Distribution / package maintainer | 2 · Part 5 → 7 · Products, not libraries → 7 · System libraries → 7 · Dependency floors → 7 · Packages and consumers |
+| Product / SDK owner (several binaries) | 1 · Part 0 → 3 · Consumer models → 5 · Where in the pipeline → 7 · Products, not libraries → 7 · Template-heavy libraries |
+| Plugin / SDK author | 2 · Part 2 → 3 · Compatibility Direction → 3 · Consumer models → 5 · Rollout and governance → 6 · Part 7 |
+| AI agent / automated reviewer | 0 · How a break shows up → 5 · Triage a suspicious finding → then the Concepts sequence: c1 · Verdicts → c2 · Evidence & Detectability → (tool track) `use/output-formats.md` |
 
 The last column of each row on the hub links the tool-track page the role
 needs *after* the ladder (`start/choose-your-workflow.md` for most; the
@@ -1186,8 +1203,8 @@ P2 on `python scripts/gen_learning_ladder.py --check`.
 
 | PR | Carries | Depends on |
 |---|---|---|
-| P1 | A1 file (listing today's pages only; new pages added as they land), A2 generator + tests, A2b nav test, `verify.py` step, `scripts/CLAUDE.md` row; hub gains the sentinel block only | — |
-| P2 | A4: `level:` on the 16 blank pages and the reconciled values; A3 footers on all 26 deep dives + 3 orientation pages; C11; front-door links (`docs/index.md`, `start/getting-started.md`) | P1 |
+| P1 | A1 file (listing today's pages only; new pages added as they land), A2 generator + its unit tests, `scripts/CLAUDE.md` row; hub gains the sentinel block only. Not yet a PR gate: the generator's `--check` would fail on the 16 pages without `level:` | — |
+| P2 | A4: `level:` on the 16 blank pages and the reconciled values; A3 footers on all 26 deep dives + 3 orientation pages; C11; front-door links (`docs/index.md`, `start/getting-started.md`); *then* the `verify.py` `learning-ladder` step and the A2b nav-order test, which pass on this PR's own head | P1 |
 | P3 | A7 hub rebuild (minus the "Now run it" table), anchor rewrites, C2, C7, C8, A6 terminology term | P2 |
 | P4 | C3 (class layout ownership), C5, C6, C9, C10, A5's "edits to existing topics" | P2 |
 | P5 | B1 How a break shows up | P3 |
