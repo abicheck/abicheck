@@ -259,12 +259,13 @@ BUG_CLASSES: tuple[BugClass, ...] = (
             "temp-directory location, or unrelated line/column drift from "
             "an edit elsewhere in the file."
         ),
-        fixed_by=(837, 843, 846, 868),
+        fixed_by=(837, 843, 846, 868, 985),
         seed_tests=(
             "tests/test_castxml_anonymous_type_location.py",
             "tests/test_anon_type_location_properties.py",
             "tests/test_lambda_identity_ordinal.py",
             "tests/test_identity_taint_end_to_end.py",
+            "tests/test_source_graph_directory_taint.py",
         ),
         axes={"frontend": ("clang", "castxml")},
         known_gaps=(
@@ -725,6 +726,24 @@ BUG_CLASSES: tuple[BugClass, ...] = (
                 reference="https://github.com/abicheck/abicheck/pull/961",
             ),
         ),
+    ),
+    BugClass(
+        id="serialization.str_enum_downcast_via_generic_rewrite",
+        invariant=(
+            "A generic tree-walking string-collect/rewrite primitive "
+            "(`isinstance(value, str)`-gated) must never treat a "
+            "`str`-subclass `Enum` field (e.g. `ParamKind(str, Enum)`) as "
+            "ordinary rewritable free text -- even though isinstance() is "
+            "true for it too -- because a real rewrite function (`re.sub`) "
+            "returns a genuinely new, plain `str` object even on zero "
+            "substitutions, silently downcasting the field's type while "
+            "leaving its string value unchanged. The walk must exclude any "
+            "`str`-subclass `Enum` member regardless of that enum's own "
+            "vocabulary, not special-case the one field that happened to "
+            "crash a caller."
+        ),
+        fixed_by=(985,),
+        seed_tests=("tests/test_param_kind_enum_identity.py",),
     ),
 )
 
