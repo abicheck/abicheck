@@ -498,32 +498,13 @@ def _build_impact_table(
 
 def _format_leaf_type_change(c: Change) -> list[str]:
     """Format a single leaf-mode type change entry."""
-    lines = [f"### {c.symbol} — {c.description}"]
-    if c.affected_symbols:
-        lines.append(f"\n**Affected interfaces ({len(c.affected_symbols)}):**")
-        for sym in c.affected_symbols[:10]:
-            lines.append(f"- `{sym}`")
-        if len(c.affected_symbols) > 10:
-            lines.append(f"- ... ({len(c.affected_symbols) - 10} more)")
-    if c.caused_count > 0:
-        lines.append(f"\n> {c.caused_count} derived change(s) collapsed")
-    # ADR-049 Phase 3 (Codex review, fresh evidence): --report-mode leaf
-    # routes root TYPE_* changes through this function, never through
-    # _format_change_md -- unlike the full/root-cause views, a leaf-mode
-    # type finding's own contract decision (already stamped when
-    # --contract was requested) was silently dropped. Mirrors
-    # _format_change_md's own "no-op unless already stamped" idiom.
-    if c.contract_relevance is not None:
-        text = _contract_decision_text(
-            c.contract_relevance, c.contract_reason_code, c.contract_assurance
-        )
-        lines.append(f"\n> Contract: {text}")
-    lines.append("")
-    return lines
+    return _rmd._format_leaf_type_change(c)
 
 
-def _build_leaf_type_sections(type_changes: list[Change], policy: str) -> list[str]:
-    """Build severity-grouped type-change sections for leaf-change view."""
+def compute_leaf_type_sections(
+    type_changes: list[Change], policy: str
+) -> _rmd.LeafTypeSectionsData:
+    """The structured intermediate for :func:`_build_leaf_type_sections`."""
     breaking_set, api_break_set, _, _ = _policy_kind_sets(policy)
     breaking_types = [c for c in type_changes if c.kind in breaking_set]
     api_break_types = [c for c in type_changes if c.kind in api_break_set]
@@ -533,18 +514,25 @@ def _build_leaf_type_sections(type_changes: list[Change], policy: str) -> list[s
         if c.kind not in breaking_set and c.kind not in api_break_set
     ]
 
-    lines: list[str] = []
-    for section_label, section_changes in [
+    sections: list[_rmd.LeafTypeSection] = []
+    for heading, section_changes in [
         ("## Breaking Type Changes", breaking_types),
         ("## Source-Level Type Breaks", api_break_types),
         ("## Other Type Changes", other_types),
     ]:
         if not section_changes:
             continue
-        lines += [section_label, ""]
-        for c in section_changes:
-            lines += _format_leaf_type_change(c)
-    return lines
+        sections.append(
+            _rmd.LeafTypeSection(heading=heading, changes=tuple(section_changes))
+        )
+    return _rmd.LeafTypeSectionsData(sections=tuple(sections))
+
+
+def _build_leaf_type_sections(type_changes: list[Change], policy: str) -> list[str]:
+    """Build severity-grouped type-change sections for leaf-change view."""
+    return _rmd.render_leaf_type_sections(
+        compute_leaf_type_sections(type_changes, policy)
+    )
 
 
 def _to_markdown_leaf(
