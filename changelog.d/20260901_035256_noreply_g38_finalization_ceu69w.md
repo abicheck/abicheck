@@ -36,3 +36,10 @@ it should read in CHANGELOG.md. Delete the other sections.
   silently applied its override to a file it never named. A versioned
   manifest key must now name the canonical name or the exact file that was
   selected.
+- **`compare --old-bundle-facts --output-dir` rejects naming the same path
+  as `-o`/`--output`** — when `--output-dir` and the primary/secondary
+  output path were the same, previously nonexistent path, the primary write
+  created a file there and the following `--output-dir` directory creation
+  then raised a raw, unhandled error instead of a clean usage error. This
+  exact-path collision is now rejected the same way the per-library-report
+  collision already was.

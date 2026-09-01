@@ -448,6 +448,24 @@ def dispatch(*, compile_context: Any, **kwargs: Any) -> None:
             if p is not None
         }
         if reserved_paths:
+            # Codex review, fresh evidence: the per-library-filename check
+            # below only catches a collision with one of the *generated*
+            # child report paths -- it misses the more direct case where
+            # --output-dir itself names the same (previously nonexistent)
+            # path as -o/--output or --write. Both Click options accept
+            # that combination on their own, and without this check the
+            # primary write below creates a *file* at that path, after
+            # which `output_dir.mkdir(...)` raises a raw FileExistsError
+            # instead of the same clean usage error every other collision
+            # here produces.
+            output_dir_resolved = output_dir.resolve()
+            if output_dir_resolved in reserved_paths:
+                raise click.UsageError(
+                    f"--output-dir {output_dir}: this path is also named by "
+                    "-o/--output or --write -- a directory and a report "
+                    "file cannot share the same path, choose a different "
+                    "--output-dir or a different -o/--write path"
+                )
             for diff in result.per_library:
                 safe_name = Path(diff.library).name or "library"
                 target = (output_dir / f"{safe_name}.json").resolve()

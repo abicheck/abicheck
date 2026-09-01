@@ -512,6 +512,46 @@ class TestCompareOldBundleFacts:
         assert "collide" in out
         assert not colliding_output.exists()
 
+    def test_output_dir_itself_colliding_with_primary_output_is_rejected(
+        self, tmp_path: Path
+    ) -> None:
+        """Codex review, fresh evidence: the per-library-filename collision
+        check above only catches a collision with a *generated child*
+        report path -- it misses the more direct case where --output-dir
+        itself names the same, previously nonexistent path as -o/--output.
+        Both Click options happily accept that combination; without this
+        check, the primary write creates a *file* at that path and the
+        following `output_dir.mkdir(...)` then raises a raw
+        FileExistsError instead of a clean usage error."""
+        old_dir = tmp_path / "old"
+        new_dir = tmp_path / "new"
+        old_dir.mkdir()
+        new_dir.mkdir()
+        body = "int add(int a, int b) { return a + b; }\n"
+        _build_so(old_dir, "libreal.so", body)
+        _build_so(new_dir, "libreal.so", body)
+        facts_path = _write_old_facts(
+            tmp_path, old_dir, old_dir / "libreal.so", "libreal.so"
+        )
+        same_path = tmp_path / "shared-path"
+
+        code, out = _invoke(
+            "compare",
+            str(facts_path),
+            str(new_dir),
+            "--old-bundle-facts",
+            "--output-dir",
+            str(same_path),
+            "-o",
+            str(same_path),
+            "--format",
+            "json",
+        )
+
+        assert code == 64, out
+        assert "collide" in out.lower() or "same path" in out.lower()
+        assert not same_path.exists()
+
 
 @pytest.mark.integration
 class TestBundleFactsLibraryManifest:
