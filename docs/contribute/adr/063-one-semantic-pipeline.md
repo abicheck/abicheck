@@ -226,14 +226,28 @@
   **Phase 3's infrastructure and its planned follow-up migration have both
   landed, but D5's own literal premise — `compute_public_surface()` becomes
   a traversal *through the graph* — is not what the shipped closure walk
-  does, and that is not a loose end left for later; it is what three review
-  rounds concluded the correct design must not do (see immediately below).
+  does, and that is not a loose end left for later; it is what a
+  three-review-round investigation concluded the correct design must not
+  do (full account: `docs/contribute/known-gaps.md`, this section's own
+  single owner for that history — summarized, not repeated, below).
   Calling the phase "complete" would hide that from a status reader, so
-  this entry states it plainly instead: the graph exists, is populated, and
-  is queried elsewhere in this phase's own wiring (`public_entity_ids`
-  narrowing `surface_graph.py`'s root set), but the one traversal D5 names
-  as its defining case — is-this-declaration-public — deliberately never
-  reads `AbiSnapshot.surface_graph`/`GraphNode.attrs` at all.** A first
+  this entry states it plainly instead: `compute_public_surface()`/
+  `PublicSurfaceQuery` never reads `AbiSnapshot.surface_graph`/
+  `GraphNode.attrs` for the one traversal D5 names as its defining case —
+  is-this-declaration-public — at all, and neither does anything else in
+  production. `compare/surface_graph.py`'s `build_public_surface_facts()`,
+  the function that would stamp this phase's own node facts onto that
+  graph, has **no production caller** (confirmed by a repo-wide call-site
+  check); `_attach_header_graph()` deliberately never calls it either (see
+  the perf note above). What *does* run in production —
+  `PublicSurfaceQuery().resolve()` computing a plain `frozenset[EntityId]`,
+  threaded through `checker.compare()` as `public_entity_ids` to narrow the
+  *legacy, unrelated* `surface_graph.py` (root module) `SurfaceGraph`'s
+  root set — is a set membership check, not a graph query, and never
+  touches `AbiSnapshot.surface_graph` either. The Phase 3 evidence graph
+  exists and is persisted (via the shared `SourceGraphSummary` instance
+  `_attach_header_graph()` assigns to it), but nothing in this phase's own
+  production wiring queries it.** A first
   landing (thirteen slices, 2026-08-31)
   shipped the plumbing above without migrating `surface.py`'s own
   closure-walk traversal — `PublicSurfaceQuery` delegated to it
@@ -256,26 +270,17 @@
   `export_surface.py` at once and keeping it in either would have closed
   a real, `check_architecture.py`-detected import cycle.
 
-  That migration went through three review rounds before landing on a
-  design that never trusts `AbiSnapshot.surface_graph`/`GraphNode.attrs`
-  for the closure walk at all — full account in
-  `docs/contribute/known-gaps.md`. In short: round 1 read a graph node's
-  `referenced_identifiers`/`identifiers_collision` attrs as stamped once
-  at graph-build time; round 2 (Codex, PR #979) found an attached-but-
-  unenriched graph (the ordinary, default dump path) silently read as
-  "references nothing," and the enrichment fix that closed it introduced
-  both a measured 30-100%+ performance regression and a second security
-  hazard (a stale/adversarial persisted fact could outrank a freshly
-  recomputed one through `merge_graph_facts`'s confidence precedence).
-  The shipped fix removes the graph from the computation entirely:
-  `compare/surface_graph.py`'s `referenced_identifiers_by_node()` — a
-  pure function of the snapshot's own declarations, computed before any
+  That migration went through three review rounds before landing on this
+  design — `docs/contribute/known-gaps.md` owns the full account (why the
+  first two designs read the graph and each turned out unsafe: a
+  never-enriched-in-production graph silently misread as "references
+  nothing," then a fix for that introducing both a measured performance
+  regression and a confidence-precedence security hazard). The shipped
+  fix stopped reading the graph for this decision at all:
+  `compare/surface_graph.py`'s `referenced_identifiers_by_node()` — a pure
+  function of the snapshot's own declarations, computed before any
   `GraphNode` is built — is what `policy/public_surface_closure.py` and
-  `export_surface.py`'s closure-walk entry points call directly, never
-  touching `snap.surface_graph` at all. Confirmed resolved by CI's own
-  `Performance` workflow "Baseline regression (PR vs base)" job (PR #979,
-  commit `5544540`, `conclusion: success`), not just an ad hoc local
-  timing.
+  `export_surface.py`'s closure-walk entry points call directly.
 
   **Against D5's own text, three things do not match "one authoritative
   graph, queried by traversal," and only two of them are this phase's
@@ -307,12 +312,18 @@
   regression is not evidence the graph traversal itself shipped, since the
   shipped design does not perform one for the closure walk.
 
-  **Bottom line for a status reader:** this phase's infrastructure landed,
-  is exercised in production (`public_entity_ids` narrowing), and its own
-  planned surface.py/export_surface.py migration is done — but D5's central
-  claim, that `compute_public_surface()` becomes a graph traversal, is not
-  what shipped for the one traversal D5 names as its motivating case. That
-  is a considered, reviewed departure from the decision as written, not an
+  **Bottom line for a status reader:** this phase's infrastructure landed
+  and its own planned `surface.py`/`export_surface.py` migration is done,
+  but neither means D5 shipped as written. `public_entity_ids` — the one
+  piece of this phase's output that does run in production — is a plain
+  `frozenset[EntityId]` narrowing the *legacy* `surface_graph.py`
+  `SurfaceGraph`'s root set, not a query against `AbiSnapshot.
+  surface_graph`; that Phase 3 evidence graph is built and persisted but
+  has no production reader at all (`build_public_surface_facts()` has no
+  caller outside its own tests). D5's central claim — that
+  `compute_public_surface()` becomes a graph traversal — is not what
+  shipped for the one traversal D5 names as its motivating case. That is a
+  considered, reviewed departure from the decision as written, not an
   oversight — recorded here rather than papered over with "complete," per
   this same document's own governing invariant against one concept getting
   two disagreeing descriptions. If D5's authoritative-graph requirement is
