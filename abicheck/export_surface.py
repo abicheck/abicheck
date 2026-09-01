@@ -28,11 +28,11 @@ second domain:
   directory, the Mach-O export trie) -- observed evidence, never a
   header-origin classification;
 - **closure** is the transitive walk over the *raw* record/enum/typedef graph
-  from those roots' signatures, reusing :mod:`abicheck.surface`'s own
-  :func:`~abicheck.surface._walk_type_closure` verbatim so the two domains
-  cannot drift apart in how they follow fields, bases, and typedef targets.
-  Only the *seeds* differ, which is precisely the difference ADR-049 D2 draws
-  between the two modes.
+  from those roots' signatures, reusing
+  :func:`~abicheck.policy.public_surface_closure._walk_type_closure` verbatim
+  (a real ``AbiSnapshot.surface_graph`` traversal, ADR-063 Phase 3 D5) so the
+  two domains cannot drift apart in how they follow fields, bases, and
+  typedef targets. Only the *seeds* differ, the difference ADR-049 D2 draws.
 
 No header-origin filtering happens anywhere here: a private-header type
 reached from a real export *is* inside the export closure, and a
@@ -67,7 +67,7 @@ from .name_classification import (
     STDLIB_TYPE_NAMESPACE_PREFIXES,
     is_cxx_runtime_library,
 )
-from .surface import (
+from .policy.public_surface import (
     _IDENT_RE,
     _TYPE_NOISE,
     PublicSurface,
@@ -75,7 +75,10 @@ from .surface import (
     _is_real_type,
     _symbol_keys,
     _type_identifiers,
+)
+from .policy.public_surface_closure import (
     _walk_type_closure,
+    resolve_surface_graph_nodes,
 )
 from .type_reachability import (
     _namespace_suffix_spellings,
@@ -1299,7 +1302,10 @@ def compute_export_surface(snap: AbiSnapshot) -> ExportSurface:
         ),
     )
 
-    _walk_type_closure(snap, scratch, record_by_name, enum_by_name, roots.seed_types)
+    graph_nodes_by_id = resolve_surface_graph_nodes(snap)
+    _walk_type_closure(
+        graph_nodes_by_id, snap, scratch, record_by_name, enum_by_name, roots.seed_types
+    )
     surface.export_types = set(scratch.public_types)
     # After the walk, so only edges the closure actually reached are scanned.
     surface.unresolved_type_edges = _unresolved_type_edges(

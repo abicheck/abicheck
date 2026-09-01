@@ -13,14 +13,22 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""``policy.public_surface.PublicSurfaceQuery`` (ADR-063 Phase 3 D5)."""
+"""``policy.public_surface_query.PublicSurfaceQuery`` (ADR-063 Phase 3 D5)."""
 
 from __future__ import annotations
 
-from abicheck.model import AbiSnapshot, Function, RecordType, Variable, Visibility
+from abicheck.model import (
+    AbiSnapshot,
+    Function,
+    Param,
+    RecordType,
+    Variable,
+    Visibility,
+)
 from abicheck.model.identity import entity_id_for_function, entity_id_for_variable
-from abicheck.policy.public_surface import PublicSurfaceQuery, resolve_public_surface
-from abicheck.surface import PublicSurface
+from abicheck.policy.public_surface import PublicSurface
+from abicheck.policy.public_surface_closure import resolve_public_surface
+from abicheck.policy.public_surface_query import PublicSurfaceQuery
 
 
 def _fn(name, mangled, vis=Visibility.PUBLIC, entity_id=None):
@@ -167,6 +175,38 @@ class TestPublicSurfaceQueryResolve:
         ids = PublicSurfaceQuery.resolve(snap)
         assert eid_fn in ids
         assert eid_rec in ids
+
+
+class TestGraphNodeCollisionDoesNotBlurReachability:
+    """A public, narrow-signature overload and a hidden, private-type-taking
+    overload sharing one demangled name with no mangled name and no
+    resolved ``entity_id`` collide onto the *same* approximate graph node id
+    (``compare.surface_graph``'s own documented fallback). The public
+    overload's own resolved reachability must not inherit the hidden
+    sibling's private parameter type merely because both collapsed onto one
+    graph node -- confirmed to fail against a version of the traversal that
+    trusts the graph's per-node union unconditionally instead of falling
+    back to each declaration's own signature on a detected collision."""
+
+    def test_public_overload_does_not_inherit_hidden_siblings_private_type(
+        self,
+    ) -> None:
+        public_overload = Function(
+            name="over", mangled="", return_type="int", visibility=Visibility.PUBLIC
+        )
+        hidden_overload = Function(
+            name="over",
+            mangled="",
+            return_type="int",
+            params=[Param(name="s", type="Secret *")],
+            visibility=Visibility.HIDDEN,
+        )
+        secret = RecordType(name="Secret", kind="struct")
+        snap = _snapshot(
+            functions=[public_overload, hidden_overload], types=[secret]
+        )
+        surf = resolve_public_surface(snap)
+        assert "Secret" not in surf.public_types
 
 
 class TestPublicSurfaceQueryResolvePublicDomain:

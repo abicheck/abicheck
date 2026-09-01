@@ -126,7 +126,7 @@ from .contract_relevance_types import (
 from .diff_cxx_rules import owner_class_of
 from .export_surface import ExportSurface, observed_exports_by_platform
 from .model import AbiSnapshot, EnumType, Function, RecordType, Visibility
-from .surface import (
+from .policy.public_surface import (
     PublicSurface,
     _index_surface_types,
     _symbol_keys,

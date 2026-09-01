@@ -257,3 +257,53 @@ class TestApproximateFallbackWhenEntityIdUnpopulated:
         assert len(decl_nodes) == 1
         assert len(type_nodes) == 1
         assert decl_nodes[0].id != type_nodes[0].id
+
+
+class TestReferencedIdentifiersAttr:
+    """``referenced_identifiers`` (ADR-063 Phase 3's follow-up traversal
+    migration): the union of every type-identifier string a declaration/
+    type's own signature/fields/bases/target names, cached on the node so
+    ``policy.public_surface`` can read it instead of re-parsing the same
+    strings a second time."""
+
+    def test_function_node_carries_its_own_referenced_identifiers(self) -> None:
+        fn = Function(
+            name="make", mangled="_Z4makev", return_type="Widget*", params=[]
+        )
+        snap = _snapshot(functions=[fn])
+        graph = SourceGraphSummary()
+        build_public_surface_facts(snap, graph)
+        decl_node = next(n for n in graph.nodes if n.kind == NODE_KIND_DECLARATION)
+        assert "Widget" in decl_node.attrs["referenced_identifiers"]
+
+    def test_record_node_unions_field_and_base_identifiers(self) -> None:
+        rec = RecordType(
+            name="Outer",
+            kind="struct",
+            qualified_name="Outer",
+            fields=[TypeField(name="i", type="Inner")],
+            bases=["Base"],
+        )
+        snap = _snapshot(types=[rec])
+        graph = SourceGraphSummary()
+        build_public_surface_facts(snap, graph)
+        type_node = next(n for n in graph.nodes if n.kind == NODE_KIND_TYPE)
+        assert {"Inner", "Base"} <= set(type_node.attrs["referenced_identifiers"])
+
+    def test_colliding_approximate_declarations_union_rather_than_drop(self) -> None:
+        # Two overloads sharing one demangled name with no resolved
+        # entity_id collide onto the same approximate declaration node id
+        # (this module's own documented fallback). Each references a
+        # different, otherwise-unrelated type; the merged node's
+        # referenced_identifiers must carry BOTH, not silently keep only
+        # whichever registration's fact won the generic cross-producer
+        # merge tie-break (the anti-hiding regression this precomputed
+        # union step exists to prevent).
+        overload_a = Function(name="f", mangled="_Z1fi", return_type="Alpha*")
+        overload_b = Function(name="f", mangled="_Z1fd", return_type="Beta*")
+        snap = _snapshot(functions=[overload_a, overload_b])
+        graph = SourceGraphSummary()
+        build_public_surface_facts(snap, graph)
+        decl_nodes = [n for n in graph.nodes if n.kind == NODE_KIND_DECLARATION]
+        assert len(decl_nodes) == 1  # confirms the collision actually occurred
+        assert {"Alpha", "Beta"} <= set(decl_nodes[0].attrs["referenced_identifiers"])

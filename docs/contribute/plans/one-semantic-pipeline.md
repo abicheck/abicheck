@@ -9574,7 +9574,76 @@ those facts back yet); `build_public_surface_facts()` stays available for
 a caller that does need them to populate the same shared instance
 explicitly.
 
-**Deliberately not landed.** `surface.py`'s closure-walk traversal and
+**Traversal migration landed (2026-09-01), for the public domain — the
+"deliberately not landed" scope directly below is now stale for that half
+and corrected here rather than silently rewritten (this section's own
+established convention).** `surface.py`'s closure-walk implementation
+(`_index_surface_types`/`_seed_public_roots`/`_walk_type_closure`/
+`_walk_exact_type_closure`/`_record_exact_identities`/
+`_record_nested_in_known_record`/`_record_is_confirmed_public_seed`, plus
+the `PublicSurface` result type itself) moved to a leaf module pair,
+`policy/public_surface.py` (the dataclass + `_index_surface_types`'
+indexing/bookkeeping) and `policy/public_surface_closure.py` (the actual
+walk, plus the real `resolve_public_surface()` entry point) — split purely
+to stay under the 800-line new-file production cap, not a design split.
+`surface.py`'s own copy of every one of those functions is **deleted**, not
+kept alongside; `compute_public_surface()` is now a thin wrapper delegating
+to `policy/public_surface_closure.py` (re-exporting `PublicSurface` for
+existing callers). `export_surface.py`'s own root-seeding (the
+`contract=exports` domain's export-table matching) is unchanged, but its
+final type-closure step calls the *same*, now-migrated `_walk_type_closure`
+it always reused "verbatim" from the header-domain implementation, so that
+domain's closure became graph-native for free, without its own separate
+migration. `PublicSurfaceQuery` itself moved to a third module,
+`policy/public_surface_query.py` — required because it is the one place
+that depends on both the closure module and `export_surface.py` at once,
+and `export_surface.py` now depends on the closure module too, so
+`PublicSurfaceQuery.resolve_export_domain` living inside that same module
+would have closed a real, `check_architecture.py`-detected import cycle
+(a *static*-analysis gate: a deferred, function-body-local import does not
+escape it, only a genuine restructuring does).
+
+The actual "traverse the graph" substitution is narrower than "operate on
+the graph's node/edge set directly" would suggest, for a reason found only
+once a first version of this migration shipped and a regression test
+caught it: `compare/surface_graph.py`'s own node ids can legitimately
+collapse two *distinct* declarations onto one id (two overloads sharing a
+demangled name with no mangled name and no resolved `entity_id` to tell
+them apart is the concrete, tested case) — and naively trusting a
+graph-node-keyed cache of "what does this id reference" for such a
+collision let a *public* overload appear to reference a *hidden* sibling's
+own private parameter type, which a `contract_replay.py` test designed to
+prove the opposite (that the private type stays `PROVEN_OUT_OF_CONTRACT`)
+correctly failed against. Unioning the colliding contributors — the
+over-keep direction that is safe for an *ambiguous type name* — is not safe
+for a *declaration identity* collision, because it attributes one
+declaration's reach to an unrelated one rather than merely widening a
+single declaration's own reach. Fixed by having `compare/surface_graph.py`
+flag such a node (`identifiers_collision`) and having the query fall back
+to recomputing that one declaration's own identifiers directly whenever the
+flag is set (`_referenced_identifiers_for_function`/`_for_variable`/
+`_for_record` in `policy/public_surface_closure.py`) — the pre-migration
+behavior, preserved exactly for the one case the graph's shared-node model
+cannot represent precisely. The declaration/type *indexing* itself
+(`_index_surface_types`, `ambiguous_type_names`, `origin_by_key`) was
+**not** re-pointed at the graph's node set for the identical structural
+reason — see `policy/public_surface.py`'s own module docstring.
+
+Deliberately still not migrated: `export_surface.py`'s own root-seeding
+(the export-table-matching logic itself, as opposed to the type-closure
+step it shares with the header domain) and
+`type_reachability.directly_referenced_stdlib_types()` (unchanged reason:
+reclassifying `type_reachability.py` into `policy` would introduce a
+genuine new `policy -> extract` violation), and `compare/surface_graph.py`'s
+node-id-namespace unification with `buildsource/header_graph.py`'s L5 ids
+remains open, exactly as the paragraph below already described. FP-rate
+gate and per-tier accuracy gate both show zero regression against this
+migration.
+
+**Deliberately not landed** (original text below, now correct only for
+the residuals named above — the "not deleted, delegates to both unchanged"
+framing no longer describes the public domain; see the corrected paragraph
+just above). `surface.py`'s closure-walk traversal and
 `export_surface.py`'s independent one are **not deleted** —
 `PublicSurfaceQuery` delegates to both unchanged rather than reimplementing
 either as a literal graph traversal. This was a scoped, documented risk
@@ -10942,20 +11011,26 @@ spellings — the type-kind id silently excluded from the root set, not
 attempted-and-failed — confirmed to fail against a version of
 `public_roots()` that maps every received id unconditionally.
 
-**Acceptance criteria.** `surface.py`'s own traversal implementation and
-`export_surface.py`'s independent closure walk are deleted, not kept
-alongside the graph query (the actual removal happens in Phase 10's
-checklist, but this phase's own PR is incomplete if it leaves both
-implementations live past one release). No second node/edge dataclass
-hierarchy exists anywhere in the repository after this phase —
-`compare/surface_graph.py` constructs `model.graph.GraphNode`/`GraphEdge`
-instances with its own kind vocabulary, the same way `buildsource/
-source_graph.py` already does, never a parallel type. The new
-`AbiSnapshot.surface_graph` field bumps `serialization.SCHEMA_VERSION`
-the same way Phase 0's `Fact[...]` fields do (a third, independent bump
-by this plan, on top of Phase 0's and Phase 7's — all three are additive
-and bump the same pre-existing `AbiSnapshot`/report-schema counters, not
-ADR-062's `ProjectSnapshot` schema). FP-rate gate shows no regression.
+**Acceptance criteria.** `surface.py`'s own traversal implementation is
+**deleted, not kept alongside the graph query** — landed 2026-09-01, see
+this phase's own "Traversal migration landed" paragraph above. `export_
+surface.py`'s independent closure walk is not a *second* implementation to
+separately delete: it always called `surface.py`'s `_walk_type_closure`
+verbatim rather than keeping its own copy, so once that one function
+migrated, both domains' closures did. What's still open there is narrower
+than "delete a closure walk" — `export_surface.py`'s own root-*seeding*
+(the export-table-matching logic, genuinely independent of the header
+domain) remains unmigrated, named explicitly as a residual rather than
+silently left. No second node/edge dataclass hierarchy exists anywhere in
+the repository after this phase — `compare/surface_graph.py` constructs
+`model.graph_facts.GraphNode`/`GraphEdge` instances with its own kind
+vocabulary, the same way `buildsource/source_graph.py` already does, never
+a parallel type. The new `AbiSnapshot.surface_graph` field bumps
+`serialization.SCHEMA_VERSION` the same way Phase 0's `Fact[...]` fields do
+(a third, independent bump by this plan, on top of Phase 0's and Phase 7's
+— all three are additive and bump the same pre-existing `AbiSnapshot`/
+report-schema counters, not ADR-062's `ProjectSnapshot` schema). FP-rate
+gate and per-tier accuracy gate both show no regression.
 
 ---
 

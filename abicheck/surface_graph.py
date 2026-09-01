@@ -247,7 +247,7 @@ def build_surface_graph(
 
     *public_entity_ids* (ADR-063 Phase 3 D5) narrows :meth:`SurfaceGraph.
     public_roots` to declarations resolved as public by
-    ``policy.public_surface.PublicSurfaceQuery`` for *this side* of a real
+    ``policy.public_surface_query.PublicSurfaceQuery`` for *this side* of a real
     two-snapshot comparison, instead of re-deriving ``Visibility.PUBLIC``
     from *snap* alone. ``None`` (every call site outside ``compare()``'s
     own pipeline) preserves the exact pre-Phase-3 behavior.

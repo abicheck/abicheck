@@ -58,6 +58,30 @@ or a CLI flag directly is in the wrong layer.
   shared function instead of independently re-assembling
   `compute_gate_decision`'s arguments from the result. New module, not a
   moved one — no flat shim exists or is needed.
+- `public_surface.py` / `public_surface_closure.py` — ADR-063 Phase 3 D5's
+  public-surface relevance query, split across two sibling leaf modules
+  purely to keep each under the 800-line new-file cap (mechanical
+  extraction, not a redesign): `public_surface.py` owns the `PublicSurface`
+  result dataclass and the declaration/type indexing (`_index_surface_types`
+  and its own origin/ambiguity bookkeeping); `public_surface_closure.py`
+  owns the actual closure-walk algorithm (`_seed_public_roots`/
+  `_walk_type_closure`/`_walk_exact_type_closure` and siblings) and the real
+  entry point, `resolve_public_surface()` — a literal traversal over
+  `AbiSnapshot.surface_graph` (`compare/surface_graph.py`'s evidence graph),
+  not the independent regex re-parse `surface.py`'s pre-migration
+  implementation used to be. Both are leaf modules with respect to
+  `surface.py`/`export_surface.py`: neither imports either of those, so both
+  (and `export_surface.py`'s own export-domain closure, which reuses
+  `_walk_type_closure` verbatim) can depend on this package without a cycle.
+  `surface.py` re-exports `PublicSurface` for its existing callers.
+- `public_surface_query.py` — `PublicSurfaceQuery`, the orchestrator on top
+  of the two modules above: the only place in this package that depends on
+  *both* `public_surface_closure.py` (the public-domain query) and
+  `export_surface.py` (the `contract=exports` domain's own root-seeding) at
+  once. Kept separate from `public_surface_closure.py` specifically because
+  that dependency pair would otherwise close a real import cycle
+  (`public_surface_closure.py -> export_surface.py -> public_surface.py` and
+  siblings) — see this module's own docstring for the full reasoning.
 
 ## Conventions
 
