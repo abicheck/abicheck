@@ -59,8 +59,10 @@ it describes *ownership and order*, never content.
 # `branches` are optional side reads hanging off a member (Tier 2's "go
 # deeper" pages): they must be >= the level of the page they hang from and
 # are otherwise outside the sequence's monotonicity check.
-# A page's level is declared once, in its own front matter; a tier's
-# `# floor:` comment only tells the reader of this file what to expect.
+# A page's level is declared once, in its own front matter. A tier's
+# `floor:` is a property of the tier, not a second declaration of any
+# page's level: every member must be >= it, so a whole tier cannot be
+# quietly downgraded while the sequence stays monotonic.
 # `paths:` are the hub's reading paths by role, as data, so the role table
 # is rendered from the same source as the ladder and checked against it.
 
@@ -73,7 +75,7 @@ sequences:
     tiers:
       - id: 0
         title: Orientation
-        # floor: beginner
+        floor: beginner
         members:
           - learn/abi-series/abi-in-5-minutes.md
           - learn/how-a-break-shows-up.md
@@ -81,14 +83,14 @@ sequences:
           - learn/abi-series/glossary.md
       - id: 1
         title: Foundations
-        # floor: beginner — first member; last member is intermediate
+        floor: beginner            # first member; last member is intermediate
         members:
           - learn/abi-series/00-product-contract.md
           - learn/abi-series/01-foundations.md
           - learn/abi-surface.md
       - id: 2
         title: Mechanics
-        # floor: intermediate
+        floor: intermediate
         members:
           - learn/abi-series/02-symbol-contracts.md
           - learn/abi-series/03-type-layout.md
@@ -103,7 +105,7 @@ sequences:
           - learn/abi-series/06-transitive-breaks.md
       - id: 3
         title: Define the contract
-        # floor: intermediate
+        floor: intermediate
         members:
           - learn/compatibility-direction.md
           - learn/consumer-models.md
@@ -113,7 +115,7 @@ sequences:
           - learn/contract-aware-compatibility.md   # member of `concepts`
       - id: 4
         title: Evidence and detection
-        # floor: intermediate
+        floor: intermediate
         members:
           - learn/abi-series/08-detection.md
           - learn/assurance-methods.md
@@ -122,7 +124,7 @@ sequences:
           - learn/what-each-level-sees.md
       - id: 5
         title: Practice
-        # floor: intermediate
+        floor: intermediate
         members:
           - learn/where-in-the-pipeline.md
           - learn/surface-growth.md
@@ -132,12 +134,12 @@ sequences:
           - use/baseline-management.md              # tool track, case 1
       - id: 6
         title: Design
-        # floor: intermediate
+        floor: intermediate
         members:
           - learn/abi-series/07-designing-for-stability.md
       - id: 7
         title: At scale
-        # floor: advanced
+        floor: advanced
         members:
           - learn/products-not-libraries.md
           - learn/template-heavy-libraries.md
@@ -147,7 +149,7 @@ sequences:
           - learn/packages-and-consumers.md
       - id: 8
         title: Beyond static ABI
-        # floor: advanced
+        floor: advanced
         members:
           - learn/behavioral-compatibility.md
           - learn/data-wire-compatibility.md
@@ -159,13 +161,13 @@ sequences:
     tiers:
       - id: c1
         title: Reading a result
-        # floor: intermediate
+        floor: intermediate
         members:
           - learn/verdicts.md
           - learn/contract-aware-compatibility.md
       - id: c2
         title: The evidence model
-        # floor: intermediate
+        floor: intermediate
         members:
           - learn/evidence-and-detectability.md
           - learn/what-each-level-sees.md
@@ -173,7 +175,7 @@ sequences:
           - learn/limitations.md
       - id: c3
         title: Internals
-        # floor: advanced
+        floor: advanced
         members:
           - learn/architecture.md
           - learn/build-source-data.md
@@ -212,11 +214,14 @@ generator only renders):
   each page's front-matter `level:` is ≥ the previous member's. Branches
   are checked only against the page they hang from. Links are never
   checked.
-- **Level is declared once.** A page's `level:` lives in its front matter
-  and nowhere else; the ladder file carries no level field. A tier's
-  `# floor:` comment is documentation for the reader of the YAML; the
-  check reads the real value from each page and fails if a member's level
-  is below the floor (a tier may span two levels, as tier 1 does).
+- **Level is declared once; floors are data.** A page's `level:` lives in
+  its front matter and nowhere else; the ladder file never states a page's
+  level. Each tier carries a `floor:` (a real key — a comment would be
+  discarded by `yaml.safe_load`, leaving nothing to check), and the check
+  reads every member's real level and fails if one is below its tier's
+  floor. Monotonicity alone would let a whole advanced tier be downgraded
+  to intermediate without failing; the floor closes that. A tier may span
+  two levels, as tier 1 does.
 - **Paths are walks up the ladder.** Every `paths:` entry names only
   members or branches; walking its `pages`, the tier position is
   non-decreasing within a sequence, and an entry continues into `concepts`
@@ -335,8 +340,8 @@ changes in Phase 1 (plan §6, Phase 1, fourth bullet).
 | `abi-series/03-type-layout.md` | — | intermediate | edu 2 | add level; hand C++ class layout to owner (C3) |
 | `abi-series/04-cpp-abi.md` | — | intermediate | edu 2 | add level; shorten three summaries, §7 → summary (C3) |
 | `class-layout-abi.md` | advanced | advanced | edu 2 branch of Part 4 | footer; nav row moves after Part 6 (A2b); becomes `class-layout` owner (C3) |
-| `exception-unwinding-abi.md` | advanced | advanced | edu 2 branch of Part 4 | footer; one command, cases 130/131 (C15) |
-| `modern-cpp-toolchain-hazards.md` | advanced | advanced | edu 2 branch of Part 4 | footer |
+| `exception-unwinding-abi.md` | advanced | advanced | edu 2 branch of Part 4 | footer; one command, `case130` (C15) |
+| `modern-cpp-toolchain-hazards.md` | advanced | advanced | edu 2 branch of Part 4 | footer; `case131` on the RTTI paragraph (C15) |
 | `abi-series/05-linker-elf.md` | — | intermediate | edu 2 | add level |
 | `msvc-pe-abi-model.md` | intermediate | advanced | edu 2 branch of Part 5 | reconcile; Windows worked example (C12) |
 | `abi-series/06-transitive-breaks.md` | intermediate | intermediate | edu 2 | (already has front matter) |
@@ -525,6 +530,7 @@ checks that each path exists. The review-trigger script
       # no entries today; add:
       - learn/where-in-the-pipeline.md
       - learn/products-not-libraries.md
+      - learn/rollout-and-governance.md   # B4 summarises the migration scenario (S26/S27, a task page here)
   impact-analysis:
     # reference_page stays reference/source-graph-schema.md; C10 moves
     # the field prose there, not to a new page
@@ -773,7 +779,7 @@ scope" records that as a possible tool gap).
 | Field | |
 |---|---|
 | Path / tier / level | `learn/rollout-and-governance.md` · edu 5 · intermediate |
-| Ownership | new cross-cutting topic `compatibility-governance`; `allowed_summaries` of `policies`, `suppressions`, and the migration scenario's owner |
+| Ownership | new cross-cutting topic `compatibility-governance`; `allowed_summaries` of `policies`, `suppressions`, and `project-integration` (the migration scenario S26/S27 is one of its task pages) |
 | Reader can… | take a project from no check to a gating check without a flag day, and write a suppression or policy override that says *who accepted what, until when* |
 | Prerequisites | B2, Verdicts |
 | Footer | ← Report the surface · Tier 5 · Triage a suspicious finding → |
@@ -891,7 +897,12 @@ Sections:
    header roots and compile contexts for products whose libraries share
    one include tree.
 7. **Fan-out and fan-in** — one check per target, `aggregate` folding
-   the reports into one gate; `project plan` as the declarative form.
+   the reports into one gate. `aggregate` needs to know the expected
+   target set: `--run-plan plan.json` from `project plan` (the
+   declarative form, recommended), `--manifest`, or an explicit
+   `--discovered-only` to gate on whatever reports are present; without
+   one of the three it exits 64 before reading a report, and the page
+   says why (a missing report must be a failure, not an absence).
 8. **What the bundle layer cannot do today** — ELF-only cross-library
    findings (per-library results everywhere); bundle checks at binary
    depth only in the declarative topology (README's migration blockers,
@@ -899,7 +910,8 @@ Sections:
 
 Runs: the directory compare; a `--manifest` compare; the
 `--bundle-facts-out` / `--old-bundle-facts` pair; `abicheck aggregate
-reports/`. Cases: 84, 90–93, 151 (provider matrix), 162 (symbol owner
+reports/ --run-plan plan.json` (and the `--discovered-only` form once,
+labelled as the opt-out). Cases: 84, 90–93, 151 (provider matrix), 162 (symbol owner
 changed). Links, not restatements: flag reference (`use/multi-binary.md`),
 aggregate axes (`use/aggregate-reports.md`), topology schema
 (`reference/project-targets-schema.md`). Done when: `topics.yaml` shows
@@ -1215,7 +1227,9 @@ contract (`case118`).
   illustrates.
 - `exception-unwinding-abi.md`: `abicheck compare old.so new.so
   --build-info old=build-old/ --build-info new=build-new/` showing the L3
-  exceptions-mode flip (`case130`, `case131`).
+  exceptions-mode flip (`case130`). `case131` is the RTTI-mode flip, not
+  an exceptions one; it goes to `modern-cpp-toolchain-hazards.md`'s
+  `-fno-rtti` paragraph, which today cites no case.
 - `02-symbol-contracts.md`: one L0 compare at the top of §1 (`case01`).
 - `assurance-methods.md`: no scanner command (by design); instead, one
   concrete non-static check per row (a consumer-rebuild job, a
@@ -1346,7 +1360,7 @@ the dependencies between artifacts.
 | P6 | 3 | B4 Rollout and governance, B5 Triage a suspicious finding | P5 |
 | P7 | 3 | B6 Products, not libraries (with the `bundle-analysis` re-registration), B7 Template-heavy libraries | P3 |
 | P8 | 3 | B8 How system libraries stay compatible, B9 Packages and consumers, C13 | P7 |
-| P9 | 4 | C1, C4, C12, C14, C15, C16 (worked examples and commands on existing pages) | P3 |
+| P9 | 4 | C1, C4, C12, C14, C15, C16 (worked examples and commands on existing pages) | P3, P5, P7 (C4 links B2 and B6, so both must exist for the strict build) |
 
 P4–P9 can proceed in parallel once their dependency has merged; P9 is
 the only one whose entries are each separable into their own smaller PR
