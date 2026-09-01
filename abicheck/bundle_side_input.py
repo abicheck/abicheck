@@ -463,3 +463,28 @@ def compare_release_against_bundle_facts(
         policy_file=policy_file,
         new_signature_evidence=dict(new_signature_evidence),
     )
+
+
+def known_libraries_for_new_side(
+    new_dir: Path, *, include_private_dso: bool = False
+) -> set[str]:
+    """The canonical library-name set a NEW-side directory resolves to.
+
+    The same primitives (and the same ``include_private_dso`` semantics)
+    :func:`compare_release_against_bundle_facts` itself uses to build
+    ``new_map`` above -- exposed separately so a caller (G38 Phase 17's
+    ``--bundle-facts-library-manifest`` validation, ``compare_bundle_facts.
+    dispatch()``) can validate a per-library override manifest's library
+    names *before* running the real comparison, without re-deriving this
+    resolution independently and risking drift. Lives here rather than in
+    the calling ``frontends``-classified module because ``package.
+    discover_shared_libraries``/``workflows.extraction.build_match_map`` are
+    `extract`-classified, which `frontends` may not import directly
+    (`may_import: [model, workflows, report]`) -- this module already may.
+    """
+    from .package import discover_shared_libraries
+    from .workflows.extraction import build_match_map
+
+    new_files = discover_shared_libraries(new_dir, include_private=include_private_dso)
+    new_map, _match_warnings = build_match_map(new_files)
+    return set(new_map)

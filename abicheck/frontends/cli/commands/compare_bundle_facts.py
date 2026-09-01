@@ -97,6 +97,37 @@ def _resolve_new_side_headers_includes(
     return headers, includes
 
 
+def _load_library_overrides(
+    manifest_path: Path, *, known_libraries: set[str]
+) -> tuple[dict[str, list[Path]], dict[str, list[Path]], dict[str, Any]]:
+    """Load and validate ``--bundle-facts-library-manifest``.
+
+    Raises :class:`~abicheck.bundle_facts_library_overrides.
+    BundleFactsLibraryOverridesError` (a ``ValueError`` subclass, caught
+    alongside every other malformed-input case by ``dispatch()``'s own
+    ``except (SnapshotError, ValueError, OSError)`` clause) on a structurally
+    invalid manifest, an unrecognized key, or a library name outside
+    *known_libraries*.
+    """
+    import yaml
+
+    from ....bundle_facts_library_overrides import (
+        BundleFactsLibraryOverridesError,
+        parse_bundle_facts_library_overrides,
+    )
+
+    try:
+        raw = yaml.safe_load(manifest_path.read_text(encoding="utf-8"))
+    except yaml.YAMLError as exc:
+        raise BundleFactsLibraryOverridesError(
+            f"--bundle-facts-library-manifest {manifest_path}: invalid YAML/JSON: {exc}"
+        ) from exc
+    overrides = parse_bundle_facts_library_overrides(
+        raw if raw is not None else {}, known_libraries=known_libraries
+    )
+    return overrides.headers, overrides.includes, overrides.compile
+
+
 def dispatch(*, compile_context: Any, **kwargs: Any) -> None:
     """Handle a ``compare OLD_FACTS NEW_DIR --old-bundle-facts`` invocation.
 
@@ -132,9 +163,11 @@ def dispatch(*, compile_context: Any, **kwargs: Any) -> None:
     # (AGENTS.md: never extend that allowlist reactively).
     import importlib
 
-    compare_release_against_bundle_facts = importlib.import_module(
-        "abicheck.bundle_side_input"
-    ).compare_release_against_bundle_facts
+    _bundle_side_input = importlib.import_module("abicheck.bundle_side_input")
+    compare_release_against_bundle_facts = (
+        _bundle_side_input.compare_release_against_bundle_facts
+    )
+    known_libraries_for_new_side = _bundle_side_input.known_libraries_for_new_side
     from ....cli_compare_release_helpers import _exit_compare_release
     from ....cli_params import _load_suppression_and_policy
     from .compare_bundle_facts_rejections import reject_unsupported_options
@@ -228,11 +261,34 @@ def dispatch(*, compile_context: Any, **kwargs: Any) -> None:
                     headers = [header_dir]
                 includes = includes + _discover_include_roots(header_dir)
 
+            per_library_headers: dict[str, list[Path]] | None = None
+            per_library_includes: dict[str, list[Path]] | None = None
+            per_library_compile: dict[str, Any] | None = None
+            manifest_path = kwargs.get("bundle_facts_library_manifest")
+            if manifest_path is not None:
+                # G38 Phase 17: known_libraries is derived from the same
+                # primitives compare_release_against_bundle_facts() itself
+                # uses on this identical lib_dir, so a manifest entry naming
+                # a library outside the bundle is a hard, immediate error
+                # instead of silently never being looked up.
+                include_private_dso = bool(kwargs.get("include_private_dso", False))
+                known_libraries = known_libraries_for_new_side(
+                    lib_dir, include_private_dso=include_private_dso
+                )
+                per_library_headers, per_library_includes, per_library_compile = (
+                    _load_library_overrides(
+                        Path(manifest_path), known_libraries=known_libraries
+                    )
+                )
+
             result = compare_release_against_bundle_facts(
                 old_facts_path,
                 lib_dir,
                 headers=headers or None,
                 includes=includes or None,
+                per_library_headers=per_library_headers,
+                per_library_includes=per_library_includes,
+                per_library_compile=per_library_compile,
                 header_backend=header_backend,
                 compile=compile_context,
                 new_version=kwargs.get("new_version", "new"),

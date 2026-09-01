@@ -35,6 +35,7 @@ OPTION_SET_SNAPSHOT: dict[str, tuple[str, ...]] = {
         "--audit-suppressions",
         "--btf",
         "--bundle-cohort",
+        "--bundle-facts-library-manifest",
         "--bundle-facts-out",
         "--bundle-system-providers",
         "--compiler",

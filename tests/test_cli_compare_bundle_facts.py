@@ -472,3 +472,148 @@ class TestCompareOldBundleFacts:
         assert code == 0, out
         assert not (tmp_path / "evil.json").exists()
         assert (output_dir / "evil.json").exists()
+
+
+@pytest.mark.integration
+class TestBundleFactsLibraryManifest:
+    """``--bundle-facts-library-manifest`` (G38 Phase 17): per-library
+    header/include/compile-context overrides for a mixed-toolchain bundle."""
+
+    def test_rejected_without_old_bundle_facts(self, tmp_path: Path) -> None:
+        old = tmp_path / "old.json"
+        old.write_text("{}")
+        new = tmp_path / "new.json"
+        new.write_text("{}")
+        manifest = tmp_path / "manifest.yaml"
+        manifest.write_text("{}")
+
+        code, out = _invoke(
+            "compare",
+            str(old),
+            str(new),
+            "--bundle-facts-library-manifest",
+            str(manifest),
+        )
+
+        assert code == 64, out
+        assert "--old-bundle-facts" in out
+
+    def test_unknown_library_name_is_rejected(self, tmp_path: Path) -> None:
+        old_dir = tmp_path / "old"
+        new_dir = tmp_path / "new"
+        old_dir.mkdir()
+        new_dir.mkdir()
+        body = "int add(int a, int b) { return a + b; }\n"
+        _build_so(old_dir, "libreal.so", body)
+        _build_so(new_dir, "libreal.so", body)
+        facts_path = _write_old_facts(
+            tmp_path, old_dir, old_dir / "libreal.so", "libreal.so"
+        )
+        manifest = tmp_path / "manifest.yaml"
+        manifest.write_text("typo_lib.so:\n  headers: []\n")
+
+        code, out = _invoke(
+            "compare",
+            str(facts_path),
+            str(new_dir),
+            "--old-bundle-facts",
+            "--include-system-declarations",
+            "--bundle-facts-library-manifest",
+            str(manifest),
+            "--format",
+            "json",
+        )
+
+        assert code == 1, out
+        assert "typo_lib.so" in out
+        assert "not a library in this bundle" in out
+
+    def test_malformed_manifest_is_a_clean_error(self, tmp_path: Path) -> None:
+        old_dir = tmp_path / "old"
+        new_dir = tmp_path / "new"
+        old_dir.mkdir()
+        new_dir.mkdir()
+        body = "int add(int a, int b) { return a + b; }\n"
+        _build_so(old_dir, "libreal.so", body)
+        _build_so(new_dir, "libreal.so", body)
+        facts_path = _write_old_facts(
+            tmp_path, old_dir, old_dir / "libreal.so", "libreal.so"
+        )
+        manifest = tmp_path / "manifest.yaml"
+        manifest.write_text("libreal.so: [not, a, mapping]\n")
+
+        code, out = _invoke(
+            "compare",
+            str(facts_path),
+            str(new_dir),
+            "--old-bundle-facts",
+            "--include-system-declarations",
+            "--bundle-facts-library-manifest",
+            str(manifest),
+            "--format",
+            "json",
+        )
+
+        assert code == 1, out
+        assert "must be a mapping" in out
+
+    def test_per_library_headers_reach_compare_release_against_bundle_facts(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Direct kwarg-forwarding check, mirroring
+        ``TestCompareReleaseAgainstBundleFactsResolutionUnit``'s style in
+        ``test_bundle_side_input.py`` -- proves the manifest's parsed maps
+        reach the real Python-API entry point unchanged, without needing a
+        second toolchain to prove a resulting finding differs (Phase 17's
+        own "Testing bar" text; the end-to-end ABI-difference case is left
+        to the Python-API layer's own ``TestCompareReleaseAgainstBundleFacts``,
+        which already covers real per-library header/compile forwarding)."""
+        import abicheck.bundle_side_input as bundle_side_input_mod
+
+        old_dir = tmp_path / "old"
+        new_dir = tmp_path / "new"
+        old_dir.mkdir()
+        new_dir.mkdir()
+        body = "int add(int a, int b) { return a + b; }\n"
+        _build_so(old_dir, "libreal.so", body)
+        _build_so(new_dir, "libreal.so", body)
+        facts_path = _write_old_facts(
+            tmp_path, old_dir, old_dir / "libreal.so", "libreal.so"
+        )
+        header_dir = tmp_path / "libreal_headers"
+        header_dir.mkdir()
+        (header_dir / "libreal.h").write_text("int add(int a, int b);\n")
+        manifest = tmp_path / "manifest.yaml"
+        manifest.write_text(f"libreal.so:\n  headers:\n    - {header_dir}\n")
+
+        captured: dict[str, object] = {}
+        real = bundle_side_input_mod.compare_release_against_bundle_facts
+
+        def _spy(*args: object, **kwargs: object):
+            captured.update(kwargs)
+            return real(*args, **kwargs)
+
+        # dispatch() resolves this function via importlib.import_module at
+        # call time (see its own docstring for why) rather than a static
+        # import, so patching the attribute on the real module it looks up
+        # is what actually takes effect here.
+        monkeypatch.setattr(
+            bundle_side_input_mod, "compare_release_against_bundle_facts", _spy
+        )
+
+        code, out = _invoke(
+            "compare",
+            str(facts_path),
+            str(new_dir),
+            "--old-bundle-facts",
+            "--include-system-declarations",
+            "--bundle-facts-library-manifest",
+            str(manifest),
+            "--format",
+            "json",
+        )
+
+        assert code == 0, out
+        assert captured["per_library_headers"] == {"libreal.so": [header_dir]}
+        assert captured["per_library_includes"] == {}
+        assert captured["per_library_compile"] == {}
