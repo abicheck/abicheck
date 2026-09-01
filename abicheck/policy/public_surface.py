@@ -40,7 +40,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from ..model.vocabulary import ScopeOrigin
 
@@ -314,3 +314,33 @@ def _index_surface_types(
     return record_by_name, enum_by_name
 
 
+# ── Back-compat re-export shim (lazy, to avoid an import cycle) ─────────────
+# Before this migration, `resolve_public_surface`/`PublicSurfaceQuery` lived
+# directly in this module (this file's own prior docstring called it "the
+# new, forward-facing entry point every Phase 3 consumer threads through").
+# They moved to `public_surface_closure.py`/`public_surface_query.py` when
+# the actual closure-walk algorithm and the orchestrator were split out.
+# A *static* `from .public_surface_closure import resolve_public_surface` /
+# `from .public_surface_query import PublicSurfaceQuery` here would form a
+# `public_surface -> public_surface_closure -> public_surface` (and
+# `-> public_surface_query -> export_surface -> public_surface_closure`)
+# import cycle -- both sibling modules import from *this* one. This
+# module-level `__getattr__` (PEP 562) resolves the two names lazily via
+# `importlib.import_module` instead (a runtime call, not a static import
+# edge), preserving the historical path `from abicheck.policy.public_surface
+# import resolve_public_surface, PublicSurfaceQuery` (Codex review, PR #979)
+# without coupling the three modules. New code should import from
+# `public_surface_closure`/`public_surface_query` directly.
+_MOVED_REEXPORTS = {
+    "resolve_public_surface": "abicheck.policy.public_surface_closure",
+    "PublicSurfaceQuery": "abicheck.policy.public_surface_query",
+}
+
+
+def __getattr__(name: str) -> Any:
+    module_name = _MOVED_REEXPORTS.get(name)
+    if module_name is not None:
+        import importlib
+
+        return getattr(importlib.import_module(module_name), name)
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

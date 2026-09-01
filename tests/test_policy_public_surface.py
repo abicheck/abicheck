@@ -308,3 +308,37 @@ class TestPublicSurfaceQueryResolveExportDomain:
         snap = _snapshot(functions=[_fn("f", "_Z1fv")])
         result = PublicSurfaceQuery.resolve_export_domain(snap)
         assert isinstance(result, ExportSurface)
+
+
+class TestPublicSurfaceBackCompatReexports:
+    """``resolve_public_surface``/``PublicSurfaceQuery`` historically lived
+    directly in ``policy.public_surface`` before this migration split them
+    into sibling modules -- the lazy ``__getattr__`` shim at the bottom of
+    that module must keep the historical import path resolving (Codex
+    review, PR #979)."""
+
+    def test_resolve_public_surface_resolves_via_the_old_import_path(self) -> None:
+        import abicheck.policy.public_surface as old_path
+        from abicheck.policy.public_surface_closure import (
+            resolve_public_surface as moved,
+        )
+
+        assert old_path.resolve_public_surface is moved
+
+    def test_public_surface_query_resolves_via_the_old_import_path(self) -> None:
+        import abicheck.policy.public_surface as old_path
+        from abicheck.policy.public_surface_query import (
+            PublicSurfaceQuery as moved,
+        )
+
+        assert old_path.PublicSurfaceQuery is moved
+
+    def test_unknown_attribute_still_raises_attribute_error(self) -> None:
+        import abicheck.policy.public_surface as old_path
+
+        try:
+            old_path.definitely_not_a_real_attribute
+        except AttributeError:
+            pass
+        else:
+            raise AssertionError("expected AttributeError")
