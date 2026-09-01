@@ -395,6 +395,13 @@ def _layer_for(
                 return name
         for legacy_path in layer.get("legacy_paths", []):
             legacy_module = legacy_path.removesuffix(".py").replace("/", ".")
+            # A package's own `__init__.py` is imported under its package
+            # name, not `<package>.__init__` -- `import abicheck.policies`
+            # never produces the latter. Without this, a legacy_paths entry
+            # naming a package `__init__.py` (e.g. "abicheck/policies/
+            # __init__.py") could never match that package's own import
+            # target, silently leaving it unclassified.
+            legacy_module = legacy_module.removesuffix(".__init__")
             if module == legacy_module or module.startswith(legacy_module + "."):
                 return name
     return None

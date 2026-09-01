@@ -393,7 +393,7 @@ def resolve_bundle_policy_file(
     sibling ``cli_compare_release.py`` -- are pinned at a no-growth line-
     count baseline (``architecture/debt.yaml``, ADR-061); this module isn't.
     """
-    from .cli_params import _load_suppression_and_policy
+    from .frontends.cli.options.params import _load_suppression_and_policy
 
     _, pf = _load_suppression_and_policy(suppress, policy, policy_file_path)
     if application is not None:

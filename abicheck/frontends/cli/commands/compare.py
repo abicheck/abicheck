@@ -70,15 +70,15 @@ from ....cli_options import (
     two_sided_input_options,
     verbose_option,
 )
-from ....cli_params import (
-    SIDED_EXISTING_PATH_PARAM,
-    SIDED_PATH_PARAM,
-    _load_suppression_and_policy as _load_suppression_and_policy,  # noqa: F401  — re-exported to keep cli import sites (test suite) stable
-)
 from ....cli_resolve import (
     _normalize_binary_input,
 )
 from ....frontends.cli import help as cli_help
+from ..options.params import (
+    SIDED_EXISTING_PATH_PARAM,
+    SIDED_PATH_PARAM,
+    _load_suppression_and_policy as _load_suppression_and_policy,  # noqa: F401  — re-exported to keep cli import sites (test suite) stable
+)
 
 if TYPE_CHECKING:
     pass

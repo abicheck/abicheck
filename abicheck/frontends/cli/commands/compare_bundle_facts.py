@@ -136,7 +136,7 @@ def dispatch(*, compile_context: Any, **kwargs: Any) -> None:
         "abicheck.bundle_side_input"
     ).compare_release_against_bundle_facts
     from ....cli_compare_release_helpers import _exit_compare_release
-    from ....cli_params import _load_suppression_and_policy
+    from ..options.params import _load_suppression_and_policy
     from .compare_bundle_facts_rejections import reject_unsupported_options
 
     reject_unsupported_options(kwargs)

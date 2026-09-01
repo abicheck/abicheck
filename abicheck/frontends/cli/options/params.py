@@ -13,7 +13,16 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Shared custom Click parameter types for the abicheck CLI."""
+"""Shared custom Click parameter types for the abicheck CLI.
+
+Physically migrated from the flat ``abicheck/cli_params.py`` (ADR-061 Phase
+4): the module was already classified ``frontends`` via ``legacy_paths``, so
+this move is relocation only, not a reclassification. Not a documented
+public Python API path (absent from ``docs/reference/python-api-reference.md``
+and ``service.__all__``), so migration rule 3 applies without a facade —
+every internal caller now imports from here directly.
+"""
+
 from __future__ import annotations
 
 from collections.abc import Sequence
@@ -23,8 +32,8 @@ from typing import TYPE_CHECKING, Any, cast
 import click
 
 if TYPE_CHECKING:
-    from .workflows.policy_file import PolicyFile
-    from .workflows.suppression import SuppressionList
+    from ....workflows.policy_file import PolicyFile
+    from ....workflows.suppression import SuppressionList
 
 
 #: The built-in verdict-classification profiles ``--policy`` accepts by name,
@@ -51,8 +60,8 @@ class PolicyFileParam(click.ParamType):
     name = "policy"
 
     def convert(self, value: Any, param: Any, ctx: Any) -> Path:
-        from .policies import builtin_policy_names
-        from .workflows.policy_file import builtin_policy_path
+        from ....policies import builtin_policy_names
+        from ....workflows.policy_file import builtin_policy_path
 
         value_str = str(value)
         builtin = builtin_policy_path(value_str)
@@ -91,7 +100,7 @@ class DepthParam(click.ParamType):
     name = "depth"
 
     def convert(self, value: Any, param: Any, ctx: Any) -> str:
-        from .buildsource.scan_levels import USER_DEPTHS
+        from ....buildsource.scan_levels import USER_DEPTHS
 
         v = str(value).lower()
         user_values = [d.value for d in USER_DEPTHS]
@@ -103,7 +112,7 @@ class DepthParam(click.ParamType):
         )
 
     def get_metavar(self, param: Any, ctx: Any = None) -> str:
-        from .buildsource.scan_levels import USER_DEPTHS
+        from ....buildsource.scan_levels import USER_DEPTHS
 
         return "[" + "|".join(d.value for d in USER_DEPTHS) + "]"
 
@@ -151,7 +160,7 @@ class SidedPathParam(click.ParamType):
         for side in _SIDES:
             prefix = f"{side}="
             if s.startswith(prefix):
-                raw = s[len(prefix):]
+                raw = s[len(prefix) :]
                 # ``click.Path.convert`` is typed ``str | bytes | PathLike`` even
                 # with ``path_type=Path``; it returns a real ``Path`` at runtime.
                 return (side, cast("Path", self._path.convert(raw, param, ctx)))
@@ -217,14 +226,15 @@ class SidedIncludePathParam(click.ParamType):
         for side in _SIDES:
             prefix = f"{side}:"
             if s.startswith(prefix):
-                rest = s[len(prefix):]
+                rest = s[len(prefix) :]
                 label, sep, raw = rest.partition("=")
                 if not sep or not label:
                     raise click.BadParameter(
                         f"{value!r}: a labeled --include requires "
                         f"'{prefix}LABEL=PATH' (e.g. '{prefix}support=path'), "
                         "with a non-empty LABEL before '='.",
-                        ctx=ctx, param=param,
+                        ctx=ctx,
+                        param=param,
                     )
                 path = cast("Path", self._sided._path.convert(raw, param, ctx))
                 return (side, path, label)
@@ -278,14 +288,15 @@ class LabeledIncludePathParam(click.ParamType):
         s = str(value)
         prefix = "both:"
         if s.startswith(prefix):
-            rest = s[len(prefix):]
+            rest = s[len(prefix) :]
             label, sep, raw = rest.partition("=")
             if not sep or not label:
                 raise click.BadParameter(
                     f"{value!r}: a labeled --include requires "
                     f"'{prefix}LABEL=PATH' (e.g. '{prefix}support=path'), "
                     "with a non-empty LABEL before '='.",
-                    ctx=ctx, param=param,
+                    ctx=ctx,
+                    param=param,
                 )
             path = cast("Path", self._path.convert(raw, param, ctx))
             return (path, label)
@@ -315,7 +326,7 @@ class SidedStrParam(click.ParamType):
         for side in _SIDES:
             prefix = f"{side}="
             if s.startswith(prefix):
-                return (side, s[len(prefix):])
+                return (side, s[len(prefix) :])
         return ("both", s)
 
     def get_metavar(self, param: Any, ctx: Any = None) -> str:
@@ -368,7 +379,9 @@ class SidedChoiceParam(click.ParamType):
 
 
 def _load_suppression_and_policy(
-    suppress: Path | None, policy: str, policy_file_path: Path | None,
+    suppress: Path | None,
+    policy: str,
+    policy_file_path: Path | None,
     *,
     strict_suppressions: bool = False,
     require_justification: bool = False,
@@ -379,14 +392,18 @@ def _load_suppression_and_policy(
     plugin command — kept here, next to ``POLICY_FILE_PARAM``, rather than in the
     oversized ``cli.py`` so the cross-command resolution logic has one home.
     """
-    from .workflows.policy_file import PolicyFile, pending_validate_overrides_warnings
-    from .workflows.suppression import SuppressionList
+    from ....workflows.policy_file import (
+        PolicyFile,
+        pending_validate_overrides_warnings,
+    )
+    from ....workflows.suppression import SuppressionList
 
     suppression: SuppressionList | None = None
     if suppress is not None:
         try:
             suppression = SuppressionList.load(
-                suppress, require_justification=require_justification,
+                suppress,
+                require_justification=require_justification,
             )
         except OSError as e:
             raise click.BadParameter(str(e), param_hint="--suppress") from e
@@ -404,9 +421,12 @@ def _load_suppression_and_policy(
                 ]
                 for idx, rule in expired:
                     target = (
-                        rule.symbol_pattern and f'symbol_pattern="{rule.symbol_pattern}"'
-                        or rule.symbol and f'symbol="{rule.symbol}"'
-                        or rule.type_pattern and f'type_pattern="{rule.type_pattern}"'
+                        rule.symbol_pattern
+                        and f'symbol_pattern="{rule.symbol_pattern}"'
+                        or rule.symbol
+                        and f'symbol="{rule.symbol}"'
+                        or rule.type_pattern
+                        and f'type_pattern="{rule.type_pattern}"'
                         # Canonical (backend-independent) identity selector
                         # (Codex review, fresh evidence, PR #753): a
                         # finding_id-only rule with no other selector
@@ -414,16 +434,16 @@ def _load_suppression_and_policy(
                         # here too, the same ambiguity already fixed in
                         # cli_compare_fold.py/post_processing.py's own
                         # selector-rendering chains.
-                        or rule.finding_id and f'finding_id="{rule.finding_id}"'
-                        or rule.source_location and f'source_location="{rule.source_location}"'
+                        or rule.finding_id
+                        and f'finding_id="{rule.finding_id}"'
+                        or rule.source_location
+                        and f'source_location="{rule.source_location}"'
                         or "?"
                     )
                     parts.append(
                         f"  Rule {idx + 1}: {target} expired on {rule.expires}"
                     )
-                parts.append(
-                    "Remove or renew expired rules before proceeding."
-                )
+                parts.append("Remove or renew expired rules before proceeding.")
                 raise click.ClickException("\n".join(parts))
 
     pf: PolicyFile | None = None

@@ -67,14 +67,14 @@ from ...cli_helpers_compare import (  # noqa: F401  — re-exported to keep cli 
     _version_sort_key as _version_sort_key,
     _warn_ignored_flags as _warn_ignored_flags,
 )
-from ...cli_params import (
-    _load_suppression_and_policy as _load_suppression_and_policy,  # noqa: F401  — re-exported to keep cli import sites (test suite) stable
-)
 from ...cli_resolve import (
     _detect_binary_format,
     _sniff_text_format,
 )
 from ...frontends.cli import help as cli_help
+from .options.params import (
+    _load_suppression_and_policy as _load_suppression_and_policy,  # noqa: F401  — re-exported to keep cli import sites (test suite) stable
+)
 
 if TYPE_CHECKING:
     from ...checker_types import Change

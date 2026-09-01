@@ -1911,14 +1911,17 @@ class TestLoadSuppressionAndPolicy:
     def test_dedup_scope_shared_with_cli_params_loader(self, tmp_path, capsys, caplog):
         """`dedup_policy_override_warnings()` must dedupe across *both*
         loaders, not just repeated `service.load_suppression_and_policy()`
-        calls -- `compare-release` also loads through `cli_params.
-        _load_suppression_and_policy` (its early strict-suppression
-        validation and probe-matrix paths), and a scope covering only one
-        loader would still let the same warning through twice (Codex
-        review: fresh evidence on the follow-up commit)."""
+        calls -- `compare-release` also loads through
+        `frontends.cli.options.params._load_suppression_and_policy` (its
+        early strict-suppression validation and probe-matrix paths), and a
+        scope covering only one loader would still let the same warning
+        through twice (Codex review: fresh evidence on the follow-up
+        commit)."""
         import logging
 
-        from abicheck.cli_params import _load_suppression_and_policy
+        from abicheck.frontends.cli.options.params import (
+            _load_suppression_and_policy,
+        )
 
         pf = tmp_path / "policy.yaml"
         pf.write_text("base_policy: strict_abi\noverrides:\n  func_removed: ignore\n")
