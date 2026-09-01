@@ -184,7 +184,8 @@ class TestCompareOldBundleFactsEarlyRejections:
             "json",
         )
 
-        assert code != 64 or "--jobs" not in out
+        assert code == 1, out
+        assert "--jobs" not in out
 
     def test_malformed_package_extraction_failure_is_a_clean_error(
         self, tmp_path: Path
