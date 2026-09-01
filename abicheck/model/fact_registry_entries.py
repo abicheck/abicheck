@@ -552,5 +552,31 @@ FACT_REGISTRY = FactRegistry(
                 "exactly, DWARF/PDB producers included."
             ),
         ),
+        # ── Phase 5's sixth batch: AbiSnapshot's own remaining case-(b) field ──
+        _E(
+            owner="AbiSnapshot",
+            field="ast_resolved_standard",
+            value_type="str | None",
+            producing_backends=("castxml", "clang"),
+            persisted=True,
+            identity_relevant=False,
+            comparable=True,
+            suppressible=False,
+            reportable=True,
+            lifecycle=FactLifecycle.PERSISTED,
+            notes=(
+                "The resolved C/C++ standard actually used for a header-AST "
+                "parse (explicit -std=/--std=/std:, or a forced gnu++20 "
+                "when the requires/concept heuristic triggered it) -- None "
+                "already unambiguously means 'not captured' (no header-AST "
+                "backend ran, or no standard was pinned/forced). Only "
+                "populated via dumper_toolchain._ast_compile_provenance(), "
+                "shared by dumper.py's ELF/PE/Mach-O snapshot constructors, "
+                "so it is never set on a DWARF/symbols-only dump. Plain "
+                "case (b) conversion -- the last one outside the four "
+                "declaration dataclasses (RecordType, EnumType, Variable, "
+                "Function)."
+            ),
+        ),
     ]
 )

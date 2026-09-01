@@ -23,6 +23,7 @@ Phase 5 section for the design this page's data comes from.
 
 | Fact | Value type | Producing backends | Lifecycle | Persisted | Identity | Comparable | Suppressible | Reportable |
 |------|------------|---------------------|-----------|:---------:|:--------:|:----------:|:------------:|:----------:|
+| `AbiSnapshot.ast_resolved_standard` | `str \| None` | castxml, clang | persisted | ✅ | — | ✅ | — | ✅ |
 | `EnumType.qualified_name` | `str \| None` | castxml, clang | persisted | ✅ | ✅ | ✅ | — | ✅ |
 | `EnumType.source_header` | `str \| None` | castxml, clang, dwarf, pdb | persisted | ✅ | — | ✅ | — | ✅ |
 | `Function.contract_attributes` | `list[str] \| None` | castxml, clang | persisted | ✅ | — | ✅ | — | ✅ |
@@ -80,7 +81,6 @@ check fails if a new eligible field appears that isn't named here.
 
 | Field | Converted? |
 |-------|------------|
-| `AbiSnapshot.ast_resolved_standard` | not yet — tracked gap |
 | `ElfMetadata.dynamic_flags` | not yet — tracked gap |
 | `ElfMetadata.has_fini` | not yet — tracked gap |
 | `ElfMetadata.has_init` | not yet — tracked gap |

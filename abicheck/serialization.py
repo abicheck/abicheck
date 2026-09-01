@@ -64,6 +64,7 @@ from .storage.fact_codec import (
     decode_fact,
     decode_function_facts,
     decode_record_facts,
+    decode_snapshot_facts,
     decode_variable_facts,
     encode_fact_fields,
 )
@@ -335,7 +336,7 @@ from .storage.surface_graph_codec import decode_surface_graph, encode_surface_gr
 # doesn't hit any producer-specific threshold above stays silent, since every
 # CI baseline is *always* some number of versions behind and warning
 # regardless of relevance would just be noise.
-SCHEMA_VERSION: int = 34  # v34: Function.contract_attributes_fact/is_explicit_fact/is_hidden_friend_fact/source_header_fact/is_variadic_fact/exception_spec_fact/is_override_fact/hidden_friend_owner_fact/elf_binding_fact/is_compiler_generated_fact persisted (storage/fact_codec.py); v33: Variable.source_header_fact/alignment_bits_fact/elf_binding_fact persisted (storage/fact_codec.py); v32: EnumType.qualified_name_fact/source_header_fact persisted (storage/fact_codec.py); v31: RecordType.is_abstract_fact/data_size_bits_fact/is_standard_layout_fact/is_trivially_copyable_fact/qualified_name_fact/source_header_fact persisted (storage/fact_codec.py); v30: RecordType.is_final_fact persisted (storage/fact_codec.py); v29: AbiSnapshot.surface_graph persisted (storage/surface_graph_codec.py); v28: entity_id carrier persisted (storage/entity_id_codec.py).
+SCHEMA_VERSION: int = 35  # v35: AbiSnapshot.ast_resolved_standard_fact persisted (storage/fact_codec.py); v34: Function.contract_attributes_fact/is_explicit_fact/is_hidden_friend_fact/source_header_fact/is_variadic_fact/exception_spec_fact/is_override_fact/hidden_friend_owner_fact/elf_binding_fact/is_compiler_generated_fact persisted (storage/fact_codec.py); v33: Variable.source_header_fact/alignment_bits_fact/elf_binding_fact persisted (storage/fact_codec.py); v32: EnumType.qualified_name_fact/source_header_fact persisted (storage/fact_codec.py); v31: RecordType.is_abstract_fact/data_size_bits_fact/is_standard_layout_fact/is_trivially_copyable_fact/qualified_name_fact/source_header_fact persisted (storage/fact_codec.py); v30: RecordType.is_final_fact persisted (storage/fact_codec.py); v29: AbiSnapshot.surface_graph persisted (storage/surface_graph_codec.py); v28: entity_id carrier persisted (storage/entity_id_codec.py).
 
 # Schema version at which CastXML field CV facts became reliable (see v9 above).
 _MIN_SCHEMA_VERSION_FOR_CV_FACTS = 9
@@ -1093,6 +1094,7 @@ def snapshot_from_dict(d: dict[str, Any]) -> AbiSnapshot:
         frontend_context_kind=frontend_context_kind,
         dependency_scope=dependency_scope,
         ast_resolved_standard=ast_resolved_standard,
+        **decode_snapshot_facts(d, _schema_version),
         ast_cplusplus_macro=ast_cplusplus_macro,
         ast_compile_args=ast_compile_args,
         ast_sysroot=ast_sysroot,

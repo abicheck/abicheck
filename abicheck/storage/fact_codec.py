@@ -39,6 +39,7 @@ __all__ = [
     "decode_fact",
     "decode_function_facts",
     "decode_record_facts",
+    "decode_snapshot_facts",
     "decode_variable_facts",
     "encode_fact_fields",
 ]
@@ -114,6 +115,9 @@ def encode_fact_fields(d: dict[str, Any]) -> None:
             _encode_one(func_dict.get(fact_key))
         for param_dict in func_dict.get("params", []):
             _encode_one(param_dict.get("is_va_list_fact"))
+    # AbiSnapshot's own case-(b) field -- a single top-level key, not
+    # nested in a list like the four declaration dataclasses above.
+    _encode_one(d.get("ast_resolved_standard_fact"))
 
 
 def _encode_one(fact_dict: dict[str, Any] | None) -> None:
@@ -156,6 +160,10 @@ _MIN_SCHEMA_VERSION_FOR_VARIABLE_CASE_B_FACTS = 33
 # ADR-063 Phase 5 (fifth batch): the schema_version Function's own ten
 # case-(b) *_fact siblings started being persisted at.
 _MIN_SCHEMA_VERSION_FOR_FUNCTION_CASE_B_FACTS = 34
+
+# ADR-063 Phase 5 (sixth batch): the schema_version AbiSnapshot's own
+# ast_resolved_standard_fact sibling started being persisted at.
+_MIN_SCHEMA_VERSION_FOR_SNAPSHOT_CASE_B_FACTS = 35
 
 
 def decode_fact(
@@ -370,6 +378,23 @@ def decode_function_facts(f: dict[str, Any], schema_version: int) -> dict[str, A
             f.get("is_compiler_generated_fact"),
             schema_version,
             min_schema_version=_MIN_SCHEMA_VERSION_FOR_FUNCTION_CASE_B_FACTS,
+        ),
+    }
+
+
+def decode_snapshot_facts(d: dict[str, Any], schema_version: int) -> dict[str, Any]:
+    """Decode ``AbiSnapshot``'s own ``Fact[...]`` sibling from the top-level
+    snapshot dict. One call, spread into the ``AbiSnapshot(**decode_
+    snapshot_facts(d, schema_version), ...)`` constructor call, mirroring
+    :func:`decode_record_facts` and siblings -- the receiver here is the
+    whole snapshot dict itself, not one item nested in a list, since
+    ``AbiSnapshot`` is the single top-level object.
+    """
+    return {
+        "ast_resolved_standard_fact": decode_fact(
+            d.get("ast_resolved_standard_fact"),
+            schema_version,
+            min_schema_version=_MIN_SCHEMA_VERSION_FOR_SNAPSHOT_CASE_B_FACTS,
         ),
     }
 

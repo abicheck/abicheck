@@ -4,6 +4,11 @@
   "ast_fallback_reason": null,
   "ast_producer": null,
   "ast_resolved_standard": null,
+  "ast_resolved_standard_fact": {
+    "diagnostics": [],
+    "status": "not_collected",
+    "value": null
+  },
   "ast_sysroot": null,
   "ast_toolchain": {},
   "ast_toolchain_supported": null,
@@ -203,7 +208,7 @@
   "platform": null,
   "python_api": null,
   "python_ext": null,
-  "schema_version": 34,
+  "schema_version": 35,
   "scope_fallback": null,
   "source_mtime": null,
   "source_mtime_epoch": false,

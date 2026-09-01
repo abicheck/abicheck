@@ -30,6 +30,7 @@ from typing import TYPE_CHECKING
 from .declarations import Function, Variable
 from .entities import EnumType, RecordType
 from .extraction_contract import DependencyInfo, ExtractionContract
+from .fact import Fact, bridge_legacy_and_fact
 from .first_wins_index import build_first_wins_index, describe_dropped
 from .graph_facts import SurfaceGraphLike
 
@@ -181,6 +182,14 @@ class AbiSnapshot:
     # requires/concept heuristic forced it (dumper.py's force_cpp20 path) —
     # never a guess at the frontend's own unpinned default.
     ast_resolved_standard: str | None = field(default=None, kw_only=True)
+    # ADR-063 Phase 5: Fact[str | None] sibling of ast_resolved_standard --
+    # the one remaining case-(b) field outside the four declaration
+    # dataclasses. Same "None already unambiguously means not captured"
+    # shape as RecordType/EnumType/Variable/Function's own case-(b) fields;
+    # see __post_init__ below for the bridge.
+    ast_resolved_standard_fact: Fact[str | None] | None = field(
+        default=None, kw_only=True
+    )
     # The __cplusplus literal mandated by ast_resolved_standard (e.g.
     # "201703L" for "gnu++17"), looked up from a static ISO-standard table —
     # None when ast_resolved_standard is unset or not a recognized C++ edition.
@@ -654,6 +663,16 @@ class AbiSnapshot:
     _type_by_name: dict[str, RecordType] | None = field(
         default=None, repr=False, compare=False
     )
+
+    def __post_init__(self) -> None:
+        self.ast_resolved_standard, self.ast_resolved_standard_fact = (
+            bridge_legacy_and_fact(
+                self.ast_resolved_standard,
+                self.ast_resolved_standard_fact,
+                None,
+                None,
+            )
+        )
 
     def index(self) -> None:
         """Build lookup indexes. Uses first-wins for duplicate mangled names.

@@ -303,7 +303,6 @@ _CASE_A_UNCONVERTED: tuple[tuple[str, str], ...] = (
 #: example) is deliberately absent here — see ``fact_registry_entries.
 #: FACT_REGISTRY``, it is this phase's first real conversion.
 _CASE_B_UNCONVERTED: tuple[tuple[str, str], ...] = (
-    ("AbiSnapshot", "ast_resolved_standard"),
     # Schema-version-driven (not backend-driven) tri-state fields on the
     # three binary-format dataclasses — the identical "resting value can't
     # distinguish not-captured from confirmed-empty" shape, gated by a

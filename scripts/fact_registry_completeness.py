@@ -572,13 +572,14 @@ def _call_receiver_name(node: ast.expr) -> str | None:
 #: relevant table cannot satisfy Direction 4 through that path at all,
 #: which is the point: an unrecognized receiver name is unresolved
 #: evidence, not silently-accepted evidence.
-_OWNER_ENCODE_RECEIVER: dict[str, str] = {"Param": "param_dict"}
+_OWNER_ENCODE_RECEIVER: dict[str, str] = {"Param": "param_dict", "AbiSnapshot": "d"}
 _OWNER_DECODE_RECEIVER: dict[str, str] = {
     "RecordType": "t",
     "Param": "p",
     "EnumType": "e",
     "Variable": "v",
     "Function": "f",
+    "AbiSnapshot": "d",
 }
 
 #: Module-level fact-key tuples in fact_codec.py, each owning exactly one
