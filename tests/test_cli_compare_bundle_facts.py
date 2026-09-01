@@ -632,6 +632,11 @@ class TestCompareOldBundleFacts:
         assert "Traceback" not in out
 
 
+@pytest.mark.skipif(
+    sys.platform != "linux",
+    reason="Uses the GNU ld flag -Wl,-soname; ELF/Linux-only bundle analysis "
+    "(matches TestCompareOldBundleFacts's identical guard).",
+)
 @pytest.mark.integration
 class TestBundleFactsLibraryManifest:
     """``--bundle-facts-library-manifest`` (G38 Phase 17): per-library
