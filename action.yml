@@ -840,15 +840,17 @@ outputs:
       incomplete contract coverage, or incomplete analysis assurance with
       the require-complete-analysis input -- as on compare, the three
       share the code and are told apart the same way, one level down
-      under diff; independently of --against, also a pinned
-      --depth/--source-method whose required source evidence was never
-      collected -- ADR-037 D5, VERDICT=EVIDENCE_CONTRACT_ERROR -- reachable
-      on an audit-only scan too, since the underlying precondition check
-      runs regardless of whether a baseline comparison follows, but only
+      under diff; independently of --against, also an unsatisfied
+      evidence contract (ADR-037 D5, VERDICT=EVIDENCE_CONTRACT_ERROR --
+      either a pinned --depth/--source-method whose required source
+      evidence was never collected, or --abi3 targeting a binary that
+      isn't a recognisable CPython extension module) -- reachable on an
+      audit-only scan too, since the underlying precondition checks run
+      regardless of whether a baseline comparison follows, but only
       published as that distinct verdict when a JSON report exists to
       carry it -- see the verdict output's own description above for
-      exactly which format/pr-comment combinations produce one; otherwise
-      this still exits 1 as the generic ERROR),
+      exactly which format/pr-comment/extra-args combinations produce
+      one; otherwise this still exits 1 as the generic ERROR),
       2 (API break), 4 (ABI break), 5 (budget overflow), 6 (not comparable --
       candidate/baseline scope or profile mismatch, VERDICT=NOT_COMPARABLE).
       deps-compare: 0 (pass), 1 (warn),

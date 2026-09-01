@@ -2653,12 +2653,13 @@ elif [[ "$MODE" == "scan" ]]; then
         # publish ERROR for a severity-policy result, or drop the severity
         # gate when coverage happened to contribute too (Codex review).
         # A crash also exits 1 and must still stay ERROR. ADR-037 D5's
-        # evidence-contract axis (a pinned depth with no evidence to
-        # collect) also exits 1 via a `click.ClickException` -- indistinguishable
-        # from a crash/bad-flag CLI error by stderr shape alone
-        # (`_evidence_contract_gated`'s own docstring), so it must be
-        # checked ahead of `_is_cli_error` or it is silently swallowed by
-        # that generic bucket.
+        # evidence-contract axis (either a pinned depth with no evidence to
+        # collect, or --abi3 targeting a binary _run_abi3_audit can't
+        # recognise as a CPython extension module) also exits 1 via a
+        # `click.ClickException` -- indistinguishable from a crash/bad-flag
+        # CLI error by stderr shape alone (`_evidence_contract_gated`'s own
+        # docstring), so it must be checked ahead of `_is_cli_error` or it
+        # is silently swallowed by that generic bucket.
         #
         # Resolved the same way, and in the same order, as the compare branch
         # below: the report's pre-fold `severity.exit_code` tells the axes

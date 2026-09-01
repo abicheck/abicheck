@@ -2,9 +2,11 @@
 
 - **CLI cleanup phase two / ADR-064, cross-front-end parity pass**: the
   composite GitHub Action's `scan` verdict mapping no longer folds a
-  `_EvidenceContractError` abort (ADR-037 D5 — a pinned `--depth`/
-  `--source-method` whose required source evidence was never collected)
-  into the generic `ERROR` bucket a bad flag or a crash gets. `cli_scan.py`
+  `_EvidenceContractError` abort (ADR-037 D5 — an unsatisfied evidence
+  contract, e.g. a pinned `--depth`/`--source-method` whose required
+  source evidence was never collected, or `--abi3` targeting a binary
+  that isn't a recognisable CPython extension module) into the generic
+  `ERROR` bucket a bad flag or a crash gets. `cli_scan.py`
   raises that abort as a `click.ClickException` (stderr `Error: ...`), the
   identical shape a CLI usage error produces, so `action/run.sh`'s
   `_is_cli_error` check could not tell them apart on its own. The Action

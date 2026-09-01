@@ -674,7 +674,16 @@ lands in two stages rather than one atomic change:
       describe; `action.yml`'s own verdict description updated the same
       way. This one needed no adversarial-input analysis, unlike the
       JSON-sidecar-condition gaps above -- it is a wording correction, not
-      a new signal to parse. Still open: the release fan-out's
+      a new signal to parse. **A fifth review round (Codex, fresh
+      evidence) caught the identical narrow framing surviving in the
+      adjacent `exit-code` output description and the changelog
+      fragment** -- both still named only the pinned-depth cause for the
+      scan exit-1 axis, and a leftover `action/run.sh` comment (the exit-1
+      dispatch's own "four possible sources" note) did too. Fixed the same
+      way: named the axis generically, listed both raise sites where a
+      concrete example was still useful, and swept the rest of this PR's
+      own diff for the same narrow phrasing rather than waiting for a
+      sixth round to find the next copy. Still open: the release fan-out's
       `GateOptions` unification, the typed-API half of this parity pass,
       the `--format text` gap named above, and a real `--artifact-set`
       member-level evidence-contract signal for the Action to consume.
