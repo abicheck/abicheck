@@ -766,7 +766,12 @@ outputs:
       pinned --depth/--source-method whose required source evidence was
       never collected -- ADR-037 D5 -- so no comparison could run at all;
       like NOT_COMPARABLE, this fails the step unconditionally and is
-      distinct from ERROR, which covers a genuine CLI/config error), or
+      distinct from ERROR, which covers a genuine CLI/config error --
+      only published as this distinct verdict when a JSON report exists
+      to carry it: format: json, or format: text with pr-comment: true
+      (which requests a JSON sidecar) or an explicit --write json=PATH in
+      extra-args; format: text with pr-comment: false and no such sidecar
+      still reads as the generic ERROR, a documented, unclosed gap), or
       ERROR.
       For deps-compare: PASS, WARN, FAIL, or ERROR.
       For deps-tree: PASS, FAIL, or ERROR.
@@ -809,7 +814,11 @@ outputs:
       --depth/--source-method whose required source evidence was never
       collected -- ADR-037 D5, VERDICT=EVIDENCE_CONTRACT_ERROR -- reachable
       on an audit-only scan too, since the underlying precondition check
-      runs regardless of whether a baseline comparison follows),
+      runs regardless of whether a baseline comparison follows, but only
+      published as that distinct verdict when a JSON report exists to
+      carry it -- see the verdict output's own description above for
+      exactly which format/pr-comment combinations produce one; otherwise
+      this still exits 1 as the generic ERROR),
       2 (API break), 4 (ABI break), 5 (budget overflow), 6 (not comparable --
       candidate/baseline scope or profile mismatch, VERDICT=NOT_COMPARABLE).
       deps-compare: 0 (pass), 1 (warn),
