@@ -597,6 +597,13 @@ pages; every move keeps a redirect and every moved anchor is rewritten.
 
 ## 6. Phased change list
 
+The artifact-level detail for every item below — the ladder file schema,
+the generator contract, the per-page level table, the `topics.yaml`
+fragments, the rebuilt hub's layout, and a section-by-section spec for
+each new and reworked page — lives in the companion page
+[Learning series — page specifications](learning-series-page-specs.md),
+which also sequences the work into independently mergeable pull requests.
+
 Each phase is independently mergeable and leaves the site consistent.
 Every moved page keeps its URL via `mkdocs.yml` `redirect_maps`; every new
 page registers a topic in `docs/_meta/topics.yaml`, carries front matter,
