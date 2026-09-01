@@ -13,7 +13,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""``dump_cmd``'s real ELF execution, via the shared typed pipeline.
+"""``dump_cmd``'s real binary execution (ELF, PE, Mach-O), via the shared
+typed pipeline.
 
 CLI cleanup phase two, PR C (PR 3A). Split out of
 ``frontends/cli/commands/dump.py`` purely to stay under the architecture
@@ -40,12 +41,23 @@ existing imports) and passes the *already-resolved* execution plan and a
 itself.
 
 No behavior change of its own: this is the real-run half of ``dump_cmd``
-that used to call ``perform_elf_dump`` directly, now calling
-``execute_dump_request`` instead -- see
-``docs/contribute/plans/cli-cleanup-phase-two.md``'s PR C section ("Slice
-landed: the real ELF run is migrated") for the full account of what changed
-and why, and ``docs/contribute/known-gaps.md``'s "PR C" entry for the
-precise mechanism.
+that used to call ``perform_elf_dump`` (ELF) or ``handle_non_elf_dump``
+(PE/Mach-O) directly, now calling ``execute_dump_request`` instead for
+either format -- see ``docs/contribute/plans/cli-cleanup-phase-two.md``'s PR
+C section ("Slice landed: the real ELF run is migrated", and its later
+"PE/Mach-O" addendum for the second half of this same migration) for the
+full account of what changed and why, and
+``docs/contribute/known-gaps.md``'s "PR C" entry for the precise mechanism.
+``execute_dump_cli_run`` itself took no format-specific branch to support
+PE/Mach-O -- ``execute_dump_request``/``_resolve_side_snapshot_impl`` were
+already format-generic (``fmt``-parameterized) before this migration; only
+the *caller* (``dump_cmd``) previously routed PE/Mach-O around this module
+entirely, through the separate ``handle_non_elf_dump`` path.
+``execute_and_write_dump_cli_run`` below is the tail both formats' real-run
+branches in ``commands/dump.py`` share (execute, stamp provenance, write
+the snapshot), factored out purely to keep that already-near-cap module
+from growing net lines when the PE/Mach-O branch stopped being a single
+delegating call to ``handle_non_elf_dump``.
 """
 
 from __future__ import annotations
@@ -63,7 +75,7 @@ if TYPE_CHECKING:
     from ...model import AbiSnapshot
     from ...service_dump_pipeline import ResolvedDumpRequest
 
-__all__ = ["execute_dump_cli_run"]
+__all__ = ["execute_and_write_dump_cli_run", "execute_dump_cli_run"]
 
 
 def execute_dump_cli_run(
@@ -79,7 +91,8 @@ def execute_dump_cli_run(
     seed_collect_mode: str | None,
     source_frontend_from_folded_context: bool,
 ) -> AbiSnapshot:
-    """Run the real ELF ``dump`` extraction and return its snapshot.
+    """Run the real ``dump`` extraction (ELF, PE, or Mach-O) and return its
+    snapshot.
 
     *exec_resolved* is the caller's own execution-only
     :class:`~abicheck.service_dump_pipeline.ResolvedDumpRequest` -- built by
@@ -157,9 +170,19 @@ def execute_dump_cli_run(
     (ADR-037 D4) precisely because it is not operator-typed.
 
     Raises:
-        click.ClickException: If extraction fails (mirrors
-            ``perform_elf_dump``'s own ``except`` clause exactly).
+        click.UsageError: If *exec_resolved* (or the input it resolves) is
+            unusable -- a ``ValidationError`` from ``execute_dump_request``
+            (e.g. no exports matched, an invalid include directory, an
+            unreachable requested depth) -- preserving exit 64, the same
+            translation ``cli_resolve._dump_native_binary``'s own docstring
+            documents for the retired ``perform_elf_dump``/
+            ``handle_non_elf_dump`` call sites (Codex review on PR #980:
+            this shared executor's own generic ``except`` clause below
+              was silently collapsing that distinction to exit 1 for
+            every caller, ELF included, since the earlier PR C migration).
+        click.ClickException: For any other extraction failure (exit 1).
     """
+    from ...errors import ValidationError
     from ...service_dump_pipeline import execute_dump_request
 
     try:
@@ -175,9 +198,104 @@ def execute_dump_cli_run(
             seed_collect_mode=seed_collect_mode,
             source_frontend_from_folded_context=source_frontend_from_folded_context,
         )
+    except ValidationError as exc:
+        raise click.UsageError(str(exc)) from exc
     except (AbicheckError, RuntimeError, OSError, ValueError) as exc:
         raise click.ClickException(str(exc)) from exc
     # `execute_dump_request` already ran the dependency walk itself
     # (`DumpRequest.follow_dependencies`, set from the CLI's own
     # `--follow-deps`) -- a second call by the caller would double it.
     return result.snapshot
+
+
+def execute_and_write_dump_cli_run(
+    exec_resolved: ResolvedDumpRequest,
+    *,
+    notify: Callable[[str], None],
+    build_config: Path | None,
+    build_query: str | None,
+    build_compile_db: str | None,
+    legacy_compile_db_tokens: tuple[str, ...],
+    legacy_compile_db_matched: bool,
+    seed_collect_mode: str | None,
+    stamp_provenance: Callable[..., None],
+    write_snapshot_output: Callable[..., None],
+    git_tag: str | None,
+    build_id: str | None,
+    no_git: bool,
+    output: Path | None,
+    build_info: Path | None,
+    sources: Path | None,
+    allow_build_query: bool,
+    collect_mode: str | None,
+    build_targets: tuple[str, ...],
+    header_backend: str,
+    requested_depth: str | None,
+    include_dependencies: bool,
+    header_roots: tuple[Path, ...],
+    clang_bin: str,
+    snapshot_compression: str,
+    public_headers: tuple[Path, ...],
+    public_header_dirs: tuple[Path, ...],
+) -> None:
+    """Run :func:`execute_dump_cli_run`, then stamp and write its snapshot.
+
+    This is the tail ``dump_cmd``'s ELF and PE/Mach-O real-run branches in
+    ``commands/dump.py`` both need -- execute, stamp git/build-id
+    provenance, write the snapshot to ``-o``/stdout -- factored out here so
+    neither branch repeats it inline. The two branches differ only in how
+    they resolve ``header_roots`` (the ELF branch also folds in
+    ``dump_manifest_header_roots``, since only ELF supports
+    ``--dump-manifest``) and in what precedes this call (the debug-artifact
+    UX echo, ELF only); both differences stay in the caller, which passes
+    its own already-resolved ``header_roots`` in rather than this function
+    re-deriving it.
+
+    ``stamp_provenance``/``write_snapshot_output`` are callables (mirroring
+    this module's own ``notify`` parameter) rather than direct imports: this
+    module deliberately does not import back into the CLI-registration
+    family (``cli_resolve``/``cli_buildsource``, ...) that supplies both --
+    see this module's own docstring for why a *new* member of that already-
+    accepted import cycle needs a maintainer decision, not a routine split.
+
+    ``allow_build_query`` here is the CLI's own ``--allow-build-query``
+    local (the deprecated no-op flag), forwarded to ``write_snapshot_output``
+    exactly as ``perform_elf_dump``/``handle_non_elf_dump`` both did --
+    distinct from the unconditional ``True`` this function passes to
+    :func:`execute_dump_cli_run`'s own ``allow_build_query`` (see that
+    function's own docstring for why those two must differ).
+    """
+    snap = execute_dump_cli_run(
+        exec_resolved,
+        notify=notify,
+        build_config=build_config,
+        build_query=build_query,
+        build_compile_db=build_compile_db,
+        allow_build_query=True,
+        legacy_compile_db_tokens=legacy_compile_db_tokens,
+        legacy_compile_db_matched=legacy_compile_db_matched,
+        seed_collect_mode=seed_collect_mode,
+        source_frontend_from_folded_context=True,
+    )
+
+    stamp_provenance(snap, git_tag=git_tag, build_id=build_id, no_git=no_git)
+    write_snapshot_output(
+        snap,
+        output,
+        build_info,
+        sources,
+        build_config,
+        allow_build_query,
+        collect_mode,
+        build_query=build_query,
+        build_compile_db=build_compile_db,
+        build_targets=build_targets,
+        extractor=header_backend,
+        depth=requested_depth,
+        include_dependencies=include_dependencies,
+        header_roots=header_roots,
+        clang_bin=clang_bin,
+        snapshot_compression=snapshot_compression,
+        public_headers=public_headers,
+        public_header_dirs=public_header_dirs,
+    )

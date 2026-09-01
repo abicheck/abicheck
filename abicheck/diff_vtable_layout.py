@@ -183,6 +183,7 @@ def _diff_vtable_layout(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
                     name=name,
                     old=", ".join(o_virtual_bases),
                     new=", ".join(n_virtual_bases),
+                    entity_id=o.entity_id or n.entity_id,
                 )
             )
 
@@ -212,6 +213,7 @@ def _diff_vtable_layout(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
                         name=name,
                         old=", ".join(og) or "(none)",
                         new=", ".join(ng) or "(none)",
+                        entity_id=o.entity_id or n.entity_id,
                     )
                 )
 

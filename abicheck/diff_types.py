@@ -62,7 +62,17 @@ from .diff_types_surface import (
     _directly_referenced as _directly_referenced,
     _is_abi_surface_type as _is_abi_surface_type,
 )
-from .diff_types_vtable import _diff_type_vtable as _diff_type_vtable
+from .diff_types_vtable import (
+    # Re-exported (`as`-aliased) so `from .diff_types import
+    # _vtable_transition_is_evidenced` and similar call sites keep resolving
+    # — mirrors the diff_types_abicc_parity re-export block above.
+    _diff_type_vtable as _diff_type_vtable,
+    _layout_evidence_is_unverifiable as _layout_evidence_is_unverifiable,
+    _owned_virtual_signatures as _owned_virtual_signatures,
+    _owned_virtual_signatures_for_record as _owned_virtual_signatures_for_record,
+    _vtable_transition_is_evidenced as _vtable_transition_is_evidenced,
+    _vtable_transition_rests_on_unresolved_evidence as _vtable_transition_rests_on_unresolved_evidence,
+)
 from .elf_symbol_filter import (
     FUNCTION_SYMBOL_TYPES,
     VARIABLE_SYMBOL_TYPES,
@@ -86,6 +96,7 @@ from .model import (
     resolved_fact_value,
     stdlib_namespaces_excluded as _exclude_stdlib_namespaces,
 )
+from .model.identity import EntityId
 
 
 def _field_type_genuinely_changed(
@@ -283,6 +294,7 @@ def _diff_types(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
                     ChangeKind.TYPE_REMOVED,
                     symbol=name,
                     description=f"Type removed: {name}",
+                    entity_id=t_old.entity_id,
                 )
             )
             continue
@@ -320,6 +332,7 @@ def _diff_types(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
                     ChangeKind.TYPE_ADDED,
                     symbol=t_new.name,
                     name=t_new.name,
+                    entity_id=t_new.entity_id,
                 )
             )
 
@@ -399,6 +412,7 @@ def _diff_overload_additions(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]
                 name=key,
                 old_value="1 overload",
                 new_value=f"{len(news)} overloads",
+                entity_id=original.entity_id,
             )
         )
     return changes
@@ -428,6 +442,7 @@ def _diff_type_pair(
                 name=name,
                 old_value="complete",
                 new_value="opaque",
+                entity_id=t_old.entity_id or t_new.entity_id,
             )
         )
         return changes  # no further checks meaningful for opaque type
@@ -488,6 +503,7 @@ def _append_type_abstract_changes(
                 name=name,
                 old_value="instantiable",
                 new_value="abstract",
+                entity_id=t_old.entity_id or t_new.entity_id,
             )
         )
     else:
@@ -498,6 +514,7 @@ def _append_type_abstract_changes(
                 name=name,
                 old_value="abstract",
                 new_value="instantiable",
+                entity_id=t_old.entity_id or t_new.entity_id,
             )
         )
 
@@ -528,6 +545,7 @@ def _append_type_finality_changes(
                 name=name,
                 old_value="non-final",
                 new_value="final",
+                entity_id=t_old.entity_id or t_new.entity_id,
             )
         )
     else:
@@ -538,6 +556,7 @@ def _append_type_finality_changes(
                 name=name,
                 old_value="final",
                 new_value="non-final",
+                entity_id=t_old.entity_id or t_new.entity_id,
             )
         )
 
@@ -566,6 +585,7 @@ def _append_type_size_and_alignment_changes(
                 old=str(t_old.size_bits),
                 new=str(t_new.size_bits),
                 qualified_name=qualified,
+                entity_id=t_old.entity_id or t_new.entity_id,
             )
         )
 
@@ -582,6 +602,7 @@ def _append_type_size_and_alignment_changes(
                 old=str(t_old.alignment_bits),
                 qualified_name=qualified,
                 new=str(t_new.alignment_bits),
+                entity_id=t_old.entity_id or t_new.entity_id,
             )
         )
 
@@ -594,6 +615,8 @@ def _try_match_reserved_field(
     added_by_type: dict[str, list[TypeField]],
     reserved_matched_added: set[str],
     renamed_type_changed_added: set[str],
+    *,
+    entity_id: EntityId | None = None,
 ) -> Change | None:
     """Check if a removed field is a reserved field put into use.
 
@@ -640,6 +663,7 @@ def _try_match_reserved_field(
             name=name,
             old=fname,
             new=candidate.name,
+            entity_id=entity_id,
         )
     return None
 
@@ -687,6 +711,7 @@ def _diff_removed_field(
     renamed_type_changed_added: set[str],
     *,
     qualified_name: str | None = None,
+    entity_id: EntityId | None = None,
 ) -> Change | None:
     """Classify a field missing from the new type as reserved-use, rename(+retype), or removal.
 
@@ -707,6 +732,7 @@ def _diff_removed_field(
         added_by_type,
         reserved_matched_added,
         renamed_type_changed_added,
+        entity_id=entity_id,
     )
     if matched is not None:
         return matched
@@ -757,6 +783,7 @@ def _diff_removed_field(
                 name=name,
                 old=fname,
                 new=f_new.name,
+                entity_id=entity_id,
             )
         f_new = candidates[0] if candidates else None
         if f_new is not None and not cv_qualifiers_only_differ(f_old.type, f_new.type):
@@ -770,6 +797,7 @@ def _diff_removed_field(
                 new=f_new.type,
                 qualified_name=qualified_name,
                 field_name=fname,
+                entity_id=entity_id,
             )
     return make_change(
         ChangeKind.TYPE_FIELD_REMOVED,
@@ -778,6 +806,7 @@ def _diff_removed_field(
         detail=fname,
         qualified_name=qualified_name,
         field_name=fname,
+        entity_id=entity_id,
     )
 
 
@@ -789,6 +818,8 @@ def _added_field_changes(
     reserved_matched_added: set[str],
     renamed_type_changed_added: set[str],
     new_trailing_fam: str | None,
+    *,
+    entity_id: EntityId | None = None,
 ) -> list[Change]:
     """Emit added-field changes for new fields not consumed by reserved/rename matching."""
     changes: list[Change] = []
@@ -807,6 +838,7 @@ def _added_field_changes(
                     symbol=name,
                     name=name,
                     detail=fname,
+                    entity_id=entity_id,
                 )
             )
     return changes
@@ -822,6 +854,10 @@ def _diff_type_fields(
     # Same qualified-identity stamp as _append_type_size_and_alignment_changes
     # above, threaded down to the field-level emitters (Codex review).
     qualified = t_new.qualified_name or t_old.qualified_name
+    # The containing record's own identity, not any one field's -- TypeField
+    # carries no entity_id of its own (mirrors diff_types_field_facts.py's
+    # identical threading for its own field-level detectors).
+    entity_id = t_old.entity_id or t_new.entity_id
 
     added_by_offset, added_by_type = _index_added_fields(old_fields, new_fields)
     # Track which added fields were matched as reserved-field activations
@@ -849,6 +885,7 @@ def _diff_type_fields(
                 reserved_matched_added,
                 renamed_type_changed_added,
                 qualified_name=qualified,
+                entity_id=entity_id,
             )
             if removed_change is not None:
                 changes.append(removed_change)
@@ -864,6 +901,7 @@ def _diff_type_fields(
                 f_new,
                 cv_facts_reliable=cv_facts_reliable,
                 qualified_name=qualified,
+                entity_id=entity_id,
             )
         )
 
@@ -876,6 +914,7 @@ def _diff_type_fields(
             reserved_matched_added,
             renamed_type_changed_added,
             new_trailing_fam,
+            entity_id=entity_id,
         )
     )
 
@@ -894,6 +933,7 @@ def _diff_type_field_pair(
     *,
     cv_facts_reliable: bool = True,
     qualified_name: str | None = None,
+    entity_id: EntityId | None = None,
 ) -> list[Change]:
     changes: list[Change] = []
     # Use canonical form for type comparison to avoid false positives from
@@ -914,6 +954,7 @@ def _diff_type_field_pair(
                 new_value=f_new.type,
                 qualified_name=qualified_name,
                 field_name=fname,
+                entity_id=entity_id,
             )
         )
     if (
@@ -931,6 +972,7 @@ def _diff_type_field_pair(
                 new=str(f_new.offset_bits),
                 qualified_name=qualified_name,
                 field_name=fname,
+                entity_id=entity_id,
             )
         )
     if (
@@ -945,6 +987,7 @@ def _diff_type_field_pair(
                 detail=fname,
                 old_value=f"bits={f_old.bitfield_bits}",
                 new_value=f"bits={f_new.bitfield_bits}",
+                entity_id=entity_id,
             )
         )
     return changes
@@ -993,6 +1036,7 @@ def _diff_flexible_array_member(
                 description=f"Flexible array member removed: {name}::{old_fam.name}",
                 old_value=old_fam.type,
                 new_value="(removed)",
+                entity_id=t_old.entity_id or t_new.entity_id,
             )
         )
     elif old_fam is None and new_fam is not None:
@@ -1004,6 +1048,7 @@ def _diff_flexible_array_member(
                 description=f"Flexible array member added: {name}::{new_fam.name}",
                 old_value="(none)",
                 new_value=new_fam.type,
+                entity_id=t_old.entity_id or t_new.entity_id,
             )
         )
     elif old_fam is not None and new_fam is not None:
@@ -1024,6 +1069,7 @@ def _diff_flexible_array_member(
                         ),
                         old_value=old_fam.type,
                         new_value=new_fam.type,
+                        entity_id=t_old.entity_id or t_new.entity_id,
                     )
                 )
 
@@ -1049,6 +1095,7 @@ def _diff_type_bases(name: str, t_old: RecordType, t_new: RecordType) -> list[Ch
     new_bases = resolved_fact_value(t_new.bases_fact, [])
     old_virtual_bases = resolved_fact_value(t_old.virtual_bases_fact, [])
     new_virtual_bases = resolved_fact_value(t_new.virtual_bases_fact, [])
+    entity_id = t_old.entity_id or t_new.entity_id
 
     # BASE_CLASS_POSITION_CHANGED: same set of non-virtual bases, different order
     # This shifts this-pointer adjustments for all bases → old binaries call wrong method.
@@ -1062,6 +1109,7 @@ def _diff_type_bases(name: str, t_old: RecordType, t_new: RecordType) -> list[Ch
                 name=name,
                 old_value=str(old_bases),
                 new_value=str(new_bases),
+                entity_id=entity_id,
             )
         )
     elif old_bases_set != new_bases_set:
@@ -1073,6 +1121,7 @@ def _diff_type_bases(name: str, t_old: RecordType, t_new: RecordType) -> list[Ch
                 description=f"Base classes changed: {name}",
                 old_value=str(old_bases),
                 new_value=str(new_bases),
+                entity_id=entity_id,
             )
         )
 
@@ -1096,6 +1145,7 @@ def _diff_type_bases(name: str, t_old: RecordType, t_new: RecordType) -> list[Ch
                 detail="; ".join(desc_parts),
                 old_value=str(sorted(old_virtual_bases)),
                 new_value=str(sorted(new_virtual_bases)),
+                entity_id=entity_id,
             )
         )
     elif old_virt_set != new_virt_set:
@@ -1110,12 +1160,11 @@ def _diff_type_bases(name: str, t_old: RecordType, t_new: RecordType) -> list[Ch
                     description=f"Virtual base classes changed: {name}",
                     old_value=str(old_virtual_bases),
                     new_value=str(new_virtual_bases),
+                    entity_id=entity_id,
                 )
             )
 
     return changes
-
-
 
 
 @registry.detector("enums")
@@ -1153,6 +1202,7 @@ def _diff_enums(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
                         ChangeKind.TYPE_REMOVED,
                         symbol=name,
                         description=f"Enum removed: {name}",
+                        entity_id=e_old.entity_id,
                     )
                 )
             continue
@@ -1197,6 +1247,7 @@ def _diff_enums(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
                         name=name,
                         detail=mname,
                         old_value=str(mval),
+                        entity_id=e_old.entity_id or e_new.entity_id,
                     )
                 )
             elif new_members[mname] != mval:
@@ -1213,6 +1264,7 @@ def _diff_enums(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
                         detail=mname,
                         old_value=str(mval),
                         new_value=str(new_members[mname]),
+                        entity_id=e_old.entity_id or e_new.entity_id,
                     )
                 )
 
@@ -1242,6 +1294,7 @@ def _diff_enums(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
                         name=name,
                         detail=mname,
                         new_value=str(mval),
+                        entity_id=e_old.entity_id or e_new.entity_id,
                     )
                 )
 
@@ -1277,6 +1330,7 @@ def _append_enum_scoped_changes(
                 name=name,
                 old_value="unscoped",
                 new_value="scoped",
+                entity_id=e_old.entity_id or e_new.entity_id,
             )
         )
     else:
@@ -1287,6 +1341,7 @@ def _append_enum_scoped_changes(
                 name=name,
                 old_value="scoped",
                 new_value="unscoped",
+                entity_id=e_old.entity_id or e_new.entity_id,
             )
         )
 
@@ -1331,6 +1386,7 @@ def _diff_method_qualifiers(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
                     name=f_old.name,
                     old_value=str(f_old.is_static),
                     new_value=str(f_new.is_static),
+                    entity_id=f_old.entity_id or f_new.entity_id,
                 )
             )
 
@@ -1345,6 +1401,7 @@ def _diff_method_qualifiers(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
                     kind,
                     symbol=mangled,
                     name=f_old.name,
+                    entity_id=f_old.entity_id or f_new.entity_id,
                 )
             )
 
@@ -1373,6 +1430,7 @@ def _diff_method_qualifiers(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
                     name=f_old.name,
                     old_value=str(f_old.is_static),
                     new_value=str(f_new.is_static),
+                    entity_id=f_old.entity_id or f_new.entity_id,
                 )
             )
         if f_old.is_const != f_new.is_const or f_old.is_volatile != f_new.is_volatile:
@@ -1383,6 +1441,7 @@ def _diff_method_qualifiers(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
                     name=f_old.name,
                     old_value=f"const={f_old.is_const} volatile={f_old.is_volatile}",
                     new_value=f"const={f_new.is_const} volatile={f_new.is_volatile}",
+                    entity_id=f_old.entity_id or f_new.entity_id,
                 )
             )
 
@@ -1399,6 +1458,7 @@ def _diff_method_qualifiers(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
                     new=repr(new_rq),
                     old_value=old_rq or "(none)",
                     new_value=new_rq or "(none)",
+                    entity_id=f_old.entity_id or f_new.entity_id,
                 )
             )
 
@@ -1448,6 +1508,7 @@ def _diff_unions(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
                         name=name,
                         detail=fname,
                         old_value=f_old.type,
+                        entity_id=t_old.entity_id or t_new.entity_id,
                     )
                 )
             elif _field_type_genuinely_changed(
@@ -1461,6 +1522,7 @@ def _diff_unions(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
                         detail=fname,
                         old_value=f_old.type,
                         new_value=new_fields[fname].type,
+                        entity_id=t_old.entity_id or t_new.entity_id,
                     )
                 )
 
@@ -1473,6 +1535,7 @@ def _diff_unions(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
                         name=name,
                         detail=fname,
                         new_value=f_new.type,
+                        entity_id=t_old.entity_id or t_new.entity_id,
                     )
                 )
 

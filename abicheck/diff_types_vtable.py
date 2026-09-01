@@ -434,6 +434,7 @@ def _diff_type_vtable(
         description=description,
         old_value=", ".join(old_vtable),
         new_value=", ".join(new_vtable),
+        entity_id=t_old.entity_id or t_new.entity_id,
     )
     # Tag (never demote) when this finding rests on the identical evidence
     # gap LAYOUT_UNVERIFIABLE reports for the same (exact, already

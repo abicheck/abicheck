@@ -71,13 +71,25 @@
   included; see the implementation plan's own Phase 0 section for the
   full accounting.
 - **Phase 1** ("finish the `dump`/`scan` typed-API convergence," closing
-  AGENTS.md "PR C") has landed its real ELF `dump` execution routing onto
-  `execute_dump_request` (`frontends/cli/dump_execute.py`), on top of the
-  earlier `--dry-run` slice — see `docs/contribute/known-gaps.md`'s "PR C"
-  entry for the exact mechanism and the two structural blockers that had to
-  be independently closed first. **Not yet migrated: the PE/Mach-O dump
-  path (`handle_non_elf_dump`)** — no PE/Mach-O toolchain was available to
-  verify a migration against; see that same known-gaps entry.
+  AGENTS.md "PR C") has landed its real `dump` execution routing onto
+  `execute_dump_request` (`frontends/cli/dump_execute.py`) for **both**
+  binary formats it supports, on top of the earlier `--dry-run` slice: ELF
+  first (commit `0b69fc3` plus three review follow-ups), then PE/Mach-O
+  the identical way once the shared pipeline's own format-generic design
+  meant no second structural investigation was needed — see
+  `docs/contribute/known-gaps.md`'s "PR C" entry for the exact mechanism
+  and the two structural blockers the ELF slice closed first.
+  `perform_elf_dump`/`handle_non_elf_dump` are both retired for this call
+  site (each stays defined, unchanged, for its own direct unit tests). The
+  PE/Mach-O half is verified only via mock-based CLI/unit tests, not a real
+  PE/Mach-O toolchain — none was available in this environment for a
+  byte-for-bit parity check the way the ELF slice's own
+  `tests/test_dump_cli_typed_api_parity.py` corpus does. **One permanent,
+  named exception remains out of scope**: `cli_buildsource.
+  dump_source_only()`, the binary-less `dump --sources`/`--build-info`
+  path, has no `execute_dump_request()` call to route through at all and
+  stays its own separate pipeline — this is a deliberate scope boundary
+  from Phase 1's own Design section, not a residual gap.
 - **Phase 2** ("`EntityId`/`ScopePath` as the one identity primitive") has
   landed seven slices: the `ScopePath`/`EntityId` primitive itself
   (`abicheck/model/identity.py`); both header-AST backends (`dumper_clang.py`/
@@ -121,15 +133,58 @@
   (`finding_identity.is_real_mangled_name`/`normalize_mangled_name` stay
   finding_identity's own — `model/identity.py`'s own docstring records why
   moving them would reverse the required `compare -> model` import
-  direction); **exhaustive population beyond the function-diff path**
-  (variable/type/enum/platform detectors construct `Change` from
-  `RecordType`/`EnumType`/`Variable` objects that also carry `.entity_id`,
-  but aren't wired yet); **and every post-parse consumer migration**
-  (`diff_filtering.py`/`type_reachability.py`'s string-based ambiguity
-  machinery, plus actually promoting the new `entity:` alias into a real
-  alias-match reconciliation tier once `EntityId.key`'s cross-release
-  stability is established). Those are the remaining items before Phase 2
-  is complete.
+  direction). **Exhaustive population beyond the function-diff path is now
+  substantially landed** (ninth through eleventh slices): every
+  `RecordType`/`EnumType`-backed `make_change()`/`bool_transition()` call
+  site across `diff_types.py`, `diff_types_field_facts.py`,
+  `diff_types_vtable.py` (the base-class/vtable evidence-gating group,
+  independently split out of `diff_types.py` by the concurrent Phase 0
+  detector migration — this slice's own separately-named copy was folded
+  into it on merge; no behavior change), `diff_layout.py`,
+  `diff_vtable_layout.py`, the remaining
+  `diff_symbols.py`/`diff_symbols_variables.py` variable/field sites, and
+  the anonymous-field group (`diff_symbols_anon_fields.py`, split out of
+  `diff_symbols.py` for the identical file-size reason) now carries
+  `entity_id=`, using the old-side-preferred pairing convention `Change.
+  symbol_binding` already established, with a field/base-level finding
+  attributed to its *containing* record's `entity_id` (no field-level
+  `EntityId` exists — `EntityKind.FIELD`/`BASE` are declared in
+  `model/identity.py` but have no constructor, an accepted, named gap, not
+  a silent one). **Three classes of site remain deliberately unwired, for
+  reasons specific to each, not oversight:** (1) typedefs and constants
+  (`diff_types.py::_diff_typedefs`, `diff_symbols.py::_diff_constants`) —
+  `entity_id_for_typedef`/`entity_id_for_constant` exist in `model/
+  identity.py` but have no production caller anywhere; wiring these call
+  sites needs that extraction-side gap closed first, a separate piece of
+  work; (2) every DWARF/PE/Mach-O/ELF-symbol-table-only detector
+  (`diff_platform.py`'s DWARF-tier struct/enum/field functions,
+  `diff_elf_layout.py`, `diff_platform_elf_dynamic.py`,
+  `diff_platform_elf_symbols.py`, `diff_versioning.py`, `diff_sycl.py`) —
+  these operate on raw platform/DWARF facts with no `EntityId`-carrying
+  object behind them at all, since only the header-AST (L2) backends
+  populate `entity_id` today; closing this needs `EntityId` extended to the
+  DWARF backend first (build a `ScopePath` from a DIE's parent chain), a
+  real, separate extraction-side project, not a diff-site wiring pass; (3)
+  `buildsource/*.py`'s L5 source-graph `Change` construction sites, which
+  already have their own identity primitive (`buildsource/
+  entity_identity.py`'s `CanonicalIdentity`) and are out of this decision's
+  scope by design (D3 generalizes flat/diff/graph identity, not the L5
+  source-graph's already-separate scheme). **Every post-parse consumer
+  migration remains not landed**: `diff_filtering.py`'s `_enum_canonical_
+  names`/`record_canonical_names` string-bridging is blocked on (2) above
+  (it exists specifically to reconcile header-tier and DWARF-tier spellings,
+  so it cannot move to `EntityId` comparison until the DWARF side has one);
+  a `type_reachability.py` hardening (anchoring `_record_identity` on
+  `EntityId.key` when available) was investigated and found not
+  independently landable — every call site feeds directly into the
+  module's signature-spelling substring-matching machinery, which has no
+  `EntityId` to anchor on regardless (see that module's own docstring);
+  and promoting the `entity:` alias into a real alias-match reconciliation
+  tier stays blocked on `EntityId.key`'s cross-release stability, which is
+  not established (`Anonymous`/`LocalToFunction` ordinals are only
+  stable within one process's lifetime, and two prior attempts at ordinal
+  stability were each reverted — see `model/identity.py`'s own docstring).
+  Those are the remaining items before Phase 2 is complete.
 - **Phase 3** ("public surface as a graph query over one evidence graph,"
   D5) has landed its plumbing across thirteen slices: `model/occurrence.py`
   (`OccurrenceId`/`canonical_key`); a `SurfaceGraphLike` structural
