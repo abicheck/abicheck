@@ -55,6 +55,11 @@ itself -- via the same ``demangle_text`` helper ``to_markdown``'s ``_out()``
 calls. This closes this half of item 5 without changing where in the
 pipeline any fold-in runs. ``into_json``/``into_oneline`` are unaffected --
 JSON/one-line output carries raw symbol data by design.
+:func:`_fold_suppression_audit_into_text` demangles less than the other
+two: a rule's own :func:`~abicheck.reporter_contract_blocks.
+suppression_rule_label` selector echo is never demangled, only the
+free-standing symbol prose around it -- see that function's own docstring
+for why (two distinct selectors can demangle to the same display string).
 """
 
 from __future__ import annotations
@@ -1063,10 +1068,15 @@ def _fold_suppression_audit_into_text(
     directly from it. This function's remaining job -- appending a section
     to already-rendered markdown/text/review text -- stays post-render
     because ``to_markdown``'s single whole-report ``_out()`` demangle pass
-    already ran by the time this appends. *demangle*, when True, applies
-    that same pass to this function's own appended section (only, never to
-    *text*) so a rule's symbol names are demangled under ``--demangle`` too,
-    closing that gap without changing where in the pipeline this fold runs.
+    already ran by the time this appends. *demangle*, when True, demangles
+    the free-standing symbol prose this section adds (``audit.summary()``,
+    a high-risk match's own ``{kind}: {symbol}`` tail) the same way
+    ``_out()`` demangles everything rendered before this fold-in runs --
+    but never a rule's own :func:`_suppression_rule_label` output (Codex
+    review: two distinct selectors, e.g. Itanium C1/C2 constructor
+    variants, can demangle to the identical display string, which would
+    silently defeat that label's whole reason to exist -- disambiguating
+    rules a bare selector alone cannot).
     """
     if audit is None:
         return text
@@ -1075,8 +1085,15 @@ def _fold_suppression_audit_into_text(
         suppression_rule_label as _suppression_rule_label,
     )
 
+    def _maybe_demangle(s: str) -> str:
+        if not demangle:
+            return s
+        from .demangle import demangle_text
+
+        return demangle_text(s)
+
     if fmt in ("markdown", "text", "review"):
-        lines = ["", "## Suppression Audit", "", audit.summary()]
+        lines = ["", "## Suppression Audit", "", _maybe_demangle(audit.summary())]
         # audit.summary() only reports the stale-rule count (Codex review,
         # fresh evidence: its own per-rule detail lines named a rule by only
         # its first selector, misidentifying two rules that share it but
@@ -1095,7 +1112,7 @@ def _fold_suppression_audit_into_text(
             for i, (rule, change) in enumerate(audit.high_risk_matches):
                 lines.append(
                     f"- `{_suppression_rule_label(rule, i)}` suppressed "
-                    f"{change.kind.value}: {change.symbol}"
+                    f"{change.kind.value}: {_maybe_demangle(change.symbol)}"
                 )
         # audit.summary() only reports counts for these two buckets (Codex
         # review, fresh evidence) -- the JSON branch above already names each
@@ -1112,11 +1129,6 @@ def _fold_suppression_audit_into_text(
             lines.append("Rules expiring soon:")
             for i, rule in enumerate(audit.near_expiry_rules):
                 lines.append(f"- `{_suppression_rule_label(rule, i)}`")
-        appended = "\n".join(lines)
-        if demangle:
-            from .demangle import demangle_text
-
-            appended = demangle_text(appended)
-        return "\n".join([text, appended])
+        return "\n".join([text, "\n".join(lines)])
 
     return text

@@ -94,7 +94,18 @@ class TestScopedCompatFoldDemangle:
 
 
 class TestSuppressionAuditFoldDemangle:
-    def test_high_risk_match_label_demangled_by_default(self, tmp_path) -> None:
+    """A rule's own :func:`suppression_rule_label` selector echo (the
+    ``symbol=...`` part of a label) must never be demangled -- only the
+    free-standing symbol prose this section separately adds (``audit.
+    summary()``'s own text, a high-risk match's ``{kind}: {symbol}`` tail)
+    is. Demangling a label would defeat its whole purpose: two distinct
+    mangled selectors (e.g. Itanium C1/C2 constructor variants) can
+    demangle to the identical display string, which would make two
+    different rules indistinguishable in the report (Codex review)."""
+
+    def test_high_risk_match_tail_demangled_but_label_stays_raw(
+        self, tmp_path
+    ) -> None:
         old_p, new_p = _write_pair(tmp_path)
         suppress = tmp_path / "suppress.yml"
         suppress.write_text(
@@ -107,10 +118,14 @@ class TestSuppressionAuditFoldDemangle:
             "--suppress", str(suppress), "--audit-suppressions",
         )
         assert "## Suppression Audit" in result.output
-        assert f"(symbol={_DEMANGLED})" in result.output
-        assert f"(symbol={_MANGLED})" not in result.output
+        # The label's own selector echo is never demangled.
+        assert f"`intentional removal (symbol={_MANGLED})`" in result.output
+        assert f"(symbol={_DEMANGLED})" not in result.output
+        # The trailing free-text symbol mention is demangled by default.
+        assert f"suppressed func_removed: {_DEMANGLED}" in result.output
+        assert f"suppressed func_removed: {_MANGLED}" not in result.output
 
-    def test_high_risk_match_label_stays_mangled_with_no_demangle(
+    def test_high_risk_match_tail_stays_mangled_with_no_demangle(
         self, tmp_path
     ) -> None:
         old_p, new_p = _write_pair(tmp_path)
@@ -124,5 +139,42 @@ class TestSuppressionAuditFoldDemangle:
             "compare", str(old_p), str(new_p),
             "--suppress", str(suppress), "--audit-suppressions", "--no-demangle",
         )
-        assert f"(symbol={_MANGLED})" in result.output
-        assert f"(symbol={_DEMANGLED})" not in result.output
+        assert f"suppressed func_removed: {_MANGLED}" in result.output
+        assert f"suppressed func_removed: {_DEMANGLED}" not in result.output
+
+    def test_colliding_demangled_names_stay_distinguishable(self, tmp_path) -> None:
+        """Two suppression rules on distinct symbols that demangle to the
+        *same* display string (Itanium C1/C2 constructor variants both
+        read `Foo::Foo()`) must still produce two distinct labels in the
+        demangled report -- proving the fix doesn't just avoid a crash but
+        actually preserves disambiguation."""
+        ctor1, ctor2 = "_ZN3FooC1Ev", "_ZN3FooC2Ev"
+        old = AbiSnapshot(
+            library="libfoo.so.1",
+            version="1.0",
+            functions=[
+                _fn("Foo::Foo", ctor1, ret="void"),
+                _fn("Foo::Foo", ctor2, ret="void"),
+            ],
+            from_headers=True,
+        )
+        new = AbiSnapshot(
+            library="libfoo.so.1", version="2.0", functions=[], from_headers=True
+        )
+        old_p = tmp_path / "old.json"
+        new_p = tmp_path / "new.json"
+        old_p.write_text(snapshot_to_json(old), encoding="utf-8")
+        new_p.write_text(snapshot_to_json(new), encoding="utf-8")
+        suppress = tmp_path / "suppress.yml"
+        suppress.write_text(
+            "version: 1\nsuppressions:\n"
+            f"  - symbol: {ctor1}\n    reason: intentional removal\n"
+            f"  - symbol: {ctor2}\n    reason: intentional removal\n",
+            encoding="utf-8",
+        )
+        result = _invoke(
+            "compare", str(old_p), str(new_p),
+            "--suppress", str(suppress), "--audit-suppressions",
+        )
+        assert f"`intentional removal (symbol={ctor1})`" in result.output
+        assert f"`intentional removal (symbol={ctor2})`" in result.output

@@ -799,26 +799,36 @@ current on those two points:
      before any fold-in ever runs, so `_fold_scoped_compat_into_text`'s
      `into_text` append (missing symbol/entrypoint names, scoped-only
      change descriptions), `_fold_suppression_audit_into_text`'s
-     markdown/text/review branch (a suppression rule's own `symbol=`/
-     selector echo), and `_fold_use_case_impact_into_text` (a use-case's
-     attributed change symbols) all stayed mangled under `--demangle`
-     regardless of the flag. Rather than moving any fold-in earlier — which
-     would either change `_out()`'s scope for every other section too, or
-     reproduce the identical post-render string-append pattern one file
-     over — each of the three now accepts its own `demangle` bool
-     (threaded from `cli_compare_helpers._render_compare_report`, which
-     already resolves the effective flag) and demangles only the section it
-     adds, via the same `demangle_text` helper `_out()` itself calls;
-     *text* — the report already rendered above the fold-in — is never
-     re-demangled. `into_json`/`into_oneline` are unaffected, by design:
+     markdown/text/review branch, and `_fold_use_case_impact_into_text` (a
+     use-case's attributed change symbols) all stayed mangled under
+     `--demangle` regardless of the flag. Rather than moving any fold-in
+     earlier — which would either change `_out()`'s scope for every other
+     section too, or reproduce the identical post-render string-append
+     pattern one file over — each of the three now accepts its own
+     `demangle` bool (threaded from `cli_compare_helpers.
+     _render_compare_report`, which already resolves the effective flag)
+     and demangles only the free-standing symbol prose it adds, via the
+     same `demangle_text` helper `_out()` itself calls; *text* — the
+     report already rendered above the fold-in — is never re-demangled.
+     `_fold_suppression_audit_into_text` deliberately demangles less than
+     the other two: a rule's own `suppression_rule_label` selector echo
+     (the `symbol=...` part of a label) is left raw always, even under
+     `--demangle` — a first revision demangled the whole appended block
+     including labels, and a Codex review round caught that this defeats
+     that label's entire purpose, since two distinct selectors (e.g.
+     Itanium C1/C2 constructor variants) can demangle to the identical
+     display string, making two different rules indistinguishable in the
+     report. Only `audit.summary()`'s own text and a high-risk match's
+     trailing `{kind}: {symbol}` free-text mention are demangled; the label
+     itself never is. `into_json`/`into_oneline` are unaffected, by design:
      JSON and the one-line summary carry raw symbol data regardless of
      `--demangle`. Verified end-to-end (real `compare --required-symbol`/
      `--audit-suppressions` invocations, not the fold function in
-     isolation) by `tests/test_cli_compare_fold_demangle.py`, asserting the
-     demangled spelling appears under the default/`--demangle` case, the
-     mangled spelling appears under `--no-demangle`, and JSON always keeps
-     the raw name — plus the unchanged golden-output suite, confirming
-     `demangle=False`'s default path stays byte-for-byte identical.
+     isolation) by `tests/test_cli_compare_fold_demangle.py`, including a
+     dedicated two-rule C1/C2-collision case asserting both labels stay
+     distinguishable after demangling — plus the unchanged golden-output
+     suite, confirming `demangle=False`'s default path stays byte-for-byte
+     identical.
    - **Still open**: `_fold_scoped_compat_into_text`'s JSON branch
      (`into_json`) re-derives already-built document sections —
      `summary`/`severity`/`root_causes` — rather than adding an independent

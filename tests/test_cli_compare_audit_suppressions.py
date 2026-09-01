@@ -584,12 +584,17 @@ class TestMarkdownReport:
         assert result.exit_code == 0, result.output
         assert "## Suppression Audit" in result.output
         assert "High-risk matches" in result.output
-        # Markdown demangles by default (ADR-061 Phase 2 item 5 closure):
-        # this appended section now goes through the same whole-report
-        # demangle pass as everything else, so the mangled `_Z5api_bv`
-        # selector echo renders as its demangled form here too, consistent
-        # with every other symbol in a demangled report.
-        assert "`intentional removal (symbol=api_b())` suppressed" in result.output
+        # ADR-061 Phase 2 item 5 closure: this section's free-standing
+        # symbol prose demangles by default like the rest of the report,
+        # but a rule's own selector echo (the `symbol=...` part of its
+        # label) never does -- two distinct selectors can demangle to the
+        # identical display string (e.g. Itanium C1/C2 constructor
+        # variants), which would silently defeat the label's whole purpose
+        # of disambiguating rules (Codex review,
+        # abicheck/abicheck#984). The label stays raw; only the trailing
+        # "suppressed <kind>: <symbol>" text is demangled.
+        assert "`intentional removal (symbol=_Z5api_bv)` suppressed" in result.output
+        assert "suppressed func_removed: api_b()" in result.output
 
     def test_omitted_by_default(self, tmp_path):
         old_p, new_p = _write_pair(tmp_path)
