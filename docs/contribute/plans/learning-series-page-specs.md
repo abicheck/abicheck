@@ -367,6 +367,12 @@ their turn); and Detecting Breaks has no next at all, so it gains
 - Each new page changes its two neighbours' footers. Section F batches the
   Tier 5 and Tier 7 pages two per PR so a neighbour's footer is edited
   once, not once per page.
+- A footer names the *then-current* neighbour. The Footer fields below
+  state the target ladder; when a page lands before its neighbour exists,
+  it points at the nearest member that does (B3 → Part 7 until P6 creates
+  B4; B7 → `dependency-floors.md` until P8 creates B8), and the PR that
+  creates the missing page rewrites both footers. A2c checks the ladder
+  as committed at each step, so both states pass in their turn.
 
 ### A4. Per-page level and placement
 
@@ -772,8 +778,9 @@ Sections:
 6. **Cost against confidence** — a four-row table: moment · depth ·
    what it catches · typical cost bucket (link `docs/contribute/
    performance.md` for numbers; no numbers typed here).
-7. **Several libraries or profiles** — one paragraph pointing at B6 and
-   the `project` topology.
+7. **Several libraries or profiles** — one paragraph pointing at the
+   `project` topology (S15, S25) and, once P7 lands, at B6; P5 links the
+   scenarios only, and P7 adds the B6 link when it creates the page.
 
 Runs: the four above, one per moment; every other depth/flag combination
 is a link to `use/scan-levels.md` §Worked examples, which owns the
@@ -1440,4 +1447,7 @@ P4–P9 can proceed in parallel once their dependency has merged; P9 is
 the only one whose entries are each separable into their own smaller PR
 if review load requires it. Each new page also appends itself to A1 and
 its `paths:` rows in the same PR, since A2c's completeness rule fails
-otherwise.
+otherwise. No PR links a page a later PR creates: footers and in-page
+pointers name the then-current neighbour (A3), and the PR that creates
+the missing page rewrites them — so P5's B3 footer ends at Part 7, P7's
+B7 footer at `dependency-floors.md`, and B2 §7 gains its B6 link in P7.
