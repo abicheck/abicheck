@@ -83,15 +83,15 @@ from .vocabulary import (
 )
 
 __all__ = [
+    "COMPILER_INTERNAL_TYPES",
+    "FACT_REGISTRY",
     "AbiSnapshot",
     "AccessLevel",
-    "COMPILER_INTERNAL_TYPES",
     "DependencyInfo",
     "ElfVisibility",
     "EnumMember",
     "EnumType",
     "ExtractionContract",
-    "FACT_REGISTRY",
     "Fact",
     "FactDefinition",
     "FactLifecycle",
