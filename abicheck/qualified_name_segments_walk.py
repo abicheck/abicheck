@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import dataclasses as _dataclasses
 from collections.abc import Callable as _Callable
+from enum import Enum as _Enum
 
 __all__ = [
     "_PAYLOAD_FIELD_EXCLUSIONS",
@@ -67,8 +68,15 @@ def _collect_strings(value: object, out: list[str]) -> None:
     """Append every ``str`` reachable from *value* to *out*, recursing
     through dataclasses, lists/tuples, and dicts (keys and values) --
     except a field named in :data:`_PAYLOAD_FIELD_EXCLUSIONS`.
+
+    A ``(str, Enum)`` member (e.g. a ``BuildMode`` enum -- this codebase's
+    own established shape, see ``serialization.py``) is excluded from the
+    plain-``str`` case even though ``isinstance(x, str)`` is true for one:
+    treating it as ordinary text here is harmless for *collection*, but the
+    identical check in :func:`_walk_rewrite_strings` below must not, so both
+    stay symmetric rather than silently diverging on what counts as a string.
     """
-    if isinstance(value, str):
+    if isinstance(value, str) and not isinstance(value, _Enum):
         out.append(value)
     elif _dataclasses.is_dataclass(value) and not isinstance(value, type):
         fields = _dataclasses.fields(value)
@@ -106,7 +114,7 @@ def _collect_strings(value: object, out: list[str]) -> None:
             _collect_strings(item, out)
     elif isinstance(value, dict):
         for k, v in value.items():
-            if isinstance(k, str):
+            if isinstance(k, str) and not isinstance(k, _Enum):
                 out.append(k)
             _collect_strings(v, out)
 
@@ -177,7 +185,7 @@ def _walk_rewrite_strings(
     path/line-tainted content even though the dataclass it belongs to was
     otherwise correctly rebuilt.
     """
-    if isinstance(value, str):
+    if isinstance(value, str) and not isinstance(value, _Enum):
         return rewrite(value)
     if _dataclasses.is_dataclass(value) and not isinstance(value, type):
         params = getattr(value, "__dataclass_params__", None)
@@ -239,7 +247,7 @@ def _walk_rewrite_strings(
         rewritten: dict[object, object] = {}
         changed = False
         for k, v in value.items():
-            new_k = rewrite(k) if isinstance(k, str) else k
+            new_k = rewrite(k) if isinstance(k, str) and not isinstance(k, _Enum) else k
             new_v = _walk_rewrite_strings(v, rewrite, field_name=field_name)
             rewritten[new_k] = new_v
             if new_k != k or new_v is not v:

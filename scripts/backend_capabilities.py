@@ -347,9 +347,13 @@ FACT_ROWS: tuple[FactRow, ...] = (
     FactRow(
         "Function",
         "hidden_friend_owner_fact",
-        _NONE,
-        _NONE,
-        note="Same shape as is_explicit_fact -- see that row's own note.",
+        _FULL,
+        _FULL,
+        note=(
+            "Same shape as is_explicit_fact -- both backends now construct "
+            "it directly as Fact.present(owner) for a real hidden friend, "
+            "Fact.not_applicable() otherwise (Codex review, PR #982)."
+        ),
     ),
     FactRow("Function", "elf_binding", _OTHER, _OTHER, note=_DYNSYM),
     FactRow(
