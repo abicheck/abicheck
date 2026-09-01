@@ -299,7 +299,7 @@ FACT_REGISTRY = FactRegistry(
             owner="Variable",
             field="source_header",
             value_type="str | None",
-            producing_backends=("castxml", "clang", "dwarf", "pdb"),
+            producing_backends=("castxml", "clang"),
             persisted=True,
             identity_relevant=False,
             comparable=True,
@@ -307,9 +307,15 @@ FACT_REGISTRY = FactRegistry(
             reportable=True,
             lifecycle=FactLifecycle.PERSISTED,
             notes=(
-                "Provenance (ADR-015, schema v6): defining header, "
-                "mirroring RecordType.source_header_fact/EnumType."
-                "source_header_fact exactly, DWARF/PDB producers included."
+                "Provenance (ADR-015, schema v6): defining header. Unlike "
+                "RecordType.source_header_fact/EnumType.source_header_fact, "
+                "dwarf/pdb are NOT producers here: dwarf_snapshot.py "
+                "constructs every Variable without source_location (its "
+                "RecordType/EnumType construction sites do set it), and no "
+                "pdb module constructs a Variable at all, so "
+                "apply_provenance()/tag_provenance() never has anything to "
+                "derive source_header from on a debug-only snapshot -- the "
+                "fact stays NOT_COLLECTED there (Codex review, PR #982)."
             ),
         ),
         _E(
@@ -539,7 +545,7 @@ FACT_REGISTRY = FactRegistry(
             owner="Function",
             field="source_header",
             value_type="str | None",
-            producing_backends=("castxml", "clang", "dwarf", "pdb"),
+            producing_backends=("castxml", "clang"),
             persisted=True,
             identity_relevant=False,
             comparable=True,
@@ -547,9 +553,14 @@ FACT_REGISTRY = FactRegistry(
             reportable=True,
             lifecycle=FactLifecycle.PERSISTED,
             notes=(
-                "Provenance (ADR-015, schema v6): defining header, "
-                "mirroring RecordType/EnumType/Variable.source_header_fact "
-                "exactly, DWARF/PDB producers included."
+                "Provenance (ADR-015, schema v6): defining header. Unlike "
+                "RecordType.source_header_fact/EnumType.source_header_fact, "
+                "dwarf/pdb are NOT producers here: dwarf_snapshot.py "
+                "constructs every Function without source_location, and no "
+                "pdb module constructs a Function at all, so "
+                "apply_provenance()/tag_provenance() never has anything to "
+                "derive source_header from on a debug-only snapshot -- the "
+                "fact stays NOT_COLLECTED there (Codex review, PR #982)."
             ),
         ),
         # ── Phase 5's sixth batch: AbiSnapshot's own remaining case-(b) field ──

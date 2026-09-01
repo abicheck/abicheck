@@ -182,14 +182,6 @@ class AbiSnapshot:
     # requires/concept heuristic forced it (dumper.py's force_cpp20 path) —
     # never a guess at the frontend's own unpinned default.
     ast_resolved_standard: str | None = field(default=None, kw_only=True)
-    # ADR-063 Phase 5: Fact[str | None] sibling of ast_resolved_standard --
-    # the one remaining case-(b) field outside the four declaration
-    # dataclasses. Same "None already unambiguously means not captured"
-    # shape as RecordType/EnumType/Variable/Function's own case-(b) fields;
-    # see __post_init__ below for the bridge.
-    ast_resolved_standard_fact: Fact[str | None] | None = field(
-        default=None, kw_only=True
-    )
     # The __cplusplus literal mandated by ast_resolved_standard (e.g.
     # "201703L" for "gnu++17"), looked up from a static ISO-standard table —
     # None when ast_resolved_standard is unset or not a recognized C++ edition.
@@ -643,6 +635,18 @@ class AbiSnapshot:
     # predating this field. See ``type_reachability_spelling.
     # _typedef_spelling_targets`` for the first consumer.
     typedefs_qualified: dict[str, str] = field(default_factory=dict, kw_only=True)
+
+    # ADR-063 Phase 5: Fact[str | None] sibling of ast_resolved_standard --
+    # the one remaining case-(b) field outside the four declaration
+    # dataclasses. Same "None already unambiguously means not captured"
+    # shape as RecordType/EnumType/Variable/Function's own case-(b) fields;
+    # see __post_init__ below for the bridge. Appended at the tail rather
+    # than beside the legacy field it bridges, per this package's own
+    # "append new fields at the end" convention (model/AGENTS.md) -- Codex
+    # review, PR #982.
+    ast_resolved_standard_fact: Fact[str | None] | None = field(
+        default=None, kw_only=True
+    )
 
     # Runtime-only provenance qualifier (not serialized — popped in
     # snapshot_to_dict). True when ``from_headers`` was *inferred* for a legacy
