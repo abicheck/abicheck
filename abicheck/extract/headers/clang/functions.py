@@ -601,6 +601,18 @@ def parse_functions(
                 return_pointer_depth=_pointer_depth(ret_type),
                 ref_qualifier=ref_qualifier,
                 is_explicit=is_explicit,
+                # The `explicit` specifier is conceptually inapplicable
+                # outside a constructor/conversion function -- an ordinary
+                # method/free function's `is_explicit=None` above is a
+                # confirmed non-gap, not missing evidence, so it gets its
+                # own explicit Fact rather than falling through the
+                # generic bridge into NOT_COLLECTED (Codex review, PR
+                # #982).
+                is_explicit_fact=(
+                    Fact.present(is_explicit)
+                    if kind in ("CXXConstructorDecl", "CXXConversionDecl")
+                    else Fact.not_applicable()
+                ),
                 is_hidden_friend=entry.in_friend,
                 # ``entry.scope`` is the enclosing-class scope path at the
                 # point ``in_friend`` first became True (the FriendDecl's
@@ -623,6 +635,14 @@ def parse_functions(
                     _clang_method_is_override(node)
                     if kind in _OVERRIDE_ELIGIBLE_KINDS
                     else None
+                ),
+                # Same "confirmed non-gap, not missing evidence" shape as
+                # is_explicit_fact above: `override` only makes sense on a
+                # kind that can actually be virtual.
+                is_override_fact=(
+                    Fact.present(_clang_method_is_override(node))
+                    if kind in _OVERRIDE_ELIGIBLE_KINDS
+                    else Fact.not_applicable()
                 ),
                 is_compiler_generated=False,
                 # ADR-063 Phase 2. `mangled_name` is offered here only when

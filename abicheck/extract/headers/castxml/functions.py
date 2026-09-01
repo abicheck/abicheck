@@ -552,6 +552,17 @@ def parse_function_element(
         return_pointer_depth=ret_ptr_depth,
         ref_qualifier=ref_qualifier,
         is_explicit=function_is_explicit(ctx, el, loc_el),
+        # The `explicit` specifier is conceptually inapplicable outside a
+        # Constructor/Method/Converter element -- a plain Function/
+        # Destructor's `is_explicit=None` above is a confirmed non-gap,
+        # not missing evidence, so it gets its own explicit Fact rather
+        # than falling through the generic bridge into NOT_COLLECTED
+        # (Codex review, PR #982).
+        is_explicit_fact=(
+            Fact.present(function_is_explicit(ctx, el, loc_el))
+            if el.tag in ("Constructor", "Method", "Converter")
+            else Fact.not_applicable()
+        ),
         # Hidden-friend marker: castxml records the link via the
         # ``befriending`` attribute on the class element. We resolved
         # the referenced ids upfront and check membership here.
@@ -577,6 +588,13 @@ def parse_function_element(
             bool(re.search(r"\boverride\b", el.get("attributes", "")))
             if el.tag in ("Method", "Destructor", "Converter", "OperatorMethod")
             else None
+        ),
+        # Same "confirmed non-gap, not missing evidence" shape as
+        # is_explicit_fact above.
+        is_override_fact=(
+            Fact.present(bool(re.search(r"\boverride\b", el.get("attributes", ""))))
+            if el.tag in ("Method", "Destructor", "Converter", "OperatorMethod")
+            else Fact.not_applicable()
         ),
         is_compiler_generated=el.get("artificial") == "1",
         # ADR-063 Phase 2. castxml ALWAYS emits a pseudo-Itanium `mangled`

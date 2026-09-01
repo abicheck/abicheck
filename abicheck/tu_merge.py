@@ -75,6 +75,7 @@ from .dumper_castxml import (
 from .errors import TuMergeError
 from .model import (
     EnumType,
+    Fact,
     Function,
     Param,
     RecordType,
@@ -1115,6 +1116,18 @@ def _merge_functions(
         params=merged_params,
         deprecated=deprecated,
         contract_attributes=contract_attributes,
+        # `replace_with_fact_sync`'s own blanket "derive Fact.present(value)"
+        # rule is wrong here specifically when the merge left
+        # `contract_attributes` at `None`: per `_merge_contract_attributes`'s
+        # own docstring, `None` means "neither side captured this", not
+        # "confirmed no attributes" -- so the merged fact must stay
+        # NOT_COLLECTED, never a fabricated PRESENT(None) (Codex review, PR
+        # #982).
+        contract_attributes_fact=(
+            Fact.not_collected()
+            if contract_attributes is None
+            else Fact.present(contract_attributes)
+        ),
     )
 
 
