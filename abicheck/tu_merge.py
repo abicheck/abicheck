@@ -73,10 +73,17 @@ from .dumper_castxml import (
     _mangled_name_is_local_linkage as _mangled_name_is_local_linkage,
 )
 from .errors import TuMergeError
-from .model import EnumType, Fact, Function, Param, RecordType, ScopeOrigin, Variable
+from .model import EnumType, Function, Param, RecordType, ScopeOrigin, Variable
 from .model.cc_attributes import is_cc_attribute as _is_cc_attribute
-from .provenance import build_public_set, classify_origin, header_from_location
+from .provenance import build_public_set
 from .tu_fragment import MergedTuFragments, TuFragment, entity_key
+from .tu_merge_provenance import (
+    _blank_provenance,
+    _more_public_of,
+    _other_is_strictly_less_public,
+    _pick_deprecated,
+    _with_more_public_provenance,
+)
 
 #: TuMergeError.code values (ADR-050 D4). Kept as plain module constants
 #: (not an enum) since TuMergeError.code is a bare string field, matching
@@ -710,48 +717,6 @@ def _merge_scalar_group(
     return merged
 
 
-def _pick_deprecated(
-    primary: _T, secondary: _T, *, secondary_is_private: bool = False
-) -> str | None:
-    """Pick which side's ``deprecated`` message survives a merge -- prefer
-    *primary* (whichever side the caller already selected as the merge's
-    representative, e.g. via :func:`_more_public_of`) when it carries one,
-    otherwise fall back to *secondary* -- **unless** *secondary_is_private*
-    is ``True``, in which case an unset *primary* stays unset rather than
-    picking up *secondary*'s message.
-
-    Two TUs' redeclarations carrying *different* non-``None`` messages --
-    e.g. ``[[deprecated("a")]] void f();`` in one TU, ``[[deprecated("b")]]
-    void f();`` in another -- is **not** a conflict (Codex review, PR #635
-    round 13, verified empirically against both GCC and Clang compiling
-    exactly that pair under ``-pedantic-errors``: both accept it cleanly).
-    A deprecation message is additive diagnostic metadata, not part of a
-    declaration's type or an ODR-significant fact, unlike
-    ``contract_attributes``/calling-convention tokens
-    (:func:`_merge_contract_attributes`), which really can describe
-    genuinely incompatible ABI-relevant claims. There is therefore nothing
-    to reject here -- this never fails, unlike every other optional-fact
-    merge in this module.
-
-    But when the caller can *prove* *secondary* is the strictly-less-public
-    side (:func:`_other_is_strictly_less_public`), an unset *primary* must
-    not pick up *secondary*'s message anyway: a private-only redeclaration
-    annotating an otherwise-undecorated public declaration as
-    ``[[deprecated]]`` does not make the library's actual public consumers
-    -- who only ever see the public header -- see that deprecation, and
-    later removing/changing that private-only annotation would surface as
-    a false ``FUNC_DEPRECATED_REMOVED``/``CHANGED`` (or the variable/type/
-    enum equivalent) against a public surface that never carried it (Codex
-    review, PR #635 round 18) -- the same leak :func:`_merge_functions`'s
-    default-argument union was fixed against in round 17.
-    """
-    if primary.deprecated is not None:
-        return primary.deprecated
-    if secondary_is_private:
-        return None
-    return secondary.deprecated
-
-
 #: Attribute families whose arguments are a *set* that legally accumulates
 #: across separate attribute occurrences -- GCC/clang both accept
 #: ``__attribute__((nonnull(1))) __attribute__((nonnull(2)))`` (or the
@@ -869,234 +834,6 @@ def _suppress_private_only_attributes(
         for token in merged
         if _is_cc_attribute(token) or token in base_set or token not in other_set
     ]
-
-
-def _blank_provenance(entity: _T) -> _T:
-    """Blank *entity*'s ``source_location``/``source_header``/``origin``/
-    ``deprecated`` for an equality comparison.
-
-    Every one of the four model types this module compares
-    (:class:`Function`/:class:`Variable`/:class:`RecordType`/:class:`EnumType`)
-    carries these same provenance fields (ADR-015 schema v6). They
-    legitimately differ across TUs for what is otherwise the very same
-    declaration -- each TU force-includes its own header file, so a
-    genuinely identical redeclaration still has a different
-    ``source_location``/``source_header`` per side (e.g. ``"a.h:1"`` vs
-    ``"b.h:1"``) purely because of *which* TU parsed it, not because the
-    declarations disagree. Comparing them directly would make ADR-050 D4's
-    own "declaration + redeclaration" trivial-merge case -- the routine
-    shape of a real multi-TU manifest, not an edge case -- spuriously
-    conflict on every ordinary cross-TU redeclaration.
-
-    ``deprecated`` gets the same treatment for the same reason: one TU
-    seeing ``[[deprecated]]`` on an otherwise-identical redeclaration that
-    another TU sees without it -- or even a *different* message than
-    another TU sees (round 13) -- is exactly as routine as differing
-    provenance, never a structural disagreement -- every caller of this
-    function picks ``deprecated`` back explicitly via
-    :func:`_pick_deprecated` afterwards.
-    """
-    updates: dict[str, object] = {
-        "source_location": None,
-        "source_header": None,
-        "origin": ScopeOrigin.UNKNOWN,
-        "deprecated": None,
-    }
-    # ADR-063 Phase 5 (Codex review, P1): a plain dataclasses.replace() call
-    # leaves source_header_fact untouched -- __post_init__'s "explicit Fact
-    # wins" rule then reads the *carried-forward, pre-blank* Fact as
-    # authoritative and restores the original (non-blanked) source_header
-    # right back onto this supposedly-blanked object, and the surviving
-    # Fact difference between two otherwise-identical cross-TU
-    # redeclarations makes this function's own equality check see them as
-    # disagreeing -- spurious INCONSISTENT_DECLARATION on the routine
-    # "declaration + redeclaration" case this function exists to make a
-    # non-conflict. hasattr-gated (RecordType only, as of this phase's
-    # second batch) since this function runs generically across all four
-    # declaration types. A fixed constant, not derived from *entity*'s own
-    # (about-to-be-discarded) state: this blanked copy is only ever used
-    # for the equality comparison below, never returned to a caller, so
-    # both sides landing on the identical constant is all correctness here
-    # requires.
-    if hasattr(entity, "source_header_fact"):
-        updates["source_header_fact"] = Fact.not_collected()
-    return replace(entity, **updates)  # type: ignore[type-var]
-
-
-def _more_public_of(
-    a: _T,
-    b: _T,
-    *,
-    header_segs: list[tuple[str, ...]],
-    dir_segs: list[tuple[str, ...]],
-    have_public_set: bool,
-) -> _T:
-    """Pick whichever of *a*/*b* -- two already-confirmed-compatible
-    declarations -- should lend its ``source_location``/``source_header``/
-    ``origin`` to the merged result.
-
-    A merged declaration carries exactly one ``source_location`` (the model
-    has no "seen from N headers" field), and
-    :func:`abicheck.provenance.apply_provenance` classifies a declaration's
-    public/private ``origin`` from that single field, *after* this merge
-    already ran. Defaulting to an arbitrary side (e.g. always the
-    tu_name-sorted-first one) is a real correctness gap, not a cosmetic
-    choice: if TU ``a`` reaches this declaration only through a private
-    header while TU ``b`` reaches the identical declaration through a
-    declared *public* one, keeping ``a``'s location would make a genuinely
-    public API read as private -- silently hiding a real ABI change from
-    public-surface scoping (Codex review, PR #635). When exactly one side
-    classifies as ``PUBLIC_HEADER``, that side wins; otherwise *a* (the
-    deterministic tu_name-ordered default) is kept, unchanged from before.
-    """
-    if not have_public_set:
-        return a
-    origin_a = classify_origin(
-        header_from_location(a.source_location),
-        header_segs,
-        dir_segs,
-        have_public_set=have_public_set,
-    )
-    if origin_a == ScopeOrigin.PUBLIC_HEADER:
-        return a
-    origin_b = classify_origin(
-        header_from_location(b.source_location),
-        header_segs,
-        dir_segs,
-        have_public_set=have_public_set,
-    )
-    return b if origin_b == ScopeOrigin.PUBLIC_HEADER else a
-
-
-def _other_is_strictly_less_public(
-    base: _T,
-    other: _T,
-    *,
-    header_segs: list[tuple[str, ...]],
-    dir_segs: list[tuple[str, ...]],
-    have_public_set: bool,
-) -> bool:
-    """Whether *other* is definitively *less* public than *base* -- i.e.
-    :func:`_more_public_of` picked *base* specifically because it classifies
-    as ``PUBLIC_HEADER`` and *other* does not (not merely an arbitrary
-    tu_name-ordered tie-break between two equally-classified, or
-    unclassifiable, sides).
-
-    A capability only *other*'s declaration grants -- most concretely, a
-    default argument (Codex review, PR #635 round 17) -- must not be
-    attributed to the merged, *base*-provenanced declaration when this is
-    ``True``: a private-only header redeclaring ``f(int)`` (the public
-    signature) as ``f(int = 42)`` does not give the library's actual public
-    consumers -- who only ever see the public header -- the ability to call
-    ``f()`` with no argument; unioning that default in anyway would make
-    the merged snapshot claim a capability the public API never granted,
-    and later removing/changing that private-only default would then
-    surface as a false ``PARAM_DEFAULT_VALUE_REMOVED``/``CHANGED`` finding
-    against the public surface. When public/private status can't be
-    determined at all (``have_public_set`` is ``False``) or both sides
-    classify the same way, this returns ``False`` and every other
-    optional-fact union in this module keeps its existing, symmetric
-    behavior -- this narrower check exists only for the one case where we
-    can concretely prove *other* is the less-visible side.
-    """
-    if not have_public_set:
-        return False
-    origin_base = classify_origin(
-        header_from_location(base.source_location),
-        header_segs,
-        dir_segs,
-        have_public_set=have_public_set,
-    )
-    if origin_base != ScopeOrigin.PUBLIC_HEADER:
-        return False
-    origin_other = classify_origin(
-        header_from_location(other.source_location),
-        header_segs,
-        dir_segs,
-        have_public_set=have_public_set,
-    )
-    return origin_other != ScopeOrigin.PUBLIC_HEADER
-
-
-def _with_more_public_provenance(
-    winner: _T,
-    other: _T,
-    *,
-    header_segs: list[tuple[str, ...]],
-    dir_segs: list[tuple[str, ...]],
-    have_public_set: bool,
-) -> _T:
-    """Return *winner* -- the structurally-complete side of a forward-
-    declaration/definition merge (:func:`_merge_types`/:func:`_merge_enums`)
-    -- with its provenance possibly overridden from *other* (the forward
-    declaration) when *other* classifies as more public, and its
-    ``deprecated`` picked via :func:`_pick_deprecated` (preferring whichever
-    side ends up as the provenance representative).
-
-    :func:`_more_public_of` alone isn't enough here: unlike the
-    already-identical-modulo-provenance case it's built for, *winner* and
-    *other* are structurally different (fields/members differ by
-    construction -- that's the whole point of a forward-decl/definition
-    pair), so simply calling it and returning whichever side "wins" would
-    silently drop the winner's richer structural facts whenever the forward
-    declaration happens to be the public one. A public header commonly
-    forward-declares a type whose full definition lives only in a private
-    implementation header -- keeping the definition's fields/size/members
-    is still correct, but the merged entity's *provenance* must reflect the
-    public forward declaration, or ``apply_provenance`` reads a genuinely
-    public type as private (Codex review, PR #635 follow-up).
-
-    ``deprecated`` gets the same "don't silently drop the other side's
-    fact" treatment (Codex review, PR #635 round 7): a public
-    ``class [[deprecated("old")]] X;`` forward declaration merged with an
-    undecorated private definition must not lose the deprecation -- picking
-    *winner*'s fields wholesale, as before this fix, always did, since
-    *winner* is the definition and definitions commonly carry no
-    ``[[deprecated]]`` of their own. Two differing non-``None`` messages are
-    not a conflict here either (round 13 -- see :func:`_pick_deprecated`),
-    so this function can no longer fail and returns ``_T`` unconditionally.
-    """
-    provenance_source = _more_public_of(
-        winner,
-        other,
-        header_segs=header_segs,
-        dir_segs=dir_segs,
-        have_public_set=have_public_set,
-    )
-    provenance_fallback = other if provenance_source is winner else winner
-    fallback_is_private = _other_is_strictly_less_public(
-        provenance_source,
-        provenance_fallback,
-        header_segs=header_segs,
-        dir_segs=dir_segs,
-        have_public_set=have_public_set,
-    )
-    deprecated = _pick_deprecated(
-        provenance_source, provenance_fallback, secondary_is_private=fallback_is_private
-    )
-    if provenance_source is winner:
-        merged = winner
-    else:
-        # ADR-063 Phase 5 (Codex review, P1): carry other's own
-        # source_header_fact status forward alongside its source_header
-        # value -- a bare replace() here would leave winner's own
-        # (pre-swap) Fact behind, which __post_init__'s "explicit Fact
-        # wins" rule then treats as authoritative, silently reverting the
-        # source_header value this branch just set. Same "surviving side's
-        # own Fact status, not a re-derived one" discipline already
-        # established for dumper_layout_backfill.py's DWARF backfill.
-        # hasattr-gated (RecordType only, as of this phase's second batch).
-        provenance_updates: dict[str, object] = {
-            "source_location": other.source_location,
-            "source_header": other.source_header,
-            "origin": other.origin,
-        }
-        if hasattr(other, "source_header_fact"):
-            provenance_updates["source_header_fact"] = other.source_header_fact
-        merged = replace(winner, **provenance_updates)  # type: ignore[type-var]
-    if merged.deprecated != deprecated:
-        merged = replace(merged, deprecated=deprecated)  # type: ignore[type-var]
-    return merged
 
 
 def _merge_identical_modulo_provenance(
