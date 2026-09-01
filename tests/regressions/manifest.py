@@ -743,7 +743,10 @@ BUG_CLASSES: tuple[BugClass, ...] = (
             "crash a caller."
         ),
         fixed_by=(985,),
-        seed_tests=("tests/test_param_kind_enum_identity.py",),
+        seed_tests=(
+            "tests/test_param_kind_enum_identity.py",
+            "tests/test_lambda_identity_ordinal.py",
+        ),
     ),
 )
 
