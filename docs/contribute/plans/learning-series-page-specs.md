@@ -250,11 +250,16 @@ time. For each group under the ABI/API Compatibility and Concepts tabs it
 asserts the pages' `level:` values are non-decreasing in nav order,
 skipping only the hub. Branches are included: A1 exempts them from the
 ladder spine's monotonicity, not from the sidebar's. That is why P1 also
-reorders one group: in ABI Mechanics, `class-layout-abi.md` (advanced)
-sits between Parts 4 and 5 (intermediate) today and moves after Part 6,
-inside the same group — a within-group reorder keeps the recorded
-by-question grouping. This is the plan's Goal criterion "each nav group is
-non-decreasing in level", made executable.
+reorders two groups, inside the group each time so the recorded
+by-question grouping is kept: in ABI Mechanics, `class-layout-abi.md`
+(advanced) sits between Parts 4 and 5 (intermediate) today and moves
+after Part 6; in Concepts, `elf-symbol-filtering.md` and `limitations.md`
+(intermediate) sit after the pages A4 reconciles to advanced
+(`architecture.md`, `build-source-data.md`, `graph-coverage.md`,
+`impact-analysis.md`) and move ahead of them, which is also A1's c2 → c3
+order. `environment-drift.md` (advanced) stays last in Concepts until C13
+moves it, so the group passes in between. This is the plan's Goal
+criterion "each nav group is non-decreasing in level", made executable.
 
 **A2c. Ladder rules in `check_docs_contract.py`.** A `_check_learning_ladder`
 section next to the `topics.yaml` and `terminology.yaml` checks: loads
@@ -279,9 +284,14 @@ permanent owner.
 
 One shape for every learning page that is not a numbered Part. The Parts
 keep their breadcrumb, and their existing "Next" line must name the
-ladder's next member (Part 7's next is B6 once it exists, the hub until
-then) — the A2c footer rule reads either shape. Placed after the last
-section, before any "See also":
+ladder's next member — the A2c footer rule reads either shape. Four of
+them do not today, and P1 rewrites those: Part 1 points at Part 2 where
+the ladder's next member is `abi-surface.md`; Part 6 points at Part 7
+where it is `compatibility-direction.md`; Part 7 points at Detecting
+Breaks, which the ladder places earlier, so its next is the hub until B6
+exists and B6 afterwards; and Detecting Breaks has no next at all, so it
+gains `assurance-methods.md`. Placed after the last section, before any
+"See also":
 
 ```markdown
 ---
@@ -333,7 +343,7 @@ changes in Phase 1 (plan §6, Phase 1, fourth bullet).
 | `compatibility-direction.md` | intermediate | intermediate | edu 3 | footer; show the reversed-arguments run once more explicitly next to the "once per direction" sentence (C15) |
 | `consumer-models.md` | intermediate | intermediate | edu 3 | footer; one `--used-by` and one `--required-symbol` run (C15) |
 | `build-profile-comparability.md` | intermediate | intermediate | edu 3 | footer; probe-matrix link (C16) |
-| `static-and-header-only.md` | intermediate | intermediate | edu 3 | footer |
+| `static-and-header-only.md` | intermediate | intermediate | edu 3 | footer; `case191` compare (C15) |
 | `abi-series/08-detection.md` | — | intermediate | edu 4 | add level; §1a grows, §2 shrinks (C5) |
 | `assurance-methods.md` | intermediate | intermediate | edu 4 | footer |
 | `where-in-the-pipeline.md` | (new) | intermediate | edu 5 | B2 |
@@ -347,7 +357,7 @@ changes in Phase 1 (plan §6, Phase 1, fourth bullet).
 | `dependency-floors.md` | — | advanced | edu 7 | add level, footer |
 | `environment-drift.md` | — | advanced | edu 7 | add level, footer; tab move; `case170` (C13) |
 | `packages-and-consumers.md` | (new) | advanced | edu 7 | B9 |
-| `behavioral-compatibility.md` | intermediate | advanced | edu 8 | reconcile; opening → sentence + link (C6) |
+| `behavioral-compatibility.md` | intermediate | advanced | edu 8 | reconcile; opening → sentence + link (C6); non-static check line (C15) |
 | `data-wire-compatibility.md` | intermediate | advanced | edu 8 | reconcile; same |
 | `ownership-and-lifetime.md` | intermediate | advanced | edu 8 | reconcile; same |
 | `concurrency-and-initialization.md` | intermediate | advanced | edu 8 | reconcile; same; drop the "why this is its own page" section |
@@ -355,8 +365,8 @@ changes in Phase 1 (plan §6, Phase 1, fourth bullet).
 | `contract-aware-compatibility.md` | intermediate | intermediate | concepts c1 | footer |
 | `evidence-and-detectability.md` | intermediate | intermediate | concepts c2 | footer; appendix → archive (C8); §5 becomes the "cannot decide" owner (C6) |
 | `what-each-level-sees.md` | intermediate | intermediate | concepts c2 | forward Next (C11) |
-| `elf-symbol-filtering.md` | intermediate | intermediate | concepts c2 | footer |
-| `limitations.md` | intermediate | intermediate | concepts c2 | footer |
+| `elf-symbol-filtering.md` | intermediate | intermediate | concepts c2 | footer; nav row moves ahead of the advanced block (A2b) |
+| `limitations.md` | intermediate | intermediate | concepts c2 | footer; nav row moves ahead of the advanced block (A2b) |
 | `architecture.md` | intermediate | advanced | concepts c3 | reconcile; verdict table → link (C7) |
 | `build-source-data.md` | — | advanced | concepts c3 | add level; split (C9) |
 | `graph-coverage.md` | — | advanced | concepts c3 | add level; pass-state detail → reference (C10) |
@@ -653,7 +663,8 @@ Sections:
    headers", "you cannot see the sixth from any binary" — each a link to
    the level's row on `what-each-level-sees.md`.
 
-Runs: none on purpose (Tier 0 is pre-tool). Cases: the ten above.
+Runs: none on purpose (Tier 0 is pre-tool; the plan's acceptance
+criterion exempts this one page by name). Cases: the ten above.
 Links, not restatements: the trio for the levels; the Parts for the
 mechanisms. Done when: every row of the table links one Part, one level
 anchor and one case; the page is under 150 lines; no `ChangeKind` names
@@ -1209,6 +1220,17 @@ contract (`case118`).
 - `assurance-methods.md`: no scanner command (by design); instead, one
   concrete non-static check per row (a consumer-rebuild job, a
   binary-swap smoke test), phrased as a shell line.
+- the four Tier 8 pages, the same way: one non-static check each as a
+  shell line — a consumer rebuild-and-test run (`behavioral-compatibility.md`),
+  a stored file written by the old version and read back by the new one
+  (`data-wire-compatibility.md`), a consumer run under AddressSanitizer
+  (`ownership-and-lifetime.md`), a consumer run under ThreadSanitizer
+  (`concurrency-and-initialization.md`). No case link: the catalog has no
+  fixture for what static comparison cannot see, and the plan's Phase 4
+  requirement is narrowed to say so.
+- `static-and-header-only.md`: the header-only compare from `case191`
+  (`--header old=… --header new=…`, `--ast-frontend clang`), copied from
+  the case's own README.
 
 ### C16. `build-profile-comparability.md` — probe matrix
 
@@ -1316,7 +1338,7 @@ the dependencies between artifacts.
 
 | PR | Plan phase | Carries | Depends on |
 |---|---|---|---|
-| P1 | 1 | A1 file (today's pages; `paths:` for today's rows), A2 generator + tests, A2b nav-order check, A2c rules, A2d `validation:` block; A4's `level:` on the 16 blank pages and the reconciled values; the one within-group nav reorder (A2b); A3 footers on all 26 deep dives + 3 orientation pages; C11; front-door links (`docs/index.md`, `start/getting-started.md`); the `GENERATED_FILE_MARKERS`, `scripts/CLAUDE.md` and `verify.py` wiring. One PR, because the rules and the levels they read must land together; the hub gains only the two sentinel blocks | — |
+| P1 | 1 | A1 file (today's pages; `paths:` for today's rows), A2 generator + tests, A2b nav-order check, A2c rules, A2d `validation:` block; A4's `level:` on the 16 blank pages and the reconciled values; the two within-group nav reorders (A2b); A3 footers on all 26 deep dives + 3 orientation pages and the four Part "Next" rewrites (A3); C11; front-door links (`docs/index.md`, `start/getting-started.md`); the `GENERATED_FILE_MARKERS`, `scripts/CLAUDE.md` and `verify.py` wiring. One PR, because the rules and the levels they read must land together; the hub gains only the two sentinel blocks | — |
 | P2 | 1 | A7 hub rebuild (minus the "Now run it" table), anchor rewrites, A6 terminology term, C7 | P1 |
 | P3 | 2 | C2, C3 (class-layout ownership), C5, C6, C8, C9, C10, A5's "edits to existing topics" | P2 |
 | P4 | 3 | B1 How a break shows up | P2 |

@@ -462,7 +462,9 @@ registered owner.
   contract. Today wheels appear on one page.
 - **Windows and macOS worked examples.** `msvc-pe-abi-model.md` teaches a
   different mental model with no case and no command; the MSVC lane exists
-  in CI and the catalog has PE-capable cases.
+  in CI and the catalog has PE-capable cases. macOS has neither an owning
+  page nor a break-shaped fixture, so only the Windows example is planned
+  (§6).
 - **Other ABI domains** (kernel kABI/BTF, SYCL host vs device): one
   "advanced/expert" page listing them as further reading would connect the
   existing tool docs to the ladder without teaching them in full.
@@ -554,8 +556,9 @@ a template library. Checkable form:
   non-decreasing along each sequence's full reading order and within
   each nav group;
 - every ★ page in §5 exists, is registered in `topics.yaml` per §4.6's
-  three cases, and has at least one runnable invocation and one linked
-  case;
+  three cases, and has at least one linked case and — except "How a break
+  shows up", the pre-tool Tier 0 page, which deliberately runs nothing —
+  at least one runnable invocation;
 - no two learning pages re-explain the same registered topic
   (`scripts/check_docs_contract.py` clean, and its duplicate-block warning
   count no higher than before);
@@ -713,8 +716,13 @@ gate all of this).
 
 The "other ABI domains" further reading from §4.7 (kernel kABI/BTF, SYCL)
 is not a page of its own: it is the last section of Packages and
-consumers (page specs B9 §6), at pointer depth. Deferred, not dropped: a
-macOS worked example follows the Windows one in Phase 4.
+consumers (page specs B9 §6), at pointer depth. A macOS worked example is
+out of scope for this plan (see the list at the end of this section): no
+learn page owns Mach-O today (Part 5 carries platform parallels only),
+and the only macOS fixture, `tests/test_cross_platform_integration.py`'s
+clang-built `.dylib`, exercises metadata parsing rather than a
+compatibility break — it needs an owning page and a break-shaped fixture
+before a spec can name either.
 
 The ownership rule for every entry is §4.6's three-case decision; the
 how-tos keep the commands and the learning page keeps the model.
@@ -722,7 +730,11 @@ how-tos keep the commands and the learning page keeps the model.
 **Phase 4 — worked examples on every concept page.**
 
 - At least one runnable invocation and one linked case per concept page
-  (F7); a Windows worked example for `msvc-pe-abi-model.md`; `case170` on
+  that teaches something the scanner detects (F7). The four Tier 8 pages
+  and Assurance Beyond Static Checking teach what static comparison
+  cannot decide, so their item is one concrete non-static check per page
+  as a shell line and no case (page specs C15); a Windows worked example
+  for `msvc-pe-abi-model.md`; `case170` on
   `environment-drift.md`; the five bundle cases on the products page; the
   template cases on the templates page; and `build-profile-comparability.md`
   links the probe matrix (`use/probe-harness.md`) as the tool's answer to
@@ -733,7 +745,8 @@ how-tos keep the commands and the learning page keeps the model.
 
 **Out of scope for this plan:** any change to what the scanner detects or
 reports; the tool-track how-to pages' commands (they stay the fact owners);
-the example catalog. If writing a practice page exposes a missing tool
+the example catalog; a macOS worked example (no owning learn page and no
+break-shaped Mach-O fixture exist yet — both come first). If writing a practice page exposes a missing tool
 feature — the most likely candidate is a first-class "surface growth"
 report rather than three separate flags — record it in
 `docs/contribute/usecase-registry.yaml` rather than papering over it in
