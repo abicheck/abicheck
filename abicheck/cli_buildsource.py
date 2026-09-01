@@ -56,7 +56,6 @@ from .cli_buildsource_helpers import (  # noqa: F401  (re-exported for API stabi
     _merge_pick_base as _merge_pick_base,
     _merge_print_summary as _merge_print_summary,
     _optional_coverage as _optional_coverage,
-    _purge_external_outputs as _purge_external_outputs,
     _resolve_side_pack as _resolve_side_pack,
     _run_adapters as _run_adapters,
     _run_external_extractors as _run_external_extractors,
@@ -64,6 +63,7 @@ from .cli_buildsource_helpers import (  # noqa: F401  (re-exported for API stabi
     diff_embedded_build_source as diff_embedded_build_source,
     parse_from_specs as parse_from_specs,
     prepare_embedded_build_source as prepare_embedded_build_source,
+    purge_external_outputs as purge_external_outputs,
 )
 from .errors import SnapshotError, ValidationError
 
@@ -127,7 +127,9 @@ def embed_build_source(
             public_headers=public_headers,
             public_header_dirs=public_header_dirs,
             defer_cleanup=defer_cleanup,
-            on_warning=None if quiet else (lambda message: click.echo(message, err=True)),
+            on_warning=None
+            if quiet
+            else (lambda message: click.echo(message, err=True)),
         )
     except ValidationError as exc:
         raise click.UsageError(str(exc)) from exc
@@ -286,9 +288,7 @@ def _missing_requested_evidence_layers(
     return missing
 
 
-def build_source_already_satisfies(
-    snap: AbiSnapshot, collect_mode: str
-) -> bool:
+def build_source_already_satisfies(snap: AbiSnapshot, collect_mode: str) -> bool:
     """True when *snap* already carries every layer *collect_mode* asks for.
 
     The idempotence predicate behind :func:`_write_snapshot_output`'s
@@ -433,13 +433,19 @@ def _write_snapshot_output(
         build_source_already_satisfies(snap, collect_mode)
     ):
         from .cli_buildsource import embed_build_source
+
         embed_build_source(
-            snap, build_info, sources,
-            build_config=build_config, allow_build_query=allow_build_query,
+            snap,
+            build_info,
+            sources,
+            build_config=build_config,
+            allow_build_query=allow_build_query,
             collect_mode=collect_mode,
-            build_query=build_query, build_compile_db=build_compile_db,
+            build_query=build_query,
+            build_compile_db=build_compile_db,
             build_targets=build_targets,
-            extractor=extractor, clang_bin=clang_bin,
+            extractor=extractor,
+            clang_bin=clang_bin,
             public_headers=tuple(str(p) for p in public_headers),
             public_header_dirs=tuple(str(p) for p in public_header_dirs),
         )
@@ -492,6 +498,7 @@ def _write_snapshot_output(
     # --sources/--build-info embed, so both fact sources combine).
     if inputs_pack is not None:
         from .cli_buildsource_merge import embed_inputs_pack
+
         embed_inputs_pack(snap, inputs_pack, output)
     # CLI-audit P1: an *explicitly* requested --depth that was not actually
     # reached is a hard failure, not a warning — see
@@ -499,6 +506,7 @@ def _write_snapshot_output(
     # embed step above has had its chance to fill in build_source.
     check_requested_depth_satisfied(depth, snap)
     from .workflows.extraction import resolve_dependency_scope
+
     snap = resolve_dependency_scope(snap, include_dependencies, header_roots)
     # ADR-059: one payload dict, one JSON encode -- previously this built a
     # full JSON *string* via snapshot_to_json(), then fold_dump_provenance_

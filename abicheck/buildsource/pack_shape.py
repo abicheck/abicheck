@@ -27,6 +27,7 @@ is_any_pack_dir` is the combined "either shape" predicate.
 from __future__ import annotations
 
 import json
+import shutil
 from pathlib import Path
 
 
@@ -61,3 +62,27 @@ def is_pack_dir(path: Path | None) -> bool:
     return isinstance(data, dict) and (
         "build_source_pack_version" in data or "evidence_pack_version" in data
     )
+
+
+def purge_external_outputs(pack_root: Path, manifest: object) -> None:
+    """Remove a failed external extractor's normalized outputs from the pack.
+
+    A failed/skipped extractor must be isolated from the collected pack: its
+    normalized output files (and its ``normalized/<name>/`` subtree) would
+    otherwise be hashed into ``BuildSourcePack`` ``manifest.artifacts`` and the
+    content hash, so an invalid output would change pack identity and publish a
+    digest for evidence that was never folded (Codex P2). Raw artifacts under
+    ``raw/`` are *not* removed — they are provenance-only, never hashed, and are
+    what audit mode preserves for debugging. Takes *manifest* duck-typed
+    (``name``/``outputs`` attributes) rather than a typed import, so this
+    dependency-free leaf stays importable from any layer.
+    """
+    name = getattr(manifest, "name", "")
+    for output in getattr(manifest, "outputs", []):
+        try:
+            (pack_root / output.path).unlink()
+        except OSError:
+            pass
+    norm_dir = pack_root / "normalized" / name
+    if norm_dir.is_dir():
+        shutil.rmtree(norm_dir, ignore_errors=True)

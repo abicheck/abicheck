@@ -373,7 +373,7 @@
     },
     {
       "path": "abicheck/cli_buildsource_helpers.py",
-      "baseline_lines": 1064,
+      "baseline_lines": 1043,
       "target": "workflows-or-frontends",
       "rule": "no_growth",
       "category": "legacy_workflow_or_frontend_monolith",
@@ -1033,7 +1033,7 @@
     },
     {
       "path": "abicheck/serialization.py",
-      "baseline_lines": 1824,
+      "baseline_lines": 1737,
       "target": "storage (blocked, deeper than expected)",
       "rule": "no_growth",
       "category": "legacy_storage_monolith",
@@ -1873,7 +1873,7 @@
     },
     {
       "path": "tests/test_mutation_score_gate.py",
-      "baseline_lines": 1532,
+      "baseline_lines": 1310,
       "target": "tests/unit-or-contract ownership matching production migration",
       "rule": "no_growth",
       "category": "legacy_oversized_test_module",
@@ -2073,7 +2073,7 @@
     },
     {
       "path": "tests/test_service_unit.py",
-      "baseline_lines": 5635,
+      "baseline_lines": 5551,
       "target": "tests/unit-or-contract ownership matching production migration",
       "rule": "no_growth",
       "category": "legacy_oversized_test_module",

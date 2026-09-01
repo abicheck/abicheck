@@ -51,7 +51,11 @@ from .cli_buildsource_merge import (
     _merge_print_summary as _merge_print_summary,
 )
 from .errors import SnapshotError
-from .workflows.extraction import DEFAULT_REDACTION, pack_content_hash
+from .workflows.extraction import (
+    DEFAULT_REDACTION,
+    pack_content_hash,
+    purge_external_outputs as purge_external_outputs,
+)
 
 if TYPE_CHECKING:
     from .buildsource.build_evidence import BuildEvidence
@@ -194,9 +198,7 @@ def attach_evidence_metrics(
     """CLI adapter over ``buildsource.evidence_report.attach_evidence_metrics``."""
     from .buildsource.evidence_report import attach_evidence_metrics as _attach
 
-    _attach(
-        result, metrics, injected_changes, on_output=None if quiet else _echo
-    )
+    _attach(result, metrics, injected_changes, on_output=None if quiet else _echo)
 
 
 def echo_evidence_metrics(metrics: dict[str, object]) -> None:
@@ -211,7 +213,6 @@ def echo_evidence_metrics(metrics: dict[str, object]) -> None:
 
     for line in evidence_metrics_lines(metrics):
         _echo(line)
-
 
 
 def _load_pack_or_raise(evidence_dir: Path) -> BuildSourcePack:
@@ -873,7 +874,7 @@ def _run_external_extractors(
             merged.diagnostics.append(
                 f"{manifest.name}: {record.detail or 'extractor did not complete'}"
             )
-            _purge_external_outputs(pack_root, manifest)
+            purge_external_outputs(pack_root, manifest)
             continue
 
         # Reject output kinds collect cannot fold yet — only
@@ -897,7 +898,7 @@ def _run_external_extractors(
                 f"{manifest.name}: output kind(s) {', '.join(unsupported)} are not yet "
                 "supported by collect (only build_evidence is folded into the pack)"
             )
-            _purge_external_outputs(pack_root, manifest)
+            purge_external_outputs(pack_root, manifest)
             continue
 
         # Fold any normalized build_evidence outputs into the merged L3 evidence.
@@ -927,7 +928,7 @@ def _run_external_extractors(
                 fold_ok = False
                 record.status = "failed"
                 record.detail = record.detail or f"invalid build_evidence output: {exc}"
-                # _purge_external_outputs (below) removes these files, so the
+                # purge_external_outputs (below) removes these files, so the
                 # failed ledger row must not keep advertising stale paths to a
                 # missing/replaced artifact (Codex P2).
                 record.artifacts = []
@@ -939,31 +940,7 @@ def _run_external_extractors(
             for build_evidence in parsed:
                 merged.merge(build_evidence)
         else:
-            _purge_external_outputs(pack_root, manifest)
-
-
-def _purge_external_outputs(pack_root: Path, manifest: object) -> None:
-    """Remove a failed external extractor's normalized outputs from the pack.
-
-    A failed/skipped extractor must be isolated from the collected pack: its
-    normalized output files (and its ``normalized/<name>/`` subtree) would
-    otherwise be hashed into ``BuildSourcePack`` ``manifest.artifacts`` and the
-    content hash, so an invalid output would change pack identity and publish a
-    digest for evidence that was never folded (Codex P2). Raw artifacts under
-    ``raw/`` are *not* removed — they are provenance-only, never hashed, and are
-    what audit mode preserves for debugging.
-    """
-    import shutil
-
-    name = getattr(manifest, "name", "")
-    for output in getattr(manifest, "outputs", []):
-        try:
-            (pack_root / output.path).unlink()
-        except OSError:
-            pass
-    norm_dir = pack_root / "normalized" / name
-    if norm_dir.is_dir():
-        shutil.rmtree(norm_dir, ignore_errors=True)
+            purge_external_outputs(pack_root, manifest)
 
 
 def _ingest_graph_backends(

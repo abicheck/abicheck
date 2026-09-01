@@ -28,8 +28,17 @@ a stable, dependency-free leaf shared across detectors), the same exemption
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
+from ..model.build_mode_facts import (
+    BuildMode,
+    BuildModeProvenance,
+    CompilerFamily,
+    CxxStandard,
+    GlibcxxDualAbi,
+    StdlibFamily,
+)
+from ..model.extraction_contract import ExtractionContract
 from ..name_classification import strip_anonymous_type_location
 from ..qualified_name_segments import (
     _LAMBDA_IDENTITY_FIELDS,
@@ -121,3 +130,96 @@ def backfill_missing_elf_binding(snap: AbiSnapshot) -> None:
             elf_sym = sym_map.get(var.mangled)
             if elf_sym is not None:
                 var.elf_binding = elf_sym.binding
+
+
+def extraction_contract_from_dict(raw: Any) -> ExtractionContract | None:
+    """Convert a serialized ExtractionContract dict (or None) back into the
+    typed dataclass (ADR-050 D1). Returns None when the field is missing
+    (every snapshot predating schema v12) or malformed."""
+    if not isinstance(raw, dict):
+        return None
+    profile_fingerprint = raw.get("profile_fingerprint")
+    scope_fingerprint = raw.get("scope_fingerprint")
+    profile_fields = raw.get("profile_fields")
+    scope_fields = raw.get("scope_fields")
+    return ExtractionContract(
+        profile_fingerprint=profile_fingerprint
+        if isinstance(profile_fingerprint, str)
+        else None,
+        scope_fingerprint=scope_fingerprint
+        if isinstance(scope_fingerprint, str)
+        else None,
+        profile_fields={str(k): str(v) for k, v in profile_fields.items()}
+        if isinstance(profile_fields, dict)
+        else {},
+        scope_fields={str(k): str(v) for k, v in scope_fields.items()}
+        if isinstance(scope_fields, dict)
+        else {},
+    )
+
+
+def _enum_or(cls: type, value: Any, default: Any) -> Any:
+    if value is None:
+        return default
+    try:
+        return cls(value)
+    except (ValueError, KeyError):
+        return default
+
+
+def build_mode_from_dict(raw: Any) -> BuildMode | None:
+    """Convert a serialized BuildMode dict (or None) back into the
+    typed dataclass. Returns None when the field is missing (older
+    snapshots) or malformed."""
+    if not isinstance(raw, dict):
+        return None
+
+    # Validate provenance shape: a malformed snapshot may carry a
+    # non-dict value (string/list from hand-edited JSON, or a partial
+    # corruption). Per the function contract, return None for
+    # malformed inputs rather than raising at .get().
+    prov_raw = raw.get("provenance")
+    if prov_raw is None:
+        prov_raw = {}
+    if not isinstance(prov_raw, dict):
+        return None
+    provenance = BuildModeProvenance(
+        raw_producer=prov_raw.get("raw_producer"),
+        raw_comment=prov_raw.get("raw_comment"),
+        compiler_version=prov_raw.get("compiler_version"),
+    )
+
+    # Coerce libcpp_abi_version: int passes through; numeric string
+    # (some YAML/JSON producers emit "1" instead of 1) coerces; anything
+    # else (bool wraps as 0/1 which would be misleading; lists/dicts)
+    # falls back to None.
+    libcpp_raw = raw.get("libcpp_abi_version")
+    if isinstance(libcpp_raw, bool):
+        libcpp_abi_version: int | None = None
+    elif isinstance(libcpp_raw, int):
+        libcpp_abi_version = libcpp_raw
+    elif isinstance(libcpp_raw, str) and libcpp_raw.isdigit():
+        libcpp_abi_version = int(libcpp_raw)
+    else:
+        libcpp_abi_version = None
+
+    return BuildMode(
+        compiler_family=_enum_or(
+            CompilerFamily,
+            raw.get("compiler_family"),
+            CompilerFamily.UNKNOWN,
+        ),
+        language_std=_enum_or(
+            CxxStandard,
+            raw.get("language_std"),
+            CxxStandard.UNKNOWN,
+        ),
+        stdlib=_enum_or(StdlibFamily, raw.get("stdlib"), StdlibFamily.UNKNOWN),
+        glibcxx_dual_abi=_enum_or(
+            GlibcxxDualAbi,
+            raw.get("glibcxx_dual_abi"),
+            GlibcxxDualAbi.NOT_APPLICABLE,
+        ),
+        libcpp_abi_version=libcpp_abi_version,
+        provenance=provenance,
+    )
