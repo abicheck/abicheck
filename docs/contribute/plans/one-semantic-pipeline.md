@@ -9721,8 +9721,10 @@ computation also removed essentially all of the `GraphNode`/`GraphFact`
 construction cost from the hot path as a direct consequence — an ad hoc
 local re-run of `scripts/benchmark_scaling.py` after this change showed
 the previously-regressed scenarios back in line with the pre-migration
-baseline, though this was not re-verified against the perf gate's own
-noise-controlled measurement before this note was written.
+baseline, confirmed by CI itself: the `Performance` workflow's own
+"Baseline regression (PR vs base)" job (PR #979, commit `5544540`)
+completed with `conclusion: success`, the gate's own noise-controlled
+PR-vs-base measurement.
 
 Deliberately still not migrated: `export_surface.py`'s own root-seeding
 (the export-table-matching logic itself, as opposed to the type-closure

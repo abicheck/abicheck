@@ -67,11 +67,8 @@
     merged, so there is no evidence precedence for a stale or adversarial
     fact to win) and, as a direct consequence, removes essentially all of
     the `GraphNode`/`GraphFact`/evidence-merge construction cost from the
-    hot path -- an ad hoc local re-run of `scripts/benchmark_scaling.py`
-    after this change showed the previously-regressed scenarios back in
-    line with the pre-migration baseline, though this was not re-verified
-    against the perf gate's own noise-controlled measurement before this
-    fragment was written. Regression tests:
+    hot path, confirmed by CI's own "Baseline regression (PR vs base)"
+    gate going green on the commit that made this change. Regression tests:
     `TestClosureIgnoresSurfaceGraphEntirely` (including a deliberately
     adversarial, high-confidence poisoned fact),
     `TestPublicSurfaceBackCompatReexports`,

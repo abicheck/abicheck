@@ -5832,8 +5832,11 @@ looked like the obvious fix and wasn't.
   after this fix showed `add_remove@2000` and `type_churn@1000` (two of
   the scenarios the perf gate had flagged) back in line with or better
   than the pre-migration baseline numbers quoted in the gate's own
-  failure output, though this was **not** re-verified against the gate's
-  own noise-controlled PR-vs-base measurement before this note was
-  written — check the PR's own CI history/comments for the actual gate
-  outcome on the commit that made this change before assuming it is
-  closed.
+  failure output. **Confirmed by CI itself, not just the local re-run**:
+  the `Performance` workflow's own "Baseline regression (PR vs base)" job
+  (PR #979, commit `5544540`) completed with `conclusion: success` — the
+  gate's own noise-controlled PR-vs-base measurement, not an ad hoc local
+  timing, so this entry is resolved rather than an open gap. Left in this
+  history for the multi-round record: three review rounds on one commit
+  chain, each fix closing the previous round's hazard while (in round 2's
+  case) introducing this one.
