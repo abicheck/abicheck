@@ -803,24 +803,24 @@ def _run_adapters(
 def _purge_and_record(
     pack_root: Path, manifest: object, record: ExtractorRecord, merged: BuildEvidence
 ) -> None:
-    """Purge a failed extractor's outputs, escalating a failed purge itself.
+    """Purge a failed extractor's outputs, aborting if the purge itself fails.
 
-    A purge failure (locked file, permissions error -- CodeRabbit review)
-    is worse than whatever reason triggered the purge: an un-purged file
-    can still be hashed into the pack's identity as valid evidence. Forces
-    ``record.status = "failed"`` regardless of its prior value and adds one
-    diagnostic to both *record* and *merged*.
+    ``pack_io.write()``'s ``_artifact_digests()`` walks ``normalized/``
+    unconditionally, ignoring extractor ``status`` -- so recording
+    ``status = "failed"`` alone does not stop a surviving file from being
+    hashed into the published pack identity, since permissive mode (the
+    default) lets collection continue past a failed extractor by design
+    (Codex review). A purge failure isn't a missing-evidence gap permissive
+    mode tolerates; it risks publishing corrupt evidence as genuine, so it
+    always raises, in every collection mode.
     """
     name = getattr(manifest, "name", "<unknown>")
     if not purge_external_outputs(pack_root, manifest):
         record.status = "failed"
-        message = (
-            f"{name}: failed to fully remove stale normalized output(s) from "
-            "the pack -- a leftover file may still be hashed into the "
-            "published pack identity"
-        )
+        message = f"{name}: failed to fully remove stale normalized output(s)"
         record.diagnostics.append(message)
         merged.diagnostics.append(message)
+        raise click.ClickException(message)
 
 
 def _run_external_extractors(

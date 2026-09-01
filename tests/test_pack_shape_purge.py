@@ -15,27 +15,36 @@
 
 """``purge_external_outputs``'s return-value contract, and
 ``cli_buildsource_helpers._purge_and_record``'s escalation of a purge
-failure to ``record.status = "failed"``.
+failure to an unconditional abort.
 
 The bug class (CodeRabbit review, PR #974): a real removal failure (a
 locked file, a permissions error) was silently swallowed -- the caller had
 no way to learn a stale, un-purged normalized output might still be sitting
 under ``pack_root`` for a later hashing pass to fold into the published
-pack's content identity as if it were valid, current-run evidence. Fixed by
-returning whether every declared output/directory was confirmed absent, and
-(at the three call sites, exercised here via the shared
-``_purge_and_record`` helper) escalating a failure to ``record.status =
-"failed"`` -- which plugs directly into the pre-existing
-``_enforce_strict_mode`` D9 gate (``tests/test_build_source_extractor.py``
-already proves that gate raises on any ``"failed"``-status record under
-``--collection-mode strict``, so a purge failure now aborts a strict run
-the same way any other extractor failure does).
+pack's content identity as if it were valid, current-run evidence. Fixed in
+two steps: first by having ``purge_external_outputs`` return whether every
+declared output/directory was confirmed absent, and escalating a failure to
+``record.status = "failed"``; then, per a Codex review of that first fix,
+by discovering ``record.status`` alone is not enough -- ``pack_io.write()``'s
+``_artifact_digests()`` walks ``normalized/`` unconditionally regardless of
+any extractor's status, and ``--collection-mode permissive`` (the default)
+lets collection continue past a "failed" extractor by design, so a purge
+failure's leftover file would still be hashed into the published pack
+identity even with the status escalation in place. A purge failure is not
+an evidence gap permissive mode is meant to tolerate -- it is a risk of
+publishing corrupted evidence as genuine -- so ``_purge_and_record`` now
+raises ``click.ClickException`` unconditionally, in every collection mode,
+rather than relying on the pre-existing ``_enforce_strict_mode`` D9 gate
+(which only fires under ``--collection-mode strict``).
 """
 
 from __future__ import annotations
 
 from pathlib import Path
 from types import SimpleNamespace
+
+import click
+import pytest
 
 from abicheck.buildsource.build_evidence import BuildEvidence
 from abicheck.buildsource.model import ExtractorRecord
@@ -139,9 +148,28 @@ class TestPurgeAndRecordEscalation:
         record = ExtractorRecord(name="ex", status="skipped", detail="gated out")
         merged = BuildEvidence()
 
-        _purge_and_record(tmp_path, manifest, record, merged)
+        with pytest.raises(click.ClickException):
+            _purge_and_record(tmp_path, manifest, record, merged)
 
         assert record.status == "failed"
         assert len(record.diagnostics) == 1
         assert "ex" in record.diagnostics[0]
         assert merged.diagnostics == record.diagnostics
+
+    def test_purge_failure_raises_unconditionally_not_only_in_strict_mode(
+        self, tmp_path: Path
+    ) -> None:
+        # The bug Codex found: escalating only to record.status = "failed"
+        # is silently swallowed by the default --collection-mode permissive,
+        # since pack_io.write()'s artifact hashing walks normalized/ with no
+        # regard for extractor status at all. A purge failure must abort
+        # regardless of collection mode -- there is no "permissive" story
+        # for a leftover file corrupting the published content hash.
+        stubborn = tmp_path / "build" / "build_evidence.json"
+        stubborn.mkdir(parents=True)
+        manifest = _manifest("ex", "build/build_evidence.json")
+        record = ExtractorRecord(name="ex", status="ok", detail=None)
+        merged = BuildEvidence()
+
+        with pytest.raises(click.ClickException):
+            _purge_and_record(tmp_path, manifest, record, merged)
