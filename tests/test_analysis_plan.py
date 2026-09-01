@@ -259,18 +259,23 @@ class TestBazelBuildTargetScoping:
         plan = AnalysisPlanner.resolve(request)
         assert isinstance(plan, AnalysisPlan)
 
-    def test_flow2_inputs_pack_with_bundled_config_is_unaffected(self, tmp_path: Path):
+    def test_flow2_inputs_pack_with_bundled_config_is_unaffected_headerless(
+        self, tmp_path: Path
+    ):
         """Codex review, fresh evidence: auto-discovery must recognize
         *both* pack shapes (a classic ``BuildSourcePack`` and a Flow-2
         ``abicheck_inputs`` pack), not just the classic one --
         ``embed_build_source``'s own ``raw_sources`` is ``None`` for either
-        shape (``src_is_pack``/``src_is_inputs``), so real execution never
-        discovers a config at *either* kind of pack directory. A first
-        version of this check used ``is_pack_dir`` alone, which only
-        recognizes the classic shape -- a Flow-2 pack whose bundled
-        ``.abicheck.yml`` happens to declare ``build.targets:`` was
+        shape (``src_is_pack``/``src_is_inputs``), so real execution's *main*
+        L3/L4/L5 collection never discovers a config at *either* kind of pack
+        directory. A first version of this check used ``is_pack_dir`` alone,
+        which only recognizes the classic shape -- a Flow-2 pack whose
+        bundled ``.abicheck.yml`` happens to declare ``build.targets:`` was
         therefore falsely treated as a source checkout and rejected, even
-        though the real run never looks at that file."""
+        though the real run's main collection never looks at that file. No
+        headers here, so the L2 seed's own independent reading of a pack's
+        bundled config (see the sibling test below) doesn't apply either --
+        genuinely nothing consults it in this shape."""
         aquery = _write(tmp_path / "aquery.json", _EMPTY_AQUERY)
         pack = tmp_path / "inputs_pack"
         pack.mkdir()
@@ -287,6 +292,42 @@ class TestBazelBuildTargetScoping:
         )
         plan = AnalysisPlanner.resolve(request)
         assert isinstance(plan, AnalysisPlan)
+
+    def test_pack_with_bundled_config_and_real_headers_raises_planning_error(
+        self, tmp_path: Path
+    ):
+        """Codex review, fresh evidence beyond the headerless pack fix above:
+        when real headers ARE present, ``buildsource.l2_seed._l2_seed_config``
+        calls ``discover_build_config`` on the *original* pack path before
+        pack recognition nulls ``raw_sources`` for the main collection --
+        and that seed only runs when headers are present
+        (``seed_includes_and_fold_compile_context``'s own ``... or not
+        headers: return ...`` gate), independent of collect_mode. So a
+        pack's bundled ``.abicheck.yml`` *is* genuinely consulted by the L2
+        seed in this shape, even though the main L3/L4/L5 collection still
+        ignores it -- unconditionally skipping pack recognition (the first
+        version of this fix) would have missed this real, reachable path."""
+        aquery = _write(tmp_path / "aquery.json", _EMPTY_AQUERY)
+        pack = tmp_path / "inputs_pack"
+        pack.mkdir()
+        (pack / "manifest.json").write_text(
+            json.dumps({"kind": "abicheck_inputs"}), encoding="utf-8"
+        )
+        (pack / ".abicheck.yml").write_text(
+            "build:\n  system: bazel\n  targets:\n    - //:from_config\n",
+            encoding="utf-8",
+        )
+        header = tmp_path / "api.h"
+        header.write_text("void f();\n", encoding="utf-8")
+        request = DumpRequest(
+            input=InputSpec.of(
+                path=None, sources=pack, build_info=aquery, headers=[header]
+            ),
+            depth="build",
+        )
+        with pytest.raises(PlanningError) as exc_info:
+            AnalysisPlanner.resolve(request)
+        assert "//:from_config" in exc_info.value.failures[0].requested
 
     def test_no_abicheck_yml_present_is_unaffected(self, tmp_path: Path):
         """No config file at ``sources`` at all -- the auto-discovery

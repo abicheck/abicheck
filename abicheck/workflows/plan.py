@@ -215,7 +215,10 @@ def _replace_lang_frontend(plan: SidePlan, lang: str, frontend: str) -> SidePlan
 
 
 def _discovered_config_build_targets(
-    sources: Path | None, build_config: Path | None = None
+    sources: Path | None,
+    build_config: Path | None = None,
+    *,
+    headers_present: bool = False,
 ) -> tuple[str, ...]:
     """Auto-discovered (or explicit) ``.abicheck.yml``'s ``build.targets``.
 
@@ -242,20 +245,29 @@ def _discovered_config_build_targets(
     correctly-typed ``ValidationError`` for it at real-execution time
     (exit 64 either way), and duplicating that diagnosis pre-flight would be
     exactly the second-copy drift this phase exists to avoid, for a case
-    that already fails loudly downstream. Auto-discovery returns ``()`` (not
-    scoped) for *either* pack shape too (Codex review) -- a classic
-    ``BuildSourcePack`` *or* a Flow-2 ``abicheck_inputs`` pack
-    (:func:`~abicheck.buildsource.inputs_pack.is_any_pack_dir`) --
-    ``embed_build_source``'s own ``raw_sources`` is ``None`` for both (its
-    ``src_is_pack``/``src_is_inputs`` pair), so real execution never reaches
-    ``discover_build_config`` for either shape: a pack dir is
-    content-addressed evidence, not a source checkout to scan for a project
-    config, and a Flow-2 pack's own `.abicheck.yml`, if it happens to carry
-    one, is likewise never consulted. Checking only the classic shape here
-    would falsely reject a Flow-2 pack whose bundled config declares targets
-    the real run never looks at. An *explicit* *build_config* is honored
-    regardless, since it names the config file directly rather than
-    searching *sources* for one.
+    that already fails loudly downstream.
+
+    *headers_present* gates whether either pack shape (classic
+    ``BuildSourcePack`` or Flow-2 ``abicheck_inputs``,
+    :func:`~abicheck.buildsource.inputs_pack.is_any_pack_dir`) is skipped
+    (Codex review, fresh evidence beyond the original pack-shape fix):
+    ``embed_build_source``'s own *main* L3/L4/L5 collection never discovers a
+    config at a pack dir (``raw_sources`` is ``None`` for either shape), but
+    ``buildsource.l2_seed._l2_seed_config`` -- reached whenever real headers
+    are present, independent of collect_mode
+    (``seed_includes_and_fold_compile_context``'s own ``... or not headers:
+    return ...`` gate) -- calls ``discover_build_config`` on the *original*
+    ``sources`` path before pack recognition nulls it for that seed's own
+    ``collect_inline_pack`` call, so a pack's bundled ``.abicheck.yml`` *is*
+    genuinely consulted in that case, just by the L2 seed rather than the
+    main collection. Skipping pack recognition unconditionally (the first
+    version of this fix) therefore missed a real, reachable path -- both
+    shapes are skipped only when *headers_present* is ``False``, matching
+    exactly the condition that keeps the L2 seed from ever running at all.
+    An *explicit* *build_config* is honored regardless of pack shape or
+    headers, since it names the config file directly rather than searching
+    *sources* for one -- the identical precedence order (`build_config or
+    discover_build_config(sources)`) whichever consumer resolves it.
     """
     # Imported from the already-`extract`-classified `buildsource.inline`
     # (which re-exports both from `buildsource.build_config`), not from
@@ -269,10 +281,11 @@ def _discovered_config_build_targets(
     else:
         if sources is None:
             return ()
-        from ..buildsource.inputs_pack import is_any_pack_dir
+        if not headers_present:
+            from ..buildsource.inputs_pack import is_any_pack_dir
 
-        if is_any_pack_dir(sources):
-            return ()
+            if is_any_pack_dir(sources):
+                return ()
         cfg_path = discover_build_config(sources)
     if cfg_path is None:
         return ()
@@ -289,6 +302,8 @@ def bazel_target_scoping_failure(
     build_targets: tuple[str, ...],
     sources: Path | None = None,
     build_config: Path | None = None,
+    *,
+    headers_present: bool = False,
 ) -> PlanningFailure | None:
     """Reject ``build_targets`` combined with a pre-captured Bazel jsonproto.
 
@@ -327,12 +342,16 @@ def bazel_target_scoping_failure(
     ``.abicheck.yml``'s ``build.targets:`` declares (see
     :func:`_discovered_config_build_targets`), mirroring
     ``embed_build_source``'s own ``targets=list(build_targets) if
-    build_targets else cfg.targets`` precedence exactly. Every existing
-    caller keeps passing neither (both default ``None``), which reproduces
-    the prior, request-level-flag-only behavior unchanged.
+    build_targets else cfg.targets`` precedence exactly. *headers_present*
+    forwards unchanged to that same function -- it governs only whether a
+    *pack* directory at *sources* is skipped (see its own docstring); it
+    does not otherwise change this function's behavior. Every existing
+    caller keeps passing none of the three (all default to ``None``/``None``/
+    ``False``), which reproduces the prior, request-level-flag-only
+    behavior unchanged.
     """
     effective_targets = build_targets or _discovered_config_build_targets(
-        sources, build_config
+        sources, build_config, headers_present=headers_present
     )
     if not effective_targets or build_info is None:
         return None
@@ -383,9 +402,10 @@ def scan_bazel_scoping_failure(
 
     *sources*/*build_config* forward to :func:`bazel_target_scoping_failure`
     unchanged -- see that function's own docstring for the config-sourced
-    (no explicit ``--build-target``) fallback they enable. Both default
-    ``None``, reproducing the prior, request-level-flag-only behavior for
-    any caller that doesn't pass them.
+    (no explicit ``--build-target``) fallback they enable, and for what
+    *headers_present* (derived here, not accepted as a parameter) governs.
+    Both default ``None``, reproducing the prior, request-level-flag-only
+    behavior for any caller that doesn't pass them.
     """
     from ..buildsource.scan_levels import EvidenceDepth
     from ..buildsource.source_replay import collection_for_ci_mode
@@ -399,6 +419,7 @@ def scan_bazel_scoping_failure(
         build_targets,
         sources=sources,
         build_config=build_config,
+        headers_present=bool(effective_headers),
     )
 
 
@@ -485,7 +506,11 @@ def _check_bazel_target_scoping(side: SidePlan) -> PlanningFailure | None:
     if off and not effective_headers:
         return None
     return bazel_target_scoping_failure(
-        side.label, side.build_info, side.build_targets, sources=side.sources
+        side.label,
+        side.build_info,
+        side.build_targets,
+        sources=side.sources,
+        headers_present=bool(effective_headers),
     )
 
 
@@ -509,10 +534,30 @@ def artifact_set_bazel_scoping_failure(
     clears headers) rather than ``scan_bazel_scoping_failure``'s, which needs a
     real, resolved ``EvidenceDepth``/``collect_mode`` pair this call site
     doesn't have yet.
+
+    *depth* being ``None`` (omitted) cannot be resolved to "off"/"not off"
+    here at all (Codex review, fresh evidence): an unset ``--depth``
+    resolves per-member, later, via real risk scoring over each member's own
+    change seed (``_resolve_auto_source_method``) -- exactly the kind of
+    resolved value :class:`AnalysisPlan`'s own design (this module's
+    docstring) excludes from a pre-flight check. Guessing "off" here risks
+    the opposite, worse failure mode (rejecting a request ``run_scan_set``'s
+    own later, correctly-resolved check would have accepted); guessing
+    "not off" is what every caller before this fix already did, and is kept
+    for an *explicit* ``build_targets`` -- a scope the caller stated
+    outright, and the shape every existing test/caller since this phase's
+    first slice already exercises. What changes for an unset *depth* is
+    narrower: the *config-sourced* (``.abicheck.yml``-only, no explicit
+    ``build_targets``) fallback is withheld by not forwarding
+    *sources*/*build_config* at all -- trusting an auto-discovered scope
+    this check cannot rule "reachable" or not for is the part that's newly
+    added and newly risky; an explicit scope the caller named is not.
     """
-    is_binary = (depth or "").lower() == "binary"
+    if depth is None:
+        return bazel_target_scoping_failure("candidate", build_info, build_targets)
+    is_binary = depth.lower() == "binary"
     effective_headers_present = False if is_binary else headers_present
-    off = depth is not None and _depth_implied_collect_mode(depth) == "off"
+    off = _depth_implied_collect_mode(depth) == "off"
     if off and not effective_headers_present:
         return None
     return bazel_target_scoping_failure(
@@ -521,6 +566,7 @@ def artifact_set_bazel_scoping_failure(
         build_targets,
         sources=sources,
         build_config=build_config,
+        headers_present=effective_headers_present,
     )
 
 
