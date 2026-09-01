@@ -17,3 +17,14 @@
   covered — it still rejects a configuration-only scope later, during real
   embedding, rather than at this pre-flight (see `docs/contribute/
   known-gaps.md`).
+- **`scan --artifact-set` with an unset `--depth` no longer silently
+  accepts a root-target scope the real scan would then reject.** Its own
+  pre-flight had approximated an unresolved `--depth` rather than
+  consulting the same risk-based resolution the real scan uses, so a
+  seeded, high-risk change (e.g. a public-header edit) could pass the
+  pre-flight and only fail -- with the identical exit 64 -- once
+  `run_scan_core`'s own per-member check ran later. The pre-flight now
+  resolves the real effective depth/collect mode first (the same
+  primitive `--dry-run` cost estimation already uses), so a request that
+  would ultimately be rejected is rejected up front, consistently, whether
+  or not `--depth` is given.

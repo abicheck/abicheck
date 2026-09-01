@@ -387,6 +387,47 @@ looked like the obvious fix and wasn't.
   `"headers"` alone (headerless) is no longer part of the always-rejected
   set, which is the corrected behavior this round establishes, not a
   weakening of the test.
+  **A thirteenth review round found `scan --artifact-set`'s own pre-flight
+  (`cli_scan._run_artifact_set`) had a second, narrower version of the same
+  false-positive/false-negative pair, specific to an *unset* `--depth`.**
+  Two intermediate designs were tried and rejected in this same round before
+  landing on the fix below: a bespoke
+  `workflows.plan.artifact_set_bazel_scoping_failure` that treated an
+  unset `--depth` as always non-`"off"` (matching every prior caller's
+  shape) false-positive-rejected a genuine no-op artifact-set request whose
+  real per-member risk scoring would resolve to `"off"`; a second attempt
+  that instead treated an unset `--depth` as always exempt
+  false-negative-accepted a seeded, high-risk request (e.g. a public-header
+  edit) that `run_scan_core`'s own later, correctly-resolved per-member
+  check would still reject with exit 64 -- recreating the exact dry-run/
+  execution parity defect this whole known-gap entry exists to close, just
+  one level narrower (real-run vs. real-run instead of dry-run vs.
+  real-run). Both were symptoms of approximating a value `AnalysisPlan`'s
+  own design (`workflows/plan.py`'s module docstring) deliberately excludes
+  from a pre-flight check: an unset `--depth` only resolves to a real
+  `collect_mode` via risk scoring over the request's own seeded change
+  (`service_scan._resolve_member_scan_level`, the identical primitive
+  `estimate_artifact_set`'s own `--dry-run` cost totals already resolve
+  through). The fix drops the approximation entirely: `_run_artifact_set`
+  now builds the same probe `ScanRequest` `estimate_artifact_set` would and
+  calls `_resolve_member_scan_level` on it to get the real `eff_depth`/
+  `collect_mode` before discovery, then hands those to the existing,
+  already-shared `scan_bazel_scoping_failure` -- no bespoke artifact-set-
+  shaped guard needed. `_resolve_member_scan_level` reads only
+  request-level fields (`depth`/`changed_paths`/`seeded`/`risk_rules_path`/
+  `mode`), none of them derived from discovery, so this probe needs no
+  `binaries` and costs nothing discovery-shaped to build. The now-dead
+  `artifact_set_bazel_scoping_failure` was deleted from `workflows/plan.py`
+  rather than left as an unused second copy.
+  `tests/test_bazel_root_targets_scan.py::
+  test_scan_cli_artifact_set_unset_depth_low_risk_seed_config_scope_is_unaffected`
+  pins the no-op case (a low-risk `--changed-path`, e.g. a docs file, seeds
+  `S0`/`collect_mode="off"`, so a config-sourced scope stays unenforced);
+  its sibling
+  `test_scan_cli_artifact_set_high_risk_seed_config_scope_still_rejects`
+  pins the risky case (a high-risk `--changed-path`, e.g. a public header,
+  seeds a non-`"off"` `collect_mode`, so the same config-sourced scope is
+  still enforced and rejects with exit 64).
   Historical analysis retained below for the record.
   `BazelAdapter.collect()`'s `self.targets` scoping is applied
   in exactly two places: gating whether a *live* `bazel query` subprocess

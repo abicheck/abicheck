@@ -642,22 +642,22 @@ def test_scan_cli_artifact_set_dry_run_rejects_build_target_with_precaptured_aqu
     assert "pre-captured Bazel aquery" in result.output
 
 
-def test_scan_cli_artifact_set_unset_depth_config_sourced_scope_is_unaffected(
+def test_scan_cli_artifact_set_unset_depth_low_risk_seed_config_scope_is_unaffected(
     monkeypatch, tmp_path: Path
 ) -> None:
-    """Codex review, fresh evidence: an unset ``--depth`` on ``--artifact-set``
-    resolves per-member later, via real risk scoring over each member's own
-    change seed -- a resolved value this early pre-flight has no access to.
-    Approximating "off" from a raw, omitted depth risks the opposite, worse
-    failure mode: rejecting a request ``run_scan_set``'s own later,
-    correctly-resolved ``scan_bazel_scoping_failure`` call would have
-    accepted (e.g. an empty/low-risk change seed resolving to `auto` -> S0 ->
-    collect_mode "off"). So the *config-sourced* (``.abicheck.yml``-only, no
-    explicit ``--build-target``) fallback is withheld here specifically when
-    depth is unset -- unlike the explicit-`--build-target` case (the sibling
-    `test_scan_cli_artifact_set_rejects_bazel_scoping_mismatch_before_discovery`
-    test), which is a scope the caller stated outright and keeps being
-    checked exactly as before."""
+    """Codex review, fresh evidence, final round: an unset ``--depth`` on
+    ``--artifact-set`` must not be *approximated* -- it must be *resolved*,
+    the same way ``run_scan_set``/``estimate_artifact_set`` do
+    (``_resolve_member_scan_level``, shared per ``workflows/AGENTS.md``'s
+    "dry-run and execution must consume the same resolved plan" rule). An
+    earlier round of this fix withheld the config-sourced fallback entirely
+    whenever depth was unset -- which over-corrected: it silently accepted a
+    *high-risk* seed too, one that resolves to a real, non-"off" collect_mode
+    the real run would still reject on (see the sibling
+    ``..._high_risk_seed_config_scope_still_rejects`` test below). This
+    request seeds a low-risk (docs-only) change, which `--source-method auto`
+    resolves to S0/collect_mode "off" -- genuinely exempt, not just assumed
+    to be."""
     aquery = _write_bazel_aquery(tmp_path)
     a = _artifact(tmp_path, "a")
     b = _artifact(tmp_path, "b")
@@ -682,10 +682,59 @@ def test_scan_cli_artifact_set_unset_depth_config_sourced_scope_is_unaffected(
             str(src),
             "--build-info",
             str(aquery),
+            "--changed-path",
+            "docs/notes.md",
         ],
     )
     assert result.exit_code == 0, result.output
     assert "pre-captured Bazel aquery" not in result.output
+
+
+def test_scan_cli_artifact_set_high_risk_seed_config_scope_still_rejects(
+    monkeypatch, tmp_path: Path
+) -> None:
+    """Codex review, fresh evidence, final round: the false-negative
+    counterpart to the low-risk test above. A seeded *high-risk* change
+    (a public-header edit) resolves `--source-method auto` to S5/
+    ``source-changed`` -- a real, active collect_mode, not "off" -- so the
+    config-sourced-only scope mismatch must still be rejected here, matching
+    what ``run_scan_set``'s own per-member ``scan_bazel_scoping_failure``
+    call would reject downstream too. An earlier round of this fix withheld
+    the config-sourced fallback unconditionally whenever ``--depth`` was
+    unset, which silently accepted this exact case in `--dry-run` (a real,
+    user-visible dry-run/execution parity gap -- the very defect class this
+    whole PR exists to close) rather than resolving the real level."""
+    aquery = _write_bazel_aquery(tmp_path)
+    a = _artifact(tmp_path, "a")
+    b = _artifact(tmp_path, "b")
+    _bypass_discovery_validation(monkeypatch, a, b)
+
+    src = _sources(tmp_path)
+    (src / ".abicheck.yml").write_text(
+        "build:\n  system: bazel\n  targets:\n    - //:math\n", encoding="utf-8"
+    )
+
+    runner = CliRunner()
+    result = runner.invoke(
+        main,
+        [
+            "scan",
+            "--artifact-set",
+            str(a),
+            "--artifact-set",
+            str(b),
+            "--dry-run",
+            "--sources",
+            str(src),
+            "--build-info",
+            str(aquery),
+            "--changed-path",
+            "include/api.h",
+        ],
+    )
+    assert result.exit_code == 64, result.output
+    assert "pre-captured Bazel aquery" in result.output
+    assert "//:math" in result.output
 
 
 def test_scan_cli_artifact_set_depth_binary_exempts_the_bazel_scoping_check(

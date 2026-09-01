@@ -110,7 +110,6 @@ __all__ = [
     "AnalysisPlanner",
     "PlanningFailure",
     "SidePlan",
-    "artifact_set_bazel_scoping_failure",
     "bazel_target_scoping_failure",
     "scan_bazel_scoping_failure",
 ]
@@ -398,10 +397,12 @@ def scan_bazel_scoping_failure(
 ) -> PlanningFailure | None:
     """The shared ``scan`` pre-flight guard for :func:`bazel_target_scoping_failure`.
 
-    Used by both ``scan_engine.run_scan_core`` (per-member) and
-    ``service_scan.run_scan_set`` (once, before discovery) so the two share
-    one exemption rule, and the depth=binary header-clearing it depends on,
-    rather than two independently-maintained copies. Exempt only when
+    Used by ``scan_engine.run_scan_core`` (per-member), ``service_scan.
+    run_scan_set`` (once, before discovery), and both of ``cli_scan.py``'s
+    own CLI-reachable pre-flight checks (``scan_cmd``'s single-binary path,
+    ``_run_artifact_set``'s own) so every caller shares one exemption rule,
+    and the depth=binary header-clearing it depends on, rather than
+    independently-maintained copies. Exempt only when
     *neither* consumer can reach ``build_info`` at all: empty collection
     layers (``embed_build_source`` no-ops) AND no headers (the L2 seed's own
     independent ``collect_inline_pack`` call no-ops too -- ``--depth headers``
@@ -519,62 +520,6 @@ def _check_bazel_target_scoping(side: SidePlan) -> PlanningFailure | None:
         side.build_targets,
         sources=side.sources,
         headers_present=bool(effective_headers),
-    )
-
-
-def artifact_set_bazel_scoping_failure(
-    depth: str | None,
-    headers_present: bool,
-    build_info: Path | None,
-    build_targets: tuple[str, ...],
-    sources: Path | None = None,
-    build_config: Path | None = None,
-) -> PlanningFailure | None:
-    """The ``scan --artifact-set`` pre-flight guard (Codex review).
-
-    ``cli_scan._run_artifact_set`` has no per-member resolved ``collect_mode``
-    to check against at this point (each discovered member resolves its own
-    tier/level independently, later, inside ``run_scan_set``) -- only the raw
-    ``depth`` CLI flag and whether *any* member's header pair was given. Mirrors
-    :func:`_check_bazel_target_scoping`'s own no-``SidePlan`` reasoning exactly
-    (``depth="binary"``/``"headers"`` both resolve to collect_mode ``"off"``
-    via :func:`_depth_implied_collect_mode`; only ``"binary"`` additionally
-    clears headers) rather than ``scan_bazel_scoping_failure``'s, which needs a
-    real, resolved ``EvidenceDepth``/``collect_mode`` pair this call site
-    doesn't have yet.
-
-    *depth* being ``None`` (omitted) cannot be resolved to "off"/"not off"
-    here at all (Codex review, fresh evidence): an unset ``--depth``
-    resolves per-member, later, via real risk scoring over each member's own
-    change seed (``_resolve_auto_source_method``) -- exactly the kind of
-    resolved value :class:`AnalysisPlan`'s own design (this module's
-    docstring) excludes from a pre-flight check. Guessing "off" here risks
-    the opposite, worse failure mode (rejecting a request ``run_scan_set``'s
-    own later, correctly-resolved check would have accepted); guessing
-    "not off" is what every caller before this fix already did, and is kept
-    for an *explicit* ``build_targets`` -- a scope the caller stated
-    outright, and the shape every existing test/caller since this phase's
-    first slice already exercises. What changes for an unset *depth* is
-    narrower: the *config-sourced* (``.abicheck.yml``-only, no explicit
-    ``build_targets``) fallback is withheld by not forwarding
-    *sources*/*build_config* at all -- trusting an auto-discovered scope
-    this check cannot rule "reachable" or not for is the part that's newly
-    added and newly risky; an explicit scope the caller named is not.
-    """
-    if depth is None:
-        return bazel_target_scoping_failure("candidate", build_info, build_targets)
-    is_binary = depth.lower() == "binary"
-    effective_headers_present = False if is_binary else headers_present
-    off = _depth_implied_collect_mode(depth) == "off"
-    if off and not effective_headers_present:
-        return None
-    return bazel_target_scoping_failure(
-        "candidate",
-        build_info,
-        build_targets,
-        sources=sources,
-        build_config=build_config,
-        headers_present=effective_headers_present,
     )
 
 

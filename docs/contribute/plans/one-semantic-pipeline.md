@@ -11432,6 +11432,43 @@ than leaking out of `_build_new_snapshot`'s pre-existing `except
 AbicheckError` wart) confirms the fix at the typed-API layer as well as
 the CLI.
 
+**Third slice: `_run_artifact_set`'s own pre-flight had a narrower version
+of the same false-positive/false-negative pair, specific to an unset
+`--depth`.** The initial fix for this slice added a bespoke
+`workflows.plan.artifact_set_bazel_scoping_failure`, since
+`_run_artifact_set` (unlike `scan_cmd`'s single-binary path) has no
+per-member resolved `collect_mode` at this point — each discovered
+member resolves its own tier/level independently, later, inside
+`run_scan_set`. That function's first version treated an unset `--depth`
+as always non-`"off"`, matching every other caller's shape, but this
+false-positive-rejected a genuine no-op artifact-set request whose real
+per-member risk scoring would resolve to `"off"`. A revision treating it
+as always exempt instead false-negative-accepted a seeded, high-risk
+request (e.g. a public-header edit) that `run_scan_core`'s own later,
+correctly-resolved check would still reject with exit 64 — reproducing
+this same phase's own dry-run/execution parity defect one level narrower
+(real-run vs. real-run, not dry-run vs. real-run). Both were symptoms of
+approximating a value `AnalysisPlan`'s own design deliberately excludes
+from a pre-flight check: an unset `--depth` only resolves to a real
+`collect_mode` via risk scoring over the request's own seeded change.
+That resolution already exists as a shared primitive —
+`service_scan._resolve_member_scan_level`, the one `estimate_artifact_set`
+itself calls for its own `--dry-run` cost totals — so the fix drops the
+approximation and calls it directly: `_run_artifact_set` builds the same
+probe `ScanRequest` `estimate_artifact_set` would (request-level fields
+only, no `binaries`, no discovery needed), resolves the real `eff_depth`/
+`collect_mode`, and hands those to the existing, already-shared
+`scan_bazel_scoping_failure` — no bespoke artifact-set-shaped guard
+needed. The now-dead `artifact_set_bazel_scoping_failure` was deleted
+from `workflows/plan.py` rather than left as an unused second copy.
+`tests/test_bazel_root_targets_scan.py::
+test_scan_cli_artifact_set_unset_depth_low_risk_seed_config_scope_is_unaffected`/
+`test_scan_cli_artifact_set_high_risk_seed_config_scope_still_rejects` pin
+the no-op and risky cases respectively, keyed on a real low-risk vs.
+high-risk `--changed-path` seed rather than an unset-vs-set `--depth`
+alone. See `docs/contribute/known-gaps.md`'s matching "thirteenth review
+round" entry for the full account.
+
 ---
 
 ### Phase 5 — the fact/capability registry (generalizes `change_registry.py`)

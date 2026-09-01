@@ -743,22 +743,30 @@ def _run_artifact_set(
     """
     from .bundle import ArtifactSetError, discover_artifact_set
     from .service import Budget, ScanRequest
-    from .service_scan import run_scan_set
+    from .service_scan import _resolve_member_scan_level, run_scan_set
+    from .workflows.plan import scan_bazel_scoping_failure
 
-    # ADR-063 Phase 4 (Codex review, fresh evidence): checked before
-    # discovery, not only inside run_scan_set() below -- discover_artifact_set()
-    # traverses a directory and stats/format-validates every explicit member,
-    # and an invalid member could otherwise mask the request's own
-    # PlanningError. Uses artifact_set_bazel_scoping_failure (Codex review),
-    # not the bare check -- the latter had no headers/collect-mode exemption
-    # (only the depth=binary case was handled here, textually), wrongly
-    # rejecting a headerless --depth headers set the scan-aware guards
-    # downstream would accept.
-    from .workflows.plan import artifact_set_bazel_scoping_failure
-
-    if _bf := artifact_set_bazel_scoping_failure(
-        depth,
-        bool(header_pairs),
+    # ADR-063 Phase 4 (Codex review): checked before discovery, via the real
+    # resolved eff_depth/collect_mode (same primitive estimate_artifact_set's
+    # --dry-run totals use), not a raw --depth approximation (both
+    # over/under-rejected in earlier rounds).
+    changed, changed_src, seeded = _resolve_changed_seed(
+        changed_paths_opt, since, sources
+    )
+    _, _, _, _, _, _, eff_depth, collect_mode = _resolve_member_scan_level(
+        ScanRequest(
+            mode="audit",
+            source_method=SourceMethod.AUTO.value if depth is None else None,
+            depth=depth,
+            changed_paths=changed,
+            seeded=seeded,
+            risk_rules_path=risk_rules_path,
+        )
+    )
+    if _bf := scan_bazel_scoping_failure(
+        header_pairs,
+        eff_depth,
+        collect_mode,
         build_info,
         build_targets,
         sources=sources,
@@ -809,9 +817,6 @@ def _run_artifact_set(
         compiler_option_tokens=compiler_option_tokens,
     )
 
-    changed, changed_src, seeded = _resolve_changed_seed(
-        changed_paths_opt, since, sources
-    )
     budget_s = _parse_budget(budget)
     abi3_floor = _parse_abi3_floor(abi3)
     enabled_checks, severities = _parse_crosschecks(crosschecks)
@@ -1791,13 +1796,9 @@ def scan_cmd(
     )
     effective_build_info = build_info
 
-    # ADR-063 Phase 4 (Codex review, fresh evidence): validate the same
-    # --build-target + pre-captured Bazel jsonproto combination
-    # `_build_new_snapshot` rejects during real execution -- run here too,
-    # before the dry-run preview below can render an unscoped-but-claimed-
-    # scoped estimate for a request the real run would then reject. Uses
-    # the scan-aware `scan_bazel_scoping_failure` (Codex review), not the
-    # bare check -- the latter has no headers/collect-mode exemption.
+    # Validate the same --build-target + pre-captured Bazel jsonproto combo
+    # `_build_new_snapshot` rejects during real execution, before the
+    # dry-run preview below can claim an unscoped request is scoped.
     from .workflows.plan import scan_bazel_scoping_failure
 
     if _bf := scan_bazel_scoping_failure(
@@ -1978,9 +1979,8 @@ def scan_cmd(
         )
         raise click.ClickException(ce.message) from ce
     except PlanningError as exc:
-        # ADR-063 Phase 4: scan_engine.py raises this framework-neutral (it also
-        # backs run_scan()'s typed API) -- translate to a usage error here, the
-        # one CLI boundary that actually knows about Click.
+        # scan_engine.py raises this framework-neutral (also backs run_scan()'s
+        # typed API) -- translate here, the one boundary that knows Click.
         raise click.UsageError(str(exc)) from exc
     finally:
         # Remove the inferred cmake build dir(s) now that every build-dir-dependent
