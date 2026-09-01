@@ -268,10 +268,14 @@ generator only renders):
   to intermediate without failing; the floor closes that. A tier may span
   two levels, as tier 1 does.
 - **Paths are walks up the ladder.** Every `paths:` entry names only
-  members or branches; walking its `pages`, the tier position is
-  non-decreasing within a sequence, and an entry continues into `concepts`
-  only after its `educational` pages. `after:` is the one tool-track
-  hand-off (a `start/` or `use/` page) and is not ordered.
+  members or branches. Each page resolves to its full ladder index
+  (sequence, tier, member position — a branch takes its parent's
+  position), and walking `pages` that index is *strictly* increasing: no
+  same-tier reversal, no repeated page, and `concepts` only after the
+  entry's `educational` pages. Comparing tier positions alone would let
+  two pages of one tier appear in reverse order, which is exactly the
+  competing reading order the hub is meant to lose. `after:` is the one
+  tool-track hand-off (a `start/` or `use/` page) and is not ordered.
 - **Links must be members elsewhere.** A `links:` entry that is not a
   member of some tier (in either sequence, or a `use/` page) is an error —
   a link is a pointer, not a place to hide an unclassified page.
@@ -321,7 +325,8 @@ links match the ladder). Fixtures in the check's own test module: (a) a
 page missing from the ladder, (b) a level regression inside a sequence,
 (c) a branch below its parent, (d) a link that is nowhere a member, (e) a
 path that steps down a tier, (f) a footer pointing at the wrong neighbour,
-and (g) the concepts sequence restarting at `intermediate` after
+(g) a path listing two members of one tier in reverse order, (h) a path
+repeating a page, and (i) the concepts sequence restarting at `intermediate` after
 `educational` ends at `advanced` — which must *pass*.
 
 **A2d. Anchor validation.** `mkdocs.yml` gains a `validation:` block with
@@ -904,7 +909,7 @@ Sections, each an H3 named as the question the reader asks:
    `--debuginfod` to even them up.
 2. **Were the headers the binary's headers?** — header/binary mismatch
    is the first suspect (`use/troubleshooting.md` §1); the compile
-   context (Part 8 §1a) is the second.
+   context (Detecting Breaks, `08-detection.md` §1a) is the second.
 3. **Were the two builds comparable at all?** — `NOT_COMPARABLE` / exit
    6 and the comparability gate (`build-profile-comparability.md`);
    `--diagnostic-comparison` to look anyway.
@@ -916,7 +921,8 @@ Sections, each an H3 named as the question the reader asks:
    fields (`compatibility_decision`, reachability state, the consumer
    call-chain under `--used-by`), and what to do next (Tier 6 patterns).
 
-Runs: a compare with `--debug-root old=… new=…`; a compare with
+Runs: a compare with `--debug-root old=… --debug-root new=…` (the
+option is repeatable and side-scoped, one token per side); a compare with
 `--diagnostic-comparison`. Cases: 148 (header/build mismatch), 149 (ODR
 variant), 150 (export/public pair). Links, not restatements: every
 mechanism above is owned elsewhere; this page is a decision procedure
