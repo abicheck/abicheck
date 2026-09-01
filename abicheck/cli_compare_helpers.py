@@ -929,9 +929,14 @@ def _render_compare_report(
         severity_config=severity_config,
         show_only=show_only, report_mode=report_mode,
         contract_evaluation=contract_evaluation,
+        demangle=demangle,
     )
-    text = _fold_suppression_audit_into_text(text, fmt, result.suppression_audit)
-    return _fold_use_case_impact_into_text(text, fmt, result, show_only)
+    text = _fold_suppression_audit_into_text(
+        text, fmt, result.suppression_audit, demangle=demangle
+    )
+    return _fold_use_case_impact_into_text(
+        text, fmt, result, show_only, demangle=demangle
+    )
 
 
 def _attach_use_case_impact(
