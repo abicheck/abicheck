@@ -41,6 +41,7 @@ import json
 import os
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 RUN_SH = Path(__file__).resolve().parents[1] / "action" / "run.sh"
@@ -119,6 +120,49 @@ def _final_exit_scan_fragment() -> str:
     return "if " + fragment[len("elif ") :]
 
 
+def _run_bash_script(
+    script: str, *, timeout: float = 30
+) -> subprocess.CompletedProcess:
+    """Run *script* via a real bash, from a temp file rather than an inline
+    ``-c`` argument.
+
+    This module's own dispatch/gating scripts (extracted run.sh fragments
+    plus this file's own harness text) run to several KB with many nested
+    double quotes. Passed as a single subprocess argv string, Windows
+    reconstructs that argv via ``list2cmdline`` (MSVCRT backslash/quote
+    escaping rules) and Git Bash's own MSYS runtime then re-parses the
+    resulting command line with its own, not-quite-identical rules -- the
+    two disagree on a large, quote-heavy argument and can corrupt it,
+    observed on windows-latest CI as a bash parse error ("unexpected EOF
+    while looking for matching `)'") on a script that is valid bash and
+    passes identically on every other platform. This is exactly the
+    established fix for that class of gap in this file's own siblings
+    (``test_action_run_sh_helpers.py``'s ``_run_harness``,
+    ``test_action_run_sh_py_safe_path.py``'s ``_run_bash_script``): a file
+    on disk needs no argv reconstruction at all, since bash reads its own
+    content directly. An earlier revision of this module's own malicious-
+    fixture test tried to work around a narrower instance of the same class
+    (a raw Windows backslash path embedded in the inline script) with
+    ``Path.as_posix()`` alone -- confirmed on windows-latest CI insufficient,
+    since the corruption is triggered by the script's own pre-existing
+    quote/backslash density (e.g. the real ``_is_path_already_qualified``'s
+    ``\\\\*`` pattern), not by any one interpolated path."""
+    with tempfile.NamedTemporaryFile(
+        "w", suffix=".sh", delete=False, encoding="utf-8", newline="\n"
+    ) as f:
+        f.write(script)
+        script_path = f.name
+    try:
+        return subprocess.run(
+            [_bash_executable(), script_path],
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+        )
+    finally:
+        os.unlink(script_path)
+
+
 def _run_exit_mapping(
     abicheck_exit: int,
     *,
@@ -144,12 +188,7 @@ _escalate_verdict_to_report() {{ :; }}
         + _exit_case_fragment()
         + '\necho "VERDICT=$VERDICT"\n'
     )
-    return subprocess.run(
-        [_bash_executable(), "-c", script],
-        capture_output=True,
-        text=True,
-        timeout=30,
-    )
+    return _run_bash_script(script)
 
 
 def test_exit_1_evidence_contract_error_maps_to_its_own_verdict():
@@ -199,12 +238,7 @@ def test_evidence_contract_error_still_fails_the_step():
         "_coverage_gated() { return 1; }\n"
         "FINAL_EXIT=0\n" + script
     )
-    result = subprocess.run(
-        [_bash_executable(), "-c", script],
-        capture_output=True,
-        text=True,
-        timeout=30,
-    )
+    result = _run_bash_script(script)
     assert result.returncode == 0, result.stderr
     assert "FINAL_EXIT=1" in result.stdout
 
@@ -241,16 +275,11 @@ def test_evidence_contract_gated_treats_hostile_json_verdict_as_inert_data(tmp_p
 
     py_safe_dir = tmp_path / "py-safe"
     py_safe_dir.mkdir()
-    # Forward-slash form of every interpolated filesystem path: on Windows
-    # these are backslash paths, and Python's subprocess module reconstructs
-    # the child's command line via MS C-runtime quoting rules (list2cmdline),
-    # not POSIX argv passing -- a raw Windows backslash path embedded in a
-    # double-quoted bash string round-trips through that reconstruction
-    # combined with the surrounding quotes and corrupts the script bash.exe
-    # actually receives (observed: "unexpected EOF while looking for
-    # matching `)'" on a windows-latest runner). Git Bash and Python's own
-    # open() both accept forward-slash Windows paths, so this sidesteps the
-    # quoting mismatch entirely rather than trying to out-escape it.
+    # Forward-slash form of every interpolated filesystem path -- harmless
+    # either way once `_run_bash_script` writes this script to a real file
+    # (a literal backslash inside a double-quoted bash string is passed
+    # through unchanged), but kept for readability/consistency with the
+    # rest of this file's Windows-path handling.
     py_bin = Path(sys.executable).as_posix()
     py_safe_dir_posix = py_safe_dir.as_posix()
     report_posix = report.as_posix()
@@ -268,12 +297,7 @@ else
 fi
 """
     )
-    result = subprocess.run(
-        [_bash_executable(), "-c", script],
-        capture_output=True,
-        text=True,
-        timeout=30,
-    )
+    result = _run_bash_script(script)
     assert result.returncode == 0, result.stderr
     # A near-miss (extra trailing content) must not compare equal to the
     # real sentinel -- only an exact match may gate.
