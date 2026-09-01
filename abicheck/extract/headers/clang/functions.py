@@ -622,6 +622,19 @@ def parse_functions(
                 hidden_friend_owner=(
                     "::".join(entry.scope) if entry.in_friend and entry.scope else None
                 ),
+                # An owner is conceptually inapplicable for an ordinary
+                # (non-friend) function -- not a missing-evidence gap -- so
+                # it gets its own explicit Fact rather than falling through
+                # the generic bridge into NOT_COLLECTED (Codex review, PR
+                # #982, same shape as is_explicit_fact above). A friend
+                # whose owner scope couldn't be resolved (in_friend True,
+                # scope empty) still falls through to NOT_COLLECTED -- that
+                # is a real evidence gap, not an inapplicable field.
+                hidden_friend_owner_fact=(
+                    Fact.not_applicable()
+                    if not entry.in_friend
+                    else (Fact.present("::".join(entry.scope)) if entry.scope else None)
+                ),
                 # clang stamps "variadic": true on FunctionDecl; the
                 # qualtype spelling ("void (int, ...)") is the fallback.
                 is_variadic=is_variadic,

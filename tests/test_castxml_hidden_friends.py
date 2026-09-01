@@ -113,6 +113,30 @@ class TestHiddenFriendDumper:
         assert len(funcs) == 1
         assert funcs[0].is_hidden_friend is False
 
+    def test_hidden_friend_owner_fact_present_for_a_real_friend(self) -> None:
+        """ADR-063 Phase 5 (Codex review, PR #982): a genuine hidden friend's
+        owner is real evidence, not a gap -- Fact.PRESENT, not NOT_COLLECTED."""
+        from abicheck.model import FactStatus
+
+        root = _make_root_with_hidden_friend()
+        parser = _CastxmlParser(root, exported_dynamic=set(), exported_static=set())
+        funcs = parser.parse_functions()
+        assert funcs[0].hidden_friend_owner_fact.status == FactStatus.PRESENT
+        assert funcs[0].hidden_friend_owner_fact.value == funcs[0].hidden_friend_owner
+
+    def test_hidden_friend_owner_fact_not_applicable_for_ordinary_function(
+        self,
+    ) -> None:
+        """An owner is conceptually inapplicable for a non-friend function --
+        a confirmed non-gap, not missing evidence (Codex review, PR #982)."""
+        from abicheck.model import FactStatus
+
+        root = _make_root_with_namespace_operator()
+        parser = _CastxmlParser(root, exported_dynamic=set(), exported_static=set())
+        funcs = parser.parse_functions()
+        assert funcs[0].hidden_friend_owner is None
+        assert funcs[0].hidden_friend_owner_fact.status == FactStatus.NOT_APPLICABLE
+
     def test_multiple_befriending_ids_split_on_whitespace(self) -> None:
         """``befriending`` is whitespace-separated. Verify all listed ids
         are picked up, not just the first."""

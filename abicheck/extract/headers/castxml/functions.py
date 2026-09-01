@@ -568,6 +568,16 @@ def parse_function_element(
         # the referenced ids upfront and check membership here.
         is_hidden_friend=el.get("id", "") in hidden_friend_owner_by_id,
         hidden_friend_owner=hidden_friend_owner_by_id.get(el.get("id", "")),
+        # An owner is conceptually inapplicable for an ordinary (non-friend)
+        # function -- not a missing-evidence gap -- so it gets its own
+        # explicit Fact rather than falling through the generic bridge into
+        # NOT_COLLECTED (Codex review, PR #982, same shape as is_explicit
+        # above).
+        hidden_friend_owner_fact=(
+            Fact.present(hidden_friend_owner_by_id.get(el.get("id", "")))
+            if el.get("id", "") in hidden_friend_owner_by_id
+            else Fact.not_applicable()
+        ),
         is_variadic=is_variadic,
         # Semantic contract / calling-convention attributes, filtered from
         # the compound ``attributes`` string (same channel as noexcept).
