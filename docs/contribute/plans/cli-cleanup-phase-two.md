@@ -4442,9 +4442,13 @@ the agreement so a future pass does not re-derive them as new:
   algorithm; then delete the flag from the CLI, the project config, the pack
   schema and the Action mapping, and let the report state
   `"gate": {"algorithm": "severity", "source": "policy-pack"}`.
-- **`contract=public` cannot be the default yet** — one unresolved breaking
-  loss remains (`exports`: 30, `all`: 0). The review's ordering advice is
-  worth keeping: do **not** fix the public evaluator with another string
+- **`contract=public` cannot be the default yet** — its unresolved-loss
+  count is not zero. The live numbers are owned by
+  `scripts/measure_contract_shadow.py`'s `UNRESOLVED_LOSS_BASELINE` (the
+  `public` entry is the one that gates the default flip) and move as
+  evaluator coverage improves — read them there rather than from a copy here,
+  which is the same staleness this checkpoint's own last bullet argues
+  against. The review's ordering advice is worth keeping: do **not** fix the public evaluator with another string
   heuristic. Finish ADR-063 Phase 2's typed `EntityId` across function /
   variable / record / enum, make it the primary finding identity, and run the
   public closure over the `EntityId` graph rather than bare-name strings —
