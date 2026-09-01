@@ -95,6 +95,25 @@ its own section below), PR 4 changes what a CI job's exit code means.
 > release fan-out rejected `--pack` outright). See PR B's own section below for
 > what this slice closed and what is still open (`gate.*` pack fields on
 > release/scan, and the effective-config digest in every report).
+>
+> **Update (2026-09-01, external re-review, `main` at `94be22ad`, recorded
+> against `2598d0d`).** The re-review's finding is a re-prioritization, not a
+> new deletion candidate: the dominant risk is no longer surface size but
+> **one user question getting different semantics per input form** — and the
+> largest new instance is `compare --old-bundle-facts` (G38 Phase 17), a
+> second compare engine behind the same command name, with ~20 flags
+> fail-closed-rejected and a legacy verdict-to-exit mapping instead of
+> `ExitDecision`. Two new entries join the Ordering block (PR I: operand
+> classification + one `BundleCompareRequest`, then delete
+> `--old-bundle-facts`; PR J: bundle topology out of CLI flags), plus
+> `--max-json-object-nodes` recorded as a temporary escape hatch rather than
+> a stable concept. Everything else the pass raised — `--exit-code-scheme`,
+> the `contract=public` default's one remaining unresolved loss, L5
+> source-graph identity migration, dry-run/execution config-discovery
+> parity, the `importlib` architecture-gate workaround, PR 0B governance —
+> is already tracked here and is re-confirmed still open. Two of its items
+> were already fixed in `94be22ad..2598d0d` and are corrected rather than
+> re-opened. Full account: **"Review checkpoint (2026-09-01)"** below.
 
 ## Problem
 
@@ -124,6 +143,11 @@ simplification).
 | `--annotate`, `--annotate-additions` | **Removed** (PR 1b/E — done) | Options on `compare` alone, shared by both operand shapes (no CLI-level split was possible); the release-report persistence prerequisite landed and the flags are deleted — `compare --annotate` now exits `64` with `No such option`; see PR 1b |
 | `dump --build-query`, `dump --build-compile-db` | Remove from CLI | Move to `.abicheck.yml`; only `build.query` (an executable command) needs the explicit-`--config` trust gate — `build.compile_db` is a data path and carries the ordinary dry-run contract only |
 | `aggregate --on-missing-required`, `--on-unexpected-target` | Remove from CLI | Move the policy into the manifest / run-plan schema alongside the expected target set |
+| `compare --old-bundle-facts` (new; G38 Phase 17) | Remove, after operand classification | Detect a stored `BundleFacts` operand from an explicit `artifact_type` marker; one `BundleCompareRequest` over live/live, stored/live, live/stored, stored/stored — see the 2026-09-01 checkpoint |
+| `compare --max-json-object-nodes` (new) | **Keep, as a temporary escape hatch** | Re-express as a resource limit (`--resource-limit memory=…` / `.abicheck.yml` `resources:`); the node budget is an internal decode detail, not a user concept |
+| `compare --bundle-facts-library-manifest` (new; merged #969) | **Keep provisionally** | Real capability (mixed-toolchain bundles); the end state is `bundles: … libraries: … target:` topology referencing existing targets, not a second compile-context manifest format |
+| release `--manifest` | Rename | Collides with `aggregate --manifest` and four other "manifest" concepts — `--abi-manifest` / `--instantiation-manifest` |
+| `--bundle-system-providers`, `--bundle-cohort` | Move to config | Topology belongs in `BundleSpec` / `.abicheck.yml` (joins G42's environment-aware provider resolution) |
 
 Everything above is a **breaking** change to the native CLI. Consistent with
 the #770 cleanup and ADR-037's stance, none of it gets a deprecation alias:
@@ -4215,6 +4239,287 @@ domain contract — member identity, expected-provider ownership, external
 providers, cohort — never merely as nicer syntax. `--artifact-set` itself is an
 explicit safety boundary, not surplus surface; it stays.
 
+## Review checkpoint (2026-09-01) — the risk moved from "too many flags" to "too many semantics"
+
+**External re-review, `main` at `94be22ad` (merge of
+[#970](https://github.com/abicheck/abicheck/pull/970)); re-verified while
+recording it against `main` at `2598d0d`** (merge of
+[#983](https://github.com/abicheck/abicheck/pull/983)), which is where the
+two staleness corrections at the end of this section come from — a review
+note recorded without re-checking its own claims against the branch it lands
+on is exactly the drift the 2026-08-27 pass above was written to stop.
+
+The review's headline finding is a re-prioritization of *this* plan, not
+another candidate for deletion:
+
+> The main risk is no longer "the CLI is too large". It is that **one user
+> question is starting to get different semantics depending on the physical
+> form of its input** — live release, stored bundle facts, snapshot, binary,
+> `scan --against`. The best next architectural step is not deleting a few
+> more flags, but unifying *operand classification → resolved request →
+> evaluation → exit → report*. After that, the remaining deletions become
+> nearly obvious and safe.
+
+That is the same governing principle the "Ordering" section already states
+("stop the mechanical CLI cleanup until the typed resolution, configuration,
+gate and report paths are unified"), so this checkpoint does not reverse the
+sequence — it adds the parallel-semantics instance that appeared *after* that
+sequence was written, and which is now the largest one.
+
+### The new instance: `compare --old-bundle-facts` is a second `compare`
+
+G38 Phase 17 landed a real and needed capability — a persisted `BundleFacts`
+baseline is now reachable from the CLI instead of only from the Python API /
+a private driver, which is what an oneDAL-scale release scan needs:
+
+```bash
+abicheck compare old.bundle-facts.json new-release/ --old-bundle-facts
+```
+
+The **capability** is right. The **shape** is the problem. There are now two
+compare engines behind one command name, and the second one is deliberately
+narrower — `abicheck/frontends/cli/commands/compare_bundle_facts.py`'s own
+docstring says so, and
+`compare_bundle_facts_rejections.reject_unsupported_options` is the
+executable list: `--contract`, `--severity-preset`, `--pack`,
+`--require-complete-analysis`, `--diagnostic-comparison`, `--used-by`,
+`--required-symbol`, `--use-cases`, `--sources`, `--build-info`,
+`--dump-manifest`, `--probe-matrix`, `--post-manifest`, `--follow-deps`,
+`--debug-info`, `--pdb-path`, `--dry-run`, `--fail-on-removed-library`,
+`--bundle-facts-out`, every `--format` outside `json`/`markdown`, and every
+`--write FORMAT=PATH` outside that same pair. It also exits through
+`cli_compare_release_helpers._exit_compare_release`'s legacy verdict mapping
+rather than the canonical `ExitDecision` PR G1 built.
+
+**Fail-closed rejection was the right call for that PR** — silently ignoring
+`--contract` would have produced a different finding set than the user asked
+for with no indication (that is what the rejection comments record). The
+problem is what happens if the mode stays a mode: in another two phases the
+repository has
+
+```text
+normal compare semantics
+release compare semantics
+bundle-facts compare semantics
+scan --against semantics
+```
+
+and every new evaluation field has to be threaded four times, with four
+chances to diverge.
+
+**Target.** `--old-bundle-facts` is not a user question, it is an answer to
+"how should I read this file", which is the input classifier's job — the same
+classifier that already distinguishes binary / snapshot / directory / rpm /
+deb / wheel without asking. So:
+
+```bash
+abicheck compare old.bundle-facts.json new-release/
+```
+
+with the operand kind detected, and the mode flag deleted (no deprecation
+alias, per this plan's standing stance).
+
+**Prerequisite, and it is a real one: the artifact needs a strong
+discriminator first.** A stored `BundleFacts` document today is identified by
+`schema_version` plus the presence of `per_library_snapshots`
+(`abicheck/bundle_facts.py`); `schema_version` is far too generic to
+classify on, and this repository already has several JSON artifacts carrying
+one. Detection must key on an explicit self-describing marker:
+
+```json
+{"artifact_type": "abicheck.bundle-facts", "schema_version": 2}
+```
+
+which is a `BundleFacts` schema bump with the ordinary machine-contract
+obligations from "Merge criteria" below (packaged *and* documented schema
+copies, an explicit backward-reading decision for existing v1 documents —
+these are persisted baselines in users' CI, so v1 must stay readable and
+classifiable by shape as the fallback path). The archive container
+(`BUNDLE_ARCHIVE_SCHEMA_VERSION`) is a separate axis and gets the same
+treatment.
+
+**Then, and only then, the deletion.** Order matters here in the same way it
+does for `--exit-code-scheme`: removing the selector before the classifier
+and the unified request exist would replace a visible narrow mode with an
+invisible one.
+
+**The unified request the deletion actually rests on.** The foundation is
+mostly built — `LiveBundleInput`, `StoredBundleFactsInput`,
+`ResolvedBundleSide` already exist. What is missing is one request object
+covering all four combinations rather than one special-cased pair:
+
+```python
+BundleCompareRequest:
+    old: LiveBundleInput | StoredBundleFactsInput
+    new: LiveBundleInput | StoredBundleFactsInput
+    topology: BundleSpec
+    evaluation: CompatibilityEvaluationConfig
+    gate: GateOptions
+```
+
+so `live/live`, `stored/live`, `live/stored` and `stored/stored` are operand
+*types*, not semantic branches, and the evaluation/gate/report parity items
+(`--contract`, `--pack`, `--severity-preset`, `ExitDecision`, `--dry-run`,
+the full renderer set) are answered once for the whole family. Note the
+`gate: GateOptions` field is the same object PR B deliberately reassigned to
+PR G2's prerequisite work — this is a second consumer for it, not a second
+design.
+
+### `--max-json-object-nodes` is an implementation detail on the user surface
+
+The flag exists for a real reason (a large SYCL facts document exceeding the
+decode node budget) and the guard itself should stay — it is a
+decompression/decode resource bound, not a nuisance. What is wrong is the
+user contract: *"how many Python JSON container nodes may the parser
+allocate"* asks the user to reason about this build's memory-DoS defense.
+Re-express it as a resource limit and derive the node budget internally:
+
+```bash
+--resource-limit memory=2GiB
+```
+
+or, better for the CI case, `.abicheck.yml`:
+
+```yaml
+resources:
+  max_decoded_memory: 2GiB
+```
+
+Treat the current spelling as a **temporary advanced escape hatch, not a
+stable CLI concept** — and note that G40's content-addressed bundle archive
+removes much of its reason to exist by not decoding one monolithic document
+at all.
+
+### Bundle topology keeps arriving as CLI flags
+
+The release/bundle option group has grown `--bundle-system-providers`,
+`--bundle-cohort`, `--manifest`, `--include-private-dso`,
+`--bundle-facts-out`, `--old-bundle-facts`, `--max-json-object-nodes`. Not
+all are wrong, and the split the review proposes matches this plan's existing
+"belongs somewhere else" test:
+
+| Flag | Where it belongs |
+|---|---|
+| `--bundle-facts-out`, `--no-bundle-analysis` | Stay — operation output / debug switches for one invocation |
+| `--bundle-system-providers`, `--bundle-cohort` | Topology → `BundleSpec` / `.abicheck.yml`, joining G42's environment-aware provider resolution rather than a per-invocation basename list |
+| `--manifest` | Rename. It is a real collision, not a style preference: `--manifest` already means one thing on `aggregate` (`cli_aggregate.py`) and another on release `compare` (`frontends/cli/options/release.py`), while the product separately has a dump manifest, an aggregate manifest, a run plan, bundle facts, and the project config. `--abi-manifest` / `--instantiation-manifest` |
+| `--old-bundle-facts` | Delete after operand classification (above) |
+
+**Per-library bundle configuration is the open half.** #972 applies a
+target's declared `public_headers` only for `kind != bundle`, because there
+is no per-bundle-member header staging yet — so a mixed-toolchain bundle
+(`libonedal_core` plain C++, `libonedal_dpc` `-fsycl`/`icpx`,
+`libonedal_parameters` with its own context) cannot yet give each DSO its own
+headers/includes/compiler/frontend/flags from one check. `#969` landed since
+the review (see corrections below) as `--bundle-facts-library-manifest`,
+which unblocks the case. **Do not treat that flag as the end state**: the
+end state is project topology referencing already-defined targets, which
+carry the real header/compile context, rather than a second manifest format
+re-describing compile configuration —
+
+```yaml
+bundles:
+  onedal:
+    libraries:
+      libonedal_core.so: {target: core}
+      libonedal_dpc.so: {target: dpc}
+```
+
+`BundleSpec` should point at targets; it should not grow a compile-context
+vocabulary of its own.
+
+### Re-verified, unchanged, still open
+
+The review independently reached items this plan already tracks; recording
+the agreement so a future pass does not re-derive them as new:
+
+- **`--exit-code-scheme` (PR G2).** Still user-selectable
+  (`auto|legacy|severity`) although the canonical `ExitDecision` already
+  composes compatibility + contract coverage + analysis assurance + scan
+  crosscheck promotion and explains the result. Target unchanged: gate policy
+  absent → compatibility mapping, gate policy present → severity mapping,
+  coverage/assurance an independent floor, the user never selects the
+  algorithm; then delete the flag from the CLI, the project config, the pack
+  schema and the Action mapping, and let the report state
+  `"gate": {"algorithm": "severity", "source": "policy-pack"}`.
+- **`contract=public` cannot be the default yet** — one unresolved breaking
+  loss remains (`exports`: 30, `all`: 0). The review's ordering advice is
+  worth keeping: do **not** fix the public evaluator with another string
+  heuristic. Finish ADR-063 Phase 2's typed `EntityId` across function /
+  variable / record / enum, make it the primary finding identity, and run the
+  public closure over the `EntityId` graph rather than bare-name strings —
+  the remaining loss is an identity ambiguity, so it should fall out.
+- **Snapshot migration is not yet symmetric.** #970 normalizes anonymous /
+  lambda identity *on load* of an old snapshot, which is the right shape, but
+  the same normalization does not reach L5 source-graph identities. The
+  failure mode is not a wrong ABI verdict; it is a wrong proof path, a lost
+  impact edge, inconsistent root-cause grouping, or a consumer/source-graph
+  join mismatch. The fix belongs in the same central `EntityId`/occurrence
+  migration — every persisted identity carrier (flat entities, source-graph
+  nodes, surface-graph nodes, consumer-graph nodes, proof-path references,
+  impact ids), not one regex per graph format.
+- **Configuration discovery still happens too late (PR C's tail).** A
+  `.abicheck.yml`-only `build: targets:` can be discovered only during real
+  execution, so `dump --dry-run` / `compare --dry-run` / `scan --dry-run` can
+  answer "valid" for a request the real run then rejects. The convergence
+  target: configuration discovery, build-target resolution, toolchain
+  selection and evidence requirements belong to ADR-063 Phase 4's
+  `AnalysisPlan`, *before* extraction — not inside an extraction adapter.
+- **The ADR-061 move is directionally right and carries one visible debt.**
+  #972 put the new command in `frontends/cli/commands/` instead of a new flat
+  `cli_compare_bundle_facts.py`, which is exactly ADR-061's direction — but
+  `compare_bundle_facts.py:181` has to reach its own dependency through
+  `importlib.import_module("abicheck.bundle_side_input")` to stay outside the
+  import-cycle gate. Physical placement is correct, dependency direction is
+  not yet: `bundle_side_input` → `workflows/release/`, service dependencies
+  downward, `frontends → workflows`, and then the frontend gets an ordinary
+  static import. A dynamic import to dodge an architecture detector is an
+  acceptable transitional hack and an unacceptable end state.
+- **CI governance (PR 0B/P0) is still the oldest open item**, and the review
+  found the same shape from outside: Actions check-runs green on the exact
+  merge SHA, `Verify Merge Checks` success, but the commit *status* red from
+  `codecov/patch` (67.96% of diff vs a 90% target) and
+  `required_status_checks.enforcement_level: off`. Two decisions are owed,
+  not one: apply the prepared ruleset
+  (`.github/branch-protection-ruleset.json`), **and** decide whether patch
+  coverage is an authoritative merge gate — if it is, it goes in the required
+  set and PRs meet it; if it is not, it should stop painting merge SHAs red.
+  A permanently red `main` is indistinguishable from a broken one.
+- **Generated plan status.** `plans/index.md`'s hand-maintained status prose
+  goes stale between merge and the next docs pass (the review caught exactly
+  that, below). The durable fix is not more careful hand-editing: take ADR
+  status from the ADR, phase status from each plan's own frontmatter
+  (`status:` plus a `phases:` map), and generate the index — the same
+  source-of-truth-plus-gate shape `doc-count-sync` and `adr-status-sync`
+  already use. Stale status is worse than absent status for an agent reading
+  the repository cold.
+
+### Corrections — two review items were already fixed in `94be22ad..2598d0d`
+
+Recorded so they are not re-opened as work:
+
+1. **`plans/index.md`'s G38 row is no longer stale.** The review read it as
+   still saying Phase 17 has "no CLI surface, open"; that was true at
+   `94be22ad` and was corrected by `c163409`/`34021e5`. The row now states
+   Phases 1–17 shipped, naming the `compare --old-bundle-facts` surface and
+   the per-library override manifest. The *generated-status* recommendation
+   above stands on its own merits — the mechanism that produced this
+   instance is unchanged.
+2. **PR [#969](https://github.com/abicheck/abicheck/pull/969) is merged.**
+   The review assessed it as an open PR proposing
+   `--bundle-facts-library-manifest`; it landed as `c163409` (G38 Phase 17),
+   and the option exists on `compare` today, gated by
+   `reject_bundle_facts_manifest_without_old_bundle_facts` so it cannot be
+   passed to the ordinary dispatch path. The review's substantive point is
+   unaffected and is recorded under "Bundle topology" above: the capability
+   is needed, the flag should not become the stable API.
+
+### Where this lands in the sequence
+
+Two new entries join the "Ordering" block below (PR I, PR J), and the review
+would run repository governance (PR A / PR 0B) ahead of everything as P0 —
+which is what this plan has said since PR 0 and has not happened yet.
+
 ## Merge criteria for every removal PR here
 
 **CLI**
@@ -4315,6 +4620,26 @@ PR H  artifact-set semantics          = PR 5 — provider ownership, moved and
       (syntax slice DONE)               duplicated symbols, cost and dry-run;
                                        syntax refinement (DONE) was the one
                                        piece independent of the semantics work
+PR I  one bundle compare, not two     — NEW (2026-09-01 checkpoint): an
+      (NEW, not started)                explicit artifact_type discriminator
+                                       on BundleFacts, operand classification
+                                       instead of a mode flag, and one
+                                       BundleCompareRequest over live/live +
+                                       stored/live + live/stored +
+                                       stored/stored, with the full
+                                       evaluation/gate/report/dry-run surface
+                                       answered once. Shares PR G2's own
+                                       GateOptions prerequisite
+      └─ then DELETE compare --old-bundle-facts
+PR J  bundle topology out of the CLI  — NEW (2026-09-01 checkpoint):
+      (NEW, not started)                --bundle-system-providers/--bundle-
+                                       cohort and per-library header/compile
+                                       context move into BundleSpec /
+                                       .abicheck.yml referencing existing
+                                       targets; release --manifest renamed;
+                                       --max-json-object-nodes re-expressed as
+                                       a resource limit. Depends on G42 for
+                                       provider resolution
 ```
 
 Independent of the chain, unblocked at any time: PR 1 (**done**), PR 2
