@@ -27,6 +27,7 @@ import pytest
 from abicheck.workflows.bundle_facts_library_overrides import (
     BundleFactsLibraryOverrides,
     BundleFactsLibraryOverridesError,
+    load_bundle_facts_library_overrides,
     parse_bundle_facts_library_overrides,
 )
 
@@ -291,3 +292,25 @@ class TestParseBundleFactsLibraryOverrides:
         )
         assert result.headers["libfoo.so"] == [Path("/abs/include/foo")]
         assert result.compile["libfoo.so"].sysroot == Path("/abs/sysroot")
+
+
+class TestLoadBundleFactsLibraryOverrides:
+    """Tests for the real-file-reading counterpart,
+    :func:`load_bundle_facts_library_overrides` -- covers failure modes
+    that only exist at the raw-YAML-text layer, before
+    ``parse_bundle_facts_library_overrides`` ever sees a parsed ``dict``."""
+
+    def test_unhashable_yaml_key_is_a_clean_error_not_a_raw_typeerror(
+        self, tmp_path: Path
+    ) -> None:
+        """Codex review, fresh evidence: a syntactically valid YAML mapping
+        can use a non-scalar (list) node as a key -- e.g. ``? [a, b]\\n:
+        1``. ``dump_manifest._load_yaml_strict``'s own duplicate-key set
+        (``key in seen``/``seen.add(key)``) raises a raw, untranslated
+        ``TypeError: unhashable type`` for that, which the loader's
+        previous ``except ManifestValidationError`` clause did not catch."""
+        manifest = tmp_path / "manifest.yaml"
+        manifest.write_text("libreal.so:\n  ? [a, b]\n  : 1\n")
+
+        with pytest.raises(BundleFactsLibraryOverridesError, match="invalid YAML"):
+            load_bundle_facts_library_overrides(manifest)

@@ -280,6 +280,20 @@ def load_bundle_facts_library_overrides(
         raise BundleFactsLibraryOverridesError(
             f"--bundle-facts-library-manifest {manifest_path}: {exc}"
         ) from exc
+    except TypeError as exc:
+        # Codex review, fresh evidence: a syntactically valid YAML mapping
+        # can use a non-scalar (list/dict) node as a *key* -- e.g.
+        # `? [a, b]\n: 1`. `_load_yaml_strict`'s own duplicate-key set
+        # (`seen: set[Any] = set(); key in seen; seen.add(key)`) raises a
+        # raw, untranslated `TypeError: unhashable type` for that, before
+        # parse_bundle_facts_library_overrides() ever runs its own
+        # non-string-key check below -- and dispatch()'s CLI boundary
+        # catches ValueError, not TypeError, so this previously leaked a
+        # traceback instead of the clean exit-64 usage error every other
+        # malformed manifest input here produces.
+        raise BundleFactsLibraryOverridesError(
+            f"--bundle-facts-library-manifest {manifest_path}: invalid YAML: {exc}"
+        ) from exc
     return parse_bundle_facts_library_overrides(
         raw if raw is not None else {},
         known_libraries=known_libraries,
