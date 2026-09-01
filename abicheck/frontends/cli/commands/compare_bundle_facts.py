@@ -280,6 +280,15 @@ def dispatch(*, compile_context: Any, **kwargs: Any) -> None:
                         Path(manifest_path), known_libraries=known_libraries
                     )
                 )
+                if depth == "binary":
+                    # Codex review: the uniform `headers` clear above only
+                    # covers the uniform operand -- a manifest-supplied
+                    # per-library header root would otherwise still run L2
+                    # extraction for that one library under --depth binary,
+                    # reporting findings outside the requested depth.
+                    per_library_headers = {}
+                    per_library_includes = {}
+                    per_library_compile = {}
 
             result = compare_release_against_bundle_facts(
                 old_facts_path,

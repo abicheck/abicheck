@@ -145,6 +145,17 @@ def parse_bundle_facts_library_overrides(
                 f"per-library override manifest.{name}: must be a mapping, "
                 f"got {type(entry).__name__}"
             )
+        non_str_keys = [k for k in entry if not isinstance(k, str)]
+        if non_str_keys:
+            # Codex review: a YAML mapping can carry a non-string key (e.g.
+            # `2: 3`) -- `sorted(set(entry) - _LIBRARY_KEYS)` below would
+            # raise a raw, untranslated TypeError comparing str to int
+            # instead of the clean BundleFactsLibraryOverridesError every
+            # other malformed-entry case here produces.
+            raise BundleFactsLibraryOverridesError(
+                f"per-library override manifest.{name}: keys must be "
+                f"strings, got {non_str_keys!r}"
+            )
         unknown = set(entry) - _LIBRARY_KEYS
         if unknown:
             raise BundleFactsLibraryOverridesError(

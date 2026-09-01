@@ -100,6 +100,14 @@ class TestParseBundleFactsLibraryOverrides:
         with pytest.raises(BundleFactsLibraryOverridesError, match="unrecognized"):
             parse_bundle_facts_library_overrides({"libfoo.so": {"bogus": 1}})
 
+    def test_non_string_key_is_rejected_cleanly_not_a_raw_typeerror(self) -> None:
+        """Codex review: a YAML mapping can carry a non-string key (e.g. a
+        bare integer); the unrecognized-key check's own ``sorted(unknown)``
+        would otherwise raise a raw ``TypeError`` comparing ``str`` to
+        ``int`` instead of ``BundleFactsLibraryOverridesError``."""
+        with pytest.raises(BundleFactsLibraryOverridesError, match="keys must be strings"):
+            parse_bundle_facts_library_overrides({"libfoo.so": {"bogus": 1, 2: 3}})
+
     def test_a_library_name_outside_known_libraries_is_rejected(self) -> None:
         with pytest.raises(
             BundleFactsLibraryOverridesError, match="not a library in this bundle"

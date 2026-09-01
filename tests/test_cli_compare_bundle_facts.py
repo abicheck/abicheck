@@ -617,3 +617,61 @@ class TestBundleFactsLibraryManifest:
         assert captured["per_library_headers"] == {"libreal.so": [header_dir]}
         assert captured["per_library_includes"] == {}
         assert captured["per_library_compile"] == {}
+
+    def test_depth_binary_clears_manifest_headers_too(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Codex review: --depth binary already clears the uniform
+        --header/--new-header operand (see dispatch()'s own comment) so the
+        comparison stays pure L0/L1 with no L2 header AST -- but a
+        manifest-supplied per-library header root was not cleared alongside
+        it, so that one library would still run L2 extraction and report
+        findings outside the requested depth."""
+        import abicheck.bundle_side_input as bundle_side_input_mod
+
+        old_dir = tmp_path / "old"
+        new_dir = tmp_path / "new"
+        old_dir.mkdir()
+        new_dir.mkdir()
+        body = "int add(int a, int b) { return a + b; }\n"
+        _build_so(old_dir, "libreal.so", body)
+        _build_so(new_dir, "libreal.so", body)
+        facts_path = _write_old_facts(
+            tmp_path, old_dir, old_dir / "libreal.so", "libreal.so"
+        )
+        header_dir = tmp_path / "libreal_headers"
+        header_dir.mkdir()
+        (header_dir / "libreal.h").write_text("int add(int a, int b);\n")
+        manifest = tmp_path / "manifest.yaml"
+        manifest.write_text(f"libreal.so:\n  headers:\n    - {header_dir}\n")
+
+        captured: dict[str, object] = {}
+        real = bundle_side_input_mod.compare_release_against_bundle_facts
+
+        def _spy(*args: object, **kwargs: object):
+            captured.update(kwargs)
+            return real(*args, **kwargs)
+
+        monkeypatch.setattr(
+            bundle_side_input_mod, "compare_release_against_bundle_facts", _spy
+        )
+
+        code, out = _invoke(
+            "compare",
+            str(facts_path),
+            str(new_dir),
+            "--old-bundle-facts",
+            "--include-system-declarations",
+            "--bundle-facts-library-manifest",
+            str(manifest),
+            "--depth",
+            "binary",
+            "--format",
+            "json",
+        )
+
+        assert code == 0, out
+        assert captured["headers"] is None
+        assert captured["per_library_headers"] == {}
+        assert captured["per_library_includes"] == {}
+        assert captured["per_library_compile"] == {}
