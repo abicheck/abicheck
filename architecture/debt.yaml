@@ -763,12 +763,12 @@
     },
     {
       "path": "abicheck/dumper_hybrid.py",
-      "baseline_lines": 989,
+      "baseline_lines": 1005,
       "target": "see ADR-061 ownership map",
       "rule": "no_growth",
       "category": "legacy_oversized_module",
       "owner": "abicheck maintainers",
-      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice. Raised by 10 for ADR-063 Phase 2's closing slice: the merged snapshot must union the typedef_entity_ids/constant_entity_ids sidecars in the same direction it already unions typedefs_qualified, or the sidecars desync from the dicts they annotate.",
+      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice. Raised by 10 for ADR-063 Phase 2's closing slice: the merged snapshot must union the typedef_entity_ids/constant_entity_ids sidecars in the same direction it already unions typedefs_qualified, or the sidecars desync from the dicts they annotate. Raised by a further 16 in the same slice's follow-up (Codex review): constants itself is NOT merged the same way typedefs_qualified is, so constant_entity_ids needed an explicit filter to the keys castxml_snap.constants actually retains, or a clang-only constant would leave a phantom sidecar key with no matching entry.",
       "review_by": "2026-11-30"
     },
     {
@@ -1693,12 +1693,12 @@
     },
     {
       "path": "tests/test_dumper_hybrid.py",
-      "baseline_lines": 1712,
+      "baseline_lines": 1773,
       "target": "tests/unit-or-contract ownership matching production migration",
       "rule": "no_growth",
       "category": "legacy_oversized_test_module",
       "owner": "abicheck maintainers",
-      "rationale": "Existing test module predates ADR-061 and will split by behavior or contract axis with its production migration.",
+      "rationale": "Existing test module predates ADR-061 and will split by behavior or contract axis with its production migration. Raised by 61 for ADR-063 Phase 2's closing slice follow-up (Codex review): TestConstantEntityIdSidecarStaysAlignedWithConstants, regression-testing the constant_entity_ids/constants alignment fix in dumper_hybrid.py's own debt.yaml entry above.",
       "review_by": "2026-11-30"
     },
     {
