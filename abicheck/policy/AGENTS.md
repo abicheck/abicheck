@@ -66,10 +66,17 @@ or a CLI flag directly is in the wrong layer.
   and its own origin/ambiguity bookkeeping); `public_surface_closure.py`
   owns the actual closure-walk algorithm (`_seed_public_roots`/
   `_walk_type_closure`/`_walk_exact_type_closure` and siblings) and the real
-  entry point, `resolve_public_surface()` — a literal traversal over
-  `AbiSnapshot.surface_graph` (`compare/surface_graph.py`'s evidence graph),
-  not the independent regex re-parse `surface.py`'s pre-migration
-  implementation used to be. Both are leaf modules with respect to
+  entry point, `resolve_public_surface()` — reads *what a declaration/type/
+  typedef references* from `compare/surface_graph.py`'s
+  `referenced_identifiers_by_node()`, a pure function of the snapshot's own
+  current declarations computed fresh on every call, not the independent
+  regex re-parse `surface.py`'s pre-migration implementation used to be, and
+  (after two further Codex review rounds — see this module's own docstring
+  and `docs/contribute/known-gaps.md`'s ADR-063 Phase 3 entry) deliberately
+  **not** `AbiSnapshot.surface_graph`'s own persisted `GraphNode.attrs`
+  either: a stale or adversarial persisted fact could otherwise silently
+  outrank a fresh, correct recomputation through the graph's own
+  cross-producer evidence-merge precedence. Both are leaf modules with respect to
   `surface.py`/`export_surface.py`: neither imports either of those, so both
   (and `export_surface.py`'s own export-domain closure, which reuses
   `_walk_type_closure` verbatim) can depend on this package without a cycle.

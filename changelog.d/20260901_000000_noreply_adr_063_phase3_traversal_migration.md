@@ -33,53 +33,55 @@
     represent precisely. A regression test
     (`TestGraphNodeCollisionDoesNotBlurReachability` in
     `tests/test_policy_public_surface.py`) pins this directly.
-  - A second correctness hazard, found by review after this migration
-    landed (Codex, PR #979): `service_header_graph_attach._attach_header_
-    graph` installs an L5 `surface_graph` on essentially every real dump,
-    but deliberately never calls `build_public_surface_facts` itself (a
-    documented, measured 47-96% header-graph-attach-cost regression from
-    paying that walk on every dump). `resolve_surface_graph_nodes()` only
-    rebuilt a graph when it was `None`, so this already-attached but
-    evidence-incomplete graph was trusted as-is and every node read as
-    referencing nothing -- silently collapsing the transitive type closure
-    on the *ordinary, default* `--scope-public-headers` dump path, not
-    merely a stale-schema edge case. Fixed by having
-    `resolve_surface_graph_nodes()` always call `build_public_surface_facts`
-    on the resolved graph -- an idempotent, evidence-preserving merge that
-    enriches an already-attached graph's existing nodes in place (never
-    discarding `_attach_header_graph`'s own L5 edges/facts) instead of only
-    covering the `None` case, and now the "later phase" the attach site's
-    own docstring always said this cost was deferred to. Regression tests
-    (`TestUnpopulatedAttachedGraphIsBackfilled`,
-    `TestStrippedGraphAttrsAreReconstructedNotTrusted` in
-    `tests/test_policy_public_surface.py`) cover both the never-populated
-    and stripped-attrs shapes.
-  - Two further review findings on the same PR, both fixed in the same
-    pass: (1) the module split dropped `PublicSurfaceQuery`/
+  - Two further review rounds (Codex, PR #979) found the graph itself
+    could not be trusted for this computation at all, in two different
+    ways, and the fix that closes both simultaneously is described below
+    rather than as two separate patches, since the final design supersedes
+    two earlier, real, individually-fixed-then-superseded intermediate
+    states (`git log` on this branch has the full round-by-round history;
+    `docs/contribute/known-gaps.md`'s ADR-063 Phase 3 entry has the
+    complete account). First, `service_header_graph_attach.
+    _attach_header_graph` installs an L5 `surface_graph` on essentially
+    every real dump without ever populating `referenced_identifiers`/
+    `identifiers_collision` on its nodes, so trusting an attrs-less node
+    as "references nothing" silently collapsed the transitive closure on
+    the *ordinary, default* dump path. Second, even after enriching that
+    graph, a schema-v29 or otherwise untrusted/adversarial snapshot could
+    carry a stale or crafted `referenced_identifiers` fact at a confidence
+    this module's own freshly-registered fact (always the lowest rank)
+    cannot outrank -- the graph's cross-producer evidence-merge precedence
+    would let the stale/poisoned value silently win over the correct one,
+    the same collapsed-closure failure mode reached a different way.
+  - **Fixed by removing the graph from this computation entirely.**
+    `compare/surface_graph.py`'s `referenced_identifiers_by_node()` (now
+    public, alongside its `ReferencedIdentifiers` return type) is a pure
+    function of a snapshot's own current declarations, computed *before*
+    any `GraphNode` is built. `policy/public_surface_closure.py`'s and
+    `export_surface.py`'s closure-walk entry points now call it directly
+    and thread the result through instead of reading
+    `AbiSnapshot.surface_graph`/`GraphNode.attrs` at all --
+    `resolve_surface_graph_nodes()` (the function that used to
+    enrich/backfill the graph for this purpose) had no remaining caller
+    once both sites switched, and is deleted rather than kept as unused
+    surface. This closes the security concern outright (nothing is ever
+    merged, so there is no evidence precedence for a stale or adversarial
+    fact to win) and, as a direct consequence, removes essentially all of
+    the `GraphNode`/`GraphFact`/evidence-merge construction cost from the
+    hot path -- an ad hoc local re-run of `scripts/benchmark_scaling.py`
+    after this change showed the previously-regressed scenarios back in
+    line with the pre-migration baseline, though this was not re-verified
+    against the perf gate's own noise-controlled measurement before this
+    fragment was written. Regression tests:
+    `TestClosureIgnoresSurfaceGraphEntirely` (including a deliberately
+    adversarial, high-confidence poisoned fact),
+    `TestPublicSurfaceBackCompatReexports`,
+    `TestResolvePublicSurfaceIsNotIdentityCached` in
+    `tests/test_policy_public_surface.py`.
+  - The module split also dropped `PublicSurfaceQuery`/
     `resolve_public_surface`/`PublicSurfaceResolution` from
     `policy/public_surface.py`'s own namespace, breaking that historical
     import path for any existing consumer -- restored via a lazy
     `__getattr__` re-export shim (the same pattern already used at the tail
     of `cli_buildsource.py`) for the two moved names, plus a direct
     `PublicSurfaceResolution = PublicSurface` alias, all three now back in
-    `__all__` for `from ... import *` compatibility too. (2)
-    `_attach_header_graph` finalizes the L5 graph (stamping `graph_id`/
-    `coverage`) *before* installing it as `snap.surface_graph`; enriching
-    that same graph in place with public-surface nodes/edges without
-    re-finalizing left a content-addressed `graph_id` that no longer
-    matched the graph's own, now-larger content on a later
-    `save_snapshot`/`to_dict`. `resolve_surface_graph_nodes()` now
-    re-finalizes after enrichment. Regression tests:
-    `TestPublicSurfaceBackCompatReexports`,
-    `TestSurfaceGraphRefinalizedAfterEnrichment` in
-    `tests/test_policy_public_surface.py`.
-  - **Known, unfixed gap**: this migration carries a real, measured
-    performance regression against `scripts/benchmark_scaling.py`'s
-    baseline gate (a genuine constant-factor cost of building real
-    `GraphNode`/`GraphFact` objects instead of the deleted regex-based
-    re-parse), reproducing identically on this PR's very first commit. An
-    identity-keyed caching fix was attempted and reverted before landing
-    because it broke a real correctness test (a snapshot mutated in place
-    between two calls must see the new content, not a stale cached
-    result) -- see `docs/contribute/known-gaps.md`'s new ADR-063 Phase 3
-    entry for the full account.
+    `__all__` for `from ... import *` compatibility too.

@@ -13,49 +13,77 @@ Everything here is still a **leaf module**: imports nothing from
 ``surface.py``/``export_surface.py``, so both of them (and
 ``policy/public_surface_query.py``, the ``PublicSurfaceQuery`` orchestrator
 built on top of this module) can depend on it without a cycle.
-``export_surface.py`` imports :func:`_walk_type_closure`/
-:func:`resolve_surface_graph_nodes` directly -- its own type-closure step
-reuses the former verbatim (see that module's own docstring), and both
-domains resolve their graph through the latter rather than each backfilling
-their own.
+``export_surface.py`` imports :func:`_walk_type_closure` directly -- its own
+type-closure step reuses it verbatim (see that module's own docstring).
 
-:func:`resolve_public_surface` is a **real traversal** over
-``AbiSnapshot.surface_graph`` — the unified evidence graph
-``compare/surface_graph.py`` builds unconditionally from L0-L2 facts — not a
-delegation to ``surface.py``'s old, independent closure-walk implementation.
-That implementation (``_seed_public_roots``/``_walk_type_closure``/
-``_walk_exact_type_closure`` and their siblings) moved here, adapted to
-resolve *what a declaration/type/typedef references* by reading the
-graph's precomputed ``referenced_identifiers`` node attrs (populated once,
-at graph-build time, from the exact same L0-L2 fields — see
-``compare/surface_graph.py``'s own ``_referenced_identifiers_by_node``)
-rather than independently re-parsing ``fn.return_type``/``rec.fields``/
-``rec.bases``/typedef targets a second time via its own regex scan.
+:func:`resolve_public_surface` computes *what a declaration/type/typedef
+references* via :func:`~abicheck.compare.surface_graph.
+referenced_identifiers_by_node` -- a pure function of *snap*'s own current
+declarations, computed fresh on every call -- rather than ``surface.py``'s
+old, independent closure-walk implementation (which re-parsed
+``fn.return_type``/``rec.fields``/``rec.bases``/typedef targets via its own
+regex scan) or ``AbiSnapshot.surface_graph``'s own persisted node attrs.
 
-**A node-id collision is not automatically safe to union, and this module
-does not blindly trust the graph's cached value when one occurred.** A
-first version of this migration assumed unioning a colliding node's
-contributors was always the conservative, safe direction (the same
-over-keep principle that already governs an ambiguous bare *type* name) --
-that assumption is wrong for a *declaration* collision specifically, and a
-regression test catches exactly why: a public, no-argument overload and a
-hidden overload taking a private-type parameter, sharing one demangled name
-with no mangled name and no resolved ``entity_id`` to tell them apart,
-collapse onto the same approximate node id. Unioning their referenced
-identifiers would make the *public* overload appear to reference the
-*hidden* overload's own private parameter type -- attributing a private
-overload's reach to a public root, not merely over-approximating a single
-root's own reach. ``compare/surface_graph.py``'s builder flags such a node
-(``identifiers_collision``), and this module's own
-``_referenced_identifiers_for_function``/``_referenced_identifiers_for_variable``/
-``_referenced_identifiers_for_record`` fall back to recomputing that *one*
-declaration's own identifiers directly (exactly what the pre-migration
-implementation always did, unconditionally) rather than trust a value that
-may be blurred across an unrelated sibling. See
-:func:`_node_identifiers_or_collision`'s own docstring. This is the one
-documented case where "traverse the graph" yields to "the graph flagged
-this id as unsafe to trust here" -- a named, tested residual, not a silent
-gap.
+**Deliberately not read off ``snap.surface_graph``, even though
+``compare/surface_graph.py`` stamps this exact same value onto its own
+``GraphNode.attrs`` too** (Codex review, PR #979, two rounds). A first
+version of this migration *did* read the graph's cached
+``referenced_identifiers``/``identifiers_collision`` node attrs, and two
+distinct hazards surfaced in review before the design settled on the
+current, graph-independent approach:
+
+1. ``snap.surface_graph`` being non-``None`` does not mean its nodes carry
+   these two attrs at all (``_attach_header_graph`` installs an L5 graph
+   on essentially every real dump without ever populating them, and an
+   older persisted schema predates them entirely) -- trusting an
+   attrs-less node as "references nothing" silently collapsed the
+   transitive closure on the *ordinary, default* dump path.
+2. Fixing (1) by rebuilding/enriching the graph in place ran into a
+   second, more fundamental problem: ``GraphNode.attrs`` are derived
+   through ``model.graph_facts``' cross-producer evidence-merge machinery,
+   which resolves a same-key disagreement between two registrations by
+   confidence/producer/content precedence -- correct for genuinely
+   independent producer facts, but wrong for this specific, single-source
+   derived computation. A stale or *adversarial* persisted fact (a crafted
+   snapshot JSON is explicitly in scope here) at a confidence this
+   module's own freshly-registered fact (always the lowest rank) cannot
+   outrank would silently win over the correct, current value -- the same
+   collapsed-closure failure mode as (1), just reachable through the fix
+   for (1) instead of around it.
+
+Both hazards share one root cause: trusting anything cached on the shared,
+evidence-mergeable graph for a value that has exactly one legitimate
+source (*snap*'s own declarations, right now) and no legitimate second
+producer to reconcile evidence with. The fix is not a smarter merge rule;
+it is not merging at all -- :func:`referenced_identifiers_by_node` is
+called directly, every time, with no ``GraphNode``/``GraphFact``
+construction (and its associated evidence-merge cost) anywhere in the
+path. This also happens to remove the per-dump graph-construction/
+enrichment cost entirely from this walk, which a real CI perf gate had
+flagged as a regression against the pre-migration regex-based re-parse --
+see ``docs/contribute/known-gaps.md``'s ADR-063 Phase 3 entry for the
+history of that measurement, since fixing the security concern above is
+what closes it, not a dedicated performance change.
+
+**A node-id collision is not automatically safe to union.** Two
+declarations can share one *approximate* node id when neither carries a
+resolved ``entity_id`` (e.g. two overloads with no mangled name to
+disambiguate them). Unioning their referenced identifiers would make a
+*public*, narrow-signature overload appear to reference a *hidden*
+sibling's own private parameter type -- attributing a private overload's
+reach to a public root, not merely over-approximating a single root's own
+reach. :func:`referenced_identifiers_by_node` itself already resolves this
+the safe way: it returns which node ids received contributions from more
+than one distinct declaration (``ReferencedIdentifiers.collided_nodes``),
+and this module's own ``_referenced_identifiers_for_function``/
+``_referenced_identifiers_for_variable``/``_referenced_identifiers_for_record``
+fall back to recomputing that *one* declaration's own identifiers directly
+on such a collision (exactly what the pre-migration implementation always
+did, unconditionally) rather than trust a value that may be blurred across
+an unrelated sibling. See :func:`_node_identifiers_or_collision`'s own
+docstring. This is the one documented case where "trust the fresh
+computation" still yields further, to "recompute even more narrowly" --
+a named, tested residual, not a silent gap.
 
 ``export_surface.py``'s own export-table-matching *root-seeding* (the
 ``contract=exports`` domain) is **not** migrated in this slice — its own
@@ -73,14 +101,14 @@ import re
 from typing import TYPE_CHECKING
 
 from ..compare.surface_graph import (
-    build_public_surface_facts,
+    ReferencedIdentifiers,
     fact_list,
     node_id_for_declaration,
     node_id_for_type,
     node_id_for_typedef,
+    referenced_identifiers_by_node,
 )
 from ..diff_cxx_rules import owner_class_of
-from ..model.source_graph import SourceGraphSummary
 from ..model.vocabulary import ScopeOrigin, Visibility
 from .public_surface import (
     _DEMOTE_ORIGINS,
@@ -95,26 +123,44 @@ from .public_surface import (
 if TYPE_CHECKING:
     from ..model.declarations import Function, Variable
     from ..model.entities import EnumType, RecordType
-    from ..model.graph_facts import GraphNode, SurfaceGraphLike
     from ..model.snapshot import AbiSnapshot
 
 __all__ = [
     "resolve_public_surface",
-    "resolve_surface_graph_nodes",
 ]
 
 
-def _referenced_identifiers(
-    graph_nodes_by_id: dict[str, GraphNode], node_id: str
-) -> set[str]:
+def _referenced_identifiers(refs: ReferencedIdentifiers, node_id: str) -> set[str]:
     """The precomputed union of type-identifier strings that the
-    declaration/type/typedef at *node_id* references, as cached on its graph
-    node by ``compare.surface_graph``'s builder — the actual "traverse the
-    graph" step this module's migration is about. Returns an empty set (not
-    an error) for a node id genuinely absent from the graph -- shouldn't
-    happen for a graph ``build_public_surface_facts`` itself produced (every
-    function/variable/record/enum/typedef gets a node), but a missing node
-    is strictly the *conservative* direction here (fewer identifiers to
+    declaration/type/typedef at *node_id* references -- read from a
+    :class:`~abicheck.compare.surface_graph.ReferencedIdentifiers` computed
+    directly and freshly from *snap* (:func:`~abicheck.compare.
+    surface_graph.referenced_identifiers_by_node`), never from a
+    :class:`~abicheck.model.graph_facts.GraphNode`'s own ``attrs``.
+
+    **Deliberately not read off the graph's node attrs, even though
+    :func:`build_public_surface_facts` also stamps this same value there**
+    (Codex review, PR #979): a node's ``attrs`` are derived through
+    ``model.graph_facts``' cross-producer evidence-merge machinery, which
+    resolves a same-key disagreement between two registrations by
+    confidence/producer/content precedence -- appropriate for genuinely
+    independent producer facts, but wrong for this specific, single-source
+    derived computation. A schema-v29 (or otherwise untrusted/adversarial)
+    persisted snapshot could carry a stale or crafted ``referenced_
+    identifiers`` fact at a confidence this module's own freshly-registered
+    fact (always ``CONF_UNKNOWN``, the lowest rank) cannot outrank, so
+    trusting ``node.attrs`` here could let a poisoned or stale value silently
+    win over the correct, current one -- collapsing the transitive closure
+    exactly like the bug this same review round already fixed once. Calling
+    :func:`referenced_identifiers_by_node` directly bypasses that merge
+    system entirely: there is no precedence to lose, because nothing but
+    *this* call's own fresh computation is ever consulted.
+
+    Returns an empty set (not an error) for a node id absent from *refs* --
+    shouldn't happen for a snapshot :func:`referenced_identifiers_by_node`
+    itself walked (every function/variable/record/typedef contributes an
+    entry when it has any identifiers at all), but a missing entry is
+    strictly the *conservative* direction here (fewer identifiers to
     expand, never a fabricated reference) so this stays a lookup, not an
     assertion.
 
@@ -126,50 +172,44 @@ def _referenced_identifiers(
     :func:`_referenced_identifiers_for_variable`/
     :func:`_referenced_identifiers_for_record` instead — see their own
     docstrings, and ``compare.surface_graph``'s
-    ``_referenced_identifiers_by_node`` docstring, for why a bare lookup by
+    ``referenced_identifiers_by_node`` docstring, for why a bare lookup by
     node id is unsound for those three kinds specifically.
     """
-    node = graph_nodes_by_id.get(node_id)
-    if node is None:
-        return set()
-    return set(node.attrs.get("referenced_identifiers", ()))
+    return set(refs.by_node.get(node_id, ()))
 
 
 def _node_identifiers_or_collision(
-    graph_nodes_by_id: dict[str, GraphNode], node_id: str
+    refs: ReferencedIdentifiers, node_id: str
 ) -> set[str] | None:
-    """The graph's cached ``referenced_identifiers`` for *node_id*, or
-    ``None`` when that node is flagged ``identifiers_collision`` (more than
-    one distinct declaration/type mapped onto this approximate id -- see
-    ``compare.surface_graph``'s own docstring) or missing entirely. ``None``
+    """*node_id*'s freshly-computed ``referenced_identifiers`` from *refs*,
+    or ``None`` when that id is flagged as a collision (more than one
+    distinct declaration/type mapped onto this approximate id -- see
+    ``compare.surface_graph``'s own docstring) or absent entirely. ``None``
     tells the caller its own per-object fallback must run instead of
-    trusting a value that may be blurred across an unrelated sibling.
-    """
-    node = graph_nodes_by_id.get(node_id)
-    if node is None or node.attrs.get("identifiers_collision", False):
+    trusting a value that may be blurred across an unrelated sibling."""
+    if node_id not in refs.by_node or node_id in refs.collided_nodes:
         return None
-    return set(node.attrs.get("referenced_identifiers", ()))
+    return set(refs.by_node[node_id])
 
 
 def _referenced_identifiers_for_function(
-    graph_nodes_by_id: dict[str, GraphNode], node_id: str, fn: Function
+    refs: ReferencedIdentifiers, node_id: str, fn: Function
 ) -> set[str]:
-    """*fn*'s own referenced type identifiers -- the graph's cached value
+    """*fn*'s own referenced type identifiers -- the freshly-computed value
     when safe, else recomputed directly from *fn*'s own return/param types.
 
-    The fallback exists for exactly the case the graph's own
-    ``identifiers_collision`` flag reports: two declarations sharing one
-    approximate node id (no resolved ``entity_id`` for either, e.g. two
-    overloads with no mangled name to disambiguate them) are not the same
-    declaration, and a public, narrow-signature overload must not appear to
-    reference whatever a same-node hidden sibling's own (possibly private)
-    parameter type happens to be. Recomputing *this* declaration's own
-    identifiers directly is exactly what the pre-migration implementation
-    always did, unconditionally -- this is the safety net for the one case
-    the graph's shared-node model cannot represent precisely, not a routine
-    path.
+    The fallback exists for exactly the case the collision flag reports:
+    two declarations sharing one approximate node id (no resolved
+    ``entity_id`` for either, e.g. two overloads with no mangled name to
+    disambiguate them) are not the same declaration, and a public,
+    narrow-signature overload must not appear to reference whatever a
+    same-node hidden sibling's own (possibly private) parameter type
+    happens to be. Recomputing *this* declaration's own identifiers
+    directly is exactly what the pre-migration implementation always did,
+    unconditionally -- this is the safety net for the one case the graph's
+    shared-node model cannot represent precisely, not a routine path.
     """
-    cached = _node_identifiers_or_collision(graph_nodes_by_id, node_id)
+    cached = _node_identifiers_or_collision(refs, node_id)
     if cached is not None:
         return cached
     idents = _type_identifiers(fn.return_type)
@@ -179,25 +219,25 @@ def _referenced_identifiers_for_function(
 
 
 def _referenced_identifiers_for_variable(
-    graph_nodes_by_id: dict[str, GraphNode], node_id: str, var: Variable
+    refs: ReferencedIdentifiers, node_id: str, var: Variable
 ) -> set[str]:
     """*var*'s own referenced type identifiers -- see
     :func:`_referenced_identifiers_for_function`'s docstring for the same
     collision-fallback rationale, applied to a variable's own type."""
-    cached = _node_identifiers_or_collision(graph_nodes_by_id, node_id)
+    cached = _node_identifiers_or_collision(refs, node_id)
     if cached is not None:
         return cached
     return _type_identifiers(var.type)
 
 
 def _referenced_identifiers_for_record(
-    graph_nodes_by_id: dict[str, GraphNode], node_id: str, rec: RecordType
+    refs: ReferencedIdentifiers, node_id: str, rec: RecordType
 ) -> set[str]:
     """*rec*'s own referenced type identifiers (fields, bases, virtual
     bases) -- see :func:`_referenced_identifiers_for_function`'s docstring
     for the same collision-fallback rationale, applied to a record sharing
     its approximate node id with a distinct sibling record/enum/typedef."""
-    cached = _node_identifiers_or_collision(graph_nodes_by_id, node_id)
+    cached = _node_identifiers_or_collision(refs, node_id)
     if cached is not None:
         return cached
     idents: set[str] = set()
@@ -211,16 +251,17 @@ def _referenced_identifiers_for_record(
 def _seed_public_roots(
     snap: AbiSnapshot,
     surface: PublicSurface,
-    graph_nodes_by_id: dict[str, GraphNode],
+    refs: ReferencedIdentifiers,
 ) -> tuple[set[str], bool]:
     """Record public symbols on *surface*; return (seed type names, has_public).
 
     Seeds the type-closure work-list from the return/parameter/variable types of
-    every :data:`Visibility.PUBLIC` function and variable -- read from the
-    evidence graph's own precomputed ``referenced_identifiers`` rather than
-    re-parsing ``fn.return_type``/``p.type``/``var.type`` here a second time
-    (falling back to a direct, per-declaration recomputation on a detected
-    graph node-id collision -- see :func:`_referenced_identifiers_for_function`).
+    every :data:`Visibility.PUBLIC` function and variable -- read from *refs*,
+    a fresh, directly-computed :class:`~abicheck.compare.surface_graph.
+    ReferencedIdentifiers`, rather than re-parsing ``fn.return_type``/
+    ``p.type``/``var.type`` here a second time (falling back to a direct,
+    per-declaration recomputation on a detected node-id collision -- see
+    :func:`_referenced_identifiers_for_function`).
     """
     seed_types: set[str] = set()
     has_public = False
@@ -234,7 +275,7 @@ def _seed_public_roots(
             if fn.params or _is_real_type(fn.return_type):
                 surface.has_typed_roots = True
             seed_types |= _referenced_identifiers_for_function(
-                graph_nodes_by_id, node_id_for_declaration(fn.entity_id, fn.name), fn
+                refs, node_id_for_declaration(fn.entity_id, fn.name), fn
             )
             # A public *method* makes its enclosing class directly public even
             # when the method's own signature carries no class-typed return/
@@ -258,13 +299,13 @@ def _seed_public_roots(
             if _is_real_type(var.type):
                 surface.has_typed_roots = True
             seed_types |= _referenced_identifiers_for_variable(
-                graph_nodes_by_id, node_id_for_declaration(var.entity_id, var.name), var
+                refs, node_id_for_declaration(var.entity_id, var.name), var
             )
     return seed_types, has_public
 
 
 def _walk_type_closure(
-    graph_nodes_by_id: dict[str, GraphNode],
+    refs: ReferencedIdentifiers,
     snap: AbiSnapshot,
     surface: PublicSurface,
     record_by_name: dict[str, list[RecordType]],
@@ -275,7 +316,7 @@ def _walk_type_closure(
 
     Follows typedef targets, record fields, and base classes from each seed
     type, marking every reachable known type as part of the public surface —
-    read via each node's precomputed ``referenced_identifiers`` graph attr,
+    read via *refs*, a fresh, directly-computed ``ReferencedIdentifiers``,
     not by re-parsing ``rec_node.fields``/``.bases``/``.virtual_bases``/the
     typedef target string directly. A name may resolve to *several* types
     (an ambiguous ``::`` tail shared by two namespaces); every match is
@@ -298,9 +339,7 @@ def _walk_type_closure(
         target = snap.typedefs.get(name)
         if target:
             surface.public_typedefs.add(name)
-            for ident in _referenced_identifiers(
-                graph_nodes_by_id, node_id_for_typedef(name)
-            ):
+            for ident in _referenced_identifiers(refs, node_id_for_typedef(name)):
                 if ident not in seen:
                     queue.append(ident)
         # A short/qualified enum alias (``Mode``) reached from a public signature
@@ -329,7 +368,7 @@ def _walk_type_closure(
                 rec_node.entity_id, rec_node.qualified_name or rec_node.name
             )
             for ident in _referenced_identifiers_for_record(
-                graph_nodes_by_id, rec_node_id, rec_node
+                refs, rec_node_id, rec_node
             ):
                 if ident not in seen:
                     queue.append(ident)
@@ -364,7 +403,7 @@ def _combined_match_count(
 
 
 def _walk_exact_type_closure(
-    graph_nodes_by_id: dict[str, GraphNode],
+    refs: ReferencedIdentifiers,
     snap: AbiSnapshot,
     surface: PublicSurface,
     record_by_name: dict[str, list[RecordType]],
@@ -403,9 +442,7 @@ def _walk_exact_type_closure(
             # invariant, only ever happens via an already-all-exact chain)
             # makes the alias name itself exact too.
             surface.exact_type_identities.add(name)
-            for ident in _referenced_identifiers(
-                graph_nodes_by_id, node_id_for_typedef(name)
-            ):
+            for ident in _referenced_identifiers(refs, node_id_for_typedef(name)):
                 if ident not in seen:
                     queue.append(ident)
         en_nodes = enum_by_name.get(name, ())
@@ -427,9 +464,7 @@ def _walk_exact_type_closure(
         rec_node_id = node_id_for_type(
             rec_node.entity_id, rec_node.qualified_name or rec_node.name
         )
-        for ident in _referenced_identifiers_for_record(
-            graph_nodes_by_id, rec_node_id, rec_node
-        ):
+        for ident in _referenced_identifiers_for_record(refs, rec_node_id, rec_node):
             if ident not in seen:
                 queue.append(ident)
 
@@ -518,118 +553,35 @@ def _record_is_confirmed_public_seed(
     )
 
 
-def resolve_surface_graph_nodes(snap: AbiSnapshot) -> dict[str, GraphNode]:
-    """``snap.surface_graph``'s nodes, keyed by id -- always ensuring
-    :func:`build_public_surface_facts` has populated the returned graph's
-    ``referenced_identifiers``/``identifiers_collision`` node attrs, rather
-    than trusting whatever ``snap.surface_graph`` already is.
-
-    The one place every ADR-063 Phase 3 traversal (this module's own public-
-    domain closure, and ``export_surface.py``'s export-domain closure, which
-    shares :func:`_walk_type_closure` verbatim) gets its graph from, so a
-    caller with an already-resolved ``snap.surface_graph`` and one without
-    are handled identically rather than each reimplementing the ``None``
-    check.
-
-    This always-populate step is not optional, because ``snap.surface_graph``
-    being non-``None`` does **not** mean it already carries these two attrs.
-    ``service_header_graph_attach._attach_header_graph`` runs on essentially
-    every real dump and unconditionally installs an L5
-    ``SourceGraphSummary`` as ``snap.surface_graph`` -- but deliberately
-    *without* calling :func:`build_public_surface_facts` itself (that
-    builder's own docstring: "populating it is deferred to whichever later
-    phase actually queries the graph" -- G31 Phase A measured a 47-96%
-    header-graph-attach-cost regression from paying that walk on *every*
-    dump, whether or not a surface query ever follows). This function is
-    that later phase, so it is exactly where the deferred cost belongs.
-    Trusting an attached-but-unpopulated graph unconditionally would read
-    every node as referencing nothing (``dict.get(..., ())`` on an absent
-    key) on the ordinary, default `--scope-public-headers` dump path,
-    collapsing the transitive closure and potentially hiding a real ABI
-    break in a type only reachable through such a node (Codex review, PR
-    #979) -- not merely a stale-schema edge case, but the common case.
-
-    :func:`build_public_surface_facts` is idempotent and evidence-preserving
-    (``SourceGraphSummary.add_node``/``add_edge`` merge a second
-    registration's facts rather than dropping or overwriting the first), so
-    calling it against an already-attached graph *enriches* that graph's
-    existing nodes in place with the two attrs above -- it does not discard
-    ``_attach_header_graph``'s own L5 edges/facts, and a graph that already
-    carries these attrs (e.g. a second call in the same process) re-derives
-    the identical value at some redundant walk cost, never a different one.
-
-    Falls back to building a throwaway, in-memory-only graph -- using the
-    exact same approximate (qualified-name-string-keyed) node ids the
-    builder already uses whenever a declaration's ``entity_id`` carrier is
-    unpopulated, the identical, already-accepted collision class the
-    pre-migration string-keyed traversal already had -- only when
-    ``snap.surface_graph`` is ``None`` (a pure binary-only L0/L1 dump, or a
-    snapshot predating the field). That throwaway graph is never persisted
-    back onto *snap*, unlike the enrich-in-place case above: a binary-only
-    snapshot has no real header-AST declaration surface to attach, and
-    fabricating one onto ``snap.surface_graph`` would misrepresent its
-    actual evidence coverage to any other reader of that field (e.g.
-    serialization, ``dependency_scope``).
-
-    Re-finalizes a :class:`~abicheck.model.source_graph.SourceGraphSummary`
-    after enrichment (Codex review, PR #979): ``_attach_header_graph`` already
-    called ``graph.finalize()`` on the L5-only content before installing it
-    as ``snap.surface_graph``, which stamped ``graph_id`` (a content hash
-    over the node/edge set) and ``coverage`` from that L5-only snapshot.
-    :func:`build_public_surface_facts` can add new declaration/type/typedef/
-    header/symbol nodes and edges the L5 pass never saw, so leaving the
-    stale ``graph_id``/``coverage`` in place would silently disagree with
-    the graph's own, now-larger node/edge set on any later ``save_snapshot``/
-    ``to_dict`` -- a content-addressed hash that no longer matches its own
-    content. ``finalize()`` isn't part of the narrower :data:`SurfaceGraphLike`
-    protocol (only a real :class:`SourceGraphSummary` has ``graph_id``/
-    ``coverage`` at all), so this narrows back to the concrete type first,
-    the pattern that protocol's own docstring documents for exactly this
-    situation.
-
-    **Deliberately not memoized across calls, even though a real CI perf
-    gate measured this function's cost as a regression** (see
-    ``docs/contribute/known-gaps.md``'s ADR-063 Phase 3 entry for the full
-    accounting). A caching attempt keyed on *snap*/*graph* identity was
-    tried and reverted before landing: ``tests/test_export_surface.py::
-    TestUnresolvedTypeEdges::test_a_scope_lost_alias_key_is_followed_to_
-    its_target`` mutates ``snap.typedefs``/``snap.types`` in place between
-    two ``compute_export_surface(snap)`` calls on the *same* object and
-    correctly expects the second call to see the new content -- an
-    identity-keyed cache would silently serve the first call's stale
-    result instead, exactly the kind of silent false-negative this whole
-    migration exists to prevent. Trading a real correctness guarantee for
-    a performance win is not an acceptable trade here; the cost is paid in
-    full, every call, until a genuinely safe optimization (e.g. cheaper
-    ``GraphNode``/``GraphFact`` construction, not caching) is designed.
-    """
-    graph: SurfaceGraphLike | None = snap.surface_graph
-    if graph is None:
-        graph = SourceGraphSummary()
-    build_public_surface_facts(snap, graph)
-    if isinstance(graph, SourceGraphSummary):
-        graph.finalize()
-    return {n.id: n for n in graph.nodes}
-
-
 def _resolve_public_surface_via_graph(snap: AbiSnapshot) -> PublicSurface:
     """The real graph traversal: computes *snap*'s public-ABI surface from
-    ``resolve_surface_graph_nodes(snap)`` instead of ``surface.py``'s old,
-    independent closure-walk implementation.
+    :func:`~abicheck.compare.surface_graph.referenced_identifiers_by_node`
+    instead of ``surface.py``'s old, independent closure-walk implementation.
 
     Public roots are :data:`Visibility.PUBLIC` functions/variables. The
     public type set is the transitive closure over the types they
     reference (returns, params, fields, bases, typedef targets), read from
-    the graph's own precomputed ``referenced_identifiers`` node attrs.
+    *refs* -- a fresh, directly-computed
+    :class:`~abicheck.compare.surface_graph.ReferencedIdentifiers`, deliberately
+    **not** ``snap.surface_graph``'s own persisted node attrs (Codex review,
+    PR #979: a schema-v29 or otherwise untrusted snapshot could carry a
+    stale or crafted ``referenced_identifiers`` fact that the graph's
+    cross-producer evidence-merge precedence would let outrank a freshly
+    recomputed one -- see :func:`_referenced_identifiers`'s own docstring
+    for the full account). This also means this function no longer needs
+    ``snap.surface_graph``/``compare.surface_graph.build_public_surface_facts``
+    at all: :func:`referenced_identifiers_by_node` is a pure function of
+    *snap*'s own current declarations, with no ``GraphNode``/``GraphFact``
+    construction (and its associated evidence-merge cost) in the way.
     """
     surface = PublicSurface()
-    graph_nodes_by_id = resolve_surface_graph_nodes(snap)
+    refs = referenced_identifiers_by_node(snap)
 
     # Build the type universe and name -> record / enum indexes for closure walks.
     record_by_name, enum_by_name = _index_surface_types(snap, surface)
 
     # Seed roots from public symbols; collect the type names they touch.
-    seed_types, has_public = _seed_public_roots(snap, surface, graph_nodes_by_id)
+    seed_types, has_public = _seed_public_roots(snap, surface, refs)
 
     # A named enum whose declaration textually came from a parsed header is
     # part of the public surface even when no function/variable signature
@@ -669,13 +621,11 @@ def _resolve_public_surface_via_graph(snap: AbiSnapshot) -> PublicSurface:
         return surface
 
     # Transitive closure over the record/typedef graph.
-    _walk_type_closure(
-        graph_nodes_by_id, snap, surface, record_by_name, enum_by_name, seed_types
-    )
+    _walk_type_closure(refs, snap, surface, record_by_name, enum_by_name, seed_types)
     # Separate, ambiguity-vetoing closure -- see its own docstring for why
     # this can't be folded into the walk above.
     _walk_exact_type_closure(
-        graph_nodes_by_id, snap, surface, record_by_name, enum_by_name, seed_types
+        refs, snap, surface, record_by_name, enum_by_name, seed_types
     )
     return surface
 

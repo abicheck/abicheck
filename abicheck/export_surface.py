@@ -60,6 +60,7 @@ import re
 from dataclasses import dataclass, field
 from typing import NamedTuple
 
+from .compare.surface_graph import referenced_identifiers_by_node
 from .diff_cxx_rules import owner_class_of
 from .elf_symbol_filter import is_abi_relevant_elf_symbol
 from .model import AbiSnapshot, EnumType, Function, RecordType
@@ -76,10 +77,7 @@ from .policy.public_surface import (
     _symbol_keys,
     _type_identifiers,
 )
-from .policy.public_surface_closure import (
-    _walk_type_closure,
-    resolve_surface_graph_nodes,
-)
+from .policy.public_surface_closure import _walk_type_closure
 from .type_reachability import (
     _namespace_suffix_spellings,
     _stripped_signature_spelling,
@@ -1302,9 +1300,9 @@ def compute_export_surface(snap: AbiSnapshot) -> ExportSurface:
         ),
     )
 
-    graph_nodes_by_id = resolve_surface_graph_nodes(snap)
+    refs = referenced_identifiers_by_node(snap)
     _walk_type_closure(
-        graph_nodes_by_id, snap, scratch, record_by_name, enum_by_name, roots.seed_types
+        refs, snap, scratch, record_by_name, enum_by_name, roots.seed_types
     )
     surface.export_types = set(scratch.public_types)
     # After the walk, so only edges the closure actually reached are scanned.

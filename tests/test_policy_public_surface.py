@@ -17,7 +17,6 @@
 
 from __future__ import annotations
 
-from abicheck.compare.surface_graph import build_public_surface_facts
 from abicheck.model import (
     AbiSnapshot,
     Function,
@@ -30,10 +29,7 @@ from abicheck.model import (
 from abicheck.model.identity import entity_id_for_function, entity_id_for_variable
 from abicheck.model.source_graph import SourceGraphSummary
 from abicheck.policy.public_surface import PublicSurface
-from abicheck.policy.public_surface_closure import (
-    resolve_public_surface,
-    resolve_surface_graph_nodes,
-)
+from abicheck.policy.public_surface_closure import resolve_public_surface
 from abicheck.policy.public_surface_query import PublicSurfaceQuery
 
 
@@ -233,62 +229,61 @@ def _outer_inner_snapshot() -> AbiSnapshot:
     return _snapshot(functions=[fn], types=[outer, inner])
 
 
-class TestUnpopulatedAttachedGraphIsBackfilled:
-    """``service_header_graph_attach._attach_header_graph`` installs an L5
-    ``surface_graph`` on essentially every real dump without ever calling
-    ``build_public_surface_facts`` itself (deferred for cost reasons -- see
-    that builder's own docstring) -- so ``snap.surface_graph`` being
-    non-``None`` does not mean its nodes carry ``referenced_identifiers``/
-    ``identifiers_collision`` (Codex review, PR #979: the ordinary, default
-    dump path, not merely a stale-schema edge case).
-    ``resolve_surface_graph_nodes`` must still populate those attrs on such
-    an already-attached, evidence-incomplete graph rather than trusting it
-    as-is, which would otherwise silently read every node as "references
-    nothing" and collapse the transitive type closure."""
+class TestClosureIgnoresSurfaceGraphEntirely:
+    """The closure walk reads :func:`~abicheck.compare.surface_graph.
+    referenced_identifiers_by_node` directly -- a pure function of *snap*'s
+    own current declarations -- and never consults ``snap.surface_graph``'s
+    own node attrs at all (Codex review, PR #979, two rounds: see
+    ``policy.public_surface_closure``'s own module docstring for the full
+    history of why trusting the graph's cached value, in either direction,
+    was unsafe). These tests pin that the resolved surface is identical
+    regardless of what ``snap.surface_graph`` contains -- absent, empty, or
+    outright adversarial."""
 
-    def _snapshot_with_unpopulated_graph(self) -> AbiSnapshot:
+    def test_transitively_reachable_type_survives_with_no_graph_at_all(self) -> None:
         snap = _outer_inner_snapshot()
-        # An L5 graph attached but never run through
-        # build_public_surface_facts -- exactly _attach_header_graph's own
-        # documented behavior.
-        snap.surface_graph = SourceGraphSummary()
-        return snap
-
-    def test_transitively_reachable_type_survives_an_unpopulated_graph(self) -> None:
-        snap = self._snapshot_with_unpopulated_graph()
+        assert snap.surface_graph is None
         surf = resolve_public_surface(snap)
         assert "Inner" in surf.public_types
 
-    def test_the_attached_graph_object_is_enriched_in_place_not_replaced(
+    def test_transitively_reachable_type_survives_an_empty_attached_graph(
         self,
     ) -> None:
-        snap = self._snapshot_with_unpopulated_graph()
-        attached = snap.surface_graph
-        nodes = resolve_surface_graph_nodes(snap)
-        assert snap.surface_graph is attached
-        assert any(n.attrs.get("referenced_identifiers") for n in nodes.values())
-
-
-class TestStrippedGraphAttrsAreReconstructedNotTrusted:
-    """A persisted ``surface_graph`` whose nodes once carried
-    ``referenced_identifiers``/``identifiers_collision`` but no longer do
-    (e.g. an older on-disk format) must be treated the same as the
-    never-populated case above: re-derived, not read as "references
-    nothing"."""
-
-    def _snapshot_with_stripped_graph(self) -> AbiSnapshot:
         snap = _outer_inner_snapshot()
-        fresh_graph = SourceGraphSummary()
-        build_public_surface_facts(snap, fresh_graph)
-        for node in fresh_graph.nodes:
-            node.attrs.pop("referenced_identifiers", None)
-            node.attrs.pop("identifiers_collision", None)
-        snap.surface_graph = fresh_graph
-        return snap
-
-    def test_transitively_reachable_type_survives_a_stripped_graph(self) -> None:
-        snap = self._snapshot_with_stripped_graph()
+        # An L5 graph attached but never run through
+        # build_public_surface_facts -- exactly what
+        # _attach_header_graph's own real behavior looks like.
+        snap.surface_graph = SourceGraphSummary()
         surf = resolve_public_surface(snap)
+        assert "Inner" in surf.public_types
+
+    def test_an_adversarial_persisted_fact_cannot_hide_a_real_reference(self) -> None:
+        """A crafted/stale ``surface_graph`` node claims ``Outer`` references
+        nothing, at ``high`` confidence -- the highest rank the evidence-merge
+        precedence system has, specifically chosen to outrank anything this
+        module's own (never-registered-here) facts could contribute. Because
+        the closure walk never reads this attrs value at all, the resolved
+        surface is unaffected either way."""
+        from abicheck.compare.surface_graph import node_id_for_type
+        from abicheck.model.graph_facts import GraphNode
+        from abicheck.model.graph_vocabulary import CONF_HIGH
+
+        snap = _outer_inner_snapshot()
+        outer = next(t for t in snap.types if t.name == "Outer")
+        poisoned_id = node_id_for_type(outer.entity_id, outer.name)
+        graph = SourceGraphSummary()
+        graph.add_node(
+            GraphNode(
+                id=poisoned_id,
+                kind="type",
+                confidence=CONF_HIGH,
+                attrs={"referenced_identifiers": [], "identifiers_collision": False},
+            )
+        )
+        snap.surface_graph = graph
+
+        surf = resolve_public_surface(snap)
+
         assert "Inner" in surf.public_types
 
 
@@ -360,42 +355,23 @@ class TestPublicSurfaceBackCompatReexports:
             raise AssertionError("expected AttributeError")
 
 
-class TestSurfaceGraphRefinalizedAfterEnrichment:
-    """``_attach_header_graph`` finalizes the L5 graph (stamping ``graph_id``/
-    ``coverage``) before installing it as ``snap.surface_graph``.
-    ``resolve_surface_graph_nodes`` then adds public-surface nodes/edges the
-    L5 pass never saw -- leaving the old ``graph_id``/``coverage`` in place
-    would silently disagree with the graph's own, now-larger content on a
-    later ``save_snapshot``/``to_dict`` (Codex review, PR #979)."""
-
-    def test_graph_id_reflects_the_enriched_node_set(self) -> None:
-        snap = _outer_inner_snapshot()
-        attached = SourceGraphSummary()
-        attached.finalize()
-        stale_graph_id = attached.graph_id
-        snap.surface_graph = attached
-
-        resolve_surface_graph_nodes(snap)
-
-        assert attached.graph_id != stale_graph_id
-        assert attached.graph_id == attached.compute_graph_id()
-
-
-class TestResolveSurfaceGraphNodesIsNotIdentityCached:
+class TestResolvePublicSurfaceIsNotIdentityCached:
     """A real CI perf gate measured a 30-100%+ regression across nearly
-    every ``benchmark_scaling.py`` scenario once ``resolve_surface_graph_
-    nodes`` started calling ``build_public_surface_facts`` unconditionally
-    on every call -- a typical compare resolves the public surface more
-    than once per side. An identity-keyed cache (on *snap* or *graph*) was
-    tried as a fix and reverted before landing: it silently served a stale
-    result once a caller mutated the snapshot in place and queried again,
-    which is a real, already-tested usage pattern (Codex review, PR #979 --
-    see the module's own docstring for the full accounting, and
-    ``docs/contribute/known-gaps.md`` for why the perf regression itself
-    stays open rather than being "fixed" by an unsafe cache). This test
-    pins that correctness requirement directly, so a future memoization
-    attempt has an immediate, explicit signal if it reintroduces the same
-    hazard."""
+    every ``benchmark_scaling.py`` scenario in an earlier version of this
+    migration that cached the closure walk's graph per ``snap``/``graph``
+    identity -- a typical compare resolves the public surface more than
+    once per side. That cache was reverted before landing: it silently
+    served a stale result once a caller mutated the snapshot in place and
+    queried again, which is a real, already-tested usage pattern (Codex
+    review, PR #979 -- see ``policy.public_surface_closure``'s own module
+    docstring for the full accounting, and ``docs/contribute/known-gaps.md``
+    for why the perf regression itself stayed open before the final,
+    graph-independent design closed it for free). This test pins the
+    correctness requirement directly against the current design
+    (:func:`referenced_identifiers_by_node` is a pure function of *snap*,
+    recomputed on every call, so it structurally cannot go stale) --
+    a future optimization attempt has an immediate, explicit signal if it
+    reintroduces the same hazard."""
 
     def test_mutating_the_snapshot_between_calls_is_reflected_immediately(
         self,
@@ -415,14 +391,13 @@ class TestResolveSurfaceGraphNodesIsNotIdentityCached:
             types=[RecordType(name="Bystander", kind="struct")],
             typedefs={"A": "Gone"},
         )
-        assert snap.surface_graph is None
 
-        first = resolve_surface_graph_nodes(snap)
-        first_ids = set(first)
+        first = resolve_public_surface(snap)
+        assert "Bystander" not in first.public_types
 
         snap.typedefs = {"A": "Here"}
         snap.types = [RecordType(name="Here", kind="struct")]
-        second = resolve_surface_graph_nodes(snap)
+        second = resolve_public_surface(snap)
 
-        assert set(second) != first_ids
-        assert any(node_id.endswith("Here") for node_id in second)
+        assert "Here" in second.public_types
+        assert "Bystander" not in second.public_types

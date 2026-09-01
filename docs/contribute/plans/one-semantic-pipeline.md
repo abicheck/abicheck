@@ -9667,6 +9667,63 @@ existed at all. `TestUnpopulatedAttachedGraphIsBackfilled` and
 `build_public_surface_facts`) and a stripped-attrs shape, each confirming a
 type only transitively reachable through such a graph survives.
 
+**Superseded (2026-09-01) by a third round that removed the graph from
+this computation entirely, rather than trying to make trusting it safe —
+the paragraph above is preserved for its own history, but its
+`resolve_surface_graph_nodes()`-enrichment design is no longer what ships.**
+A second Codex security review found that even the enrichment fix above
+was not sufficient: `GraphNode.attrs` are derived through
+`model.graph_facts`' cross-producer evidence-merge machinery, which
+resolves a same-key disagreement between two registrations by
+confidence/producer/content precedence — correct for genuinely independent
+producer facts, wrong for `referenced_identifiers`/`identifiers_collision`
+specifically, since they have exactly one legitimate source (the
+snapshot's own current declarations) and no legitimate second producer to
+reconcile evidence with. A schema-v29 or otherwise untrusted/adversarial
+snapshot could carry a stale or crafted `referenced_identifiers` fact at a
+confidence this module's own freshly-registered fact (always
+`CONF_UNKNOWN`, the lowest rank) cannot outrank, so the enrichment fix's
+own fresh, correct recomputation could still silently lose to a poisoned
+persisted value — the identical collapsed-closure failure mode as the
+paragraph above, reached through its own fix instead of around it. This
+also explains the real, separately-measured performance regression against
+`scripts/benchmark_scaling.py`'s "Baseline regression (PR vs base)" gate
+that `resolve_surface_graph_nodes()`'s unconditional enrichment introduced:
+building real `GraphNode`/`GraphFact` objects for every declaration, twice
+per compare (once per side, since `checker.compare()` defaults
+`scope_to_public_surface=True`), carries meaningfully more overhead than
+the deleted regex-based re-parse it replaced. An identity-keyed cache was
+tried to close that regression specifically and reverted: it broke
+`tests/test_export_surface.py::TestUnresolvedTypeEdges::
+test_a_scope_lost_alias_key_is_followed_to_its_target`, which mutates a
+snapshot's `typedefs`/`types` in place between two calls and correctly
+expects the second to see the new content — an identity-keyed cache
+silently served the stale first result instead.
+
+The actual fix needed no merge-precedence override and no cache:
+`compare/surface_graph.py`'s `referenced_identifiers_by_node()` (renamed
+public, alongside its `ReferencedIdentifiers` return type) was already a
+pure function of the snapshot's own declarations, computed *before* any
+`GraphNode` is built. `policy/public_surface_closure.py` and
+`export_surface.py`'s closure-walk entry points now call it directly and
+thread the result through (`_referenced_identifiers`/
+`_node_identifiers_or_collision`/`_seed_public_roots`/`_walk_type_closure`/
+`_walk_exact_type_closure` all take a `ReferencedIdentifiers` now, not a
+`dict[str, GraphNode]`), never touching `snap.surface_graph` or
+`GraphNode.attrs` at all. `resolve_surface_graph_nodes()` had no remaining
+caller once both sites switched and was deleted rather than kept as unused
+surface — along with its own regression tests, replaced by
+`TestClosureIgnoresSurfaceGraphEntirely` (three cases: no graph at all, an
+empty attached graph, and a deliberately adversarial high-confidence
+poisoned fact) and `TestResolvePublicSurfaceIsNotIdentityCached` in
+`tests/test_policy_public_surface.py`. Removing the graph from the
+computation also removed essentially all of the `GraphNode`/`GraphFact`
+construction cost from the hot path as a direct consequence — an ad hoc
+local re-run of `scripts/benchmark_scaling.py` after this change showed
+the previously-regressed scenarios back in line with the pre-migration
+baseline, though this was not re-verified against the perf gate's own
+noise-controlled measurement before this note was written.
+
 Deliberately still not migrated: `export_surface.py`'s own root-seeding
 (the export-table-matching logic itself, as opposed to the type-closure
 step it shares with the header domain) and

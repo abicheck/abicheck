@@ -86,11 +86,13 @@ if TYPE_CHECKING:
     from ..model.snapshot import AbiSnapshot
 
 __all__ = [
+    "ReferencedIdentifiers",
     "build_public_surface_facts",
     "fact_list",
     "node_id_for_declaration",
     "node_id_for_type",
     "node_id_for_typedef",
+    "referenced_identifiers_by_node",
 ]
 
 NODE_KIND_HEADER = "header"
@@ -255,12 +257,12 @@ def _add_references(
                 )
 
 
-class _ReferencedIdentifiers(NamedTuple):
+class ReferencedIdentifiers(NamedTuple):
     by_node: dict[str, list[str]]
     collided_nodes: frozenset[str]
 
 
-def _referenced_identifiers_by_node(snap: AbiSnapshot) -> _ReferencedIdentifiers:
+def referenced_identifiers_by_node(snap: AbiSnapshot) -> ReferencedIdentifiers:
     """First pass, computed before any node is emitted: node id -> the
     sorted union of every type-identifier string that *any* declaration/
     record/typedef mapping to that id references in its own signature/
@@ -338,15 +340,33 @@ def _referenced_identifiers_by_node(snap: AbiSnapshot) -> _ReferencedIdentifiers
     collided = frozenset(
         node_id for node_id, count in contributor_counts.items() if count > 1
     )
-    return _ReferencedIdentifiers(by_node=by_node, collided_nodes=collided)
+    return ReferencedIdentifiers(by_node=by_node, collided_nodes=collided)
 
 
-def _node_attrs(refs: _ReferencedIdentifiers, node_id: str) -> dict[str, object]:
+def _node_attrs(refs: ReferencedIdentifiers, node_id: str) -> dict[str, object]:
     """The ``referenced_identifiers``/``identifiers_collision`` attrs pair
     every declaration/type/typedef node carries -- see
-    :func:`_referenced_identifiers_by_node`'s own docstring for what
+    :func:`referenced_identifiers_by_node`'s own docstring for what
     ``identifiers_collision`` means and why a caller needing per-declaration
-    precision must check it before trusting the unioned list."""
+    precision must check it before trusting the unioned list.
+
+    **Informational graph content only, as of ADR-063 Phase 3 D5's third
+    review round (Codex, PR #979) -- no consumer inside this codebase
+    trusts these two attrs for a correctness-sensitive decision.**
+    ``policy.public_surface_closure``'s closure walk (the one consumer that
+    originally did) now calls :func:`referenced_identifiers_by_node`
+    directly instead: a node's ``attrs`` are derived through
+    ``model.graph_facts``' cross-producer evidence-merge machinery, which
+    resolves a same-key disagreement between two registrations by
+    confidence/producer/content precedence -- appropriate for genuinely
+    independent producer facts, but wrong for this specific, single-source
+    derived computation, since a stale or adversarial persisted fact could
+    silently outrank a freshly recomputed correct one. These attrs are kept
+    on the node purely because they are legitimate, general graph content
+    (per ADR-063's "one graph, all evidence" governing principle) that some
+    future consumer may still find useful to inspect -- not because
+    anything here should be trusted over a direct call to
+    :func:`referenced_identifiers_by_node` for a real decision."""
     return {
         "referenced_identifiers": refs.by_node.get(node_id, []),
         "identifiers_collision": node_id in refs.collided_nodes,
@@ -358,7 +378,7 @@ def _build_type_index(
     types: list[RecordType],
     enums: list[EnumType],
     typedefs: dict[str, str],
-    referenced_by_node: _ReferencedIdentifiers,
+    referenced_by_node: ReferencedIdentifiers,
 ) -> dict[str, str]:
     """Register every declared record/enum/typedef as a ``type`` node,
     returning a name → node-id index (both the bare leaf and the qualified
@@ -426,7 +446,7 @@ def build_public_surface_facts(snap: AbiSnapshot, graph: SurfaceGraphLike) -> No
     key, so calling this twice on the same graph (or on a graph another
     builder already wrote into) is safe.
     """
-    referenced_by_node = _referenced_identifiers_by_node(snap)
+    referenced_by_node = referenced_identifiers_by_node(snap)
     type_index = _build_type_index(
         graph, snap.types, snap.enums, snap.typedefs, referenced_by_node
     )
