@@ -185,7 +185,7 @@ without teaching; "absent" means neither.
 | Source replay (L4) and the L5 graph | `use/producing-source-facts.md` | taught, but inside `build-source-data.md` (expert-level, contributor tone) |
 | `scan` one-build audit (no `--against`): accidental export, private-header leak, unversioned export, RTTI leak, cross-source checks | `use/scan-levels.md` §single-build audit, `integration/scenarios/single-build-audit.md` | linked (hub §source scan); cases 143–151 indexed on the hub |
 | PR-scoped scan (`--since`/`--changed-path`), `--budget`, `--dry-run` cost estimate | `use/scan-levels.md`, `use/github-action-source-scans.md` | linked only |
-| Contract domains (`--contract public|exports|all`), coverage exit `1` | `use/contract-evaluation.md` | taught on `contract-aware-compatibility.md` — but placed in Concepts, not next to Part 0's "define the public surface" |
+| Contract domains (`--contract` with `public`, `exports` or `all`), coverage exit `1` | `use/contract-evaluation.md` | taught on `contract-aware-compatibility.md` — but placed in Concepts, not next to Part 0's "define the public surface" |
 | Consumer-scoped check (`--used-by APP`) | `use/appcompat.md` | taught (`consumer-models.md`, `evidence-and-detectability.md` §4) — no command |
 | Plugin/`dlopen` contract (`--required-symbol[s]`, `plugin_abi`) | `use/plugin-systems.md` | linked (Part 0 §5, role path) |
 | Directory/package compare — release fan-out, `--fail-on-removed-library`, RPM/Deb/tar/conda inputs, `--debug-info`/`--devel-pkg` | `use/multi-binary.md` (mostly flag reference), `use/cli-usage.md` | **absent** |
@@ -544,9 +544,10 @@ a PR gate on a real project; how to read a report that shows growth as
 well as breaks; and what changes when the product is several binaries or
 a template library. Checkable form:
 
-- every page under the ABI/API Compatibility tab carries `level:` and a
-  previous/next footer, every learn page is in exactly one of
-  `docs/_meta/learning-ladder.yaml`'s two sequences, and level is
+- every page under the ABI/API Compatibility tab except the hub carries
+  `level:` and a previous/next footer, every learn page except the hub is
+  in exactly one of `docs/_meta/learning-ladder.yaml`'s two sequences,
+  and level is
   non-decreasing along each sequence's full reading order and within
   each nav group;
 - every ★ page in §5 exists, is registered in `topics.yaml` per §4.6's
@@ -556,7 +557,9 @@ a template library. Checkable form:
   (`scripts/check_docs_contract.py` clean, and its duplicate-block warning
   count no higher than before);
 - every row of §3's coverage matrix reads "taught" or "linked", none
-  "absent".
+  "absent" — except the two rows (kernel BTF/CTF and kABI; SYCL/DPC++)
+  that the deferred "other ABI domains" page in §6 covers, which stay
+  "absent" until that page exists.
 
 ## Files & surfaces
 
@@ -617,8 +620,10 @@ gate all of this).
   `start/getting-started.md` link it first; remove the "don't start here"
   admonition.
 - Add a consistent previous/next footer to every page on the educational
-  tab that lacks one — the 26 deep dives and the three orientation pages
-  (on-ramp, cheat sheet, glossary); the numbered Parts already have one.
+  tab that lacks one — the 15 educational-tab deep dives and the three
+  orientation pages (on-ramp, cheat sheet, glossary); the numbered Parts
+  already have one. The 11 Concepts-tab pages get the same footer along
+  their own sequence, since the ladder file orders them too.
   Give `what-each-level-sees.md` a forward "Next" and resolve Part 7's
   double next.
 - Keep the nav's by-question groups; reorder within each so level is
