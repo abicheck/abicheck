@@ -352,9 +352,7 @@ def render_impact_table(table: ImpactTable | None) -> list[str]:
     for entry in table.root_entries:
         iface_str = f"{entry.iface_count} functions" if entry.iface_count > 0 else "—"
         caused_str = f"+{entry.caused} collapsed" if entry.caused > 0 else "—"
-        lines.append(
-            f"| {entry.symbol} | {entry.kind} | {iface_str} | {caused_str} |"
-        )
+        lines.append(f"| {entry.symbol} | {entry.kind} | {iface_str} | {caused_str} |")
     if table.direct_removals > 0:
         lines.append(f"| — | removals ({table.direct_removals}) | direct | — |")
     lines.append("")
