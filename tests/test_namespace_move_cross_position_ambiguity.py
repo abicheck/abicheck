@@ -32,7 +32,7 @@ from __future__ import annotations
 
 from abicheck.checker import compare
 from abicheck.checker_policy import ChangeKind
-from abicheck.diff_symbols_renames import (
+from abicheck.compare.namespace_move import (
     emit_namespace_move_batches,
     find_namespace_move_groups,
 )

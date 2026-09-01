@@ -673,12 +673,12 @@
     },
     {
       "path": "abicheck/diff_symbols_renames.py",
-      "baseline_lines": 1187,
+      "baseline_lines": 807,
       "target": "compare",
       "rule": "no_growth",
       "category": "legacy_compare_monolith",
       "owner": "abicheck maintainers",
-      "rationale": "Existing implementation and concurrent pre-adoption changes predate ADR-061; migrate it as a behavior-preserving compare-package slice.",
+      "rationale": "Namespace-move batch-rename detection moved to compare/namespace_move.py; the remainder (prefix-rename detection, ELF fingerprint-based rename detector) still predates ADR-061 and awaits its own behavior-preserving compare-package slice.",
       "review_by": "2026-11-30"
     },
     {
@@ -1259,16 +1259,6 @@
       "category": "legacy_oversized_test_module",
       "owner": "abicheck maintainers",
       "rationale": "Existing test module predates ADR-061 and will split by behavior or contract axis with its production migration.",
-      "review_by": "2026-11-30"
-    },
-    {
-      "path": "tests/test_batch_rename_namespace_move.py",
-      "baseline_lines": 1460,
-      "target": "tests/unit/compare alongside namespace/rename comparison migration",
-      "rule": "no_growth",
-      "category": "legacy_oversized_test_module",
-      "owner": "abicheck maintainers",
-      "rationale": "Concurrent pre-adoption rename and namespace-move coverage made this an oversized legacy test; split it by contract axis with the compare migration.",
       "review_by": "2026-11-30"
     },
     {
