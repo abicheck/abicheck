@@ -92,7 +92,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from ..fact_provenance import func_fact_key, var_fact_key
-from ..model import AbiSnapshot, ScopeOrigin
+from ..model import AbiSnapshot, ScopeOrigin, resolved_fact_value
 from ..model.graph_facts import (
     CONF_HIGH,
     CONF_REDUCED,
@@ -310,7 +310,9 @@ def _flat_structural_type_edges(snapshot: AbiSnapshot) -> list[TypeEdge]:
         # rule already applied to edge targets.
         if counts.get(rt.name, 0) > 1:
             continue
-        for base in rt.bases:
+        # Fact[T]-bridged read (ADR-063 Phase 0): value-preserving, see
+        # `model.resolved_fact_value`'s own docstring.
+        for base in resolved_fact_value(rt.bases_fact, []):
             emit(rt.name, base, EDGE_TYPE_INHERITS, "base")
         for fld in rt.fields:
             emit(rt.name, fld.type, EDGE_TYPE_HAS_FIELD_TYPE, "field")

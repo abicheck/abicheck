@@ -563,13 +563,13 @@ def _enqueue_record_children(
     # argument* of the base (e.g. inheriting ``_Head_base<0, Proxy*, false>``,
     # libstdc++'s decomposed unique_ptr) reaches that argument through a pointer —
     # mark it per-hop, like fields.
-    for base in rec.bases:
+    for base in rec.resolved_bases():
         for cand, via_ptr in _candidate_type_names_indirect(base):
             step = [f"base:{base}"]
             if via_ptr:
                 step.append("indirect:edge")
             queue.append((cand, new_path + step))
-    for vb in rec.virtual_bases:
+    for vb in rec.resolved_virtual_bases():
         for cand, via_ptr in _candidate_type_names_indirect(vb):
             step = [f"vbase:{vb}"]
             if via_ptr:

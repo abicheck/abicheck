@@ -26,7 +26,7 @@ from collections.abc import Iterable, Mapping
 from .checker_policy import ChangeKind
 from .checker_types import Change
 from .diff_helpers import make_change
-from .model import Function, RecordType
+from .model import Fact, Function, RecordType
 
 # The Itanium/MSVC mangled-name scope-component parsers' real home is
 # model/mangled_name.py (ADR-061 D1): pure string decoding with no I/O,
@@ -950,7 +950,7 @@ def vtable_slot_is_override_reuse(
     ``virtual_method_addition()`` already withholds ``VIRTUAL_METHOD_ADDED``
     for exactly this situation — a same-signature override of an inherited
     virtual — by comparing ``virtual_signature_key``. The per-type vtable diff
-    (``diff_types._diff_type_vtable``) independently compares each class's
+    (``diff_types_vtable._diff_type_vtable``) independently compares each class's
     raw vtable entry list, so without this check it disagrees with that
     exemption: the slot's mangled name textually changes (``Base::paint`` ->
     ``Derived::paint``) even though the slot index, order, and call signature
@@ -1011,6 +1011,23 @@ def old_virtual_signatures(functions: Iterable[Function]) -> dict[str, set[str]]
     return sigs
 
 
+def _fact_str_list(fact: Fact[list[str]] | None) -> list[str]:
+    """Read a ``Fact[list[str]]`` sibling the owning dataclass's own
+    ``__post_init__`` guarantees is never ``None`` (ADR-063 Phase 0 —
+    ``RecordType.bases_fact``/``virtual_bases_fact``/``vtable_fact``, see
+    ``model/fact.py``'s ``bridge_legacy_and_fact``). The ``assert`` states
+    that runtime invariant for mypy, which cannot see it through the
+    dataclass field's declared ``Fact[...] | None`` type; the trailing
+    ``or []`` only removes the *type-level* ``None`` mypy still carries for
+    ``.value`` (a real ``PRESENT`` fact for these fields is never
+    constructed with a ``None`` value) and is a no-op for an actually-empty
+    list.
+    """
+    assert fact is not None
+    value = fact.value if fact.is_present else []
+    return value or []
+
+
 def _transitive_bases(
     start: RecordType | None, types: Mapping[str, RecordType]
 ) -> set[str]:
@@ -1023,7 +1040,9 @@ def _transitive_bases(
     seen: set[str] = set()
     if start is None:
         return seen
-    stack = [*start.bases, *start.virtual_bases]
+    start_bases = _fact_str_list(start.bases_fact)
+    start_virtual_bases = _fact_str_list(start.virtual_bases_fact)
+    stack = [*start_bases, *start_virtual_bases]
     while stack:
         b = stack.pop()
         if b in seen:
@@ -1031,7 +1050,9 @@ def _transitive_bases(
         seen.add(b)
         rec = types.get(b) or types.get(b.rsplit("::", 1)[-1])
         if rec is not None:
-            stack.extend((*rec.bases, *rec.virtual_bases))
+            rec_bases = _fact_str_list(rec.bases_fact)
+            rec_virtual_bases = _fact_str_list(rec.virtual_bases_fact)
+            stack.extend((*rec_bases, *rec_virtual_bases))
     return seen
 
 
@@ -1076,7 +1097,9 @@ def virtual_method_addition(
     t_new = _resolve_owner_type(owner, new_types, old_owner_classes)
     if t_old is None or t_new is None:
         return None  # no pre-existing record on both sides → compatible / out of scope
-    if t_old.vtable != t_new.vtable:
+    old_vtable = _fact_str_list(t_old.vtable_fact)
+    new_vtable = _fact_str_list(t_new.vtable_fact)
+    if old_vtable != new_vtable:
         return None  # TYPE_VTABLE_CHANGED covers this case
     # An override of an inherited virtual reuses that base's slot — no new slot,
     # no relayout. If any transitive base already declared a virtual with the

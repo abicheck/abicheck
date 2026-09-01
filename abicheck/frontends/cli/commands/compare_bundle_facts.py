@@ -97,6 +97,52 @@ def _resolve_new_side_headers_includes(
     return headers, includes
 
 
+def _load_library_overrides(
+    manifest_path: Path,
+    *,
+    known_libraries: set[str],
+    selected_paths: dict[str, Path],
+) -> tuple[dict[str, list[Path]], dict[str, list[Path]], dict[str, Any]]:
+    """Load and validate ``--bundle-facts-library-manifest``.
+
+    Thin wrapper over :func:`~abicheck.workflows.bundle_facts_library_
+    overrides.load_bundle_facts_library_overrides` -- the actual file
+    reading/YAML-loading lives in that ``workflows``-classified module, not
+    here, since it needs ``dump_manifest``'s duplicate-key-checking strict
+    YAML loader (classified ``extract``) and ``frontends`` may not import
+    ``extract`` directly (only ``workflows`` may -- ``architecture/
+    modules.yaml``).
+
+    Translates :class:`~abicheck.workflows.bundle_facts_library_overrides.
+    BundleFactsLibraryOverridesError` (a ``ValueError`` subclass) into
+    :class:`click.UsageError` here, rather than letting it reach
+    ``dispatch()``'s own ``except (SnapshotError, ValueError, OSError)``
+    clause (Codex review): invalid YAML, a duplicate manifest key, an
+    unrecognized key, or a library name outside *known_libraries* is a
+    malformed CLI input -- AGENTS.md's exit-code table reserves ``64`` for
+    exactly that (``cli._EXIT_USAGE_ERROR``, via ``_AbicheckGroup``'s
+    UsageError-exit-2-to-64 remap) -- not the generic operational-failure
+    exit ``1`` that clause produces for e.g. a malformed OLD_FACTS document.
+    Mirrors ``dump.py``'s own ``_load_dump_manifest_or_reject()``, which
+    does the identical translation for ``--dump-manifest``'s
+    ``ManifestValidationError``.
+    """
+    from ....workflows.bundle_facts_library_overrides import (
+        BundleFactsLibraryOverridesError,
+        load_bundle_facts_library_overrides,
+    )
+
+    try:
+        overrides = load_bundle_facts_library_overrides(
+            manifest_path,
+            known_libraries=known_libraries,
+            selected_paths=selected_paths,
+        )
+    except BundleFactsLibraryOverridesError as exc:
+        raise click.UsageError(str(exc)) from exc
+    return overrides.headers, overrides.includes, overrides.compile
+
+
 def dispatch(*, compile_context: Any, **kwargs: Any) -> None:
     """Handle a ``compare OLD_FACTS NEW_DIR --old-bundle-facts`` invocation.
 
@@ -132,10 +178,23 @@ def dispatch(*, compile_context: Any, **kwargs: Any) -> None:
     # (AGENTS.md: never extend that allowlist reactively).
     import importlib
 
-    compare_release_against_bundle_facts = importlib.import_module(
-        "abicheck.bundle_side_input"
-    ).compare_release_against_bundle_facts
+    _bundle_side_input = importlib.import_module("abicheck.bundle_side_input")
+    compare_release_against_bundle_facts = (
+        _bundle_side_input.compare_release_against_bundle_facts
+    )
     from ....cli_compare_release_helpers import _exit_compare_release
+
+    # known_libraries_for_new_side lives in workflows/bundle_facts_library_
+    # overrides.py, not bundle_side_input.py (Codex review, fresh evidence):
+    # that module is grandfathered flat-root legacy, and new behavior
+    # belongs in a real workflows/ module even though frontends -> workflows
+    # already makes it reachable either way. A plain import (not the
+    # importlib indirection above) is safe here: this module, unlike
+    # bundle_side_input, does not transitively import `service`.
+    from ....workflows.bundle_facts_library_overrides import (
+        BundleFactsLibraryOverridesError,
+        known_libraries_for_new_side,
+    )
     from ..options.params import _load_suppression_and_policy
     from .compare_bundle_facts_rejections import reject_unsupported_options
 
@@ -223,16 +282,58 @@ def dispatch(*, compile_context: Any, **kwargs: Any) -> None:
                     detect_extractor,
                 )
             )
-            if header_dir is not None:
+            if header_dir is not None and depth != "binary":
+                # Codex review: --depth binary's uniform `headers = []`
+                # clear above (dispatch()'s own comment) must survive
+                # package/--devel-pkg extraction too -- without this guard,
+                # a NEW_INPUT package (or `--devel-pkg new=...`) that
+                # discovers its own header_dir would reassign `headers`
+                # right back to a non-empty list here, silently re-enabling
+                # L2 header extraction for that library under a depth that
+                # promises pure L0/L1 evidence with no header AST at all.
                 if not headers:
                     headers = [header_dir]
                 includes = includes + _discover_include_roots(header_dir)
+
+            per_library_headers: dict[str, list[Path]] | None = None
+            per_library_includes: dict[str, list[Path]] | None = None
+            per_library_compile: dict[str, Any] | None = None
+            manifest_path = kwargs.get("bundle_facts_library_manifest")
+            if manifest_path is not None:
+                # G38 Phase 17: known_libraries is derived from the same
+                # primitives compare_release_against_bundle_facts() itself
+                # uses on this identical lib_dir, so a manifest entry naming
+                # a library outside the bundle is a hard, immediate error
+                # instead of silently never being looked up.
+                include_private_dso = bool(kwargs.get("include_private_dso", False))
+                new_library_paths = known_libraries_for_new_side(
+                    lib_dir, include_private_dso=include_private_dso
+                )
+                per_library_headers, per_library_includes, per_library_compile = (
+                    _load_library_overrides(
+                        Path(manifest_path),
+                        known_libraries=set(new_library_paths),
+                        selected_paths=new_library_paths,
+                    )
+                )
+                if depth == "binary":
+                    # Codex review: the uniform `headers` clear above only
+                    # covers the uniform operand -- a manifest-supplied
+                    # per-library header root would otherwise still run L2
+                    # extraction for that one library under --depth binary,
+                    # reporting findings outside the requested depth.
+                    per_library_headers = {}
+                    per_library_includes = {}
+                    per_library_compile = {}
 
             result = compare_release_against_bundle_facts(
                 old_facts_path,
                 lib_dir,
                 headers=headers or None,
                 includes=includes or None,
+                per_library_headers=per_library_headers,
+                per_library_includes=per_library_includes,
+                per_library_compile=per_library_compile,
                 header_backend=header_backend,
                 compile=compile_context,
                 new_version=kwargs.get("new_version", "new"),
@@ -256,6 +357,17 @@ def dispatch(*, compile_context: Any, **kwargs: Any) -> None:
                 include_dependencies=bool(kwargs.get("include_dependencies", False)),
                 max_json_object_nodes=kwargs.get("max_json_object_nodes"),
             )
+        except BundleFactsLibraryOverridesError as exc:
+            # Codex review, fresh evidence: compare_release_against_bundle_
+            # facts() itself re-validates the manifest's per-library keys
+            # against the libraries actually matched between OLD_FACTS and
+            # NEW_INPUT (a check known_libraries_for_new_side()'s earlier,
+            # NEW-side-only pass cannot make) -- this is a malformed-CLI-
+            # input case exactly like every other BundleFactsLibraryOverrides
+            # Error in this module, so it gets the same exit-64 usage-error
+            # translation rather than falling into the generic ValueError
+            # clause below (exit 1).
+            raise click.UsageError(str(exc)) from exc
         # TypeError (Codex review, fresh evidence): a malformed nested
         # build_mode/contract field inside one of OLD_FACTS's per-library
         # snapshots is rejected rather than coerced at the storage boundary
@@ -323,8 +435,92 @@ def dispatch(*, compile_context: Any, **kwargs: Any) -> None:
     # write failure into a concise ClickException instead.
     from ..runtime import _safe_write_output
 
-    text = _render(result, fmt, old_facts_path=old_facts_path, new_dir=new_dir)
     output = kwargs.get("output")
+    output_dir = kwargs.get("output_dir")
+    if output_dir is not None:
+        output_dir = Path(output_dir)
+        # Codex review, fresh evidence: an --output-dir that already exists
+        # as a regular file -- entirely unrelated to -o/--output/--write --
+        # is not caught by the reserved-path collision checks below (it
+        # names neither of them), yet `output_dir.mkdir(parents=True,
+        # exist_ok=True)` still raises a raw, uncaught FileExistsError for
+        # it (`exist_ok=True` tolerates an existing *directory*, not an
+        # existing file), after the primary report has already been
+        # written. Reject it up front instead, as a general precondition
+        # independent of whether -o/--output/--write were even given.
+        if output_dir.exists() and not output_dir.is_dir():
+            raise click.UsageError(
+                f"--output-dir {output_dir}: this path already exists and "
+                "is not a directory -- choose a different --output-dir"
+            )
+        # Codex review: --output-dir's per-library filenames
+        # (`{safe_name}.json`, derived from diff.library below) are known
+        # up front -- reject a collision with -o/--output or --write's own
+        # secondary_output *before* any artifact is written, rather than
+        # letting whichever write happens to run second silently clobber
+        # the first (the primary/secondary writes below run before this
+        # loop, so a collision would otherwise overwrite one of them with
+        # no signal anything was lost).
+        reserved_paths = {
+            p.resolve()
+            for p in (
+                Path(output) if output is not None else None,
+                Path(secondary_output) if secondary_output is not None else None,
+            )
+            if p is not None
+        }
+        if reserved_paths:
+            # Codex review, fresh evidence: the per-library-filename check
+            # below only catches a collision with one of the *generated*
+            # child report paths -- it misses the more direct case where
+            # --output-dir itself names the same (previously nonexistent)
+            # path as -o/--output or --write. Both Click options accept
+            # that combination on their own, and without this check the
+            # primary write below creates a *file* at that path, after
+            # which `output_dir.mkdir(...)` raises a raw FileExistsError
+            # instead of the same clean usage error every other collision
+            # here produces.
+            output_dir_resolved = output_dir.resolve()
+            if output_dir_resolved in reserved_paths:
+                raise click.UsageError(
+                    f"--output-dir {output_dir}: this path is also named by "
+                    "-o/--output or --write -- a directory and a report "
+                    "file cannot share the same path, choose a different "
+                    "--output-dir or a different -o/--write path"
+                )
+            for diff in result.per_library:
+                safe_name = Path(diff.library).name or "library"
+                target = (output_dir / f"{safe_name}.json").resolve()
+                if target in reserved_paths:
+                    raise click.UsageError(
+                        f"--output-dir {output_dir}: the per-library report "
+                        f"for {diff.library!r} would be written to "
+                        f"{target}, which collides with -o/--output or "
+                        "--write's own output path -- choose a different "
+                        "--output-dir, or a different -o/--write path"
+                    )
+        # Codex review, fresh evidence: this was previously deferred until
+        # after the primary/secondary writes below, right before the
+        # per-library write loop. When some *ancestor* of --output-dir
+        # (not output_dir itself -- the check above only catches that
+        # narrower case) is a regular file, mkdir(parents=True) raises
+        # NotADirectoryError only at that later point, by which time the
+        # primary/secondary report has already been written to disk --
+        # so a "failed" command silently left a partial artifact behind.
+        # Creating (and validating) the directory up front, before any
+        # report is rendered or written, makes this precondition failure
+        # behave the same as every other rejection above: no artifact
+        # written at all.
+        try:
+            output_dir.mkdir(parents=True, exist_ok=True)
+        except OSError as exc:
+            # Mirrors _safe_write_output's own OSError -> ClickException
+            # translation for the identical operation (creating a report's
+            # parent directory) -- covers a permission failure, a full
+            # disk, or a non-directory *parent* path component.
+            raise click.ClickException(f"Cannot create {output_dir}: {exc}") from exc
+
+    text = _render(result, fmt, old_facts_path=old_facts_path, new_dir=new_dir)
     if output is not None:
         _safe_write_output(Path(output), text)
     else:
@@ -339,7 +535,6 @@ def dispatch(*, compile_context: Any, **kwargs: Any) -> None:
             result, secondary_fmt, old_facts_path=old_facts_path, new_dir=new_dir
         )
         _safe_write_output(Path(secondary_output), secondary_text)
-    output_dir = kwargs.get("output_dir")
     if output_dir is not None:
         # Codex review: NEW_INPUT is a release-style operand here, so
         # --output-dir's own per-library-report contract applies -- the
@@ -349,8 +544,6 @@ def dispatch(*, compile_context: Any, **kwargs: Any) -> None:
         # producing nothing.
         from ....reporter import to_json
 
-        output_dir = Path(output_dir)
-        output_dir.mkdir(parents=True, exist_ok=True)
         for diff in result.per_library:
             # Codex review: `diff.library` originates in OLD_FACTS -- a
             # user-supplied document, not a path this process resolved

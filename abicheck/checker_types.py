@@ -313,7 +313,7 @@ class Change:
     # `checker.compare`, *before* the verdict is computed.
     compatibility_evaluation_status: CompatibilityEvaluationStatus | None = None
     compatibility_decision: Verdict | None = None
-    # Set by diff_types._diff_type_vtable on a TYPE_VTABLE_CHANGED finding
+    # Set by diff_types_vtable._diff_type_vtable on a TYPE_VTABLE_CHANGED finding
     # when it rests on the identical asymmetric-layout-evidence gap
     # LAYOUT_UNVERIFIABLE (diff_layout.py) reports for the same type. Purely
     # an internal cross-detector correlation key for

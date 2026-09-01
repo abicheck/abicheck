@@ -5716,6 +5716,167 @@ posture. `python scripts/check_docs_contract.py` and `python scripts/
 check_ai_readiness.py` both re-run clean at their existing baselines
 (0 errors, 2/148 warnings respectively) after the addition.
 
+**Detector migration (fourth slice) — landed, closing this phase.** Every
+site the `KNOWN_UNMIGRATED_READERS` baseline recorded — 104 keys across 20
+modules at the point this slice started — has migrated off the bare legacy
+attribute onto its `Fact[...]` sibling; the baseline is now the literal
+empty set (`frozenset()`), and the scan (`unmigrated_fact_reader_sites`/
+`check_fact_field_readers`) stays exactly as live as before — a genuinely
+new direct read anywhere under `abicheck/` still fails the gate on sight,
+with nothing left to exempt it. This is the exact gap the Status section of
+`docs/contribute/adr/063-one-semantic-pipeline.md` previously recorded
+("No detector has migrated to read the converted fields' `Fact[...]`
+siblings yet") — closed, not deferred.
+
+**The migration is representation-only, per this phase's own Design
+section and Acceptance criteria stated above — it does not change any
+detector's emitted findings.** The mechanism is a single, provable
+invariant `bridge_legacy_and_fact` (this phase's own compatibility bridge,
+landed in the first slice) already establishes for every constructed
+`RecordType`/`Param` instance: the retained legacy field always equals
+`<field>_fact.value` when `<field>_fact.is_present`, and the field's own
+normal resting value (`[]` for `bases`/`virtual_bases`/`vtable`, `None` for
+`vptr_offset_bits`, `False` for `is_va_list`) otherwise — by construction,
+not by convention, since `__post_init__` is the only place either
+representation is ever written after construction. `abicheck/model/fact.py`
+gained one new function, `resolved_fact_value(fact: Fact[T] | None,
+default: T) -> T`, expressing exactly this: `fact.value_or(default)` when
+`fact` is not `None`, else `default` (the `Fact[T] | None` union on the
+parameter — not `Fact[T]` alone — matches the field's own declared type;
+see below for why that union matters). Every migrated call site replaces
+`rec.bases` with `resolved_fact_value(rec.bases_fact, [])` — a pure
+re-spelling of the identical value the legacy field already held, verified
+by the full test suite staying green (mypy 0 errors, ruff clean, the
+complete non-integration/non-slow/non-golden suite unchanged) and by the
+FP-rate/tier-accuracy gates staying at their existing baselines with no
+new corpus case needed. **This is deliberately not the same thing as
+`Fact.value_or(...)`'s own documented "not detector-safe" warning
+(Design section, above) being quietly ignored** — that warning is about a
+detector *inventing* a collapsed default that discards information the raw
+legacy field never had ("`old.vtable_fact.value_or([]) != new.vtable_fact.
+value_or([])` reintroduces... the exact ambiguity"); `resolved_fact_value`
+used at one of these 104 sites reproduces a value that already existed,
+observable at the exact same fidelity, one hop away, on the still-live
+`.status` of the very `Fact[...]` object each call reads from. A future
+caller wanting genuine per-status handling still matches on `.status`
+directly — this phase does not remove that capability, only stops forcing
+every reader to go through the ambiguous legacy name to get an ordinary
+value.
+
+**Why `resolved_fact_value` takes `Fact[T] | None`, not `Fact[T]` — a real
+mypy gap the first attempt at this slice missed.** `RecordType.bases_fact`
+(and its four siblings) are declared `Fact[list[str]] | None`, not
+`Fact[list[str]]` — required by this phase's own direct-construction
+compatibility bridge (Design section: the field's real default is `None`,
+distinct from `Fact.not_collected()`, so `__post_init__` can tell "caller
+passed nothing" apart from "caller explicitly asserted no evidence"). A
+first pass at each migrated call site wrote the natural-looking
+`rec.bases_fact.value if rec.bases_fact.is_present else []` directly —
+`mypy` correctly rejected essentially every one of them
+(`Item "None" of "Fact[list[str]] | None" has no attribute "is_present"`):
+the field is provably never `None` on a fully-constructed instance
+(`__post_init__` always resolves it), but mypy has no cross-instance view
+of that invariant and must assume the declared type. `resolved_fact_value`
+closes this once, centrally, rather than repeating an `assert fact is not
+None` (or an equivalent `... or []` narrowing hack) at every one of the 104
+sites — a real, if narrower, instance of this phase's own governing
+principle (one concept, one representation) applied to the *narrowing*
+step itself, not only to availability.
+
+**Two modules crossed the AI-readiness `file-size` hard cap purely from
+this slice's added local-variable lines, and both were split the same way
+this codebase already splits an oversized module — a fifth slice, not a
+new design.** `diff_types.py` (2018 lines) and `dwarf_snapshot.py` (2041
+lines) each exceeded the unconditional 2000-line limit once every migrated
+site's `resolved_fact_value(...)` assignment line was added; `diff_types.py`
+already had three such sibling splits before this phase
+(`diff_types_abicc_parity.py`/`diff_types_field_facts.py`/
+`diff_types_surface.py`), so this is the same pattern, not a new one.
+`diff_types_vtable.py` takes the self-contained `TYPE_VTABLE_CHANGED`
+evidence-gating cluster (`_vtable_transition_is_evidenced`/
+`_vtable_transition_rests_on_unresolved_evidence`/
+`_layout_evidence_is_unverifiable`/`_owned_virtual_signatures`/
+`_owned_virtual_signatures_for_record`/`_diff_type_vtable`) — every one of
+these six functions was already only ever called from within this same
+cluster or from the one external call `diff_types.py` makes into
+`_diff_type_vtable`, so the split needed only one import back
+(`from .diff_types_vtable import _diff_type_vtable as _diff_type_vtable`),
+mirroring the `as`-aliased re-export convention the three pre-existing
+siblings already use. `dwarf_snapshot_datasources.py` takes
+`show_data_sources` and its three private formatting helpers
+(`_evidence_layer_line`/`_coverage_row_summary`/`_evidence_payload_summary`)
+— a human-readable L0-L5 diagnostic renderer with zero dependency on
+`_DwarfSnapshotBuilder` or anything else in `dwarf_snapshot.py` — with
+`show_data_sources` re-exported (`as`-aliased) from `dwarf_snapshot.py` so
+`cli_datasources.py`/`cli_dump_helpers.py`/`workflows/extraction.py` and
+their tests, all of which import it as `from abicheck.dwarf_snapshot import
+show_data_sources`, are unaffected. Neither split changes any behavior,
+only which module owns the code; both land at 1579 and 1915 lines
+respectively, with headroom under the cap.
+
+**A second, narrower growth surface -- ADR-061's own `architecture/debt.yaml`
+no-growth ledger, not the AI-readiness `file-size` cap above -- needed a
+different fix, not a module split.** Six already-`no_growth`-tracked files
+(`contract_evidence_collect.py`/`dumper_scoping.py`/`export_surface.py`/
+`internal_leak.py`/`surface.py`/`type_reachability.py`) each grew 2-9 lines
+past their frozen adoption baseline purely from the two-line
+`bases = resolved_fact_value(...)` / `virtual_bases = resolved_fact_value
+(...)` local-variable pattern this migration otherwise uses everywhere --
+`architecture/debt.yaml`'s own README states the ledger "should only
+shrink," so raising six baselines to absorb this migration's own overhead
+would be exactly the kind of undocumented exception this ADR's Governing
+Invariant section rejects. Splitting a module was not the fix here either
+(none of the six is anywhere near the 2000-line hard cap the split above
+addresses; `architecture/debt.yaml`'s own per-file ceiling is a stricter,
+independent budget the same file can be tracked under well before that).
+The actual fix: `RecordType` gained two short, import-free convenience
+methods, `resolved_bases()`/`resolved_virtual_bases()` (`model/entities.py`,
+right after `__post_init__`, each a one-line call to the identical
+`resolved_fact_value` primitive) -- a call site with an already-typed
+`RecordType` in hand writes `rec.resolved_bases()` instead of
+`resolved_fact_value(rec.bases_fact, [])`, which needs no new `from .model
+import resolved_fact_value` line at all (the six files above already import
+`RecordType` for their own type annotations) and is short enough to often
+collapse the two-line local-variable pattern back to the original
+single-line call site the pre-migration code used. This is not a second
+representation of the same concept -- both spellings resolve through the
+one `resolved_fact_value` primitive in `model/fact.py`, and the method
+exists purely to avoid an import cost at space-constrained call sites, the
+same reasoning `Fact.value_or()`/`bridge_legacy_and_fact()` already coexist
+under in that same module. The free-function form remains correct and used
+elsewhere (`diff_cpp_patterns.py`'s `_is_empty_record(t: object)` cannot
+call a `RecordType` method at all, since `t` is deliberately typed `object`
+there). All six files land exactly at their recorded adoption baseline
+(1183/1289/1312/1651/1507/1504 lines respectively) with this migration's
+reads included -- confirmed via `python scripts/check_architecture.py
+--base <this-branch's-actual-base-commit>`, which is what isolates a PR's
+own growth from unrelated already-on-`main` debt the same way CI's own
+`ARCHITECTURE_BASE` does (a bare local run with no resolvable
+`origin/main` tracking ref, as in a stale/shallow sandbox checkout, can
+misattribute pre-existing debt to an unrelated PR -- passing `--base`
+explicitly is the fix, not a ledger change).
+
+With the empty baseline, the empty-baseline test
+(`tests/test_fact_field_readers.py::test_baseline_entries_are_real_sites`)
+is vacuously satisfied (there is nothing left to check is "real"), and
+`tests/test_fact_field_readers.py`'s own synthetic-violation tests continue
+to pin the scan's real behavior against a throwaway `abicheck/`-shaped tree,
+independent of the baseline's size. Phase 0 is therefore complete per its
+own stated scope in this document's Goal/Design/Acceptance-criteria
+sections above: `Fact[T]` exists, every one of the five converted fields'
+producers construct it directly, every currently-known reader consults it
+instead of the ambiguous legacy attribute, and both AI-readiness gates
+(`fact-detector-misuse`/`fact-field-readers`) are live with nothing left in
+either baseline for a *known* violation to hide behind. What remains
+explicitly outside this phase's scope, unchanged: a detector *branching* on
+`FactStatus` to actually change which findings it emits (Phase 5's job);
+converting any field beyond the five this phase named (also Phase 5,
+registry-driven); and removing the four retained legacy attributes
+themselves, which Phase 10's own checklist already schedules for once the
+widened reader check reports zero remaining readers outside the
+compatibility bridge's own `__post_init__` and serialization — true as of
+this slice, but Phase 10 is where that removal actually happens, not here.
+
 ---
 
 ### Phase 1 — finish the `dump`/`scan` typed-API convergence (closes AGENTS.md "PR C")

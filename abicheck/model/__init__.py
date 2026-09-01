@@ -66,7 +66,11 @@ from .extraction_contract import (
     DependencyInfo as DependencyInfo,
     ExtractionContract as ExtractionContract,
 )
-from .fact import Fact as Fact, replace_with_fact_sync as replace_with_fact_sync
+from .fact import (
+    Fact as Fact,
+    replace_with_fact_sync as replace_with_fact_sync,
+    resolved_fact_value as resolved_fact_value,
+)
 from .snapshot import AbiSnapshot as AbiSnapshot
 from .stdlib_surface import stdlib_namespaces_excluded as stdlib_namespaces_excluded
 from .vocabulary import (
@@ -107,5 +111,6 @@ __all__ = [
     "record_layout_facts",
     "replace_with_fact_sync",
     "resolve_vptr_offset_bits",
+    "resolved_fact_value",
     "stdlib_namespaces_excluded",
 ]
