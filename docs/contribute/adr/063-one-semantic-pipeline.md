@@ -223,28 +223,114 @@
   by CI on this phase's own PR). `build_public_surface_facts()` stays
   available for a caller that does need those facts to populate onto the
   same shared instance explicitly.
-  **Deliberately not landed, and recorded here rather than left for a
-  later phase to rediscover as a gap:** `surface.py`'s own closure-walk
-  traversal and `export_surface.py`'s independent one are **not**
-  deleted — `PublicSurfaceQuery` delegates to both unchanged rather than
-  reimplementing either as a literal graph traversal, a scoped,
-  documented risk decision given the demonstrated fragility of that exact
-  algorithm (see `docs/contribute/known-gaps.md`); consequently there is
-  no lazy, graph-reading legacy-snapshot backfill path either, since
-  `compute_public_surface()`'s signature was never changed to accept a
-  structured resolution. `compare/surface_graph.py`'s own node ids
-  (`canonical_key(occurrence_id)`/`approx::`/`typedef::` fallbacks) and
-  `buildsource/header_graph.py`'s pre-existing L5 node ids
-  (`decl://<identity>`/`type://<identity>`) are two independent
+  **Phase 3's infrastructure and its planned follow-up migration have both
+  landed, but D5's own literal premise — `compute_public_surface()` becomes
+  a traversal *through the graph* — is not what the shipped closure walk
+  does, and that is not a loose end left for later; it is what a
+  three-review-round investigation concluded the correct design must not
+  do (full account: `docs/contribute/known-gaps.md`, this section's own
+  single owner for that history — summarized, not repeated, below).
+  Calling the phase "complete" would hide that from a status reader, so
+  this entry states it plainly instead: `compute_public_surface()`/
+  `PublicSurfaceQuery` never reads `AbiSnapshot.surface_graph`/
+  `GraphNode.attrs` for the one traversal D5 names as its defining case —
+  is-this-declaration-public — at all, and neither does anything else in
+  production. `compare/surface_graph.py`'s `build_public_surface_facts()`,
+  the function that would stamp this phase's own node facts onto that
+  graph, has **no production caller** (confirmed by a repo-wide call-site
+  check); `_attach_header_graph()` deliberately never calls it either (see
+  the perf note above). What *does* run in production —
+  `PublicSurfaceQuery().resolve()` computing a plain `frozenset[EntityId]`,
+  threaded through `checker.compare()` as `public_entity_ids` to narrow the
+  *legacy, unrelated* `surface_graph.py` (root module) `SurfaceGraph`'s
+  root set — is a set membership check, not a graph query, and never
+  touches `AbiSnapshot.surface_graph` either. The Phase 3 evidence graph
+  exists and is persisted (via the shared `SourceGraphSummary` instance
+  `_attach_header_graph()` assigns to it), but nothing in this phase's own
+  production wiring queries it.** A first
+  landing (thirteen slices, 2026-08-31)
+  shipped the plumbing above without migrating `surface.py`'s own
+  closure-walk traversal — `PublicSurfaceQuery` delegated to it
+  unchanged, a scoped, documented risk decision given the demonstrated
+  fragility of that exact algorithm (see `docs/contribute/known-gaps.md`).
+  A second round (2026-09-01) did migrate it: `surface.py`'s
+  `_index_surface_types`/`_seed_public_roots`/`_walk_type_closure`/
+  `_walk_exact_type_closure`/`_record_exact_identities`/
+  `_record_nested_in_known_record`/`_record_is_confirmed_public_seed` and
+  the `PublicSurface` type moved to `policy/public_surface.py` (the
+  dataclass + indexing) and `policy/public_surface_closure.py` (the walk
+  itself, plus `resolve_public_surface()`); `surface.py`'s own copies were
+  **deleted**, not kept alongside, and `surface.compute_public_surface()`
+  is now a thin re-exporting wrapper. `export_surface.py`'s own
+  root-seeding (the export-table-matching logic) was left unchanged, but
+  its final type-closure step calls the same migrated `_walk_type_closure`
+  the header domain uses, so that domain became graph-native for free.
+  `PublicSurfaceQuery` itself moved again, to `policy/public_surface_query.py`,
+  since it is the one module depending on both the closure module and
+  `export_surface.py` at once and keeping it in either would have closed
+  a real, `check_architecture.py`-detected import cycle.
+
+  That migration went through three review rounds before landing on this
+  design — `docs/contribute/known-gaps.md` owns the full account (why the
+  first two designs read the graph and each turned out unsafe: a
+  never-enriched-in-production graph silently misread as "references
+  nothing," then a fix for that introducing both a measured performance
+  regression and a confidence-precedence security hazard). The shipped
+  fix stopped reading the graph for this decision at all:
+  `compare/surface_graph.py`'s `referenced_identifiers_by_node()` — a pure
+  function of the snapshot's own declarations, computed before any
+  `GraphNode` is built — is what `policy/public_surface_closure.py` and
+  `export_surface.py`'s closure-walk entry points call directly.
+
+  **Against D5's own text, three things do not match "one authoritative
+  graph, queried by traversal," and only two of them are this phase's
+  deliberate scope boundaries — the third is the closure-walk deviation
+  named above, which is neither a scope boundary nor an open item, but a
+  considered decision to not do what D5 originally specified:**
+  `export_surface.py`'s own root-seeding logic was never reimplemented as a
+  graph traversal (only the type-closure step it shares with the header
+  domain became graph-native); `type_reachability.
+  directly_referenced_stdlib_types()` was not migrated into
+  `policy/public_surface.py` — doing so would require reclassifying
+  `type_reachability.py` into the `policy` layer, which would introduce a
+  genuine new `policy -> extract` architecture violation (that module
+  imports two already-`extract`-classified siblings); and the closure walk
+  itself resolves declaration/type reachability from `referenced_
+  identifiers_by_node()` — a pure function of the snapshot's own
+  declarations — rather than from the graph object, for the correctness and
+  security reasons the review-round history above gives. **One item remains
+  genuinely open, not deliberately deferred:** `compare/surface_graph.py`'s
+  own node ids (`canonical_key(occurrence_id)`/`approx::`/`typedef::`
+  fallbacks) and `buildsource/header_graph.py`'s pre-existing L5 node ids
+  (`decl://<identity>`/`type://<identity>`) remain two independent
   namespaces — sharing one `SourceGraphSummary` instance is real and
-  tested, but the two schemes do not currently dedup onto one node for a
-  declaration both builders see (see `compare/surface_graph.py`'s own
-  module docstring). `type_reachability.directly_referenced_stdlib_types()`
-  was not migrated into `policy/public_surface.py` either: doing so would
-  require reclassifying `type_reachability.py` into the `policy` layer,
-  which would introduce a genuine new `policy -> extract` architecture
-  violation (that module imports two already-`extract`-classified
-  siblings) — a real, separate migration, not attempted reactively here.
+  tested, but the two schemes do not dedup onto one node for a declaration
+  both builders see (see `compare/surface_graph.py`'s own module
+  docstring). This is real, separate follow-up work, not
+  silently-abandoned scope. FP-rate gate and per-tier accuracy gate both
+  show zero regression from any part of this phase — but a gate showing no
+  regression is not evidence the graph traversal itself shipped, since the
+  shipped design does not perform one for the closure walk.
+
+  **Bottom line for a status reader:** this phase's infrastructure landed
+  and its own planned `surface.py`/`export_surface.py` migration is done,
+  but neither means D5 shipped as written. `public_entity_ids` — the one
+  piece of this phase's output that does run in production — is a plain
+  `frozenset[EntityId]` narrowing the *legacy* `surface_graph.py`
+  `SurfaceGraph`'s root set, not a query against `AbiSnapshot.
+  surface_graph`; that Phase 3 evidence graph is built and persisted but
+  has no production reader at all (`build_public_surface_facts()` has no
+  caller outside its own tests). D5's central claim — that
+  `compute_public_surface()` becomes a graph traversal — is not what
+  shipped for the one traversal D5 names as its motivating case. That is a
+  considered, reviewed departure from the decision as written, not an
+  oversight — recorded here rather than papered over with "complete," per
+  this same document's own governing invariant against one concept getting
+  two disagreeing descriptions. If D5's authoritative-graph requirement is
+  still wanted for the closure walk specifically, it is unimplemented scope
+  for a future phase to pick back up, informed by why three rounds already
+  concluded the graph-reading version is unsafe as designed.
+
   Two corrections to the implementation plan's own text, found during this
   phase's implementation rather than assumed from the design prose: the
   plan's Phase 3 section describes `surface.py`/`export_surface.py`/
