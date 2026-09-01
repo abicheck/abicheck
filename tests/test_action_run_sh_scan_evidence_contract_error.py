@@ -52,7 +52,11 @@ _FINAL_EXIT_SCAN_START = (
     "  # scan: BREAKING/API_BREAK follow the fail-on flags"
 )
 _FINAL_EXIT_SCAN_END = "\nelse\n"
-_IS_PATH_QUALIFIED_START = "_is_path_already_qualified() {\n"
+#: Includes the real `$OSTYPE`-detection preamble that sets
+#: `_RUNNING_ON_WINDOWS`, not just the function body -- see
+#: `_report_query_and_gated_fragment`'s own docstring for why a hardcoded
+#: value here was a real, self-masking bug.
+_IS_PATH_QUALIFIED_START = 'case "$OSTYPE" in'
 _IS_PATH_QUALIFIED_END = "}\n"
 _REPORT_QUERY_START = "_report_query() {\n"
 _REPORT_QUERY_END = "PYQUERY\n}\n"
@@ -95,10 +99,25 @@ def _extract(start_marker: str, end_marker: str) -> str:
 
 
 def _report_query_and_gated_fragment() -> str:
-    """``_is_path_already_qualified``, ``_report_query`` (which it calls),
-    and ``_evidence_contract_gated`` (which calls ``_report_query``),
-    extracted verbatim -- the real pipeline that turns a JSON report file
-    into the boolean ``_evidence_contract_gated`` decision, unmodified."""
+    """The real ``$OSTYPE``-detection preamble (sets ``_RUNNING_ON_WINDOWS``),
+    ``_is_path_already_qualified``, ``_report_query`` (which it calls), and
+    ``_evidence_contract_gated`` (which calls ``_report_query``), extracted
+    verbatim -- the real pipeline that turns a JSON report file into the
+    boolean ``_evidence_contract_gated`` decision, unmodified.
+
+    Including the real preamble (rather than a caller-supplied
+    ``_RUNNING_ON_WINDOWS`` value) matters on a real Windows Git-Bash host:
+    `.as_posix()`-converted paths keep their drive letter (``D:/...``), which
+    ``_is_path_already_qualified`` only recognises via its
+    ``$_RUNNING_ON_WINDOWS == "true"`` branch. An earlier revision hardcoded
+    ``_RUNNING_ON_WINDOWS="false"`` in the caller instead, which silently
+    misclassified every drive-letter path as *not* already-qualified,
+    prepending a bogus ``$PWD/`` prefix -- ``_report_query`` then failed to
+    open the (now-wrong) path and printed nothing, same observable outcome
+    as a real near-miss. That made the hostile-value test (which expects
+    ``GATED=0`` either way) pass for the wrong reason on windows-latest CI,
+    and was only caught once a positive-path test (`GATED=1` expected)
+    exposed it as a real failure there (windows-latest CI)."""
     return (
         _extract(_IS_PATH_QUALIFIED_START, _IS_PATH_QUALIFIED_END)
         + "\n"
@@ -269,7 +288,6 @@ def _run_real_gated_pipeline(
     script = (
         _report_query_and_gated_fragment()
         + f"""
-_RUNNING_ON_WINDOWS="false"
 _PY_BIN="{py_bin}"
 _PY_SAFE_DIR="{py_safe_dir_posix}"
 _json_report_src() {{ echo "{report_posix}"; }}
