@@ -1600,6 +1600,7 @@ def _diff_typedefs(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
         new_type = new_typedefs.get(alias)
         if new_type is None and suppress_removed:
             continue
+        eid = old.typedef_entity_ids.get(alias) or new.typedef_entity_ids.get(alias)
         if new_type is None:
             # Version-stamped typedefs (e.g. png_libpng_version_1_6_46) are
             # compile-time sentinels that change every release by design and
@@ -1615,6 +1616,7 @@ def _diff_typedefs(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
                         symbol=bare_alias,
                         name=bare_alias,
                         old_value=old_type,
+                        entity_id=eid,
                     )
                 )
                 continue
@@ -1625,6 +1627,7 @@ def _diff_typedefs(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
                     symbol=bare_alias,
                     name=bare_alias,
                     old_value=old_type,
+                    entity_id=eid,
                     description=f"Typedef removed: {bare_alias}{qualified_suffix}",
                 )
             )
@@ -1636,6 +1639,7 @@ def _diff_typedefs(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
                     name=bare_alias,
                     old_value=old_type,
                     new_value=new_type,
+                    entity_id=eid,
                     description=f"Typedef base type changed: {bare_alias}{qualified_suffix}",
                 )
             )

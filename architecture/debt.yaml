@@ -713,12 +713,12 @@
     },
     {
       "path": "abicheck/dumper.py",
-      "baseline_lines": 1985,
+      "baseline_lines": 1991,
       "target": "see ADR-061 ownership map",
       "rule": "no_growth",
       "category": "legacy_oversized_module",
       "owner": "abicheck maintainers",
-      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice.",
+      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice. Raised by 6 for ADR-063 Phase 2's closing slice: each of the three AbiSnapshot construction sites gained the typedef_entity_ids/constant_entity_ids sidecar keywords. No smaller diff exists that still populates both fields on every format handler without hiding the field names behind a spread helper.",
       "review_by": "2026-11-30"
     },
     {
@@ -763,12 +763,12 @@
     },
     {
       "path": "abicheck/dumper_hybrid.py",
-      "baseline_lines": 979,
+      "baseline_lines": 1005,
       "target": "see ADR-061 ownership map",
       "rule": "no_growth",
       "category": "legacy_oversized_module",
       "owner": "abicheck maintainers",
-      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice.",
+      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice. Raised by 10 for ADR-063 Phase 2's closing slice: the merged snapshot must union the typedef_entity_ids/constant_entity_ids sidecars in the same direction it already unions typedefs_qualified, or the sidecars desync from the dicts they annotate. Raised by a further 16 in the same slice's follow-up (Codex review): constants itself is NOT merged the same way typedefs_qualified is, so constant_entity_ids needed an explicit filter to the keys castxml_snap.constants actually retains, or a clang-only constant would leave a phantom sidecar key with no matching entry.",
       "review_by": "2026-11-30"
     },
     {
@@ -1033,12 +1033,12 @@
     },
     {
       "path": "abicheck/serialization.py",
-      "baseline_lines": 1737,
+      "baseline_lines": 1747,
       "target": "storage (blocked, deeper than expected)",
       "rule": "no_growth",
       "category": "legacy_storage_monolith",
       "owner": "abicheck maintainers",
-      "rationale": "Classifying this `storage` (measured directly) surfaced 72 findings, not a handful. One slice of that is now closed: BundleFacts (de)serialization -- the whole `storage -> workflows` edge (BundleFacts is `workflows`-classified) -- moved to the new sibling `bundle_facts_serialization.py` (itself `workflows`, since bundle_facts.py is already at its own 800-line cap), dropping the measured count to 62. Two distinct kinds of finding remain, and only one is mechanical: (1) ~10 `storage -> extract` sites where `_xxx_from_dict` helpers still import dataclasses (`ElfMetadata`, `PeMetadata`, ...) from the flat, unclassified parser modules (`elf_metadata.py`, `pe_metadata.py`, ...) instead of their canonical `model/*_facts.py` home each parser already re-exports from -- a same-object import-path fix, not yet done because it alone would not unblock classification (see (2)); (2) one genuine behavioral edge, not a wrong import path: `snapshot_from_dict`'s legacy-snapshot backward-compat backfill calls `python_ext.detect_python_extension()` -- real extraction logic (inferring a fact from exported-symbol/import evidence), not a fact lookup -- so `storage`'s `may_import: [model]` cannot admit it without either moving that backfill to a workflows-level post-load step (auditing every `snapshot_from_dict` caller to confirm none needs it skipped) or leaving `serialization.py` itself unclassified, the same treatment `policy_file.py` gets for an analogous reason. The remaining `frontends -> storage`/`compare -> storage` edges (cli_buildsource.py, cli_buildsource_merge.py, cli_compare_release_helpers.py, compat/cli.py, probe_harness.py) are unchanged and still real -- probe_harness.py's need for `snapshot_to_dict`/`snapshot_from_dict` to serialize its own probe-matrix JSON is a `compare`-classified module needing a `storage` operation, which `compare`'s narrower `may_import: [model]` (no `workflows` either) cannot route around via the usual facade pattern, and has not been investigated further. Not yet a routine reclassification. ADR-061 Phase 4 (service.py thinning slice, second pass) added `abicheck.serialization` to `architecture/modules.yaml`'s `public_root_surfaces` instead of attempting the full classification above: the new `abicheck/workflows/input_resolution.py` module (real `resolve_input`/`load_env_matrix`/`collect_metadata` implementations moved out of `service.py`, physically inside the `workflows` package) needs `load_snapshot`, and being `migrated_source` it is checked for unclassified imports unconditionally, unlike `service.py`'s own flat, `legacy_paths`-classified copy of the same import. `public_root_surfaces` is the documented exemption for exactly this shape -- a genuinely public, stable surface (`serialization.py`'s own docstring already calls `load_snapshot`/`save_snapshot`/`write_snapshot` 'the public compatibility surface') reached from a migrated package, without deciding the harder question this entry is still open on. It changes nothing about the five real `frontends -> storage`/`compare -> storage` edges above, and does not move this entry's `target` off 'blocked' -- `probe_harness.py`'s `compare -> storage` edge in particular has no available facade route (`compare`'s `may_import` is `[model]` only, not `workflows`) and would need its own investigation independent of this exemption.",
+      "rationale": "Classifying this `storage` (measured directly) surfaced 72 findings, not a handful. One slice of that is now closed: BundleFacts (de)serialization -- the whole `storage -> workflows` edge (BundleFacts is `workflows`-classified) -- moved to the new sibling `bundle_facts_serialization.py` (itself `workflows`, since bundle_facts.py is already at its own 800-line cap), dropping the measured count to 62. Two distinct kinds of finding remain, and only one is mechanical: (1) ~10 `storage -> extract` sites where `_xxx_from_dict` helpers still import dataclasses (`ElfMetadata`, `PeMetadata`, ...) from the flat, unclassified parser modules (`elf_metadata.py`, `pe_metadata.py`, ...) instead of their canonical `model/*_facts.py` home each parser already re-exports from -- a same-object import-path fix, not yet done because it alone would not unblock classification (see (2)); (2) one genuine behavioral edge, not a wrong import path: `snapshot_from_dict`'s legacy-snapshot backward-compat backfill calls `python_ext.detect_python_extension()` -- real extraction logic (inferring a fact from exported-symbol/import evidence), not a fact lookup -- so `storage`'s `may_import: [model]` cannot admit it without either moving that backfill to a workflows-level post-load step (auditing every `snapshot_from_dict` caller to confirm none needs it skipped) or leaving `serialization.py` itself unclassified, the same treatment `policy_file.py` gets for an analogous reason. The remaining `frontends -> storage`/`compare -> storage` edges (cli_buildsource.py, cli_buildsource_merge.py, cli_compare_release_helpers.py, compat/cli.py, probe_harness.py) are unchanged and still real -- probe_harness.py's need for `snapshot_to_dict`/`snapshot_from_dict` to serialize its own probe-matrix JSON is a `compare`-classified module needing a `storage` operation, which `compare`'s narrower `may_import: [model]` (no `workflows` either) cannot route around via the usual facade pattern, and has not been investigated further. Not yet a routine reclassification. ADR-061 Phase 4 (service.py thinning slice, second pass) added `abicheck.serialization` to `architecture/modules.yaml`'s `public_root_surfaces` instead of attempting the full classification above: the new `abicheck/workflows/input_resolution.py` module (real `resolve_input`/`load_env_matrix`/`collect_metadata` implementations moved out of `service.py`, physically inside the `workflows` package) needs `load_snapshot`, and being `migrated_source` it is checked for unclassified imports unconditionally, unlike `service.py`'s own flat, `legacy_paths`-classified copy of the same import. `public_root_surfaces` is the documented exemption for exactly this shape -- a genuinely public, stable surface (`serialization.py`'s own docstring already calls `load_snapshot`/`save_snapshot`/`write_snapshot` 'the public compatibility surface') reached from a migrated package, without deciding the harder question this entry is still open on. It changes nothing about the five real `frontends -> storage`/`compare -> storage` edges above, and does not move this entry's `target` off 'blocked' -- `probe_harness.py`'s `compare -> storage` edge in particular has no available facade route (`compare`'s `may_import` is `[model]` only, not `workflows`) and would need its own investigation independent of this exemption. Raised by 10 for ADR-063 Phase 2's closing slice (schema v31): the encode/decode hookup and reconstruction keywords for the typedef_entity_ids/constant_entity_ids sidecars. The codec itself lives in storage/entity_id_codec.py, so only the call-site plumbing lands here.",
       "review_by": "2026-11-30"
     },
     {
@@ -1093,12 +1093,12 @@
     },
     {
       "path": "abicheck/tu_merge.py",
-      "baseline_lines": 1552,
+      "baseline_lines": 1622,
       "target": "see ADR-061 ownership map",
       "rule": "no_growth",
       "category": "legacy_oversized_module",
       "owner": "abicheck maintainers",
-      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice.",
+      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice. Raised by 14 for ADR-063 Phase 2's closing slice: TuFragment's typedef_entity_ids/constant_entity_ids sidecars must fold through the cross-TU merge, or a manifest dump loses the identity a single-TU dump keeps. Raised by a further 56 in the same slice's follow-up (Codex review): the sidecars' plain union was replaced with _merge_entity_id_sidecar, which detects two TUs agreeing on a qualified name's spelling/value while disagreeing on its structural scope (ADR-063's own motivating collision) and raises TuMergeError rather than silently picking whichever TU is unioned last.",
       "review_by": "2026-11-30"
     },
     {
@@ -1693,22 +1693,22 @@
     },
     {
       "path": "tests/test_dumper_hybrid.py",
-      "baseline_lines": 1712,
+      "baseline_lines": 1773,
       "target": "tests/unit-or-contract ownership matching production migration",
       "rule": "no_growth",
       "category": "legacy_oversized_test_module",
       "owner": "abicheck maintainers",
-      "rationale": "Existing test module predates ADR-061 and will split by behavior or contract axis with its production migration.",
+      "rationale": "Existing test module predates ADR-061 and will split by behavior or contract axis with its production migration. Raised by 61 for ADR-063 Phase 2's closing slice follow-up (Codex review): TestConstantEntityIdSidecarStaysAlignedWithConstants, regression-testing the constant_entity_ids/constants alignment fix in dumper_hybrid.py's own debt.yaml entry above.",
       "review_by": "2026-11-30"
     },
     {
       "path": "tests/test_dumper_manifest.py",
-      "baseline_lines": 1765,
+      "baseline_lines": 1771,
       "target": "tests/unit-or-contract ownership matching production migration",
       "rule": "no_growth",
       "category": "legacy_oversized_test_module",
       "owner": "abicheck maintainers",
-      "rationale": "Existing test module predates ADR-061 and will split by behavior or contract axis with its production migration.",
+      "rationale": "Existing test module predates ADR-061 and will split by behavior or contract axis with its production migration. Raised by 6 for ADR-063 Phase 2's closing slice: the stub header-AST parser gained the two entity-id sidecar methods the real parsers now expose.",
       "review_by": "2026-11-30"
     },
     {
@@ -2183,12 +2183,12 @@
     },
     {
       "path": "tests/test_tu_merge.py",
-      "baseline_lines": 1888,
+      "baseline_lines": 1950,
       "target": "tests/unit-or-contract ownership matching production migration",
       "rule": "no_growth",
       "category": "legacy_oversized_test_module",
       "owner": "abicheck maintainers",
-      "rationale": "Existing test module predates ADR-061 and will split by behavior or contract axis with its production migration.",
+      "rationale": "Existing test module predates ADR-061 and will split by behavior or contract axis with its production migration. Raised by 2 for ADR-063 Phase 2's closing slice: the empty-merge expected value gained the two sidecar keywords MergedTuFragments now carries. Raised by a further 28 in the same slice's follow-up (Codecov): test_merge_fragments_unions_typedef_and_constant_entity_id_sidecars, closing the gap between the empty-input case above and merge_fragments' real cross-fragment union comprehension, which no test previously exercised. Raised by a further 32 in the same follow-up (Codex review): test_merge_fragments_rejects_conflicting_typedef_entity_id_same_key, regression-testing tu_merge.py's own new _merge_entity_id_sidecar conflict check.",
       "review_by": "2026-11-30"
     },
     {

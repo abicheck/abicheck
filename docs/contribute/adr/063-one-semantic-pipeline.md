@@ -150,13 +150,36 @@
   attributed to its *containing* record's `entity_id` (no field-level
   `EntityId` exists — `EntityKind.FIELD`/`BASE` are declared in
   `model/identity.py` but have no constructor, an accepted, named gap, not
-  a silent one). **Three classes of site remain deliberately unwired, for
-  reasons specific to each, not oversight:** (1) typedefs and constants
-  (`diff_types.py::_diff_typedefs`, `diff_symbols.py::_diff_constants`) —
-  `entity_id_for_typedef`/`entity_id_for_constant` exist in `model/
-  identity.py` but have no production caller anywhere; wiring these call
-  sites needs that extraction-side gap closed first, a separate piece of
-  work; (2) every DWARF/PE/Mach-O/ELF-symbol-table-only detector
+  a silent one). A twelfth slice closed the typedef/constant gap this
+  paragraph previously listed first: `entity_id_for_typedef`/
+  `entity_id_for_constant` now have production callers on both header-AST
+  backends (`dumper_clang.py::parse_typedef_entity_ids`/
+  `parse_constant_entity_ids`, `dumper_castxml.py`'s same-named pair),
+  feeding two additive `AbiSnapshot` sidecars — `typedef_entity_ids`/
+  `constant_entity_ids`, keyed exactly like `typedefs_qualified`/
+  `constants` respectively, since neither collection has a parsed
+  declaration object to carry an `entity_id` on the way
+  `RecordType`/`EnumType`/`Function`/`Variable` do. They persist through
+  `storage/entity_id_codec.py` (`SCHEMA_VERSION` 30→31; absent on a
+  pre-v31 snapshot, which loads as `{}` — the same value a v31 snapshot
+  with no header-resolved typedef/constant identity carries, so no
+  migration adapter is needed) and `snapshot_cache.py` (cache version
+  22→23), merge through `dumper_hybrid.py`/`tu_merge.py` in the same
+  direction as the dicts they annotate, and are read by
+  `diff_types.py::_diff_typedefs` (`TYPEDEF_REMOVED`/
+  `TYPEDEF_BASE_CHANGED`/`TYPEDEF_VERSION_SENTINEL`) and
+  `diff_symbols.py::_diff_constants` (`CONSTANT_REMOVED`/`CONSTANT_CHANGED`/
+  `CONSTANT_ADDED`) under the same old-side-preferred convention every
+  slice above uses. `typedef_entity_ids` joins
+  `qualified_name_segments._LAMBDA_IDENTITY_FIELDS` because
+  `typedefs_qualified`'s keys are renumbered there and the sidecar's must
+  move with them; `constant_entity_ids` deliberately does not, because
+  `constants` itself is excluded from that walk (its values are payload
+  literals) and renumbering only the sidecar is what would desynchronize
+  the pair. DWARF-only snapshots leave both sidecars empty, exactly as they
+  already leave `typedefs_qualified`. **Two classes of site remain
+  deliberately unwired, for reasons specific to each, not oversight:**
+  (1) every DWARF/PE/Mach-O/ELF-symbol-table-only detector
   (`diff_platform.py`'s DWARF-tier struct/enum/field functions,
   `diff_elf_layout.py`, `diff_platform_elf_dynamic.py`,
   `diff_platform_elf_symbols.py`, `diff_versioning.py`, `diff_sycl.py`) —
@@ -164,14 +187,14 @@
   object behind them at all, since only the header-AST (L2) backends
   populate `entity_id` today; closing this needs `EntityId` extended to the
   DWARF backend first (build a `ScopePath` from a DIE's parent chain), a
-  real, separate extraction-side project, not a diff-site wiring pass; (3)
+  real, separate extraction-side project, not a diff-site wiring pass; (2)
   `buildsource/*.py`'s L5 source-graph `Change` construction sites, which
   already have their own identity primitive (`buildsource/
   entity_identity.py`'s `CanonicalIdentity`) and are out of this decision's
   scope by design (D3 generalizes flat/diff/graph identity, not the L5
   source-graph's already-separate scheme). **Every post-parse consumer
   migration remains not landed**: `diff_filtering.py`'s `_enum_canonical_
-  names`/`record_canonical_names` string-bridging is blocked on (2) above
+  names`/`record_canonical_names` string-bridging is blocked on (1) above
   (it exists specifically to reconcile header-tier and DWARF-tier spellings,
   so it cannot move to `EntityId` comparison until the DWARF side has one);
   a `type_reachability.py` hardening (anchoring `_record_identity` on

@@ -151,7 +151,13 @@ from .model import (
     Variable,
     Visibility,
 )
-from .model.identity import ScopePath, entity_id_for_variable
+from .model.identity import (
+    EntityId,
+    ScopePath,
+    entity_id_for_constant,
+    entity_id_for_typedef,
+    entity_id_for_variable,
+)
 from .provenance import build_public_set
 
 
@@ -1217,9 +1223,31 @@ class _ClangAstParser:
         to the public-header surface via provenance; empty when no public set was
         supplied (provenance is opt-in).
         """
+        return {
+            self._qualified(entry): value
+            for entry, value in self._iter_public_constants()
+        }
+
+    def parse_constant_entity_ids(self) -> dict[str, EntityId]:
+        """``EntityId`` sidecar for :meth:`parse_constants` (ADR-063 Phase 2),
+        keyed identically and built from the same filtering pass so the two
+        maps can never disagree about which constants qualify. See
+        ``AbiSnapshot.constant_entity_ids``.
+        """
+        return {
+            self._qualified(entry): entity_id_for_constant(
+                entry.scope_path, str(entry.node.get("name", ""))
+            )
+            for entry, _ in self._iter_public_constants()
+        }
+
+    def _iter_public_constants(self) -> list[tuple[_Decl, str]]:
+        """``(decl, initializer value)`` for every public ``const``/
+        ``constexpr`` — the single filtering pass shared by
+        :meth:`parse_constants` and :meth:`parse_constant_entity_ids`."""
         if not self._have_public_set:
-            return {}
-        out: dict[str, str] = {}
+            return []
+        out: list[tuple[_Decl, str]] = []
         for entry in self._variables:
             node = entry.node
             if _is_builtin_file(entry.file):
@@ -1237,7 +1265,7 @@ class _ClangAstParser:
                 continue
             if not self._decl_is_public(entry):
                 continue
-            out[self._qualified(entry)] = value
+            out.append((entry, value))
         return out
 
     def _decl_is_public(self, entry: _Decl) -> bool:
@@ -1369,6 +1397,24 @@ class _ClangAstParser:
             underlying = _typedef_underlying(node)
             typedefs[self._qualified(entry)] = underlying or "?"
         return typedefs
+
+    def parse_typedef_entity_ids(self) -> dict[str, EntityId]:
+        """``EntityId`` sidecar for :meth:`parse_typedefs_qualified` (ADR-063
+        Phase 2), keyed identically so the two maps join on the same key.
+
+        The scope is already walked for the qualified key; this keeps it in
+        typed ``ScopePath`` form instead of flattening it to a ``"::"``-joined
+        string. See ``AbiSnapshot.typedef_entity_ids``.
+        """
+        out: dict[str, EntityId] = {}
+        for entry in self._typedefs:
+            if _is_builtin_file(entry.file):
+                continue
+            name = str(entry.node.get("name", ""))
+            if not name:
+                continue
+            out[self._qualified(entry)] = entity_id_for_typedef(entry.scope_path, name)
+        return out
 
 
 # ─── pure node helpers (module-level so they are unit-testable on their own) ──
