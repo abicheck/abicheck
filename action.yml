@@ -805,7 +805,11 @@ outputs:
       incomplete contract coverage, or incomplete analysis assurance with
       the require-complete-analysis input -- as on compare, the three
       share the code and are told apart the same way, one level down
-      under diff),
+      under diff; independently of --against, also a pinned
+      --depth/--source-method whose required source evidence was never
+      collected -- ADR-037 D5, VERDICT=EVIDENCE_CONTRACT_ERROR -- reachable
+      on an audit-only scan too, since the underlying precondition check
+      runs regardless of whether a baseline comparison follows),
       2 (API break), 4 (ABI break), 5 (budget overflow), 6 (not comparable --
       candidate/baseline scope or profile mismatch, VERDICT=NOT_COMPARABLE).
       deps-compare: 0 (pass), 1 (warn),
