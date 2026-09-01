@@ -266,6 +266,78 @@ class TestScanModelDataclasses:
 # ---------------------------------------------------------------------------
 
 
+# ---------------------------------------------------------------------------
+# Codex review: the model/ scan must recurse into nested subpackages (e.g.
+# model/change_catalog/), not just its immediate *.py children.
+# ---------------------------------------------------------------------------
+
+
+class TestRecursiveModelScan:
+    def test_scan_model_dataclasses_finds_a_field_in_a_nested_subpackage(
+        self, tmp_path: Path
+    ) -> None:
+        nested = tmp_path / "nested_pkg"
+        nested.mkdir()
+        (nested / "__init__.py").write_text("")
+        (nested / "widgets.py").write_text(
+            "from __future__ import annotations\n"
+            "from dataclasses import dataclass\n"
+            "@dataclass\n"
+            "class NestedWidget:\n"
+            "    # Tri-state: None = not captured (older snapshots).\n"
+            "    label: str | None = None\n"
+        )
+        found = scan_model_dataclasses(model_dir=tmp_path)
+        assert ("NestedWidget", "label") in found
+
+    def test_model_fact_siblings_finds_a_sibling_in_a_nested_subpackage(
+        self, tmp_path: Path
+    ) -> None:
+        nested = tmp_path / "nested_pkg"
+        nested.mkdir()
+        (nested / "__init__.py").write_text("")
+        (nested / "widgets.py").write_text(
+            "from __future__ import annotations\n"
+            "from dataclasses import dataclass\n"
+            "from abicheck.model.fact import Fact\n"
+            "@dataclass\n"
+            "class NestedWidget:\n"
+            "    gadget_fact: Fact[str] = None\n"
+        )
+        siblings = _model_fact_siblings(model_dir=tmp_path)
+        assert ("NestedWidget", "gadget") in siblings
+
+    def test_all_model_dataclass_field_pairs_finds_a_field_in_a_nested_subpackage(
+        self, tmp_path: Path
+    ) -> None:
+        nested = tmp_path / "nested_pkg"
+        nested.mkdir()
+        (nested / "__init__.py").write_text("")
+        (nested / "widgets.py").write_text(
+            "from __future__ import annotations\n"
+            "from dataclasses import dataclass\n"
+            "@dataclass\n"
+            "class NestedWidget:\n"
+            "    thingy: int = 0\n"
+        )
+        original = fact_registry_completeness.MODEL_DIR
+        fact_registry_completeness.MODEL_DIR = tmp_path
+        try:
+            pairs = fact_registry_completeness._all_model_dataclass_field_pairs()
+        finally:
+            fact_registry_completeness.MODEL_DIR = original
+        assert ("NestedWidget", "thingy") in pairs
+
+    def test_real_repo_recursive_scan_finds_change_catalog_dataclass(self) -> None:
+        """The real, existing nested subpackage Codex named
+        (`model/change_catalog/`) is not hypothetical -- ``ChangeKindMeta``
+        is a real ``@dataclass`` declared there, and the recursive scan must
+        see it."""
+        pairs = fact_registry_completeness._all_model_dataclass_field_pairs()
+        assert ("ChangeKindMeta", "kind") in pairs
+        assert ("ChangeKindMeta", "default_verdict") in pairs
+
+
 class TestModelFactSiblings:
     def test_finds_is_final_fact_on_recordtype(self) -> None:
         siblings = _model_fact_siblings()

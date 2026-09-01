@@ -312,7 +312,7 @@ def _all_model_dataclass_field_pairs() -> set[tuple[str, str]]:
     never will, so it would otherwise never be caught).
     """
     pairs: set[tuple[str, str]] = set()
-    for path in sorted(MODEL_DIR.glob("*.py")):
+    for path in sorted(MODEL_DIR.glob("**/*.py")):
         source = _read(path)
         if not source:
             continue
@@ -365,12 +365,16 @@ def scan_model_dataclasses(
     Returns ``{(owner, field): (rel_path, lineno)}`` — a field whose own
     annotation is tri-state-shaped (``X | None``/``Optional[...]``) *and*
     whose immediately-preceding comment names one of ``_CASE_B_MARKERS``,
-    scanned across every ``@dataclass`` in every ``model/*.py`` module (not
-    only ``entities.py``/``declarations.py`` — the plan's own review-found
-    correction: eligibility isn't restricted to any one filename pattern).
+    scanned across every ``@dataclass`` in every ``model/**/*.py`` module,
+    recursively (not only ``entities.py``/``declarations.py`` — the plan's
+    own review-found correction: eligibility isn't restricted to any one
+    filename pattern — and not only ``model/``'s immediate children: a
+    nested subpackage like ``model/change_catalog/`` is real today, and a
+    non-recursive scan would silently miss a dataclass declared there;
+    Codex review).
     """
     found: dict[tuple[str, str], tuple[str, int]] = {}
-    for path in sorted(model_dir.glob("*.py")):
+    for path in sorted(model_dir.glob("**/*.py")):
         rel = _rel(path)
         source = _read(path)
         if not source:
@@ -437,7 +441,7 @@ def _model_fact_siblings(
     ``Fact[T]`` sibling does.
     """
     siblings: dict[tuple[str, str], tuple[str, str]] = {}
-    for path in sorted(model_dir.glob("*.py")):
+    for path in sorted(model_dir.glob("**/*.py")):
         rel = _rel(path)
         source = _read(path)
         if not source:

@@ -25,9 +25,9 @@ Phase 5 section for the design this page's data comes from.
 |------|------------|---------------------|-----------|:---------:|:--------:|:----------:|:------------:|:----------:|
 | `Param.is_va_list` | `bool` | clang | persisted | ✅ | — | ✅ | — | ✅ |
 | `RecordType.bases` | `list[str]` | castxml, clang, dwarf | persisted | ✅ | — | ✅ | — | ✅ |
-| `RecordType.is_final` | `bool | None` | castxml, clang | persisted | ✅ | — | ✅ | — | ✅ |
+| `RecordType.is_final` | `bool \| None` | castxml, clang | persisted | ✅ | — | ✅ | — | ✅ |
 | `RecordType.virtual_bases` | `list[str]` | castxml, clang, dwarf | persisted | ✅ | — | ✅ | — | ✅ |
-| `RecordType.vptr_offset_bits` | `int | None` | castxml, clang, dwarf | persisted | ✅ | — | ✅ | — | ✅ |
+| `RecordType.vptr_offset_bits` | `int \| None` | castxml, clang, dwarf | persisted | ✅ | — | ✅ | — | ✅ |
 | `RecordType.vtable` | `list[str]` | castxml, clang, dwarf | persisted | ✅ | — | ✅ | — | ✅ |
 
 ## Reliability-flag coverage (case (a))

@@ -19,6 +19,7 @@ in sync with `abicheck/model/fact_registry.py`."""
 from __future__ import annotations
 
 import importlib.util
+import re
 import sys
 from pathlib import Path
 
@@ -57,3 +58,49 @@ def test_every_unconverted_entry_is_rendered():
     content = gen.render()
     for owner, field in gen.KNOWN_UNCONVERTED_ELIGIBLE_FACTS:
         assert f"`{owner}.{field}`" in content
+
+
+# ---------------------------------------------------------------------------
+# Codex review: a raw `|` inside a table cell (a union value_type like
+# "bool | None") is parsed as an extra GFM column delimiter even inside
+# backticks, shifting every later column in that row.
+# ---------------------------------------------------------------------------
+
+
+def test_table_cell_text_escapes_pipe():
+    gen = _load_gen()
+    assert gen._table_cell_text("bool | None") == "bool \\| None"
+    assert gen._table_cell_text("list[str]") == "list[str]"
+
+
+def test_real_union_value_type_is_escaped_in_rendered_table():
+    gen = _load_gen()
+    content = gen.render()
+    # RecordType.is_final/vptr_offset_bits both register a real union
+    # value_type today -- proves the escape actually reaches the page, not
+    # just the helper in isolation.
+    assert "`bool \\| None`" in content
+    assert "`int \\| None`" in content
+    assert "`bool | None`" not in content
+    assert "`int | None`" not in content
+
+
+def _unescaped_pipe_count(text: str) -> int:
+    """Count real GFM column-delimiter pipes -- an escaped ``\\|`` (what
+    ``_table_cell_text`` produces for a union value_type) is not a
+    delimiter and must not count as one, or this check would be blind to
+    exactly the bug it exists to catch."""
+    return len(re.findall(r"(?<!\\)\|", text))
+
+
+def test_registry_table_rows_have_consistent_cell_count():
+    """The actual invariant the bug broke: an unescaped `|` gives one row
+    more pipe-delimited cells than its header, silently misaligning every
+    later column -- checked structurally rather than by string-matching one
+    known-union row, so any future value_type shape is covered too."""
+    gen = _load_gen()
+    lines = gen._render_registry_table().splitlines()
+    header_pipes = _unescaped_pipe_count(lines[0])
+    assert header_pipes > 0
+    for row in lines[2:]:  # skip the header and the "---" separator row
+        assert _unescaped_pipe_count(row) == header_pipes, row

@@ -59,6 +59,17 @@ def _bool_cell(value: bool) -> str:
     return "✅" if value else "—"
 
 
+def _table_cell_text(text: str) -> str:
+    """Escape a literal ``|`` before interpolating ``text`` into a Markdown
+    table cell (Codex review): GFM table syntax splits a row on every raw
+    ``|`` character, including one inside inline-code backticks — a plain
+    ``` `{value_type}` ``` for a union type like ``bool | None`` (already
+    real today, e.g. ``RecordType.is_final``/``vptr_offset_bits``) silently
+    gains an extra cell and shifts every later column in that row.
+    """
+    return text.replace("|", "\\|")
+
+
 def _render_registry_table() -> str:
     lines = [
         "| Fact | Value type | Producing backends | Lifecycle | Persisted | Identity | Comparable | Suppressible | Reportable |",
@@ -66,8 +77,9 @@ def _render_registry_table() -> str:
     ]
     for entry in sorted(FACT_REGISTRY.entries.values(), key=lambda e: e.id):
         backends = ", ".join(sorted(entry.producing_backends))
+        value_type = _table_cell_text(entry.value_type)
         lines.append(
-            f"| `{entry.id}` | `{entry.value_type}` | {backends} | "
+            f"| `{entry.id}` | `{value_type}` | {backends} | "
             f"{entry.lifecycle.value} | {_bool_cell(entry.persisted)} | "
             f"{_bool_cell(entry.identity_relevant)} | "
             f"{_bool_cell(entry.comparable)} | "
