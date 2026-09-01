@@ -13,14 +13,24 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""``policy.public_surface.PublicSurfaceQuery`` (ADR-063 Phase 3 D5)."""
+"""``policy.public_surface_query.PublicSurfaceQuery`` (ADR-063 Phase 3 D5)."""
 
 from __future__ import annotations
 
-from abicheck.model import AbiSnapshot, Function, RecordType, Variable, Visibility
+from abicheck.model import (
+    AbiSnapshot,
+    Function,
+    Param,
+    RecordType,
+    TypeField,
+    Variable,
+    Visibility,
+)
 from abicheck.model.identity import entity_id_for_function, entity_id_for_variable
-from abicheck.policy.public_surface import PublicSurfaceQuery, resolve_public_surface
-from abicheck.surface import PublicSurface
+from abicheck.model.source_graph import SourceGraphSummary
+from abicheck.policy.public_surface import PublicSurface
+from abicheck.policy.public_surface_closure import resolve_public_surface
+from abicheck.policy.public_surface_query import PublicSurfaceQuery
 
 
 def _fn(name, mangled, vis=Visibility.PUBLIC, entity_id=None):
@@ -113,6 +123,23 @@ class TestPublicSurfaceQueryResolve:
         snap = _snapshot(functions=[fn])
         assert PublicSurfaceQuery.resolve(snap) is None
 
+    def test_a_private_only_entity_id_does_not_mask_unavailable_public_ids(
+        self,
+    ) -> None:
+        # The public declaration's own entity_id carrier is None (resolution
+        # unavailable for it), but an unrelated *private* declaration on the
+        # same snapshot does carry one. A whole-snapshot "does anything have
+        # an entity_id" check would wrongly treat that private-only id as
+        # proof entity-id resolution is available, then silently return an
+        # empty (non-None) set once the loops below find no *public* id to
+        # add -- read downstream as "confirmed zero public surface" instead
+        # of "fall back to the legacy answer" (CodeRabbit review, PR #979).
+        fn_public = _fn("f", "_Z1fv", vis=Visibility.PUBLIC, entity_id=None)
+        eid_hidden = entity_id_for_function((), "g", mangled_name="_Z1gv")
+        fn_hidden = _fn("g", "_Z1gv", vis=Visibility.HIDDEN, entity_id=eid_hidden)
+        snap = _snapshot(functions=[fn_public, fn_hidden])
+        assert PublicSurfaceQuery.resolve(snap) is None
+
     def test_unresolvable_snapshot_returns_none(self) -> None:
         # No declarations at all -> compute_public_surface() itself is
         # unresolvable (surf.resolvable is False) -- same "fall back to
@@ -169,6 +196,114 @@ class TestPublicSurfaceQueryResolve:
         assert eid_rec in ids
 
 
+class TestGraphNodeCollisionDoesNotBlurReachability:
+    """A public, narrow-signature overload and a hidden, private-type-taking
+    overload sharing one demangled name with no mangled name and no
+    resolved ``entity_id`` collide onto the *same* approximate graph node id
+    (``compare.surface_graph``'s own documented fallback). The public
+    overload's own resolved reachability must not inherit the hidden
+    sibling's private parameter type merely because both collapsed onto one
+    graph node -- confirmed to fail against a version of the traversal that
+    trusts the graph's per-node union unconditionally instead of falling
+    back to each declaration's own signature on a detected collision."""
+
+    def test_public_overload_does_not_inherit_hidden_siblings_private_type(
+        self,
+    ) -> None:
+        public_overload = Function(
+            name="over", mangled="", return_type="int", visibility=Visibility.PUBLIC
+        )
+        hidden_overload = Function(
+            name="over",
+            mangled="",
+            return_type="int",
+            params=[Param(name="s", type="Secret *")],
+            visibility=Visibility.HIDDEN,
+        )
+        secret = RecordType(name="Secret", kind="struct")
+        snap = _snapshot(
+            functions=[public_overload, hidden_overload], types=[secret]
+        )
+        surf = resolve_public_surface(snap)
+        assert "Secret" not in surf.public_types
+
+
+def _outer_inner_snapshot() -> AbiSnapshot:
+    """A public function taking ``Outer *``, where ``Outer`` has a field of
+    type ``Inner`` -- ``Inner`` is only transitively reachable through that
+    field, never directly referenced by a declaration."""
+    inner = RecordType(name="Inner", kind="struct")
+    outer = RecordType(
+        name="Outer", kind="struct", fields=[TypeField(name="i", type="Inner")]
+    )
+    fn = Function(
+        name="f",
+        mangled="_Z1fv",
+        return_type="void",
+        params=[Param(name="o", type="Outer *")],
+        visibility=Visibility.PUBLIC,
+    )
+    return _snapshot(functions=[fn], types=[outer, inner])
+
+
+class TestClosureIgnoresSurfaceGraphEntirely:
+    """The closure walk reads :func:`~abicheck.compare.surface_graph.
+    referenced_identifiers_by_node` directly -- a pure function of *snap*'s
+    own current declarations -- and never consults ``snap.surface_graph``'s
+    own node attrs at all (Codex review, PR #979, two rounds: see
+    ``policy.public_surface_closure``'s own module docstring for the full
+    history of why trusting the graph's cached value, in either direction,
+    was unsafe). These tests pin that the resolved surface is identical
+    regardless of what ``snap.surface_graph`` contains -- absent, empty, or
+    outright adversarial."""
+
+    def test_transitively_reachable_type_survives_with_no_graph_at_all(self) -> None:
+        snap = _outer_inner_snapshot()
+        assert snap.surface_graph is None
+        surf = resolve_public_surface(snap)
+        assert "Inner" in surf.public_types
+
+    def test_transitively_reachable_type_survives_an_empty_attached_graph(
+        self,
+    ) -> None:
+        snap = _outer_inner_snapshot()
+        # An L5 graph attached but never run through
+        # build_public_surface_facts -- exactly what
+        # _attach_header_graph's own real behavior looks like.
+        snap.surface_graph = SourceGraphSummary()
+        surf = resolve_public_surface(snap)
+        assert "Inner" in surf.public_types
+
+    def test_an_adversarial_persisted_fact_cannot_hide_a_real_reference(self) -> None:
+        """A crafted/stale ``surface_graph`` node claims ``Outer`` references
+        nothing, at ``high`` confidence -- the highest rank the evidence-merge
+        precedence system has, specifically chosen to outrank anything this
+        module's own (never-registered-here) facts could contribute. Because
+        the closure walk never reads this attrs value at all, the resolved
+        surface is unaffected either way."""
+        from abicheck.compare.surface_graph import node_id_for_type
+        from abicheck.model.graph_facts import GraphNode
+        from abicheck.model.graph_vocabulary import CONF_HIGH
+
+        snap = _outer_inner_snapshot()
+        outer = next(t for t in snap.types if t.name == "Outer")
+        poisoned_id = node_id_for_type(outer.entity_id, outer.name)
+        graph = SourceGraphSummary()
+        graph.add_node(
+            GraphNode(
+                id=poisoned_id,
+                kind="type",
+                confidence=CONF_HIGH,
+                attrs={"referenced_identifiers": [], "identifiers_collision": False},
+            )
+        )
+        snap.surface_graph = graph
+
+        surf = resolve_public_surface(snap)
+
+        assert "Inner" in surf.public_types
+
+
 class TestPublicSurfaceQueryResolvePublicDomain:
     def test_matches_resolve_public_surface(self) -> None:
         fn = _fn("f", "_Z1fv")
@@ -185,3 +320,101 @@ class TestPublicSurfaceQueryResolveExportDomain:
         snap = _snapshot(functions=[_fn("f", "_Z1fv")])
         result = PublicSurfaceQuery.resolve_export_domain(snap)
         assert isinstance(result, ExportSurface)
+
+
+class TestPublicSurfaceBackCompatReexports:
+    """``resolve_public_surface``/``PublicSurfaceQuery`` historically lived
+    directly in ``policy.public_surface`` before this migration split them
+    into sibling modules -- the lazy ``__getattr__`` shim at the bottom of
+    that module must keep the historical import path resolving (Codex
+    review, PR #979)."""
+
+    def test_resolve_public_surface_resolves_via_the_old_import_path(self) -> None:
+        import abicheck.policy.public_surface as old_path
+        from abicheck.policy.public_surface_closure import (
+            resolve_public_surface as moved,
+        )
+
+        assert old_path.resolve_public_surface is moved
+
+    def test_public_surface_query_resolves_via_the_old_import_path(self) -> None:
+        import abicheck.policy.public_surface as old_path
+        from abicheck.policy.public_surface_query import (
+            PublicSurfaceQuery as moved,
+        )
+
+        assert old_path.PublicSurfaceQuery is moved
+
+    def test_public_surface_resolution_is_the_public_surface_alias(self) -> None:
+        import abicheck.policy.public_surface as old_path
+
+        assert old_path.PublicSurfaceResolution is old_path.PublicSurface
+
+    def test_star_import_carries_all_four_historical_names(self) -> None:
+        ns: dict[str, object] = {}
+        exec("from abicheck.policy.public_surface import *", ns)  # noqa: S102
+        for name in (
+            "PublicSurface",
+            "PublicSurfaceQuery",
+            "PublicSurfaceResolution",
+            "resolve_public_surface",
+        ):
+            assert name in ns, name
+
+    def test_unknown_attribute_still_raises_attribute_error(self) -> None:
+        import abicheck.policy.public_surface as old_path
+
+        try:
+            old_path.definitely_not_a_real_attribute
+        except AttributeError:
+            pass
+        else:
+            raise AssertionError("expected AttributeError")
+
+
+class TestResolvePublicSurfaceIsNotIdentityCached:
+    """A real CI perf gate measured a 30-100%+ regression across nearly
+    every ``benchmark_scaling.py`` scenario in an earlier version of this
+    migration that cached the closure walk's graph per ``snap``/``graph``
+    identity -- a typical compare resolves the public surface more than
+    once per side. That cache was reverted before landing: it silently
+    served a stale result once a caller mutated the snapshot in place and
+    queried again, which is a real, already-tested usage pattern (Codex
+    review, PR #979 -- see ``policy.public_surface_closure``'s own module
+    docstring for the full accounting, and ``docs/contribute/known-gaps.md``
+    for why the perf regression itself stayed open before the final,
+    graph-independent design closed it for free). This test pins the
+    correctness requirement directly against the current design
+    (:func:`referenced_identifiers_by_node` is a pure function of *snap*,
+    recomputed on every call, so it structurally cannot go stale) --
+    a future optimization attempt has an immediate, explicit signal if it
+    reintroduces the same hazard."""
+
+    def test_mutating_the_snapshot_between_calls_is_reflected_immediately(
+        self,
+    ) -> None:
+        snap = AbiSnapshot(
+            library="l",
+            version="1",
+            functions=[
+                Function(
+                    name="f",
+                    mangled="_Z1fv",
+                    return_type="void",
+                    params=[Param(name="a", type="A *")],
+                    visibility=Visibility.PUBLIC,
+                )
+            ],
+            types=[RecordType(name="Bystander", kind="struct")],
+            typedefs={"A": "Gone"},
+        )
+
+        first = resolve_public_surface(snap)
+        assert "Bystander" not in first.public_types
+
+        snap.typedefs = {"A": "Here"}
+        snap.types = [RecordType(name="Here", kind="struct")]
+        second = resolve_public_surface(snap)
+
+        assert "Here" in second.public_types
+        assert "Bystander" not in second.public_types

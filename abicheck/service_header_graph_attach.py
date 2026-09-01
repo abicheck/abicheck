@@ -335,15 +335,21 @@ def _attach_header_graph(
     #
     # Deliberately NOT populated with compare/surface_graph.py's own
     # declaration/type/header/symbol facts here: `_attach_header_graph` runs
-    # unconditionally on essentially every real dump (G31 Phase A), and
-    # nothing in this phase's own wiring reads those facts back yet --
-    # `PublicSurfaceQuery.resolve()` reads each declaration's `.entity_id`
-    # directly and delegates domain resolution to `surface.compute_public_
-    # surface()` unchanged (see that module's own docstring for the full
-    # scoping decision). Paying `build_public_surface_facts`'s per-
-    # declaration walk on every dump for a feature with no current reader
+    # unconditionally on essentially every real dump (G31 Phase A). Paying
+    # `build_public_surface_facts`'s per-declaration walk on every dump
     # regressed the header-graph attach-cost perf gate by 47-96% at
-    # realistic sizes (caught by CI on this phase's own PR) -- populating
-    # it is deferred to whichever later phase actually queries the graph.
+    # realistic sizes (caught by CI on this phase's own PR). An earlier
+    # revision of ADR-063 Phase 3 D5's traversal migration deferred that
+    # populate step to a later enrichment call instead, keyed off this same
+    # graph object -- but a further review round found the graph's own
+    # cross-producer evidence-merge precedence could let a stale or
+    # adversarial persisted fact outrank a fresh recomputation, so the final
+    # design (`policy.public_surface_closure.py`'s
+    # `_resolve_public_surface_from_snapshot`) does not read or enrich this
+    # graph at all: it calls `compare/surface_graph.py`'s
+    # `referenced_identifiers_by_node()`, a pure function of the snapshot's
+    # own current declarations, computed fresh on every public/export-domain
+    # surface query (Codex review, PR #979) -- see that module's own
+    # docstring for the full security history.
     snap.surface_graph = graph
     return snap

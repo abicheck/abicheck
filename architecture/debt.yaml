@@ -823,12 +823,12 @@
     },
     {
       "path": "abicheck/export_surface.py",
-      "baseline_lines": 1312,
+      "baseline_lines": 1318,
       "target": "see ADR-061 ownership map",
       "rule": "no_growth",
       "category": "legacy_oversized_module",
       "owner": "abicheck maintainers",
-      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice.",
+      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice. Baseline bumped by 6 lines (ADR-063 Phase 3 D5): the closure-walk helpers this file imports moved from `surface.py` to the new `policy/public_surface.py`/`policy/public_surface_closure.py` pair, and ruff's own import-formatting rules require the resulting two-module import split across more lines than the single prior import block -- a mechanical consequence of the split, not new debt accumulated in this file.",
       "review_by": "2026-11-30"
     },
     {

@@ -9987,7 +9987,173 @@ those facts back yet); `build_public_surface_facts()` stays available for
 a caller that does need them to populate the same shared instance
 explicitly.
 
-**Deliberately not landed.** `surface.py`'s closure-walk traversal and
+**Traversal migration landed (2026-09-01), for the public domain — the
+"deliberately not landed" scope directly below is now stale for that half
+and corrected here rather than silently rewritten (this section's own
+established convention).** `surface.py`'s closure-walk implementation
+(`_index_surface_types`/`_seed_public_roots`/`_walk_type_closure`/
+`_walk_exact_type_closure`/`_record_exact_identities`/
+`_record_nested_in_known_record`/`_record_is_confirmed_public_seed`, plus
+the `PublicSurface` result type itself) moved to a leaf module pair,
+`policy/public_surface.py` (the dataclass + `_index_surface_types`'
+indexing/bookkeeping) and `policy/public_surface_closure.py` (the actual
+walk, plus the real `resolve_public_surface()` entry point) — split purely
+to stay under the 800-line new-file production cap, not a design split.
+`surface.py`'s own copy of every one of those functions is **deleted**, not
+kept alongside; `compute_public_surface()` is now a thin wrapper delegating
+to `policy/public_surface_closure.py` (re-exporting `PublicSurface` for
+existing callers). `export_surface.py`'s own root-seeding (the
+`contract=exports` domain's export-table matching) is unchanged, but its
+final type-closure step calls the *same*, now-migrated `_walk_type_closure`
+it always reused "verbatim" from the header-domain implementation, so that
+domain's closure became graph-native for free, without its own separate
+migration. `PublicSurfaceQuery` itself moved to a third module,
+`policy/public_surface_query.py` — required because it is the one place
+that depends on both the closure module and `export_surface.py` at once,
+and `export_surface.py` now depends on the closure module too, so
+`PublicSurfaceQuery.resolve_export_domain` living inside that same module
+would have closed a real, `check_architecture.py`-detected import cycle
+(a *static*-analysis gate: a deferred, function-body-local import does not
+escape it, only a genuine restructuring does).
+
+The actual "traverse the graph" substitution is narrower than "operate on
+the graph's node/edge set directly" would suggest, for a reason found only
+once a first version of this migration shipped and a regression test
+caught it: `compare/surface_graph.py`'s own node ids can legitimately
+collapse two *distinct* declarations onto one id (two overloads sharing a
+demangled name with no mangled name and no resolved `entity_id` to tell
+them apart is the concrete, tested case) — and naively trusting a
+graph-node-keyed cache of "what does this id reference" for such a
+collision let a *public* overload appear to reference a *hidden* sibling's
+own private parameter type, which a `contract_replay.py` test designed to
+prove the opposite (that the private type stays `PROVEN_OUT_OF_CONTRACT`)
+correctly failed against. Unioning the colliding contributors — the
+over-keep direction that is safe for an *ambiguous type name* — is not safe
+for a *declaration identity* collision, because it attributes one
+declaration's reach to an unrelated one rather than merely widening a
+single declaration's own reach. Fixed by having `compare/surface_graph.py`
+flag such a node (`identifiers_collision`) and having the query fall back
+to recomputing that one declaration's own identifiers directly whenever the
+flag is set (`_referenced_identifiers_for_function`/`_for_variable`/
+`_for_record` in `policy/public_surface_closure.py`) — the pre-migration
+behavior, preserved exactly for the one case the graph's shared-node model
+cannot represent precisely. The declaration/type *indexing* itself
+(`_index_surface_types`, `ambiguous_type_names`, `origin_by_key`) was
+**not** re-pointed at the graph's node set for the identical structural
+reason — see `policy/public_surface.py`'s own module docstring.
+
+A second correctness hazard was found by post-merge review (Codex, PR #979)
+rather than caught before landing — and a more consequential one than it
+first looked, since it hits the *default* dump path rather than an aged
+on-disk format. `service_header_graph_attach._attach_header_graph` installs
+an L5 `surface_graph` on essentially every real dump (G31 Phase A), but
+deliberately never calls `build_public_surface_facts` itself — an earlier
+measurement found paying that per-declaration walk on *every* dump
+regressed the header-graph-attach-cost perf gate 47-96% at realistic sizes,
+so that attach site's own comment always said populating it "is deferred to
+whichever later phase actually queries the graph." `resolve_surface_graph_
+nodes()`'s `graph is None` check alone never triggered a rebuild for such an
+already-attached graph, so it was trusted as-is and every lookup against its
+un-stamped nodes silently read as "references nothing," collapsing the
+transitive closure on the ordinary, default `--scope-public-headers` path —
+not a stale-schema corner case, the common one. (A first fix attempt reached
+for the file's own established schema-version-gated reliability-flag
+pattern, e.g. `header_cv_facts_reliable` — that closes only the narrower
+"persisted pre-migration snapshot" shape of this same defect and does
+nothing for a fresh, never-serialized snapshot straight out of
+`_attach_header_graph`, since such an object's flag would default `True`
+with no schema version to gate on; reverted before landing once the
+broader defect was understood.) Fixed at the actual deferral point instead:
+`resolve_surface_graph_nodes()` now always calls `build_public_surface_facts`
+on the resolved graph, not only when it was `None`. That call is idempotent
+and evidence-preserving (`SourceGraphSummary.add_node`/`add_edge` merge a
+second registration's facts rather than replacing them), so it enriches an
+already-attached graph's existing nodes in place — never discarding
+`_attach_header_graph`'s own L5 edges/facts — and this *is* the "later
+phase" that attach site's docstring always deferred the cost to, so no new
+per-dump cost is introduced; the cost only lands when a caller actually
+resolves a public/export-domain surface, exactly as before this traversal
+existed at all. `TestUnpopulatedAttachedGraphIsBackfilled` and
+`TestStrippedGraphAttrsAreReconstructedNotTrusted` in
+`tests/test_policy_public_surface.py` cover, respectively, the real
+`_attach_header_graph` shape (a graph attached but never run through
+`build_public_surface_facts`) and a stripped-attrs shape, each confirming a
+type only transitively reachable through such a graph survives.
+
+**Superseded (2026-09-01) by a third round that removed the graph from
+this computation entirely, rather than trying to make trusting it safe —
+the paragraph above is preserved for its own history, but its
+`resolve_surface_graph_nodes()`-enrichment design is no longer what ships.**
+A second Codex security review found that even the enrichment fix above
+was not sufficient: `GraphNode.attrs` are derived through
+`model.graph_facts`' cross-producer evidence-merge machinery, which
+resolves a same-key disagreement between two registrations by
+confidence/producer/content precedence — correct for genuinely independent
+producer facts, wrong for `referenced_identifiers`/`identifiers_collision`
+specifically, since they have exactly one legitimate source (the
+snapshot's own current declarations) and no legitimate second producer to
+reconcile evidence with. A schema-v29 or otherwise untrusted/adversarial
+snapshot could carry a stale or crafted `referenced_identifiers` fact at a
+confidence this module's own freshly-registered fact (always
+`CONF_UNKNOWN`, the lowest rank) cannot outrank, so the enrichment fix's
+own fresh, correct recomputation could still silently lose to a poisoned
+persisted value — the identical collapsed-closure failure mode as the
+paragraph above, reached through its own fix instead of around it. This
+also explains the real, separately-measured performance regression against
+`scripts/benchmark_scaling.py`'s "Baseline regression (PR vs base)" gate
+that `resolve_surface_graph_nodes()`'s unconditional enrichment introduced:
+building real `GraphNode`/`GraphFact` objects for every declaration, twice
+per compare (once per side, since `checker.compare()` defaults
+`scope_to_public_surface=True`), carries meaningfully more overhead than
+the deleted regex-based re-parse it replaced. An identity-keyed cache was
+tried to close that regression specifically and reverted: it broke
+`tests/test_export_surface.py::TestUnresolvedTypeEdges::
+test_a_scope_lost_alias_key_is_followed_to_its_target`, which mutates a
+snapshot's `typedefs`/`types` in place between two calls and correctly
+expects the second to see the new content — an identity-keyed cache
+silently served the stale first result instead.
+
+The actual fix needed no merge-precedence override and no cache:
+`compare/surface_graph.py`'s `referenced_identifiers_by_node()` (renamed
+public, alongside its `ReferencedIdentifiers` return type) was already a
+pure function of the snapshot's own declarations, computed *before* any
+`GraphNode` is built. `policy/public_surface_closure.py` and
+`export_surface.py`'s closure-walk entry points now call it directly and
+thread the result through (`_referenced_identifiers`/
+`_node_identifiers_or_collision`/`_seed_public_roots`/`_walk_type_closure`/
+`_walk_exact_type_closure` all take a `ReferencedIdentifiers` now, not a
+`dict[str, GraphNode]`), never touching `snap.surface_graph` or
+`GraphNode.attrs` at all. `resolve_surface_graph_nodes()` had no remaining
+caller once both sites switched and was deleted rather than kept as unused
+surface — along with its own regression tests, replaced by
+`TestClosureIgnoresSurfaceGraphEntirely` (three cases: no graph at all, an
+empty attached graph, and a deliberately adversarial high-confidence
+poisoned fact) and `TestResolvePublicSurfaceIsNotIdentityCached` in
+`tests/test_policy_public_surface.py`. Removing the graph from the
+computation also removed essentially all of the `GraphNode`/`GraphFact`
+construction cost from the hot path as a direct consequence — an ad hoc
+local re-run of `scripts/benchmark_scaling.py` after this change showed
+the previously-regressed scenarios back in line with the pre-migration
+baseline, confirmed by CI itself: the `Performance` workflow's own
+"Baseline regression (PR vs base)" job (PR #979, commit `5544540`)
+completed with `conclusion: success`, the gate's own noise-controlled
+PR-vs-base measurement.
+
+Deliberately still not migrated: `export_surface.py`'s own root-seeding
+(the export-table-matching logic itself, as opposed to the type-closure
+step it shares with the header domain) and
+`type_reachability.directly_referenced_stdlib_types()` (unchanged reason:
+reclassifying `type_reachability.py` into `policy` would introduce a
+genuine new `policy -> extract` violation), and `compare/surface_graph.py`'s
+node-id-namespace unification with `buildsource/header_graph.py`'s L5 ids
+remains open, exactly as the paragraph below already described. FP-rate
+gate and per-tier accuracy gate both show zero regression against this
+migration.
+
+**Deliberately not landed** (original text below, now correct only for
+the residuals named above — the "not deleted, delegates to both unchanged"
+framing no longer describes the public domain; see the corrected paragraph
+just above). `surface.py`'s closure-walk traversal and
 `export_surface.py`'s independent one are **not deleted** —
 `PublicSurfaceQuery` delegates to both unchanged rather than reimplementing
 either as a literal graph traversal. This was a scoped, documented risk
@@ -11355,20 +11521,26 @@ spellings — the type-kind id silently excluded from the root set, not
 attempted-and-failed — confirmed to fail against a version of
 `public_roots()` that maps every received id unconditionally.
 
-**Acceptance criteria.** `surface.py`'s own traversal implementation and
-`export_surface.py`'s independent closure walk are deleted, not kept
-alongside the graph query (the actual removal happens in Phase 10's
-checklist, but this phase's own PR is incomplete if it leaves both
-implementations live past one release). No second node/edge dataclass
-hierarchy exists anywhere in the repository after this phase —
-`compare/surface_graph.py` constructs `model.graph.GraphNode`/`GraphEdge`
-instances with its own kind vocabulary, the same way `buildsource/
-source_graph.py` already does, never a parallel type. The new
-`AbiSnapshot.surface_graph` field bumps `serialization.SCHEMA_VERSION`
-the same way Phase 0's `Fact[...]` fields do (a third, independent bump
-by this plan, on top of Phase 0's and Phase 7's — all three are additive
-and bump the same pre-existing `AbiSnapshot`/report-schema counters, not
-ADR-062's `ProjectSnapshot` schema). FP-rate gate shows no regression.
+**Acceptance criteria.** `surface.py`'s own traversal implementation is
+**deleted, not kept alongside the graph query** — landed 2026-09-01, see
+this phase's own "Traversal migration landed" paragraph above. `export_
+surface.py`'s independent closure walk is not a *second* implementation to
+separately delete: it always called `surface.py`'s `_walk_type_closure`
+verbatim rather than keeping its own copy, so once that one function
+migrated, both domains' closures did. What's still open there is narrower
+than "delete a closure walk" — `export_surface.py`'s own root-*seeding*
+(the export-table-matching logic, genuinely independent of the header
+domain) remains unmigrated, named explicitly as a residual rather than
+silently left. No second node/edge dataclass hierarchy exists anywhere in
+the repository after this phase — `compare/surface_graph.py` constructs
+`model.graph_facts.GraphNode`/`GraphEdge` instances with its own kind
+vocabulary, the same way `buildsource/source_graph.py` already does, never
+a parallel type. The new `AbiSnapshot.surface_graph` field bumps
+`serialization.SCHEMA_VERSION` the same way Phase 0's `Fact[...]` fields do
+(a third, independent bump by this plan, on top of Phase 0's and Phase 7's
+— all three are additive and bump the same pre-existing `AbiSnapshot`/
+report-schema counters, not ADR-062's `ProjectSnapshot` schema). FP-rate
+gate and per-tier accuracy gate both show no regression.
 
 ---
 

@@ -45,7 +45,7 @@ field existed carries no top-level ``surface_graph`` key at all; its nested
 it always was, independent of this codec) is never promoted to
 ``AbiSnapshot.surface_graph`` — that graph predates the public-surface
 builder and was never populated with the edges
-``policy.public_surface.PublicSurfaceQuery`` traverses, so treating it as
+``policy.public_surface_query.PublicSurfaceQuery`` traverses, so treating it as
 usable would silently skip the intentional approximate-backfill path in
 favor of a graph that resolves to a *smaller* surface than either the
 backfill or the pre-Phase-3 flat-snapshot traversal would. ``surface_graph``
