@@ -101,6 +101,19 @@ class TestParseBundleFactsLibraryOverrides:
         with pytest.raises(BundleFactsLibraryOverridesError, match="unrecognized"):
             parse_bundle_facts_library_overrides({"libfoo.so": {"bogus": 1}})
 
+    def test_empty_entry_is_rejected(self) -> None:
+        """Codex review: an empty entry (``libfoo.so: {}``) is a
+        syntactically valid mapping that adds this library to none of
+        headers/includes/compile_by_library -- it would otherwise be
+        silently accepted and invisible to every later check keyed off
+        those output maps (e.g. bundle_side_input.py's matched-library
+        validation), with no signal the requested override was never
+        applied to anything."""
+        with pytest.raises(
+            BundleFactsLibraryOverridesError, match="at least one override field"
+        ):
+            parse_bundle_facts_library_overrides({"libfoo.so": {}})
+
     def test_non_string_key_is_rejected_cleanly_not_a_raw_typeerror(self) -> None:
         """Codex review: a YAML mapping can carry a non-string key (e.g. a
         bare integer); the unrecognized-key check's own ``sorted(unknown)``

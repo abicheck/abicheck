@@ -267,6 +267,28 @@ def parse_bundle_facts_library_overrides(
                 f"per-library override manifest.{name}: must be a mapping, "
                 f"got {type(entry).__name__}"
             )
+        if not entry:
+            # Codex review, fresh evidence: an empty entry (`libfoo.so: {}`)
+            # is a syntactically valid mapping that adds this library to
+            # none of headers/includes/compile_by_library below -- it is
+            # therefore invisible to every later check keyed off those
+            # maps (this parser's own "known library" membership check
+            # inspects *raw manifest names*, not the output maps, so it
+            # still catches a typo'd name here -- but bundle_side_input.
+            # py's matched-library validation only ever sees the keys of
+            # the returned maps, so a library that's absent from OLD_FACTS
+            # or NEW_INPUT and named only by an empty entry would silently
+            # never be flagged, and the comparison would just apply every
+            # uniform fallback with no signal the requested override was
+            # never applied to anything).
+            raise BundleFactsLibraryOverridesError(
+                f"per-library override manifest.{name}: must specify at "
+                "least one override field (headers/includes/gcc_path/"
+                "gcc_prefix/gcc_options/sysroot/nostdinc/frontend/"
+                "frontend_context) -- an empty entry contributes nothing "
+                "and would silently behave as if this library were absent "
+                "from the manifest"
+            )
         non_str_keys = [k for k in entry if not isinstance(k, str)]
         if non_str_keys:
             # Codex review: a YAML mapping can carry a non-string key (e.g.

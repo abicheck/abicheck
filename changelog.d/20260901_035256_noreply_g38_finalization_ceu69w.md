@@ -55,3 +55,10 @@ it should read in CHANGELOG.md. Delete the other sections.
   unhandled `OSError` after the primary report had already been written.
   Wrapped in the same `OSError` → clean CLI error translation the rest of
   this command's output writing already uses.
+- **`--bundle-facts-library-manifest` rejects an empty per-library entry**
+  — a manifest entry with no override fields (`libfoo.so: {}`) was silently
+  accepted but added the library to none of the parsed override maps,
+  making it invisible to the matched-library validation above; a
+  comparison would silently apply every uniform fallback with no signal
+  the requested override was never applied. Such an entry is now rejected
+  up front.
