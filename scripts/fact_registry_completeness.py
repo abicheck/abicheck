@@ -40,6 +40,20 @@ each closing a different way a registry could go silently stale:
    since been converted, is a stale baseline entry and fails too — shrink
    it rather than leaving dead weight (the same rule
    ``IMPORT_CYCLE_ALLOWLIST`` states for itself in AGENTS.md).
+4. Every registry entry with ``persisted=True`` is actually reachable from
+   both ``storage/fact_codec.py``'s encode path (``encode_fact_fields``)
+   and its decode path (``decode_record_facts``/a same-shaped
+   ``decode_fact(...)`` call in ``serialization.py`` for the one
+   non-``RecordType``-owned field, ``Param.is_va_list_fact``) — closing a
+   real gap a Codex review round found directions 1-2 above miss entirely:
+   they only compare model attribute *names* against registry keys, so a
+   registry entry claiming ``persisted=True`` with no matching encode/
+   decode wiring at all would still pass. Textual (the exact ``fact_attr``
+   string literal must appear in the combined source of both files), not a
+   full data-flow proof — the same "no type inference, textual signal"
+   stance this scan's own case-(b) heuristic already takes — but real: it
+   fails on the exact scenario the review named (a new ``Fact[T]``
+   sibling + registry entry landing with no ``fact_codec.py`` change).
 
 **Case (b) heuristic, stated precisely.** A field is a case-(b) candidate
 when its annotation textually contains ``| None`` (or ``Optional[``) *and*
@@ -64,6 +78,7 @@ first and independently of the annotation-shape heuristic below.
 from __future__ import annotations
 
 import ast
+import re
 import sys
 from pathlib import Path
 from typing import Protocol
@@ -264,6 +279,37 @@ def _model_fact_siblings() -> dict[tuple[str, str], str]:
     return siblings
 
 
+#: Files that together carry every existing encode/decode wiring for a
+#: persisted ``Fact[T]`` sibling — ``storage/fact_codec.py`` owns the
+#: ``RecordType``-shaped ones (``_TYPE_FACT_KEYS``/``decode_record_facts``)
+#: and the one hardcoded ``Param.is_va_list_fact`` encode line;
+#: ``serialization.py`` owns that same field's ``decode_fact(...)`` call
+#: site (Codex review: direction 4 below).
+_PERSISTENCE_WIRING_FILES: tuple[Path, ...] = (
+    PKG / "storage" / "fact_codec.py",
+    PKG / "serialization.py",
+)
+
+
+def _persisted_fact_attr_occurrences() -> dict[str, int]:
+    """``{fact_attr: count}`` — how many times each ``"<fact_attr>"`` string
+    literal appears across :data:`_PERSISTENCE_WIRING_FILES`.
+
+    Purely textual (a quoted-string count, not a data-flow proof) — the
+    same "no type inference" stance this module's own case-(b) heuristic
+    already takes. A field with real encode + decode wiring appears at
+    least twice (verified against every one of today's six persisted
+    entries, each with three or four occurrences); a field with none of
+    that wiring appears zero or one times.
+    """
+    combined = "\n".join(_read(p) for p in _PERSISTENCE_WIRING_FILES)
+    counts: dict[str, int] = {}
+    for match in re.finditer(r'"([A-Za-z_][A-Za-z0-9_]*_fact)"', combined):
+        name = match.group(1)
+        counts[name] = counts.get(name, 0) + 1
+    return counts
+
+
 def check_fact_registry_completeness(f: Findings) -> None:
     """ERROR on any of the three directions this module's docstring states.
 
@@ -343,6 +389,27 @@ def check_fact_registry_completeness(f: Findings) -> None:
                 f"{field_name}_fact sibling — remove the stale allowlist "
                 f"entry (shrink-only, per this repo's allowlist "
                 f"convention)",
+            )
+
+    # Direction 4: a persisted entry must actually be wired into
+    # storage/fact_codec.py's (or serialization.py's) encode/decode path.
+    occurrences = _persisted_fact_attr_occurrences()
+    for entry in FACT_REGISTRY.entries.values():
+        if not entry.persisted:
+            continue
+        count = occurrences.get(entry.fact_attr, 0)
+        if count < 2:
+            f.err(
+                "fact-registry-completeness",
+                f"{entry.id}: registered with persisted=True, but "
+                f"{entry.fact_attr!r} appears only {count} time(s) across "
+                f"storage/fact_codec.py + serialization.py — a real "
+                f"encode path AND a real decode path both need to "
+                f"reference it (see storage/fact_codec.py's "
+                f"_TYPE_FACT_KEYS/decode_record_facts, or the "
+                f"Param.is_va_list_fact pattern for a non-RecordType "
+                f"owner) or this snapshot field silently fails to "
+                f"round-trip",
             )
 
 

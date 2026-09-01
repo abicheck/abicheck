@@ -41,8 +41,10 @@ _REPO_ROOT = Path(__file__).resolve().parent.parent
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
+import scripts.fact_registry_completeness as fact_registry_completeness  # noqa: E402
 from scripts.fact_registry_completeness import (  # noqa: E402
     _model_fact_siblings,
+    _persisted_fact_attr_occurrences,
     check_fact_registry_completeness,
     scan_model_dataclasses,
 )
@@ -355,3 +357,61 @@ class TestReferenceFlagCoverage:
         owners = {owner for owner, _ in pairs}
         assert owners == {"Function", "Variable", "TypeField", "RecordType", "EnumType"}
         assert ("EnumType", "is_scoped") in pairs
+
+
+# ---------------------------------------------------------------------------
+# Direction 4 (Codex review): a persisted registry entry must actually be
+# wired into storage/fact_codec.py's encode/decode path, not merely named
+# in the registry with a matching model field.
+# ---------------------------------------------------------------------------
+
+
+class TestPersistedEncodeDecodeWiring:
+    def test_real_repo_every_persisted_entry_has_real_wiring(self) -> None:
+        occurrences = _persisted_fact_attr_occurrences()
+        for entry in FACT_REGISTRY.entries.values():
+            if entry.persisted:
+                assert occurrences.get(entry.fact_attr, 0) >= 2, (
+                    f"{entry.id} claims persisted=True but "
+                    f"{entry.fact_attr!r} has no real encode+decode wiring"
+                )
+
+    def test_counts_quoted_occurrences_across_both_files(self, tmp_path: Path) -> None:
+        codec = tmp_path / "fact_codec.py"
+        codec.write_text('_TYPE_FACT_KEYS = ("widget_fact",)\n')
+        serialization = tmp_path / "serialization.py"
+        serialization.write_text('decode_fact(t.get("widget_fact"), v)\n')
+        original = fact_registry_completeness._PERSISTENCE_WIRING_FILES
+        fact_registry_completeness._PERSISTENCE_WIRING_FILES = (codec, serialization)
+        try:
+            occurrences = _persisted_fact_attr_occurrences()
+        finally:
+            fact_registry_completeness._PERSISTENCE_WIRING_FILES = original
+        assert occurrences["widget_fact"] == 2
+
+    def test_gate_flags_a_persisted_entry_with_no_wiring(self, tmp_path: Path) -> None:
+        """The gate's own detection logic fires when a registry entry claims
+        persisted=True for a real model field whose Fact[T] sibling has no
+        encode/decode wiring anywhere — the exact gap a Codex review round
+        found directions 1-2 (name matching alone) cannot catch."""
+        empty_codec = tmp_path / "fact_codec.py"
+        empty_codec.write_text("# no wiring here\n")
+        empty_serialization = tmp_path / "serialization.py"
+        empty_serialization.write_text("# no wiring here either\n")
+        original = fact_registry_completeness._PERSISTENCE_WIRING_FILES
+        fact_registry_completeness._PERSISTENCE_WIRING_FILES = (
+            empty_codec,
+            empty_serialization,
+        )
+        try:
+            findings = _LocalFindings()
+            check_fact_registry_completeness(findings)
+        finally:
+            fact_registry_completeness._PERSISTENCE_WIRING_FILES = original
+        # RecordType.is_final is a real, persisted=True registry entry --
+        # with the wiring files swapped out for empty ones, its own
+        # is_final_fact wiring is now invisible, and the gate must say so.
+        assert any(
+            "RecordType.is_final" in msg and "persisted=True" in msg
+            for _, msg in findings.errors
+        )

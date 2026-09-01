@@ -37,6 +37,19 @@ for the full design discussion this module implements, including the
 review-corrected eligibility rule ("field-based with an optional
 availability source", not "one of the three annotation shapes Phase 0
 happened to use").
+
+**Why this lives in `model/` (Codex review).** `model/AGENTS.md`'s own
+Purpose section says this package "answers 'what is this fact' and never
+'how was it produced'" — and ``FactDefinition.producing_backends`` looks,
+read narrowly, like exactly that second question. It is admitted under
+the same test ``change_catalog/`` already passes there (see that file's
+own "second deliberate, ADR-063 D7-sanctioned exception" entry):
+``producing_backends`` is closed, fixed-vocabulary *data*
+(:data:`KNOWN_PRODUCING_BACKENDS`), not the *code* that extracts a fact —
+this module has zero first-party imports beyond ``model/`` itself. The
+real extraction logic stays in ``extract/``; this registry only records
+which of the flags ``AbiSnapshot.ast_producer``/``platform`` already
+carry elsewhere in this same package apply to a given fact.
 """
 
 from __future__ import annotations
@@ -98,6 +111,21 @@ LIFECYCLE_ORDER: tuple[FactLifecycle, ...] = (
 #: ``FactRegistry`` validates every entry's ``producing_backends`` against
 #: this set — a typo'd or invented backend name fails at import time
 #: rather than silently documenting a producer that doesn't exist.
+#:
+#: Deliberately excludes ``"hybrid"`` (Codex review), even though
+#: ``AbiSnapshot.ast_producer`` can legitimately read that value
+#: (``--ast-frontend hybrid``, ``dumper_hybrid.merge_snapshots()``):
+#: ``"hybrid"`` is a snapshot-level *merge mode*, not a third fact
+#: producer alongside castxml/clang — the real per-fact producer on such a
+#: snapshot is still ``"castxml"`` or ``"clang"`` (whichever the merge
+#: kept for that declaration), recorded per-declaration by
+#: ``fact_provenance.py``. Mirrors ``backend_capabilities.py``'s own
+#: identical stance for its own hybrid column: derived from the two real
+#: backends' own capability, never hand-typed as a third one. A fact
+#: legitimately producible under a hybrid merge is fully described by
+#: naming the real backend(s) that produce it — ``("castxml", "clang")``
+#: already covers a hybrid snapshot's own castxml-sourced or
+#: clang-backfilled value for that fact.
 KNOWN_PRODUCING_BACKENDS: frozenset[str] = frozenset(
     {"castxml", "clang", "dwarf", "pdb", "btf", "ctf", "elf", "pe", "macho"}
 )
