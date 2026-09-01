@@ -473,6 +473,45 @@ class TestCompareOldBundleFacts:
         assert not (tmp_path / "evil.json").exists()
         assert (output_dir / "evil.json").exists()
 
+    def test_output_dir_collision_with_primary_output_is_rejected(
+        self, tmp_path: Path
+    ) -> None:
+        """Codex review: --output-dir's per-library filename
+        (`{diff.library}.json`) is known up front from OLD_FACTS -- when it
+        collides with -o/--output's own path, the primary report (written
+        first) was silently clobbered by the per-library write (written
+        second) with no signal either artifact was lost. Reject the
+        collision before any artifact is written instead."""
+        old_dir = tmp_path / "old"
+        new_dir = tmp_path / "new"
+        old_dir.mkdir()
+        new_dir.mkdir()
+        body = "int add(int a, int b) { return a + b; }\n"
+        _build_so(old_dir, "libreal.so", body)
+        _build_so(new_dir, "libreal.so", body)
+        facts_path = _write_old_facts(
+            tmp_path, old_dir, old_dir / "libreal.so", "libreal.so"
+        )
+        output_dir = tmp_path / "reports"
+        colliding_output = output_dir / "libreal.so.json"
+
+        code, out = _invoke(
+            "compare",
+            str(facts_path),
+            str(new_dir),
+            "--old-bundle-facts",
+            "--output-dir",
+            str(output_dir),
+            "-o",
+            str(colliding_output),
+            "--format",
+            "json",
+        )
+
+        assert code == 64, out
+        assert "collide" in out
+        assert not colliding_output.exists()
+
 
 @pytest.mark.integration
 class TestBundleFactsLibraryManifest:

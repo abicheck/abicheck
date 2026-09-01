@@ -408,8 +408,40 @@ def dispatch(*, compile_context: Any, **kwargs: Any) -> None:
     # write failure into a concise ClickException instead.
     from ..runtime import _safe_write_output
 
-    text = _render(result, fmt, old_facts_path=old_facts_path, new_dir=new_dir)
     output = kwargs.get("output")
+    output_dir = kwargs.get("output_dir")
+    if output_dir is not None:
+        output_dir = Path(output_dir)
+        # Codex review: --output-dir's per-library filenames
+        # (`{safe_name}.json`, derived from diff.library below) are known
+        # up front -- reject a collision with -o/--output or --write's own
+        # secondary_output *before* any artifact is written, rather than
+        # letting whichever write happens to run second silently clobber
+        # the first (the primary/secondary writes below run before this
+        # loop, so a collision would otherwise overwrite one of them with
+        # no signal anything was lost).
+        reserved_paths = {
+            p.resolve()
+            for p in (
+                Path(output) if output is not None else None,
+                Path(secondary_output) if secondary_output is not None else None,
+            )
+            if p is not None
+        }
+        if reserved_paths:
+            for diff in result.per_library:
+                safe_name = Path(diff.library).name or "library"
+                target = (output_dir / f"{safe_name}.json").resolve()
+                if target in reserved_paths:
+                    raise click.UsageError(
+                        f"--output-dir {output_dir}: the per-library report "
+                        f"for {diff.library!r} would be written to "
+                        f"{target}, which collides with -o/--output or "
+                        "--write's own output path -- choose a different "
+                        "--output-dir, or a different -o/--write path"
+                    )
+
+    text = _render(result, fmt, old_facts_path=old_facts_path, new_dir=new_dir)
     if output is not None:
         _safe_write_output(Path(output), text)
     else:
@@ -424,7 +456,6 @@ def dispatch(*, compile_context: Any, **kwargs: Any) -> None:
             result, secondary_fmt, old_facts_path=old_facts_path, new_dir=new_dir
         )
         _safe_write_output(Path(secondary_output), secondary_text)
-    output_dir = kwargs.get("output_dir")
     if output_dir is not None:
         # Codex review: NEW_INPUT is a release-style operand here, so
         # --output-dir's own per-library-report contract applies -- the
@@ -434,7 +465,6 @@ def dispatch(*, compile_context: Any, **kwargs: Any) -> None:
         # producing nothing.
         from ....reporter import to_json
 
-        output_dir = Path(output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
         for diff in result.per_library:
             # Codex review: `diff.library` originates in OLD_FACTS -- a
