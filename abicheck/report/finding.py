@@ -68,28 +68,25 @@ def build_report_findings(
     the same values a caller would have passed to either function directly
     (typically ``result.policy``/``result._effective_kind_sets()``/
     ``result.policy_file``) so the resolved verdict/category agree with
-    what the rest of the report already computes.
+    what the rest of the report already computes. Each change's verdict is
+    resolved once and handed to ``classify_effective_change`` rather than
+    left for it to re-derive internally (Codex review).
     """
-    return tuple(
-        ReportFinding(
-            change=change,
-            verdict=effective_verdict_for_change(
-                change,
-                policy=policy,
-                kind_sets=kind_sets,
-                policy_file=policy_file,
-                today=today,
-            ),
-            category=classify_effective_change(
-                change,
-                policy=policy,
-                kind_sets=kind_sets,
-                policy_file=policy_file,
-                today=today,
-            ),
+    findings = []
+    for change in changes:
+        verdict = effective_verdict_for_change(
+            change, policy=policy, kind_sets=kind_sets, policy_file=policy_file, today=today,
         )
-        for change in changes
-    )
+        category = classify_effective_change(
+            change,
+            policy=policy,
+            kind_sets=kind_sets,
+            policy_file=policy_file,
+            today=today,
+            verdict=verdict,
+        )
+        findings.append(ReportFinding(change=change, verdict=verdict, category=category))
+    return tuple(findings)
 
 
 def findings_by_change_id(
