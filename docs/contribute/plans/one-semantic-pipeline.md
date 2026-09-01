@@ -9629,27 +9629,43 @@ cannot represent precisely. The declaration/type *indexing* itself
 **not** re-pointed at the graph's node set for the identical structural
 reason — see `policy/public_surface.py`'s own module docstring.
 
-A second correctness hazard was found by post-merge review (PR #979) rather
-than caught before landing: a *persisted* `surface_graph` from the
-schema-v29 plumbing (landed one version before this traversal started
-reading it) is already non-`None`, so `resolve_surface_graph_nodes()`'s
-`graph is None` check alone never triggered a rebuild for such a snapshot —
-but its nodes predate the `referenced_identifiers`/`identifiers_collision`
-attrs entirely, so every lookup against them silently read as "references
-nothing," collapsing the transitive closure for any snapshot round-tripped
-through an abicheck between the two schema versions. Fixed the same way
-every other "real but stale, not merely absent" fact in `serialization.py`
-is: `SCHEMA_VERSION` bumped to 30, and a new `AbiSnapshot.surface_graph_
-referenced_identifiers_reliable` flag (mirroring `header_cv_facts_reliable`'s
-own explicit-key-wins-else-derive-from-schema_version shape) marks a
-pre-v30 persisted graph unreliable, so `resolve_surface_graph_nodes()`
-rebuilds it in memory (never persisting the rebuild back onto the loaded
-object) instead of trusting the stale one.
-`TestStalePersistedGraphIsNotTrustedForReachability` in
-`tests/test_policy_public_surface.py` builds a real graph, strips the two
-attrs to simulate a v29 snapshot, and confirms a type only reachable
-through the stale node survives once the flag is set correctly (and is
-lost if it isn't — the test's own negative-control half).
+A second correctness hazard was found by post-merge review (Codex, PR #979)
+rather than caught before landing — and a more consequential one than it
+first looked, since it hits the *default* dump path rather than an aged
+on-disk format. `service_header_graph_attach._attach_header_graph` installs
+an L5 `surface_graph` on essentially every real dump (G31 Phase A), but
+deliberately never calls `build_public_surface_facts` itself — an earlier
+measurement found paying that per-declaration walk on *every* dump
+regressed the header-graph-attach-cost perf gate 47-96% at realistic sizes,
+so that attach site's own comment always said populating it "is deferred to
+whichever later phase actually queries the graph." `resolve_surface_graph_
+nodes()`'s `graph is None` check alone never triggered a rebuild for such an
+already-attached graph, so it was trusted as-is and every lookup against its
+un-stamped nodes silently read as "references nothing," collapsing the
+transitive closure on the ordinary, default `--scope-public-headers` path —
+not a stale-schema corner case, the common one. (A first fix attempt reached
+for the file's own established schema-version-gated reliability-flag
+pattern, e.g. `header_cv_facts_reliable` — that closes only the narrower
+"persisted pre-migration snapshot" shape of this same defect and does
+nothing for a fresh, never-serialized snapshot straight out of
+`_attach_header_graph`, since such an object's flag would default `True`
+with no schema version to gate on; reverted before landing once the
+broader defect was understood.) Fixed at the actual deferral point instead:
+`resolve_surface_graph_nodes()` now always calls `build_public_surface_facts`
+on the resolved graph, not only when it was `None`. That call is idempotent
+and evidence-preserving (`SourceGraphSummary.add_node`/`add_edge` merge a
+second registration's facts rather than replacing them), so it enriches an
+already-attached graph's existing nodes in place — never discarding
+`_attach_header_graph`'s own L5 edges/facts — and this *is* the "later
+phase" that attach site's docstring always deferred the cost to, so no new
+per-dump cost is introduced; the cost only lands when a caller actually
+resolves a public/export-domain surface, exactly as before this traversal
+existed at all. `TestUnpopulatedAttachedGraphIsBackfilled` and
+`TestStrippedGraphAttrsAreReconstructedNotTrusted` in
+`tests/test_policy_public_surface.py` cover, respectively, the real
+`_attach_header_graph` shape (a graph attached but never run through
+`build_public_surface_facts`) and a stripped-attrs shape, each confirming a
+type only transitively reachable through such a graph survives.
 
 Deliberately still not migrated: `export_surface.py`'s own root-seeding
 (the export-table-matching logic itself, as opposed to the type-closure

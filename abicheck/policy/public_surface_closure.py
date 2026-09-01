@@ -519,13 +519,10 @@ def _record_is_confirmed_public_seed(
 
 
 def resolve_surface_graph_nodes(snap: AbiSnapshot) -> dict[str, GraphNode]:
-    """``snap.surface_graph``'s nodes, keyed by id -- lazily backfilling an
-    approximate, in-memory-only graph for a snapshot that predates
-    ``AbiSnapshot.surface_graph`` (schema < 29), or whose persisted graph
-    predates its nodes carrying reliable ``referenced_identifiers``/
-    ``identifiers_collision`` attrs (schema < 30 --
-    ``AbiSnapshot.surface_graph_referenced_identifiers_reliable``), never
-    persisted back onto *snap* either way.
+    """``snap.surface_graph``'s nodes, keyed by id -- always ensuring
+    :func:`build_public_surface_facts` has populated the returned graph's
+    ``referenced_identifiers``/``identifiers_collision`` node attrs, rather
+    than trusting whatever ``snap.surface_graph`` already is.
 
     The one place every ADR-063 Phase 3 traversal (this module's own public-
     domain closure, and ``export_surface.py``'s export-domain closure, which
@@ -534,30 +531,50 @@ def resolve_surface_graph_nodes(snap: AbiSnapshot) -> dict[str, GraphNode]:
     are handled identically rather than each reimplementing the ``None``
     check.
 
-    The reliability check matters because a schema-v29 snapshot's
-    ``surface_graph`` is already non-``None`` -- D5's plumbing persisted the
-    graph one schema version before this module's traversal started reading
-    the two node attrs above -- so trusting it unconditionally would read
+    This always-populate step is not optional, because ``snap.surface_graph``
+    being non-``None`` does **not** mean it already carries these two attrs.
+    ``service_header_graph_attach._attach_header_graph`` runs on essentially
+    every real dump and unconditionally installs an L5
+    ``SourceGraphSummary`` as ``snap.surface_graph`` -- but deliberately
+    *without* calling :func:`build_public_surface_facts` itself (that
+    builder's own docstring: "populating it is deferred to whichever later
+    phase actually queries the graph" -- G31 Phase A measured a 47-96%
+    header-graph-attach-cost regression from paying that walk on *every*
+    dump, whether or not a surface query ever follows). This function is
+    that later phase, so it is exactly where the deferred cost belongs.
+    Trusting an attached-but-unpopulated graph unconditionally would read
     every node as referencing nothing (``dict.get(..., ())`` on an absent
-    key), collapsing the transitive closure and potentially hiding a real
-    ABI break in a type only reachable through such a node (Codex review,
-    PR #979).
+    key) on the ordinary, default `--scope-public-headers` dump path,
+    collapsing the transitive closure and potentially hiding a real ABI
+    break in a type only reachable through such a node (Codex review, PR
+    #979) -- not merely a stale-schema edge case, but the common case.
 
-    Lazy backfill: the same builder a fresh extraction uses, given the same
-    flat snapshot fields it would have been called with at dump time. Falls
-    back to the exact same approximate (qualified-name-string-keyed) node
-    ids the builder already uses whenever a declaration's ``entity_id``
-    carrier is unpopulated, which is the common case for an old snapshot --
-    the identical, already-accepted collision class the pre-migration
-    string-keyed traversal already had. A query against the same old
-    snapshot pays this build cost each time (no caching -- rare path once
-    fresh snapshots carry the field).
+    :func:`build_public_surface_facts` is idempotent and evidence-preserving
+    (``SourceGraphSummary.add_node``/``add_edge`` merge a second
+    registration's facts rather than dropping or overwriting the first), so
+    calling it against an already-attached graph *enriches* that graph's
+    existing nodes in place with the two attrs above -- it does not discard
+    ``_attach_header_graph``'s own L5 edges/facts, and a graph that already
+    carries these attrs (e.g. a second call in the same process) re-derives
+    the identical value at some redundant walk cost, never a different one.
+
+    Falls back to building a throwaway, in-memory-only graph -- using the
+    exact same approximate (qualified-name-string-keyed) node ids the
+    builder already uses whenever a declaration's ``entity_id`` carrier is
+    unpopulated, the identical, already-accepted collision class the
+    pre-migration string-keyed traversal already had -- only when
+    ``snap.surface_graph`` is ``None`` (a pure binary-only L0/L1 dump, or a
+    snapshot predating the field). That throwaway graph is never persisted
+    back onto *snap*, unlike the enrich-in-place case above: a binary-only
+    snapshot has no real header-AST declaration surface to attach, and
+    fabricating one onto ``snap.surface_graph`` would misrepresent its
+    actual evidence coverage to any other reader of that field (e.g.
+    serialization, ``dependency_scope``).
     """
     graph: SurfaceGraphLike | None = snap.surface_graph
-    if graph is None or not snap.surface_graph_referenced_identifiers_reliable:
-        backfilled = SourceGraphSummary()
-        build_public_surface_facts(snap, backfilled)
-        graph = backfilled
+    if graph is None:
+        graph = SourceGraphSummary()
+    build_public_surface_facts(snap, graph)
     return {n.id: n for n in graph.nodes}
 
 

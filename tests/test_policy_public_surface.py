@@ -30,7 +30,10 @@ from abicheck.model import (
 from abicheck.model.identity import entity_id_for_function, entity_id_for_variable
 from abicheck.model.source_graph import SourceGraphSummary
 from abicheck.policy.public_surface import PublicSurface
-from abicheck.policy.public_surface_closure import resolve_public_surface
+from abicheck.policy.public_surface_closure import (
+    resolve_public_surface,
+    resolve_surface_graph_nodes,
+)
 from abicheck.policy.public_surface_query import PublicSurfaceQuery
 
 
@@ -212,30 +215,69 @@ class TestGraphNodeCollisionDoesNotBlurReachability:
         assert "Secret" not in surf.public_types
 
 
-class TestStalePersistedGraphIsNotTrustedForReachability:
-    """A schema-v29 persisted ``surface_graph`` is already non-``None`` but
-    predates its nodes carrying ``referenced_identifiers``/
-    ``identifiers_collision`` (schema v30) -- Codex review, PR #979.
-    ``resolve_surface_graph_nodes``/``resolve_public_surface`` must rebuild
-    such a graph in memory rather than trusting the stale, attr-less nodes,
-    which would otherwise silently read as "references nothing" and
-    collapse the transitive type closure."""
+def _outer_inner_snapshot() -> AbiSnapshot:
+    """A public function taking ``Outer *``, where ``Outer`` has a field of
+    type ``Inner`` -- ``Inner`` is only transitively reachable through that
+    field, never directly referenced by a declaration."""
+    inner = RecordType(name="Inner", kind="struct")
+    outer = RecordType(
+        name="Outer", kind="struct", fields=[TypeField(name="i", type="Inner")]
+    )
+    fn = Function(
+        name="f",
+        mangled="_Z1fv",
+        return_type="void",
+        params=[Param(name="o", type="Outer *")],
+        visibility=Visibility.PUBLIC,
+    )
+    return _snapshot(functions=[fn], types=[outer, inner])
 
-    def _stale_snapshot(self) -> AbiSnapshot:
-        inner = RecordType(name="Inner", kind="struct")
-        outer = RecordType(
-            name="Outer",
-            kind="struct",
-            fields=[TypeField(name="i", type="Inner")],
-        )
-        fn = Function(
-            name="f",
-            mangled="_Z1fv",
-            return_type="void",
-            params=[Param(name="o", type="Outer *")],
-            visibility=Visibility.PUBLIC,
-        )
-        snap = _snapshot(functions=[fn], types=[outer, inner])
+
+class TestUnpopulatedAttachedGraphIsBackfilled:
+    """``service_header_graph_attach._attach_header_graph`` installs an L5
+    ``surface_graph`` on essentially every real dump without ever calling
+    ``build_public_surface_facts`` itself (deferred for cost reasons -- see
+    that builder's own docstring) -- so ``snap.surface_graph`` being
+    non-``None`` does not mean its nodes carry ``referenced_identifiers``/
+    ``identifiers_collision`` (Codex review, PR #979: the ordinary, default
+    dump path, not merely a stale-schema edge case).
+    ``resolve_surface_graph_nodes`` must still populate those attrs on such
+    an already-attached, evidence-incomplete graph rather than trusting it
+    as-is, which would otherwise silently read every node as "references
+    nothing" and collapse the transitive type closure."""
+
+    def _snapshot_with_unpopulated_graph(self) -> AbiSnapshot:
+        snap = _outer_inner_snapshot()
+        # An L5 graph attached but never run through
+        # build_public_surface_facts -- exactly _attach_header_graph's own
+        # documented behavior.
+        snap.surface_graph = SourceGraphSummary()
+        return snap
+
+    def test_transitively_reachable_type_survives_an_unpopulated_graph(self) -> None:
+        snap = self._snapshot_with_unpopulated_graph()
+        surf = resolve_public_surface(snap)
+        assert "Inner" in surf.public_types
+
+    def test_the_attached_graph_object_is_enriched_in_place_not_replaced(
+        self,
+    ) -> None:
+        snap = self._snapshot_with_unpopulated_graph()
+        attached = snap.surface_graph
+        nodes = resolve_surface_graph_nodes(snap)
+        assert snap.surface_graph is attached
+        assert any(n.attrs.get("referenced_identifiers") for n in nodes.values())
+
+
+class TestStrippedGraphAttrsAreReconstructedNotTrusted:
+    """A persisted ``surface_graph`` whose nodes once carried
+    ``referenced_identifiers``/``identifiers_collision`` but no longer do
+    (e.g. an older on-disk format) must be treated the same as the
+    never-populated case above: re-derived, not read as "references
+    nothing"."""
+
+    def _snapshot_with_stripped_graph(self) -> AbiSnapshot:
+        snap = _outer_inner_snapshot()
         fresh_graph = SourceGraphSummary()
         build_public_surface_facts(snap, fresh_graph)
         for node in fresh_graph.nodes:
@@ -244,21 +286,10 @@ class TestStalePersistedGraphIsNotTrustedForReachability:
         snap.surface_graph = fresh_graph
         return snap
 
-    def test_transitively_reachable_type_survives_a_stale_graph(self) -> None:
-        snap = self._stale_snapshot()
-        snap.surface_graph_referenced_identifiers_reliable = False
+    def test_transitively_reachable_type_survives_a_stripped_graph(self) -> None:
+        snap = self._snapshot_with_stripped_graph()
         surf = resolve_public_surface(snap)
         assert "Inner" in surf.public_types
-
-    def test_trusting_the_stale_graph_unconditionally_would_lose_it(self) -> None:
-        # Demonstrates the bug this reliability flag exists to prevent: a
-        # stale graph whose nodes are (incorrectly) reported reliable reads
-        # every node as referencing nothing, so the closure never reaches
-        # `Inner` through `Outer`'s field.
-        snap = self._stale_snapshot()
-        snap.surface_graph_referenced_identifiers_reliable = True
-        surf = resolve_public_surface(snap)
-        assert "Inner" not in surf.public_types
 
 
 class TestPublicSurfaceQueryResolvePublicDomain:
