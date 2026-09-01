@@ -762,10 +762,14 @@ outputs:
       not extracted under a comparable profile/scope contract -- ADR-050
       D2 -- so no comparison could run at all; this verdict fails the step
       unconditionally, since no fail-on-* input governs a run in which no
-      comparison happened), BUDGET_OVERFLOW, EVIDENCE_CONTRACT_ERROR (a
-      pinned --depth/--source-method whose required source evidence was
-      never collected -- ADR-037 D5 -- so no comparison could run at all;
-      like NOT_COMPARABLE, this fails the step unconditionally and is
+      comparison happened), BUDGET_OVERFLOW, EVIDENCE_CONTRACT_ERROR
+      (this scan's evidence contract could not be satisfied -- ADR-037 D5
+      -- so no comparison could run at all; two independent causes share
+      this one verdict: a pinned --depth/--source-method whose required
+      source evidence was never collected, or --abi3 targeting a binary
+      that isn't a recognisable CPython extension module -- see the
+      command's own error message for which one applied. Like
+      NOT_COMPARABLE, this fails the step unconditionally and is
       distinct from ERROR, which covers a genuine CLI/config error --
       only published as this distinct verdict when a JSON report exists
       for this Action to read it from. format: json always qualifies;

@@ -657,9 +657,26 @@ lands in two stages rather than one atomic change:
       `tests/test_action_run_sh_scan_evidence_contract_error.py` covers the
       exit-1 dispatch (including the "both signals present" case, since
       real stderr always satisfies `_is_cli_error` too) and the
-      step-failure block. Still open: the release fan-out's `GateOptions`
-      unification, the typed-API half of this parity pass, the
-      `--format text` gap named above, and a real `--artifact-set`
+      step-failure block. **A fourth review round (Codex, fresh evidence)
+      caught a message-accuracy gap, not a detection gap:**
+      `_EvidenceContractError` has two independent raise sites in
+      `scan_engine.py` -- the pinned-depth/missing-evidence check this
+      wrapper's messages were written around, and `_run_abi3_audit`'s own
+      abi3-precondition check (`--abi3` targeting a binary that isn't a
+      recognisable CPython extension module, unrelated to any depth pin)
+      -- and the JSON envelope this wrapper reads carries only the verdict
+      string, not which raise site fired. The `::error::` annotation, job
+      summary, and final-exit message all named the depth/evidence cause
+      unconditionally, misdiagnosing the abi3 case. Fixed by making all
+      three generic (naming the axis -- "this scan's evidence contract
+      could not be satisfied" -- and pointing at the command's own error
+      message for the specific cause) rather than picking one cause to
+      describe; `action.yml`'s own verdict description updated the same
+      way. This one needed no adversarial-input analysis, unlike the
+      JSON-sidecar-condition gaps above -- it is a wording correction, not
+      a new signal to parse. Still open: the release fan-out's
+      `GateOptions` unification, the typed-API half of this parity pass,
+      the `--format text` gap named above, and a real `--artifact-set`
       member-level evidence-contract signal for the Action to consume.
 2. **Atomic.** Once the report block agrees with today's real behaviour for
    every axis and every mode (verified by the axis-separated tests this ADR

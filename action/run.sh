@@ -2666,7 +2666,15 @@ elif [[ "$MODE" == "scan" ]]; then
         _sev_exit=$(_severity_gate_exit)
         if _evidence_contract_gated; then
           VERDICT="EVIDENCE_CONTRACT_ERROR"
-          echo "::error::abicheck scan aborted: a pinned --depth/--source-method requires source evidence that was never collected (exit code 1). This is NOT a CLI usage error and NOT an ABI/API break — see the command's own error message above, or the JSON report's top-level verdict/diff.exit for detail."
+          # Generic on purpose (Codex review, fresh evidence): scan_engine's
+          # _EvidenceContractError has two independent raise sites -- a
+          # pinned --depth/--source-method with no source evidence, and
+          # --abi3 targeting a binary _run_abi3_audit can't recognise as a
+          # CPython extension module -- and the JSON envelope this wrapper
+          # reads carries only the verdict, not which one fired. Naming the
+          # depth/evidence cause here would misdiagnose the abi3 case, which
+          # has nothing to do with a pin or missing evidence.
+          echo "::error::abicheck scan aborted: this scan's evidence contract could not be satisfied (ADR-037 D5, exit code 1). This is NOT a CLI usage error and NOT an ABI/API break — see the command's own error message above for the exact cause (e.g. a pinned --depth/--source-method needing source evidence that was never collected, or --abi3 targeting a binary that isn't a recognisable CPython extension module)."
         elif _is_cli_error; then
           VERDICT="ERROR"
           echo "::error::abicheck scan failed due to a CLI error (exit code 1)."
@@ -2893,7 +2901,10 @@ if [[ "${INPUT_ADD_JOB_SUMMARY:-true}" == "true" && "$MODE" != "dump" ]]; then
         echo "> **Verdict: BUDGET_OVERFLOW** ⏱️ — Scan exceeded the configured \`budget\`. Pin a shallower level (--depth) or raise the budget; a budget never silently shrinks scope."
         ;;
       EVIDENCE_CONTRACT_ERROR)
-        echo "> **Verdict: EVIDENCE_CONTRACT_ERROR** 🛑 — A pinned \`--depth\`/\`--source-method\` requires source evidence (\`--sources\`/\`--build-info\`) that was never collected (ADR-037 D5). This is not a CLI usage error and not an ABI/API break; either supply the missing evidence or drop the pin to fall back to a best-effort \`auto\` scan."
+        # Generic wording -- see the exit-1 dispatch's own comment on why
+        # (two independent _EvidenceContractError raise sites, only one of
+        # which is about a pinned depth/missing evidence).
+        echo "> **Verdict: EVIDENCE_CONTRACT_ERROR** 🛑 — This scan's evidence contract could not be satisfied (ADR-037 D5). This is not a CLI usage error and not an ABI/API break; see the command's own error message above for the exact cause and remedy (e.g. supplying \`--sources\`/\`--build-info\` or dropping a \`--depth\` pin, or reconsidering an \`--abi3\` target that isn't a recognisable CPython extension module)."
         ;;
       NOT_COMPARABLE)
         echo "> **Verdict: NOT_COMPARABLE** 🛑 — The candidate and \`--against\` baseline were not extracted under a comparable profile/scope contract (ADR-050 D2), so no compatibility comparison ran. This is not an ABI/API break; see the JSON report's \`diff.reason\` for what mismatched."
@@ -3363,15 +3374,17 @@ elif [[ "$MODE" == "scan" ]]; then
 
   # EVIDENCE_CONTRACT_ERROR (exit 1, ADR-037 D5) unconditionally fails the
   # step too, the same way NOT_COMPARABLE and BUDGET_OVERFLOW do -- no
-  # fail-on-* flag governs it, since a pinned depth with no evidence to
-  # collect means no compatibility comparison ran at all. Splitting this
-  # verdict out of the generic ERROR bucket above (this fix's own point:
-  # ERROR and EVIDENCE_CONTRACT_ERROR read identically on stderr, but are
-  # distinguishable via the JSON report) means it no longer matches the
-  # top-level `VERDICT == "ERROR"` branch's own `FINAL_EXIT=1`, so it needs
-  # this explicit twin or the step would silently pass.
+  # fail-on-* flag governs it, since this axis means no compatibility
+  # comparison ran at all. Splitting this verdict out of the generic ERROR
+  # bucket above (this fix's own point: ERROR and EVIDENCE_CONTRACT_ERROR
+  # read identically on stderr, but are distinguishable via the JSON
+  # report) means it no longer matches the top-level `VERDICT == "ERROR"`
+  # branch's own `FINAL_EXIT=1`, so it needs this explicit twin or the step
+  # would silently pass. Generic wording, same reason as the exit-1
+  # dispatch's own comment: two independent _EvidenceContractError raise
+  # sites, only one of which is a pinned depth with missing evidence.
   if [[ "$VERDICT" == "EVIDENCE_CONTRACT_ERROR" ]]; then
-    echo "::error::Scan aborted: a pinned --depth/--source-method requires source evidence that was never collected."
+    echo "::error::Scan aborted: this scan's evidence contract could not be satisfied (ADR-037 D5) — see the command's own error message above for the exact cause."
     FINAL_EXIT=1
   fi
 
