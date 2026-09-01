@@ -190,6 +190,43 @@
   `AnalysisPlanner.resolve()` through the two functions this phase changed
   directly, so there is no second call site for those gates to newly
   police yet; a future phase adding one should widen them then.
+  **Second slice: the `.abicheck.yml`-only dry-run/execution parity gap this
+  phase's first slice named as open is now closed for `dump`/`compare`/
+  `scan`.** `workflows.plan.bazel_target_scoping_failure`/
+  `scan_bazel_scoping_failure` now accept an optional `sources`/
+  `build_config`, and fall back to auto-discovering (or, for `scan`, an
+  explicit `ScanRequest.build_config` override honoring) an
+  `.abicheck.yml`'s `build.targets:` at that source tree whenever no
+  explicit `build_targets` was requested — mirroring `embed_build_source`'s
+  own `targets=list(build_targets) if build_targets else cfg.targets`
+  precedence exactly, never running the fold itself (a pure, deterministic
+  config read, not the P0.3 compile-context resolution this phase's own
+  design excludes). Because `dump --dry-run`/`compare --dry-run` already
+  resolve through the same `AnalysisPlanner`-wired chokepoint, widening the
+  check there closes their dry-run parity gap for free, with no change to
+  either renderer; three of `scan`'s four pre-flight call sites
+  (`scan_engine.run_scan_core`, and both of `cli_scan.py`'s single-binary
+  and `--artifact-set` pre-flight checks, real-run and dry-run alike) were
+  updated to forward their own already-in-scope `sources`/`build_config`
+  values. `dump`/`compare` still have no request-level seam for an
+  *explicit* `--config <path>` override (no `build_config` field exists on
+  `InputSpec`/`DumpRequest`/`CompareRequest`) — only the auto-discovery half
+  closes for them; `scan`'s own `ScanRequest.build_config` field already
+  provided that seam, so both halves close for the three updated call
+  sites. **The fourth, `service_scan.run_scan_set`, was deliberately left
+  unwidened**: that file sits exactly at the AI-readiness 2000-line hard
+  cap, the widened call doesn't fit `ruff format`'s column budget on one
+  line, and a hard-cap file is not a `LARGE_FILE_ALLOWLIST` candidate for a
+  fix this narrow (that allowlist's own comment reserves it for pre-existing
+  `scripts/`/`tests/` debt, not a new production-file exemption). A direct
+  `run_scan_set(ScanRequest(...))` typed-API call with no CLI in front of it
+  is the one shape this residual leaves open — `scan --artifact-set`'s own
+  CLI pre-flight in `cli_scan._run_artifact_set` already forwards both
+  values ahead of this call, so the CLI path is unaffected. Named explicitly
+  as out of scope for this slice, per this ADR's own governing "acknowledged
+  gap over risky reactive patch" convention, rather than forced in under a
+  file-size constraint; see `docs/contribute/known-gaps.md`'s matching
+  entry.
 - **Phases 5–10** are still unimplemented design text.
 
 See the [implementation plan](../plans/one-semantic-pipeline.md) for the

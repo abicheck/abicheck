@@ -1097,7 +1097,13 @@ def run_scan_core(
     # ADR-063 Phase 4 (Codex review): checked before S3/POI work, since a typed
     # run_scan()/run_scan_subprocess caller has no cli_scan.py pre-flight.
     if _bf := scan_bazel_scoping_failure(
-        headers, eff_depth_enum, collect_mode, effective_build_info, build_targets
+        headers,
+        eff_depth_enum,
+        collect_mode,
+        effective_build_info,
+        build_targets,
+        sources=sources,
+        build_config=build_config,
     ):
         raise PlanningError((_bf,))
 

@@ -756,7 +756,13 @@ def _run_artifact_set(
     from .workflows.plan import bazel_target_scoping_failure
 
     if (depth or "").lower() != "binary" and (
-        _bf := bazel_target_scoping_failure("candidate", build_info, build_targets)
+        _bf := bazel_target_scoping_failure(
+            "candidate",
+            build_info,
+            build_targets,
+            sources=sources,
+            build_config=build_config,
+        )
     ):
         raise click.UsageError(str(_bf))
 
@@ -1793,7 +1799,11 @@ def scan_cmd(
     from .workflows.plan import bazel_target_scoping_failure
 
     if _bf := bazel_target_scoping_failure(
-        "candidate", effective_build_info, build_targets
+        "candidate",
+        effective_build_info,
+        build_targets,
+        sources=sources,
+        build_config=build_config,
     ):
         raise click.UsageError(str(_bf))
 

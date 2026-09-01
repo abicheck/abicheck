@@ -213,8 +213,71 @@ def _replace_lang_frontend(plan: SidePlan, lang: str, frontend: str) -> SidePlan
     return replace(plan, lang=lang, frontend=plan.frontend or frontend)
 
 
+def _discovered_config_build_targets(
+    sources: Path | None, build_config: Path | None = None
+) -> tuple[str, ...]:
+    """Auto-discovered (or explicit) ``.abicheck.yml``'s ``build.targets``.
+
+    Mirrors ``embed_build_source``'s own ``cfg_path = build_config or
+    discover_build_config(raw_sources)`` precedence exactly: an explicit
+    *build_config* path (``scan``'s own ``ScanRequest.build_config`` /
+    ``dump``/``compare``'s ``--config``) wins outright; otherwise falls back
+    to auto-discovering one at *sources*. ``dump``/``compare`` have no
+    request-level seam for the explicit half today -- no ``build_config``
+    field exists on :class:`~abicheck.api_types.InputSpec`/
+    :class:`~abicheck.api_types.DumpRequest`/
+    :class:`~abicheck.api_types.CompareRequest` (see this module's own
+    "Also not landed" status entry) -- so their own call sites always pass
+    *build_config* as ``None`` and get the auto-discovery half only.
+    Discovering and parsing a ``.abicheck.yml`` is a pure, deterministic,
+    non-executing read (no subprocess, no ambiguity to raise on), so it fits
+    the same side-effect-free constraint every other :data:`_CHECKS` entry
+    already honors -- unlike the P0.3 L3->L2 compile-context fold, which this
+    module's own docstring explains cannot run here.
+
+    A malformed ``.abicheck.yml`` is deliberately swallowed to "no config
+    found" here rather than raised as a second, independently-worded
+    :class:`PlanningError` -- ``embed_build_source`` already raises a
+    correctly-typed ``ValidationError`` for it at real-execution time
+    (exit 64 either way), and duplicating that diagnosis pre-flight would be
+    exactly the second-copy drift this phase exists to avoid, for a case
+    that already fails loudly downstream. Auto-discovery returns ``()`` (not
+    scoped) for a pack directory too -- ``embed_build_source``'s own
+    ``raw_sources`` is ``None`` for one, so it never reaches
+    ``discover_build_config`` for real either (a pack dir is
+    content-addressed evidence, not a source checkout to scan for a project
+    config); an *explicit* *build_config* is honored regardless, since it
+    names the config file directly rather than searching *sources* for one.
+    """
+    if build_config is not None:
+        cfg_path: Path | None = build_config
+    else:
+        if sources is None:
+            return ()
+        from ..buildsource.pack_shape import is_pack_dir
+
+        if is_pack_dir(sources):
+            return ()
+        from ..config_paths import discover_build_config
+
+        cfg_path = discover_build_config(sources)
+    if cfg_path is None:
+        return ()
+    from ..buildsource.build_config import load_build_config
+
+    try:
+        cfg = load_build_config(cfg_path)
+    except ValueError:
+        return ()
+    return tuple(cfg.targets)
+
+
 def bazel_target_scoping_failure(
-    label: str, build_info: Path | None, build_targets: tuple[str, ...]
+    label: str,
+    build_info: Path | None,
+    build_targets: tuple[str, ...],
+    sources: Path | None = None,
+    build_config: Path | None = None,
 ) -> PlanningFailure | None:
     """Reject ``build_targets`` combined with a pre-captured Bazel jsonproto.
 
@@ -245,8 +308,22 @@ def bazel_target_scoping_failure(
     of its own to resolve through. Exposing the check itself, over plain
     ``(build_info, build_targets)`` values, lets that call site reuse the
     identical logic instead of a second, independently-maintained copy.
+
+    *sources*/*build_config*, when given, close the dry-run/execution parity
+    gap this module's own docstring names for the config-sourced (no
+    explicit ``--build-target``) case: an empty *build_targets* falls back
+    to whatever root targets an auto-discovered (or explicitly named)
+    ``.abicheck.yml``'s ``build.targets:`` declares (see
+    :func:`_discovered_config_build_targets`), mirroring
+    ``embed_build_source``'s own ``targets=list(build_targets) if
+    build_targets else cfg.targets`` precedence exactly. Every existing
+    caller keeps passing neither (both default ``None``), which reproduces
+    the prior, request-level-flag-only behavior unchanged.
     """
-    if not build_targets or build_info is None:
+    effective_targets = build_targets or _discovered_config_build_targets(
+        sources, build_config
+    )
+    if not effective_targets or build_info is None:
         return None
     if not build_info.is_file():
         return None
@@ -255,8 +332,12 @@ def bazel_target_scoping_failure(
     fmt = sniff_build_info_format(build_info)
     if fmt not in ("bazel_aquery", "bazel_cquery"):
         return None
+    source_note = "" if build_targets else " (from an auto-discovered .abicheck.yml)"
     return PlanningFailure(
-        requested=f"build_targets={list(build_targets)!r} on the {label!r} side",
+        requested=(
+            f"build_targets={list(effective_targets)!r}{source_note} on the "
+            f"{label!r} side"
+        ),
         why_unsupported=(
             f"the {label!r} side's --build-info is a pre-captured Bazel "
             f"{fmt.removeprefix('bazel_')} jsonproto ({build_info}); "
@@ -274,6 +355,8 @@ def scan_bazel_scoping_failure(
     collect_mode: str,
     build_info: Path | None,
     build_targets: tuple[str, ...],
+    sources: Path | None = None,
+    build_config: Path | None = None,
 ) -> PlanningFailure | None:
     """The shared ``scan`` pre-flight guard for :func:`bazel_target_scoping_failure`.
 
@@ -286,6 +369,12 @@ def scan_bazel_scoping_failure(
     independent ``collect_inline_pack`` call no-ops too -- ``--depth headers``
     keeps real headers, so it stays unexempted despite its own ``collect_mode``
     being ``"off"``, same as ``--depth binary``).
+
+    *sources*/*build_config* forward to :func:`bazel_target_scoping_failure`
+    unchanged -- see that function's own docstring for the config-sourced
+    (no explicit ``--build-target``) fallback they enable. Both default
+    ``None``, reproducing the prior, request-level-flag-only behavior for
+    any caller that doesn't pass them.
     """
     from ..buildsource.scan_levels import EvidenceDepth
     from ..buildsource.source_replay import collection_for_ci_mode
@@ -293,7 +382,13 @@ def scan_bazel_scoping_failure(
     effective_headers = [] if eff_depth is EvidenceDepth.BINARY else headers
     if not effective_headers and not collection_for_ci_mode(collect_mode)[1]:
         return None
-    return bazel_target_scoping_failure("candidate", build_info, build_targets)
+    return bazel_target_scoping_failure(
+        "candidate",
+        build_info,
+        build_targets,
+        sources=sources,
+        build_config=build_config,
+    )
 
 
 def _depth_implied_collect_mode(depth: str) -> str:
@@ -378,7 +473,9 @@ def _check_bazel_target_scoping(side: SidePlan) -> PlanningFailure | None:
         off = False
     if off and not effective_headers:
         return None
-    return bazel_target_scoping_failure(side.label, side.build_info, side.build_targets)
+    return bazel_target_scoping_failure(
+        side.label, side.build_info, side.build_targets, sources=side.sources
+    )
 
 
 #: Every registered pre-flight check, run against each side of a request in

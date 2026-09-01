@@ -736,7 +736,7 @@ def test_run_scan_depth_binary_exempts_the_early_bazel_scoping_check(
     assert result.verdict not in ("BUDGET_OVERFLOW", "EVIDENCE_CONTRACT_ERROR")
 
 
-def test_run_scan_depth_headers_still_rejects_bazel_scoping_mismatch(
+def test_run_scan_depth_headers_config_sourced_target_scope_raises_planning_error(
     tmp_path: Path,
 ) -> None:
     """Codex review, fresh evidence: unlike depth=binary, `--depth headers`
@@ -748,19 +748,19 @@ def test_run_scan_depth_headers_still_rejects_bazel_scoping_mismatch(
     clean COMPATIBLE result (exit 0) -- now it fails loudly instead.
 
     This case is specifically the `.abicheck.yml`-sourced target scope (no
-    explicit `build_targets` on the request), which `run_scan_core`'s own
-    early pre-flight check (widened below to also fire for depth=headers,
-    see the sibling test using an explicit `build_targets=`) cannot see at
-    all -- the same structural gap `docs/contribute/known-gaps.md` already
-    documents as deferred for `--dry-run`. So it surfaces as
-    `click.ClickException` here, not the framework-neutral `PlanningError`:
-    `scan_engine._build_new_snapshot`'s own `except AbicheckError: raise
-    click.ClickException(...)` is a pre-existing wart predating ADR-063
-    entirely (see that module's own docstring) that leaks a Click-specific
-    exception into the typed API for *any* `AbicheckError` this call chain
-    raises, not just this new one -- out of scope for this fix; see
-    docs/contribute/known-gaps.md's own note on this exact case."""
-    import click
+    explicit `build_targets` on the request) -- previously a structural gap
+    `run_scan_core`'s own early pre-flight check could not see at all (it
+    surfaced only later, leaked as `click.ClickException` from
+    `scan_engine._build_new_snapshot`'s pre-existing `except AbicheckError`
+    wart, per `docs/contribute/known-gaps.md`'s own account of that state).
+    ADR-063 Phase 4's second slice closed it: `scan_bazel_scoping_failure`/
+    `bazel_target_scoping_failure` now auto-discover an `.abicheck.yml` at
+    `sources` (mirroring `embed_build_source`'s own `cfg.targets` fallback)
+    when no explicit `build_targets` is given, so this now raises the
+    framework-neutral `PlanningError` from `run_scan_core`'s own early
+    pre-flight check -- before ever reaching the L2 seed, matching the
+    sibling explicit-`build_targets` case below exactly."""
+    from abicheck.errors import PlanningError
 
     aquery = _write_bazel_aquery(tmp_path)
     src = tmp_path / "src"
@@ -778,7 +778,7 @@ def test_run_scan_depth_headers_still_rejects_bazel_scoping_mismatch(
         build_info=aquery,
         depth="headers",
     )
-    with pytest.raises(click.ClickException, match="pre-captured Bazel aquery"):
+    with pytest.raises(PlanningError, match="pre-captured Bazel aquery"):
         run_scan(req)
 
 

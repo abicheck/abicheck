@@ -173,6 +173,125 @@ class TestBazelBuildTargetScoping:
         plan = AnalysisPlanner.resolve(request)
         assert isinstance(plan, AnalysisPlan)
 
+    def test_dump_config_sourced_target_scope_raises_planning_error(
+        self, tmp_path: Path
+    ):
+        """ADR-063 Phase 4's second slice: no explicit ``build_targets`` on
+        the request at all -- the scope comes only from an auto-discovered
+        ``.abicheck.yml``'s ``build.targets:`` at ``sources``, mirroring
+        ``embed_build_source``'s own ``cfg.targets`` fallback. Closes the
+        dry-run/execution parity gap this module's own docstring and
+        ``docs/contribute/known-gaps.md`` name as open: previously
+        ``AnalysisPlanner`` could not see this value at all."""
+        aquery = _write(tmp_path / "aquery.json", _EMPTY_AQUERY)
+        (tmp_path / ".abicheck.yml").write_text(
+            "build:\n  system: bazel\n  targets:\n    - //:from_config\n",
+            encoding="utf-8",
+        )
+        request = DumpRequest(
+            input=InputSpec.of(path=None, sources=tmp_path, build_info=aquery),
+            depth="build",
+        )
+        with pytest.raises(PlanningError) as exc_info:
+            AnalysisPlanner.resolve(request)
+        failure = exc_info.value.failures[0]
+        assert "//:from_config" in failure.requested
+        assert "auto-discovered .abicheck.yml" in failure.requested
+
+    def test_compare_config_sourced_target_scope_raises_planning_error(
+        self, tmp_path: Path
+    ):
+        aquery = _write(tmp_path / "aquery.json", _EMPTY_AQUERY)
+        (tmp_path / ".abicheck.yml").write_text(
+            "build:\n  system: bazel\n  targets:\n    - //:from_config\n",
+            encoding="utf-8",
+        )
+        old = InputSpec.of(path=tmp_path / "old.so", sources=tmp_path)
+        new = InputSpec.of(
+            path=tmp_path / "new.so", sources=tmp_path, build_info=aquery
+        )
+        request = CompareRequest(old=old, new=new)
+        with pytest.raises(PlanningError) as exc_info:
+            AnalysisPlanner.resolve(request)
+        assert "'new'" in exc_info.value.failures[0].requested
+
+    def test_explicit_build_target_wins_over_config_wording(self, tmp_path: Path):
+        """When both an explicit ``build_targets`` and an auto-discovered
+        ``.abicheck.yml`` are present, the explicit value is what's actually
+        checked/reported (``embed_build_source``'s own "CLI overrides win"
+        precedence) -- the failure message must not carry the "auto-
+        discovered" qualifier in this case."""
+        aquery = _write(tmp_path / "aquery.json", _EMPTY_AQUERY)
+        (tmp_path / ".abicheck.yml").write_text(
+            "build:\n  system: bazel\n  targets:\n    - //:from_config\n",
+            encoding="utf-8",
+        )
+        request = DumpRequest(
+            input=InputSpec.of(
+                path=None,
+                sources=tmp_path,
+                build_info=aquery,
+                build_targets=["//:explicit"],
+            ),
+            depth="build",
+        )
+        with pytest.raises(PlanningError) as exc_info:
+            AnalysisPlanner.resolve(request)
+        failure = exc_info.value.failures[0]
+        assert "//:explicit" in failure.requested
+        assert "from_config" not in failure.requested
+        assert "auto-discovered .abicheck.yml" not in failure.requested
+
+    def test_config_sourced_scope_respects_depth_binary_exemption(self, tmp_path: Path):
+        """The config-sourced fallback doesn't defeat the pre-existing
+        depth=binary exemption -- that depth resolves to a collect_mode
+        that never consults build_info/build_targets regardless of where
+        the requested scope came from."""
+        aquery = _write(tmp_path / "aquery.json", _EMPTY_AQUERY)
+        (tmp_path / ".abicheck.yml").write_text(
+            "build:\n  system: bazel\n  targets:\n    - //:from_config\n",
+            encoding="utf-8",
+        )
+        request = DumpRequest(
+            input=InputSpec.of(path=None, sources=tmp_path, build_info=aquery),
+            depth="binary",
+        )
+        plan = AnalysisPlanner.resolve(request)
+        assert isinstance(plan, AnalysisPlan)
+
+    def test_no_abicheck_yml_present_is_unaffected(self, tmp_path: Path):
+        """No config file at ``sources`` at all -- the auto-discovery
+        fallback must not raise/crash and must leave an otherwise-valid,
+        unscoped request alone (identical to the pre-existing
+        ``test_no_build_targets_is_unaffected`` case, just spelled with a
+        ``sources`` tree that genuinely has no ``.abicheck.yml``)."""
+        aquery = _write(tmp_path / "aquery.json", _EMPTY_AQUERY)
+        request = DumpRequest(
+            input=InputSpec.of(path=None, sources=tmp_path, build_info=aquery),
+            depth="build",
+        )
+        plan = AnalysisPlanner.resolve(request)
+        assert isinstance(plan, AnalysisPlan)
+
+    def test_malformed_abicheck_yml_is_unaffected_by_this_check(self, tmp_path: Path):
+        """A malformed ``.abicheck.yml`` is not this check's problem to
+        diagnose -- ``embed_build_source`` already raises a correctly-typed
+        ``ValidationError`` for it at real-execution time. Duplicating that
+        diagnosis pre-flight would be a second, independently-worded error
+        for a case that already fails loudly downstream, so this check
+        degrades to "no config found" instead of raising a confusing YAML
+        parse error from inside a Bazel-scoping check."""
+        aquery = _write(tmp_path / "aquery.json", _EMPTY_AQUERY)
+        (tmp_path / ".abicheck.yml").write_text(
+            "build: [this is not a mapping\n", encoding="utf-8"
+        )
+        request = DumpRequest(
+            input=InputSpec.of(path=None, sources=tmp_path, build_info=aquery),
+            depth="build",
+        )
+        plan = AnalysisPlanner.resolve(request)
+        assert isinstance(plan, AnalysisPlan)
+
     def test_nonexistent_build_info_path_is_unaffected(self, tmp_path: Path):
         """A ``build_info`` path that does not exist on disk cannot be
         sniffed as a Bazel jsonproto -- this check must not raise (or crash

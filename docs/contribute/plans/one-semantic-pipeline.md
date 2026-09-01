@@ -11343,22 +11343,94 @@ so there is no second, independent call site for either gate to newly
 police yet — a future phase adding one should widen them then, not this
 one preemptively.
 
-**Also not landed: `dump --dry-run`/`compare --dry-run`/`scan --dry-run`
-parity for a `.abicheck.yml`-only (no `--build-target` flag) root-target
-scope, a fourth Codex review round.** The known-gap entry's own new
-paragraph (see `docs/contribute/known-gaps.md`) has the full account: none
-of the three commands' dry-run renderers discover `.abicheck.yml` the way
-`embed_build_source` does at real-execution time, and `AnalysisPlanner`
-itself structurally cannot see this value — `DumpRequest`/`CompareRequest`/
-`InputSpec` carry no `build_config` field at all, so there is no seam to
-resolve it through even in principle. Closing it needs either a real API
-addition (a `build_config` field threaded onto the typed request objects)
-or an independent, duplicated slice of `embed_build_source`'s own
-discovery-then-merge logic inside three separate dry-run renderers, each
-needing the same depth-binary exemption `_check_bazel_target_scoping`
-applies — named explicitly as out of scope for this slice, per the same
-governing convention the paragraph above already invokes, rather than
-patched reactively under continued review pressure.
+**Second slice (later session): the `dump --dry-run`/`compare --dry-run`/
+`scan --dry-run` parity gap named above is now closed, via the narrower of
+the two designs that paragraph named rather than either literal option.**
+Neither "(a) a `build_config` field on the typed request objects" nor "(b)
+a duplicated discovery-then-merge slice in three renderers" turned out to
+be necessary once the actual seam was checked again: `SidePlan` (`dump`/
+`compare`) already carries `sources` — exactly what auto-discovery needs
+(`discover_build_config(sources)`, mirroring `embed_build_source`'s own
+`cfg_path = build_config or discover_build_config(raw_sources)`) — and
+`scan`'s `ScanRequest` already carries both `sources` *and* `build_config`
+(the explicit `--config` override, a seam `dump`/`compare` don't have at
+the request level at all). So the fix is a widening of the *check itself*,
+not a new field or a second discovery pass: `bazel_target_scoping_failure`
+gained two new, defaulted keyword parameters (`sources`, `build_config`);
+when the request's own `build_targets` is empty, it now falls back to
+`_discovered_config_build_targets(sources, build_config)` — an explicit
+`build_config` wins outright (mirrors `cfg_path = build_config or ...`),
+otherwise a `.abicheck.yml` is auto-discovered at `sources` (skipped for a
+pack directory, mirroring `embed_build_source`'s own `raw_sources = None`
+for one) — reproducing `embed_build_source`'s own `targets=list(
+build_targets) if build_targets else cfg.targets` precedence exactly. A
+malformed config is deliberately swallowed to "no config found" here
+(`except ValueError: return ()`) rather than raised as a second,
+independently-worded error — `embed_build_source` already raises a
+correctly-typed `ValidationError` for it at real-execution time, so
+duplicating that diagnosis pre-flight would itself be the "second,
+independently-maintained copy" drift this phase exists to avoid, for a
+case that already fails loudly downstream. `scan_bazel_scoping_failure`
+gained the identical two parameters and forwards them unchanged; its own
+depth/collect-mode/header exemption logic (eleven Codex rounds' worth,
+`docs/contribute/known-gaps.md`) is untouched, since that exemption
+answers "is `build_info` ever consulted at all," a question independent of
+*where* the requested target scope came from.
+
+Every existing caller of either function keeps passing neither parameter
+(both default `None`), so this is additive: `_check_bazel_target_scoping`
+(the `dump`/`compare` path, via `AnalysisPlanner`) now passes
+`sources=side.sources` — `dump`/`compare` have no `build_config` field to
+pass, so only the auto-discovery half applies to them, closing their
+dry-run parity for free (they resolve `--dry-run` through the identical
+`resolve_dump_request`/`resolve_compare_request` chokepoint the real run
+does, so no renderer needed touching). Three of `scan`'s four pre-flight
+call sites pass their own already-in-scope `sources`/`build_config` locals:
+`scan_engine.run_scan_core` (both real-run and, since it runs before any
+dry-run-vs-real-run branch, the dry-run path too) and `cli_scan.py`'s two
+direct `bazel_target_scoping_failure` call sites (`scan_cmd`'s single-binary
+pre-flight, which already ran ahead of both its real-run and `--dry-run`
+branches, and `_run_artifact_set`'s own pre-flight ahead of `--artifact-set`
+discovery) — closing both the explicit-`--config` and auto-discovered
+halves for the CLI-reachable `scan` shapes. **The fourth,
+`service_scan.run_scan_set`, was left unwidened**: `service_scan.py` sits
+exactly at the AI-readiness 2000-line hard cap, and the widened call (5
+positional args + 2 new keyword args) doesn't fit `ruff format`'s
+column budget on one line — the resulting explosion would have pushed the
+file 8+ lines over. Trimming unrelated content elsewhere in that file to
+buy back the budget was rejected as its own kind of risk (that file's
+existing content is all load-bearing review-history documentation, not
+slack); adding it to `LARGE_FILE_ALLOWLIST` was rejected too, since that
+allowlist's own comment reserves it for pre-existing `scripts/`/`tests/`
+debt discovered when scanning was widened to those trees, not a fresh
+production-file exemption for an unrelated fix. So the change was reverted
+at that one call site and named here instead: `run_scan_set`'s own
+`.abicheck.yml`-only gap stays open for a **direct typed-API call with no
+CLI in front of it** (`from abicheck.service_scan import run_scan_set;
+run_scan_set(ScanRequest(...))`) — `scan --artifact-set`'s own CLI path is
+unaffected, since `cli_scan._run_artifact_set`'s pre-flight (now widened)
+already runs ahead of `run_scan_set` and catches the mismatch first. A
+future pass splitting `service_scan.py` under its own file-size budget
+would remove this constraint; not attempted reactively here.
+`tests/test_analysis_plan.py::TestBazelBuildTargetScoping` gained six new
+cases (config-sourced scope raises for `dump`/`compare`; an explicit
+`build_targets` still wins over a present config, with the failure message
+correctly omitting the "auto-discovered" qualifier; the depth=binary
+exemption still holds with a config-sourced scope; no `.abicheck.yml`
+present is unaffected; a malformed one degrades to "no config found"
+rather than raising a second error).
+`tests/test_bazel_root_targets.py::test_dot_abicheck_yml_build_targets_dry_run_parity`
+pins the closed `dump --dry-run` gap end to end (CLI invocation, exit 64,
+same message as the pre-existing real-run sibling test immediately above
+it); `tests/test_bazel_root_targets_scan.py`'s
+`test_run_scan_depth_headers_config_sourced_target_scope_raises_planning_error`
+(renamed and re-asserted from the pre-existing `..._still_rejects_...` test,
+which had pinned the *pre-fix* `click.ClickException` leak this same gap
+caused for the typed `run_scan()` API — now a clean `PlanningError`,
+raised earlier too, from `run_scan_core`'s own pre-flight check rather
+than leaking out of `_build_new_snapshot`'s pre-existing `except
+AbicheckError` wart) confirms the fix at the typed-API layer as well as
+the CLI.
 
 ---
 
