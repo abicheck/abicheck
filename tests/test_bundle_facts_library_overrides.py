@@ -196,6 +196,38 @@ class TestParseBundleFactsLibraryOverrides:
                 base_dir=Path("/some/manifest/dir"),
             )
 
+    @pytest.mark.parametrize(
+        "field_name,mixed_case_value,canonical_value",
+        [
+            ("frontend", "CLANG", "clang"),
+            ("frontend_context", "DEVICE", "device"),
+        ],
+    )
+    def test_enum_value_is_case_insensitive_like_the_cli(
+        self, field_name: str, mixed_case_value: str, canonical_value: str
+    ) -> None:
+        """Codex review: ``--ast-frontend``'s own Click choice is case-
+        insensitive and the typed API normalizes both fields via
+        ``.lower()`` throughout -- this manifest's raw membership check
+        used to reject an otherwise-valid CLI-equivalent spelling like
+        ``frontend: CLANG``."""
+        result = parse_bundle_facts_library_overrides(
+            {"libfoo.so": {field_name: mixed_case_value}}
+        )
+        assert getattr(result.compile["libfoo.so"], field_name) == canonical_value
+
+    def test_empty_sysroot_is_rejected_rather_than_silently_dropped(self) -> None:
+        """Codex review: ``sysroot: ""`` is falsy, so ``sysroot=... if
+        sysroot else None`` would silently swallow it -- but the ``sysroot``
+        key is still present, so this library still gets its own per-
+        library ``CompileContext``, which *replaces* the uniform one
+        entirely (``bundle_side_input.py``'s ``.get(key, compile)``
+        fallback). An accidentally blank ``sysroot: ""`` would therefore
+        silently discard that library's uniform ``--compiler``/
+        ``--compiler-option``/etc rather than being rejected."""
+        with pytest.raises(BundleFactsLibraryOverridesError, match="empty string"):
+            parse_bundle_facts_library_overrides({"libfoo.so": {"sysroot": ""}})
+
     def test_empty_library_name_is_rejected(self) -> None:
         with pytest.raises(BundleFactsLibraryOverridesError, match="non-empty strings"):
             parse_bundle_facts_library_overrides({"": {"headers": ["x"]}})

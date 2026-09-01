@@ -372,9 +372,31 @@ def _build_compile_context(
             f"{where}.nostdinc: must be a boolean, got {type(nostdinc).__name__}"
         )
     sysroot = str_fields["sysroot"]
+    if sysroot == "":
+        # Codex review: an empty sysroot string is falsy, so `sysroot=...
+        # if sysroot else None` below would silently swallow it -- but the
+        # entry itself is not otherwise empty (the `sysroot` key is
+        # present), so this library still gets its own per-library
+        # CompileContext, which *replaces* the uniform one entirely
+        # (bundle_side_input.py's own `(per_library_compile or {}).get(key,
+        # compile)` fallback: present in the map at all means "use this
+        # instead", not "use this where set"). An accidentally blank
+        # `sysroot: ""` would therefore silently discard that library's
+        # uniform --compiler/--compiler-option/etc, rather than being
+        # rejected as the malformed input it is.
+        raise BundleFactsLibraryOverridesError(f"{where}.sysroot: must not be an empty string")
+    # Codex review: `--ast-frontend`'s own Click choice is case-insensitive
+    # (`click.Choice(AST_FRONTENDS, case_sensitive=False)`) and the typed
+    # API normalizes both fields via `.lower()` throughout (service_compare_
+    # evidence.py et al.) -- this manifest's raw membership check rejected
+    # an otherwise-valid CLI-equivalent spelling like `frontend: CLANG`.
+    # Normalized before the check and stored as the canonical lowercase
+    # value, matching that convention exactly.
     frontend = str_fields["frontend"]
     frontend_context = str_fields["frontend_context"]
     assert frontend is not None and frontend_context is not None  # defaulted above
+    frontend = frontend.lower()
+    frontend_context = frontend_context.lower()
     # Codex review: a typo'd enum value (e.g. "clnag") previously reached
     # CompileContext unchecked and only failed later, deep in extraction --
     # surfacing as dispatch()'s generic exit-1 ClickException instead of the
