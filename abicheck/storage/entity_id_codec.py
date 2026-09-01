@@ -53,6 +53,7 @@ from collections.abc import Sequence
 from typing import TYPE_CHECKING, Any, Protocol
 
 from .entity_ids import domain_entity_id_from_dto, domain_entity_id_to_dto
+from .guards import identity_text, mapping
 
 if TYPE_CHECKING:
     from ..model.declarations import Function, Variable
@@ -168,14 +169,27 @@ def decode_sidecar_entity_ids(d: dict[str, Any]) -> dict[str, dict[str, Any]]:
     v31 snapshot with no header-resolved typedef/constant identity carries, so
     no migration adapter is needed (identical reasoning to the v25
     ``typedefs_qualified`` addition).
+
+    ``raw is None`` is the only degrade-to-empty case, matching
+    :func:`_decode_one`'s own rule: a present-but-malformed sidecar (a list,
+    a string, a mapping with a non-string key) is refused via ``guards.
+    mapping``/``guards.identity_text`` rather than silently read as "this
+    snapshot predates the sidecar" (Codex review) — a falsy-but-present
+    value like ``[]`` is exactly the shape a truthiness check would have
+    let through as an empty mapping.
     """
-    return {
-        key: {
-            name: domain_entity_id_from_dto(raw)
-            for name, raw in (d.get(key) or {}).items()
+    result: dict[str, dict[str, Any]] = {}
+    for key in _SIDECAR_KEYS:
+        raw = d.get(key)
+        if raw is None:
+            result[key] = {}
+            continue
+        mapping(raw, key)
+        result[key] = {
+            identity_text(name, f"{key} key"): domain_entity_id_from_dto(value)
+            for name, value in raw.items()
         }
-        for key in _SIDECAR_KEYS
-    }
+    return result
 
 
 def _decode_one(raw: Any) -> Any:

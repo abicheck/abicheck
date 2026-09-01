@@ -525,6 +525,47 @@ class TestMalformedEntityIdDocumentIsRefused:
             snapshot_from_dict(d)
 
 
+class TestMalformedSidecarEntityIdDocumentIsRefused:
+    """The same bug class as :class:`TestMalformedEntityIdDocumentIsRefused`
+    above, recurring on ``typedef_entity_ids``/``constant_entity_ids``
+    (ADR-063 Phase 2's typedef/constant slice): a present-but-malformed
+    sidecar container or key must be refused, not silently read as an
+    honest absence or as a valid identity (Codex review).
+    """
+
+    @pytest.mark.parametrize(
+        "sidecar_key", ["typedef_entity_ids", "constant_entity_ids"]
+    )
+    @pytest.mark.parametrize(
+        "bogus_sidecar", [[], "", False, 0, ["not", "a", "mapping"]]
+    )
+    def test_non_mapping_sidecar_is_refused_not_treated_as_empty(
+        self, sidecar_key: str, bogus_sidecar: object
+    ) -> None:
+        d = snapshot_to_dict(_snapshot_with_every_kind())
+        d[sidecar_key] = bogus_sidecar
+        with pytest.raises((TypeError, ValueError)):
+            snapshot_from_dict(d)
+
+    @pytest.mark.parametrize(
+        "sidecar_key", ["typedef_entity_ids", "constant_entity_ids"]
+    )
+    def test_non_string_sidecar_key_is_refused(self, sidecar_key: str) -> None:
+        # A well-formed entity-id document, so the only defect under test is
+        # the non-string key -- a document-shape defect must not mask it.
+        valid_document = {
+            "schema_version": 2,
+            "scope": [],
+            "kind": "typedef",
+            "leaf_name": "x",
+            "extra": [],
+        }
+        d = snapshot_to_dict(_snapshot_with_every_kind())
+        d[sidecar_key] = {1: valid_document}
+        with pytest.raises((TypeError, ValueError)):
+            snapshot_from_dict(d)
+
+
 #: Modules allowed to *call* an ``entity_id_for_*`` constructor: the two
 #: header-AST producers and their ``extract`` entity modules. By option
 #: (a)'s own design the identity is computed once, at parse time, and read
