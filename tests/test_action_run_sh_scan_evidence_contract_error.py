@@ -37,8 +37,10 @@ explicit ``FINAL_EXIT=1``, or the step silently starts passing.
 
 from __future__ import annotations
 
+import json
 import os
 import subprocess
+import sys
 from pathlib import Path
 
 RUN_SH = Path(__file__).resolve().parents[1] / "action" / "run.sh"
@@ -49,6 +51,12 @@ _FINAL_EXIT_SCAN_START = (
     "  # scan: BREAKING/API_BREAK follow the fail-on flags"
 )
 _FINAL_EXIT_SCAN_END = "\nelse\n"
+_IS_PATH_QUALIFIED_START = "_is_path_already_qualified() {\n"
+_IS_PATH_QUALIFIED_END = "}\n"
+_REPORT_QUERY_START = "_report_query() {\n"
+_REPORT_QUERY_END = "PYQUERY\n}\n"
+_EVIDENCE_CONTRACT_GATED_START = "_evidence_contract_gated() {\n"
+_EVIDENCE_CONTRACT_GATED_END = "}\n"
 
 
 def _bash_executable() -> str:
@@ -74,6 +82,29 @@ def _exit_case_fragment() -> str:
     case_start = text.index(_CASE_START, start)
     case_end = text.index(_CASE_END, case_start) + len(_CASE_END)
     return text[case_start:case_end]
+
+
+def _extract(start_marker: str, end_marker: str) -> str:
+    """One verbatim ``name() { ... }`` function body from ``run.sh``, found
+    by its exact opening line and the first matching end-marker after it."""
+    text = RUN_SH.read_text(encoding="utf-8")
+    start = text.index(start_marker)
+    end = text.index(end_marker, start) + len(end_marker)
+    return text[start:end]
+
+
+def _report_query_and_gated_fragment() -> str:
+    """``_is_path_already_qualified``, ``_report_query`` (which it calls),
+    and ``_evidence_contract_gated`` (which calls ``_report_query``),
+    extracted verbatim -- the real pipeline that turns a JSON report file
+    into the boolean ``_evidence_contract_gated`` decision, unmodified."""
+    return (
+        _extract(_IS_PATH_QUALIFIED_START, _IS_PATH_QUALIFIED_END)
+        + "\n"
+        + _extract(_REPORT_QUERY_START, _REPORT_QUERY_END)
+        + "\n"
+        + _extract(_EVIDENCE_CONTRACT_GATED_START, _EVIDENCE_CONTRACT_GATED_END)
+    )
 
 
 def _final_exit_scan_fragment() -> str:
@@ -176,3 +207,67 @@ def test_evidence_contract_error_still_fails_the_step():
     )
     assert result.returncode == 0, result.stderr
     assert "FINAL_EXIT=1" in result.stdout
+
+
+def test_evidence_contract_gated_treats_hostile_json_verdict_as_inert_data(tmp_path):
+    """``_evidence_contract_gated`` reads a JSON report's ``verdict`` field
+    and compares it against a fixed literal — proven here by *executing*
+    the real, unmodified ``_is_path_already_qualified``/``_report_query``/
+    ``_evidence_contract_gated`` pipeline against a crafted, adversarial
+    report file, not by asserting the script's text (the class of gap
+    #705 shipped and #758 had to close with an executing test: a
+    text-only assertion proves nothing about behaviour under a hostile
+    value).
+
+    The report's ``verdict`` is data straight from a comparison report on
+    every real invocation — but this test does not trust that abicheck's
+    own writer only ever emits one of its fixed sentinel strings; it
+    supplies a value engineered to look dangerous if the pipeline ever
+    stopped being a plain string comparison: command-substitution syntax
+    (`` `...` ``, ``$(...)``) and a value that merely *resembles* the real
+    sentinel (extra trailing content) rather than equalling it exactly.
+    Two properties are checked by execution, not by reading: (1) no shell
+    command from the payload ever runs (a marker file the payload tries to
+    create must not exist afterwards), and (2) a near-miss string must not
+    compare equal — a substring/prefix match would be its own, different
+    injection-adjacent bug (an attacker-influenced value that merely
+    starts with the sentinel could otherwise forge a false positive)."""
+    marker = tmp_path / "pwned"
+    hostile_verdict = (
+        f"EVIDENCE_CONTRACT_ERROR`touch {marker}`$(touch {marker}); touch {marker} #"
+    )
+    report = tmp_path / "report.json"
+    report.write_text(json.dumps({"verdict": hostile_verdict}), encoding="utf-8")
+
+    py_safe_dir = tmp_path / "py-safe"
+    py_safe_dir.mkdir()
+    script = (
+        _report_query_and_gated_fragment()
+        + f"""
+_RUNNING_ON_WINDOWS="false"
+_PY_BIN="{sys.executable}"
+_PY_SAFE_DIR="{py_safe_dir}"
+_json_report_src() {{ echo "{report}"; }}
+if _evidence_contract_gated; then
+  echo "GATED=1"
+else
+  echo "GATED=0"
+fi
+"""
+    )
+    result = subprocess.run(
+        [_bash_executable(), "-c", script],
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    assert result.returncode == 0, result.stderr
+    # A near-miss (extra trailing content) must not compare equal to the
+    # real sentinel -- only an exact match may gate.
+    assert "GATED=0" in result.stdout
+    # Nothing in the hostile value's command-substitution/backtick payload
+    # ever executed as a shell command.
+    assert not marker.exists(), (
+        "hostile JSON verdict value executed as a shell command "
+        f"(marker file {marker} was created)"
+    )
