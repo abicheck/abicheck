@@ -24,6 +24,7 @@ from abicheck.model import (
     AbiSnapshot,
     EnumMember,
     EnumType,
+    FactStatus,
     Function,
     RecordType,
     ScopeOrigin,
@@ -405,6 +406,38 @@ def test_apply_provenance_opt_in_classification():
     assert snap.variables[0].origin is ScopeOrigin.PUBLIC_HEADER
     assert snap.types[0].origin is ScopeOrigin.PUBLIC_HEADER
     assert snap.enums[0].origin is ScopeOrigin.PUBLIC_HEADER
+
+
+def test_apply_provenance_source_header_fact_matches_presence_of_a_real_header():
+    # ADR-063 Phase 5 (Codex review): tag_provenance() must not claim
+    # Fact.present(None) for a declaration whose location never resolved a
+    # header at all -- source_header's own case-(b) convention (matching
+    # every other field this phase converted) treats a None legacy value
+    # as "not captured", not a confirmed-empty determination.
+    snap = apply_provenance(
+        AbiSnapshot(
+            library="libfoo.so.1",
+            version="1.0",
+            types=[
+                RecordType(
+                    name="WithHeader",
+                    kind="struct",
+                    source_location="/build/include/api.h:30",
+                ),
+                RecordType(name="NoLocation", kind="struct"),
+            ],
+        ),
+        public_headers=["include/api.h"],
+    )
+    by_name = {t.name: t for t in snap.types}
+    with_header = by_name["WithHeader"]
+    assert with_header.source_header == "/build/include/api.h"
+    assert with_header.source_header_fact.status is FactStatus.PRESENT
+    assert with_header.source_header_fact.value == "/build/include/api.h"
+
+    no_location = by_name["NoLocation"]
+    assert no_location.source_header is None
+    assert no_location.source_header_fact.status is FactStatus.NOT_COLLECTED
 
 
 def test_apply_provenance_no_set_keeps_unknown_but_fills_header():

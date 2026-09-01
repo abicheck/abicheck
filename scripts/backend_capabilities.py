@@ -250,12 +250,68 @@ FACT_ROWS: tuple[FactRow, ...] = (
     FactRow("Function", "elf_visibility", _OTHER, _OTHER, note=_DYNSYM),
     FactRow("Function", "ref_qualifier", _FULL, _FULL),
     FactRow("Function", "is_explicit", _FULL, _FULL),
+    FactRow(
+        "Function",
+        "is_explicit_fact",
+        _FULL,
+        _FULL,
+        note=(
+            "ADR-063 Phase 5: Fact[bool | None] sibling of is_explicit. "
+            "Both backends now construct it directly as an explicit kwarg "
+            "-- Fact.present(is_explicit) for a Constructor/Method/"
+            "Converter (castxml) or CXXConstructorDecl/CXXConversionDecl "
+            "(clang), Fact.not_applicable() otherwise -- since a kind "
+            "where `explicit` is conceptually inapplicable is a confirmed "
+            "non-gap, not missing evidence the generic bridge should read "
+            "as NOT_COLLECTED (Codex review, PR #982)."
+        ),
+    ),
     FactRow("Function", "is_hidden_friend", _FULL, _FULL),
+    FactRow(
+        "Function",
+        "is_hidden_friend_fact",
+        _NONE,
+        _NONE,
+        note="Same shape as is_explicit_fact -- see that row's own note.",
+    ),
     FactRow("Function", "source_header", _OTHER, _OTHER, note=_PROVENANCE_PASS),
+    FactRow(
+        "Function",
+        "source_header_fact",
+        _OTHER,
+        _OTHER,
+        note=(
+            "ADR-063 Phase 5 (fifth batch): Fact[str | None] sibling of "
+            "source_header, mirroring RecordType/EnumType/Variable."
+            "source_header_fact exactly -- another layer "
+            "(provenance.tag_provenance()) owns it."
+        ),
+    ),
     FactRow("Function", "origin", _OTHER, _OTHER, note=_PROVENANCE_PASS),
     FactRow("Function", "is_variadic", _FULL, _FULL),
+    FactRow(
+        "Function",
+        "is_variadic_fact",
+        _NONE,
+        _NONE,
+        note="Same shape as is_explicit_fact -- see that row's own note.",
+    ),
     FactRow("Function", "contract_attributes", _FULL, _FULL),
+    FactRow(
+        "Function",
+        "contract_attributes_fact",
+        _NONE,
+        _NONE,
+        note="Same shape as is_explicit_fact -- see that row's own note.",
+    ),
     FactRow("Function", "exception_spec", _FULL, _FULL),
+    FactRow(
+        "Function",
+        "exception_spec_fact",
+        _NONE,
+        _NONE,
+        note="Same shape as is_explicit_fact -- see that row's own note.",
+    ),
     FactRow(
         "Function",
         "deprecated",
@@ -275,15 +331,52 @@ FACT_ROWS: tuple[FactRow, ...] = (
             "`OverrideAttr` child node (`dumper_clang._clang_method_is_override`)."
         ),
     ),
+    FactRow(
+        "Function",
+        "is_override_fact",
+        _FULL,
+        _FULL,
+        note=(
+            "Same shape as is_explicit_fact above: both backends now "
+            "construct it directly as Fact.present(is_override) for a "
+            "kind in their own OVERRIDE_ELIGIBLE_KINDS set, "
+            "Fact.not_applicable() otherwise (Codex review, PR #982)."
+        ),
+    ),
     FactRow("Function", "hidden_friend_owner", _FULL, _FULL),
+    FactRow(
+        "Function",
+        "hidden_friend_owner_fact",
+        _FULL,
+        _FULL,
+        note=(
+            "Same shape as is_explicit_fact -- both backends now construct "
+            "it directly as Fact.present(owner) for a real hidden friend, "
+            "Fact.not_applicable() otherwise (Codex review, PR #982)."
+        ),
+    ),
     FactRow("Function", "elf_binding", _OTHER, _OTHER, note=_DYNSYM),
+    FactRow(
+        "Function",
+        "elf_binding_fact",
+        _OTHER,
+        _OTHER,
+        note=(
+            "ADR-063 Phase 5 (fifth batch): Fact[SymbolBinding | None] "
+            "sibling of elf_binding, mirroring Variable.elf_binding_fact "
+            "exactly -- another layer "
+            "(dumper_elf_symbols._populate_elf_visibility) owns it, kept "
+            "in sync explicitly since it sets elf_binding by attribute "
+            "assignment, never re-running __post_init__."
+        ),
+    ),
     FactRow(
         "Function",
         "is_compiler_generated",
         _FULL,
         _NONE,
         note=(
-            "castxml reads its own `artificial=\"1\"` XML attribute (any "
+            'castxml reads its own `artificial="1"` XML attribute (any '
             "function-like element, not just Constructor/Destructor). clang "
             "never derives this per-declaration -- it hardcodes False for "
             "every Function it emits, which is still a correct answer, not "
@@ -291,6 +384,13 @@ FACT_ROWS: tuple[FactRow, ...] = (
             "`isImplicit`, so a node reaching `parse_functions()` is "
             "structurally guaranteed to have been written by the user."
         ),
+    ),
+    FactRow(
+        "Function",
+        "is_compiler_generated_fact",
+        _NONE,
+        _NONE,
+        note="Same shape as is_explicit_fact -- see that row's own note.",
     ),
     FactRow(
         "Function",
@@ -351,6 +451,18 @@ FACT_ROWS: tuple[FactRow, ...] = (
     ),
     FactRow("Variable", "elf_visibility", _OTHER, _OTHER, note=_DYNSYM),
     FactRow("Variable", "source_header", _OTHER, _OTHER, note=_PROVENANCE_PASS),
+    FactRow(
+        "Variable",
+        "source_header_fact",
+        _OTHER,
+        _OTHER,
+        note=(
+            "ADR-063 Phase 5 (fourth batch): Fact[str | None] sibling of "
+            "source_header, mirroring RecordType.source_header_fact/"
+            "EnumType.source_header_fact exactly -- another layer "
+            "(provenance.tag_provenance()) owns it."
+        ),
+    ),
     FactRow("Variable", "origin", _OTHER, _OTHER, note=_PROVENANCE_PASS),
     FactRow(
         "Variable",
@@ -367,6 +479,23 @@ FACT_ROWS: tuple[FactRow, ...] = (
     ),
     FactRow(
         "Variable",
+        "alignment_bits_fact",
+        _NONE,
+        _NONE,
+        note=(
+            "ADR-063 Phase 5 (fourth batch): Fact[int | None] sibling of "
+            "alignment_bits. Deliberately NOT constructed as an explicit "
+            "keyword the way qualified_name_fact is -- neither backend "
+            "passes it literally at Variable(...) construction; it is "
+            "correctly derived by the generic bridge_legacy_and_fact "
+            "bridge in __post_init__ from whatever legacy value the "
+            "constructor call actually supplies, so NONE here reflects "
+            "literal-keyword evidence only, not runtime behavior (same "
+            "shape as RecordType.data_size_bits_fact/is_abstract_fact)."
+        ),
+    ),
+    FactRow(
+        "Variable",
         "deprecated",
         _FULL,
         _FULL,
@@ -374,6 +503,19 @@ FACT_ROWS: tuple[FactRow, ...] = (
         note="clang side wired in G31 Phase C (schema v19).",
     ),
     FactRow("Variable", "elf_binding", _OTHER, _OTHER, note=_DYNSYM),
+    FactRow(
+        "Variable",
+        "elf_binding_fact",
+        _OTHER,
+        _OTHER,
+        note=(
+            "ADR-063 Phase 5 (fourth batch): Fact[SymbolBinding | None] "
+            "sibling of elf_binding -- another layer "
+            "(dumper_elf_symbols._populate_elf_visibility) owns it, kept "
+            "in sync explicitly since it sets elf_binding by attribute "
+            "assignment, never re-running __post_init__."
+        ),
+    ),
     FactRow(
         "Variable",
         "entity_id",
@@ -570,6 +712,21 @@ FACT_ROWS: tuple[FactRow, ...] = (
         ),
     ),
     FactRow("RecordType", "source_header", _OTHER, _OTHER, note=_PROVENANCE_PASS),
+    FactRow(
+        "RecordType",
+        "source_header_fact",
+        _OTHER,
+        _OTHER,
+        note=(
+            "ADR-063 Phase 5: `Fact[str | None]` sibling of `source_header`. "
+            "Same non-header ownership as the legacy field — `provenance."
+            "tag_provenance()` keeps both representations in sync via an "
+            "explicit post-construction update (mirroring "
+            "`resolve_vptr_offset_bits()`'s pattern), since it sets "
+            "`source_header` by plain attribute assignment, which never "
+            "re-runs `RecordType.__post_init__`'s bridge."
+        ),
+    ),
     FactRow("RecordType", "origin", _OTHER, _OTHER, note=_PROVENANCE_PASS),
     FactRow(
         "RecordType",
@@ -580,6 +737,25 @@ FACT_ROWS: tuple[FactRow, ...] = (
         note=(
             "The tail-padding-excluded size. Neither backend's own parse "
             "computes it; it arrives from the layout companion tool or DWARF."
+        ),
+    ),
+    FactRow(
+        "RecordType",
+        "data_size_bits_fact",
+        _NONE,
+        _NONE,
+        note=(
+            "ADR-063 Phase 5: `Fact[int | None]` sibling of `data_size_bits`. "
+            "Unlike `bases_fact`/`vtable_fact`/`is_final_fact`, neither "
+            "backend passes this keyword literally at `RecordType(...)` "
+            "construction — it is correctly derived by the generic "
+            "`bridge_legacy_and_fact` bridge in `__post_init__` from "
+            "whatever legacy value the constructor call (or a later "
+            "`replace_with_fact_sync` layout backfill — "
+            "`dumper_layout_backfill.py`, `clang_layout_tool.py`) actually "
+            "supplies, so `NONE` here reflects literal-keyword evidence, "
+            "not runtime behavior (see fact_registry.py's own entry for "
+            "this field's real, correct availability semantics)."
         ),
     ),
     FactRow(
@@ -597,11 +773,31 @@ FACT_ROWS: tuple[FactRow, ...] = (
     ),
     FactRow(
         "RecordType",
+        "is_standard_layout_fact",
+        _NONE,
+        _NONE,
+        note=(
+            "ADR-063 Phase 5: `Fact[bool | None]` sibling of "
+            "`is_standard_layout`. Same shape as `data_size_bits_fact` "
+            "above — derived by the generic `__post_init__` bridge, not a "
+            "literal constructor keyword, so `NONE` reflects scan evidence "
+            "only."
+        ),
+    ),
+    FactRow(
+        "RecordType",
         "is_trivially_copyable",
         _NONE,
         _FULL,
         hybrid_backfilled=True,
         note="Same shape as `is_standard_layout`; activated `TRIVIALLY_COPYABLE_LOST`.",
+    ),
+    FactRow(
+        "RecordType",
+        "is_trivially_copyable_fact",
+        _NONE,
+        _NONE,
+        note="Same shape as `is_standard_layout_fact` — see that row's own note.",
     ),
     FactRow(
         "RecordType",
@@ -645,6 +841,26 @@ FACT_ROWS: tuple[FactRow, ...] = (
     FactRow("RecordType", "qualified_name", _FULL, _FULL),
     FactRow(
         "RecordType",
+        "qualified_name_fact",
+        _FULL,
+        _FULL,
+        note=(
+            "ADR-063 Phase 5 (Codex review, second pass): `Fact[str | "
+            "None]` sibling of `qualified_name`. Both backends construct "
+            "it directly (`Fact.present(qualified_name)`), unlike "
+            "`data_size_bits_fact`/`is_standard_layout_fact`/etc — "
+            "`qualified_name`'s own `None` return is overwhelmingly a "
+            "genuine, confirmed 'no enclosing scope' determination on "
+            "both header-AST paths (a real cycle/depth-cap walk failure "
+            "on the castxml side is a pathological, essentially "
+            "unobserved edge case — see the construction site's own "
+            "comment), so relying on the generic bridge's coarser "
+            "None-means-omitted default would misreport confirmed "
+            "evidence as not collected for the common case."
+        ),
+    ),
+    FactRow(
+        "RecordType",
         "is_abstract",
         _FULL,
         _FULL,
@@ -654,6 +870,25 @@ FACT_ROWS: tuple[FactRow, ...] = (
             "`definitionData.isAbstract` (`dumper_clang._clang_record_is_abstract`) "
             "— real semantic computation (an inherited-and-unoverridden pure "
             "virtual counts), not just a direct-declaration check."
+        ),
+    ),
+    FactRow(
+        "RecordType",
+        "is_abstract_fact",
+        _NONE,
+        _NONE,
+        note=(
+            "ADR-063 Phase 5: `Fact[bool | None]` sibling of `is_abstract`. "
+            "Deliberately NOT constructed as an explicit "
+            "`Fact.present(is_abstract)` keyword the way `is_final_fact` is "
+            "-- `is_abstract` is genuinely `None` on castxml for an opaque/"
+            "incomplete record (no member list to judge from), so an "
+            "explicit `Fact.present(None)` there would misreport a real "
+            "not-collected case as a confirmed determination. The generic "
+            "`__post_init__` bridge already gets this right (`None` legacy "
+            "value -> `not_collected()`, a real bool -> `present(...)`), so "
+            "`NONE` here reflects literal-keyword scan evidence only, not "
+            "runtime behavior."
         ),
     ),
     FactRow(
@@ -706,6 +941,19 @@ FACT_ROWS: tuple[FactRow, ...] = (
     ),
     FactRow("EnumType", "source_location", _FULL, _FULL),
     FactRow("EnumType", "source_header", _OTHER, _OTHER, note=_PROVENANCE_PASS),
+    FactRow(
+        "EnumType",
+        "source_header_fact",
+        _OTHER,
+        _OTHER,
+        note=(
+            "ADR-063 Phase 5 (third batch): Fact[str | None] sibling of "
+            "source_header, mirroring RecordType.source_header_fact -- "
+            "another layer (provenance.tag_provenance()) owns it, kept in "
+            "sync explicitly since it sets source_header by attribute "
+            "assignment, never re-running __post_init__."
+        ),
+    ),
     FactRow("EnumType", "origin", _OTHER, _OTHER, note=_PROVENANCE_PASS),
     FactRow(
         "EnumType",
@@ -724,6 +972,18 @@ FACT_ROWS: tuple[FactRow, ...] = (
         note="clang side wired in G31 Phase C (schema v19).",
     ),
     FactRow("EnumType", "qualified_name", _FULL, _FULL),
+    FactRow(
+        "EnumType",
+        "qualified_name_fact",
+        _FULL,
+        _FULL,
+        note=(
+            "ADR-063 Phase 5 (third batch): Fact[str | None] sibling of "
+            "qualified_name, mirroring RecordType.qualified_name_fact -- "
+            "both backends construct it directly as "
+            "Fact.present(qualified_name)."
+        ),
+    ),
     FactRow(
         "EnumType",
         "entity_id",
@@ -959,11 +1219,7 @@ def _entity_module_paths(header_backend_dir: Path) -> list[Path]:
     if not header_backend_dir.is_dir():
         return []
     excluded = {"__init__.py", "context.py"}
-    return sorted(
-        p
-        for p in header_backend_dir.glob("*.py")
-        if p.name not in excluded
-    )
+    return sorted(p for p in header_backend_dir.glob("*.py") if p.name not in excluded)
 
 
 def castxml_evidence() -> dict[str, dict[str, Evidence]]:

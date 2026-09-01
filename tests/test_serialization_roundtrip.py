@@ -660,7 +660,7 @@ class TestClangFieldInitializerFactsReliableRoundTrip:
     def test_same_producer_gate_trusts_recorded_entry_on_legacy_hybrid(self) -> None:
         """The flip side of the case above: a MATCHED field's ``default``
         provenance on the SAME legacy hybrid snapshot was always
-        unconditionally stamped "castxml" by ``_backfill_fact`` regardless of
+        unconditionally stamped "castxml" by ``backfill_fact`` regardless of
         schema version -- a PRESENT entry stays trusted and comparable even
         though the snapshot's own reliability flag is False, since that flag
         only governs what an ABSENCE means, not a recorded value."""

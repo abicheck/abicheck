@@ -302,7 +302,7 @@ def _diff_field_default_initializer(old: AbiSnapshot, new: AbiSnapshot) -> list[
     gate above, even when the removal is genuine. The tempting relaxation
     — trust a hybrid merge's ``"castxml"`` provenance stamp on a ``None``
     value as "both backends independently confirmed absence" — is UNSOUND:
-    ``dumper_hybrid._backfill_fact``'s own docstring already discloses that
+    ``fact_provenance.backfill_fact``'s own docstring already discloses that
     this stamp means only "the final value is castxml-sourced," and
     confirmed empirically that it fires identically whether clang genuinely
     examined the field and agreed, OR never matched the field/type at all
@@ -368,7 +368,7 @@ def _diff_field_default_initializer(old: AbiSnapshot, new: AbiSnapshot) -> list[
                 # backend confirmed it, in principle. Two earlier attempts
                 # at exploiting this tried to trust a hybrid merge's
                 # "castxml" provenance stamp on the NEW side as dual-backend
-                # confirmation (dumper_hybrid._backfill_fact's docstring:
+                # confirmation (fact_provenance.backfill_fact's docstring:
                 # "Provenance is recorded as castxml even when own_value is
                 # None and no clang value was available to backfill from").
                 # That docstring line is exactly the trap: it explicitly

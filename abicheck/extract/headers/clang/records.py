@@ -206,12 +206,21 @@ def _build_record(
     deprecated = dep_msg if dep_msg is not None else clang_deprecated_message(node)
     if is_opaque:
         # Mirrors dumper_castxml.py's `incomplete="1"` branch.
+        opaque_qualified_name = (
+            "::".join([*entry.scope, own_name]) if entry.scope else None
+        )
         return RecordType(
             name=own_name,
             kind=kind,
-            qualified_name=(
-                "::".join([*entry.scope, own_name]) if entry.scope else None
-            ),
+            qualified_name=opaque_qualified_name,
+            # ADR-063 Phase 5 (Codex/CodeRabbit review, fresh evidence): the
+            # non-opaque branch below constructs qualified_name_fact
+            # explicitly for the identical reason (entry.scope is a clean
+            # structural fact, no cycle/depth-cap ambiguity on this
+            # backend) -- an opaque/incomplete record is no different, so
+            # it must not silently fall through the generic bridge to
+            # NOT_COLLECTED.
+            qualified_name_fact=Fact.present(opaque_qualified_name),
             size_bits=None,
             alignment_bits=None,
             fields=[],
@@ -271,6 +280,14 @@ def _build_record(
         # getQualifiedNameAsString() spelling (e.g. "ns::Foo") fell back
         # to the bare "Foo" and never matched (Codex review, G28 Phase 4).
         qualified_name=("::".join([*entry.scope, own_name]) if entry.scope else None),
+        # ADR-063 Phase 5 (Codex review): entry.scope is a clean structural
+        # fact from clang's own tree-shaped JSON AST -- unlike castxml's
+        # string-context-chain walk, there is no cycle/depth-cap case to
+        # conflate with a genuine "no enclosing scope" here, so an empty
+        # entry.scope is always a real, confirmed determination.
+        qualified_name_fact=Fact.present(
+            "::".join([*entry.scope, own_name]) if entry.scope else None
+        ),
         # clang's JSON AST does not compute layout — size/align/offsets are
         # left None so the layout detectors skip an unknown-vs-unknown
         # comparison (DWARF remains the layout authority on this host).

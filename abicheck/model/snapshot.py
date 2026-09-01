@@ -30,6 +30,7 @@ from typing import TYPE_CHECKING
 from .declarations import Function, Variable
 from .entities import EnumType, RecordType
 from .extraction_contract import DependencyInfo, ExtractionContract
+from .fact import Fact, bridge_legacy_and_fact
 from .first_wins_index import build_first_wins_index, describe_dropped
 from .graph_facts import SurfaceGraphLike
 
@@ -660,6 +661,18 @@ class AbiSnapshot:
     typedef_entity_ids: dict[str, EntityId] = field(default_factory=dict, kw_only=True)
     constant_entity_ids: dict[str, EntityId] = field(default_factory=dict, kw_only=True)
 
+    # ADR-063 Phase 5: Fact[str | None] sibling of ast_resolved_standard --
+    # the one remaining case-(b) field outside the four declaration
+    # dataclasses. Same "None already unambiguously means not captured"
+    # shape as RecordType/EnumType/Variable/Function's own case-(b) fields;
+    # see __post_init__ below for the bridge. Appended at the tail rather
+    # than beside the legacy field it bridges, per this package's own
+    # "append new fields at the end" convention (model/AGENTS.md) -- Codex
+    # review, PR #982.
+    ast_resolved_standard_fact: Fact[str | None] | None = field(
+        default=None, kw_only=True
+    )
+
     # Runtime-only provenance qualifier (not serialized — popped in
     # snapshot_to_dict). True when ``from_headers`` was *inferred* for a legacy
     # snapshot that predates the explicit ``from_headers`` key, rather than set
@@ -679,6 +692,16 @@ class AbiSnapshot:
     _type_by_name: dict[str, RecordType] | None = field(
         default=None, repr=False, compare=False
     )
+
+    def __post_init__(self) -> None:
+        self.ast_resolved_standard, self.ast_resolved_standard_fact = (
+            bridge_legacy_and_fact(
+                self.ast_resolved_standard,
+                self.ast_resolved_standard_fact,
+                None,
+                None,
+            )
+        )
 
     def index(self) -> None:
         """Build lookup indexes. Uses first-wins for duplicate mangled names.

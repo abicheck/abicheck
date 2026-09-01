@@ -39,6 +39,7 @@ from ..model.build_mode_facts import (
     StdlibFamily,
 )
 from ..model.extraction_contract import ExtractionContract
+from ..model.fact import Fact
 from ..name_classification import strip_anonymous_type_location
 from ..qualified_name_segments import (
     _LAMBDA_IDENTITY_FIELDS,
@@ -126,11 +127,17 @@ def backfill_missing_elf_binding(snap: AbiSnapshot) -> None:
             elf_sym = sym_map.get(func.mangled)
             if elf_sym is not None:
                 func.elf_binding = elf_sym.binding
+                # Plain attribute assignment never re-runs __post_init__, so
+                # elf_binding_fact must be kept in sync explicitly here too
+                # (ADR-063 Phase 5 -- same mutation trap already fixed at
+                # dump time in dumper_elf_symbols._populate_elf_visibility).
+                func.elf_binding_fact = Fact.present(elf_sym.binding)
     for var in snap.variables:
         if var.elf_binding is None:
             elf_sym = sym_map.get(var.mangled)
             if elf_sym is not None:
                 var.elf_binding = elf_sym.binding
+                var.elf_binding_fact = Fact.present(elf_sym.binding)
 
 
 def _str_field_mapping(raw: Any, field_name: str) -> dict[str, str]:

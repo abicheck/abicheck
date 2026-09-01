@@ -274,11 +274,15 @@ class TestScanModelDataclasses:
         # the scan_model_dataclasses() heuristic itself can never find it
         # (no Optional shape), which is exactly why REFERENCE_FLAG_COVERAGE
         # is checked independently in the real gate. Function.deprecated
-        # IS Optional-shaped with a documented marker and is found here.
+        # and EnumType.is_scoped ARE Optional-shaped with a documented
+        # marker and are found here -- both remain genuinely unconverted
+        # (ElfMetadata.dynamic_flags/has_init/has_fini, PeMetadata.
+        # delay_imports, and MachoMetadata.rpaths -- the binary-format
+        # case-(b) fields -- converted in Phase 5's seventh batch; see
+        # fact_registry_entries.py's FACT_REGISTRY).
         found = scan_model_dataclasses()
         assert ("Function", "deprecated") in found
-        assert ("Function", "contract_attributes") in found
-        assert ("RecordType", "is_abstract") in found
+        assert ("EnumType", "is_scoped") in found
 
 
 # ---------------------------------------------------------------------------
@@ -748,15 +752,20 @@ class TestPersistedEncodeDecodeWiring:
         codec.write_text('decode_fact(t.get("widget_fact"), v)\n')
         serialization = tmp_path / "serialization.py"
         serialization.write_text("# nothing here\n")
+        platform_blocks = tmp_path / "snapshot_platform_blocks.py"
+        platform_blocks.write_text("# nothing here\n")
         original_codec = fact_registry_completeness._FACT_CODEC_PATH
         original_ser = fact_registry_completeness._SERIALIZATION_PATH
+        original_blocks = fact_registry_completeness._SNAPSHOT_PLATFORM_BLOCKS_PATH
         fact_registry_completeness._FACT_CODEC_PATH = codec
         fact_registry_completeness._SERIALIZATION_PATH = serialization
+        fact_registry_completeness._SNAPSHOT_PLATFORM_BLOCKS_PATH = platform_blocks
         try:
             wired = fact_registry_completeness._decode_wired_fact_attrs()
         finally:
             fact_registry_completeness._FACT_CODEC_PATH = original_codec
             fact_registry_completeness._SERIALIZATION_PATH = original_ser
+            fact_registry_completeness._SNAPSHOT_PLATFORM_BLOCKS_PATH = original_blocks
         assert wired == {("RecordType", "widget_fact")}
 
     def test_decode_wired_ignores_an_unrecognized_receiver(
@@ -766,15 +775,20 @@ class TestPersistedEncodeDecodeWiring:
         codec.write_text('decode_fact(some_other_dict.get("widget_fact"), v)\n')
         serialization = tmp_path / "serialization.py"
         serialization.write_text("# nothing here\n")
+        platform_blocks = tmp_path / "snapshot_platform_blocks.py"
+        platform_blocks.write_text("# nothing here\n")
         original_codec = fact_registry_completeness._FACT_CODEC_PATH
         original_ser = fact_registry_completeness._SERIALIZATION_PATH
+        original_blocks = fact_registry_completeness._SNAPSHOT_PLATFORM_BLOCKS_PATH
         fact_registry_completeness._FACT_CODEC_PATH = codec
         fact_registry_completeness._SERIALIZATION_PATH = serialization
+        fact_registry_completeness._SNAPSHOT_PLATFORM_BLOCKS_PATH = platform_blocks
         try:
             wired = fact_registry_completeness._decode_wired_fact_attrs()
         finally:
             fact_registry_completeness._FACT_CODEC_PATH = original_codec
             fact_registry_completeness._SERIALIZATION_PATH = original_ser
+            fact_registry_completeness._SNAPSHOT_PLATFORM_BLOCKS_PATH = original_blocks
         assert wired == set()
 
     def test_gate_flags_a_persisted_entry_wired_encode_only(

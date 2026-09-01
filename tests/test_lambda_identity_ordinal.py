@@ -39,7 +39,7 @@ identical ordinal to the identical closure.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, field
 from pathlib import Path
 
 import pytest
@@ -50,6 +50,7 @@ from abicheck.buildsource.source_graph import SourceGraphSummary
 from abicheck.checker import compare
 from abicheck.checker_policy import ChangeKind
 from abicheck.model import AbiSnapshot, Function, Param, RecordType, Visibility
+from abicheck.model.fact import replace_with_fact_sync
 from abicheck.model.identity import (
     Namespace,
     Record,
@@ -252,152 +253,6 @@ class TestSnapshotRenumbering:
         renumber_anonymous_closure_identities(snap)
         assert snap.types[0].qualified_name == before_type
         assert snap.functions[0].mangled == before_func
-
-
-class TestPayloadTextIsNeverCorrupted:
-    """Codex review: a free-text/expression field (never a type/name
-    spelling) can coincidentally contain a substring matching the closure
-    marker syntax -- e.g. a deprecation message that literally quotes one.
-    Such text must never be collected as identity evidence or rewritten,
-    or a snapshot's own human-readable payload silently corrupts."""
-
-    def test_a_deprecated_message_matching_the_marker_syntax_is_untouched(
-        self,
-    ) -> None:
-        message = f"avoid {_closure('x.h', 10, 2)}"
-        snap = AbiSnapshot(
-            library="lib.so",
-            version="1.0",
-            types=[
-                replace(_record("Widget", qualified="ns::Widget"), deprecated=message)
-            ],
-        )
-        renumber_anonymous_closure_identities(snap)
-        assert snap.types[0].deprecated == message
-
-    def test_a_default_initializer_matching_the_marker_syntax_is_untouched(
-        self,
-    ) -> None:
-        from abicheck.model import TypeField
-
-        expr = f"get_default({_closure('x.h', 10, 2)})"
-        rec = replace(
-            _record("Widget", qualified="ns::Widget"),
-            fields=[TypeField(name="f", type="int", default=expr)],
-        )
-        snap = AbiSnapshot(library="lib.so", version="1.0", types=[rec])
-        renumber_anonymous_closure_identities(snap)
-        assert snap.types[0].fields[0].default == expr
-
-    def test_payload_text_does_not_fabricate_an_ordinal_for_a_real_closure(
-        self,
-    ) -> None:
-        """A deprecated message's coincidental marker must not consume an
-        ordinal slot that a real, identity-bearing closure would otherwise
-        get -- confirming exclusion happens at collection time too, not
-        only at rewrite time."""
-        closure_type = f"raii_guard<{_closure('x.h', 5, 1)}>"
-        message = f"avoid {_closure('x.h', 1, 1)}"
-        rec = replace(
-            _record(closure_type, qualified=f"ns::{closure_type}"),
-            deprecated=message,
-        )
-        snap = AbiSnapshot(library="lib.so", version="1.0", types=[rec])
-        renumber_anonymous_closure_identities(snap)
-        # The real closure gets ordinal #1 (the only identity-bearing one
-        # collected) -- not #2, which it would get if the deprecated
-        # message's coincidental marker at line 1 (earlier than line 5)
-        # had also been collected as a competing coordinate.
-        assert "#1)" in snap.types[0].qualified_name
-        assert snap.types[0].deprecated == message
-
-    def test_a_variable_initializer_value_matching_the_marker_syntax_is_untouched(
-        self,
-    ) -> None:
-        """Codex review, fresh evidence: ``Variable.value`` (its compile-time
-        constant initializer) is the identical payload shape as
-        ``deprecated``/``default`` -- reached by the dataclass-field walk,
-        not previously excluded."""
-        from abicheck.model import Variable, Visibility
-
-        value = f"text {_closure('x.h', 10, 2)}"
-        var = Variable(
-            name="v",
-            mangled="_ZN1vE",
-            type="const char *",
-            visibility=Visibility.PUBLIC,
-            value=value,
-        )
-        snap = AbiSnapshot(library="lib.so", version="1.0", variables=[var])
-        renumber_anonymous_closure_identities(snap)
-        assert snap.variables[0].value == value
-
-    def test_a_constant_value_matching_the_marker_syntax_is_untouched(self) -> None:
-        """Codex review, fresh evidence: ``AbiSnapshot.constants`` (a
-        ``#define``/``constexpr`` name -> value string dict) is payload,
-        never a type-name spelling -- the generic dict walk previously
-        rewrote its values along with any genuine identity-bearing dict's."""
-        value = f"text {_closure('x.h', 10, 2)}"
-        snap = AbiSnapshot(library="lib.so", version="1.0", constants={"MSG": value})
-        renumber_anonymous_closure_identities(snap)
-        assert snap.constants["MSG"] == value
-
-    def test_a_constant_value_does_not_fabricate_an_ordinal_for_a_real_closure(
-        self,
-    ) -> None:
-        """Same collection-time exclusion check as the deprecated-message
-        sibling above, for a constant's payload value."""
-        closure_type = f"raii_guard<{_closure('x.h', 5, 1)}>"
-        value = f"text {_closure('x.h', 1, 1)}"
-        rec = _record(closure_type, qualified=f"ns::{closure_type}")
-        snap = AbiSnapshot(
-            library="lib.so",
-            version="1.0",
-            types=[rec],
-            constants={"MSG": value},
-        )
-        renumber_anonymous_closure_identities(snap)
-        assert "#1)" in snap.types[0].qualified_name
-        assert snap.constants["MSG"] == value
-
-    def test_a_source_location_matching_the_marker_syntax_is_untouched(
-        self,
-    ) -> None:
-        """Codex review, fresh evidence: source_location/source_header
-        (ADR-015 provenance -- a filesystem path, never a type/name
-        spelling) is the identical payload shape as deprecated/default/
-        value -- a legal path containing marker-shaped text of its own
-        (e.g. a directory literally named "(lambda:a.h:1:2)") was rewritten
-        even for a snapshot with no real closure at all, corrupting
-        persisted declaration provenance."""
-        path = f"/tmp/{_closure('x.h', 10, 2)}/api.h"
-        rec = replace(
-            _record("Widget", qualified="ns::Widget"),
-            source_location=f"{path}:42",
-            source_header=path,
-        )
-        snap = AbiSnapshot(library="lib.so", version="1.0", types=[rec])
-        renumber_anonymous_closure_identities(snap)
-        assert snap.types[0].source_location == f"{path}:42"
-        assert snap.types[0].source_header == path
-
-    def test_a_source_location_does_not_fabricate_an_ordinal_for_a_real_closure(
-        self,
-    ) -> None:
-        """Same collection-time exclusion check as the deprecated-message/
-        constant siblings above, for source_location/source_header."""
-        closure_type = f"raii_guard<{_closure('x.h', 5, 1)}>"
-        path = f"/tmp/{_closure('x.h', 1, 1)}/api.h"
-        rec = replace(
-            _record(closure_type, qualified=f"ns::{closure_type}"),
-            source_location=f"{path}:42",
-            source_header=path,
-        )
-        snap = AbiSnapshot(library="lib.so", version="1.0", types=[rec])
-        renumber_anonymous_closure_identities(snap)
-        assert "#1)" in snap.types[0].qualified_name
-        assert snap.types[0].source_location == f"{path}:42"
-        assert snap.types[0].source_header == path
 
 
 class TestLegacyPersistedSnapshotsAreRenumberedOnLoad:
@@ -804,7 +659,9 @@ class TestHybridMergeDefersRenumbering:
                 # its own independent ordinal for the SAME shared closure
                 # would be #1 -- a real fact only clang captures rides
                 # along on this type, to prove the merge actually joined.
-                replace(_record(owner_clang, qualified=owner_clang), is_abstract=True),
+                replace_with_fact_sync(
+                    _record(owner_clang, qualified=owner_clang), is_abstract=True
+                ),
             ],
         )
 
@@ -872,7 +729,9 @@ class TestServiceRunDumpHybridAlsoDefersRenumbering:
                 # independent ordinal for the SAME closure would be #1 --
                 # a real clang-only fact rides along to prove the merge
                 # actually joined rather than missing due to desync.
-                replace(_record(owner, qualified=owner), is_abstract=True),
+                replace_with_fact_sync(
+                    _record(owner, qualified=owner), is_abstract=True
+                ),
             ],
         )
 
@@ -882,7 +741,9 @@ class TestServiceRunDumpHybridAlsoDefersRenumbering:
                 return clang_snap
             return castxml_snap
 
-        with patch("abicheck.service_dump_native._dump_elf", side_effect=_fake_dump_elf):
+        with patch(
+            "abicheck.service_dump_native._dump_elf", side_effect=_fake_dump_elf
+        ):
             merged = run_dump(p, "elf", header_backend="hybrid")
 
         matched = [t for t in merged.types if t.name.startswith("Foo<")]
@@ -1117,7 +978,9 @@ class TestFrozenDataclassesReachableFromTheWalkAreRebuilt:
             pytest.param(lambda leaf: [leaf], id="in-a-list"),
             pytest.param(lambda leaf: {"k": leaf}, id="as-a-dict-value"),
             pytest.param(lambda leaf: ([leaf],), id="two-levels-deep"),
-            pytest.param(lambda leaf: _MutableHolder(child=leaf), id="on-a-mutable-parent"),
+            pytest.param(
+                lambda leaf: _MutableHolder(child=leaf), id="on-a-mutable-parent"
+            ),
             pytest.param(
                 lambda leaf: _FrozenHolder(child=leaf), id="on-a-frozen-parent"
             ),

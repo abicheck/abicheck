@@ -908,10 +908,11 @@ class TestBundleFactsArchiveResourceLimits:
         import abicheck.bundle_facts as bundle_facts_module
         from abicheck.storage.bundle_archive import BundleArchiveReader
 
-        # Generous enough for both real per-library JSON blobs (~2.7 KiB
-        # each) to actually decode, so the assertions below exercise the
-        # cap *shrinking* between reads rather than a decode failure.
-        cap = 6000
+        # Generous enough for both real per-library JSON blobs (~3.2 KiB
+        # each as of ADR-063 Phase 5's per-declaration Fact[...] siblings)
+        # to actually decode, so the assertions below exercise the cap
+        # *shrinking* between reads rather than a decode failure.
+        cap = 8000
         monkeypatch.setattr(bundle_facts_module, "DEFAULT_MAX_BUNDLE_DECODED_BYTES", cap)
         metadata = {
             f"lib{i}.so": _meta(soname=f"lib{i}.so", exports=[f"sym{i}"]) for i in range(2)

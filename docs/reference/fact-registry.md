@@ -23,12 +23,39 @@ Phase 5 section for the design this page's data comes from.
 
 | Fact | Value type | Producing backends | Lifecycle | Persisted | Identity | Comparable | Suppressible | Reportable |
 |------|------------|---------------------|-----------|:---------:|:--------:|:----------:|:------------:|:----------:|
+| `AbiSnapshot.ast_resolved_standard` | `str \| None` | castxml, clang | persisted | ✅ | — | ✅ | — | ✅ |
+| `ElfMetadata.dynamic_flags` | `frozenset[str] \| None` | elf | persisted | ✅ | — | ✅ | — | ✅ |
+| `ElfMetadata.has_fini` | `bool \| None` | elf | persisted | ✅ | — | ✅ | — | ✅ |
+| `ElfMetadata.has_init` | `bool \| None` | elf | persisted | ✅ | — | ✅ | — | ✅ |
+| `EnumType.qualified_name` | `str \| None` | castxml, clang | persisted | ✅ | ✅ | ✅ | — | ✅ |
+| `EnumType.source_header` | `str \| None` | castxml, clang, dwarf, pdb | persisted | ✅ | — | ✅ | — | ✅ |
+| `Function.contract_attributes` | `list[str] \| None` | castxml, clang | persisted | ✅ | — | ✅ | — | ✅ |
+| `Function.elf_binding` | `SymbolBinding \| None` | castxml, clang, elf | persisted | ✅ | — | ✅ | — | ✅ |
+| `Function.exception_spec` | `str \| None` | castxml, clang | persisted | ✅ | — | ✅ | — | ✅ |
+| `Function.hidden_friend_owner` | `str \| None` | castxml, clang | persisted | ✅ | — | ✅ | — | ✅ |
+| `Function.is_compiler_generated` | `bool \| None` | castxml | persisted | ✅ | — | ✅ | — | ✅ |
+| `Function.is_explicit` | `bool \| None` | castxml, clang, dwarf | persisted | ✅ | — | ✅ | — | ✅ |
+| `Function.is_hidden_friend` | `bool \| None` | castxml, clang | persisted | ✅ | — | ✅ | — | ✅ |
+| `Function.is_override` | `bool \| None` | castxml, clang | persisted | ✅ | — | ✅ | — | ✅ |
+| `Function.is_variadic` | `bool \| None` | castxml, clang | persisted | ✅ | — | ✅ | — | ✅ |
+| `Function.source_header` | `str \| None` | castxml, clang | persisted | ✅ | — | ✅ | — | ✅ |
+| `MachoMetadata.rpaths` | `list[str] \| None` | macho | persisted | ✅ | — | ✅ | — | ✅ |
 | `Param.is_va_list` | `bool` | clang | persisted | ✅ | — | ✅ | — | ✅ |
+| `PeMetadata.delay_imports` | `dict[str, list[str]] \| None` | pe | persisted | ✅ | — | ✅ | — | ✅ |
 | `RecordType.bases` | `list[str]` | castxml, clang, dwarf | persisted | ✅ | — | ✅ | — | ✅ |
+| `RecordType.data_size_bits` | `int \| None` | clang | persisted | ✅ | — | ✅ | — | ✅ |
+| `RecordType.is_abstract` | `bool \| None` | castxml, clang | persisted | ✅ | — | ✅ | — | ✅ |
 | `RecordType.is_final` | `bool \| None` | castxml, clang | persisted | ✅ | — | ✅ | — | ✅ |
+| `RecordType.is_standard_layout` | `bool \| None` | clang | persisted | ✅ | — | ✅ | — | ✅ |
+| `RecordType.is_trivially_copyable` | `bool \| None` | clang | persisted | ✅ | — | ✅ | — | ✅ |
+| `RecordType.qualified_name` | `str \| None` | castxml, clang | persisted | ✅ | ✅ | ✅ | — | ✅ |
+| `RecordType.source_header` | `str \| None` | castxml, clang, dwarf, pdb | persisted | ✅ | — | ✅ | — | ✅ |
 | `RecordType.virtual_bases` | `list[str]` | castxml, clang, dwarf | persisted | ✅ | — | ✅ | — | ✅ |
 | `RecordType.vptr_offset_bits` | `int \| None` | castxml, clang, dwarf | persisted | ✅ | — | ✅ | — | ✅ |
 | `RecordType.vtable` | `list[str]` | castxml, clang, dwarf | persisted | ✅ | — | ✅ | — | ✅ |
+| `Variable.alignment_bits` | `int \| None` | castxml, clang | persisted | ✅ | — | ✅ | — | ✅ |
+| `Variable.elf_binding` | `SymbolBinding \| None` | castxml, clang, elf | persisted | ✅ | — | ✅ | — | ✅ |
+| `Variable.source_header` | `str \| None` | castxml, clang | persisted | ✅ | — | ✅ | — | ✅ |
 
 ## Reliability-flag coverage (case (a))
 
@@ -59,42 +86,15 @@ check fails if a new eligible field appears that isn't named here.
 
 | Field | Converted? |
 |-------|------------|
-| `AbiSnapshot.ast_resolved_standard` | not yet — tracked gap |
-| `ElfMetadata.dynamic_flags` | not yet — tracked gap |
-| `ElfMetadata.has_fini` | not yet — tracked gap |
-| `ElfMetadata.has_init` | not yet — tracked gap |
 | `EnumType.deprecated` | not yet — tracked gap |
 | `EnumType.is_scoped` | not yet — tracked gap |
-| `EnumType.qualified_name` | not yet — tracked gap |
-| `EnumType.source_header` | not yet — tracked gap |
-| `Function.contract_attributes` | not yet — tracked gap |
 | `Function.deprecated` | not yet — tracked gap |
-| `Function.elf_binding` | not yet — tracked gap |
-| `Function.exception_spec` | not yet — tracked gap |
-| `Function.hidden_friend_owner` | not yet — tracked gap |
-| `Function.is_compiler_generated` | not yet — tracked gap |
-| `Function.is_explicit` | not yet — tracked gap |
-| `Function.is_hidden_friend` | not yet — tracked gap |
-| `Function.is_override` | not yet — tracked gap |
-| `Function.is_variadic` | not yet — tracked gap |
-| `Function.source_header` | not yet — tracked gap |
-| `MachoMetadata.rpaths` | not yet — tracked gap |
 | `Param.is_restrict` | not yet — tracked gap |
-| `PeMetadata.delay_imports` | not yet — tracked gap |
-| `RecordType.data_size_bits` | not yet — tracked gap |
 | `RecordType.deprecated` | not yet — tracked gap |
-| `RecordType.is_abstract` | not yet — tracked gap |
-| `RecordType.is_standard_layout` | not yet — tracked gap |
-| `RecordType.is_trivially_copyable` | not yet — tracked gap |
-| `RecordType.qualified_name` | not yet — tracked gap |
-| `RecordType.source_header` | not yet — tracked gap |
 | `TypeField.default` | not yet — tracked gap |
 | `TypeField.deprecated` | not yet — tracked gap |
 | `TypeField.is_const` | not yet — tracked gap |
 | `TypeField.is_mutable` | not yet — tracked gap |
 | `TypeField.is_volatile` | not yet — tracked gap |
 | `Variable.access` | not yet — tracked gap |
-| `Variable.alignment_bits` | not yet — tracked gap |
 | `Variable.deprecated` | not yet — tracked gap |
-| `Variable.elf_binding` | not yet — tracked gap |
-| `Variable.source_header` | not yet — tracked gap |

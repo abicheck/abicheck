@@ -601,6 +601,18 @@ def parse_functions(
                 return_pointer_depth=_pointer_depth(ret_type),
                 ref_qualifier=ref_qualifier,
                 is_explicit=is_explicit,
+                # The `explicit` specifier is conceptually inapplicable
+                # outside a constructor/conversion function -- an ordinary
+                # method/free function's `is_explicit=None` above is a
+                # confirmed non-gap, not missing evidence, so it gets its
+                # own explicit Fact rather than falling through the
+                # generic bridge into NOT_COLLECTED (Codex review, PR
+                # #982).
+                is_explicit_fact=(
+                    Fact.present(is_explicit)
+                    if kind in ("CXXConstructorDecl", "CXXConversionDecl")
+                    else Fact.not_applicable()
+                ),
                 is_hidden_friend=entry.in_friend,
                 # ``entry.scope`` is the enclosing-class scope path at the
                 # point ``in_friend`` first became True (the FriendDecl's
@@ -609,6 +621,19 @@ def parse_functions(
                 # ``befriending`` attribute resolution.
                 hidden_friend_owner=(
                     "::".join(entry.scope) if entry.in_friend and entry.scope else None
+                ),
+                # An owner is conceptually inapplicable for an ordinary
+                # (non-friend) function -- not a missing-evidence gap -- so
+                # it gets its own explicit Fact rather than falling through
+                # the generic bridge into NOT_COLLECTED (Codex review, PR
+                # #982, same shape as is_explicit_fact above). A friend
+                # whose owner scope couldn't be resolved (in_friend True,
+                # scope empty) still falls through to NOT_COLLECTED -- that
+                # is a real evidence gap, not an inapplicable field.
+                hidden_friend_owner_fact=(
+                    Fact.not_applicable()
+                    if not entry.in_friend
+                    else (Fact.present("::".join(entry.scope)) if entry.scope else None)
                 ),
                 # clang stamps "variadic": true on FunctionDecl; the
                 # qualtype spelling ("void (int, ...)") is the fallback.
@@ -623,6 +648,14 @@ def parse_functions(
                     _clang_method_is_override(node)
                     if kind in _OVERRIDE_ELIGIBLE_KINDS
                     else None
+                ),
+                # Same "confirmed non-gap, not missing evidence" shape as
+                # is_explicit_fact above: `override` only makes sense on a
+                # kind that can actually be virtual.
+                is_override_fact=(
+                    Fact.present(_clang_method_is_override(node))
+                    if kind in _OVERRIDE_ELIGIBLE_KINDS
+                    else Fact.not_applicable()
                 ),
                 is_compiler_generated=False,
                 # ADR-063 Phase 2. `mangled_name` is offered here only when

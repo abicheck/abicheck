@@ -5467,6 +5467,32 @@ def test_hidden_friend_function_marked() -> None:
     (fn,) = _ClangAstParser(root, set(), set()).parse_functions()
     assert fn.name == "operator=="
     assert fn.is_hidden_friend is True
+    # ADR-063 Phase 5 (Codex review, PR #982): a resolved friend owner is
+    # real evidence -- Fact.PRESENT, not NOT_COLLECTED.
+    from abicheck.model import FactStatus
+
+    assert fn.hidden_friend_owner_fact.status == FactStatus.PRESENT
+    assert fn.hidden_friend_owner_fact.value == fn.hidden_friend_owner == "Pt"
+
+
+def test_hidden_friend_owner_fact_not_applicable_for_ordinary_function() -> None:
+    """An owner is conceptually inapplicable for a non-friend function -- a
+    confirmed non-gap, not missing evidence (Codex review, PR #982)."""
+    from abicheck.model import FactStatus
+
+    root = _tu(
+        {
+            "kind": "FunctionDecl",
+            "name": "do_thing",
+            "loc": {"file": "include/foo.h", "line": 1},
+            "mangledName": "_Z8do_thingv",
+            "type": {"qualType": "void ()"},
+        }
+    )
+    (fn,) = _ClangAstParser(root, set(), set()).parse_functions()
+    assert fn.is_hidden_friend is False
+    assert fn.hidden_friend_owner is None
+    assert fn.hidden_friend_owner_fact.status == FactStatus.NOT_APPLICABLE
 
 
 def test_default_argument_non_literal_fingerprint_and_marker_fallback() -> None:

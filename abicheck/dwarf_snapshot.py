@@ -68,6 +68,7 @@ from .model import (
     record_layout_facts,
     resolve_vptr_offset_bits,
 )
+from .model.mangled_name import itanium_scope_components
 
 if TYPE_CHECKING:
     from .dwarf_advanced import AdvancedDwarfMetadata
@@ -603,7 +604,29 @@ class _DwarfSnapshotBuilder:
         # Tri-state: True/False are authoritative readings from DWARF; the
         # snapshot loader defaults to None for older snapshots that predate
         # this field, so the diff can distinguish "unknown" from "implicit".
-        is_explicit: bool | None = _attr_bool(die, "DW_AT_explicit")
+        #
+        # `_attr_bool` returns False (never None) for a missing attribute
+        # (Codex review, fresh evidence, PR #982), and the compiler only
+        # ever *emits* DW_AT_explicit on a ctor/conversion-operator DIE in
+        # the first place -- so a bare `_attr_bool` read can't distinguish
+        # "confirmed not explicit" (an implicit ctor/conversion op, real
+        # evidence) from "explicit is conceptually inapplicable" (an
+        # ordinary method/free function/destructor, no evidence at all).
+        # Eligibility is derived from the mangled name's own Itanium ctor/
+        # conversion-operator encoding (`{ctor}`/`{op:cv:...}`) -- DWARF
+        # carries no equivalent of castxml/clang's own AST node kind here.
+        _explicit_components = itanium_scope_components(mangled)
+        _is_explicit_eligible = (
+            _explicit_components is not None
+            and bool(_explicit_components)
+            and (
+                _explicit_components[-1] == "{ctor}"
+                or _explicit_components[-1].startswith("{op:cv:")
+            )
+        )
+        is_explicit: bool | None = (
+            _attr_bool(die, "DW_AT_explicit") if _is_explicit_eligible else None
+        )
 
         # Access level
         access_val = _attr_int(die, "DW_AT_accessibility")
@@ -630,6 +653,11 @@ class _DwarfSnapshotBuilder:
             is_deleted=is_deleted,
             deleted_from_dwarf=is_deleted,
             is_explicit=is_explicit,
+            is_explicit_fact=(
+                Fact.present(is_explicit)
+                if _is_explicit_eligible
+                else Fact.not_applicable()
+            ),
         )
 
     def _is_abi_relevant_export(self, name: str) -> bool:

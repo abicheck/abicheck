@@ -14,7 +14,8 @@
 
 """Shared qualified-name segmentation and versioned inline-namespace helpers.
 
-Leaf module (no imports from the rest of ``abicheck``) so it can be shared
+Leaf module (its only ``abicheck`` import is its own sibling
+``qualified_name_segments_walk.py``, itself a leaf) so it can be shared
 between ``diff_namespaces.py`` (which owns the segment-splitting logic this
 module was extracted from) and any other detector that needs to recognize a
 versioned inline-namespace segment (``v1``, ``_V2``, ``__1``, ...) without
@@ -49,17 +50,29 @@ cannot be made sound with the data available today.
 from __future__ import annotations
 
 import contextlib as _contextlib
-import dataclasses as _dataclasses
 import re as _re
 import threading as _threading
 from collections.abc import (
-    Callable as _Callable,
     Iterable as _Iterable,
     Iterator as _Iterator,
     Mapping as _Mapping,
 )
-from enum import Enum as _Enum
 from typing import NamedTuple as _NamedTuple, TypeVar as _TypeVar
+
+# The generic payload-exclusion-aware dataclass string walk this module's
+# own renumbering builds on -- split out into qualified_name_segments_walk.py
+# (a sibling leaf module, stdlib-only like this one) once this module
+# crossed the AI-readiness file-size gate's 800-line production cap. Its
+# names are re-exported here so every existing
+# `from .qualified_name_segments import _walk_rewrite_strings` call site
+# (this module's own use below, plus tests exercising the walk directly) is
+# unaffected.
+from .qualified_name_segments_walk import (
+    _PAYLOAD_FIELD_EXCLUSIONS as _PAYLOAD_FIELD_EXCLUSIONS,
+    _collect_strings as _collect_strings,
+    _legacy_sibling_is_payload_excluded as _legacy_sibling_is_payload_excluded,
+    _walk_rewrite_strings as _walk_rewrite_strings,
+)
 
 _SnapshotT = _TypeVar("_SnapshotT")
 
@@ -518,139 +531,6 @@ def apply_anonymous_type_ordinals(
         cursor = match.end
     pieces.append(name[cursor:])
     return "".join(pieces)
-
-
-#: Dataclass field names that carry free-text/expression payload, never a
-#: type/name spelling -- so a coincidental substring matching the closure
-#: marker syntax must not be collected as (fabricated) identity evidence or
-#: rewritten as if it were one (Codex review: a ``RecordType.deprecated``
-#: message like ``"avoid (lambda:x.h:10:2)"`` was silently corrupted to
-#: ``"avoid (lambda:x.h#1)"``). Shared across every declaration dataclass in
-#: ``model.py`` that has a field of this name (``Function``/``Variable``/
-#: ``TypeField``/``RecordType``/``EnumType``/``EnumMember`` all document
-#: ``deprecated`` as "see Function.deprecated for the message-string
-#: convention"; ``Param.default``/``TypeField.default`` are documented
-#: "verbatim, value not preserved"), matched by name alone rather than
-#: per-dataclass, since the walk in ``_collect_strings``/
-#: ``_walk_rewrite_strings`` is itself dataclass-agnostic. ``Variable.value``
-#: (its compile-time constant initializer, "if known", model.py's own
-#: docstring) is the identical payload shape -- added after the same
-#: reachable-corruption pattern was found on it too (Codex review, fresh
-#: evidence). ``source_location``/``source_header`` (ADR-015 provenance --
-#: a filesystem path, optionally with ``:line:col`` appended, never a C++
-#: type/name spelling) are the same shape again: a legal path containing
-#: marker-shaped text of its own (``/tmp/(lambda:a.h:1:2)``) was rewritten
-#: even for a snapshot with no real closure at all, corrupting persisted
-#: declaration provenance and, transitively, any later header-origin/
-#: dependency-scoping decision that reads it (Codex review, fresh evidence).
-_PAYLOAD_FIELD_EXCLUSIONS: frozenset[str] = frozenset(
-    {"deprecated", "default", "value", "source_location", "source_header"}
-)
-
-
-def _collect_strings(value: object, out: list[str]) -> None:
-    """Append every ``str`` reachable from *value* to *out*, recursing
-    through dataclasses, lists/tuples, and dicts (keys and values) --
-    except a field named in :data:`_PAYLOAD_FIELD_EXCLUSIONS`.
-    """
-    if isinstance(value, str) and not isinstance(value, _Enum):
-        out.append(value)
-    elif _dataclasses.is_dataclass(value) and not isinstance(value, type):
-        for f in _dataclasses.fields(value):
-            if f.name in _PAYLOAD_FIELD_EXCLUSIONS:
-                continue
-            _collect_strings(getattr(value, f.name), out)
-    elif isinstance(value, (list, tuple)):
-        for item in value:
-            _collect_strings(item, out)
-    elif isinstance(value, dict):
-        for k, v in value.items():
-            if isinstance(k, str) and not isinstance(k, _Enum):
-                out.append(k)
-            _collect_strings(v, out)
-
-
-def _walk_rewrite_strings(value: object, rewrite: _Callable[[str], str]) -> object:
-    """Rewrite every ``str`` reachable from *value* via ``rewrite(s)``,
-    mutating dataclasses/lists/dicts in place where possible -- except a
-    field named in :data:`_PAYLOAD_FIELD_EXCLUSIONS`. Returns the (possibly
-    new) value -- a bare ``str`` can't be mutated in place.
-
-    A **frozen** dataclass is rebuilt via ``dataclasses.replace`` rather
-    than mutated: ``setattr`` on one raises ``FrozenInstanceError``
-    outright, so this walk would crash the whole dump the moment any
-    reachable model field held one. That is not hypothetical -- ADR-063
-    Phase 2's ``entity_id`` carrier (a frozen ``model.identity.EntityId``,
-    itself holding a tuple of frozen scope segments) is reachable from
-    ``functions``/``variables``/``types``/``enums``, all four of which
-    :data:`_LAMBDA_IDENTITY_FIELDS` walks. Rebuilding is also the right
-    *behaviour*, not merely a way to avoid the exception: a closure marker
-    that survives unrewritten inside an identity carrier would leave that
-    carrier keyed on the raw ``:line:col`` spelling this whole function
-    exists to remove, i.e. path/line-tainted identity next to a normalized
-    one. Only ``init=True`` fields can be handed to ``replace``; a changed
-    ``init=False`` field on a frozen dataclass is instead applied via
-    ``object.__setattr__`` -- the same escape hatch a frozen dataclass's
-    own ``__post_init__`` uses to set a derived field, and the established
-    convention elsewhere in this codebase for the identical need (see
-    ``compatibility_evaluation_config.py``) -- applied AFTER ``replace``
-    rebuilds the ``init=True`` fields, onto the freshly-rebuilt object
-    rather than the original, so a rewrite touching both kinds of field in
-    one dataclass lands on the object this function actually returns
-    (Codex review, PR #943): a reachable ``init=False`` field can itself
-    hold a closure marker (e.g. one populated from a rewritten ``init=True``
-    field inside ``__post_init__``), and silently discarding its rewrite
-    would leave that field pointing at stale, path/line-tainted content
-    even though the dataclass it belongs to was otherwise correctly
-    rebuilt.
-    """
-    if isinstance(value, str) and not isinstance(value, _Enum):
-        return rewrite(value)
-    if _dataclasses.is_dataclass(value) and not isinstance(value, type):
-        params = getattr(value, "__dataclass_params__", None)
-        is_frozen = bool(getattr(params, "frozen", False))
-        replacements: dict[str, object] = {}
-        frozen_field_updates: dict[str, object] = {}
-        for f in _dataclasses.fields(value):
-            if f.name in _PAYLOAD_FIELD_EXCLUSIONS:
-                continue
-            old = getattr(value, f.name)
-            new = _walk_rewrite_strings(old, rewrite)
-            if new is old:
-                continue
-            if not is_frozen:
-                setattr(value, f.name, new)
-            elif f.init:
-                replacements[f.name] = new
-            else:
-                frozen_field_updates[f.name] = new
-        if replacements or frozen_field_updates:
-            value = _dataclasses.replace(value, **replacements)
-        for name, new in frozen_field_updates.items():
-            object.__setattr__(value, name, new)
-        return value
-    if isinstance(value, list):
-        for i, item in enumerate(value):
-            new_item = _walk_rewrite_strings(item, rewrite)
-            if new_item is not item:
-                value[i] = new_item
-        return value
-    if isinstance(value, tuple):
-        return tuple(_walk_rewrite_strings(item, rewrite) for item in value)
-    if isinstance(value, dict):
-        rewritten: dict[object, object] = {}
-        changed = False
-        for k, v in value.items():
-            new_k = rewrite(k) if isinstance(k, str) and not isinstance(k, _Enum) else k
-            new_v = _walk_rewrite_strings(v, rewrite)
-            rewritten[new_k] = new_v
-            if new_k != k or new_v is not v:
-                changed = True
-        if changed:
-            value.clear()
-            value.update(rewritten)
-        return value
-    return value
 
 
 #: Fields whose string content can embed a castxml/clang closure marker --

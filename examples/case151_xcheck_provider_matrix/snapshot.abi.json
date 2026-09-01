@@ -4,6 +4,11 @@
   "ast_fallback_reason": null,
   "ast_producer": null,
   "ast_resolved_standard": null,
+  "ast_resolved_standard_fact": {
+    "diagnostics": [],
+    "status": "not_collected",
+    "value": null
+  },
   "ast_sysroot": null,
   "ast_toolchain": {},
   "ast_toolchain_supported": null,
@@ -114,6 +119,11 @@
     "abi_flags": [],
     "bind_now": false,
     "dynamic_flags": null,
+    "dynamic_flags_fact": {
+      "diagnostics": [],
+      "status": "not_collected",
+      "value": null
+    },
     "e_flags": 0,
     "ei_data": "",
     "elf_class": 64,
@@ -121,8 +131,18 @@
     "has_dt_relr": false,
     "has_executable_stack": false,
     "has_fini": null,
+    "has_fini_fact": {
+      "diagnostics": [],
+      "status": "not_collected",
+      "value": null
+    },
     "has_fortify_source": false,
     "has_init": null,
+    "has_init_fact": {
+      "diagnostics": [],
+      "status": "not_collected",
+      "value": null
+    },
     "has_stack_canary": false,
     "has_static_tls": false,
     "has_textrel": false,
@@ -167,24 +187,69 @@
     {
       "access": "public",
       "contract_attributes": null,
+      "contract_attributes_fact": {
+        "diagnostics": [],
+        "status": "not_collected",
+        "value": null
+      },
       "deleted_from_dwarf": false,
       "deprecated": null,
       "elf_binding": "global",
+      "elf_binding_fact": {
+        "diagnostics": [],
+        "status": "present",
+        "value": "global"
+      },
       "elf_visibility": "default",
       "exception_spec": null,
+      "exception_spec_fact": {
+        "diagnostics": [],
+        "status": "not_collected",
+        "value": null
+      },
       "hidden_friend_owner": null,
+      "hidden_friend_owner_fact": {
+        "diagnostics": [],
+        "status": "not_collected",
+        "value": null
+      },
       "is_compiler_generated": null,
+      "is_compiler_generated_fact": {
+        "diagnostics": [],
+        "status": "not_collected",
+        "value": null
+      },
       "is_const": false,
       "is_deleted": false,
       "is_explicit": null,
+      "is_explicit_fact": {
+        "diagnostics": [],
+        "status": "not_collected",
+        "value": null
+      },
       "is_extern_c": false,
       "is_hidden_friend": null,
+      "is_hidden_friend_fact": {
+        "diagnostics": [],
+        "status": "not_collected",
+        "value": null
+      },
       "is_inline": false,
       "is_noexcept": false,
       "is_override": null,
+      "is_override_fact": {
+        "diagnostics": [],
+        "status": "not_collected",
+        "value": null
+      },
       "is_pure_virtual": false,
       "is_static": false,
       "is_variadic": null,
+      "is_variadic_fact": {
+        "diagnostics": [],
+        "status": "not_collected",
+        "value": null
+      },
       "is_virtual": false,
       "is_volatile": false,
       "mangled": "_Z11make_widgetv",
@@ -195,6 +260,11 @@
       "return_pointer_depth": 0,
       "return_type": "detail::WidgetImpl *",
       "source_header": null,
+      "source_header_fact": {
+        "diagnostics": [],
+        "status": "not_collected",
+        "value": null
+      },
       "source_location": null,
       "visibility": "public",
       "vtable_index": null
@@ -213,7 +283,7 @@
   "platform": null,
   "python_api": null,
   "python_ext": null,
-  "schema_version": 31,
+  "schema_version": 37,
   "scope_fallback": null,
   "source_mtime": null,
   "source_mtime_epoch": false,
@@ -234,10 +304,20 @@
         "value": null
       },
       "data_size_bits": null,
+      "data_size_bits_fact": {
+        "diagnostics": [],
+        "status": "not_collected",
+        "value": null
+      },
       "deprecated": null,
       "fields": [],
       "has_anonymous_aggregate_fields": false,
       "is_abstract": null,
+      "is_abstract_fact": {
+        "diagnostics": [],
+        "status": "not_collected",
+        "value": null
+      },
       "is_final": null,
       "is_final_fact": {
         "diagnostics": [],
@@ -246,15 +326,35 @@
       },
       "is_opaque": false,
       "is_standard_layout": null,
+      "is_standard_layout_fact": {
+        "diagnostics": [],
+        "status": "not_collected",
+        "value": null
+      },
       "is_template_pattern": false,
       "is_trivially_copyable": null,
+      "is_trivially_copyable_fact": {
+        "diagnostics": [],
+        "status": "not_collected",
+        "value": null
+      },
       "is_union": false,
       "kind": "struct",
       "name": "detail::WidgetImpl",
       "origin": "private_header",
       "qualified_name": null,
+      "qualified_name_fact": {
+        "diagnostics": [],
+        "status": "not_collected",
+        "value": null
+      },
       "size_bits": null,
       "source_header": null,
+      "source_header_fact": {
+        "diagnostics": [],
+        "status": "not_collected",
+        "value": null
+      },
       "source_location": null,
       "virtual_bases": [],
       "virtual_bases_fact": {
