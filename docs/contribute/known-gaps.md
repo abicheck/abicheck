@@ -5846,11 +5846,13 @@ looked like the obvious fix and wasn't.
   placement (its own docstring already states the reason and the
   precedent it follows) as accepted debt until that slice is done.
 
-- **ADR-063 Phase 3 (D5) lands the public-surface-as-graph-query
-  infrastructure without migrating `surface.py`/`export_surface.py`'s own
-  traversal algorithms onto it, and without unifying the new graph
-  builder's node ids with the pre-existing L5 graph's — both deliberate,
-  documented scope boundaries, not oversights.** `policy/public_surface.py`'s
+- **[Superseded 2026-09-01 for `surface.py`'s own half — see the correction
+  below; the node-id-namespace half is still accurate.] ADR-063 Phase 3
+  (D5) lands the public-surface-as-graph-query infrastructure without
+  migrating `surface.py`/`export_surface.py`'s own traversal algorithms
+  onto it, and without unifying the new graph builder's node ids with the
+  pre-existing L5 graph's — both deliberate, documented scope boundaries,
+  not oversights.** `policy/public_surface.py`'s
   `PublicSurfaceQuery` delegates to `surface.compute_public_surface()`/
   `export_surface.compute_export_surface()` unchanged rather than
   reimplementing either as a literal graph traversal: both are exactly the
