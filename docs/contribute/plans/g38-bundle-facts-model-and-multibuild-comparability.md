@@ -2329,8 +2329,12 @@ name's coarse three-way switch).
 **Effort:** S — the blocking file-size-cap constraint documented in Phase
 13's table applies to *adding a new CLI surface* (a flag, a config block);
 this phase adds no new flag, only forwards an already-resolved local
-variable one call deeper, so it is not blocked by that constraint the way
-Phase 15 is.
+variable one call deeper, so it was never blocked by that constraint the
+way Phase 13's own literal CLI/config surface once was — see Phase 13's
+own "Update" note and Phase 15's corrected section for how that later
+resolved (shipped via Phase 17's split-out module, in one case; found to
+be permanently unnecessary, in the other) rather than by relieving the
+file-size room this table measured.
 
 **Shipped**, in a materially different shape than the first pass, once
 `architecture/debt.yaml`'s no-growth pin on `cli_compare_release.py`

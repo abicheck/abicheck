@@ -379,3 +379,19 @@ class TestLoadBundleFactsLibraryOverrides:
 
         with pytest.raises(BundleFactsLibraryOverridesError, match="cannot decode as UTF-8"):
             load_bundle_facts_library_overrides(manifest)
+
+    def test_deeply_nested_manifest_is_a_clean_error_not_a_raw_recursionerror(
+        self, tmp_path: Path
+    ) -> None:
+        """Codex review, fresh evidence: a well-formed but sufficiently
+        deeply nested manifest exhausts Python's own recursion limit
+        inside ``_load_yaml_strict``'s recursive-descent parsing --
+        ``RecursionError`` is not a ``ValueError`` subclass (unlike
+        ``UnicodeDecodeError``), so it escaped every existing translation
+        clause here and dispatch()'s generic ``except (SnapshotError,
+        ValueError, OSError)`` clause alike, leaking a raw traceback."""
+        manifest = tmp_path / "manifest.yaml"
+        manifest.write_text("[" * 2000 + "]" * 2000)
+
+        with pytest.raises(BundleFactsLibraryOverridesError, match="too deeply nested"):
+            load_bundle_facts_library_overrides(manifest)

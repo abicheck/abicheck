@@ -393,6 +393,20 @@ def load_bundle_facts_library_overrides(
         raise BundleFactsLibraryOverridesError(
             f"--bundle-facts-library-manifest {manifest_path}: invalid YAML: {exc}"
         ) from exc
+    except RecursionError as exc:
+        # Codex review, fresh evidence: a well-formed but sufficiently
+        # deeply nested manifest (~1,500 nested sequences reproduces it)
+        # exhausts Python's own recursion limit inside PyYAML's/
+        # _load_yaml_strict's recursive-descent parsing, before this
+        # function's own translation layer or parse_bundle_facts_library_
+        # overrides() ever run -- and dispatch()'s CLI boundary catches
+        # ValueError, not RecursionError, so this previously leaked a raw
+        # traceback instead of the clean exit-64 usage error every other
+        # malformed manifest input here produces.
+        raise BundleFactsLibraryOverridesError(
+            f"--bundle-facts-library-manifest {manifest_path}: too deeply "
+            "nested to parse"
+        ) from exc
     return parse_bundle_facts_library_overrides(
         raw if raw is not None else {},
         known_libraries=known_libraries,

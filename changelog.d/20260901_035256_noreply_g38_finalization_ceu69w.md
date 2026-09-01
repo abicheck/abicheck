@@ -62,3 +62,8 @@ it should read in CHANGELOG.md. Delete the other sections.
   comparison would silently apply every uniform fallback with no signal
   the requested override was never applied. Such an entry is now rejected
   up front.
+- **`--bundle-facts-library-manifest` reports a deeply nested manifest
+  cleanly** — a well-formed but sufficiently deeply nested manifest (~1,500
+  nested sequences) exhausted Python's own recursion limit inside the
+  strict YAML loader, leaking a raw `RecursionError` traceback instead of
+  the exit-64 usage error every other malformed manifest input produces.
