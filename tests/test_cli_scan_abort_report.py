@@ -85,6 +85,33 @@ def test_budget_overflow_json_report_has_exit_block(runner, new_snap_compatible)
     assert payload["diff"]["exit"]["budget_overflow_contribution"] == 5
 
 
+def test_budget_overflow_json_report_written_to_primary_output_file(
+    runner, new_snap_compatible, tmp_path
+):
+    """`--format json --output <path>` (the primary-output path, distinct
+    from `--write json=...`'s secondary artifact) must also get the abort
+    payload written to disk, not just stdout."""
+    output = tmp_path / "abort.json"
+    res = runner.invoke(
+        main,
+        [
+            "scan",
+            str(new_snap_compatible),
+            "--budget",
+            "0s",
+            "--format",
+            "json",
+            "--output",
+            str(output),
+        ],
+    )
+    assert res.exit_code == 5, res.output
+    assert f"Report written to {output}" in res.output
+    payload = json.loads(output.read_text())
+    assert payload["verdict"] == "BUDGET_OVERFLOW"
+    assert payload["diff"]["exit"]["reasons"] == ["budget_overflow"]
+
+
 def test_budget_overflow_text_format_has_no_json_report(runner, new_snap_compatible):
     # Unchanged pre-existing behaviour: `--format text` (the default) still
     # gets only the stderr message, no stdout report -- this fix is scoped to
