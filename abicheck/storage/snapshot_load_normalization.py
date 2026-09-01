@@ -45,6 +45,7 @@ from ..qualified_name_segments import (
     _lambda_identity_containers_and_strings,
     _walk_rewrite_strings,
 )
+from .guards import decision_key, identity_text, mapping as _mapping_guard
 
 if TYPE_CHECKING:
     from ..model.snapshot import AbiSnapshot
@@ -132,31 +133,52 @@ def backfill_missing_elf_binding(snap: AbiSnapshot) -> None:
                 var.elf_binding = elf_sym.binding
 
 
-def _str_field_mapping(raw: Any) -> dict[str, str]:
-    """A ``dict[str, str]`` extraction-contract field, dropped rather than
-    coerced when the container -- or an individual key/value pair inside it
-    -- is not already string-shaped (storage AGENTS.md invariant 6,
-    ``guards``'s "reject rather than coerce" rule applied here):
+def _str_field_mapping(raw: Any, field_name: str) -> dict[str, str]:
+    """A ``dict[str, str]`` extraction-contract field, rejected outright --
+    not filtered down to its well-formed entries -- when the container, or
+    an individual key/value pair inside it, is not already string-shaped
+    (storage AGENTS.md invariant 6, ``guards``'s "reject rather than
+    coerce" rule, reused here rather than restated).
+
     ``profile_fields``/``scope_fields`` feed ADR-050's comparability gate
-    directly, so ``str()`` collapsing ``1``/``"1"`` onto one entry -- or
-    turning a malformed non-string value into plausible-looking fingerprint
-    text -- would make the gate compare snapshots that were never actually
-    extracted under the same contract as if they were (Codex review). A
-    malformed *pair* is dropped rather than failing the whole snapshot load,
-    matching this function's own established per-field degrade-to-empty
-    contract for ``profile_fingerprint``/``scope_fingerprint`` above --
-    unlike ``guards.decision_key``'s callers, this parses an optional,
-    forward-compatible document field, not a stored record's own identity.
+    directly (``comparability.py``'s carve-out checks look values up in
+    them by known keys), so two failure modes both had to close, not just
+    the ``str()``-coercion one: a first fix (Codex review) stopped ``1``/
+    ``"1"`` colliding onto one entry, but silently *dropping* the malformed
+    pair instead of rejecting the field left a second, subtler one open
+    (fresh Codex review) -- a malformed ``profile_fields``/``scope_fields``
+    becomes indistinguishable from one that genuinely has fewer entries,
+    so a carve-out that reads a still-present key never learns the
+    document was corrupt. A field present but wrong-shaped is a malformed
+    document, and this package's own convention (see ``dependency_scope``'s
+    handling in ``serialization.snapshot_from_dict``) is to fail the load
+    loudly rather than let a corrupt document masquerade as a smaller
+    legitimate one. Only a genuinely *absent* field (the key missing, or an
+    explicit ``null`` -- the same "no evidence" spelling every other
+    optional field in this contract already accepts) degrades to ``{}``;
+    every other shape raises.
     """
-    if not isinstance(raw, dict):
+    if raw is None:
         return {}
-    return {k: v for k, v in raw.items() if isinstance(k, str) and isinstance(v, str)}
+    _mapping_guard(raw, field_name)
+    result: dict[str, str] = {}
+    for key, value in raw.items():
+        str_key = decision_key(key, f"{field_name} key")
+        result[str_key] = identity_text(value, f"{field_name}[{str_key!r}]")
+    return result
 
 
 def extraction_contract_from_dict(raw: Any) -> ExtractionContract | None:
     """Convert a serialized ExtractionContract dict (or None) back into the
-    typed dataclass (ADR-050 D1). Returns None when the field is missing
-    (every snapshot predating schema v12) or malformed."""
+    typed dataclass (ADR-050 D1). Returns None when the whole ``contract``
+    field is missing (every snapshot predating schema v12) or not a dict.
+
+    Raises ``TypeError`` -- does not degrade -- when a *present*
+    ``profile_fields``/``scope_fields`` sub-field is the wrong shape (see
+    ``_str_field_mapping``): those two feed the comparability gate
+    directly, so a malformed one must fail the load rather than silently
+    read as a smaller legitimate one.
+    """
     if not isinstance(raw, dict):
         return None
     profile_fingerprint = raw.get("profile_fingerprint")
@@ -168,8 +190,8 @@ def extraction_contract_from_dict(raw: Any) -> ExtractionContract | None:
         scope_fingerprint=scope_fingerprint
         if isinstance(scope_fingerprint, str)
         else None,
-        profile_fields=_str_field_mapping(raw.get("profile_fields")),
-        scope_fields=_str_field_mapping(raw.get("scope_fields")),
+        profile_fields=_str_field_mapping(raw.get("profile_fields"), "profile_fields"),
+        scope_fields=_str_field_mapping(raw.get("scope_fields"), "scope_fields"),
     )
 
 
