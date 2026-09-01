@@ -170,9 +170,19 @@ def execute_dump_cli_run(
     (ADR-037 D4) precisely because it is not operator-typed.
 
     Raises:
-        click.ClickException: If extraction fails (mirrors
-            ``perform_elf_dump``'s own ``except`` clause exactly).
+        click.UsageError: If *exec_resolved* (or the input it resolves) is
+            unusable -- a ``ValidationError`` from ``execute_dump_request``
+            (e.g. no exports matched, an invalid include directory, an
+            unreachable requested depth) -- preserving exit 64, the same
+            translation ``cli_resolve._dump_native_binary``'s own docstring
+            documents for the retired ``perform_elf_dump``/
+            ``handle_non_elf_dump`` call sites (Codex review on PR #980:
+            this shared executor's own generic ``except`` clause below
+              was silently collapsing that distinction to exit 1 for
+            every caller, ELF included, since the earlier PR C migration).
+        click.ClickException: For any other extraction failure (exit 1).
     """
+    from ...errors import ValidationError
     from ...service_dump_pipeline import execute_dump_request
 
     try:
@@ -188,6 +198,8 @@ def execute_dump_cli_run(
             seed_collect_mode=seed_collect_mode,
             source_frontend_from_folded_context=source_frontend_from_folded_context,
         )
+    except ValidationError as exc:
+        raise click.UsageError(str(exc)) from exc
     except (AbicheckError, RuntimeError, OSError, ValueError) as exc:
         raise click.ClickException(str(exc)) from exc
     # `execute_dump_request` already ran the dependency walk itself

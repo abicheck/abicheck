@@ -487,3 +487,66 @@ class TestExecutionConsumesTheResolvedPlan:
         # undecorated function is on `.callback`.
         source = inspect.getsource(cli_mod.dump_cmd.callback)
         assert "split_public_header_inputs(" not in source
+
+
+def _pe_binary(tmp_path: Path) -> Path:
+    """A minimal PE binary (MZ header + PE signature + COFF header)."""
+    import struct
+
+    dos_header = bytearray(64)
+    dos_header[0:2] = b"MZ"
+    pe_offset = 64
+    struct.pack_into("<I", dos_header, 0x3C, pe_offset)
+    pe_sig = b"PE\x00\x00"
+    coff_header = struct.pack("<HHIIIHH", 0x8664, 0, 0, 0, 0, 0, 0x2000)
+    pe_path = tmp_path / "foo.dll"
+    pe_path.write_bytes(bytes(dos_header) + pe_sig + coff_header)
+    return pe_path
+
+
+class TestValidationErrorExitsAsUsageError:
+    """CodeRabbit/Codex review on PR #980 (ADR-063 Phase 1).
+
+    ``cli_resolve._dump_native_binary`` -- the function
+    ``perform_elf_dump``/``handle_non_elf_dump`` both called before this
+    migration -- specifically translated a ``ValidationError`` into
+    :class:`click.UsageError` (exit 64), never the plain
+    :class:`click.ClickException` (exit 1) it used for every other
+    extraction failure (see that function's own docstring). The shared
+    ``execute_dump_cli_run`` (``frontends.cli.dump_execute``) both formats
+    now route through had no such special case -- a real ``ValidationError``
+    from ``execute_dump_request`` (unmatched exports, a bad include
+    directory, ...) silently exited 1 instead of the documented usage-error
+    convention (root ``AGENTS.md``: "64 = usage error ... applies across
+    commands"), for ELF and PE/Mach-O alike, since both share this one
+    execution entry point. Exercised for both binary formats: whichever one
+    a future edit only fixes for is exactly the sibling case a single-format
+    regression test would miss.
+    """
+
+    def _fake_execute_dump_request_raises(self, monkeypatch) -> None:
+        from abicheck import service_dump_pipeline
+        from abicheck.errors import ValidationError
+
+        def _raise(*_args: object, **_kwargs: object):
+            raise ValidationError("no exported symbols matched the given headers")
+
+        monkeypatch.setattr(service_dump_pipeline, "execute_dump_request", _raise)
+
+    def test_elf_validation_error_exits_64(self, tmp_path: Path, monkeypatch) -> None:
+        from click.testing import CliRunner
+
+        from abicheck.cli import main
+
+        self._fake_execute_dump_request_raises(monkeypatch)
+        result = CliRunner().invoke(main, ["dump", str(_binary(tmp_path))])
+        assert result.exit_code == 64, result.output
+
+    def test_pe_validation_error_exits_64(self, tmp_path: Path, monkeypatch) -> None:
+        from click.testing import CliRunner
+
+        from abicheck.cli import main
+
+        self._fake_execute_dump_request_raises(monkeypatch)
+        result = CliRunner().invoke(main, ["dump", str(_pe_binary(tmp_path))])
+        assert result.exit_code == 64, result.output
