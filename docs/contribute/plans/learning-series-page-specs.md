@@ -945,8 +945,9 @@ links its Part or Tier 3 page.
 
 ### C2. Part 1 §8 → glossary
 
-Delete §8; replace with "Terms used here are defined in the
-[Glossary](glossary.md)." Any Part 1 term the glossary lacks moves there
+Delete §8; replace with one sentence linking `abi-series/glossary.md`
+("Terms used here are defined in the Glossary"). Any Part 1 term the
+glossary lacks moves there
 first (diff the two lists before deleting).
 
 ### C3. Class layout: one owner
