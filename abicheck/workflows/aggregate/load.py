@@ -151,6 +151,48 @@ def _effective_config_digest(data: Mapping[str, Any]) -> str | None:
     return None
 
 
+#: The two synthetic ``verdict`` strings a native `scan` abort report (single
+#: binary or set-level) can carry at its own root, mapped to the aggregate
+#: gate's blocking-category label -- shared between the root-level check
+#: below and :func:`_member_abort_categories`, which needs the same mapping
+#: for a `scan --artifact-set` *member* whose own abort verdict was folded
+#: away by `_aggregate_scan_set_verdict`'s stronger-verdict-wins rule.
+_scan_abort_categories = {
+    _SCAN_BUDGET_OVERFLOW_VERDICT: "budget_overflow",
+    _SCAN_EVIDENCE_CONTRACT_ERROR_VERDICT: "evidence_contract_error",
+}
+
+
+def _member_abort_categories(data: Mapping[str, Any]) -> frozenset[str]:
+    """Abort categories from ``per_artifact`` members the set-level verdict
+    no longer names.
+
+    ``_aggregate_scan_set_verdict`` (ADR-056 D3) deliberately keeps a
+    stronger real ``API_BREAK``/``BREAKING`` verdict at the set's own root
+    even when one member aborted with ``EVIDENCE_CONTRACT_ERROR`` alongside
+    it -- a real break must not be hidden behind an evidence-completeness
+    verdict. That is the right compatibility verdict, but it means the root
+    ``verdict`` string alone no longer tells this loader which member(s)
+    aborted, so the root-level check above (matching ``verdict`` against
+    :data:`_scan_abort_categories` directly) misses it and the target's gate
+    would silently drop the ``evidence_contract_error``/``budget_overflow``
+    category despite the member never completing a comparison (Codex
+    review). Reads each member's own bare ``verdict`` field directly --
+    ``ScanArtifactResult.to_dict()`` flattens it to the member dict's own
+    top level, not nested under ``report`` -- rather than
+    :func:`_scan_abort_exit_blocks`'s ``exit`` blocks, which a member that
+    aborted before producing a decision may not carry at all.
+    """
+    per_artifact = data.get("per_artifact")
+    if not isinstance(per_artifact, list):
+        return frozenset()
+    return frozenset(
+        _scan_abort_categories[member["verdict"]]
+        for member in per_artifact
+        if isinstance(member, dict) and member.get("verdict") in _scan_abort_categories
+    )
+
+
 def _incomplete_findings(data: dict[str, Any]) -> ReportFindings:
     """Whatever findings *data* lists, explicitly not accounted as exhaustive.
 
@@ -392,10 +434,6 @@ def _load_report_file(path: Path, *, prefix: str) -> _LoadedReport:
     # `*_contribution` fields, and downgrading a real ABI/API break already
     # found before the abort to a bare coverage-incomplete `1` would hide it
     # from a severity-aware consumer (Codex review, fresh evidence).
-    _scan_abort_categories = {
-        _SCAN_BUDGET_OVERFLOW_VERDICT: "budget_overflow",
-        _SCAN_EVIDENCE_CONTRACT_ERROR_VERDICT: "evidence_contract_error",
-    }
     raw_scan_verdict = data.get("verdict")
     scan_abort_category = (
         _scan_abort_categories.get(raw_scan_verdict)
@@ -501,6 +539,16 @@ def _load_report_file(path: Path, *, prefix: str) -> _LoadedReport:
             )
         if gate is None:
             gate = GateInfo.legacy_from_verdict(verdict)
+        extra_categories = _member_abort_categories(data) - set(
+            gate.blocking_categories
+        )
+        if extra_categories:
+            gate = replace(
+                gate,
+                blocking_categories=tuple(
+                    sorted(set(gate.blocking_categories) | extra_categories)
+                ),
+            )
     raw_verdict = data.get("verdict")
     if verdict is not None:
         unavailable_reason = None

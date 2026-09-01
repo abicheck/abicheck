@@ -507,8 +507,29 @@ lands in two stages rather than one atomic change:
       own report producers can actually emit (native CLI single-binary,
       typed-API single-result, artifact-set member abort, artifact-set
       member completed-without-abort); a further exotic shape would need
-      its own review round to surface, same as these five did. Still open:
-      the release fan-out's `GateOptions` unification and a full
+      its own review round to surface, same as these five did. **(12) A
+      twelfth round caught a different kind of gap in the same file, not
+      another envelope shape:** `_aggregate_scan_set_verdict` (ADR-056 D3,
+      `service_scan.py`) deliberately keeps a stronger real `API_BREAK`/
+      `BREAKING` verdict at a set's own root even when another member
+      aborted with `EVIDENCE_CONTRACT_ERROR` alongside it -- a real break
+      must never be hidden behind an evidence-completeness verdict -- but
+      that left the root `verdict` string with no way to say which member
+      aborted, so the loader's `blocking_categories` silently dropped
+      `evidence_contract_error` for that target despite the member never
+      completing a comparison (the real severity, exit 2/4, was already
+      correct through `GateInfo.from_scan_report`'s mapped-code branch;
+      only the category label was missing) (Codex review, fresh evidence).
+      Fixed by a new `_member_abort_categories` helper that reads each
+      `per_artifact` member's own bare `verdict` field directly and folds
+      any abort category it names into the gate, independent of which
+      verdict won at the root. Unlike (1)-(11), this was not another
+      envelope shape `_scan_abort_exit_blocks` needed to recognize --
+      it was the set-level verdict-blending logic itself dropping a
+      category label it never carried into any `exit` block to begin
+      with, so it needed its own read of `per_artifact[*].verdict` rather
+      than another fold over `_scan_abort_exit_blocks`'s output. Still
+      open: the release fan-out's `GateOptions` unification and a full
       cross-front-end parity pass (typed API, Action).
 2. **Atomic.** Once the report block agrees with today's real behaviour for
    every axis and every mode (verified by the axis-separated tests this ADR

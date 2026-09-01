@@ -476,3 +476,68 @@ def test_artifact_set_completed_member_exit_code_counts_without_a_report_exit(
     assert loaded.verdict is None
     assert loaded.gate is not None
     assert loaded.gate.exit_code == 2
+
+
+def test_artifact_set_evidence_contract_error_member_alongside_a_real_break_still_gates_its_own_category(
+    tmp_path: Path,
+) -> None:
+    """`_aggregate_scan_set_verdict` (ADR-056 D3, service_scan.py) deliberately
+    keeps a stronger real `API_BREAK`/`BREAKING` verdict at a `scan
+    --artifact-set` set's own root even when one member aborted with
+    `EVIDENCE_CONTRACT_ERROR` alongside it -- a real break must not be
+    hidden behind an evidence-completeness verdict. But that means the
+    root-level `verdict` string this loader checks first no longer names
+    the aborted member's category at all, so before this fix the target's
+    gate silently dropped "evidence_contract_error" despite that member
+    never completing a comparison (Codex review, fresh evidence). The
+    real severity (exit 2/4) was already correct through
+    `GateInfo.from_scan_report`'s mapped-code branch -- only the category
+    label was missing.
+    """
+    report = tmp_path / "abi-report-bundle.json"
+    report.write_text(
+        json.dumps(
+            {
+                "scan_schema_version": "1.23",
+                "verdict": "API_BREAK",
+                "exit_code": 2,
+                "per_artifact": [
+                    {
+                        "artifact": "libapibreak.so",
+                        "scan_schema_version": "1.23",
+                        "verdict": "API_BREAK",
+                        "exit_code": 2,
+                        "findings": 3,
+                        "layers": [],
+                        "confidence": {},
+                        "estimate": [],
+                        "report": {},
+                    },
+                    {
+                        "artifact": "libincomplete.so",
+                        "scan_schema_version": "1.23",
+                        "verdict": "EVIDENCE_CONTRACT_ERROR",
+                        "exit_code": 1,
+                        "findings": 0,
+                        "layers": [],
+                        "confidence": {},
+                        "estimate": [],
+                        "report": {},
+                    },
+                ],
+                "bundle_findings": [],
+                "bundle_finding_count": 0,
+                "bundle_verdict": None,
+                "bundle_incomplete": False,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    loaded = _load_report_file(report, prefix="abi-report-")
+
+    assert loaded.verdict is not None
+    assert loaded.gate is not None
+    assert loaded.gate.exit_code == 2
+    assert loaded.gate.blocking is True
+    assert "evidence_contract_error" in loaded.gate.blocking_categories
