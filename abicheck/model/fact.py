@@ -44,9 +44,43 @@ from typing import Generic, TypeVar
 
 from .availability import FactStatus
 
-__all__ = ["Fact", "replace_with_fact_sync"]
+__all__ = ["Fact", "replace_with_fact_sync", "resolved_fact_value"]
 
 T = TypeVar("T")
+
+
+def resolved_fact_value(fact: Fact[T] | None, default: T) -> T:
+    """``fact.value`` when present, else *default* -- narrows a ``Fact[T] |
+    None``-typed dataclass field (``RecordType.bases_fact`` and its
+    siblings) the way every ADR-063 Phase 0 migrated reader needs to.
+
+    The declared type is ``Fact[T] | None`` only because of the direct-
+    construction compatibility bridge (see :func:`bridge_legacy_and_fact`'s
+    own docstring): ``None`` means "the caller passed nothing and
+    ``__post_init__`` hasn't resolved it yet", which is never true for an
+    already-constructed ``RecordType``/``Param`` -- but mypy cannot see
+    that invariant across instances, so every call site needs the same
+    narrowing. This is that one, shared, audited narrowing, not a second
+    per-callsite ``is None`` check that could drift.
+
+    **This is not a general-purpose "detector-safe" unwrap** -- see
+    :meth:`Fact.value_or`'s own docstring for why collapsing "not
+    collected" and "confirmed empty" to one default is unsafe for an
+    arbitrary detection decision. It is safe for exactly the five fields
+    this phase converted (``bases``/``virtual_bases``/``vtable``/
+    ``vptr_offset_bits``/``is_va_list``), because ``bridge_legacy_and_fact``
+    establishes a *provable* invariant for those specific fields: the
+    retained legacy field already equals
+    ``resolved_fact_value(rec.bases_fact, [])`` for every constructed
+    instance, so this is a pure re-spelling of the value a direct read
+    would already have returned -- representation-only, not a new
+    availability collapse. A reader that wants genuine per-status handling
+    (Phase 5's job) still matches on ``fact.status`` directly instead of
+    calling this.
+    """
+    if fact is None:
+        return default
+    return fact.value_or(default)
 
 
 class _Omitted:

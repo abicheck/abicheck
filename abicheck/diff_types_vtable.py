@@ -13,29 +13,19 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Base-class and vtable diffing for ``RecordType`` pairs: ``_diff_type_bases``
-(base-set/virtual-base/base-order changes) and the vtable group feeding
-``_diff_type_vtable`` (the capture-gap evidence guard
-``_vtable_transition_is_evidenced``, its unresolved-evidence-correlation
-sibling ``_vtable_transition_rests_on_unresolved_evidence``, the
-``diff_layout`` delegation ``_layout_evidence_is_unverifiable``, and the two
-owned-virtual-signature helpers both of those consult).
+"""The ``TYPE_VTABLE_CHANGED`` evidence-gating cluster: whether an
+empty<->non-empty vtable transition rests on real evidence or a capture
+gap, and the correlation with ``diff_layout``'s ``LAYOUT_UNVERIFIABLE``.
 
-Split out of ``diff_types.py`` to stay under its line-count hard cap (ADR-063
-Phase 2's ``entity_id=`` wiring pushed the parent past 2000 lines) — a
-mechanical follow-up, not new semantic work; see
-``docs/contribute/plans/one-semantic-pipeline.md`` Phase 2 for the dated
-entry. Kept together as one module rather than two because the two groups
-already lean on each other: ``_vtable_transition_rests_on_unresolved_evidence``
-reads both ``t_old.bases``/``t_new.bases`` directly (mirroring
-``_diff_type_bases``'s own base-set comparison) to avoid mis-correlating an
-ordinary base-hierarchy change as an unresolved vtable-evidence gap.
-
-A genuine leaf module with respect to ``diff_types.py`` itself: it does not
-import anything from ``diff_types``, so ``diff_types.py``'s own import of
-these names back (for ``_diff_type_pair`` and for re-export — see that
-module's own import block) creates no cycle, the same discipline
-``diff_types_field_facts.py``'s own docstring documents for its split.
+Split out of ``diff_types.py`` to stay under its line-count cap (ADR-063
+Phase 0's detector migration pushed it over) -- a genuine leaf module (must
+not import from ``diff_types`` at all, to avoid an import cycle:
+``diff_types.py`` imports ``_diff_type_vtable`` back for its own use, the
+only symbol this module exports). Everything else here
+(``_vtable_transition_is_evidenced``/``_vtable_transition_rests_on_
+unresolved_evidence``/``_layout_evidence_is_unverifiable``/
+``_owned_virtual_signatures``/``_owned_virtual_signatures_for_record``) is
+private to this cluster and was already only ever called from within it.
 """
 
 from __future__ import annotations
@@ -47,80 +37,7 @@ from .checker_policy import ChangeKind
 from .checker_types import Change
 from .diff_cxx_rules import vtable_slot_is_override_reuse
 from .diff_helpers import make_change
-from .model import Function, RecordType
-
-
-def _diff_type_bases(name: str, t_old: RecordType, t_new: RecordType) -> list[Change]:
-    changes: list[Change] = []
-
-    # BASE_CLASS_POSITION_CHANGED: same set of non-virtual bases, different order
-    # This shifts this-pointer adjustments for all bases → old binaries call wrong method.
-    old_bases_set = set(t_old.bases)
-    new_bases_set = set(t_new.bases)
-    if old_bases_set == new_bases_set and t_old.bases != t_new.bases:
-        changes.append(
-            make_change(
-                ChangeKind.BASE_CLASS_POSITION_CHANGED,
-                symbol=name,
-                name=name,
-                old_value=str(t_old.bases),
-                new_value=str(t_new.bases),
-                entity_id=t_old.entity_id or t_new.entity_id,
-            )
-        )
-    elif old_bases_set != new_bases_set:
-        # General base class set change (add/remove base) → TYPE_BASE_CHANGED
-        changes.append(
-            make_change(
-                ChangeKind.TYPE_BASE_CHANGED,
-                symbol=name,
-                description=f"Base classes changed: {name}",
-                old_value=str(t_old.bases),
-                new_value=str(t_new.bases),
-                entity_id=t_old.entity_id or t_new.entity_id,
-            )
-        )
-
-    # BASE_CLASS_VIRTUAL_CHANGED: a base moved between virtual and non-virtual
-    old_virt_set = set(t_old.virtual_bases)
-    new_virt_set = set(t_new.virtual_bases)
-    # Bases that moved from non-virtual to virtual or vice versa
-    became_virtual = (new_virt_set - old_virt_set) & old_bases_set
-    lost_virtual = (old_virt_set - new_virt_set) & new_bases_set
-    if became_virtual or lost_virtual:
-        desc_parts = []
-        if became_virtual:
-            desc_parts.append(f"became virtual: {sorted(became_virtual)}")
-        if lost_virtual:
-            desc_parts.append(f"lost virtual: {sorted(lost_virtual)}")
-        changes.append(
-            make_change(
-                ChangeKind.BASE_CLASS_VIRTUAL_CHANGED,
-                symbol=name,
-                name=name,
-                detail="; ".join(desc_parts),
-                old_value=str(sorted(t_old.virtual_bases)),
-                new_value=str(sorted(t_new.virtual_bases)),
-                entity_id=t_old.entity_id or t_new.entity_id,
-            )
-        )
-    elif old_virt_set != new_virt_set:
-        # Pure add/remove of a virtual base (not a migration from non-virtual):
-        # e.g. class D : virtual A  →  class D : virtual A, virtual B
-        # → TYPE_BASE_CHANGED (hierarchy changed, not just virtuality toggled)
-        if not changes:  # don't duplicate if TYPE_BASE_CHANGED already emitted above
-            changes.append(
-                make_change(
-                    ChangeKind.TYPE_BASE_CHANGED,
-                    symbol=name,
-                    description=f"Virtual base classes changed: {name}",
-                    old_value=str(t_old.virtual_bases),
-                    new_value=str(t_new.virtual_bases),
-                    entity_id=t_old.entity_id or t_new.entity_id,
-                )
-            )
-
-    return changes
+from .model import Function, RecordType, resolved_fact_value
 
 
 def _vtable_transition_is_evidenced(
@@ -202,7 +119,9 @@ def _vtable_transition_is_evidenced(
     both base chains) -- see AGENTS.md's evidence-provider entry -- not a
     cleverer reading of the fields already here.
     """
-    if t_old.vtable and t_new.vtable:
+    old_vtable = resolved_fact_value(t_old.vtable_fact, [])
+    new_vtable = resolved_fact_value(t_new.vtable_fact, [])
+    if old_vtable and new_vtable:
         # Both sides captured something, so the difference is a real
         # reorder/replace rather than one side's evidence going missing.
         return True
@@ -256,7 +175,9 @@ def _vtable_transition_is_evidenced(
         return True
     if t_old.size_bits != t_new.size_bits:
         return True
-    return list(t_old.virtual_bases) != list(t_new.virtual_bases)
+    old_virtual_bases = resolved_fact_value(t_old.virtual_bases_fact, [])
+    new_virtual_bases = resolved_fact_value(t_new.virtual_bases_fact, [])
+    return list(old_virtual_bases) != list(new_virtual_bases)
 
 
 def _vtable_transition_rests_on_unresolved_evidence(
@@ -299,7 +220,9 @@ def _vtable_transition_rests_on_unresolved_evidence(
     marker fired on any co-occurring ``LAYOUT_UNVERIFIABLE`` regardless,
     wrongly tagging a real reorder/replace with both sides populated).
     """
-    if t_old.vtable and t_new.vtable:
+    old_vtable = resolved_fact_value(t_old.vtable_fact, [])
+    new_vtable = resolved_fact_value(t_new.vtable_fact, [])
+    if old_vtable and new_vtable:
         return False
     # A single normalized identity for *both* sides, not each RecordType's
     # own (possibly unset) qualified_name independently -- t_old and t_new
@@ -321,7 +244,9 @@ def _vtable_transition_rests_on_unresolved_evidence(
     # TYPE_BASE_CHANGED/BASE_CLASS_VIRTUAL_CHANGED) could have its
     # TYPE_VTABLE_CHANGED half demoted to RISK merely because size_bits
     # happens to be unknown.
-    if list(t_old.virtual_bases) != list(t_new.virtual_bases):
+    old_virtual_bases = resolved_fact_value(t_old.virtual_bases_fact, [])
+    new_virtual_bases = resolved_fact_value(t_new.virtual_bases_fact, [])
+    if list(old_virtual_bases) != list(new_virtual_bases):
         return False
     # An ordinary (non-virtual) base addition, removal, or reorder is the
     # identical class of independent evidence -- diff_types._diff_type_bases
@@ -331,7 +256,9 @@ def _vtable_transition_rests_on_unresolved_evidence(
     # because size_bits also happens to be unknown (Codex review, fresh
     # evidence -- the identical false-correlation risk the virtual_bases
     # check above already guards against, just for the non-virtual case).
-    if list(t_old.bases) != list(t_new.bases):
+    old_bases = resolved_fact_value(t_old.bases_fact, [])
+    new_bases = resolved_fact_value(t_new.bases_fact, [])
+    if list(old_bases) != list(new_bases):
         return False
     return t_old.size_bits is None or t_new.size_bits is None
 
@@ -466,7 +393,9 @@ def _diff_type_vtable(
     *,
     vtable_facts_reliable: bool = True,
 ) -> list[Change]:
-    if t_old.vtable == t_new.vtable:
+    old_vtable = resolved_fact_value(t_old.vtable_fact, [])
+    new_vtable = resolved_fact_value(t_new.vtable_fact, [])
+    if old_vtable == new_vtable:
         return []
     if not vtable_facts_reliable:
         # Either side is a persisted, pre-v21 direct-clang snapshot whose
@@ -487,24 +416,24 @@ def _diff_type_vtable(
     # covers the new symbol. Mirrors virtual_method_addition()'s exemption
     # (own-owner-descends-from-old-owner guard included, so an unrelated
     # same-signature virtual can't false-suppress a genuine replacement).
-    if len(t_old.vtable) == len(t_new.vtable) and all(
+    if len(old_vtable) == len(new_vtable) and all(
         vtable_slot_is_override_reuse(
             old_entry, new_entry, old_funcs, new_funcs, old_types, new_types
         )
-        for old_entry, new_entry in zip(t_old.vtable, t_new.vtable)
+        for old_entry, new_entry in zip(old_vtable, new_vtable)
     ):
         return []
     description = (
         f"vtable reordered: {name}"
-        if Counter(t_old.vtable) == Counter(t_new.vtable)
+        if Counter(old_vtable) == Counter(new_vtable)
         else f"vtable changed: {name}"
     )
     change = make_change(
         ChangeKind.TYPE_VTABLE_CHANGED,
         symbol=name,
         description=description,
-        old_value=", ".join(t_old.vtable),
-        new_value=", ".join(t_new.vtable),
+        old_value=", ".join(old_vtable),
+        new_value=", ".join(new_vtable),
         entity_id=t_old.entity_id or t_new.entity_id,
     )
     # Tag (never demote) when this finding rests on the identical evidence

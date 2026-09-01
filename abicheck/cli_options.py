@@ -1492,6 +1492,15 @@ def apply_compare_profile(ctx: object, kwargs: dict[str, object]) -> None:
         meta[RUN_PROFILE_META_KEY] = {"name": str(name), "injected": injected}
 
 
+#: G38 Phase 17's ``--bundle-facts-library-manifest`` option, a small,
+#: standalone leaf module (see its own docstring for why it isn't declared
+#: inline on ``compare_cmd``). Re-exported here for the same reason as
+#: ``contract_options``/``pack_option`` below.
+from .frontends.cli.options.bundle_facts import (  # noqa: E402
+    bundle_facts_manifest_options as bundle_facts_manifest_options,
+    reject_bundle_facts_manifest_without_old_bundle_facts as reject_bundle_facts_manifest_without_old_bundle_facts,
+)
+
 #: ADR-049's contract-evaluation option decorator moved to
 #: ``cli_contract_options.py`` when this module reached its own 2000-line
 #: hard limit -- the same split, for the same reason, as ``cli_profiles.py``

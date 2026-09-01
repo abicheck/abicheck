@@ -870,8 +870,8 @@ def _walk_reached_records(
             if exclude_export_only and rec.origin is ScopeOrigin.EXPORT_ONLY:
                 continue
             texts = [f.type for f in rec.fields] + [
-                *rec.bases,
-                *rec.virtual_bases,
+                *rec.resolved_bases(),
+                *rec.resolved_virtual_bases(),
             ]
             # Both direct and virtual bases are ABI-reachable through the
             # derived type (virtual inheritance still embeds the base

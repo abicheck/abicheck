@@ -1164,7 +1164,7 @@ def _unresolved_type_edges(
             continue
         for f in rec.fields:
             scan(f.type)
-        for base in (*rec.bases, *rec.virtual_bases):
+        for base in (*rec.resolved_bases(), *rec.resolved_virtual_bases()):
             scan(base)
     return frozenset(unresolved)
 

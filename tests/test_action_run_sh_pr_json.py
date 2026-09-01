@@ -196,6 +196,45 @@ CMD=(abicheck compare old.json new.json --format json -o "$TEST_OUTPUT_FILE")
             pr_json.read_text(encoding="utf-8") == '{"source": "primary-output-file"}'
         )
 
+    def test_reuses_extra_args_write_json_sidecar_under_a_non_json_format(
+        self, tmp_path
+    ):
+        # Codex review, fresh evidence: `format: text`/`markdown` whose own
+        # extra-args supplied `--write json=PATH` is exactly as faithful and
+        # unfiltered as a `format: json` primary output -- `_json_report_src`
+        # already only trusts that sidecar when it's real and fresh
+        # (fingerprint-checked). Before this fix, `_can_reuse_primary_json`'s
+        # blanket `$FORMAT == "json"` requirement rejected it anyway and
+        # forced a full rerun despite the JSON already existing on disk --
+        # for an `_EvidenceContractError` abi3 abort specifically, that rerun
+        # happens after real candidate-snapshot extraction, not the cheap,
+        # precondition-only kind a rerun is for the pinned-depth abort.
+        pr_json = tmp_path / "pr.json"
+        pr_json.write_text("", encoding="utf-8")
+        extra_write_json = tmp_path / "caller-report.json"
+        extra_write_json.write_text('{"source": "extra-args-write"}', encoding="utf-8")
+        stub = tmp_path / "stub.sh"
+        # Would overwrite pr_json with a rerun sentinel if `_build_json_cmd`'s
+        # rerun path were reached — proves reuse, not just "didn't crash".
+        stub.write_text('echo rerun-sentinel > "${@: -1}"\n', encoding="utf-8")
+        harness = """
+PR_JSON="$TEST_PR_JSON"
+FORMAT=markdown
+OUTPUT_FILE=
+_extra_write_json_path="$TEST_EXTRA_WRITE_JSON"
+CMD=("$TEST_BASH" "$TEST_STUB" compare old.json new.json --format markdown)
+"""
+        _run(
+            harness,
+            {
+                "TEST_PR_JSON": str(pr_json),
+                "TEST_EXTRA_WRITE_JSON": str(extra_write_json),
+                "TEST_STUB": str(stub),
+                "TEST_BASH": _bash_executable(),
+            },
+        )
+        assert pr_json.read_text(encoding="utf-8") == '{"source": "extra-args-write"}'
+
     def test_falls_back_to_rerun_when_pr_json_empty_and_not_reusable(self, tmp_path):
         # FORMAT isn't json (or --show-only/--stat is present) and PR_JSON
         # wasn't pre-populated — falls all the way through to _build_json_cmd

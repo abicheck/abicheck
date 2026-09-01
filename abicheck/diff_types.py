@@ -48,19 +48,6 @@ from .diff_types_abicc_parity import (
     _diff_type_kind_changes as _diff_type_kind_changes,
     _diff_var_values as _diff_var_values,
 )
-from .diff_types_bases_vtable import (
-    # Re-exported (`as`-aliased) so `from .diff_types import
-    # _vtable_transition_is_evidenced` (tests/test_vtable_evidence_guard.py)
-    # and similar call sites keep resolving after the split — mirrors the
-    # diff_types_abicc_parity re-export block above.
-    _diff_type_bases as _diff_type_bases,
-    _diff_type_vtable as _diff_type_vtable,
-    _layout_evidence_is_unverifiable as _layout_evidence_is_unverifiable,
-    _owned_virtual_signatures as _owned_virtual_signatures,
-    _owned_virtual_signatures_for_record as _owned_virtual_signatures_for_record,
-    _vtable_transition_is_evidenced as _vtable_transition_is_evidenced,
-    _vtable_transition_rests_on_unresolved_evidence as _vtable_transition_rests_on_unresolved_evidence,
-)
 from .diff_types_field_facts import (
     _diff_enum_deprecated as _diff_enum_deprecated,
     _diff_enum_renames as _diff_enum_renames,
@@ -74,6 +61,17 @@ from .diff_types_surface import (
     _RESERVED_FIELD_RE as _RESERVED_FIELD_RE,
     _directly_referenced as _directly_referenced,
     _is_abi_surface_type as _is_abi_surface_type,
+)
+from .diff_types_vtable import (
+    # Re-exported (`as`-aliased) so `from .diff_types import
+    # _vtable_transition_is_evidenced` and similar call sites keep resolving
+    # — mirrors the diff_types_abicc_parity re-export block above.
+    _diff_type_vtable as _diff_type_vtable,
+    _layout_evidence_is_unverifiable as _layout_evidence_is_unverifiable,
+    _owned_virtual_signatures as _owned_virtual_signatures,
+    _owned_virtual_signatures_for_record as _owned_virtual_signatures_for_record,
+    _vtable_transition_is_evidenced as _vtable_transition_is_evidenced,
+    _vtable_transition_rests_on_unresolved_evidence as _vtable_transition_rests_on_unresolved_evidence,
 )
 from .elf_symbol_filter import (
     FUNCTION_SYMBOL_TYPES,
@@ -95,6 +93,7 @@ from .model import (
     cv_qualifiers_only_differ,
     func_signature_cv_only_differ,
     is_non_abi_surface_type as _is_non_abi_surface_type,
+    resolved_fact_value,
     stdlib_namespaces_excluded as _exclude_stdlib_namespaces,
 )
 from .model.identity import EntityId
@@ -1080,12 +1079,92 @@ def _diff_flexible_array_member(
 def _new_field_change_kind(t_new: RecordType) -> ChangeKind:
     # Field addition is BREAKING for polymorphic types or types with vtables;
     # COMPATIBLE only for standard-layout types without virtual functions.
-    is_polymorphic = bool(t_new.vtable or t_new.virtual_bases)
+    new_vtable = resolved_fact_value(t_new.vtable_fact, [])
+    new_virtual_bases = resolved_fact_value(t_new.virtual_bases_fact, [])
+    is_polymorphic = bool(new_vtable or new_virtual_bases)
     return (
         ChangeKind.TYPE_FIELD_ADDED_COMPATIBLE
         if not is_polymorphic and t_new.kind == "struct"
         else ChangeKind.TYPE_FIELD_ADDED
     )
+
+
+def _diff_type_bases(name: str, t_old: RecordType, t_new: RecordType) -> list[Change]:
+    changes: list[Change] = []
+    old_bases = resolved_fact_value(t_old.bases_fact, [])
+    new_bases = resolved_fact_value(t_new.bases_fact, [])
+    old_virtual_bases = resolved_fact_value(t_old.virtual_bases_fact, [])
+    new_virtual_bases = resolved_fact_value(t_new.virtual_bases_fact, [])
+    entity_id = t_old.entity_id or t_new.entity_id
+
+    # BASE_CLASS_POSITION_CHANGED: same set of non-virtual bases, different order
+    # This shifts this-pointer adjustments for all bases → old binaries call wrong method.
+    old_bases_set = set(old_bases)
+    new_bases_set = set(new_bases)
+    if old_bases_set == new_bases_set and old_bases != new_bases:
+        changes.append(
+            make_change(
+                ChangeKind.BASE_CLASS_POSITION_CHANGED,
+                symbol=name,
+                name=name,
+                old_value=str(old_bases),
+                new_value=str(new_bases),
+                entity_id=entity_id,
+            )
+        )
+    elif old_bases_set != new_bases_set:
+        # General base class set change (add/remove base) → TYPE_BASE_CHANGED
+        changes.append(
+            make_change(
+                ChangeKind.TYPE_BASE_CHANGED,
+                symbol=name,
+                description=f"Base classes changed: {name}",
+                old_value=str(old_bases),
+                new_value=str(new_bases),
+                entity_id=entity_id,
+            )
+        )
+
+    # BASE_CLASS_VIRTUAL_CHANGED: a base moved between virtual and non-virtual
+    old_virt_set = set(old_virtual_bases)
+    new_virt_set = set(new_virtual_bases)
+    # Bases that moved from non-virtual to virtual or vice versa
+    became_virtual = (new_virt_set - old_virt_set) & old_bases_set
+    lost_virtual = (old_virt_set - new_virt_set) & new_bases_set
+    if became_virtual or lost_virtual:
+        desc_parts = []
+        if became_virtual:
+            desc_parts.append(f"became virtual: {sorted(became_virtual)}")
+        if lost_virtual:
+            desc_parts.append(f"lost virtual: {sorted(lost_virtual)}")
+        changes.append(
+            make_change(
+                ChangeKind.BASE_CLASS_VIRTUAL_CHANGED,
+                symbol=name,
+                name=name,
+                detail="; ".join(desc_parts),
+                old_value=str(sorted(old_virtual_bases)),
+                new_value=str(sorted(new_virtual_bases)),
+                entity_id=entity_id,
+            )
+        )
+    elif old_virt_set != new_virt_set:
+        # Pure add/remove of a virtual base (not a migration from non-virtual):
+        # e.g. class D : virtual A  →  class D : virtual A, virtual B
+        # → TYPE_BASE_CHANGED (hierarchy changed, not just virtuality toggled)
+        if not changes:  # don't duplicate if TYPE_BASE_CHANGED already emitted above
+            changes.append(
+                make_change(
+                    ChangeKind.TYPE_BASE_CHANGED,
+                    symbol=name,
+                    description=f"Virtual base classes changed: {name}",
+                    old_value=str(old_virtual_bases),
+                    new_value=str(new_virtual_bases),
+                    entity_id=entity_id,
+                )
+            )
+
+    return changes
 
 
 @registry.detector("enums")
