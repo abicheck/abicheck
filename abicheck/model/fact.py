@@ -106,6 +106,25 @@ def bridge_legacy_and_fact(
     derives ``Fact.present(new_value)`` and passes both into ``replace()``,
     so the two representations cannot drift out of sync at the one call
     site capable of keeping them honest — the one making the change.
+
+    **A second, related trap this function cannot see either (Codex
+    review, confirmed to already reproduce identically on ``bases`` — not
+    something a later conversion introduces): plain post-construction
+    attribute mutation.** ``record.is_final = True`` (or ``record.bases =
+    [...]``) never re-invokes ``__post_init__`` at all — this bridge only
+    runs at construction time, so the sibling ``Fact[T]`` is never
+    re-derived, and the pair is left holding the *new* legacy value beside
+    the *stale* fact. Both directions of the earlier gap are true again for
+    the identical reason: the pair is now internally inconsistent, and
+    ``encode_fact_fields``/``decode_fact`` (``storage/fact_codec.py``) trust
+    the ``Fact[T]`` sibling over the legacy field on the next
+    encode-then-decode round trip, silently reverting the mutation.
+    ``replace_with_fact_sync`` does not help here — it only wraps
+    ``dataclasses.replace()`` calls, not attribute assignment. There is no
+    mechanical guard against this today; treat every bridged field
+    (anything with a ``<field>_fact`` sibling) as effectively immutable
+    after construction — build a fresh instance (or use
+    ``replace_with_fact_sync``) instead of assigning to it directly.
     """
     if explicit_fact is not None:
         value = (

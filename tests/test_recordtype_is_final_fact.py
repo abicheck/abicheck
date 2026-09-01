@@ -188,3 +188,24 @@ class TestIsFinalReplaceBridge:
         )
         assert rec2.is_final_fact is not None
         assert rec2.is_final_fact.status is FactStatus.UNSUPPORTED
+
+    def test_post_construction_attribute_mutation_does_not_survive_round_trip(
+        self,
+    ) -> None:
+        """A second, related trap (Codex review, fresh finding): plain
+        attribute assignment (`rec.is_final = True`) never re-runs
+        `__post_init__`, so `is_final_fact` is never re-derived and the
+        pair goes out of sync -- confirmed to reproduce identically on
+        `bases` (a Phase 0 field) in
+        `test_model_fact.py::TestPostConstructionMutationIsUnsafeForFactBridgedFields`,
+        so this is not a gap `is_final`'s own conversion introduces. On the
+        next encode-then-decode round trip, the stale `is_final_fact` wins
+        over the mutated `is_final`, silently reverting it -- the exact
+        failure `bridge_legacy_and_fact`'s docstring now names explicitly."""
+        rec = RecordType(name="Widget", kind="class", is_final=False)
+        rec.is_final = True
+        assert rec.is_final_fact is not None
+        assert rec.is_final_fact.value is False  # already stale before any I/O
+
+        r = _round_trip(_make_snap(types=[rec])).types[0]
+        assert r.is_final is False  # the mutation to True did not survive
