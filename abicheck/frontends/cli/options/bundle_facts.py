@@ -36,7 +36,7 @@ import click
 
 #: A YAML/JSON manifest of per-library header/include/compile-context
 #: overrides for ``compare --old-bundle-facts``, parsed by
-#: :func:`abicheck.bundle_facts_library_overrides.parse_bundle_facts_library_overrides`.
+#: :func:`abicheck.workflows.bundle_facts_library_overrides.parse_bundle_facts_library_overrides`.
 #: Meaningless without ``--old-bundle-facts`` -- rejected explicitly by
 #: :func:`reject_bundle_facts_manifest_without_old_bundle_facts` below,
 #: rather than silently ignored, since a live directory/package

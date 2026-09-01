@@ -13,9 +13,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Unit tests for :mod:`abicheck.bundle_facts_library_overrides` (G38 Phase 17)
--- the per-library header/include/compile-context override manifest parser
-for ``compare --old-bundle-facts``.
+"""Unit tests for :mod:`abicheck.workflows.bundle_facts_library_overrides`
+(G38 Phase 17) -- the per-library header/include/compile-context override
+manifest parser for ``compare --old-bundle-facts``.
 """
 
 from __future__ import annotations
@@ -24,7 +24,7 @@ from pathlib import Path
 
 import pytest
 
-from abicheck.bundle_facts_library_overrides import (
+from abicheck.workflows.bundle_facts_library_overrides import (
     BundleFactsLibraryOverrides,
     BundleFactsLibraryOverridesError,
     parse_bundle_facts_library_overrides,

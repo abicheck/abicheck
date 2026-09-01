@@ -2540,11 +2540,17 @@ bundle_facts()` already accepted `per_library_headers`/`per_library_
 includes`/`per_library_compile: dict[str, CompileContext]` since Phase 13
 follow-up, but nothing on the CLI path forwarded them. Closed via:
 
-- `abicheck/bundle_facts_library_overrides.py` — `parse_bundle_facts_
-  library_overrides()`, an eager, strict-unknown-key-rejecting parser for a
-  `{library_name: {headers: [...], includes: [...], gcc_path: ...,
-  gcc_options: [...], ...}}` YAML/JSON manifest, mirroring
-  `bundle_variants_config.py`'s existing precedent (a plain `dict` input
+- `abicheck/workflows/bundle_facts_library_overrides.py` — `parse_bundle_
+  facts_library_overrides()`, an eager, strict-unknown-key-rejecting parser
+  for a `{library_name: {headers: [...], includes: [...], gcc_path: ...,
+  gcc_options: [...], ...}}` YAML/JSON manifest. Physically under
+  `abicheck/workflows/` from the start (unlike `bundle_variants_config.py`'s
+  own pre-ADR-061 flat-root placement — a real Codex-review finding: adding
+  a *new* module to the frozen `bundle_` root family instead of routing it
+  to its real ADR-061 owner "defeats the migration gate," root AGENTS.md's
+  own "route new behavior to the target owner rather than extending a flat
+  root prefix family"), reusing that module's validation-style precedent (a
+  plain `dict` input
   rather than a new `.abicheck.yml` block, for the identical reason that
   module's own docstring already gives: `BuildConfig` has a fixed, declared
   schema and adding a new top-level block there needs real schema/precedence

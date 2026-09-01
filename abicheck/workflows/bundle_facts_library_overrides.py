@@ -36,6 +36,21 @@ file avoids entirely. This module therefore takes an already-parsed raw
 ``dict`` (whatever a caller's own YAML/JSON loader produced), not a
 ``.abicheck.yml`` path.
 
+**Physically under ``abicheck/workflows/``, unlike ``bundle_variants_
+config.py``'s own flat-root placement (Codex review, verified against
+AGENTS.md's task-routing table).** Root AGENTS.md's "Task routing and
+dependency direction" section is explicit: "route new behavior to the
+target owner rather than extending a flat root prefix family" -- the
+pre-existing flat `bundle_*.py` siblings (`bundle_variants_config.py`
+included) predate ADR-061 and are grandfathered into that family's
+`legacy_paths`/`architecture/debt.yaml` entries, not a precedent for where
+genuinely *new* code should land. This module coordinates a `compare`-shaped
+workflow's manifest input (`workflows`'s own routing-table row: "Coordinate
+dump, compare, scan, release, aggregate, project, or dependency behavior"),
+so it lives here from the start, with no `architecture/modules.yaml`
+allowlist edit needed at all -- physical location under `abicheck/
+workflows/` is what classifies it, exactly as ADR-061 intends for new code.
+
 Validates eagerly and completely before returning anything, mirroring
 ``bundle_variants_config.parse_bundle_variants_config()``'s own convention:
 a malformed entry is a hard :class:`BundleFactsLibraryOverridesError`, never
@@ -52,7 +67,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from .compile_context import CompileContext
+from ..compile_context import CompileContext
 
 #: Recognized keys inside one library's own mapping. The compile-context
 #: fields mirror `CompileContext`'s own field names exactly (rather than the

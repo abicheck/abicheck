@@ -102,7 +102,7 @@ def _load_library_overrides(
 ) -> tuple[dict[str, list[Path]], dict[str, list[Path]], dict[str, Any]]:
     """Load and validate ``--bundle-facts-library-manifest``.
 
-    Raises :class:`~abicheck.bundle_facts_library_overrides.
+    Raises :class:`~abicheck.workflows.bundle_facts_library_overrides.
     BundleFactsLibraryOverridesError` (a ``ValueError`` subclass, caught
     alongside every other malformed-input case by ``dispatch()``'s own
     ``except (SnapshotError, ValueError, OSError)`` clause) on a structurally
@@ -111,7 +111,7 @@ def _load_library_overrides(
     """
     import yaml
 
-    from ....bundle_facts_library_overrides import (
+    from ....workflows.bundle_facts_library_overrides import (
         BundleFactsLibraryOverridesError,
         parse_bundle_facts_library_overrides,
     )
