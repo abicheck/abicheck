@@ -541,3 +541,67 @@ def test_artifact_set_evidence_contract_error_member_alongside_a_real_break_stil
     assert loaded.gate.exit_code == 2
     assert loaded.gate.blocking is True
     assert "evidence_contract_error" in loaded.gate.blocking_categories
+
+
+def test_artifact_set_budget_overflow_root_still_names_a_sibling_members_evidence_error(
+    tmp_path: Path,
+) -> None:
+    """`_aggregate_scan_set_verdict`'s own step 1 makes any member's
+    `BUDGET_OVERFLOW` dominate the set-level `verdict` unconditionally,
+    even when a *different* member aborted with `EVIDENCE_CONTRACT_ERROR`
+    for an unrelated reason. The root-abort branch above hardcodes only
+    the one category matching the root `verdict` string
+    (`scan_abort_category`), so before this fix the sibling member's own
+    `evidence_contract_error` category was silently dropped from the
+    gate -- the same class of gap `_member_abort_categories` closed for
+    the normal-verdict path, but reached here too since the budget-
+    dominant branch returns before that helper is ever consulted (Codex
+    review, fresh evidence).
+    """
+    report = tmp_path / "abi-report-bundle.json"
+    report.write_text(
+        json.dumps(
+            {
+                "scan_schema_version": "1.23",
+                "verdict": "BUDGET_OVERFLOW",
+                "exit_code": 5,
+                "per_artifact": [
+                    {
+                        "artifact": "libincomplete.so",
+                        "scan_schema_version": "1.23",
+                        "verdict": "EVIDENCE_CONTRACT_ERROR",
+                        "exit_code": 1,
+                        "findings": 0,
+                        "layers": [],
+                        "confidence": {},
+                        "estimate": [],
+                        "report": {},
+                    },
+                    {
+                        "artifact": "libtimedout.so",
+                        "scan_schema_version": "1.23",
+                        "verdict": "BUDGET_OVERFLOW",
+                        "exit_code": 5,
+                        "findings": 0,
+                        "layers": [],
+                        "confidence": {},
+                        "estimate": [],
+                        "report": {},
+                    },
+                ],
+                "bundle_findings": [],
+                "bundle_finding_count": 0,
+                "bundle_verdict": None,
+                "bundle_incomplete": False,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    loaded = _load_report_file(report, prefix="abi-report-")
+
+    assert loaded.verdict is None
+    assert loaded.gate is not None
+    assert loaded.gate.blocking is True
+    assert "budget_overflow" in loaded.gate.blocking_categories
+    assert "evidence_contract_error" in loaded.gate.blocking_categories

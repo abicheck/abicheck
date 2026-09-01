@@ -528,9 +528,23 @@ lands in two stages rather than one atomic change:
       it was the set-level verdict-blending logic itself dropping a
       category label it never carried into any `exit` block to begin
       with, so it needed its own read of `per_artifact[*].verdict` rather
-      than another fold over `_scan_abort_exit_blocks`'s output. Still
-      open: the release fan-out's `GateOptions` unification and a full
-      cross-front-end parity pass (typed API, Action).
+      than another fold over `_scan_abort_exit_blocks`'s output. **(13) A
+      thirteenth round, immediately after, caught the fix above only
+      reaching one of `_load_report_file`'s two abort-handling branches:**
+      `_aggregate_scan_set_verdict`'s own step 1 makes any member's
+      `BUDGET_OVERFLOW` dominate the set-level `verdict` unconditionally,
+      even when a *different* member aborted with `EVIDENCE_CONTRACT_ERROR`
+      for an unrelated reason -- but the root-abort branch (the one keyed
+      on `raw_scan_verdict` matching a synthetic abort string directly)
+      hardcoded only the single category matching that string and
+      returned before `_member_abort_categories` was ever consulted, so a
+      sibling member's `evidence_contract_error` category was still
+      silently dropped in exactly the case (12)'s fix didn't reach (Codex
+      review, fresh evidence). Fixed by unioning
+      `_member_abort_categories` into that branch's `blocking_categories`
+      too, the same way (12) already does for the normal-verdict branch.
+      Still open: the release fan-out's `GateOptions` unification and a
+      full cross-front-end parity pass (typed API, Action).
 2. **Atomic.** Once the report block agrees with today's real behaviour for
    every axis and every mode (verified by the axis-separated tests this ADR
    requires below), remove `--exit-code-scheme` from `compare` and `scan`,

@@ -164,24 +164,26 @@ _scan_abort_categories = {
 
 
 def _member_abort_categories(data: Mapping[str, Any]) -> frozenset[str]:
-    """Abort categories from ``per_artifact`` members the set-level verdict
-    no longer names.
+    """Abort categories from every ``per_artifact`` member, independent of
+    which single category the set-level ``verdict`` string names.
 
-    ``_aggregate_scan_set_verdict`` (ADR-056 D3) deliberately keeps a
-    stronger real ``API_BREAK``/``BREAKING`` verdict at the set's own root
-    even when one member aborted with ``EVIDENCE_CONTRACT_ERROR`` alongside
-    it -- a real break must not be hidden behind an evidence-completeness
-    verdict. That is the right compatibility verdict, but it means the root
-    ``verdict`` string alone no longer tells this loader which member(s)
-    aborted, so the root-level check above (matching ``verdict`` against
-    :data:`_scan_abort_categories` directly) misses it and the target's gate
-    would silently drop the ``evidence_contract_error``/``budget_overflow``
-    category despite the member never completing a comparison (Codex
-    review). Reads each member's own bare ``verdict`` field directly --
-    ``ScanArtifactResult.to_dict()`` flattens it to the member dict's own
-    top level, not nested under ``report`` -- rather than
-    :func:`_scan_abort_exit_blocks`'s ``exit`` blocks, which a member that
-    aborted before producing a decision may not carry at all.
+    ``_aggregate_scan_set_verdict`` (ADR-056 D3) collapses a whole set's
+    outcome into exactly one root ``verdict`` string, picking one of: any
+    member's ``BUDGET_OVERFLOW`` (dominates unconditionally), else the
+    worst real compatibility verdict, else a member's own
+    ``EVIDENCE_CONTRACT_ERROR``. Two members can abort for *different*
+    reasons at once (one budget-starved, another evidence-incomplete), or
+    one member can abort while another's real break wins the root string --
+    either way the root alone cannot name every category, so both callers
+    below (the root-abort branch, whose own ``scan_abort_category`` is only
+    ever the *one* string that won, and the normal-verdict branch, where a
+    real break at the root hides an aborted member entirely) union this
+    function's result into their gate rather than trusting the root alone
+    (Codex review, fresh evidence for both). Reads each member's own bare
+    ``verdict`` field directly -- ``ScanArtifactResult.to_dict()`` flattens
+    it to the member dict's own top level, not nested under ``report`` --
+    rather than :func:`_scan_abort_exit_blocks`'s ``exit`` blocks, which a
+    member that aborted before producing a decision may not carry at all.
     """
     per_artifact = data.get("per_artifact")
     if not isinstance(per_artifact, list):
@@ -447,13 +449,16 @@ def _load_report_file(path: Path, *, prefix: str) -> _LoadedReport:
         assurance_axis, _ = _scan_abort_exit_axis(
             data, "analysis_assurance_contribution"
         )
+        blocking_categories = frozenset(
+            {scan_abort_category}
+        ) | _member_abort_categories(data)
         return _LoadedReport(
             target_id=target_id,
             verdict=None,
             gate=GateInfo(
                 exit_code=max(COVERAGE_INCOMPLETE_EXIT, _scan_abort_prior_exit(data)),
                 blocking=True,
-                blocking_categories=(scan_abort_category,),
+                blocking_categories=tuple(sorted(blocking_categories)),
                 from_report=True,
             ),
             library=data.get("library"),
