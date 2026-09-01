@@ -873,10 +873,10 @@ def generate_html_report(
     # Split display changes into buckets; duck-typed like compatibility_metrics.
     # ADR-061 Phase 2 item 4b: a real DiffResult reads each verdict from a
     # ReportFinding resolved once per change; a stub falls back as before.
-    _effective_verdict_fn: Callable[[object], object] | None = getattr(
-        result, "_effective_verdict_for_change", None
-    )
-    if _effective_verdict_fn is not None:
+    # Also gate on _effective_kind_sets: report_findings_for needs policy/
+    # policy_file too, absent from a verdict-only stub (Codex review).
+    _effective_verdict_fn: Callable[[object], object] | None = getattr(result, "_effective_verdict_for_change", None)
+    if _effective_verdict_fn is not None and hasattr(result, "_effective_kind_sets"):
         from .report.finding import findings_by_change_id, report_findings_for
         _findings_by_id = findings_by_change_id(report_findings_for(result))  # type: ignore[arg-type]
         def _lookup_verdict(change: object) -> object:
