@@ -240,3 +240,25 @@ class Variable:
     # rationale, including why this is keyword-only, excluded from
     # equality, and not yet readable by any consumer.
     entity_id: EntityId | None = field(default=None, kw_only=True, compare=False)
+    # ADR-063 Phase 5 (fourth batch): Fact[...] siblings for this dataclass's
+    # own case-(b) fields, mirroring RecordType.source_header_fact/
+    # EnumType.source_header_fact exactly — each field's own None already
+    # unambiguously means "not captured", so the generic bridge applies
+    # directly with no explicit Fact.present(...) construction needed
+    # (unlike qualified_name_fact on the other two dataclasses).
+    source_header_fact: Fact[str | None] | None = field(default=None, kw_only=True)
+    alignment_bits_fact: Fact[int | None] | None = field(default=None, kw_only=True)
+    elf_binding_fact: Fact[SymbolBinding | None] | None = field(
+        default=None, kw_only=True
+    )
+
+    def __post_init__(self) -> None:
+        self.source_header, self.source_header_fact = bridge_legacy_and_fact(
+            self.source_header, self.source_header_fact, None, None
+        )
+        self.alignment_bits, self.alignment_bits_fact = bridge_legacy_and_fact(
+            self.alignment_bits, self.alignment_bits_fact, None, None
+        )
+        self.elf_binding, self.elf_binding_fact = bridge_legacy_and_fact(
+            self.elf_binding, self.elf_binding_fact, None, None
+        )

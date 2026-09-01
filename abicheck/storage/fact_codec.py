@@ -25,9 +25,10 @@ concern out of `serialization.py`'s neighbours.
 
 from __future__ import annotations
 
+from dataclasses import replace
 from typing import TYPE_CHECKING, Any
 
-from ..model import Fact, FactStatus
+from ..model import Fact, FactStatus, SymbolBinding
 
 if TYPE_CHECKING:
     from ..model import Function, RecordType
@@ -37,6 +38,7 @@ __all__ = [
     "decode_enum_facts",
     "decode_fact",
     "decode_record_facts",
+    "decode_variable_facts",
     "encode_fact_fields",
 ]
 
@@ -62,6 +64,15 @@ _ENUM_FACT_KEYS = (
     "source_header_fact",
 )
 
+# ADR-063 Phase 5 (fourth batch): Variable's own case-(b) *_fact siblings --
+# a distinct tuple since Variable is a different owner/collection
+# ("variables", not "types"/"enums").
+_VARIABLE_FACT_KEYS = (
+    "source_header_fact",
+    "alignment_bits_fact",
+    "elf_binding_fact",
+)
+
 
 def encode_fact_fields(d: dict[str, Any]) -> None:
     """In-place: encode every ``Fact[...]``-typed field's ``status`` as a string.
@@ -78,6 +89,9 @@ def encode_fact_fields(d: dict[str, Any]) -> None:
     for enum_dict in d.get("enums", []):
         for fact_key in _ENUM_FACT_KEYS:
             _encode_one(enum_dict.get(fact_key))
+    for var_dict in d.get("variables", []):
+        for fact_key in _VARIABLE_FACT_KEYS:
+            _encode_one(var_dict.get(fact_key))
     for func_dict in d.get("functions", []):
         for param_dict in func_dict.get("params", []):
             _encode_one(param_dict.get("is_va_list_fact"))
@@ -114,6 +128,11 @@ _MIN_SCHEMA_VERSION_FOR_RECORDTYPE_CASE_B_FACTS = 31
 # qualified_name_fact/source_header_fact siblings started being persisted
 # at.
 _MIN_SCHEMA_VERSION_FOR_ENUMTYPE_FACTS = 32
+
+# ADR-063 Phase 5 (fourth batch): the schema_version Variable's own
+# source_header_fact/alignment_bits_fact/elf_binding_fact siblings started
+# being persisted at.
+_MIN_SCHEMA_VERSION_FOR_VARIABLE_CASE_B_FACTS = 33
 
 
 def decode_fact(
@@ -220,6 +239,46 @@ def decode_enum_facts(e: dict[str, Any], schema_version: int) -> dict[str, Any]:
             schema_version,
             min_schema_version=_MIN_SCHEMA_VERSION_FOR_ENUMTYPE_FACTS,
         ),
+    }
+
+
+def decode_variable_facts(v: dict[str, Any], schema_version: int) -> dict[str, Any]:
+    """Decode every ``Variable`` ``Fact[...]`` sibling from one variable dict.
+
+    One call, spread into the ``Variable(**decode_variable_facts(v), ...)``
+    constructor call, mirroring :func:`decode_record_facts`/
+    :func:`decode_enum_facts`. ``elf_binding_fact``'s ``value`` needs one
+    extra step the other two fields don't: JSON has no enum type, so the
+    raw decoded value is a plain string, and the legacy (non-Fact)
+    ``Variable.elf_binding``/``Function.elf_binding`` reader convention
+    (``diff_symbols.py``, ``diff_platform.py``) unconditionally accesses
+    ``.value`` on it, which only a real ``SymbolBinding`` member supports —
+    a bare ``str`` would raise ``AttributeError``. ``bridge_legacy_and_fact``
+    then carries this same converted value back into the legacy
+    ``elf_binding`` field too, so the two representations stay a real
+    ``SymbolBinding`` instance together, not a str/enum split.
+    """
+    elf_binding_fact = decode_fact(
+        v.get("elf_binding_fact"),
+        schema_version,
+        min_schema_version=_MIN_SCHEMA_VERSION_FOR_VARIABLE_CASE_B_FACTS,
+    )
+    if elf_binding_fact is not None and elf_binding_fact.value is not None:
+        elf_binding_fact = replace(
+            elf_binding_fact, value=SymbolBinding(elf_binding_fact.value)
+        )
+    return {
+        "source_header_fact": decode_fact(
+            v.get("source_header_fact"),
+            schema_version,
+            min_schema_version=_MIN_SCHEMA_VERSION_FOR_VARIABLE_CASE_B_FACTS,
+        ),
+        "alignment_bits_fact": decode_fact(
+            v.get("alignment_bits_fact"),
+            schema_version,
+            min_schema_version=_MIN_SCHEMA_VERSION_FOR_VARIABLE_CASE_B_FACTS,
+        ),
+        "elf_binding_fact": elf_binding_fact,
     }
 
 

@@ -306,8 +306,6 @@ _CASE_B_UNCONVERTED: tuple[tuple[str, str], ...] = (
     ("Function", "hidden_friend_owner"),
     ("Function", "elf_binding"),
     ("Function", "exception_spec"),
-    ("Variable", "alignment_bits"),
-    ("Variable", "elf_binding"),
     # Provenance (ADR-015, schema v6): "missing on older snapshots and
     # default to None / UNKNOWN" — the identical ambiguity on all four
     # declaration dataclasses that carry it; only Function's own comment
@@ -317,7 +315,6 @@ _CASE_B_UNCONVERTED: tuple[tuple[str, str], ...] = (
     # auto-discovers Function.source_header — the other three are named
     # here from manual inspection, not the scan.
     ("Function", "source_header"),
-    ("Variable", "source_header"),
     # Schema-version-driven (not backend-driven) tri-state fields on the
     # three binary-format dataclasses — the identical "resting value can't
     # distinguish not-captured from confirmed-empty" shape, gated by a
@@ -586,6 +583,72 @@ FACT_REGISTRY = FactRegistry(
                 "Provenance (ADR-015, schema v6): defining header, "
                 "mirroring RecordType.source_header_fact exactly. Not "
                 "populated by the DWARF backend."
+            ),
+        ),
+        # ── Phase 5's fourth batch: Variable's own case-(b) fields ─────────
+        _E(
+            owner="Variable",
+            field="source_header",
+            value_type="str | None",
+            producing_backends=("castxml", "clang"),
+            persisted=True,
+            identity_relevant=False,
+            comparable=True,
+            suppressible=False,
+            reportable=True,
+            lifecycle=FactLifecycle.PERSISTED,
+            notes=(
+                "Provenance (ADR-015, schema v6): defining header, "
+                "mirroring RecordType.source_header_fact/EnumType."
+                "source_header_fact exactly. Not populated by the DWARF "
+                "backend."
+            ),
+        ),
+        _E(
+            owner="Variable",
+            field="alignment_bits",
+            value_type="int | None",
+            producing_backends=("castxml", "clang"),
+            persisted=True,
+            identity_relevant=False,
+            comparable=True,
+            suppressible=False,
+            reportable=True,
+            lifecycle=FactLifecycle.PERSISTED,
+            notes=(
+                "Declared alignment in bits (explicit alignas/"
+                "__attribute__((aligned)), else the type's natural "
+                "alignment when a dumper can resolve it). None already "
+                "unambiguously means 'not captured' — a plain case (b) "
+                "conversion."
+            ),
+        ),
+        _E(
+            owner="Variable",
+            field="elf_binding",
+            value_type="SymbolBinding | None",
+            producing_backends=("castxml", "clang", "elf"),
+            persisted=True,
+            identity_relevant=False,
+            comparable=True,
+            suppressible=False,
+            reportable=True,
+            lifecycle=FactLifecycle.PERSISTED,
+            notes=(
+                "ELF symbol linkage (st_info.bind), populated from "
+                ".dynsym by dumper_elf_symbols._populate_elf_visibility -- "
+                "a post-construction attribute assignment site kept in "
+                "sync with elf_binding_fact explicitly (Codex-review-style "
+                "mutation trap, same shape as tu_merge.py's/provenance.py's "
+                "own fixes). Lists 'castxml'/'clang' alongside 'elf' since "
+                "either header-backend-driven snapshot ends up carrying "
+                "this fact once the elf pass runs, mirroring source_header/"
+                "elf_visibility's own OTHER_LAYER convention. The decoded "
+                "Fact[...].value is reconstructed as a real SymbolBinding "
+                "member (storage/fact_codec.py's decode_variable_facts), "
+                "not left as a bare JSON string, since existing readers "
+                "(diff_symbols.py, diff_platform.py) unconditionally access "
+                "'.value' on it."
             ),
         ),
     ]

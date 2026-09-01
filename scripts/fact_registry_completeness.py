@@ -577,6 +577,7 @@ _OWNER_DECODE_RECEIVER: dict[str, str] = {
     "RecordType": "t",
     "Param": "p",
     "EnumType": "e",
+    "Variable": "v",
 }
 
 #: Module-level fact-key tuples in fact_codec.py, each owning exactly one
@@ -587,6 +588,7 @@ _OWNER_DECODE_RECEIVER: dict[str, str] = {
 _OWNER_FACT_KEY_TUPLES: dict[str, str] = {
     "_TYPE_FACT_KEYS": "RecordType",
     "_ENUM_FACT_KEYS": "EnumType",
+    "_VARIABLE_FACT_KEYS": "Variable",
 }
 
 

@@ -37,6 +37,9 @@ Phase 5 section for the design this page's data comes from.
 | `RecordType.virtual_bases` | `list[str]` | castxml, clang, dwarf | persisted | ✅ | — | ✅ | — | ✅ |
 | `RecordType.vptr_offset_bits` | `int \| None` | castxml, clang, dwarf | persisted | ✅ | — | ✅ | — | ✅ |
 | `RecordType.vtable` | `list[str]` | castxml, clang, dwarf | persisted | ✅ | — | ✅ | — | ✅ |
+| `Variable.alignment_bits` | `int \| None` | castxml, clang | persisted | ✅ | — | ✅ | — | ✅ |
+| `Variable.elf_binding` | `SymbolBinding \| None` | castxml, clang, elf | persisted | ✅ | — | ✅ | — | ✅ |
+| `Variable.source_header` | `str \| None` | castxml, clang | persisted | ✅ | — | ✅ | — | ✅ |
 
 ## Reliability-flag coverage (case (a))
 
@@ -94,7 +97,4 @@ check fails if a new eligible field appears that isn't named here.
 | `TypeField.is_mutable` | not yet — tracked gap |
 | `TypeField.is_volatile` | not yet — tracked gap |
 | `Variable.access` | not yet — tracked gap |
-| `Variable.alignment_bits` | not yet — tracked gap |
 | `Variable.deprecated` | not yet — tracked gap |
-| `Variable.elf_binding` | not yet — tracked gap |
-| `Variable.source_header` | not yet — tracked gap |

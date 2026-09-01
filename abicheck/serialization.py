@@ -63,6 +63,7 @@ from .storage.fact_codec import (
     decode_enum_facts,
     decode_fact,
     decode_record_facts,
+    decode_variable_facts,
     encode_fact_fields,
 )
 from .storage.snapshot_load_normalization import (
@@ -333,7 +334,7 @@ from .storage.surface_graph_codec import decode_surface_graph, encode_surface_gr
 # doesn't hit any producer-specific threshold above stays silent, since every
 # CI baseline is *always* some number of versions behind and warning
 # regardless of relevance would just be noise.
-SCHEMA_VERSION: int = 32  # v32: EnumType.qualified_name_fact/source_header_fact persisted (storage/fact_codec.py); v31: RecordType.is_abstract_fact/data_size_bits_fact/is_standard_layout_fact/is_trivially_copyable_fact/qualified_name_fact/source_header_fact persisted (storage/fact_codec.py); v30: RecordType.is_final_fact persisted (storage/fact_codec.py); v29: AbiSnapshot.surface_graph persisted (storage/surface_graph_codec.py); v28: entity_id carrier persisted (storage/entity_id_codec.py).
+SCHEMA_VERSION: int = 33  # v33: Variable.source_header_fact/alignment_bits_fact/elf_binding_fact persisted (storage/fact_codec.py); v32: EnumType.qualified_name_fact/source_header_fact persisted (storage/fact_codec.py); v31: RecordType.is_abstract_fact/data_size_bits_fact/is_standard_layout_fact/is_trivially_copyable_fact/qualified_name_fact/source_header_fact persisted (storage/fact_codec.py); v30: RecordType.is_final_fact persisted (storage/fact_codec.py); v29: AbiSnapshot.surface_graph persisted (storage/surface_graph_codec.py); v28: entity_id carrier persisted (storage/entity_id_codec.py).
 
 # Schema version at which CastXML field CV facts became reliable (see v9 above).
 _MIN_SCHEMA_VERSION_FOR_CV_FACTS = 9
@@ -635,6 +636,7 @@ def snapshot_from_dict(d: dict[str, Any]) -> AbiSnapshot:
             elf_binding=SymbolBinding(v["elf_binding"])
             if v.get("elf_binding")
             else None,
+            **decode_variable_facts(v, _schema_version),
         )
         for v in d.get("variables", [])
     ]

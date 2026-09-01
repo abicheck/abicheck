@@ -283,7 +283,7 @@ FACT_ROWS: tuple[FactRow, ...] = (
         _FULL,
         _NONE,
         note=(
-            "castxml reads its own `artificial=\"1\"` XML attribute (any "
+            'castxml reads its own `artificial="1"` XML attribute (any '
             "function-like element, not just Constructor/Destructor). clang "
             "never derives this per-declaration -- it hardcodes False for "
             "every Function it emits, which is still a correct answer, not "
@@ -351,6 +351,18 @@ FACT_ROWS: tuple[FactRow, ...] = (
     ),
     FactRow("Variable", "elf_visibility", _OTHER, _OTHER, note=_DYNSYM),
     FactRow("Variable", "source_header", _OTHER, _OTHER, note=_PROVENANCE_PASS),
+    FactRow(
+        "Variable",
+        "source_header_fact",
+        _OTHER,
+        _OTHER,
+        note=(
+            "ADR-063 Phase 5 (fourth batch): Fact[str | None] sibling of "
+            "source_header, mirroring RecordType.source_header_fact/"
+            "EnumType.source_header_fact exactly -- another layer "
+            "(provenance.tag_provenance()) owns it."
+        ),
+    ),
     FactRow("Variable", "origin", _OTHER, _OTHER, note=_PROVENANCE_PASS),
     FactRow(
         "Variable",
@@ -367,6 +379,23 @@ FACT_ROWS: tuple[FactRow, ...] = (
     ),
     FactRow(
         "Variable",
+        "alignment_bits_fact",
+        _NONE,
+        _NONE,
+        note=(
+            "ADR-063 Phase 5 (fourth batch): Fact[int | None] sibling of "
+            "alignment_bits. Deliberately NOT constructed as an explicit "
+            "keyword the way qualified_name_fact is -- neither backend "
+            "passes it literally at Variable(...) construction; it is "
+            "correctly derived by the generic bridge_legacy_and_fact "
+            "bridge in __post_init__ from whatever legacy value the "
+            "constructor call actually supplies, so NONE here reflects "
+            "literal-keyword evidence only, not runtime behavior (same "
+            "shape as RecordType.data_size_bits_fact/is_abstract_fact)."
+        ),
+    ),
+    FactRow(
+        "Variable",
         "deprecated",
         _FULL,
         _FULL,
@@ -374,6 +403,19 @@ FACT_ROWS: tuple[FactRow, ...] = (
         note="clang side wired in G31 Phase C (schema v19).",
     ),
     FactRow("Variable", "elf_binding", _OTHER, _OTHER, note=_DYNSYM),
+    FactRow(
+        "Variable",
+        "elf_binding_fact",
+        _OTHER,
+        _OTHER,
+        note=(
+            "ADR-063 Phase 5 (fourth batch): Fact[SymbolBinding | None] "
+            "sibling of elf_binding -- another layer "
+            "(dumper_elf_symbols._populate_elf_visibility) owns it, kept "
+            "in sync explicitly since it sets elf_binding by attribute "
+            "assignment, never re-running __post_init__."
+        ),
+    ),
     FactRow(
         "Variable",
         "entity_id",
@@ -1077,11 +1119,7 @@ def _entity_module_paths(header_backend_dir: Path) -> list[Path]:
     if not header_backend_dir.is_dir():
         return []
     excluded = {"__init__.py", "context.py"}
-    return sorted(
-        p
-        for p in header_backend_dir.glob("*.py")
-        if p.name not in excluded
-    )
+    return sorted(p for p in header_backend_dir.glob("*.py") if p.name not in excluded)
 
 
 def castxml_evidence() -> dict[str, dict[str, Evidence]]:
