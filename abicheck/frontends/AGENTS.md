@@ -75,11 +75,15 @@ surprises were involved. The rule that move confirmed still stands for the
 next candidate: **this is a migrated package, so `unclassified-import`
 applies to every module physically inside it.** Check a candidate's full
 first-party import set before moving it, not just whether it looks
-leaf-shaped — a module that reaches a `model`-classified package (like
-`abicheck.policies`) for policy-owned discovery data still routes through
-the matching `workflows` facade (`workflows.policy_file.builtin_policy_names`)
-rather than importing it directly, the same boundary this section's `cli/
-commands` table entries already respect.
+leaf-shaped — a module that reaches a `policy`-classified package (like
+`abicheck.policies`, the shipped policy documents) for policy-owned discovery
+data still routes through the matching `workflows` facade
+(`workflows.policy_file.builtin_policy_names`) rather than importing it
+directly, the same boundary this section's `cli/commands` table entries
+already respect. `abicheck.policies` briefly carried a `model` classification
+during this same migration, which the architecture checker accepted but which
+was itself the wrong layer for policy-owned data (Codex review) — it belongs
+in `policy`'s `legacy_paths` alongside `policy_file.py`, not `model`'s.
 
 **Still open:** `service.py` (1763 lines) has not been thinned, and the reason
 is now specific rather than open-ended. Moving it means classifying the 28 flat

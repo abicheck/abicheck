@@ -26,7 +26,6 @@
         "abicheck/evidence_depth.py",
         "abicheck/fact_provenance.py",
         "abicheck/name_classification.py",
-        "abicheck/policies/__init__.py",
         "abicheck/report_side_facts.py",
         "abicheck/stable_abi_data.py",
         "abicheck/errors.py"
@@ -243,6 +242,7 @@
         "abicheck/export_surface.py",
         "abicheck/idioms.py",
         "abicheck/pattern_verdicts.py",
+        "abicheck/policies/__init__.py",
         "abicheck/policy_file.py",
         "abicheck/post_processing.py",
         "abicheck/post_processing_context.py",
