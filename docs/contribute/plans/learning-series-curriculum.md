@@ -487,7 +487,7 @@ so every page can carry its tier without changing the gate.
 | Tier | Level | Pages (★ = new, ↻ = merged/moved) |
 |---|---|---|
 | **0 · Orientation** | beginner | ABI in Five Minutes · ★ How a break shows up (symptom → mechanism → level) · Cheat Sheet · Glossary (↻ absorbs Part 1 §8) |
-| **1 · Foundations** | beginner → intermediate | Part 1 Foundations · Part 0 Product Contract (↻ gains the compatibility-levels ladder, §4.3) · Your ABI Surface |
+| **1 · Foundations** | beginner → intermediate | Part 0 Product Contract (↻ gains the compatibility-levels ladder, §4.3) · Part 1 Foundations (the spine's own 0 → 7 order is kept) · Your ABI Surface |
 | **2 · Mechanics** | intermediate | Parts 2, 3, 4, 5, 6 — with Class Layout, Exception Unwinding, Modern Hazards, MSVC/PE listed *under* their Part as "go deeper" (Part 4 shortens its inline summaries to a sentence and a link) |
 | **3 · Define the contract** | intermediate | Compatibility Direction · Consumer Models · ↻ Contract-Aware Compatibility (from Concepts) · Build-Profile Comparability · Static & Header-Only Contracts (↻ from Beyond ABI — library *shape* is a contract question) |
 | **4 · Evidence & detection** | intermediate | ↻ Detecting Breaks (§1a grows into the AST summary, §2 becomes links into the trio) · Evidence & Detectability and What Each Level Sees (stay on the Concepts tab; the appendix of removed flags moves to `contribute/archive/`) · Assurance Beyond Static Checking |
@@ -509,7 +509,9 @@ order, next to `topics.yaml`. The hub's ladder table is then *generated*
 by joining that file with each page's `level:` — a small script splicing
 between sentinels with a `--check` mode, the pattern ADR-051 established
 for the platform matrix — so neither the badge column nor the tier rows
-are a hand-copied table. `--check` fails on a learn page missing from the
+are a hand-copied table. The hub itself is the page that *renders* the
+ladder and is explicitly exempt from it (the one documented exception,
+stated in the ladder file). `--check` fails on any other learn page missing from the
 ladder, on a ladder entry that is not a page, and on any level regression
 along the ladder's full reading order (not only within a nav group). The
 hub renders the result as a badge per row so the ladder is visible in the
@@ -585,9 +587,11 @@ gate all of this).
 **Phase 1 — navigation and hub (no new prose).**
 
 - Rebuild `abi-api-handling.md` around the tier table in §5; move the
-  23-row break-family index and the three "deeper" sections to their
-  owners (the cheat sheet, the trio, the practice pages once they exist).
-  Two consequences to carry: inbound anchor links (`08-detection.md` and
+  23-row break-family index to the cheat sheet and the two "deeper"
+  sections on the source scan and the L5 graph to the trio, whose pages
+  exist today. The third "deeper" section (the "now run it" CI table)
+  stays on the hub until Phase 3 creates its practice-page owner, so this
+  phase leaves no dangling link. Two consequences to carry: inbound anchor links (`08-detection.md` and
   five other pages link the index and the two "deeper" sections by
   fragment, which `mkdocs build --strict` does not verify) are rewritten,
   and the hub keeps its role as `terminology.yaml`'s defining page for
