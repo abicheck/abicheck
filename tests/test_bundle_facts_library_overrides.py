@@ -314,3 +314,16 @@ class TestLoadBundleFactsLibraryOverrides:
 
         with pytest.raises(BundleFactsLibraryOverridesError, match="invalid YAML"):
             load_bundle_facts_library_overrides(manifest)
+
+    def test_invalid_utf8_manifest_is_a_clean_error(self, tmp_path: Path) -> None:
+        """Codex review, fresh evidence: ``UnicodeDecodeError`` is a
+        ``ValueError`` subclass, so an invalid-UTF-8 manifest was still
+        caught somewhere -- but only by ``dispatch()``'s generic ``except
+        (SnapshotError, ValueError, OSError)`` clause, exiting 1 instead of
+        the exit-64 usage error every other malformed manifest input here
+        produces."""
+        manifest = tmp_path / "manifest.yaml"
+        manifest.write_bytes(b"libreal.so:\n  headers:\n    - \xff\xfe invalid utf-8\n")
+
+        with pytest.raises(BundleFactsLibraryOverridesError, match="cannot decode as UTF-8"):
+            load_bundle_facts_library_overrides(manifest)

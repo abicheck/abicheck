@@ -276,6 +276,17 @@ def load_bundle_facts_library_overrides(
         raw = _load_yaml_strict(
             manifest_path.read_text(encoding="utf-8"), source=str(manifest_path)
         )
+    except UnicodeDecodeError as exc:
+        # Codex review, fresh evidence: a manifest file containing invalid
+        # UTF-8 raises here, before _load_yaml_strict ever runs -- and
+        # UnicodeDecodeError is a ValueError subclass, so without this it
+        # was still caught, but by dispatch()'s generic ``except
+        # (SnapshotError, ValueError, OSError)`` clause, exiting 1 instead
+        # of the exit-64 usage error every other malformed manifest input
+        # here produces.
+        raise BundleFactsLibraryOverridesError(
+            f"--bundle-facts-library-manifest {manifest_path}: cannot decode as UTF-8: {exc}"
+        ) from exc
     except ManifestValidationError as exc:
         raise BundleFactsLibraryOverridesError(
             f"--bundle-facts-library-manifest {manifest_path}: {exc}"
