@@ -338,9 +338,11 @@ ladder's next member — the A2c footer rule reads either shape. Four of
 them do not today, and P1 rewrites those: Part 1 points at Part 2 where
 the ladder's next member is `abi-surface.md`; Part 6 points at Part 7
 where it is `compatibility-direction.md`; Part 7 points at Detecting
-Breaks, which the ladder places earlier, so its next is the hub until B6
-exists and B6 afterwards; and Detecting Breaks has no next at all, so it
-gains `assurance-methods.md`. Placed after the last section, before any
+Breaks, which the ladder places earlier, so its next is the first Tier 7
+member that exists — `dependency-floors.md` in P1, and B6 once P7 lands
+(A2c reads the ladder as committed at each step, so both are correct in
+their turn); and Detecting Breaks has no next at all, so it gains
+`assurance-methods.md`. Placed after the last section, before any
 "See also":
 
 ```markdown
@@ -531,7 +533,8 @@ checks that each path exists. The review-trigger script
       - use/multi-binary.md             # was canonical_page
       - integration/scenarios/release-bundle.md
       - integration/scenarios/multi-dso-project.md
-    # fact_sources unchanged
+    # fact_sources and reference_page (reference/cli-reference.md, the
+    # exhaustive flag reference B6 keeps deferring to) unchanged
 
   evidence-model:
     allowed_summaries:
@@ -744,7 +747,9 @@ Sections:
 2. **The PR gate** — cheap tiers always; seeded source depth for the
    changed translation units; what the report must show (breaks *and*
    additions, link to B3). Run: `abicheck scan build/libfoo.so -H include/
-   --sources . --against baseline.json --since origin/main`, and the
+   --sources . --against baseline.json --since origin/main --depth
+   source` (without `--depth`, `scan` picks `auto`, which is risk-driven
+   under a `--since` seed and may stop short of the source tier), and the
    Action equivalent in scan mode — `mode: scan`, `new-library`,
    `new-header`, `sources`, `depth: source`, `since: origin/main`, and
    `against` (or `abi-baseline`) for the baseline; `against` and `since`
@@ -810,7 +815,9 @@ Sections:
    growing SDK).
    Show the Action snippet from `use/github-action-recipes.md` §"Detect
    unintentional API expansion" by link, not copy.
-4. **Make it visible on the PR** — `annotate-additions: true` notices,
+4. **Make it visible on the PR** — `annotate: true` plus
+   `annotate-additions: true` (the second has no effect without the
+   first, per the input reference) for the notices,
    and the sticky comment recipe (link).
 5. **Trend it** — a paragraph on keeping the roll-ups in a dashboard; no
    tooling claimed beyond the JSON fields.
