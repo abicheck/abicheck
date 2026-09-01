@@ -23,8 +23,8 @@ Phase 5 section for the design this page's data comes from.
 
 | Fact | Value type | Producing backends | Lifecycle | Persisted | Identity | Comparable | Suppressible | Reportable |
 |------|------------|---------------------|-----------|:---------:|:--------:|:----------:|:------------:|:----------:|
-| `EnumType.qualified_name` | `str \| None` | castxml, clang | persisted | ✅ | — | ✅ | — | ✅ |
-| `EnumType.source_header` | `str \| None` | castxml, clang | persisted | ✅ | — | ✅ | — | ✅ |
+| `EnumType.qualified_name` | `str \| None` | castxml, clang | persisted | ✅ | ✅ | ✅ | — | ✅ |
+| `EnumType.source_header` | `str \| None` | castxml, clang, dwarf, pdb | persisted | ✅ | — | ✅ | — | ✅ |
 | `Function.contract_attributes` | `list[str] \| None` | castxml, clang | persisted | ✅ | — | ✅ | — | ✅ |
 | `Function.elf_binding` | `SymbolBinding \| None` | castxml, clang, elf | persisted | ✅ | — | ✅ | — | ✅ |
 | `Function.exception_spec` | `str \| None` | castxml, clang | persisted | ✅ | — | ✅ | — | ✅ |
@@ -34,7 +34,7 @@ Phase 5 section for the design this page's data comes from.
 | `Function.is_hidden_friend` | `bool \| None` | castxml, clang | persisted | ✅ | — | ✅ | — | ✅ |
 | `Function.is_override` | `bool \| None` | castxml, clang | persisted | ✅ | — | ✅ | — | ✅ |
 | `Function.is_variadic` | `bool \| None` | castxml, clang | persisted | ✅ | — | ✅ | — | ✅ |
-| `Function.source_header` | `str \| None` | castxml, clang | persisted | ✅ | — | ✅ | — | ✅ |
+| `Function.source_header` | `str \| None` | castxml, clang, dwarf, pdb | persisted | ✅ | — | ✅ | — | ✅ |
 | `Param.is_va_list` | `bool` | clang | persisted | ✅ | — | ✅ | — | ✅ |
 | `RecordType.bases` | `list[str]` | castxml, clang, dwarf | persisted | ✅ | — | ✅ | — | ✅ |
 | `RecordType.data_size_bits` | `int \| None` | clang | persisted | ✅ | — | ✅ | — | ✅ |
@@ -42,14 +42,14 @@ Phase 5 section for the design this page's data comes from.
 | `RecordType.is_final` | `bool \| None` | castxml, clang | persisted | ✅ | — | ✅ | — | ✅ |
 | `RecordType.is_standard_layout` | `bool \| None` | clang | persisted | ✅ | — | ✅ | — | ✅ |
 | `RecordType.is_trivially_copyable` | `bool \| None` | clang | persisted | ✅ | — | ✅ | — | ✅ |
-| `RecordType.qualified_name` | `str \| None` | castxml, clang | persisted | ✅ | — | ✅ | — | ✅ |
-| `RecordType.source_header` | `str \| None` | castxml, clang | persisted | ✅ | — | ✅ | — | ✅ |
+| `RecordType.qualified_name` | `str \| None` | castxml, clang | persisted | ✅ | ✅ | ✅ | — | ✅ |
+| `RecordType.source_header` | `str \| None` | castxml, clang, dwarf, pdb | persisted | ✅ | — | ✅ | — | ✅ |
 | `RecordType.virtual_bases` | `list[str]` | castxml, clang, dwarf | persisted | ✅ | — | ✅ | — | ✅ |
 | `RecordType.vptr_offset_bits` | `int \| None` | castxml, clang, dwarf | persisted | ✅ | — | ✅ | — | ✅ |
 | `RecordType.vtable` | `list[str]` | castxml, clang, dwarf | persisted | ✅ | — | ✅ | — | ✅ |
 | `Variable.alignment_bits` | `int \| None` | castxml, clang | persisted | ✅ | — | ✅ | — | ✅ |
 | `Variable.elf_binding` | `SymbolBinding \| None` | castxml, clang, elf | persisted | ✅ | — | ✅ | — | ✅ |
-| `Variable.source_header` | `str \| None` | castxml, clang | persisted | ✅ | — | ✅ | — | ✅ |
+| `Variable.source_header` | `str \| None` | castxml, clang, dwarf, pdb | persisted | ✅ | — | ✅ | — | ✅ |
 
 ## Reliability-flag coverage (case (a))
 

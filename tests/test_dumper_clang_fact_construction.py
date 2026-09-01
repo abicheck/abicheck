@@ -156,6 +156,40 @@ def test_opaque_record_facts_present_and_match_legacy_empty_values() -> None:
     assert rec.vptr_offset_bits_fact.value is None
     assert rec.is_final_fact.status is FactStatus.PRESENT
     assert rec.is_final_fact.value is False
+    # ADR-063 Phase 5 (Codex/CodeRabbit review, fresh evidence): the opaque
+    # branch previously set qualified_name but not qualified_name_fact, so
+    # an opaque record at confirmed global scope silently fell through the
+    # generic bridge to NOT_COLLECTED instead of PRESENT(None).
+    assert rec.qualified_name is None
+    assert rec.qualified_name_fact.status is FactStatus.PRESENT
+    assert rec.qualified_name_fact.value is None
+
+
+def test_namespaced_opaque_record_qualified_name_fact_present_with_real_value() -> None:
+    root = _tu(
+        {
+            "kind": "NamespaceDecl",
+            "name": "ns",
+            "loc": {"file": "include/foo.h", "line": 1},
+            "inner": [
+                {
+                    "kind": "CXXRecordDecl",
+                    "name": "Opaque",
+                    "tagUsed": "struct",
+                    "loc": {"file": "include/foo.h", "line": 2},
+                },
+            ],
+        }
+    )
+    (rec,) = [
+        t
+        for t in _ClangAstParser(root, set(), set()).parse_types()
+        if t.name == "Opaque"
+    ]
+    assert rec.is_opaque is True
+    assert rec.qualified_name == "ns::Opaque"
+    assert rec.qualified_name_fact.status is FactStatus.PRESENT
+    assert rec.qualified_name_fact.value == "ns::Opaque"
 
 
 def test_enum_qualified_name_fact_present_at_global_scope() -> None:

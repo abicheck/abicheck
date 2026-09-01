@@ -206,12 +206,21 @@ def _build_record(
     deprecated = dep_msg if dep_msg is not None else clang_deprecated_message(node)
     if is_opaque:
         # Mirrors dumper_castxml.py's `incomplete="1"` branch.
+        opaque_qualified_name = (
+            "::".join([*entry.scope, own_name]) if entry.scope else None
+        )
         return RecordType(
             name=own_name,
             kind=kind,
-            qualified_name=(
-                "::".join([*entry.scope, own_name]) if entry.scope else None
-            ),
+            qualified_name=opaque_qualified_name,
+            # ADR-063 Phase 5 (Codex/CodeRabbit review, fresh evidence): the
+            # non-opaque branch below constructs qualified_name_fact
+            # explicitly for the identical reason (entry.scope is a clean
+            # structural fact, no cycle/depth-cap ambiguity on this
+            # backend) -- an opaque/incomplete record is no different, so
+            # it must not silently fall through the generic bridge to
+            # NOT_COLLECTED.
+            qualified_name_fact=Fact.present(opaque_qualified_name),
             size_bits=None,
             alignment_bits=None,
             fields=[],

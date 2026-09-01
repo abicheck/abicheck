@@ -213,7 +213,7 @@ FACT_REGISTRY = FactRegistry(
             value_type="str | None",
             producing_backends=("castxml", "clang"),
             persisted=True,
-            identity_relevant=False,
+            identity_relevant=True,
             comparable=True,
             suppressible=False,
             reportable=True,
@@ -229,14 +229,18 @@ FACT_REGISTRY = FactRegistry(
                 "Fact.present(...) rather than relying on the generic "
                 "bridge (Codex review, second pass) — a None return is "
                 "overwhelmingly a genuine, confirmed 'no enclosing scope' "
-                "determination on both paths, not an absence of evidence."
+                "determination on both paths, not an absence of evidence. "
+                "identity_relevant=True (Codex review, fresh evidence): "
+                "tu_merge.merge_translation_units keys a record by "
+                "`rt.qualified_name or rt.name`, so this field is part of "
+                "the merge/matching identity, not just a display detail."
             ),
         ),
         _E(
             owner="RecordType",
             field="source_header",
             value_type="str | None",
-            producing_backends=("castxml", "clang"),
+            producing_backends=("castxml", "clang", "dwarf", "pdb"),
             persisted=True,
             identity_relevant=False,
             comparable=True,
@@ -244,9 +248,12 @@ FACT_REGISTRY = FactRegistry(
             reportable=True,
             lifecycle=FactLifecycle.PERSISTED,
             notes=(
-                "Provenance (ADR-015, schema v6): defining header. Not "
-                "populated by the DWARF backend. Plain case (b) "
-                "conversion."
+                "Provenance (ADR-015, schema v6): defining header. "
+                "provenance.apply_provenance()/tag_provenance() derive it "
+                "unconditionally from source_location for any declaration, "
+                "so a DWARF (DW_AT_decl_file, dwarf_snapshot.py) or PDB "
+                "(pdb_model.py) producer populates it too, not only the two "
+                "header-AST backends (Codex review, fresh evidence)."
             ),
         ),
         # ── Phase 5's third batch: EnumType's own case-(b) fields ──────────
@@ -256,7 +263,7 @@ FACT_REGISTRY = FactRegistry(
             value_type="str | None",
             producing_backends=("castxml", "clang"),
             persisted=True,
-            identity_relevant=False,
+            identity_relevant=True,
             comparable=True,
             suppressible=False,
             reportable=True,
@@ -265,14 +272,16 @@ FACT_REGISTRY = FactRegistry(
                 "Namespace/enclosing-class-qualified spelling, mirroring "
                 "RecordType.qualified_name_fact exactly (same fields, same "
                 "explicit Fact.present(...) construction on both header-AST "
-                "backends, same rationale)."
+                "backends, same rationale). identity_relevant=True (Codex "
+                "review, fresh evidence): tu_merge.merge_translation_units "
+                "keys an enum by `en.qualified_name or en.name`."
             ),
         ),
         _E(
             owner="EnumType",
             field="source_header",
             value_type="str | None",
-            producing_backends=("castxml", "clang"),
+            producing_backends=("castxml", "clang", "dwarf", "pdb"),
             persisted=True,
             identity_relevant=False,
             comparable=True,
@@ -281,8 +290,8 @@ FACT_REGISTRY = FactRegistry(
             lifecycle=FactLifecycle.PERSISTED,
             notes=(
                 "Provenance (ADR-015, schema v6): defining header, "
-                "mirroring RecordType.source_header_fact exactly. Not "
-                "populated by the DWARF backend."
+                "mirroring RecordType.source_header_fact exactly, DWARF/PDB "
+                "producers included (Codex review, fresh evidence)."
             ),
         ),
         # ── Phase 5's fourth batch: Variable's own case-(b) fields ─────────
@@ -290,7 +299,7 @@ FACT_REGISTRY = FactRegistry(
             owner="Variable",
             field="source_header",
             value_type="str | None",
-            producing_backends=("castxml", "clang"),
+            producing_backends=("castxml", "clang", "dwarf", "pdb"),
             persisted=True,
             identity_relevant=False,
             comparable=True,
@@ -300,8 +309,7 @@ FACT_REGISTRY = FactRegistry(
             notes=(
                 "Provenance (ADR-015, schema v6): defining header, "
                 "mirroring RecordType.source_header_fact/EnumType."
-                "source_header_fact exactly. Not populated by the DWARF "
-                "backend."
+                "source_header_fact exactly, DWARF/PDB producers included."
             ),
         ),
         _E(
@@ -517,7 +525,7 @@ FACT_REGISTRY = FactRegistry(
             owner="Function",
             field="source_header",
             value_type="str | None",
-            producing_backends=("castxml", "clang"),
+            producing_backends=("castxml", "clang", "dwarf", "pdb"),
             persisted=True,
             identity_relevant=False,
             comparable=True,
@@ -527,7 +535,7 @@ FACT_REGISTRY = FactRegistry(
             notes=(
                 "Provenance (ADR-015, schema v6): defining header, "
                 "mirroring RecordType/EnumType/Variable.source_header_fact "
-                "exactly. Not populated by the DWARF backend."
+                "exactly, DWARF/PDB producers included."
             ),
         ),
     ]
