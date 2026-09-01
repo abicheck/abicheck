@@ -473,12 +473,12 @@
     },
     {
       "path": "abicheck/cli_scan.py",
-      "baseline_lines": 1993,
+      "baseline_lines": 2000,
       "target": "workflows-or-frontends",
       "rule": "no_growth",
       "category": "legacy_workflow_or_frontend_monolith",
       "owner": "abicheck maintainers",
-      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice.",
+      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice. Baseline raised 1993 -> 2000 (the file-size hard cap exactly), ADR-063 Phase 4's second slice: both of this file's own Bazel-scoping pre-flight call sites (scan_cmd's single-binary check, _run_artifact_set's own) needed a sources=/build_config= pair forwarded so a config-sourced (no explicit --build-target) root-target scope closes the dry-run/execution parity gap the phase's first slice left open here -- see docs/contribute/adr/063-one-semantic-pipeline.md's Phase 4 status. A later Codex review round additionally found scan_cmd's own call used the bare bazel_target_scoping_failure instead of the scan-aware scan_bazel_scoping_failure, missing its headers/collect-mode exemption; switching it to the correct, already-shared guard cost three more positional arguments at that one call site. No smaller diff was found that still forwards both values through both call sites without a second, independently-maintained copy of the config-sourced fallback logic.",
       "review_by": "2026-11-30"
     },
     {
@@ -1013,12 +1013,12 @@
     },
     {
       "path": "abicheck/scan_engine.py",
-      "baseline_lines": 1491,
+      "baseline_lines": 1494,
       "target": "workflows-or-frontends",
       "rule": "no_growth",
       "category": "legacy_workflow_or_frontend_monolith",
       "owner": "abicheck maintainers",
-      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice. Baseline raised then lowered across several ADR-063 Phase 4 Codex rounds: the Bazel target-scoping pre-flight check needed to run at the top of run_scan_core(), before the S3 pattern scan/POI work, not only inside _build_new_snapshot() -- a typed run_scan()/run_scan_subprocess caller has no cli_scan.py pre-flight ahead of run_scan_core() the way the CLI does, so without this fix an unsupported request paid for real (if cheap) work before being rejected. The old check inside _build_new_snapshot() was then removed rather than left as a second, unguarded copy -- testing found that unguarded duplicate reintroduced the depth=binary false positive for the typed API (collect_mode's exemption lived only in the new guard). A further round found the guard's own exemption too broad: collect_mode(\"off\") alone wrongly covered --depth headers too (only --depth binary also clears headers to empty, the actual reason build_info is never consulted) -- widened to `headers or collection_for_ci_mode(...)[1]`. Finally, once service_scan.run_scan_set() needed the identical guard+exemption (see that file's own entry) the whole check was extracted into a shared workflows.plan.scan_bazel_scoping_failure(), replacing this file's own inlined copy with a single import + call -- net lower than every prior checkpoint despite the added functionality.",
+      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice. Baseline raised then lowered across several ADR-063 Phase 4 Codex rounds: the Bazel target-scoping pre-flight check needed to run at the top of run_scan_core(), before the S3 pattern scan/POI work, not only inside _build_new_snapshot() -- a typed run_scan()/run_scan_subprocess caller has no cli_scan.py pre-flight ahead of run_scan_core() the way the CLI does, so without this fix an unsupported request paid for real (if cheap) work before being rejected. The old check inside _build_new_snapshot() was then removed rather than left as a second, unguarded copy -- testing found that unguarded duplicate reintroduced the depth=binary false positive for the typed API (collect_mode's exemption lived only in the new guard). A further round found the guard's own exemption too broad: collect_mode(\"off\") alone wrongly covered --depth headers too (only --depth binary also clears headers to empty, the actual reason build_info is never consulted) -- widened to `headers or collection_for_ci_mode(...)[1]`. Finally, once service_scan.run_scan_set() needed the identical guard+exemption (see that file's own entry) the whole check was extracted into a shared workflows.plan.scan_bazel_scoping_failure(), replacing this file's own inlined copy with a single import + call -- net lower than every prior checkpoint despite the added functionality. Baseline raised again, 1491 -> 1494, ADR-063 Phase 4's second slice: run_scan_core()'s own call to scan_bazel_scoping_failure() now forwards sources=/build_config=, closing the config-sourced (no explicit --build-target) root-target-scope gap the phase's first slice left open -- see docs/contribute/adr/063-one-semantic-pipeline.md's Phase 4 status.",
       "review_by": "2026-11-30"
     },
     {

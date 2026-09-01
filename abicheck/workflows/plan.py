@@ -256,6 +256,13 @@ def _discovered_config_build_targets(
     regardless, since it names the config file directly rather than
     searching *sources* for one.
     """
+    # Imported from the already-`extract`-classified `buildsource.inline`
+    # (which re-exports both from `buildsource.build_config`), not from
+    # `config_paths`/`buildsource.build_config` directly -- neither is
+    # classified into a layer `workflows` may import from
+    # (`scripts/check_architecture.py`'s `unclassified-import` gate).
+    from ..buildsource.inline import discover_build_config, load_build_config
+
     if build_config is not None:
         cfg_path: Path | None = build_config
     else:
@@ -265,13 +272,9 @@ def _discovered_config_build_targets(
 
         if is_any_pack_dir(sources):
             return ()
-        from ..config_paths import discover_build_config
-
         cfg_path = discover_build_config(sources)
     if cfg_path is None:
         return ()
-    from ..buildsource.build_config import load_build_config
-
     try:
         cfg = load_build_config(cfg_path)
     except ValueError:
