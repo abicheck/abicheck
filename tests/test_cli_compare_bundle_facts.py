@@ -634,3 +634,51 @@ class TestCompareOldBundleFacts:
         assert code == 1, out
         assert "Cannot create" in out
         assert "Traceback" not in out
+
+    def test_output_dir_mkdir_failure_leaves_no_partial_primary_report(
+        self, tmp_path: Path
+    ) -> None:
+        """Codex review, fresh evidence: the previous test above proves the
+        failure is clean, but not that it's *complete* -- with -o/--output
+        also given, the primary report used to be rendered and written
+        (_safe_write_output(Path(output), text)) before --output-dir's own
+        mkdir ran, so a command that ultimately fails with exit 1 still left
+        a seemingly valid summary.json on disk. --output-dir's directory is
+        now created (and validated) before any report is written, so a
+        precondition failure here must leave no artifact behind at all."""
+        old_dir = tmp_path / "old"
+        new_dir = tmp_path / "new"
+        old_dir.mkdir()
+        new_dir.mkdir()
+        body = "int add(int a, int b) { return a + b; }\n"
+        _build_so(old_dir, "libreal.so", body)
+        _build_so(new_dir, "libreal.so", body)
+        facts_path = _write_old_facts(
+            tmp_path, old_dir, old_dir / "libreal.so", "libreal.so"
+        )
+        blocking_file = tmp_path / "blocking-file"
+        blocking_file.write_text("not a directory\n")
+        output_dir = blocking_file / "reports"
+        summary_path = tmp_path / "summary.json"
+
+        code, out = _invoke(
+            "compare",
+            str(facts_path),
+            str(new_dir),
+            "--old-bundle-facts",
+            "-o",
+            str(summary_path),
+            "--output-dir",
+            str(output_dir),
+            "--format",
+            "json",
+        )
+
+        assert code == 1, out
+        assert "Cannot create" in out
+        assert "Traceback" not in out
+        assert not summary_path.exists(), (
+            "primary report was written before --output-dir's own "
+            "precondition failure -- a partial artifact was left behind "
+            "despite the overall command failing"
+        )

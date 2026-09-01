@@ -74,3 +74,12 @@ it should read in CHANGELOG.md. Delete the other sections.
   single-file `NEW_INPUT`, even though the underlying comparison already
   supports that case. The gate now mirrors the comparison's own
   file-vs-directory handling.
+- **`compare --old-bundle-facts --output-dir` no longer leaves a partial
+  primary report behind on a directory-creation failure** — with `-o`/
+  `--output` also given, the primary report was rendered and written
+  *before* `--output-dir`'s own directory was created; when some ancestor
+  of `--output-dir` (not `--output-dir` itself) was an existing regular
+  file, directory creation failed only after that write had already
+  landed, so a command that ultimately exited with an error still left a
+  seemingly valid report on disk. `--output-dir`'s directory is now
+  created (and validated) before any report is rendered or written.

@@ -491,6 +491,26 @@ def dispatch(*, compile_context: Any, **kwargs: Any) -> None:
                         "--write's own output path -- choose a different "
                         "--output-dir, or a different -o/--write path"
                     )
+        # Codex review, fresh evidence: this was previously deferred until
+        # after the primary/secondary writes below, right before the
+        # per-library write loop. When some *ancestor* of --output-dir
+        # (not output_dir itself -- the check above only catches that
+        # narrower case) is a regular file, mkdir(parents=True) raises
+        # NotADirectoryError only at that later point, by which time the
+        # primary/secondary report has already been written to disk --
+        # so a "failed" command silently left a partial artifact behind.
+        # Creating (and validating) the directory up front, before any
+        # report is rendered or written, makes this precondition failure
+        # behave the same as every other rejection above: no artifact
+        # written at all.
+        try:
+            output_dir.mkdir(parents=True, exist_ok=True)
+        except OSError as exc:
+            # Mirrors _safe_write_output's own OSError -> ClickException
+            # translation for the identical operation (creating a report's
+            # parent directory) -- covers a permission failure, a full
+            # disk, or a non-directory *parent* path component.
+            raise click.ClickException(f"Cannot create {output_dir}: {exc}") from exc
 
     text = _render(result, fmt, old_facts_path=old_facts_path, new_dir=new_dir)
     if output is not None:
@@ -516,18 +536,6 @@ def dispatch(*, compile_context: Any, **kwargs: Any) -> None:
         # producing nothing.
         from ....reporter import to_json
 
-        try:
-            output_dir.mkdir(parents=True, exist_ok=True)
-        except OSError as exc:
-            # Mirrors _safe_write_output's own OSError -> ClickException
-            # translation for the identical operation (creating a report's
-            # parent directory) -- without this, a permission failure, a
-            # full disk, or a non-directory *parent* path component (e.g.
-            # --output-dir naming a subdirectory of an existing file, which
-            # this function's own explicit-file check above does not catch
-            # since it only inspects output_dir itself) leaked a raw
-            # traceback instead of a clean CLI error.
-            raise click.ClickException(f"Cannot create {output_dir}: {exc}") from exc
         for diff in result.per_library:
             # Codex review: `diff.library` originates in OLD_FACTS -- a
             # user-supplied document, not a path this process resolved
