@@ -567,6 +567,46 @@ class TestBundleFactsLibraryManifest:
         assert "typo_lib.so" in out
         assert "not a library in this bundle" in out
 
+    def test_manifest_entry_for_a_new_only_library_is_rejected(
+        self, tmp_path: Path
+    ) -> None:
+        """Codex review: known_libraries_for_new_side() only knows the
+        NEW-side canonical key set -- a library present in NEW_INPUT but
+        absent from OLD_FACTS (an added library) passes that check, yet the
+        real per-library comparison loop (bundle_side_input.py) only
+        iterates keys present in BOTH sides, so the override for it would
+        silently never be consulted. Must be rejected instead."""
+        old_dir = tmp_path / "old"
+        new_dir = tmp_path / "new"
+        old_dir.mkdir()
+        new_dir.mkdir()
+        body = "int add(int a, int b) { return a + b; }\n"
+        _build_so(old_dir, "libreal.so", body)
+        _build_so(new_dir, "libreal.so", body)
+        # "libextra.so" exists only on the NEW side -- an added library, not
+        # present in OLD_FACTS's own per_library_snapshots.
+        _build_so(new_dir, "libextra.so", body)
+        facts_path = _write_old_facts(
+            tmp_path, old_dir, old_dir / "libreal.so", "libreal.so"
+        )
+        manifest = tmp_path / "manifest.yaml"
+        manifest.write_text("libextra.so:\n  headers: []\n")
+
+        code, out = _invoke(
+            "compare",
+            str(facts_path),
+            str(new_dir),
+            "--old-bundle-facts",
+            "--include-system-declarations",
+            "--bundle-facts-library-manifest",
+            str(manifest),
+            "--format",
+            "json",
+        )
+
+        assert code == 64, out
+        assert "libextra.so" in out
+
     def test_malformed_manifest_is_a_clean_error(self, tmp_path: Path) -> None:
         old_dir = tmp_path / "old"
         new_dir = tmp_path / "new"

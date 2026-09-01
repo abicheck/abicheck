@@ -188,6 +188,7 @@ def dispatch(*, compile_context: Any, **kwargs: Any) -> None:
     # importlib indirection above) is safe here: this module, unlike
     # bundle_side_input, does not transitively import `service`.
     from ....workflows.bundle_facts_library_overrides import (
+        BundleFactsLibraryOverridesError,
         known_libraries_for_new_side,
     )
     from .compare_bundle_facts_rejections import reject_unsupported_options
@@ -349,6 +350,17 @@ def dispatch(*, compile_context: Any, **kwargs: Any) -> None:
                 include_dependencies=bool(kwargs.get("include_dependencies", False)),
                 max_json_object_nodes=kwargs.get("max_json_object_nodes"),
             )
+        except BundleFactsLibraryOverridesError as exc:
+            # Codex review, fresh evidence: compare_release_against_bundle_
+            # facts() itself re-validates the manifest's per-library keys
+            # against the libraries actually matched between OLD_FACTS and
+            # NEW_INPUT (a check known_libraries_for_new_side()'s earlier,
+            # NEW-side-only pass cannot make) -- this is a malformed-CLI-
+            # input case exactly like every other BundleFactsLibraryOverrides
+            # Error in this module, so it gets the same exit-64 usage-error
+            # translation rather than falling into the generic ValueError
+            # clause below (exit 1).
+            raise click.UsageError(str(exc)) from exc
         except (SnapshotError, ValueError, OSError) as exc:
             # Same CLI-boundary translation every other SnapshotError-raising
             # entry point uses (cli_resolve.py et al.) -- without this, a

@@ -389,6 +389,9 @@ def compare_release_against_bundle_facts(
     from .bundle_models import BundleSignatureEvidence
     from .package import discover_shared_libraries
     from .serialization import load_bundle_facts
+    from .workflows.bundle_facts_library_overrides import (
+        BundleFactsLibraryOverridesError,
+    )
     from .workflows.extraction import build_match_map
 
     old_facts = load_bundle_facts(old_facts_path, max_json_object_nodes=max_json_object_nodes)
@@ -410,6 +413,34 @@ def compare_release_against_bundle_facts(
     # propagates as a plain Python exception, appropriate for a module with
     # callers outside any Click command.
     new_map, _match_warnings = build_match_map(new_files)
+
+    # Codex review, fresh evidence: `known_libraries_for_new_side()` (the
+    # manifest's own pre-validation gate, called by the CLI dispatcher
+    # before this function) only knows the NEW-side canonical key set -- a
+    # library present in NEW_INPUT but absent from *old_facts*
+    # (per_library_snapshots), or vice versa, is never diffed at all (the
+    # loop just below only iterates keys present in BOTH), so a manifest
+    # entry naming such a library passes that earlier check yet is silently
+    # never consulted here. Re-validate against the actual matched
+    # intersection, computed for free from data already in hand (no second
+    # load of *old_facts_path* -- see this function's own docstring on why
+    # that's deliberately avoided for --fail-on-removed-library), before any
+    # per-library work runs.
+    matched_keys = set(old_facts.per_library_snapshots) & set(new_map)
+    for override_map, label in (
+        (per_library_headers, "per_library_headers"),
+        (per_library_includes, "per_library_includes"),
+        (per_library_compile, "per_library_compile"),
+    ):
+        unmatched = sorted(set(override_map or {}) - matched_keys)
+        if unmatched:
+            raise BundleFactsLibraryOverridesError(
+                f"{label}: {unmatched!r} named in the per-library override "
+                "manifest but not present in both OLD_FACTS and NEW_INPUT "
+                "-- an override for a library that is never actually "
+                "compared would silently never be applied. Known matched "
+                f"libraries are {sorted(matched_keys)!r}"
+            )
 
     per_library_results: list[DiffResult] = []
     new_signature_evidence: dict[str, BundleSignatureEvidence] = {}

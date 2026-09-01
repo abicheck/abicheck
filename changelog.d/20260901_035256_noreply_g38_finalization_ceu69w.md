@@ -22,3 +22,9 @@ it should read in CHANGELOG.md. Delete the other sections.
   output path, silently clobbering whichever write ran second. The
   collision is now detected and rejected (exit 64) before any artifact is
   written.
+- **`--bundle-facts-library-manifest` rejects an override for a library
+  that isn't actually compared** — a manifest entry naming a library
+  present in `NEW_INPUT` but absent from `OLD_FACTS` (an added library, or
+  vice versa) previously passed validation yet was silently never
+  consulted, since the real per-library comparison only matches libraries
+  present on both sides. Such an entry is now rejected up front.
