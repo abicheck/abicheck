@@ -415,6 +415,35 @@ class TestPayloadTextIsNeverCorrupted:
         renumber_anonymous_closure_identities(snap)
         assert snap.types[0].source_location == f"{path}:42"
         assert snap.types[0].source_header == path
+        assert snap.types[0].source_header_fact.value == path
+
+    def test_a_source_header_matching_a_real_closures_own_marker_is_untouched(
+        self,
+    ) -> None:
+        """Codex review, fresh evidence: a real closure identity and a
+        legal source_header path can coincidentally share the identical
+        normalized marker text (e.g. the type embeds
+        ``(lambda:x.h:5:1)`` and the path is
+        ``/tmp/(lambda:x.h:5:1)/api.h``) -- source_header_fact must stay
+        untouched exactly like its own legacy source_header sibling,
+        never rewritten just because qualified_name_fact legitimately is."""
+        marker = _closure("x.h", 5, 1)
+        closure_type = f"raii_guard<{marker}>"
+        path = f"/tmp/{marker}/api.h"
+        rec = replace_with_fact_sync(
+            _record(closure_type, qualified=f"ns::{closure_type}"),
+            source_header=path,
+        )
+        snap = AbiSnapshot(library="lib.so", version="1.0", types=[rec])
+        renumber_anonymous_closure_identities(snap)
+        renumbered = snap.types[0]
+        # The real closure in qualified_name DOES get renumbered...
+        assert "#1)" in renumbered.qualified_name
+        assert renumbered.qualified_name_fact.value == renumbered.qualified_name
+        # ...but the coincidentally-identical marker text inside
+        # source_header (a payload-excluded path) must not be.
+        assert renumbered.source_header == path
+        assert renumbered.source_header_fact.value == path
 
     def test_a_source_location_does_not_fabricate_an_ordinal_for_a_real_closure(
         self,

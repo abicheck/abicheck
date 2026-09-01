@@ -571,11 +571,43 @@ def _collect_strings(value: object, out: list[str]) -> None:
             _collect_strings(v, out)
 
 
-def _walk_rewrite_strings(value: object, rewrite: _Callable[[str], str]) -> object:
+def _legacy_sibling_is_payload_excluded(field_name: str | None) -> bool:
+    """Whether *field_name* (a ``<x>_fact`` sibling) describes the same
+    payload its own legacy field ``<x>`` does, and that legacy field is
+    itself listed in :data:`_PAYLOAD_FIELD_EXCLUSIONS`.
+
+    ``source_header_fact`` must be excluded exactly like ``source_header``
+    is -- a filesystem path, never identity-bearing text -- while
+    ``qualified_name_fact`` must not be, matching ``qualified_name``'s own
+    non-exclusion (Codex review, fresh evidence: a real closure marker and
+    a legal source-header path can coincidentally embed the identical
+    normalized marker text, e.g. a type spelling ``(lambda:x.h:5:1)``
+    alongside a path ``/tmp/(lambda:x.h:5:1)/api.h`` -- without this check,
+    the earlier ``is_fact_value_field`` override rewrote every reachable
+    ``Fact[...]``'s ``value`` unconditionally, including
+    ``source_header_fact``, corrupting real provenance the legacy
+    ``source_header`` field itself was correctly left untouched).
+    """
+    if field_name is None or not field_name.endswith("_fact"):
+        return False
+    return field_name[: -len("_fact")] in _PAYLOAD_FIELD_EXCLUSIONS
+
+
+def _walk_rewrite_strings(
+    value: object, rewrite: _Callable[[str], str], *, field_name: str | None = None
+) -> object:
     """Rewrite every ``str`` reachable from *value* via ``rewrite(s)``,
     mutating dataclasses/lists/dicts in place where possible -- except a
     field named in :data:`_PAYLOAD_FIELD_EXCLUSIONS`. Returns the (possibly
     new) value -- a bare ``str`` can't be mutated in place.
+
+    ``field_name`` is the dataclass field name this call is processing the
+    value *of* (``None`` for a call with no single owning field -- the
+    top-level call, or a list/dict element one level removed from its own
+    field) -- propagated through container recursion so a ``Fact[...]``
+    reached via a payload-excluded ``<x>_fact`` sibling (e.g.
+    ``source_header_fact``) is recognized as such once inside it; see
+    :func:`_legacy_sibling_is_payload_excluded`.
 
     A **frozen** dataclass is rebuilt via ``dataclasses.replace`` rather
     than mutated: ``setattr`` on one raises ``FrozenInstanceError``
@@ -628,6 +660,7 @@ def _walk_rewrite_strings(value: object, rewrite: _Callable[[str], str]) -> obje
             and is_frozen
             and {f.name for f in _dataclasses.fields(value)}
             == {"status", "value", "diagnostics"}
+            and not _legacy_sibling_is_payload_excluded(field_name)
         )
         replacements: dict[str, object] = {}
         frozen_field_updates: dict[str, object] = {}
@@ -637,7 +670,7 @@ def _walk_rewrite_strings(value: object, rewrite: _Callable[[str], str]) -> obje
             ):
                 continue
             old = getattr(value, f.name)
-            new = _walk_rewrite_strings(old, rewrite)
+            new = _walk_rewrite_strings(old, rewrite, field_name=f.name)
             if new is old:
                 continue
             if not is_frozen:
@@ -653,18 +686,21 @@ def _walk_rewrite_strings(value: object, rewrite: _Callable[[str], str]) -> obje
         return value
     if isinstance(value, list):
         for i, item in enumerate(value):
-            new_item = _walk_rewrite_strings(item, rewrite)
+            new_item = _walk_rewrite_strings(item, rewrite, field_name=field_name)
             if new_item is not item:
                 value[i] = new_item
         return value
     if isinstance(value, tuple):
-        return tuple(_walk_rewrite_strings(item, rewrite) for item in value)
+        return tuple(
+            _walk_rewrite_strings(item, rewrite, field_name=field_name)
+            for item in value
+        )
     if isinstance(value, dict):
         rewritten: dict[object, object] = {}
         changed = False
         for k, v in value.items():
             new_k = rewrite(k) if isinstance(k, str) else k
-            new_v = _walk_rewrite_strings(v, rewrite)
+            new_v = _walk_rewrite_strings(v, rewrite, field_name=field_name)
             rewritten[new_k] = new_v
             if new_k != k or new_v is not v:
                 changed = True
