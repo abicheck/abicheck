@@ -160,6 +160,25 @@ class TestParseBundleFactsLibraryOverrides:
         with pytest.raises(BundleFactsLibraryOverridesError, match="must be a string"):
             parse_bundle_facts_library_overrides({"libfoo.so": {field_name: None}})
 
+    @pytest.mark.parametrize(
+        "field_name,bad_value,accepted_snippet",
+        [
+            ("frontend", "clnag", "recognized AST frontend"),
+            ("frontend_context", "gpu", "not supported"),
+        ],
+    )
+    def test_invalid_enum_value_is_rejected(
+        self, field_name: str, bad_value: str, accepted_snippet: str
+    ) -> None:
+        """Codex review: a correctly-*typed* but unrecognized ``frontend``/
+        ``frontend_context`` string (a typo, e.g. ``"clnag"``) used to reach
+        ``CompileContext`` unchecked and only fail later, deep in extraction
+        -- surfacing as a generic error instead of the clean, immediate
+        ``BundleFactsLibraryOverridesError`` every other malformed field
+        here raises."""
+        with pytest.raises(BundleFactsLibraryOverridesError, match=accepted_snippet):
+            parse_bundle_facts_library_overrides({"libfoo.so": {field_name: bad_value}})
+
     def test_empty_library_name_is_rejected(self) -> None:
         with pytest.raises(BundleFactsLibraryOverridesError, match="non-empty strings"):
             parse_bundle_facts_library_overrides({"": {"headers": ["x"]}})

@@ -177,9 +177,19 @@ def dispatch(*, compile_context: Any, **kwargs: Any) -> None:
     compare_release_against_bundle_facts = (
         _bundle_side_input.compare_release_against_bundle_facts
     )
-    known_libraries_for_new_side = _bundle_side_input.known_libraries_for_new_side
     from ....cli_compare_release_helpers import _exit_compare_release
     from ....cli_params import _load_suppression_and_policy
+
+    # known_libraries_for_new_side lives in workflows/bundle_facts_library_
+    # overrides.py, not bundle_side_input.py (Codex review, fresh evidence):
+    # that module is grandfathered flat-root legacy, and new behavior
+    # belongs in a real workflows/ module even though frontends -> workflows
+    # already makes it reachable either way. A plain import (not the
+    # importlib indirection above) is safe here: this module, unlike
+    # bundle_side_input, does not transitively import `service`.
+    from ....workflows.bundle_facts_library_overrides import (
+        known_libraries_for_new_side,
+    )
     from .compare_bundle_facts_rejections import reject_unsupported_options
 
     reject_unsupported_options(kwargs)

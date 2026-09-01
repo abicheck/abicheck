@@ -278,6 +278,40 @@ def load_bundle_facts_library_overrides(
     )
 
 
+def known_libraries_for_new_side(
+    new_dir: Path, *, include_private_dso: bool = False
+) -> set[str]:
+    """The canonical library-name set a NEW-side directory resolves to.
+
+    The same primitives (and the same ``include_private_dso`` semantics)
+    ``bundle_side_input.compare_release_against_bundle_facts`` itself uses to
+    build its own NEW-side match map -- exposed separately so
+    ``compare_bundle_facts.dispatch()`` can validate
+    ``--bundle-facts-library-manifest``'s library names *before* running the
+    real comparison, without re-deriving this resolution independently and
+    risking drift.
+
+    Lives in this ``workflows``-classified module, not
+    ``bundle_side_input.py`` (Codex review, fresh evidence): that module is
+    grandfathered flat-root legacy (``architecture/modules.yaml``'s
+    ``legacy_paths``/frozen ``bundle_`` family) -- being import-compatible
+    with it (`frontends -> workflows` is legal, so this function is already
+    reachable through it) does not make it the right place to *add* new
+    behavior, the same "route new behavior to the target owner, not a flat
+    root family" rule that moved this file's own manifest parser here in the
+    first place. ``package.discover_shared_libraries``/``.extraction.
+    build_match_map`` are ``extract``-classified, which ``frontends`` may
+    not import directly (``may_import: [model, workflows, report]``) --
+    ``workflows`` already may.
+    """
+    from ..package import discover_shared_libraries
+    from .extraction import build_match_map
+
+    new_files = discover_shared_libraries(new_dir, include_private=include_private_dso)
+    new_map, _match_warnings = build_match_map(new_files)
+    return set(new_map)
+
+
 def _build_compile_context(
     fields: dict[str, object], *, where: str, base_dir: Path | None
 ) -> CompileContext:
@@ -332,6 +366,31 @@ def _build_compile_context(
     frontend = str_fields["frontend"]
     frontend_context = str_fields["frontend_context"]
     assert frontend is not None and frontend_context is not None  # defaulted above
+    # Codex review: a typo'd enum value (e.g. "clnag") previously reached
+    # CompileContext unchecked and only failed later, deep in extraction --
+    # surfacing as dispatch()'s generic exit-1 ClickException instead of the
+    # clean, immediate usage error every other malformed manifest field here
+    # raises. HEADER_AST_FRONTENDS is api_types.py's own canonical set (a
+    # `public_root_surfaces` entry, so any migrated package may import it),
+    # the same one cli_options.AST_FRONTENDS / --ast-frontend validate
+    # against; _SUPPORTED_FRONTEND_CONTEXTS is dump_manifest's identical set
+    # for --dump-manifest's own frontend_context field. Reused, not
+    # reimplemented, so this manifest's accepted values can't drift from the
+    # CLI's.
+    from ..api_types import HEADER_AST_FRONTENDS
+    from ..dump_manifest import _SUPPORTED_FRONTEND_CONTEXTS
+
+    if frontend not in HEADER_AST_FRONTENDS:
+        raise BundleFactsLibraryOverridesError(
+            f"{where}.frontend: {frontend!r} is not a recognized AST frontend "
+            f"-- accepted values are {sorted(HEADER_AST_FRONTENDS)!r}"
+        )
+    if frontend_context not in _SUPPORTED_FRONTEND_CONTEXTS:
+        raise BundleFactsLibraryOverridesError(
+            f"{where}.frontend_context: {frontend_context!r} is not "
+            f"supported -- accepted values are "
+            f"{sorted(_SUPPORTED_FRONTEND_CONTEXTS)!r}"
+        )
     return CompileContext(
         gcc_path=str_fields["gcc_path"],
         gcc_prefix=str_fields["gcc_prefix"],
