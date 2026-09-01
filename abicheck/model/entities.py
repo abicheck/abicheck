@@ -93,6 +93,14 @@ class RecordType:
     #           diff skips the finality detector when either side is None to
     #           avoid false findings from schema evolution / tier downgrade.
     is_final: bool | None = None
+    # ADR-063 Phase 5 (D7's first registered conversion): Fact[bool]
+    # sibling. Unlike bases/virtual_bases/vtable/vptr_offset_bits above,
+    # is_final needs no private omission sentinel and no snapshot-level
+    # reliability flag — its own None already unambiguously means
+    # "dumper/loader could not determine" (there is no separate
+    # "confirmed no evidence" state distinct from the field simply being
+    # unset), so __post_init__ bridges directly off the literal None.
+    is_final_fact: Fact[bool | None] | None = field(default=None, kw_only=True)
     # True when this RecordType is a class/struct template's own pattern body
     # (e.g. the clang header backend's CXXRecordDecl nested inside a
     # ClassTemplateDecl) rather than a concrete, instantiable type. Its field
@@ -243,6 +251,12 @@ class RecordType:
             self.vptr_offset_bits_fact,
             _OMITTED_VPTR_OFFSET_BITS,
             None,
+        )
+        # `None` itself is the omission marker here — no private sentinel
+        # needed, since a caller-supplied `is_final=None` and an omitted
+        # `is_final` mean the identical thing (see the field's own comment).
+        self.is_final, self.is_final_fact = bridge_legacy_and_fact(
+            self.is_final, self.is_final_fact, None, None
         )
 
 

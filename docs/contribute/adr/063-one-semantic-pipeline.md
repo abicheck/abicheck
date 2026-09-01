@@ -190,7 +190,59 @@
   `AnalysisPlanner.resolve()` through the two functions this phase changed
   directly, so there is no second call site for those gates to newly
   police yet; a future phase adding one should widen them then.
-- **Phases 5–10** are still unimplemented design text.
+- **Phase 5** (the fact/capability registry, generalizing
+  `change_registry.py`'s `ChangeKindMeta` pattern from change *kinds* to
+  *facts*) has landed its registry infrastructure and one real, worked-
+  example field conversion — not the full field-by-field population the
+  plan's own Scope section describes, which it explicitly frames as
+  proceeding "field by field... each conversion is its own small commit,"
+  not a single PR. `abicheck/model/fact_registry.py` (new) defines
+  `FactDefinition`/`FactLifecycle`/`FactRegistry`, the case-(a)
+  `REFERENCE_FLAG_COVERAGE` inventory (every `*_facts_reliable` flag on
+  `AbiSnapshot` and the exact fields it gates — built against the real
+  `fact_provenance.py`/detector call sites, not derived from a flag's own
+  name), and `FACT_REGISTRY` itself, populated with the five fields Phase 0
+  already converted (`RecordType.bases`/`virtual_bases`/`vtable`/
+  `vptr_offset_bits`, `Param.is_va_list`) plus this phase's own first new
+  conversion, `RecordType.is_final` — chosen because, unlike Phase 0's own
+  five fields, it needs no private omission sentinel and no reliability
+  flag (`is_final`'s own `None` already unambiguously means "not
+  captured"), demonstrating the plan's stated six-item touch list at its
+  simplest: model field + registry entry + serialization encode/decode
+  (`storage/fact_codec.py`, `SCHEMA_VERSION` 30) + parser (none needed —
+  the legacy-to-`Fact[T]` bridge is automatic) + detector (none needed —
+  Phase 0's own precedent: no detector migrates to read a `Fact[...]`
+  sibling in this phase either) + test. `scripts/fact_registry_
+  completeness.py` (new, mirroring `fact_field_readers.py`'s split-leaf-
+  module pattern) is the `fact-registry-completeness` AI-readiness check
+  D7 calls for: every `Fact[T]`-typed field has exactly one registry entry
+  and vice versa, and a real AST scan finds every field eligible for
+  conversion (case (a) via `REFERENCE_FLAG_COVERAGE`, case (b) via a
+  tri-state-annotation-plus-documented-ambiguity heuristic) that isn't yet
+  converted — each such field must be named in `fact_registry.
+  KNOWN_UNCONVERTED_ELIGIBLE_FACTS`, an allowlist-and-shrink baseline
+  (~30 fields today, spanning `TypeField`/`Function`/`Variable`/
+  `RecordType`/`EnumType`/`AbiSnapshot`/`ElfMetadata`/`PeMetadata`/
+  `MachoMetadata`) mirroring `fact_field_readers.KNOWN_UNMIGRATED_READERS`'s
+  own convention exactly, rather than a silently-passing check. A stale
+  allowlist entry (naming a field that's since been converted, or no
+  longer exists) fails the same way. `scripts/gen_fact_capability_
+  matrix.py` (new) renders the registry into `docs/reference/
+  fact-registry.md`, a fully-generated page (`gen_detector_spec.py`'s
+  pattern, not `gen_backend_capability_matrix.py`'s splice-into-hand-
+  authored-page one — this page has no hand-authored narrative to
+  preserve). **Deliberately not attempted in this phase, named explicitly
+  rather than left as a silent gap**: converting any of the ~30
+  `KNOWN_UNCONVERTED_ELIGIBLE_FACTS` entries themselves (each is its own
+  reviewed, small commit per the plan's own Scope section); generating the
+  model field, the serialization encode/decode pair, or a suppression/
+  report-schema wiring from the registry (the plan's own Design/Acceptance
+  sections name all three as separate, out-of-scope codegen designs); and
+  widening the registry to the full "every persisted, detected, or
+  reported fact" population D7's own amendment scopes as a future,
+  separately-justified extension beyond the availability-bearing subset
+  this phase (and D7's initial realization) actually covers.
+- **Phases 6–10** are still unimplemented design text.
 
 See the [implementation plan](../plans/one-semantic-pipeline.md) for the
 full phase-by-phase state, including every slice's own "Landed"/"What this

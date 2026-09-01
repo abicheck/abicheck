@@ -159,6 +159,7 @@ nav:
     - Environment Variables: reference/environment.md
     - Platforms: reference/platforms.md
     - Header-Backend Capabilities: reference/header-backend-capabilities.md
+    - Fact/Capability Registry: reference/fact-registry.md
     - Tool Comparison: reference/tool-comparison.md
     - ABICC Flag Reference: reference/abicc-flags.md
     - GitHub Action Inputs/Outputs: reference/github-action-inputs.md
