@@ -300,12 +300,14 @@ time. For each group under the ABI/API Compatibility and Concepts tabs it
 asserts the pages' `level:` values are non-decreasing in nav order,
 skipping only the hub. Branches are included: A1 exempts them from the
 ladder spine's monotonicity, not from the sidebar's. That is why P1 also
-reorders two groups, inside the group each time so the recorded
+reorders three groups, inside the group each time so the recorded
 by-question grouping is kept: in ABI Mechanics, `class-layout-abi.md`
 (advanced) sits between Parts 4 and 5 (intermediate) today and moves
-after Part 6; in Concepts, `elf-symbol-filtering.md` and `limitations.md`
-(intermediate) sit after the pages A4 reconciles to advanced
-(`architecture.md`, `build-source-data.md`, `graph-coverage.md`,
+after Part 6; in Beyond ABI, `static-and-header-only.md` (intermediate)
+sits fourth among the four pages A4 reconciles to advanced and moves to
+the top of the group; in Concepts, `elf-symbol-filtering.md` and
+`limitations.md` (intermediate) sit after the pages A4 reconciles to
+advanced (`architecture.md`, `build-source-data.md`, `graph-coverage.md`,
 `impact-analysis.md`) and move ahead of them, which is also A1's c2 → c3
 order. `environment-drift.md` (advanced) stays last in Concepts until C13
 moves it, so the group passes in between. This is the plan's Goal
@@ -395,7 +397,7 @@ changes in Phase 1 (plan §6, Phase 1, fourth bullet).
 | `compatibility-direction.md` | intermediate | intermediate | edu 3 | footer; show the reversed-arguments run once more explicitly next to the "once per direction" sentence (C15) |
 | `consumer-models.md` | intermediate | intermediate | edu 3 | footer; one `--used-by` and one `--required-symbol` run (C15) |
 | `build-profile-comparability.md` | intermediate | intermediate | edu 3 | footer; probe-matrix link (C16) |
-| `static-and-header-only.md` | intermediate | intermediate | edu 3 | footer; `case191` compare (C15) |
+| `static-and-header-only.md` | intermediate | intermediate | edu 3 | footer; nav row moves to the top of Beyond ABI (A2b); `case191` compare (C15) |
 | `abi-series/08-detection.md` | — | intermediate | edu 4 | add level; §1a grows, §2 shrinks (C5) |
 | `assurance-methods.md` | intermediate | intermediate | edu 4 | footer |
 | `where-in-the-pipeline.md` | (new) | intermediate | edu 5 | B2 |
@@ -1424,7 +1426,7 @@ the dependencies between artifacts.
 
 | PR | Plan phase | Carries | Depends on |
 |---|---|---|---|
-| P1 | 1 | A1 file (today's pages only; `paths:` for today's rows — each later PR appends its own page), A2 generator + tests, A2b nav-order check, A2c rules, A2d `validation:` block; A4's `level:` on the 16 blank pages and the reconciled values; the two within-group nav reorders (A2b); A3 footers on all 26 deep dives + 3 orientation pages and the four Part "Next" rewrites (A3); C11; front-door links (`docs/index.md`, `start/getting-started.md`); the `GENERATED_FILE_MARKERS`, `scripts/CLAUDE.md` and `verify.py` wiring. One PR, because the rules and the levels they read must land together; the hub gains only the two sentinel blocks | — |
+| P1 | 1 | A1 file (today's pages only; `paths:` for today's rows — each later PR appends its own page), A2 generator + tests, A2b nav-order check, A2c rules, A2d `validation:` block; A4's `level:` on the 16 blank pages and the reconciled values; the three within-group nav reorders (A2b); A3 footers on all 26 deep dives + 3 orientation pages and the four Part "Next" rewrites (A3); C11; front-door links (`docs/index.md`, `start/getting-started.md`); the `GENERATED_FILE_MARKERS`, `scripts/CLAUDE.md` and `verify.py` wiring. One PR, because the rules and the levels they read must land together; the hub gains only the two sentinel blocks | — |
 | P2 | 1 | A7 hub rebuild (minus the "Now run it" table), anchor rewrites, A6 terminology term, C7 | P1 |
 | P3 | 2 | C2, C3 (class-layout ownership), C5, C6, C8, C9, C10, and only the A5 fragments whose pages exist by then (`class-layout`; the `evidence-model` and `ast-frontend-resolution` additions for `08-detection.md` and `build-source-data.md`). Every other fragment, the `bundle-analysis` re-registration included, ships with the PR that creates its page (P4–P8) | P2 |
 | P4 | 3 | B1 How a break shows up | P2 |

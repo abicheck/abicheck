@@ -296,9 +296,11 @@ place their library on, in order of strength of promise:
 with the verdict, exit code, SemVer action, and `--contract` domain each
 level implies. Part 0 is the right owner; the ladder should replace the
 eight-way dimension table's role as the page's spine (the dimensions stay
-as the columns). `contract-aware-compatibility.md` belongs beside it in the
-Define Your Contract group rather than in Concepts: "which surface is the
-contract" is a contract question, not a tool internal.
+as the columns). `contract-aware-compatibility.md` answers the same
+question — "which surface is the contract" — so the ladder links it from
+the Define-the-contract tier (§5, page specs A1); it stays in Concepts,
+since its prose names internals the educational tab forbids (see §5's
+note on that page).
 
 ### 4.4 Failure types and what each scan level discovers, up to source AST
 
