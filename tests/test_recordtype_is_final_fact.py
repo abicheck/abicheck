@@ -33,9 +33,11 @@ bridge, not a flag-gated correction.
 
 from __future__ import annotations
 
+import dataclasses
 import json
 
 from abicheck.model import AbiSnapshot, Fact, FactStatus, RecordType
+from abicheck.model.fact import replace_with_fact_sync
 from abicheck.serialization import (
     SCHEMA_VERSION,
     snapshot_from_dict,
@@ -147,3 +149,42 @@ class TestIsFinalFactRoundTrip:
 
     def test_schema_version_is_30_or_higher(self) -> None:
         assert SCHEMA_VERSION >= 30
+
+
+class TestIsFinalReplaceBridge:
+    """``is_final`` shares ``bridge_legacy_and_fact`` with Phase 0's own
+    four fields, so it inherits that bridge's own already-documented,
+    already-accepted ``dataclasses.replace()`` limitation (Codex review:
+    ``replace(record, is_final=True)`` carries the old, already-resolved
+    ``is_final_fact`` forward unchanged, which ``__post_init__`` cannot
+    tell apart from a deliberate fresh pair — see
+    ``bridge_legacy_and_fact``'s own docstring, and
+    ``TestReplaceIsUnsafeForFactBridgedFields``/``TestReplaceWithFactSync``
+    in ``test_model_fact.py`` for the identical pair of tests already
+    covering ``bases``). Not a new gap this conversion introduces — the
+    existing, generic ``replace_with_fact_sync()`` escape hatch already
+    covers ``is_final`` automatically (it resolves via ``hasattr(obj,
+    f"{name}_fact")``, not a hardcoded field list), which these tests
+    verify directly rather than by inference."""
+
+    def test_raw_replace_updating_only_is_final_is_silently_discarded(self) -> None:
+        rec = RecordType(name="Widget", kind="class", is_final=False)
+        rec2 = dataclasses.replace(rec, is_final=True)
+        assert rec2.is_final is False
+        assert rec2.is_final_fact.value is False
+
+    def test_replace_with_fact_sync_updates_both_representations(self) -> None:
+        rec = RecordType(name="Widget", kind="class", is_final=False)
+        rec2 = replace_with_fact_sync(rec, is_final=True)
+        assert rec2.is_final is True
+        assert rec2.is_final_fact is not None
+        assert rec2.is_final_fact.status is FactStatus.PRESENT
+        assert rec2.is_final_fact.value is True
+
+    def test_replace_with_fact_sync_honors_an_explicit_fact(self) -> None:
+        rec = RecordType(name="Widget", kind="class", is_final=False)
+        rec2 = replace_with_fact_sync(
+            rec, is_final=True, is_final_fact=Fact.unsupported("DWARF-only")
+        )
+        assert rec2.is_final_fact is not None
+        assert rec2.is_final_fact.status is FactStatus.UNSUPPORTED
