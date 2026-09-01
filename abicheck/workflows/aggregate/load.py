@@ -164,35 +164,70 @@ def _incomplete_findings(data: dict[str, Any]) -> ReportFindings:
 
 
 def _scan_abort_exit_blocks(data: Mapping[str, Any]) -> list[Mapping[str, Any]]:
-    """Every ``ExitDecision.to_dict()``-shaped ``exit`` block a scan abort's
-    report may preserve.
+    """Every real severity signal a scan abort's report may preserve,
+    normalized to ``ExitDecision.to_dict()``-shaped ``exit`` blocks (or a
+    minimal stand-in carrying just ``compatibility_contribution``).
 
-    A single-binary ``scan``/``ScanOutcome`` abort report nests its one
-    preserved decision at ``diff.exit`` (``ScanOutcome.to_dict()``'s own
-    shape). A ``scan --artifact-set``/``ScanSetResult`` abort report has no
-    ``diff`` key at all -- its own top-level ``verdict`` can equally read
-    ``"BUDGET_OVERFLOW"`` (``_aggregate_scan_set_verdict``: any member
-    overflowing makes the whole set report one), but each member's own
-    preserved decision nests instead at ``per_artifact[i].report.exit``
-    (``ScanArtifactResult.to_dict()`` wrapping ``ScanResult.to_dict()``'s
-    ``report`` field -- the *typed API's* envelope, not ``ScanOutcome``'s).
-    Reading only the first shape silently dropped every member's preserved
-    contribution for a set-level abort, downgrading a real exit `2`/`4` to
-    the generic abort floor and omitting the coverage/assurance target axes
-    entirely (Codex review, fresh evidence). Shared lookup for
-    :func:`_scan_abort_prior_exit` and :func:`_scan_abort_exit_axis` below,
-    both of which fold ``max()`` across every block this returns.
+    Three shapes of *already-computed* decision this codebase's own report
+    producers can leave behind, all recognized here:
+
+    * ``diff.exit`` -- the single-binary native CLI's ``scan``/
+      ``ScanOutcome`` abort envelope.
+    * ``report.exit`` -- the typed API's own ``ScanResult.to_dict()`` root
+      shape (a caller that dumps that dict directly, rather than going
+      through the CLI, never gets ``diff`` at all) (Codex review, fresh
+      evidence).
+    * ``per_artifact[i].report.exit`` -- a ``scan --artifact-set``/
+      ``ScanSetResult`` abort report's per-member decision
+      (``ScanArtifactResult.to_dict()`` wrapping a *member's own*
+      typed-API envelope).
+
+    A fourth case has no ``exit`` block to read at all: when a set-level
+    abort fires *after* every member already finished normally (no member
+    itself aborted, e.g. the shared budget expires during the bundle
+    audit that runs after all members), each completed member's real
+    compatibility result lives only in its own top-level ``exit_code``
+    (``0``/``1``/``2``/``4``, the exact scheme :data:`_VALID_GATE_EXIT`
+    validates) -- there is no nested decision to find, only that bare
+    scalar (Codex review, fresh evidence). Reading only the three real
+    blocks above silently dropped this case's real member results,
+    downgrading e.g. a completed member's exit `2` to the generic abort
+    floor. Synthesized here as a minimal block (just
+    ``compatibility_contribution``) so it folds through the exact same
+    ``max()`` machinery as a real one, rather than a separate code path.
+
+    Shared lookup for :func:`_scan_abort_prior_exit` and
+    :func:`_scan_abort_exit_axis` below, both of which fold ``max()``
+    across every block this returns.
     """
     diff = data.get("diff")
-    single = diff.get("exit") if isinstance(diff, dict) else None
-    blocks: list[Mapping[str, Any]] = [single] if isinstance(single, dict) else []
+    diff_exit = diff.get("exit") if isinstance(diff, dict) else None
+    report = data.get("report")
+    root_exit = report.get("exit") if isinstance(report, dict) else None
+    blocks: list[Mapping[str, Any]] = [
+        b for b in (diff_exit, root_exit) if isinstance(b, dict)
+    ]
     per_artifact = data.get("per_artifact")
     if isinstance(per_artifact, list):
         for member in per_artifact:
-            report = member.get("report") if isinstance(member, dict) else None
-            member_exit = report.get("exit") if isinstance(report, dict) else None
+            if not isinstance(member, dict):
+                continue
+            member_report = member.get("report")
+            member_exit = (
+                member_report.get("exit") if isinstance(member_report, dict) else None
+            )
             if isinstance(member_exit, dict):
                 blocks.append(member_exit)
+                continue
+            # No nested decision (the member completed normally, without
+            # aborting) -- fall back to its own bare exit_code.
+            code = member.get("exit_code")
+            if (
+                isinstance(code, int)
+                and not isinstance(code, bool)
+                and code in _VALID_GATE_EXIT
+            ):
+                blocks.append({"compatibility_contribution": code})
     return blocks
 
 

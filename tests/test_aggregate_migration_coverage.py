@@ -373,3 +373,106 @@ def test_artifact_set_budget_overflow_preserves_a_member_s_prior_break(
     assert loaded.contract_coverage_exit == 1
     assert loaded.contract_coverage_declared is True
     assert loaded.analysis_assurance_exit == 1
+
+
+def test_typed_api_root_report_exit_preserves_a_real_prior_break(
+    tmp_path: Path,
+) -> None:
+    """A caller of the typed Python API (`abicheck.service.run_scan`) that
+    dumps `ScanResult.to_dict()` straight to disk, rather than going
+    through the native CLI, gets a report with no `diff` key at all -- the
+    preserved decision for a late abort nests at the document *root*'s own
+    `report.exit` (`ScanResult.report`), a third shape distinct from both
+    the CLI's `diff.exit` and an artifact-set member's `per_artifact[i].
+    report.exit` (Codex review, fresh evidence).
+    """
+    report = tmp_path / "abi-report-linux.json"
+    report.write_text(
+        json.dumps(
+            {
+                "scan_schema_version": "1.23",
+                "verdict": "BUDGET_OVERFLOW",
+                "exit_code": 5,
+                "findings": 0,
+                "layers": [],
+                "confidence": {},
+                "estimate": [],
+                "report": {
+                    "scan_schema_version": "1.23",
+                    "exit": {
+                        "code": 5,
+                        "reasons": ["budget_overflow"],
+                        "budget_overflow_contribution": 5,
+                        "compatibility_contribution": 4,
+                    },
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    loaded = _load_report_file(report, prefix="abi-report-")
+
+    assert loaded.verdict is None
+    assert loaded.gate is not None
+    assert loaded.gate.exit_code == 4
+
+
+def test_artifact_set_completed_member_exit_code_counts_without_a_report_exit(
+    tmp_path: Path,
+) -> None:
+    """A set-level abort that fires *after* every member already finished
+    normally (e.g. the shared budget expires during the post-member bundle
+    audit, `service_scan.run_scan_set`) preserves `per_artifact` with real,
+    completed member results -- but a completed member's own `ScanResult.
+    report` is `{}` (no nested `exit` block at all, since it never
+    aborted): the real result lives only in that member's bare top-level
+    `exit_code`. Must still be picked up (Codex review, fresh evidence:
+    `per_artifact` is not discarded on this exact set-level overflow path,
+    per `run_scan_set`'s own `per_artifact=per_artifact` on this branch).
+    """
+    report = tmp_path / "abi-report-bundle.json"
+    report.write_text(
+        json.dumps(
+            {
+                "scan_schema_version": "1.23",
+                "verdict": "BUDGET_OVERFLOW",
+                "exit_code": 5,
+                "per_artifact": [
+                    {
+                        "artifact": "libclean.so",
+                        "scan_schema_version": "1.23",
+                        "verdict": "COMPATIBLE",
+                        "exit_code": 0,
+                        "findings": 0,
+                        "layers": [],
+                        "confidence": {},
+                        "estimate": [],
+                        "report": {},
+                    },
+                    {
+                        "artifact": "libapibreak.so",
+                        "scan_schema_version": "1.23",
+                        "verdict": "API_BREAK",
+                        "exit_code": 2,
+                        "findings": 3,
+                        "layers": [],
+                        "confidence": {},
+                        "estimate": [],
+                        "report": {},
+                    },
+                ],
+                "bundle_findings": [],
+                "bundle_finding_count": 0,
+                "bundle_verdict": None,
+                "bundle_incomplete": False,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    loaded = _load_report_file(report, prefix="abi-report-")
+
+    assert loaded.verdict is None
+    assert loaded.gate is not None
+    assert loaded.gate.exit_code == 2

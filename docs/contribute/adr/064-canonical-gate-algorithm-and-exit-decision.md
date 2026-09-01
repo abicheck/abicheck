@@ -485,7 +485,30 @@ lands in two stages rather than one atomic change:
       which returns every exit-decision block a report may carry (the
       single `diff.exit`, plus every `per_artifact[i].report.exit`); both
       consumers now fold `max()` across all of them instead of reading one.
-      Still open: the release fan-out's `GateOptions` unification and a full
+      **(10)/(11) A tenth and eleventh round, on the same commit, caught two
+      further shapes `_scan_abort_exit_blocks` still missed:** (10) the
+      typed API's own `ScanResult.to_dict()` dumped directly (no native CLI
+      involved) has no `diff` key at all -- its preserved decision nests at
+      the document *root*'s own `report.exit`, a third shape distinct from
+      both `diff.exit` and an artifact-set member's `per_artifact[i].
+      report.exit`; (11) a `scan --artifact-set` set-level abort firing
+      *after* every member already finished normally (the shared budget
+      expiring during the post-member bundle audit, `run_scan_set`'s own
+      `per_artifact=per_artifact` branch there) preserves real, completed
+      member results in `per_artifact` -- but a completed member never
+      aborted, so its own `ScanResult.report` is empty with no nested
+      `exit` block at all; its real result lives only in its own bare
+      top-level `exit_code` (Codex review, fresh evidence for both). Fixed
+      by extending `_scan_abort_exit_blocks` to also read root `report.
+      exit`, and to synthesize a minimal `{"compatibility_contribution":
+      exit_code}` block from a member with no nested decision -- both fold
+      through the same `max()` machinery as a real block, rather than a
+      separate code path. This closes every envelope shape this codebase's
+      own report producers can actually emit (native CLI single-binary,
+      typed-API single-result, artifact-set member abort, artifact-set
+      member completed-without-abort); a further exotic shape would need
+      its own review round to surface, same as these five did. Still open:
+      the release fan-out's `GateOptions` unification and a full
       cross-front-end parity pass (typed API, Action).
 2. **Atomic.** Once the report block agrees with today's real behaviour for
    every axis and every mode (verified by the axis-separated tests this ADR
