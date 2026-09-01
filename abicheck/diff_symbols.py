@@ -43,8 +43,8 @@ from .diff_helpers import (
     type_map_key,
 )
 from .diff_hidden_friends import check_hidden_friend_change, diff_inline_hidden_friends
-from .diff_symbols_anon_fields import (  # noqa: F401 — triggers detector registration
-    _diff_anon_fields,
+from .diff_symbols_anon_fields import (
+    check_anon_fields_for_type,
 )
 from .diff_symbols_renames import (  # noqa: F401  (public-surface re-exports)
     _CTOR_DTOR_CODE_RE as _CTOR_DTOR_CODE_RE,
@@ -1533,6 +1533,29 @@ def _diff_access_levels(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
         if not t.is_union and is_abi_surface_type_name(t.name, exclude_stdlib=excl)
     )
     changes.extend(_check_field_access_changes(old_types, new_types))
+    return changes
+
+
+@registry.detector("anon_fields")
+def _diff_anon_fields(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
+    """Detect changes in anonymous struct/union members."""
+    changes: list[Change] = []
+    excl = stdlib_namespaces_excluded(old, new)
+    old_map = build_type_map(
+        t for t in old.types if is_abi_surface_type_name(t.name, exclude_stdlib=excl)
+    )
+    new_map = build_type_map(
+        t for t in new.types if is_abi_surface_type_name(t.name, exclude_stdlib=excl)
+    )
+
+    for t_old in old_map.values():
+        t_new = lookup_matched_type(old_map, new_map, t_old)
+        if t_new is None:
+            continue
+        # Bare, not the qualified matching key.
+        name = t_old.name
+        changes.extend(check_anon_fields_for_type(name, t_old, t_new))
+
     return changes
 
 

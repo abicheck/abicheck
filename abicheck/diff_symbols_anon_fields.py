@@ -13,20 +13,35 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Anonymous struct/union member diffing, split out of ``diff_symbols.py``.
+"""Anonymous struct/union member diffing helpers, split out of
+``diff_symbols.py``.
 
 Purely a file-size mitigation (`abicheck/diff_symbols.py`'s own ADR-063
 Phase 2 `entity_id=` wiring pushed it past the architecture-debt ledger's
 no-growth baseline for that file) -- no behavior change, and this group was
 already fully self-contained (its only dependencies are leaf modules
-`diff_helpers.py`/`checker_policy.py`/`checker_types.py`/`model.py`, never a
-`diff_symbols.py`-local helper), so it moves out unchanged rather than
-requiring a deeper refactor. Leaf module: must not import from
-``diff_symbols`` to avoid an import cycle (mirrors
-``diff_symbols_variables.py``'s own identical rule) -- ``diff_symbols`` is
-this module's sole caller, importing ``_diff_anon_fields`` purely to trigger
-this module's own ``@registry.detector`` registration at import time, the
-same mechanism every other split-out detector sibling already relies on.
+``diff_helpers.py``/``checker_policy.py``/``checker_types.py``/``model.py``,
+never a ``diff_symbols.py``-local helper), so it moves out unchanged rather
+than requiring a deeper refactor.
+
+**Deliberately does NOT carry the ``@registry.detector("anon_fields")``
+registration itself** (Codex review, PR #980) -- ``registry.detector()``
+stamps an incrementing counter at *decoration* time, and ``run_all()``
+executes detectors in that order, so registration order fixes the order
+findings appear in every JSON/text report
+(``tests/test_detector_discovery.py::
+test_param_qualifier_detectors_keep_their_registration_position`` pins the
+exact same invariant for the ``diff_param_qualifiers`` split). Moving the
+decorated ``_diff_anon_fields`` function itself here would move its
+registration to whenever this leaf module is first imported, not its
+original position among ``diff_symbols.py``'s own detectors. So only the
+loop-body helpers move; ``_diff_anon_fields`` itself stays defined (and
+decorated) in ``diff_symbols.py`` at its original source position, calling
+:func:`check_anon_fields_for_type` here -- the identical split shape
+``diff_param_qualifiers.py`` already established for ``param_restrict``/
+``param_va_list``. Leaf module: must not import from ``diff_symbols`` to
+avoid an import cycle (mirrors ``diff_symbols_variables.py``'s own
+identical rule).
 """
 
 from __future__ import annotations
@@ -35,9 +50,7 @@ from typing import Any
 
 from .checker_policy import ChangeKind
 from .checker_types import Change
-from .detector_registry import registry
-from .diff_helpers import build_type_map, lookup_matched_type, make_change
-from .model import AbiSnapshot, is_abi_surface_type_name, stdlib_namespaces_excluded
+from .diff_helpers import make_change
 from .model.identity import EntityId
 
 
@@ -46,7 +59,7 @@ def _is_anon_field(f: Any) -> bool:
     return not f.name or f.name.startswith("__anon")
 
 
-def _check_anon_field_at_offset(
+def check_anon_field_at_offset(
     name: str,
     offset: int,
     f_old: Any,
@@ -91,7 +104,7 @@ def _anon_fields_by_offset(fields: list[Any]) -> dict[int, Any]:
     }
 
 
-def _check_anon_fields_for_type(name: str, t_old: Any, t_new: Any) -> list[Change]:
+def check_anon_fields_for_type(name: str, t_old: Any, t_new: Any) -> list[Change]:
     """Compare anonymous fields by offset for a single matched type pair."""
     old_by_offset = _anon_fields_by_offset(t_old.fields)
     new_by_offset = _anon_fields_by_offset(t_new.fields)
@@ -102,32 +115,9 @@ def _check_anon_fields_for_type(name: str, t_old: Any, t_new: Any) -> list[Chang
     entity_id = t_old.entity_id or t_new.entity_id
     changes: list[Change] = []
     for offset, f_old in old_by_offset.items():
-        ch = _check_anon_field_at_offset(
+        ch = check_anon_field_at_offset(
             name, offset, f_old, new_by_offset, entity_id=entity_id
         )
         if ch is not None:
             changes.append(ch)
-    return changes
-
-
-@registry.detector("anon_fields")
-def _diff_anon_fields(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
-    """Detect changes in anonymous struct/union members."""
-    changes: list[Change] = []
-    excl = stdlib_namespaces_excluded(old, new)
-    old_map = build_type_map(
-        t for t in old.types if is_abi_surface_type_name(t.name, exclude_stdlib=excl)
-    )
-    new_map = build_type_map(
-        t for t in new.types if is_abi_surface_type_name(t.name, exclude_stdlib=excl)
-    )
-
-    for t_old in old_map.values():
-        t_new = lookup_matched_type(old_map, new_map, t_old)
-        if t_new is None:
-            continue
-        # Bare, not the qualified matching key.
-        name = t_old.name
-        changes.extend(_check_anon_fields_for_type(name, t_old, t_new))
-
     return changes
