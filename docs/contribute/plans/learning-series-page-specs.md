@@ -239,7 +239,7 @@ sentinel-splice pattern ADR-051 established for `gen_platform_matrix.py`.
 | `--check` | Regenerates in memory and diffs against the file: drift only, exit 1 with the diff. It does not re-implement A1's rules — those live in `check_docs_contract.py` (A2c), so one gate owns every `docs/_meta/*.yaml` contract and the generator stays a renderer, like `gen_platform_matrix.py` |
 | Wiring | `docs/AGENTS.md` "Regenerating generated docs" gains one line; `scripts/CLAUDE.md`'s inventory table gains the script; both sentinel blocks join `GENERATED_FILE_MARKERS` in `scripts/check_ai_readiness.py` (a hand edit inside a block is then caught, as for the platform matrix); `scripts/verify.py` gains a `learning-ladder` drift step in the `pr` profile. All of it lands in P1, together with the levels the rules read — a rule without its data fails its own gate, which is why P1 is one PR |
 | Tests | `tests/test_gen_learning_ladder.py`: a round-trip test (`gen` then `--check` is clean), a drift test (an edited block exits 1), and a missing-sentinel test. The rule fixtures live with the contract check (A2c) |
-| Not in scope | Reordering `mkdocs.yml` nav (that stays hand-edited; A2b covers it) |
+| Not in scope | Reordering `mkdocs.yml` nav (that stays hand-edited; A2b checks it) |
 
 **A2b. Nav-order check.** A `learning-nav-order` check in
 `scripts/check_ai_readiness.py`, implemented in a sibling leaf module
@@ -248,9 +248,13 @@ sentinel-splice pattern ADR-051 established for `gen_platform_matrix.py`.
 has (`_collect_mkdocs_nav_refs`) rather than parsing `mkdocs.yml` a second
 time. For each group under the ABI/API Compatibility and Concepts tabs it
 asserts the pages' `level:` values are non-decreasing in nav order,
-skipping the hub and any page A1 marks as a branch. This is the plan's Goal
-criterion "each nav group is non-decreasing in level", made executable
-without touching the recorded by-question grouping.
+skipping only the hub. Branches are included: A1 exempts them from the
+ladder spine's monotonicity, not from the sidebar's. That is why P1 also
+reorders one group: in ABI Mechanics, `class-layout-abi.md` (advanced)
+sits between Parts 4 and 5 (intermediate) today and moves after Part 6,
+inside the same group — a within-group reorder keeps the recorded
+by-question grouping. This is the plan's Goal criterion "each nav group is
+non-decreasing in level", made executable.
 
 **A2c. Ladder rules in `check_docs_contract.py`.** A `_check_learning_ladder`
 section next to the `topics.yaml` and `terminology.yaml` checks: loads
@@ -320,7 +324,7 @@ changes in Phase 1 (plan §6, Phase 1, fourth bullet).
 | `abi-series/02-symbol-contracts.md` | — | intermediate | edu 2 | add level; one invocation + case links exist |
 | `abi-series/03-type-layout.md` | — | intermediate | edu 2 | add level; hand C++ class layout to owner (C3) |
 | `abi-series/04-cpp-abi.md` | — | intermediate | edu 2 | add level; shorten three summaries, §7 → summary (C3) |
-| `class-layout-abi.md` | advanced | advanced | edu 2 branch of Part 4 | footer; becomes `class-layout` owner (C3) |
+| `class-layout-abi.md` | advanced | advanced | edu 2 branch of Part 4 | footer; nav row moves after Part 6 (A2b); becomes `class-layout` owner (C3) |
 | `exception-unwinding-abi.md` | advanced | advanced | edu 2 branch of Part 4 | footer; one command, cases 130/131 (C15) |
 | `modern-cpp-toolchain-hazards.md` | advanced | advanced | edu 2 branch of Part 4 | footer |
 | `abi-series/05-linker-elf.md` | — | intermediate | edu 2 | add level |
@@ -675,8 +679,11 @@ Sections:
    changed translation units; what the report must show (breaks *and*
    additions, link to B3). Run: `abicheck scan build/libfoo.so -H include/
    --sources . --against baseline.json --since origin/main`, and the
-   Action equivalent with `old-library`, `new-library`, `new-header`,
-   `sources`, `depth: source`.
+   Action equivalent in scan mode — `mode: scan`, `new-library`,
+   `new-header`, `sources`, `depth: source`, `since: origin/main`, and
+   `against` (or `abi-baseline`) for the baseline; `against` and `since`
+   are scan-only inputs, so a compare-mode `old-library`/`new-library`
+   pair cannot express the seeded scan.
 3. **Merge to main** — refresh the accepted-main baseline; why skipping
    the *check* instead of relaxing the *gate* on a labelled PR poisons
    every later PR (`use/baseline-management.md` explains it in full; here,
@@ -1158,13 +1165,20 @@ the `--depth` choice."
 
 ### C12. MSVC/PE worked example
 
-Add **"A worked example on Windows"** to `msvc-pe-abi-model.md`: a
-compare of a case whose `platforms` entry in `examples/ground_truth.json`
-includes `windows` (`case01` is the smallest), run as `abicheck compare
-old\foo.dll new\foo.dll -H include\` with the PDB found next to the DLL,
-showing the report's evidence block naming PDB rather than DWARF; then
-the same case without the PDB to show what "no headers, no PDB" leaves.
-Link the MSVC CI lane's fixture rather than inventing a new one.
+Add **"A worked example on Windows"** to `msvc-pe-abi-model.md`, built
+on the MSVC CI lane's own fixture (`tests/test_msvc_pdb_e2e.py` compiles
+`foo.dll` twice with `cl.exe /Zi`, the second build growing the by-value
+`Widget` struct): `abicheck compare v1\foo.dll v2\foo.dll` with each PDB
+next to its DLL reports the struct growth as BREAKING, because the PDB
+supplies the layout; the same compare with the PDBs removed shows only
+the export table, in which the grown struct is invisible. Use that
+PDB-dependent signal, not an export removal (`case01`-shaped breaks are
+visible from the export table alone, so removing the PDB changes
+nothing). The report does not say "PDB" — PDB-derived layout lands in the
+same debug-info channel as DWARF and the report states evidence tiers
+only — so the page explains the difference in prose and points at the
+evidence tier that changes, not at a field. Reuse the test's own header
+source rather than inventing a fixture.
 
 ### C13. `environment-drift.md`
 
@@ -1302,7 +1316,7 @@ the dependencies between artifacts.
 
 | PR | Plan phase | Carries | Depends on |
 |---|---|---|---|
-| P1 | 1 | A1 file (today's pages; `paths:` for today's rows), A2 generator + tests, A2b nav-order check, A2c rules, A2d `validation:` block; A4's `level:` on the 16 blank pages and the reconciled values; A3 footers on all 26 deep dives + 3 orientation pages; C11; front-door links (`docs/index.md`, `start/getting-started.md`); the `GENERATED_FILE_MARKERS`, `scripts/CLAUDE.md` and `verify.py` wiring. One PR, because the rules and the levels they read must land together; the hub gains only the two sentinel blocks | — |
+| P1 | 1 | A1 file (today's pages; `paths:` for today's rows), A2 generator + tests, A2b nav-order check, A2c rules, A2d `validation:` block; A4's `level:` on the 16 blank pages and the reconciled values; the one within-group nav reorder (A2b); A3 footers on all 26 deep dives + 3 orientation pages; C11; front-door links (`docs/index.md`, `start/getting-started.md`); the `GENERATED_FILE_MARKERS`, `scripts/CLAUDE.md` and `verify.py` wiring. One PR, because the rules and the levels they read must land together; the hub gains only the two sentinel blocks | — |
 | P2 | 1 | A7 hub rebuild (minus the "Now run it" table), anchor rewrites, A6 terminology term, C7 | P1 |
 | P3 | 2 | C2, C3 (class-layout ownership), C5, C6, C8, C9, C10, A5's "edits to existing topics" | P2 |
 | P4 | 3 | B1 How a break shows up | P2 |
