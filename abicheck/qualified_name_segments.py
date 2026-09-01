@@ -604,8 +604,27 @@ def _walk_rewrite_strings(value: object, rewrite: _Callable[[str], str]) -> obje
     would leave that field pointing at stale, path/line-tainted content
     even though the dataclass it belongs to was otherwise correctly
     rebuilt.
+
+    A ``str``-subclass instance that is not *exactly* ``str`` (a closed-
+    vocabulary ``class Visibility(str, Enum)`` member, say) is left
+    untouched rather than handed to ``rewrite``: such a value is never a
+    free-text type/name spelling a closure marker could appear in, and
+    ``rewrite`` returning a plain ``str`` -- even one equal in content, as
+    every stdlib string-transform helper does -- would silently demote the
+    field from its enum member to a bare string one indistinguishable
+    ``==``/``in`` check later couldn't tell apart from the real thing (a
+    stored snapshot loaded through
+    ``storage.snapshot_load_normalization.normalize_anonymous_type_spellings_on_load``
+    then crashed every ``diff_symbols`` lookup of ``Function.visibility.value``
+    with ``AttributeError: 'str' object has no attribute 'value'`` on any
+    snapshot with a lambda/anonymous-type marker anywhere in it -- the walk
+    reaches every ``Function``/``Variable`` in ``functions``/``variables``,
+    ``visibility`` included, not just the marker-bearing field that
+    triggered the walk).
     """
     if isinstance(value, str):
+        if type(value) is not str:
+            return value
         return rewrite(value)
     if _dataclasses.is_dataclass(value) and not isinstance(value, type):
         params = getattr(value, "__dataclass_params__", None)
