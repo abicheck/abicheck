@@ -131,7 +131,7 @@
   "platform": null,
   "python_api": null,
   "python_ext": null,
-  "schema_version": 30,
+  "schema_version": 31,
   "scope_fallback": null,
   "source_mtime": null,
   "source_mtime_epoch": false,
@@ -151,10 +151,20 @@
         "value": null
       },
       "data_size_bits": null,
+      "data_size_bits_fact": {
+        "diagnostics": [],
+        "status": "not_collected",
+        "value": null
+      },
       "deprecated": null,
       "fields": [],
       "has_anonymous_aggregate_fields": false,
       "is_abstract": null,
+      "is_abstract_fact": {
+        "diagnostics": [],
+        "status": "not_collected",
+        "value": null
+      },
       "is_final": null,
       "is_final_fact": {
         "diagnostics": [],
@@ -163,15 +173,35 @@
       },
       "is_opaque": false,
       "is_standard_layout": null,
+      "is_standard_layout_fact": {
+        "diagnostics": [],
+        "status": "not_collected",
+        "value": null
+      },
       "is_template_pattern": false,
       "is_trivially_copyable": null,
+      "is_trivially_copyable_fact": {
+        "diagnostics": [],
+        "status": "not_collected",
+        "value": null
+      },
       "is_union": false,
       "kind": "struct",
       "name": "detail::WidgetImpl",
       "origin": "private_header",
       "qualified_name": null,
+      "qualified_name_fact": {
+        "diagnostics": [],
+        "status": "not_collected",
+        "value": null
+      },
       "size_bits": null,
       "source_header": null,
+      "source_header_fact": {
+        "diagnostics": [],
+        "status": "not_collected",
+        "value": null
+      },
       "source_location": null,
       "virtual_bases": [],
       "virtual_bases_fact": {
