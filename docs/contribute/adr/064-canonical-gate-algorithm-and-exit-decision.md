@@ -606,7 +606,27 @@ lands in two stages rather than one atomic change:
       itself and stays the one acknowledged gap noted above this update:
       `cli_scan.py` writes no report at all on that path, so this wrapper
       still cannot distinguish the axis there and continues to read it as
-      `ERROR`, same as before this fix.
+      `ERROR`, same as before this fix. **A stricter instance of the same
+      gap (Codex review, fresh evidence):** `--artifact-set`
+      (the Action's `new-library-set` input) skips the JSON secondary
+      write *unconditionally* — `action/run.sh`'s own injection guard
+      requires `-z "$SCAN_ARTIFACT_SET"` regardless of `pr-comment` — even
+      though `cli_scan._run_artifact_set`'s text renderer
+      (`_render_artifact_set_text`) always prints a stable, parseable
+      `Artifact-set scan verdict: EVIDENCE_CONTRACT_ERROR (exit N)` line
+      (unlike the single-binary abort, which prints nothing distinguishing
+      in text form at all — `ScanSetResult` already exists as a real
+      object here, so there is genuinely something to render). Left
+      unread rather than parsed: teaching the wrapper to recognize a
+      second, mode-specific text sentinel — after this same review round
+      already found the first `--evidence_contract_gated` addition needed
+      its own hostile-input test — was judged not worth the additional
+      parsing surface and its own adversarial-input analysis for one
+      narrower mode, when `--format json` already produces this verdict
+      correctly (`ScanSetResult.to_dict()`'s own top-level `verdict` field
+      is exactly the one `_report_query`'s `compat_verdict` query already
+      reads). Documented in `action.yml`'s own `verdict`/`exit-code`
+      output descriptions instead, alongside the pre-existing gap above.
       `tests/test_action_run_sh_scan_evidence_contract_error.py` covers the
       exit-1 dispatch (including the "both signals present" case, since
       real stderr always satisfies `_is_cli_error` too) and the

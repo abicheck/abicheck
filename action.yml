@@ -771,7 +771,11 @@ outputs:
       to carry it: format: json, or format: text with pr-comment: true
       (which requests a JSON sidecar) or an explicit --write json=PATH in
       extra-args; format: text with pr-comment: false and no such sidecar
-      still reads as the generic ERROR, a documented, unclosed gap), or
+      still reads as the generic ERROR, a documented, unclosed gap --
+      new-library-set (--artifact-set) scans are a stricter case of the
+      same gap: the JSON sidecar is never requested for that mode
+      regardless of pr-comment, so a new-library-set scan only ever
+      publishes this distinct verdict under format: json), or
       ERROR.
       For deps-compare: PASS, WARN, FAIL, or ERROR.
       For deps-tree: PASS, FAIL, or ERROR.
