@@ -167,6 +167,23 @@ directory of member binaries, which the root Action's `scan` mode — the
 no-baseline routing — rejects outright). Both are rejected at validation
 time.
 
+**A bundle spanning multiple mandatory build-toolchain variants (e.g. a
+CPU build and a DPC++ build of the same release) must give its check an
+explicit `profiles:` selector naming every required profile** —
+`checks: [{channel: release, depth: binary, profiles: [cpu, dpc]}]`, not a
+bare `checks: [{channel: release, depth: binary}]`. [Profile scoping](#profile-scoping-for-checks)'s
+implicit sweep (`profiles:` omitted) is for "run this bundle wherever it
+happens to apply," and treats a profile that doesn't build every member as
+a silent, valid skip for that profile — correct for a genuinely
+profile-specific bundle, wrong for one where every listed variant is
+mandatory. With an explicit selector, a profile missing any member (or
+missing a `build-output.json` entirely) is a hard `abicheck project plan`
+error instead, which is what makes "the DPC++ variant went missing between
+releases" a loud CI failure rather than a silently-incomplete run. G30
+(`run_plan.py`'s cell generation, one independent `RunPlanCheck` per
+`(bundle, profile)` pair) is what already makes this true — see
+`tests/test_run_plan_bundle_multi_profile.py` for the worked example.
+
 ## `profiles:`
 
 A mapping of profile id → `{contract, os, arch, dependency_source, compile,

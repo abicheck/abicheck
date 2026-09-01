@@ -570,6 +570,36 @@ live-directory comparison uses — so the two entry points can never
 independently drift, and a stored-facts comparison produces byte-identical
 findings to a live one for the same underlying facts.
 
+### Per-library header/include/compile-context overrides (G38 Phase 17)
+
+`--old-bundle-facts` normally applies one uniform `--header`/`--include`/
+compile-context to every library in `NEW_INPUT` — fine when the whole bundle
+shares one toolchain, but not for a bundle built with more than one (e.g. a
+plain-C++ library alongside a `-fsycl`/`icpx` DPC++ one sharing an umbrella
+header tree). `--bundle-facts-library-manifest PATH` names a YAML/JSON file
+giving individual libraries their own header root, include path, or compile
+context instead:
+
+```yaml
+# manifest.yaml
+libonedal_dpc.so:
+  headers: [include/oneapi/dal/dpc]
+  gcc_path: icpx
+  gcc_options: ["-fsycl", "-DONEDAL_DATA_PARALLEL"]
+  sysroot: /opt/intel/oneapi/sysroot
+```
+
+```bash
+abicheck compare release-1.0.bundlefacts.json release-3.0/ --old-bundle-facts \
+    --bundle-facts-library-manifest manifest.yaml
+```
+
+A library not named in the manifest keeps the uniform `--header`/
+`--include`/compile-context fallback unchanged. A manifest entry naming a
+library outside the bundle (a typo, or a library that was renamed/removed)
+is a hard error, not a silent no-op. The flag is meaningless — and rejected
+— without `--old-bundle-facts`.
+
 ## Platform support
 
 Bundle analysis is **ELF/Linux-only** (ADR-018, ADR-023). Mach-O and

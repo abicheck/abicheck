@@ -389,6 +389,9 @@ def compare_release_against_bundle_facts(
     from .bundle_models import BundleSignatureEvidence
     from .package import discover_shared_libraries
     from .serialization import load_bundle_facts
+    from .workflows.bundle_facts_library_overrides import (
+        validate_matched_library_overrides,
+    )
     from .workflows.extraction import build_match_map
 
     old_facts = load_bundle_facts(old_facts_path, max_json_object_nodes=max_json_object_nodes)
@@ -410,6 +413,21 @@ def compare_release_against_bundle_facts(
     # propagates as a plain Python exception, appropriate for a module with
     # callers outside any Click command.
     new_map, _match_warnings = build_match_map(new_files)
+
+    # Codex review, fresh evidence: the actual validation logic lives in
+    # workflows/bundle_facts_library_overrides.py (a `workflows`-classified
+    # module), not here -- this grandfathered flat-root module only
+    # computes *matched_keys* (the one piece of data that function needs
+    # and cannot get any other way, since it's derived from this
+    # function's own already-loaded `old_facts`/`new_map`, with no second
+    # OLD_FACTS load) and delegates the actual check.
+    matched_keys = set(old_facts.per_library_snapshots) & set(new_map)
+    validate_matched_library_overrides(
+        per_library_headers=per_library_headers,
+        per_library_includes=per_library_includes,
+        per_library_compile=per_library_compile,
+        matched_keys=matched_keys,
+    )
 
     per_library_results: list[DiffResult] = []
     new_signature_evidence: dict[str, BundleSignatureEvidence] = {}
