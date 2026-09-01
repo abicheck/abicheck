@@ -502,7 +502,7 @@ so every page can carry its tier without changing the gate.
 | **6 · Design** | intermediate | Part 7 Designing for Stability (↻ adds "the scanner recognises these patterns": idioms, pattern-aware verdicts) |
 | **7 · At scale** | advanced | ★ Products, not libraries (multi-binary) · ★ Template- and header-heavy libraries · ★ How system libraries stay compatible (glibc / libstdc++ / linker) · Dependency & Runtime Floors · Environment & Toolchain Drift (↻ from Concepts) · ★ Packages and consumers (deb/rpm/conda/wheel, `abi3`, FFI) |
 | **8 · Beyond static ABI** | advanced | Behavioral · Data & Wire · Ownership · Concurrency — four pages, as `topics.yaml` records (criterion 4); the shared "cannot decide this" argument gets one owner and four links |
-| **Concepts tab** (tool internals) | intermediate → expert | Verdicts (`intermediate`, reclassified from `beginner`) · Evidence & Detectability · What Each Level Sees · Architecture · Build & Source Data (↻ split: model and workflow stay and keep `canonical_for`; findings/schema/storage become a registered `reference_page`) · Graph Coverage (↻ pass-state detail to a `reference_page`) · Impact Assessment (↻ plan/ADR framing removed; field detail to a `reference_page`) · ELF Symbol Filtering · Limitations |
+| **Concepts tab** (tool internals) | intermediate → expert | Verdicts (`intermediate`, reclassified from `beginner`) · Contract-Aware Compatibility (member here; Tier 3 links to it) · Evidence & Detectability · What Each Level Sees · Architecture · Build & Source Data (↻ split: model and workflow stay and keep `canonical_for`; findings/schema/storage become a registered `reference_page`) · Graph Coverage (↻ pass-state detail to a `reference_page`) · Impact Assessment (↻ plan/ADR framing removed; field detail to a `reference_page`) · ELF Symbol Filtering · Limitations |
 
 Reading paths by role stay on the hub, but each path is then a walk *up*
 the ladder rather than a jump list across tabs.
@@ -703,7 +703,10 @@ how-tos keep the commands and the learning page keeps the model.
 - At least one runnable invocation and one linked case per concept page
   (F7); a Windows worked example for `msvc-pe-abi-model.md`; `case170` on
   `environment-drift.md`; the five bundle cases on the products page; the
-  template cases on the templates page.
+  template cases on the templates page; and `build-profile-comparability.md`
+  links the probe matrix (`use/probe-harness.md`) as the tool's answer to
+  "compare one library across build configurations", which turns §3's
+  probe-matrix row from absent to linked.
 - Part 0 gains the compatibility-levels ladder; Part 7 gains the
   idiom/pattern-verdict section.
 
