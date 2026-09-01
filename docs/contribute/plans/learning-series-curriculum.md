@@ -488,14 +488,14 @@ so every page can carry its tier without changing the gate.
 |---|---|---|
 | **0 · Orientation** | beginner | ABI in Five Minutes · ★ How a break shows up (symptom → mechanism → level) · Cheat Sheet · Glossary (↻ absorbs Part 1 §8) |
 | **1 · Foundations** | beginner → intermediate | Part 0 Product Contract (↻ gains the compatibility-levels ladder, §4.3) · Part 1 Foundations (the spine's own 0 → 7 order is kept) · Your ABI Surface |
-| **2 · Mechanics** | intermediate | Parts 2, 3, 4, 5, 6 — with Class Layout, Exception Unwinding, Modern Hazards, MSVC/PE listed *under* their Part as "go deeper" (Part 4 shortens its inline summaries to a sentence and a link) |
+| **2 · Mechanics** | intermediate (branches: advanced) | Parts 2, 3, 4, 5, 6 — with Class Layout, Exception Unwinding, Modern Hazards, MSVC/PE listed *under* their Part as optional "go deeper" branches, `advanced`, outside the spine's monotonicity check (Part 4 shortens its inline summaries to a sentence and a link) |
 | **3 · Define the contract** | intermediate | Compatibility Direction · Consumer Models · ↻ Contract-Aware Compatibility (from Concepts) · Build-Profile Comparability · Static & Header-Only Contracts (↻ from Beyond ABI — library *shape* is a contract question) |
 | **4 · Evidence & detection** | intermediate | ↻ Detecting Breaks (§1a grows into the AST summary, §2 becomes links into the trio) · Evidence & Detectability and What Each Level Sees (stay on the Concepts tab; the appendix of removed flags moves to `contribute/archive/`) · Assurance Beyond Static Checking |
 | **5 · Practice** | intermediate | Baselines as contracts (`use/baseline-management.md`, linked from the ladder, stays in the tool track — §4.6 case 1) · ★ Where in the pipeline (PR / main / nightly / release) · ★ Report the surface, not only the breaks · ★ Rollout & governance · ★ Triage a suspicious finding |
 | **6 · Design** | intermediate | Part 7 Designing for Stability (↻ adds "the scanner recognises these patterns": idioms, pattern-aware verdicts) |
 | **7 · At scale** | advanced | ★ Products, not libraries (multi-binary) · ★ Template- and header-heavy libraries · ★ How system libraries stay compatible (glibc / libstdc++ / linker) · Dependency & Runtime Floors · Environment & Toolchain Drift (↻ from Concepts) · ★ Packages and consumers (deb/rpm/conda/wheel, `abi3`, FFI) |
 | **8 · Beyond static ABI** | advanced | Behavioral · Data & Wire · Ownership · Concurrency — four pages, as `topics.yaml` records (criterion 4); the shared "cannot decide this" argument gets one owner and four links |
-| **Concepts tab** (tool internals) | advanced → expert | Verdicts · Evidence & Detectability · What Each Level Sees · Architecture · Build & Source Data (↻ split: model and workflow stay and keep `canonical_for`; findings/schema/storage become a registered `reference_page`) · Graph Coverage (↻ pass-state detail to a `reference_page`) · Impact Assessment (↻ plan/ADR framing removed; field detail to a `reference_page`) · ELF Symbol Filtering · Limitations |
+| **Concepts tab** (tool internals) | intermediate → expert | Verdicts (`intermediate`, reclassified from `beginner`) · Evidence & Detectability · What Each Level Sees · Architecture · Build & Source Data (↻ split: model and workflow stay and keep `canonical_for`; findings/schema/storage become a registered `reference_page`) · Graph Coverage (↻ pass-state detail to a `reference_page`) · Impact Assessment (↻ plan/ADR framing removed; field detail to a `reference_page`) · ELF Symbol Filtering · Limitations |
 
 Reading paths by role stay on the hub, but each path is then a walk *up*
 the ladder rather than a jump list across tabs.
@@ -511,7 +511,8 @@ between sentinels with a `--check` mode, the pattern ADR-051 established
 for the platform matrix — so neither the badge column nor the tier rows
 are a hand-copied table. The hub itself is the page that *renders* the
 ladder and is explicitly exempt from it (the one documented exception,
-stated in the ladder file). `--check` fails on any other learn page missing from the
+stated in the ladder file). Branch pages (Tier 2's "go deeper" deep dives) are marked as such in the
+ladder file and checked only against their parent Part. `--check` fails on any other learn page missing from the
 ladder, on a ladder entry that is not a page, and on any level regression
 along the ladder's full reading order (not only within a nav group). The
 hub renders the result as a badge per row so the ladder is visible in the
@@ -599,12 +600,21 @@ gate all of this).
 - Make the on-ramp the front door: hub, `docs/index.md`, and
   `start/getting-started.md` link it first; remove the "don't start here"
   admonition.
-- Add a consistent previous/next footer to every deep dive (the numbered
-  Parts already have one); give `what-each-level-sees.md` a forward
-  "Next" and resolve Part 7's double next.
+- Add a consistent previous/next footer to every page on the educational
+  tab that lacks one — the 26 deep dives and the three orientation pages
+  (on-ramp, cheat sheet, glossary); the numbered Parts already have one.
+  Give `what-each-level-sees.md` a forward "Next" and resolve Part 7's
+  double next.
 - Keep the nav's by-question groups; reorder within each so level is
-  non-decreasing, and add `level:` front matter to the 16 pages lacking
-  it, using the tier mapping in §5. Pages that change tab are limited to
+  non-decreasing. Add `level:` front matter to the 16 pages lacking it
+  *and* reconcile the 23 existing values with the tier mapping in §5 —
+  today's values were assigned page by page, not against a ladder, so
+  several disagree with it: `verdicts.md` (`beginner`) becomes the
+  Concepts tab's first, `intermediate` entry; the four Tier 8 pages move
+  from `intermediate` to `advanced`; and the Tier 2 "go deeper" pages
+  keep `advanced` but are marked as *branches* in the ladder file, which
+  the monotonicity check skips (a branch is read optionally, off the
+  spine, and must only be ≥ the Part it hangs from). Pages that change tab are limited to
   the two verified clean of internal names (§5); `docs/AGENTS.md` "Layout"
   is updated for those two moves in the same change.
 
