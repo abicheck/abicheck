@@ -661,8 +661,10 @@ now mutates the rebuilt tree rather than the caller's, which is the observable
 half of "a renderer cannot alter its input".
 
 **Not met yet, and this partial status must not be read as the acceptance
-criteria having been met.** Two distinct gaps remain, and they are different
-sizes:
+criteria having been met.** One large gap remains (item 1 below); item 4's
+per-finding-verdict half and item 5's demangle-scope half have since closed
+— see their own paragraphs below rather than reading this summary as still
+current on those two points:
 
 1. *Markdown's richer modes (`to_markdown`, `to_review_digest`) and HTML.*
    Unlike JSON/SARIF/JUnit, these do not build a structured value and then
@@ -706,30 +708,49 @@ sizes:
    `gate_decision_for_result`'s unfiltered-changes contract would be the
    wrong abstraction rather than closing a gap.
 
-   The **per-finding verdict** half of item 4 remains open:
-   `junit_report`/`html_report`/`reporter_markdown` each still resolve a
-   per-change verdict through `effective_verdict_for_change`/
-   `DiffResult._effective_verdict_for_change` at their own call sites
-   (`junit_report.py` alone calls it independently from both `_is_failure`
-   and `_failure_type` for the same change). Unlike the gate decision, this
-   is not a single value with one shape: it is resolved once per `Change`,
-   already threads a caller-precomputed `kind_sets` through several of
-   these call sites specifically to avoid rebuilding *that* per finding, and
-   sits directly upstream of `DiffResult`'s own public `breaking`/
-   `source_breaks`/`compatible`/`risk` properties — which this ADR has
-   already ruled out moving, as a breaking change to the documented public
-   Python API (see above). Consolidating it correctly affects
-   heavily-reviewed, scar-tissue-dense logic in three format modules at
-   once; attempting it as a drive-by inside this gate-decision slice would
-   risk exactly the "wrong abstraction, forced through" failure mode this
-   ADR warns against elsewhere. It remains its own follow-up slice, and the
-   design for it is owned by, and stated in full only in,
-   `duplication-and-convergence-assessment.md`'s Phase 4 item 1 (hold the
-   resolved verdict on `ReportFinding`, built once per `Change` while
-   iterating `DiffResult.changes` during envelope construction — not a
-   separate cache keyed by `Change` identity, since `Change` is not
-   hashable) — see that plan's Phase 4 section rather than restating the
-   rationale here a second time.
+   **The per-finding verdict half of item 4 is now closed.**
+   `report/finding.py` is the `ReportFinding` the convergence-assessment
+   plan's Phase 4 item 1 asked for: a frozen `(change, verdict, category)`
+   triple built once per `Change` by `build_report_findings`, resolving
+   both `effective_verdict_for_change` and `classify_effective_change` in
+   the same pass — not a cache keyed by `Change` identity (`Change` is
+   still not hashable), a plain tuple plus an `id(change)`-keyed lookup
+   dict built fresh per render instead. Classified `report` (D1): every
+   symbol it needs — `Verdict`, `KindSets`, `IssueCategory`, both resolver
+   functions — is reached through `policy.severity` alone, since
+   `checker_policy.py`/`reclassify.py` are themselves unclassified
+   `legacy_root_modules` a migrated `report`-package module may not import
+   directly (`unclassified-import`). `DiffResult` itself cannot own this as
+   a method — it is `model`-classified, and `model`'s `may_import: []`
+   forbids reaching into `report`/`policy` — so the memoized per-result
+   convenience (`report_findings_for`, an attribute cache keyed on the
+   `DiffResult` instance) lives in `report/finding.py` instead and is
+   called from outside `model`, not as a `DiffResult` method.
+   `junit_report._is_failure`/`_failure_type` (deduplicated through two new
+   leaf helpers, `_resolved_verdict`/`_resolved_category`, so the two
+   stopped each independently re-deriving both values), `html_report`'s
+   `_change_bucket` callback (previously invoked up to three times per
+   change, once per candidate bucket — now a single pass), and
+   `reporter_markdown.to_review_digest`'s top-impacted-symbols section all
+   read from it. `DiffResult`'s own public `breaking`/`source_breaks`/
+   `compatible`/`risk` properties are untouched, as this ADR already
+   requires. `ShowOnlyFilter._check_severity` deliberately stays on its
+   direct `effective_verdict_for_change` call: investigation found it is
+   not an instance of this gap at all — it already calls the identical
+   canonical resolver (its own docstring says so), just at a call site that
+   filters arbitrary change subsets without a `DiffResult` in hand, so
+   forcing it through `ReportFinding` would add a dependency for no
+   correctness gain. Verified by `tests/unit/report/test_report_finding.py`
+   — a parametrized sweep (mirroring `test_gate_decision_shared.py`'s
+   pattern) asserting `ReportFinding.verdict`/`.category` against direct
+   resolver calls across several policy configurations, that
+   `report_findings_for`'s memoization returns the identical object on a
+   second call, and that JUnit's `_is_failure` (via `findings_by_id`) never
+   disagrees with the JSON report's own independently-derived `severity`
+   field for the same changes — plus the full existing golden-output suite
+   (`tests/test_golden_output.py`, `tests/test_html_template_golden.py`)
+   passing byte-for-byte unchanged, since this closure changes only *where*
+   each value is computed, never its value.
 
    Item 5 (post-render mutation) is **partially closed**, and the reasoning
    for what moved and what didn't is worth keeping precise, since it
@@ -764,32 +785,46 @@ sizes:
      pre-render path produces byte-identical text — including the
      combined case, since the two facts' relative order in the JSON
      object needed to match the old append order too.
-   - **Still open, for a materially different reason each**:
-     `_fold_scoped_compat_into_text` (JSON branch) re-derives already-built
-     document sections — `summary`/`severity`/`root_causes` — rather than
-     adding an independent key; closing it needs restructuring
-     `reporter.py`'s JSON-building internals themselves (`_build_json_base`/
-     `_to_json_root_cause`/`_add_changes_block`) to accept scoped-gate
-     awareness natively, a materially larger, separate slice with its own
-     parity risk against heavily-review-scarred logic — the same caution
-     item 4's "per-finding verdict" half above already states for a
-     different function. `_fold_suppression_audit_into_text`'s remaining
-     markdown/text/review branch and all of `_fold_use_case_impact_into_
-     text` are demangle-scope-sensitive: `reporter_markdown.to_markdown`
-     applies its one whole-report `_out()` demangle pass and returns before
-     any fold-in ever ran, so these appended sections are deliberately
-     *not* demangled the way the rest of a `--demangle` report is. Folding
-     them into `to_markdown`'s own pre-`_out()` line list would either
-     silently change that demangle scope (a real, undocumented behavior
-     change) or reproduce the identical post-render string-append pattern
-     one file over, which is not the fix this item asks for. Both remain
-     genuinely separate follow-up slices, not scoped down for effort
-     reasons — and both are the identical problem
-     `duplication-and-convergence-assessment.md`'s "P1 — Reporting composes
-     too late" finding names (independently, almost word-for-word) as the
-     motivation for that plan's `ReportEnvelope`/Phase 4; fold the two
-     still-open pieces into that migration rather than solving them a
-     second time in isolation.
+   - **The demangle-scope half is now closed.** `reporter_markdown.
+     to_markdown`'s single whole-report `_out()` demangle pass returns
+     before any fold-in ever runs, so `_fold_scoped_compat_into_text`'s
+     `into_text` append (missing symbol/entrypoint names, scoped-only
+     change descriptions), `_fold_suppression_audit_into_text`'s
+     markdown/text/review branch (a suppression rule's own `symbol=`/
+     selector echo), and `_fold_use_case_impact_into_text` (a use-case's
+     attributed change symbols) all stayed mangled under `--demangle`
+     regardless of the flag. Rather than moving any fold-in earlier — which
+     would either change `_out()`'s scope for every other section too, or
+     reproduce the identical post-render string-append pattern one file
+     over — each of the three now accepts its own `demangle` bool
+     (threaded from `cli_compare_helpers._render_compare_report`, which
+     already resolves the effective flag) and demangles only the section it
+     adds, via the same `demangle_text` helper `_out()` itself calls;
+     *text* — the report already rendered above the fold-in — is never
+     re-demangled. `into_json`/`into_oneline` are unaffected, by design:
+     JSON and the one-line summary carry raw symbol data regardless of
+     `--demangle`. Verified end-to-end (real `compare --required-symbol`/
+     `--audit-suppressions` invocations, not the fold function in
+     isolation) by `tests/test_cli_compare_fold_demangle.py`, asserting the
+     demangled spelling appears under the default/`--demangle` case, the
+     mangled spelling appears under `--no-demangle`, and JSON always keeps
+     the raw name — plus the unchanged golden-output suite, confirming
+     `demangle=False`'s default path stays byte-for-byte identical.
+   - **Still open**: `_fold_scoped_compat_into_text`'s JSON branch
+     (`into_json`) re-derives already-built document sections —
+     `summary`/`severity`/`root_causes` — rather than adding an independent
+     key; closing it needs restructuring `reporter.py`'s JSON-building
+     internals themselves (`_build_json_base`/`_to_json_root_cause`/
+     `_add_changes_block`) to accept scoped-gate awareness natively, a
+     materially larger, separate slice with its own parity risk against
+     heavily-review-scarred logic. Not attempted here for the same reason
+     the per-finding-verdict closure above was deliberately kept to a
+     dedicated, narrowly-scoped change rather than folded into a larger
+     slice touching this same review-scarred code — this is the identical
+     problem `duplication-and-convergence-assessment.md`'s "P1 — Reporting
+     composes too late" finding names as the motivation for that plan's
+     `ReportEnvelope`/Phase 4; fold this piece into that migration rather
+     than solving it a second time in isolation.
 
 **The `compare -> policy` blocker this section previously recorded is
 closed**, and how it was re-measured is worth keeping: the earlier note

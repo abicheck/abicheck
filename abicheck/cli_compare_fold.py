@@ -32,21 +32,29 @@ ADR-061 Phase 2 item 5 (post-render mutation): the module used to also host
 ``reporter.to_json``'s document construction, since
 ``result.suppression_audit`` was already attached before rendering here
 too). Both were pure "inject an already-known fact as a JSON key" cases with
-no interaction with anything else in the payload. The three functions still
-here -- :func:`_fold_scoped_compat_into_text`, the markdown/text/review half
-of :func:`_fold_suppression_audit_into_text`, and
-:func:`_fold_use_case_impact_into_text` -- were investigated for the same
-treatment and kept as post-render text: the scoped-compat JSON branch
-re-derives already-built document sections (``summary``/``severity``/
-``root_causes``) rather than adding an independent key, which would need
-restructuring ``reporter.py``'s JSON builders themselves rather than a
-`fold-in` move; and the markdown/text/review appends (all three functions)
-run *after* ``to_markdown``'s own single, whole-report ``_out()`` demangle
-pass specifically so their own content is never demangled -- folding them
-into ``to_markdown``'s pre-``_out()`` line list would either change that
-scoping (a real behavior change) or reproduce the identical post-render
-append one file over, which is not the fix Phase 2 asks for. See that
-section of ADR-061 for the fuller reasoning.
+no interaction with anything else in the payload.
+
+:func:`_fold_scoped_compat_into_text`'s JSON branch (``into_json``) is still
+here and still post-render: it re-derives already-built document sections
+(``summary``/``severity``/``root_causes``) rather than adding an
+independent key, which needs restructuring ``reporter.py``'s JSON builders
+themselves rather than a `fold-in` move -- not yet attempted.
+
+The markdown/text/review appends run *after* ``to_markdown``'s own single,
+whole-report ``_out()`` demangle pass, so their own content was never
+demangled under ``--demangle`` -- including :func:`_fold_scoped_compat_into_
+text`'s own ``into_text`` append (missing symbol/entrypoint names, scoped-
+only change descriptions), which renders the same kind of mangled C++ name
+as the other two. Rather than moving these fold-ins earlier (which would
+either change that pass's scope for every other section too, or reproduce
+the identical post-render append one file over), all three of
+:func:`_fold_scoped_compat_into_text`, :func:`_fold_suppression_audit_into_
+text`, and :func:`_fold_use_case_impact_into_text` now accept their own
+``demangle`` flag and demangle only the section(s) they add -- never *text*
+itself -- via the same ``demangle_text`` helper ``to_markdown``'s ``_out()``
+calls. This closes this half of item 5 without changing where in the
+pipeline any fold-in runs. ``into_json``/``into_oneline`` are unaffected --
+JSON/one-line output carries raw symbol data by design.
 """
 
 from __future__ import annotations
@@ -77,6 +85,8 @@ def _fold_scoped_compat_into_text(
     show_only: str | None = None,
     report_mode: str = "full",
     contract_evaluation: bool = False,
+    *,
+    demangle: bool = False,
 ) -> str:
     """Fold ``--used-by``/``--required-symbol(s)`` summaries into the rendered text.
 
@@ -120,6 +130,14 @@ def _fold_scoped_compat_into_text(
     matching ``result.changes`` entry) in place before this function runs,
     so ``_change_to_dict`` picks up the decision for free the same way it
     does for any other already-stamped ``Change``.
+
+    *demangle*, when True, demangles the ``into_text`` append (missing
+    symbol/entrypoint names, scoped-only change descriptions) the same way
+    ``reporter_markdown.to_markdown``'s own ``_out()`` pass demangles
+    everything rendered before this fold-in runs (ADR-061 Phase 2 item 5) --
+    this section runs after that pass and previously stayed mangled
+    regardless of ``--demangle``. Never applied to ``into_json``/
+    ``into_oneline``, which carry raw symbol data by design.
     """
     used_by = getattr(result, "used_by", None)
     required_symbols = getattr(result, "required_symbols", None)
@@ -133,6 +151,7 @@ def _fold_scoped_compat_into_text(
         contract_evaluation=contract_evaluation,
         used_by=used_by,
         required_symbols=required_symbols,
+        demangle=demangle,
     )
     if fmt == "json":
         return fold.into_json(text)
@@ -174,6 +193,7 @@ class _ScopedFold:
     contract_evaluation: bool
     used_by: Any
     required_symbols: Any
+    demangle: bool = False
 
     @property
     def scoped_verdict_value(self) -> Any:
@@ -891,20 +911,30 @@ class _ScopedFold:
     def into_text(self, text: str, fmt: str) -> str:
         """Append the scoped-gate sections to a markdown/text/review report.
 
-        The report itself is left exactly as rendered; what follows it is a
-        scoped-verdict header (only when the two verdicts disagree), the
-        per-consumer summaries, and the scoped gate's own findings.
+        The report itself is left exactly as rendered; what precedes/follows
+        it is a scoped-verdict header (only when the two verdicts disagree,
+        prepended) and the per-consumer summaries plus the scoped gate's own
+        findings (appended) -- both demangled under ``self.demangle`` the
+        same way ``to_markdown``'s own ``_out()`` pass demangles everything
+        rendered before this fold-in runs (ADR-061 Phase 2 item 5): missing
+        symbol/entrypoint names and scoped-only change descriptions can be
+        mangled C++ names, same as anything else in the report. *text*
+        itself is never re-demangled here.
         """
-        return "\n".join(
-            [
-                *self._scoped_verdict_header(),
-                text,
-                "",
-                *self._used_by_lines(),
-                *self._required_symbols_lines(),
-                *self._scoped_gate_finding_lines(fmt),
-            ]
-        )
+        header_lines = self._scoped_verdict_header()
+        footer_lines = [
+            "",
+            *self._used_by_lines(),
+            *self._required_symbols_lines(),
+            *self._scoped_gate_finding_lines(fmt),
+        ]
+        if self.demangle:
+            from .demangle import demangle_text
+
+            if header_lines:
+                header_lines = demangle_text("\n".join(header_lines)).split("\n")
+            footer_lines = demangle_text("\n".join(footer_lines)).split("\n")
+        return "\n".join([*header_lines, text, *footer_lines])
 
 
 #: The formats a ``--use-cases`` attribution actually reaches a reader
@@ -947,7 +977,12 @@ def format_carries_use_case_impact(fmt: str | None) -> bool:
 
 
 def _fold_use_case_impact_into_text(
-    text: str, fmt: str, result: Any, show_only: str | None = None
+    text: str,
+    fmt: str,
+    result: Any,
+    show_only: str | None = None,
+    *,
+    demangle: bool = False,
 ) -> str:
     """Fold ``compare --use-cases``'s attribution into the rendered report.
 
@@ -963,6 +998,14 @@ def _fold_use_case_impact_into_text(
     removed (Codex review) -- the same thing
     :func:`_fold_scoped_compat_into_text` does for its own scoped-only
     changes, and the same projection the JSON paths apply.
+
+    *demangle*, when True, demangles this function's own appended section
+    the same way ``reporter_markdown.to_markdown``'s single whole-report
+    ``_out()`` pass demangles everything rendered *before* this fold-in runs
+    (ADR-061 Phase 2 item 5) -- this section runs after that pass, on text
+    it never saw, so without this it silently stayed mangled under
+    ``--demangle``. Only the newly-appended lines are demangled, never
+    *text* itself (already correctly demangled or not by the caller).
     """
     from .impact.use_case_impact import UseCaseImpact, render_use_case_impact_lines
 
@@ -995,10 +1038,17 @@ def _fold_use_case_impact_into_text(
             )
             + scoped_only_changes_filtered(result, show_only)
         )
-    return "\n".join([text, *render_use_case_impact_lines(impact)])
+    appended = "\n".join(render_use_case_impact_lines(impact))
+    if demangle:
+        from .demangle import demangle_text
+
+        appended = demangle_text(appended)
+    return "\n".join([text, appended])
 
 
-def _fold_suppression_audit_into_text(text: str, fmt: str, audit: Any) -> str:
+def _fold_suppression_audit_into_text(
+    text: str, fmt: str, audit: Any, *, demangle: bool = False
+) -> str:
     """Fold a ``--audit-suppressions`` ``SuppressionAudit`` into a rendered
     markdown/text/review report.
 
@@ -1012,8 +1062,11 @@ def _fold_suppression_audit_into_text(text: str, fmt: str, audit: Any) -> str:
     ``reporter.to_json``'s JSON builders emit the ``suppression_audit`` key
     directly from it. This function's remaining job -- appending a section
     to already-rendered markdown/text/review text -- stays post-render
-    because that append must NOT be demangled the way the rest of a
-    ``--demangle`` report is (see this module's own docstring).
+    because ``to_markdown``'s single whole-report ``_out()`` demangle pass
+    already ran by the time this appends. *demangle*, when True, applies
+    that same pass to this function's own appended section (only, never to
+    *text*) so a rule's symbol names are demangled under ``--demangle`` too,
+    closing that gap without changing where in the pipeline this fold runs.
     """
     if audit is None:
         return text
@@ -1023,7 +1076,7 @@ def _fold_suppression_audit_into_text(text: str, fmt: str, audit: Any) -> str:
     )
 
     if fmt in ("markdown", "text", "review"):
-        lines = [text, "", "## Suppression Audit", "", audit.summary()]
+        lines = ["", "## Suppression Audit", "", audit.summary()]
         # audit.summary() only reports the stale-rule count (Codex review,
         # fresh evidence: its own per-rule detail lines named a rule by only
         # its first selector, misidentifying two rules that share it but
@@ -1059,6 +1112,11 @@ def _fold_suppression_audit_into_text(text: str, fmt: str, audit: Any) -> str:
             lines.append("Rules expiring soon:")
             for i, rule in enumerate(audit.near_expiry_rules):
                 lines.append(f"- `{_suppression_rule_label(rule, i)}`")
-        return "\n".join(lines)
+        appended = "\n".join(lines)
+        if demangle:
+            from .demangle import demangle_text
+
+            appended = demangle_text(appended)
+        return "\n".join([text, appended])
 
     return text

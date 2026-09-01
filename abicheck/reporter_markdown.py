@@ -1533,12 +1533,12 @@ def to_review_digest(
     # here printed "safe to merge" directly above the symbol it says is
     # impacted (Codex review). The excluded finding keeps its own disclosed
     # section elsewhere in the report; this list is the digest of what gated.
+    from .report.finding import report_findings_for
     impacted = [
-        c
-        for c in result.changes
-        if is_evaluated(c)
-        if result._effective_verdict_for_change(c)
-        in (Verdict.BREAKING, Verdict.API_BREAK)
+        f.change
+        for f in report_findings_for(result)
+        if is_evaluated(f.change)
+        if f.verdict in (Verdict.BREAKING, Verdict.API_BREAK)
     ]
     if impacted:
         lines += ["**Top impacted symbols:**", ""]

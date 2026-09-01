@@ -871,7 +871,17 @@ def generate_html_report(
     suppressed_count: int = getattr(result, "suppressed_count", len(suppressed))
 
     # Split display changes into buckets; duck-typed like compatibility_metrics.
-    _effective_verdict_fn = getattr(result, "_effective_verdict_for_change", None)
+    # ADR-061 Phase 2 item 4b: a real DiffResult reads each verdict from a
+    # ReportFinding resolved once per change; a stub falls back as before.
+    _effective_verdict_fn: Callable[[object], object] | None = getattr(
+        result, "_effective_verdict_for_change", None
+    )
+    if _effective_verdict_fn is not None:
+        from .report.finding import findings_by_change_id, report_findings_for
+        _findings_by_id = findings_by_change_id(report_findings_for(result))  # type: ignore[arg-type]
+        def _lookup_verdict(change: object) -> object:
+            return _findings_by_id[id(change)].verdict
+        _effective_verdict_fn = _lookup_verdict
     # ADR-049 D1: a NOT_EVALUATED finding is partitioned out of the three
     # verdict buckets before they are built, the same way Markdown's own
     # "Not Evaluated (Contract)" section works -- bucketing one by its raw
@@ -882,21 +892,14 @@ def generate_html_report(
 
     not_evaluated = [ch for ch in display_changes if not is_evaluated(ch)]
     scored_changes = [ch for ch in display_changes if is_evaluated(ch)]
-    removed = [
-        ch
-        for ch in scored_changes
-        if _change_bucket(ch, _effective_verdict_fn) == "removed"
-    ]
-    added = [
-        ch
-        for ch in scored_changes
-        if _change_bucket(ch, _effective_verdict_fn) == "added"
-    ]
-    changed = [
-        ch
-        for ch in scored_changes
-        if _change_bucket(ch, _effective_verdict_fn) == "changed"
-    ]
+    # Single pass, not three (one per candidate bucket, each re-resolving
+    # the effective verdict) as this used to be.
+    removed: list[object] = []
+    added: list[object] = []
+    changed: list[object] = []
+    _buckets = {"removed": removed, "added": added, "changed": changed}
+    for ch in scored_changes:
+        _buckets[_change_bucket(ch, _effective_verdict_fn)].append(ch)
 
     # Metrics always use the full (unfiltered) change list. policy/kind_sets/
     # policy_file make the Binary Compatibility % agree with the verdict

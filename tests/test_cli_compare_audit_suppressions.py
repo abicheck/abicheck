@@ -584,7 +584,12 @@ class TestMarkdownReport:
         assert result.exit_code == 0, result.output
         assert "## Suppression Audit" in result.output
         assert "High-risk matches" in result.output
-        assert "`intentional removal (symbol=_Z5api_bv)` suppressed" in result.output
+        # Markdown demangles by default (ADR-061 Phase 2 item 5 closure):
+        # this appended section now goes through the same whole-report
+        # demangle pass as everything else, so the mangled `_Z5api_bv`
+        # selector echo renders as its demangled form here too, consistent
+        # with every other symbol in a demangled report.
+        assert "`intentional removal (symbol=api_b())` suppressed" in result.output
 
     def test_omitted_by_default(self, tmp_path):
         old_p, new_p = _write_pair(tmp_path)

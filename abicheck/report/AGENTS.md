@@ -29,15 +29,25 @@ lossless encoding; `render_xml_document` is the projection. Put a report
 *fact* (a tag, an attribute, text) in the document and a *formatting* choice
 (indentation, the XML declaration) in the projection.
 
+`finding.py` is the per-`Change` counterpart to `document.py`'s whole-report
+value: `ReportFinding` holds one change's already-resolved `verdict`/
+`category`, built once by `build_report_findings` rather than re-derived at
+each renderer's own call site. `report_findings_for` is the memoized
+per-`DiffResult` convenience (an attribute cache on the result, not a
+`DiffResult` method — `model` may not import this package, so the method
+cannot live there); `findings_by_change_id` indexes a set of findings by
+`id(change)` for O(1) lookup within one render (never persisted past it —
+`Change` has no `__hash__`).
+
 Markdown's richer modes (`to_markdown`, `to_review_digest`) and HTML remain
-explicit follow-up slices: they emit prose straight from a `DiffResult`
+the one open follow-up slice: they emit prose straight from a `DiffResult`
 rather than building a structured value first, so each needs its own rewrite
-against its golden output. See ADR-061's Phase 2 status note for the second
-open half — renderers that still call `severity.compute_gate_decision` /
-`effective_verdict_for_change` themselves, and the `cli_compare_fold.py`
-post-render folds — and for why a pre-existing `compare -> policy` coupling
-in `checker_types.py`/`checker.py` still blocks moving a severity-touching
-builder physically into this package.
+against its golden output. See ADR-061's Phase 2 status note for the
+now-closed halves of items 4 and 5 (per-finding verdict; the fold-ins'
+demangle scope) — one piece of item 5 stays open, `cli_compare_fold.py`'s
+scoped-gate JSON fold, which needs this package's JSON builders to accept
+scoped-gate awareness natively rather than re-deriving already-built
+sections post-render.
 
 ## Tests
 
