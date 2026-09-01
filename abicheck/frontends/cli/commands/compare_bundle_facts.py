@@ -98,7 +98,10 @@ def _resolve_new_side_headers_includes(
 
 
 def _load_library_overrides(
-    manifest_path: Path, *, known_libraries: set[str]
+    manifest_path: Path,
+    *,
+    known_libraries: set[str],
+    selected_paths: dict[str, Path],
 ) -> tuple[dict[str, list[Path]], dict[str, list[Path]], dict[str, Any]]:
     """Load and validate ``--bundle-facts-library-manifest``.
 
@@ -131,7 +134,9 @@ def _load_library_overrides(
 
     try:
         overrides = load_bundle_facts_library_overrides(
-            manifest_path, known_libraries=known_libraries
+            manifest_path,
+            known_libraries=known_libraries,
+            selected_paths=selected_paths,
         )
     except BundleFactsLibraryOverridesError as exc:
         raise click.UsageError(str(exc)) from exc
@@ -301,12 +306,14 @@ def dispatch(*, compile_context: Any, **kwargs: Any) -> None:
                 # a library outside the bundle is a hard, immediate error
                 # instead of silently never being looked up.
                 include_private_dso = bool(kwargs.get("include_private_dso", False))
-                known_libraries = known_libraries_for_new_side(
+                new_library_paths = known_libraries_for_new_side(
                     lib_dir, include_private_dso=include_private_dso
                 )
                 per_library_headers, per_library_includes, per_library_compile = (
                     _load_library_overrides(
-                        Path(manifest_path), known_libraries=known_libraries
+                        Path(manifest_path),
+                        known_libraries=set(new_library_paths),
+                        selected_paths=new_library_paths,
                     )
                 )
                 if depth == "binary":

@@ -147,6 +147,7 @@ def parse_bundle_facts_library_overrides(
     raw: dict[str, object],
     *,
     known_libraries: set[str] | None = None,
+    selected_paths: dict[str, Path] | None = None,
     base_dir: Path | None = None,
 ) -> BundleFactsLibraryOverrides:
     """Validate a raw per-library override mapping.
@@ -173,6 +174,17 @@ def parse_bundle_facts_library_overrides(
     (``libfoo.so.1``) interchangeably -- two entries that canonicalize to
     the same library are a hard error rather than one silently overwriting
     the other.
+
+    *selected_paths*, when given, is the same resolved NEW-side match map
+    *known_libraries* was itself built from (``{canonical_name: Path}``) --
+    when NEW_INPUT contains more than one version of a library (e.g. both
+    ``libfoo.so.1`` and ``libfoo.so.2``), ``build_match_map()`` selects
+    exactly one of them by its own version-aware tie-break, and only that
+    file's own filename is a valid versioned alias for the canonical name:
+    a manifest key naming a *different*, non-selected version would
+    otherwise canonicalize to the same key and silently apply its override
+    to a file it never actually named. Omitted (the default) skips this
+    check, matching *known_libraries*'s own opt-in shape.
 
     *base_dir*, when given, is the directory every relative ``headers``/
     ``includes``/``sysroot`` path resolves against -- the manifest file's own
@@ -228,6 +240,28 @@ def parse_bundle_facts_library_overrides(
                 f"in this bundle -- known libraries are "
                 f"{sorted(known_libraries)!r}"
             )
+        if name != canonical_name and selected_paths is not None:
+            # Codex review, fresh evidence: a versioned alias (name !=
+            # canonical_name) is only a faithful spelling of "the library
+            # actually being overridden" when it names the one file
+            # build_match_map() actually selected for this canonical key --
+            # not merely any version string that happens to canonicalize
+            # the same way. Without this, `libfoo.so.1` in the manifest
+            # would silently apply to a NEW_INPUT that actually selected
+            # `libfoo.so.2` (e.g. because both versions are present and the
+            # match map's own tie-break picked the newer one).
+            selected = selected_paths.get(canonical_name)
+            selected_name = selected.name if selected is not None else None
+            if selected_name != name:
+                raise BundleFactsLibraryOverridesError(
+                    f"per-library override manifest: {name!r} does not "
+                    f"match the file actually selected for "
+                    f"{canonical_name!r} ({selected_name!r}) -- when more "
+                    "than one version of a library is present in "
+                    "NEW_INPUT, a manifest key must be either the "
+                    "canonical name or the exact filename that was "
+                    "selected"
+                )
         if not isinstance(entry, dict):
             raise BundleFactsLibraryOverridesError(
                 f"per-library override manifest.{name}: must be a mapping, "
@@ -279,6 +313,7 @@ def load_bundle_facts_library_overrides(
     manifest_path: Path,
     *,
     known_libraries: set[str] | None = None,
+    selected_paths: dict[str, Path] | None = None,
 ) -> BundleFactsLibraryOverrides:
     """Read, strictly parse, and validate a real
     ``--bundle-facts-library-manifest`` YAML/JSON file at *manifest_path*.
@@ -339,14 +374,16 @@ def load_bundle_facts_library_overrides(
     return parse_bundle_facts_library_overrides(
         raw if raw is not None else {},
         known_libraries=known_libraries,
+        selected_paths=selected_paths,
         base_dir=manifest_path.resolve().parent,
     )
 
 
 def known_libraries_for_new_side(
     new_dir: Path, *, include_private_dso: bool = False
-) -> set[str]:
-    """The canonical library-name set a NEW-side directory resolves to.
+) -> dict[str, Path]:
+    """The canonical-name -> selected-Path match map a NEW-side directory
+    resolves to.
 
     The same primitives (and the same ``include_private_dso`` semantics)
     ``bundle_side_input.compare_release_against_bundle_facts`` itself uses to
@@ -368,13 +405,23 @@ def known_libraries_for_new_side(
     build_match_map`` are ``extract``-classified, which ``frontends`` may
     not import directly (``may_import: [model, workflows, report]``) --
     ``workflows`` already may.
+
+    Returns the full ``{canonical_name: Path}`` map (Codex review, fresh
+    evidence), not just its key set -- a manifest key naming a versioned
+    alias (e.g. ``libfoo.so.1``) is only a faithful spelling of the library
+    ``build_match_map()`` actually selected for that canonical name when
+    NEW_INPUT carries more than one version; the caller needs the selected
+    ``Path`` itself (its ``.name``) to tell a genuine alias from a
+    different, non-selected version that merely canonicalizes the same way.
+    ``set(known_libraries_for_new_side(...))`` recovers the old key-only
+    set for a caller that only needs bundle membership.
     """
     from ..package import discover_shared_libraries
     from .extraction import build_match_map
 
     new_files = discover_shared_libraries(new_dir, include_private=include_private_dso)
     new_map, _match_warnings = build_match_map(new_files)
-    return set(new_map)
+    return new_map
 
 
 def _build_compile_context(

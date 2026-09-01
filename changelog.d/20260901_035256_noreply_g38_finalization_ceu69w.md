@@ -28,3 +28,11 @@ it should read in CHANGELOG.md. Delete the other sections.
   vice versa) previously passed validation yet was silently never
   consulted, since the real per-library comparison only matches libraries
   present on both sides. Such an entry is now rejected up front.
+- **`--bundle-facts-library-manifest` rejects a versioned alias that names
+  the wrong version** — when `NEW_INPUT` carries more than one version of a
+  library (e.g. `libfoo.so.1` and `libfoo.so.2`), only one is actually
+  selected for comparison; a manifest entry keyed by a *different*,
+  non-selected version previously canonicalized to the same bundle key and
+  silently applied its override to a file it never named. A versioned
+  manifest key must now name the canonical name or the exact file that was
+  selected.

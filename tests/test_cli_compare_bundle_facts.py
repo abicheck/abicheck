@@ -607,6 +607,81 @@ class TestBundleFactsLibraryManifest:
         assert code == 64, out
         assert "libextra.so" in out
 
+    def test_manifest_key_naming_a_non_selected_version_is_rejected(
+        self, tmp_path: Path
+    ) -> None:
+        """Codex review, fresh evidence: when NEW_INPUT carries more than
+        one version of a library (``libreal.so.1`` and ``libreal.so.2``),
+        ``build_match_map()`` selects exactly one of them (the higher
+        version, ``.2``) -- a manifest key naming the *other*, non-selected
+        version (``.1``) canonicalizes to the same bundle key and would
+        otherwise silently apply its override to the file it never actually
+        named."""
+        old_dir = tmp_path / "old"
+        new_dir = tmp_path / "new"
+        old_dir.mkdir()
+        new_dir.mkdir()
+        body = "int add(int a, int b) { return a + b; }\n"
+        _build_so(old_dir, "libreal.so", body)
+        # Two versions of the same canonical library on the NEW side --
+        # build_match_map()'s own version-aware tie-break selects ".2".
+        _build_so(new_dir, "libreal.so.1", body)
+        _build_so(new_dir, "libreal.so.2", body)
+        facts_path = _write_old_facts(
+            tmp_path, old_dir, old_dir / "libreal.so", "libreal.so"
+        )
+        manifest = tmp_path / "manifest.yaml"
+        manifest.write_text("libreal.so.1:\n  headers: []\n")
+
+        code, out = _invoke(
+            "compare",
+            str(facts_path),
+            str(new_dir),
+            "--old-bundle-facts",
+            "--include-system-declarations",
+            "--bundle-facts-library-manifest",
+            str(manifest),
+            "--format",
+            "json",
+        )
+
+        assert code == 64, out
+        assert "libreal.so.1" in out
+        assert "libreal.so.2" in out
+
+    def test_manifest_key_naming_the_selected_version_is_accepted(
+        self, tmp_path: Path
+    ) -> None:
+        """The positive-path sibling of the above: naming the version
+        build_match_map() actually selected must still work."""
+        old_dir = tmp_path / "old"
+        new_dir = tmp_path / "new"
+        old_dir.mkdir()
+        new_dir.mkdir()
+        body = "int add(int a, int b) { return a + b; }\n"
+        _build_so(old_dir, "libreal.so", body)
+        _build_so(new_dir, "libreal.so.1", body)
+        _build_so(new_dir, "libreal.so.2", body)
+        facts_path = _write_old_facts(
+            tmp_path, old_dir, old_dir / "libreal.so", "libreal.so"
+        )
+        manifest = tmp_path / "manifest.yaml"
+        manifest.write_text("libreal.so.2:\n  headers: []\n")
+
+        code, out = _invoke(
+            "compare",
+            str(facts_path),
+            str(new_dir),
+            "--old-bundle-facts",
+            "--include-system-declarations",
+            "--bundle-facts-library-manifest",
+            str(manifest),
+            "--format",
+            "json",
+        )
+
+        assert code == 0, out
+
     def test_malformed_manifest_is_a_clean_error(self, tmp_path: Path) -> None:
         old_dir = tmp_path / "old"
         new_dir = tmp_path / "new"
