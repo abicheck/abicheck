@@ -412,6 +412,8 @@ def test_merge_fragments_empty_returns_empty_result():
         typedefs={},
         typedefs_qualified={},
         constants={},
+        typedef_entity_ids={},
+        constant_entity_ids={},
         ast_producer="castxml",
         ast_toolchain={},
         ast_fallback_reason=None,

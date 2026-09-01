@@ -890,6 +890,16 @@ def merge_snapshots(castxml_snap: AbiSnapshot, clang_snap: AbiSnapshot) -> AbiSn
             **clang_snap.typedefs_qualified,
             **castxml_snap.typedefs_qualified,
         },
+        # The `EntityId` sidecars (ADR-063 Phase 2) union the same way, in the
+        # same direction, so they cannot desync from the dicts they annotate.
+        typedef_entity_ids={
+            **clang_snap.typedef_entity_ids,
+            **castxml_snap.typedef_entity_ids,
+        },
+        constant_entity_ids={
+            **clang_snap.constant_entity_ids,
+            **castxml_snap.constant_entity_ids,
+        },
         ast_producer="hybrid",
         ast_toolchain={
             **{

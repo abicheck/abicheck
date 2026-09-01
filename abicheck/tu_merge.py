@@ -303,6 +303,8 @@ def merge_fragments(
             typedefs={},
             typedefs_qualified={},
             constants={},
+            typedef_entity_ids={},
+            constant_entity_ids={},
             ast_producer="castxml",
             ast_toolchain={},
             ast_fallback_reason=None,
@@ -490,6 +492,16 @@ def merge_fragments(
         ),
         kind="constant",
     )
+    # `EntityId` sidecars (ADR-063 Phase 2): a plain union in `ordered` order,
+    # not `_merge_scalar_group`. That helper diagnoses two TUs disagreeing
+    # about one key's *value*, and an `EntityId` is derived entirely from the
+    # key's own scope and leaf name, so there is no disagreement to report.
+    typedef_entity_ids = {
+        name: eid for f in ordered for name, eid in f.typedef_entity_ids.items()
+    }
+    constant_entity_ids = {
+        name: eid for f in ordered for name, eid in f.constant_entity_ids.items()
+    }
 
     # Any contributing fragment's AST provenance is representative: ADR-050
     # D3 rejects a manifest declaring different compilers/target triples
@@ -543,6 +555,8 @@ def merge_fragments(
         typedefs=typedefs,
         typedefs_qualified=typedefs_qualified,
         constants=constants,
+        typedef_entity_ids=typedef_entity_ids,
+        constant_entity_ids=constant_entity_ids,
         ast_producer=representative.ast_producer,
         ast_toolchain=merged_ast_toolchain,
         ast_fallback_reason=representative.ast_fallback_reason,

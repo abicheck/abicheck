@@ -72,13 +72,20 @@ if TYPE_CHECKING:
         entity_id: EntityId | None
 
 
-__all__ = ["decode_entity_ids", "encode_entity_ids"]
+__all__ = [
+    "decode_entity_ids",
+    "decode_sidecar_entity_ids",
+    "encode_entity_ids",
+    "encode_sidecar_entity_ids",
+]
 
 #: Snapshot keys holding lists of declaration dicts/objects that carry the
 #: field, paired with the matching ``AbiSnapshot`` attribute name.
-#: ``typedefs``/``constants`` get no carrier (``AbiSnapshot``'s own
-#: `model/entities.py` docstring on `RecordType.entity_id` records why) so
-#: they are not listed here.
+#: ``typedefs``/``constants`` are plain ``dict[str, str]`` with no
+#: declaration object to carry the field on, so they are not listed here —
+#: their identity travels in the separate ``AbiSnapshot.typedef_entity_ids``/
+#: ``constant_entity_ids`` sidecars instead (schema v31), encoded by
+#: :func:`encode_sidecar_entity_ids` below.
 _DECLARATION_LIST_KEYS = (
     ("types", "types"),
     ("enums", "enums"),
@@ -126,6 +133,49 @@ def encode_entity_ids(d: dict[str, Any], snap: AbiSnapshot) -> dict[str, Any]:
             else:
                 decl_dict["entity_id"] = domain_entity_id_to_dto(entity_id)
     return d
+
+
+#: The ``AbiSnapshot`` attributes (and identically-named wire keys) holding a
+#: ``dict[str, EntityId]`` sidecar rather than a declaration list.
+_SIDECAR_KEYS = ("typedef_entity_ids", "constant_entity_ids")
+
+
+def encode_sidecar_entity_ids(d: dict[str, Any], snap: AbiSnapshot) -> dict[str, Any]:
+    """In-place: replace each ``dict[str, EntityId]`` sidecar with a plain
+    ``{key: entity-id document}`` mapping. Returns *d*, for chaining alongside
+    :func:`encode_entity_ids`.
+
+    Needed for the same reason that function is given the still-typed *snap*:
+    ``dataclasses.asdict()`` flattens each ``EntityId``'s ``ScopePath``
+    segments into anonymous dicts with no record of which segment dataclass
+    produced them. An empty sidecar is written as an empty mapping rather than
+    dropped, matching how ``typedefs_qualified`` itself is written.
+    """
+    for key in _SIDECAR_KEYS:
+        d[key] = {
+            name: domain_entity_id_to_dto(entity_id)
+            for name, entity_id in getattr(snap, key).items()
+        }
+    return d
+
+
+def decode_sidecar_entity_ids(d: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    """The inverse of :func:`encode_sidecar_entity_ids`: each sidecar's
+    reconstructed ``{key: EntityId}`` mapping, ready to hand straight to the
+    ``AbiSnapshot(...)`` reconstruction as keyword arguments.
+
+    Absent on every pre-v31 snapshot, which loads as ``{}`` — the same value a
+    v31 snapshot with no header-resolved typedef/constant identity carries, so
+    no migration adapter is needed (identical reasoning to the v25
+    ``typedefs_qualified`` addition).
+    """
+    return {
+        key: {
+            name: domain_entity_id_from_dto(raw)
+            for name, raw in (d.get(key) or {}).items()
+        }
+        for key in _SIDECAR_KEYS
+    }
 
 
 def _decode_one(raw: Any) -> Any:
