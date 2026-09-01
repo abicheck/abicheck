@@ -30,7 +30,7 @@ Phase 5 section for the design this page's data comes from.
 | `Function.exception_spec` | `str \| None` | castxml, clang | persisted | ✅ | — | ✅ | — | ✅ |
 | `Function.hidden_friend_owner` | `str \| None` | castxml, clang | persisted | ✅ | — | ✅ | — | ✅ |
 | `Function.is_compiler_generated` | `bool \| None` | castxml | persisted | ✅ | — | ✅ | — | ✅ |
-| `Function.is_explicit` | `bool \| None` | castxml, clang | persisted | ✅ | — | ✅ | — | ✅ |
+| `Function.is_explicit` | `bool \| None` | castxml, clang, dwarf | persisted | ✅ | — | ✅ | — | ✅ |
 | `Function.is_hidden_friend` | `bool \| None` | castxml, clang | persisted | ✅ | — | ✅ | — | ✅ |
 | `Function.is_override` | `bool \| None` | castxml, clang | persisted | ✅ | — | ✅ | — | ✅ |
 | `Function.is_variadic` | `bool \| None` | castxml, clang | persisted | ✅ | — | ✅ | — | ✅ |

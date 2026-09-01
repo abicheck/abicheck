@@ -388,7 +388,7 @@ FACT_REGISTRY = FactRegistry(
             owner="Function",
             field="is_explicit",
             value_type="bool | None",
-            producing_backends=("castxml", "clang"),
+            producing_backends=("castxml", "clang", "dwarf"),
             persisted=True,
             identity_relevant=False,
             comparable=True,
@@ -399,7 +399,9 @@ FACT_REGISTRY = FactRegistry(
                 "explicit specifier on constructors/conversion operators. "
                 "Tri-state like RecordType.is_final -- None already "
                 "unambiguously means 'not captured'. Plain case (b) "
-                "conversion."
+                "conversion. dwarf_snapshot.py reads DW_AT_explicit and "
+                "passes a real bool too, so DWARF is a genuine producer "
+                "(Codex review, fresh evidence)."
             ),
         ),
         _E(
@@ -462,7 +464,19 @@ FACT_REGISTRY = FactRegistry(
             notes=(
                 "True when a declaration was never written by the user "
                 "(compiler-synthesized implicit special member). Same "
-                "shape as is_explicit -- plain case (b) conversion."
+                "shape as is_explicit -- plain case (b) conversion. "
+                "clang is deliberately NOT listed (Codex review raised "
+                "this; investigated and declined): extract/headers/clang/"
+                "functions.py does construct every retained Function with "
+                "is_compiler_generated=False, but backend_capabilities.py's "
+                "own AST-verified matrix (test_matrix_claims_match_parser_"
+                "source) draws a real, established, load-bearing "
+                "distinction between a real extracted expression and a "
+                "hardcoded literal -- clang's own AST walk skips "
+                "`isImplicit` nodes entirely, so False here is structurally "
+                "guaranteed, never derived per-declaration, matching that "
+                "row's own NONE/clang claim. Listing 'clang' here would "
+                "contradict that already-tested convention, not correct it."
             ),
         ),
         _E(
