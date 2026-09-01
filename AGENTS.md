@@ -553,11 +553,15 @@ Core pipeline (in order of data flow):
      shared pipeline `compare`'s implicit-dump operand and `scan`'s
      candidate resolution already use, with the legacy `-p`/`--compile-db`
      auto-match threaded through as an explicit pass-through rather than a
-     typed-API field (`execute_dump_request`'s own docstring). `handle_non_
-     elf_dump` (PE/Mach-O) is unmigrated — no PE/Mach-O toolchain was
-     available to verify a migration against; see the "PR C" entry under
-     "Known gaps" for the full account, including the L4 source-extractor
-     default change this migration carries for ELF
+     typed-API field (`execute_dump_request`'s own docstring). PE/Mach-O
+     now routes through the identical shared executor too (ADR-063 Phase
+     1) — `handle_non_elf_dump` stays defined, unchanged, only for its own
+     direct unit tests, never called from the CLI's real dispatch;
+     verified via mock-based CLI/unit tests only, since no PE/Mach-O
+     toolchain was available to verify a migration against a real binary.
+     See the "PR C" entry under "Known gaps" for the full ELF account,
+     including the L4 source-extractor default change that migration
+     carries
    - `cli_dump_request.py` — CLI cleanup phase two, PR 3A: `dump_cmd`'s ~30
      Click parameters as one `DumpRequest`, plus the Tier-2-to-Click error
      translation the boundary owes. Fed the CLI's *already-resolved* compile

@@ -76,11 +76,13 @@ its own section below), PR 4 changes what a CI job's exit code means.
 > `execute_dump_request` — see its own section's closing status note
 > ("Slice landed: the real ELF run is migrated") for the account; the
 > section's own long investigation history above that note remains as the
-> record of why this was not attempted sooner. PR C's PE/Mach-O half
-> (`handle_non_elf_dump`) is unmigrated — no PE/Mach-O toolchain was
-> available where this was done — and PR F/3C's removal itself still needs
-> that half closed too, per 3C's own "all three resolvers" ordering rule
-> (its own section, unchanged by this update).
+> record of why this was not attempted sooner. **Update (2026-09-01, PR
+> #980): PR C's PE/Mach-O half (`handle_non_elf_dump`) is migrated too**
+> — see that section's own "Update (2026-09-01, PR #980)" paragraph for
+> the account; verified only via mock-based CLI/unit tests, no real
+> PE/Mach-O toolchain was available to verify against. PR F/3C's removal
+> is no longer blocked on this half specifically, per 3C's own "all three
+> resolvers" ordering rule (its own section).
 >
 > **Update (2026-08-16, later the same day).** PR G1 (canonical `ExitDecision`
 > + report block) landed as [#789](https://github.com/abicheck/abicheck/pull/789)
@@ -2148,10 +2150,21 @@ pipelines a fourth time.
   > PE/Mach-O closes item 1 in full, per this entry's own "all three
   > resolvers" rule.
   >
+  > **Update (2026-09-01, PR #980): item 1 is now fully closed, PE/Mach-O
+  > included.** `handle_non_elf_dump` no longer executes independently —
+  > it routes through `execute_dump_request` the identical way ELF's real
+  > run and `scan`'s candidate resolution already do (see PR C's own
+  > section above for the account; verified only via mock-based CLI/unit
+  > tests, no PE/Mach-O toolchain was available to verify against a real
+  > binary). **3C's removal is therefore no longer blocked by item 1 at
+  > all — only item 2 (the L4 extractor default divergence, still not
+  > attempted, deliberately) remains open** before this entry's "all three
+  > resolvers" condition is fully satisfied.
+  >
   > **What still blocks the removal**, restated precisely because "3A is not
-  > done" is now too coarse to act on (numbered list below predates the
-  > update immediately above; item 1's `dump`-side/ELF half is superseded by
-  > it, not by anything in this list):
+  > done" is now too coarse to act on (numbered list below predates both
+  > updates immediately above; item 1's `dump`-side half, ELF and PE/Mach-O
+  > alike, is superseded by them, not by anything in this list):
   >
   > 1. **Neither real run routes through the shared pipeline yet.** The ELF/
   >    PE/Mach-O `dump` executes through `perform_elf_dump`/
@@ -3221,6 +3234,31 @@ pipelines a fourth time.
   > site instead of the CLI local. The same spy test now also asserts
   > `seen["allow_build_query"] is True` (verified to fail against the
   > pre-fix code the same way).
+
+  > **Update (2026-09-01, PR #980): PE/Mach-O is now migrated too, closing
+  > this section's own "What this does not close" gap.** The design this
+  > section already worked out for ELF above carried over mechanically —
+  > `execute_dump_request`/`_resolve_side_snapshot_impl` were already
+  > format-generic (confirmed by reading the real code: `is_elf=True if
+  > fmt == "elf" else None`, the ADR-039 build-context collector and
+  > `embed_side_build_source` both called unconditionally regardless of
+  > format), the same pipeline `compare`'s implicit-dump operand and
+  > `scan`'s candidate resolution already used for PE/Mach-O input — so no
+  > second structural investigation was needed the way the ELF slice above
+  > required. `handle_non_elf_dump` is retired from `dump_cmd`'s real
+  > dispatch the same way `perform_elf_dump` was (still defined, for its
+  > own direct unit tests). **Verified only via mock-based CLI/unit tests,
+  > not real `g++`/clang/castxml** — no PE/Mach-O toolchain was available
+  > in this environment either, so unlike the ELF slice's own
+  > `test_dump_cli_typed_api_parity.py` corpus, there is no byte-for-bit
+  > confirmation against a real compiled DLL/dylib. PR F/3C's removal
+  > itself is therefore no longer blocked on this half specifically, per
+  > 3C's own "all three resolvers" ordering rule below — see that rule's
+  > own text for what (if anything) it still needs. Root `AGENTS.md`'s own
+  > PR C entry, `docs/contribute/known-gaps.md`'s "PR C" entry, and
+  > `docs/contribute/adr/063-one-semantic-pipeline.md`'s Phase 1 status
+  > bullet are all updated to match (Codex review on PR #980 caught this
+  > section's own conclusion left stale after that PR's initial push).
 
 `dump --build-query` and `dump --build-compile-db` describe how the *project*
 is built, not what this snapshot is. They are already documented as CLI
