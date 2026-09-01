@@ -749,20 +749,20 @@ def _run_artifact_set(
     # discovery, not only inside run_scan_set() below -- discover_artifact_set()
     # traverses a directory and stats/format-validates every explicit member,
     # and an invalid member could otherwise mask the request's own
-    # PlanningError. Same check as the single-binary path's own, including
-    # its depth=binary exemption -- that depth resolves to a collect_mode
-    # that never consults build_info/build_targets at all, matching
-    # workflows.plan._check_bazel_target_scoping.
-    from .workflows.plan import bazel_target_scoping_failure
+    # PlanningError. Uses artifact_set_bazel_scoping_failure (Codex review),
+    # not the bare check -- the latter had no headers/collect-mode exemption
+    # (only the depth=binary case was handled here, textually), wrongly
+    # rejecting a headerless --depth headers set the scan-aware guards
+    # downstream would accept.
+    from .workflows.plan import artifact_set_bazel_scoping_failure
 
-    if (depth or "").lower() != "binary" and (
-        _bf := bazel_target_scoping_failure(
-            "candidate",
-            build_info,
-            build_targets,
-            sources=sources,
-            build_config=build_config,
-        )
+    if _bf := artifact_set_bazel_scoping_failure(
+        depth,
+        bool(header_pairs),
+        build_info,
+        build_targets,
+        sources=sources,
+        build_config=build_config,
     ):
         raise click.UsageError(str(_bf))
 

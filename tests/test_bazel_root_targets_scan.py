@@ -681,6 +681,46 @@ def test_scan_cli_artifact_set_depth_binary_exempts_the_bazel_scoping_check(
     assert "pre-captured Bazel aquery" not in result.output
 
 
+def test_scan_cli_artifact_set_headerless_depth_headers_exempts_the_bazel_scoping_check(
+    monkeypatch, tmp_path: Path
+) -> None:
+    """Codex review, fresh evidence (ADR-063 Phase 4's second slice): the
+    `--artifact-set` path's own pre-flight check only ever special-cased
+    `--depth binary` textually -- it carried none of the headers/collect-
+    mode exemption `scan_bazel_scoping_failure` applies elsewhere, so a
+    headerless `--depth headers` set (collect_mode "off", neither
+    embed_build_source nor the L2 seed ever consulting build_info) with an
+    explicit `--build-target` was wrongly rejected here, before the
+    scan-aware guards downstream that would have accepted it."""
+    aquery = _write_bazel_aquery(tmp_path)
+    a = _artifact(tmp_path, "a")
+    b = _artifact(tmp_path, "b")
+    _bypass_discovery_validation(monkeypatch, a, b)
+
+    runner = CliRunner()
+    result = runner.invoke(
+        main,
+        [
+            "scan",
+            "--artifact-set",
+            str(a),
+            "--artifact-set",
+            str(b),
+            "--dry-run",
+            "--depth",
+            "headers",
+            "--sources",
+            str(_sources(tmp_path)),
+            "--build-info",
+            str(aquery),
+            "--build-target",
+            "//:math",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    assert "pre-captured Bazel aquery" not in result.output
+
+
 def test_run_scan_typed_api_raises_planning_error_not_click_usage_error(
     tmp_path: Path,
 ) -> None:

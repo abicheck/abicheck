@@ -110,6 +110,7 @@ __all__ = [
     "AnalysisPlanner",
     "PlanningFailure",
     "SidePlan",
+    "artifact_set_bazel_scoping_failure",
     "bazel_target_scoping_failure",
     "scan_bazel_scoping_failure",
 ]
@@ -485,6 +486,41 @@ def _check_bazel_target_scoping(side: SidePlan) -> PlanningFailure | None:
         return None
     return bazel_target_scoping_failure(
         side.label, side.build_info, side.build_targets, sources=side.sources
+    )
+
+
+def artifact_set_bazel_scoping_failure(
+    depth: str | None,
+    headers_present: bool,
+    build_info: Path | None,
+    build_targets: tuple[str, ...],
+    sources: Path | None = None,
+    build_config: Path | None = None,
+) -> PlanningFailure | None:
+    """The ``scan --artifact-set`` pre-flight guard (Codex review).
+
+    ``cli_scan._run_artifact_set`` has no per-member resolved ``collect_mode``
+    to check against at this point (each discovered member resolves its own
+    tier/level independently, later, inside ``run_scan_set``) -- only the raw
+    ``depth`` CLI flag and whether *any* member's header pair was given. Mirrors
+    :func:`_check_bazel_target_scoping`'s own no-``SidePlan`` reasoning exactly
+    (``depth="binary"``/``"headers"`` both resolve to collect_mode ``"off"``
+    via :func:`_depth_implied_collect_mode`; only ``"binary"`` additionally
+    clears headers) rather than ``scan_bazel_scoping_failure``'s, which needs a
+    real, resolved ``EvidenceDepth``/``collect_mode`` pair this call site
+    doesn't have yet.
+    """
+    is_binary = (depth or "").lower() == "binary"
+    effective_headers_present = False if is_binary else headers_present
+    off = depth is not None and _depth_implied_collect_mode(depth) == "off"
+    if off and not effective_headers_present:
+        return None
+    return bazel_target_scoping_failure(
+        "candidate",
+        build_info,
+        build_targets,
+        sources=sources,
+        build_config=build_config,
     )
 
 
