@@ -285,15 +285,13 @@ def raw_segments(qualified: str) -> list[str]:
 # ``architecture/debt.yaml``.
 # ---------------------------------------------------------------------------
 
-#: Matches the marker prefix :func:`strip_anonymous_type_location` already
-#: produces (``"(lambda:"``, ``"(unnamed struct:"``) -- NOT the raw
-#: ``at <path>:<line>:<col>`` form that function itself consumes. Only the
-#: fixed prefix is a regex; the variable-length basename that follows is
-#: scanned manually by :func:`_scan_anon_type_marker` below, since a single
-#: regex alternation (``\([^()]*\)``) can only ever balance one level of
-#: nesting and fails on a basename with two, e.g. ``foo(a(b)).hpp``
-#: (Codex review, fresh evidence).
-_ANON_TYPE_MARKER_PREFIX_RE = _re.compile(r"\((lambda|unnamed\s+\w+):")
+#: Matches the marker prefix :func:`strip_anonymous_type_location` already produces
+#: (``"(lambda:"``, ``"(unnamed struct:"``) -- NOT the raw ``at <path>:<line>:<col>``
+#: form that function itself consumes. Only the fixed prefix is a regex; the
+#: variable-length basename that follows is scanned manually by :func:`_scan_anon_type_marker`
+#: below, since a single regex alternation (``\([^()]*\)``) can only ever balance one
+#: level of nesting and fails on a basename with two, e.g. ``foo(a(b)).hpp`` (Codex review, fresh evidence).
+_ANON_TYPE_MARKER_PREFIX_RE = _re.compile(r"\((lambda|unnamed\s+\w+|anonymous\s+\w+):")
 
 #: Matches a marker's trailing ``:<line>:<col>`` right before the closing
 #: paren :func:`_scan_anon_type_marker` already found -- applied to the text
@@ -621,7 +619,8 @@ def _lambda_identity_containers_and_strings(
     strings: list[str] = []
     for container in containers:
         _collect_strings(container, strings)
-    if not any("(lambda" in s or "(unnamed " in s for s in strings):
+    markers = ("(lambda", "(unnamed ", "(anonymous ")
+    if not any(m in s for s in strings for m in markers):
         return None
     return containers, strings
 

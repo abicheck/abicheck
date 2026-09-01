@@ -122,9 +122,18 @@ from ..name_classification import (
 #: convention (root ``AGENTS.md``) -- pinned by
 #: ``test_bare_marker_normalization_known_limitation_marker_text_in_path``
 #: rather than silently left unrecorded.
+#:
+#: ``anonymous\s+\w+`` (fresh evidence, real corpus): a real L5 graph node
+#: was observed spelled bare as ``"anonymous union at /abs/.../x.h:649:9"``
+#: -- a legitimate anonymous-tag vocabulary this regex's original
+#: ``lambda``/``unnamed <kind>`` alternation didn't cover, so the whole
+#: match failed and the checkout-dependent absolute path survived straight
+#: into the node id: two builds of the identical, unedited declaration
+#: produced two different ids, read downstream as a spurious
+#: ``declaration_renamed``.
 _BARE_ANON_TYPE_LOCATION_RE = re.compile(
-    r"\b(lambda|unnamed\s+\w+)\s+at\s+"
-    r"((?:(?!(?:lambda|unnamed\s+\w+)\s+at\s)[^\"])*):(\d+):(\d+)\b"
+    r"\b(lambda|unnamed\s+\w+|anonymous\s+\w+)\s+at\s+"
+    r"((?:(?!(?:lambda|unnamed\s+\w+|anonymous\s+\w+)\s+at\s)[^\"])*):(\d+):(\d+)\b"
 )
 
 
