@@ -27,7 +27,7 @@ import pytest
 from click.testing import CliRunner
 
 from abicheck.cli import main
-from abicheck.cli_params import DEPTH_PARAM
+from abicheck.frontends.cli.options.params import DEPTH_PARAM
 
 
 def _registered() -> dict:

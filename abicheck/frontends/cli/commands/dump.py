@@ -62,15 +62,15 @@ from ....cli_options import (
     snapshot_compression_option,
     verbose_option,
 )
-from ....cli_params import (
-    _load_suppression_and_policy as _load_suppression_and_policy,  # noqa: F401  — re-exported to keep cli import sites (test suite) stable
-)
 from ....cli_resolve import (
     _click_notify,
     _expand_header_inputs,
     _normalize_binary_input,
 )
 from ....frontends.cli import help as cli_help
+from ..options.params import (
+    _load_suppression_and_policy as _load_suppression_and_policy,  # noqa: F401  — re-exported to keep cli import sites (test suite) stable
+)
 
 if TYPE_CHECKING:
     from ....service_scan import CompileContext

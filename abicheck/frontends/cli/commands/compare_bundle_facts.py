@@ -183,7 +183,6 @@ def dispatch(*, compile_context: Any, **kwargs: Any) -> None:
         _bundle_side_input.compare_release_against_bundle_facts
     )
     from ....cli_compare_release_helpers import _exit_compare_release
-    from ....cli_params import _load_suppression_and_policy
 
     # known_libraries_for_new_side lives in workflows/bundle_facts_library_
     # overrides.py, not bundle_side_input.py (Codex review, fresh evidence):
@@ -196,6 +195,7 @@ def dispatch(*, compile_context: Any, **kwargs: Any) -> None:
         BundleFactsLibraryOverridesError,
         known_libraries_for_new_side,
     )
+    from ..options.params import _load_suppression_and_policy
     from .compare_bundle_facts_rejections import reject_unsupported_options
 
     reject_unsupported_options(kwargs)
@@ -368,7 +368,15 @@ def dispatch(*, compile_context: Any, **kwargs: Any) -> None:
             # translation rather than falling into the generic ValueError
             # clause below (exit 1).
             raise click.UsageError(str(exc)) from exc
-        except (SnapshotError, ValueError, OSError) as exc:
+        # TypeError (Codex review, fresh evidence): a malformed nested
+        # build_mode/contract field inside one of OLD_FACTS's per-library
+        # snapshots is rejected rather than coerced at the storage boundary
+        # (storage AGENTS.md invariant 6) -- bundle_facts_from_dict()'s own
+        # per_library_snapshots comprehension calls snapshot_from_dict()
+        # with no nested guard, so that TypeError propagates all the way
+        # here and must be caught alongside ValueError like every other
+        # malformed-OLD_FACTS shape.
+        except (SnapshotError, TypeError, ValueError, OSError) as exc:
             # Same CLI-boundary translation every other SnapshotError-raising
             # entry point uses (cli_resolve.py et al.) -- without this, a
             # container-node-budget rejection (or any other SnapshotError) would

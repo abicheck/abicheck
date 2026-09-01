@@ -93,7 +93,6 @@ from .cli_options import (
     split_sided_paths,
     verbose_option,
 )
-from .cli_params import DEPTH_PARAM, SIDED_PATH_PARAM, _load_suppression_and_policy
 from .cli_scan_baseline import (
     _baseline_is_native_library,  # noqa: F401 - re-export for scan tests/service_scan
     _emit_estimate,  # noqa: F401 - re-export; --estimate CLI flag removed, kept for direct callers
@@ -122,6 +121,11 @@ from .cli_scan_helpers import (  # noqa: F401 - coverage/depth helpers re-export
     scan_pattern_roots,
 )
 from .frontends.cli.help import scan_help_options
+from .frontends.cli.options.params import (
+    DEPTH_PARAM,
+    SIDED_PATH_PARAM,
+    _load_suppression_and_policy,
+)
 
 # The scan *engine* (classify → always-on tier → level → compare) lives in
 # scan_engine.py, not here — this module is a thin Click front-end over it
