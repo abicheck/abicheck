@@ -107,7 +107,7 @@ Across the 129 fields of the 6 declaration types the two header-AST backends bui
 | `elf_visibility` | — n/a | — n/a | — n/a | Read from the binary's own symbol table (`dumper_elf_symbols.py`). |
 | `ref_qualifier` | ✅ Yes | ✅ Yes | ✅ Yes | — |
 | `is_explicit` | ✅ Yes | ✅ Yes | ✅ Yes | — |
-| `is_explicit_fact` | ❌ No | ❌ No | ❌ No | ADR-063 Phase 5 (fifth batch): Fact[bool \| None] sibling of is_explicit. Deliberately NOT constructed as an explicit keyword -- neither backend passes it literally at Function(...) construction; correctly derived by the generic bridge_legacy_and_fact bridge in __post_init__, so NONE here reflects literal-keyword evidence only, not runtime behavior (same shape as RecordType.data_size_bits_fact). |
+| `is_explicit_fact` | ✅ Yes | ✅ Yes | ✅ Yes | ADR-063 Phase 5: Fact[bool \| None] sibling of is_explicit. Both backends now construct it directly as an explicit kwarg -- Fact.present(is_explicit) for a Constructor/Method/Converter (castxml) or CXXConstructorDecl/CXXConversionDecl (clang), Fact.not_applicable() otherwise -- since a kind where `explicit` is conceptually inapplicable is a confirmed non-gap, not missing evidence the generic bridge should read as NOT_COLLECTED (Codex review, PR #982). |
 | `is_hidden_friend` | ✅ Yes | ✅ Yes | ✅ Yes | — |
 | `is_hidden_friend_fact` | ❌ No | ❌ No | ❌ No | Same shape as is_explicit_fact -- see that row's own note. |
 | `source_header` | — n/a | — n/a | — n/a | Set after parsing by `provenance.apply_provenance()` from the public-header set (`-H`/`--header`, plus `scan --public-header-dir`), not by either backend. |
@@ -121,7 +121,7 @@ Across the 129 fields of the 6 declaration types the two header-AST backends bui
 | `exception_spec_fact` | ❌ No | ❌ No | ❌ No | Same shape as is_explicit_fact -- see that row's own note. |
 | `deprecated` | ✅ Yes | ✅ Yes | ✅ Yes | clang side wired in G31 Phase C (schema v19). |
 | `is_override` | ✅ Yes | ✅ Yes | ✅ Yes | clang side wired in G31 Phase C backend audit, from a real `OverrideAttr` child node (`dumper_clang._clang_method_is_override`). |
-| `is_override_fact` | ❌ No | ❌ No | ❌ No | Same shape as is_explicit_fact -- see that row's own note. |
+| `is_override_fact` | ✅ Yes | ✅ Yes | ✅ Yes | Same shape as is_explicit_fact above: both backends now construct it directly as Fact.present(is_override) for a kind in their own OVERRIDE_ELIGIBLE_KINDS set, Fact.not_applicable() otherwise (Codex review, PR #982). |
 | `hidden_friend_owner` | ✅ Yes | ✅ Yes | ✅ Yes | — |
 | `hidden_friend_owner_fact` | ❌ No | ❌ No | ❌ No | Same shape as is_explicit_fact -- see that row's own note. |
 | `elf_binding` | — n/a | — n/a | — n/a | Read from the binary's own symbol table (`dumper_elf_symbols.py`). |

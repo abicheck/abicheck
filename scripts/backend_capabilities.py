@@ -253,16 +253,17 @@ FACT_ROWS: tuple[FactRow, ...] = (
     FactRow(
         "Function",
         "is_explicit_fact",
-        _NONE,
-        _NONE,
+        _FULL,
+        _FULL,
         note=(
-            "ADR-063 Phase 5 (fifth batch): Fact[bool | None] sibling of "
-            "is_explicit. Deliberately NOT constructed as an explicit "
-            "keyword -- neither backend passes it literally at "
-            "Function(...) construction; correctly derived by the generic "
-            "bridge_legacy_and_fact bridge in __post_init__, so NONE here "
-            "reflects literal-keyword evidence only, not runtime behavior "
-            "(same shape as RecordType.data_size_bits_fact)."
+            "ADR-063 Phase 5: Fact[bool | None] sibling of is_explicit. "
+            "Both backends now construct it directly as an explicit kwarg "
+            "-- Fact.present(is_explicit) for a Constructor/Method/"
+            "Converter (castxml) or CXXConstructorDecl/CXXConversionDecl "
+            "(clang), Fact.not_applicable() otherwise -- since a kind "
+            "where `explicit` is conceptually inapplicable is a confirmed "
+            "non-gap, not missing evidence the generic bridge should read "
+            "as NOT_COLLECTED (Codex review, PR #982)."
         ),
     ),
     FactRow("Function", "is_hidden_friend", _FULL, _FULL),
@@ -333,9 +334,14 @@ FACT_ROWS: tuple[FactRow, ...] = (
     FactRow(
         "Function",
         "is_override_fact",
-        _NONE,
-        _NONE,
-        note="Same shape as is_explicit_fact -- see that row's own note.",
+        _FULL,
+        _FULL,
+        note=(
+            "Same shape as is_explicit_fact above: both backends now "
+            "construct it directly as Fact.present(is_override) for a "
+            "kind in their own OVERRIDE_ELIGIBLE_KINDS set, "
+            "Fact.not_applicable() otherwise (Codex review, PR #982)."
+        ),
     ),
     FactRow("Function", "hidden_friend_owner", _FULL, _FULL),
     FactRow(
