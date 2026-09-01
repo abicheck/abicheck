@@ -73,3 +73,13 @@
     `TestPublicSurfaceBackCompatReexports`,
     `TestSurfaceGraphRefinalizedAfterEnrichment` in
     `tests/test_policy_public_surface.py`.
+  - **Known, unfixed gap**: this migration carries a real, measured
+    performance regression against `scripts/benchmark_scaling.py`'s
+    baseline gate (a genuine constant-factor cost of building real
+    `GraphNode`/`GraphFact` objects instead of the deleted regex-based
+    re-parse), reproducing identically on this PR's very first commit. An
+    identity-keyed caching fix was attempted and reverted before landing
+    because it broke a real correctness test (a snapshot mutated in place
+    between two calls must see the new content, not a stale cached
+    result) -- see `docs/contribute/known-gaps.md`'s new ADR-063 Phase 3
+    entry for the full account.

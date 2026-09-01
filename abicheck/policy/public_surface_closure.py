@@ -586,6 +586,22 @@ def resolve_surface_graph_nodes(snap: AbiSnapshot) -> dict[str, GraphNode]:
     ``coverage`` at all), so this narrows back to the concrete type first,
     the pattern that protocol's own docstring documents for exactly this
     situation.
+
+    **Deliberately not memoized across calls, even though a real CI perf
+    gate measured this function's cost as a regression** (see
+    ``docs/contribute/known-gaps.md``'s ADR-063 Phase 3 entry for the full
+    accounting). A caching attempt keyed on *snap*/*graph* identity was
+    tried and reverted before landing: ``tests/test_export_surface.py::
+    TestUnresolvedTypeEdges::test_a_scope_lost_alias_key_is_followed_to_
+    its_target`` mutates ``snap.typedefs``/``snap.types`` in place between
+    two ``compute_export_surface(snap)`` calls on the *same* object and
+    correctly expects the second call to see the new content -- an
+    identity-keyed cache would silently serve the first call's stale
+    result instead, exactly the kind of silent false-negative this whole
+    migration exists to prevent. Trading a real correctness guarantee for
+    a performance win is not an acceptable trade here; the cost is paid in
+    full, every call, until a genuinely safe optimization (e.g. cheaper
+    ``GraphNode``/``GraphFact`` construction, not caching) is designed.
     """
     graph: SurfaceGraphLike | None = snap.surface_graph
     if graph is None:

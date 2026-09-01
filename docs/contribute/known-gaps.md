@@ -5765,3 +5765,48 @@ looked like the obvious fix and wasn't.
   note (`docs/contribute/plans/one-semantic-pipeline.md`), and
   `compare/surface_graph.py`'s/`policy/public_surface.py`'s own module
   docstrings for the exact reasoning each carries.
+
+- **ADR-063 Phase 3 (D5)'s traversal migration (`policy/
+  public_surface_closure.py::resolve_surface_graph_nodes`) carries a real,
+  measured, unfixed performance regression against `scripts/
+  benchmark_scaling.py`'s "Baseline regression (PR vs base)" CI gate — a
+  30-100%+ slowdown across nearly every scenario, not scoped to one.
+  Root cause: `checker.compare()` defaults `scope_to_public_surface=True`,
+  so `post_processing.FilterNonPublicSurface` calls `compute_public_
+  surface()` (hence `resolve_surface_graph_nodes()`) exactly twice per
+  compare (once per side) regardless of whether scoping changes the
+  verdict — this call count is unchanged from the pre-migration
+  `surface.py` implementation, and unchanged by anything this PR's
+  Codex-review-response commits did. What changed is the *cost per call*:
+  the migrated walk builds real `GraphNode`/`GraphFact` objects through
+  `compare/surface_graph.py`'s ADR-046 evidence-preserving merge machinery
+  for every function/variable/record/typedef, which carries meaningfully
+  more per-declaration overhead than the deleted regex-based re-parse it
+  replaced (sorting facts by precedence, JSON-content tie-breaking,
+  conflict tracking) — a genuine constant-factor cost of the graph
+  architecture, not a bug in one call site. This defect predates every
+  fix commit addressing Codex's actual review comments (stale-graph
+  reachability, the broken `policy.public_surface` back-compat import
+  path, the stale `graph_id` after enrichment): it reproduces identically
+  on this PR's very first commit, before any of those fixes existed.
+  **Reverted fix attempt**: an identity-keyed cache (a marker on `graph`
+  when `snap.surface_graph` is already attached; a private cache slot on
+  `snap` itself for the backfill-graph case) made repeated calls on an
+  *unchanged* snapshot free, restoring parity with the pre-migration
+  cost — but `tests/test_export_surface.py::TestUnresolvedTypeEdges::
+  test_a_scope_lost_alias_key_is_followed_to_its_target` mutates
+  `snap.typedefs`/`snap.types` in place between two `compute_export_
+  surface(snap)` calls on the *same* object and correctly expects the
+  second call to see the new content; the identity-keyed cache silently
+  served the first call's stale result instead. That is precisely the
+  silent-false-negative class this whole PR exists to close, so the cache
+  was reverted before landing rather than accepted as a acceptable
+  trade-off — see `resolve_surface_graph_nodes()`'s own docstring for the
+  in-code account. **Not fixed here**: a real fix needs either a
+  content-aware cache-invalidation signal (expensive to compute cheaply)
+  or a genuinely cheaper `GraphNode`/`GraphFact` construction path for a
+  known-single-producer, throwaway graph — both are real, scoped
+  optimization work distinct from this PR's correctness-focused scope,
+  and neither was attempted under this PR given the risk of a rushed,
+  unverified change to the shared ADR-046 evidence-merge machinery every
+  other graph producer also depends on.

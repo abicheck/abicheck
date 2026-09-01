@@ -379,3 +379,50 @@ class TestSurfaceGraphRefinalizedAfterEnrichment:
 
         assert attached.graph_id != stale_graph_id
         assert attached.graph_id == attached.compute_graph_id()
+
+
+class TestResolveSurfaceGraphNodesIsNotIdentityCached:
+    """A real CI perf gate measured a 30-100%+ regression across nearly
+    every ``benchmark_scaling.py`` scenario once ``resolve_surface_graph_
+    nodes`` started calling ``build_public_surface_facts`` unconditionally
+    on every call -- a typical compare resolves the public surface more
+    than once per side. An identity-keyed cache (on *snap* or *graph*) was
+    tried as a fix and reverted before landing: it silently served a stale
+    result once a caller mutated the snapshot in place and queried again,
+    which is a real, already-tested usage pattern (Codex review, PR #979 --
+    see the module's own docstring for the full accounting, and
+    ``docs/contribute/known-gaps.md`` for why the perf regression itself
+    stays open rather than being "fixed" by an unsafe cache). This test
+    pins that correctness requirement directly, so a future memoization
+    attempt has an immediate, explicit signal if it reintroduces the same
+    hazard."""
+
+    def test_mutating_the_snapshot_between_calls_is_reflected_immediately(
+        self,
+    ) -> None:
+        snap = AbiSnapshot(
+            library="l",
+            version="1",
+            functions=[
+                Function(
+                    name="f",
+                    mangled="_Z1fv",
+                    return_type="void",
+                    params=[Param(name="a", type="A *")],
+                    visibility=Visibility.PUBLIC,
+                )
+            ],
+            types=[RecordType(name="Bystander", kind="struct")],
+            typedefs={"A": "Gone"},
+        )
+        assert snap.surface_graph is None
+
+        first = resolve_surface_graph_nodes(snap)
+        first_ids = set(first)
+
+        snap.typedefs = {"A": "Here"}
+        snap.types = [RecordType(name="Here", kind="struct")]
+        second = resolve_surface_graph_nodes(snap)
+
+        assert set(second) != first_ids
+        assert any(node_id.endswith("Here") for node_id in second)
