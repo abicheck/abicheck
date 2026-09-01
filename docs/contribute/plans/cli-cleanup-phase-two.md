@@ -3554,9 +3554,16 @@ second top-level spelling of the same fact.
 > gated()` helper (JSON-verdict-first, mirroring `_coverage_gated`/
 > `_assurance_gated`) consulted ahead of `_is_cli_error`, a matching
 > `EVIDENCE_CONTRACT_ERROR` output verdict (job summary, `action.yml`
-> docs, and the same unconditional step-failure/PR-comment-skip treatment
-> `NOT_COMPARABLE`/`BUDGET_OVERFLOW` already have), and
-> `tests/test_action_run_sh_scan_evidence_contract_error.py`. See
+> docs, and the same unconditional step-failure block `NOT_COMPARABLE`/
+> `BUDGET_OVERFLOW` already have — but deliberately **not** their
+> `_maybe_post_pr_comment` skip: a Codex review round caught that the
+> analogy to `BUDGET_OVERFLOW`'s skip doesn't hold here, since reaching
+> this verdict already proves a readable JSON report exists, and
+> `pr_comment_scan_abort.scan_abort_incomplete_reason` already renders it
+> correctly — see ADR-064's own update for the full account), and
+> `tests/test_action_run_sh_scan_evidence_contract_error.py` (including an
+> executing malicious-fixture test the `bugfix-test-contract` CI gate
+> required for this trust-boundary diff). See
 > [ADR-064](../adr/064-canonical-gate-algorithm-and-exit-decision.md)'s own
 > matching update for the full account, including the one gap this leaves:
 > `--format text` with no JSON secondary output still reads as `ERROR`,

@@ -582,15 +582,31 @@ lands in two stages rather than one atomic change:
       unconditional step-failure block those two verdicts needed of their
       own (splitting a new verdict out of the generic `ERROR` bucket means
       it no longer matches that bucket's own `FINAL_EXIT=1`, so it needs an
-      explicit twin or the step would silently start passing), and the same
-      `_maybe_post_pr_comment` skip `BUDGET_OVERFLOW` already has (a
-      pinned depth's missing evidence does not change on re-run, so
-      re-running for a PR-commentable report would deterministically repeat
-      the identical abort). `--format text` with no JSON secondary output
-      is unaffected and stays the one acknowledged gap noted above this
-      update: `cli_scan.py` writes no report at all on that path, so this
-      wrapper still cannot distinguish the axis there and continues to read
-      it as `ERROR`, same as before this fix.
+      explicit twin or the step would silently start passing). **Deliberately
+      not** given `BUDGET_OVERFLOW`'s own `_maybe_post_pr_comment` skip — an
+      initial version of this fix copied that skip by analogy and a Codex
+      review round (fresh evidence) caught that the analogy doesn't hold:
+      unlike `BUDGET_OVERFLOW` (which genuinely has no report to reuse,
+      since `run_scan_core`'s deadline-guarded candidate-snapshot collection
+      raises before `_emit_scan_report` ever runs), reaching
+      `EVIDENCE_CONTRACT_ERROR` already proves `_evidence_contract_gated`
+      found a populated, readable JSON report — that is the only way it can
+      have returned true — and `pr_comment_scan_abort.
+      scan_abort_incomplete_reason` (above) already renders that exact
+      envelope as a blocking "analysis incomplete" finding, its own
+      docstring naming the GitHub Action as one of the paths meant to reach
+      it. The skip would have left a previous sticky BREAKING/API_BREAK
+      comment stale and misleading instead of updating it, and — for the
+      rarer case where no JSON exists yet at this point (`--format text`
+      with no `--write json=...` secondary) — a re-run to obtain one is
+      cheap for this specific abort, since `_EvidenceContractError`'s own
+      precondition check fires before any source evidence collection
+      begins, unlike a real budget-limited scan. `--format text` with no
+      JSON secondary output at all is still unaffected by the classification
+      itself and stays the one acknowledged gap noted above this update:
+      `cli_scan.py` writes no report at all on that path, so this wrapper
+      still cannot distinguish the axis there and continues to read it as
+      `ERROR`, same as before this fix.
       `tests/test_action_run_sh_scan_evidence_contract_error.py` covers the
       exit-1 dispatch (including the "both signals present" case, since
       real stderr always satisfies `_is_cli_error` too) and the

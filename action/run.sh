@@ -3092,13 +3092,24 @@ _maybe_post_pr_comment() {
   # potentially expensive) scan only to hit the identical overflow again
   # with nothing new to show for it (Codex review).
   [[ "$VERDICT" == "BUDGET_OVERFLOW" ]] && return 0
-  # Same reasoning applies to scan's own _EvidenceContractError handler
-  # (ADR-037 D5, `_evidence_contract_gated` above): a pinned depth's missing
-  # source evidence does not change between runs, so re-running to obtain a
-  # PR-commentable JSON report would deterministically hit the identical
-  # abort again -- there is nothing new for a comment to show, only a
-  # wasted second invocation.
-  [[ "$VERDICT" == "EVIDENCE_CONTRACT_ERROR" ]] && return 0
+  # EVIDENCE_CONTRACT_ERROR deliberately does NOT get the same skip
+  # (Codex review, fresh evidence): unlike BUDGET_OVERFLOW, reaching this
+  # verdict already proves `_evidence_contract_gated` found a populated,
+  # readable JSON report -- that is the only way it can have returned
+  # true. So there is a real report to reuse, not "nothing to reuse",
+  # and `pr_comment_scan_abort.scan_abort_incomplete_reason`
+  # (abicheck/pr_comment_scan_abort.py) already renders this exact
+  # envelope as a blocking "analysis incomplete" finding, the same
+  # treatment NOT_COMPARABLE gets -- its own docstring names the GitHub
+  # Action as one of the paths meant to reach it. Skipping here would
+  # leave any previous sticky BREAKING/API_BREAK comment stale and
+  # misleading instead of updating it to reflect the incomplete analysis.
+  # Falling through to the normal reuse-or-rerun path below is correct
+  # even when a rerun is needed (no JSON was written this run): unlike a
+  # real budget-limited scan, `_EvidenceContractError`'s own precondition
+  # check fires before any source evidence collection begins, so a rerun
+  # to obtain JSON is cheap, not "potentially expensive" the way
+  # BUDGET_OVERFLOW's comment above describes.
   case "${GITHUB_EVENT_NAME:-}" in
     pull_request | pull_request_target) ;;
     *)
