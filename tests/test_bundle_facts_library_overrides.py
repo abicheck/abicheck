@@ -29,6 +29,7 @@ from abicheck.workflows.bundle_facts_library_overrides import (
     BundleFactsLibraryOverridesError,
     load_bundle_facts_library_overrides,
     parse_bundle_facts_library_overrides,
+    validate_matched_library_overrides,
 )
 
 
@@ -395,3 +396,45 @@ class TestLoadBundleFactsLibraryOverrides:
 
         with pytest.raises(BundleFactsLibraryOverridesError, match="too deeply nested"):
             load_bundle_facts_library_overrides(manifest)
+
+
+class TestValidateMatchedLibraryOverrides:
+    """Direct unit tests for :func:`validate_matched_library_overrides` --
+    the matched-intersection check ``bundle_side_input.compare_release_
+    against_bundle_facts()`` delegates to (Codex review, fresh evidence:
+    this validation logic belongs in this ``workflows``-classified module,
+    not the grandfathered flat-root ``bundle_side_input.py``)."""
+
+    def test_all_override_keys_within_matched_keys_is_valid(self) -> None:
+        validate_matched_library_overrides(
+            per_library_headers={"libfoo.so": [Path("x")]},
+            per_library_includes=None,
+            per_library_compile=None,
+            matched_keys={"libfoo.so", "libbar.so"},
+        )
+
+    def test_an_unmatched_headers_key_is_rejected(self) -> None:
+        with pytest.raises(BundleFactsLibraryOverridesError, match="per_library_headers"):
+            validate_matched_library_overrides(
+                per_library_headers={"libextra.so": [Path("x")]},
+                per_library_includes=None,
+                per_library_compile=None,
+                matched_keys={"libfoo.so"},
+            )
+
+    def test_an_unmatched_compile_key_is_rejected(self) -> None:
+        with pytest.raises(BundleFactsLibraryOverridesError, match="per_library_compile"):
+            validate_matched_library_overrides(
+                per_library_headers=None,
+                per_library_includes=None,
+                per_library_compile={"libextra.so": object()},
+                matched_keys={"libfoo.so"},
+            )
+
+    def test_none_maps_are_valid(self) -> None:
+        validate_matched_library_overrides(
+            per_library_headers=None,
+            per_library_includes=None,
+            per_library_compile=None,
+            matched_keys=set(),
+        )

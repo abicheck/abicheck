@@ -1829,21 +1829,25 @@ per-binary extraction cost. That remains its own, separately-scoped
 initiative (shared/content-addressed evidence storage, memory-aware
 scan scheduling), not additional G38 phase surface.
 
-### Phase 13 follow-up — real-world assessment of the driver, two of three gaps closed
+### Phase 13 follow-up — real-world assessment of the driver, all three gaps closed
 
 A follow-up assessment, exercising `compare_release_against_bundle_facts()`
 against a real, mixed-toolchain oneDAL-shaped release (a `-fsycl`/`icpx`
 `dpc` library alongside plain-C++ `daal`/`oneapi::dal` libraries sharing one
 umbrella header tree), reported three gaps. All three are now small and
-precisely specified rather than architectural — two are fixed, the third
-remains the already-documented Known-gap above:
+precisely specified rather than architectural — all three are fixed, the
+first later than the other two:
 
-1. **No CLI surface.** Unchanged from the "Known gap" note above: adoption
-   still needs a committed Python step calling
-   `compare_release_against_bundle_facts(...)` directly, not
-   `uses: abicheck/abicheck@sha` with a bare CLI flag — every file that
-   would host the dispatch is still within two lines of (or already at)
-   the 2000-line hard cap.
+1. **Fixed, later — Phase 17.** At the time this follow-up was written,
+   adoption still needed a committed Python step calling
+   `compare_release_against_bundle_facts(...)` directly, not `uses:
+   abicheck/abicheck@sha` with a bare CLI flag, for the same file-size-cap
+   reason the "Known gap" note above gives. Phase 17 below closed this: a
+   real `compare --old-bundle-facts` CLI flag, reachable from a plain
+   `abicheck compare old.bundlefacts.json new-release/ --old-bundle-facts`
+   invocation with no committed driver script — see Phase 17's own
+   "Shipped implementation" list for exactly how it landed without
+   squeezing into any of the at-cap files this note used to name.
 2. **Fixed.** The driver's `service.resolve_input()` call never forwarded
    `header_backend`/`compile`, so a header-scoped NEW side always resolved
    under the library's own `header_backend="auto"` default — absent a real

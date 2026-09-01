@@ -64,6 +64,7 @@ the uniform default with no signal anything was wrong.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -469,6 +470,58 @@ def known_libraries_for_new_side(
         new_files = [new_dir]
     new_map, _match_warnings = build_match_map(new_files)
     return new_map
+
+
+def validate_matched_library_overrides(
+    *,
+    per_library_headers: dict[str, list[Path]] | None,
+    per_library_includes: dict[str, list[Path]] | None,
+    per_library_compile: Mapping[str, object] | None,
+    matched_keys: set[str],
+) -> None:
+    """Reject a per-library override naming a library that is never
+    actually compared (Codex review, fresh evidence).
+
+    ``known_libraries_for_new_side()``'s own pre-validation gate only knows
+    the NEW-side canonical key set -- a library present in NEW_INPUT but
+    absent from OLD_FACTS's ``per_library_snapshots`` (or vice versa) is
+    never diffed at all (``compare_release_against_bundle_facts()``'s own
+    per-library loop only iterates keys present in *both*), so a manifest
+    entry naming such a library passes that earlier check yet is silently
+    never consulted. *matched_keys* is that real intersection -- the
+    caller computes it once, for free, from data it already has in hand
+    (``bundle_side_input.compare_release_against_bundle_facts()`` builds it
+    right after resolving its own NEW-side match map, with no second
+    OLD_FACTS load).
+
+    Lives in this ``workflows``-classified module, not
+    ``bundle_side_input.py`` (Codex review, fresh evidence, same reasoning
+    ``known_libraries_for_new_side()``'s own docstring already gives for
+    itself): validating a ``--bundle-facts-library-manifest`` override is
+    this module's own responsibility, and ``bundle_side_input.py`` is
+    grandfathered flat-root legacy -- being import-compatible with it
+    (`workflows` may import `workflows`) does not make it the right place
+    to *add* new validation behavior. The caller supplies *matched_keys*
+    rather than this function re-deriving it, since deriving it needs the
+    real ``old_facts.per_library_snapshots``/NEW-side match map the caller
+    already built -- re-fetching either here would either duplicate that
+    resolution or force this leaf module to import `bundle_side_input`
+    circularly.
+    """
+    for override_map, label in (
+        (per_library_headers, "per_library_headers"),
+        (per_library_includes, "per_library_includes"),
+        (per_library_compile, "per_library_compile"),
+    ):
+        unmatched = sorted(set(override_map or {}) - matched_keys)
+        if unmatched:
+            raise BundleFactsLibraryOverridesError(
+                f"{label}: {unmatched!r} named in the per-library override "
+                "manifest but not present in both OLD_FACTS and NEW_INPUT "
+                "-- an override for a library that is never actually "
+                "compared would silently never be applied. Known matched "
+                f"libraries are {sorted(matched_keys)!r}"
+            )
 
 
 def _build_compile_context(
