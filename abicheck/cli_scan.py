@@ -742,17 +742,15 @@ def _run_artifact_set(
     """``scan --artifact-set`` (ADR-056/G34): audit a set of libraries as one,
     no old side. Discovers the set, scans each member (the same tier +
     pinned level a single-binary scan runs), adds one cross-library
-    bundle-audit pass. ``--dry-run`` previews it (``frontends.cli.
-    artifact_set_dry_run``).
+    bundle-audit pass. ``--dry-run`` previews it (``frontends.cli.artifact_set_dry_run``).
     """
     from .bundle import ArtifactSetError, discover_artifact_set
     from .service import Budget, ScanRequest
     from .service_scan import _resolve_member_scan_level, run_scan_set
     from .workflows.plan import scan_bazel_scoping_failure
 
-    # Checked before discovery, via the real resolved eff_depth/collect_mode
-    # (same primitive estimate_artifact_set's --dry-run totals use), not a
-    # raw --depth approximation (both over/under-rejected in earlier rounds).
+    # Checked before discovery via the real resolved eff_depth/collect_mode
+    # (same primitive estimate_artifact_set's --dry-run totals use).
     changed, changed_src, seeded = _resolve_changed_seed(
         changed_paths_opt, since, sources
     )
@@ -1802,8 +1800,7 @@ def scan_cmd(
     )
     effective_build_info = build_info
 
-    # Validate the same combo `_build_new_snapshot` rejects during real
-    # execution, before the dry-run preview claims an unscoped request is scoped.
+    # Validates the same combo `_build_new_snapshot` rejects for real.
     from .workflows.plan import scan_bazel_scoping_failure
 
     if _bf := scan_bazel_scoping_failure(
@@ -1984,7 +1981,6 @@ def scan_cmd(
         )
         raise click.ClickException(ce.message) from ce
     except PlanningError as exc:
-        # scan_engine.py raises this framework-neutral; translate here.
         raise click.UsageError(str(exc)) from exc
     finally:
         # Remove the inferred cmake build dir(s) now that every build-dir-dependent
