@@ -174,6 +174,7 @@ def _check_base_offsets(
                     detail=base,
                     old=str(old_off),
                     new=str(new_off),
+                    entity_id=old_rec.entity_id or new_rec.entity_id,
                 )
             )
     return changes
@@ -219,6 +220,7 @@ def _check_vptr_introduced(
                 name=name,
                 old_value="non-polymorphic",
                 new_value=f"vptr@{new_rec.vptr_offset_bits}",
+                entity_id=old_rec.entity_id or new_rec.entity_id,
             )
         ]
     return []
@@ -236,6 +238,7 @@ def _check_trivially_copyable_lost(
                 name=name,
                 old_value="trivially_copyable",
                 new_value="non_trivially_copyable",
+                entity_id=old_rec.entity_id or new_rec.entity_id,
             )
         ]
     return []
@@ -253,6 +256,7 @@ def _check_standard_layout_lost(
                 name=name,
                 old_value="standard_layout",
                 new_value="non_standard_layout",
+                entity_id=old_rec.entity_id or new_rec.entity_id,
             )
         ]
     return []
@@ -278,6 +282,7 @@ def _check_tail_padding_reuse(
                 old=str(old_rec.data_size_bits),
                 new=str(new_rec.data_size_bits),
                 detail=str(new_rec.size_bits),
+                entity_id=old_rec.entity_id or new_rec.entity_id,
             )
         ]
     return []
@@ -341,6 +346,7 @@ def _check_layout_unverifiable(
                 # correlate against the *exact* RecordType this finding is
                 # about, rather than a same-named-but-different one.
                 qualified_name=new_rec.qualified_name or new_rec.name,
+                entity_id=old_rec.entity_id or new_rec.entity_id,
             )
         ]
     return []
