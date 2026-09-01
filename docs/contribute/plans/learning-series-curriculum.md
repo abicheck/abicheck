@@ -3,7 +3,7 @@ doc_type: contributor
 level: advanced
 lifecycle: active
 depends_on:
-  - docs/learn
+  - docs/learn/abi-api-handling.md
   - docs/_meta/topics.yaml
   - mkdocs.yml
 ---
@@ -122,8 +122,9 @@ have exactly one inbound link each across the whole docs tree.
 
 `docs/_meta/topics.yaml` already resolves several look-alike pairs: a
 registered `allowed_summaries` page (`architecture.md` for the evidence
-model, `limitations.md` for symbol filtering, Part 4 for the three hazard
-pages split out of it) is a permitted short summary, not a duplicate, and
+model, `limitations.md` for symbol filtering, Part 4 for two of the three
+hazard pages split out of it — `class-layout-abi.md` owns no topic yet) is
+a permitted short summary, not a duplicate, and
 `docs/contribute/documentation.md` records those fixes. The rows below are
 the ones *not* covered by a registration, or where the second treatment is
 a full re-explanation rather than a summary:
@@ -133,7 +134,7 @@ a full re-explanation rather than a summary:
 | L0–L5 evidence model | `evidence-and-detectability.md` (model) + `what-each-level-sees.md` (worked example) | `08-detection.md` §2 (a per-family evidence table) and `build-source-data.md` §Evidence layers (a second L0–L5 ladder) — neither registered as a summary of `evidence-model` |
 | "a static comparer structurally cannot decide this" | — | `behavioral-compatibility.md`, `data-wire-compatibility.md`, `ownership-and-lifetime.md`, `concurrency-and-initialization.md` each make the same argument in their own words (so the 40-word duplicate-block warning does not fire); `assurance-methods.md` summarises all four |
 | Struct/class layout | `03-type-layout.md` | `04-cpp-abi.md` §7, `class-layout-abi.md` (which calls itself "the single place") — no registered owner |
-| Verdict semantics and the numeric verdict → exit-code table | `verdicts.md` | `architecture.md` (the numeric table again, although registered only as a summary of `verdicts`); `abi-cheat-sheet.md` and `07-designing-for-stability.md` (verdict-meaning tables, unregistered) |
+| Verdict semantics and the numeric verdict → exit-code table | `verdicts.md` | `architecture.md` (the numeric table again, unregistered — it becomes a link, page specs C7); `abi-cheat-sheet.md` and `07-designing-for-stability.md` (verdict-meaning tables, unregistered) |
 | Glossary | `glossary.md` | `01-foundations.md` §8 |
 | C++ hazards split out of Part 4 | `exception-unwinding-abi.md`, `modern-cpp-toolchain-hazards.md`, `class-layout-abi.md` | Part 4 keeps an inline summary of each — registered, but long enough that the reader meets each hazard twice with no signal which is the full treatment (F3) |
 
@@ -194,7 +195,7 @@ without teaching; "absent" means neither.
 | Multi-TU `--dump-manifest`, extraction comparability (`NOT_COMPARABLE`, exit 6), `--diagnostic-comparison` | `use/dump-compare-flags.md`, ADR-050 | partial — `build-profile-comparability.md` covers the *why*; the manifest mechanics are absent |
 | Dependency floors: `--env-matrix` runtime floors, `deps tree`/`deps compare`, sysroot/container checks | `reference/cli-reference.md` (`--env-matrix`), `integration/scenarios/dependency-and-container-checks.md` (`deps`) | **taught** (`dependency-floors.md`, `environment-drift.md`) |
 | glibc/libstdc++-style symbol-versioning discipline, `glibc_symbol_versioned` policy, version-node kinds (cases 13/65/139/141/183/145) | `use/policies.md`, `reference/change-kinds.md` | partial — Part 5 §3 explains version scripts and glibc's append-only nodes in ~25 lines; the discipline as a *strategy a library adopts* is not taught (see §4.2) |
-| Surface-growth reporting (`--surface-metrics`, `severity-addition`, `annotate-additions`; the release recommendation) | `use/api-surface-intelligence.md`, `use/github-action-recipes.md`, `use/annotations.md`; `use/output-formats.md` §Release recommendation and `--profile release-cut` | **absent** as a topic |
+| Surface-growth reporting (`--surface-metrics`, `.abicheck.yml` `severity.addition: error`, `annotate-additions`; the release recommendation) | `use/api-surface-intelligence.md`, `use/github-action-recipes.md`, `use/annotations.md`; `use/output-formats.md` §Release recommendation and `--profile release-cut` | **absent** as a topic |
 | Idioms and pattern-aware verdicts (`--pattern-verdicts`, opaque/PIMPL demotion, `opaque_invariant_broken`) | `use/api-surface-intelligence.md` | absent — Part 7 teaches the *patterns* but never that the scanner recognises them |
 | Baselines: two kinds, storage recipes A–D, self-approval hazard, `publish-baseline`/`resolve-baseline`/`protect-committed-baseline` | `use/baseline-management.md`, `use/create-baseline.md`, `use/baseline-storage.md`, `reference/publish-baseline.md`, `reference/resolve-baseline.md`, `reference/protect-committed-baseline.md` | **absent** from the ladder |
 | Severity / exit-code schemes, policies, suppressions (incl. reachability-aware refusal), `--pack` | `use/ci-gating.md`, `use/severity.md`, `use/policies.md`, `use/suppressions.md` | verdicts taught (`verdicts.md`); governance absent |
@@ -397,7 +398,7 @@ lifted out of the how-to pages and taught in order:
 3. **Report the surface, not only the breaks.** Additions are compatible
    but not invisible: `--surface-metrics` roll-ups
    (`public_surface_grew`, undocumented-export ratio), the
-   `severity-addition: error` gate for frozen APIs, `annotate-additions`
+   `severity.addition: error` config gate for frozen APIs, `annotate-additions`
    notices on the PR, the SemVer/SONAME recommendation, and single-build
    hygiene (accidental exports, unversioned exports) as *growth you did
    not intend*. This is the one place the series would say plainly that
@@ -430,10 +431,12 @@ writing a second explanation next to a registered one:
    two owners.
 3. **The page spans several registered topics** — rollout & governance
    over `policies`, `suppressions` and the migration scenario; triage over
-   `troubleshooting` and `limitations`; "where in the pipeline" over
+   `evidence-model` plus `use/troubleshooting.md` and `limitations.md`
+   (those two own no registered topic, so the page links them and
+   registers nothing about them); "where in the pipeline" over
    `github-actions-surface` and `project-integration`. The page owns one
    new cross-cutting topic (registered) and is an `allowed_summaries`
-   entry of each topic it touches; it links, never re-explains.
+   entry of each registered topic it touches; it links, never re-explains.
 
 Under `docs/AGENTS.md` "When does a new fact need a new page?", each ★
 page in §5 rests on criterion 2 (a mental model the how-to does not state:
@@ -497,7 +500,7 @@ so every page can carry its tier without changing the gate.
 | **1 · Foundations** | beginner → intermediate | Part 0 Product Contract (↻ gains the compatibility-levels ladder, §4.3) · Part 1 Foundations (the spine's own 0 → 7 order is kept) · Your ABI Surface |
 | **2 · Mechanics** | intermediate (branches: advanced) | Parts 2, 3, 4, 5, 6 — with Class Layout, Exception Unwinding, Modern Hazards, MSVC/PE listed *under* their Part as optional "go deeper" branches, `advanced`, outside the spine's monotonicity check (Part 4 shortens its inline summaries to a sentence and a link) |
 | **3 · Define the contract** | intermediate | Compatibility Direction · Consumer Models · Contract-Aware Compatibility (linked; stays on the Concepts tab) · Build-Profile Comparability · Static & Header-Only Contracts (↻ from Beyond ABI — library *shape* is a contract question) |
-| **4 · Evidence & detection** | intermediate | ↻ Detecting Breaks (§1a grows into the AST summary, §2 becomes links into the trio) · Evidence & Detectability and What Each Level Sees (stay on the Concepts tab; the appendix of removed flags moves to `contribute/archive/`) · Assurance Beyond Static Checking |
+| **4 · Evidence & detection** | intermediate | ↻ Detecting Breaks (§1a grows into the AST summary, §2 becomes links into the trio) · Evidence & Detectability and What Each Level Sees (stay on the Concepts tab; the appendix of removed flags moves to `use/companion-commands.md`) · Assurance Beyond Static Checking |
 | **5 · Practice** | intermediate | Baselines as contracts (`use/baseline-management.md`, linked from the ladder, stays in the tool track — §4.6 case 1) · ★ Where in the pipeline (PR / main / nightly / release) · ★ Report the surface, not only the breaks · ★ Rollout & governance · ★ Triage a suspicious finding |
 | **6 · Design** | intermediate | Part 7 Designing for Stability (↻ adds "the scanner recognises these patterns": idioms, pattern-aware verdicts) |
 | **7 · At scale** | advanced | ★ Products, not libraries (multi-binary) · ★ Template- and header-heavy libraries · ★ How system libraries stay compatible (glibc / libstdc++ / linker) · Dependency & Runtime Floors · Environment & Toolchain Drift (↻ from Concepts) · ★ Packages and consumers (deb/rpm/conda/wheel, `abi3`, FFI) |
@@ -557,9 +560,9 @@ a template library. Checkable form:
   (`scripts/check_docs_contract.py` clean, and its duplicate-block warning
   count no higher than before);
 - every row of §3's coverage matrix reads "taught" or "linked", none
-  "absent" — except the two rows (kernel BTF/CTF and kABI; SYCL/DPC++)
-  that the deferred "other ABI domains" page in §6 covers, which stay
-  "absent" until that page exists.
+  "absent" — the kernel BTF/CTF and SYCL/DPC++ rows become "linked"
+  through the last section of the packages page (page specs B9 §6), at
+  pointer depth.
 
 ## Files & surfaces
 
@@ -568,8 +571,12 @@ and `redirect_maps`); `docs/_meta/topics.yaml`, `terminology.yaml` and the new
 `learning-ladder.yaml` (new topics, re-registrations, the authority-rule
 term, tier membership);
 `docs/AGENTS.md` "Layout" (the two tab moves); `docs/index.md` and
-`start/getting-started.md` (front-door links); the hub's generated ladder
-splice and its `scripts/` generator; `docs/contribute/plans/index.md`
+`start/getting-started.md` (front-door links); `docs/use/policies.md` and
+`docs/use/suppressions.md` (each links a hub anchor that moves);
+`docs/use/companion-commands.md` (receives the removed-flags appendix);
+the hub's generated ladder splice and its `scripts/` generator, with the
+ladder rules in `scripts/check_docs_contract.py` and a nav-order check
+beside `scripts/check_ai_readiness.py`; `docs/contribute/plans/index.md`
 (this row). No `abicheck/` code, no example fixtures, no generated case
 pages.
 
@@ -579,12 +586,14 @@ The existing gates are the tests: `scripts/check_docs_contract.py`
 (ownership, front matter, duplicate blocks, retired surfaces),
 `mkdocs build --strict` (links, nav), `scripts/check_ai_readiness.py`
 (`mkdocs-nav-coverage`, `doc-count-sync`, `changekind-docs`), and
-`scripts/check_docs_review_triggers.py` (`depends_on`). Phase 1 adds two:
-the ladder generator's `--check` mode (ladder completeness and level
-monotonicity along each sequence's whole reading order), and a test that each
-learning nav group is non-decreasing in `level:` — the acceptance
-criterion above, made executable. Anchor rewrites in Phase 1 need a one-off fragment check,
-since `mkdocs build --strict` does not validate anchors.
+`scripts/check_docs_review_triggers.py` (`depends_on`). Phase 1 adds
+three: ladder rules inside `scripts/check_docs_contract.py` (completeness,
+level monotonicity along each sequence's whole reading order, footers,
+reading paths), a generator drift check for the hub's splice, and an
+AI-readiness check that each learning nav group is non-decreasing in
+`level:` — the acceptance criterion above, made executable. Anchor
+rewrites need `mkdocs.yml`'s `validation: anchors:` setting (page specs
+A2d), since `mkdocs build --strict` does not validate fragments by default.
 
 ## Effort & risk
 
@@ -602,7 +611,10 @@ the generator contract, the per-page level table, the `topics.yaml`
 fragments, the rebuilt hub's layout, and a section-by-section spec for
 each new and reworked page — lives in the companion page
 [Learning series — page specifications](learning-series-page-specs.md),
-which also sequences the work into independently mergeable pull requests.
+whose §F sequences the work into independently mergeable pull requests
+(Phase 1 = P1–P2, Phase 2 = P3, Phase 3 = P4–P8, Phase 4 = P9). Where
+the order below and §F differ, §F wins: it records the dependencies
+between artifacts.
 
 Each phase is independently mergeable and leaves the site consistent.
 Every moved page keeps its URL via `mkdocs.yml` `redirect_maps`; every new
@@ -679,7 +691,8 @@ gate all of this).
   narrative owner cannot live under `reference/`). Each move edits
   `topics.yaml` in the same change and follows
   `docs/contribute/documentation.md` "Retiring or merging a page". The
-  removed-flags appendix moves to `contribute/archive/`.
+  removed-flags appendix moves to `use/companion-commands.md`, the CLI
+  migration page.
 
 **Phase 3 — new pages, in the order a reader needs them.**
 
@@ -698,8 +711,9 @@ gate all of this).
 9. Triage a suspicious finding (§4.7) — §4.6 case 3
 10. Packages and consumers (§4.7) — criterion 4
 
-Deferred, not dropped: the "other ABI domains" further-reading page from
-§4.7 (kernel kABI/BTF, SYCL) waits until the pages above exist, and a
+The "other ABI domains" further reading from §4.7 (kernel kABI/BTF, SYCL)
+is not a page of its own: it is the last section of Packages and
+consumers (page specs B9 §6), at pointer depth. Deferred, not dropped: a
 macOS worked example follows the Windows one in Phase 4.
 
 The ownership rule for every entry is §4.6's three-case decision; the

@@ -3,7 +3,7 @@ doc_type: contributor
 level: advanced
 lifecycle: active
 depends_on:
-  - docs/learn
+  - docs/learn/abi-api-handling.md
   - docs/_meta/topics.yaml
   - docs/_meta/terminology.yaml
   - mkdocs.yml
@@ -59,6 +59,10 @@ it describes *ownership and order*, never content.
 # `branches` are optional side reads hanging off a member (Tier 2's "go
 # deeper" pages): they must be >= the level of the page they hang from and
 # are otherwise outside the sequence's monotonicity check.
+# A page's level is declared once, in its own front matter; a tier's
+# `# floor:` comment only tells the reader of this file what to expect.
+# `paths:` are the hub's reading paths by role, as data, so the role table
+# is rendered from the same source as the ladder and checked against it.
 
 version: 1
 hub: learn/abi-api-handling.md          # renders the ladder; exempt from it
@@ -69,7 +73,7 @@ sequences:
     tiers:
       - id: 0
         title: Orientation
-        level: beginner
+        # floor: beginner
         members:
           - learn/abi-series/abi-in-5-minutes.md
           - learn/how-a-break-shows-up.md
@@ -77,14 +81,14 @@ sequences:
           - learn/abi-series/glossary.md
       - id: 1
         title: Foundations
-        level: beginner            # first member; last member is intermediate
+        # floor: beginner — first member; last member is intermediate
         members:
           - learn/abi-series/00-product-contract.md
           - learn/abi-series/01-foundations.md
           - learn/abi-surface.md
       - id: 2
         title: Mechanics
-        level: intermediate
+        # floor: intermediate
         members:
           - learn/abi-series/02-symbol-contracts.md
           - learn/abi-series/03-type-layout.md
@@ -99,7 +103,7 @@ sequences:
           - learn/abi-series/06-transitive-breaks.md
       - id: 3
         title: Define the contract
-        level: intermediate
+        # floor: intermediate
         members:
           - learn/compatibility-direction.md
           - learn/consumer-models.md
@@ -109,7 +113,7 @@ sequences:
           - learn/contract-aware-compatibility.md   # member of `concepts`
       - id: 4
         title: Evidence and detection
-        level: intermediate
+        # floor: intermediate
         members:
           - learn/abi-series/08-detection.md
           - learn/assurance-methods.md
@@ -118,7 +122,7 @@ sequences:
           - learn/what-each-level-sees.md
       - id: 5
         title: Practice
-        level: intermediate
+        # floor: intermediate
         members:
           - learn/where-in-the-pipeline.md
           - learn/surface-growth.md
@@ -128,12 +132,12 @@ sequences:
           - use/baseline-management.md              # tool track, case 1
       - id: 6
         title: Design
-        level: intermediate
+        # floor: intermediate
         members:
           - learn/abi-series/07-designing-for-stability.md
       - id: 7
         title: At scale
-        level: advanced
+        # floor: advanced
         members:
           - learn/products-not-libraries.md
           - learn/template-heavy-libraries.md
@@ -143,7 +147,7 @@ sequences:
           - learn/packages-and-consumers.md
       - id: 8
         title: Beyond static ABI
-        level: advanced
+        # floor: advanced
         members:
           - learn/behavioral-compatibility.md
           - learn/data-wire-compatibility.md
@@ -155,13 +159,13 @@ sequences:
     tiers:
       - id: c1
         title: Reading a result
-        level: intermediate
+        # floor: intermediate
         members:
           - learn/verdicts.md
           - learn/contract-aware-compatibility.md
       - id: c2
         title: The evidence model
-        level: intermediate
+        # floor: intermediate
         members:
           - learn/evidence-and-detectability.md
           - learn/what-each-level-sees.md
@@ -169,28 +173,55 @@ sequences:
           - learn/limitations.md
       - id: c3
         title: Internals
-        level: advanced
+        # floor: advanced
         members:
           - learn/architecture.md
           - learn/build-source-data.md
           - learn/graph-coverage.md
           - learn/impact-analysis.md
+
+paths:
+  - role: New C/C++ library author
+    pages:
+      - learn/abi-series/abi-in-5-minutes.md
+      - learn/how-a-break-shows-up.md
+      - learn/abi-series/00-product-contract.md
+      - learn/abi-series/01-foundations.md
+      - learn/abi-series/02-symbol-contracts.md
+      - learn/abi-series/03-type-layout.md
+      - learn/abi-series/07-designing-for-stability.md
+    after: start/choose-your-workflow.md    # tool-track hand-off; not ordered
+  - role: AI agent / automated reviewer
+    pages:
+      - learn/how-a-break-shows-up.md
+      - learn/triage-a-finding.md
+      - learn/verdicts.md
+      - learn/evidence-and-detectability.md
+    after: use/output-formats.md
+  # ... one entry per row of section E below
 ```
 
-Rules the file encodes (and the generator enforces):
+Rules the file encodes (checked by `check_docs_contract.py`, A2c — the
+generator only renders):
 
 - **Completeness.** Every `docs/learn/**/*.md` except `hub` appears exactly
   once as a member or branch across both sequences. A file listed that does
-  not exist, or a learn page listed nowhere, is an error.
+  not exist, or a learn page listed nowhere, is an error. A `paths:` or
+  `links:` mention never counts as placement.
 - **Monotonicity per sequence.** Walking a sequence's members in order,
   each page's front-matter `level:` is ≥ the previous member's. Branches
   are checked only against the page they hang from. Links are never
   checked.
-- **Tier level is derived, not declared twice.** The `level:` on a tier is
-  documentation for the reader of the YAML; the generator reads the real
-  value from each page's front matter and fails if a member's level is
-  below the tier's declared level (a tier may span two levels, as tier 1
-  does — its declared level is the floor).
+- **Level is declared once.** A page's `level:` lives in its front matter
+  and nowhere else; the ladder file carries no level field. A tier's
+  `# floor:` comment is documentation for the reader of the YAML; the
+  check reads the real value from each page and fails if a member's level
+  is below the floor (a tier may span two levels, as tier 1 does).
+- **Paths are walks up the ladder.** Every `paths:` entry names only
+  members or branches; walking its `pages`, the tier position is
+  non-decreasing within a sequence, and an entry continues into `concepts`
+  only after its `educational` pages. `after:` is the one tool-track
+  hand-off (a `start/` or `use/` page) and is not ordered.
 - **Links must be members elsewhere.** A `links:` entry that is not a
   member of some tier (in either sequence, or a `use/` page) is an error —
   a link is a pointer, not a place to hide an unclassified page.
@@ -204,23 +235,49 @@ sentinel-splice pattern ADR-051 established for `gen_platform_matrix.py`.
 |---|---|
 | Inputs | `docs/_meta/learning-ladder.yaml`; the front matter (`level`, `title` if present, else the first H1) of every page it names |
 | Output | Replaces the block between `<!-- BEGIN GENERATED: learning-ladder -->` and `<!-- END GENERATED: learning-ladder -->` in `docs/learn/abi-api-handling.md` with one table per sequence: Tier · Level badge · Pages (members as links; branches indented with "go deeper"; links marked "(on the Concepts tab)" / "(tool guide)") |
-| `--check` | Regenerates in memory and diffs against the file (drift), then runs A1's four rules; exit 1 on any violation with one line per violation naming the page and the rule |
-| Wiring | `docs/AGENTS.md` "Regenerating generated docs" gains one line and `scripts/CLAUDE.md`'s inventory table gains the script when the generator lands (P1); `scripts/verify.py` gains a `learning-ladder` step in the `pr` profile only once every page carries `level:` (P2) — wiring it earlier would fail its own gate on the 16 blank pages |
-| Tests | `tests/test_gen_learning_ladder.py`: a fixture tree with (a) a page missing from the ladder, (b) a level regression inside a sequence, (c) a branch below its parent, (d) a link that is nowhere a member, (e) the concepts sequence restarting at `intermediate` after `educational` ends at `advanced` — which must *pass*; plus a round-trip test that `gen` then `--check` is clean |
-| Not in scope | Reordering `mkdocs.yml` nav (that stays hand-edited; the separate nav-order test in A2b covers it) |
+| Output, continued | The hub's role table (A7 §4) from `paths:`, in a second sentinel block `learning-paths`, so the two tables cannot drift from the file |
+| `--check` | Regenerates in memory and diffs against the file: drift only, exit 1 with the diff. It does not re-implement A1's rules — those live in `check_docs_contract.py` (A2c), so one gate owns every `docs/_meta/*.yaml` contract and the generator stays a renderer, like `gen_platform_matrix.py` |
+| Wiring | `docs/AGENTS.md` "Regenerating generated docs" gains one line; `scripts/CLAUDE.md`'s inventory table gains the script; both sentinel blocks join `GENERATED_FILE_MARKERS` in `scripts/check_ai_readiness.py` (a hand edit inside a block is then caught, as for the platform matrix); `scripts/verify.py` gains a `learning-ladder` drift step in the `pr` profile. All of it lands in P1, together with the levels the rules read — a rule without its data fails its own gate, which is why P1 is one PR |
+| Tests | `tests/test_gen_learning_ladder.py`: a round-trip test (`gen` then `--check` is clean), a drift test (an edited block exits 1), and a missing-sentinel test. The rule fixtures live with the contract check (A2c) |
+| Not in scope | Reordering `mkdocs.yml` nav (that stays hand-edited; A2b covers it) |
 
-**A2b. Nav-order test.** `tests/test_docs_learning_nav_order.py` parses
-`mkdocs.yml`, and for each group under the ABI/API Compatibility and
-Concepts tabs asserts the pages' `level:` values are non-decreasing in nav
-order, skipping the hub and any page marked as a branch in A1. This is the
-plan's Goal criterion "each nav group is non-decreasing in level", made
-executable without touching the recorded by-question grouping.
+**A2b. Nav-order check.** A `learning-nav-order` check in
+`scripts/check_ai_readiness.py`, implemented in a sibling leaf module
+(`scripts/learning_nav_order.py`, since the main script is past the
+2000-line cap) that reuses the nav reader `mkdocs-nav-coverage` already
+has (`_collect_mkdocs_nav_refs`) rather than parsing `mkdocs.yml` a second
+time. For each group under the ABI/API Compatibility and Concepts tabs it
+asserts the pages' `level:` values are non-decreasing in nav order,
+skipping the hub and any page A1 marks as a branch. This is the plan's Goal
+criterion "each nav group is non-decreasing in level", made executable
+without touching the recorded by-question grouping.
+
+**A2c. Ladder rules in `check_docs_contract.py`.** A `_check_learning_ladder`
+section next to the `topics.yaml` and `terminology.yaml` checks: loads
+A1, then enforces completeness, monotonicity, floors, links-are-members,
+paths-are-walks, and the footer rule from A3 (each page's previous/next
+links match the ladder). Fixtures in the check's own test module: (a) a
+page missing from the ladder, (b) a level regression inside a sequence,
+(c) a branch below its parent, (d) a link that is nowhere a member, (e) a
+path that steps down a tier, (f) a footer pointing at the wrong neighbour,
+and (g) the concepts sequence restarting at `intermediate` after
+`educational` ends at `advanced` — which must *pass*.
+
+**A2d. Anchor validation.** `mkdocs.yml` gains a `validation:` block with
+`anchors: warn` (MkDocs 1.6+), so a link to a heading that no longer
+exists is reported; under `--strict` a warning fails the build, which is
+what A7's anchor rewrites need. Land it as `anchors: info` first if the
+head has existing anchor warnings, and promote to `warn` in the same PR
+once they are fixed — the plan's "one-off fragment check" then has a
+permanent owner.
 
 ### A3. The page footer
 
-One shape for every learning page that is not a numbered Part (the Parts
-keep their existing breadcrumb + "Next"). Placed after the last section,
-before any "See also":
+One shape for every learning page that is not a numbered Part. The Parts
+keep their breadcrumb, and their existing "Next" line must name the
+ladder's next member (Part 7's next is B6 once it exists, the hub until
+then) — the A2c footer rule reads either shape. Placed after the last
+section, before any "See also":
 
 ```markdown
 ---
@@ -233,15 +290,22 @@ before any "See also":
   page of a sequence points back to the hub.
 - Branch pages point "previous" at the page they hang from and "next" at
   that page's own next, so a reader who took the branch rejoins the spine.
-- The footer is hand-written in Phase 1 and *verified* by the A2 `--check`
-  (it knows the order, so it can assert each footer's two links match).
-  Generating the footer itself is deliberately not done: a page's tail is
-  prose, and a splice block in every page is more churn than a check.
+- The footer is hand-written and *verified* by A2c (it knows the order,
+  so it asserts each footer's two links match). Generating the footer
+  itself is deliberately not done: a page's tail is prose, and a splice
+  block in every page is more churn than a check. Material's
+  `navigation.footer` feature was considered and rejected: it follows nav
+  order, not ladder order, and cannot express a branch rejoining the spine.
+- Each new page changes its two neighbours' footers. Section F batches the
+  Tier 5 and Tier 7 pages two per PR so a neighbour's footer is edited
+  once, not once per page.
 
 ### A4. Per-page level and placement
 
-Every learn page, its level today, its target, and the action. "Reconcile"
-means the value changes in Phase 1 (plan §6, Phase 1, fourth bullet).
+Every learn page, its level today, its target, and the action. A1 owns
+placement; this table is the per-page worklist, and its Action column
+names the B or C entry that carries the edit. "Reconcile" means the value
+changes in Phase 1 (plan §6, Phase 1, fourth bullet).
 
 | Page | Today | Target | Sequence / tier | Action |
 |---|---|---|---|---|
@@ -297,8 +361,11 @@ means the value changes in Phase 1 (plan §6, Phase 1, fourth bullet).
 ### A5. `topics.yaml` changes
 
 Fragments to add or edit, keyed the way the file is today. Fact sources
-name the code that produces what each page teaches, so
-`check_docs_review_triggers.py` flags the page when that code changes.
+name the code that produces what each page teaches; `check_docs_contract.py`
+checks that each path exists. The review-trigger script
+(`check_docs_review_triggers.py`) reads a page's own front-matter
+`depends_on`, not the registry, so every new page below also carries a
+`depends_on:` listing the same paths as its `fact_sources`.
 
 ```yaml
   # --- new topics (Phase 3) ---
@@ -379,6 +446,7 @@ name the code that produces what each page teaches, so
       - use/python-extensions.md
       - use/debian-symbols.md
       - start/scanning-conda-packages.md
+      - integration/scenarios/packages-and-sdks.md
     allowed_summaries:
       - learn/abi-series/01-foundations.md
 
@@ -407,6 +475,8 @@ name the code that produces what each page teaches, so
       - learn/abi-series/08-detection.md
       - learn/build-source-data.md
       - learn/how-a-break-shows-up.md
+      - learn/where-in-the-pipeline.md    # depth per moment (B2 §2, §4)
+      - learn/triage-a-finding.md         # evidence parity (B5 §1)
 
   verdicts:
     allowed_summaries:
@@ -442,9 +512,11 @@ name the code that produces what each page teaches, so
       - learn/where-in-the-pipeline.md
       - learn/products-not-libraries.md
   impact-analysis:
-    reference_page: reference/impact-assessment-fields.md   # C10 (new)
+    # reference_page stays reference/source-graph-schema.md; C10 moves
+    # the field prose there, not to a new page
   build-target-scoping:
-    # canonical stays learn/build-source-data.md (the workflow half, C9)
+    # canonical stays learn/build-source-data.md and reference_page stays
+    # reference/cli-reference.md; C9 moves sections to existing owners
 ```
 
 Every `allowed_summaries` fragment above is an *addition* to the list the
@@ -456,7 +528,10 @@ rejects it), and they keep `baseline-lifecycle` on
 `use/baseline-management.md` (plan §4.6 case 1).
 Exact `fact_sources` paths are to be confirmed against the tree when each
 page is written; a wrong path is a hard error in `check_docs_contract.py`,
-so it cannot ship silently.
+so it cannot ship silently. `use/troubleshooting.md` and `limitations.md`
+own no registered topic today, so B5 links them and registers nothing
+about them — a `summarizes` entry naming a topic that does not exist is
+itself a contract error.
 
 ### A6. `terminology.yaml` addition
 
@@ -487,7 +562,8 @@ Target length: roughly a third of today's page. Section order:
 3. **The ladder** — the generated block (A2): the educational sequence's
    nine tiers, then the Concepts sequence, each row with a level badge.
 4. **Reading paths by role** — the existing table, rewritten so each path
-   is a subsequence of the ladder (D below), never a jump to a `use/` page
+   is a subsequence of the ladder (E below), rendered from A1's `paths:`
+   by the generator, never a jump to a `use/` page
    that the ladder does not reach through a tier link.
 5. **The one idea** — the existing "compiler bakes the facts" paragraph,
    kept verbatim; it is the series' thesis.
@@ -507,11 +583,15 @@ headers" section → already owned by `limitations.md`'s recommendation
 section, so it becomes a link.
 
 **Anchors to rewrite** when those sections move (`mkdocs build --strict`
-does not check fragments): `#break-families-at-a-glance` (linked from
-`08-detection.md` twice), `#going-deeper-than-artifacts-the-source-scan`
-and `#the-l5-graph-reachability-not-just-structure` (linked from five
-pages — grep `abi-api-handling.md#` across `docs/` before moving, and
-re-point each to the new owner's anchor).
+does not check fragments until A2d lands): `#break-families-at-a-glance`
+(linked from `08-detection.md` twice),
+`#going-deeper-than-artifacts-the-source-scan` (from
+`what-each-level-sees.md`) and
+`#the-l5-graph-reachability-not-just-structure` (from
+`static-and-header-only.md` three times, `use/policies.md` and
+`use/suppressions.md`) — four pages for the two "deeper" anchors, two of
+them under `docs/use/`. Grep `abi-api-handling.md#` across `docs/` before
+moving, and re-point each to the new owner's anchor.
 
 ### A8. Redirects
 
@@ -531,7 +611,7 @@ redirects.
 |---|---|
 | Path / tier / level | `learn/how-a-break-shows-up.md` · edu 0 · beginner |
 | Ownership | new topic `break-symptoms`; `allowed_summaries` of `evidence-model` (it introduces the ladder the trio owns) |
-| Reader can… | name the six ways a compatibility break surfaces, say which mechanism family each comes from, and say which kind of evidence first reveals it |
+| Reader can… | name the eight ways a compatibility break surfaces, say which mechanism family each comes from, and say which kind of evidence first reveals it |
 | Prerequisites | ABI in Five Minutes |
 | Footer | ← ABI in Five Minutes · Tier 0 · ABI Cheat Sheet → |
 
@@ -540,7 +620,7 @@ Sections:
 1. **A break is a symptom before it is a mechanism** — one paragraph: the
    series is organised by mechanism (symbols, layout, C++, linker), but a
    reader meets a break as something that *happened*.
-2. **The six symptoms** — one H3 each, ~6 lines: what the user sees, one
+2. **The eight symptoms** — one H3 each, ~6 lines: what the user sees, one
    real error line, the mechanism family (link to the Part), the first
    evidence level that shows it (link to the trio), one case:
    - link error, `undefined reference to …` → Part 2, L0, `case01`
@@ -562,7 +642,8 @@ Sections:
    - works for the app, breaks the plugin or a sibling library → consumer
      models / bundle, `case90`
 3. **The table** — the symptom → mechanism → level matrix from plan §4.1,
-   one screen, no prose.
+   one screen, no prose; each level cell is a link to that level's row on
+   `what-each-level-sees.md`, never a typed definition of the level.
 4. **What this means for you** — three bullets: "you cannot see the
    third row without debug info", "you cannot see the fourth without
    headers", "you cannot see the sixth from any binary" — each a link to
@@ -614,10 +695,13 @@ Sections:
 7. **Several libraries or profiles** — one paragraph pointing at B6 and
    the `project` topology.
 
-Runs: the four above. Cases: `case147` (a scan states the depth it
+Runs: the four above, one per moment; every other depth/flag combination
+is a link to `use/scan-levels.md` §Worked examples, which owns the
+per-depth invocations. Cases: `case147` (a scan states the depth it
 reached). Links, not restatements: baseline lifecycle and storage
 (`use/baseline-*.md`), Action inputs (`reference/github-action-inputs.md`),
-gating order (`use/ci-gating.md`). Done when: each moment has one runnable
+gating order (`use/ci-gating.md`), per-depth commands
+(`use/scan-levels.md`). Done when: each moment has one runnable
 command and one link to its how-to; the accepted-main/release-contract
 distinction is explained in ≤ 2 paragraphs and links out.
 
@@ -646,9 +730,11 @@ Sections:
      report; `--profile release-cut`);
    - growth you did not intend: the one-build audit's accidental and
      unversioned exports (`case143`, `case145`).
-3. **Report or gate?** — the `severity-addition: error` Action input /
-   `.abicheck.yml` `severity:` block turns additions into exit 1; when
-   that is right (a frozen API) and when it is noise (a growing SDK).
+3. **Report or gate?** — a `.abicheck.yml` `severity:` block with
+   `addition: error` (or an Action `severity-preset` that includes it)
+   turns additions into exit 1 — there is no dedicated Action input for
+   additions; when that is right (a frozen API) and when it is noise (a
+   growing SDK).
    Show the Action snippet from `use/github-action-recipes.md` §"Detect
    unintentional API expansion" by link, not copy.
 4. **Make it visible on the PR** — `annotate-additions: true` notices,
@@ -696,9 +782,11 @@ Sections:
    `plugin_abi`, and the use-case profiles (`glibc_symbol_versioned` gets
    its full treatment in B8); `--pack` for reusable bundles of overrides
    and gate settings.
-6. **A minimal `.abicheck.yml`** — one block with `severity:`,
-   `suppression:` and `policy:` keys the page has discussed, each line
-   commented.
+6. **A minimal `.abicheck.yml`** — one block with the `severity:` and
+   `suppression:` keys the page has discussed, each line commented. The
+   policy profile is selected with `--policy` (or the Action's `policy`
+   input), not in the config file, which has no policy key — the page says
+   so, since the reader will look for one.
 
 Runs: `abicheck compare old.json new.so -H include/ --suppress
 suppressions.yaml --audit-suppressions`; `abicheck compare … --policy
@@ -714,8 +802,8 @@ every knob named is linked to its owner.
 | Field | |
 |---|---|
 | Path / tier / level | `learn/triage-a-finding.md` · edu 5 · intermediate |
-| Ownership | new cross-cutting topic `finding-triage`; `allowed_summaries` of the troubleshooting and limitations owners |
-| Reader can… | given a finding that looks wrong, run a five-step check that ends in "real break", "wrong inputs", or "known limitation", and knows which flag re-runs the comparison to confirm |
+| Ownership | new cross-cutting topic `finding-triage`; `allowed_summaries` of `evidence-model` (§1 summarises evidence parity). `use/troubleshooting.md` and `limitations.md` own no registered topic, so the page links them and registers nothing about them |
+| Reader can… | given a finding that looks wrong, run a six-question check that ends in "real break", "wrong inputs", or "known limitation", and knows which flag re-runs the comparison to confirm |
 | Prerequisites | Verdicts; `what-each-level-sees.md` |
 | Footer | ← Rollout and governance · Tier 5 · Designing for Stability → |
 
@@ -911,8 +999,9 @@ sourced to a Part or a case.
 Sections:
 
 1. **The artifact is the package** — comparing `.rpm`/`.deb`/tar/conda
-   inputs directly; debuginfo and devel packages as the evidence sources.
-   Run: `abicheck compare old.rpm new.rpm --debug-info old=old-dbg.rpm
+   inputs directly; debuginfo and devel packages as the evidence sources;
+   two lines summarising the packages-and-SDKs scenario (S13, a registered
+   task page) and a link to it. Run: `abicheck compare old.rpm new.rpm --debug-info old=old-dbg.rpm
    --debug-info new=new-dbg.rpm --devel-pkg old=old-devel.rpm --devel-pkg
    new=new-devel.rpm`.
 2. **Debian `symbols` files are a consumer-declared contract** — generate,
@@ -936,8 +1025,8 @@ Sections:
 
 Runs: the package compare; the `--abi3` scan; a `--used-by` compare
 against a Python interpreter or binding. Cases: 121, 163, 170, 175, 176,
-82, 126. Links, not restatements: all three how-tos are task pages. Done
-when: each package format has one runnable command; the Python section
+82, 126. Links, not restatements: all four task pages (the three how-tos
+and S13). Done when: each package format has one runnable command; the Python section
 never re-explains the limited API beyond one paragraph.
 
 ---
@@ -1023,24 +1112,31 @@ icons with their names) and link; both are added to `verdicts`'
 
 ### C8. Evidence appendix
 
-The "removed scan axes" appendix moves to a new
-`docs/contribute/archive/removed-scan-axes.md` (lifecycle `historical`),
-linked from the archive index; the model page keeps one sentence pointing
-there. The retired-surface check exempts `contribute/archive/`, so the
-dead spellings are safe there.
+The "removed scan axes" appendix moves to `use/companion-commands.md`,
+the CLI migration page, as a new `## Removed scan axes` section beside its
+`## Removed commands`; the model page keeps one sentence pointing there.
+That page has no front matter today, so it gains one with
+`lifecycle: migration` — the retired-surface check exempts that lifecycle,
+so the dead spellings are safe there without an allowlist entry.
 
 ### C9. `build-source-data.md` split
 
-Stays (and keeps `canonical_for: [build-target-scoping]`): §Authority
-rule (as a link once A6 lands), §Evidence layers (as a summary, C5),
-§How the data flows, §Workflow (all H3s, including the Bazel scoping
-section the topic is registered for), §Inputs, expectations & cost.
-Moves to `reference/build-source-facts.md` (registered as the topic's
-`reference_page`, `doc_type: reference`): §What the data actually looks
-like (the three record shapes), §Build-evidence findings, §Source ABI
-replay findings, §Source graph findings, §Cross-source validation
-findings, §Evidence coverage / metrics, §Schema & storage. The narrative
-page links each moved section at the point it was.
+The page has no front matter today; it gains one (`level: advanced`, and
+`canonical_for: [build-target-scoping]`, which the registry already names
+it for). Stays: §Authority rule (as a link once A6 lands), §Evidence
+layers (as a summary, C5), §How the data flows, §Workflow (all H3s,
+including the Bazel scoping section the topic is registered for), §Inputs,
+expectations & cost. Moves, each to the reference page that already owns
+the subject — no new reference page, and `build-target-scoping`'s
+`reference_page` stays `reference/cli-reference.md`: §What the data
+actually looks like → `reference/build-output-schema.md` (the L3 record)
+and `reference/source-graph-schema.md` (the L5 record); the four findings
+lists (§Build-evidence, §Source ABI replay, §Source graph, §Cross-source
+validation) → one paragraph each on the narrative page linking the kinds'
+entries in the generated `reference/detector-spec.md`, since the list of
+kinds is generated and must not be copied; §Evidence coverage / metrics →
+`use/output-formats.md`; §Schema & storage → `reference/snapshot-format.md`.
+The narrative page links each moved section at the point it was.
 
 ### C10. Graph coverage and impact assessment
 
@@ -1048,10 +1144,10 @@ page links each moved section at the point it was.
 `contribute/plans/` links; keep the mental model (what reachability
 means, the tri-state, the worked dispatcher scenario); move the
 field-by-field description of `impact_assessment` and
-`reachability_state` to `reference/impact-assessment-fields.md`
-(`reference_page`). `graph-coverage.md`: keep the negative-evidence
-argument; move the pass-state field names (`extractor_passes` and
-siblings) to the same reference page.
+`reachability_state` to `reference/source-graph-schema.md`, the topic's
+registered `reference_page` already. `graph-coverage.md` (canonical of no
+topic): keep the negative-evidence argument; move the pass-state field
+names (`extractor_passes` and siblings) to the same reference page.
 
 ### C11. `what-each-level-sees.md` forward Next
 
@@ -1109,7 +1205,7 @@ configurations", linking `use/probe-harness.md`.
 
 ---
 
-## F. Content to remove
+## D. Content to remove
 
 The plan's phases move and consolidate; this section lists what should be
 **deleted** from today's pages because it is stale, a roadmap claim, a
@@ -1130,7 +1226,7 @@ are rewritten first.
 | hub | "Which input proves which family" and "The L5 graph" | restate the trio and `impact-analysis.md`; the L5 section is the third statement of the authority rule (A6) | shrink |
 | hub | the 23-row break-family index | the cheat sheet already indexes cases by change; two indexes drift | move into the cheat sheet's table (one index), delete here |
 | hub | the phrase "nine-part learning series" | the page itself says the capstone is not Part 8; the count contradicts the spine | delete the count |
-| `evidence-and-detectability.md` | Appendix "removed scan axes" | a changelog for flags that no longer exist; dead spellings in a live page | move to `contribute/archive/` (C8) |
+| `evidence-and-detectability.md` | Appendix "removed scan axes" | a changelog for flags that no longer exist; dead spellings in a live page | move to `use/companion-commands.md` (C8) |
 | `evidence-and-detectability.md` | the self-correction about a previously over-claimed coverage figure | changelog material; a reader gains nothing from the history of a wrong number | delete |
 | `evidence-and-detectability.md` | §2 b–d (libabigail, ABICC, abicheck compared) | `reference/tool-comparison.md` and `use/tool-modes.md` own the comparison | shrink to one paragraph + links; keep §2 a (app swap) and e (non-static methods) |
 | `08-detection.md` | §3 "Why an abidiff- or ABICC-class checker is not sufficient" | the same tool comparison, a third time | shrink to the two-sentence claim + link to `reference/tool-comparison.md` |
@@ -1147,10 +1243,10 @@ are rewritten first.
 | `abi-cheat-sheet.md` | closing link to the raw GitHub `examples/` tree | the encyclopedia is the published catalog; a raw-tree link bypasses the generated case pages | replace with `reference/examples/index.md` |
 | `limitations.md` | "Dependency Limitations & Known Bugs" (the castxml `__has_cpp_attribute` / Xcode note) | a dated bug note in a boundaries page; `use/troubleshooting.md` §0 is where setup failures live and it already covers castxml aborts | move the paragraph to troubleshooting §0, delete here |
 | `limitations.md` | "Troubleshooting" stub section | a heading with a link under it | delete; link from the page intro instead |
-| `architecture.md` | the module map and per-module prose | contributor material; `abicheck/AGENTS.md` owns the module map and is already `audience: contributor` | shrink to the pipeline diagram + link to the contributor docs |
+| `architecture.md` | the module map and per-module prose | contributor material; `docs/contribute/codebase-overview.md` owns the module map for site readers (the root `AGENTS.md` for agents) | shrink to the pipeline diagram + link to the codebase overview |
 | `architecture.md` | verdict / exit-code table | `verdicts.md` owns it | shrink to a link (C7) |
 | `build-source-data.md` | "Recommended defaults", "Time & resource model" | `use/scan-levels.md` §Cost guide and `contribute/performance.md` own them | shrink to links |
-| `build-source-data.md` | schema, storage and redaction sections | reference material, not a mental model | move to the `reference_page` (C9) |
+| `build-source-data.md` | schema, storage and redaction sections | reference material, not a mental model | move to the existing reference owners (C9) |
 | `impact-analysis.md` | "slice 1 of G29 Phase 3 (ADR-052)" opener and `contribute/plans/` links | delivery history, not learning | delete (C10) |
 | `graph-coverage.md` | "G31 Phase B" references and pass-state field names in prose | same | delete the phase references; fields move to the reference page (C10) |
 | `concurrency-and-initialization.md` | "Why this belongs on its own page rather than folded into 'behavioral'" | editorial justification; the registry comment already records the decision | delete (C6) |
@@ -1168,9 +1264,10 @@ its sources).
 
 ---
 
-## D. Reading paths by role, as ladder subsequences
+## E. Reading paths by role, as ladder subsequences
 
-The hub's role table is rewritten so each path is a walk *up* the ladder.
+The hub's role table is rendered from A1's `paths:` (A2), so each path
+is a walk *up* the ladder by construction and A2c checks it.
 A path may skip tiers but never steps back to a lower one, and within a
 tier it follows member order; a path that continues into the Concepts
 sequence does so only after its educational tiers are done, since the
@@ -1189,31 +1286,34 @@ the ladder does not reach.
 
 The last column of each row on the hub links the tool-track page the role
 needs *after* the ladder (`start/choose-your-workflow.md` for most; the
-output-formats page for agents), so the hand-off to `use/` is one
-deliberate step, not an interleaving.
+output-formats page for agents) — the entry's `after:` — so the hand-off
+to `use/` is one deliberate step, not an interleaving.
 
 ---
 
-## E. Sequencing into pull requests
+## F. Sequencing into pull requests
 
 Each PR is independently mergeable and leaves every gate green. Gate
-commands for all of them: `python scripts/check_docs_contract.py`,
-`mkdocs build --strict`, `python scripts/check_ai_readiness.py`, and from
-P2 on `python scripts/gen_learning_ladder.py --check`.
+command for all of them: `python scripts/verify.py --profile pr --only
+docs-contract,docs-build,ai-readiness`, plus `learning-ladder` (the A2
+drift step) from P1 on. The "Plan phase" column maps each PR to the
+plan's §6; where the two orders differ, this table wins, since it records
+the dependencies between artifacts.
 
-| PR | Carries | Depends on |
-|---|---|---|
-| P1 | A1 file (listing today's pages only; new pages added as they land), A2 generator + its unit tests, `scripts/CLAUDE.md` row; hub gains the sentinel block only. Not yet a PR gate: the generator's `--check` would fail on the 16 pages without `level:` | — |
-| P2 | A4: `level:` on the 16 blank pages and the reconciled values; A3 footers on all 26 deep dives + 3 orientation pages; C11; front-door links (`docs/index.md`, `start/getting-started.md`); *then* the `verify.py` `learning-ladder` step and the A2b nav-order test, which pass on this PR's own head | P1 |
-| P3 | A7 hub rebuild (minus the "Now run it" table), anchor rewrites, C2, C7, C8, A6 terminology term | P2 |
-| P4 | C3 (class layout ownership), C5, C6, C9, C10, A5's "edits to existing topics" | P2 |
-| P5 | B1 How a break shows up | P3 |
-| P6 | B2 Where in the pipeline (moves the hub's "Now run it" table), B3 Report the surface | P5 |
-| P7 | B4 Rollout and governance, B5 Triage a suspicious finding | P6 |
-| P8 | B6 Products, not libraries (with the `bundle-analysis` re-registration), B7 Template-heavy libraries | P4 |
-| P9 | B8 How system libraries stay compatible, B9 Packages and consumers, C13 | P8 |
-| P10 | C1, C4, C12, C14, C15, C16 (worked examples and commands on existing pages) | P4 |
+| PR | Plan phase | Carries | Depends on |
+|---|---|---|---|
+| P1 | 1 | A1 file (today's pages; `paths:` for today's rows), A2 generator + tests, A2b nav-order check, A2c rules, A2d `validation:` block; A4's `level:` on the 16 blank pages and the reconciled values; A3 footers on all 26 deep dives + 3 orientation pages; C11; front-door links (`docs/index.md`, `start/getting-started.md`); the `GENERATED_FILE_MARKERS`, `scripts/CLAUDE.md` and `verify.py` wiring. One PR, because the rules and the levels they read must land together; the hub gains only the two sentinel blocks | — |
+| P2 | 1 | A7 hub rebuild (minus the "Now run it" table), anchor rewrites, A6 terminology term, C7 | P1 |
+| P3 | 2 | C2, C3 (class-layout ownership), C5, C6, C8, C9, C10, A5's "edits to existing topics" | P2 |
+| P4 | 3 | B1 How a break shows up | P2 |
+| P5 | 3 | B2 Where in the pipeline (moves the hub's "Now run it" table), B3 Report the surface | P4 |
+| P6 | 3 | B4 Rollout and governance, B5 Triage a suspicious finding | P5 |
+| P7 | 3 | B6 Products, not libraries (with the `bundle-analysis` re-registration), B7 Template-heavy libraries | P3 |
+| P8 | 3 | B8 How system libraries stay compatible, B9 Packages and consumers, C13 | P7 |
+| P9 | 4 | C1, C4, C12, C14, C15, C16 (worked examples and commands on existing pages) | P3 |
 
-P5–P10 can proceed in parallel once their dependency has merged; P10 is
+P4–P9 can proceed in parallel once their dependency has merged; P9 is
 the only one whose entries are each separable into their own smaller PR
-if review load requires it.
+if review load requires it. Each new page also appends itself to A1 and
+its `paths:` rows in the same PR, since A2c's completeness rule fails
+otherwise.
