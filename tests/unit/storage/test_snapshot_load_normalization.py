@@ -36,7 +36,10 @@ from typing import Any
 
 import pytest
 
-from abicheck.storage.snapshot_load_normalization import extraction_contract_from_dict
+from abicheck.storage.snapshot_load_normalization import (
+    build_mode_from_dict,
+    extraction_contract_from_dict,
+)
 
 
 class TestExtractionContractFieldsNeverCoerce:
@@ -120,3 +123,68 @@ class TestExtractionContractFieldsNeverCoerce:
             extraction_contract_from_dict(
                 {"profile_fields": {1: "bogus"}, "scope_fields": {"abi": "itanium"}}
             )
+
+
+class TestBuildModeFieldsNeverCoerce:
+    """``build_mode_from_dict`` must reject -- not silently null out or
+    coerce -- a present but malformed ``build_mode``/``provenance``/
+    ``libcpp_abi_version`` (Codex review, PR #974, fresh evidence after the
+    ``extraction_contract_from_dict`` fix above): a corrupt build_mode
+    reading as "predates this field" lets ``_effective_build_mode`` infer
+    weaker facts, or skip stdlib-ABI checks, from evidence that was never
+    actually collected -- and a string ``libcpp_abi_version`` coercing to
+    int collapses ``1``/``"1"``/``"01"`` onto one trusted value.
+    """
+
+    def test_an_absent_field_returns_none(self) -> None:
+        assert build_mode_from_dict(None) is None
+
+    @pytest.mark.parametrize(
+        "raw",
+        [
+            pytest.param([], id="list"),
+            pytest.param("libc++", id="string"),
+            pytest.param(42, id="int"),
+        ],
+    )
+    def test_a_present_non_mapping_container_is_rejected(self, raw: Any) -> None:
+        with pytest.raises(TypeError):
+            build_mode_from_dict(raw)
+
+    def test_a_present_non_mapping_provenance_is_rejected(self) -> None:
+        with pytest.raises(TypeError):
+            build_mode_from_dict({"provenance": "not-a-dict"})
+
+    def test_an_absent_provenance_degrades_to_empty(self) -> None:
+        bm = build_mode_from_dict({})
+        assert bm is not None
+        assert bm.provenance.raw_producer is None
+
+    def test_a_real_int_libcpp_abi_version_round_trips(self) -> None:
+        bm = build_mode_from_dict({"libcpp_abi_version": 1})
+        assert bm is not None
+        assert bm.libcpp_abi_version == 1
+
+    def test_an_absent_libcpp_abi_version_is_none(self) -> None:
+        bm = build_mode_from_dict({})
+        assert bm is not None
+        assert bm.libcpp_abi_version is None
+
+    @pytest.mark.parametrize(
+        "raw",
+        [
+            pytest.param("1", id="numeric-string"),
+            pytest.param("01", id="numeric-string-leading-zero"),
+            pytest.param(True, id="bool"),
+            pytest.param(1.0, id="float"),
+            pytest.param([1], id="list"),
+        ],
+    )
+    def test_a_non_int_libcpp_abi_version_is_rejected_not_coerced(
+        self, raw: Any
+    ) -> None:
+        # The exact collapse this bug class produces elsewhere: "1" and 1
+        # coercing to the same trusted value. Must raise, not silently
+        # normalize.
+        with pytest.raises(TypeError):
+            build_mode_from_dict({"libcpp_abi_version": raw})

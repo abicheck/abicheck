@@ -45,7 +45,7 @@ from ..qualified_name_segments import (
     _lambda_identity_containers_and_strings,
     _walk_rewrite_strings,
 )
-from .guards import decision_key, identity_text, mapping as _mapping_guard
+from .guards import decision_key, identity_text, mapping as _mapping_guard, strict_int
 
 if TYPE_CHECKING:
     from ..model.snapshot import AbiSnapshot
@@ -206,39 +206,43 @@ def _enum_or(cls: type, value: Any, default: Any) -> Any:
 
 def build_mode_from_dict(raw: Any) -> BuildMode | None:
     """Convert a serialized BuildMode dict (or None) back into the
-    typed dataclass. Returns None when the field is missing (older
-    snapshots) or malformed."""
-    if not isinstance(raw, dict):
+    typed dataclass. Returns None when the field is genuinely absent
+    (missing key, or explicit ``null`` -- every snapshot predating this
+    field, or a current one that never went through a build-mode-aware
+    dumper). Raises ``TypeError`` for a *present* but wrong-shaped value:
+    storage AGENTS.md invariant 6, the same "reject rather than coerce"
+    rule ``extraction_contract_from_dict`` applies above -- a present,
+    malformed ``build_mode``/``provenance``/``libcpp_abi_version`` must not
+    read as "this snapshot predates the field", or ``_effective_build_mode``
+    would infer weaker facts (or skip stdlib-ABI checks) from evidence that
+    was never actually collected, silently, with no signal anything was
+    wrong (Codex review).
+    """
+    if raw is None:
         return None
+    _mapping_guard(raw, "build_mode")
 
-    # Validate provenance shape: a malformed snapshot may carry a
-    # non-dict value (string/list from hand-edited JSON, or a partial
-    # corruption). Per the function contract, return None for
-    # malformed inputs rather than raising at .get().
     prov_raw = raw.get("provenance")
     if prov_raw is None:
         prov_raw = {}
-    if not isinstance(prov_raw, dict):
-        return None
+    else:
+        _mapping_guard(prov_raw, "build_mode.provenance")
     provenance = BuildModeProvenance(
         raw_producer=prov_raw.get("raw_producer"),
         raw_comment=prov_raw.get("raw_comment"),
         compiler_version=prov_raw.get("compiler_version"),
     )
 
-    # Coerce libcpp_abi_version: int passes through; numeric string
-    # (some YAML/JSON producers emit "1" instead of 1) coerces; anything
-    # else (bool wraps as 0/1 which would be misleading; lists/dicts)
-    # falls back to None.
+    # libcpp_abi_version: an int passes through unchanged; anything else
+    # present (a string -- even a numeric one like "1", since that is
+    # exactly the 1/"1" collision invariant 6 exists to prevent -- a bool,
+    # a float, a list) is rejected via strict_int rather than coerced.
     libcpp_raw = raw.get("libcpp_abi_version")
-    if isinstance(libcpp_raw, bool):
-        libcpp_abi_version: int | None = None
-    elif isinstance(libcpp_raw, int):
-        libcpp_abi_version = libcpp_raw
-    elif isinstance(libcpp_raw, str) and libcpp_raw.isdigit():
-        libcpp_abi_version = int(libcpp_raw)
-    else:
-        libcpp_abi_version = None
+    libcpp_abi_version: int | None = (
+        None
+        if libcpp_raw is None
+        else strict_int(libcpp_raw, "build_mode.libcpp_abi_version")
+    )
 
     return BuildMode(
         compiler_family=_enum_or(
