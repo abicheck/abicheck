@@ -123,6 +123,23 @@ class TestPublicSurfaceQueryResolve:
         snap = _snapshot(functions=[fn])
         assert PublicSurfaceQuery.resolve(snap) is None
 
+    def test_a_private_only_entity_id_does_not_mask_unavailable_public_ids(
+        self,
+    ) -> None:
+        # The public declaration's own entity_id carrier is None (resolution
+        # unavailable for it), but an unrelated *private* declaration on the
+        # same snapshot does carry one. A whole-snapshot "does anything have
+        # an entity_id" check would wrongly treat that private-only id as
+        # proof entity-id resolution is available, then silently return an
+        # empty (non-None) set once the loops below find no *public* id to
+        # add -- read downstream as "confirmed zero public surface" instead
+        # of "fall back to the legacy answer" (CodeRabbit review, PR #979).
+        fn_public = _fn("f", "_Z1fv", vis=Visibility.PUBLIC, entity_id=None)
+        eid_hidden = entity_id_for_function((), "g", mangled_name="_Z1gv")
+        fn_hidden = _fn("g", "_Z1gv", vis=Visibility.HIDDEN, entity_id=eid_hidden)
+        snap = _snapshot(functions=[fn_public, fn_hidden])
+        assert PublicSurfaceQuery.resolve(snap) is None
+
     def test_unresolvable_snapshot_returns_none(self) -> None:
         # No declarations at all -> compute_public_surface() itself is
         # unresolvable (surf.resolvable is False) -- same "fall back to

@@ -82,3 +82,20 @@
     of `cli_buildsource.py`) for the two moved names, plus a direct
     `PublicSurfaceResolution = PublicSurface` alias, all three now back in
     `__all__` for `from ... import *` compatibility too.
+  - A further review round (CodeRabbit, PR #979) found
+    `PublicSurfaceQuery.resolve()`'s entity-id-availability check
+    (`_has_any_entity_id`) scanned *every* declaration on the snapshot --
+    public and private alike -- to decide whether to fall back to `None`
+    ("entity-id resolution unavailable"). A snapshot where every *public*
+    declaration lacks an `entity_id` but an unrelated *private* one happens
+    to carry one passed that check and fell through to the id-collection
+    loops, which only ever add public ids -- so the method silently
+    returned an empty, non-`None` `frozenset()` (read downstream as
+    "confirmed zero public surface") instead of `None` ("fall back to the
+    legacy `Visibility.PUBLIC`-only answer"). Fixed by scoping the
+    availability check to the collected public `ids` themselves: `if not
+    ids and (surf.public_symbols or surf.public_types): return None`,
+    evaluated after the loops instead of as an upfront whole-snapshot scan.
+    `_has_any_entity_id` had no other caller and is removed.
+    `test_a_private_only_entity_id_does_not_mask_unavailable_public_ids` in
+    `tests/test_policy_public_surface.py` pins this directly.

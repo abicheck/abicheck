@@ -62,21 +62,6 @@ def _linker_key_is_public(mangled: str, name: str, public_symbols: set[str]) -> 
     return mangled in public_symbols or name in public_symbols
 
 
-def _has_any_entity_id(snapshot: AbiSnapshot) -> bool:
-    """Whether *any* function/variable/type/enum on *snapshot* carries a
-    resolved ``entity_id`` -- the whole-snapshot availability signal
-    :meth:`PublicSurfaceQuery.resolve` needs to distinguish "entity-id
-    resolution is unavailable on this snapshot" (fall back to ``None``)
-    from "resolution ran and genuinely found zero public declarations"
-    (a real, non-``None`` empty ``frozenset``)."""
-    return (
-        any(fn.entity_id is not None for fn in snapshot.functions)
-        or any(var.entity_id is not None for var in snapshot.variables)
-        or any(rec.entity_id is not None for rec in snapshot.types)
-        or any(en.entity_id is not None for en in snapshot.enums)
-    )
-
-
 class PublicSurfaceQuery:
     """Bare-membership and structured relevance queries over one
     snapshot's public/exports surface (ADR-063 Phase 3 D5)."""
@@ -101,11 +86,20 @@ class PublicSurfaceQuery:
         ``resolve_public_surface()`` itself is unresolvable (``surf.
         resolvable`` is ``False`` — no header-derived visibility exists at
         all, per :class:`~abicheck.policy.public_surface.PublicSurface`'s
-        own docstring, "scoping is skipped entirely"), or *snapshot*
-        carries no ``entity_id``-bearing declaration at all (a
-        pre-ADR-063-Phase-2 snapshot, schema < 28, or a header-AST backend
-        gap wide enough that nothing on the whole snapshot resolved one).
-        Every ``*_public_entity_ids`` consumer downstream (``build_
+        own docstring, "scoping is skipped entirely"), or the *public*
+        portion of the surface carries no ``entity_id``-bearing declaration
+        at all (a pre-ADR-063-Phase-2 snapshot, schema < 28, or a
+        header-AST backend gap wide enough that nothing public resolved
+        one). That availability check is deliberately scoped to *public*
+        declarations only (CodeRabbit review, PR #979) — a snapshot where
+        every public declaration lacks an ``entity_id`` but some unrelated
+        *private* declaration happens to carry one is exactly the
+        "unavailable" case, not a legitimate empty answer; checking
+        ``entity_id`` presence across the whole snapshot would wrongly let
+        that private-only id mask the missing public coverage, since the
+        loops below only ever add public ids and would then silently
+        return an empty (non-``None``) set instead of falling back. Every
+        ``*_public_entity_ids`` consumer downstream (``build_
         surface_graph``/``compute_surface_metrics``/``compare()``) treats
         ``None`` as "fall back to the legacy ``Visibility.PUBLIC``-only
         answer" — collapsing either unavailability case to an empty
@@ -119,8 +113,6 @@ class PublicSurfaceQuery:
         """
         surf = resolve_public_surface(snapshot)
         if not surf.resolvable:
-            return None
-        if not _has_any_entity_id(snapshot):
             return None
         ids: set[EntityId] = set()
         for fn in snapshot.functions:
@@ -145,6 +137,8 @@ class PublicSurfaceQuery:
                 or (en.qualified_name or "") in surf.public_types
             ):
                 ids.add(en.entity_id)
+        if not ids and (surf.public_symbols or surf.public_types):
+            return None
         return frozenset(ids)
 
     @staticmethod
