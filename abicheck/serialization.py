@@ -308,10 +308,6 @@ from .storage.surface_graph_codec import decode_surface_graph, encode_surface_gr
 #     `True`, so an older snapshot degrades cleanly to today's (buggy)
 #     inclusive behavior rather than being misread as "confirmed
 #     user-written".
-#   30 — ADR-063 Phase 5: `RecordType.is_final_fact`, the fact registry's
-#     (`abicheck/model/fact_registry.py`) first conversion. No reliability
-#     flag needed — see `storage/fact_codec.py`'s
-#     `_MIN_SCHEMA_VERSION_FOR_IS_FINAL_FACT`.
 #
 # Reading an OLDER snapshot (the direction every CI baseline actually hits —
 # a baseline is committed once and outlives however many abicheck pin bumps
