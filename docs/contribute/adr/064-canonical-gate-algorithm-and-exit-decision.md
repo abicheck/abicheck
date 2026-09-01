@@ -56,8 +56,19 @@ that wrong shape before the gap was caught. `--format text` is deliberately
 unchanged: `bo.message`/`ce.message` already read as the human-facing
 explanation, and there is no `ScanOutcome` to feed `_render_text` at this
 point (most of its fields were never computed) — inventing prose for that
-gap remains a separate, open question this update does not attempt. Still
-open: the release fan-out's `GateOptions` unification; and **stage 2**, the
+gap remains a separate, open question this update does not attempt. **Update
+(2026-09-01):** the first slice of the "full cross-front-end parity pass"
+this section names as still open has landed — the composite Action's own
+`scan` verdict mapping (`action/run.sh`) previously folded an
+`_EvidenceContractError` abort into the generic `ERROR` bucket a CLI usage
+error gets, since both produce the identical `Error: ...` stderr shape; it
+now recognizes the native CLI's own `verdict: "EVIDENCE_CONTRACT_ERROR"`
+JSON envelope and publishes a matching, distinguishable verdict (see
+"Staged landing, additive first" below, item 1's own end-of-list "Update"
+for the full account). Still
+open: the release fan-out's `GateOptions` unification; the rest of the
+cross-front-end parity pass (typed API; the `--format text` gap named
+above); and **stage 2**, the
 `--exit-code-scheme` removal itself. See
 [cli-cleanup-phase-two.md](../plans/cli-cleanup-phase-two.md)'s "PR 4 — one
 gate algorithm" section, which this ADR formalizes rather than restates.
@@ -545,6 +556,249 @@ lands in two stages rather than one atomic change:
       too, the same way (12) already does for the normal-verdict branch.
       Still open: the release fan-out's `GateOptions` unification and a
       full cross-front-end parity pass (typed API, Action).
+
+      **Update (2026-09-01): first slice of the Action-side parity pass.**
+      The composite Action's own `scan` verdict mapping
+      (`action/run.sh`) had exactly the gap this precedence work exists to
+      close: `cli_scan.py` raises `_EvidenceContractError` as a
+      `click.ClickException` (stderr `Error: <message>`, exit 1) — the
+      identical shape a bad flag or a crash produces — so `run.sh`'s
+      `_is_cli_error` check (`grep -qE '(^Usage:|^Error:|...)'`) matched it
+      unconditionally and folded a well-formed, evidence-incomplete scan
+      into the same generic `ERROR` bucket a syntax typo gets, even though
+      the native CLI's `--format json` path already writes a real,
+      distinguishable `verdict: "EVIDENCE_CONTRACT_ERROR"` envelope for
+      this exact abort (`_emit_scan_abort_report`/
+      `scan_abort_result_fields`, landed earlier in this same stage). Fixed
+      by a new `_evidence_contract_gated()` helper (mirrors
+      `_coverage_gated`/`_assurance_gated`'s own JSON-first pattern,
+      reading the report's top-level `verdict` field, which
+      `_json_report_src`'s existing freshness/fingerprint checks already
+      keep from false-positiving on a stale prior report) consulted ahead
+      of `_is_cli_error` in the exit-1 dispatch, giving the abort its own
+      `EVIDENCE_CONTRACT_ERROR` verdict with a job-summary line and
+      `action.yml` output documentation, mirroring `NOT_COMPARABLE`/
+      `BUDGET_OVERFLOW`'s existing treatment — including the same
+      unconditional step-failure block those two verdicts needed of their
+      own (splitting a new verdict out of the generic `ERROR` bucket means
+      it no longer matches that bucket's own `FINAL_EXIT=1`, so it needs an
+      explicit twin or the step would silently start passing). **Deliberately
+      not** given `BUDGET_OVERFLOW`'s own `_maybe_post_pr_comment` skip — an
+      initial version of this fix copied that skip by analogy and a Codex
+      review round (fresh evidence) caught that the analogy doesn't hold:
+      unlike `BUDGET_OVERFLOW` (which genuinely has no report to reuse,
+      since `run_scan_core`'s deadline-guarded candidate-snapshot collection
+      raises before `_emit_scan_report` ever runs), reaching
+      `EVIDENCE_CONTRACT_ERROR` already proves `_evidence_contract_gated`
+      found a populated, readable JSON report — that is the only way it can
+      have returned true — and `pr_comment_scan_abort.
+      scan_abort_incomplete_reason` (above) already renders that exact
+      envelope as a blocking "analysis incomplete" finding, its own
+      docstring naming the GitHub Action as one of the paths meant to reach
+      it. The skip would have left a previous sticky BREAKING/API_BREAK
+      comment stale and misleading instead of updating it, and — for the
+      rarer case where no JSON report exists yet at this point — a re-run to
+      obtain one is cheap for this specific abort, since
+      `_EvidenceContractError`'s own precondition check fires before any
+      source evidence collection begins, unlike a real budget-limited scan.
+      Whenever no JSON report exists at all for this wrapper to read, this
+      classification is unavailable and the run still reads as `ERROR`,
+      same as before this fix — the one acknowledged gap noted above this
+      update. **Three successive review rounds each found the previous
+      restatement of exactly *when* a JSON report exists incomplete**
+      (`pr-comment: false` with no other JSON source; an `--artifact-set`
+      scan, which suppresses the auto-injected sidecar unconditionally; and
+      the run's own `extra-args` already supplying a non-JSON `--write`,
+      which also suppresses the injection so as not to clobber the
+      caller's own flag) — `action.yml`'s `verdict`/`exit-code` output
+      descriptions stopped trying to enumerate the condition in prose after
+      the third finding and instead point at `action/run.sh`'s own
+      JSON-sidecar-injection logic as the one authoritative source, rather than
+      a fourth prose restatement this file's own history shows keeps
+      finding one more uncovered combination. **A stricter instance of the same
+      gap (Codex review, fresh evidence):** `--artifact-set`
+      (the Action's `new-library-set` input) skips the JSON secondary
+      write *unconditionally* — `action/run.sh`'s own injection guard
+      requires `-z "$SCAN_ARTIFACT_SET"` regardless of `pr-comment` — even
+      though `cli_scan._run_artifact_set`'s text renderer
+      (`_render_artifact_set_text`) always prints a stable, parseable
+      `Artifact-set scan verdict: EVIDENCE_CONTRACT_ERROR (exit N)` line
+      (unlike the single-binary abort, which prints nothing distinguishing
+      in text form at all — `ScanSetResult` already exists as a real
+      object here, so there is genuinely something to render). Left
+      unread rather than parsed: teaching the wrapper to recognize a
+      second, mode-specific text sentinel — after this same review round
+      already found the first `--evidence_contract_gated` addition needed
+      its own hostile-input test — was judged not worth the additional
+      parsing surface and its own adversarial-input analysis for one
+      narrower mode, when `--format json` already produces this verdict
+      at the set's top level in the common case (`ScanSetResult.to_dict()`'s
+      own top-level `verdict` field is exactly the one `_report_query`'s
+      `compat_verdict` query already reads). **A second review round found
+      that claim itself incomplete (Codex review, fresh evidence):**
+      `ScanSetResult`'s own aggregation
+      (`service_scan._aggregate_scan_set_verdict`, pre-existing, untouched
+      by this PR) reports `EVIDENCE_CONTRACT_ERROR` at the set's top level
+      only when it is the *worst* outcome across the set — a sibling
+      library's real `API_BREAK`/`BREAKING` keeps that verdict at the top
+      level instead (the aborted member's contribution still floors the
+      overall exit code at 1, per that function's own docstring, but the
+      wrapper's fail-on-api-break/fail-on-breaking inputs alone decide the
+      step's outcome in that case, same as for an ordinary break, with the
+      sibling abort visible only in the JSON report's own `per_artifact`
+      list). So even under `--format json`, "unconditionally fails the
+      step" holds for `--artifact-set` only when the evidence-contract
+      abort is the set's own worst outcome. Documented precisely in
+      `action.yml`'s own `verdict`/`exit-code` output descriptions instead
+      of parsing `per_artifact` here too, for the same reason as the first
+      gap: a second layer of JSON-array parsing logic earns its own
+      hostile-input analysis and test, and this PR would rather record an
+      accurate limitation than ship that under-tested.
+      `tests/test_action_run_sh_scan_evidence_contract_error.py` covers the
+      exit-1 dispatch (including the "both signals present" case, since
+      real stderr always satisfies `_is_cli_error` too) and the
+      step-failure block. **A fourth review round (Codex, fresh evidence)
+      caught a message-accuracy gap, not a detection gap:**
+      `_EvidenceContractError` has two independent raise sites in
+      `scan_engine.py` -- the pinned-depth/missing-evidence check this
+      wrapper's messages were written around, and `_run_abi3_audit`'s own
+      abi3-precondition check (`--abi3` targeting a binary that isn't a
+      recognisable CPython extension module, unrelated to any depth pin)
+      -- and the JSON envelope this wrapper reads carries only the verdict
+      string, not which raise site fired. The `::error::` annotation, job
+      summary, and final-exit message all named the depth/evidence cause
+      unconditionally, misdiagnosing the abi3 case. Fixed by making all
+      three generic (naming the axis -- "this scan's evidence contract
+      could not be satisfied" -- and pointing at the command's own error
+      message for the specific cause) rather than picking one cause to
+      describe; `action.yml`'s own verdict description updated the same
+      way. This one needed no adversarial-input analysis, unlike the
+      JSON-sidecar-condition gaps above -- it is a wording correction, not
+      a new signal to parse. **A fifth review round (Codex, fresh
+      evidence) caught the identical narrow framing surviving in the
+      adjacent `exit-code` output description and the changelog
+      fragment** -- both still named only the pinned-depth cause for the
+      scan exit-1 axis, and a leftover `action/run.sh` comment (the exit-1
+      dispatch's own "four possible sources" note) did too. Fixed the same
+      way: named the axis generically, listed both raise sites where a
+      concrete example was still useful, and swept the rest of this PR's
+      own diff for the same narrow phrasing rather than waiting for a
+      sixth round to find the next copy. **A sixth review round (Codex,
+      fresh evidence) found a fourth uncovered escape hatch in the same
+      JSON-detection family, distinct from the three the `verdict`
+      description already names:** `_STDOUT_JSON_FILE` (the primary-output
+      stdout capture immediately above `_json_report_src`) is gated on
+      `"${FORMAT:-}" == "json"` -- this Action's own `format` input, read
+      *before* the CLI runs -- not on what the invocation actually
+      produced. `extra-args: --format json` under `format: text` makes the
+      real CLI invocation emit JSON on stdout (the later flag wins, same
+      as any CLI argv), but the wrapper's own capture never notices,
+      since it never re-derives the effective format from the actual
+      command it built. Unlike the fifth round, this is a real detection
+      gap, not wording -- but it is the same *shape* of gap as the
+      `--write`-collision findings (three and five), so it gets the same
+      treatment for the same reason: teaching this wrapper to track an
+      effective-format override needs its own parsing of `extra-args` and
+      its own hostile-input test, the bar the first `_evidence_contract_
+      gated` addition was already held to, and this PR would rather record
+      an accurate limitation than add that under-tested. Folded into the
+      `verdict` description's existing generic pointer at
+      `action/run.sh`'s own JSON-detection logic, now naming
+      `_STDOUT_JSON_FILE` alongside `_json_report_src` and updating the
+      combination count from three to four. Still open: the release
+      fan-out's `GateOptions` unification, the typed-API half of this
+      parity pass, the `--format text` gap named above, a real
+      `--artifact-set` member-level evidence-contract signal for the
+      Action to consume, and this round's own effective-format-override
+      gap.
+
+      **A CI-infrastructure fix, not a review finding:** the new test
+      file's own malicious-fixture test (and its siblings) passed their
+      generated bash script via `subprocess.run([bash, "-c", script])`,
+      which failed on `windows-latest` CI with a bash parse error
+      (`unexpected EOF while looking for matching \`)'`) -- Windows
+      reconstructs that argv via `list2cmdline` (MSVCRT quoting rules) and
+      Git Bash's own MSYS runtime then re-parses the resulting command
+      line with its own, not-quite-identical rules, corrupting this file's
+      large, quote-heavy scripts. An earlier revision patched only the
+      interpolated paths with `Path.as_posix()`; that addressed a
+      narrower instance of the same class and left this one, confirmed
+      still failing with the identical error text. Fixed by porting the
+      same fix two sibling test modules already use for this exact class
+      of gap (`test_action_run_sh_helpers.py`'s `_run_harness`,
+      `test_action_run_sh_py_safe_path.py`'s `_run_bash_script`): write
+      the script to a real file and run `bash <path>`, which needs no
+      argv reconstruction at all.
+
+      **A seventh review round (Codex, fresh evidence) found a real test-
+      coverage gap, not a wording or detection gap:** every exit-1
+      dispatch test in the new test file stubs `_evidence_contract_gated`
+      out entirely, and the one test executing the real
+      `_report_query`/`_evidence_contract_gated` pipeline only supplied a
+      near-miss verdict (expecting `GATED=0`) -- none of the five tests
+      would have failed if that pipeline were broken to always return
+      false, silently restoring the exact pre-fix misclassification for
+      every genuine `EVIDENCE_CONTRACT_ERROR` report. Fixed by adding a
+      positive-path test supplying the exact sentinel string through the
+      same real, extracted pipeline (factoring the report-writing/script-
+      assembly the hostile-value test already did into a shared helper so
+      both tests exercise one pipeline, not two copies), verified to
+      actually catch the regression the same way every malicious-fixture
+      test in this PR has been.
+
+      **An eighth review round (Codex, fresh evidence) found a real
+      correctness/cost bug in pre-existing, untouched-by-this-PR code
+      this PR's own comment had overclaimed about:** `_can_reuse_primary_
+      json` (the sticky-PR-comment JSON acquisition decision) requires
+      `$FORMAT == "json"` before it will reuse an already-produced report
+      -- so a `format: text`/`markdown` run whose own extra-args supplied
+      `--write json=PATH` (exactly the faithful, unfiltered report
+      `_json_report_src`'s `_extra_write_json_path` branch already
+      trusts, and exactly what let `_evidence_contract_gated` classify
+      the verdict correctly in the first place) is rejected anyway,
+      forcing `_maybe_post_pr_comment` into a full rerun despite the JSON
+      already sitting on disk. For the abi3 `_EvidenceContractError` raise
+      site specifically, that rerun happens *after* real candidate-
+      snapshot extraction -- not the cheap, precondition-only rerun this
+      PR's own `EVIDENCE_CONTRACT_ERROR`-doesn't-get-`BUDGET_OVERFLOW`'s-
+      skip comment (added in the very first slice above) claimed for
+      every raise site. Unlike the documentation-precision rounds above,
+      this is fixed in code rather than recorded as a gap: dropped the
+      blanket `$FORMAT == "json"` requirement and let `_can_reuse_primary_
+      json` rely purely on `_json_report_src` (whose own per-branch
+      gating already restricts a non-`format:-json` trust to exactly the
+      `_extra_write_json_path` case) -- a minimal, general fix to the
+      shared acquisition helper every mode's PR comment goes through, not
+      a special case for this one verdict. Corrected the now-inaccurate
+      "rerun is cheap" framing in the earlier comment to match: reaching
+      `EVIDENCE_CONTRACT_ERROR` already proves a report exists, so with
+      this fix the reuse-or-rerun fallthrough never actually reruns for
+      this verdict at all. New test:
+      `test_reuses_extra_args_write_json_sidecar_under_a_non_json_format`
+      in `tests/test_action_run_sh_pr_json.py`, verified to catch the
+      regression the same way.
+
+      **A ninth review round (Codex, fresh evidence) found the mirror
+      image of the sixth round's finding, falsifying the one guarantee
+      the `verdict` description still asserted:** "This Action's own
+      `format: json` input always qualifies" was itself wrong -- `extra-
+      args: --format text` under `format: json` overrides the effective
+      invocation to text output the same way `--format json` under
+      `format: text` (the sixth round's finding) overrides it to JSON;
+      neither direction is detected specially, so `format: json` alone
+      guarantees nothing about what `_json_report_src`/`_STDOUT_JSON_FILE`
+      actually find. This is the fifth successive round to find one more
+      uncovered combination in a *claim* this description made about
+      when a JSON report exists, even after the fifth round (see above)
+      already tried retreating from enumeration to a single narrower
+      claim -- proof that the narrower claim was still an enumeration,
+      just of one case instead of several. Fixed by removing the "always
+      qualifies" guarantee entirely rather than adding a sixth caveat:
+      the description now states plainly that the *effective* invocation
+      decides, not any one input considered alone, and points at
+      `action/run.sh`'s own logic with no shortcut claim standing in for
+      it. No code change and no new test -- this is prose accuracy only,
+      the same class the fourth round already established needs neither.
 2. **Atomic.** Once the report block agrees with today's real behaviour for
    every axis and every mode (verified by the axis-separated tests this ADR
    requires below), remove `--exit-code-scheme` from `compare` and `scan`,
