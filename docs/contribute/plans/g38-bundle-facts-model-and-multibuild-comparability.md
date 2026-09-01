@@ -187,8 +187,12 @@ identified. Lowest risk, do first.
 
 **Implementation status (2026-08-23): the model, the mandatory parity test,
 and the producer (`--bundle-facts-out`) are shipped; the CLI consumer half
-is deliberately deferred.** Two real deviations from this section's original
-design, both discovered during implementation rather than planned up front:
+is deliberately deferred.** *(Update: the CLI consumer half shipped later —
+Phase 13 built its Python-API driver, Phase 17 gave it a real CLI surface,
+`compare --old-bundle-facts`. This note is kept as the historical record of
+this phase's own original scope, not a still-open item.)* Two real
+deviations from this section's original design, both discovered during
+implementation rather than planned up front:
 
 1. **No `BundleArtifactFacts`/persisted `ResolutionGraph`.** The sketch
    below assumed the resolution graph needed its own serialized form. It
@@ -388,6 +392,14 @@ plan, informed by whatever `BundleFacts` looked like in production by then.
 surface that discovers real per-variant `BundleFacts` and feeds them to
 `pair_variants` is deliberately deferred, the same posture Phase 2's own
 implementation-status note already took for its CLI consumer half.**
+*(Update: unlike Phase 2's CLI consumer half, this one did not later ship —
+Phase 15's own correction found it is not needed at all. The declarative CI
+pipeline that would have called `pair_variants()`
+(`check-project.yml`/G30's `bundles:`/`profiles:` schema) always resolves
+its baseline live, in-job, so it never needs to pair two already-captured
+`BundleFacts` documents in the first place; see Phase 15's "Why
+`bundle_variants_config.py`/`pair_variants`/`BundleVariantSpec` stay
+unwired" note. This deferral is therefore permanent, not pending.)*
 
 - `abicheck/bundle_multibuild.py` implements `variant_fingerprint`,
   `VariantOutcome`, `VariantComparison`, `pair_variants`, and
@@ -435,12 +447,13 @@ implementation-status note already took for its CLI consumer half.**
   reporter's `bundle.json`/`bundle.md` yet (that's this phase's own
   "Reporter" row in "Files & surfaces", still open). Also not shipped: any
   CLI/config surface that discovers a release's real build variants,
-  extracts `BundleFacts` per variant, and calls `pair_variants` — that needs
-  the same real, separate design Phase 2's CLI consumer half deferred for
-  (most of `compare`'s release-fan-out option surface loses its per-variant
-  meaning once there is more than one old/new directory pair per release),
-  and `comparability.py`'s bundle-level fingerprint-mismatch refusal is
-  likewise not yet wired to this module's `variant_fingerprint`.
+  extracts `BundleFacts` per variant, and calls `pair_variants` — see Phase
+  15's later correction (this deferral turned out to be permanent, not
+  pending: the declarative CI pipeline that would have called it never
+  needs to, since it always resolves its baseline live rather than pairing
+  two already-captured `BundleFacts` documents) — and `comparability.py`'s
+  bundle-level fingerprint-mismatch refusal is likewise not yet wired to
+  this module's `variant_fingerprint`.
 
 **New module, `abicheck/bundle_multibuild.py`:**
 
@@ -1764,6 +1777,27 @@ splits one of these files has a concrete, checkable pointer to what should
 consume the room it frees, rather than rediscovering this constraint from
 scratch.
 
+**Update (2026-09-01): both halves of this gap are now accounted for,
+neither by squeezing into the at-cap files this table measured.**
+`compare_release_against_bundle_facts()`'s own CLI surface shipped in
+Phase 17 below (`compare --old-bundle-facts`), via a new, split-out
+`frontends/cli/commands/compare_bundle_facts.py` dispatch module
+(ADR-061's migrated-package pattern) rather than a new option squeezed
+into one of the legacy files this table measured — sidestepping the
+constraint described above rather than resolving it in place.
+`run_bundle_variant_pairing()`'s own `.abicheck.yml` `bundle_variants:`
+wiring, by contrast, turned out not to need building at all: Phase 15's
+own correction (below) found that the declarative CI pipeline that would
+have been its caller (`check-project.yml`, via G30 P1.4/P1.5's
+`bundles:`/`profiles:` schema) always resolves its baseline live, in-job,
+so it never needs a mechanism for pairing two already-*captured*
+`BundleFacts` documents in the first place — see Phase 15's own "Why
+`bundle_variants_config.py`/`pair_variants`/`BundleVariantSpec` stay
+unwired" note for the full reasoning. Neither half remains blocked on
+file-size room the way this section originally framed it; the table above
+is kept as the historical record of why this phase itself didn't attempt
+either at the time.
+
 **Fixed (Phase 13 follow-up, second pass):** `bundle_variants_config.py`'s
 own narrower, non-CLI-blocked gap — that it never verified a captured
 `BundleFacts.variant_fingerprint` against what a declared spec's own
@@ -1783,7 +1817,8 @@ specs against arbitrary sentinel fingerprints unrelated to any real
 coordinates) is unaffected. This does not need the CLI/`BuildConfig`
 wiring above — it is a pure addition to the already-shipped Python-API
 `run_bundle_variant_pairing()` function — so it was safe to close
-independently of the still-open CLI-surface gap. See
+independently of the CLI-surface gap above (itself now resolved, per the
+Update note above, rather than still open). See
 `tests/test_bundle_variants_config.py::TestRunBundleVariantPairingVerifyFingerprints`.
 
 The original multi-binary performance problem (repeated header/AST
