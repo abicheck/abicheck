@@ -800,6 +800,29 @@ def _run_adapters(
         )
 
 
+def _purge_and_record(
+    pack_root: Path, manifest: object, record: ExtractorRecord, merged: BuildEvidence
+) -> None:
+    """Purge a failed extractor's outputs, escalating a failed purge itself.
+
+    A purge failure (locked file, permissions error -- CodeRabbit review)
+    is worse than whatever reason triggered the purge: an un-purged file
+    can still be hashed into the pack's identity as valid evidence. Forces
+    ``record.status = "failed"`` regardless of its prior value and adds one
+    diagnostic to both *record* and *merged*.
+    """
+    name = getattr(manifest, "name", "<unknown>")
+    if not purge_external_outputs(pack_root, manifest):
+        record.status = "failed"
+        message = (
+            f"{name}: failed to fully remove stale normalized output(s) from "
+            "the pack -- a leftover file may still be hashed into the "
+            "published pack identity"
+        )
+        record.diagnostics.append(message)
+        merged.diagnostics.append(message)
+
+
 def _run_external_extractors(
     merged: BuildEvidence,
     extractors: list[ExtractorRecord],
@@ -874,7 +897,7 @@ def _run_external_extractors(
             merged.diagnostics.append(
                 f"{manifest.name}: {record.detail or 'extractor did not complete'}"
             )
-            purge_external_outputs(pack_root, manifest)
+            _purge_and_record(pack_root, manifest, record, merged)
             continue
 
         # Reject output kinds collect cannot fold yet — only
@@ -898,7 +921,7 @@ def _run_external_extractors(
                 f"{manifest.name}: output kind(s) {', '.join(unsupported)} are not yet "
                 "supported by collect (only build_evidence is folded into the pack)"
             )
-            purge_external_outputs(pack_root, manifest)
+            _purge_and_record(pack_root, manifest, record, merged)
             continue
 
         # Fold any normalized build_evidence outputs into the merged L3 evidence.
@@ -940,7 +963,7 @@ def _run_external_extractors(
             for build_evidence in parsed:
                 merged.merge(build_evidence)
         else:
-            purge_external_outputs(pack_root, manifest)
+            _purge_and_record(pack_root, manifest, record, merged)
 
 
 def _ingest_graph_backends(

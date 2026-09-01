@@ -64,7 +64,7 @@ def is_pack_dir(path: Path | None) -> bool:
     )
 
 
-def purge_external_outputs(pack_root: Path, manifest: object) -> None:
+def purge_external_outputs(pack_root: Path, manifest: object) -> bool:
     """Remove a failed external extractor's normalized outputs from the pack.
 
     A failed/skipped extractor must be isolated from the collected pack: its
@@ -76,13 +76,34 @@ def purge_external_outputs(pack_root: Path, manifest: object) -> None:
     what audit mode preserves for debugging. Takes *manifest* duck-typed
     (``name``/``outputs`` attributes) rather than a typed import, so this
     dependency-free leaf stays importable from any layer.
+
+    Returns ``True`` when every declared output and the ``normalized/<name>/``
+    subtree were confirmed absent afterward (already-missing counts as
+    removed), ``False`` when a real removal failure occurred -- a locked file,
+    a permissions error, a read-only remount. Previously swallowed either way
+    with no signal at all (CodeRabbit review): a caller that only checks
+    ``record.status`` had no way to learn a stale, un-purged file might still
+    be sitting under *pack_root* for a later hashing pass to pick up as if it
+    were valid, current-run evidence -- exactly the corruption this
+    function's own first paragraph exists to prevent. Callers should record a
+    ``False`` result somewhere a human/CI will see it (see
+    ``cli_buildsource_helpers.py``'s three call sites); this leaf itself
+    stays a pure filesystem primitive with no diagnostics/ledger shape of its
+    own to append to.
     """
     name = getattr(manifest, "name", "")
+    fully_removed = True
     for output in getattr(manifest, "outputs", []):
+        path = pack_root / output.path
         try:
-            (pack_root / output.path).unlink()
+            path.unlink()
+        except FileNotFoundError:
+            pass  # already absent -- not a removal failure
         except OSError:
-            pass
+            fully_removed = False
     norm_dir = pack_root / "normalized" / name
     if norm_dir.is_dir():
         shutil.rmtree(norm_dir, ignore_errors=True)
+        if norm_dir.is_dir():
+            fully_removed = False
+    return fully_removed
