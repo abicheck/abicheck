@@ -553,10 +553,17 @@ def _record_is_confirmed_public_seed(
     )
 
 
-def _resolve_public_surface_via_graph(snap: AbiSnapshot) -> PublicSurface:
-    """The real graph traversal: computes *snap*'s public-ABI surface from
+def _resolve_public_surface_from_snapshot(snap: AbiSnapshot) -> PublicSurface:
+    """Computes *snap*'s public-ABI surface from
     :func:`~abicheck.compare.surface_graph.referenced_identifiers_by_node`
     instead of ``surface.py``'s old, independent closure-walk implementation.
+    Despite this module's own name, the resolution below never reads
+    ``snap.surface_graph`` itself -- see this function's own body and
+    ``referenced_identifiers_by_node``'s docstring for why (CodeRabbit
+    review, PR #979: an earlier revision of this function *did* read the
+    persisted graph, and was renamed off ``_via_graph`` once that design
+    was superseded -- see this module's own top-of-file docstring for the
+    full history).
 
     Public roots are :data:`Visibility.PUBLIC` functions/variables. The
     public type set is the transitive closure over the types they
@@ -637,10 +644,10 @@ def resolve_public_surface(
     surface from. *explicit_roots* is accepted for this function's own
     future graph-native signature (a caller that already knows its roots,
     e.g. ``--used-by``/``--required-symbol`` scoping) but is not yet
-    consulted -- the resolution today is entirely graph/snapshot-derived,
-    with no external root injection.
+    consulted -- the resolution today is entirely snapshot-derived, with no
+    external root injection.
     """
-    return _resolve_public_surface_via_graph(snapshot)
+    return _resolve_public_surface_from_snapshot(snapshot)
 
 
 # ``type_reachability.directly_referenced_stdlib_types()`` migrating here

@@ -20,10 +20,15 @@ public_surface_closure.resolve_public_surface` -- import it from there, not
 here. See that module's own docstring for the full accounting of what the
 migration actually changed (the closure-walk's data source, moved from
 independently re-parsing ``fn.return_type``/``rec.fields``/``rec.bases``/
-typedef targets to reading ``compare/surface_graph.py``'s precomputed
-``referenced_identifiers`` node attrs) and what deliberately did not
-(this file's own indexing/bookkeeping, still snapshot-field-derived --
-see the docstring on :func:`_index_surface_types` for why).
+typedef targets to reading ``compare/surface_graph.py``'s
+``referenced_identifiers_by_node()`` -- a pure function of the snapshot's
+own current declarations, computed fresh on every call, deliberately
+**not** ``AbiSnapshot.surface_graph``'s own persisted node attrs, after two
+further review rounds found the persisted graph could not be trusted for
+this computation at all; see that module's own docstring for the full
+security history) and what deliberately did not (this file's own
+indexing/bookkeeping, still snapshot-field-derived -- see the docstring on
+:func:`_index_surface_types` for why).
 
 ``surface.py``'s own ``compute_public_surface()`` is now a thin wrapper
 delegating to ``policy/public_surface_closure.py``'s ``resolve_public_

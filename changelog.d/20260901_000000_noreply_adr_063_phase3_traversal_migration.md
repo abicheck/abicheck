@@ -1,14 +1,20 @@
 ### Changed
 
 - **ADR-063 Phase 3 (D5): the public-surface closure walk is now a real
-  graph traversal, not a delegation.** `policy.public_surface_query.
+  traversal, not a delegation.** `policy.public_surface_query.
   PublicSurfaceQuery`'s public-domain resolution (and `export_surface.py`'s
   `contract=exports` type-closure step, which has always shared the same
-  closure-walk function) now traverses `AbiSnapshot.surface_graph` --
-  `compare/surface_graph.py`'s unconditional L0-L2 evidence graph -- instead
-  of `surface.py`'s previous, independent regex-based re-parse of
-  `fn.return_type`/`rec.fields`/`rec.bases`/typedef targets. `surface.py`'s
-  own closure-walk implementation is deleted (its `compute_public_surface()`
+  closure-walk function) now resolves each declaration's referenced
+  identifiers via `compare/surface_graph.py`'s `referenced_identifiers_by_
+  node()` -- a pure function of the snapshot's own current declarations,
+  computed fresh on every call -- instead of `surface.py`'s previous,
+  independent regex-based re-parse of `fn.return_type`/`rec.fields`/
+  `rec.bases`/typedef targets. (An earlier revision of this same migration
+  read `AbiSnapshot.surface_graph` -- `compare/surface_graph.py`'s
+  unconditional L0-L2 evidence graph -- directly; two further review rounds
+  found that design untrustworthy and it was superseded before merge, see
+  below.) `surface.py`'s own closure-walk implementation is deleted (its
+  `compute_public_surface()`
   is now a thin wrapper); the algorithm and its `PublicSurface` result type
   moved to a new leaf module pair, `abicheck/policy/public_surface.py` /
   `abicheck/policy/public_surface_closure.py`, with `PublicSurfaceQuery`

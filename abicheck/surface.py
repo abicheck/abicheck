@@ -334,8 +334,12 @@ def compute_public_surface(
     Public roots are :data:`Visibility.PUBLIC` functions/variables. The
     public type set is the transitive closure over the types they
     reference (returns, params, fields, bases, typedef targets) -- computed
-    today by a real traversal over ``snap.surface_graph`` (ADR-063 Phase 3
-    D5), not by this module's own former closure-walk implementation.
+    today (ADR-063 Phase 3 D5) from ``compare/surface_graph.py``'s
+    ``referenced_identifiers_by_node()``, a pure function of *snap*'s own
+    current declarations, not by this module's own former closure-walk
+    implementation and deliberately not by reading ``snap.surface_graph``
+    itself either -- see ``policy/public_surface_closure.py``'s own
+    docstring for why.
     """
     if resolution is not None:
         return resolution
