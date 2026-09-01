@@ -362,7 +362,15 @@ def bazel_target_scoping_failure(
     fmt = sniff_build_info_format(build_info)
     if fmt not in ("bazel_aquery", "bazel_cquery"):
         return None
-    source_note = "" if build_targets else " (from an auto-discovered .abicheck.yml)"
+    source_note = (
+        ""
+        if build_targets
+        else (
+            " (from an explicit build config)"
+            if build_config is not None
+            else " (from an auto-discovered .abicheck.yml)"
+        )
+    )
     return PlanningFailure(
         requested=(
             f"build_targets={list(effective_targets)!r}{source_note} on the "

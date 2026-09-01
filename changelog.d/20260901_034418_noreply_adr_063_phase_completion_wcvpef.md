@@ -8,7 +8,12 @@
   raised a clear usage error (exit 64) for an explicit `--build-target`
   flag, but a scope declared only in a discovered `.abicheck.yml`'s
   `build.targets:` still previewed success under `--dry-run` for a request
-  the real run then rejected. `dump`/`compare`/`scan`'s pre-flight check
-  now auto-discovers (or, for `scan`, honors an explicit `--config`
-  override for) that config the same way real execution does, closing the
-  gap for every shape of the request — CLI and typed Python API alike.
+  the real run then rejected. `dump`/`compare`'s pre-flight check, and
+  `scan`'s CLI-reachable pre-flight checks (single-binary and
+  `--artifact-set` alike, both real-run and `--dry-run`), now auto-discover
+  (or, for `scan`, honor an explicit `--config` override for) that config
+  the same way real execution does. A direct `service_scan.run_scan_set(
+  ScanRequest(...))` typed-API call with no CLI in front of it is not yet
+  covered — it still rejects a configuration-only scope later, during real
+  embedding, rather than at this pre-flight (see `docs/contribute/
+  known-gaps.md`).

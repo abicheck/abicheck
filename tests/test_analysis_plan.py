@@ -198,6 +198,33 @@ class TestBazelBuildTargetScoping:
         assert "//:from_config" in failure.requested
         assert "auto-discovered .abicheck.yml" in failure.requested
 
+    def test_explicit_build_config_wording_is_not_called_auto_discovered(
+        self, tmp_path: Path
+    ):
+        """CodeRabbit review: the failure message must say "explicit build
+        config", not "auto-discovered .abicheck.yml", when *build_config*
+        names the file directly (``scan``'s own ``ScanRequest.build_config``,
+        or dump/compare's own future seam) rather than being found by
+        searching ``sources`` -- ``dump``/``compare`` have no request-level
+        seam for this today, so this calls
+        :func:`~abicheck.workflows.plan.bazel_target_scoping_failure`
+        directly, the same free function ``scan``'s own call sites use."""
+        from abicheck.workflows.plan import bazel_target_scoping_failure
+
+        aquery = _write(tmp_path / "aquery.json", _EMPTY_AQUERY)
+        cfg = tmp_path / "explicit-config.yml"
+        cfg.write_text(
+            "build:\n  system: bazel\n  targets:\n    - //:from_explicit_config\n",
+            encoding="utf-8",
+        )
+        failure = bazel_target_scoping_failure(
+            "candidate", aquery, (), sources=None, build_config=cfg
+        )
+        assert failure is not None
+        assert "//:from_explicit_config" in failure.requested
+        assert "explicit build config" in failure.requested
+        assert "auto-discovered .abicheck.yml" not in failure.requested
+
     def test_compare_config_sourced_target_scope_raises_planning_error(
         self, tmp_path: Path
     ):
