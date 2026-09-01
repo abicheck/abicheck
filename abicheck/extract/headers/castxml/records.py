@@ -167,6 +167,18 @@ def build_record_type(
     # the same channel used for noexcept -- header mode always knows the
     # answer, so this is a concrete bool, never None on the castxml path.
     is_final = bool(re.search(r"\bfinal\b", el.get("attributes", "")))
+    # ADR-063 Phase 5 (Codex review): qualified_type_name()'s own None
+    # return means EITHER a genuine, confirmed global-scope record OR a
+    # broken/cyclic context chain it gave up walking (see that function's
+    # own docstring) -- but the former is overwhelmingly the common shape
+    # a None return actually takes (a truly cyclic/16-deep XML context
+    # chain is a pathological, essentially unobserved case), so treating
+    # the header-AST determination as PRESENT here -- matching is_final's
+    # own "always a concrete value on this path" precedent -- is correct
+    # for the case this matters for. The rare pathological walk-failure
+    # case is a known, accepted imprecision, the same class of trade-off
+    # AGENTS.md's own "Known gaps" entries already document elsewhere.
+    qualified_name = qualified_type_name(ctx, el, leaf_name=name)
     return RecordType(
         name=name,
         kind=el.tag.lower(),
@@ -191,7 +203,8 @@ def build_record_type(
         # the flattened `qualified_name` on the next line, which cannot say
         # whether a segment was a namespace or a record.
         entity_id=entity_id_for_type(scope_path(ctx, el), name),
-        qualified_name=qualified_type_name(ctx, el, leaf_name=name),
+        qualified_name=qualified_name,
+        qualified_name_fact=Fact.present(qualified_name),
         is_final=is_final,
         # ADR-063 Phase 5: Fact[bool | None] sibling of is_final -- see the
         # local variable's own comment above for why this is always a real,

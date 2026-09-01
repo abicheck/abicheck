@@ -271,6 +271,14 @@ def _build_record(
         # getQualifiedNameAsString() spelling (e.g. "ns::Foo") fell back
         # to the bare "Foo" and never matched (Codex review, G28 Phase 4).
         qualified_name=("::".join([*entry.scope, own_name]) if entry.scope else None),
+        # ADR-063 Phase 5 (Codex review): entry.scope is a clean structural
+        # fact from clang's own tree-shaped JSON AST -- unlike castxml's
+        # string-context-chain walk, there is no cycle/depth-cap case to
+        # conflate with a genuine "no enclosing scope" here, so an empty
+        # entry.scope is always a real, confirmed determination.
+        qualified_name_fact=Fact.present(
+            "::".join([*entry.scope, own_name]) if entry.scope else None
+        ),
         # clang's JSON AST does not compute layout — size/align/offsets are
         # left None so the layout detectors skip an unknown-vs-unknown
         # comparison (DWARF remains the layout authority on this host).

@@ -70,6 +70,36 @@ def test_polymorphic_record_facts_present_and_match_legacy_fields() -> None:
     assert rec.is_final is False
     assert rec.is_final_fact.status is FactStatus.PRESENT
     assert rec.is_final_fact.value is False
+    # ADR-063 Phase 5 (Codex review, second pass): qualified_name_fact is
+    # also constructed directly, as Fact.present(...) — Widget is at
+    # global scope (entry.scope is empty), and that empty scope is a
+    # clean structural fact from clang's tree-shaped AST, not an omission.
+    assert rec.qualified_name is None
+    assert rec.qualified_name_fact.status is FactStatus.PRESENT
+    assert rec.qualified_name_fact.value is None
+
+
+def test_namespaced_record_qualified_name_fact_present_with_real_value() -> None:
+    root = _tu(
+        {
+            "kind": "NamespaceDecl",
+            "name": "ns",
+            "loc": {"file": "include/foo.h", "line": 1},
+            "inner": [
+                {
+                    "kind": "CXXRecordDecl",
+                    "name": "Nested",
+                    "tagUsed": "struct",
+                    "loc": {"file": "include/foo.h", "line": 2},
+                    "completeDefinition": True,
+                },
+            ],
+        }
+    )
+    (rec,) = [t for t in _ClangAstParser(root, set(), set()).parse_types() if t.name == "Nested"]
+    assert rec.qualified_name == "ns::Nested"
+    assert rec.qualified_name_fact.status is FactStatus.PRESENT
+    assert rec.qualified_name_fact.value == "ns::Nested"
 
 
 def test_final_record_is_final_fact_present_true() -> None:

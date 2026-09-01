@@ -700,15 +700,21 @@ FACT_ROWS: tuple[FactRow, ...] = (
     FactRow(
         "RecordType",
         "qualified_name_fact",
-        _NONE,
-        _NONE,
+        _FULL,
+        _FULL,
         note=(
-            "ADR-063 Phase 5: `Fact[str | None]` sibling of `qualified_name`. "
-            "Neither backend passes this keyword literally — derived by the "
-            "generic `__post_init__` bridge from `qualified_name` itself, so "
-            "`NONE` reflects literal-keyword scan evidence only, not runtime "
-            "behavior. See `data_size_bits_fact`'s own note for the general "
-            "shape."
+            "ADR-063 Phase 5 (Codex review, second pass): `Fact[str | "
+            "None]` sibling of `qualified_name`. Both backends construct "
+            "it directly (`Fact.present(qualified_name)`), unlike "
+            "`data_size_bits_fact`/`is_standard_layout_fact`/etc — "
+            "`qualified_name`'s own `None` return is overwhelmingly a "
+            "genuine, confirmed 'no enclosing scope' determination on "
+            "both header-AST paths (a real cycle/depth-cap walk failure "
+            "on the castxml side is a pathological, essentially "
+            "unobserved edge case — see the construction site's own "
+            "comment), so relying on the generic bridge's coarser "
+            "None-means-omitted default would misreport confirmed "
+            "evidence as not collected for the common case."
         ),
     ),
     FactRow(

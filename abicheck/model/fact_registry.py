@@ -529,7 +529,12 @@ FACT_REGISTRY = FactRegistry(
                 "The DWARF backend folds the qualified spelling into "
                 "RecordType.name itself (dwarf_snapshot.py) rather than "
                 "populating this separate field, so it is not a producer "
-                "here — a plain case (b) conversion."
+                "here. Unlike the batch's other five fields, both header "
+                "backends construct qualified_name_fact explicitly as "
+                "Fact.present(...) rather than relying on the generic "
+                "bridge (Codex review, second pass) — a None return is "
+                "overwhelmingly a genuine, confirmed 'no enclosing scope' "
+                "determination on both paths, not an absence of evidence."
             ),
         ),
         _E(
