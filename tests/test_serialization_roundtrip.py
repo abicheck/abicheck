@@ -1056,21 +1056,19 @@ class TestExtractionContractRoundTrip:
         d = _minimal_dict(contract="not-a-dict")
         assert snapshot_from_dict(d).contract is None
 
-    def test_contract_with_malformed_nested_fields_defaults_gracefully(self) -> None:
-        d = _minimal_dict(
-            contract={
-                "profile_fingerprint": 123,  # not a str
-                "scope_fingerprint": None,
-                "profile_fields": "not-a-dict",
-                "scope_fields": {"headers": "foo.h"},
-            }
-        )
-        restored = snapshot_from_dict(d).contract
+    def test_malformed_scalar_fingerprints_default_gracefully(self) -> None:
+        # Unlike profile_fields/scope_fields below, scalars degrade quietly.
+        contract = {"profile_fingerprint": 123, "scope_fingerprint": None}
+        restored = snapshot_from_dict(_minimal_dict(contract=contract)).contract
         assert restored is not None
         assert restored.profile_fingerprint is None
         assert restored.scope_fingerprint is None
-        assert restored.profile_fields == {}
-        assert restored.scope_fields == {"headers": "foo.h"}
+
+    def test_malformed_profile_fields_rejects_the_load(self) -> None:
+        # Present-but-wrong-shaped is corrupt, not "no evidence" (Codex).
+        d = _minimal_dict(contract={"profile_fields": "not-a-dict"})
+        with pytest.raises(TypeError):
+            snapshot_from_dict(d)
 
     def test_contract_survives_file_io(self, tmp_path: Path) -> None:
         contract = ExtractionContract(

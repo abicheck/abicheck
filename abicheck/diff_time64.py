@@ -26,6 +26,7 @@ emits ONE grouped diagnostic naming the root cause.
 Requires typedef evidence (L1 DWARF / L2 headers): an L0 symbol-only snapshot
 carries no ``typedefs`` map, so the detector is naturally silent there.
 """
+
 from __future__ import annotations
 
 import re
@@ -35,15 +36,22 @@ from .checker_types import Change
 from .detector_registry import registry
 from .diff_helpers import make_change
 from .diff_integer_model import _int_width_bucket
-from .model import AbiSnapshot, RecordType, Visibility
+from .model import AbiSnapshot, RecordType, Visibility, resolved_fact_value
 
 #: Typedefs resized by glibc's ``_TIME_BITS=64`` (time64) option.
 _TIME64_TYPEDEFS = frozenset({"time_t", "suseconds_t"})
 
 #: Typedefs resized by glibc's ``_FILE_OFFSET_BITS=64`` (LFS) option.
-_LFS_TYPEDEFS = frozenset({
-    "off_t", "ino_t", "blkcnt_t", "fsblkcnt_t", "fsfilcnt_t", "rlim_t",
-})
+_LFS_TYPEDEFS = frozenset(
+    {
+        "off_t",
+        "ino_t",
+        "blkcnt_t",
+        "fsblkcnt_t",
+        "fsfilcnt_t",
+        "rlim_t",
+    }
+)
 
 _FAMILY = _TIME64_TYPEDEFS | _LFS_TYPEDEFS
 
@@ -129,7 +137,9 @@ def _fold_record_tokens(tokens: set[str], rec: RecordType) -> None:
     # Inherited layout is public layout: fold base-class names in
     # so a base carrying time_t/off_t is visited too (Codex
     # review #510, round 6).
-    for base in list(rec.bases) + list(rec.virtual_bases):
+    bases = resolved_fact_value(rec.bases_fact, [])
+    virtual_bases = resolved_fact_value(rec.virtual_bases_fact, [])
+    for base in list(bases) + list(virtual_bases):
         _add_tokens(tokens, base)
 
 
@@ -250,8 +260,7 @@ def _diff_time64_abi(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
         else "64-bit → 32-bit (time64/LFS disabled)"
     )
     detail = (
-        f"{', '.join(sorted(flipped))}; {direction} — "
-        f"likely {' / '.join(macros)} drift"
+        f"{', '.join(sorted(flipped))}; {direction} — likely {' / '.join(macros)} drift"
     )
     return [
         make_change(

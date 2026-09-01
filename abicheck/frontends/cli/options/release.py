@@ -26,7 +26,7 @@ every stacked-decorator option group that adds no edge back into the
 CLI-registration import cycle, mirroring why ``apply_compare_profile``/
 ``_profile_targets_set_input`` stayed behind in :mod:`abicheck.cli_options`
 itself (they reach ``cli_resolve``, this module does not reach anything
-beyond ``click``/``cli_params``).
+beyond ``click``/``params``).
 
 Deliberately a **leaf**, the same shape as this package's ``profiles.py``/
 ``contract.py``/``secondary_output.py`` siblings: it restates the one-line
@@ -45,7 +45,7 @@ from typing import TypeVar
 
 import click
 
-from abicheck.cli_params import (
+from .params import (
     DEPTH_PARAM,
     SIDED_BUILD_INFO_PARAM,
     SIDED_EXISTING_PATH_PARAM,

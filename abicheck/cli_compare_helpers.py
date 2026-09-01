@@ -83,7 +83,6 @@ from .cli_options import (
     resolve_contract_domain,
     resolve_contract_evaluation,
 )
-from .cli_params import _load_suppression_and_policy
 from .cli_resolve import (
     _reject_compile_context_for_set_inputs,
     _reject_evidence_flags_for_set_inputs,
@@ -94,6 +93,7 @@ from .cli_resolve import (
 from .contract_scoped_promotion import stamp_scoped_result_findings
 from .errors import AbicheckError, ProfileMismatchError, ScopeMismatchError
 from .frontends.cli.options import reject_incoherent_secondary_output
+from .frontends.cli.options.params import _load_suppression_and_policy
 from .frontends.cli.runtime import (
     _EXIT_NOT_COMPARABLE,
     _announce_exit_scheme,

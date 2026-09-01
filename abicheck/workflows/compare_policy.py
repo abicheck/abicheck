@@ -52,7 +52,7 @@ from ..checker import compare
 from ..checker_types import DiffResult
 from ..errors import ValidationError
 from ..model import AbiSnapshot
-from ..policy.public_surface import PublicSurfaceQuery
+from ..policy.public_surface_query import PublicSurfaceQuery
 from ..policy_file import (
     dedup_validate_overrides_warnings as _dedup_validate_overrides_warnings,
     pending_validate_overrides_warnings as _pending_validate_overrides_warnings,

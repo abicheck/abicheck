@@ -735,13 +735,29 @@ class TestCompareExitCodeDocs:
 # ── dump error handling uses ClickException ──────────────────────────────
 
 class TestDumpClickException:
-    def test_dump_error_exits_1_not_2(self, tmp_path):
-        """dump on non-ELF file should exit 1 (ClickException) not 2 (sys.exit)."""
+    def test_dump_error_exits_64_not_2(self, tmp_path):
+        """dump on an unrecognizable file exits 64 (UsageError), not 2 (sys.exit).
+
+        A file with no recognizable ELF/PE/Mach-O/JSON/ABICC-dump magic is
+        exactly the "unusable input" `ValidationError`'s own docstring
+        describes (`cli_resolve._dump_native_binary`), so the CLI's
+        documented exit-code contract (root `AGENTS.md`: "64 = usage error
+        ... applies across commands") puts it at 64, not the generic
+        `ClickException` exit 1 -- previously misrouted for both ELF and
+        PE/Mach-O by `execute_dump_cli_run`'s missing `ValidationError`
+        special case (CodeRabbit/Codex review on PR #980); see
+        `tests/test_dump_request_from_cli.py::TestValidationErrorExitsAsUsageError`
+        for the dedicated regression test covering both binary formats
+        directly against a forced `ValidationError`. This test's own job is
+        narrower and unchanged: prove the CLI still exits cleanly through
+        Click, not via an uncaught `sys.exit`/traceback, for this real,
+        naturally-occurring bad-input case.
+        """
         empty = tmp_path / "empty.so"
         empty.write_bytes(b"")
         runner = CliRunner()
         result = runner.invoke(main, ["dump", str(empty)])
-        assert result.exit_code == 1
+        assert result.exit_code == 64
         assert "Error:" in result.output
         assert "Traceback" not in result.output
 

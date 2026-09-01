@@ -88,8 +88,8 @@ MOVED: dict[str, str] = {
     "_resolve_linker_script": "abicheck.cli_resolve",
     "_sniff_text_format": "abicheck.cli_resolve",
     "classify_compare_operand": "abicheck.cli_resolve",
-    # Shared option/parameter helpers (owner: `cli_params`).
-    "_load_suppression_and_policy": "abicheck.cli_params",
+    # Shared option/parameter helpers (owner: `frontends.cli.options.params`).
+    "_load_suppression_and_policy": "abicheck.frontends.cli.options.params",
     # Release fan-out helpers (moved earlier, to `cli_helpers_compare`).
     "_build_match_map": "abicheck.cli_helpers_compare",
     "_canonical_library_key": "abicheck.cli_helpers_compare",

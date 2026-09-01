@@ -77,6 +77,7 @@ def var_access_changes(
                 name=v_old.name,
                 old=v_old.access.value,
                 new=v_new.access.value,
+                entity_id=v_old.entity_id or v_new.entity_id,
             )
         )
     return changes
@@ -101,6 +102,7 @@ def _check_variable_alignment(
             name=v_old.name,
             old=str(v_old.alignment_bits),
             new=str(v_new.alignment_bits),
+            entity_id=v_old.entity_id or v_new.entity_id,
         )
     ]
 

@@ -49,6 +49,7 @@ from ....cli_options import (
     adr027_compare_options,
     app_usage_scope_options,
     apply_compare_profile,
+    bundle_facts_manifest_options,
     compile_context_options,
     contract_options,
     debug_resolution_options,
@@ -62,6 +63,7 @@ from ....cli_options import (
     pack_option,
     policy_options,
     profile_option,
+    reject_bundle_facts_manifest_without_old_bundle_facts,
     release_options,
     scope_options,
     secondary_output_options,
@@ -70,15 +72,15 @@ from ....cli_options import (
     two_sided_input_options,
     verbose_option,
 )
-from ....cli_params import (
-    SIDED_EXISTING_PATH_PARAM,
-    SIDED_PATH_PARAM,
-    _load_suppression_and_policy as _load_suppression_and_policy,  # noqa: F401  — re-exported to keep cli import sites (test suite) stable
-)
 from ....cli_resolve import (
     _normalize_binary_input,
 )
 from ....frontends.cli import help as cli_help
+from ..options.params import (
+    SIDED_EXISTING_PATH_PARAM,
+    SIDED_PATH_PARAM,
+    _load_suppression_and_policy as _load_suppression_and_policy,  # noqa: F401  — re-exported to keep cli import sites (test suite) stable
+)
 
 if TYPE_CHECKING:
     pass
@@ -485,6 +487,7 @@ def _embed_inline_source_side(
     "over the default to decode; this is the supported way "
     "to raise it, instead of patching the budget in code.",
 )
+@bundle_facts_manifest_options  # G38 Phase 17
 # ── Dump options (used when input is an ELF binary) ──────────────────────────
 # Two-sided header/include/version family (ADR-037 D3). The L2 compile-context
 # family (--ast-frontend + cross-toolchain --gcc-*/--sysroot/--nostdinc) comes from
@@ -760,9 +763,7 @@ def compare_cmd(ctx: click.Context, /, **kwargs: Any) -> None:
         _lang_src = ctx.get_parameter_source("lang")
         kwargs["lang_explicit"] = _lang_src == click.core.ParameterSource.COMMANDLINE
         _headers, _includes = _resolve_new_side_headers_includes(kwargs)
-        _header_backend = (
-            kwargs.get("new_header_backend") or kwargs.get("header_backend") or "auto"
-        )
+        _header_backend = kwargs.get("new_header_backend") or kwargs.get("header_backend") or "auto"
         # Codex review: mirror run_compare's own cwd-upward cfg_path fallback
         # (_resolve_compare_config) -- resolve_compile_context alone never
         # auto-discovers without a --sources tree. Overwriting kwargs
@@ -795,5 +796,5 @@ def compare_cmd(ctx: click.Context, /, **kwargs: Any) -> None:
         dispatch_bundle_facts(compile_context=_compile_context, **kwargs)
         return
     kwargs.pop("max_json_object_nodes", None)
-
+    reject_bundle_facts_manifest_without_old_bundle_facts(kwargs)
     run_compare(ctx, **kwargs)

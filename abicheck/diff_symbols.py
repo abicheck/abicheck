@@ -43,6 +43,9 @@ from .diff_helpers import (
     type_map_key,
 )
 from .diff_hidden_friends import check_hidden_friend_change, diff_inline_hidden_friends
+from .diff_symbols_anon_fields import (
+    check_anon_fields_for_type,
+)
 from .diff_symbols_renames import (  # noqa: F401  (public-surface re-exports)
     _CTOR_DTOR_CODE_RE as _CTOR_DTOR_CODE_RE,
     _FUNC_LIKE_TYPES as _FUNC_LIKE_TYPES,
@@ -1171,6 +1174,7 @@ def _check_variable(
                     name=v_old.name,
                     old=v_old.type,
                     new=v_new.type,
+                    entity_id=v_old.entity_id or v_new.entity_id,
                 )
             ]
     # const-qualification transitions only matter when the type is unchanged.
@@ -1188,6 +1192,7 @@ def _check_variable(
             f"Variable lost const qualifier: {v_old.name} (ODR / inlining break)",
         ),
         removed_values=("const", "non-const"),
+        entity_id=v_old.entity_id or v_new.entity_id,
     )
 
 
@@ -1199,6 +1204,7 @@ def _var_removed(mangled: str, v_old: Variable) -> list[Change]:
             name=v_old.name,
             # See Change.symbol_binding's docstring — None when not captured.
             symbol_binding=v_old.elf_binding.value if v_old.elf_binding else None,
+            entity_id=v_old.entity_id,
         )
     ]
 
@@ -1209,6 +1215,7 @@ def _var_added(mangled: str, v_new: Variable) -> list[Change]:
             ChangeKind.VAR_ADDED,
             symbol=mangled,
             name=v_new.name,
+            entity_id=v_new.entity_id,
         )
     ]
 
@@ -1497,6 +1504,7 @@ def _check_field_access_changes(
                         detail=fname,
                         old=f_old_f.access.value,
                         new=f_new_f.access.value,
+                        entity_id=t_old.entity_id or t_new.entity_id,
                     )
                 )
     return changes
@@ -1528,62 +1536,6 @@ def _diff_access_levels(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     return changes
 
 
-def _is_anon_field(f: Any) -> bool:
-    """Return True for compiler-generated anonymous/unnamed fields."""
-    return not f.name or f.name.startswith("__anon")
-
-
-def _check_anon_field_at_offset(
-    name: str,
-    offset: int,
-    f_old: Any,
-    new_by_offset: dict[int, Any],
-) -> Change | None:
-    """Compare a single anonymous field (by offset) to what the new type has."""
-    f_new = new_by_offset.get(offset)
-    if f_new is None:
-        return make_change(
-            ChangeKind.ANON_FIELD_CHANGED,
-            symbol=name,
-            description=f"Anonymous field removed at offset {offset} in {name}",
-            old_value=f_old.type,
-        )
-    if f_old.type != f_new.type:
-        return make_change(
-            ChangeKind.ANON_FIELD_CHANGED,
-            symbol=name,
-            description=f"Anonymous field type changed at offset {offset} in {name}",
-            old_value=f_old.type,
-            new_value=f_new.type,
-        )
-    return None
-
-
-def _anon_fields_by_offset(fields: list[Any]) -> dict[int, Any]:
-    """Index anonymous fields (no name or __anon prefix) by their bit offset."""
-    return {
-        f.offset_bits: f
-        for f in fields
-        if _is_anon_field(f) and f.offset_bits is not None
-    }
-
-
-def _check_anon_fields_for_type(name: str, t_old: Any, t_new: Any) -> list[Change]:
-    """Compare anonymous fields by offset for a single matched type pair."""
-    old_by_offset = _anon_fields_by_offset(t_old.fields)
-    new_by_offset = _anon_fields_by_offset(t_new.fields)
-
-    if not old_by_offset and not new_by_offset:
-        return []
-
-    changes: list[Change] = []
-    for offset, f_old in old_by_offset.items():
-        ch = _check_anon_field_at_offset(name, offset, f_old, new_by_offset)
-        if ch is not None:
-            changes.append(ch)
-    return changes
-
-
 @registry.detector("anon_fields")
 def _diff_anon_fields(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     """Detect changes in anonymous struct/union members."""
@@ -1602,7 +1554,7 @@ def _diff_anon_fields(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
             continue
         # Bare, not the qualified matching key.
         name = t_old.name
-        changes.extend(_check_anon_fields_for_type(name, t_old, t_new))
+        changes.extend(check_anon_fields_for_type(name, t_old, t_new))
 
     return changes
 
@@ -1826,6 +1778,7 @@ def _diff_var_deprecated(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
                     name=v_old.name,
                     detail=v_new.deprecated,
                     new_value=v_new.deprecated,
+                    entity_id=v_old.entity_id or v_new.entity_id,
                 )
             )
         elif v_old.deprecated is not None and v_new.deprecated is None:
@@ -1835,6 +1788,7 @@ def _diff_var_deprecated(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
                     symbol=mangled,
                     name=v_old.name,
                     old_value=v_old.deprecated,
+                    entity_id=v_old.entity_id or v_new.entity_id,
                 )
             )
     return changes

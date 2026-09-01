@@ -1104,7 +1104,9 @@ def _parse_compat_descriptors(
             _load_descriptor_or_dump(old_desc, relpath=old_relpath),
             _load_descriptor_or_dump(new_desc, relpath=new_relpath),
         )
-    except (ValueError, FileNotFoundError, OSError) as exc:
+    # TypeError: a malformed nested contract field rejected at the storage
+    # boundary (storage AGENTS.md invariant 6), caught like a bad descriptor.
+    except (TypeError, ValueError, FileNotFoundError, OSError) as exc:
         _compat_fail("parsing descriptor", exc)
 
 

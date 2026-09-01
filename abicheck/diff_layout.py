@@ -53,6 +53,7 @@ from .checker_policy import ChangeKind
 from .checker_types import Change
 from .detector_registry import registry
 from .diff_helpers import build_type_map, lookup_matched_type, make_change
+from .model import resolved_fact_value
 from .name_classification import STDLIB_TYPE_NAMESPACE_PREFIXES
 
 if TYPE_CHECKING:
@@ -151,9 +152,10 @@ def _has_layout_descriptor(
     `data_size_bits`/`base_offsets` are untouched, since those still require
     the unrelated `ABICHECK_CLANG_LAYOUT_TOOL` opt-in either way.
     """
+    vptr_offset_bits = resolved_fact_value(rec.vptr_offset_bits_fact, None)
     return (
         rec.data_size_bits is not None
-        or (vtable_facts_reliable and rec.vptr_offset_bits is not None)
+        or (vtable_facts_reliable and vptr_offset_bits is not None)
         or bool(rec.base_offsets)
     )
 
@@ -174,6 +176,7 @@ def _check_base_offsets(
                     detail=base,
                     old=str(old_off),
                     new=str(new_off),
+                    entity_id=old_rec.entity_id or new_rec.entity_id,
                 )
             )
     return changes
@@ -206,11 +209,15 @@ def _check_vptr_introduced(
     """
     if not vtable_facts_reliable:
         return []
+    old_vtable = resolved_fact_value(old_rec.vtable_fact, [])
+    new_vtable = resolved_fact_value(new_rec.vtable_fact, [])
+    old_vptr_offset_bits = resolved_fact_value(old_rec.vptr_offset_bits_fact, None)
+    new_vptr_offset_bits = resolved_fact_value(new_rec.vptr_offset_bits_fact, None)
     if (
-        not old_rec.vtable
-        and old_rec.vptr_offset_bits is None
-        and new_rec.vtable
-        and new_rec.vptr_offset_bits is not None
+        not old_vtable
+        and old_vptr_offset_bits is None
+        and new_vtable
+        and new_vptr_offset_bits is not None
     ):
         return [
             make_change(
@@ -218,7 +225,8 @@ def _check_vptr_introduced(
                 symbol=name,
                 name=name,
                 old_value="non-polymorphic",
-                new_value=f"vptr@{new_rec.vptr_offset_bits}",
+                new_value=f"vptr@{new_vptr_offset_bits}",
+                entity_id=old_rec.entity_id or new_rec.entity_id,
             )
         ]
     return []
@@ -236,6 +244,7 @@ def _check_trivially_copyable_lost(
                 name=name,
                 old_value="trivially_copyable",
                 new_value="non_trivially_copyable",
+                entity_id=old_rec.entity_id or new_rec.entity_id,
             )
         ]
     return []
@@ -253,6 +262,7 @@ def _check_standard_layout_lost(
                 name=name,
                 old_value="standard_layout",
                 new_value="non_standard_layout",
+                entity_id=old_rec.entity_id or new_rec.entity_id,
             )
         ]
     return []
@@ -278,6 +288,7 @@ def _check_tail_padding_reuse(
                 old=str(old_rec.data_size_bits),
                 new=str(new_rec.data_size_bits),
                 detail=str(new_rec.size_bits),
+                entity_id=old_rec.entity_id or new_rec.entity_id,
             )
         ]
     return []
@@ -288,7 +299,7 @@ def _layout_evidence_asymmetric(
 ) -> bool:
     """True when *old_rec*/*new_rec* carry layout evidence on exactly one
     side -- the one asymmetric-evidence condition ``_check_layout_unverifiable``
-    below keys off, extracted so ``diff_types._layout_evidence_is_unverifiable``
+    below keys off, extracted so ``diff_types_vtable._layout_evidence_is_unverifiable``
     can consult the *identical* predicate for its cross-detector correlation
     instead of a hand-duplicated copy that could silently drift out of sync
     with this function (Codex review).
@@ -341,6 +352,7 @@ def _check_layout_unverifiable(
                 # correlate against the *exact* RecordType this finding is
                 # about, rather than a same-named-but-different one.
                 qualified_name=new_rec.qualified_name or new_rec.name,
+                entity_id=old_rec.entity_id or new_rec.entity_id,
             )
         ]
     return []

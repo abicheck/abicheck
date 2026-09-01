@@ -45,6 +45,7 @@ side — e.g. an evidence-tier downgrade to symbols-only), the reconstruction
 returns ``None`` and no finding is emitted, degrading to B1's L0 view rather
 than fabricating a break.
 """
+
 from __future__ import annotations
 
 from .checker_policy import ChangeKind
@@ -55,6 +56,7 @@ from .model import (
     AbiSnapshot,
     RecordType,
     is_non_abi_surface_type,
+    resolved_fact_value,
     stdlib_namespaces_excluded,
 )
 
@@ -80,13 +82,16 @@ def _is_polymorphic(
     if rec is None:
         memo[name] = None
         return None
-    if rec.vtable or rec.virtual_bases:
+    vtable = resolved_fact_value(rec.vtable_fact, [])
+    virtual_bases = resolved_fact_value(rec.virtual_bases_fact, [])
+    if vtable or virtual_bases:
         memo[name] = True
         return True
     # Guard against inheritance cycles (malformed input): assume non-polymorphic
     # while resolving, overwrite below.
     memo[name] = False
-    for base in rec.bases:
+    bases = resolved_fact_value(rec.bases_fact, [])
+    for base in bases:
         sub = _is_polymorphic(base, types, memo)
         if sub is None:
             memo[name] = None
@@ -112,7 +117,9 @@ def _secondary_groups(
     """
     primary_taken = False
     groups: list[str] = []
-    for base in rec.bases:  # direct, non-virtual, in declaration order
+    bases = resolved_fact_value(rec.bases_fact, [])
+    virtual_bases = resolved_fact_value(rec.virtual_bases_fact, [])
+    for base in bases:  # direct, non-virtual, in declaration order
         poly = _is_polymorphic(base, types, memo)
         if poly is None:
             return None
@@ -122,7 +129,7 @@ def _secondary_groups(
             primary_taken = True  # first polymorphic non-virtual base is primary
             continue
         groups.append(base)
-    for vbase in rec.virtual_bases:
+    for vbase in virtual_bases:
         poly = _is_polymorphic(vbase, types, memo)
         if poly is None:
             return None
@@ -156,22 +163,27 @@ def _diff_vtable_layout(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
         if is_non_abi_surface_type(name, exclude_stdlib_namespaces=exclude_stdlib):
             continue
         o, n = old_types[name], new_types[name]
+        o_bases = resolved_fact_value(o.bases_fact, [])
+        n_bases = resolved_fact_value(n.bases_fact, [])
+        o_virtual_bases = resolved_fact_value(o.virtual_bases_fact, [])
+        n_virtual_bases = resolved_fact_value(n.virtual_bases_fact, [])
 
         # ── virtual_base_offset_changed ──────────────────────────────────────
         # A same-set reorder of virtual bases; not covered by the non-virtual
         # base_class_position_changed check.
         if (
-            len(o.virtual_bases) > 1
-            and set(o.virtual_bases) == set(n.virtual_bases)
-            and o.virtual_bases != n.virtual_bases
+            len(o_virtual_bases) > 1
+            and set(o_virtual_bases) == set(n_virtual_bases)
+            and o_virtual_bases != n_virtual_bases
         ):
             changes.append(
                 make_change(
                     ChangeKind.VIRTUAL_BASE_OFFSET_CHANGED,
                     symbol=name,
                     name=name,
-                    old=", ".join(o.virtual_bases),
-                    new=", ".join(n.virtual_bases),
+                    old=", ".join(o_virtual_bases),
+                    new=", ".join(n_virtual_bases),
+                    entity_id=o.entity_id or n.entity_id,
                 )
             )
 
@@ -190,7 +202,7 @@ def _diff_vtable_layout(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
         # residual asymmetric-capture case would need cross-CU completeness
         # tracking to resolve, and the *real* change (if any) is independently
         # reported on the base type itself.
-        if o.bases == n.bases and o.virtual_bases == n.virtual_bases:
+        if o_bases == n_bases and o_virtual_bases == n_virtual_bases:
             og = _secondary_groups(o, old_types, old_memo)
             ng = _secondary_groups(n, new_types, new_memo)
             if og is not None and ng is not None and og != ng:
@@ -201,6 +213,7 @@ def _diff_vtable_layout(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
                         name=name,
                         old=", ".join(og) or "(none)",
                         new=", ".join(ng) or "(none)",
+                        entity_id=o.entity_id or n.entity_id,
                     )
                 )
 

@@ -5428,6 +5428,28 @@ looked like the obvious fix and wasn't.
   toolchain was available in this environment to verify a migration
   against, so it stays exactly where this entry's "Blocker B (both ELF and
   PE/Mach-O)" heading already scoped it: open.
+
+  **Update (2026-09-01, PR #980): PE/Mach-O is now migrated too, closing
+  this entry's remaining half.** The design this entry already worked out
+  for ELF (null out `requested_depth` before calling
+  `execute_dump_request`, keep `_write_snapshot_output`'s embed/enforce/
+  scope stanza as the sole enforcement point, thread the legacy `-p`/
+  `--compile-db` auto-match through as an explicit pass-through) carried
+  over to PE/Mach-O mechanically, with no second structural investigation
+  needed — `execute_dump_request`/`_resolve_side_snapshot_impl` were
+  already format-generic (`is_elf=True if fmt == "elf" else None`,
+  `attach_build_context_for_parsed_headers`/`embed_side_build_source`
+  called unconditionally regardless of format), the same pipeline
+  `compare`'s implicit-dump operand and `scan`'s candidate resolution
+  already used for PE/Mach-O input. `handle_non_elf_dump` is retired from
+  the CLI's real dispatch the same way `perform_elf_dump` was (still
+  defined, for its own direct unit tests). **Verified only via mock-based
+  CLI/unit tests, not a real end-to-end parity run** — no PE/Mach-O
+  toolchain was available in this environment either, so unlike ELF's own
+  `test_dump_cli_typed_api_parity.py` corpus, there is no byte-for-bit
+  confirmation against a real compiled DLL/dylib. `AGENTS.md`'s own
+  `service_dump_pipeline.py` entry is updated to match.
+
   One real, user-visible behavior change falls out of the migration rather
   than being a side effect nobody decided: `dump`'s L4 source-extractor
   default flips from an accidental **clang** (`perform_elf_dump` forwarded
@@ -5859,3 +5881,78 @@ looked like the obvious fix and wasn't.
   note (`docs/contribute/plans/one-semantic-pipeline.md`), and
   `compare/surface_graph.py`'s/`policy/public_surface.py`'s own module
   docstrings for the exact reasoning each carries.
+
+- **ADR-063 Phase 3 (D5)'s traversal migration went through three review
+  rounds before landing on a design that reads `AbiSnapshot.surface_graph`
+  never at all for the closure walk — the history is worth keeping because
+  each round's fix created the next round's bug.** Round 1 (the original
+  migration): `policy/public_surface_closure.py` read a graph node's
+  `referenced_identifiers`/`identifiers_collision` attrs, stamped once at
+  graph-build time by `compare/surface_graph.py`. Round 2 (Codex, PR #979):
+  `snap.surface_graph` being non-`None` does not mean its nodes carry those
+  attrs at all — `service_header_graph_attach._attach_header_graph` installs
+  an L5 graph on essentially every real dump without ever populating them —
+  so trusting an attrs-less node as "references nothing" silently collapsed
+  the transitive closure on the *ordinary, default* dump path. The fix
+  (`resolve_surface_graph_nodes()` unconditionally calling
+  `build_public_surface_facts()` to enrich/backfill the graph before
+  reading it) introduced two further problems of its own: (a) a genuine,
+  measured 30-100%+ performance regression against `scripts/
+  benchmark_scaling.py`'s "Baseline regression (PR vs base)" CI gate,
+  because `checker.compare()`'s default `scope_to_public_surface=True`
+  calls this path twice per compare (once per side) and building real
+  `GraphNode`/`GraphFact` objects through the ADR-046 evidence-merge
+  machinery for every declaration is meaningfully more expensive per-call
+  than the deleted regex-based re-parse it replaced; and (b) Round 3
+  (Codex, second security-focused round): even *with* enrichment, a
+  schema-v29 (or otherwise untrusted/adversarial) snapshot could carry a
+  stale or crafted `referenced_identifiers` fact at a confidence this
+  module's own freshly-registered fact (always `CONF_UNKNOWN`, the lowest
+  rank in `model.graph_vocabulary._CONFIDENCE_RANK`) cannot outrank —
+  `model.graph_facts.merge_graph_facts`'s per-key precedence would let the
+  stale/poisoned value silently win over the correct, current one,
+  reproducing the exact same collapsed-closure failure mode as round 2,
+  just reachable through the round-2 fix instead of around it. An
+  identity-keyed cache was also tried, purely to close the perf
+  regression from (a), and reverted separately: it broke
+  `tests/test_export_surface.py::TestUnresolvedTypeEdges::
+  test_a_scope_lost_alias_key_is_followed_to_its_target`, which mutates a
+  snapshot's `typedefs`/`types` in place between two calls and correctly
+  expects the second to see the new content.
+
+  **Fixed, for real, by removing the graph from this computation
+  entirely** rather than trying to make trusting it safe. Both the
+  attrs-staleness hazard (round 2) and the evidence-merge-precedence
+  hazard (round 3) share one root cause: trusting anything cached on the
+  shared, evidence-mergeable graph for a value that has exactly one
+  legitimate source (the snapshot's own current declarations) and no
+  legitimate second producer to reconcile evidence with. Once that was
+  understood, the fix stopped being about merge precedence or caching at
+  all: `compare/surface_graph.py`'s own `referenced_identifiers_by_node()`
+  (renamed public, alongside its `ReferencedIdentifiers` return type) was
+  already a pure function of the snapshot's declarations, computed
+  *before* any `GraphNode` is even built — `policy/
+  public_surface_closure.py` and `export_surface.py`'s closure-walk entry
+  points now call it directly and thread the result through
+  (`_referenced_identifiers`/`_node_identifiers_or_collision`/
+  `_seed_public_roots`/`_walk_type_closure`/`_walk_exact_type_closure` all
+  take a `ReferencedIdentifiers` now, not a `dict[str, GraphNode]`), never
+  touching `snap.surface_graph` or `GraphNode.attrs` at all.
+  `resolve_surface_graph_nodes()` (the round-2 enrichment function) had no
+  remaining caller once both call sites switched, and was deleted rather
+  than kept as unused surface. This closes the security concern outright
+  (nothing is ever merged, so there is no precedence for an adversarial
+  fact to win) and, as a direct consequence, removes essentially all of
+  the `GraphNode`/`GraphFact`/evidence-merge construction cost from the
+  hot path too — an ad hoc local re-run of `scripts/benchmark_scaling.py`
+  after this fix showed `add_remove@2000` and `type_churn@1000` (two of
+  the scenarios the perf gate had flagged) back in line with or better
+  than the pre-migration baseline numbers quoted in the gate's own
+  failure output. **Confirmed by CI itself, not just the local re-run**:
+  the `Performance` workflow's own "Baseline regression (PR vs base)" job
+  (PR #979, commit `5544540`) completed with `conclusion: success` — the
+  gate's own noise-controlled PR-vs-base measurement, not an ad hoc local
+  timing, so this entry is resolved rather than an open gap. Left in this
+  history for the multi-round record: three review rounds on one commit
+  chain, each fix closing the previous round's hazard while (in round 2's
+  case) introducing this one.

@@ -324,6 +324,27 @@ def test_legacy_module_is_classified_by_its_target_owner(tmp_path: Path) -> None
     assert check_repository(root) == []
 
 
+def test_legacy_package_initializer_is_classified_by_its_package_name(
+    tmp_path: Path,
+) -> None:
+    """A legacy_paths entry naming a package's own ``__init__.py`` must
+    classify that package's *import name* (``abicheck.legacy_pkg``), not the
+    literal ``abicheck.legacy_pkg.__init__`` no import statement ever
+    produces -- a real gap found migrating ``abicheck/policies/__init__.py``,
+    which stayed silently unclassified under the naive ``.py``-stripping
+    match until ``_layer_for`` learned to strip a trailing ``.__init__`` too.
+    """
+    root = _tree(tmp_path)
+    config = json.loads((root / "architecture/modules.yaml").read_text())
+    config["layers"]["model"]["legacy_paths"] = ["abicheck/legacy_pkg/__init__.py"]
+    config["legacy_root_directories"] = ["legacy_pkg"]
+    _write(root / "architecture/modules.yaml", json.dumps(config))
+    _write(root / "abicheck/legacy_pkg/__init__.py", "VALUE = 1\n")
+    _add_package(root, "workflows", "from abicheck.legacy_pkg import VALUE\n")
+
+    assert check_repository(root) == []
+
+
 def test_legacy_module_cannot_have_two_target_owners(tmp_path: Path) -> None:
     root = _tree(tmp_path)
     config = json.loads((root / "architecture/modules.yaml").read_text())

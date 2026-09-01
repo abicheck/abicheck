@@ -103,6 +103,7 @@ from ..buildsource.pack_io import (
     to_ref as pack_to_ref,
 )
 from ..buildsource.pack_load import load_inputs_pack_or_raise, load_pack_or_raise
+from ..buildsource.pack_shape import purge_external_outputs
 from ..buildsource.pattern_scan import scan_files
 from ..buildsource.poi import build_points_of_interest, resolve_symbol_tus
 from ..buildsource.preprocessor_scan import run_preprocessor_scan
@@ -253,6 +254,7 @@ __all__ = [
     "pack_to_ref",
     "parse_dwarf",
     "parse_elf_metadata",
+    "purge_external_outputs",
     "relink_surface_exports",
     "resolve_debug_info",
     "resolve_dependency_scope",

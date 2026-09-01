@@ -159,6 +159,66 @@ class TestCompareOldBundleFactsEarlyRejections:
         assert code == 1
         assert "Traceback" not in out
 
+    def test_malformed_nested_build_mode_in_old_facts_is_a_clean_error(
+        self, tmp_path: Path
+    ) -> None:
+        """A well-formed OLD_FACTS document whose one per-library snapshot
+        carries a malformed nested ``build_mode`` (rejected rather than
+        coerced at the storage boundary, storage AGENTS.md invariant 6)
+        must produce the same clean CLI error every other malformed
+        OLD_FACTS shape gets here -- not leak the raw ``TypeError``
+        ``bundle_facts_from_dict``'s ``per_library_snapshots`` comprehension
+        (a bare ``snapshot_from_dict()`` call, no nested guard) lets through
+        uncaught (Codex review, fresh evidence beyond the ordinary-snapshot
+        report this file's sibling test class already covers).
+        """
+        facts_path = tmp_path / "old.bundlefacts.json"
+        facts_path.write_text(
+            json.dumps(
+                {
+                    "per_library_snapshots": {
+                        "libfoo.so": {
+                            "library": "libfoo.so",
+                            "version": "1.0",
+                            "functions": [],
+                            "variables": [],
+                            "types": [],
+                            "enums": [],
+                            "typedefs": [],
+                            "build_mode": [],
+                        }
+                    }
+                }
+            )
+        )
+        new_dir = tmp_path / "new"
+        new_dir.mkdir()
+
+        # Not the shared _invoke()/(code, output) helper: CliRunner catches
+        # *any* uncaught exception (a bare TypeError included) the same way
+        # it catches a deliberate click.ClickException -- both read
+        # exit_code=1 with empty output at that level, so (code, output)
+        # alone cannot tell "clean CLI error" from "TypeError leaked
+        # uncaught" apart. result.exception's own type is the only signal
+        # that actually distinguishes them (verified: this assertion fails
+        # on the pre-fix code, where result.exception is a bare TypeError
+        # and result.output is empty).
+        result = CliRunner().invoke(
+            main,
+            [
+                "compare",
+                str(facts_path),
+                str(new_dir),
+                "--old-bundle-facts",
+                "--format",
+                "json",
+            ],
+        )
+
+        assert result.exit_code == 1
+        assert not isinstance(result.exception, TypeError)
+        assert "build_mode" in result.output
+
     def test_old_input_directory_is_a_clean_error(self, tmp_path: Path) -> None:
         # Codex review: load_bundle_facts() raises IsADirectoryError (an
         # OSError) when OLD_INPUT is a directory -- OLD_INPUT is a plain

@@ -72,7 +72,7 @@ rather than attempted reactively here.
 from __future__ import annotations
 
 import re
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, NamedTuple
 
 from ..model.graph_facts import GraphEdge, GraphNode
 from ..model.occurrence import OccurrenceId, canonical_key
@@ -85,7 +85,15 @@ if TYPE_CHECKING:
     from ..model.identity import EntityId
     from ..model.snapshot import AbiSnapshot
 
-__all__ = ["build_public_surface_facts"]
+__all__ = [
+    "ReferencedIdentifiers",
+    "build_public_surface_facts",
+    "fact_list",
+    "node_id_for_declaration",
+    "node_id_for_type",
+    "node_id_for_typedef",
+    "referenced_identifiers_by_node",
+]
 
 NODE_KIND_HEADER = "header"
 NODE_KIND_DECLARATION = "declaration"
@@ -164,7 +172,7 @@ def _declaration_entity_id(decl: Function | Variable) -> EntityId | None:
     return decl.entity_id
 
 
-def _fact_list(fact: Fact[list[str]] | None) -> list[str]:
+def fact_list(fact: Fact[list[str]] | None) -> list[str]:
     """``rec.bases``/``.virtual_bases``' ``Fact[T]`` sibling, unwrapped —
     never the legacy field directly (ADR-063 Phase 0's `fact-field-readers`
     gate): ``NOT_COLLECTED`` reads as no bases to reference, the same as a
@@ -191,6 +199,29 @@ def _node_id_for(entity_id: EntityId | None, qualified_name: str, *, kind: str) 
         if entity_id is not None
         else _approximate_node_id(qualified_name, kind=kind)
     )
+
+
+def node_id_for_declaration(entity_id: EntityId | None, name: str) -> str:
+    """Public wrapper over :func:`_node_id_for` for a function/variable
+    declaration -- the same id :func:`build_public_surface_facts` gives its
+    own declaration nodes, exposed so ``policy/public_surface.py`` (the
+    ADR-063 Phase 3 D5 query side) can look one up by the same key without
+    reaching into this module's private helpers."""
+    return _node_id_for(entity_id, name, kind="declaration")
+
+
+def node_id_for_type(entity_id: EntityId | None, qualified_name: str) -> str:
+    """Public wrapper over :func:`_node_id_for` for a record/enum type node
+    -- see :func:`node_id_for_declaration`."""
+    return _node_id_for(entity_id, qualified_name, kind="type")
+
+
+def node_id_for_typedef(alias: str) -> str:
+    """Public wrapper over :func:`_approximate_node_id` for a typedef alias
+    node -- see :func:`node_id_for_declaration`. A typedef has no
+    ``entity_id`` carrier at all (``snap.typedefs`` is a bare ``dict[str,
+    str]``), so this is always the approximate string form."""
+    return _approximate_node_id(alias, kind="typedef")
 
 
 def _header_node_id(header: str) -> str:
@@ -226,11 +257,128 @@ def _add_references(
                 )
 
 
+class ReferencedIdentifiers(NamedTuple):
+    by_node: dict[str, list[str]]
+    collided_nodes: frozenset[str]
+
+
+def referenced_identifiers_by_node(snap: AbiSnapshot) -> ReferencedIdentifiers:
+    """First pass, computed before any node is emitted: node id -> the
+    sorted union of every type-identifier string that *any* declaration/
+    record/typedef mapping to that id references in its own signature/
+    fields/bases/target (ADR-063 Phase 3 D5's own follow-up: the actual
+    ``policy.public_surface`` traversal migration reads this attrs entry
+    instead of re-parsing ``fn.return_type``/``rec.fields``/etc. a second,
+    third, and fourth time the way ``surface.py``'s own closure walk used
+    to) -- plus which node ids that union is *not* safe to trust for a
+    caller needing per-declaration precision.
+
+    **Why a union, and why precomputed rather than attached inline as each
+    node is built**: two declarations can share one *approximate* node id
+    (no real ``entity_id`` resolved for either -- see this module's own
+    docstring) without being the same declaration at all (two overloads
+    sharing one demangled name, e.g.). Attaching each one's own identifier
+    set independently, in two separate ``add_node`` calls for the same id,
+    would hand the second call's list to the generic cross-producer
+    ``GraphFact`` merge machinery (``model.graph_facts.merge_graph_facts``),
+    which resolves a same-key disagreement by confidence/producer/content
+    precedence, not by union -- silently dropping whichever side loses that
+    tie-break. That is exactly the anti-hiding violation this whole module
+    exists to avoid: a real reference from the losing declaration would
+    vanish from the graph's evidence with no trace. Precomputing the union
+    up front means every ``add_node`` call for a given id carries the
+    *same*, already-complete value, so the merge machinery only ever sees
+    identical repeated registrations (a no-op), never a real value
+    conflict.
+
+    **Why a union is not always the right answer either, and why the
+    collision needs to be reported, not just resolved.** Unioning is safe
+    for a caller that only ever asks "is *anything* reachable from here"
+    (over-keeping is this whole area's own established safe direction).
+    It is not safe for a caller that needs to know what *one specific*
+    declaration references, independent of a same-node sibling it happens
+    to share an approximate id with -- e.g. a public, no-argument overload
+    sharing one id with a hidden, private-type-taking overload (no
+    ``entity_id`` resolved for either, no mangled name to fall back to)
+    must not appear to reference the hidden overload's own private
+    parameter type merely because both collapsed onto one node. Returning
+    the set of node ids where more than one distinct declaration/type/
+    typedef entry contributed lets such a caller detect exactly that case
+    and fall back to computing that *one* entry's own identifiers directly,
+    rather than either silently trusting a blurred union or (worse) an
+    arbitrary single contributor's value.
+    """
+    acc: dict[str, set[str]] = {}
+    contributor_counts: dict[str, int] = {}
+
+    def _add(node_id: str, *type_strs: str | None) -> None:
+        idents: set[str] = set()
+        for s in type_strs:
+            idents |= _type_identifiers(s)
+        if idents:
+            acc.setdefault(node_id, set()).update(idents)
+        contributor_counts[node_id] = contributor_counts.get(node_id, 0) + 1
+
+    for fn in snap.functions:
+        node_id = node_id_for_declaration(_declaration_entity_id(fn), fn.name)
+        _add(node_id, fn.return_type, *(p.type for p in fn.params))
+    for var in snap.variables:
+        node_id = node_id_for_declaration(_declaration_entity_id(var), var.name)
+        _add(node_id, var.type)
+    for rec in snap.types:
+        qname = rec.qualified_name or rec.name
+        node_id = node_id_for_type(rec.entity_id, qname)
+        _add(
+            node_id,
+            *(f.type for f in rec.fields),
+            *fact_list(rec.bases_fact),
+            *fact_list(rec.virtual_bases_fact),
+        )
+    for alias, target in snap.typedefs.items():
+        _add(node_id_for_typedef(alias), target)
+    by_node = {node_id: sorted(idents) for node_id, idents in acc.items()}
+    collided = frozenset(
+        node_id for node_id, count in contributor_counts.items() if count > 1
+    )
+    return ReferencedIdentifiers(by_node=by_node, collided_nodes=collided)
+
+
+def _node_attrs(refs: ReferencedIdentifiers, node_id: str) -> dict[str, object]:
+    """The ``referenced_identifiers``/``identifiers_collision`` attrs pair
+    every declaration/type/typedef node carries -- see
+    :func:`referenced_identifiers_by_node`'s own docstring for what
+    ``identifiers_collision`` means and why a caller needing per-declaration
+    precision must check it before trusting the unioned list.
+
+    **Informational graph content only, as of ADR-063 Phase 3 D5's third
+    review round (Codex, PR #979) -- no consumer inside this codebase
+    trusts these two attrs for a correctness-sensitive decision.**
+    ``policy.public_surface_closure``'s closure walk (the one consumer that
+    originally did) now calls :func:`referenced_identifiers_by_node`
+    directly instead: a node's ``attrs`` are derived through
+    ``model.graph_facts``' cross-producer evidence-merge machinery, which
+    resolves a same-key disagreement between two registrations by
+    confidence/producer/content precedence -- appropriate for genuinely
+    independent producer facts, but wrong for this specific, single-source
+    derived computation, since a stale or adversarial persisted fact could
+    silently outrank a freshly recomputed correct one. These attrs are kept
+    on the node purely because they are legitimate, general graph content
+    (per ADR-063's "one graph, all evidence" governing principle) that some
+    future consumer may still find useful to inspect -- not because
+    anything here should be trusted over a direct call to
+    :func:`referenced_identifiers_by_node` for a real decision."""
+    return {
+        "referenced_identifiers": refs.by_node.get(node_id, []),
+        "identifiers_collision": node_id in refs.collided_nodes,
+    }
+
+
 def _build_type_index(
     graph: SurfaceGraphLike,
     types: list[RecordType],
     enums: list[EnumType],
     typedefs: dict[str, str],
+    referenced_by_node: ReferencedIdentifiers,
 ) -> dict[str, str]:
     """Register every declared record/enum/typedef as a ``type`` node,
     returning a name → node-id index (both the bare leaf and the qualified
@@ -246,7 +394,14 @@ def _build_type_index(
     ambiguous_bare: set[str] = set()
 
     def _register(qname: str, bare: str, node_id: str, label: str) -> None:
-        graph.add_node(GraphNode(id=node_id, kind=NODE_KIND_TYPE, label=label))
+        graph.add_node(
+            GraphNode(
+                id=node_id,
+                kind=NODE_KIND_TYPE,
+                label=label,
+                attrs=_node_attrs(referenced_by_node, node_id),
+            )
+        )
         index.setdefault(qname, node_id)
         if bare in index and index[bare] != node_id:
             ambiguous_bare.add(bare)
@@ -291,12 +446,22 @@ def build_public_surface_facts(snap: AbiSnapshot, graph: SurfaceGraphLike) -> No
     key, so calling this twice on the same graph (or on a graph another
     builder already wrote into) is safe.
     """
-    type_index = _build_type_index(graph, snap.types, snap.enums, snap.typedefs)
+    referenced_by_node = referenced_identifiers_by_node(snap)
+    type_index = _build_type_index(
+        graph, snap.types, snap.enums, snap.typedefs, referenced_by_node
+    )
     decl_node_ids: dict[str, str] = {}
 
     for fn in snap.functions:
         node_id = _node_id_for(_declaration_entity_id(fn), fn.name, kind="declaration")
-        graph.add_node(GraphNode(id=node_id, kind=NODE_KIND_DECLARATION, label=fn.name))
+        graph.add_node(
+            GraphNode(
+                id=node_id,
+                kind=NODE_KIND_DECLARATION,
+                label=fn.name,
+                attrs=_node_attrs(referenced_by_node, node_id),
+            )
+        )
         _add_header_declares(graph, fn.source_header, node_id)
         _add_references(
             graph, node_id, type_index, fn.return_type, *(p.type for p in fn.params)
@@ -309,7 +474,12 @@ def build_public_surface_facts(snap: AbiSnapshot, graph: SurfaceGraphLike) -> No
             _declaration_entity_id(var), var.name, kind="declaration"
         )
         graph.add_node(
-            GraphNode(id=node_id, kind=NODE_KIND_DECLARATION, label=var.name)
+            GraphNode(
+                id=node_id,
+                kind=NODE_KIND_DECLARATION,
+                label=var.name,
+                attrs=_node_attrs(referenced_by_node, node_id),
+            )
         )
         _add_header_declares(graph, var.source_header, node_id)
         _add_references(graph, node_id, type_index, var.type)
@@ -325,8 +495,8 @@ def build_public_surface_facts(snap: AbiSnapshot, graph: SurfaceGraphLike) -> No
             node_id,
             type_index,
             *(f.type for f in rec.fields),
-            *_fact_list(rec.bases_fact),
-            *_fact_list(rec.virtual_bases_fact),
+            *fact_list(rec.bases_fact),
+            *fact_list(rec.virtual_bases_fact),
         )
 
     for en in snap.enums:

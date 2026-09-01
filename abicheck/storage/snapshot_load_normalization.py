@@ -28,14 +28,24 @@ a stable, dependency-free leaf shared across detectors), the same exemption
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
+from ..model.build_mode_facts import (
+    BuildMode,
+    BuildModeProvenance,
+    CompilerFamily,
+    CxxStandard,
+    GlibcxxDualAbi,
+    StdlibFamily,
+)
+from ..model.extraction_contract import ExtractionContract
 from ..name_classification import strip_anonymous_type_location
 from ..qualified_name_segments import (
     _LAMBDA_IDENTITY_FIELDS,
     _lambda_identity_containers_and_strings,
     _walk_rewrite_strings,
 )
+from .guards import decision_key, identity_text, mapping as _mapping_guard, strict_int
 
 if TYPE_CHECKING:
     from ..model.snapshot import AbiSnapshot
@@ -121,3 +131,136 @@ def backfill_missing_elf_binding(snap: AbiSnapshot) -> None:
             elf_sym = sym_map.get(var.mangled)
             if elf_sym is not None:
                 var.elf_binding = elf_sym.binding
+
+
+def _str_field_mapping(raw: Any, field_name: str) -> dict[str, str]:
+    """A ``dict[str, str]`` extraction-contract field, rejected outright --
+    not filtered down to its well-formed entries -- when the container, or
+    an individual key/value pair inside it, is not already string-shaped
+    (storage AGENTS.md invariant 6, ``guards``'s "reject rather than
+    coerce" rule, reused here rather than restated).
+
+    ``profile_fields``/``scope_fields`` feed ADR-050's comparability gate
+    directly (``comparability.py``'s carve-out checks look values up in
+    them by known keys), so two failure modes both had to close, not just
+    the ``str()``-coercion one: a first fix (Codex review) stopped ``1``/
+    ``"1"`` colliding onto one entry, but silently *dropping* the malformed
+    pair instead of rejecting the field left a second, subtler one open
+    (fresh Codex review) -- a malformed ``profile_fields``/``scope_fields``
+    becomes indistinguishable from one that genuinely has fewer entries,
+    so a carve-out that reads a still-present key never learns the
+    document was corrupt. A field present but wrong-shaped is a malformed
+    document, and this package's own convention (see ``dependency_scope``'s
+    handling in ``serialization.snapshot_from_dict``) is to fail the load
+    loudly rather than let a corrupt document masquerade as a smaller
+    legitimate one. Only a genuinely *absent* field (the key missing, or an
+    explicit ``null`` -- the same "no evidence" spelling every other
+    optional field in this contract already accepts) degrades to ``{}``;
+    every other shape raises.
+    """
+    if raw is None:
+        return {}
+    _mapping_guard(raw, field_name)
+    result: dict[str, str] = {}
+    for key, value in raw.items():
+        str_key = decision_key(key, f"{field_name} key")
+        result[str_key] = identity_text(value, f"{field_name}[{str_key!r}]")
+    return result
+
+
+def extraction_contract_from_dict(raw: Any) -> ExtractionContract | None:
+    """Convert a serialized ExtractionContract dict (or None) back into the
+    typed dataclass (ADR-050 D1). Returns None when the whole ``contract``
+    field is missing (every snapshot predating schema v12) or not a dict.
+
+    Raises ``TypeError`` -- does not degrade -- when a *present*
+    ``profile_fields``/``scope_fields`` sub-field is the wrong shape (see
+    ``_str_field_mapping``): those two feed the comparability gate
+    directly, so a malformed one must fail the load rather than silently
+    read as a smaller legitimate one.
+    """
+    if not isinstance(raw, dict):
+        return None
+    profile_fingerprint = raw.get("profile_fingerprint")
+    scope_fingerprint = raw.get("scope_fingerprint")
+    return ExtractionContract(
+        profile_fingerprint=profile_fingerprint
+        if isinstance(profile_fingerprint, str)
+        else None,
+        scope_fingerprint=scope_fingerprint
+        if isinstance(scope_fingerprint, str)
+        else None,
+        profile_fields=_str_field_mapping(raw.get("profile_fields"), "profile_fields"),
+        scope_fields=_str_field_mapping(raw.get("scope_fields"), "scope_fields"),
+    )
+
+
+def _enum_or(cls: type, value: Any, default: Any) -> Any:
+    if value is None:
+        return default
+    try:
+        return cls(value)
+    except (ValueError, KeyError):
+        return default
+
+
+def build_mode_from_dict(raw: Any) -> BuildMode | None:
+    """Convert a serialized BuildMode dict (or None) back into the
+    typed dataclass. Returns None when the field is genuinely absent
+    (missing key, or explicit ``null`` -- every snapshot predating this
+    field, or a current one that never went through a build-mode-aware
+    dumper). Raises ``TypeError`` for a *present* but wrong-shaped value:
+    storage AGENTS.md invariant 6, the same "reject rather than coerce"
+    rule ``extraction_contract_from_dict`` applies above -- a present,
+    malformed ``build_mode``/``provenance``/``libcpp_abi_version`` must not
+    read as "this snapshot predates the field", or ``_effective_build_mode``
+    would infer weaker facts (or skip stdlib-ABI checks) from evidence that
+    was never actually collected, silently, with no signal anything was
+    wrong (Codex review).
+    """
+    if raw is None:
+        return None
+    _mapping_guard(raw, "build_mode")
+
+    prov_raw = raw.get("provenance")
+    if prov_raw is None:
+        prov_raw = {}
+    else:
+        _mapping_guard(prov_raw, "build_mode.provenance")
+    provenance = BuildModeProvenance(
+        raw_producer=prov_raw.get("raw_producer"),
+        raw_comment=prov_raw.get("raw_comment"),
+        compiler_version=prov_raw.get("compiler_version"),
+    )
+
+    # libcpp_abi_version: an int passes through unchanged; anything else
+    # present (a string -- even a numeric one like "1", since that is
+    # exactly the 1/"1" collision invariant 6 exists to prevent -- a bool,
+    # a float, a list) is rejected via strict_int rather than coerced.
+    libcpp_raw = raw.get("libcpp_abi_version")
+    libcpp_abi_version: int | None = (
+        None
+        if libcpp_raw is None
+        else strict_int(libcpp_raw, "build_mode.libcpp_abi_version")
+    )
+
+    return BuildMode(
+        compiler_family=_enum_or(
+            CompilerFamily,
+            raw.get("compiler_family"),
+            CompilerFamily.UNKNOWN,
+        ),
+        language_std=_enum_or(
+            CxxStandard,
+            raw.get("language_std"),
+            CxxStandard.UNKNOWN,
+        ),
+        stdlib=_enum_or(StdlibFamily, raw.get("stdlib"), StdlibFamily.UNKNOWN),
+        glibcxx_dual_abi=_enum_or(
+            GlibcxxDualAbi,
+            raw.get("glibcxx_dual_abi"),
+            GlibcxxDualAbi.NOT_APPLICABLE,
+        ),
+        libcpp_abi_version=libcpp_abi_version,
+        provenance=provenance,
+    )
