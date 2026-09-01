@@ -2183,12 +2183,12 @@
     },
     {
       "path": "tests/test_tu_merge.py",
-      "baseline_lines": 1890,
+      "baseline_lines": 1918,
       "target": "tests/unit-or-contract ownership matching production migration",
       "rule": "no_growth",
       "category": "legacy_oversized_test_module",
       "owner": "abicheck maintainers",
-      "rationale": "Existing test module predates ADR-061 and will split by behavior or contract axis with its production migration. Raised by 2 for ADR-063 Phase 2's closing slice: the empty-merge expected value gained the two sidecar keywords MergedTuFragments now carries.",
+      "rationale": "Existing test module predates ADR-061 and will split by behavior or contract axis with its production migration. Raised by 2 for ADR-063 Phase 2's closing slice: the empty-merge expected value gained the two sidecar keywords MergedTuFragments now carries. Raised by a further 28 in the same slice's follow-up (Codecov): test_merge_fragments_unions_typedef_and_constant_entity_id_sidecars, closing the gap between the empty-input case above and merge_fragments' real cross-fragment union comprehension, which no test previously exercised.",
       "review_by": "2026-11-30"
     },
     {

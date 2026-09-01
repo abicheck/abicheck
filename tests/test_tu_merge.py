@@ -233,6 +233,34 @@ def test_merge_fragments_is_order_independent():
         assert merge_fragments(list(shuffled)) == baseline
 
 
+def test_merge_fragments_unions_typedef_and_constant_entity_id_sidecars():
+    # The two EntityId sidecars (ADR-063 Phase 2) union across fragments the
+    # same plain way typedefs/typedefs_qualified/constants already do -- no
+    # test previously exercised merge_fragments' actual union comprehension
+    # for these two fields beyond the trivial empty-input case (Codecov).
+    from abicheck.model.identity import entity_id_for_constant, entity_id_for_typedef
+
+    alias_id = entity_id_for_typedef((), "Alias")
+    limit_id = entity_id_for_constant((), "kLimit")
+    a = TuFragment(
+        tu_name="a",
+        typedefs={"Alias": "int"},
+        typedef_entity_ids={"Alias": alias_id},
+    )
+    b = TuFragment(
+        tu_name="b",
+        constants={"kLimit": "7"},
+        constant_entity_ids={"kLimit": limit_id},
+    )
+    merged = merge_fragments([a, b])
+    assert merged.typedef_entity_ids == {"Alias": alias_id}
+    assert merged.constant_entity_ids == {"kLimit": limit_id}
+    # Order-independence, same as every other unioned field this module
+    # already pins (test_merge_fragments_is_order_independent above).
+    assert merge_fragments([b, a]).typedef_entity_ids == {"Alias": alias_id}
+    assert merge_fragments([b, a]).constant_entity_ids == {"kLimit": limit_id}
+
+
 def test_merge_fragments_output_order_is_content_derived_not_input_derived():
     # Swapping which fragment is passed first must not change which entity
     # "wins" a union merge, nor the final tuple order.
