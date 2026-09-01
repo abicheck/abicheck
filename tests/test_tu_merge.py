@@ -261,6 +261,38 @@ def test_merge_fragments_unions_typedef_and_constant_entity_id_sidecars():
     assert merge_fragments([b, a]).constant_entity_ids == {"kLimit": limit_id}
 
 
+def test_merge_fragments_rejects_conflicting_typedef_entity_id_same_key():
+    # Codex review: two TUs can agree on a typedef's qualified spelling AND
+    # its underlying-type value (so `typedefs_qualified`'s own
+    # `_merge_scalar_group` value check would not catch this) while
+    # disagreeing on its *structural* scope -- ADR-063's own motivating
+    # collision, `ns::Alias` nested in a namespace in one TU vs a
+    # same-named `struct ns` in another. The identity conflict must still
+    # be refused, not silently resolved by whichever TU is unioned last.
+    from abicheck.model.identity import EntityId, EntityKind, Namespace, Record
+
+    namespace_id = EntityId(
+        scope=(Namespace("ns"),), kind=EntityKind.TYPEDEF, leaf_name="Alias", extra=()
+    )
+    record_id = EntityId(
+        scope=(Record("ns"),), kind=EntityKind.TYPEDEF, leaf_name="Alias", extra=()
+    )
+    a = TuFragment(
+        tu_name="a",
+        typedefs_qualified={"ns::Alias": "int"},
+        typedef_entity_ids={"ns::Alias": namespace_id},
+    )
+    b = TuFragment(
+        tu_name="b",
+        typedefs_qualified={"ns::Alias": "int"},
+        typedef_entity_ids={"ns::Alias": record_id},
+    )
+    with pytest.raises(TuMergeError) as excinfo:
+        merge_fragments([a, b])
+    assert excinfo.value.code == INCONSISTENT_DECLARATION
+    assert excinfo.value.entity_key == ("typedef", "ns::Alias")
+
+
 def test_merge_fragments_output_order_is_content_derived_not_input_derived():
     # Swapping which fragment is passed first must not change which entity
     # "wins" a union merge, nor the final tuple order.

@@ -1093,12 +1093,12 @@
     },
     {
       "path": "abicheck/tu_merge.py",
-      "baseline_lines": 1566,
+      "baseline_lines": 1622,
       "target": "see ADR-061 ownership map",
       "rule": "no_growth",
       "category": "legacy_oversized_module",
       "owner": "abicheck maintainers",
-      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice. Raised by 14 for ADR-063 Phase 2's closing slice: TuFragment's typedef_entity_ids/constant_entity_ids sidecars must fold through the cross-TU merge, or a manifest dump loses the identity a single-TU dump keeps.",
+      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice. Raised by 14 for ADR-063 Phase 2's closing slice: TuFragment's typedef_entity_ids/constant_entity_ids sidecars must fold through the cross-TU merge, or a manifest dump loses the identity a single-TU dump keeps. Raised by a further 56 in the same slice's follow-up (Codex review): the sidecars' plain union was replaced with _merge_entity_id_sidecar, which detects two TUs agreeing on a qualified name's spelling/value while disagreeing on its structural scope (ADR-063's own motivating collision) and raises TuMergeError rather than silently picking whichever TU is unioned last.",
       "review_by": "2026-11-30"
     },
     {
@@ -2183,12 +2183,12 @@
     },
     {
       "path": "tests/test_tu_merge.py",
-      "baseline_lines": 1918,
+      "baseline_lines": 1950,
       "target": "tests/unit-or-contract ownership matching production migration",
       "rule": "no_growth",
       "category": "legacy_oversized_test_module",
       "owner": "abicheck maintainers",
-      "rationale": "Existing test module predates ADR-061 and will split by behavior or contract axis with its production migration. Raised by 2 for ADR-063 Phase 2's closing slice: the empty-merge expected value gained the two sidecar keywords MergedTuFragments now carries. Raised by a further 28 in the same slice's follow-up (Codecov): test_merge_fragments_unions_typedef_and_constant_entity_id_sidecars, closing the gap between the empty-input case above and merge_fragments' real cross-fragment union comprehension, which no test previously exercised.",
+      "rationale": "Existing test module predates ADR-061 and will split by behavior or contract axis with its production migration. Raised by 2 for ADR-063 Phase 2's closing slice: the empty-merge expected value gained the two sidecar keywords MergedTuFragments now carries. Raised by a further 28 in the same slice's follow-up (Codecov): test_merge_fragments_unions_typedef_and_constant_entity_id_sidecars, closing the gap between the empty-input case above and merge_fragments' real cross-fragment union comprehension, which no test previously exercised. Raised by a further 32 in the same follow-up (Codex review): test_merge_fragments_rejects_conflicting_typedef_entity_id_same_key, regression-testing tu_merge.py's own new _merge_entity_id_sidecar conflict check.",
       "review_by": "2026-11-30"
     },
     {
