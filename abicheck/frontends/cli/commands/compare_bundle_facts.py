@@ -516,7 +516,18 @@ def dispatch(*, compile_context: Any, **kwargs: Any) -> None:
         # producing nothing.
         from ....reporter import to_json
 
-        output_dir.mkdir(parents=True, exist_ok=True)
+        try:
+            output_dir.mkdir(parents=True, exist_ok=True)
+        except OSError as exc:
+            # Mirrors _safe_write_output's own OSError -> ClickException
+            # translation for the identical operation (creating a report's
+            # parent directory) -- without this, a permission failure, a
+            # full disk, or a non-directory *parent* path component (e.g.
+            # --output-dir naming a subdirectory of an existing file, which
+            # this function's own explicit-file check above does not catch
+            # since it only inspects output_dir itself) leaked a raw
+            # traceback instead of a clean CLI error.
+            raise click.ClickException(f"Cannot create {output_dir}: {exc}") from exc
         for diff in result.per_library:
             # Codex review: `diff.library` originates in OLD_FACTS -- a
             # user-supplied document, not a path this process resolved

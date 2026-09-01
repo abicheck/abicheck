@@ -49,3 +49,9 @@ it should read in CHANGELOG.md. Delete the other sections.
   collision checks above; the primary report was written before directory
   creation raised a raw, unhandled error. `--output-dir` is now validated
   as a non-file path before any artifact is written.
+- **`compare --old-bundle-facts --output-dir` reports directory-creation
+  failures cleanly** — any remaining `--output-dir` creation failure (a
+  non-directory *parent* path component, a permission error) leaked a raw,
+  unhandled `OSError` after the primary report had already been written.
+  Wrapped in the same `OSError` → clean CLI error translation the rest of
+  this command's output writing already uses.

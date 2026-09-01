@@ -592,6 +592,45 @@ class TestCompareOldBundleFacts:
         assert "not a directory" in out.lower()
         assert preexisting_file.read_text() == "leftover from an earlier run\n"
 
+    def test_output_dir_mkdir_failure_is_a_clean_error_not_a_raw_traceback(
+        self, tmp_path: Path
+    ) -> None:
+        """--output-dir naming a path whose *parent* is an existing regular
+        file (not output_dir itself, which the previous test already
+        covers) makes `output_dir.mkdir(parents=True, exist_ok=True)`
+        raise `NotADirectoryError` -- a case the explicit-file precondition
+        check above cannot catch, since it only inspects output_dir itself,
+        not its ancestors. Mirrors _safe_write_output's own OSError ->
+        ClickException translation for the identical mkdir operation."""
+        old_dir = tmp_path / "old"
+        new_dir = tmp_path / "new"
+        old_dir.mkdir()
+        new_dir.mkdir()
+        body = "int add(int a, int b) { return a + b; }\n"
+        _build_so(old_dir, "libreal.so", body)
+        _build_so(new_dir, "libreal.so", body)
+        facts_path = _write_old_facts(
+            tmp_path, old_dir, old_dir / "libreal.so", "libreal.so"
+        )
+        blocking_file = tmp_path / "blocking-file"
+        blocking_file.write_text("not a directory\n")
+        output_dir = blocking_file / "reports"
+
+        code, out = _invoke(
+            "compare",
+            str(facts_path),
+            str(new_dir),
+            "--old-bundle-facts",
+            "--output-dir",
+            str(output_dir),
+            "--format",
+            "json",
+        )
+
+        assert code == 1, out
+        assert "Cannot create" in out
+        assert "Traceback" not in out
+
 
 @pytest.mark.integration
 class TestBundleFactsLibraryManifest:
