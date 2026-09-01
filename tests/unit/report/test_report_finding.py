@@ -23,7 +23,7 @@ import json
 
 import pytest
 
-from abicheck.checker import Change, ChangeKind, DiffResult
+from abicheck.checker import Change, ChangeKind, DiffResult, Verdict
 from abicheck.junit_report import _is_failure, to_junit_xml
 from abicheck.policy.severity import classify_effective_change
 from abicheck.reclassify import effective_verdict_for_change
@@ -90,13 +90,11 @@ class TestBuildReportFindingsAgreesWithDirectResolution:
             )
 
     @pytest.mark.parametrize("changes", _CHANGE_COMBINATIONS)
-    def test_memoized_result_findings_match_fresh_build(
+    def test_result_findings_match_direct_build_and_reflect_mutation(
         self, changes: list[Change]
     ) -> None:
         result = _result(changes)
         first = report_findings_for(result)
-        second = report_findings_for(result)
-        assert first is second  # memoized, not recomputed
 
         fresh = build_report_findings(
             result.changes,
@@ -105,6 +103,25 @@ class TestBuildReportFindingsAgreesWithDirectResolution:
             policy_file=result.policy_file,
         )
         assert first == fresh
+
+        if not changes:
+            return
+        # Codex review: a prior revision cached this on the DiffResult
+        # instance, which went stale if a caller mutated *result* between
+        # two calls (e.g. a demotion applied after a first render). Confirm
+        # a second call reflects the mutation rather than replaying it --
+        # pick a verdict guaranteed to differ from the original so this
+        # holds regardless of which combination is parametrized in.
+        original_verdict = first[0].verdict
+        new_verdict = (
+            Verdict.COMPATIBLE
+            if original_verdict != Verdict.COMPATIBLE
+            else Verdict.BREAKING
+        )
+        changes[0].effective_verdict = new_verdict
+        mutated = report_findings_for(result)
+        assert mutated[0].verdict == new_verdict
+        assert mutated[0].verdict != original_verdict
 
 
 class TestFindingsByChangeId:

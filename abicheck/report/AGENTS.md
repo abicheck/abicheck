@@ -31,13 +31,15 @@ lossless encoding; `render_xml_document` is the projection. Put a report
 
 `finding.py` is the per-`Change` counterpart to `document.py`'s whole-report
 value: `ReportFinding` holds one change's already-resolved `verdict`/
-`category`, built once by `build_report_findings` rather than re-derived at
-each renderer's own call site. `report_findings_for` is the memoized
-per-`DiffResult` convenience (an attribute cache on the result, not a
-`DiffResult` method — `model` may not import this package, so the method
-cannot live there); `findings_by_change_id` indexes a set of findings by
-`id(change)` for O(1) lookup within one render (never persisted past it —
-`Change` has no `__hash__`).
+`category`, built once per render by `build_report_findings` rather than
+re-derived at each renderer's own call site. `report_findings_for` is the
+per-`DiffResult` convenience (not a `DiffResult` method — `model` may not
+import this package, so the method cannot live there); it recomputes on
+every call rather than caching on the result instance, since `DiffResult`
+is mutable and a cache there went stale across two renders of the same
+result with a mutation in between (Codex review). `findings_by_change_id`
+indexes a set of findings by `id(change)` for O(1) lookup within one render
+(never persisted past it — `Change` has no `__hash__`).
 
 Markdown's richer modes (`to_markdown`, `to_review_digest`) and HTML remain
 the one open follow-up slice: they emit prose straight from a `DiffResult`

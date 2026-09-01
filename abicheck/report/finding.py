@@ -104,12 +104,22 @@ def findings_by_change_id(
 
 
 def report_findings_for(result: DiffResult) -> tuple[ReportFinding, ...]:
-    """:func:`build_report_findings` over ``result.changes``, memoized on
-    *result* via a plain attribute cache (not a dataclass field --
-    ``DiffResult`` itself cannot own this as a method: it is ``model``-
-    classified, and ``model`` may not import ``report``/``policy``, the
-    dependency direction ADR-061 D1 forbids; this function lives here,
-    outside ``model``, and is called with a ``DiffResult`` from outside it.
+    """:func:`build_report_findings` over ``result.changes``.
+
+    Not memoized: ``DiffResult`` is a mutable dataclass, and ``model`` may
+    not own this as a method anyway (it is ``model``-classified; ``model``
+    may not import ``report``/``policy``, the dependency direction ADR-061
+    D1 forbids). A prior revision cached the result on the instance
+    (``result._report_findings_cache``) -- caching here was strictly a
+    cross-call convenience, since every current caller already invokes this
+    once per render, so it bought nothing; it also went stale silently if a
+    caller mutated ``result`` (its ``changes``, ``policy_file``, or a
+    ``Change.effective_verdict``) and called this again on the same
+    instance -- e.g. a caller rendering twice with a demotion in between
+    would keep serving the first render's verdicts (Codex review). Recomputed
+    every call instead: this function is one pass over ``result.changes``,
+    called at most twice per report (primary + `--write` secondary), so the
+    cost is negligible next to the correctness this trades for it.
 
     A caller holding only a duck-typed stub result (``html_report.py``
     accepts one without ``policy_file``) should confirm the object looks
@@ -117,13 +127,9 @@ def report_findings_for(result: DiffResult) -> tuple[ReportFinding, ...]:
     before calling this, the same way it already guards other
     ``DiffResult``-only calls.
     """
-    cached = getattr(result, "_report_findings_cache", None)
-    if cached is None:
-        cached = build_report_findings(
-            result.changes,
-            policy=result.policy,
-            kind_sets=result._effective_kind_sets(),
-            policy_file=result.policy_file,
-        )
-        result._report_findings_cache = cached  # type: ignore[attr-defined]
-    return cached
+    return build_report_findings(
+        result.changes,
+        policy=result.policy,
+        kind_sets=result._effective_kind_sets(),
+        policy_file=result.policy_file,
+    )

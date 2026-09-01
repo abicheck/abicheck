@@ -722,10 +722,18 @@ current on those two points:
    `legacy_root_modules` a migrated `report`-package module may not import
    directly (`unclassified-import`). `DiffResult` itself cannot own this as
    a method — it is `model`-classified, and `model`'s `may_import: []`
-   forbids reaching into `report`/`policy` — so the memoized per-result
-   convenience (`report_findings_for`, an attribute cache keyed on the
-   `DiffResult` instance) lives in `report/finding.py` instead and is
-   called from outside `model`, not as a `DiffResult` method.
+   forbids reaching into `report`/`policy` — so the per-result convenience
+   (`report_findings_for`) lives in `report/finding.py` instead and is
+   called from outside `model`, not as a `DiffResult` method. It recomputes
+   on every call rather than caching on the (mutable) `DiffResult` instance
+   — a first revision cached there and a Codex review round on the PR
+   caught the resulting staleness hazard: a caller rendering the same
+   result twice with a mutation in between (`result.changes`, `policy_file`,
+   or a `Change.effective_verdict` demotion/promotion) would keep serving
+   the first render's now-stale verdicts. No current caller does this —
+   each already calls it at most once per render — so caching bought
+   nothing real; recomputing removes the hazard class outright rather than
+   trying to invalidate a cache correctly against every mutation surface.
    `junit_report._is_failure`/`_failure_type` (deduplicated through two new
    leaf helpers, `_resolved_verdict`/`_resolved_category`, so the two
    stopped each independently re-deriving both values), `html_report`'s
@@ -744,10 +752,11 @@ current on those two points:
    — a parametrized sweep (mirroring `test_gate_decision_shared.py`'s
    pattern) asserting `ReportFinding.verdict`/`.category` against direct
    resolver calls across several policy configurations, that
-   `report_findings_for`'s memoization returns the identical object on a
-   second call, and that JUnit's `_is_failure` (via `findings_by_id`) never
-   disagrees with the JSON report's own independently-derived `severity`
-   field for the same changes — plus the full existing golden-output suite
+   `report_findings_for` reflects a mutation applied to `result` between two
+   calls rather than replaying a stale answer, and that JUnit's
+   `_is_failure` (via `findings_by_id`) never disagrees with the JSON
+   report's own independently-derived `severity` field for the same
+   changes — plus the full existing golden-output suite
    (`tests/test_golden_output.py`, `tests/test_html_template_golden.py`)
    passing byte-for-byte unchanged, since this closure changes only *where*
    each value is computed, never its value.
