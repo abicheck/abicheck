@@ -411,10 +411,12 @@ writing a second explanation next to a registered one:
 1. **The registered canonical page is already an explanation** —
    `baseline-lifecycle` → `use/baseline-management.md` (front matter
    `doc_type: explanation`; its sections are exactly the model above). No
-   new page: the existing page is navigated into the ladder's Practice
-   tier and given tier front matter (nav placement and file location are
-   independent, per `docs/AGENTS.md` "Layout"). "Baselines as contracts"
-   is therefore a *move*, not a ★ page.
+   new page, and no tab move either: the page carries Action inputs and
+   internal names (`abicheck.product_baseline`), which the educational tab
+   forbids in prose, so it stays in the tool track and the ladder *links*
+   to it as the Practice tier's baseline entry — the same treatment §5
+   gives the evidence trio. "Baselines as contracts" is therefore a
+   ladder link, not a ★ page and not a move.
 2. **The registered canonical page is a flag/how-to reference** —
    `bundle-analysis` → `use/multi-binary.md`. The new learning page takes
    `canonical_page` and the how-to is re-registered as a `task_pages`
@@ -488,24 +490,30 @@ so every page can carry its tier without changing the gate.
 | **1 · Foundations** | beginner → intermediate | Part 1 Foundations · Part 0 Product Contract (↻ gains the compatibility-levels ladder, §4.3) · Your ABI Surface |
 | **2 · Mechanics** | intermediate | Parts 2, 3, 4, 5, 6 — with Class Layout, Exception Unwinding, Modern Hazards, MSVC/PE listed *under* their Part as "go deeper" (Part 4 shortens its inline summaries to a sentence and a link) |
 | **3 · Define the contract** | intermediate | Compatibility Direction · Consumer Models · ↻ Contract-Aware Compatibility (from Concepts) · Build-Profile Comparability · Static & Header-Only Contracts (↻ from Beyond ABI — library *shape* is a contract question) |
-| **4 · Evidence & detection** | intermediate → advanced | ↻ Detecting Breaks (§1a grows into the AST summary, §2 becomes links into the trio) · Evidence & Detectability and What Each Level Sees (stay on the Concepts tab; the appendix of removed flags moves to `contribute/archive/`) · Assurance Beyond Static Checking |
-| **5 · Practice** | intermediate | ↻ Baselines as contracts (`use/baseline-management.md`, navigated into this tier — §4.6 case 1) · ★ Where in the pipeline (PR / main / nightly / release) · ★ Report the surface, not only the breaks · ★ Rollout & governance · ★ Triage a suspicious finding |
-| **6 · At scale** | advanced | ★ Products, not libraries (multi-binary) · ★ Template- and header-heavy libraries · ★ How system libraries stay compatible (glibc / libstdc++ / linker) · Dependency & Runtime Floors · Environment & Toolchain Drift (↻ from Concepts) · ★ Packages and consumers (deb/rpm/conda/wheel, `abi3`, FFI) |
-| **7 · Beyond static ABI** | advanced | Behavioral · Data & Wire · Ownership · Concurrency — four pages, as `topics.yaml` records (criterion 4); the shared "cannot decide this" argument gets one owner and four links |
-| **8 · Design** | intermediate | Part 7 Designing for Stability (↻ adds "the scanner recognises these patterns": idioms, pattern-aware verdicts) |
+| **4 · Evidence & detection** | intermediate | ↻ Detecting Breaks (§1a grows into the AST summary, §2 becomes links into the trio) · Evidence & Detectability and What Each Level Sees (stay on the Concepts tab; the appendix of removed flags moves to `contribute/archive/`) · Assurance Beyond Static Checking |
+| **5 · Practice** | intermediate | Baselines as contracts (`use/baseline-management.md`, linked from the ladder, stays in the tool track — §4.6 case 1) · ★ Where in the pipeline (PR / main / nightly / release) · ★ Report the surface, not only the breaks · ★ Rollout & governance · ★ Triage a suspicious finding |
+| **6 · Design** | intermediate | Part 7 Designing for Stability (↻ adds "the scanner recognises these patterns": idioms, pattern-aware verdicts) |
+| **7 · At scale** | advanced | ★ Products, not libraries (multi-binary) · ★ Template- and header-heavy libraries · ★ How system libraries stay compatible (glibc / libstdc++ / linker) · Dependency & Runtime Floors · Environment & Toolchain Drift (↻ from Concepts) · ★ Packages and consumers (deb/rpm/conda/wheel, `abi3`, FFI) |
+| **8 · Beyond static ABI** | advanced | Behavioral · Data & Wire · Ownership · Concurrency — four pages, as `topics.yaml` records (criterion 4); the shared "cannot decide this" argument gets one owner and four links |
 | **Concepts tab** (tool internals) | advanced → expert | Verdicts · Evidence & Detectability · What Each Level Sees · Architecture · Build & Source Data (↻ split: model and workflow stay and keep `canonical_for`; findings/schema/storage become a registered `reference_page`) · Graph Coverage (↻ pass-state detail to a `reference_page`) · Impact Assessment (↻ plan/ADR framing removed; field detail to a `reference_page`) · ELF Symbol Filtering · Limitations |
 
 Reading paths by role stay on the hub, but each path is then a walk *up*
 the ladder rather than a jump list across tabs.
 
 The `level:` front matter should carry the tier's level (mapped as above)
-on every page in the learning tree (today 16 pages have none). The hub's
-ladder table is then *generated* from that front matter — a small script
-splicing between sentinels with a `--check` mode, the pattern ADR-051
-established for the platform matrix — so the badge column is never a
-hand-copied table. The hub should render
-that as a badge per row so the ladder is visible in the navigator, not
-only in this plan.
+on every page in the learning tree (today 16 pages have none). Level
+alone cannot reconstruct the ladder (tiers 2–6 are all `intermediate`),
+so tier membership and order get one machine-readable owner:
+`docs/_meta/learning-ladder.yaml`, listing each tier's pages in reading
+order, next to `topics.yaml`. The hub's ladder table is then *generated*
+by joining that file with each page's `level:` — a small script splicing
+between sentinels with a `--check` mode, the pattern ADR-051 established
+for the platform matrix — so neither the badge column nor the tier rows
+are a hand-copied table. `--check` fails on a learn page missing from the
+ladder, on a ladder entry that is not a page, and on any level regression
+along the ladder's full reading order (not only within a nav group). The
+hub renders the result as a badge per row so the ladder is visible in the
+navigator, not only in this plan.
 
 ---
 
@@ -519,7 +527,9 @@ well as breaks; and what changes when the product is several binaries or
 a template library. Checkable form:
 
 - every page under the ABI/API Compatibility tab carries `level:` and a
-  previous/next footer, and each nav group is non-decreasing in level;
+  previous/next footer, every learn page is in
+  `docs/_meta/learning-ladder.yaml`, and level is non-decreasing along
+  the ladder's full reading order and within each nav group;
 - every ★ page in §5 exists, is registered in `topics.yaml` per §4.6's
   three cases, and has at least one runnable invocation and one linked
   case;
@@ -532,8 +542,9 @@ a template library. Checkable form:
 ## Files & surfaces
 
 `docs/learn/**` (content, front matter, footers); `mkdocs.yml` (nav order
-and `redirect_maps`); `docs/_meta/topics.yaml` and `terminology.yaml`
-(new topics, re-registrations, the authority-rule term);
+and `redirect_maps`); `docs/_meta/topics.yaml`, `terminology.yaml` and the new
+`learning-ladder.yaml` (new topics, re-registrations, the authority-rule
+term, tier membership);
 `docs/AGENTS.md` "Layout" (the two tab moves); `docs/index.md` and
 `start/getting-started.md` (front-door links); the hub's generated ladder
 splice and its `scripts/` generator; `docs/contribute/plans/index.md`
@@ -547,9 +558,10 @@ The existing gates are the tests: `scripts/check_docs_contract.py`
 `mkdocs build --strict` (links, nav), `scripts/check_ai_readiness.py`
 (`mkdocs-nav-coverage`, `doc-count-sync`, `changekind-docs`), and
 `scripts/check_docs_review_triggers.py` (`depends_on`). Phase 1 adds two:
-the ladder generator's `--check` mode, and a test that each learning nav
-group is non-decreasing in `level:` — the acceptance criterion above, made
-executable. Anchor rewrites in Phase 1 need a one-off fragment check,
+the ladder generator's `--check` mode (ladder completeness and level
+monotonicity along the whole reading order), and a test that each
+learning nav group is non-decreasing in `level:` — the acceptance
+criterion above, made executable. Anchor rewrites in Phase 1 need a one-off fragment check,
 since `mkdocs build --strict` does not validate anchors.
 
 ## Effort & risk
@@ -622,8 +634,8 @@ gate all of this).
 1. How a break shows up (§4.1) — new topic, criterion 2; registered as an
    `allowed_summaries` entry of `evidence-model`, since it introduces the
    ladder the trio owns
-2. Baselines as contracts — a nav move of `use/baseline-management.md`
-   (§4.6 case 1), listed for reading order, not a new file
+2. Baselines as contracts — a ladder link to `use/baseline-management.md`
+   (§4.6 case 1), listed for reading order; no new file, no tab move
 3. Where in the pipeline (§4.6 item 2) — §4.6 case 3
 4. Report the surface, not only the breaks (§4.6 item 3) — criterion 2
 5. Products, not libraries (§4.5) — takes `bundle-analysis` from
