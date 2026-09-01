@@ -44,7 +44,6 @@ if str(_REPO_ROOT) not in sys.path:
 import scripts.fact_registry_completeness as fact_registry_completeness  # noqa: E402
 from scripts.fact_registry_completeness import (  # noqa: E402
     _model_fact_siblings,
-    _persisted_fact_attr_occurrences,
     check_fact_registry_completeness,
     scan_model_dataclasses,
 )
@@ -368,50 +367,178 @@ class TestReferenceFlagCoverage:
 
 class TestPersistedEncodeDecodeWiring:
     def test_real_repo_every_persisted_entry_has_real_wiring(self) -> None:
-        occurrences = _persisted_fact_attr_occurrences()
+        encode_wired = fact_registry_completeness._encode_wired_fact_attrs()
+        decode_wired = fact_registry_completeness._decode_wired_fact_attrs()
         for entry in FACT_REGISTRY.entries.values():
             if entry.persisted:
-                assert occurrences.get(entry.fact_attr, 0) >= 2, (
+                assert entry.fact_attr in encode_wired, (
                     f"{entry.id} claims persisted=True but "
-                    f"{entry.fact_attr!r} has no real encode+decode wiring"
+                    f"{entry.fact_attr!r} has no real encode wiring"
+                )
+                assert entry.fact_attr in decode_wired, (
+                    f"{entry.id} claims persisted=True but "
+                    f"{entry.fact_attr!r} has no real decode wiring"
                 )
 
-    def test_counts_quoted_occurrences_across_both_files(self, tmp_path: Path) -> None:
+    def test_encode_wired_finds_type_fact_keys_membership(self, tmp_path: Path) -> None:
         codec = tmp_path / "fact_codec.py"
-        codec.write_text('_TYPE_FACT_KEYS = ("widget_fact",)\n')
-        serialization = tmp_path / "serialization.py"
-        serialization.write_text('decode_fact(t.get("widget_fact"), v)\n')
-        original = fact_registry_completeness._PERSISTENCE_WIRING_FILES
-        fact_registry_completeness._PERSISTENCE_WIRING_FILES = (codec, serialization)
-        try:
-            occurrences = _persisted_fact_attr_occurrences()
-        finally:
-            fact_registry_completeness._PERSISTENCE_WIRING_FILES = original
-        assert occurrences["widget_fact"] == 2
-
-    def test_gate_flags_a_persisted_entry_with_no_wiring(self, tmp_path: Path) -> None:
-        """The gate's own detection logic fires when a registry entry claims
-        persisted=True for a real model field whose Fact[T] sibling has no
-        encode/decode wiring anywhere — the exact gap a Codex review round
-        found directions 1-2 (name matching alone) cannot catch."""
-        empty_codec = tmp_path / "fact_codec.py"
-        empty_codec.write_text("# no wiring here\n")
-        empty_serialization = tmp_path / "serialization.py"
-        empty_serialization.write_text("# no wiring here either\n")
-        original = fact_registry_completeness._PERSISTENCE_WIRING_FILES
-        fact_registry_completeness._PERSISTENCE_WIRING_FILES = (
-            empty_codec,
-            empty_serialization,
+        codec.write_text(
+            '_TYPE_FACT_KEYS = ("widget_fact",)\n'
+            "def encode_fact_fields(d):\n"
+            "    for t in d.get('types', []):\n"
+            "        for k in _TYPE_FACT_KEYS:\n"
+            "            t.get(k)\n"
         )
+        original = fact_registry_completeness._FACT_CODEC_PATH
+        fact_registry_completeness._FACT_CODEC_PATH = codec
+        try:
+            wired = fact_registry_completeness._encode_wired_fact_attrs()
+        finally:
+            fact_registry_completeness._FACT_CODEC_PATH = original
+        assert "widget_fact" in wired
+
+    def test_encode_wired_finds_hardcoded_get_call(self, tmp_path: Path) -> None:
+        codec = tmp_path / "fact_codec.py"
+        codec.write_text(
+            "def encode_fact_fields(d):\n"
+            "    for p in d.get('params', []):\n"
+            '        p.get("gadget_fact")\n'
+        )
+        original = fact_registry_completeness._FACT_CODEC_PATH
+        fact_registry_completeness._FACT_CODEC_PATH = codec
+        try:
+            wired = fact_registry_completeness._encode_wired_fact_attrs()
+        finally:
+            fact_registry_completeness._FACT_CODEC_PATH = original
+        assert "gadget_fact" in wired
+
+    def test_decode_wired_requires_a_real_decode_fact_call(
+        self, tmp_path: Path
+    ) -> None:
+        codec = tmp_path / "fact_codec.py"
+        codec.write_text('decode_fact(t.get("widget_fact"), v)\n')
+        serialization = tmp_path / "serialization.py"
+        serialization.write_text("# nothing here\n")
+        original_codec = fact_registry_completeness._FACT_CODEC_PATH
+        original_ser = fact_registry_completeness._SERIALIZATION_PATH
+        fact_registry_completeness._FACT_CODEC_PATH = codec
+        fact_registry_completeness._SERIALIZATION_PATH = serialization
+        try:
+            wired = fact_registry_completeness._decode_wired_fact_attrs()
+        finally:
+            fact_registry_completeness._FACT_CODEC_PATH = original_codec
+            fact_registry_completeness._SERIALIZATION_PATH = original_ser
+        assert wired == {"widget_fact"}
+
+    def test_gate_flags_a_persisted_entry_wired_encode_only(
+        self, tmp_path: Path
+    ) -> None:
+        """The gate's own detection logic fires when a registry entry claims
+        persisted=True for a real model field whose Fact[T] sibling has
+        encode wiring but no decode wiring — the exact gap a Codex review
+        round found a combined occurrence count (directions 1-2's name
+        matching, and a first draft of direction 4 itself) cannot catch:
+        an encode-only reference alone must not satisfy this check."""
+        codec = tmp_path / "fact_codec.py"
+        codec.write_text(
+            '_TYPE_FACT_KEYS = ("is_final_fact",)\n'
+            "def encode_fact_fields(d):\n"
+            "    pass\n"
+        )
+        serialization = tmp_path / "serialization.py"
+        serialization.write_text("# no decode_fact call here\n")
+        original_codec = fact_registry_completeness._FACT_CODEC_PATH
+        original_ser = fact_registry_completeness._SERIALIZATION_PATH
+        fact_registry_completeness._FACT_CODEC_PATH = codec
+        fact_registry_completeness._SERIALIZATION_PATH = serialization
         try:
             findings = _LocalFindings()
             check_fact_registry_completeness(findings)
         finally:
-            fact_registry_completeness._PERSISTENCE_WIRING_FILES = original
+            fact_registry_completeness._FACT_CODEC_PATH = original_codec
+            fact_registry_completeness._SERIALIZATION_PATH = original_ser
         # RecordType.is_final is a real, persisted=True registry entry --
-        # with the wiring files swapped out for empty ones, its own
-        # is_final_fact wiring is now invisible, and the gate must say so.
+        # with the swapped-in files, is_final_fact has encode wiring
+        # (_TYPE_FACT_KEYS membership) but no decode wiring at all, and the
+        # gate must say so specifically (not merely "some wiring missing").
+        assert any(
+            "RecordType.is_final" in msg
+            and "persisted=True" in msg
+            and "no real decode wiring" in msg
+            and "no real encode wiring" not in msg
+            for _, msg in findings.errors
+        )
+
+    def test_gate_flags_a_persisted_entry_with_no_wiring_at_all(
+        self, tmp_path: Path
+    ) -> None:
+        empty_codec = tmp_path / "fact_codec.py"
+        empty_codec.write_text("# no wiring here\n")
+        empty_serialization = tmp_path / "serialization.py"
+        empty_serialization.write_text("# no wiring here either\n")
+        original_codec = fact_registry_completeness._FACT_CODEC_PATH
+        original_ser = fact_registry_completeness._SERIALIZATION_PATH
+        fact_registry_completeness._FACT_CODEC_PATH = empty_codec
+        fact_registry_completeness._SERIALIZATION_PATH = empty_serialization
+        try:
+            findings = _LocalFindings()
+            check_fact_registry_completeness(findings)
+        finally:
+            fact_registry_completeness._FACT_CODEC_PATH = original_codec
+            fact_registry_completeness._SERIALIZATION_PATH = original_ser
         assert any(
             "RecordType.is_final" in msg and "persisted=True" in msg
             for _, msg in findings.errors
         )
+
+
+# ---------------------------------------------------------------------------
+# Direction 5 (Codex review): a registry entry's producing_backends must
+# agree with backend_capabilities.py's own AST-verified capability matrix
+# for the six declaration classes that matrix covers, not merely name a
+# real backend from the closed KNOWN_PRODUCING_BACKENDS vocabulary.
+# ---------------------------------------------------------------------------
+
+
+class TestCrossCheckAgainstBackendCapabilities:
+    def test_real_repo_every_entry_agrees_with_the_matrix(self) -> None:
+        for entry in FACT_REGISTRY.entries.values():
+            problems = (
+                fact_registry_completeness._cross_check_against_backend_capabilities(
+                    entry.owner, entry.field, entry.producing_backends
+                )
+            )
+            assert not problems, f"{entry.id}: {problems}"
+
+    def test_flags_a_backend_the_matrix_says_has_no_real_capability(self) -> None:
+        # RecordType.is_template_pattern is castxml=NONE, clang=FULL per the
+        # real matrix (castxml never emits an uninstantiated template
+        # pattern) -- claiming castxml here is the exact "elf added to
+        # is_final" shape the review flagged, using a real committed row.
+        problems = fact_registry_completeness._cross_check_against_backend_capabilities(
+            "RecordType", "is_template_pattern", ("castxml", "clang")
+        )
+        assert any("claims 'castxml'" in p for p in problems)
+
+    def test_flags_a_missing_backend_the_matrix_confirms(self) -> None:
+        problems = fact_registry_completeness._cross_check_against_backend_capabilities(
+            "RecordType", "is_final", ("castxml",)
+        )
+        assert any("does not name 'clang'" in p for p in problems)
+
+    def test_does_not_flag_a_real_third_producer_outside_the_matrix_scope(self) -> None:
+        # dwarf_snapshot.py genuinely also produces RecordType.bases --
+        # backend_capabilities.py's own scope is header-AST backends only,
+        # so its silence about dwarf must not read as "dwarf is wrong".
+        problems = fact_registry_completeness._cross_check_against_backend_capabilities(
+            "RecordType", "bases", ("castxml", "clang", "dwarf")
+        )
+        assert problems == []
+
+    def test_returns_empty_for_a_field_outside_the_matrix_entirely(self) -> None:
+        # A pair with no FACT_ROWS row at all -- neither confirms nor
+        # denies, so nothing to flag.
+        problems = fact_registry_completeness._cross_check_against_backend_capabilities(
+            "NoSuchOwner", "no_such_field", ("castxml",)
+        )
+        assert problems == []

@@ -10,8 +10,10 @@ AI-readiness hard cap and only stays green through ``LARGE_FILE_ALLOWLIST``,
 not a license to keep growing it).
 
 **What this checks, and why each direction matters.** The Phase 5 plan's
-own Tests section states three directions a completeness check must cover,
-each closing a different way a registry could go silently stale:
+own Tests section states three directions a completeness check must cover
+(1-3 below); two Codex review rounds on this module's own introducing PR
+found two more real gaps those three cannot catch (4-5) — each closes a
+different way a registry could go silently stale:
 
 1. Every ``Fact[T]``-typed model field (a ``<field>_fact`` sibling on a
    ``@dataclass`` under ``abicheck/model/``) has **exactly one**
@@ -41,19 +43,43 @@ each closing a different way a registry could go silently stale:
    it rather than leaving dead weight (the same rule
    ``IMPORT_CYCLE_ALLOWLIST`` states for itself in AGENTS.md).
 4. Every registry entry with ``persisted=True`` is actually reachable from
-   both ``storage/fact_codec.py``'s encode path (``encode_fact_fields``)
-   and its decode path (``decode_record_facts``/a same-shaped
-   ``decode_fact(...)`` call in ``serialization.py`` for the one
-   non-``RecordType``-owned field, ``Param.is_va_list_fact``) — closing a
-   real gap a Codex review round found directions 1-2 above miss entirely:
-   they only compare model attribute *names* against registry keys, so a
-   registry entry claiming ``persisted=True`` with no matching encode/
-   decode wiring at all would still pass. Textual (the exact ``fact_attr``
-   string literal must appear in the combined source of both files), not a
-   full data-flow proof — the same "no type inference, textual signal"
-   stance this scan's own case-(b) heuristic already takes — but real: it
-   fails on the exact scenario the review named (a new ``Fact[T]``
-   sibling + registry entry landing with no ``fact_codec.py`` change).
+   BOTH a real encode path (``storage/fact_codec.py``'s
+   ``encode_fact_fields`` — either ``_TYPE_FACT_KEYS`` membership or its
+   own hardcoded ``.get(...)`` call) AND a real decode path
+   (``decode_record_facts``, or a same-shaped ``decode_fact(...)`` call in
+   ``serialization.py`` for the one non-``RecordType``-owned field,
+   ``Param.is_va_list_fact``) — checked independently, not as a combined
+   occurrence count. Closes a real gap a Codex review round found
+   directions 1-2 above miss entirely: they only compare model attribute
+   *names* against registry keys, so a registry entry claiming
+   ``persisted=True`` with no matching encode/decode wiring at all would
+   still pass. A first draft of this direction counted total quoted
+   occurrences of the ``fact_attr`` string across both files (``>= 2``) —
+   a second review round correctly found that conflates "two encode-only
+   references" or "an encoder key plus an unrelated occurrence" with real
+   two-sided wiring, so a `persisted=True` fact could still silently lose
+   its status on reload. `_encode_wired_fact_attrs()`/
+   `_decode_wired_fact_attrs()` instead resolve each side from the real
+   AST shape a genuine call site has (`_TYPE_FACT_KEYS` membership or an
+   ``encode_fact_fields``-local ``.get(...)`` call for encode; a
+   ``decode_fact(<expr>.get("<name>"), ...)`` call for decode) — still no
+   full data-flow proof, but real enough to fail on the exact scenario
+   both review rounds named (a new ``Fact[T]`` sibling + registry entry
+   landing with no matching ``fact_codec.py``/``serialization.py``
+   change, on either side).
+5. For the six declaration classes ``backend_capabilities.py``'s own
+   AST-verified ``FACT_ROWS`` matrix already tracks, a registry entry's
+   ``producing_backends`` must agree with it — not merely name a real
+   backend from the closed ``KNOWN_PRODUCING_BACKENDS`` vocabulary
+   (Codex review: a fact could otherwise claim ``"elf"``, a real backend
+   name, as a producer of a header-AST-only field no ELF parser actually
+   populates). `_cross_check_against_backend_capabilities()` reuses that
+   matrix as independently-verified ground truth rather than
+   re-implementing its own parser scan — deliberately does **not** flag a
+   claimed backend outside castxml/clang, since that matrix's own scope
+   never covered a real third producer like DWARF in the first place; see
+   that function's own docstring for the false positive an earlier draft
+   found here.
 
 **Case (b) heuristic, stated precisely.** A field is a case-(b) candidate
 when its annotation textually contains ``| None`` (or ``Optional[``) *and*
@@ -78,7 +104,6 @@ first and independently of the annotation-shape heuristic below.
 from __future__ import annotations
 
 import ast
-import re
 import sys
 from pathlib import Path
 from typing import Protocol
@@ -86,6 +111,15 @@ from typing import Protocol
 ROOT = Path(__file__).resolve().parent.parent
 PKG = ROOT / "abicheck"
 MODEL_DIR = PKG / "model"
+
+# This script's own directory, so `backend_capabilities` (below) resolves
+# whether this module is run directly, loaded as a sibling import from
+# check_ai_readiness.py, or loaded as `scripts.fact_registry_completeness`
+# by a test that never imported either first -- mirroring
+# fact_field_readers.py's own identical guard for its own sibling import.
+if str(Path(__file__).resolve().parent) not in sys.path:
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+from backend_capabilities import FACT_ROWS, Capability  # noqa: E402
 
 #: Marker phrases this codebase already uses, verbatim, to document a
 #: field's own backend/schema-dependent tri-state meaning (drawn directly
@@ -284,30 +318,157 @@ def _model_fact_siblings() -> dict[tuple[str, str], str]:
 #: ``RecordType``-shaped ones (``_TYPE_FACT_KEYS``/``decode_record_facts``)
 #: and the one hardcoded ``Param.is_va_list_fact`` encode line;
 #: ``serialization.py`` owns that same field's ``decode_fact(...)`` call
-#: site (Codex review: direction 4 below).
-_PERSISTENCE_WIRING_FILES: tuple[Path, ...] = (
-    PKG / "storage" / "fact_codec.py",
-    PKG / "serialization.py",
-)
+#: site.
+_FACT_CODEC_PATH: Path = PKG / "storage" / "fact_codec.py"
+_SERIALIZATION_PATH: Path = PKG / "serialization.py"
 
 
-def _persisted_fact_attr_occurrences() -> dict[str, int]:
-    """``{fact_attr: count}`` — how many times each ``"<fact_attr>"`` string
-    literal appears across :data:`_PERSISTENCE_WIRING_FILES`.
+def _string_constant(node: ast.expr | None) -> str | None:
+    if isinstance(node, ast.Constant) and isinstance(node.value, str):
+        return node.value
+    return None
 
-    Purely textual (a quoted-string count, not a data-flow proof) — the
-    same "no type inference" stance this module's own case-(b) heuristic
-    already takes. A field with real encode + decode wiring appears at
-    least twice (verified against every one of today's six persisted
-    entries, each with three or four occurrences); a field with none of
-    that wiring appears zero or one times.
+
+def _get_call_key(node: ast.expr) -> str | None:
+    """If ``node`` is ``<expr>.get("<literal>", ...)``, return the literal."""
+    if (
+        isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr == "get"
+        and node.args
+    ):
+        return _string_constant(node.args[0])
+    return None
+
+
+def _encode_wired_fact_attrs() -> set[str]:
+    """Every ``fact_attr`` name ``fact_codec.encode_fact_fields()`` actually
+    reaches — real encode-side evidence only (Codex review: the combined
+    quoted-occurrence count this replaced could not tell an encode-only or
+    decode-only reference apart from real wiring on both sides).
+
+    Two shapes: membership in the ``_TYPE_FACT_KEYS`` tuple (the
+    ``RecordType``-owned fields, looped over in the function body), and a
+    literal ``.get("<name>")`` call directly inside ``encode_fact_fields``
+    itself (the one hardcoded ``Param.is_va_list_fact`` line).
     """
-    combined = "\n".join(_read(p) for p in _PERSISTENCE_WIRING_FILES)
-    counts: dict[str, int] = {}
-    for match in re.finditer(r'"([A-Za-z_][A-Za-z0-9_]*_fact)"', combined):
-        name = match.group(1)
-        counts[name] = counts.get(name, 0) + 1
-    return counts
+    source = _read(_FACT_CODEC_PATH)
+    if not source:
+        return set()
+    tree = ast.parse(source, filename=str(_FACT_CODEC_PATH))
+    wired: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Assign) and any(
+            isinstance(t, ast.Name) and t.id == "_TYPE_FACT_KEYS" for t in node.targets
+        ):
+            if isinstance(node.value, ast.Tuple):
+                for elt in node.value.elts:
+                    name = _string_constant(elt)
+                    if name is not None:
+                        wired.add(name)
+        if isinstance(node, ast.FunctionDef) and node.name == "encode_fact_fields":
+            for call in ast.walk(node):
+                if isinstance(call, ast.Call):
+                    name = _get_call_key(call)
+                    if name is not None:
+                        wired.add(name)
+    return wired
+
+
+def _decode_wired_fact_attrs() -> set[str]:
+    """Every ``fact_attr`` name some real ``decode_fact(...)`` call reaches,
+    across both files that call it — ``storage/fact_codec.py``'s own
+    ``decode_record_facts`` (the ``RecordType``-owned fields) and
+    ``serialization.py``'s one direct call site (``Param.is_va_list_fact``,
+    decoded inline rather than through ``decode_record_facts``).
+
+    A field is decode-wired when ``decode_fact(...)``'s own first
+    (positional) argument is itself a ``<expr>.get("<name>")`` call naming
+    it — the shape every real call site in this codebase uses.
+    """
+    wired: set[str] = set()
+    for path in (_FACT_CODEC_PATH, _SERIALIZATION_PATH):
+        source = _read(path)
+        if not source:
+            continue
+        tree = ast.parse(source, filename=str(path))
+        for node in ast.walk(tree):
+            if (
+                isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Name)
+                and node.func.id == "decode_fact"
+                and node.args
+            ):
+                name = _get_call_key(node.args[0])
+                if name is not None:
+                    wired.add(name)
+    return wired
+
+
+#: The two backends `backend_capabilities.py`'s own `FACT_ROWS` actually
+#: tracks a real (AST-verified) capability for — see that module's own
+#: `test_matrix_claims_match_parser_source`. A `FactDefinition` naming any
+#: other backend for a `(owner, field)` pair that matrix also covers is
+#: claiming a producer that matrix's own real parser scan has no evidence
+#: for.
+_HEADER_AST_BACKENDS: frozenset[str] = frozenset({"castxml", "clang"})
+
+
+def _cross_check_against_backend_capabilities(
+    owner: str, field: str, producing_backends: tuple[str, ...]
+) -> list[str]:
+    """Cross-validate one registry entry's ``producing_backends`` against
+    ``backend_capabilities.FACT_ROWS`` for the same ``(owner, field)``,
+    when a row exists (Codex review: membership in the closed
+    ``KNOWN_PRODUCING_BACKENDS`` vocabulary alone can't catch a real but
+    *wrong* backend for one specific fact — e.g. ``"elf"`` naming a
+    producer no ELF parser actually populates for a header-AST-owned
+    field). Returns a list of human-readable problem strings (empty if
+    the entry agrees with the matrix, or if no matching row exists — a
+    fact outside the six declaration classes that matrix covers has
+    nothing here to cross-check against).
+
+    Real, not vacuous: ``FACT_ROWS`` itself is independently verified
+    against the parsers' own AST by ``test_matrix_claims_match_parser_
+    source`` in ``tests/test_backend_capability_matrix.py``, so agreeing
+    with it is agreeing with real parser evidence, not another hand-typed
+    claim.
+
+    **Deliberately does not flag a claimed backend outside
+    :data:`_HEADER_AST_BACKENDS`** (``dwarf``, ``pdb``, ``btf``/``ctf``,
+    ``elf``/``pe``/``macho``) as wrong — a first draft of this function did,
+    and it was a real false positive: ``RecordType.bases``/``vtable``/etc.
+    genuinely are also produced by ``dwarf_snapshot.py``, a real third
+    producer entirely outside ``backend_capabilities.py``'s own stated scope
+    ("the L2 header-AST backend capability matrix"). That module's silence
+    about a backend it was never built to track is not evidence the backend
+    is wrong, so a claim naming one is neither confirmed nor denied here —
+    a real, named limitation of this cross-check, not a gap it silently
+    pretends to close.
+    """
+    row = next((r for r in FACT_ROWS if r.owner == owner and r.field == field), None)
+    if row is None:
+        return []
+    problems: list[str] = []
+    real: dict[str, bool] = {
+        "castxml": row.castxml != Capability.NONE,
+        "clang": row.clang != Capability.NONE,
+    }
+    claimed = set(producing_backends)
+    for backend, has_real_capability in real.items():
+        claims = backend in claimed
+        if claims and not has_real_capability:
+            problems.append(
+                f"claims {backend!r} as a producer, but backend_capabilities.py's "
+                f"AST-verified matrix says {backend}'s own capability for this "
+                f"field is {row.castxml if backend == 'castxml' else row.clang}"
+            )
+        if has_real_capability and not claims:
+            problems.append(
+                f"does not name {backend!r} as a producer, but backend_capabilities.py's "
+                f"AST-verified matrix says {backend} does populate this field"
+            )
+    return problems
 
 
 def check_fact_registry_completeness(f: Findings) -> None:
@@ -391,25 +552,45 @@ def check_fact_registry_completeness(f: Findings) -> None:
                 f"convention)",
             )
 
-    # Direction 4: a persisted entry must actually be wired into
-    # storage/fact_codec.py's (or serialization.py's) encode/decode path.
-    occurrences = _persisted_fact_attr_occurrences()
+    # Direction 4: a persisted entry must actually be wired into BOTH a real
+    # encode path and a real decode path — checked independently, not as a
+    # combined occurrence count (Codex review: a count alone can't tell an
+    # encode-only or decode-only reference apart from real wiring on both
+    # sides).
+    encode_wired = _encode_wired_fact_attrs()
+    decode_wired = _decode_wired_fact_attrs()
     for entry in FACT_REGISTRY.entries.values():
         if not entry.persisted:
             continue
-        count = occurrences.get(entry.fact_attr, 0)
-        if count < 2:
+        missing = [
+            side
+            for side, wired in (("encode", encode_wired), ("decode", decode_wired))
+            if entry.fact_attr not in wired
+        ]
+        if missing:
             f.err(
                 "fact-registry-completeness",
                 f"{entry.id}: registered with persisted=True, but "
-                f"{entry.fact_attr!r} appears only {count} time(s) across "
-                f"storage/fact_codec.py + serialization.py — a real "
-                f"encode path AND a real decode path both need to "
-                f"reference it (see storage/fact_codec.py's "
+                f"{entry.fact_attr!r} has no real {' or '.join(missing)} "
+                f"wiring in storage/fact_codec.py/serialization.py (see "
                 f"_TYPE_FACT_KEYS/decode_record_facts, or the "
                 f"Param.is_va_list_fact pattern for a non-RecordType "
-                f"owner) or this snapshot field silently fails to "
+                f"owner) — this snapshot field would silently fail to "
                 f"round-trip",
+            )
+
+    # Direction 5: for the six declaration classes backend_capabilities.py's
+    # own AST-verified FACT_ROWS matrix already tracks, a registry entry's
+    # producing_backends must agree with it, not merely name a real backend
+    # from the closed vocabulary (Codex review).
+    for entry in FACT_REGISTRY.entries.values():
+        problems = _cross_check_against_backend_capabilities(
+            entry.owner, entry.field, entry.producing_backends
+        )
+        for problem in problems:
+            f.err(
+                "fact-registry-completeness",
+                f"{entry.id}: {problem}",
             )
 
 
