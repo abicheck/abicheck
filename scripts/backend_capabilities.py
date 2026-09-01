@@ -250,12 +250,67 @@ FACT_ROWS: tuple[FactRow, ...] = (
     FactRow("Function", "elf_visibility", _OTHER, _OTHER, note=_DYNSYM),
     FactRow("Function", "ref_qualifier", _FULL, _FULL),
     FactRow("Function", "is_explicit", _FULL, _FULL),
+    FactRow(
+        "Function",
+        "is_explicit_fact",
+        _NONE,
+        _NONE,
+        note=(
+            "ADR-063 Phase 5 (fifth batch): Fact[bool | None] sibling of "
+            "is_explicit. Deliberately NOT constructed as an explicit "
+            "keyword -- neither backend passes it literally at "
+            "Function(...) construction; correctly derived by the generic "
+            "bridge_legacy_and_fact bridge in __post_init__, so NONE here "
+            "reflects literal-keyword evidence only, not runtime behavior "
+            "(same shape as RecordType.data_size_bits_fact)."
+        ),
+    ),
     FactRow("Function", "is_hidden_friend", _FULL, _FULL),
+    FactRow(
+        "Function",
+        "is_hidden_friend_fact",
+        _NONE,
+        _NONE,
+        note="Same shape as is_explicit_fact -- see that row's own note.",
+    ),
     FactRow("Function", "source_header", _OTHER, _OTHER, note=_PROVENANCE_PASS),
+    FactRow(
+        "Function",
+        "source_header_fact",
+        _OTHER,
+        _OTHER,
+        note=(
+            "ADR-063 Phase 5 (fifth batch): Fact[str | None] sibling of "
+            "source_header, mirroring RecordType/EnumType/Variable."
+            "source_header_fact exactly -- another layer "
+            "(provenance.tag_provenance()) owns it."
+        ),
+    ),
     FactRow("Function", "origin", _OTHER, _OTHER, note=_PROVENANCE_PASS),
     FactRow("Function", "is_variadic", _FULL, _FULL),
+    FactRow(
+        "Function",
+        "is_variadic_fact",
+        _NONE,
+        _NONE,
+        note="Same shape as is_explicit_fact -- see that row's own note.",
+    ),
     FactRow("Function", "contract_attributes", _FULL, _FULL),
+    FactRow(
+        "Function",
+        "contract_attributes_fact",
+        _NONE,
+        _NONE,
+        note="Same shape as is_explicit_fact -- see that row's own note.",
+    ),
     FactRow("Function", "exception_spec", _FULL, _FULL),
+    FactRow(
+        "Function",
+        "exception_spec_fact",
+        _NONE,
+        _NONE,
+        note="Same shape as is_explicit_fact -- see that row's own note.",
+    ),
     FactRow(
         "Function",
         "deprecated",
@@ -275,8 +330,36 @@ FACT_ROWS: tuple[FactRow, ...] = (
             "`OverrideAttr` child node (`dumper_clang._clang_method_is_override`)."
         ),
     ),
+    FactRow(
+        "Function",
+        "is_override_fact",
+        _NONE,
+        _NONE,
+        note="Same shape as is_explicit_fact -- see that row's own note.",
+    ),
     FactRow("Function", "hidden_friend_owner", _FULL, _FULL),
+    FactRow(
+        "Function",
+        "hidden_friend_owner_fact",
+        _NONE,
+        _NONE,
+        note="Same shape as is_explicit_fact -- see that row's own note.",
+    ),
     FactRow("Function", "elf_binding", _OTHER, _OTHER, note=_DYNSYM),
+    FactRow(
+        "Function",
+        "elf_binding_fact",
+        _OTHER,
+        _OTHER,
+        note=(
+            "ADR-063 Phase 5 (fifth batch): Fact[SymbolBinding | None] "
+            "sibling of elf_binding, mirroring Variable.elf_binding_fact "
+            "exactly -- another layer "
+            "(dumper_elf_symbols._populate_elf_visibility) owns it, kept "
+            "in sync explicitly since it sets elf_binding by attribute "
+            "assignment, never re-running __post_init__."
+        ),
+    ),
     FactRow(
         "Function",
         "is_compiler_generated",
@@ -291,6 +374,13 @@ FACT_ROWS: tuple[FactRow, ...] = (
             "`isImplicit`, so a node reaching `parse_functions()` is "
             "structurally guaranteed to have been written by the user."
         ),
+    ),
+    FactRow(
+        "Function",
+        "is_compiler_generated_fact",
+        _NONE,
+        _NONE,
+        note="Same shape as is_explicit_fact -- see that row's own note.",
     ),
     FactRow(
         "Function",

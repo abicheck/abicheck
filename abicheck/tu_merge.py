@@ -73,7 +73,15 @@ from .dumper_castxml import (
     _mangled_name_is_local_linkage as _mangled_name_is_local_linkage,
 )
 from .errors import TuMergeError
-from .model import EnumType, Function, Param, RecordType, ScopeOrigin, Variable
+from .model import (
+    EnumType,
+    Function,
+    Param,
+    RecordType,
+    ScopeOrigin,
+    Variable,
+    replace_with_fact_sync,
+)
 from .model.cc_attributes import is_cc_attribute as _is_cc_attribute
 from .provenance import build_public_set
 from .tu_fragment import MergedTuFragments, TuFragment, entity_key
@@ -926,15 +934,21 @@ def _merge_functions(
     # explicitly afterwards via `_merge_contract_attributes`.
     # Only the *comparison* ignores these -- the merged declaration's own
     # parameter names come from `base` below, not blanked ones.
+    # replace_with_fact_sync (not raw replace()) keeps contract_attributes_fact
+    # consistent with the blanked None value on both sides -- a raw replace()
+    # would carry each side's own, possibly-differing, ORIGINAL fact forward
+    # unchanged, which could make an otherwise-trivial redeclaration compare
+    # unequal purely from Fact-status noise unrelated to any real field
+    # (ADR-063 Phase 5).
     a_bare = _blank_provenance(
-        replace(
+        replace_with_fact_sync(
             a,
             params=[replace(p, name="", default=None) for p in a.params],
             contract_attributes=None,
         )
     )
     b_bare = _blank_provenance(
-        replace(
+        replace_with_fact_sync(
             b,
             params=[replace(p, name="", default=None) for p in b.params],
             contract_attributes=None,
@@ -1026,7 +1040,7 @@ def _merge_functions(
         )
         for p_base, p_other in zip(base.params, other.params, strict=True)
     ]
-    return replace(
+    return replace_with_fact_sync(
         base,
         params=merged_params,
         deprecated=deprecated,

@@ -121,13 +121,22 @@ from .dumper_castxml import (
     is_synthetic_dtor_key,
 )
 from .fact_provenance import (
+    backfill_fact,
     enum_fact_key,
     field_fact_key,
     func_fact_key,
     type_fact_key,
     var_fact_key,
 )
-from .model import AbiSnapshot, EnumType, Function, RecordType, TypeField, Variable
+from .model import (
+    AbiSnapshot,
+    EnumType,
+    Function,
+    RecordType,
+    TypeField,
+    Variable,
+    replace_with_fact_sync,
+)
 from .model.identity import with_mangled_name
 from .model.mangled_name import _skip_template_args, itanium_scope_components
 from .name_classification import canonicalize_type_name
@@ -137,27 +146,6 @@ _DTOR_MARKER = "{dtor}"
 _CALLING_CONVENTION_ATTRIBUTES = frozenset({"ms_abi", "sysv_abi"})
 
 log = logging.getLogger(__name__)
-
-
-def _backfill_fact(
-    own_value: Any, clang_value: Any, key: str, provenance: dict[str, str]
-) -> Any:
-    """Return the merged value for one castxml-only fact and record its
-    provenance under *key*.
-
-    "Prefer castxml, backfill from clang only when castxml's own value is
-    null" (G28 Phase 3 design). Provenance is recorded as ``"castxml"`` even
-    when *own_value* is ``None`` and no clang value was available to
-    backfill from — the entity itself IS castxml-sourced; a genuinely
-    "not deprecated"/"not overridden"/etc. `None` is not the same as "this
-    entity was never seen by castxml at all" (the latter simply never calls
-    this helper — see :func:`merge_snapshots`'s clang-only-entity handling).
-    """
-    if own_value is None and clang_value is not None:
-        provenance[key] = "clang"
-        return clang_value
-    provenance[key] = "castxml"
-    return own_value
 
 
 def _ctor_dtor_scope(mangled: str) -> tuple[str, str] | None:
@@ -398,7 +386,7 @@ def _backfill_function_facts(
     updates: dict[str, Any] = {}
     for attr in ("deprecated", "is_override"):
         key = func_fact_key(f.mangled, attr)
-        value = _backfill_fact(
+        value = backfill_fact(
             getattr(f, attr), getattr(clang_f, attr, None), key, provenance
         )
         if value != getattr(f, attr):
@@ -452,7 +440,7 @@ def _backfill_function_facts(
     # evidence). For an ordinary (non-rewritten) function this is a no-op:
     # both sides independently looked up the identical real key, so a
     # genuinely-None castxml value means clang's is None too. Deliberately
-    # NOT routed through _backfill_fact/provenance: this isn't a producer
+    # NOT routed through backfill_fact/provenance: this isn't a producer
     # disagreement to record, just recovering a fact that was always there
     # under the right key.
     if (
@@ -467,7 +455,8 @@ def _backfill_function_facts(
         and clang_f.elf_visibility is not None
     ):
         updates["elf_visibility"] = clang_f.elf_visibility
-    return replace(f, **updates) if updates else f
+    # ADR-063 Phase 5: keeps every fact-bridged field's Fact sibling in sync.
+    return replace_with_fact_sync(f, **updates) if updates else f
 
 
 def _merge_functions(
@@ -556,7 +545,7 @@ def _merge_variable(
     v: Variable, clang_v: Variable | None, provenance: dict[str, str]
 ) -> Variable:
     key = var_fact_key(v.mangled, "deprecated")
-    value = _backfill_fact(
+    value = backfill_fact(
         v.deprecated, clang_v.deprecated if clang_v else None, key, provenance
     )
     return replace(v, deprecated=value) if value != v.deprecated else v
@@ -602,7 +591,7 @@ def _merge_field(
         # baselines keyed bare are still read via
         # diff_helpers.fact_same_producer_qualified's bare fallback.
         key = field_fact_key(type_map_key(t), f.name, attr)
-        value = _backfill_fact(
+        value = backfill_fact(
             getattr(f, attr), getattr(clang_f, attr, None), key, provenance
         )
         if value != getattr(f, attr):
@@ -628,7 +617,7 @@ def _merge_record_type(
         # writes to it), deprecated is qualified (G31 Phase C).
         type_key = type_map_key(t) if attr == "deprecated" else t.name
         key = type_fact_key(type_key, attr)
-        value = _backfill_fact(
+        value = backfill_fact(
             getattr(t, attr), getattr(clang_t, attr, None), key, provenance
         )
         if value != getattr(t, attr):
@@ -648,7 +637,7 @@ def _merge_record_type(
         # clang 18 output, PR #719 follow-up): unlike every other backfilled
         # fact above, these two are plain `bool = False` -- not an Optional
         # tri-state -- so there is no null "castxml doesn't know" state to key
-        # a _backfill_fact()-style None-check off. castxml's own `False` is
+        # a backfill_fact()-style None-check off. castxml's own `False` is
         # ALWAYS structurally correct by construction rather than a placeholder
         # (castxml never emits an uninstantiated template pattern as a
         # declaration at all, and it always computes real per-field offsets
@@ -707,7 +696,7 @@ def _merge_enum_type(
     type_key = type_map_key(e)
     for attr in ("is_scoped", "deprecated"):
         key = enum_fact_key(type_key, attr)
-        value = _backfill_fact(
+        value = backfill_fact(
             getattr(e, attr), getattr(clang_e, attr, None), key, provenance
         )
         if value != getattr(e, attr):

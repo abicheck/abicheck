@@ -37,6 +37,7 @@ __all__ = [
     "apply_legacy_fact_backfill",
     "decode_enum_facts",
     "decode_fact",
+    "decode_function_facts",
     "decode_record_facts",
     "decode_variable_facts",
     "encode_fact_fields",
@@ -73,6 +74,22 @@ _VARIABLE_FACT_KEYS = (
     "elf_binding_fact",
 )
 
+# ADR-063 Phase 5 (fifth batch): Function's own ten case-(b) *_fact
+# siblings -- a distinct tuple since Function is a different owner/
+# collection ("functions", not "variables"/"types"/"enums").
+_FUNCTION_FACT_KEYS = (
+    "contract_attributes_fact",
+    "is_explicit_fact",
+    "is_hidden_friend_fact",
+    "source_header_fact",
+    "is_variadic_fact",
+    "exception_spec_fact",
+    "is_override_fact",
+    "hidden_friend_owner_fact",
+    "elf_binding_fact",
+    "is_compiler_generated_fact",
+)
+
 
 def encode_fact_fields(d: dict[str, Any]) -> None:
     """In-place: encode every ``Fact[...]``-typed field's ``status`` as a string.
@@ -93,6 +110,8 @@ def encode_fact_fields(d: dict[str, Any]) -> None:
         for fact_key in _VARIABLE_FACT_KEYS:
             _encode_one(var_dict.get(fact_key))
     for func_dict in d.get("functions", []):
+        for fact_key in _FUNCTION_FACT_KEYS:
+            _encode_one(func_dict.get(fact_key))
         for param_dict in func_dict.get("params", []):
             _encode_one(param_dict.get("is_va_list_fact"))
 
@@ -133,6 +152,10 @@ _MIN_SCHEMA_VERSION_FOR_ENUMTYPE_FACTS = 32
 # source_header_fact/alignment_bits_fact/elf_binding_fact siblings started
 # being persisted at.
 _MIN_SCHEMA_VERSION_FOR_VARIABLE_CASE_B_FACTS = 33
+
+# ADR-063 Phase 5 (fifth batch): the schema_version Function's own ten
+# case-(b) *_fact siblings started being persisted at.
+_MIN_SCHEMA_VERSION_FOR_FUNCTION_CASE_B_FACTS = 34
 
 
 def decode_fact(
@@ -279,6 +302,75 @@ def decode_variable_facts(v: dict[str, Any], schema_version: int) -> dict[str, A
             min_schema_version=_MIN_SCHEMA_VERSION_FOR_VARIABLE_CASE_B_FACTS,
         ),
         "elf_binding_fact": elf_binding_fact,
+    }
+
+
+def decode_function_facts(f: dict[str, Any], schema_version: int) -> dict[str, Any]:
+    """Decode every ``Function`` ``Fact[...]`` sibling from one function dict.
+
+    One call, spread into the ``Function(**decode_function_facts(f), ...)``
+    constructor call, mirroring :func:`decode_record_facts`/
+    :func:`decode_variable_facts`. ``elf_binding_fact`` needs the same
+    ``SymbolBinding`` reconstruction :func:`decode_variable_facts` performs,
+    for the identical reason (``Function.elf_binding`` shares the same
+    ``.value``-accessing reader convention as ``Variable.elf_binding``).
+    """
+    elf_binding_fact = decode_fact(
+        f.get("elf_binding_fact"),
+        schema_version,
+        min_schema_version=_MIN_SCHEMA_VERSION_FOR_FUNCTION_CASE_B_FACTS,
+    )
+    if elf_binding_fact is not None and elf_binding_fact.value is not None:
+        elf_binding_fact = replace(
+            elf_binding_fact, value=SymbolBinding(elf_binding_fact.value)
+        )
+    return {
+        "contract_attributes_fact": decode_fact(
+            f.get("contract_attributes_fact"),
+            schema_version,
+            min_schema_version=_MIN_SCHEMA_VERSION_FOR_FUNCTION_CASE_B_FACTS,
+        ),
+        "is_explicit_fact": decode_fact(
+            f.get("is_explicit_fact"),
+            schema_version,
+            min_schema_version=_MIN_SCHEMA_VERSION_FOR_FUNCTION_CASE_B_FACTS,
+        ),
+        "is_hidden_friend_fact": decode_fact(
+            f.get("is_hidden_friend_fact"),
+            schema_version,
+            min_schema_version=_MIN_SCHEMA_VERSION_FOR_FUNCTION_CASE_B_FACTS,
+        ),
+        "source_header_fact": decode_fact(
+            f.get("source_header_fact"),
+            schema_version,
+            min_schema_version=_MIN_SCHEMA_VERSION_FOR_FUNCTION_CASE_B_FACTS,
+        ),
+        "is_variadic_fact": decode_fact(
+            f.get("is_variadic_fact"),
+            schema_version,
+            min_schema_version=_MIN_SCHEMA_VERSION_FOR_FUNCTION_CASE_B_FACTS,
+        ),
+        "exception_spec_fact": decode_fact(
+            f.get("exception_spec_fact"),
+            schema_version,
+            min_schema_version=_MIN_SCHEMA_VERSION_FOR_FUNCTION_CASE_B_FACTS,
+        ),
+        "is_override_fact": decode_fact(
+            f.get("is_override_fact"),
+            schema_version,
+            min_schema_version=_MIN_SCHEMA_VERSION_FOR_FUNCTION_CASE_B_FACTS,
+        ),
+        "hidden_friend_owner_fact": decode_fact(
+            f.get("hidden_friend_owner_fact"),
+            schema_version,
+            min_schema_version=_MIN_SCHEMA_VERSION_FOR_FUNCTION_CASE_B_FACTS,
+        ),
+        "elf_binding_fact": elf_binding_fact,
+        "is_compiler_generated_fact": decode_fact(
+            f.get("is_compiler_generated_fact"),
+            schema_version,
+            min_schema_version=_MIN_SCHEMA_VERSION_FOR_FUNCTION_CASE_B_FACTS,
+        ),
     }
 
 

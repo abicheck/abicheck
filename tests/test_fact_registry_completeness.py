@@ -274,14 +274,14 @@ class TestScanModelDataclasses:
         # the scan_model_dataclasses() heuristic itself can never find it
         # (no Optional shape), which is exactly why REFERENCE_FLAG_COVERAGE
         # is checked independently in the real gate. Function.deprecated
-        # IS Optional-shaped with a documented marker and is found here.
-        # Function.exception_spec is Phase 5's second batch's own remaining
-        # scope (RecordType's own case-(b) fields, including is_abstract,
-        # converted in that batch — see fact_registry.py's FACT_REGISTRY).
+        # and AbiSnapshot.ast_resolved_standard ARE Optional-shaped with a
+        # documented marker and are found here -- both remain genuinely
+        # unconverted (Function's own case-(b) fields, including
+        # contract_attributes/exception_spec, converted in Phase 5's fifth
+        # batch — see fact_registry.py's FACT_REGISTRY).
         found = scan_model_dataclasses()
         assert ("Function", "deprecated") in found
-        assert ("Function", "contract_attributes") in found
-        assert ("Function", "exception_spec") in found
+        assert ("AbiSnapshot", "ast_resolved_standard") in found
 
 
 # ---------------------------------------------------------------------------

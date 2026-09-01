@@ -59,6 +59,10 @@ def _populate_elf_visibility(snap: AbiSnapshot) -> None:
         if elf_sym is not None:
             func.elf_visibility = _ELF_VIS_MAP.get(elf_sym.visibility)
             func.elf_binding = elf_sym.binding
+            # Plain attribute assignment never re-runs __post_init__, so the
+            # elf_binding_fact sibling must be kept in sync explicitly here
+            # (ADR-063 Phase 5) — see the identical Variable fix below.
+            func.elf_binding_fact = Fact.present(elf_sym.binding)
     for var in snap.variables:
         elf_sym = sym_map.get(var.mangled)
         if elf_sym is not None:

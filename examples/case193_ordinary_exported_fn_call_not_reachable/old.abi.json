@@ -167,24 +167,69 @@
     {
       "access": "public",
       "contract_attributes": null,
+      "contract_attributes_fact": {
+        "diagnostics": [],
+        "status": "not_collected",
+        "value": null
+      },
       "deleted_from_dwarf": false,
       "deprecated": null,
       "elf_binding": null,
+      "elf_binding_fact": {
+        "diagnostics": [],
+        "status": "not_collected",
+        "value": null
+      },
       "elf_visibility": null,
       "exception_spec": null,
+      "exception_spec_fact": {
+        "diagnostics": [],
+        "status": "not_collected",
+        "value": null
+      },
       "hidden_friend_owner": null,
+      "hidden_friend_owner_fact": {
+        "diagnostics": [],
+        "status": "not_collected",
+        "value": null
+      },
       "is_compiler_generated": null,
+      "is_compiler_generated_fact": {
+        "diagnostics": [],
+        "status": "not_collected",
+        "value": null
+      },
       "is_const": false,
       "is_deleted": false,
       "is_explicit": null,
+      "is_explicit_fact": {
+        "diagnostics": [],
+        "status": "not_collected",
+        "value": null
+      },
       "is_extern_c": false,
       "is_hidden_friend": null,
+      "is_hidden_friend_fact": {
+        "diagnostics": [],
+        "status": "not_collected",
+        "value": null
+      },
       "is_inline": false,
       "is_noexcept": false,
       "is_override": null,
+      "is_override_fact": {
+        "diagnostics": [],
+        "status": "not_collected",
+        "value": null
+      },
       "is_pure_virtual": false,
       "is_static": false,
       "is_variadic": null,
+      "is_variadic_fact": {
+        "diagnostics": [],
+        "status": "not_collected",
+        "value": null
+      },
       "is_virtual": false,
       "is_volatile": false,
       "mangled": "_ZN4demo3apiEv",
@@ -195,6 +240,11 @@
       "return_pointer_depth": 0,
       "return_type": "void",
       "source_header": null,
+      "source_header_fact": {
+        "diagnostics": [],
+        "status": "not_collected",
+        "value": null
+      },
       "source_location": null,
       "visibility": "public",
       "vtable_index": null
@@ -202,24 +252,69 @@
     {
       "access": "public",
       "contract_attributes": null,
+      "contract_attributes_fact": {
+        "diagnostics": [],
+        "status": "not_collected",
+        "value": null
+      },
       "deleted_from_dwarf": false,
       "deprecated": null,
       "elf_binding": null,
+      "elf_binding_fact": {
+        "diagnostics": [],
+        "status": "not_collected",
+        "value": null
+      },
       "elf_visibility": null,
       "exception_spec": null,
+      "exception_spec_fact": {
+        "diagnostics": [],
+        "status": "not_collected",
+        "value": null
+      },
       "hidden_friend_owner": null,
+      "hidden_friend_owner_fact": {
+        "diagnostics": [],
+        "status": "not_collected",
+        "value": null
+      },
       "is_compiler_generated": null,
+      "is_compiler_generated_fact": {
+        "diagnostics": [],
+        "status": "not_collected",
+        "value": null
+      },
       "is_const": false,
       "is_deleted": false,
       "is_explicit": null,
+      "is_explicit_fact": {
+        "diagnostics": [],
+        "status": "not_collected",
+        "value": null
+      },
       "is_extern_c": false,
       "is_hidden_friend": null,
+      "is_hidden_friend_fact": {
+        "diagnostics": [],
+        "status": "not_collected",
+        "value": null
+      },
       "is_inline": false,
       "is_noexcept": false,
       "is_override": null,
+      "is_override_fact": {
+        "diagnostics": [],
+        "status": "not_collected",
+        "value": null
+      },
       "is_pure_virtual": false,
       "is_static": false,
       "is_variadic": null,
+      "is_variadic_fact": {
+        "diagnostics": [],
+        "status": "not_collected",
+        "value": null
+      },
       "is_virtual": false,
       "is_volatile": false,
       "mangled": "_ZN4demo6detail11log_contextEv",
@@ -230,6 +325,11 @@
       "return_pointer_depth": 0,
       "return_type": "void",
       "source_header": null,
+      "source_header_fact": {
+        "diagnostics": [],
+        "status": "not_collected",
+        "value": null
+      },
       "source_location": null,
       "visibility": "public",
       "vtable_index": null
@@ -248,7 +348,7 @@
   "platform": null,
   "python_api": null,
   "python_ext": null,
-  "schema_version": 33,
+  "schema_version": 34,
   "scope_fallback": null,
   "source_mtime": null,
   "source_mtime_epoch": false,

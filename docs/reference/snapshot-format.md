@@ -31,13 +31,13 @@ compatibility rules, and its top-level structure.
 ## Schema version
 
 Every snapshot carries a top-level **`schema_version`** field — a single
-**integer** (not `MAJOR.MINOR`). The current value is **`33`** (see
+**integer** (not `MAJOR.MINOR`). The current value is **`34`** (see
 `abicheck/serialization.py`'s `SCHEMA_VERSION` for the authoritative,
 up-to-date value and the full per-version history comment).
 
 ```json
 {
-  "schema_version": 33,
+  "schema_version": 34,
   "library": "libfoo.so.1",
   "version": "1.2.3"
 }
@@ -121,7 +121,14 @@ the same case-(b) pattern applied to `Variable`'s own three fields;
 `elf_binding_fact`'s decoded value is reconstructed as a real
 `SymbolBinding` enum member rather than left as the bare JSON string
 (`storage/fact_codec.py`'s `decode_variable_facts`), since existing
-readers unconditionally access `.value` on it.
+readers unconditionally access `.value` on it, and (v34)
+`Function.contract_attributes_fact`/`is_explicit_fact`/
+`is_hidden_friend_fact`/`source_header_fact`/`is_variadic_fact`/
+`exception_spec_fact`/`is_override_fact`/`hidden_friend_owner_fact`/
+`elf_binding_fact`/`is_compiler_generated_fact` — the same case-(b)
+pattern applied to `Function`'s own ten remaining fields, closing out
+this dataclass's ADR-063 Phase 5 conversion; `elf_binding_fact` gets the
+identical `SymbolBinding` reconstruction as `Variable.elf_binding_fact`.
 
 ### Forward / backward compatibility
 
@@ -132,7 +139,7 @@ is determined entirely by comparing the file's `schema_version` against the
 | File `schema_version` | Behavior on load |
 |-----------------------|------------------|
 | **Missing** | Treated as `1` (the pre-versioning format) and loaded normally. |
-| **Older or equal** to this build (`<= 33`) | Loaded cleanly. Fields introduced by newer versions are absent and fall back to their defaults (`None`, empty, or a tri-state `None` that suppresses the detectors depending on that evidence). No warning. |
+| **Older or equal** to this build (`<= 34`) | Loaded cleanly. Fields introduced by newer versions are absent and fall back to their defaults (`None`, empty, or a tri-state `None` that suppresses the detectors depending on that evidence). No warning. |
 | **Newer** than this build, **and** `< 14` | Loaded **best-effort** with a `UserWarning` ("Data may be incomplete or misinterpreted. Upgrade abicheck…"). The load is **not** aborted — unrecognised keys are ignored and recognised keys are read. |
 | **Newer** than this build, **and** `>= 14` | **Hard-rejected** — `IncompatibleSnapshotSchemaError` — instead of warn-and-continue. |
 
@@ -197,7 +204,7 @@ serializer (`abicheck/serialization.py`) from the `AbiSnapshot` model
 
 | Key | Type | Meaning |
 |-----|------|---------|
-| `schema_version` | int | Snapshot format version (currently `33`). |
+| `schema_version` | int | Snapshot format version (currently `34`). |
 | `library` | string | Library identity, e.g. `libfoo.so.1`. |
 | `version` | string | Library version string, e.g. `1.2.3`. |
 | `source_path` | string \| null | Original path the snapshot was taken from. |
@@ -329,7 +336,7 @@ files:
 | | Snapshot (`dump`) | Comparison report (`compare --format json`) |
 |-|-------------------|---------------------------------------------|
 | **Version field** | `schema_version` | `report_schema_version` |
-| **Type** | integer (currently `33`) | string `MAJOR.MINOR` (e.g. `1.0`) |
+| **Type** | integer (currently `34`) | string `MAJOR.MINOR` (e.g. `1.0`) |
 | **Describes** | one library's ABI surface | the diff between two snapshots |
 
 A snapshot has no `report_schema_version`, and a report has no

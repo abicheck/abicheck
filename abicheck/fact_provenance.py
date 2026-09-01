@@ -43,7 +43,32 @@ already uses.
 
 from __future__ import annotations
 
+from typing import Any
+
 from .model import AbiSnapshot
+
+
+def backfill_fact(
+    own_value: Any, clang_value: Any, key: str, provenance: dict[str, str]
+) -> Any:
+    """Return the merged value for one castxml-only fact and record its
+    provenance under *key* (moved here from ``dumper_hybrid.py`` -- ADR-063
+    Phase 5, that module's own architecture/debt.yaml no-growth budget).
+
+    "Prefer castxml, backfill from clang only when castxml's own value is
+    null" (G28 Phase 3 design). Provenance is recorded as ``"castxml"`` even
+    when *own_value* is ``None`` and no clang value was available to
+    backfill from — the entity itself IS castxml-sourced; a genuinely
+    "not deprecated"/"not overridden"/etc. `None` is not the same as "this
+    entity was never seen by castxml at all" (the latter simply never calls
+    this helper — see ``dumper_hybrid.merge_snapshots``'s clang-only-entity
+    handling).
+    """
+    if own_value is None and clang_value is not None:
+        provenance[key] = "clang"
+        return clang_value
+    provenance[key] = "castxml"
+    return own_value
 
 
 def func_fact_key(mangled: str, fact: str) -> str:

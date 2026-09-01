@@ -25,6 +25,16 @@ Phase 5 section for the design this page's data comes from.
 |------|------------|---------------------|-----------|:---------:|:--------:|:----------:|:------------:|:----------:|
 | `EnumType.qualified_name` | `str \| None` | castxml, clang | persisted | ✅ | — | ✅ | — | ✅ |
 | `EnumType.source_header` | `str \| None` | castxml, clang | persisted | ✅ | — | ✅ | — | ✅ |
+| `Function.contract_attributes` | `list[str] \| None` | castxml, clang | persisted | ✅ | — | ✅ | — | ✅ |
+| `Function.elf_binding` | `SymbolBinding \| None` | castxml, clang, elf | persisted | ✅ | — | ✅ | — | ✅ |
+| `Function.exception_spec` | `str \| None` | castxml, clang | persisted | ✅ | — | ✅ | — | ✅ |
+| `Function.hidden_friend_owner` | `str \| None` | castxml, clang | persisted | ✅ | — | ✅ | — | ✅ |
+| `Function.is_compiler_generated` | `bool \| None` | castxml | persisted | ✅ | — | ✅ | — | ✅ |
+| `Function.is_explicit` | `bool \| None` | castxml, clang | persisted | ✅ | — | ✅ | — | ✅ |
+| `Function.is_hidden_friend` | `bool \| None` | castxml, clang | persisted | ✅ | — | ✅ | — | ✅ |
+| `Function.is_override` | `bool \| None` | castxml, clang | persisted | ✅ | — | ✅ | — | ✅ |
+| `Function.is_variadic` | `bool \| None` | castxml, clang | persisted | ✅ | — | ✅ | — | ✅ |
+| `Function.source_header` | `str \| None` | castxml, clang | persisted | ✅ | — | ✅ | — | ✅ |
 | `Param.is_va_list` | `bool` | clang | persisted | ✅ | — | ✅ | — | ✅ |
 | `RecordType.bases` | `list[str]` | castxml, clang, dwarf | persisted | ✅ | — | ✅ | — | ✅ |
 | `RecordType.data_size_bits` | `int \| None` | clang | persisted | ✅ | — | ✅ | — | ✅ |
@@ -76,17 +86,7 @@ check fails if a new eligible field appears that isn't named here.
 | `ElfMetadata.has_init` | not yet — tracked gap |
 | `EnumType.deprecated` | not yet — tracked gap |
 | `EnumType.is_scoped` | not yet — tracked gap |
-| `Function.contract_attributes` | not yet — tracked gap |
 | `Function.deprecated` | not yet — tracked gap |
-| `Function.elf_binding` | not yet — tracked gap |
-| `Function.exception_spec` | not yet — tracked gap |
-| `Function.hidden_friend_owner` | not yet — tracked gap |
-| `Function.is_compiler_generated` | not yet — tracked gap |
-| `Function.is_explicit` | not yet — tracked gap |
-| `Function.is_hidden_friend` | not yet — tracked gap |
-| `Function.is_override` | not yet — tracked gap |
-| `Function.is_variadic` | not yet — tracked gap |
-| `Function.source_header` | not yet — tracked gap |
 | `MachoMetadata.rpaths` | not yet — tracked gap |
 | `Param.is_restrict` | not yet — tracked gap |
 | `PeMetadata.delay_imports` | not yet — tracked gap |
