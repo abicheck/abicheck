@@ -629,7 +629,7 @@ def _walk_type_closure(
             # Both direct and virtual bases are ABI-reachable through the derived
             # type (virtual inheritance still embeds the base subobject + vtable
             # path), so the public closure must follow both (ADR-025 A3 review).
-            for base in (*rec_node.bases, *rec_node.virtual_bases):
+            for base in rec_node.resolved_bases() + rec_node.resolved_virtual_bases():
                 for ident in _type_identifiers(base):
                     if ident not in seen:
                         queue.append(ident)
@@ -779,7 +779,7 @@ def _walk_exact_type_closure(
             for ident in _type_identifiers(f.type):
                 if ident not in seen:
                     queue.append(ident)
-        for base in (*rec_node.bases, *rec_node.virtual_bases):
+        for base in (*rec_node.resolved_bases(), *rec_node.resolved_virtual_bases()):
             for ident in _type_identifiers(base):
                 if ident not in seen:
                     queue.append(ident)

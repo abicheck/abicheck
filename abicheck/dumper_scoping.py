@@ -339,8 +339,8 @@ def _kept_signature_haystack(
         texts.append(var.type)
     for rec in kept_types:
         texts.extend(f.type for f in rec.fields)
-        texts.extend(rec.bases)
-        texts.extend(rec.virtual_bases)
+        texts.extend(rec.resolved_bases())
+        texts.extend(rec.resolved_virtual_bases())
     return "\n".join(t for t in texts if t)
 
 
