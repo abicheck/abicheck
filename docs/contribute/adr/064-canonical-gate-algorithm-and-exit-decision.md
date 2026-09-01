@@ -597,16 +597,25 @@ lands in two stages rather than one atomic change:
       docstring naming the GitHub Action as one of the paths meant to reach
       it. The skip would have left a previous sticky BREAKING/API_BREAK
       comment stale and misleading instead of updating it, and — for the
-      rarer case where no JSON exists yet at this point (`--format text`
-      with no `--write json=...` secondary) — a re-run to obtain one is
-      cheap for this specific abort, since `_EvidenceContractError`'s own
-      precondition check fires before any source evidence collection
-      begins, unlike a real budget-limited scan. `--format text` with no
-      JSON secondary output at all is still unaffected by the classification
-      itself and stays the one acknowledged gap noted above this update:
-      `cli_scan.py` writes no report at all on that path, so this wrapper
-      still cannot distinguish the axis there and continues to read it as
-      `ERROR`, same as before this fix. **A stricter instance of the same
+      rarer case where no JSON report exists yet at this point — a re-run to
+      obtain one is cheap for this specific abort, since
+      `_EvidenceContractError`'s own precondition check fires before any
+      source evidence collection begins, unlike a real budget-limited scan.
+      Whenever no JSON report exists at all for this wrapper to read, this
+      classification is unavailable and the run still reads as `ERROR`,
+      same as before this fix — the one acknowledged gap noted above this
+      update. **Three successive review rounds each found the previous
+      restatement of exactly *when* a JSON report exists incomplete**
+      (`pr-comment: false` with no other JSON source; an `--artifact-set`
+      scan, which suppresses the auto-injected sidecar unconditionally; and
+      the run's own `extra-args` already supplying a non-JSON `--write`,
+      which also suppresses the injection so as not to clobber the
+      caller's own flag) — `action.yml`'s `verdict`/`exit-code` output
+      descriptions stopped trying to enumerate the condition in prose after
+      the third finding and instead point at `action/run.sh`'s own
+      JSON-sidecar-injection logic as the one authoritative source, rather than
+      a fourth prose restatement this file's own history shows keeps
+      finding one more uncovered combination. **A stricter instance of the same
       gap (Codex review, fresh evidence):** `--artifact-set`
       (the Action's `new-library-set` input) skips the JSON secondary
       write *unconditionally* — `action/run.sh`'s own injection guard
