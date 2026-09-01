@@ -47,7 +47,10 @@ added it; the plan's §7 rule applies.
 
 The one machine-readable owner of tier membership and reading order (plan
 §5). It sits next to `topics.yaml` and `terminology.yaml`, and like them
-it describes *ownership and order*, never content.
+it describes *ownership and order*, never content. The listing below is
+the *target* shape after P8: P1 commits it with only the pages that exist
+at that point, and each later PR appends the page it creates (§F), so
+A2c's existence and completeness rules hold at every step.
 
 ```yaml
 # docs/_meta/learning-ladder.yaml
@@ -193,6 +196,49 @@ paths:
       - learn/abi-series/03-type-layout.md
       - learn/abi-series/07-designing-for-stability.md
     after: start/choose-your-workflow.md    # tool-track hand-off; not ordered
+  - role: C++ library maintainer
+    pages:
+      - learn/abi-series/01-foundations.md
+      - learn/abi-series/04-cpp-abi.md
+      - learn/class-layout-abi.md              # branch of Part 4
+      - learn/abi-series/06-transitive-breaks.md
+      - learn/abi-series/07-designing-for-stability.md
+      - learn/template-heavy-libraries.md
+    after: start/choose-your-workflow.md
+  - role: CI / release engineer
+    pages:
+      - learn/how-a-break-shows-up.md
+      - learn/compatibility-direction.md
+      - learn/abi-series/08-detection.md
+      - learn/where-in-the-pipeline.md
+      - learn/surface-growth.md
+      - learn/rollout-and-governance.md
+      - learn/verdicts.md                      # concepts, after the educational tiers
+    after: start/choose-your-workflow.md
+  - role: Distribution / package maintainer
+    pages:
+      - learn/abi-series/05-linker-elf.md
+      - learn/products-not-libraries.md
+      - learn/system-library-discipline.md
+      - learn/dependency-floors.md
+      - learn/packages-and-consumers.md
+    after: start/choose-your-workflow.md
+  - role: Product / SDK owner (several binaries)
+    pages:
+      - learn/abi-series/00-product-contract.md
+      - learn/consumer-models.md
+      - learn/where-in-the-pipeline.md
+      - learn/products-not-libraries.md
+      - learn/template-heavy-libraries.md
+    after: start/choose-your-workflow.md
+  - role: Plugin / SDK author
+    pages:
+      - learn/abi-series/02-symbol-contracts.md
+      - learn/compatibility-direction.md
+      - learn/consumer-models.md
+      - learn/rollout-and-governance.md
+      - learn/abi-series/07-designing-for-stability.md
+    after: start/choose-your-workflow.md
   - role: AI agent / automated reviewer
     pages:
       - learn/how-a-break-shows-up.md
@@ -200,7 +246,6 @@ paths:
       - learn/verdicts.md
       - learn/evidence-and-detectability.md
     after: use/output-formats.md
-  # ... one entry per row of section E below
 ```
 
 Rules the file encodes (checked by `check_docs_contract.py`, A2c — the
@@ -546,9 +591,13 @@ round trip fails. Two more things the fragments do not do, on purpose:
 they never register a second `canonical_page` for a topic (the gate
 rejects it), and they keep `baseline-lifecycle` on
 `use/baseline-management.md` (plan §4.6 case 1).
+Each fragment lands in the PR that creates the page it names (§F), never
+earlier: a path that does not exist yet is a hard error, so the
+`bundle-analysis` re-registration ships with B6, the `evidence-model`
+addition for `learn/how-a-break-shows-up.md` with B1, and so on.
 Exact `fact_sources` paths are to be confirmed against the tree when each
-page is written; a wrong path is a hard error in `check_docs_contract.py`,
-so it cannot ship silently. `use/troubleshooting.md` and `limitations.md`
+page is written; a wrong path is the same hard error in
+`check_docs_contract.py`, so it cannot ship silently. `use/troubleshooting.md` and `limitations.md`
 own no registered topic today, so B5 links them and registers nothing
 about them — a `summarizes` entry naming a topic that does not exist is
 itself a contract error.
@@ -911,8 +960,11 @@ Sections:
 Runs: the directory compare; a `--manifest` compare; the
 `--bundle-facts-out` / `--old-bundle-facts` pair; `abicheck aggregate
 reports/ --run-plan plan.json` (and the `--discovered-only` form once,
-labelled as the opt-out). Cases: 84, 90–93, 151 (provider matrix), 162 (symbol owner
-changed). Links, not restatements: flag reference (`use/multi-binary.md`),
+labelled as the opt-out). Cases: 84, 90–93 — the bundle cases only.
+`case151` (a single-build audit corroborating the header AST against the
+source index) and `case162` (an exported declaration moving between
+header files, L5) are evidence-provider cases, not product ones; both go
+to Detecting Breaks (C5). Links, not restatements: flag reference (`use/multi-binary.md`),
 aggregate axes (`use/aggregate-reports.md`), topology schema
 (`reference/project-targets-schema.md`). Done when: `topics.yaml` shows
 this page as `bundle-analysis`'s canonical page and `use/multi-binary.md`
@@ -943,7 +995,8 @@ Sections:
    instantiations only; the clang L2 backend also records the
    uninstantiated pattern (`reference/header-backend-capabilities.md`);
    neither detects a change to an uninstantiated template's *signature*
-   — that is L4's job (`case122`, `template_body_changed`); default
+   — that is L4's job (`case122`, the same uninstantiated-signature case
+   B1 cites); default
    template arguments (`case87`), internal template signatures
    (`case85`), templated `detail::` bases (`case77`).
 4. **The cost cliff** — the one cliff at L4 tracks template depth; what a
@@ -1033,10 +1086,14 @@ Sections:
    two lines summarising the packages-and-SDKs scenario (S13, a registered
    task page) and a link to it. Run: `abicheck compare old.rpm new.rpm --debug-info old=old-dbg.rpm
    --debug-info new=new-dbg.rpm --devel-pkg old=old-devel.rpm --devel-pkg
-   new=new-devel.rpm`.
+   new=new-devel.rpm`, then one line each for the other two operand
+   types `package.py` accepts the same way — `abicheck compare
+   old.tar.gz new.tar.gz -H include/` and `abicheck compare old.conda
+   new.conda -H include/` — since only the operand changes.
 2. **Debian `symbols` files are a consumer-declared contract** — generate,
    validate, diff (link `use/debian-symbols.md`); the automatic check on
-   a `.deb` compare.
+   a `.deb` compare. Run: `abicheck compare old.deb new.deb --debug-info
+   old=old-dbgsym.deb --debug-info new=new-dbgsym.deb`.
 3. **conda: the pieces live in different packages** — the umbrella-header
    trick and mapping a conda version to an upstream tag (link the
    scanning-conda page; two paragraphs).
@@ -1053,11 +1110,14 @@ Sections:
    `case82`/`case126`) — the "other ABI domains" further-reading the
    plan defers, at pointer depth only.
 
-Runs: the package compare; the `--abi3` scan; a `--used-by` compare
+Runs: the RPM and Debian compares in full, the tar and conda operand
+variants one line each, the `--abi3` scan, and a `--used-by` compare
 against a Python interpreter or binding. Cases: 121, 163, 170, 175, 176,
 82, 126. Links, not restatements: all four task pages (the three how-tos
-and S13). Done when: each package format has one runnable command; the Python section
-never re-explains the limited API beyond one paragraph.
+and S13). Done when: each of the four package formats has one runnable
+command (RPM and Debian with their debug sidecars, tar and conda as the
+operand variants above); the Python section never re-explains the
+limited API beyond one paragraph.
 
 ---
 
@@ -1116,8 +1176,10 @@ link to B2; the page ends with one "Next" (B6, per the ladder).
   contents), the castxml/clang capability difference at pattern level
   (link the reference matrix), and "the same idea applied per translation
   unit" for L4, with the explicit note that an uninstantiated template's
-  signature change is L4-only (`case122`). Keep the existing context
-  table.
+  signature change is L4-only (`case122`); cite `case151` (two providers
+  corroborating one declaration) and `case162` (a declaration's source
+  file changing, which only L5 sees) in the same paragraphs. Keep the
+  existing context table.
 - §2 "What it takes to find each break family" shrinks to one paragraph
   and a link to `what-each-level-sees.md` §Reference (the table there is
   the owner).
@@ -1214,9 +1276,12 @@ the educational list gains it).
 
 §"Checking the boundary with abicheck" gains two runs: the one-build
 audit `abicheck scan libfoo.so -H include/` (accidental export,
-private-header leak — `case143`, `case144`) and a scoped compare with
-`--contract exports` showing an internal change classified out of
-contract (`case118`).
+private-header leak — `case143`, `case144`) and a compare with
+`--contract exports --no-scope-public-headers` showing an internal change
+classified out of contract (`case118`). The second flag is required: the
+default public-header scoping filters the unreachable change out before
+contract evaluation classifies it, so with `--contract exports` alone the
+report shows nothing.
 
 ### C15. Commands on concept pages without one
 
@@ -1352,9 +1417,9 @@ the dependencies between artifacts.
 
 | PR | Plan phase | Carries | Depends on |
 |---|---|---|---|
-| P1 | 1 | A1 file (today's pages; `paths:` for today's rows), A2 generator + tests, A2b nav-order check, A2c rules, A2d `validation:` block; A4's `level:` on the 16 blank pages and the reconciled values; the two within-group nav reorders (A2b); A3 footers on all 26 deep dives + 3 orientation pages and the four Part "Next" rewrites (A3); C11; front-door links (`docs/index.md`, `start/getting-started.md`); the `GENERATED_FILE_MARKERS`, `scripts/CLAUDE.md` and `verify.py` wiring. One PR, because the rules and the levels they read must land together; the hub gains only the two sentinel blocks | — |
+| P1 | 1 | A1 file (today's pages only; `paths:` for today's rows — each later PR appends its own page), A2 generator + tests, A2b nav-order check, A2c rules, A2d `validation:` block; A4's `level:` on the 16 blank pages and the reconciled values; the two within-group nav reorders (A2b); A3 footers on all 26 deep dives + 3 orientation pages and the four Part "Next" rewrites (A3); C11; front-door links (`docs/index.md`, `start/getting-started.md`); the `GENERATED_FILE_MARKERS`, `scripts/CLAUDE.md` and `verify.py` wiring. One PR, because the rules and the levels they read must land together; the hub gains only the two sentinel blocks | — |
 | P2 | 1 | A7 hub rebuild (minus the "Now run it" table), anchor rewrites, A6 terminology term, C7 | P1 |
-| P3 | 2 | C2, C3 (class-layout ownership), C5, C6, C8, C9, C10, A5's "edits to existing topics" | P2 |
+| P3 | 2 | C2, C3 (class-layout ownership), C5, C6, C8, C9, C10, and only the A5 fragments whose pages exist by then (`class-layout`; the `evidence-model` and `ast-frontend-resolution` additions for `08-detection.md` and `build-source-data.md`). Every other fragment, the `bundle-analysis` re-registration included, ships with the PR that creates its page (P4–P8) | P2 |
 | P4 | 3 | B1 How a break shows up | P2 |
 | P5 | 3 | B2 Where in the pipeline (moves the hub's "Now run it" table), B3 Report the surface | P4 |
 | P6 | 3 | B4 Rollout and governance, B5 Triage a suspicious finding | P5 |
