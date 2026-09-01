@@ -32,10 +32,14 @@ from .contracts import (
     _BOOTSTRAP_VERDICT,
     _NEW_TARGET_VERDICT,
     _OPERATIONAL_ERROR_VERDICT,
+    _SCAN_BUDGET_OVERFLOW_VERDICT,
+    _SCAN_EVIDENCE_CONTRACT_ERROR_VERDICT,
     DEFAULT_REPORT_PREFIX,
     GateInfo,
 )
 from .gate import (
+    _VALID_GATE_EXIT,
+    COVERAGE_INCOMPLETE_EXIT,
     _contract_coverage_declared,
     _contract_coverage_exit,
     _contract_coverage_incomplete,
@@ -147,6 +151,50 @@ def _effective_config_digest(data: Mapping[str, Any]) -> str | None:
     return None
 
 
+#: The two synthetic ``verdict`` strings a native `scan` abort report (single
+#: binary or set-level) can carry at its own root, mapped to the aggregate
+#: gate's blocking-category label -- shared between the root-level check
+#: below and :func:`_member_abort_categories`, which needs the same mapping
+#: for a `scan --artifact-set` *member* whose own abort verdict was folded
+#: away by `_aggregate_scan_set_verdict`'s stronger-verdict-wins rule.
+_scan_abort_categories = {
+    _SCAN_BUDGET_OVERFLOW_VERDICT: "budget_overflow",
+    _SCAN_EVIDENCE_CONTRACT_ERROR_VERDICT: "evidence_contract_error",
+}
+
+
+def _member_abort_categories(data: Mapping[str, Any]) -> frozenset[str]:
+    """Abort categories from every ``per_artifact`` member, independent of
+    which single category the set-level ``verdict`` string names.
+
+    ``_aggregate_scan_set_verdict`` (ADR-056 D3) collapses a whole set's
+    outcome into exactly one root ``verdict`` string, picking one of: any
+    member's ``BUDGET_OVERFLOW`` (dominates unconditionally), else the
+    worst real compatibility verdict, else a member's own
+    ``EVIDENCE_CONTRACT_ERROR``. Two members can abort for *different*
+    reasons at once (one budget-starved, another evidence-incomplete), or
+    one member can abort while another's real break wins the root string --
+    either way the root alone cannot name every category, so both callers
+    below (the root-abort branch, whose own ``scan_abort_category`` is only
+    ever the *one* string that won, and the normal-verdict branch, where a
+    real break at the root hides an aborted member entirely) union this
+    function's result into their gate rather than trusting the root alone
+    (Codex review, fresh evidence for both). Reads each member's own bare
+    ``verdict`` field directly -- ``ScanArtifactResult.to_dict()`` flattens
+    it to the member dict's own top level, not nested under ``report`` --
+    rather than :func:`_scan_abort_exit_blocks`'s ``exit`` blocks, which a
+    member that aborted before producing a decision may not carry at all.
+    """
+    per_artifact = data.get("per_artifact")
+    if not isinstance(per_artifact, list):
+        return frozenset()
+    return frozenset(
+        _scan_abort_categories[member["verdict"]]
+        for member in per_artifact
+        if isinstance(member, dict) and member.get("verdict") in _scan_abort_categories
+    )
+
+
 def _incomplete_findings(data: dict[str, Any]) -> ReportFindings:
     """Whatever findings *data* lists, explicitly not accounted as exhaustive.
 
@@ -157,6 +205,135 @@ def _incomplete_findings(data: dict[str, Any]) -> ReportFindings:
     lives, instead of relying on a property of the shape it happens to have.
     """
     return replace(parse_report_findings(data), complete=False)
+
+
+def _scan_abort_exit_blocks(data: Mapping[str, Any]) -> list[Mapping[str, Any]]:
+    """Every real severity signal a scan abort's report may preserve,
+    normalized to ``ExitDecision.to_dict()``-shaped ``exit`` blocks (or a
+    minimal stand-in carrying just ``compatibility_contribution``).
+
+    Three shapes of *already-computed* decision this codebase's own report
+    producers can leave behind, all recognized here:
+
+    * ``diff.exit`` -- the single-binary native CLI's ``scan``/
+      ``ScanOutcome`` abort envelope.
+    * ``report.exit`` -- the typed API's own ``ScanResult.to_dict()`` root
+      shape (a caller that dumps that dict directly, rather than going
+      through the CLI, never gets ``diff`` at all) (Codex review, fresh
+      evidence).
+    * ``per_artifact[i].report.exit`` -- a ``scan --artifact-set``/
+      ``ScanSetResult`` abort report's per-member decision
+      (``ScanArtifactResult.to_dict()`` wrapping a *member's own*
+      typed-API envelope).
+
+    A fourth case has no ``exit`` block to read at all: when a set-level
+    abort fires *after* every member already finished normally (no member
+    itself aborted, e.g. the shared budget expires during the bundle
+    audit that runs after all members), each completed member's real
+    compatibility result lives only in its own top-level ``exit_code``
+    (``0``/``1``/``2``/``4``, the exact scheme :data:`_VALID_GATE_EXIT`
+    validates) -- there is no nested decision to find, only that bare
+    scalar (Codex review, fresh evidence). Reading only the three real
+    blocks above silently dropped this case's real member results,
+    downgrading e.g. a completed member's exit `2` to the generic abort
+    floor. Synthesized here as a minimal block (just
+    ``compatibility_contribution``) so it folds through the exact same
+    ``max()`` machinery as a real one, rather than a separate code path.
+
+    Shared lookup for :func:`_scan_abort_prior_exit` and
+    :func:`_scan_abort_exit_axis` below, both of which fold ``max()``
+    across every block this returns.
+    """
+    diff = data.get("diff")
+    diff_exit = diff.get("exit") if isinstance(diff, dict) else None
+    report = data.get("report")
+    root_exit = report.get("exit") if isinstance(report, dict) else None
+    blocks: list[Mapping[str, Any]] = [
+        b for b in (diff_exit, root_exit) if isinstance(b, dict)
+    ]
+    per_artifact = data.get("per_artifact")
+    if isinstance(per_artifact, list):
+        for member in per_artifact:
+            if not isinstance(member, dict):
+                continue
+            member_report = member.get("report")
+            member_exit = (
+                member_report.get("exit") if isinstance(member_report, dict) else None
+            )
+            if isinstance(member_exit, dict):
+                blocks.append(member_exit)
+                continue
+            # No nested decision (the member completed normally, without
+            # aborting) -- fall back to its own bare exit_code.
+            code = member.get("exit_code")
+            if (
+                isinstance(code, int)
+                and not isinstance(code, bool)
+                and code in _VALID_GATE_EXIT
+            ):
+                blocks.append({"compatibility_contribution": code})
+    return blocks
+
+
+def _scan_abort_prior_exit(data: Mapping[str, Any]) -> int:
+    """The largest PR-G1 contribution preserved across a scan abort's own
+    ``exit`` block(s) (see :func:`_scan_abort_exit_blocks`), or ``0``.
+
+    A *late* ``_BudgetOverflow``/``_EvidenceContractError``
+    (``attach_prior_on_budget_overflow``) carries the ordinary
+    compatibility/contract-coverage/analysis-assurance/crosscheck-promotion
+    contributions through into an ``exit`` block's own ``*_contribution``
+    fields even though none of them decided ``code`` there (``code`` is
+    always the dominant budget/evidence-contract-error code, chosen large
+    enough to exceed them -- see ``ExitDecision``'s own docstring). Reading
+    them here is what lets this target's forced gate still reflect a real
+    ABI/API break already found before the abort fired, instead of
+    downgrading it to a bare coverage-incomplete ``1`` (Codex review, fresh
+    evidence).
+    """
+    best = 0
+    for exit_block in _scan_abort_exit_blocks(data):
+        for key in (
+            "compatibility_contribution",
+            "contract_coverage_contribution",
+            "analysis_assurance_contribution",
+            "crosscheck_promotion_contribution",
+        ):
+            raw = exit_block.get(key)
+            if (
+                isinstance(raw, int)
+                and not isinstance(raw, bool)
+                and raw in _VALID_GATE_EXIT
+            ):
+                best = max(best, raw)
+    return best
+
+
+def _scan_abort_exit_axis(data: Mapping[str, Any], key: str) -> tuple[int, bool]:
+    """A single preserved ``0``/``1`` PR-G1 axis from a scan abort's own
+    ``diff.exit`` (*key* is ``"contract_coverage_contribution"`` or
+    ``"analysis_assurance_contribution"``) as ``(value, declared)``.
+
+    Sibling of :func:`_scan_abort_prior_exit`, which folds every preserved
+    axis into one gate-exit ceiling -- these two are reported separately
+    instead (as :attr:`_LoadedReport.contract_coverage_exit`/
+    :attr:`_LoadedReport.analysis_assurance_exit`, ADR-049 Phase 7/P0.4's
+    own orthogonal axes), so folding them into the gate alone left
+    :func:`_contract_coverage_exit`/:func:`_analysis_assurance_exit` reading
+    ``0`` with an empty target list for a late abort that preserved a real
+    ``1`` here -- those two only read the older, differently-named
+    ``contract_coverage_exit_contribution``/``analysis_assurance_exit_
+    contribution`` fields a scan-abort payload never carries at all (Codex
+    review, fresh evidence).
+    """
+    best = 0
+    declared = False
+    for exit_block in _scan_abort_exit_blocks(data):
+        raw = exit_block.get(key)
+        if _is_valid_contribution(raw):
+            best = max(best, raw)
+            declared = True
+    return best, declared
 
 
 def _load_report_file(path: Path, *, prefix: str) -> _LoadedReport:
@@ -228,6 +405,81 @@ def _load_report_file(path: Path, *, prefix: str) -> _LoadedReport:
             findings=_incomplete_findings(data),
             effective_config_digest=effective_config_digest,
         )
+    # `scan`'s own two abort verdicts (ADR-064 stage 1b's native-CLI abort
+    # report) carry no comparison at all -- a budget overflow or a pinned
+    # depth's evidence-contract violation -- but must still gate, not fall
+    # through as an unavailable/verdictless report a required-target policy
+    # could silently tolerate (Codex review, fresh evidence: neither string
+    # is a `Verdict` member, so this function never even reached
+    # `GateInfo.from_scan_report` for these before this branch existed).
+    #
+    # Unlike the operational-error branch above, `verdict` stays `None` here
+    # rather than a synthetic `Verdict.BREAKING`: a scan that aborted before
+    # comparing never produced an ABI-break finding, so forcing one invents
+    # both a compatibility verdict and an "analyzed" target count for a
+    # comparison that never ran (Codex review, fresh evidence --
+    # `AggregateResult.to_dict()` reported `compatibility.verdict:
+    # "BREAKING"` and complete `analyzed_targets`/required-coverage for this
+    # exact case). The gate is still attached and still counts toward
+    # `AggregateResult.exit_code()`/`blocking_targets` regardless of the
+    # target's own required/optional declaration --
+    # `AggregateResult._forced_gate_targets` folds in exactly this shape
+    # (unavailable, but carrying a non-`None` gate) alongside the analyzed
+    # targets, the same way the now-removed synthetic verdict used to. The
+    # gate's own `exit_code` is `max(COVERAGE_INCOMPLETE_EXIT, prior
+    # contribution)`, never scan's raw private code (5 for budget overflow)
+    # -- `GateInfo.from_scan_report` already normalizes every scan exit
+    # outside {0, 2, 4} to `COVERAGE_INCOMPLETE_EXIT`, and the aggregate's
+    # own published contract has no exit 5 -- but a *late* `_BudgetOverflow`
+    # (`attach_prior_on_budget_overflow`) preserves whatever gate/coverage/
+    # assurance/crosscheck decision already existed in `diff.exit`'s own
+    # `*_contribution` fields, and downgrading a real ABI/API break already
+    # found before the abort to a bare coverage-incomplete `1` would hide it
+    # from a severity-aware consumer (Codex review, fresh evidence).
+    raw_scan_verdict = data.get("verdict")
+    scan_abort_category = (
+        _scan_abort_categories.get(raw_scan_verdict)
+        if isinstance(raw_scan_verdict, str)
+        else None
+    )
+    if scan_abort_category is not None:
+        contract_axis, contract_declared = _scan_abort_exit_axis(
+            data, "contract_coverage_contribution"
+        )
+        assurance_axis, _ = _scan_abort_exit_axis(
+            data, "analysis_assurance_contribution"
+        )
+        blocking_categories = frozenset(
+            {scan_abort_category}
+        ) | _member_abort_categories(data)
+        return _LoadedReport(
+            target_id=target_id,
+            verdict=None,
+            gate=GateInfo(
+                exit_code=max(COVERAGE_INCOMPLETE_EXIT, _scan_abort_prior_exit(data)),
+                blocking=True,
+                blocking_categories=tuple(sorted(blocking_categories)),
+                from_report=True,
+            ),
+            library=data.get("library"),
+            head_sha=head_sha,
+            reason=f"scan aborted before completing a comparison ({scan_abort_category})",
+            path=path,
+            contract_coverage_exit=max(_contract_coverage_exit(data), contract_axis),
+            contract_coverage_incomplete=(
+                _contract_coverage_incomplete(data) or contract_axis == 1
+            ),
+            contract_coverage_declared=(
+                _contract_coverage_declared(data) or contract_declared
+            ),
+            analysis_assurance_exit=max(_analysis_assurance_exit(data), assurance_axis),
+            # No comparison ran at all -- unlike the operational-error branch
+            # above, there is no partial finding set to preserve, and (unlike
+            # that branch) this target is not "analyzed" for the finding
+            # matrix either.
+            findings=None,
+            effective_config_digest=None,
+        )
     # ADR-050 D2: a native compare/compare-release not_comparable report
     # carries a real ``verdict: null`` (JSON null, not a missing key) plus a
     # structured ``reason: {kind, message}`` (schema 2.17) -- distinct from
@@ -292,6 +544,16 @@ def _load_report_file(path: Path, *, prefix: str) -> _LoadedReport:
             )
         if gate is None:
             gate = GateInfo.legacy_from_verdict(verdict)
+        extra_categories = _member_abort_categories(data) - set(
+            gate.blocking_categories
+        )
+        if extra_categories:
+            gate = replace(
+                gate,
+                blocking_categories=tuple(
+                    sorted(set(gate.blocking_categories) | extra_categories)
+                ),
+            )
     raw_verdict = data.get("verdict")
     if verdict is not None:
         unavailable_reason = None

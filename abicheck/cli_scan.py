@@ -53,7 +53,7 @@ import time
 from collections.abc import Callable
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import click
 
@@ -148,6 +148,9 @@ from .workflows.extraction import (  # noqa: F401 - re-exported for tests
     scan_files,
 )
 from .workflows.scan_config import RiskScore, score_changed_paths
+
+if TYPE_CHECKING:
+    from .workflows.scan_abort_result import ScanAbortAxis
 
 #: Back-compat alias — the resolver moved to ``cli_options`` (ADR-037 D3: one
 #: resolver shared by compare/dump/scan). Kept importable from here for existing
@@ -482,6 +485,69 @@ def _emit_scan_report(
 
     if outcome.exit_code != 0:
         sys.exit(outcome.exit_code)
+
+
+def _emit_scan_abort_report(
+    axis: ScanAbortAxis,
+    fmt: str,
+    output: Path | None,
+    *,
+    prior_decision: dict[str, object] | None = None,
+    secondary_fmt: str | None = None,
+    secondary_output: Path | None = None,
+) -> None:
+    """Give ``scan --format json`` a real report on a `_BudgetOverflow`/
+    `_EvidenceContractError` abort, instead of empty stdout (ADR-064 stage
+    1b, native-CLI half). Before this, a ``--format json`` invocation that
+    aborted here produced no stdout content at all -- so a consumer parsing
+    it as JSON was already broken; this only adds content where none
+    existed, it does not change either abort's exit code or its existing
+    stderr message. `--format text` is unchanged: `bo.message`/`ce.message`
+    already read as the human-facing explanation, and there is no
+    `ScanOutcome` to feed `_render_text` (most of its fields were never
+    computed at this point) -- inventing prose for that gap is a separate,
+    genuinely open design question ADR-064 leaves unresolved.
+
+    Shaped as a real (if minimal) ``ScanOutcome.to_dict()``-compatible
+    envelope -- top-level ``verdict``/``exit_code``, the exit decision under
+    ``diff.exit`` -- rather than `scan_abort_result_fields`'s own ``report``
+    nesting (that shape is the *typed API's* ``ScanResult.report`` field,
+    a different envelope): `workflows/aggregate/gate.py`'s
+    `GateInfo.from_scan_report` requires a top-level `exit_code` and raises
+    `_MalformedGate` without one, so a consumer that saved this abort's
+    `--format json` output and fed it to `aggregate` would crash rather than
+    read the budget/evidence decision it carries (Codex review, fresh
+    evidence). `diff.exit` matches where `NOT_COMPARABLE`/a baseline compare
+    already publish theirs, so a severity-unaware reader's raw-`exit_code`
+    fallback path applies unchanged.
+
+    *secondary_fmt*/*secondary_output* cover ``--format text --write
+    json=...`` (Codex review, fresh evidence): the GitHub Action's own text
+    primary + JSON secondary combination gets the same abort payload the
+    secondary artifact would have carried had the scan completed, instead
+    of a missing file just because the primary renderer wasn't JSON.
+    """
+    if fmt != "json" and secondary_fmt != "json":
+        return
+    from .workflows.scan_abort_result import scan_abort_result_fields
+
+    fields = scan_abort_result_fields(axis, prior_decision=prior_decision)
+    payload = {
+        "scan_schema_version": fields["report"]["scan_schema_version"],
+        "verdict": fields["verdict"],
+        "exit_code": fields["exit_code"],
+        "diff": {"exit": fields["report"]["exit"]},
+    }
+    text = json.dumps(payload, indent=2)
+    if fmt == "json":
+        if output:
+            _safe_write_output(output, text)
+            click.echo(f"Report written to {output}", err=True)
+        else:
+            click.echo(text)
+    if secondary_fmt == "json" and secondary_output:
+        _safe_write_output(secondary_output, text)
+        click.echo(f"Secondary report written to {secondary_output}", err=True)
 
 
 def _resolve_artifact_set_paths(spec: tuple[str, ...]) -> tuple[list[Path], bool]:
@@ -1876,11 +1942,26 @@ def scan_cmd(
         )
     except _BudgetOverflow as bo:
         click.echo(bo.message, err=True)
+        _emit_scan_abort_report(
+            "budget_overflow",
+            fmt,
+            output,
+            prior_decision=bo.prior_decision,
+            secondary_fmt=secondary_fmt,
+            secondary_output=secondary_output,
+        )
         sys.exit(_EXIT_BUDGET_OVERFLOW)
     except _EvidenceContractError as ce:
         # A pinned depth that can't collect its evidence is a usage contract
         # violation → a clean CLI error (exit 1), distinct from the verdict codes
         # (2/4) and the budget code (5).
+        _emit_scan_abort_report(
+            "evidence_contract_error",
+            fmt,
+            output,
+            secondary_fmt=secondary_fmt,
+            secondary_output=secondary_output,
+        )
         raise click.ClickException(ce.message) from ce
     except PlanningError as exc:
         # ADR-063 Phase 4: scan_engine.py raises this framework-neutral (it also

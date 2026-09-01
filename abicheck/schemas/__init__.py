@@ -1006,12 +1006,11 @@ REPORT_SCHEMA_VERSION = "2.47"  #: ADR-064 stage 1b: ``ExitDecision.to_dict`` ga
 #:        same round as `compare`'s report_schema_version 2.46 entry:
 #:        ``policy.collapse_versioned_symbols``, ``policy.surface_metrics``,
 #:        and ``policy.env_matrix`` were added, sharing the identical
-#:        computation (see that entry for the full reasoning). One more:
-#:        ``policy.reconcile_build_context`` was added, same round. One
-#:        more: ``surface.scope_to_public_surface_requested`` was added,
-#:        same round as `compare`'s report_schema_version 2.46 entry.
+#:        computation (see that entry for the full reasoning). Two more,
+#:        same round as `compare`'s report_schema_version 2.46 entry: ``policy.reconcile_build_context`` and ``surface.scope_to_public_surface_requested`` were both added.
 #: 1.21 -- ``scan --against``'s baseline summary gains ``coverage_warnings`` (Codex review), mirroring `compare`'s own top-level field of the same name/shape -- e.g. a byte-identical-binaries warning. Additive key, omitted when empty.
-SCAN_SCHEMA_VERSION = "1.22"  #: ADR-064 stage 1b, mirrors `compare`'s 2.47 entry: ``ExitDecision.to_dict``'s five new keys reach ``diff.exit`` too, and a ``NOT_COMPARABLE`` baseline outcome now persists a real ``diff.exit`` block (previously ``diff`` was only ``{"reason": <message>}``).
+#: 1.22 -- ADR-064 stage 1b, mirrors `compare`'s 2.47 entry: ``ExitDecision.to_dict``'s five new keys reach ``diff.exit`` too, and a ``NOT_COMPARABLE`` baseline outcome now persists a real ``diff.exit`` block (previously ``diff`` was only ``{"reason": <message>}``).
+SCAN_SCHEMA_VERSION = "1.23"  #: ADR-064 stage 1b (Codex review, PR #967): the typed ``ScanResult`` envelope's own ``report`` key -- ``ScanResult.to_dict()``'s ``report``, not the CLI's ``diff`` block above -- now nests a real ``exit`` block for a ``BUDGET_OVERFLOW``/``EVIDENCE_CONTRACT_ERROR`` abort (`abicheck.workflows.scan_abort_result.scan_abort_result_fields`), where it used to be `{}`.
 
 _SCHEMA_DIR = Path(__file__).resolve().parent
 COMPARE_REPORT_SCHEMA_PATH = _SCHEMA_DIR / "compare_report.schema.json"

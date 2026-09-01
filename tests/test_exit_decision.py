@@ -27,7 +27,13 @@ new ``exit`` block agrees with the real process exit.
 ADR-064's additive extension: pure resolvers for the three axes PR G1
 deliberately left unmodeled (evidence-contract error, budget overflow,
 not-comparable, and a release's mode-dependent removed-required-library
-rank). Neither resolver is wired into a real call site yet -- see
+rank). `tests/test_scan_abort_result.py` covers a later stage-1b slice built
+on top of `resolve_scan_exit_decision`: `abicheck.workflows.scan_abort_
+result.scan_abort_result_fields`, which `service_scan.run_scan`/
+`_run_scan_one_member`'s own `_BudgetOverflow`/`_EvidenceContractError`
+catches use to persist a decision into `ScanResult.report["exit"]` -- a
+separate module/test file since shaping a `ScanResult` is `workflows`
+responsibility, not `policy`'s (`abicheck/policy/AGENTS.md`). See
 ``docs/contribute/adr/064-canonical-gate-algorithm-and-exit-decision.md``
 and `abicheck/policy/exit_decision_precedence.py`'s own module docstring
 for what remains open.

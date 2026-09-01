@@ -72,22 +72,29 @@ release fan-out's JSON summary gains an `exit` block via
 `cli_compare_release_helpers._exit_compare_release`'s own, independently
 computed and heavily pinned exit code (`tests/test_exit_code_integrity.py`'s
 `TestReleaseExitDecisionForReportAgreesWithRealExit`) without changing that
-function itself. **Still open:** `scan`'s `_BudgetOverflow`/
-`_EvidenceContractError` abort points (`scan_engine.py`), which raise
-*before* any report exists today -- persisting a decision for them needs a
-genuine new design decision (should the CLI construct a minimal report at
-those abort points at all?) that this stage deliberately did not make; see
-ADR-064's own "Stage 1b, further split" section. The atomic
-`--exit-code-scheme` removal remains stage 2.
+function itself. `scan`'s `_BudgetOverflow`/`_EvidenceContractError` abort
+points (`scan_engine.py`), which raise before any report exists, have since
+landed too: the typed `service_scan.ScanResult` API persists a real
+`ExitDecision` into `report["exit"]` for both
+(`abicheck.workflows.scan_abort_result.scan_abort_result_fields`, prior
+gate/coverage/assurance contributions preserved across a *late*
+`_BudgetOverflow` via `attach_prior_on_budget_overflow`), and the native
+`scan` CLI's own `--format json` invocation gets the same report shape on
+either abort via `cli_scan._emit_scan_abort_report` (`--format text` is
+unaffected, per that design's own account of what remained genuinely open).
+See ADR-064's own "Stage 1b, further split" section for the full account.
+The atomic `--exit-code-scheme` removal remains stage 2.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import Enum
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping
+
     from ..checker_types import DiffResult
     from .severity import SeverityConfig
 
@@ -326,6 +333,43 @@ class ExitDecision:
                 self.removed_required_library_contribution
             ),
         }
+
+    @classmethod
+    def from_dict(cls, d: Mapping[str, Any]) -> ExitDecision:
+        """Reconstruct a decision from :meth:`to_dict`'s own output.
+
+        The exact inverse of :meth:`to_dict` -- round-trips every field,
+        including the five ADR-064 additions, which default to ``0`` via
+        ``.get`` so a pre-2.47/1.22 persisted dict (missing those keys
+        entirely) reconstructs the same way an already-in-memory decision
+        built before those fields existed would: "never asked," not
+        "evaluated and came out clean." Exists for a caller that only has
+        the JSON-serialized form available -- e.g. a raw ``diff_summary
+        ["exit"]`` dict a scan engine persisted earlier in a run, carried
+        across an exception boundary that cannot hold the dataclass itself
+        (`abicheck.scan_engine._BudgetOverflow`'s own ``prior_decision``,
+        ADR-064's "preserve prior contributions on a later budget overflow"
+        follow-up).
+        """
+        return cls(
+            code=d["code"],
+            reasons=tuple(ExitReason(r) for r in d["reasons"]),
+            compatibility_contribution=d["compatibility_contribution"],
+            contract_coverage_contribution=d["contract_coverage_contribution"],
+            analysis_assurance_contribution=d["analysis_assurance_contribution"],
+            crosscheck_promotion_contribution=d.get(
+                "crosscheck_promotion_contribution", 0
+            ),
+            operational_error_contribution=d.get("operational_error_contribution", 0),
+            evidence_contract_error_contribution=d.get(
+                "evidence_contract_error_contribution", 0
+            ),
+            budget_overflow_contribution=d.get("budget_overflow_contribution", 0),
+            not_comparable_contribution=d.get("not_comparable_contribution", 0),
+            removed_required_library_contribution=d.get(
+                "removed_required_library_contribution", 0
+            ),
+        )
 
 
 def resolve_exit_decision(

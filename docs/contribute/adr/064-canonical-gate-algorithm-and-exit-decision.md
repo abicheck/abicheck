@@ -19,12 +19,46 @@ block reproducing `_exit_compare_release`'s own precedence — verified,
 never assumed, to always agree numerically with that (deliberately
 untouched) function's real, independently-tested output (see "Stage 1b,
 further split" below for exactly what landed and why the numbers can never
-diverge). **Still not implemented:** persisting a decision for `scan`'s
-`_BudgetOverflow`/`_EvidenceContractError` abort points, which raise
-*before* any report exists today and therefore need a genuine new design
-decision this stage deliberately did not make; the release fan-out's
-`GateOptions` unification; and **stage 2**, the `--exit-code-scheme`
-removal itself. See
+diverge). **Update (2026-08-31):** the programmatic `ScanResult` API's own
+`_BudgetOverflow`/`_EvidenceContractError` catches
+(`service_scan.run_scan`/`_run_scan_one_member`) now also persist a real
+`ExitDecision` into `ScanResult.report["exit"]`
+(`abicheck.workflows.scan_abort_result.scan_abort_result_fields` — a
+`workflows`-classified module, not `policy`, since shaping `ScanResult`'s
+own fields is report-shape work `abicheck/policy/AGENTS.md` reserves for a
+different layer than the gate decision itself, which still resolves through
+`abicheck.policy.exit_decision_precedence.resolve_scan_exit_decision`
+unchanged; Codex review, PR #967),
+closing that half of the gap this section used to describe as fully open —
+these two abort exceptions previously left `report` at its default empty
+dict, unlike `NOT_COMPARABLE`, which already built one. Prior contributions
+across a *late* `_BudgetOverflow` (the post-compare deadline check, which
+can fire after a real gate/coverage/assurance decision already exists) are
+preserved too (in both the baseline-compare and audit-only branches), via
+`_BudgetOverflow.prior_decision`/`abicheck.workflows.scan_abort_result.
+attach_prior_on_budget_overflow`/`audit_prior_decision`, rather than
+discarded in favor of a budget-only decision. **Landed (2026-08-31): the
+native `scan` CLI's own equivalent.** `cli_scan.py`'s two abort catches now
+call the new `_emit_scan_abort_report` helper — but only for `--format
+json` (or a `--write json=...` secondary output); before this, such an
+invocation that hit either abort produced empty stdout/no secondary file,
+so a consumer trying to parse it was already broken, and adding real
+content on that path changes no exit code and adds no output where any
+consumer could have depended on emptiness of a *working* JSON path. The
+payload is a minimal `ScanOutcome.to_dict()`-*compatible* envelope
+(top-level `verdict`/`exit_code`, the exit decision under `diff.exit`) —
+deliberately **not** `scan_abort_result_fields(...)["report"]`'s own shape,
+which is the *typed API's* `ScanResult.report` nesting, a different
+envelope; `workflows/aggregate/gate.py`'s `GateInfo.from_scan_report`
+requires a top-level `exit_code` and would raise `_MalformedGate` without
+one (Codex review, fresh evidence) — an earlier revision of this fix used
+that wrong shape before the gap was caught. `--format text` is deliberately
+unchanged: `bo.message`/`ce.message` already read as the human-facing
+explanation, and there is no `ScanOutcome` to feed `_render_text` at this
+point (most of its fields were never computed) — inventing prose for that
+gap remains a separate, open question this update does not attempt. Still
+open: the release fan-out's `GateOptions` unification; and **stage 2**, the
+`--exit-code-scheme` removal itself. See
 [cli-cleanup-phase-two.md](../plans/cli-cleanup-phase-two.md)'s "PR 4 — one
 gate algorithm" section, which this ADR formalizes rather than restates.
 **Decision maker:** Nikolay Petrov
@@ -258,16 +292,259 @@ lands in two stages rather than one atomic change:
       legacy-scheme code the new resolver can produce caps at the same `4`
       the real function's own operational-`"ERROR"` floor does, so the two
       cannot diverge on `code`, only on which `reasons`/contributions a
-      report reader sees). **Still not landed:** `scan`'s
-      `_BudgetOverflow`/`_EvidenceContractError` abort points
-      (`scan_engine.py`) raise *before* any report is ever constructed
-      today (unlike `NOT_COMPARABLE`, which already builds one) — a real
-      design decision (should the CLI construct a minimal report at those
-      abort points at all, and if so, what does it contain?) that this
-      stage deliberately declined to make as a side effect of wiring
-      already-designed resolvers. Also still open: the release fan-out's
-      `GateOptions` unification and a full cross-front-end parity pass
-      (typed API, Action).
+      report reader sees). **Landed (2026-08-31), typed-API half:** the
+      programmatic `ScanResult` API's own `_BudgetOverflow`/
+      `_EvidenceContractError` catches (`service_scan.run_scan`/
+      `_run_scan_one_member`) now persist a real `ExitDecision` into
+      `ScanResult.report["exit"]`
+      (`abicheck.workflows.scan_abort_result.scan_abort_result_fields`,
+      `tests/test_scan_abort_result.py`) — `ScanResult` already existed as a
+      real return value at these two abort points (it is what `run_scan`'s
+      docstring calls "the single object the CLI and library callers
+      consume"), so giving its already-present, always-empty `report` field
+      real content needed no new design decision, only the same wiring
+      `NOT_COMPARABLE` already got. The shaping logic (the verdict/exit_code
+      pairing and the `{"exit": ...}` wrapping) lives in this new
+      `workflows` module rather than the `policy` package that resolves the
+      underlying `ExitDecision` — `abicheck/policy/AGENTS.md` reserves "how
+      is it reported" for a different layer, and an earlier revision had put
+      it in `exit_decision_precedence.py` itself before a review round
+      caught the boundary violation (PR #967). `SCAN_SCHEMA_VERSION` bumped
+      to `1.23` for the newly nonempty `report.exit` shape. **Landed
+      (2026-08-31), prior-decision follow-up:** carrying a `prior_decision`
+      across `scan_engine.py`'s own *later* `_BudgetOverflow` raise site
+      (the post-compare deadline check, which runs after a real
+      gate/coverage/assurance decision already exists) — `_BudgetOverflow`
+      now carries a `prior_decision: dict[str, object] | None` attribute,
+      set by `abicheck.workflows.scan_abort_result.
+      attach_prior_on_budget_overflow` (a context manager wrapping that one
+      call site, catching via `hasattr` duck typing rather than importing
+      the private exception class into the unclassified `scan_engine.py`);
+      `service_scan.py`'s two catch sites forward `exc.prior_decision`
+      through to `scan_abort_result_fields`, which reconstructs it via
+      `ExitDecision.from_dict` before handing it to `resolve_scan_exit_
+      decision`'s own `prior_decision` parameter (`tests/
+      test_scan_abort_result.py::TestAttachPriorOnBudgetOverflow`). **Landed
+      (2026-08-31), native-CLI half:** `cli_scan.py`'s `scan_cmd` calls
+      `run_scan_core` directly (not through `service_scan.run_scan`), and
+      used to only write a stderr message plus `sys.exit`/`ClickException`
+      at these two abort points — no `ScanOutcome`/report was ever
+      constructed on this path, unlike `NOT_COMPARABLE`, which the CLI's own
+      code path already built one for. The open design question was whether
+      a machine-readable `--format json` scan invocation should get a
+      minimal JSON report on this abort path too, instead of empty stdout,
+      and from what partial state (most of `ScanOutcome`'s fields are never
+      computed at the earliest, candidate-collection-stage budget overflow).
+      Resolved narrowly rather than by constructing a partial `ScanOutcome`:
+      a new `_emit_scan_abort_report` helper prints a minimal
+      `ScanOutcome.to_dict()`-*compatible* envelope (top-level
+      `verdict`/`exit_code`/`scan_schema_version`, the exit decision nested
+      under `diff.exit`, matching where `NOT_COMPARABLE`/a baseline compare
+      already publish theirs) — but only when `fmt == "json"`; a `--format
+      json` invocation on this path previously produced empty stdout, which
+      was already unusable to any consumer parsing it as JSON, so this adds
+      content only where none existed and changes neither exit code
+      (`tests/test_cli_scan_abort_report.py`). `--format text` is
+      unchanged: `bo.message`/`ce.message` already read as the human-facing
+      explanation, and inventing prose to fill `ScanOutcome`'s missing
+      fields for a text rendering remains a separate, unaddressed question.
+      **Landed (2026-08-31), four follow-up fixes found by review on the
+      slices above:** (1) the *audit* path
+      (`run_scan_core`'s no-baseline branch) had the same late-budget-
+      overflow gap the baseline-compare branch's own fix closed —
+      `_audit_exit_code` never built a `diff_summary`, so a late overflow in
+      audit mode had nothing to preserve either. `_audit_exit_code` now
+      returns a third element, `abicheck.workflows.scan_abort_result.
+      audit_prior_decision`'s ``{"exit": ...}`` shape built from the same
+      compatibility/crosscheck contributions it already computes, fed to
+      `attach_prior_on_budget_overflow` via `diff_summary or audit_prior` —
+      without changing audit mode's own (non-aborting) report, which still
+      carries `diff: null` (`cli_scan_helpers.py`'s text renderer keys off
+      exactly that presence/absence, so populating it unconditionally would
+      have been a real regression, not merely a schema-version bump).
+      (2) `cli_scan._emit_scan_abort_report` only wrote to the *primary*
+      `--format`/`--output`; the documented `--format text --write
+      json=...` combination (the GitHub Action's own text-primary/JSON-
+      secondary pattern) silently produced no secondary artifact on abort.
+      It now also writes to `secondary_output` whenever `secondary_fmt ==
+      "json"`, independent of the primary format (`tests/
+      test_scan_abort_result.py::TestAuditPriorDecision`, `tests/
+      test_cli_scan_abort_report.py`'s secondary-output tests). (3) The
+      first cut of `_emit_scan_abort_report` reused
+      `scan_abort_result_fields(...)["report"]` directly — the *typed API's*
+      `ScanResult.report` nesting, `{scan_schema_version, exit}` with no
+      top-level `verdict`/`exit_code` — which is a different envelope from
+      the CLI's own `ScanOutcome.to_dict()` contract. A saved `--format
+      json` abort report fed to `workflows/aggregate/gate.py`'s
+      `GateInfo.from_scan_report` (which requires a top-level `exit_code`)
+      would have raised `_MalformedGate` rather than reading the budget/
+      evidence decision it carries (Codex review, fresh evidence). Fixed by
+      building the envelope-compatible payload described above instead
+      (`TestAbortPayloadIsAggregateCompatible` in `tests/
+      test_cli_scan_abort_report.py`, exercising `GateInfo.from_scan_report`
+      and `workflows/aggregate/load.parse_report_verdict` directly against a
+      real abort payload). (4) That fix alone was still not enough for the
+      real `aggregate` pipeline: `workflows/aggregate/load._load_report_file`
+      only calls `GateInfo.from_scan_report` *after*
+      `parse_report_verdict` succeeds, and neither `"BUDGET_OVERFLOW"` nor
+      `"EVIDENCE_CONTRACT_ERROR"` is a `Verdict` enum member, so the abort
+      still read as an unavailable/verdictless report a warn/optional/
+      discovered-target policy could silently tolerate, exactly the
+      "unmodeled" gap the review caught by exercising `_load_report_file`
+      itself rather than its two callees in isolation. Fixed the same way
+      `_load_report_file` already handles a compare-release operational
+      `"ERROR"` verdict and a native `not_comparable` result: two new
+      sentinels (`_SCAN_BUDGET_OVERFLOW_VERDICT`/
+      `_SCAN_EVIDENCE_CONTRACT_ERROR_VERDICT` in `workflows/aggregate/
+      contracts.py`) force a blocking `GateInfo` before the generic
+      verdict-parsing branch, the same "real failure, never silently
+      tolerated" treatment `_OPERATIONAL_ERROR_VERDICT` already gets —
+      unlike `_BOOTSTRAP_VERDICT`/`_NEW_TARGET_VERDICT`, which are
+      legitimately-tolerated fall-throughs. **A same-day follow-up caught
+      this forced gate's own `exit_code`:** the first cut hardcoded scan's
+      raw private code (5 for budget overflow) straight into the forced
+      `GateInfo`, bypassing `GateInfo.from_scan_report`'s own normalization
+      (every scan exit outside `{0, 2, 4}` folds to `1`,
+      `COVERAGE_INCOMPLETE_EXIT`) — the aggregate's own published contract
+      has no exit 5, so this leaked scan's numbering into
+      `AggregateResult.exit_code` (Codex review, fresh evidence: a legacy
+      scan payload with the same verdict already correctly returned 1,
+      while the new sentinel branch returned 5 for the identical failure).
+      Fixed by using `COVERAGE_INCOMPLETE_EXIT` for both abort verdicts'
+      gate `exit_code` (still `blocking_categories=("budget_overflow",)`/
+      `("evidence_contract_error",)`), matching `GateInfo.from_scan_report`'s
+      own rule exactly. Verified against the real end-to-end path this
+      time, not just the two readers: `tests/test_aggregate_migration_
+      coverage.py` exercises `_load_report_file` directly, and `tests/
+      test_cli_scan_abort_report.py::TestAbortPayloadThroughRealAggregate`
+      runs a real `scan --format json` abort through the real
+      `aggregate_reports_dir`. **(5) A further review round caught the
+      forced gate itself inventing a compatibility verdict:** setting
+      `compatibility_verdict=Verdict.BREAKING` for the forced abort gate
+      (mirroring `_OPERATIONAL_ERROR_VERDICT`) made `AggregateResult.
+      to_dict()` report `compatibility.verdict: "BREAKING"`, a complete
+      `analyzed_targets` count, and an affected profile for a scan that
+      never actually compared anything (Codex review, fresh evidence).
+      Fixed by keeping the target `compatibility_verdict=None` (unavailable)
+      for a scan abort specifically, while its forced gate still counts
+      toward `AggregateResult.exit_code()`/`blocking_targets` regardless of
+      required/optional declaration via a new `AggregateResult.
+      _forced_gate_targets` fold — the unavailable-but-gated shape
+      `operational_error`/`not_comparable` don't need, since those keep the
+      synthetic `BREAKING` verdict this fix removes only for scan aborts.
+      **(6) A sixth round caught the sticky PR comment reading the same
+      abort envelope as a clean, zero-findings comparison:**
+      `pr_comment_scan.from_scan` only special-cased `NOT_COMPARABLE`'s
+      `{"reason": ...}` shape, so the abort envelope's empty `findings`/
+      `additions`/`quality` buckets rendered "No ABI changes" — under
+      `--on=changes` this could delete a prior sticky failure comment
+      (Codex review, fresh evidence). Fixed via a new
+      `pr_comment_scan_abort.scan_abort_incomplete_reason` helper (split
+      into its own leaf module for the same no-growth-budget reason as the
+      scan-engine helpers above), giving the abort the identical single
+      blocking "analysis incomplete" `Finding` treatment `NOT_COMPARABLE`
+      already gets. **(7) A seventh round caught the aggregate gate
+      downgrading a real prior break:** a *late* `_BudgetOverflow`
+      preserves the ordinary compatibility/coverage/assurance/crosscheck
+      contributions already computed before it fired in the report's
+      `diff.exit` (`attach_prior_on_budget_overflow`, (4) above) -- but
+      `_load_report_file`'s forced-blocking branch never read them,
+      unconditionally floor-setting the gate to `COVERAGE_INCOMPLETE_EXIT`
+      (1) even when `compatibility_contribution` was `4` (a real ABI break
+      already found) (Codex review, fresh evidence). Fixed via a new
+      `_scan_abort_prior_exit` helper that reads the largest valid
+      preserved contribution from `diff.exit` and folds it with `max()`
+      against the coverage floor; an early abort (every contribution
+      genuinely `0`) still floors at `1` unchanged, and a malformed/
+      out-of-scheme contribution is ignored rather than trusted. **(8) An
+      eighth round caught the preserved contract-coverage/analysis-
+      assurance contributions folded into the gate but dropped from their
+      own orthogonal reports:** `AggregateResult.contract_coverage_exit`/
+      `.analysis_assurance_exit` (and their `..._targets` lists) read
+      `_LoadedReport.contract_coverage_exit`/`.analysis_assurance_exit`
+      directly, never the gate -- and those two fields only ever read the
+      differently-named, older `contract_coverage_exit_contribution`/
+      `analysis_assurance_exit_contribution` fields a scan-abort payload
+      never carries, so a late abort that preserved a real `1` on either
+      axis silently reported `0` with an empty target list on both
+      (Codex review, fresh evidence). Fixed via a new `_scan_abort_exit_
+      axis` helper that reads each axis separately from `diff.exit` and
+      folds it into the corresponding `_LoadedReport` field. **(9) A ninth
+      round caught the same two helpers missing `scan --artifact-set`'s own
+      abort shape entirely:** `ScanSetResult.to_dict()` has no `diff` key at
+      all -- its own top-level `verdict` can equally read `"BUDGET_
+      OVERFLOW"` (`_aggregate_scan_set_verdict`: any member overflowing
+      makes the whole set report one), but each member's own preserved
+      decision nests instead at `per_artifact[i].report.exit`
+      (`ScanArtifactResult.to_dict()` wrapping the typed API's own
+      `ScanResult.report` envelope, not `ScanOutcome`'s `diff.exit`) (Codex
+      review, fresh evidence). Reading only the single-binary shape silently
+      downgraded a real member break to the generic abort floor and omitted
+      the coverage/assurance axes for a set-level abort. Fixed by
+      generalizing `_scan_abort_exit_block` into `_scan_abort_exit_blocks`,
+      which returns every exit-decision block a report may carry (the
+      single `diff.exit`, plus every `per_artifact[i].report.exit`); both
+      consumers now fold `max()` across all of them instead of reading one.
+      **(10)/(11) A tenth and eleventh round, on the same commit, caught two
+      further shapes `_scan_abort_exit_blocks` still missed:** (10) the
+      typed API's own `ScanResult.to_dict()` dumped directly (no native CLI
+      involved) has no `diff` key at all -- its preserved decision nests at
+      the document *root*'s own `report.exit`, a third shape distinct from
+      both `diff.exit` and an artifact-set member's `per_artifact[i].
+      report.exit`; (11) a `scan --artifact-set` set-level abort firing
+      *after* every member already finished normally (the shared budget
+      expiring during the post-member bundle audit, `run_scan_set`'s own
+      `per_artifact=per_artifact` branch there) preserves real, completed
+      member results in `per_artifact` -- but a completed member never
+      aborted, so its own `ScanResult.report` is empty with no nested
+      `exit` block at all; its real result lives only in its own bare
+      top-level `exit_code` (Codex review, fresh evidence for both). Fixed
+      by extending `_scan_abort_exit_blocks` to also read root `report.
+      exit`, and to synthesize a minimal `{"compatibility_contribution":
+      exit_code}` block from a member with no nested decision -- both fold
+      through the same `max()` machinery as a real block, rather than a
+      separate code path. This closes every envelope shape this codebase's
+      own report producers can actually emit (native CLI single-binary,
+      typed-API single-result, artifact-set member abort, artifact-set
+      member completed-without-abort); a further exotic shape would need
+      its own review round to surface, same as these five did. **(12) A
+      twelfth round caught a different kind of gap in the same file, not
+      another envelope shape:** `_aggregate_scan_set_verdict` (ADR-056 D3,
+      `service_scan.py`) deliberately keeps a stronger real `API_BREAK`/
+      `BREAKING` verdict at a set's own root even when another member
+      aborted with `EVIDENCE_CONTRACT_ERROR` alongside it -- a real break
+      must never be hidden behind an evidence-completeness verdict -- but
+      that left the root `verdict` string with no way to say which member
+      aborted, so the loader's `blocking_categories` silently dropped
+      `evidence_contract_error` for that target despite the member never
+      completing a comparison (the real severity, exit 2/4, was already
+      correct through `GateInfo.from_scan_report`'s mapped-code branch;
+      only the category label was missing) (Codex review, fresh evidence).
+      Fixed by a new `_member_abort_categories` helper that reads each
+      `per_artifact` member's own bare `verdict` field directly and folds
+      any abort category it names into the gate, independent of which
+      verdict won at the root. Unlike (1)-(11), this was not another
+      envelope shape `_scan_abort_exit_blocks` needed to recognize --
+      it was the set-level verdict-blending logic itself dropping a
+      category label it never carried into any `exit` block to begin
+      with, so it needed its own read of `per_artifact[*].verdict` rather
+      than another fold over `_scan_abort_exit_blocks`'s output. **(13) A
+      thirteenth round, immediately after, caught the fix above only
+      reaching one of `_load_report_file`'s two abort-handling branches:**
+      `_aggregate_scan_set_verdict`'s own step 1 makes any member's
+      `BUDGET_OVERFLOW` dominate the set-level `verdict` unconditionally,
+      even when a *different* member aborted with `EVIDENCE_CONTRACT_ERROR`
+      for an unrelated reason -- but the root-abort branch (the one keyed
+      on `raw_scan_verdict` matching a synthetic abort string directly)
+      hardcoded only the single category matching that string and
+      returned before `_member_abort_categories` was ever consulted, so a
+      sibling member's `evidence_contract_error` category was still
+      silently dropped in exactly the case (12)'s fix didn't reach (Codex
+      review, fresh evidence). Fixed by unioning
+      `_member_abort_categories` into that branch's `blocking_categories`
+      too, the same way (12) already does for the normal-verdict branch.
+      Still open: the release fan-out's `GateOptions` unification and a
+      full cross-front-end parity pass (typed API, Action).
 2. **Atomic.** Once the report block agrees with today's real behaviour for
    every axis and every mode (verified by the axis-separated tests this ADR
    requires below), remove `--exit-code-scheme` from `compare` and `scan`,
@@ -325,8 +602,8 @@ alongside the flag deletion itself.
 - [cli-cleanup-phase-two.md](../plans/cli-cleanup-phase-two.md) — "PR 4 —
   one gate algorithm (`--exit-code-scheme` removal)" is this ADR's source
   material; the plan's "Ordering" table tracks PR G1 (done, #789) and PR G2
-  (this ADR — stage 1a landed, stage 1b/stage 2 not yet implemented) as a
-  pair.
+  (this ADR — stage 1a landed, stage 1b partially landed per this ADR's own
+  status header above, stage 2 not yet implemented) as a pair.
 - [ADR-049](049-contract-relevance-and-compatibility-configuration.md) —
   contract-coverage's own orthogonal exit contribution, folded on top of
   this ADR's precedence, never lowering it.

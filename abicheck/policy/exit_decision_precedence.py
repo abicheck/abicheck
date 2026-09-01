@@ -27,9 +27,13 @@ exit_decision``, ``resolve_release_exit_decision``) still reach
 functions moved *out of* the module the shim mirrors.
 
 See ``exit_decision.py``'s own module docstring for what ADR-064 is and
-what stage this additive work belongs to; this module implements exactly
-the same stage (1a: pure resolvers, not yet wired into any real call site),
-just physically split for the line-count cap.
+what stage this additive work belongs to; this module implements the same
+stage 1a resolvers, just physically split for the line-count cap. Stage 1b
+has since wired `resolve_scan_exit_decision` into real call sites --
+`scan_engine.py`'s `NOT_COMPARABLE` outcome and (via
+`abicheck.workflows.scan_abort_result`) its `_BudgetOverflow`/
+`_EvidenceContractError` aborts -- so this module is no longer additive-only
+dead code the way it was when first split out.
 """
 
 from __future__ import annotations
@@ -199,10 +203,12 @@ def resolve_scan_exit_decision(
     resolve an ordinary :class:`ExitDecision` for it instead (via
     :func:`resolve_compare_exit_decision`/:func:`resolve_exit_decision`).
 
-    This is pure, additive logic (ADR-064's first stage) -- it is not yet
-    called from `scan_engine.py`/`cli_scan_baseline.py`, so no existing
-    call site's actually-returned exit code changes because this function
-    exists. The `*_code` keyword arguments default to `scan`'s own real
+    Pure resolver logic (ADR-064's first stage); stage 1b has since wired it
+    into `scan_engine.py`'s `NOT_COMPARABLE`/`_BudgetOverflow`/
+    `_EvidenceContractError` outcomes, always producing the same code an
+    unwired caller already computed by hand -- so no existing call site's
+    actually-returned exit code changed *because* this function exists. The
+    `*_code` keyword arguments default to `scan`'s own real
     numbers (1/5/6, shared by both budget-overflow axes since they map to
     the identical exit code regardless of which raised it) but are
     accepted explicitly rather than hard-coded, so a future caller for a
