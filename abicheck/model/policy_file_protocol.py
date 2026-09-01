@@ -41,18 +41,34 @@ so ``PolicyFile``/``ReclassifyRule`` stay exactly as they are in
 Two things this narrow fix does **not** claim to resolve — recorded so a
 later reader doesn't re-litigate them as if this module were meant to:
 
-1. It closes only the *field's declared type*. ``DiffResult``'s own methods
-   (``_effective_kind_sets``/``_effective_verdict_for_change``) still
-   *execute* real policy-resolution algorithms in their bodies (module-level
-   imports of ``checker_policy``/``reclassify``, not annotations) — a
-   second, real ``model``-holds-policy-logic tension the ADR's own Phase 4
-   section records as an explicit, unaudited known gap, not something this
-   module's Protocol pair touches.
+1. It closes only the *field's declared type*. What it does NOT close by
+   itself is the real, independent ``model``-holds-policy-logic tension the
+   ADR's own Phase 4 section originally recorded as an explicit, unaudited
+   known gap: ``DiffResult``'s own methods (``_effective_kind_sets``/
+   ``_effective_verdict_for_change``) *executing* policy-resolution
+   algorithms in their own bodies, not merely holding a typed reference to
+   one. **That gap is now closed separately** (ADR-061 Phase 4 finalization,
+   ``checker_policy.apply_policy_file_overrides``): both methods are pure
+   one-line delegating calls today — no branching, looping, or set
+   manipulation happens inside ``checker_types.py`` itself any more. The
+   import edge to ``checker_policy``/``reclassify`` necessarily remains
+   (``DiffResult`` still needs to *call* something to get the computed
+   result), which is why closing this did not, and could not, change either
+   module's classification — see point 2 below for why that import edge is
+   sanctioned rather than a residual violation.
 2. ``reclassify.py`` itself is not reclassified and does not need to be —
    it remains **deliberately unclassified** (``check_architecture.py``
    never checks an unclassified module's own imports), so nothing here
    requires ``ReclassifyRule``'s constructor-time ``suppression.py``
    dependency, or its own ``checker_policy`` imports, to be resolved first.
+   ``checker_policy.py`` carries the identical treatment, for the identical
+   reason: both are ``public_root_surfaces`` leaves any layer may reach
+   without tripping ``unclassified-import``, the same sanctioned-leaf shape
+   ``policy_file.py`` had before its own split into ``policy``. Formally
+   classifying either as ``policy`` would not shrink this edge — it would
+   only turn the same, now-purely-data-consuming call into a blocked
+   ``model -> policy`` finding, since ``model``'s own ``may_import`` is
+   empty by design (D1) and widening it defeats the point of the layer.
 
 Exhaustiveness of the member lists below was verified against every real
 ``<something>.policy_file.<member>`` read in the codebase (``reporter.py``,
