@@ -5572,6 +5572,19 @@ looked like the obvious fix and wasn't.
   and graph-only closures in one header -- a real, cross-cutting change
   to two independently-evolving modules, not a same-PR reactive patch.
 
+  **Same gap, also reachable from the load path (Codex review, fresh
+  evidence).** `storage.snapshot_load_normalization.normalize_anonymous_
+  type_spellings_on_load` (added to close a sibling bug: a raw pre-strip
+  on-disk baseline was left completely unrenumbered on load, see this
+  file's own git history) rewrites the identical flat
+  `_LAMBDA_IDENTITY_FIELDS` only, called after `snapshot_from_dict` has
+  already decoded a schema-v29+ document's `AbiSnapshot.surface_graph` --
+  so a loaded raw-marker baseline's attached graph keeps its own
+  un-stripped node/edge identities even once the flat fields are
+  normalized. Not fixed here, for the same reason as above: it needs the
+  same graph-aware widening this entry already calls for, not a second,
+  independent patch on the load side.
+
 - ~~Neither `scan`'s dry-run report validates `--abi3` applicability before
   reporting success~~ **Fixed (CLI cleanup phase two, PR 5 follow-up).**
   Both `frontends.cli.scan_dry_run.render_scan_dry_run` (single-binary) and

@@ -54,6 +54,10 @@ from .storage.fact_codec import (
     decode_record_facts,
     encode_fact_fields,
 )
+from .storage.snapshot_load_normalization import (
+    backfill_missing_elf_binding,
+    normalize_anonymous_type_spellings_on_load,
+)
 from .storage.surface_graph_codec import decode_surface_graph, encode_surface_graph
 
 # Current schema version for snapshot serialization.
@@ -798,41 +802,6 @@ def _sub_block(parser: Callable[[dict[str, Any]], _T], raw: Any) -> _T | None:
     one guard keeps a dozen call sites from each spelling it out.
     """
     return parser(raw) if isinstance(raw, dict) else None
-
-
-def _backfill_missing_elf_binding(snap: AbiSnapshot) -> None:
-    """Backfill Function/Variable.elf_binding from an already-loaded
-    ``elf.symbols`` for a snapshot serialized before this field existed
-    (Codex review, fresh evidence).
-
-    A pre-this-PR snapshot's own ``elf`` block already carries the exact
-    same fact ``dumper_elf_symbols._populate_elf_visibility`` reads it
-    from at dump time -- only the newer per-declaration ``elf_binding``
-    key was never written at serialization time, so loading it as ``None``
-    (the ordinary missing-key convention) would make a fresh ``binding:``
-    suppression selector fail closed against *every* already-archived
-    baseline, not just genuinely-unknown-binding cases, until each one is
-    regenerated -- which is not always possible for an archived release.
-    Only fills a ``None``: an explicitly serialized value from a v16+
-    writer is preserved untouched, never recomputed.
-
-    Deliberately scoped to ``elf_binding`` alone -- ``elf_visibility`` has
-    the identical legacy-backfill gap but predates this PR, is unrelated to
-    the field this PR adds, and is left as it already was.
-    """
-    if snap.elf is None:
-        return
-    sym_map = snap.elf.symbol_map
-    for func in snap.functions:
-        if func.elf_binding is None:
-            elf_sym = sym_map.get(func.mangled)
-            if elf_sym is not None:
-                func.elf_binding = elf_sym.binding
-    for var in snap.variables:
-        if var.elf_binding is None:
-            elf_sym = sym_map.get(var.mangled)
-            if elf_sym is not None:
-                var.elf_binding = elf_sym.binding
 
 
 def snapshot_from_dict(d: dict[str, Any]) -> AbiSnapshot:
@@ -1643,7 +1612,8 @@ def snapshot_from_dict(d: dict[str, Any]) -> AbiSnapshot:
             stacklevel=2,
         )
 
-    _backfill_missing_elf_binding(snap)
+    backfill_missing_elf_binding(snap)
+    normalize_anonymous_type_spellings_on_load(snap)
     return qualified_name_segments.renumber_anonymous_closure_identities(snap)
 
 

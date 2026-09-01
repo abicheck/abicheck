@@ -729,6 +729,21 @@ def defer_closure_identity_renumbering() -> _Iterator[None]:
         _defer_renumber.active = previous
 
 
+def _lambda_identity_containers_and_strings(
+    snapshot: object,
+) -> tuple[list[object], list[str]] | None:
+    """Collect :data:`_LAMBDA_IDENTITY_FIELDS`' containers and strings, or
+    ``None`` once none mentions ``"(lambda"``/``"(unnamed "`` -- shared with
+    ``storage.snapshot_load_normalization``, an importer of this helper."""
+    containers = [getattr(snapshot, name) for name in _LAMBDA_IDENTITY_FIELDS]
+    strings: list[str] = []
+    for container in containers:
+        _collect_strings(container, strings)
+    if not any("(lambda" in s or "(unnamed " in s for s in strings):
+        return None
+    return containers, strings
+
+
 def renumber_anonymous_closure_identities(snapshot: _SnapshotT) -> _SnapshotT:
     """Replace each castxml/clang closure marker's ``:<line>:<col>``
     discriminator with a stable ordinal among same-header, same-kind
@@ -746,33 +761,30 @@ def renumber_anonymous_closure_identities(snapshot: _SnapshotT) -> _SnapshotT:
     ``getattr(snapshot, field)`` rather than importing ``AbiSnapshot``, to
     keep this module import-free -- see its own docstring.
 
-    Known, accepted residual (Codex review, fresh evidence): a snapshot
-    written by a version of abicheck *older* than this function's own
-    introduction never carries an ordinal-form marker, and a reader
-    *older* than this function that later loads a snapshot written by a
-    *newer* abicheck (which already carries the ordinal form) has no code
-    path that renumbers it back -- ``serialization.SCHEMA_VERSION`` was not
-    bumped for this representation change, so that older reader has no
-    signal that the identity format it's comparing against differs from
-    what its own dumper would have produced. The reverse direction (an
-    older-format on-disk baseline compared by a current reader) is closed
-    by ``snapshot_from_dict``'s unconditional renumber-on-load. Closing
-    this direction too needs a real schema bump, which ripples into
-    ``docs/`` (the doc-count-sync AI-readiness check) and every test
-    fixture pinning the current schema version -- a real, separate change,
-    not folded into this fix.
+    The marker regex requires the stripped spelling, never a raw
+    ``(lambda at <path>:<line>:<col>)`` one --
+    ``storage.snapshot_load_normalization`` strips it first on load.
+
+    Known, accepted residual (Codex review, fresh evidence): a reader
+    *older* than this function that loads a snapshot written by a *newer*
+    abicheck (already in ordinal form) has no code path renumbering it
+    back -- ``serialization.SCHEMA_VERSION`` was not bumped for this
+    representation change, so that older reader has no signal the identity
+    format differs from what its own dumper would produce. The reverse
+    direction (an older-format baseline, current reader) is closed by the
+    strip-then-renumber load path above; closing this one too needs a real
+    schema bump, rippling into ``docs/`` and every fixture pinning the
+    schema version -- separate, not folded into this fix.
 
     A no-op, returning *snapshot* untouched, inside
     :func:`defer_closure_identity_renumbering`'s context.
     """
     if getattr(_defer_renumber, "active", False):
         return snapshot
-    containers = [getattr(snapshot, name) for name in _LAMBDA_IDENTITY_FIELDS]
-    strings: list[str] = []
-    for container in containers:
-        _collect_strings(container, strings)
-    if not any("(lambda" in s or "(unnamed " in s for s in strings):
+    collected = _lambda_identity_containers_and_strings(snapshot)
+    if collected is None:
         return snapshot
+    containers, strings = collected
     ordinals = collect_anonymous_type_ordinals(strings)
     if not ordinals:
         return snapshot

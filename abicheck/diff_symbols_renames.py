@@ -36,6 +36,7 @@ from .binary_fingerprint import (
 )
 from .checker_policy import ChangeKind
 from .checker_types import Change
+from .compare.rename_ambiguity import added_side_ambiguity_resolver
 from .demangle import demangle, demangle_batch
 from .detector_registry import registry
 from .diff_cxx_rules import (
@@ -1169,19 +1170,17 @@ def find_namespace_move_groups(
     # come from `raw_symbol_keys` instead, so a key raised at a
     # locally-ambiguous position still counts as a competitor even without
     # its own entry. A genuine tie (both/neither corroborated) still rejects.
-    key_support: dict[tuple[str, str], set[str]] = {}
-    for masked, r_comps, i, a_comps in entries:
-        sid = "::".join(r_comps)
-        k = (r_comps[i], a_comps[i])
-        key_support.setdefault(k, set()).add(sid)
+    key_support, is_added_side_acceptable = added_side_ambiguity_resolver(
+        entries, added_id_to_removed_symbols, raw_symbol_key_targets
+    )
     for masked, r_comps, i, a_comps in entries:
         if len(masked_to_old_segments[masked]) != 1:
             continue
         added_id = "::".join(a_comps)
         symbol_id = "::".join(r_comps)
-        if len(added_id_to_removed_symbols[added_id]) != 1:
-            continue
         key = (r_comps[i], a_comps[i])
+        if not is_added_side_acceptable(symbol_id, added_id, key):
+            continue
         if len(removed_id_to_added_symbols[symbol_id]) != 1:
             # This key itself may resolve to >1 distinct target for this
             # symbol (see raw_symbol_key_targets's docstring) -- reject

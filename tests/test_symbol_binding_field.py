@@ -113,15 +113,25 @@ class TestSerializationRoundTrip:
 
     def test_missing_elf_binding_stays_none_when_no_matching_symbol(self) -> None:
         # elf block present, but no .dynsym entry for this declaration's
-        # mangled name -- nothing to backfill from either.
+        # mangled name -- nothing to backfill from either. Covers the
+        # variable branch too (`backfill_missing_elf_binding` walks
+        # functions and variables separately) -- previously exercised only
+        # for functions.
         func = Function(name="f", mangled="_Z1fv", return_type="void")
+        var = Variable(name="g", mangled="g", type="int")
         snap = AbiSnapshot(
-            library="lib.so", version="1.0", functions=[func], elf=ElfMetadata(symbols=[])
+            library="lib.so",
+            version="1.0",
+            functions=[func],
+            variables=[var],
+            elf=ElfMetadata(symbols=[]),
         )
         d = snapshot_to_dict(snap)
         d["functions"][0].pop("elf_binding", None)
+        d["variables"][0].pop("elf_binding", None)
         loaded = snapshot_from_dict(d)
         assert loaded.functions[0].elf_binding is None
+        assert loaded.variables[0].elf_binding is None
 
     def test_explicit_elf_binding_is_not_overwritten_by_backfill(self) -> None:
         # An already-serialized non-None value must be preserved untouched,
