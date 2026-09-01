@@ -3540,6 +3540,29 @@ second top-level spelling of the same fact.
 > full cross-front-end parity pass (typed API, Action), and stage 2 (the
 > atomic removal — deleting `--exit-code-scheme` and updating CLI/API/
 > Action/`aggregate` parity together).
+>
+> **Update (2026-09-01): a first Action-side parity slice.** The
+> cross-front-end parity pass found a real gap on the very axis this
+> section just finished wiring: `action/run.sh`'s `scan` verdict mapping
+> could not tell an `_EvidenceContractError` abort apart from a genuine CLI
+> usage error, since `cli_scan.py` raises it as a `click.ClickException` —
+> identical `Error: ...` stderr to a bad flag or a crash — so the Action
+> folded a well-formed, evidence-incomplete scan into the generic `ERROR`
+> bucket, discarding the distinguishable `verdict:
+> "EVIDENCE_CONTRACT_ERROR"` JSON envelope this section's own native-CLI
+> work had just started emitting. Fixed with a new `_evidence_contract_
+> gated()` helper (JSON-verdict-first, mirroring `_coverage_gated`/
+> `_assurance_gated`) consulted ahead of `_is_cli_error`, a matching
+> `EVIDENCE_CONTRACT_ERROR` output verdict (job summary, `action.yml`
+> docs, and the same unconditional step-failure/PR-comment-skip treatment
+> `NOT_COMPARABLE`/`BUDGET_OVERFLOW` already have), and
+> `tests/test_action_run_sh_scan_evidence_contract_error.py`. See
+> [ADR-064](../adr/064-canonical-gate-algorithm-and-exit-decision.md)'s own
+> matching update for the full account, including the one gap this leaves:
+> `--format text` with no JSON secondary output still reads as `ERROR`,
+> since `cli_scan.py` writes no report at all on that path. Still open:
+> the `GateOptions` rewrite, the typed-API half of the parity pass, and
+> that `--format text` gap.
 
 **This is the item the original draft got wrong, and it gets its own ADR.**
 

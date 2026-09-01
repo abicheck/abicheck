@@ -762,7 +762,12 @@ outputs:
       not extracted under a comparable profile/scope contract -- ADR-050
       D2 -- so no comparison could run at all; this verdict fails the step
       unconditionally, since no fail-on-* input governs a run in which no
-      comparison happened), BUDGET_OVERFLOW, or ERROR.
+      comparison happened), BUDGET_OVERFLOW, EVIDENCE_CONTRACT_ERROR (a
+      pinned --depth/--source-method whose required source evidence was
+      never collected -- ADR-037 D5 -- so no comparison could run at all;
+      like NOT_COMPARABLE, this fails the step unconditionally and is
+      distinct from ERROR, which covers a genuine CLI/config error), or
+      ERROR.
       For deps-compare: PASS, WARN, FAIL, or ERROR.
       For deps-tree: PASS, FAIL, or ERROR.
       On compare and scan alike, verdict and exit-code are different axes and

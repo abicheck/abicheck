@@ -1,0 +1,178 @@
+# Copyright 2026 Nikolay Petrov
+# SPDX-License-Identifier: Apache-2.0
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+"""Behavioral tests for ``action/run.sh``'s ``scan`` exit-1 VERDICT mapping
+for ``_EvidenceContractError`` (ADR-037 D5, scan_engine.py) — extracted
+verbatim, same discipline as the sibling ``test_action_run_sh_*.py`` files
+(``test_action_run_sh_scan_not_comparable.py`` is the closest analog).
+
+CLI cleanup phase two / ADR-064's own "still open" item: a full
+cross-front-end parity pass between the native CLI and this composite
+Action. ``cli_scan.py`` raises ``_EvidenceContractError`` as a
+``click.ClickException`` (exit 1, stderr ``Error: <message>``) — the
+identical stderr shape a bad flag or a crash produces, so before this fix
+``_is_cli_error``'s own ``^Error:`` match won the exit-1 disambiguation
+unconditionally, folding a well-formed command that merely lacked evidence
+for its own pinned ``--depth`` into the same generic "CLI error" bucket a
+syntax typo gets — even though the native CLI's ``--format json`` path
+already writes a real, distinguishable ``verdict: "EVIDENCE_CONTRACT_ERROR"``
+envelope for this abort (``_emit_scan_abort_report``/
+``scan_abort_result_fields``). The final-exit-code block is exercised too,
+mirroring ``test_action_run_sh_scan_not_comparable.py``'s own rationale: a
+verdict newly split out of the generic ``ERROR`` bucket must carry its own
+explicit ``FINAL_EXIT=1``, or the step silently starts passing.
+"""
+
+from __future__ import annotations
+
+import os
+import subprocess
+from pathlib import Path
+
+RUN_SH = Path(__file__).resolve().parents[1] / "action" / "run.sh"
+_CASE_START = "    case $ABICHECK_EXIT in\n"
+_CASE_END = "    esac\n"
+_FINAL_EXIT_SCAN_START = (
+    'elif [[ "$MODE" == "scan" ]]; then\n'
+    "  # scan: BREAKING/API_BREAK follow the fail-on flags"
+)
+_FINAL_EXIT_SCAN_END = "\nelse\n"
+
+
+def _bash_executable() -> str:
+    if os.name != "nt":
+        return "bash"
+    for candidate in (
+        os.environ.get("GIT_BASH_PATH"),
+        r"C:\Program Files\Git\bin\bash.exe",
+        r"C:\Program Files\Git\usr\bin\bash.exe",
+    ):
+        if candidate and Path(candidate).is_file():
+            return candidate
+    return "bash"
+
+
+def _exit_case_fragment() -> str:
+    """The ``case $ABICHECK_EXIT in ... esac`` block from the scan branch,
+    extracted verbatim (the second ``elif [[ "$MODE" == "scan" ]]`` region,
+    which maps ``ABICHECK_EXIT`` to ``VERDICT``)."""
+    text = RUN_SH.read_text(encoding="utf-8")
+    marker = 'elif [[ "$MODE" == "scan" ]]; then\n  # scan exit codes:'
+    start = text.index(marker)
+    case_start = text.index(_CASE_START, start)
+    case_end = text.index(_CASE_END, case_start) + len(_CASE_END)
+    return text[case_start:case_end]
+
+
+def _final_exit_scan_fragment() -> str:
+    """The scan branch of the final-exit-code ``if/elif`` chain, extracted
+    verbatim, stopping right before the sibling ``compare`` branch (see
+    ``test_action_run_sh_scan_not_comparable.py`` for the full rationale)."""
+    text = RUN_SH.read_text(encoding="utf-8")
+    start = text.index(_FINAL_EXIT_SCAN_START)
+    end = text.index(_FINAL_EXIT_SCAN_END, start)
+    fragment = text[start:end]
+    assert fragment.startswith("elif ")
+    return "if " + fragment[len("elif ") :]
+
+
+def _run_exit_mapping(
+    abicheck_exit: int,
+    *,
+    evidence_contract_gated: bool = False,
+    is_cli_error: bool = False,
+    severity_exit: str = "0",
+) -> subprocess.CompletedProcess:
+    # Stub every helper the extracted case-block calls -- this test is
+    # scoped to the mapping itself.
+    stubs = f"""
+_resolve_clean_exit_verdict() {{ VERDICT="COMPATIBLE"; }}
+_severity_gate_exit() {{ echo "{severity_exit}"; }}
+_evidence_contract_gated() {{ return {0 if evidence_contract_gated else 1}; }}
+_is_cli_error() {{ return {0 if is_cli_error else 1}; }}
+_coverage_gated() {{ return 1; }}
+_assurance_gated() {{ return 1; }}
+_escalate_verdict_to_report() {{ :; }}
+"""
+    script = (
+        stubs
+        + f"ABICHECK_EXIT={abicheck_exit}\n"
+        + 'STDERR_CONTENT=""\n'
+        + _exit_case_fragment()
+        + '\necho "VERDICT=$VERDICT"\n'
+    )
+    return subprocess.run(
+        [_bash_executable(), "-c", script],
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+
+
+def test_exit_1_evidence_contract_error_maps_to_its_own_verdict():
+    """The signal the CLI now provides (a JSON verdict of
+    EVIDENCE_CONTRACT_ERROR) must win over the generic CLI-error bucket,
+    even though both conditions are simultaneously true on real stderr
+    (Click's ClickException always prints "Error: ...")."""
+    result = _run_exit_mapping(1, evidence_contract_gated=True, is_cli_error=True)
+    assert result.returncode == 0, result.stderr
+    assert "VERDICT=EVIDENCE_CONTRACT_ERROR" in result.stdout
+
+
+def test_exit_1_plain_cli_error_still_maps_to_error():
+    """A genuine bad-flag/crash abort (no evidence-contract JSON signal)
+    must still classify as the generic ERROR bucket, unchanged."""
+    result = _run_exit_mapping(1, evidence_contract_gated=False, is_cli_error=True)
+    assert result.returncode == 0, result.stderr
+    assert "VERDICT=ERROR" in result.stdout
+
+
+def test_exit_1_severity_error_unaffected():
+    """A severity-scheme gate at exit 1 (no evidence-contract abort, no CLI
+    error) must still classify as SEVERITY_ERROR, unchanged."""
+    result = _run_exit_mapping(
+        1, evidence_contract_gated=False, is_cli_error=False, severity_exit="2"
+    )
+    assert result.returncode == 0, result.stderr
+    assert "VERDICT=SEVERITY_ERROR" in result.stdout
+
+
+def test_evidence_contract_error_still_fails_the_step():
+    """Before this fix, an evidence-contract abort read as VERDICT=ERROR,
+    which the final-exit-code block's own `[[ "$VERDICT" == "ERROR" ]]`
+    branch (outside the scan-specific fragment under test here) always
+    failed. Splitting it into its own verdict removes that automatic path,
+    so the scan-specific block must carry an explicit twin or the step
+    would silently start passing on this exact abort (Codex review)."""
+    script = _final_exit_scan_fragment() + 'fi\necho "FINAL_EXIT=$FINAL_EXIT"\n'
+    script = (
+        'MODE="scan"\n'
+        'VERDICT="EVIDENCE_CONTRACT_ERROR"\n'
+        'GATE_TIER=""\n'
+        'ADVISORY_BREAK="false"\n'
+        'INPUT_FAIL_ON_BREAKING="true"\n'
+        'INPUT_FAIL_ON_API_BREAK="false"\n'
+        '_severity_gate_categories() { echo ""; }\n'
+        "_coverage_gated() { return 1; }\n"
+        "FINAL_EXIT=0\n" + script
+    )
+    result = subprocess.run(
+        [_bash_executable(), "-c", script],
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    assert result.returncode == 0, result.stderr
+    assert "FINAL_EXIT=1" in result.stdout

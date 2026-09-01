@@ -56,8 +56,19 @@ that wrong shape before the gap was caught. `--format text` is deliberately
 unchanged: `bo.message`/`ce.message` already read as the human-facing
 explanation, and there is no `ScanOutcome` to feed `_render_text` at this
 point (most of its fields were never computed) — inventing prose for that
-gap remains a separate, open question this update does not attempt. Still
-open: the release fan-out's `GateOptions` unification; and **stage 2**, the
+gap remains a separate, open question this update does not attempt. **Update
+(2026-09-01):** the first slice of the "full cross-front-end parity pass"
+this section names as still open has landed — the composite Action's own
+`scan` verdict mapping (`action/run.sh`) previously folded an
+`_EvidenceContractError` abort into the generic `ERROR` bucket a CLI usage
+error gets, since both produce the identical `Error: ...` stderr shape; it
+now recognizes the native CLI's own `verdict: "EVIDENCE_CONTRACT_ERROR"`
+JSON envelope and publishes a matching, distinguishable verdict (see
+"Staged landing, additive first" below, item 1's own end-of-list "Update"
+for the full account). Still
+open: the release fan-out's `GateOptions` unification; the rest of the
+cross-front-end parity pass (typed API; the `--format text` gap named
+above); and **stage 2**, the
 `--exit-code-scheme` removal itself. See
 [cli-cleanup-phase-two.md](../plans/cli-cleanup-phase-two.md)'s "PR 4 — one
 gate algorithm" section, which this ADR formalizes rather than restates.
@@ -545,6 +556,47 @@ lands in two stages rather than one atomic change:
       too, the same way (12) already does for the normal-verdict branch.
       Still open: the release fan-out's `GateOptions` unification and a
       full cross-front-end parity pass (typed API, Action).
+
+      **Update (2026-09-01): first slice of the Action-side parity pass.**
+      The composite Action's own `scan` verdict mapping
+      (`action/run.sh`) had exactly the gap this precedence work exists to
+      close: `cli_scan.py` raises `_EvidenceContractError` as a
+      `click.ClickException` (stderr `Error: <message>`, exit 1) — the
+      identical shape a bad flag or a crash produces — so `run.sh`'s
+      `_is_cli_error` check (`grep -qE '(^Usage:|^Error:|...)'`) matched it
+      unconditionally and folded a well-formed, evidence-incomplete scan
+      into the same generic `ERROR` bucket a syntax typo gets, even though
+      the native CLI's `--format json` path already writes a real,
+      distinguishable `verdict: "EVIDENCE_CONTRACT_ERROR"` envelope for
+      this exact abort (`_emit_scan_abort_report`/
+      `scan_abort_result_fields`, landed earlier in this same stage). Fixed
+      by a new `_evidence_contract_gated()` helper (mirrors
+      `_coverage_gated`/`_assurance_gated`'s own JSON-first pattern,
+      reading the report's top-level `verdict` field, which
+      `_json_report_src`'s existing freshness/fingerprint checks already
+      keep from false-positiving on a stale prior report) consulted ahead
+      of `_is_cli_error` in the exit-1 dispatch, giving the abort its own
+      `EVIDENCE_CONTRACT_ERROR` verdict with a job-summary line and
+      `action.yml` output documentation, mirroring `NOT_COMPARABLE`/
+      `BUDGET_OVERFLOW`'s existing treatment — including the same
+      unconditional step-failure block those two verdicts needed of their
+      own (splitting a new verdict out of the generic `ERROR` bucket means
+      it no longer matches that bucket's own `FINAL_EXIT=1`, so it needs an
+      explicit twin or the step would silently start passing), and the same
+      `_maybe_post_pr_comment` skip `BUDGET_OVERFLOW` already has (a
+      pinned depth's missing evidence does not change on re-run, so
+      re-running for a PR-commentable report would deterministically repeat
+      the identical abort). `--format text` with no JSON secondary output
+      is unaffected and stays the one acknowledged gap noted above this
+      update: `cli_scan.py` writes no report at all on that path, so this
+      wrapper still cannot distinguish the axis there and continues to read
+      it as `ERROR`, same as before this fix.
+      `tests/test_action_run_sh_scan_evidence_contract_error.py` covers the
+      exit-1 dispatch (including the "both signals present" case, since
+      real stderr always satisfies `_is_cli_error` too) and the
+      step-failure block. Still open: the release fan-out's `GateOptions`
+      unification, the typed-API half of this parity pass, and the
+      `--format text` gap named above.
 2. **Atomic.** Once the report block agrees with today's real behaviour for
    every axis and every mode (verified by the axis-separated tests this ADR
    requires below), remove `--exit-code-scheme` from `compare` and `scan`,
