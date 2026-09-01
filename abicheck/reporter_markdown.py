@@ -864,6 +864,103 @@ def _resolve_scoped_gate_findings(
     return scoped_only, missing_labels, blocks, missing_kind
 
 
+def compute_root_cause_section(
+    changes: list[Change],
+    scoped_only: list[Change],
+    missing_labels: list[str],
+    blocks: bool,
+    missing_kind: str,
+    *,
+    contract_evaluation: bool,
+) -> _rmd.RootCauseSectionData | None:
+    """The structured intermediate for ``--report-mode root-cause``'s
+    "## Root Causes" section.
+
+    Groups *changes* + *scoped_only* by root cause (:func:`_group_changes_by_root_cause`)
+    and merges each *missing_labels* entry into a matching group -- or starts
+    a new singleton group -- by the identical key
+    :func:`_root_cause_key_and_display` computes. Returns ``None`` (no
+    section at all) only when there is neither a real group nor a missing
+    label to show.
+    """
+    groups = _group_changes_by_root_cause(changes + scoped_only)
+    if not groups and not missing_labels:
+        return None
+
+    order: list[str] = []
+    root_by_key: dict[str, str] = {}
+    finding_lines_by_key: dict[str, list[str]] = {}
+    count_by_key: dict[str, int] = {}
+    for key, root_display, group_changes in groups:
+        order.append(key)
+        root_by_key[key] = root_display
+        finding_lines_by_key[key] = [_format_change_md(c) for c in group_changes]
+        count_by_key[key] = len(group_changes)
+
+    if missing_labels:
+        referenced_causes = frozenset(
+            c.caused_by_type for c in changes + scoped_only if c.caused_by_type
+        )
+        severity_tag = "breaking" if blocks else "compatible"
+        for label in missing_labels:
+            key, root_display = _root_cause_key_and_display(
+                None,
+                label,
+                missing_kind,
+                label,
+                referenced_causes=referenced_causes,
+            )
+            line = (
+                f"- `{label}` is required but missing from the new "
+                f"library ({severity_tag})"
+            )
+            # ADR-049 Phase 3 (Codex review, fresh evidence): the
+            # non-root-cause markdown/text/review fold-in
+            # (cli_compare_fold._fold_scoped_compat_into_text) already
+            # tags a missing-contract label with its stamped decision;
+            # this root-cause path builds the identical label shape
+            # independently and was missing the same treatment, so
+            # --report-mode root-cause silently dropped the contract
+            # decision for this one finding shape. A missing-contract
+            # label has no Change object of its own to read an
+            # already-stamped decision off of (unlike scoped_only,
+            # rendered via _format_change_md above), so unlike every
+            # other contract-rendering site in this fix, this one
+            # genuinely needs the caller's own --contract
+            # intent threaded through explicitly.
+            if contract_evaluation:
+                from .contract_scoped_promotion import (
+                    stamp_explicit_scope_contract_evaluation,
+                )
+
+                label_decision: dict[str, object] = {}
+                stamp_explicit_scope_contract_evaluation(label_decision)
+                line += (
+                    f" [contract: {label_decision['contract_relevance']} "
+                    f"({label_decision['contract_reason_code']}), "
+                    f"assurance: {label_decision['contract_assurance']}]"
+                )
+            if key in finding_lines_by_key:
+                finding_lines_by_key[key].append(line)
+                count_by_key[key] += 1
+            else:
+                order.append(key)
+                root_by_key[key] = root_display
+                finding_lines_by_key[key] = [line]
+                count_by_key[key] = 1
+
+    return _rmd.RootCauseSectionData(
+        groups=tuple(
+            _rmd.RootCauseGroupData(
+                root_display=root_by_key[key],
+                count=count_by_key[key],
+                finding_lines=tuple(finding_lines_by_key[key]),
+            )
+            for key in order
+        )
+    )
+
+
 def _to_markdown_root_cause(
     result: DiffResult,
     show_only: str | None = None,
@@ -919,79 +1016,16 @@ def _to_markdown_root_cause(
                 result, "scoped_blocking_categories", None
             ),
         )
-    groups = _group_changes_by_root_cause(changes + scoped_only)
-    has_root_cause_entries = bool(groups or missing_labels)
-    if has_root_cause_entries:
-        order: list[str] = []
-        root_by_key: dict[str, str] = {}
-        finding_lines_by_key: dict[str, list[str]] = {}
-        count_by_key: dict[str, int] = {}
-        for key, root_display, group_changes in groups:
-            order.append(key)
-            root_by_key[key] = root_display
-            finding_lines_by_key[key] = [_format_change_md(c) for c in group_changes]
-            count_by_key[key] = len(group_changes)
-
-        if missing_labels:
-            referenced_causes = frozenset(
-                c.caused_by_type for c in changes + scoped_only if c.caused_by_type
-            )
-            severity_tag = "breaking" if blocks else "compatible"
-            for label in missing_labels:
-                key, root_display = _root_cause_key_and_display(
-                    None,
-                    label,
-                    missing_kind,
-                    label,
-                    referenced_causes=referenced_causes,
-                )
-                line = (
-                    f"- `{label}` is required but missing from the new "
-                    f"library ({severity_tag})"
-                )
-                # ADR-049 Phase 3 (Codex review, fresh evidence): the
-                # non-root-cause markdown/text/review fold-in
-                # (cli_compare_fold._fold_scoped_compat_into_text) already
-                # tags a missing-contract label with its stamped decision;
-                # this root-cause path builds the identical label shape
-                # independently and was missing the same treatment, so
-                # --report-mode root-cause silently dropped the contract
-                # decision for this one finding shape. A missing-contract
-                # label has no Change object of its own to read an
-                # already-stamped decision off of (unlike scoped_only,
-                # rendered via _format_change_md above), so unlike every
-                # other contract-rendering site in this fix, this one
-                # genuinely needs the caller's own --contract
-                # intent threaded through explicitly.
-                if contract_evaluation:
-                    from .contract_scoped_promotion import (
-                        stamp_explicit_scope_contract_evaluation,
-                    )
-
-                    label_decision: dict[str, object] = {}
-                    stamp_explicit_scope_contract_evaluation(label_decision)
-                    line += (
-                        f" [contract: {label_decision['contract_relevance']} "
-                        f"({label_decision['contract_reason_code']}), "
-                        f"assurance: {label_decision['contract_assurance']}]"
-                    )
-                if key in finding_lines_by_key:
-                    finding_lines_by_key[key].append(line)
-                    count_by_key[key] += 1
-                else:
-                    order.append(key)
-                    root_by_key[key] = root_display
-                    finding_lines_by_key[key] = [line]
-                    count_by_key[key] = 1
-
-        lines += [f"## Root Causes ({len(order)})", ""]
-        for key in order:
-            n = count_by_key[key]
-            plural = "" if n == 1 else "s"
-            lines.append(f"### `{root_by_key[key]}` ({n} finding{plural})")
-            lines.append("")
-            lines.extend(finding_lines_by_key[key])
-            lines.append("")
+    root_cause_section = compute_root_cause_section(
+        changes,
+        scoped_only,
+        missing_labels,
+        blocks,
+        missing_kind,
+        contract_evaluation=contract_evaluation,
+    )
+    has_root_cause_entries = root_cause_section is not None
+    lines += _rmd.render_root_cause_section(root_cause_section)
 
     # Codex review: a scoped-only change or missing-contract label can be the
     # *only* displayed finding (result.changes itself empty/filtered out) --

@@ -212,6 +212,36 @@ def render_leaf_type_sections(data: LeafTypeSectionsData) -> list[str]:
 
 
 # ---------------------------------------------------------------------------
+# Root-cause grouped sections (--report-mode root-cause)
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True, slots=True)
+class RootCauseGroupData:
+    root_display: str
+    count: int
+    finding_lines: tuple[str, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class RootCauseSectionData:
+    groups: tuple[RootCauseGroupData, ...]
+
+
+def render_root_cause_section(data: RootCauseSectionData | None) -> list[str]:
+    if data is None:
+        return []
+    lines: list[str] = [f"## Root Causes ({len(data.groups)})", ""]
+    for group in data.groups:
+        plural = "" if group.count == 1 else "s"
+        lines.append(f"### `{group.root_display}` ({group.count} finding{plural})")
+        lines.append("")
+        lines.extend(group.finding_lines)
+        lines.append("")
+    return lines
+
+
+# ---------------------------------------------------------------------------
 # Footer
 # ---------------------------------------------------------------------------
 
