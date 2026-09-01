@@ -50,6 +50,7 @@ from abicheck.buildsource.source_graph import SourceGraphSummary
 from abicheck.checker import compare
 from abicheck.checker_policy import ChangeKind
 from abicheck.model import AbiSnapshot, Function, Param, RecordType, Visibility
+from abicheck.model.fact import replace_with_fact_sync
 from abicheck.model.identity import (
     Namespace,
     Record,
@@ -254,6 +255,32 @@ class TestSnapshotRenumbering:
         assert snap.functions[0].mangled == before_func
 
 
+class TestQualifiedNameFactIsRenumberedToo:
+    """ADR-063 Phase 5 (Codex review): ``RecordType.qualified_name`` now has
+    a ``Fact[str | None]`` sibling. ``_walk_rewrite_strings`` walks it too
+    (it's a real, non-excluded field), but ``_PAYLOAD_FIELD_EXCLUSIONS``'s
+    ``"value"`` entry -- meant for ``Variable.value``'s own unrelated
+    field -- coincidentally also matches ``Fact.value``'s field name, so
+    the closure marker inside ``qualified_name_fact.value`` was silently
+    left in its raw, unrenumbered ``:line:col`` form even after the legacy
+    ``qualified_name`` field itself was correctly rewritten -- two
+    conflicting spellings of the same identity persisted together."""
+
+    def test_qualified_name_fact_value_matches_the_renumbered_qualified_name(
+        self,
+    ) -> None:
+        rec = _record(
+            f"raii_guard<{_closure('task_group.h', 522, 26)}>",
+            qualified=f"ns::raii_guard<{_closure('task_group.h', 522, 26)}>",
+        )
+        snap = AbiSnapshot(library="lib.so", version="1.0", types=[rec])
+        renumber_anonymous_closure_identities(snap)
+        renumbered = snap.types[0]
+        assert "#" in renumbered.qualified_name
+        assert ":522:" not in renumbered.qualified_name
+        assert renumbered.qualified_name_fact.value == renumbered.qualified_name
+
+
 class TestPayloadTextIsNeverCorrupted:
     """Codex review: a free-text/expression field (never a type/name
     spelling) can coincidentally contain a substring matching the closure
@@ -371,7 +398,15 @@ class TestPayloadTextIsNeverCorrupted:
         even for a snapshot with no real closure at all, corrupting
         persisted declaration provenance."""
         path = f"/tmp/{_closure('x.h', 10, 2)}/api.h"
-        rec = replace(
+        # ADR-063 Phase 5: source_header now has a Fact[str | None] sibling
+        # -- a raw dataclasses.replace() carries the pre-existing (already-
+        # resolved) source_header_fact forward unchanged, and
+        # __post_init__'s "explicit Fact wins" bridge rule then discards
+        # this call's own source_header update (model/fact.py's own
+        # documented dataclasses.replace() trap). replace_with_fact_sync
+        # derives the matching Fact.present(...) alongside the legacy
+        # value instead, so the two representations can't disagree.
+        rec = replace_with_fact_sync(
             _record("Widget", qualified="ns::Widget"),
             source_location=f"{path}:42",
             source_header=path,
@@ -388,7 +423,7 @@ class TestPayloadTextIsNeverCorrupted:
         constant siblings above, for source_location/source_header."""
         closure_type = f"raii_guard<{_closure('x.h', 5, 1)}>"
         path = f"/tmp/{_closure('x.h', 1, 1)}/api.h"
-        rec = replace(
+        rec = replace_with_fact_sync(
             _record(closure_type, qualified=f"ns::{closure_type}"),
             source_location=f"{path}:42",
             source_header=path,
@@ -804,7 +839,7 @@ class TestHybridMergeDefersRenumbering:
                 # its own independent ordinal for the SAME shared closure
                 # would be #1 -- a real fact only clang captures rides
                 # along on this type, to prove the merge actually joined.
-                replace(_record(owner_clang, qualified=owner_clang), is_abstract=True),
+                replace_with_fact_sync(_record(owner_clang, qualified=owner_clang), is_abstract=True),
             ],
         )
 
@@ -872,7 +907,7 @@ class TestServiceRunDumpHybridAlsoDefersRenumbering:
                 # independent ordinal for the SAME closure would be #1 --
                 # a real clang-only fact rides along to prove the merge
                 # actually joined rather than missing due to desync.
-                replace(_record(owner, qualified=owner), is_abstract=True),
+                replace_with_fact_sync(_record(owner, qualified=owner), is_abstract=True),
             ],
         )
 

@@ -748,8 +748,19 @@ def tag_provenance(
     # post-construction vptr resolution. hasattr-gated (not a hardcoded
     # owner list) since this function runs generically across all four
     # declaration types and only some carry the sibling today.
+    #
+    # sh is None precisely when header_from_location(loc) could not derive
+    # a header spelling -- source_header's own field-level convention
+    # (matching every other case-(b) field this phase converted) treats a
+    # None legacy value as "not captured", not a confirmed-empty
+    # determination, so this mirrors bridge_legacy_and_fact's own not_
+    # collected()-on-None branch rather than always claiming present()
+    # (Codex review: a blanket Fact.present(None) here would misreport
+    # every declaration with no location info as a confirmed "no header").
     if hasattr(decl, "source_header_fact"):
-        decl.source_header_fact = Fact.present(sh)  # type: ignore[attr-defined]
+        decl.source_header_fact = (  # type: ignore[attr-defined]
+            Fact.present(sh) if sh is not None else Fact.not_collected()
+        )
     if origin_cache is None:
         origin = classify_origin(
             sh, header_segs, dir_segs, have_public_set=have_set, export_only=export_only

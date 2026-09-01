@@ -73,7 +73,7 @@ from .dumper_castxml import (
     _mangled_name_is_local_linkage as _mangled_name_is_local_linkage,
 )
 from .errors import TuMergeError
-from .model import EnumType, Function, Param, RecordType, ScopeOrigin, Variable
+from .model import EnumType, Fact, Function, Param, RecordType, ScopeOrigin, Variable
 from .model.cc_attributes import is_cc_attribute as _is_cc_attribute
 from .provenance import build_public_set, classify_origin, header_from_location
 from .tu_fragment import MergedTuFragments, TuFragment, entity_key
@@ -896,13 +896,31 @@ def _blank_provenance(entity: _T) -> _T:
     function picks ``deprecated`` back explicitly via
     :func:`_pick_deprecated` afterwards.
     """
-    return replace(  # type: ignore[type-var]
-        entity,
-        source_location=None,
-        source_header=None,
-        origin=ScopeOrigin.UNKNOWN,
-        deprecated=None,
-    )
+    updates: dict[str, object] = {
+        "source_location": None,
+        "source_header": None,
+        "origin": ScopeOrigin.UNKNOWN,
+        "deprecated": None,
+    }
+    # ADR-063 Phase 5 (Codex review, P1): a plain dataclasses.replace() call
+    # leaves source_header_fact untouched -- __post_init__'s "explicit Fact
+    # wins" rule then reads the *carried-forward, pre-blank* Fact as
+    # authoritative and restores the original (non-blanked) source_header
+    # right back onto this supposedly-blanked object, and the surviving
+    # Fact difference between two otherwise-identical cross-TU
+    # redeclarations makes this function's own equality check see them as
+    # disagreeing -- spurious INCONSISTENT_DECLARATION on the routine
+    # "declaration + redeclaration" case this function exists to make a
+    # non-conflict. hasattr-gated (RecordType only, as of this phase's
+    # second batch) since this function runs generically across all four
+    # declaration types. A fixed constant, not derived from *entity*'s own
+    # (about-to-be-discarded) state: this blanked copy is only ever used
+    # for the equality comparison below, never returned to a caller, so
+    # both sides landing on the identical constant is all correctness here
+    # requires.
+    if hasattr(entity, "source_header_fact"):
+        updates["source_header_fact"] = Fact.not_collected()
+    return replace(entity, **updates)  # type: ignore[type-var]
 
 
 def _more_public_of(
@@ -1056,16 +1074,26 @@ def _with_more_public_provenance(
     deprecated = _pick_deprecated(
         provenance_source, provenance_fallback, secondary_is_private=fallback_is_private
     )
-    merged = (
-        winner
-        if provenance_source is winner
-        else replace(  # type: ignore[type-var]
-            winner,
-            source_location=other.source_location,
-            source_header=other.source_header,
-            origin=other.origin,
-        )
-    )
+    if provenance_source is winner:
+        merged = winner
+    else:
+        # ADR-063 Phase 5 (Codex review, P1): carry other's own
+        # source_header_fact status forward alongside its source_header
+        # value -- a bare replace() here would leave winner's own
+        # (pre-swap) Fact behind, which __post_init__'s "explicit Fact
+        # wins" rule then treats as authoritative, silently reverting the
+        # source_header value this branch just set. Same "surviving side's
+        # own Fact status, not a re-derived one" discipline already
+        # established for dumper_layout_backfill.py's DWARF backfill.
+        # hasattr-gated (RecordType only, as of this phase's second batch).
+        provenance_updates: dict[str, object] = {
+            "source_location": other.source_location,
+            "source_header": other.source_header,
+            "origin": other.origin,
+        }
+        if hasattr(other, "source_header_fact"):
+            provenance_updates["source_header_fact"] = other.source_header_fact
+        merged = replace(winner, **provenance_updates)  # type: ignore[type-var]
     if merged.deprecated != deprecated:
         merged = replace(merged, deprecated=deprecated)  # type: ignore[type-var]
     return merged

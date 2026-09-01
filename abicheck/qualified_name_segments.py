@@ -610,10 +610,31 @@ def _walk_rewrite_strings(value: object, rewrite: _Callable[[str], str]) -> obje
     if _dataclasses.is_dataclass(value) and not isinstance(value, type):
         params = getattr(value, "__dataclass_params__", None)
         is_frozen = bool(getattr(params, "frozen", False))
+        # ADR-063 Phase 5 (Codex review): `_PAYLOAD_FIELD_EXCLUSIONS`'s
+        # "value" entry exists for `Variable.value` (a compile-time
+        # constant, not identity-bearing text) — but `model.fact.Fact[T]`'s
+        # own payload field is *also* named `value`, and a `Fact[str]`
+        # sibling (`qualified_name_fact`/`source_header_fact`) legitimately
+        # wraps the exact identity spelling this walk exists to renumber.
+        # Recognized structurally, not by importing `Fact` (this module is
+        # deliberately import-free) -- a class literally named "Fact" with
+        # this shape is close enough that a false positive would need a
+        # coincidentally-identical, unrelated type. Without this, a
+        # closure-marker-embedded qualified_name/source_header gets
+        # renumbered on the legacy field but left stale inside its own
+        # Fact sibling, persisting two conflicting spellings.
+        is_fact_value_field = (
+            type(value).__name__ == "Fact"
+            and is_frozen
+            and {f.name for f in _dataclasses.fields(value)}
+            == {"status", "value", "diagnostics"}
+        )
         replacements: dict[str, object] = {}
         frozen_field_updates: dict[str, object] = {}
         for f in _dataclasses.fields(value):
-            if f.name in _PAYLOAD_FIELD_EXCLUSIONS:
+            if f.name in _PAYLOAD_FIELD_EXCLUSIONS and not (
+                is_fact_value_field and f.name == "value"
+            ):
                 continue
             old = getattr(value, f.name)
             new = _walk_rewrite_strings(old, rewrite)
