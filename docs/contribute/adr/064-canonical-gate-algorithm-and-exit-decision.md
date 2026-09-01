@@ -777,6 +777,28 @@ lands in two stages rather than one atomic change:
       `test_reuses_extra_args_write_json_sidecar_under_a_non_json_format`
       in `tests/test_action_run_sh_pr_json.py`, verified to catch the
       regression the same way.
+
+      **A ninth review round (Codex, fresh evidence) found the mirror
+      image of the sixth round's finding, falsifying the one guarantee
+      the `verdict` description still asserted:** "This Action's own
+      `format: json` input always qualifies" was itself wrong -- `extra-
+      args: --format text` under `format: json` overrides the effective
+      invocation to text output the same way `--format json` under
+      `format: text` (the sixth round's finding) overrides it to JSON;
+      neither direction is detected specially, so `format: json` alone
+      guarantees nothing about what `_json_report_src`/`_STDOUT_JSON_FILE`
+      actually find. This is the fifth successive round to find one more
+      uncovered combination in a *claim* this description made about
+      when a JSON report exists, even after the fifth round (see above)
+      already tried retreating from enumeration to a single narrower
+      claim -- proof that the narrower claim was still an enumeration,
+      just of one case instead of several. Fixed by removing the "always
+      qualifies" guarantee entirely rather than adding a sixth caveat:
+      the description now states plainly that the *effective* invocation
+      decides, not any one input considered alone, and points at
+      `action/run.sh`'s own logic with no shortcut claim standing in for
+      it. No code change and no new test -- this is prose accuracy only,
+      the same class the fourth round already established needs neither.
 2. **Atomic.** Once the report block agrees with today's real behaviour for
    every axis and every mode (verified by the axis-separated tests this ADR
    requires below), remove `--exit-code-scheme` from `compare` and `scan`,

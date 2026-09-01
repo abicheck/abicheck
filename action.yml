@@ -772,25 +772,30 @@ outputs:
       NOT_COMPARABLE, this fails the step unconditionally and is
       distinct from ERROR, which covers a genuine CLI/config error --
       only published as this distinct verdict when a JSON report exists
-      for this Action to read it from. This Action's own format: json
-      input always qualifies; otherwise it depends on whether a JSON
-      report was produced this run -- an auto-injected `--write
-      json=...` sidecar, the run's own extra-args already naming one via
-      `--write`, or (independently) extra-args overriding this Action's
-      `format` input at the CLI level itself (e.g. `extra-args: --format
-      json` under `format: text`, which this Action's own primary-output
-      capture does not detect, since that capture is keyed on its own
-      `format` input rather than the effective invocation) -- this
-      description does not attempt to enumerate every format/pr-comment/
-      extra-args combination that does or doesn't produce one, since four
-      successive review rounds each found the previous enumeration
-      incomplete (pr-comment: false; an --artifact-set scan; extra-args
-      already owning --write for a non-JSON format; extra-args overriding
-      the primary --format itself); action/run.sh's own JSON-detection
-      logic (`_json_report_src` and the `_STDOUT_JSON_FILE` capture
-      immediately above it -- search that file for either name) is the
-      authoritative condition. Whenever no JSON report exists, this still
-      reads as the generic ERROR, a documented, unclosed gap.
+      for this Action to read it from -- whether one was produced this
+      run depends on the *effective* invocation, not any one input
+      considered alone: an auto-injected `--write json=...` sidecar, the
+      run's own extra-args already naming one via `--write`, this
+      Action's own `format: json` input, or extra-args overriding
+      `--format` in either direction (`--format json` under `format:
+      text`, or `--format text` under `format: json` -- neither override
+      is detected specially, so `format: json` alone is not a reliable
+      guarantee any more than `format: text` alone is a reliable
+      disqualifier). This description does not attempt to enumerate
+      every format/pr-comment/extra-args combination that does or
+      doesn't produce one, since five successive review rounds each
+      found the previous claim incomplete (pr-comment: false; an
+      --artifact-set scan; extra-args already owning --write for a
+      non-JSON format; extra-args overriding a text primary format to
+      JSON; extra-args overriding a JSON primary format back to text --
+      the last two are mirror images of the same "the effective
+      invocation, not the configured input, decides" root cause);
+      action/run.sh's own JSON-detection logic (`_json_report_src` and
+      the `_STDOUT_JSON_FILE` capture immediately above it -- search that
+      file for either name) is the one authoritative source, with no
+      shortcut claim in this description standing in for it. Whenever no
+      JSON report exists, this still reads as the generic ERROR, a
+      documented, unclosed gap.
       new-library-set (--artifact-set) scans are a stricter case of the
       same gap: the JSON sidecar is never auto-requested for that mode
       regardless of pr-comment, so a JSON report requires either
