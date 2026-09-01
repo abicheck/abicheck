@@ -583,6 +583,24 @@ class TestMalformedSidecarEntityIdDocumentIsRefused:
         with pytest.raises((TypeError, ValueError)):
             snapshot_to_dict(snap)
 
+    @pytest.mark.parametrize(
+        "sidecar_key", ["typedef_entity_ids", "constant_entity_ids"]
+    )
+    @pytest.mark.parametrize("bogus_sidecar", [[], "", False, 0])
+    def test_non_mapping_sidecar_is_refused_on_encode(
+        self, sidecar_key: str, bogus_sidecar: object
+    ) -> None:
+        # The mirror of test_non_mapping_sidecar_is_refused_not_treated_as_
+        # empty above, but on the encode path: a caller constructing
+        # AbiSnapshot directly (outside the dataclass's own type
+        # annotation) with a non-mapping sidecar must not leak an
+        # AttributeError from a bare .items() call (Codex review).
+        snap = dataclasses.replace(
+            _snapshot_with_every_kind(), **{sidecar_key: bogus_sidecar}
+        )
+        with pytest.raises((TypeError, ValueError)):
+            snapshot_to_dict(snap)
+
 
 #: Modules allowed to *call* an ``entity_id_for_*`` constructor: the two
 #: header-AST producers and their ``extract`` entity modules. By option

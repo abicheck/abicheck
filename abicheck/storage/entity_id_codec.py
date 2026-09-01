@@ -158,12 +158,19 @@ def encode_sidecar_entity_ids(d: dict[str, Any], snap: AbiSnapshot) -> dict[str,
     ``str``) would otherwise encode as JSON's own coerced string form, and a
     snapshot carrying both ``1`` and ``"1"`` would silently collide onto one
     key, losing one entity's identity rather than refusing the document
-    (Codex review).
+    (Codex review). Each sidecar itself is checked with ``mapping`` first,
+    for the identical reason ``decode_sidecar_entity_ids`` checks its own
+    raw input: a caller reaching this function with a non-mapping
+    (``AbiSnapshot(constant_entity_ids=[])``, still reachable outside the
+    dataclass's own type annotation) must not leak an ``AttributeError``
+    from a bare ``.items()`` call (Codex review).
     """
     for key in _SIDECAR_KEYS:
+        sidecar = getattr(snap, key)
+        mapping(sidecar, key)
         d[key] = {
             identity_text(name, f"{key} key"): domain_entity_id_to_dto(entity_id)
-            for name, entity_id in getattr(snap, key).items()
+            for name, entity_id in sidecar.items()
         }
     return d
 
