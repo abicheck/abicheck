@@ -374,12 +374,17 @@ def function_is_explicit(
     ctx: CastxmlParserContext, el: Element, loc_el: Element | None
 ) -> bool | None:
     """Determine the tri-state `explicit` specifier for a function element."""
-    # castxml emits explicit="1" on Constructor / Method elements that
-    # carry the `explicit` specifier. Tri-state: only Constructor /
-    # Method tags can be explicit; for plain Function / Destructor the
-    # attribute is conceptually N/A and we leave is_explicit=None so
-    # the diff does not produce spurious findings.
-    if el.tag in ("Constructor", "Method"):
+    # castxml emits explicit="1" on a Constructor element that carries the
+    # `explicit` specifier. Tri-state: only Constructor/Converter can be
+    # explicit in real C++ -- for a plain Method/Function/Destructor the
+    # attribute is conceptually N/A and we leave is_explicit=None so the
+    # diff does not produce spurious findings. Empirically confirmed
+    # against castxml 0.7.0 (Codex review, PR #982): an ordinary Method
+    # never carries the `explicit` attribute at all, so treating it as
+    # eligible previously always evaluated to a confirmed-False reading
+    # that was really a non-gap, inconsistent with clang/DWARF which
+    # already restrict eligibility to constructors/conversion functions.
+    if el.tag == "Constructor":
         return el.get("explicit") == "1"
     if el.tag == "Converter":
         return (
@@ -553,14 +558,16 @@ def parse_function_element(
         ref_qualifier=ref_qualifier,
         is_explicit=function_is_explicit(ctx, el, loc_el),
         # The `explicit` specifier is conceptually inapplicable outside a
-        # Constructor/Method/Converter element -- a plain Function/
+        # Constructor/Converter element -- a plain Function/Method/
         # Destructor's `is_explicit=None` above is a confirmed non-gap,
         # not missing evidence, so it gets its own explicit Fact rather
         # than falling through the generic bridge into NOT_COLLECTED
-        # (Codex review, PR #982).
+        # (Codex review, PR #982; narrowed off "Method" per that same
+        # review's follow-up, confirmed against real castxml 0.7.0 output
+        # -- see function_is_explicit's own docstring).
         is_explicit_fact=(
             Fact.present(function_is_explicit(ctx, el, loc_el))
-            if el.tag in ("Constructor", "Method", "Converter")
+            if el.tag in ("Constructor", "Converter")
             else Fact.not_applicable()
         ),
         # Hidden-friend marker: castxml records the link via the

@@ -104,7 +104,10 @@ def _collect_strings(value: object, out: list[str]) -> None:
             "diagnostics",
         }
         for f in fields:
-            if f.name in _PAYLOAD_FIELD_EXCLUSIONS:
+            if (
+                f.name in _PAYLOAD_FIELD_EXCLUSIONS
+                or _legacy_sibling_is_payload_excluded(f.name)
+            ):
                 continue
             if is_fact and f.name == "status":
                 continue

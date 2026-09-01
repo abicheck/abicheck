@@ -45,6 +45,7 @@ from test_lambda_identity_ordinal import _closure, _record
 from abicheck.model import AbiSnapshot
 from abicheck.model.fact import replace_with_fact_sync
 from abicheck.qualified_name_segments import renumber_anonymous_closure_identities
+from abicheck.qualified_name_segments_walk import _collect_strings
 
 
 class TestQualifiedNameFactIsRenumberedToo:
@@ -254,3 +255,32 @@ class TestPayloadTextIsNeverCorrupted:
         assert "#1)" in snap.types[0].qualified_name
         assert snap.types[0].source_location == f"{path}:42"
         assert snap.types[0].source_header == path
+
+    def test_collect_strings_excludes_source_header_facts_diagnostics_too(
+        self,
+    ) -> None:
+        """CodeRabbit review, PR #982: ``_collect_strings`` (the ordinal-
+        detection walk) must skip a payload-excluded ``<x>_fact`` sibling's
+        WHOLE subtree, not just its ``value`` -- ``value`` happens to also
+        be excluded by :data:`_PAYLOAD_FIELD_EXCLUSIONS`'s own generic
+        "value" entry (a coincidental name collision with
+        ``Variable.value``), but ``Fact.diagnostics`` is not, so a
+        marker-shaped diagnostic string on ``source_header_fact`` used to
+        leak into the ordinal-coordinate set and could shift a real
+        closure's assigned ordinal. Confirmed to fail on pre-fix code."""
+        from abicheck.model import Fact, FactStatus, RecordType
+
+        rec = RecordType(
+            name="X",
+            kind="class",
+            size_bits=8,
+            source_header="/tmp/api.h",
+            source_header_fact=Fact(
+                status=FactStatus.PRESENT,
+                value="/tmp/api.h",
+                diagnostics=(_closure("x.h", 7, 1),),
+            ),
+        )
+        out: list[str] = []
+        _collect_strings(rec, out)
+        assert _closure("x.h", 7, 1) not in out

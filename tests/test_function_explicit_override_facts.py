@@ -113,6 +113,48 @@ def test_castxml_constructor_is_explicit_fact_present() -> None:
     assert ctor.is_explicit_fact.value is True
 
 
+def test_castxml_ordinary_method_is_explicit_fact_not_applicable() -> None:
+    """Codex review, PR #982: `explicit` only applies to constructors and
+    conversion functions in real C++ -- an ordinary Method element must be
+    NOT_APPLICABLE, matching clang/DWARF, not a confirmed-False PRESENT
+    (castxml 0.7.0 never emits the `explicit` attribute on a plain Method
+    at all, confirmed empirically)."""
+    root = Element("CastXML", attrib={"format": "1.4.0"})
+    SubElement(root, "File", attrib={"id": "f1", "name": "lib.h"})
+    SubElement(root, "Namespace", attrib={"id": "_1", "name": "::"})
+    SubElement(root, "FundamentalType", attrib={"id": "_v", "name": "void"})
+    SubElement(
+        root,
+        "Class",
+        attrib={
+            "id": "_3",
+            "name": "Widget",
+            "context": "_1",
+            "file": "f1",
+            "location": "f1:2",
+        },
+    )
+    SubElement(
+        root,
+        "Method",
+        attrib={
+            "id": "_4",
+            "name": "doThing",
+            "returns": "_v",
+            "context": "_3",
+            "access": "public",
+            "file": "f1",
+            "location": "f1:3",
+            "mangled": "_ZN6Widget7doThingEv",
+        },
+    )
+    parser = _CastxmlParser(root, exported_dynamic=set(), exported_static=set())
+    funcs = {f.name: f for f in parser.parse_functions()}
+    method = funcs["doThing"]
+    assert method.is_explicit is None
+    assert method.is_explicit_fact.status is FactStatus.NOT_APPLICABLE
+
+
 def _clang_tu(*inner: dict) -> dict:
     return {"kind": "TranslationUnitDecl", "inner": list(inner)}
 
