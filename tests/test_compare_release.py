@@ -1910,7 +1910,7 @@ class TestParallelFanOutDedupPropagation:
             return {"library": f"{key}.so", "verdict": "NO_CHANGE"}
 
         monkeypatch.setattr(
-            "abicheck.cli_compare_release._compare_one_library",
+            "abicheck.cli_compare_release_pairwise._compare_one_library",
             _fake_compare_one_library,
         )
 
@@ -1941,7 +1941,7 @@ class TestParallelFanOutDedupPropagation:
             return {"library": f"{key}.so", "verdict": "NO_CHANGE"}
 
         monkeypatch.setattr(
-            "abicheck.cli_compare_release._compare_one_library",
+            "abicheck.cli_compare_release_pairwise._compare_one_library",
             _fake_compare_one_library,
         )
 
@@ -1977,7 +1977,7 @@ class TestParallelFanOutDedupPropagation:
             return {"library": f"{key}.so", "verdict": "NO_CHANGE"}
 
         monkeypatch.setattr(
-            "abicheck.cli_compare_release._compare_one_library",
+            "abicheck.cli_compare_release_pairwise._compare_one_library",
             _fake_compare_one_library,
         )
 

@@ -2824,7 +2824,7 @@ class TestCompareReleaseExtraFlows:
         _write_snap(old_dir / "libfoo.json", _snap())
         _write_snap(new_dir / "libfoo.json", _snap())
 
-        import abicheck.cli_compare_release as cr_mod
+        import abicheck.cli_compare_release_pairwise as cr_mod
 
         def boom(*a, **k):
             raise ValueError("corrupt snapshot")
