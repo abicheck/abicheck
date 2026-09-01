@@ -172,6 +172,27 @@ class TestResolveInput:
         with pytest.raises(Exception, match="Failed to load JSON snapshot"):
             _resolve_input(p, headers=[], includes=[], version="1.0", lang="c++")
 
+    def test_malformed_contract_field_raises_clean_error_not_bare_typeerror(
+        self, tmp_path
+    ):
+        """A wrong-shaped ``contract.profile_fields``/``scope_fields`` makes
+        ``extraction_contract_from_dict`` raise ``TypeError`` rather than
+        silently degrading (storage AGENTS.md invariant 6) -- this CLI
+        boundary must wrap that into the same clean ``SnapshotError`` every
+        other malformed-JSON-snapshot failure gets, not let a bare
+        ``TypeError`` escape uncaught (Codex review, PR #974: the
+        `workflows/input_resolution.py` JSON-loading branch only caught
+        ``ValueError``/``KeyError``/``UnicodeDecodeError``/``OSError``, not
+        the ``TypeError`` this storage-boundary rejection actually raises).
+        """
+        d = json.loads(snapshot_to_json(_make_snapshot("1.0")))
+        d["contract"] = {"profile_fields": "not-a-dict"}
+        p = tmp_path / "bad_contract.json"
+        p.write_text(json.dumps(d), encoding="utf-8")
+        with pytest.raises(Exception, match="Failed to load JSON snapshot") as exc_info:
+            _resolve_input(p, headers=[], includes=[], version="1.0", lang="c++")
+        assert not isinstance(exc_info.value, TypeError)
+
     def test_elf_with_missing_header_raises(self, tmp_path):
         p = _write_fake_elf(tmp_path / "lib.so")
         missing = tmp_path / "nonexistent.h"

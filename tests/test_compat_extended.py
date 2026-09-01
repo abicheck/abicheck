@@ -38,6 +38,7 @@ from abicheck.compat.cli import (
     _build_whitelist_suppression,
     _limit_affected_changes,
     _load_descriptor_or_dump,
+    _parse_compat_descriptors,
     _resolve_headers_from_list,
     _setup_logging,
     _warn_stub_flags,
@@ -1036,6 +1037,43 @@ class TestCompatFailHelper:
 
         with pytest.raises(SystemExit) as excinfo:
             _compat_fail("parsing descriptor", ValueError("bad descriptor"))
+
+        assert excinfo.value.code == 6
+        err = capsys.readouterr().err
+        assert "Error parsing descriptor" in err
+
+
+class TestParseCompatDescriptorsMalformedContract:
+    def test_malformed_contract_field_exits_clean_not_bare_typeerror(
+        self, tmp_path: Path, capsys
+    ) -> None:
+        """A wrong-shaped ``contract.profile_fields``/``scope_fields`` in a
+        JSON dump makes ``extraction_contract_from_dict`` raise ``TypeError``
+        rather than silently degrading (storage AGENTS.md invariant 6) --
+        ``_parse_compat_descriptors`` must map that into the same clean,
+        classified compat-mode exit every other malformed-descriptor
+        failure gets (rc=6, ``_classify_compat_error_exit_code``'s
+        "invalid descriptor/config/suppression inputs" bucket), not let a
+        bare ``TypeError`` escape uncaught (Codex review, PR #974 -- the
+        identical gap found and fixed in
+        ``workflows/input_resolution.py``'s own JSON-loading branch, which
+        this function mirrors for compat mode).
+        """
+        snap = _make_snapshot("1.0")
+        old_p = tmp_path / "old.json"
+        new_p = tmp_path / "new.json"
+        save_snapshot(snap, old_p)
+        save_snapshot(snap, new_p)
+        raw = json.loads(new_p.read_text(encoding="utf-8"))
+        raw["contract"] = {"profile_fields": "not-a-dict"}
+        new_p.write_text(json.dumps(raw), encoding="utf-8")
+
+        # Pre-fix, this raised a bare TypeError instead of the classified
+        # SystemExit(6) every other malformed-descriptor failure produces --
+        # pytest.raises(SystemExit) itself is the regression check: a
+        # TypeError escaping here would fail to match and surface as such.
+        with pytest.raises(SystemExit) as excinfo:
+            _parse_compat_descriptors(old_p, new_p, None, None)
 
         assert excinfo.value.code == 6
         err = capsys.readouterr().err

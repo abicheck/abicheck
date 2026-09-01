@@ -2295,7 +2295,7 @@ CLI_CONTRACT_ALLOWLIST: frozenset[str] = frozenset(
         # both `dumper.dump()` and `checker.compare()` directly.
         "abicheck/compat/cli.py:317:19:dumper.dump",
         "abicheck/compat/cli.py:974:17:checker.compare",
-        "abicheck/compat/cli.py:1167:15:dumper.dump",
+        "abicheck/compat/cli.py:1169:15:dumper.dump",
     }
 )
 

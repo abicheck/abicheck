@@ -456,7 +456,16 @@ def resolve_input(
     if fmt == "json":
         try:
             return load_snapshot(path)
-        except (ValueError, KeyError, UnicodeDecodeError, OSError) as exc:
+        # TypeError: a malformed nested field (e.g. a non-mapping/non-string
+        # ExtractionContract.profile_fields/scope_fields) is rejected rather
+        # than coerced at the storage boundary (storage AGENTS.md invariant
+        # 6, storage/snapshot_load_normalization.py) -- the caller here is
+        # exactly the "malformed package" side of the TypeError/ValueError
+        # split that convention documents, so it must be caught alongside
+        # ValueError, not left to escape as an unhandled crash (Codex
+        # review; matches bundle_facts.py's identical TypeError catch
+        # around its own snapshot_from_dict() call).
+        except (TypeError, ValueError, KeyError, UnicodeDecodeError, OSError) as exc:
             raise SnapshotError(
                 f"Failed to load JSON snapshot '{path}': {exc}"
             ) from exc
