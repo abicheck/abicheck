@@ -637,6 +637,45 @@ class TestBundleFactsLibraryManifest:
     """``--bundle-facts-library-manifest`` (G38 Phase 17): per-library
     header/include/compile-context overrides for a mixed-toolchain bundle."""
 
+    def test_manifest_works_when_new_input_is_a_direct_file_not_a_directory(
+        self, tmp_path: Path
+    ) -> None:
+        """Codex review, fresh evidence: compare_release_against_bundle_
+        facts() itself supports a direct single-file NEW_INPUT (``if
+        new_dir.is_dir(): ... else: new_files = [new_dir]``,
+        bundle_side_input.py) -- but known_libraries_for_new_side() (the
+        manifest's own pre-validation gate) called discover_shared_
+        libraries() unconditionally, which walks a directory tree and
+        silently returns no entries for a plain file, rejecting every
+        manifest library key as unknown even though the comparison itself
+        would succeed fine."""
+        old_dir = tmp_path / "old"
+        new_dir = tmp_path / "new"
+        old_dir.mkdir()
+        new_dir.mkdir()
+        body = "int add(int a, int b) { return a + b; }\n"
+        _build_so(old_dir, "libreal.so", body)
+        new_so = _build_so(new_dir, "libreal.so", body)
+        facts_path = _write_old_facts(
+            tmp_path, old_dir, old_dir / "libreal.so", "libreal.so"
+        )
+        manifest = tmp_path / "manifest.yaml"
+        manifest.write_text("libreal.so:\n  headers: []\n")
+
+        code, out = _invoke(
+            "compare",
+            str(facts_path),
+            str(new_so),  # the .so FILE itself, not new_dir
+            "--old-bundle-facts",
+            "--include-system-declarations",
+            "--bundle-facts-library-manifest",
+            str(manifest),
+            "--format",
+            "json",
+        )
+
+        assert code == 0, out
+
     def test_rejected_without_old_bundle_facts(self, tmp_path: Path) -> None:
         old = tmp_path / "old.json"
         old.write_text("{}")

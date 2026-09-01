@@ -67,3 +67,10 @@ it should read in CHANGELOG.md. Delete the other sections.
   nested sequences) exhausted Python's own recursion limit inside the
   strict YAML loader, leaking a raw `RecursionError` traceback instead of
   the exit-64 usage error every other malformed manifest input produces.
+- **`--bundle-facts-library-manifest` works when `NEW_INPUT` is a direct
+  library file, not a directory** — the manifest's pre-validation gate
+  always walked `NEW_INPUT` as a directory tree, silently finding no
+  libraries (and rejecting every manifest entry as unknown) for a direct
+  single-file `NEW_INPUT`, even though the underlying comparison already
+  supports that case. The gate now mirrors the comparison's own
+  file-vs-directory handling.

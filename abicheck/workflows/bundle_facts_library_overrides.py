@@ -455,7 +455,18 @@ def known_libraries_for_new_side(
     from ..package import discover_shared_libraries
     from .extraction import build_match_map
 
-    new_files = discover_shared_libraries(new_dir, include_private=include_private_dso)
+    # Codex review, fresh evidence: mirrors compare_release_against_
+    # bundle_facts()'s own file-vs-directory branch exactly
+    # (bundle_side_input.py) -- discover_shared_libraries() walks a
+    # directory tree (os.walk), so a direct single-file NEW_INPUT (a bare
+    # `.so`, not an extracted directory -- a case the real driver
+    # explicitly supports) silently returns no entries here, rejecting
+    # every manifest library key as unknown even though the comparison
+    # itself would succeed fine.
+    if new_dir.is_dir():
+        new_files = discover_shared_libraries(new_dir, include_private=include_private_dso)
+    else:
+        new_files = [new_dir]
     new_map, _match_warnings = build_match_map(new_files)
     return new_map
 
