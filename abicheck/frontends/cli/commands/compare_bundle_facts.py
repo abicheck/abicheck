@@ -256,7 +256,15 @@ def dispatch(*, compile_context: Any, **kwargs: Any) -> None:
                 include_dependencies=bool(kwargs.get("include_dependencies", False)),
                 max_json_object_nodes=kwargs.get("max_json_object_nodes"),
             )
-        except (SnapshotError, ValueError, OSError) as exc:
+        # TypeError (Codex review, fresh evidence): a malformed nested
+        # build_mode/contract field inside one of OLD_FACTS's per-library
+        # snapshots is rejected rather than coerced at the storage boundary
+        # (storage AGENTS.md invariant 6) -- bundle_facts_from_dict()'s own
+        # per_library_snapshots comprehension calls snapshot_from_dict()
+        # with no nested guard, so that TypeError propagates all the way
+        # here and must be caught alongside ValueError like every other
+        # malformed-OLD_FACTS shape.
+        except (SnapshotError, TypeError, ValueError, OSError) as exc:
             # Same CLI-boundary translation every other SnapshotError-raising
             # entry point uses (cli_resolve.py et al.) -- without this, a
             # container-node-budget rejection (or any other SnapshotError) would
