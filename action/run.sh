@@ -3023,15 +3023,32 @@ _can_reuse_primary_json() {
   # re-running the comparison — but only when it is a faithful, unfiltered
   # report. It must already be JSON, actually available somewhere
   # (_json_report_src, defined near the top of the script — it already
-  # falls back from $OUTPUT_FILE through the stdout-mode $_STDOUT_JSON_FILE;
-  # its middle fallback, $PR_JSON, is always empty at this call site, since
-  # the caller only reaches here after its own "already populated" check on
-  # PR_JSON came back empty), and free of the --show-only display filter
-  # that hides gated changes from the comment (which _build_json_cmd strips
-  # for exactly that reason). --stat no longer exists as a CLI flag (CLI
+  # falls back from $OUTPUT_FILE through the stdout-mode $_STDOUT_JSON_FILE
+  # to the run's own extra-args `--write json=PATH` sidecar; its middle
+  # fallback, $PR_JSON, is always empty at this call site, since the caller
+  # only reaches here after its own "already populated" check on PR_JSON
+  # came back empty), and free of the --show-only display filter that hides
+  # gated changes from the comment (which _build_json_cmd strips for
+  # exactly that reason). --stat no longer exists as a CLI flag (CLI
   # cleanup phase two, PR 1) -- a $CMD array containing it would already
   # have failed the abicheck invocation itself before this script's
   # post-processing logic ever ran, so there is nothing left to check here.
+  #
+  # No blanket `$FORMAT == "json"` requirement (Codex review, fresh
+  # evidence): a `format: text`/`markdown` primary run whose own extra-args
+  # supplied `--write json=PATH` (the `_extra_write_json_path` branch
+  # above) is exactly as faithful and unfiltered as a `format: json`
+  # primary output — `_json_report_src` already only trusts that branch
+  # when it names a real, fresh (fingerprint-checked) file, so there is
+  # nothing left for this function to gate on beyond "did it find one at
+  # all". Requiring `$FORMAT == "json"` on top of that rejected exactly
+  # this faithful report and forced a full rerun instead — for the abi3
+  # `_EvidenceContractError` raise site (unlike the pinned-depth one),
+  # that rerun happens *after* candidate snapshot extraction, so it is not
+  # the "cheap, precondition-only" rerun `_maybe_post_pr_comment`'s own
+  # EVIDENCE_CONTRACT_ERROR comment describes -- it repeats real
+  # depth/build/source work needlessly when the JSON this function should
+  # have reused was sitting on disk the whole time.
   #
   # Codex review: the stdout-JSON case (format: json, no output-file) used
   # to fall through this check — it only ever looked at $OUTPUT_FILE, never
@@ -3039,7 +3056,6 @@ _can_reuse_primary_json() {
   # whole scan/compare a second time just to get JSON that had already been
   # produced, for scan doubling potentially expensive --depth build/source
   # work and describing a separate, budget-metered run.
-  [[ "${FORMAT:-}" == "json" ]] || return 1
   [[ -n "$(_json_report_src)" ]] || return 1
   local arg
   for arg in ${CMD[@]+"${CMD[@]}"}; do
@@ -3116,12 +3132,16 @@ _maybe_post_pr_comment() {
   # Action as one of the paths meant to reach it. Skipping here would
   # leave any previous sticky BREAKING/API_BREAK comment stale and
   # misleading instead of updating it to reflect the incomplete analysis.
-  # Falling through to the normal reuse-or-rerun path below is correct
-  # even when a rerun is needed (no JSON was written this run): unlike a
-  # real budget-limited scan, `_EvidenceContractError`'s own precondition
-  # check fires before any source evidence collection begins, so a rerun
-  # to obtain JSON is cheap, not "potentially expensive" the way
-  # BUDGET_OVERFLOW's comment above describes.
+  # Falling through to the normal reuse-or-rerun path below never actually
+  # reruns for this verdict (Codex review, fresh evidence, superseding an
+  # earlier "a rerun is cheap here" version of this comment): reaching
+  # EVIDENCE_CONTRACT_ERROR already proves `_json_report_src` found a
+  # report, and `_can_reuse_primary_json` (below) now trusts that same
+  # lookup unconditionally rather than requiring `$FORMAT == "json"` on
+  # top of it -- so the report this verdict's own detection already found
+  # is exactly what gets reused here too, for every raise site (the
+  # abi3 one included, whose own rerun would not have been the cheap,
+  # precondition-only kind a real rerun is for the pinned-depth site).
   case "${GITHUB_EVENT_NAME:-}" in
     pull_request | pull_request_target) ;;
     *)

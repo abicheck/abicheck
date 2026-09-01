@@ -711,6 +711,72 @@ lands in two stages rather than one atomic change:
       `--artifact-set` member-level evidence-contract signal for the
       Action to consume, and this round's own effective-format-override
       gap.
+
+      **A CI-infrastructure fix, not a review finding:** the new test
+      file's own malicious-fixture test (and its siblings) passed their
+      generated bash script via `subprocess.run([bash, "-c", script])`,
+      which failed on `windows-latest` CI with a bash parse error
+      (`unexpected EOF while looking for matching \`)'`) -- Windows
+      reconstructs that argv via `list2cmdline` (MSVCRT quoting rules) and
+      Git Bash's own MSYS runtime then re-parses the resulting command
+      line with its own, not-quite-identical rules, corrupting this file's
+      large, quote-heavy scripts. An earlier revision patched only the
+      interpolated paths with `Path.as_posix()`; that addressed a
+      narrower instance of the same class and left this one, confirmed
+      still failing with the identical error text. Fixed by porting the
+      same fix two sibling test modules already use for this exact class
+      of gap (`test_action_run_sh_helpers.py`'s `_run_harness`,
+      `test_action_run_sh_py_safe_path.py`'s `_run_bash_script`): write
+      the script to a real file and run `bash <path>`, which needs no
+      argv reconstruction at all.
+
+      **A seventh review round (Codex, fresh evidence) found a real test-
+      coverage gap, not a wording or detection gap:** every exit-1
+      dispatch test in the new test file stubs `_evidence_contract_gated`
+      out entirely, and the one test executing the real
+      `_report_query`/`_evidence_contract_gated` pipeline only supplied a
+      near-miss verdict (expecting `GATED=0`) -- none of the five tests
+      would have failed if that pipeline were broken to always return
+      false, silently restoring the exact pre-fix misclassification for
+      every genuine `EVIDENCE_CONTRACT_ERROR` report. Fixed by adding a
+      positive-path test supplying the exact sentinel string through the
+      same real, extracted pipeline (factoring the report-writing/script-
+      assembly the hostile-value test already did into a shared helper so
+      both tests exercise one pipeline, not two copies), verified to
+      actually catch the regression the same way every malicious-fixture
+      test in this PR has been.
+
+      **An eighth review round (Codex, fresh evidence) found a real
+      correctness/cost bug in pre-existing, untouched-by-this-PR code
+      this PR's own comment had overclaimed about:** `_can_reuse_primary_
+      json` (the sticky-PR-comment JSON acquisition decision) requires
+      `$FORMAT == "json"` before it will reuse an already-produced report
+      -- so a `format: text`/`markdown` run whose own extra-args supplied
+      `--write json=PATH` (exactly the faithful, unfiltered report
+      `_json_report_src`'s `_extra_write_json_path` branch already
+      trusts, and exactly what let `_evidence_contract_gated` classify
+      the verdict correctly in the first place) is rejected anyway,
+      forcing `_maybe_post_pr_comment` into a full rerun despite the JSON
+      already sitting on disk. For the abi3 `_EvidenceContractError` raise
+      site specifically, that rerun happens *after* real candidate-
+      snapshot extraction -- not the cheap, precondition-only rerun this
+      PR's own `EVIDENCE_CONTRACT_ERROR`-doesn't-get-`BUDGET_OVERFLOW`'s-
+      skip comment (added in the very first slice above) claimed for
+      every raise site. Unlike the documentation-precision rounds above,
+      this is fixed in code rather than recorded as a gap: dropped the
+      blanket `$FORMAT == "json"` requirement and let `_can_reuse_primary_
+      json` rely purely on `_json_report_src` (whose own per-branch
+      gating already restricts a non-`format:-json` trust to exactly the
+      `_extra_write_json_path` case) -- a minimal, general fix to the
+      shared acquisition helper every mode's PR comment goes through, not
+      a special case for this one verdict. Corrected the now-inaccurate
+      "rerun is cheap" framing in the earlier comment to match: reaching
+      `EVIDENCE_CONTRACT_ERROR` already proves a report exists, so with
+      this fix the reuse-or-rerun fallthrough never actually reruns for
+      this verdict at all. New test:
+      `test_reuses_extra_args_write_json_sidecar_under_a_non_json_format`
+      in `tests/test_action_run_sh_pr_json.py`, verified to catch the
+      regression the same way.
 2. **Atomic.** Once the report block agrees with today's real behaviour for
    every axis and every mode (verified by the axis-separated tests this ADR
    requires below), remove `--exit-code-scheme` from `compare` and `scan`,
