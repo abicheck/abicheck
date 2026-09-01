@@ -623,16 +623,35 @@ lands in two stages rather than one atomic change:
       its own hostile-input test — was judged not worth the additional
       parsing surface and its own adversarial-input analysis for one
       narrower mode, when `--format json` already produces this verdict
-      correctly (`ScanSetResult.to_dict()`'s own top-level `verdict` field
-      is exactly the one `_report_query`'s `compat_verdict` query already
-      reads). Documented in `action.yml`'s own `verdict`/`exit-code`
-      output descriptions instead, alongside the pre-existing gap above.
+      at the set's top level in the common case (`ScanSetResult.to_dict()`'s
+      own top-level `verdict` field is exactly the one `_report_query`'s
+      `compat_verdict` query already reads). **A second review round found
+      that claim itself incomplete (Codex review, fresh evidence):**
+      `ScanSetResult`'s own aggregation
+      (`service_scan._aggregate_scan_set_verdict`, pre-existing, untouched
+      by this PR) reports `EVIDENCE_CONTRACT_ERROR` at the set's top level
+      only when it is the *worst* outcome across the set — a sibling
+      library's real `API_BREAK`/`BREAKING` keeps that verdict at the top
+      level instead (the aborted member's contribution still floors the
+      overall exit code at 1, per that function's own docstring, but the
+      wrapper's fail-on-api-break/fail-on-breaking inputs alone decide the
+      step's outcome in that case, same as for an ordinary break, with the
+      sibling abort visible only in the JSON report's own `per_artifact`
+      list). So even under `--format json`, "unconditionally fails the
+      step" holds for `--artifact-set` only when the evidence-contract
+      abort is the set's own worst outcome. Documented precisely in
+      `action.yml`'s own `verdict`/`exit-code` output descriptions instead
+      of parsing `per_artifact` here too, for the same reason as the first
+      gap: a second layer of JSON-array parsing logic earns its own
+      hostile-input analysis and test, and this PR would rather record an
+      accurate limitation than ship that under-tested.
       `tests/test_action_run_sh_scan_evidence_contract_error.py` covers the
       exit-1 dispatch (including the "both signals present" case, since
       real stderr always satisfies `_is_cli_error` too) and the
       step-failure block. Still open: the release fan-out's `GateOptions`
-      unification, the typed-API half of this parity pass, and the
-      `--format text` gap named above.
+      unification, the typed-API half of this parity pass, the
+      `--format text` gap named above, and a real `--artifact-set`
+      member-level evidence-contract signal for the Action to consume.
 2. **Atomic.** Once the report block agrees with today's real behaviour for
    every axis and every mode (verified by the axis-separated tests this ADR
    requires below), remove `--exit-code-scheme` from `compare` and `scan`,
