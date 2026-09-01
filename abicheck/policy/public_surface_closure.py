@@ -570,11 +570,29 @@ def resolve_surface_graph_nodes(snap: AbiSnapshot) -> dict[str, GraphNode]:
     fabricating one onto ``snap.surface_graph`` would misrepresent its
     actual evidence coverage to any other reader of that field (e.g.
     serialization, ``dependency_scope``).
+
+    Re-finalizes a :class:`~abicheck.model.source_graph.SourceGraphSummary`
+    after enrichment (Codex review, PR #979): ``_attach_header_graph`` already
+    called ``graph.finalize()`` on the L5-only content before installing it
+    as ``snap.surface_graph``, which stamped ``graph_id`` (a content hash
+    over the node/edge set) and ``coverage`` from that L5-only snapshot.
+    :func:`build_public_surface_facts` can add new declaration/type/typedef/
+    header/symbol nodes and edges the L5 pass never saw, so leaving the
+    stale ``graph_id``/``coverage`` in place would silently disagree with
+    the graph's own, now-larger node/edge set on any later ``save_snapshot``/
+    ``to_dict`` -- a content-addressed hash that no longer matches its own
+    content. ``finalize()`` isn't part of the narrower :data:`SurfaceGraphLike`
+    protocol (only a real :class:`SourceGraphSummary` has ``graph_id``/
+    ``coverage`` at all), so this narrows back to the concrete type first,
+    the pattern that protocol's own docstring documents for exactly this
+    situation.
     """
     graph: SurfaceGraphLike | None = snap.surface_graph
     if graph is None:
         graph = SourceGraphSummary()
     build_public_surface_facts(snap, graph)
+    if isinstance(graph, SourceGraphSummary):
+        graph.finalize()
     return {n.id: n for n in graph.nodes}
 
 

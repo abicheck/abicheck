@@ -54,3 +54,22 @@
     `TestStrippedGraphAttrsAreReconstructedNotTrusted` in
     `tests/test_policy_public_surface.py`) cover both the never-populated
     and stripped-attrs shapes.
+  - Two further review findings on the same PR, both fixed in the same
+    pass: (1) the module split dropped `PublicSurfaceQuery`/
+    `resolve_public_surface`/`PublicSurfaceResolution` from
+    `policy/public_surface.py`'s own namespace, breaking that historical
+    import path for any existing consumer -- restored via a lazy
+    `__getattr__` re-export shim (the same pattern already used at the tail
+    of `cli_buildsource.py`) for the two moved names, plus a direct
+    `PublicSurfaceResolution = PublicSurface` alias, all three now back in
+    `__all__` for `from ... import *` compatibility too. (2)
+    `_attach_header_graph` finalizes the L5 graph (stamping `graph_id`/
+    `coverage`) *before* installing it as `snap.surface_graph`; enriching
+    that same graph in place with public-surface nodes/edges without
+    re-finalizing left a content-addressed `graph_id` that no longer
+    matched the graph's own, now-larger content on a later
+    `save_snapshot`/`to_dict`. `resolve_surface_graph_nodes()` now
+    re-finalizes after enrichment. Regression tests:
+    `TestPublicSurfaceBackCompatReexports`,
+    `TestSurfaceGraphRefinalizedAfterEnrichment` in
+    `tests/test_policy_public_surface.py`.

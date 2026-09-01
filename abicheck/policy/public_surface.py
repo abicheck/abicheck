@@ -50,6 +50,9 @@ if TYPE_CHECKING:
 
 __all__ = [
     "PublicSurface",
+    "PublicSurfaceQuery",  # noqa: F822 -- resolved by the __getattr__ shim below
+    "PublicSurfaceResolution",
+    "resolve_public_surface",  # noqa: F822 -- resolved by the __getattr__ shim below
 ]
 
 # ── Leaf-local duplicate of surface._type_identifiers ───────────────────────
@@ -193,6 +196,16 @@ class PublicSurface:
     # "unreachable" — doing so would hide a real break (ADR-024 §D5.2). Only
     # confident provenance (private/system header) may demote in that case.
     has_typed_roots: bool = False
+
+
+# Back-compat alias: `PublicSurfaceQuery`'s pre-migration home imported
+# `PublicSurface` from `surface.py` under this name (`from ..surface import
+# PublicSurface as PublicSurfaceResolution`, back when `PublicSurface` itself
+# still lived there). A plain, direct assignment -- unlike `resolve_public_
+# surface`/`PublicSurfaceQuery` below, `PublicSurface` is defined in this
+# same module, so there is no cycle to route around with a lazy shim
+# (Codex review, PR #979).
+PublicSurfaceResolution = PublicSurface
 
 
 def _is_real_type(type_str: str | None) -> bool:

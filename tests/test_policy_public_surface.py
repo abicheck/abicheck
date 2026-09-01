@@ -333,6 +333,22 @@ class TestPublicSurfaceBackCompatReexports:
 
         assert old_path.PublicSurfaceQuery is moved
 
+    def test_public_surface_resolution_is_the_public_surface_alias(self) -> None:
+        import abicheck.policy.public_surface as old_path
+
+        assert old_path.PublicSurfaceResolution is old_path.PublicSurface
+
+    def test_star_import_carries_all_four_historical_names(self) -> None:
+        ns: dict[str, object] = {}
+        exec("from abicheck.policy.public_surface import *", ns)  # noqa: S102
+        for name in (
+            "PublicSurface",
+            "PublicSurfaceQuery",
+            "PublicSurfaceResolution",
+            "resolve_public_surface",
+        ):
+            assert name in ns, name
+
     def test_unknown_attribute_still_raises_attribute_error(self) -> None:
         import abicheck.policy.public_surface as old_path
 
@@ -342,3 +358,24 @@ class TestPublicSurfaceBackCompatReexports:
             pass
         else:
             raise AssertionError("expected AttributeError")
+
+
+class TestSurfaceGraphRefinalizedAfterEnrichment:
+    """``_attach_header_graph`` finalizes the L5 graph (stamping ``graph_id``/
+    ``coverage``) before installing it as ``snap.surface_graph``.
+    ``resolve_surface_graph_nodes`` then adds public-surface nodes/edges the
+    L5 pass never saw -- leaving the old ``graph_id``/``coverage`` in place
+    would silently disagree with the graph's own, now-larger content on a
+    later ``save_snapshot``/``to_dict`` (Codex review, PR #979)."""
+
+    def test_graph_id_reflects_the_enriched_node_set(self) -> None:
+        snap = _outer_inner_snapshot()
+        attached = SourceGraphSummary()
+        attached.finalize()
+        stale_graph_id = attached.graph_id
+        snap.surface_graph = attached
+
+        resolve_surface_graph_nodes(snap)
+
+        assert attached.graph_id != stale_graph_id
+        assert attached.graph_id == attached.compute_graph_id()
