@@ -23,7 +23,6 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, TypeVar, cast
 
 if TYPE_CHECKING:
-    from .build_mode import BuildMode
     from .bundle_facts import BundleFacts
     from .snapshot_io import SnapshotWriteResult
 from . import qualified_name_segments
@@ -35,7 +34,6 @@ from .model import (
     ElfVisibility,
     EnumMember,
     EnumType,
-    ExtractionContract,
     Function,
     Param,
     ParamKind,
@@ -56,6 +54,8 @@ from .storage.fact_codec import (
 )
 from .storage.snapshot_load_normalization import (
     backfill_missing_elf_binding,
+    build_mode_from_dict,
+    extraction_contract_from_dict,
     normalize_anonymous_type_spellings_on_load,
 )
 from .storage.surface_graph_codec import decode_surface_graph, encode_surface_graph
@@ -1041,7 +1041,7 @@ def snapshot_from_dict(d: dict[str, Any]) -> AbiSnapshot:
 
     # Rehydrate BuildMode (schema v5). Missing key = older snapshot →
     # leave as None so build-mode-aware detectors fall back to "unknown".
-    build_mode = _build_mode_from_dict(d.get("build_mode"))
+    build_mode = build_mode_from_dict(d.get("build_mode"))
 
     # Build/source pack reference (schema v7, ADR-028). Optional: a missing key
     # on an older snapshot loads as None; a malformed (non-dict) value is ignored
@@ -1314,7 +1314,7 @@ def snapshot_from_dict(d: dict[str, Any]) -> AbiSnapshot:
     # ADR-050 D1 (schema v12) — profile/scope fingerprints. Missing key (every
     # snapshot predating this field) loads as None, same as every other
     # additive optional field.
-    contract = _extraction_contract_from_dict(d.get("contract"))
+    contract = extraction_contract_from_dict(d.get("contract"))
     # ADR-050 D5 (G32 Phase D) — resolved SYCL/DPC++ "host"/"device" kind.
     # Missing key (every pre-Phase-D snapshot) loads as None (Codex review:
     # snapshot_to_dict already writes this field, but snapshot_from_dict
@@ -1617,106 +1617,6 @@ def snapshot_from_dict(d: dict[str, Any]) -> AbiSnapshot:
     return qualified_name_segments.renumber_anonymous_closure_identities(snap)
 
 
-def _extraction_contract_from_dict(raw: Any) -> ExtractionContract | None:
-    """Convert a serialized ExtractionContract dict (or None) back into the
-    typed dataclass (ADR-050 D1). Returns None when the field is missing
-    (every snapshot predating schema v12) or malformed."""
-    if not isinstance(raw, dict):
-        return None
-    profile_fingerprint = raw.get("profile_fingerprint")
-    scope_fingerprint = raw.get("scope_fingerprint")
-    profile_fields = raw.get("profile_fields")
-    scope_fields = raw.get("scope_fields")
-    return ExtractionContract(
-        profile_fingerprint=profile_fingerprint
-        if isinstance(profile_fingerprint, str)
-        else None,
-        scope_fingerprint=scope_fingerprint
-        if isinstance(scope_fingerprint, str)
-        else None,
-        profile_fields={str(k): str(v) for k, v in profile_fields.items()}
-        if isinstance(profile_fields, dict)
-        else {},
-        scope_fields={str(k): str(v) for k, v in scope_fields.items()}
-        if isinstance(scope_fields, dict)
-        else {},
-    )
-
-
-def _build_mode_from_dict(raw: Any) -> BuildMode | None:
-    """Convert a serialized BuildMode dict (or None) back into the
-    typed dataclass. Returns None when the field is missing (older
-    snapshots) or malformed."""
-    if not isinstance(raw, dict):
-        return None
-    from .build_mode import (
-        BuildMode,
-        BuildModeProvenance,
-        CompilerFamily,
-        CxxStandard,
-        GlibcxxDualAbi,
-        StdlibFamily,
-    )
-
-    def _enum_or(cls: type, value: Any, default: Any) -> Any:
-        if value is None:
-            return default
-        try:
-            return cls(value)
-        except (ValueError, KeyError):
-            return default
-
-    # Validate provenance shape: a malformed snapshot may carry a
-    # non-dict value (string/list from hand-edited JSON, or a partial
-    # corruption). Per the function contract, return None for
-    # malformed inputs rather than raising at .get().
-    prov_raw = raw.get("provenance")
-    if prov_raw is None:
-        prov_raw = {}
-    if not isinstance(prov_raw, dict):
-        return None
-    provenance = BuildModeProvenance(
-        raw_producer=prov_raw.get("raw_producer"),
-        raw_comment=prov_raw.get("raw_comment"),
-        compiler_version=prov_raw.get("compiler_version"),
-    )
-
-    # Coerce libcpp_abi_version: int passes through; numeric string
-    # (some YAML/JSON producers emit "1" instead of 1) coerces; anything
-    # else (bool wraps as 0/1 which would be misleading; lists/dicts)
-    # falls back to None.
-    libcpp_raw = raw.get("libcpp_abi_version")
-    if isinstance(libcpp_raw, bool):
-        libcpp_abi_version: int | None = None
-    elif isinstance(libcpp_raw, int):
-        libcpp_abi_version = libcpp_raw
-    elif isinstance(libcpp_raw, str) and libcpp_raw.isdigit():
-        libcpp_abi_version = int(libcpp_raw)
-    else:
-        libcpp_abi_version = None
-
-    return BuildMode(
-        compiler_family=_enum_or(
-            CompilerFamily,
-            raw.get("compiler_family"),
-            CompilerFamily.UNKNOWN,
-        ),
-        language_std=_enum_or(
-            CxxStandard,
-            raw.get("language_std"),
-            CxxStandard.UNKNOWN,
-        ),
-        stdlib=_enum_or(StdlibFamily, raw.get("stdlib"), StdlibFamily.UNKNOWN),
-        glibcxx_dual_abi=_enum_or(
-            GlibcxxDualAbi,
-            raw.get("glibcxx_dual_abi"),
-            GlibcxxDualAbi.NOT_APPLICABLE,
-        ),
-        libcpp_abi_version=libcpp_abi_version,
-        provenance=provenance,
-    )
-
-
 def load_snapshot(path: str | Path) -> AbiSnapshot:
     """Load a snapshot from *path*, transparently handling plain, gzip, and
     zstd storage (ADR-059) — detected from magic bytes, not the filename."""
@@ -1796,7 +1696,9 @@ def bundle_facts_to_dict(facts: BundleFacts) -> dict[str, Any]:
     """Serialize a :class:`~abicheck.bundle_facts.BundleFacts` to a
     JSON-able dict (G38 Phase 2). See
     :func:`abicheck.bundle_facts_serialization.bundle_facts_to_dict`."""
-    return cast("dict[str, Any]", _bundle_facts_serialization().bundle_facts_to_dict(facts))
+    return cast(
+        "dict[str, Any]", _bundle_facts_serialization().bundle_facts_to_dict(facts)
+    )
 
 
 def bundle_facts_from_dict(d: dict[str, Any]) -> BundleFacts:

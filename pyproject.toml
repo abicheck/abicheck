@@ -212,12 +212,12 @@ disallow_untyped_decorators = false
 disable_error_code = ["no-any-return", "misc", "import-untyped"]
 
 [[tool.mypy.overrides]]
-# ``cli_params.PolicyFileParam`` subclasses ``click.ParamType``. Depending on
+# ``PolicyFileParam`` subclasses ``click.ParamType``. Depending on
 # the installed click's type stubs, mypy treats the base either as ``Any``
 # (-> ``misc``: "cannot subclass Any") or as a generic needing a type argument
 # (-> ``type-arg``). Suppress both so the module stays portable across click /
 # mypy versions without a runtime ``ParamType[...]`` subscription.
-module = ["abicheck.cli_params"]
+module = ["abicheck.frontends.cli.options.params"]
 disallow_untyped_decorators = false
 disable_error_code = ["no-any-return", "misc", "type-arg"]
 

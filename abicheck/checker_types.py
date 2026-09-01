@@ -31,6 +31,7 @@ from .checker_policy import (
     EvidenceTier,
     ReachabilityState,
     Verdict,
+    apply_policy_file_overrides as _apply_policy_file_overrides,
     policy_kind_sets as _policy_kind_sets,
 )
 from .contract_relevance_types import (
@@ -312,7 +313,7 @@ class Change:
     # `checker.compare`, *before* the verdict is computed.
     compatibility_evaluation_status: CompatibilityEvaluationStatus | None = None
     compatibility_decision: Verdict | None = None
-    # Set by diff_types._diff_type_vtable on a TYPE_VTABLE_CHANGED finding
+    # Set by diff_types_vtable._diff_type_vtable on a TYPE_VTABLE_CHANGED finding
     # when it rests on the identical asymmetric-layout-evidence gap
     # LAYOUT_UNVERIFIABLE (diff_layout.py) reports for the same type. Purely
     # an internal cross-detector correlation key for
@@ -677,32 +678,26 @@ class DiffResult(ReportSideFacts):
         frozenset[ChangeKind],
         frozenset[ChangeKind],
     ]:
-        """Return (breaking, api_break, compatible, risk) kind sets with overrides applied."""
-        breaking, api_break, compatible, risk = _policy_kind_sets(self.policy)
-        if not self.policy_file or not self.policy_file.overrides:
-            return breaking, api_break, compatible, risk
+        """Return (breaking, api_break, compatible, risk) kind sets with overrides applied.
 
-        # Apply overrides: move kinds between sets
-        b, a, c, r = set(breaking), set(api_break), set(compatible), set(risk)
-        _VERDICT_TO_SET_IDX = {
-            Verdict.BREAKING: 0,
-            Verdict.API_BREAK: 1,
-            Verdict.COMPATIBLE: 2,
-            Verdict.COMPATIBLE_WITH_RISK: 3,
-        }
-        sets = [b, a, c, r]
-        for kind, verdict in self.policy_file.overrides.items():
-            # Remove from all sets
-            for s in sets:
-                s.discard(kind)
-            # Add to target set
-            idx = _VERDICT_TO_SET_IDX.get(verdict)
-            if idx is not None:
-                sets[idx].add(kind)
-        return frozenset(b), frozenset(a), frozenset(c), frozenset(r)
+        Pure delegation (ADR-061 Phase 4's own recorded gap, now closed): the
+        override-application algorithm itself lives in
+        ``checker_policy.apply_policy_file_overrides`` — this method only
+        consumes that already-computed result, it does not itself execute
+        policy-resolution logic. See that function's own docstring for why
+        this split matters and what changed.
+        """
+        overrides = self.policy_file.overrides if self.policy_file else None
+        return _apply_policy_file_overrides(_policy_kind_sets(self.policy), overrides)
 
     def _effective_verdict_for_change(self, change: Change) -> Verdict:
-        """Return the per-change verdict, including frozen namespace guards."""
+        """Return the per-change verdict, including frozen namespace guards.
+
+        Pure delegation to ``reclassify.effective_verdict_for_change`` — this
+        method holds no policy-resolution logic of its own (unlike
+        ``_effective_kind_sets`` before ADR-061 Phase 4's closure above; see
+        that method's docstring).
+        """
         from .reclassify import effective_verdict_for_change  # severity re-exports it
 
         return effective_verdict_for_change(

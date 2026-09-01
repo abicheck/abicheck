@@ -33,7 +33,7 @@ import pytest
 from abicheck.model.availability import FactStatus
 from abicheck.model.declarations import Param
 from abicheck.model.entities import RecordType
-from abicheck.model.fact import Fact, replace_with_fact_sync
+from abicheck.model.fact import Fact, replace_with_fact_sync, resolved_fact_value
 
 
 class TestFactConstructors:
@@ -320,3 +320,83 @@ class TestParamFactBridge:
     def test_field_type_never_widens(self) -> None:
         by_name = {f.name: f for f in dataclasses.fields(Param)}
         assert by_name["is_va_list"].type == "bool"
+
+
+class TestResolvedFactValue:
+    """ADR-063 Phase 0's detector-migration slice: the shared, mypy-safe
+    narrowing every migrated reader calls through instead of the bare
+    legacy attribute. Pins the exact invariant the migration itself rests
+    on: for a fully-constructed RecordType/Param, `resolved_fact_value`
+    always reproduces exactly what the retained legacy field already held —
+    a pure re-spelling, not a new collapse of availability.
+    """
+
+    def test_none_fact_resolves_to_default(self) -> None:
+        assert resolved_fact_value(None, []) == []
+        assert resolved_fact_value(None, "fallback") == "fallback"
+
+    def test_present_fact_resolves_to_its_value(self) -> None:
+        assert resolved_fact_value(Fact.present(["a", "b"]), []) == ["a", "b"]
+
+    def test_partial_fact_resolves_to_its_value(self) -> None:
+        assert resolved_fact_value(Fact.partial([1, 2]), []) == [1, 2]
+
+    def test_not_collected_fact_resolves_to_default(self) -> None:
+        assert resolved_fact_value(Fact.not_collected(), []) == []
+
+    def test_unsupported_and_failed_resolve_to_default(self) -> None:
+        assert resolved_fact_value(Fact.unsupported(), []) == []
+        assert resolved_fact_value(Fact.failed("reason"), []) == []
+
+    @pytest.mark.parametrize(
+        "bases, virtual_bases",
+        [
+            ([], []),
+            (["Base"], []),
+            ([], ["VBase"]),
+            (["A", "B"], ["V"]),
+        ],
+    )
+    def test_matches_legacy_field_for_every_real_construction(
+        self, bases: list[str], virtual_bases: list[str]
+    ) -> None:
+        """The exact invariant the whole migration rests on: for any real
+        (producer-shaped) construction, `resolved_fact_value` reproduces
+        the legacy field bit-for-bit."""
+        rec = RecordType(
+            name="C", kind="struct", bases=bases, virtual_bases=virtual_bases
+        )
+        assert resolved_fact_value(rec.bases_fact, []) == rec.bases
+        assert resolved_fact_value(rec.virtual_bases_fact, []) == rec.virtual_bases
+
+    def test_matches_legacy_field_for_a_bare_omitted_construction(self) -> None:
+        rec = RecordType(name="C", kind="struct")
+        assert resolved_fact_value(rec.bases_fact, []) == rec.bases == []
+        assert rec.bases_fact is not None
+        assert rec.bases_fact.status is FactStatus.NOT_COLLECTED
+
+
+class TestRecordTypeResolvedBasesMethods:
+    """`RecordType.resolved_bases()`/`resolved_virtual_bases()` — the
+    import-free convenience wrappers added to keep several already
+    line-budget-constrained readers (ADR-061's `architecture/debt.yaml`
+    no-growth ledger) from needing a new `resolved_fact_value` import.
+    Must behave identically to calling the free function directly.
+    """
+
+    def test_resolved_bases_matches_free_function(self) -> None:
+        rec = RecordType(name="D", kind="struct", bases=["Base1", "Base2"])
+        assert rec.resolved_bases() == resolved_fact_value(rec.bases_fact, [])
+        assert rec.resolved_bases() == ["Base1", "Base2"]
+
+    def test_resolved_virtual_bases_matches_free_function(self) -> None:
+        rec = RecordType(name="D", kind="struct", virtual_bases=["VBase"])
+        assert rec.resolved_virtual_bases() == resolved_fact_value(
+            rec.virtual_bases_fact, []
+        )
+        assert rec.resolved_virtual_bases() == ["VBase"]
+
+    def test_not_collected_resolves_to_empty_list_not_none(self) -> None:
+        rec = RecordType(name="D", kind="struct")
+        assert rec.resolved_bases() == []
+        assert rec.resolved_virtual_bases() == []

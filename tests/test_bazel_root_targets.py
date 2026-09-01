@@ -767,3 +767,47 @@ def test_dot_abicheck_yml_build_targets_with_precaptured_aquery_rejected(
     )
     assert result.exit_code == 64, result.output
     assert "pre-captured Bazel aquery" in result.output
+
+
+def test_dot_abicheck_yml_build_targets_dry_run_parity(tmp_path: Path):
+    """ADR-063 Phase 4's second slice: ``dump --dry-run`` must reject the
+    identical ``.abicheck.yml``-only (no ``--build-target`` flag) scope
+    mismatch the real run above rejects, not silently preview success for a
+    request the real run then refuses -- the dry-run/execution parity gap
+    ``docs/contribute/known-gaps.md`` and this ADR's own plan doc named as
+    still open. ``dump --dry-run`` resolves via the same
+    ``resolve_dump_request`` -> ``AnalysisPlanner.resolve`` chokepoint the
+    real run does, so widening the check there (auto-discovering
+    ``.abicheck.yml`` at ``--sources``, mirroring ``embed_build_source``'s
+    own fallback) closes this for free, with no change to the dry-run
+    renderer itself."""
+    from click.testing import CliRunner
+
+    from abicheck.cli import main
+
+    src = tmp_path / "src"
+    src.mkdir()
+    (src / "a.cpp").write_text("int f() { return 0; }\n", encoding="utf-8")
+    (src / ".abicheck.yml").write_text(
+        "build:\n  system: bazel\n  targets:\n    - //:from_config\n",
+        encoding="utf-8",
+    )
+    aquery = tmp_path / "aquery.json"
+    aquery.write_text(
+        json.dumps({"actions": [], "pathFragments": [], "artifacts": [], "targets": []})
+    )
+
+    runner = CliRunner()
+    result = runner.invoke(
+        main,
+        [
+            "dump",
+            "--sources",
+            str(src),
+            "--build-info",
+            str(aquery),
+            "--dry-run",
+        ],
+    )
+    assert result.exit_code == 64, result.output
+    assert "pre-captured Bazel aquery" in result.output

@@ -33,7 +33,7 @@ import abicheck.diff_surface_metrics as diff_surface_metrics_module
 import abicheck.pattern_verdicts as pattern_verdicts_module
 from abicheck.model import AbiSnapshot, Function, Visibility
 from abicheck.model.identity import entity_id_for_function
-from abicheck.policy.public_surface import PublicSurfaceQuery
+from abicheck.policy.public_surface_query import PublicSurfaceQuery
 from abicheck.service import compare_snapshots
 
 

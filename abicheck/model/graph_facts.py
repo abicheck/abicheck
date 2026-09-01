@@ -557,7 +557,7 @@ class SurfaceGraphLike(Protocol):
     first draft of this protocol had: a graph *builder* (``compare/
     surface_graph.py``'s public-surface builder, the existing L5 builder)
     only ever calls :meth:`add_node`/:meth:`add_edge`; the *query* layer
-    (``policy/public_surface.py``'s ``PublicSurfaceQuery``) must read
+    (``policy/public_surface_query.py``'s ``PublicSurfaceQuery``) must read
     :attr:`nodes`/:attr:`edges` back to traverse them, and check
     :meth:`has_node` for O(1) membership rather than a linear scan.
     ``Sequence``, not ``list`` — a read-only view is all traversal needs.

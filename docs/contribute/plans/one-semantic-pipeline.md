@@ -5716,6 +5716,167 @@ posture. `python scripts/check_docs_contract.py` and `python scripts/
 check_ai_readiness.py` both re-run clean at their existing baselines
 (0 errors, 2/148 warnings respectively) after the addition.
 
+**Detector migration (fourth slice) — landed, closing this phase.** Every
+site the `KNOWN_UNMIGRATED_READERS` baseline recorded — 104 keys across 20
+modules at the point this slice started — has migrated off the bare legacy
+attribute onto its `Fact[...]` sibling; the baseline is now the literal
+empty set (`frozenset()`), and the scan (`unmigrated_fact_reader_sites`/
+`check_fact_field_readers`) stays exactly as live as before — a genuinely
+new direct read anywhere under `abicheck/` still fails the gate on sight,
+with nothing left to exempt it. This is the exact gap the Status section of
+`docs/contribute/adr/063-one-semantic-pipeline.md` previously recorded
+("No detector has migrated to read the converted fields' `Fact[...]`
+siblings yet") — closed, not deferred.
+
+**The migration is representation-only, per this phase's own Design
+section and Acceptance criteria stated above — it does not change any
+detector's emitted findings.** The mechanism is a single, provable
+invariant `bridge_legacy_and_fact` (this phase's own compatibility bridge,
+landed in the first slice) already establishes for every constructed
+`RecordType`/`Param` instance: the retained legacy field always equals
+`<field>_fact.value` when `<field>_fact.is_present`, and the field's own
+normal resting value (`[]` for `bases`/`virtual_bases`/`vtable`, `None` for
+`vptr_offset_bits`, `False` for `is_va_list`) otherwise — by construction,
+not by convention, since `__post_init__` is the only place either
+representation is ever written after construction. `abicheck/model/fact.py`
+gained one new function, `resolved_fact_value(fact: Fact[T] | None,
+default: T) -> T`, expressing exactly this: `fact.value_or(default)` when
+`fact` is not `None`, else `default` (the `Fact[T] | None` union on the
+parameter — not `Fact[T]` alone — matches the field's own declared type;
+see below for why that union matters). Every migrated call site replaces
+`rec.bases` with `resolved_fact_value(rec.bases_fact, [])` — a pure
+re-spelling of the identical value the legacy field already held, verified
+by the full test suite staying green (mypy 0 errors, ruff clean, the
+complete non-integration/non-slow/non-golden suite unchanged) and by the
+FP-rate/tier-accuracy gates staying at their existing baselines with no
+new corpus case needed. **This is deliberately not the same thing as
+`Fact.value_or(...)`'s own documented "not detector-safe" warning
+(Design section, above) being quietly ignored** — that warning is about a
+detector *inventing* a collapsed default that discards information the raw
+legacy field never had ("`old.vtable_fact.value_or([]) != new.vtable_fact.
+value_or([])` reintroduces... the exact ambiguity"); `resolved_fact_value`
+used at one of these 104 sites reproduces a value that already existed,
+observable at the exact same fidelity, one hop away, on the still-live
+`.status` of the very `Fact[...]` object each call reads from. A future
+caller wanting genuine per-status handling still matches on `.status`
+directly — this phase does not remove that capability, only stops forcing
+every reader to go through the ambiguous legacy name to get an ordinary
+value.
+
+**Why `resolved_fact_value` takes `Fact[T] | None`, not `Fact[T]` — a real
+mypy gap the first attempt at this slice missed.** `RecordType.bases_fact`
+(and its four siblings) are declared `Fact[list[str]] | None`, not
+`Fact[list[str]]` — required by this phase's own direct-construction
+compatibility bridge (Design section: the field's real default is `None`,
+distinct from `Fact.not_collected()`, so `__post_init__` can tell "caller
+passed nothing" apart from "caller explicitly asserted no evidence"). A
+first pass at each migrated call site wrote the natural-looking
+`rec.bases_fact.value if rec.bases_fact.is_present else []` directly —
+`mypy` correctly rejected essentially every one of them
+(`Item "None" of "Fact[list[str]] | None" has no attribute "is_present"`):
+the field is provably never `None` on a fully-constructed instance
+(`__post_init__` always resolves it), but mypy has no cross-instance view
+of that invariant and must assume the declared type. `resolved_fact_value`
+closes this once, centrally, rather than repeating an `assert fact is not
+None` (or an equivalent `... or []` narrowing hack) at every one of the 104
+sites — a real, if narrower, instance of this phase's own governing
+principle (one concept, one representation) applied to the *narrowing*
+step itself, not only to availability.
+
+**Two modules crossed the AI-readiness `file-size` hard cap purely from
+this slice's added local-variable lines, and both were split the same way
+this codebase already splits an oversized module — a fifth slice, not a
+new design.** `diff_types.py` (2018 lines) and `dwarf_snapshot.py` (2041
+lines) each exceeded the unconditional 2000-line limit once every migrated
+site's `resolved_fact_value(...)` assignment line was added; `diff_types.py`
+already had three such sibling splits before this phase
+(`diff_types_abicc_parity.py`/`diff_types_field_facts.py`/
+`diff_types_surface.py`), so this is the same pattern, not a new one.
+`diff_types_vtable.py` takes the self-contained `TYPE_VTABLE_CHANGED`
+evidence-gating cluster (`_vtable_transition_is_evidenced`/
+`_vtable_transition_rests_on_unresolved_evidence`/
+`_layout_evidence_is_unverifiable`/`_owned_virtual_signatures`/
+`_owned_virtual_signatures_for_record`/`_diff_type_vtable`) — every one of
+these six functions was already only ever called from within this same
+cluster or from the one external call `diff_types.py` makes into
+`_diff_type_vtable`, so the split needed only one import back
+(`from .diff_types_vtable import _diff_type_vtable as _diff_type_vtable`),
+mirroring the `as`-aliased re-export convention the three pre-existing
+siblings already use. `dwarf_snapshot_datasources.py` takes
+`show_data_sources` and its three private formatting helpers
+(`_evidence_layer_line`/`_coverage_row_summary`/`_evidence_payload_summary`)
+— a human-readable L0-L5 diagnostic renderer with zero dependency on
+`_DwarfSnapshotBuilder` or anything else in `dwarf_snapshot.py` — with
+`show_data_sources` re-exported (`as`-aliased) from `dwarf_snapshot.py` so
+`cli_datasources.py`/`cli_dump_helpers.py`/`workflows/extraction.py` and
+their tests, all of which import it as `from abicheck.dwarf_snapshot import
+show_data_sources`, are unaffected. Neither split changes any behavior,
+only which module owns the code; both land at 1579 and 1915 lines
+respectively, with headroom under the cap.
+
+**A second, narrower growth surface -- ADR-061's own `architecture/debt.yaml`
+no-growth ledger, not the AI-readiness `file-size` cap above -- needed a
+different fix, not a module split.** Six already-`no_growth`-tracked files
+(`contract_evidence_collect.py`/`dumper_scoping.py`/`export_surface.py`/
+`internal_leak.py`/`surface.py`/`type_reachability.py`) each grew 2-9 lines
+past their frozen adoption baseline purely from the two-line
+`bases = resolved_fact_value(...)` / `virtual_bases = resolved_fact_value
+(...)` local-variable pattern this migration otherwise uses everywhere --
+`architecture/debt.yaml`'s own README states the ledger "should only
+shrink," so raising six baselines to absorb this migration's own overhead
+would be exactly the kind of undocumented exception this ADR's Governing
+Invariant section rejects. Splitting a module was not the fix here either
+(none of the six is anywhere near the 2000-line hard cap the split above
+addresses; `architecture/debt.yaml`'s own per-file ceiling is a stricter,
+independent budget the same file can be tracked under well before that).
+The actual fix: `RecordType` gained two short, import-free convenience
+methods, `resolved_bases()`/`resolved_virtual_bases()` (`model/entities.py`,
+right after `__post_init__`, each a one-line call to the identical
+`resolved_fact_value` primitive) -- a call site with an already-typed
+`RecordType` in hand writes `rec.resolved_bases()` instead of
+`resolved_fact_value(rec.bases_fact, [])`, which needs no new `from .model
+import resolved_fact_value` line at all (the six files above already import
+`RecordType` for their own type annotations) and is short enough to often
+collapse the two-line local-variable pattern back to the original
+single-line call site the pre-migration code used. This is not a second
+representation of the same concept -- both spellings resolve through the
+one `resolved_fact_value` primitive in `model/fact.py`, and the method
+exists purely to avoid an import cost at space-constrained call sites, the
+same reasoning `Fact.value_or()`/`bridge_legacy_and_fact()` already coexist
+under in that same module. The free-function form remains correct and used
+elsewhere (`diff_cpp_patterns.py`'s `_is_empty_record(t: object)` cannot
+call a `RecordType` method at all, since `t` is deliberately typed `object`
+there). All six files land exactly at their recorded adoption baseline
+(1183/1289/1312/1651/1507/1504 lines respectively) with this migration's
+reads included -- confirmed via `python scripts/check_architecture.py
+--base <this-branch's-actual-base-commit>`, which is what isolates a PR's
+own growth from unrelated already-on-`main` debt the same way CI's own
+`ARCHITECTURE_BASE` does (a bare local run with no resolvable
+`origin/main` tracking ref, as in a stale/shallow sandbox checkout, can
+misattribute pre-existing debt to an unrelated PR -- passing `--base`
+explicitly is the fix, not a ledger change).
+
+With the empty baseline, the empty-baseline test
+(`tests/test_fact_field_readers.py::test_baseline_entries_are_real_sites`)
+is vacuously satisfied (there is nothing left to check is "real"), and
+`tests/test_fact_field_readers.py`'s own synthetic-violation tests continue
+to pin the scan's real behavior against a throwaway `abicheck/`-shaped tree,
+independent of the baseline's size. Phase 0 is therefore complete per its
+own stated scope in this document's Goal/Design/Acceptance-criteria
+sections above: `Fact[T]` exists, every one of the five converted fields'
+producers construct it directly, every currently-known reader consults it
+instead of the ambiguous legacy attribute, and both AI-readiness gates
+(`fact-detector-misuse`/`fact-field-readers`) are live with nothing left in
+either baseline for a *known* violation to hide behind. What remains
+explicitly outside this phase's scope, unchanged: a detector *branching* on
+`FactStatus` to actually change which findings it emits (Phase 5's job);
+converting any field beyond the five this phase named (also Phase 5,
+registry-driven); and removing the four retained legacy attributes
+themselves, which Phase 10's own checklist already schedules for once the
+widened reader check reports zero remaining readers outside the
+compatibility bridge's own `__post_init__` and serialization — true as of
+this slice, but Phase 10 is where that removal actually happens, not here.
+
 ---
 
 ### Phase 1 — finish the `dump`/`scan` typed-API convergence (closes AGENTS.md "PR C")
@@ -5993,6 +6154,63 @@ either. This phase's Acceptance criteria section remains unmet for the
 routing half; closing it now has two named prerequisites (the seed-cleanup
 ownership redesign, and a decision on where `dump`'s embed/enforce/scope
 stanza belongs) rather than being a mechanical restructuring.
+
+**Update (landed, ELF): `dump`'s real ELF run now routes through
+`execute_dump_request`.** Both blockers A and B above were closed —
+`frontends/cli/commands/dump.py`'s ELF branch now builds a second,
+execution-scoped `ResolvedDumpRequest` (re-pointed at the normalized
+`so_path`, `requested_depth` nulled so the shared pipeline's own depth gate
+never fires ahead of `_write_snapshot_output`'s existing one) and calls
+`frontends.cli.dump_execute.execute_dump_cli_run`, which runs
+`service_dump_pipeline.execute_dump_request` — `perform_elf_dump` is
+retired for this call site (kept defined for its own direct unit tests).
+Landed as commit `0b69fc3` ("refactor(cli): migrate dump's real ELF run
+onto execute_dump_request (PR C)") plus three Codex-review follow-up
+commits (collect-mode/folded-compiler forwarding, keeping the new module
+out of the CLI-registration import cycle, and treating an explicit
+`dump --config`/`--build-query` as trusted operator input). See
+`docs/contribute/known-gaps.md`'s "PR C" entry for the exact mechanism
+each blocker's fix uses.
+
+**Update (2026-09-01, landed): the PE/Mach-O half is closed the identical
+way, completing this phase's routing half for both binary formats.** The
+same structural finding that blocked a from-scratch PE/Mach-O migration
+above no longer applies once the ELF slice had already resolved blockers A
+and B for the shared pipeline itself — `execute_dump_request`/
+`_resolve_side_snapshot_impl` were already format-generic
+(`fmt`-parameterized: `is_elf=True if fmt == "elf" else None`,
+`pdb_path=side.pdb` unconditional, `attach_build_context_for_parsed_headers`/
+`embed_side_build_source` both format-unconditional), so no second design
+investigation was needed — only the *caller* was still routing PE/Mach-O
+around it. `frontends/cli/commands/dump.py`'s PE/Mach-O branch now builds
+the identical execution-scoped `ResolvedDumpRequest` and calls the same
+`execute_dump_cli_run`; `handle_non_elf_dump` is retired for this call
+site (kept defined, unchanged, for its own direct unit tests — the same
+discipline `perform_elf_dump` already follows). The shared real-run tail
+(execute, stamp provenance, write the snapshot) both formats now need was
+factored into a new `frontends/cli/dump_execute.
+execute_and_write_dump_cli_run` so `commands/dump.py` — already at the
+architecture gate's 800-line production cap — did not grow net lines when
+the PE/Mach-O branch stopped being a single delegating call to
+`handle_non_elf_dump`. Verified via the existing mock-based CLI/unit test
+suite (four CLI-dispatch tests that previously monkeypatched
+`handle_non_elf_dump` were rewritten to patch
+`abicheck.service_dump_native._dump_pe`/`_dump_macho` instead, the same
+depth below the format dispatch the pre-existing ELF-side precedent,
+`test_compile_context_parity.py::test_dump_reads_compile_block_from_config`,
+already patches `abicheck.dumper.dump` at) — **not** a real PE/Mach-O
+toolchain end-to-end run: no PE/Mach-O toolchain was available in this
+environment to do a byte-for-bit parity check the way the ELF migration's
+own `tests/test_dump_cli_typed_api_parity.py` corpus does for ELF. This
+phase's Acceptance criteria section's routing half is therefore now met
+for both binary formats that execute through this pipeline at all. The
+one remaining, permanent exception is unchanged from this phase's own
+Design section: `cli_buildsource.dump_source_only()` (the binary-less
+`dump --sources`/`--build-info` path) is explicitly out of scope for this
+phase and was not touched — it has no `execute_dump_request()` call to
+route through at all (`ResolvedDumpRequest`'s own docstring: a
+binary-less request has no `InputSpec.path` for `execute_dump_request` to
+resolve), and remains its own separate pipeline.
 
 ---
 
@@ -9541,6 +9759,201 @@ the function-diff path, the post-parse consumer migrations, and promoting
 the new `entity:` alias into a real alias-match reconciliation tier once
 `EntityId.key`'s stability question above is resolved.
 
+**Landed (ninth slice, 2026-09-01): `entity_id` reaches the non-`diff_types.py`
+tail of exhaustive population, plus one hardening attempt explicitly not
+taken.** First part: every remaining `make_change()`/`bool_transition()`
+call site in `diff_layout.py`, `diff_vtable_layout.py`, and
+`diff_symbols_variables.py` now carries `entity_id` -- all ten sites
+across those three files (`diff_layout.py`'s six layout-descriptor findings,
+`diff_vtable_layout.py`'s two vtable-group findings,
+`diff_symbols_variables.py`'s `VAR_ACCESS_CHANGED`/`WIDENED` and
+`VAR_ALIGNMENT_CHANGED`), each keyed off the two matched `RecordType`/
+`Variable` objects already in scope at the call site
+(`old_rec.entity_id or new_rec.entity_id`, following the seventh/eighth
+slice's old-preferred/new-fallback convention). `diff_symbols.py`'s own
+remaining gap closed too: `_check_variable`'s `VAR_TYPE_CHANGED` and its
+`bool_transition` const-flip pair, `_var_removed`/`_var_added`
+(`VAR_REMOVED`/`VAR_ADDED`, one-sided), `_check_field_access_changes`
+(`FIELD_ACCESS_CHANGED`, attributed to the containing `RecordType` since a
+`TypeField` carries no `EntityId` of its own), `_check_anon_field_at_offset`
+(`ANON_FIELD_CHANGED`, both branches -- the containing-record identity is
+now threaded through as an explicit parameter from
+`_check_anon_fields_for_type`, since the field-level helper itself never
+had a `RecordType` in scope), and `_diff_var_deprecated`
+(`VAR_DEPRECATED_ADDED`/`REMOVED`). Nine sites in `diff_symbols.py`, all
+regression-tested by the existing `compare=False` invariant (no equality
+based test can regress) and confirmed by a direct code-level count
+(`make_change`/`bool_transition` call-site keyword arguments vs. the file's
+total `make_change`/`bool_transition` call count, distinguishing an actual
+call-site `entity_id=` keyword from the one signature parameter declaration
+and the one local `entity_id = ...` variable assignment this slice also
+added). Three sites deliberately stay unwired, all in `diff_symbols.py`'s
+`_diff_constants` (`CONSTANT_REMOVED`/`CHANGED`/`ADDED`): `AbiSnapshot.
+constants` is a plain `dict[str, str]`, with no parsed declaration object
+behind either side to carry an `EntityId` -- fabricating one was explicitly
+out of scope. Second part: the `type_reachability.py`/
+`type_reachability_spelling.py` hardening this slice was scoped to look at
+(`_record_identity(name, qualified_name)`'s three call sites --
+`_partition_snapshot_types`, and the two `snapshot.enums`-keyed
+`enum_identities` sites in `directly_referenced_stdlib_types`/its sibling)
+was investigated and **not taken**: every one of those three call sites'
+output strings feed directly into `_non_stdlib_signature_spellings`, which
+is consumed by `_StdlibReferenceScan`'s own substring/spelling-matching
+machinery -- the exact "core signature-spelling substring-matching
+machinery" this slice's own scope explicitly excluded. There is no
+`_record_identity` call site in either module that is an independent
+RecordType/EnumType-keyed anchor separable from that string-spelling
+domain; swapping any of the three to prefer `.entity_id.key` would mix
+opaque `EntityId` keys into a domain whose whole contract is "a spellable
+string that can appear inside a rendered `Function.return_type`/
+`Param.type`/`TypeField.type`", breaking the matching algorithm for any
+type that happens to carry a populated `entity_id`. Verification: full fast
+unit suite green, `mypy abicheck/` clean at the documented 0-error
+baseline, `ruff check`/`ruff format --check` clean on every file this
+slice touched (two pre-existing, unrelated formatting violations were
+independently confirmed present on the base commit before this slice's own
+changes, via `git stash`). Remaining Phase 2 items unchanged by this
+slice: `entity_id` population for DWARF/PDB/ELF-only tiers (still always
+`None` there, an out-of-scope gap noted since the background section
+above), the post-parse consumer migrations, and promoting the `entity:`
+alias into a real alias-match reconciliation tier.
+
+**Landed (tenth slice, 2026-09-01): `entity_id` reaches `diff_types.py`/
+`diff_types_field_facts.py`, closing exhaustive population for the
+type-diff detector family.** Every `make_change()` call site in
+`diff_types.py` (43 sites) and `diff_types_field_facts.py` (16 sites) now
+carries `entity_id`, following the same old-preferred/new-fallback
+convention (`t_old.entity_id or t_new.entity_id` for a matched
+`RecordType`/`EnumType`/`Function` pair; the single available side's own
+`entity_id` for a one-sided add/removal). Field-level findings (a struct/
+union field or enum member gaining, losing, or changing a property)
+attribute to the *containing* `RecordType`/`EnumType`'s `entity_id`, since
+`TypeField` carries no `EntityId` of its own (`EntityKind.FIELD` is
+declared but unimplemented -- the same conclusion the ninth slice reached
+for `diff_symbols.py`'s field-level detectors). Four helper functions that
+previously had no record object in scope at all at their own call sites
+(`_try_match_reserved_field`, `_diff_removed_field`, and
+`_diff_type_field_pair` in `diff_types.py`; `_check_field_qualifier_pair`
+in `diff_types_field_facts.py`) gained an explicit `entity_id`
+keyword-only parameter threaded down from their caller (`_diff_type_fields`/
+`_diff_field_qualifiers`, both of which do have the matched `RecordType`
+pair in scope), mirroring the existing `qualified_name` threading pattern
+already established at those same call sites. 56 of 59 `make_change()`
+sites wired (40/43 in `diff_types.py`, 16/16 in
+`diff_types_field_facts.py`); three sites deliberately stay unwired --
+`diff_types.py::_diff_typedefs`'s `TYPEDEF_VERSION_SENTINEL`/
+`TYPEDEF_REMOVED`/`TYPEDEF_BASE_CHANGED` -- since `_typedef_diff_maps`
+produces plain `str -> str` alias maps with no parsed declaration object
+behind either side to carry an `EntityId` (matching the ninth slice's
+identical conclusion for `diff_symbols.py::_diff_constants`;
+`entity_id_for_typedef` in `model/identity.py` still has zero confirmed
+production callers). One `OVERLOAD_ADDED` site in
+`_diff_overload_additions` is a genuine new shape not seen in earlier
+slices: its "new" side is a *group* of overload `Function`s rather than a
+single matched object, so it is stamped with only the still-present
+old-side declaration's own `entity_id`. Verification: full fast unit suite
+green (one pre-existing, unrelated failure --
+`test_platform_matrix.py::test_type_param_diff_implies_symbol_diff`, a
+`dataclasses`/`sys.modules` introspection error confirmed present on the
+base commit via `git stash` -- and one pre-existing mypy error in
+`frontends/cli/commands/dump.py` from concurrent, unrelated work in
+progress on this branch; neither touched by this slice); `mypy abicheck/`
+clean except that one pre-existing, unrelated error; `ruff check`/`ruff
+format --check` clean on both files this slice touched. Remaining Phase 2
+items unchanged by this slice: `entity_id` population for DWARF/PDB/
+ELF-only tiers, the post-parse consumer migrations, and promoting the
+`entity:` alias into a real alias-match reconciliation tier.
+
+**Landed (eleventh slice, 2026-09-01): `diff_types.py` split into
+`diff_types_bases_vtable.py` — a mechanical AI-readiness follow-up, not
+new ADR-063 semantic work.** The tenth slice's `entity_id=` wiring pushed
+`diff_types.py` from 1999 to 2066 lines, past the AI-readiness gate's
+2000-line hard cap (`file-size`, no allowlist mechanism), and shifted the
+line numbers thirteen `fact-field-readers` `KNOWN_UNMIGRATED_READERS`
+baseline entries in `diff_layout.py`/`diff_types.py`/
+`diff_vtable_layout.py` were keyed against. Fixed by extracting the
+largest genuinely self-contained function group in `diff_types.py` --
+base-class diffing (`_diff_type_bases`) and the vtable-diffing group
+feeding `_diff_type_vtable` (`_vtable_transition_is_evidenced`,
+`_vtable_transition_rests_on_unresolved_evidence`,
+`_layout_evidence_is_unverifiable`, `_owned_virtual_signatures`,
+`_owned_virtual_signatures_for_record`) -- 501 lines, into a new sibling
+leaf module, `abicheck/diff_types_bases_vtable.py`, following the exact
+precedent `diff_types_field_facts.py`/`diff_types_abicc_parity.py`/
+`diff_types_surface.py` already established for this same file: `diff_types.py`
+imports the moved names back with the same `as`-aliased re-export
+convention (so `from .diff_types import _vtable_transition_is_evidenced`,
+which `tests/test_vtable_evidence_guard.py` uses directly, keeps
+resolving), and the new module imports nothing from `diff_types.py`
+itself, so no import cycle is introduced. `diff_types.py` now sits at
+1566 lines (well under the cap, restoring margin), and the new module is
+553 lines. Registered in `architecture/modules.yaml`'s `compare` layer
+`legacy_paths` and `frozen_root_families.diff_` allowlist alongside its
+three siblings -- required since ADR-061's architecture gate
+(`scripts/check_architecture.py`) independently forbids an unregistered
+new flat `diff_*.py` root module; the new module is exempt from
+`compare/`'s own `may_import: [model]` restriction the same way its
+already-registered siblings are, since that restriction only applies to
+files physically inside `abicheck/compare/`, not to a `legacy_paths`-listed
+flat file (verified against the checker's own `_source_layer_for`/
+`migrated_source` logic before registering, rather than assumed).
+
+The thirteen `fact-field-readers` baseline entries were updated in
+`scripts/fact_field_readers.py`'s `KNOWN_UNMIGRATED_READERS` (a 37-key
+swap covering every entry whose file, containing-expression text, or both
+moved: the ten in `diff_types.py` for `_diff_type_bases`/
+`_vtable_transition_is_evidenced`/
+`_vtable_transition_rests_on_unresolved_evidence`/`_diff_type_vtable` now
+key off `diff_types_bases_vtable.py` with the `entity_id=`-bearing
+call-site text, plus the twenty-two sibling reads in that same moved
+block the task's own error list didn't enumerate individually, plus the
+three genuinely-stale entries in `diff_layout.py`/`diff_vtable_layout.py`
+whose exact text shifted from the tenth slice's `entity_id=` insertion
+without moving file) -- derived mechanically via
+`fact_field_readers.unmigrated_fact_reader_sites()` run against the
+post-split tree rather than hand-edited, so the new keys are exactly what
+the scanner itself would produce. No reader's own logic changed; this is
+purely baseline-key bookkeeping for code that already existed pre-split.
+
+Verification: `python scripts/check_ai_readiness.py` back to the
+documented 3 pre-existing `adr-status-sync` errors only (zero new
+`file-size`/`fact-field-readers` errors); `ruff check`/`ruff format
+--check`/`mypy abicheck/` clean; `python scripts/check_architecture.py`
+clean except one pre-existing, unrelated `debt-no-growth` finding on
+`diff_symbols.py` from the tenth slice's own concurrent, uncommitted
+`entity_id=` wiring (not touched by this slice); targeted tests
+(`test_diff_types_deep.py`, `test_vtable_evidence_guard.py`,
+`test_vtable_severity.py`, `test_checker.py`,
+`test_ai_readiness.py`, `test_fact_field_readers.py`, plus a
+type/layout/enum/vtable-keyed slice of the full suite, ~4370 tests) green
+-- the same one pre-existing, unrelated `test_platform_matrix.py`
+test-isolation failure the tenth slice's own entry already names
+reproduces only under that large combined run and passes standalone,
+confirming it predates this slice too.
+
+**Update (2026-09-01, merge with main): `diff_types_bases_vtable.py` no
+longer exists — folded into main's independently-landed
+`diff_types_vtable.py`.** Merging this branch's PR against `main` surfaced
+that `a2cc048` ("feat(model): complete ADR-063 Phase 0 detector migration")
+had, concurrently and independently, split the identical base-class/vtable
+function group out of `diff_types.py` into its own new sibling module --
+`diff_types_vtable.py` (same functions, same rationale, already Fact-migrated
+per Phase 0) -- landing on `main` before this slice's own extraction merged.
+Rather than keep two near-duplicate modules, the merge conflict was resolved
+by keeping `main`'s `diff_types_vtable.py` (it already carries the Phase 0
+`resolved_fact_value()` migration this slice's own copy did not) and layering
+only this slice's `entity_id=` addition onto its `_diff_type_vtable`; `_diff_
+type_bases` itself stayed where `main` already had it, inline in
+`diff_types.py` (also Fact-migrated), with `entity_id=` added to its three
+`make_change()` calls. `diff_types_bases_vtable.py` was deleted along with
+its `architecture/modules.yaml` registrations; the `fact-field-readers`
+baseline resolved to `main`'s side (now empty -- Phase 0 migrated every
+known reader, so there is nothing left for this slice's raw-field version of
+these functions to add back). No behavior change beyond what each side
+already carried; `tests/test_vtable_evidence_guard.py`'s existing `from
+abicheck.diff_types_vtable import _vtable_transition_is_evidenced` import
+was the confirming signal for which filename to keep.
+
 ---
 
 ### Phase 3 — public surface as a graph query over one evidence graph (D5)
@@ -9574,7 +9987,173 @@ those facts back yet); `build_public_surface_facts()` stays available for
 a caller that does need them to populate the same shared instance
 explicitly.
 
-**Deliberately not landed.** `surface.py`'s closure-walk traversal and
+**Traversal migration landed (2026-09-01), for the public domain — the
+"deliberately not landed" scope directly below is now stale for that half
+and corrected here rather than silently rewritten (this section's own
+established convention).** `surface.py`'s closure-walk implementation
+(`_index_surface_types`/`_seed_public_roots`/`_walk_type_closure`/
+`_walk_exact_type_closure`/`_record_exact_identities`/
+`_record_nested_in_known_record`/`_record_is_confirmed_public_seed`, plus
+the `PublicSurface` result type itself) moved to a leaf module pair,
+`policy/public_surface.py` (the dataclass + `_index_surface_types`'
+indexing/bookkeeping) and `policy/public_surface_closure.py` (the actual
+walk, plus the real `resolve_public_surface()` entry point) — split purely
+to stay under the 800-line new-file production cap, not a design split.
+`surface.py`'s own copy of every one of those functions is **deleted**, not
+kept alongside; `compute_public_surface()` is now a thin wrapper delegating
+to `policy/public_surface_closure.py` (re-exporting `PublicSurface` for
+existing callers). `export_surface.py`'s own root-seeding (the
+`contract=exports` domain's export-table matching) is unchanged, but its
+final type-closure step calls the *same*, now-migrated `_walk_type_closure`
+it always reused "verbatim" from the header-domain implementation, so that
+domain's closure became graph-native for free, without its own separate
+migration. `PublicSurfaceQuery` itself moved to a third module,
+`policy/public_surface_query.py` — required because it is the one place
+that depends on both the closure module and `export_surface.py` at once,
+and `export_surface.py` now depends on the closure module too, so
+`PublicSurfaceQuery.resolve_export_domain` living inside that same module
+would have closed a real, `check_architecture.py`-detected import cycle
+(a *static*-analysis gate: a deferred, function-body-local import does not
+escape it, only a genuine restructuring does).
+
+The actual "traverse the graph" substitution is narrower than "operate on
+the graph's node/edge set directly" would suggest, for a reason found only
+once a first version of this migration shipped and a regression test
+caught it: `compare/surface_graph.py`'s own node ids can legitimately
+collapse two *distinct* declarations onto one id (two overloads sharing a
+demangled name with no mangled name and no resolved `entity_id` to tell
+them apart is the concrete, tested case) — and naively trusting a
+graph-node-keyed cache of "what does this id reference" for such a
+collision let a *public* overload appear to reference a *hidden* sibling's
+own private parameter type, which a `contract_replay.py` test designed to
+prove the opposite (that the private type stays `PROVEN_OUT_OF_CONTRACT`)
+correctly failed against. Unioning the colliding contributors — the
+over-keep direction that is safe for an *ambiguous type name* — is not safe
+for a *declaration identity* collision, because it attributes one
+declaration's reach to an unrelated one rather than merely widening a
+single declaration's own reach. Fixed by having `compare/surface_graph.py`
+flag such a node (`identifiers_collision`) and having the query fall back
+to recomputing that one declaration's own identifiers directly whenever the
+flag is set (`_referenced_identifiers_for_function`/`_for_variable`/
+`_for_record` in `policy/public_surface_closure.py`) — the pre-migration
+behavior, preserved exactly for the one case the graph's shared-node model
+cannot represent precisely. The declaration/type *indexing* itself
+(`_index_surface_types`, `ambiguous_type_names`, `origin_by_key`) was
+**not** re-pointed at the graph's node set for the identical structural
+reason — see `policy/public_surface.py`'s own module docstring.
+
+A second correctness hazard was found by post-merge review (Codex, PR #979)
+rather than caught before landing — and a more consequential one than it
+first looked, since it hits the *default* dump path rather than an aged
+on-disk format. `service_header_graph_attach._attach_header_graph` installs
+an L5 `surface_graph` on essentially every real dump (G31 Phase A), but
+deliberately never calls `build_public_surface_facts` itself — an earlier
+measurement found paying that per-declaration walk on *every* dump
+regressed the header-graph-attach-cost perf gate 47-96% at realistic sizes,
+so that attach site's own comment always said populating it "is deferred to
+whichever later phase actually queries the graph." `resolve_surface_graph_
+nodes()`'s `graph is None` check alone never triggered a rebuild for such an
+already-attached graph, so it was trusted as-is and every lookup against its
+un-stamped nodes silently read as "references nothing," collapsing the
+transitive closure on the ordinary, default `--scope-public-headers` path —
+not a stale-schema corner case, the common one. (A first fix attempt reached
+for the file's own established schema-version-gated reliability-flag
+pattern, e.g. `header_cv_facts_reliable` — that closes only the narrower
+"persisted pre-migration snapshot" shape of this same defect and does
+nothing for a fresh, never-serialized snapshot straight out of
+`_attach_header_graph`, since such an object's flag would default `True`
+with no schema version to gate on; reverted before landing once the
+broader defect was understood.) Fixed at the actual deferral point instead:
+`resolve_surface_graph_nodes()` now always calls `build_public_surface_facts`
+on the resolved graph, not only when it was `None`. That call is idempotent
+and evidence-preserving (`SourceGraphSummary.add_node`/`add_edge` merge a
+second registration's facts rather than replacing them), so it enriches an
+already-attached graph's existing nodes in place — never discarding
+`_attach_header_graph`'s own L5 edges/facts — and this *is* the "later
+phase" that attach site's docstring always deferred the cost to, so no new
+per-dump cost is introduced; the cost only lands when a caller actually
+resolves a public/export-domain surface, exactly as before this traversal
+existed at all. `TestUnpopulatedAttachedGraphIsBackfilled` and
+`TestStrippedGraphAttrsAreReconstructedNotTrusted` in
+`tests/test_policy_public_surface.py` cover, respectively, the real
+`_attach_header_graph` shape (a graph attached but never run through
+`build_public_surface_facts`) and a stripped-attrs shape, each confirming a
+type only transitively reachable through such a graph survives.
+
+**Superseded (2026-09-01) by a third round that removed the graph from
+this computation entirely, rather than trying to make trusting it safe —
+the paragraph above is preserved for its own history, but its
+`resolve_surface_graph_nodes()`-enrichment design is no longer what ships.**
+A second Codex security review found that even the enrichment fix above
+was not sufficient: `GraphNode.attrs` are derived through
+`model.graph_facts`' cross-producer evidence-merge machinery, which
+resolves a same-key disagreement between two registrations by
+confidence/producer/content precedence — correct for genuinely independent
+producer facts, wrong for `referenced_identifiers`/`identifiers_collision`
+specifically, since they have exactly one legitimate source (the
+snapshot's own current declarations) and no legitimate second producer to
+reconcile evidence with. A schema-v29 or otherwise untrusted/adversarial
+snapshot could carry a stale or crafted `referenced_identifiers` fact at a
+confidence this module's own freshly-registered fact (always
+`CONF_UNKNOWN`, the lowest rank) cannot outrank, so the enrichment fix's
+own fresh, correct recomputation could still silently lose to a poisoned
+persisted value — the identical collapsed-closure failure mode as the
+paragraph above, reached through its own fix instead of around it. This
+also explains the real, separately-measured performance regression against
+`scripts/benchmark_scaling.py`'s "Baseline regression (PR vs base)" gate
+that `resolve_surface_graph_nodes()`'s unconditional enrichment introduced:
+building real `GraphNode`/`GraphFact` objects for every declaration, twice
+per compare (once per side, since `checker.compare()` defaults
+`scope_to_public_surface=True`), carries meaningfully more overhead than
+the deleted regex-based re-parse it replaced. An identity-keyed cache was
+tried to close that regression specifically and reverted: it broke
+`tests/test_export_surface.py::TestUnresolvedTypeEdges::
+test_a_scope_lost_alias_key_is_followed_to_its_target`, which mutates a
+snapshot's `typedefs`/`types` in place between two calls and correctly
+expects the second to see the new content — an identity-keyed cache
+silently served the stale first result instead.
+
+The actual fix needed no merge-precedence override and no cache:
+`compare/surface_graph.py`'s `referenced_identifiers_by_node()` (renamed
+public, alongside its `ReferencedIdentifiers` return type) was already a
+pure function of the snapshot's own declarations, computed *before* any
+`GraphNode` is built. `policy/public_surface_closure.py` and
+`export_surface.py`'s closure-walk entry points now call it directly and
+thread the result through (`_referenced_identifiers`/
+`_node_identifiers_or_collision`/`_seed_public_roots`/`_walk_type_closure`/
+`_walk_exact_type_closure` all take a `ReferencedIdentifiers` now, not a
+`dict[str, GraphNode]`), never touching `snap.surface_graph` or
+`GraphNode.attrs` at all. `resolve_surface_graph_nodes()` had no remaining
+caller once both sites switched and was deleted rather than kept as unused
+surface — along with its own regression tests, replaced by
+`TestClosureIgnoresSurfaceGraphEntirely` (three cases: no graph at all, an
+empty attached graph, and a deliberately adversarial high-confidence
+poisoned fact) and `TestResolvePublicSurfaceIsNotIdentityCached` in
+`tests/test_policy_public_surface.py`. Removing the graph from the
+computation also removed essentially all of the `GraphNode`/`GraphFact`
+construction cost from the hot path as a direct consequence — an ad hoc
+local re-run of `scripts/benchmark_scaling.py` after this change showed
+the previously-regressed scenarios back in line with the pre-migration
+baseline, confirmed by CI itself: the `Performance` workflow's own
+"Baseline regression (PR vs base)" job (PR #979, commit `5544540`)
+completed with `conclusion: success`, the gate's own noise-controlled
+PR-vs-base measurement.
+
+Deliberately still not migrated: `export_surface.py`'s own root-seeding
+(the export-table-matching logic itself, as opposed to the type-closure
+step it shares with the header domain) and
+`type_reachability.directly_referenced_stdlib_types()` (unchanged reason:
+reclassifying `type_reachability.py` into `policy` would introduce a
+genuine new `policy -> extract` violation), and `compare/surface_graph.py`'s
+node-id-namespace unification with `buildsource/header_graph.py`'s L5 ids
+remains open, exactly as the paragraph below already described. FP-rate
+gate and per-tier accuracy gate both show zero regression against this
+migration.
+
+**Deliberately not landed** (original text below, now correct only for
+the residuals named above — the "not deleted, delegates to both unchanged"
+framing no longer describes the public domain; see the corrected paragraph
+just above). `surface.py`'s closure-walk traversal and
 `export_surface.py`'s independent one are **not deleted** —
 `PublicSurfaceQuery` delegates to both unchanged rather than reimplementing
 either as a literal graph traversal. This was a scoped, documented risk
@@ -10942,20 +11521,26 @@ spellings — the type-kind id silently excluded from the root set, not
 attempted-and-failed — confirmed to fail against a version of
 `public_roots()` that maps every received id unconditionally.
 
-**Acceptance criteria.** `surface.py`'s own traversal implementation and
-`export_surface.py`'s independent closure walk are deleted, not kept
-alongside the graph query (the actual removal happens in Phase 10's
-checklist, but this phase's own PR is incomplete if it leaves both
-implementations live past one release). No second node/edge dataclass
-hierarchy exists anywhere in the repository after this phase —
-`compare/surface_graph.py` constructs `model.graph.GraphNode`/`GraphEdge`
-instances with its own kind vocabulary, the same way `buildsource/
-source_graph.py` already does, never a parallel type. The new
-`AbiSnapshot.surface_graph` field bumps `serialization.SCHEMA_VERSION`
-the same way Phase 0's `Fact[...]` fields do (a third, independent bump
-by this plan, on top of Phase 0's and Phase 7's — all three are additive
-and bump the same pre-existing `AbiSnapshot`/report-schema counters, not
-ADR-062's `ProjectSnapshot` schema). FP-rate gate shows no regression.
+**Acceptance criteria.** `surface.py`'s own traversal implementation is
+**deleted, not kept alongside the graph query** — landed 2026-09-01, see
+this phase's own "Traversal migration landed" paragraph above. `export_
+surface.py`'s independent closure walk is not a *second* implementation to
+separately delete: it always called `surface.py`'s `_walk_type_closure`
+verbatim rather than keeping its own copy, so once that one function
+migrated, both domains' closures did. What's still open there is narrower
+than "delete a closure walk" — `export_surface.py`'s own root-*seeding*
+(the export-table-matching logic, genuinely independent of the header
+domain) remains unmigrated, named explicitly as a residual rather than
+silently left. No second node/edge dataclass hierarchy exists anywhere in
+the repository after this phase — `compare/surface_graph.py` constructs
+`model.graph_facts.GraphNode`/`GraphEdge` instances with its own kind
+vocabulary, the same way `buildsource/source_graph.py` already does, never
+a parallel type. The new `AbiSnapshot.surface_graph` field bumps
+`serialization.SCHEMA_VERSION` the same way Phase 0's `Fact[...]` fields do
+(a third, independent bump by this plan, on top of Phase 0's and Phase 7's
+— all three are additive and bump the same pre-existing `AbiSnapshot`/
+report-schema counters, not ADR-062's `ProjectSnapshot` schema). FP-rate
+gate and per-tier accuracy gate both show no regression.
 
 ---
 
@@ -11343,22 +11928,131 @@ so there is no second, independent call site for either gate to newly
 police yet — a future phase adding one should widen them then, not this
 one preemptively.
 
-**Also not landed: `dump --dry-run`/`compare --dry-run`/`scan --dry-run`
-parity for a `.abicheck.yml`-only (no `--build-target` flag) root-target
-scope, a fourth Codex review round.** The known-gap entry's own new
-paragraph (see `docs/contribute/known-gaps.md`) has the full account: none
-of the three commands' dry-run renderers discover `.abicheck.yml` the way
-`embed_build_source` does at real-execution time, and `AnalysisPlanner`
-itself structurally cannot see this value — `DumpRequest`/`CompareRequest`/
-`InputSpec` carry no `build_config` field at all, so there is no seam to
-resolve it through even in principle. Closing it needs either a real API
-addition (a `build_config` field threaded onto the typed request objects)
-or an independent, duplicated slice of `embed_build_source`'s own
-discovery-then-merge logic inside three separate dry-run renderers, each
-needing the same depth-binary exemption `_check_bazel_target_scoping`
-applies — named explicitly as out of scope for this slice, per the same
-governing convention the paragraph above already invokes, rather than
-patched reactively under continued review pressure.
+**Second slice (later session): the `dump --dry-run`/`compare --dry-run`/
+`scan --dry-run` parity gap named above is now closed, via the narrower of
+the two designs that paragraph named rather than either literal option.**
+Neither "(a) a `build_config` field on the typed request objects" nor "(b)
+a duplicated discovery-then-merge slice in three renderers" turned out to
+be necessary once the actual seam was checked again: `SidePlan` (`dump`/
+`compare`) already carries `sources` — exactly what auto-discovery needs
+(`discover_build_config(sources)`, mirroring `embed_build_source`'s own
+`cfg_path = build_config or discover_build_config(raw_sources)`) — and
+`scan`'s `ScanRequest` already carries both `sources` *and* `build_config`
+(the explicit `--config` override, a seam `dump`/`compare` don't have at
+the request level at all). So the fix is a widening of the *check itself*,
+not a new field or a second discovery pass: `bazel_target_scoping_failure`
+gained two new, defaulted keyword parameters (`sources`, `build_config`);
+when the request's own `build_targets` is empty, it now falls back to
+`_discovered_config_build_targets(sources, build_config)` — an explicit
+`build_config` wins outright (mirrors `cfg_path = build_config or ...`),
+otherwise a `.abicheck.yml` is auto-discovered at `sources` (skipped for a
+pack directory, mirroring `embed_build_source`'s own `raw_sources = None`
+for one) — reproducing `embed_build_source`'s own `targets=list(
+build_targets) if build_targets else cfg.targets` precedence exactly. A
+malformed config is deliberately swallowed to "no config found" here
+(`except ValueError: return ()`) rather than raised as a second,
+independently-worded error — `embed_build_source` already raises a
+correctly-typed `ValidationError` for it at real-execution time, so
+duplicating that diagnosis pre-flight would itself be the "second,
+independently-maintained copy" drift this phase exists to avoid, for a
+case that already fails loudly downstream. `scan_bazel_scoping_failure`
+gained the identical two parameters and forwards them unchanged; its own
+depth/collect-mode/header exemption logic (eleven Codex rounds' worth,
+`docs/contribute/known-gaps.md`) is untouched, since that exemption
+answers "is `build_info` ever consulted at all," a question independent of
+*where* the requested target scope came from.
+
+Every existing caller of either function keeps passing neither parameter
+(both default `None`), so this is additive: `_check_bazel_target_scoping`
+(the `dump`/`compare` path, via `AnalysisPlanner`) now passes
+`sources=side.sources` — `dump`/`compare` have no `build_config` field to
+pass, so only the auto-discovery half applies to them, closing their
+dry-run parity for free (they resolve `--dry-run` through the identical
+`resolve_dump_request`/`resolve_compare_request` chokepoint the real run
+does, so no renderer needed touching). Three of `scan`'s four pre-flight
+call sites pass their own already-in-scope `sources`/`build_config` locals:
+`scan_engine.run_scan_core` (both real-run and, since it runs before any
+dry-run-vs-real-run branch, the dry-run path too) and `cli_scan.py`'s two
+direct `bazel_target_scoping_failure` call sites (`scan_cmd`'s single-binary
+pre-flight, which already ran ahead of both its real-run and `--dry-run`
+branches, and `_run_artifact_set`'s own pre-flight ahead of `--artifact-set`
+discovery) — closing both the explicit-`--config` and auto-discovered
+halves for the CLI-reachable `scan` shapes. **The fourth,
+`service_scan.run_scan_set`, was left unwidened**: `service_scan.py` sits
+exactly at the AI-readiness 2000-line hard cap, and the widened call (5
+positional args + 2 new keyword args) doesn't fit `ruff format`'s
+column budget on one line — the resulting explosion would have pushed the
+file 8+ lines over. Trimming unrelated content elsewhere in that file to
+buy back the budget was rejected as its own kind of risk (that file's
+existing content is all load-bearing review-history documentation, not
+slack); adding it to `LARGE_FILE_ALLOWLIST` was rejected too, since that
+allowlist's own comment reserves it for pre-existing `scripts/`/`tests/`
+debt discovered when scanning was widened to those trees, not a fresh
+production-file exemption for an unrelated fix. So the change was reverted
+at that one call site and named here instead: `run_scan_set`'s own
+`.abicheck.yml`-only gap stays open for a **direct typed-API call with no
+CLI in front of it** (`from abicheck.service_scan import run_scan_set;
+run_scan_set(ScanRequest(...))`) — `scan --artifact-set`'s own CLI path is
+unaffected, since `cli_scan._run_artifact_set`'s pre-flight (now widened)
+already runs ahead of `run_scan_set` and catches the mismatch first. A
+future pass splitting `service_scan.py` under its own file-size budget
+would remove this constraint; not attempted reactively here.
+`tests/test_analysis_plan.py::TestBazelBuildTargetScoping` gained six new
+cases (config-sourced scope raises for `dump`/`compare`; an explicit
+`build_targets` still wins over a present config, with the failure message
+correctly omitting the "auto-discovered" qualifier; the depth=binary
+exemption still holds with a config-sourced scope; no `.abicheck.yml`
+present is unaffected; a malformed one degrades to "no config found"
+rather than raising a second error).
+`tests/test_bazel_root_targets.py::test_dot_abicheck_yml_build_targets_dry_run_parity`
+pins the closed `dump --dry-run` gap end to end (CLI invocation, exit 64,
+same message as the pre-existing real-run sibling test immediately above
+it); `tests/test_bazel_root_targets_scan.py`'s
+`test_run_scan_depth_headers_config_sourced_target_scope_raises_planning_error`
+(renamed and re-asserted from the pre-existing `..._still_rejects_...` test,
+which had pinned the *pre-fix* `click.ClickException` leak this same gap
+caused for the typed `run_scan()` API — now a clean `PlanningError`,
+raised earlier too, from `run_scan_core`'s own pre-flight check rather
+than leaking out of `_build_new_snapshot`'s pre-existing `except
+AbicheckError` wart) confirms the fix at the typed-API layer as well as
+the CLI.
+
+**Third slice: `_run_artifact_set`'s own pre-flight had a narrower version
+of the same false-positive/false-negative pair, specific to an unset
+`--depth`.** The initial fix for this slice added a bespoke
+`workflows.plan.artifact_set_bazel_scoping_failure`, since
+`_run_artifact_set` (unlike `scan_cmd`'s single-binary path) has no
+per-member resolved `collect_mode` at this point — each discovered
+member resolves its own tier/level independently, later, inside
+`run_scan_set`. That function's first version treated an unset `--depth`
+as always non-`"off"`, matching every other caller's shape, but this
+false-positive-rejected a genuine no-op artifact-set request whose real
+per-member risk scoring would resolve to `"off"`. A revision treating it
+as always exempt instead false-negative-accepted a seeded, high-risk
+request (e.g. a public-header edit) that `run_scan_core`'s own later,
+correctly-resolved check would still reject with exit 64 — reproducing
+this same phase's own dry-run/execution parity defect one level narrower
+(real-run vs. real-run, not dry-run vs. real-run). Both were symptoms of
+approximating a value `AnalysisPlan`'s own design deliberately excludes
+from a pre-flight check: an unset `--depth` only resolves to a real
+`collect_mode` via risk scoring over the request's own seeded change.
+That resolution already exists as a shared primitive —
+`service_scan._resolve_member_scan_level`, the one `estimate_artifact_set`
+itself calls for its own `--dry-run` cost totals — so the fix drops the
+approximation and calls it directly: `_run_artifact_set` builds the same
+probe `ScanRequest` `estimate_artifact_set` would (request-level fields
+only, no `binaries`, no discovery needed), resolves the real `eff_depth`/
+`collect_mode`, and hands those to the existing, already-shared
+`scan_bazel_scoping_failure` — no bespoke artifact-set-shaped guard
+needed. The now-dead `artifact_set_bazel_scoping_failure` was deleted
+from `workflows/plan.py` rather than left as an unused second copy.
+`tests/test_bazel_root_targets_scan.py::
+test_scan_cli_artifact_set_unset_depth_low_risk_seed_config_scope_is_unaffected`/
+`test_scan_cli_artifact_set_high_risk_seed_config_scope_still_rejects` pin
+the no-op and risky cases respectively, keyed on a real low-risk vs.
+high-risk `--changed-path` seed rather than an unset-vs-set `--depth`
+alone. See `docs/contribute/known-gaps.md`'s matching "thirteenth review
+round" entry for the full account.
 
 ---
 

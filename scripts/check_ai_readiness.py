@@ -1408,6 +1408,25 @@ IMPORT_CYCLE_ALLOWLIST: frozenset[frozenset[str]] = frozenset(
                 # registration imports it always closed through. `cli` itself
                 # stays a member via its own `{"cli", "cli_X"}` entries above.
                 "frontends.cli.commands.compare",
+                # G38 Phase 17: `compare_bundle_facts` is a same-session
+                # size-split sibling of `frontends.cli.commands.compare`
+                # (already a member, immediately above) -- `compare_cmd`'s
+                # own `dispatch_bundle_facts(...)` call reaches it function-
+                # locally, exactly the shape every other split-sibling in
+                # this cluster already reaches its parent through. Every
+                # edge it has in turn -- `..runtime._safe_write_output`
+                # (already a member), `....cli_compare_release_helpers`/
+                # `....reporter`/`....bundle`/`....errors`/`....workflows.
+                # extraction`/`....workflows.bundle_facts_library_overrides`
+                # (leaves), `..options.params._load_suppression_and_policy`
+                # (leaf) -- lands on an already-member module or a leaf, so
+                # this closes the same cluster of cycles through already-
+                # member modules, not a new dependency direction. Found via
+                # this check's own documented DFS-order flakiness (the
+                # cluster's non-deterministic `set` iteration surfaces a
+                # different representative cycle each process run) rather
+                # than a code change that introduced it.
+                "frontends.cli.commands.compare_bundle_facts",
                 "frontends.cli.commands.dump",
                 "frontends.cli.runtime",
                 # CLI cleanup phase two, PR C: `frontends.cli.dump_execute` is
@@ -2324,7 +2343,7 @@ CLI_CONTRACT_ALLOWLIST: frozenset[str] = frozenset(
         # both `dumper.dump()` and `checker.compare()` directly.
         "abicheck/compat/cli.py:317:19:dumper.dump",
         "abicheck/compat/cli.py:974:17:checker.compare",
-        "abicheck/compat/cli.py:1167:15:dumper.dump",
+        "abicheck/compat/cli.py:1169:15:dumper.dump",
     }
 )
 

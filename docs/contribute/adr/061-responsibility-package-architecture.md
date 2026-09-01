@@ -1753,6 +1753,64 @@ pass" bullet (part of the `service.py`-thinning re-measurement list) and
 closure, and the "Still open: `service.py`" discussion's own later update
 for what this unblocked there.
 
+**Update: the twenty-second round's own gap is now closed too, for exactly
+the scope it named — not by reclassifying `checker_policy.py`/`reclassify.py`
+(rejected, see below), but by moving the one piece of it that actually was
+an *algorithm* out of `checker_types.py`.** Re-reading `_effective_kind_sets`'s
+and `_effective_verdict_for_change`'s own bodies at the time this was
+finally attempted found the two methods were not equally guilty:
+`_effective_verdict_for_change` was already a pure delegating call to
+`reclassify.effective_verdict_for_change` — nothing to move. `_effective_kind_sets`
+was not: after calling `checker_policy.policy_kind_sets(self.policy)` (an
+imported call, fine on its own), it went on to *locally implement*
+`PolicyFile.overrides` application — building a verdict→set-index table,
+discarding an overridden kind from every set, adding it back to its target
+set — entirely inline, inside a `model`-owned dataclass's own method body.
+That loop is the real thing this round's finding was about: not the import
+(imports of deliberately-unclassified leaves are the sanctioned mechanism
+`policy_file.py` used for years before its own split, see point 2 below),
+but a policy *algorithm* executing where only data is supposed to live.
+Extracted verbatim into a new `checker_policy.apply_policy_file_overrides`
+function (`kind_sets, overrides -> kind_sets`, same behavior, only its
+address changed) and `_effective_kind_sets` now reads as a single line —
+`_apply_policy_file_overrides(_policy_kind_sets(self.policy), overrides)` —
+consuming an already-computed result rather than computing one, exactly the
+distinction this whole gap turned on.
+
+Two things this closure deliberately does *not* do, worth being as precise
+about as every other paragraph in this section: it does not remove the
+`model -> checker_policy`/`model -> reclassify` import edges (both methods
+still have to *call* something to get their answer), and it does not
+formally classify `checker_policy.py`/`reclassify.py` as `policy` — both
+stay `public_root_surfaces` leaves, the identical sanctioned-unclassified
+shape `reclassify.py`/`contract_gating.py` already have and `policy_file.py`
+had before ADR-049's independent `ChangeKind` move let it split out. Doing
+either would not shrink anything: the call itself is unavoidable (`DiffResult`
+consumers need the computed kind sets/verdict, and re-deriving them
+independently in every one of the ~40 call sites across `report/`, `policy/`,
+and `workflows/`-owned `cli_*` modules that already call `result.
+_effective_kind_sets()`/`result._effective_verdict_for_change(...)` directly
+would be the opposite of consolidation), and `model`'s own `may_import` stays
+`[]` by design (D1) — widening it to admit `policy` would legalize *any*
+`model` module reaching into policy, not just this one already-audited edge,
+which is precisely the blanket exception this ADR's layering exists to
+prevent. What changed is narrower and real: the thing living inside a
+`model`-owned method body is now a call, never an algorithm.
+`self.policy`/`self.policy_file` mutated after construction (a pattern
+several existing tests rely on — `tests/test_report_integrity.py`,
+`tests/test_reporter.py`, `tests/test_sarif.py`, `tests/test_sprint9_html.py`)
+still take effect on the next call, unchanged, since both methods still read
+`self.policy`/`self.policy_file` fresh each time rather than caching a value
+computed once at `DiffResult` construction — a static-once-at-construction
+design was considered and rejected for exactly this reason, not overlooked.
+`python scripts/check_architecture.py` and the full targeted test slice
+(`test_policy_file.py`, `test_report_integrity.py`, `test_reporter.py`,
+`test_sarif.py`, `test_sprint9_html.py`, `test_junit_report.py`,
+`test_reclassify.py`, `test_config_review.py`, `test_annotations.py`,
+`test_frozen_namespace.py`, `test_report_filtering.py`,
+`test_vtable_severity.py`, `test_bundle.py`, `test_report_model.py`,
+`test_checker.py` — 1300+ tests) pass unchanged against this closure.
+
 **A tenth Codex review round named the risk every number in this whole
 investigation shares, worth stating once rather than re-litigating per
 figure: nothing here is gated.** The module lists, line counts, and site

@@ -126,7 +126,7 @@ from .contract_relevance_types import (
 from .diff_cxx_rules import owner_class_of
 from .export_surface import ExportSurface, observed_exports_by_platform
 from .model import AbiSnapshot, EnumType, Function, RecordType, Visibility
-from .surface import (
+from .policy.public_surface import (
     PublicSurface,
     _index_surface_types,
     _symbol_keys,
@@ -470,7 +470,7 @@ def build_type_graph(snap: AbiSnapshot) -> TypeGraphSnapshot:
         nodes.add(node)
         for fld in rec.fields:
             link(node, index.resolve_type_string(fld.type))
-        for base in list(rec.bases) + list(rec.virtual_bases):
+        for base in [*rec.resolved_bases(), *rec.resolved_virtual_bases()]:
             link(node, index.resolve_type_string(base))
         _link_type_aliases(rec, node, nodes, edges)
 

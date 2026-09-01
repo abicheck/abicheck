@@ -185,7 +185,9 @@ topics:
       - abicheck/bundle_facts.py
       - abicheck/product_baseline.py
       - abicheck/bundle_side_input.py
+      - abicheck/workflows/bundle_facts_library_overrides.py
       - abicheck/frontends/cli/commands/compare_bundle_facts.py
+      - abicheck/frontends/cli/options/bundle_facts.py
     reference_page: reference/cli-reference.md
 
   cli-surface:

@@ -20,7 +20,7 @@ from abicheck.cli_options import (
     split_sided_include_paths,
     split_sided_paths,
 )
-from abicheck.cli_params import (
+from abicheck.frontends.cli.options.params import (
     LABELED_INCLUDE_PATH_PARAM,
     SIDED_INCLUDE_PATH_PARAM,
     SIDED_PATH_PARAM,

@@ -69,7 +69,7 @@ from .cli_compare_release_helpers import (
     _match_release_keys,
     _resolve_release_headers,
 )
-from .cli_params import _load_suppression_and_policy
+from .frontends.cli.options.params import _load_suppression_and_policy
 from .model import AbiSnapshot
 
 if TYPE_CHECKING:

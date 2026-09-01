@@ -201,40 +201,51 @@ class TestReserialization:
         snap = snapshot_from_dict(d)
         assert snap.build_mode is None
 
-    def test_malformed_build_mode_falls_back_to_none(self):
-        """A malformed ``build_mode`` payload (e.g. a string instead of
-        a dict, or a dict whose ``provenance`` is the wrong shape) must
-        load as None rather than raising. Regression for CodeRabbit's
-        review: previously ``prov_raw.get(...)`` would raise on a
-        non-dict provenance."""
+    def test_malformed_build_mode_rejects_the_load(self):
+        """A malformed ``build_mode`` payload (a string instead of a dict, a
+        dict whose ``provenance`` is the wrong shape, or a non-int
+        ``libcpp_abi_version``) must raise ``TypeError``, not silently
+        degrade to ``None``/coerce (storage AGENTS.md invariant 6; Codex
+        review, PR #974, fresh evidence) -- a corrupt ``build_mode`` reading
+        as "predates this field" would let ``_effective_build_mode`` infer
+        weaker facts from evidence that was never actually collected, and a
+        string ``libcpp_abi_version`` coercing to int collapsed
+        ``1``/``"1"`` onto one trusted value.
+
+        Superseded the previous "falls back to None" contract this test
+        pinned (CodeRabbit review): that fix's real point -- a non-dict
+        ``provenance`` must not raise an opaque ``AttributeError`` from
+        ``prov_raw.get(...)`` -- still holds here, just via a deliberate,
+        typed ``TypeError`` instead of either the original opaque
+        ``AttributeError`` or a silently-dropped field.
+        """
         d = _load_fixture("v5.json")
 
         # Case 1: build_mode itself is a non-dict.
         d_bad = dict(d)
         d_bad["build_mode"] = "garbage"
-        snap = snapshot_from_dict(d_bad)
-        assert snap.build_mode is None
+        with pytest.raises(TypeError):
+            snapshot_from_dict(d_bad)
 
-        # Case 2: provenance is a non-dict.
+        # Case 2: provenance is a non-dict -- must raise TypeError, not the
+        # opaque AttributeError the original CodeRabbit fix guarded against.
         d_bad = dict(d)
         d_bad["build_mode"] = {
             "compiler_family": "gcc",
             "provenance": "not-a-dict",
         }
-        snap = snapshot_from_dict(d_bad)
-        assert snap.build_mode is None
+        with pytest.raises(TypeError):
+            snapshot_from_dict(d_bad)
 
-        # Case 3: libcpp_abi_version is a non-int (must coerce to None,
-        # not raise downstream when other code does arithmetic on it).
+        # Case 3: libcpp_abi_version is a non-int.
         d_bad = dict(d)
         d_bad["build_mode"] = {
             "compiler_family": "clang",
             "libcpp_abi_version": "not-a-number",
             "provenance": {},
         }
-        snap = snapshot_from_dict(d_bad)
-        assert snap.build_mode is not None
-        assert snap.build_mode.libcpp_abi_version is None
+        with pytest.raises(TypeError):
+            snapshot_from_dict(d_bad)
 
     def test_future_version_hard_rejects(self):
         """Loading a snapshot with schema_version >=

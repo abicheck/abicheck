@@ -30,7 +30,8 @@ from typing import TYPE_CHECKING, Any, TypeVar, overload
 
 import click
 
-from .cli_params import (
+from .frontends.cli.options import secondary_output_options as _secondary_output_options
+from .frontends.cli.options.params import (
     BUILTIN_POLICY_PROFILES,
     DEFAULT_POLICY_PROFILE,
     POLICY_FILE_PARAM,
@@ -40,7 +41,6 @@ from .cli_params import (
     SIDED_STR_PARAM,
     SidedChoiceParam,
 )
-from .frontends.cli.options import secondary_output_options as _secondary_output_options
 
 if TYPE_CHECKING:
     from .service_scan import CompileContext
@@ -79,7 +79,7 @@ def split_sided_include_paths(
     triples: Sequence[tuple[str, Path, str | None]],
 ) -> tuple[tuple[Path, ...], tuple[Path, ...], tuple[Path, ...], dict[Path, str]]:
     """Like :func:`split_sided_paths`, but for ``--include``'s own
-    :class:`~abicheck.cli_params.SidedIncludePathParam` triples (ADR-050 D1):
+    :class:`~abicheck.frontends.cli.options.params.SidedIncludePathParam` triples (ADR-050 D1):
     also collects each entry's optional label into one ``path -> label`` map
     spanning all three buckets.
 
@@ -420,7 +420,7 @@ def _resolve_policy_operand(
     ``--policy-file`` naming a document -- two flags for the one question
     "how are verdicts classified for this run?", and the second silently
     winning when both were given. One flag now answers it: a
-    :data:`~abicheck.cli_params.BUILTIN_POLICY_PROFILES` name selects that
+    :data:`~abicheck.frontends.cli.options.params.BUILTIN_POLICY_PROFILES` name selects that
     profile, anything else is resolved as a document (a path, or a packaged
     built-in like ``security``) and runs under the default profile, exactly
     what ``--policy-file`` did.
@@ -1491,6 +1491,15 @@ def apply_compare_profile(ctx: object, kwargs: dict[str, object]) -> None:
     if meta is not None:
         meta[RUN_PROFILE_META_KEY] = {"name": str(name), "injected": injected}
 
+
+#: G38 Phase 17's ``--bundle-facts-library-manifest`` option, a small,
+#: standalone leaf module (see its own docstring for why it isn't declared
+#: inline on ``compare_cmd``). Re-exported here for the same reason as
+#: ``contract_options``/``pack_option`` below.
+from .frontends.cli.options.bundle_facts import (  # noqa: E402
+    bundle_facts_manifest_options as bundle_facts_manifest_options,
+    reject_bundle_facts_manifest_without_old_bundle_facts as reject_bundle_facts_manifest_without_old_bundle_facts,
+)
 
 #: ADR-049's contract-evaluation option decorator moved to
 #: ``cli_contract_options.py`` when this module reached its own 2000-line

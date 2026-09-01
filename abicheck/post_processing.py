@@ -184,7 +184,7 @@ class AnnotateLayoutUnverifiableCoveredByVtableChanged:
     identical asymmetric-evidence gap — never removing either finding from
     ``changes``.
 
-    ``diff_types._vtable_transition_is_evidenced`` and
+    ``diff_types_vtable._vtable_transition_is_evidenced`` and
     ``diff_layout._check_layout_unverifiable`` both key off the same "one
     side has real layout evidence, the other has none" condition. The
     vtable detector correctly stays BREAKING for it (an unknown size

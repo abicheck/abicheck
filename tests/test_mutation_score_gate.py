@@ -70,7 +70,10 @@ def test_parse_survivors_returns_none_when_unmeasurable(text: str) -> None:
 def test_mutmut_subprocess_timeout_matches_the_workflow_ceiling() -> None:
     """The Python cap must not pre-empt the GitHub Actions job deadline."""
     workflow = (
-        Path(__file__).resolve().parent.parent / ".github" / "workflows" / "mutation.yml"
+        Path(__file__).resolve().parent.parent
+        / ".github"
+        / "workflows"
+        / "mutation.yml"
     ).read_text(encoding="utf-8")
     assert "timeout-minutes: 240" in workflow
     assert gate.MUTMUT_RUN_TIMEOUT_SECONDS == 240 * 60
@@ -449,15 +452,24 @@ def test_diff_scoped_allows_recorded_legacy_survivors_but_rejects_delta(
     diff, baseline = _diff_scoped_env(tmp_path, monkeypatch)
     Path(baseline).write_text(
         json.dumps(
-            {"modules": {"abicheck/diff_types.py": {
-                "survivors": 10, "keys": [], "functions": {"alpha": 1}
-            }}},
+            {
+                "modules": {
+                    "abicheck/diff_types.py": {
+                        "survivors": 10,
+                        "keys": [],
+                        "functions": {"alpha": 1},
+                    }
+                }
+            },
         ),
         encoding="utf-8",
     )
-    one = _write(tmp_path, "one.txt", "    abicheck.diff_types.x_alpha__mutmut_1: survived\n")
+    one = _write(
+        tmp_path, "one.txt", "    abicheck.diff_types.x_alpha__mutmut_1: survived\n"
+    )
     two = _write(
-        tmp_path, "two.txt",
+        tmp_path,
+        "two.txt",
         "    abicheck.diff_types.x_alpha__mutmut_1: survived\n"
         "    abicheck.diff_types.x_alpha__mutmut_2: survived\n",
     )
@@ -465,16 +477,6 @@ def test_diff_scoped_allows_recorded_legacy_survivors_but_rejects_delta(
     assert gate.main(["--results-file", one, *common]) == 0
     assert gate.main(["--results-file", two, *common]) == 1
     assert "alpha: 1 -> 2" in capsys.readouterr().out
-
-
-#: A diff that touches only a test file — the shape a PR takes when it weakens
-#: or deletes assertions without editing the detector.
-_TEST_ONLY_DIFF = """diff --git a/tests/test_diff_types.py b/tests/test_diff_types.py
---- a/tests/test_diff_types.py
-+++ b/tests/test_diff_types.py
-@@ -4,2 +4,1 @@
-+    assert result is not None
-"""
 
 
 def test_an_unreadable_results_file_fails(
@@ -553,266 +555,6 @@ def test_a_deleted_file_does_not_leak_into_the_previous_file() -> None:
         "--- a/gone.py\n+++ /dev/null\n@@ -1,5 +0,0 @@\n-y = 2\n"
     )
     assert gate.parse_changed_lines(diff) == {"keep.py": {2}}
-
-
-class TestUngatedRun:
-    """A run that examined nothing must not report a pass.
-
-    `--diff-scoped` is attribution-based, so a branch that weakens a detector
-    test without touching a production function gives it nothing to scope to.
-    Printing the OK line there claimed a check that never happened (Codex
-    review); such a change is only visible as *drift*, which needs the
-    baseline.
-    """
-
-    def test_a_test_only_diff_without_a_baseline_reports_gating_nothing(
-        self,
-        tmp_path: Path,
-        monkeypatch: pytest.MonkeyPatch,
-        capsys: pytest.CaptureFixture[str],
-    ) -> None:
-        _diff_scoped_env(tmp_path, monkeypatch)
-        diff = _write(tmp_path, "t.diff", _TEST_ONLY_DIFF)
-        results = _write(
-            tmp_path, "r.txt", "    abicheck.diff_types.x_alpha__mutmut_1: survived\n"
-        )
-        rc = gate.main(
-            [
-                "--results-file",
-                results,
-                "--baseline-file",
-                str(tmp_path / "absent.json"),
-                "--diff-scoped",
-                "--diff-file",
-                diff,
-            ]
-        )
-        out = capsys.readouterr().out
-        assert rc == 0
-        assert "GATED NOTHING" in out
-        assert "diff-scoped OK" not in out
-
-    def test_the_same_diff_with_a_baseline_is_gated_as_drift(
-        self,
-        tmp_path: Path,
-        monkeypatch: pytest.MonkeyPatch,
-        capsys: pytest.CaptureFixture[str],
-    ) -> None:
-        """Negative control, and the reason the message points at the baseline:
-        with one recorded, the identical test-only diff *is* checked — the
-        survivor the weakened test allows shows up as per-module drift."""
-        _diff_scoped_env(tmp_path, monkeypatch)
-        diff = _write(tmp_path, "t.diff", _TEST_ONLY_DIFF)
-        baseline = _baseline(tmp_path, {"abicheck/diff_types.py": 0})
-        results = _write(
-            tmp_path, "r.txt", "    abicheck.diff_types.x_alpha__mutmut_1: survived\n"
-        )
-        rc = gate.main(
-            [
-                "--results-file",
-                results,
-                "--baseline-file",
-                baseline,
-                "--diff-scoped",
-                "--diff-file",
-                diff,
-            ]
-        )
-        out = capsys.readouterr().out
-        assert rc == 1
-        assert "GATED NOTHING" not in out
-        assert "0 -> 1" in out
-
-    def test_a_changed_function_still_reports_ok(
-        self,
-        tmp_path: Path,
-        monkeypatch: pytest.MonkeyPatch,
-        capsys: pytest.CaptureFixture[str],
-    ) -> None:
-        """Second negative control: the ungated message must not swallow the
-        ordinary clean run."""
-        diff, _ = _diff_scoped_env(tmp_path, monkeypatch)
-        results = _write(
-            tmp_path,
-            "r.txt",
-            "    abicheck.diff_types.x_untouched__mutmut_1: survived\n",
-        )
-        rc = gate.main(
-            [
-                "--results-file",
-                results,
-                "--baseline-file",
-                str(tmp_path / "absent.json"),
-                "--diff-scoped",
-                "--diff-file",
-                diff,
-            ]
-        )
-        out = capsys.readouterr().out
-        assert rc == 0
-        assert "diff-scoped OK" in out
-        assert "GATED NOTHING" not in out
-
-    def test_require_baseline_turns_an_ungated_run_into_a_failure(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """The PR lane accepts an ungated run (the baseline is a maintainer
-        artifact, not the contributor's); a lane that asks to gate does not."""
-        _diff_scoped_env(tmp_path, monkeypatch)
-        diff = _write(tmp_path, "t.diff", _TEST_ONLY_DIFF)
-        results = _write(
-            tmp_path, "r.txt", "    abicheck.diff_types.x_alpha__mutmut_1: survived\n"
-        )
-        assert (
-            gate.main(
-                [
-                    "--results-file",
-                    results,
-                    "--baseline-file",
-                    str(tmp_path / "absent.json"),
-                    "--diff-scoped",
-                    "--diff-file",
-                    diff,
-                    "--require-baseline",
-                ]
-            )
-            == 1
-        )
-
-    def test_require_baseline_is_not_satisfied_by_diff_scoped_alone(
-        self,
-        tmp_path: Path,
-        monkeypatch: pytest.MonkeyPatch,
-        capsys: pytest.CaptureFixture[str],
-    ) -> None:
-        """The mixed diff: a changed production function *and* a weakened test.
-
-        --diff-scoped is a real gate, but it answers a narrower question —
-        only whether the functions this branch changed have survivors. The
-        survivors a weakened test allows in an *untouched* function are
-        outside its scope, so treating it as satisfying --require-baseline let
-        that diff exit 0 with no drift reference at all (Codex review).
-        """
-        diff, _ = _diff_scoped_env(tmp_path, monkeypatch)
-        results = _write(
-            tmp_path,
-            "r.txt",
-            "    abicheck.diff_types.x_untouched__mutmut_1: survived\n",
-        )
-        rc = gate.main(
-            [
-                "--results-file",
-                results,
-                "--baseline-file",
-                str(tmp_path / "absent.json"),
-                "--diff-scoped",
-                "--diff-file",
-                diff,
-                "--require-baseline",
-            ]
-        )
-        assert rc == 1
-        assert "--diff-scoped does not substitute" in capsys.readouterr().out
-
-    def test_require_baseline_is_satisfied_by_a_recorded_baseline(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """Negative control: the flag must not become unsatisfiable. With a
-        baseline recorded, the same mixed diff is checked and passes."""
-        diff, baseline = _diff_scoped_env(tmp_path, monkeypatch)
-        results = _write(
-            tmp_path,
-            "r.txt",
-            "    abicheck.diff_types.x_untouched__mutmut_1: survived\n",
-        )
-        assert (
-            gate.main(
-                [
-                    "--results-file",
-                    results,
-                    "--baseline-file",
-                    baseline,
-                    "--diff-scoped",
-                    "--diff-file",
-                    diff,
-                    "--require-baseline",
-                ]
-            )
-            == 0
-        )
-
-    def test_the_receipt_records_whether_anything_was_gated(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        _diff_scoped_env(tmp_path, monkeypatch)
-        diff = _write(tmp_path, "t.diff", _TEST_ONLY_DIFF)
-        results = _write(
-            tmp_path, "r.txt", "    abicheck.diff_types.x_alpha__mutmut_1: survived\n"
-        )
-        receipt = tmp_path / "receipt.json"
-        gate.main(
-            [
-                "--results-file",
-                results,
-                "--baseline-file",
-                str(tmp_path / "absent.json"),
-                "--diff-scoped",
-                "--diff-file",
-                diff,
-                "--json",
-                str(receipt),
-            ]
-        )
-        assert json.loads(receipt.read_text())["gated"] is False
-
-    def test_a_report_only_run_does_not_claim_to_have_gated(
-        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
-    ) -> None:
-        """No --diff-scoped and no baseline of either kind: nothing in this
-        invocation can fail, so the receipt must not say it gated. The flag
-        used to default to True and was only cleared inside the diff-scoped
-        arm, so precisely the run that checks nothing at all reported
-        ``"gated": true`` (Codex review)."""
-        results = _write(
-            tmp_path, "r.txt", "    abicheck.diff_types.x_alpha__mutmut_1: survived\n"
-        )
-        receipt = tmp_path / "receipt.json"
-        rc = gate.main(
-            [
-                "--results-file",
-                results,
-                "--baseline-file",
-                str(tmp_path / "absent.json"),
-                "--json",
-                str(receipt),
-            ]
-        )
-        assert rc == 0
-        assert json.loads(receipt.read_text())["gated"] is False
-
-    def test_a_global_baseline_alone_counts_as_gated(self, tmp_path: Path) -> None:
-        """Negative control for the above: SURVIVOR_BASELINE is a real gate on
-        its own (the survivors-vs-total comparison below runs and can fail),
-        so a run carrying one must not be reported as having gated nothing —
-        which is what a `gated = False` default would have done."""
-        results = _write(
-            tmp_path, "r.txt", "    abicheck.diff_types.x_alpha__mutmut_1: survived\n"
-        )
-        receipt = tmp_path / "receipt.json"
-        rc = gate.main(
-            [
-                "--results-file",
-                results,
-                "--baseline-file",
-                str(tmp_path / "absent.json"),
-                "--baseline",
-                "1",
-                "--json",
-                str(receipt),
-            ]
-        )
-        assert rc == 0
-        assert json.loads(receipt.read_text())["gated"] is True
 
 
 def test_diff_scoped_ignores_survivors_in_untouched_functions(

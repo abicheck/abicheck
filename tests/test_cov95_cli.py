@@ -383,20 +383,33 @@ class TestSmallHelpers:
         # ADR-037 D3 (Codex): --compiler-option is now threaded into the native
         # PE/Mach-O header-scoping path (resolved before format dispatch), so the
         # old "will be ignored" warning is gone and the context reaches the dump.
+        #
+        # ADR-063 Phase 1: the real PE/Mach-O run now executes through
+        # `execute_dump_request`, not the retired `handle_non_elf_dump` --
+        # patch `abicheck.service_dump_native._dump_macho` instead (the same
+        # depth below the format dispatch `abicheck.dumper.dump` sits at for
+        # the ELF precedent, `test_compile_context_parity.py::
+        # test_dump_reads_compile_block_from_config`), and assert on the
+        # `compile` CompileContext it receives.
         import struct
 
-        import abicheck.frontends.cli.commands.dump as cli_mod
+        from abicheck.model import AbiSnapshot
 
         dylib = tmp_path / "fake.dylib"
         dylib.write_bytes(struct.pack("<I", 0xFEEDFACF) + b"\x00" * 64)
         captured: dict[str, object] = {}
+
+        def _fake_dump_macho(*args: object, **kwargs: object) -> AbiSnapshot:
+            captured.update(kwargs)
+            return AbiSnapshot(library="fake.dylib", version="1.0")
+
         monkeypatch.setattr(
-            cli_mod, "handle_non_elf_dump", lambda *a, **k: captured.update(k)
+            "abicheck.service_dump_native._dump_macho", _fake_dump_macho
         )
         result = CliRunner().invoke(main, ["dump", str(dylib), "--compiler-option=-DX"])
         assert result.exit_code == 0, result.output
         assert "will be ignored" not in result.output
-        assert getattr(captured["compile_context"], "gcc_option_tokens") == ("-DX",)
+        assert getattr(captured["compile"], "gcc_option_tokens") == ("-DX",)
 
     def test_dump_compile_db_flags_and_match_threaded_to_non_elf(
         self, tmp_path, monkeypatch
@@ -408,11 +421,17 @@ class TestSmallHelpers:
         rejecting a --depth build backed only by that database). It arrives
         via --build-info now; the -p/--build-dir + --compile-db pair folded
         into it.
+
+        ADR-063 Phase 1: the real PE/Mach-O run now executes through
+        `execute_dump_request` -- patch `abicheck.service_dump_native.
+        _dump_macho` (see the sibling test above) and assert on the folded
+        `compile` context it receives, the same signal `compile_context`
+        carried before this migration.
         """
         import json
         import struct
 
-        import abicheck.frontends.cli.commands.dump as cli_mod
+        from abicheck.model import AbiSnapshot
 
         header = tmp_path / "foo.h"
         header.write_text("int f();\n", encoding="utf-8")
@@ -435,17 +454,21 @@ class TestSmallHelpers:
         dylib.write_bytes(struct.pack("<I", 0xFEEDFACF) + b"\x00" * 64)
 
         captured: dict[str, object] = {}
+
+        def _fake_dump_macho(*args: object, **kwargs: object) -> AbiSnapshot:
+            captured.update(kwargs)
+            return AbiSnapshot(library="fake.dylib", version="1.0")
+
         monkeypatch.setattr(
-            cli_mod, "handle_non_elf_dump", lambda *a, **k: captured.update(k)
+            "abicheck.service_dump_native._dump_macho", _fake_dump_macho
         )
         result = CliRunner().invoke(
             main, ["dump", str(dylib), "-H", str(header), "--build-info", str(db)]
         )
         assert result.exit_code == 0, result.output
-        assert captured["compile_db_context_matched"] is True
-        gcc_options = getattr(captured["compile_context"], "gcc_options")
-        assert "-std=c++17" in gcc_options
-        assert "-DFOO=1" in gcc_options
+        gcc_option_tokens = getattr(captured["compile"], "gcc_option_tokens")
+        assert "-std=c++17" in gcc_option_tokens
+        assert "-DFOO=1" in gcc_option_tokens
 
     def test_dump_compiler_option_help(self) -> None:
         # G21.5: the repeatable --compiler-option is documented on dump. It's a

@@ -494,9 +494,12 @@ def execute_dump_request(
     docstring for why a real match with zero derived flags still must set
     it. Both default falsy, so every pre-existing caller (including
     :func:`run_dump_request`) is unaffected. Both are passed by the migrated
-    ``dump`` CLI's real ELF run (``frontends.cli.dump_execute.
-    execute_dump_cli_run``); PE/Mach-O still executes through
-    ``cli_dump_helpers.handle_non_elf_dump``, not this function.
+    ``dump`` CLI's real run for either binary format
+    (``frontends.cli.dump_execute.execute_dump_cli_run``) -- ADR-063 Phase 1
+    migrated PE/Mach-O onto this same function after ELF, so
+    ``cli_dump_non_elf.handle_non_elf_dump`` is no longer called from
+    ``dump_cmd`` for either format (it stays defined for its own direct
+    unit tests).
 
     *seed_collect_mode*/*source_frontend_from_folded_context* (Codex review
     on the initial ELF migration -- two real regressions it introduced):
