@@ -23,6 +23,8 @@ Phase 5 section for the design this page's data comes from.
 
 | Fact | Value type | Producing backends | Lifecycle | Persisted | Identity | Comparable | Suppressible | Reportable |
 |------|------------|---------------------|-----------|:---------:|:--------:|:----------:|:------------:|:----------:|
+| `EnumType.qualified_name` | `str \| None` | castxml, clang | persisted | ✅ | — | ✅ | — | ✅ |
+| `EnumType.source_header` | `str \| None` | castxml, clang | persisted | ✅ | — | ✅ | — | ✅ |
 | `Param.is_va_list` | `bool` | clang | persisted | ✅ | — | ✅ | — | ✅ |
 | `RecordType.bases` | `list[str]` | castxml, clang, dwarf | persisted | ✅ | — | ✅ | — | ✅ |
 | `RecordType.data_size_bits` | `int \| None` | clang | persisted | ✅ | — | ✅ | — | ✅ |
@@ -71,8 +73,6 @@ check fails if a new eligible field appears that isn't named here.
 | `ElfMetadata.has_init` | not yet — tracked gap |
 | `EnumType.deprecated` | not yet — tracked gap |
 | `EnumType.is_scoped` | not yet — tracked gap |
-| `EnumType.qualified_name` | not yet — tracked gap |
-| `EnumType.source_header` | not yet — tracked gap |
 | `Function.contract_attributes` | not yet — tracked gap |
 | `Function.deprecated` | not yet — tracked gap |
 | `Function.elf_binding` | not yet — tracked gap |

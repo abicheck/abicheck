@@ -25,6 +25,7 @@ is ``Fact.unsupported()`` — a real, deliberate divergence from what the
 omission bridge alone would produce (``NOT_COLLECTED``), since castxml can
 never determine va_list-ness for any parameter, on any run.
 """
+
 from __future__ import annotations
 
 from xml.etree.ElementTree import Element, SubElement
@@ -201,6 +202,49 @@ def test_namespaced_record_qualified_name_fact_present_with_real_value() -> None
     assert rec.qualified_name == "ns::Nested"
     assert rec.qualified_name_fact.status is FactStatus.PRESENT
     assert rec.qualified_name_fact.value == "ns::Nested"
+
+
+def test_enum_qualified_name_fact_present_at_global_scope() -> None:
+    # ADR-063 Phase 5 (third batch): EnumType.qualified_name_fact is
+    # constructed directly too, mirroring RecordType's own pattern.
+    root = _base_root()
+    SubElement(
+        root,
+        "Enumeration",
+        attrib={
+            "id": "_50",
+            "name": "Color",
+            "context": "_1",
+            "file": "f1",
+            "location": "f1:1",
+        },
+    )
+    parser = _CastxmlParser(root, exported_dynamic=set(), exported_static=set())
+    (en,) = [e for e in parser.parse_enums() if e.name == "Color"]
+    assert en.qualified_name is None
+    assert en.qualified_name_fact.status is FactStatus.PRESENT
+    assert en.qualified_name_fact.value is None
+
+
+def test_enum_qualified_name_fact_present_with_real_value() -> None:
+    root = _base_root()
+    SubElement(root, "Namespace", attrib={"id": "_2", "name": "ns", "context": "_1"})
+    SubElement(
+        root,
+        "Enumeration",
+        attrib={
+            "id": "_51",
+            "name": "Color",
+            "context": "_2",
+            "file": "f1",
+            "location": "f1:1",
+        },
+    )
+    parser = _CastxmlParser(root, exported_dynamic=set(), exported_static=set())
+    (en,) = [e for e in parser.parse_enums() if e.name == "Color"]
+    assert en.qualified_name == "ns::Color"
+    assert en.qualified_name_fact.status is FactStatus.PRESENT
+    assert en.qualified_name_fact.value == "ns::Color"
 
 
 def test_param_is_va_list_fact_is_unsupported_not_not_collected() -> None:

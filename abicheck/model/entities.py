@@ -355,6 +355,23 @@ class EnumType:
     # consumer.
     entity_id: EntityId | None = field(default=None, kw_only=True, compare=False)
 
+    # ADR-063 Phase 5 (third batch): Fact[str | None] siblings for
+    # EnumType's own case-(b) fields, mirroring RecordType.qualified_name_fact/
+    # source_header_fact exactly (same fields, same rationale -- see those
+    # fields' own comments in this file). __post_init__ bridges directly
+    # off the literal None, the same "no separate confirmed-absence state"
+    # pattern every other case-(b) field in this batch uses.
+    qualified_name_fact: Fact[str | None] | None = field(default=None, kw_only=True)
+    source_header_fact: Fact[str | None] | None = field(default=None, kw_only=True)
+
+    def __post_init__(self) -> None:
+        self.qualified_name, self.qualified_name_fact = bridge_legacy_and_fact(
+            self.qualified_name, self.qualified_name_fact, None, None
+        )
+        self.source_header, self.source_header_fact = bridge_legacy_and_fact(
+            self.source_header, self.source_header_fact, None, None
+        )
+
 
 def record_layout_facts(
     bases: list[str],

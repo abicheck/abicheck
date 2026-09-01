@@ -297,7 +297,6 @@ _CASE_A_UNCONVERTED: tuple[tuple[str, str], ...] = (
 #: is this phase's first real conversion.
 _CASE_B_UNCONVERTED: tuple[tuple[str, str], ...] = (
     ("AbiSnapshot", "ast_resolved_standard"),
-    ("EnumType", "qualified_name"),
     ("Function", "contract_attributes"),
     ("Function", "is_explicit"),
     ("Function", "is_hidden_friend"),
@@ -319,7 +318,6 @@ _CASE_B_UNCONVERTED: tuple[tuple[str, str], ...] = (
     # here from manual inspection, not the scan.
     ("Function", "source_header"),
     ("Variable", "source_header"),
-    ("EnumType", "source_header"),
     # Schema-version-driven (not backend-driven) tri-state fields on the
     # three binary-format dataclasses — the identical "resting value can't
     # distinguish not-captured from confirmed-empty" shape, gated by a
@@ -552,6 +550,42 @@ FACT_REGISTRY = FactRegistry(
                 "Provenance (ADR-015, schema v6): defining header. Not "
                 "populated by the DWARF backend. Plain case (b) "
                 "conversion."
+            ),
+        ),
+        # ── Phase 5's third batch: EnumType's own case-(b) fields ──────────
+        _E(
+            owner="EnumType",
+            field="qualified_name",
+            value_type="str | None",
+            producing_backends=("castxml", "clang"),
+            persisted=True,
+            identity_relevant=False,
+            comparable=True,
+            suppressible=False,
+            reportable=True,
+            lifecycle=FactLifecycle.PERSISTED,
+            notes=(
+                "Namespace/enclosing-class-qualified spelling, mirroring "
+                "RecordType.qualified_name_fact exactly (same fields, same "
+                "explicit Fact.present(...) construction on both header-AST "
+                "backends, same rationale)."
+            ),
+        ),
+        _E(
+            owner="EnumType",
+            field="source_header",
+            value_type="str | None",
+            producing_backends=("castxml", "clang"),
+            persisted=True,
+            identity_relevant=False,
+            comparable=True,
+            suppressible=False,
+            reportable=True,
+            lifecycle=FactLifecycle.PERSISTED,
+            notes=(
+                "Provenance (ADR-015, schema v6): defining header, "
+                "mirroring RecordType.source_header_fact exactly. Not "
+                "populated by the DWARF backend."
             ),
         ),
     ]

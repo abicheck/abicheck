@@ -35,7 +35,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Any
 
-from ....model import EnumMember, EnumType
+from ....model import EnumMember, EnumType, Fact
 from ....model.identity import entity_id_for_enum
 from .context import (
     _Decl,
@@ -91,17 +91,20 @@ def parse_enums(
             value = explicit if explicit is not None else next_value
             members.append(EnumMember(name=str(child.get("name", "")), value=value))
             next_value = value + 1
+        # See RecordType.qualified_name (_build_record) for why this is
+        # only set when it differs from the bare name; entry.scope is a
+        # clean structural fact from clang's tree-shaped AST, so an empty
+        # scope is a confirmed determination for the explicit
+        # qualified_name_fact= construction below (ADR-063 Phase 5).
+        enum_qualified_name = "::".join([*entry.scope, name]) if entry.scope else None
         result.append(
             EnumType(
                 name=name,
                 members=members,
                 underlying_type=_enum_underlying(node),
                 source_location=_source_location(entry),
-                # See RecordType.qualified_name (_build_record) for why
-                # this is only set when it differs from the bare name.
-                qualified_name=(
-                    "::".join([*entry.scope, name]) if entry.scope else None
-                ),
+                qualified_name=enum_qualified_name,
+                qualified_name_fact=Fact.present(enum_qualified_name),
                 # G31 Phase C: clang's EnumDecl carries a "scopedEnumTag"
                 # key ("class"/"struct") only for an `enum class`/`enum
                 # struct` -- absent (not merely false) for a plain C-style

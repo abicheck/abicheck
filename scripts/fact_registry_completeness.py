@@ -573,7 +573,21 @@ def _call_receiver_name(node: ast.expr) -> str | None:
 #: which is the point: an unrecognized receiver name is unresolved
 #: evidence, not silently-accepted evidence.
 _OWNER_ENCODE_RECEIVER: dict[str, str] = {"Param": "param_dict"}
-_OWNER_DECODE_RECEIVER: dict[str, str] = {"RecordType": "t", "Param": "p"}
+_OWNER_DECODE_RECEIVER: dict[str, str] = {
+    "RecordType": "t",
+    "Param": "p",
+    "EnumType": "e",
+}
+
+#: Module-level fact-key tuples in fact_codec.py, each owning exactly one
+#: model dataclass (mirrors _TYPE_FACT_KEYS's own RecordType-only shape) --
+#: a new owner adopting this same "tuple of *_fact key names, looped over
+#: encode_fact_fields" idiom is added here, reviewed, the same allowlist-
+#: and-shrink discipline _TYPE_FACT_KEYS itself already establishes.
+_OWNER_FACT_KEY_TUPLES: dict[str, str] = {
+    "_TYPE_FACT_KEYS": "RecordType",
+    "_ENUM_FACT_KEYS": "EnumType",
+}
 
 
 def _encode_wired_fact_attrs() -> set[tuple[str, str]]:
@@ -600,14 +614,22 @@ def _encode_wired_fact_attrs() -> set[tuple[str, str]]:
     tree = ast.parse(source, filename=str(_FACT_CODEC_PATH))
     wired: set[tuple[str, str]] = set()
     for node in ast.walk(tree):
-        if isinstance(node, ast.Assign) and any(
-            isinstance(t, ast.Name) and t.id == "_TYPE_FACT_KEYS" for t in node.targets
-        ):
-            if isinstance(node.value, ast.Tuple):
+        if isinstance(node, ast.Assign):
+            owner = next(
+                (
+                    o
+                    for t in node.targets
+                    if isinstance(t, ast.Name)
+                    for key, o in _OWNER_FACT_KEY_TUPLES.items()
+                    if t.id == key
+                ),
+                None,
+            )
+            if owner is not None and isinstance(node.value, ast.Tuple):
                 for elt in node.value.elts:
                     name = _string_constant(elt)
                     if name is not None:
-                        wired.add(("RecordType", name))
+                        wired.add((owner, name))
         if isinstance(node, ast.FunctionDef) and node.name == "encode_fact_fields":
             for call in ast.walk(node):
                 if not isinstance(call, ast.Call):

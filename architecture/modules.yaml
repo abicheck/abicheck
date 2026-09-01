@@ -853,6 +853,7 @@
     "severity.py",
     "snapshot_cache.py",
     "snapshot_io.py",
+    "snapshot_platform_blocks.py",
     "source_smoke.py",
     "stable_abi.py",
     "stable_abi_data.py",

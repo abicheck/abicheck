@@ -31,13 +31,13 @@ compatibility rules, and its top-level structure.
 ## Schema version
 
 Every snapshot carries a top-level **`schema_version`** field — a single
-**integer** (not `MAJOR.MINOR`). The current value is **`31`** (see
+**integer** (not `MAJOR.MINOR`). The current value is **`32`** (see
 `abicheck/serialization.py`'s `SCHEMA_VERSION` for the authoritative,
 up-to-date value and the full per-version history comment).
 
 ```json
 {
-  "schema_version": 31,
+  "schema_version": 32,
   "library": "libfoo.so.1",
   "version": "1.2.3"
 }
@@ -105,7 +105,17 @@ unconditional public-surface/L5 evidence graph (ADR-063 Phase 3 D5, see
 fact/capability registry's (ADR-063 Phase 5 D7,
 `abicheck/model/fact_registry.py`) first registered `Fact[T]` conversion;
 needs no reliability flag, since `is_final`'s own `None` already
-unambiguously means "not captured".
+unambiguously means "not captured", (v31) `RecordType.is_abstract_fact`/
+`data_size_bits_fact`/`is_standard_layout_fact`/`is_trivially_copyable_fact`/
+`qualified_name_fact`/`source_header_fact` — the same registry's next batch
+of case-(b) conversions (fields already `X | None`-typed, so the existing
+"`None` already unambiguously means not captured" bridge applies directly);
+`qualified_name_fact` is the one field in this batch both header backends
+construct as an explicit `Fact.present(...)` rather than relying on the
+generic bridge, since a `None` qualified name at global scope is itself a
+confirmed determination, not missing evidence, and (v32)
+`EnumType.qualified_name_fact`/`source_header_fact` — the identical
+case-(b) pattern applied to `EnumType`'s own twin fields.
 
 ### Forward / backward compatibility
 
@@ -116,7 +126,7 @@ is determined entirely by comparing the file's `schema_version` against the
 | File `schema_version` | Behavior on load |
 |-----------------------|------------------|
 | **Missing** | Treated as `1` (the pre-versioning format) and loaded normally. |
-| **Older or equal** to this build (`<= 31`) | Loaded cleanly. Fields introduced by newer versions are absent and fall back to their defaults (`None`, empty, or a tri-state `None` that suppresses the detectors depending on that evidence). No warning. |
+| **Older or equal** to this build (`<= 32`) | Loaded cleanly. Fields introduced by newer versions are absent and fall back to their defaults (`None`, empty, or a tri-state `None` that suppresses the detectors depending on that evidence). No warning. |
 | **Newer** than this build, **and** `< 14` | Loaded **best-effort** with a `UserWarning` ("Data may be incomplete or misinterpreted. Upgrade abicheck…"). The load is **not** aborted — unrecognised keys are ignored and recognised keys are read. |
 | **Newer** than this build, **and** `>= 14` | **Hard-rejected** — `IncompatibleSnapshotSchemaError` — instead of warn-and-continue. |
 
@@ -181,7 +191,7 @@ serializer (`abicheck/serialization.py`) from the `AbiSnapshot` model
 
 | Key | Type | Meaning |
 |-----|------|---------|
-| `schema_version` | int | Snapshot format version (currently `31`). |
+| `schema_version` | int | Snapshot format version (currently `32`). |
 | `library` | string | Library identity, e.g. `libfoo.so.1`. |
 | `version` | string | Library version string, e.g. `1.2.3`. |
 | `source_path` | string \| null | Original path the snapshot was taken from. |
@@ -313,7 +323,7 @@ files:
 | | Snapshot (`dump`) | Comparison report (`compare --format json`) |
 |-|-------------------|---------------------------------------------|
 | **Version field** | `schema_version` | `report_schema_version` |
-| **Type** | integer (currently `31`) | string `MAJOR.MINOR` (e.g. `1.0`) |
+| **Type** | integer (currently `32`) | string `MAJOR.MINOR` (e.g. `1.0`) |
 | **Describes** | one library's ABI surface | the diff between two snapshots |
 
 A snapshot has no `report_schema_version`, and a report has no

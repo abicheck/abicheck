@@ -799,6 +799,19 @@ FACT_ROWS: tuple[FactRow, ...] = (
     ),
     FactRow("EnumType", "source_location", _FULL, _FULL),
     FactRow("EnumType", "source_header", _OTHER, _OTHER, note=_PROVENANCE_PASS),
+    FactRow(
+        "EnumType",
+        "source_header_fact",
+        _OTHER,
+        _OTHER,
+        note=(
+            "ADR-063 Phase 5 (third batch): Fact[str | None] sibling of "
+            "source_header, mirroring RecordType.source_header_fact -- "
+            "another layer (provenance.tag_provenance()) owns it, kept in "
+            "sync explicitly since it sets source_header by attribute "
+            "assignment, never re-running __post_init__."
+        ),
+    ),
     FactRow("EnumType", "origin", _OTHER, _OTHER, note=_PROVENANCE_PASS),
     FactRow(
         "EnumType",
@@ -817,6 +830,18 @@ FACT_ROWS: tuple[FactRow, ...] = (
         note="clang side wired in G31 Phase C (schema v19).",
     ),
     FactRow("EnumType", "qualified_name", _FULL, _FULL),
+    FactRow(
+        "EnumType",
+        "qualified_name_fact",
+        _FULL,
+        _FULL,
+        note=(
+            "ADR-063 Phase 5 (third batch): Fact[str | None] sibling of "
+            "qualified_name, mirroring RecordType.qualified_name_fact -- "
+            "both backends construct it directly as "
+            "Fact.present(qualified_name)."
+        ),
+    ),
     FactRow(
         "EnumType",
         "entity_id",

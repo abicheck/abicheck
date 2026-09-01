@@ -34,6 +34,7 @@ if TYPE_CHECKING:
 
 __all__ = [
     "apply_legacy_fact_backfill",
+    "decode_enum_facts",
     "decode_fact",
     "decode_record_facts",
     "encode_fact_fields",
@@ -53,6 +54,14 @@ _TYPE_FACT_KEYS = (
     "source_header_fact",
 )
 
+# ADR-063 Phase 5 (third batch): EnumType's own qualified_name_fact/
+# source_header_fact -- same shape as _TYPE_FACT_KEYS, a distinct tuple
+# since EnumType is a different owner/collection ("enums", not "types").
+_ENUM_FACT_KEYS = (
+    "qualified_name_fact",
+    "source_header_fact",
+)
+
 
 def encode_fact_fields(d: dict[str, Any]) -> None:
     """In-place: encode every ``Fact[...]``-typed field's ``status`` as a string.
@@ -66,6 +75,9 @@ def encode_fact_fields(d: dict[str, Any]) -> None:
     for type_dict in d.get("types", []):
         for fact_key in _TYPE_FACT_KEYS:
             _encode_one(type_dict.get(fact_key))
+    for enum_dict in d.get("enums", []):
+        for fact_key in _ENUM_FACT_KEYS:
+            _encode_one(enum_dict.get(fact_key))
     for func_dict in d.get("functions", []):
         for param_dict in func_dict.get("params", []):
             _encode_one(param_dict.get("is_va_list_fact"))
@@ -97,6 +109,11 @@ _MIN_SCHEMA_VERSION_FOR_IS_FINAL_FACT = 30
 # same schema bump. Same reasoning as _MIN_SCHEMA_VERSION_FOR_IS_FINAL_FACT
 # above: a document below this version never carried these keys at all.
 _MIN_SCHEMA_VERSION_FOR_RECORDTYPE_CASE_B_FACTS = 31
+
+# ADR-063 Phase 5 (third batch): the schema_version EnumType's own
+# qualified_name_fact/source_header_fact siblings started being persisted
+# at.
+_MIN_SCHEMA_VERSION_FOR_ENUMTYPE_FACTS = 32
 
 
 def decode_fact(
@@ -145,7 +162,9 @@ def decode_record_facts(t: dict[str, Any], schema_version: int) -> dict[str, Any
         "bases_fact": decode_fact(t.get("bases_fact"), schema_version),
         "virtual_bases_fact": decode_fact(t.get("virtual_bases_fact"), schema_version),
         "vtable_fact": decode_fact(t.get("vtable_fact"), schema_version),
-        "vptr_offset_bits_fact": decode_fact(t.get("vptr_offset_bits_fact"), schema_version),
+        "vptr_offset_bits_fact": decode_fact(
+            t.get("vptr_offset_bits_fact"), schema_version
+        ),
         "is_final_fact": decode_fact(
             t.get("is_final_fact"),
             schema_version,
@@ -180,6 +199,26 @@ def decode_record_facts(t: dict[str, Any], schema_version: int) -> dict[str, Any
             t.get("source_header_fact"),
             schema_version,
             min_schema_version=_MIN_SCHEMA_VERSION_FOR_RECORDTYPE_CASE_B_FACTS,
+        ),
+    }
+
+
+def decode_enum_facts(e: dict[str, Any], schema_version: int) -> dict[str, Any]:
+    """Decode every ``EnumType`` ``Fact[...]`` sibling from one enum dict.
+
+    One call, spread into the ``EnumType(**decode_enum_facts(e), ...)``
+    constructor call, mirroring :func:`decode_record_facts`.
+    """
+    return {
+        "qualified_name_fact": decode_fact(
+            e.get("qualified_name_fact"),
+            schema_version,
+            min_schema_version=_MIN_SCHEMA_VERSION_FOR_ENUMTYPE_FACTS,
+        ),
+        "source_header_fact": decode_fact(
+            e.get("source_header_fact"),
+            schema_version,
+            min_schema_version=_MIN_SCHEMA_VERSION_FOR_ENUMTYPE_FACTS,
         ),
     }
 

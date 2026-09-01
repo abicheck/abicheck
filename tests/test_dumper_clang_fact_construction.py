@@ -23,6 +23,7 @@ covers x86-64 System V and conservatively answers ``False`` (not
 "confirmed no") on any other target, so ``is_va_list_fact`` states
 ``Fact.partial(...)``, not ``Fact.present(...)``.
 """
+
 from __future__ import annotations
 
 from abicheck.dumper_clang import _ClangAstParser
@@ -55,7 +56,11 @@ def test_polymorphic_record_facts_present_and_match_legacy_fields() -> None:
             ],
         }
     )
-    (rec,) = [t for t in _ClangAstParser(root, set(), set()).parse_types() if t.name == "Widget"]
+    (rec,) = [
+        t
+        for t in _ClangAstParser(root, set(), set()).parse_types()
+        if t.name == "Widget"
+    ]
     assert rec.bases == ["Base"]
     assert rec.bases_fact.status is FactStatus.PRESENT
     assert rec.bases_fact.value == rec.bases
@@ -96,7 +101,11 @@ def test_namespaced_record_qualified_name_fact_present_with_real_value() -> None
             ],
         }
     )
-    (rec,) = [t for t in _ClangAstParser(root, set(), set()).parse_types() if t.name == "Nested"]
+    (rec,) = [
+        t
+        for t in _ClangAstParser(root, set(), set()).parse_types()
+        if t.name == "Nested"
+    ]
     assert rec.qualified_name == "ns::Nested"
     assert rec.qualified_name_fact.status is FactStatus.PRESENT
     assert rec.qualified_name_fact.value == "ns::Nested"
@@ -113,7 +122,11 @@ def test_final_record_is_final_fact_present_true() -> None:
             "inner": [{"kind": "FinalAttr"}],
         }
     )
-    (rec,) = [t for t in _ClangAstParser(root, set(), set()).parse_types() if t.name == "Sealed"]
+    (rec,) = [
+        t
+        for t in _ClangAstParser(root, set(), set()).parse_types()
+        if t.name == "Sealed"
+    ]
     assert rec.is_final is True
     assert rec.is_final_fact.status is FactStatus.PRESENT
     assert rec.is_final_fact.value is True
@@ -128,7 +141,11 @@ def test_opaque_record_facts_present_and_match_legacy_empty_values() -> None:
             "loc": {"file": "include/foo.h", "line": 10},
         }
     )
-    (rec,) = [t for t in _ClangAstParser(root, set(), set()).parse_types() if t.name == "Opaque"]
+    (rec,) = [
+        t
+        for t in _ClangAstParser(root, set(), set()).parse_types()
+        if t.name == "Opaque"
+    ]
     assert rec.is_opaque is True
     assert rec.bases == rec.virtual_bases == rec.vtable == []
     assert rec.vptr_offset_bits is None
@@ -139,6 +156,51 @@ def test_opaque_record_facts_present_and_match_legacy_empty_values() -> None:
     assert rec.vptr_offset_bits_fact.value is None
     assert rec.is_final_fact.status is FactStatus.PRESENT
     assert rec.is_final_fact.value is False
+
+
+def test_enum_qualified_name_fact_present_at_global_scope() -> None:
+    # ADR-063 Phase 5 (third batch): EnumType.qualified_name_fact is
+    # constructed directly too, mirroring RecordType's own pattern.
+    root = _tu(
+        {
+            "kind": "EnumDecl",
+            "name": "Color",
+            "loc": {"file": "include/foo.h", "line": 1},
+        }
+    )
+    (en,) = [
+        e
+        for e in _ClangAstParser(root, set(), set()).parse_enums()
+        if e.name == "Color"
+    ]
+    assert en.qualified_name is None
+    assert en.qualified_name_fact.status is FactStatus.PRESENT
+    assert en.qualified_name_fact.value is None
+
+
+def test_enum_qualified_name_fact_present_with_real_value() -> None:
+    root = _tu(
+        {
+            "kind": "NamespaceDecl",
+            "name": "ns",
+            "loc": {"file": "include/foo.h", "line": 1},
+            "inner": [
+                {
+                    "kind": "EnumDecl",
+                    "name": "Color",
+                    "loc": {"file": "include/foo.h", "line": 2},
+                },
+            ],
+        }
+    )
+    (en,) = [
+        e
+        for e in _ClangAstParser(root, set(), set()).parse_enums()
+        if e.name == "Color"
+    ]
+    assert en.qualified_name == "ns::Color"
+    assert en.qualified_name_fact.status is FactStatus.PRESENT
+    assert en.qualified_name_fact.value == "ns::Color"
 
 
 def test_param_is_va_list_fact_is_partial_not_unsupported_or_present() -> None:
