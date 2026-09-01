@@ -241,13 +241,26 @@ def test_evidence_contract_gated_treats_hostile_json_verdict_as_inert_data(tmp_p
 
     py_safe_dir = tmp_path / "py-safe"
     py_safe_dir.mkdir()
+    # Forward-slash form of every interpolated filesystem path: on Windows
+    # these are backslash paths, and Python's subprocess module reconstructs
+    # the child's command line via MS C-runtime quoting rules (list2cmdline),
+    # not POSIX argv passing -- a raw Windows backslash path embedded in a
+    # double-quoted bash string round-trips through that reconstruction
+    # combined with the surrounding quotes and corrupts the script bash.exe
+    # actually receives (observed: "unexpected EOF while looking for
+    # matching `)'" on a windows-latest runner). Git Bash and Python's own
+    # open() both accept forward-slash Windows paths, so this sidesteps the
+    # quoting mismatch entirely rather than trying to out-escape it.
+    py_bin = Path(sys.executable).as_posix()
+    py_safe_dir_posix = py_safe_dir.as_posix()
+    report_posix = report.as_posix()
     script = (
         _report_query_and_gated_fragment()
         + f"""
 _RUNNING_ON_WINDOWS="false"
-_PY_BIN="{sys.executable}"
-_PY_SAFE_DIR="{py_safe_dir}"
-_json_report_src() {{ echo "{report}"; }}
+_PY_BIN="{py_bin}"
+_PY_SAFE_DIR="{py_safe_dir_posix}"
+_json_report_src() {{ echo "{report_posix}"; }}
 if _evidence_contract_gated; then
   echo "GATED=1"
 else
