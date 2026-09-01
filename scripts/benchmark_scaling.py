@@ -1285,6 +1285,11 @@ class Scenario:
     # *inherently* super-linear (a deep embedding chain) and must be exempt so a
     # blanket exponent budget can gate everything else without flagging them.
     gate_exponent: bool = True
+    # Per-scenario override for the regression gate's tolerance/floor.
+    # ``None`` means "use the CLI-wide --regress-tolerance/--regress-min-
+    # delta-seconds" -- opt-out precedent mirrors ``gate_exponent`` above.
+    regress_tolerance: float | None = None
+    regress_min_delta_seconds: float | None = None
 
 
 SCENARIOS: dict[str, Scenario] = {
@@ -1311,7 +1316,14 @@ SCENARIOS: dict[str, Scenario] = {
     ),
     "suppression_audit": Scenario(_build_suppression_audit, run=_run_suppression_audit),
     "severity": Scenario(_build_severity, run=_run_severity),
-    "serialize": Scenario(_build_serialize, run=_run_serialize),
+    # ADR-063 Phase 5's growing `Fact[T]` sibling surface (~27 fields as of
+    # PR #982) raised this scenario's real cost ~2x: every sibling is walked
+    # by `dataclasses.asdict()` (encode) and by the closure-identity string
+    # walk in `qualified_name_segments_walk._collect_strings` (decode), even
+    # with no markers present -- that walk now skips a `Fact`'s own `status`
+    # (never a string, PR #982), but most of the rest is genuinely new data.
+    # Scenario-scoped, not a blanket raise -- a new regression still fails.
+    "serialize": Scenario(_build_serialize, run=_run_serialize, regress_tolerance=1.3),
     "report_html": Scenario(_build_report, run=_run_report_html),
     "report_sarif": Scenario(_build_report, run=_run_report_sarif),
     "report_junit": Scenario(_build_report, run=_run_report_junit),
@@ -1862,13 +1874,23 @@ def _run_scenario(
     if baseline_points:
         matched = matched_baseline_points(points, scenario, baseline_points)
         overlap = len(matched)
+        tolerance = (
+            spec.regress_tolerance
+            if spec.regress_tolerance is not None
+            else args.regress_tolerance
+        )
+        min_delta_seconds = (
+            spec.regress_min_delta_seconds
+            if spec.regress_min_delta_seconds is not None
+            else args.regress_min_delta_seconds
+        )
         failures.extend(
             check_regressions(
                 points,
                 scenario,
                 baseline_points,
-                args.regress_tolerance,
-                min_delta_seconds=args.regress_min_delta_seconds,
+                tolerance,
+                min_delta_seconds=min_delta_seconds,
             )
         )
     return failures, overlap

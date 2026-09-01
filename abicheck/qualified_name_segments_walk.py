@@ -71,8 +71,34 @@ def _collect_strings(value: object, out: list[str]) -> None:
     if isinstance(value, str):
         out.append(value)
     elif _dataclasses.is_dataclass(value) and not isinstance(value, type):
-        for f in _dataclasses.fields(value):
+        fields = _dataclasses.fields(value)
+        # ADR-063 Phase 5: every `model.fact.Fact[T]` sibling now reachable
+        # from `functions`/`variables`/`types`/`enums` (up to ~10 per
+        # declaration) makes this walk's own "cheap no-op when nothing
+        # embeds a marker" common case measurably non-cheap (real PR #982
+        # perf-gate regression, ~2x on the serialize scenario) unless a
+        # `Fact`'s own `status: FactStatus` field is skipped -- it is
+        # structurally guaranteed to never hold a string (`FactStatus` is a
+        # plain `enum.Enum`, not `(str, Enum)`; `model/` has no other field
+        # literally named "status"), so recursing into it can never
+        # contribute to `out`. Recognized the same cheap-first structural
+        # way `_walk_rewrite_strings`' own `is_fact_value_field` already
+        # recognizes a `Fact` (this module is deliberately import-free, see
+        # its own docstring) -- a class literally named "Fact" with this
+        # exact field shape is close enough that a false positive would
+        # need a coincidentally-identical, unrelated type. Read-only here,
+        # so (unlike `_walk_rewrite_strings`) frozen-ness doesn't matter and
+        # `fields` is reused instead of calling `dataclasses.fields()` a
+        # second time just to build the comparison set.
+        is_fact = type(value).__name__ == "Fact" and {f.name for f in fields} == {
+            "status",
+            "value",
+            "diagnostics",
+        }
+        for f in fields:
             if f.name in _PAYLOAD_FIELD_EXCLUSIONS:
+                continue
+            if is_fact and f.name == "status":
                 continue
             _collect_strings(getattr(value, f.name), out)
     elif isinstance(value, (list, tuple)):
