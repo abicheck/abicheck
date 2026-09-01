@@ -711,6 +711,84 @@ class TestBundleFactsLibraryManifest:
         assert captured["per_library_includes"] == {}
         assert captured["per_library_compile"] == {}
 
+    def test_depth_binary_ignores_extracted_package_headers(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """P1 Codex finding: --depth binary's uniform ``headers = []`` clear
+        (dispatch()'s own comment above) is undone right below it -- when
+        NEW_INPUT is a package archive or ``--devel-pkg new=...`` extraction
+        yields a non-None ``header_dir``, ``if not headers: headers =
+        [header_dir]`` reassigns the operand back to a non-empty list,
+        silently re-enabling L2 header extraction under a depth that
+        promises pure L0/L1 evidence with no header AST at all.
+
+        Simulates a package/devel-pkg extraction that discovers a
+        ``header_dir`` by monkeypatching ``_extract_if_package`` (the exact
+        primitive ``dispatch()`` calls) rather than building a real archive
+        fixture -- this is the one thing that varies from the plain
+        already-extracted-directory case ``_extract_if_package``'s own
+        docstring describes.
+        """
+        import abicheck.bundle_side_input as bundle_side_input_mod
+        import abicheck.cli_compare_release_helpers as cli_compare_release_helpers_mod
+
+        old_dir = tmp_path / "old"
+        new_dir = tmp_path / "new"
+        old_dir.mkdir()
+        new_dir.mkdir()
+        body = "int add(int a, int b) { return a + b; }\n"
+        _build_so(old_dir, "libreal.so", body)
+        _build_so(new_dir, "libreal.so", body)
+        facts_path = _write_old_facts(
+            tmp_path, old_dir, old_dir / "libreal.so", "libreal.so"
+        )
+
+        header_dir = tmp_path / "extracted_headers"
+        header_dir.mkdir()
+        (header_dir / "libreal.h").write_text("int add(int a, int b);\n")
+
+        real_extract_if_package = cli_compare_release_helpers_mod._extract_if_package
+
+        def _fake_extract_if_package(
+            input_path, debug_pkg, devel_pkg, make_temp_dir, is_package, detect_extractor
+        ):
+            lib_dir, debug_dir, _header_dir, symbols_file = real_extract_if_package(
+                input_path, debug_pkg, devel_pkg, make_temp_dir, is_package, detect_extractor
+            )
+            return lib_dir, debug_dir, header_dir, symbols_file
+
+        monkeypatch.setattr(
+            cli_compare_release_helpers_mod,
+            "_extract_if_package",
+            _fake_extract_if_package,
+        )
+
+        captured: dict[str, object] = {}
+        real_compare = bundle_side_input_mod.compare_release_against_bundle_facts
+
+        def _spy(*args: object, **kwargs: object):
+            captured.update(kwargs)
+            return real_compare(*args, **kwargs)
+
+        monkeypatch.setattr(
+            bundle_side_input_mod, "compare_release_against_bundle_facts", _spy
+        )
+
+        code, out = _invoke(
+            "compare",
+            str(facts_path),
+            str(new_dir),
+            "--old-bundle-facts",
+            "--include-system-declarations",
+            "--depth",
+            "binary",
+            "--format",
+            "json",
+        )
+
+        assert code == 0, out
+        assert captured["headers"] is None
+
     def test_duplicate_library_key_is_rejected(self, tmp_path: Path) -> None:
         """Codex review: plain ``yaml.safe_load()`` silently keeps only the
         last value of a repeated mapping key, so a manifest with two entries

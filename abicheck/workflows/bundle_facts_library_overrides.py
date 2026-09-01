@@ -165,7 +165,14 @@ def parse_bundle_facts_library_overrides(
     set (from the resolved NEW-side match map) -- a manifest entry naming a
     library outside that set is a hard error, since a typo'd name would
     otherwise silently fall back to the uniform default with no signal
-    anything is wrong.
+    anything is wrong. Each manifest key is canonicalized (the same
+    ``_canonical_library_key`` logic ``known_libraries`` itself is built
+    from) before that membership check and before being used as an output
+    key, so a manifest may key an entry by either the bundle's canonical
+    name (``libfoo.so``) or a real, versioned on-disk filename
+    (``libfoo.so.1``) interchangeably -- two entries that canonicalize to
+    the same library are a hard error rather than one silently overwriting
+    the other.
 
     *base_dir*, when given, is the directory every relative ``headers``/
     ``includes``/``sysroot`` path resolves against -- the manifest file's own
@@ -177,6 +184,20 @@ def parse_bundle_facts_library_overrides(
     never altered. ``None`` (the default) keeps every path exactly as
     written, for a caller with no real manifest file behind the raw dict.
     """
+    # Codex review, fresh evidence: `known_libraries` (the resolved NEW-side
+    # match map -- see `known_libraries_for_new_side` below) and
+    # `BundleFacts.per_library_snapshots` are always keyed by the bundle's
+    # own *canonical* library key (`build_match_map`/`_canonical_library_
+    # key`, e.g. `libfoo.so`), never by a discovered filename's literal,
+    # possibly-versioned spelling. A manifest author keying an entry by the
+    # real on-disk filename (`libfoo.so.1`, common for a runtime package
+    # with no unversioned dev symlink) is a perfectly correct spelling of
+    # that same library -- canonicalize every manifest name through the
+    # identical primitive before checking membership or using it as a dict
+    # key, so it isn't rejected as "not a library in this bundle" purely for
+    # not matching the canonical spelling by coincidence.
+    from .extraction import _canonical_library_key
+
     if not isinstance(raw, dict):
         raise BundleFactsLibraryOverridesError(
             f"per-library override manifest: must be a mapping of library "
@@ -185,13 +206,23 @@ def parse_bundle_facts_library_overrides(
     headers: dict[str, list[Path]] = {}
     includes: dict[str, list[Path]] = {}
     compile_by_library: dict[str, CompileContext] = {}
+    canonical_names: dict[str, str] = {}
     for name, entry in raw.items():
         if not isinstance(name, str) or not name:
             raise BundleFactsLibraryOverridesError(
                 f"per-library override manifest: library names must be "
                 f"non-empty strings, got {name!r}"
             )
-        if known_libraries is not None and name not in known_libraries:
+        canonical_name = _canonical_library_key(Path(name))
+        if canonical_name in canonical_names:
+            raise BundleFactsLibraryOverridesError(
+                f"per-library override manifest: {name!r} and "
+                f"{canonical_names[canonical_name]!r} both refer to the "
+                f"same library ({canonical_name!r}) -- a library may only "
+                f"appear once in this manifest, under either spelling"
+            )
+        canonical_names[canonical_name] = name
+        if known_libraries is not None and canonical_name not in known_libraries:
             raise BundleFactsLibraryOverridesError(
                 f"per-library override manifest: {name!r} is not a library "
                 f"in this bundle -- known libraries are "
@@ -221,20 +252,20 @@ def parse_bundle_facts_library_overrides(
                 f"{sorted(_LIBRARY_KEYS)!r}"
             )
         if "headers" in entry:
-            headers[name] = _resolve_str_list_as_paths(
+            headers[canonical_name] = _resolve_str_list_as_paths(
                 entry["headers"],
                 base_dir=base_dir,
                 where=f"per-library override manifest.{name}.headers",
             )
         if "includes" in entry:
-            includes[name] = _resolve_str_list_as_paths(
+            includes[canonical_name] = _resolve_str_list_as_paths(
                 entry["includes"],
                 base_dir=base_dir,
                 where=f"per-library override manifest.{name}.includes",
             )
         compile_fields = {k: v for k, v in entry.items() if k in _COMPILE_KEYS}
         if compile_fields:
-            compile_by_library[name] = _build_compile_context(
+            compile_by_library[canonical_name] = _build_compile_context(
                 compile_fields,
                 where=f"per-library override manifest.{name}",
                 base_dir=base_dir,
@@ -390,6 +421,24 @@ def _build_compile_context(
             raise BundleFactsLibraryOverridesError(
                 f"{where}.{key}: must be a string, got {type(value).__name__}"
             )
+        if nullable and value == "":
+            # Codex review (originally found for `sysroot`, fresh evidence
+            # extends it to `gcc_path`/`gcc_prefix` -- the same reasoning
+            # applies to all three nullable string fields identically): an
+            # empty string is falsy, so `sysroot=... if sysroot else None`
+            # below would silently swallow it -- but the entry itself is
+            # not otherwise empty (the key is present), so this library
+            # still gets its own per-library CompileContext, which
+            # *replaces* the uniform one entirely (bundle_side_input.py's
+            # own `(per_library_compile or {}).get(key, compile)` fallback:
+            # present in the map at all means "use this instead", not "use
+            # this where set"). An accidentally blank value would therefore
+            # silently discard that library's uniform --compiler/
+            # --compiler-option/toolchain selection, rather than being
+            # rejected as the malformed input it is.
+            raise BundleFactsLibraryOverridesError(
+                f"{where}.{key}: must not be an empty string"
+            )
         str_fields[key] = value
     nostdinc = fields.get("nostdinc", False)
     if not isinstance(nostdinc, bool):
@@ -397,19 +446,6 @@ def _build_compile_context(
             f"{where}.nostdinc: must be a boolean, got {type(nostdinc).__name__}"
         )
     sysroot = str_fields["sysroot"]
-    if sysroot == "":
-        # Codex review: an empty sysroot string is falsy, so `sysroot=...
-        # if sysroot else None` below would silently swallow it -- but the
-        # entry itself is not otherwise empty (the `sysroot` key is
-        # present), so this library still gets its own per-library
-        # CompileContext, which *replaces* the uniform one entirely
-        # (bundle_side_input.py's own `(per_library_compile or {}).get(key,
-        # compile)` fallback: present in the map at all means "use this
-        # instead", not "use this where set"). An accidentally blank
-        # `sysroot: ""` would therefore silently discard that library's
-        # uniform --compiler/--compiler-option/etc, rather than being
-        # rejected as the malformed input it is.
-        raise BundleFactsLibraryOverridesError(f"{where}.sysroot: must not be an empty string")
     # Codex review: `--ast-frontend`'s own Click choice is case-insensitive
     # (`click.Choice(AST_FRONTENDS, case_sensitive=False)`) and the typed
     # API normalizes both fields via `.lower()` throughout (service_compare_

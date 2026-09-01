@@ -125,6 +125,40 @@ class TestParseBundleFactsLibraryOverrides:
         )
         assert "anything.so" in result.headers
 
+    def test_manifest_key_may_be_the_real_versioned_filename(self) -> None:
+        # Codex review, fresh evidence: `known_libraries` (the resolved
+        # NEW-side match map) and `BundleFacts.per_library_snapshots` are
+        # always keyed by the bundle's *canonical* library name
+        # (`_canonical_library_key`, e.g. "libfoo.so"), never by a
+        # discovered filename's literal, possibly-versioned spelling. A
+        # runtime package with no unversioned dev symlink only ever ships
+        # "libfoo.so.1" on disk -- a manifest author keying an entry by that
+        # real, on-disk filename must not be rejected as "not a library in
+        # this bundle" purely because it doesn't match the canonical
+        # spelling by coincidence.
+        result = parse_bundle_facts_library_overrides(
+            {"libfoo.so.1": {"headers": ["x"]}}, known_libraries={"libfoo.so"}
+        )
+        assert result.headers == {"libfoo.so": [Path("x")]}
+
+    def test_two_manifest_keys_canonicalizing_to_the_same_library_are_rejected(
+        self,
+    ) -> None:
+        # Two different raw spellings ("libfoo.so.1"/"libfoo.so.2") of the
+        # SAME canonical library must not silently overwrite one another in
+        # the output maps -- that would leave whichever key iterates last
+        # in effect with no signal the other entry was ever discarded.
+        with pytest.raises(
+            BundleFactsLibraryOverridesError, match="both refer to the same library"
+        ):
+            parse_bundle_facts_library_overrides(
+                {
+                    "libfoo.so.1": {"headers": ["a"]},
+                    "libfoo.so.2": {"headers": ["b"]},
+                },
+                known_libraries={"libfoo.so"},
+            )
+
     @pytest.mark.parametrize(
         "field_name,bad_value",
         [
@@ -217,17 +251,22 @@ class TestParseBundleFactsLibraryOverrides:
         )
         assert getattr(result.compile["libfoo.so"], field_name) == canonical_value
 
-    def test_empty_sysroot_is_rejected_rather_than_silently_dropped(self) -> None:
-        """Codex review: ``sysroot: ""`` is falsy, so ``sysroot=... if
-        sysroot else None`` would silently swallow it -- but the ``sysroot``
-        key is still present, so this library still gets its own per-
-        library ``CompileContext``, which *replaces* the uniform one
+    @pytest.mark.parametrize("field_name", ["sysroot", "gcc_path", "gcc_prefix"])
+    def test_empty_nullable_string_field_is_rejected_rather_than_silently_dropped(
+        self, field_name: str
+    ) -> None:
+        """Codex review (originally found for ``sysroot``, fresh evidence
+        extends it to ``gcc_path``/``gcc_prefix`` -- identical reasoning
+        applies to all three nullable string fields): an empty string is
+        falsy, so ``value=... if value else None`` would silently swallow
+        it -- but the key is still present, so this library still gets its
+        own per-library ``CompileContext``, which *replaces* the uniform one
         entirely (``bundle_side_input.py``'s ``.get(key, compile)``
-        fallback). An accidentally blank ``sysroot: ""`` would therefore
-        silently discard that library's uniform ``--compiler``/
-        ``--compiler-option``/etc rather than being rejected."""
+        fallback). An accidentally blank value would therefore silently
+        discard that library's uniform ``--compiler``/``--compiler-option``/
+        toolchain selection rather than being rejected."""
         with pytest.raises(BundleFactsLibraryOverridesError, match="empty string"):
-            parse_bundle_facts_library_overrides({"libfoo.so": {"sysroot": ""}})
+            parse_bundle_facts_library_overrides({"libfoo.so": {field_name: ""}})
 
     def test_empty_library_name_is_rejected(self) -> None:
         with pytest.raises(BundleFactsLibraryOverridesError, match="non-empty strings"):

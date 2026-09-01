@@ -276,7 +276,15 @@ def dispatch(*, compile_context: Any, **kwargs: Any) -> None:
                     detect_extractor,
                 )
             )
-            if header_dir is not None:
+            if header_dir is not None and depth != "binary":
+                # Codex review: --depth binary's uniform `headers = []`
+                # clear above (dispatch()'s own comment) must survive
+                # package/--devel-pkg extraction too -- without this guard,
+                # a NEW_INPUT package (or `--devel-pkg new=...`) that
+                # discovers its own header_dir would reassign `headers`
+                # right back to a non-empty list here, silently re-enabling
+                # L2 header extraction for that library under a depth that
+                # promises pure L0/L1 evidence with no header AST at all.
                 if not headers:
                     headers = [header_dir]
                 includes = includes + _discover_include_roots(header_dir)
