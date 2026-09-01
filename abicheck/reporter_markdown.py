@@ -38,11 +38,16 @@ from .checker import (
 )
 from .checker_policy import (
     HasKind,
-    impact_for,
     policy_kind_sets as _policy_kind_sets,
 )
 from .contract_gating import is_evaluated
 from .finding_identity import missing_contract_kind, report_finding_id
+from .report import render_markdown as _rmd
+from .report.render_markdown import (
+    _contract_decision_text as _contract_decision_text,
+    _format_change_md as _format_change_md,
+    _format_change_md_oneline as _format_change_md_oneline,
+)
 from .report_correlation import (
     _suppress_dangling_correlation_notes as _suppress_dangling_correlation_notes,
 )
@@ -432,11 +437,11 @@ def apply_show_only(
 # ---------------------------------------------------------------------------
 
 
-def _build_impact_table(
+def compute_impact_table(
     result: DiffResult,
     displayed_changes: list[Change] | None = None,
-) -> list[str]:
-    """Build impact summary table rows.
+) -> _rmd.ImpactTable | None:
+    """Build the impact summary table's structured intermediate.
 
     When *displayed_changes* is given (e.g. after ``--show-only`` filtering),
     only those changes are considered.  Interface counts use unique
@@ -450,13 +455,18 @@ def _build_impact_table(
     )
 
     # Collect root type changes with their impact
-    root_entries: list[tuple[str, str, int, int]] = []
+    root_entries: list[_rmd.ImpactRootEntry] = []
     for c in changes:
         if c.kind in _ROOT_TYPE_CHANGE_KINDS:
             affected_count = len(c.affected_symbols) if c.affected_symbols else 0
             if affected_count > 0 or c.caused_count > 0:
                 root_entries.append(
-                    (c.symbol, c.kind.value, affected_count, c.caused_count)
+                    _rmd.ImpactRootEntry(
+                        symbol=c.symbol,
+                        kind=c.kind.value,
+                        iface_count=affected_count,
+                        caused=c.caused_count,
+                    )
                 )
 
     # Count non-type direct changes
@@ -467,45 +477,23 @@ def _build_impact_table(
     )
 
     if not root_entries and direct_removals == 0:
-        return []
+        return None
 
-    lines = [
-        "## Impact Summary",
-        "",
-        "| Root Change | Kind | Affected Interfaces | Derived |",
-        "|-------------|------|---------------------|---------|",
-    ]
-    for symbol, kind, iface_count, caused in root_entries:
-        iface_str = f"{iface_count} functions" if iface_count > 0 else "—"
-        caused_str = f"+{caused} collapsed" if caused > 0 else "—"
-        lines.append(f"| {symbol} | {kind} | {iface_str} | {caused_str} |")
-    if direct_removals > 0:
-        lines.append(f"| — | removals ({direct_removals}) | direct | — |")
-    lines.append("")
-    return lines
+    return _rmd.ImpactTable(
+        root_entries=tuple(root_entries), direct_removals=direct_removals
+    )
+
+
+def _build_impact_table(
+    result: DiffResult,
+    displayed_changes: list[Change] | None = None,
+) -> list[str]:
+    return _rmd.render_impact_table(compute_impact_table(result, displayed_changes))
 
 
 # ---------------------------------------------------------------------------
 # Leaf-change mode helpers
 # ---------------------------------------------------------------------------
-
-
-def _contract_decision_text(
-    relevance: Any, reason_code: str | None, assurance: Any
-) -> str:
-    """Core ``<relevance> (<reason_code>), assurance: <level>`` text, shared
-    by every already-stamped-``Change`` rendering site in this module
-    (CodeRabbit review: the same tag-building pattern was duplicated at
-    several call sites). Deliberately excludes any ``Contract:``/``[contract:
-    ...]`` wrapper -- callers render in visibly different shapes (a leading
-    ``"Contract: "``, a bracketed ``"[contract: ...]"``), so each keeps its
-    own exact prefix/suffix and casing."""
-    tag = str(relevance.value)
-    if reason_code:
-        tag += f" ({reason_code})"
-    if assurance is not None:
-        tag += f", assurance: {assurance.value}"
-    return tag
 
 
 def _format_leaf_type_change(c: Change) -> list[str]:
@@ -1053,40 +1041,53 @@ def _fmt_size(size_bytes: int) -> str:
     return f"{size_bytes / (1024 * 1024):.1f} MB"
 
 
-def _append_redundancy_note(lines: list[str], result: DiffResult) -> None:
+def compute_redundancy_note(result: DiffResult) -> _rmd.RedundancyNote | None:
+    """The structured intermediate for :func:`_append_redundancy_note`."""
     if result.redundant_count > 0:
-        lines.append("")
-        lines.append(
-            f"> ℹ️ {result.redundant_count} redundant change(s) hidden "
-            "(derived from root type changes). Set `scope.show_redundant: true` in\n"
-            "> `.abicheck.yml` to show all."
-        )
+        return _rmd.RedundancyNote(redundant_count=result.redundant_count)
+    return None
+
+
+def compute_out_of_surface_note(result: DiffResult) -> _rmd.OutOfSurfaceNote | None:
+    """The structured intermediate for :func:`_append_out_of_surface_note`."""
+    if result.scope_to_public_surface and result.out_of_surface_count:
+        return _rmd.OutOfSurfaceNote(count=result.out_of_surface_count)
+    return None
+
+
+def compute_suppression_note(result: DiffResult) -> _rmd.SuppressionNote | None:
+    """The structured intermediate for :func:`_append_suppression_note`."""
+    if not result.suppression_file_provided:
+        return None
+    entries: list[_rmd.SuppressedEntry] = []
+    if result.suppressed_count != 0:
+        for sc in result.suppressed_changes:
+            contract_text = None
+            relevance = getattr(sc, "contract_relevance", None)
+            if relevance is not None:
+                reason_code = getattr(sc, "contract_reason_code", None)
+                assurance = getattr(sc, "contract_assurance", None)
+                contract_text = _contract_decision_text(relevance, reason_code, assurance)
+            entries.append(
+                _rmd.SuppressedEntry(
+                    symbol=sc.symbol, description=sc.description, contract_text=contract_text
+                )
+            )
+    return _rmd.SuppressionNote(
+        suppressed_count=result.suppressed_count, entries=tuple(entries)
+    )
+
+
+def _append_redundancy_note(lines: list[str], result: DiffResult) -> None:
+    lines += _rmd.render_redundancy_note(compute_redundancy_note(result))
 
 
 def _append_out_of_surface_note(lines: list[str], result: DiffResult) -> None:
-    if result.scope_to_public_surface and result.out_of_surface_count:
-        lines += ["", f"> ℹ️ {result.out_of_surface_count} finding(s) filtered as non-public ABI surface (`--scope-public-headers`). Pass `--show-filtered` to list them."]
+    lines += _rmd.render_out_of_surface_note(compute_out_of_surface_note(result))
 
 
 def _append_suppression_note(lines: list[str], result: DiffResult) -> None:
-    if result.suppression_file_provided:
-        lines.append("")
-        if result.suppressed_count == 0:
-            lines.append(
-                "> ℹ️ Suppression file active — 0 changes matched (nothing suppressed)"
-            )
-        else:
-            lines.append(
-                f"> ℹ️ {result.suppressed_count} change(s) suppressed via suppression file"
-            )
-            for sc in result.suppressed_changes:
-                line = f">   - `{sc.symbol}` — {sc.description}"
-                relevance = getattr(sc, "contract_relevance", None)
-                if relevance is not None:
-                    reason_code = getattr(sc, "contract_reason_code", None)
-                    assurance = getattr(sc, "contract_assurance", None)
-                    line += f" [contract: {_contract_decision_text(relevance, reason_code, assurance)}]"
-                lines.append(line)
+    lines += _rmd.render_suppression_note(compute_suppression_note(result))
 
 
 # ---------------------------------------------------------------------------
@@ -1904,94 +1905,3 @@ def _append_recommendation_section(lines: list[str], result: DiffResult) -> None
         "",
     ]
 
-
-def _format_change_md_oneline(c: object) -> str:
-    """Format a single change as a bare ``- **kind**: description`` line, plus
-    a "See also" correlation note when ``correlated_change_kind`` is set.
-
-    Used by the sections (Deployment Risk, Quality Issues, Not Evaluated)
-    that deliberately render a change as a single terse line rather than
-    routing through the fuller :func:`_format_change_md` (impact/affected-
-    symbols/contract detail) -- but the cross-detector correlation must
-    still reach every section a correlated finding (currently only
-    ``LAYOUT_UNVERIFIABLE``) can land in, or a policy/contract
-    configuration that routes it into one of these terse sections silently
-    drops the "See also" note the fuller formatter carries (Codex review,
-    fresh evidence).
-    """
-    kind = getattr(c, "kind", None)
-    kind_val = kind.value if kind else ""
-    desc = getattr(c, "description", "")
-    line = f"- **{kind_val}**: {desc}"
-    correlated = getattr(c, "correlated_change_kind", None)
-    if correlated:
-        line += f"\n  > See also: `{correlated}` finding for the same symbol"
-    return line
-
-
-def _format_change_md(c: object) -> str:
-    """Format a single change as a markdown list item with impact and metadata."""
-    kind = getattr(c, "kind", None)
-    kind_val = kind.value if kind else ""
-    desc = getattr(c, "description", "")
-    old_val = getattr(c, "old_value", None)
-    new_val = getattr(c, "new_value", None)
-    loc = getattr(c, "source_location", None)
-    affected = getattr(c, "affected_symbols", None)
-    caused_count = getattr(c, "caused_count", 0)
-
-    # Base line
-    old_new = ""
-    if old_val is not None and new_val is not None:
-        old_new = f" (`{old_val}` → `{new_val}`)"
-    elif old_val is not None:
-        old_new = f" (`{old_val}`)"
-    elif new_val is not None:
-        old_new = f" (`{new_val}`)"
-    line = f"- **{kind_val}**: {desc}{old_new}"
-
-    # Source location
-    if loc:
-        line += f" — `{loc}`"
-
-    # Impact
-    if kind:
-        impact = impact_for(kind)
-        if impact:
-            line += f"\n  > {impact}"
-
-    # Collapsed derived changes
-    if caused_count > 0:
-        line += f"\n  > {caused_count} derived change(s) collapsed"
-
-    # Affected functions
-    if affected:
-        names = ", ".join(f"`{s}`" for s in affected[:5])
-        suffix = f" (+{len(affected) - 5} more)" if len(affected) > 5 else ""
-        line += f"\n  > Affected symbols: {names}{suffix}"
-
-    # ADR-049 Phase 3 (Codex review, fresh evidence): --contract's
-    # own help text promises every finding is stamped with a contract
-    # decision, but only the JSON report (reporter.py's
-    # _add_contract_evaluation_fields) ever rendered it -- an ordinary
-    # `compare --contract` run (default markdown format) was
-    # byte-for-byte identical to one without the flag. A no-op when *c* was
-    # never stamped (contract_evaluation not requested), mirroring that
-    # helper's own documented default.
-    contract_relevance = getattr(c, "contract_relevance", None)
-    if contract_relevance is not None:
-        reason_code = getattr(c, "contract_reason_code", None)
-        contract_assurance = getattr(c, "contract_assurance", None)
-        line += f"\n  > Contract: {_contract_decision_text(contract_relevance, reason_code, contract_assurance)}"
-
-    # Cross-detector correlation (e.g. LAYOUT_UNVERIFIABLE annotated by
-    # post_processing.AnnotateLayoutUnverifiableCoveredByVtableChanged as
-    # sharing its evidence gap with a co-reported TYPE_VTABLE_CHANGED). Only
-    # JSON (reporter.py) and SARIF (sarif.py) rendered this field before —
-    # the default `compare --format markdown` report showed the two findings
-    # with no visible link between them (Codex review).
-    correlated = getattr(c, "correlated_change_kind", None)
-    if correlated:
-        line += f"\n  > See also: `{correlated}` finding for the same symbol"
-
-    return line
