@@ -133,32 +133,69 @@ looked like the obvious fix and wasn't.
   closed for the CLI-flag case, just not yet closed for the config-sourced
   one, and not yet checked on `compare --dry-run`/`scan --dry-run` either
   (neither discovers `.abicheck.yml`'s build config during their own dry-run
-  preview today). Not fixed here: `AnalysisPlanner` cannot see this value at
-  all — `DumpRequest`/`CompareRequest`/`InputSpec` carry no `build_config`
-  field, so `.abicheck.yml` discovery only ever happens inside
-  `embed_build_source` itself, deep inside real execution. Closing the gap
-  correctly needs one of two real designs, not a quick patch: (a) thread a
-  resolved `build_config` path onto the typed request objects so
-  `AnalysisPlanner` can discover+load it too — a real API surface addition
-  touching `InputSpec`/`DumpRequest`/`CompareRequest`, not a leaf-module
-  fix; or (b) duplicate a *scoped* slice of `embed_build_source`'s own
-  discovery-then-CLI-overrides-config merge (`config_paths.
-  discover_build_config`, `buildsource.inline.load_build_config`, the same
-  `targets=list(build_targets) if build_targets else cfg.targets`
-  precedence) independently inside each of the (at least three) dry-run
-  renderers, each needing the identical `requested_depth == "binary"`
-  exemption `_check_bazel_target_scoping` already applies — a second,
-  independently-maintained copy of that merge logic in three more places,
-  exactly the drift risk ADR-063 Phase 4 exists to avoid, not reduce. Either
-  is a real, multi-call-site feature needing its own design and test
-  coverage, not a same-session reactive patch under continued review
-  pressure (this file's own governing convention, and the same standard the
-  exit-code-variance paragraph above and D4's second scenario already apply
-  in this document). Until fixed, the workaround is unchanged from the
-  general one: pre-capture the Bazel jsonproto already scoped to the desired
-  targets, or use a live `bazel query`; a dry-run preview's silence on a
-  root-target scope declared only in `.abicheck.yml` is not evidence the
-  real run will succeed.
+  preview today).
+  **Fixed in a later session, closing this gap for `dump`/`compare`/`scan`
+  alike.** Neither of the two designs originally floated here turned out to
+  be necessary in the form stated: `AnalysisPlanner`'s own `SidePlan`
+  already carries `sources` (exactly what auto-discovery needs), and
+  `scan`'s `ScanRequest` already carries both `sources` *and*
+  `build_config` (the explicit `--config` override — a seam `dump`/
+  `compare` don't have at the request level at all, so only their
+  auto-discovery half closes). `workflows.plan.bazel_target_scoping_failure`/
+  `scan_bazel_scoping_failure` gained two new, defaulted keyword parameters
+  (`sources`, `build_config`): when the request's own `build_targets` is
+  empty, the check now falls back to whatever an explicit `build_config` or
+  an auto-discovered `.abicheck.yml` at `sources` declares under
+  `build.targets:` (`_discovered_config_build_targets`), reproducing
+  `embed_build_source`'s own `targets=list(build_targets) if build_targets
+  else cfg.targets` precedence exactly — never running the P0.3
+  compile-context fold itself, just a pure, deterministic config read, so
+  it fits `AnalysisPlanner`'s own side-effect-free constraint. A malformed
+  `.abicheck.yml` degrades to "no config found" here (`except ValueError:
+  return ()`) rather than raising a second, independently-worded error,
+  since `embed_build_source` already raises a correctly-typed
+  `ValidationError` for it at real-execution time. Every existing caller
+  keeps passing neither parameter, so this is additive. `dump`/`compare`'s
+  `--dry-run` resolve through the identical `resolve_dump_request`/
+  `resolve_compare_request` chokepoint the real run does, so widening the
+  check there closed their dry-run parity for free, with **no change to
+  either renderer**; three of `scan`'s four pre-flight call sites
+  (`scan_engine.run_scan_core` and both of `cli_scan.py`'s direct call
+  sites — the single-binary pre-flight and `_run_artifact_set`'s own, each
+  already running ahead of both their real-run and `--dry-run` branches)
+  were each updated to forward their own already-in-scope
+  `sources`/`build_config` locals. **The fourth, `service_scan.
+  run_scan_set`, was deliberately left unwidened**: `service_scan.py` sits
+  exactly at the AI-readiness 2000-line hard cap, and the widened call
+  doesn't fit `ruff format`'s column budget on one line — the resulting
+  explosion would have pushed the file over. Adding it to
+  `LARGE_FILE_ALLOWLIST` was rejected (that allowlist is reserved for
+  pre-existing `scripts:`/`tests/` debt, not a fresh production-file
+  exemption for an unrelated fix); trimming unrelated content in that
+  already-densely-reviewed file to buy back the budget was rejected too. So
+  this one call site keeps its pre-fix behavior: a direct
+  `run_scan_set(ScanRequest(...))` typed-API call with no CLI in front of
+  it still won't see the `.abicheck.yml`-only scope pre-flight (it still
+  fails, just later and less cleanly, inside real embedding) — `scan
+  --artifact-set`'s own CLI path is unaffected, since
+  `cli_scan._run_artifact_set`'s pre-flight (now widened) already runs
+  ahead of `run_scan_set` and catches the mismatch first. A future pass
+  splitting `service_scan.py` under its own file-size budget would remove
+  this constraint; not attempted reactively here. See
+  `docs/contribute/adr/063-one-semantic-pipeline.md`'s Phase 4 status entry
+  ("Second slice") and `docs/contribute/plans/one-semantic-pipeline.md`'s
+  matching Phase 4 update for the full accounting, and
+  `tests/test_analysis_plan.py::TestBazelBuildTargetScoping`/`tests/
+  test_bazel_root_targets.py::test_dot_abicheck_yml_build_targets_dry_run_parity`/
+  `tests/test_bazel_root_targets_scan.py::
+  test_run_scan_depth_headers_config_sourced_target_scope_raises_planning_error`
+  for the regression coverage (the last of these also replaces this
+  paragraph's earlier pinning of the *pre-fix* `click.ClickException` leak
+  from the typed `run_scan()` API with the now-clean `PlanningError`,
+  raised earlier too, from `run_scan_core`'s own pre-flight check rather
+  than leaking out of `_build_new_snapshot`'s pre-existing `except
+  AbicheckError` wart — that wart itself is unrelated and stays open, see
+  this entry's earlier notes on it).
   **A later Codex/CodeRabbit review round found the `.abicheck.yml` fix
   itself had a second, distinct gap — not deferrable the way the dry-run
   parity gap above was, since this one had a direct, bounded fix.** At
@@ -350,6 +387,63 @@ looked like the obvious fix and wasn't.
   `"headers"` alone (headerless) is no longer part of the always-rejected
   set, which is the corrected behavior this round establishes, not a
   weakening of the test.
+  **A thirteenth review round found `scan --artifact-set`'s own pre-flight
+  (`cli_scan._run_artifact_set`) had a second, narrower version of the same
+  false-positive/false-negative pair, specific to an *unset* `--depth`.**
+  Two intermediate designs were tried and rejected in this same round before
+  landing on the fix below: a bespoke
+  `workflows.plan.artifact_set_bazel_scoping_failure` that treated an
+  unset `--depth` as always non-`"off"` (matching every prior caller's
+  shape) false-positive-rejected a genuine no-op artifact-set request whose
+  real per-member risk scoring would resolve to `"off"`; a second attempt
+  that instead treated an unset `--depth` as always exempt
+  false-negative-accepted a seeded, high-risk request (e.g. a public-header
+  edit) that `run_scan_core`'s own later, correctly-resolved per-member
+  check would still reject with exit 64 -- recreating the exact dry-run/
+  execution parity defect this whole known-gap entry exists to close, just
+  one level narrower (real-run vs. real-run instead of dry-run vs.
+  real-run). Both were symptoms of approximating a value `AnalysisPlan`'s
+  own design (`workflows/plan.py`'s module docstring) deliberately excludes
+  from a pre-flight check: an unset `--depth` only resolves to a real
+  `collect_mode` via risk scoring over the request's own seeded change
+  (`service_scan._resolve_member_scan_level`, the identical primitive
+  `estimate_artifact_set`'s own `--dry-run` cost totals already resolve
+  through). The fix drops the approximation entirely: `_run_artifact_set`
+  now builds the same probe `ScanRequest` `estimate_artifact_set` would and
+  calls `_resolve_member_scan_level` on it to get the real `eff_depth`/
+  `collect_mode` before discovery, then hands those to the existing,
+  already-shared `scan_bazel_scoping_failure` -- no bespoke artifact-set-
+  shaped guard needed. `_resolve_member_scan_level` reads only
+  request-level fields (`depth`/`changed_paths`/`seeded`/`risk_rules_path`/
+  `mode`), none of them derived from discovery, so this probe needs no
+  `binaries` and costs nothing discovery-shaped to build. The now-dead
+  `artifact_set_bazel_scoping_failure` was deleted from `workflows/plan.py`
+  rather than left as an unused second copy.
+  `tests/test_bazel_root_targets_scan.py::
+  test_scan_cli_artifact_set_unset_depth_low_risk_seed_config_scope_is_unaffected`
+  pins the no-op case (a low-risk `--changed-path`, e.g. a docs file, seeds
+  `S0`/`collect_mode="off"`, so a config-sourced scope stays unenforced);
+  its sibling
+  `test_scan_cli_artifact_set_high_risk_seed_config_scope_still_rejects`
+  pins the risky case (a high-risk `--changed-path`, e.g. a public header,
+  seeds a non-`"off"` `collect_mode`, so the same config-sourced scope is
+  still enforced and rejects with exit 64).
+  **A fourteenth review round found the thirteenth round's own fix had no
+  error translation of its own.** `_resolve_member_scan_level()` raises a
+  plain `ValueError` for a malformed `--risk-rules` profile (via
+  `_load_risk_rules_for_service`, which converts the single-binary path's
+  `click.ClickException` into exactly that so a direct typed-API caller
+  never sees a Click-flavored exception) -- but the thirteenth round's new
+  resolution call sat ahead of both of `_run_artifact_set`'s existing
+  `try`/`except (ArtifactSetError, ValueError)` blocks, so that `ValueError`
+  now leaked past them (exit 1, an unhandled traceback) for both a real run
+  and `--dry-run` alike, instead of the established clean usage error (exit
+  64) `TestArtifactSetMalformedRiskRules::
+  test_malformed_risk_rules_yaml_is_usage_error` already pinned for this
+  exact class of input (a ninth-round-era regression, per that test's own
+  docstring). Fixed by wrapping the new resolution call in its own
+  `try`/`except ValueError`, translating to `click.UsageError` the same way
+  the two pre-existing blocks below it already do.
   Historical analysis retained below for the record.
   `BazelAdapter.collect()`'s `self.targets` scoping is applied
   in exactly two places: gating whether a *live* `bazel query` subprocess

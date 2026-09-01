@@ -173,6 +173,222 @@ class TestBazelBuildTargetScoping:
         plan = AnalysisPlanner.resolve(request)
         assert isinstance(plan, AnalysisPlan)
 
+    def test_dump_config_sourced_target_scope_raises_planning_error(
+        self, tmp_path: Path
+    ):
+        """ADR-063 Phase 4's second slice: no explicit ``build_targets`` on
+        the request at all -- the scope comes only from an auto-discovered
+        ``.abicheck.yml``'s ``build.targets:`` at ``sources``, mirroring
+        ``embed_build_source``'s own ``cfg.targets`` fallback. Closes the
+        dry-run/execution parity gap this module's own docstring and
+        ``docs/contribute/known-gaps.md`` name as open: previously
+        ``AnalysisPlanner`` could not see this value at all."""
+        aquery = _write(tmp_path / "aquery.json", _EMPTY_AQUERY)
+        (tmp_path / ".abicheck.yml").write_text(
+            "build:\n  system: bazel\n  targets:\n    - //:from_config\n",
+            encoding="utf-8",
+        )
+        request = DumpRequest(
+            input=InputSpec.of(path=None, sources=tmp_path, build_info=aquery),
+            depth="build",
+        )
+        with pytest.raises(PlanningError) as exc_info:
+            AnalysisPlanner.resolve(request)
+        failure = exc_info.value.failures[0]
+        assert "//:from_config" in failure.requested
+        assert "auto-discovered .abicheck.yml" in failure.requested
+
+    def test_explicit_build_config_wording_is_not_called_auto_discovered(
+        self, tmp_path: Path
+    ):
+        """CodeRabbit review: the failure message must say "explicit build
+        config", not "auto-discovered .abicheck.yml", when *build_config*
+        names the file directly (``scan``'s own ``ScanRequest.build_config``,
+        or dump/compare's own future seam) rather than being found by
+        searching ``sources`` -- ``dump``/``compare`` have no request-level
+        seam for this today, so this calls
+        :func:`~abicheck.workflows.plan.bazel_target_scoping_failure`
+        directly, the same free function ``scan``'s own call sites use."""
+        from abicheck.workflows.plan import bazel_target_scoping_failure
+
+        aquery = _write(tmp_path / "aquery.json", _EMPTY_AQUERY)
+        cfg = tmp_path / "explicit-config.yml"
+        cfg.write_text(
+            "build:\n  system: bazel\n  targets:\n    - //:from_explicit_config\n",
+            encoding="utf-8",
+        )
+        failure = bazel_target_scoping_failure(
+            "candidate", aquery, (), sources=None, build_config=cfg
+        )
+        assert failure is not None
+        assert "//:from_explicit_config" in failure.requested
+        assert "explicit build config" in failure.requested
+        assert "auto-discovered .abicheck.yml" not in failure.requested
+
+    def test_compare_config_sourced_target_scope_raises_planning_error(
+        self, tmp_path: Path
+    ):
+        aquery = _write(tmp_path / "aquery.json", _EMPTY_AQUERY)
+        (tmp_path / ".abicheck.yml").write_text(
+            "build:\n  system: bazel\n  targets:\n    - //:from_config\n",
+            encoding="utf-8",
+        )
+        old = InputSpec.of(path=tmp_path / "old.so", sources=tmp_path)
+        new = InputSpec.of(
+            path=tmp_path / "new.so", sources=tmp_path, build_info=aquery
+        )
+        request = CompareRequest(old=old, new=new)
+        with pytest.raises(PlanningError) as exc_info:
+            AnalysisPlanner.resolve(request)
+        assert "'new'" in exc_info.value.failures[0].requested
+
+    def test_explicit_build_target_wins_over_config_wording(self, tmp_path: Path):
+        """When both an explicit ``build_targets`` and an auto-discovered
+        ``.abicheck.yml`` are present, the explicit value is what's actually
+        checked/reported (``embed_build_source``'s own "CLI overrides win"
+        precedence) -- the failure message must not carry the "auto-
+        discovered" qualifier in this case."""
+        aquery = _write(tmp_path / "aquery.json", _EMPTY_AQUERY)
+        (tmp_path / ".abicheck.yml").write_text(
+            "build:\n  system: bazel\n  targets:\n    - //:from_config\n",
+            encoding="utf-8",
+        )
+        request = DumpRequest(
+            input=InputSpec.of(
+                path=None,
+                sources=tmp_path,
+                build_info=aquery,
+                build_targets=["//:explicit"],
+            ),
+            depth="build",
+        )
+        with pytest.raises(PlanningError) as exc_info:
+            AnalysisPlanner.resolve(request)
+        failure = exc_info.value.failures[0]
+        assert "//:explicit" in failure.requested
+        assert "from_config" not in failure.requested
+        assert "auto-discovered .abicheck.yml" not in failure.requested
+
+    def test_config_sourced_scope_respects_depth_binary_exemption(self, tmp_path: Path):
+        """The config-sourced fallback doesn't defeat the pre-existing
+        depth=binary exemption -- that depth resolves to a collect_mode
+        that never consults build_info/build_targets regardless of where
+        the requested scope came from."""
+        aquery = _write(tmp_path / "aquery.json", _EMPTY_AQUERY)
+        (tmp_path / ".abicheck.yml").write_text(
+            "build:\n  system: bazel\n  targets:\n    - //:from_config\n",
+            encoding="utf-8",
+        )
+        request = DumpRequest(
+            input=InputSpec.of(path=None, sources=tmp_path, build_info=aquery),
+            depth="binary",
+        )
+        plan = AnalysisPlanner.resolve(request)
+        assert isinstance(plan, AnalysisPlan)
+
+    def test_flow2_inputs_pack_with_bundled_config_is_unaffected_headerless(
+        self, tmp_path: Path
+    ):
+        """Codex review, fresh evidence: auto-discovery must recognize
+        *both* pack shapes (a classic ``BuildSourcePack`` and a Flow-2
+        ``abicheck_inputs`` pack), not just the classic one --
+        ``embed_build_source``'s own ``raw_sources`` is ``None`` for either
+        shape (``src_is_pack``/``src_is_inputs``), so real execution's *main*
+        L3/L4/L5 collection never discovers a config at *either* kind of pack
+        directory. A first version of this check used ``is_pack_dir`` alone,
+        which only recognizes the classic shape -- a Flow-2 pack whose
+        bundled ``.abicheck.yml`` happens to declare ``build.targets:`` was
+        therefore falsely treated as a source checkout and rejected, even
+        though the real run's main collection never looks at that file. No
+        headers here, so the L2 seed's own independent reading of a pack's
+        bundled config (see the sibling test below) doesn't apply either --
+        genuinely nothing consults it in this shape."""
+        aquery = _write(tmp_path / "aquery.json", _EMPTY_AQUERY)
+        pack = tmp_path / "inputs_pack"
+        pack.mkdir()
+        (pack / "manifest.json").write_text(
+            json.dumps({"kind": "abicheck_inputs"}), encoding="utf-8"
+        )
+        (pack / ".abicheck.yml").write_text(
+            "build:\n  system: bazel\n  targets:\n    - //:from_config\n",
+            encoding="utf-8",
+        )
+        request = DumpRequest(
+            input=InputSpec.of(path=None, sources=pack, build_info=aquery),
+            depth="build",
+        )
+        plan = AnalysisPlanner.resolve(request)
+        assert isinstance(plan, AnalysisPlan)
+
+    def test_pack_with_bundled_config_and_real_headers_raises_planning_error(
+        self, tmp_path: Path
+    ):
+        """Codex review, fresh evidence beyond the headerless pack fix above:
+        when real headers ARE present, ``buildsource.l2_seed._l2_seed_config``
+        calls ``discover_build_config`` on the *original* pack path before
+        pack recognition nulls ``raw_sources`` for the main collection --
+        and that seed only runs when headers are present
+        (``seed_includes_and_fold_compile_context``'s own ``... or not
+        headers: return ...`` gate), independent of collect_mode. So a
+        pack's bundled ``.abicheck.yml`` *is* genuinely consulted by the L2
+        seed in this shape, even though the main L3/L4/L5 collection still
+        ignores it -- unconditionally skipping pack recognition (the first
+        version of this fix) would have missed this real, reachable path."""
+        aquery = _write(tmp_path / "aquery.json", _EMPTY_AQUERY)
+        pack = tmp_path / "inputs_pack"
+        pack.mkdir()
+        (pack / "manifest.json").write_text(
+            json.dumps({"kind": "abicheck_inputs"}), encoding="utf-8"
+        )
+        (pack / ".abicheck.yml").write_text(
+            "build:\n  system: bazel\n  targets:\n    - //:from_config\n",
+            encoding="utf-8",
+        )
+        header = tmp_path / "api.h"
+        header.write_text("void f();\n", encoding="utf-8")
+        request = DumpRequest(
+            input=InputSpec.of(
+                path=None, sources=pack, build_info=aquery, headers=[header]
+            ),
+            depth="build",
+        )
+        with pytest.raises(PlanningError) as exc_info:
+            AnalysisPlanner.resolve(request)
+        assert "//:from_config" in exc_info.value.failures[0].requested
+
+    def test_no_abicheck_yml_present_is_unaffected(self, tmp_path: Path):
+        """No config file at ``sources`` at all -- the auto-discovery
+        fallback must not raise/crash and must leave an otherwise-valid,
+        unscoped request alone (identical to the pre-existing
+        ``test_no_build_targets_is_unaffected`` case, just spelled with a
+        ``sources`` tree that genuinely has no ``.abicheck.yml``)."""
+        aquery = _write(tmp_path / "aquery.json", _EMPTY_AQUERY)
+        request = DumpRequest(
+            input=InputSpec.of(path=None, sources=tmp_path, build_info=aquery),
+            depth="build",
+        )
+        plan = AnalysisPlanner.resolve(request)
+        assert isinstance(plan, AnalysisPlan)
+
+    def test_malformed_abicheck_yml_is_unaffected_by_this_check(self, tmp_path: Path):
+        """A malformed ``.abicheck.yml`` is not this check's problem to
+        diagnose -- ``embed_build_source`` already raises a correctly-typed
+        ``ValidationError`` for it at real-execution time. Duplicating that
+        diagnosis pre-flight would be a second, independently-worded error
+        for a case that already fails loudly downstream, so this check
+        degrades to "no config found" instead of raising a confusing YAML
+        parse error from inside a Bazel-scoping check."""
+        aquery = _write(tmp_path / "aquery.json", _EMPTY_AQUERY)
+        (tmp_path / ".abicheck.yml").write_text(
+            "build: [this is not a mapping\n", encoding="utf-8"
+        )
+        request = DumpRequest(
+            input=InputSpec.of(path=None, sources=tmp_path, build_info=aquery),
+            depth="build",
+        )
+        plan = AnalysisPlanner.resolve(request)
+        assert isinstance(plan, AnalysisPlan)
+
     def test_nonexistent_build_info_path_is_unaffected(self, tmp_path: Path):
         """A ``build_info`` path that does not exist on disk cannot be
         sniffed as a Bazel jsonproto -- this check must not raise (or crash
