@@ -2,6 +2,10 @@
 doc_type: contributor
 level: advanced
 lifecycle: active
+depends_on:
+  - docs/learn
+  - docs/_meta/topics.yaml
+  - mkdocs.yml
 ---
 
 # Learning series — structure review and proposed curriculum
@@ -17,11 +21,11 @@ nothing under `docs/learn/` changes with this page.
 
 **Scope reviewed:** all 39 pages under `docs/learn/` (the hub, the numbered
 Parts 0–7 plus the detection capstone, the five-minute on-ramp, glossary,
-cheat sheet, and 27 deep dives — ~10,400 lines), their `mkdocs.yml` nav
+cheat sheet, and 26 deep dives — ~10,400 lines), their `mkdocs.yml` nav
 placement, `docs/_meta/topics.yaml` ownership, and — for the coverage
 matrix — the tool track (`docs/use/`, `docs/integration/scenarios/`,
-`docs/reference/`), the 197-case example catalog, and
-`docs/contribute/usecase-registry.yaml`.
+`docs/reference/`), the example catalog (`examples/ground_truth.json` owns
+its count), and `docs/contribute/usecase-registry.yaml`.
 
 ---
 
@@ -32,7 +36,7 @@ tabs (`docs/AGENTS.md` "Layout"):
 
 | Tab | Pages | Role |
 |---|---|---|
-| **ABI/API Compatibility** (educational) | hub, on-ramp, cheat sheet, Parts 0–7, capstone (`08-detection.md`), glossary, and 17 deep dives grouped as Define Your Contract / ABI Mechanics / Beyond ABI / Platforms & Toolchains / Designing Stable Interfaces / Verification & Assurance | "understand the problem" — tool-independent |
+| **ABI/API Compatibility** (educational) | hub, on-ramp, cheat sheet, Parts 0–7, capstone (`08-detection.md`), glossary, and 15 deep dives grouped as Define Your Contract / ABI Mechanics / Beyond ABI / Platforms & Toolchains / Designing Stable Interfaces / Verification & Assurance | "understand the problem" — tool-independent |
 | **Concepts** (tool track) | `verdicts.md`, `contract-aware-compatibility.md`, `evidence-and-detectability.md`, `what-each-level-sees.md`, `architecture.md`, `build-source-data.md`, `graph-coverage.md`, `impact-analysis.md`, `environment-drift.md`, `elf-symbol-filtering.md`, `limitations.md` | "how abicheck models it" |
 
 Declared reader level (front matter `level:`), where a page declares one:
@@ -40,7 +44,7 @@ Declared reader level (front matter `level:`), where a page declares one:
 | Level | Pages |
 |---|---|
 | beginner | `verdicts.md` only |
-| intermediate | 22 pages (every other deep dive that has front matter) |
+| intermediate | 19 pages (every other deep dive that has front matter) |
 | advanced | `class-layout-abi.md`, `exception-unwinding-abi.md`, `modern-cpp-toolchain-hazards.md` |
 | *(none)* | the hub, cheat sheet, all numbered Parts except 06, glossary, on-ramp, `build-source-data.md`, `dependency-floors.md`, `environment-drift.md`, `graph-coverage.md` |
 
@@ -69,32 +73,36 @@ same pages by *question asked* and interleaves deep dives between Parts
 (`class-layout-abi.md` sits between Parts 4 and 5; `compatibility-direction.md`,
 `consumer-models.md`, `build-profile-comparability.md`, `abi-surface.md` sit
 between Part 0 and Part 1). `mkdocs.yml` documents this as deliberate. The
-cost is that the 27 deep dives have *no* previous/next links at all — only
+cost is that the 26 deep dives have *no* previous/next links at all — only
 trailing "See also" lines — so a reader who steps off a Part into
 `class-layout-abi.md` has no way forward except back. Three concrete
 navigation faults:
 
 - `07-designing-for-stability.md` ends with two different "next" targets
   (the capstone and the hub).
-- `evidence-and-detectability.md` and `what-each-level-sees.md` each name
-  the other as "Next" — a two-page loop.
-- `08-detection.md` spends its first ten lines explaining why it is not
+- `what-each-level-sees.md`'s only "Next" points *back* to
+  `evidence-and-detectability.md` (which has no "Next" of its own), so the
+  trio's worked example returns the reader to the model instead of sending
+  them on to the flag reference or the practice material.
+- `08-detection.md` opens with an admonition explaining why it is not
   "Part 8" — a symptom of the two orders disagreeing.
 
 ### F2 — The entry page tells newcomers not to start there
 
 `abi-api-handling.md` is the URL the series is published and linked under,
 and its first admonition is "New to the topic? Don't start here." It is a
-390-line *navigator* (a role table, a role-path table, a 22-row break-family
+390-line *navigator* (a role table, a role-path table, a 23-row break-family
 index, three "deeper" sections on scan/L5/CI) rather than a curriculum. The
 two pages a novice most needs — the five-minute on-ramp and the glossary —
 have exactly one inbound link each across the whole docs tree.
 
 ### F3 — Complexity does not grow monotonically
 
-- 22 of 25 pages that declare a level say `intermediate`; the front matter
-  cannot express the ladder the user asked for (novice → practitioner →
-  advanced → expert), so neither can the nav.
+- 19 of the 23 pages that declare a level say `intermediate`, and 16
+  declare none. The vocabulary for a ladder exists (`beginner` /
+  `intermediate` / `advanced` / `expert`, enforced by
+  `scripts/check_docs_contract.py`) but is barely used, so neither the
+  front matter nor the nav expresses one today.
 - `verdicts.md` is declared `beginner` but its sections on contract
   evaluation and the two exit-code schemes are advanced material.
 - Part 1 (505 lines) is the longest Part and is the *first* one a
@@ -112,27 +120,30 @@ have exactly one inbound link each across the whole docs tree.
 
 ### F4 — The same topic is taught several times
 
+`docs/_meta/topics.yaml` already resolves several look-alike pairs: a
+registered `allowed_summaries` page (`architecture.md` for the evidence
+model, `limitations.md` for symbol filtering, Part 4 for the three hazard
+pages split out of it) is a permitted short summary, not a duplicate, and
+`docs/contribute/documentation.md` records those fixes. The rows below are
+the ones *not* covered by a registration, or where the second treatment is
+a full re-explanation rather than a summary:
+
 | Topic | Taught in full on | Also (re)explained on |
 |---|---|---|
-| L0–L5 evidence model | `evidence-and-detectability.md` (723 lines) | `what-each-level-sees.md` (515), `08-detection.md` §2, `architecture.md` §Evidence layers, `build-source-data.md` §Evidence layers — five L0–L5 tables |
-| "a static comparer structurally cannot see this" | — | `behavioral-compatibility.md`, `data-wire-compatibility.md`, `ownership-and-lifetime.md`, `concurrency-and-initialization.md` each open with the same argument, in the same shape, and `assurance-methods.md` summarises all four |
-| Struct/class layout | `03-type-layout.md` | `04-cpp-abi.md` §7, `class-layout-abi.md` (which calls itself "the single page") |
-| Platform capability matrix | `reference/platforms.md` | `architecture.md`, `limitations.md`, `05-linker-elf.md` §parallels, `msvc-pe-abi-model.md` |
-| Verdict → exit-code table | `verdicts.md` | `architecture.md`, `abi-cheat-sheet.md`, `07-designing-for-stability.md` |
-| Symbols-only false positives | `elf-symbol-filtering.md` | the closing section of `limitations.md`, near-verbatim |
+| L0–L5 evidence model | `evidence-and-detectability.md` (model) + `what-each-level-sees.md` (worked example) | `08-detection.md` §2 (a per-family evidence table) and `build-source-data.md` §Evidence layers (a second L0–L5 ladder) — neither registered as a summary of `evidence-model` |
+| "a static comparer structurally cannot decide this" | — | `behavioral-compatibility.md`, `data-wire-compatibility.md`, `ownership-and-lifetime.md`, `concurrency-and-initialization.md` each make the same argument in their own words (so the 40-word duplicate-block warning does not fire); `assurance-methods.md` summarises all four |
+| Struct/class layout | `03-type-layout.md` | `04-cpp-abi.md` §7, `class-layout-abi.md` (which calls itself "the single place") — no registered owner |
+| Verdict semantics and the numeric verdict → exit-code table | `verdicts.md` | `architecture.md` (the numeric table again, although registered only as a summary of `verdicts`); `abi-cheat-sheet.md` and `07-designing-for-stability.md` (verdict-meaning tables, unregistered) |
 | Glossary | `glossary.md` | `01-foundations.md` §8 |
-
-The `docs/AGENTS.md` rule ("one question is explained in full on exactly
-one page") is enforced for the topics registered in `topics.yaml`; most of
-the pairs above predate registration.
+| C++ hazards split out of Part 4 | `exception-unwinding-abi.md`, `modern-cpp-toolchain-hazards.md`, `class-layout-abi.md` | Part 4 keeps an inline summary of each — registered, but long enough that the reader meets each hazard twice with no signal which is the full treatment (F3) |
 
 ### F5 — Contributor material sits inside the learning tree
 
 `impact-analysis.md` opens with "slice 1 of G29 Phase 3 (ADR-052)" and links
 `contribute/plans/`; `graph-coverage.md` uses internal pass-state field
 names and "G31 Phase B"; `build-source-data.md` (810 lines, the longest page
-in the tree) cites four ADRs and carries schema/storage/redaction detail;
-`architecture.md` is `audience: contributor`; `evidence-and-detectability.md`
+in the tree) cites a dozen ADRs and carries schema/storage/redaction
+detail; `architecture.md` lists `contributor` among its audiences; `evidence-and-detectability.md`
 ends with an appendix cataloguing *removed* scan flags and carries a
 self-correction about a previously over-claimed coverage figure. A user
 reading "Concepts" top to bottom crosses from mental model into
@@ -140,25 +151,20 @@ release-engineering vocabulary without a marker.
 
 ### F6 — The practice track is missing from the learning tab
 
-Measured by where a topic is *taught* (not merely mentioned):
-
-| Practice topic | Tool-track home | Learning-tab treatment |
-|---|---|---|
-| What a baseline is; why a project needs two (release-contract vs accepted-main); baseline identity and comparability; scanner-upgrade generations | `use/baseline-management.md`, `use/create-baseline.md`, `use/baseline-storage.md`, `reference/publish-baseline.md`, `reference/resolve-baseline.md`, `reference/protect-committed-baseline.md` | absent from every numbered Part; mentioned in six deep dives only in passing |
-| PR-level gating (catch it before merge, not at release) | `use/ci-gating.md`, `use/github-action*.md`, `use/scan-levels.md` §PR gate | one sentence each in Parts 5/6/7; `--since`-seeded PR scan only in `build-source-data.md` |
-| Reporting surface *growth*, not only breaks (`--surface-metrics` roll-ups, `severity-addition: error`, `annotate-additions`, the SemVer bump recommendation) | `use/api-surface-intelligence.md`, `use/github-action-recipes.md` §"Detect unintentional API expansion", `use/annotations.md`, `use/severity.md` | no page treats additions as a topic; the cheat sheet lists them as "safe" and stops |
-| Multi-binary products (bundle contract, SONAME cohort, provider ownership, instantiation manifest) | `use/multi-binary.md` (670 lines, mostly flag reference), `integration/scenarios/release-bundle.md`, `multi-dso-project.md`, `monorepo.md` | Part 0 §5 names the shape in one paragraph; nothing teaches it |
-| Rollout: advisory → gating, intentional-break labels, suppression hygiene | `use/policies.md`, `use/suppressions.md`, `integration/scenarios/migration-and-rollout.md` | absent |
-| Packaging and consumers: `.deb`/`.rpm`/conda/wheel inputs, manylinux glibc floors, CPython `abi3`, FFI bindings | `use/debian-symbols.md`, `start/scanning-conda-packages.md`, `use/python-extensions.md`, `use/post-python.md` | wheels appear on one page (Part 1); `abi3`/FFI on none |
+Measured by where a topic is *taught* (not merely mentioned), six topics
+have a rich tool-track home and no learning-tab treatment at all: what a
+baseline is and why a project needs two; PR-level gating; reporting surface
+*growth* rather than only breaks; multi-binary products; rollout and
+governance; and packaging/consumer inputs (deb/rpm/conda/wheel, `abi3`,
+FFI). The coverage matrix in §3 lists each with its owner; §4.5–4.6 say
+what a learning page would teach.
 
 ### F7 — Concept pages with nothing to run
 
-`02-symbol-contracts.md`, `compatibility-direction.md`, `consumer-models.md`,
-`assurance-methods.md`, `msvc-pe-abi-model.md`, and the four "Beyond ABI"
-pages contain no abicheck invocation. `abi-surface.md` has a section titled
-"Checking the boundary with abicheck" that is prose only.
-`compatibility-direction.md` says "run `compare` once per direction" and
-shows no command. `msvc-pe-abi-model.md` has zero case links and zero
+`02-symbol-contracts.md`, `consumer-models.md`, `assurance-methods.md`,
+`msvc-pe-abi-model.md`, and the five "Beyond ABI" pages contain no abicheck
+invocation. `abi-surface.md` has a section titled "Checking the boundary
+with abicheck" that is prose only. `msvc-pe-abi-model.md` has zero case links and zero
 commands on the platform where evidence is weakest — there is no worked
 Windows example anywhere in the series. `environment-drift.md` links no
 case although `case170` is its fixture.
@@ -182,15 +188,15 @@ without teaching; "absent" means neither.
 | Contract domains (`--contract public|exports|all`), coverage exit `1` | `use/contract-evaluation.md` | taught on `contract-aware-compatibility.md` — but placed in Concepts, not next to Part 0's "define the public surface" |
 | Consumer-scoped check (`--used-by APP`) | `use/appcompat.md` | taught (`consumer-models.md`, `evidence-and-detectability.md` §4) — no command |
 | Plugin/`dlopen` contract (`--required-symbol[s]`, `plugin_abi`) | `use/plugin-systems.md` | linked (Part 0 §5, role path) |
-| Directory/package compare — release fan-out, `--fail-on-removed-library`, RPM/Deb/tar/conda inputs, `--debug-info`/`--devel-pkg` | `use/multi-binary.md`, `use/cli-usage.md` | **absent** |
+| Directory/package compare — release fan-out, `--fail-on-removed-library`, RPM/Deb/tar/conda inputs, `--debug-info`/`--devel-pkg` | `use/multi-binary.md` (mostly flag reference), `use/cli-usage.md` | **absent** |
 | Bundle layer — SONAME cohort skew, intra-bundle dependency drift, provider ownership, `--manifest` (pattern / template+instantiations / symbol), `--bundle-facts-out` stored-facts comparison, `--bundle-system-providers` | `use/multi-binary.md`, cases 84/90–93 | **absent** (the five bundle cases appear in no learn page) |
 | Independent targets vs bundle (S15 vs S14), fan-in with `aggregate`, `project plan`/`.abicheck.yml` topology | `integration/scenarios/*`, `use/aggregate-reports.md`, `reference/project-targets-schema.md` | **absent** |
 | Multi-TU `--dump-manifest`, extraction comparability (`NOT_COMPARABLE`, exit 6), `--diagnostic-comparison` | `use/dump-compare-flags.md`, ADR-050 | partial — `build-profile-comparability.md` covers the *why*; the manifest mechanics are absent |
-| Dependency floors: `--env-matrix` runtime floors, `deps tree`/`deps compare`, sysroot/container checks | `use/companion-commands.md`, `integration/scenarios/dependency-and-container-checks.md` | **taught** (`dependency-floors.md`, `environment-drift.md`) |
+| Dependency floors: `--env-matrix` runtime floors, `deps tree`/`deps compare`, sysroot/container checks | `reference/cli-reference.md` (`--env-matrix`), `integration/scenarios/dependency-and-container-checks.md` (`deps`) | **taught** (`dependency-floors.md`, `environment-drift.md`) |
 | glibc/libstdc++-style symbol-versioning discipline, `glibc_symbol_versioned` policy, version-node kinds (cases 13/65/139/141/183/145) | `use/policies.md`, `reference/change-kinds.md` | partial — Part 5 §3 explains version scripts and glibc's append-only nodes in ~25 lines; the discipline as a *strategy a library adopts* is not taught (see §4.2) |
-| Surface-growth reporting (`--surface-metrics`, `severity-addition`, `annotate-additions`, SemVer recommendation) | `use/api-surface-intelligence.md`, `use/github-action-recipes.md`, `use/annotations.md` | **absent** as a topic |
+| Surface-growth reporting (`--surface-metrics`, `severity-addition`, `annotate-additions`; the release recommendation) | `use/api-surface-intelligence.md`, `use/github-action-recipes.md`, `use/annotations.md`; `use/output-formats.md` §Release recommendation and `--profile release-cut` | **absent** as a topic |
 | Idioms and pattern-aware verdicts (`--pattern-verdicts`, opaque/PIMPL demotion, `opaque_invariant_broken`) | `use/api-surface-intelligence.md` | absent — Part 7 teaches the *patterns* but never that the scanner recognises them |
-| Baselines: two kinds, storage recipes A–D, self-approval hazard, `publish-baseline`/`resolve-baseline`/`protect-committed-baseline` | `use/baseline-*.md`, `reference/*-baseline.md` | **absent** from the ladder |
+| Baselines: two kinds, storage recipes A–D, self-approval hazard, `publish-baseline`/`resolve-baseline`/`protect-committed-baseline` | `use/baseline-management.md`, `use/create-baseline.md`, `use/baseline-storage.md`, `reference/publish-baseline.md`, `reference/resolve-baseline.md`, `reference/protect-committed-baseline.md` | **absent** from the ladder |
 | Severity / exit-code schemes, policies, suppressions (incl. reachability-aware refusal), `--pack` | `use/ci-gating.md`, `use/severity.md`, `use/policies.md`, `use/suppressions.md` | verdicts taught (`verdicts.md`); governance absent |
 | Output formats, SARIF/Code Scanning, PR annotations, sticky comments, JUnit | `use/output-formats.md`, `use/annotations.md` | linked from role path only |
 | Build-flag / toolchain drift (L3), probe matrix (`--probe-matrix`) | `use/dump-compare-flags.md`, `use/probe-harness.md` | drift taught (`environment-drift.md`, `build-profile-comparability.md`); probe matrix absent |
@@ -229,8 +235,9 @@ linker, transitive), but a newcomer meets a break as a **symptom**:
 | link error: undefined reference | symbol removed/renamed (2) | L0 |
 | load error: `undefined symbol` / `version GLIBC_2.x not found` | symbol or version node removed, floor raised (5) | L0 |
 | crash or silent corruption after upgrade, no rebuild | layout / vtable / calling convention (3, 4) | L1 |
-| compile error after upgrade | source-only API break (6) | L2 |
-| behaviour changed, nothing else did | inline body, macro, `constexpr`, default arg (6) | L4 |
+| compile error after upgrade | source-only API break: rename, access, `explicit`, a default argument removed (6) | L2 |
+| a call silently binds to a different value | default-argument *value* changed (6) | L2 |
+| behaviour changed, nothing else did | inline body, macro, `constexpr` value (6) | L4 |
 | works on the build box, fails on the customer's distro | dependency floor / toolchain drift | L0 + `--env-matrix` |
 | works for the app, breaks for the plugin / sibling library | consumer model, bundle contract | `--used-by`, directory compare |
 
@@ -253,14 +260,15 @@ strategies that different tiers of the stack use:
 | kernel ↔ user space | syscalls, kABI | never break; symbol namespaces, CRCs | `kernel-btf.md`, cases 175/176 |
 | C runtime | glibc | one SONAME for decades; every ABI change is a *new version node*, old node kept as a compat symbol; append-only | `glibc_symbol_versioned` policy, `symbol_version_*` kinds, cases 13/65/139/141/183 |
 | C++ runtime | libstdc++ | same SONAME since 2004; `GLIBCXX_3.4.x` nodes; the dual ABI as a *parallel* namespace rather than a break | `glibcxx_dual_abi_flip_detected`, `modern-cpp-toolchain-hazards.md`, case104 |
-| system tooling | binutils / `ld` | the defaults (`--as-needed`, `-z relro`, `DT_RELR`, default symver) drift between releases and move a library's contract without a source change | `environment-drift.md` §binutils, L3 flag drift |
+| system tooling | binutils / `ld` | linker defaults (`DT_RELR`, RPATH vs RUNPATH, hash style, CET/static-TLS, `--as-needed`, RELRO) drift between releases and move a library's contract without a source change | `environment-drift.md` §binutils (the first four), `use/security-hardening.md` (RELRO), L3 flag drift |
 | vendor SDK / product | oneDAL, TBB, OpenSSL | SONAME bump per major, inline-namespace generations, explicit-instantiation matrix, experimental namespaces | Part 7, cases 99–101, `--manifest` |
 | application plugin | host ↔ `dlopen` | required-symbol contract, direction reversed | `plugin_abi`, `--required-symbol` |
 
 A "How system libraries stay compatible" page in the Platforms &
 Toolchains group would close this: the glibc/libstdc++ model as the
 worked example of *governing* the linker-level contract (Part 5's closing
-section promises this and links out), the binutils role, where a
+"How to govern" box states five rules but never shows a real system
+library applying them), the binutils role, where a
 vendor library sits on the ladder, and how each strategy maps to an
 abicheck policy profile and set of cases. `compatibility-direction.md`
 already covers the direction axis that the plugin row needs.
@@ -268,7 +276,7 @@ already covers the direction axis that the plugin row needs.
 ### 4.3 ABI/API compatibility levels
 
 **Covered, but scattered.** Part 0 §2 names eight dimensions;
-`compatibility-direction.md` names five directions; `consumer-models.md`
+`compatibility-direction.md` names six directions; `consumer-models.md`
 names eight consumer shapes; `contract-aware-compatibility.md` names three
 contract domains; `build-profile-comparability.md` names the precondition.
 Each is a good page. What is missing is the single *ladder* a reader can
@@ -297,9 +305,10 @@ contract" is a contract question, not a tool internal.
 (`evidence-and-detectability.md` model, `what-each-level-sees.md` worked
 example, `use/scan-levels.md` flag reference) is a deliberate design that
 `docs/AGENTS.md` protects ("don't add a fourth page"). The problem is that
-two *more* pages (`08-detection.md` §2, `architecture.md`) restate the L0–L5
-table and `build-source-data.md` restates it a third time, none of them
-carrying the trio's "this topic lives in three pages" banner (F4).
+`08-detection.md` §2 and `build-source-data.md` §Evidence layers each
+carry their own evidence table outside the trio, neither registered as a
+summary and neither carrying the trio's "this topic lives in three pages"
+banner (F4).
 
 Two content gaps within the area:
 
@@ -310,12 +319,19 @@ Two content gaps within the area:
   clang backend can see uninstantiated templates (`case122`,
   `reference/header-backend-capabilities.md`), and that the same header
   under two contexts is two different surfaces (`build-profile-comparability.md`).
-  `08-detection.md` §1a is the seed; it should grow into one section of
-  the model page, with the L4 source replay presented as "the same idea,
-  applied to `.cpp` files, per translation unit".
+  The backend facts are already owned: `topics.yaml`'s
+  `ast-frontend-resolution` topic has `reference/header-backend-capabilities.md`
+  as canonical page. So the fix is not a new full section on the (already
+  long) model page: `08-detection.md` §1a, which is the seed and sits on
+  the educational tab, grows into the *summary* — registered as an
+  `allowed_summaries` entry of that topic — with the L4 source replay
+  presented as "the same idea, applied to `.cpp` files, per translation
+  unit", and links to the reference page for the capability matrix.
 - **The authority rule needs one home.** It is stated on the hub, in
-  `build-source-data.md` §1, `evidence-and-detectability.md`, and
-  `what-each-level-sees.md`. One statement, three links.
+  `build-source-data.md` §1, `evidence-and-detectability.md`,
+  `what-each-level-sees.md`, and the glossary. Register it as a
+  `terminology.yaml` term with one canonical page (decided before Phase 2
+  moves any of `build-source-data.md`), so the other four become links.
 
 ### 4.5 Large products: multi-binary, build profiles, template libraries
 
@@ -326,9 +342,11 @@ topology, seeded scans, budgets, the L4 cache, RAM-aware worker caps) and
 the most hard-won lessons (`docs/contribute/performance.md`: the one cost
 cliff at L4 that tracks template depth; OOM-killed full-target replays on
 oneTBB/oneDNN; a 4→20 minute regression from a serial preprocessor tier;
-G38's origin in a real oneDAL checkout where CPU and data-parallel variants
-were silently unioned). None of it is taught. An "At scale" group with two
-pages would close this:
+and `plans/g38-bundle-facts-model-and-multibuild-comparability.md`: its
+origin in a real oneDAL checkout where CPU and data-parallel variants were
+silently unioned). None of it is taught. Two pages in an "At scale" group
+(joined there by §4.2's system-library page and §4.7's packaging page)
+would close this:
 
 - **Products, not libraries** — the bundle contract (a symbol one sibling
   imports from another is public *inside* the product even if hidden from
@@ -385,9 +403,40 @@ lifted out of the how-to pages and taught in order:
    refusal to suppress a public-reachable break, policy profiles as
    named contract shapes, packs.
 
-Each of these has a tool-track owner already; the learning pages are
-summaries-with-links under `topics.yaml`'s `allowed_summaries`, not second
-explanations.
+Each of these already has a tool-track page, and several of those pages
+are *registered* owners in `topics.yaml`. So "add a learning page" is
+decided per topic against the registry, one of three ways — never by
+writing a second explanation next to a registered one:
+
+1. **The registered canonical page is already an explanation** —
+   `baseline-lifecycle` → `use/baseline-management.md` (front matter
+   `doc_type: explanation`; its sections are exactly the model above). No
+   new page: the existing page is navigated into the ladder's Practice
+   tier and given tier front matter (nav placement and file location are
+   independent, per `docs/AGENTS.md` "Layout"). "Baselines as contracts"
+   is therefore a *move*, not a ★ page.
+2. **The registered canonical page is a flag/how-to reference** —
+   `bundle-analysis` → `use/multi-binary.md`. The new learning page takes
+   `canonical_page` and the how-to is re-registered as a `task_pages`
+   entry *in the same change* (`docs/contribute/documentation.md`
+   "Retiring or merging a page" is the procedure), so the topic never has
+   two owners.
+3. **The page spans several registered topics** — rollout & governance
+   over `policies`, `suppressions` and the migration scenario; triage over
+   `troubleshooting` and `limitations`; "where in the pipeline" over
+   `github-actions-surface` and `project-integration`. The page owns one
+   new cross-cutting topic (registered) and is an `allowed_summaries`
+   entry of each topic it touches; it links, never re-explains.
+
+Under `docs/AGENTS.md` "When does a new fact need a new page?", each ★
+page in §5 rests on criterion 2 (a mental model the how-to does not state:
+"a product is one contract", "additions are not invisible", "the
+explicit-instantiation matrix *is* the contract") or criterion 4 (a new
+audience: readers who need the model before any flag). A proposed page
+that cannot name its criterion is folded into an existing owner instead —
+which is why §4.7's "reading machine output" is *not* a new page:
+`use/output-formats.md` already reads the report field by field and is the
+registered owner.
 
 ### 4.7 Other aspects worth covering
 
@@ -407,11 +456,11 @@ explanations.
 - **Other ABI domains** (kernel kABI/BTF, SYCL host vs device): one
   "advanced/expert" page listing them as further reading would connect the
   existing tool docs to the ladder without teaching them in full.
-- **Reading machine output.** The AI-agent role path exists; a short
-  "reading the JSON/SARIF" page (verdict, `compatibility_decision`,
-  `impact_assessment`, coverage block, `evaluation_context`) would serve
-  agents and CI authors alike and give `impact-analysis.md` a user-facing
-  home for its field reference.
+- **Reading machine output.** The AI-agent role path exists, and
+  `use/output-formats.md` already reads the report field by field; what is
+  missing is a link from the ladder to it, and a `reference/` home for
+  `impact-analysis.md`'s field detail (registered as that topic's
+  `reference_page`, with the narrative page staying where it is).
 - **Lean on the failure demos.** Every case page has a "Real Failure
   Demo"; concept pages should link one per section (F7), and Part 7 —
   the pattern capstone — links two cases in 450 lines.
@@ -420,32 +469,97 @@ explanations.
 
 ## 5. Proposed target shape
 
-One ladder, levelled, with the numbered spine kept intact. Deep dives are
-badged by tier rather than interleaved between Parts. Tool internals leave
-the learning tree.
+One ladder, levelled, with the numbered spine kept intact. The tiers are a
+**reading order**, rendered on the hub and carried by each page's `level:`
+badge — not a replacement for the nav's by-question groups, which are a
+recorded decision (`docs/AGENTS.md` "Layout", `mkdocs.yml`'s nav comments,
+ADR-051) this plan keeps. Within each group the order becomes
+non-decreasing in level, and a page changes *tab* only when it carries no
+internal module names in prose (`contract-aware-compatibility.md` and
+`environment-drift.md` were checked and are clean; the evidence trio is
+not, and stays on the Concepts tab — the ladder links across tabs). The
+level column uses the four values the docs gate accepts — novice =
+`beginner`, practitioner = `intermediate`, then `advanced` and `expert` —
+so every page can carry its tier without changing the gate.
 
 | Tier | Level | Pages (★ = new, ↻ = merged/moved) |
 |---|---|---|
-| **0 · Orientation** | novice | ABI in Five Minutes · ★ How a break shows up (symptom → mechanism → level) · Cheat Sheet · Glossary (↻ absorbs Part 1 §8) |
-| **1 · Foundations** | novice → practitioner | Part 1 Foundations · Part 0 Product Contract (↻ gains the compatibility-levels ladder, §4.3) · Your ABI Surface |
-| **2 · Mechanics** | practitioner | Parts 2, 3, 4, 5, 6 — with Class Layout, Exception Unwinding, Modern Hazards, MSVC/PE listed *under* their Part as "go deeper" (Part 4 drops its inline summaries) |
-| **3 · Define the contract** | practitioner | Compatibility Direction · Consumer Models · ↻ Contract-Aware Compatibility (from Concepts) · Build-Profile Comparability |
-| **4 · Evidence & detection** | practitioner → advanced | Evidence & Detectability (↻ gains the AST-as-artifact section; loses the removed-flags appendix to `contribute/archive/`) · What Each Level Sees · ↻ Detecting Breaks (§2 becomes links into the trio) · Assurance Beyond Static Checking |
-| **5 · Practice** | practitioner | ★ Baselines as contracts · ★ Where in the pipeline (PR / main / nightly / release) · ★ Report the surface, not only the breaks · ★ Rollout & governance · ★ Triage a suspicious finding |
+| **0 · Orientation** | beginner | ABI in Five Minutes · ★ How a break shows up (symptom → mechanism → level) · Cheat Sheet · Glossary (↻ absorbs Part 1 §8) |
+| **1 · Foundations** | beginner → intermediate | Part 1 Foundations · Part 0 Product Contract (↻ gains the compatibility-levels ladder, §4.3) · Your ABI Surface |
+| **2 · Mechanics** | intermediate | Parts 2, 3, 4, 5, 6 — with Class Layout, Exception Unwinding, Modern Hazards, MSVC/PE listed *under* their Part as "go deeper" (Part 4 shortens its inline summaries to a sentence and a link) |
+| **3 · Define the contract** | intermediate | Compatibility Direction · Consumer Models · ↻ Contract-Aware Compatibility (from Concepts) · Build-Profile Comparability · Static & Header-Only Contracts (↻ from Beyond ABI — library *shape* is a contract question) |
+| **4 · Evidence & detection** | intermediate → advanced | ↻ Detecting Breaks (§1a grows into the AST summary, §2 becomes links into the trio) · Evidence & Detectability and What Each Level Sees (stay on the Concepts tab; the appendix of removed flags moves to `contribute/archive/`) · Assurance Beyond Static Checking |
+| **5 · Practice** | intermediate | ↻ Baselines as contracts (`use/baseline-management.md`, navigated into this tier — §4.6 case 1) · ★ Where in the pipeline (PR / main / nightly / release) · ★ Report the surface, not only the breaks · ★ Rollout & governance · ★ Triage a suspicious finding |
 | **6 · At scale** | advanced | ★ Products, not libraries (multi-binary) · ★ Template- and header-heavy libraries · ★ How system libraries stay compatible (glibc / libstdc++ / linker) · Dependency & Runtime Floors · Environment & Toolchain Drift (↻ from Concepts) · ★ Packages and consumers (deb/rpm/conda/wheel, `abi3`, FFI) |
-| **7 · Beyond static ABI** | advanced | ↻ one "What no static comparison can see" page with Behavioral / Data & Wire / Ownership / Concurrency as sections sharing a single introduction |
-| **8 · Design** | practitioner | Part 7 Designing for Stability (↻ adds "the scanner recognises these patterns": idioms, pattern-aware verdicts) |
-| **Concepts tab** (tool internals) | advanced → expert | Verdicts · Architecture · Build & Source Data (↻ split: model stays, findings/schema/storage to `reference/`) · Graph Coverage · Impact Assessment (↻ or `reference/`) · ELF Symbol Filtering · Limitations (↻ drops its copy of the filter section) |
+| **7 · Beyond static ABI** | advanced | Behavioral · Data & Wire · Ownership · Concurrency — four pages, as `topics.yaml` records (criterion 4); the shared "cannot decide this" argument gets one owner and four links |
+| **8 · Design** | intermediate | Part 7 Designing for Stability (↻ adds "the scanner recognises these patterns": idioms, pattern-aware verdicts) |
+| **Concepts tab** (tool internals) | advanced → expert | Verdicts · Evidence & Detectability · What Each Level Sees · Architecture · Build & Source Data (↻ split: model and workflow stay and keep `canonical_for`; findings/schema/storage become a registered `reference_page`) · Graph Coverage (↻ pass-state detail to a `reference_page`) · Impact Assessment (↻ plan/ADR framing removed; field detail to a `reference_page`) · ELF Symbol Filtering · Limitations |
 
 Reading paths by role stay on the hub, but each path is then a walk *up*
 the ladder rather than a jump list across tabs.
 
-The `level:` front matter should carry the tier's level on every page in
-the learning tree (today 14 pages have none), and the hub should render
+The `level:` front matter should carry the tier's level (mapped as above)
+on every page in the learning tree (today 16 pages have none). The hub's
+ladder table is then *generated* from that front matter — a small script
+splicing between sentinels with a `--check` mode, the pattern ADR-051
+established for the platform matrix — so the badge column is never a
+hand-copied table. The hub should render
 that as a badge per row so the ladder is visible in the navigator, not
 only in this plan.
 
 ---
+
+## Goal & acceptance criteria
+
+The series is done when a reader can answer, from the learning tab in
+order: what an ABI break is and how it shows up; which level of evidence
+finds each kind; what their own contract is; how to set up a baseline and
+a PR gate on a real project; how to read a report that shows growth as
+well as breaks; and what changes when the product is several binaries or
+a template library. Checkable form:
+
+- every page under the ABI/API Compatibility tab carries `level:` and a
+  previous/next footer, and each nav group is non-decreasing in level;
+- every ★ page in §5 exists, is registered in `topics.yaml` per §4.6's
+  three cases, and has at least one runnable invocation and one linked
+  case;
+- no two learning pages re-explain the same registered topic
+  (`scripts/check_docs_contract.py` clean, and its duplicate-block warning
+  count no higher than before);
+- every row of §3's coverage matrix reads "taught" or "linked", none
+  "absent".
+
+## Files & surfaces
+
+`docs/learn/**` (content, front matter, footers); `mkdocs.yml` (nav order
+and `redirect_maps`); `docs/_meta/topics.yaml` and `terminology.yaml`
+(new topics, re-registrations, the authority-rule term);
+`docs/AGENTS.md` "Layout" (the two tab moves); `docs/index.md` and
+`start/getting-started.md` (front-door links); the hub's generated ladder
+splice and its `scripts/` generator; `docs/contribute/plans/index.md`
+(this row). No `abicheck/` code, no example fixtures, no generated case
+pages.
+
+## Tests
+
+The existing gates are the tests: `scripts/check_docs_contract.py`
+(ownership, front matter, duplicate blocks, retired surfaces),
+`mkdocs build --strict` (links, nav), `scripts/check_ai_readiness.py`
+(`mkdocs-nav-coverage`, `doc-count-sync`, `changekind-docs`), and
+`scripts/check_docs_review_triggers.py` (`depends_on`). Phase 1 adds two:
+the ladder generator's `--check` mode, and a test that each learning nav
+group is non-decreasing in `level:` — the acceptance criterion above, made
+executable. Anchor rewrites in Phase 1 need a one-off fragment check,
+since `mkdocs build --strict` does not validate anchors.
+
+## Effort & risk
+
+L overall (the index row's estimate): Phase 1 is S, Phase 2 M, Phase 3 L
+(nine pages, each needing a topic decision), Phase 4 M. The main risk is
+the one F4 documents — a new page becoming a second explanation of a
+registered topic — which §4.6's three-case rule and the docs-contract gate
+exist to prevent. The second is URL and anchor churn for externally linked
+pages; every move keeps a redirect and every moved anchor is rewritten.
 
 ## 6. Phased change list
 
@@ -459,49 +573,73 @@ gate all of this).
 **Phase 1 — navigation and hub (no new prose).**
 
 - Rebuild `abi-api-handling.md` around the tier table in §5; move the
-  22-row break-family index and the three "deeper" sections to their
+  23-row break-family index and the three "deeper" sections to their
   owners (the cheat sheet, the trio, the practice pages once they exist).
+  Two consequences to carry: inbound anchor links (`08-detection.md` and
+  five other pages link the index and the two "deeper" sections by
+  fragment, which `mkdocs build --strict` does not verify) are rewritten,
+  and the hub keeps its role as `terminology.yaml`'s defining page for
+  the terms ABI and API.
 - Make the on-ramp the front door: hub, `docs/index.md`, and
   `start/getting-started.md` link it first; remove the "don't start here"
   admonition.
 - Add a consistent previous/next footer to every deep dive (the numbered
-  Parts already have one); resolve the two-page loop and Part 7's double
-  next.
-- Regroup the nav to the tiers; add `level:` front matter to the 14
-  pages lacking it.
+  Parts already have one); give `what-each-level-sees.md` a forward
+  "Next" and resolve Part 7's double next.
+- Keep the nav's by-question groups; reorder within each so level is
+  non-decreasing, and add `level:` front matter to the 16 pages lacking
+  it, using the tier mapping in §5. Pages that change tab are limited to
+  the two verified clean of internal names (§5); `docs/AGENTS.md` "Layout"
+  is updated for those two moves in the same change.
 
 **Phase 2 — de-duplicate (content moves, no new topics).**
 
-- Evidence model: `08-detection.md` §2 and `architecture.md` §Evidence
-  layers become one-paragraph summaries linking the trio; the trio banner
-  goes on all three; `build-source-data.md`'s L0–L5 table goes.
-- Part 4 drops the inline summaries of its three split-out sections.
-- Part 1 §8 → `glossary.md`; `limitations.md`'s filter section → link to
-  `elf-symbol-filtering.md`; one platform matrix (`reference/platforms.md`)
-  with the others linking; one verdict/exit-code table (`verdicts.md`).
-- The four "Beyond ABI" pages become sections of one page with a shared
-  introduction (or keep four pages and delete the repeated introduction —
-  either is fine; the repeated argument is the defect).
-- `impact-analysis.md`, `graph-coverage.md`'s pass-state detail, and
-  `build-source-data.md`'s schema/storage sections move to `reference/`
-  or `contribute/`; the removed-flags appendix moves to
-  `contribute/archive/`.
+- Evidence model: `08-detection.md` §2 and `build-source-data.md`
+  §Evidence layers become short summaries linking the trio, and are
+  registered as such; the trio banner goes on all three trio pages.
+- Part 4 shortens the inline summaries of its three split-out sections to
+  one sentence and a link each (they stay registered `allowed_summaries`).
+- Part 1 §8 → `glossary.md`; one numeric verdict/exit-code table
+  (`verdicts.md`), with `architecture.md` linking instead of restating.
+- The four "cannot decide this" pages stay four pages (`topics.yaml`
+  records that decision under criterion 4, with four registered topics).
+  The repeated argument gets one owner — `evidence-and-detectability.md`
+  §5 "What ABI tools cannot prove" is the existing home — and the four
+  pages open with a sentence and a link instead of the argument.
+  `static-and-header-only.md`, the fifth page in today's Beyond ABI
+  group, is listed under Tier 3 on the hub's ladder.
+- `graph-coverage.md`'s pass-state detail, `impact-analysis.md`'s field
+  detail, and `build-source-data.md`'s schema/storage sections move to
+  `reference/` as each topic's registered `reference_page`; the
+  narrative pages stay in `docs/learn/` and keep `canonical_for` (a
+  narrative owner cannot live under `reference/`). Each move edits
+  `topics.yaml` in the same change and follows
+  `docs/contribute/documentation.md` "Retiring or merging a page". The
+  removed-flags appendix moves to `contribute/archive/`.
 
 **Phase 3 — new pages, in the order a reader needs them.**
 
-1. How a break shows up (§4.1)
-2. Baselines as contracts (§4.6 item 1)
-3. Where in the pipeline (§4.6 item 2)
-4. Report the surface, not only the breaks (§4.6 item 3)
-5. Products, not libraries (§4.5)
-6. Template- and header-heavy libraries (§4.5)
-7. How system libraries stay compatible (§4.2)
-8. Rollout & governance; Triage (§4.6 item 4, §4.7)
-9. Packages and consumers (§4.7)
+1. How a break shows up (§4.1) — new topic, criterion 2; registered as an
+   `allowed_summaries` entry of `evidence-model`, since it introduces the
+   ladder the trio owns
+2. Baselines as contracts — a nav move of `use/baseline-management.md`
+   (§4.6 case 1), listed for reading order, not a new file
+3. Where in the pipeline (§4.6 item 2) — §4.6 case 3
+4. Report the surface, not only the breaks (§4.6 item 3) — criterion 2
+5. Products, not libraries (§4.5) — takes `bundle-analysis` from
+   `use/multi-binary.md` (§4.6 case 2)
+6. Template- and header-heavy libraries (§4.5) — criterion 2
+7. How system libraries stay compatible (§4.2) — criterion 4
+8. Rollout & governance (§4.6 item 4) — §4.6 case 3
+9. Triage a suspicious finding (§4.7) — §4.6 case 3
+10. Packages and consumers (§4.7) — criterion 4
 
-Each is a narrative owner in `topics.yaml` whose task pages are the
-existing `use/`/`integration/` how-tos, so the how-tos keep the commands
-and the learning page keeps the model.
+Deferred, not dropped: the "other ABI domains" further-reading page from
+§4.7 (kernel kABI/BTF, SYCL) waits until the pages above exist, and a
+macOS worked example follows the Windows one in Phase 4.
+
+The ownership rule for every entry is §4.6's three-case decision; the
+how-tos keep the commands and the learning page keeps the model.
 
 **Phase 4 — worked examples on every concept page.**
 
@@ -526,13 +664,18 @@ prose.
 
 - `docs/AGENTS.md`'s one-owner rule and `topics.yaml`: a new learning page
   that restates a tool page's content is the defect this plan is fixing,
-  not a way to fix it. New pages are narrative owners; the how-tos are
-  their task pages.
-- The evidence trio is deliberately three pages; the AST section and the
-  authority rule consolidate *into* it, they do not add a fourth.
+  not a way to fix it. Every new page's ownership is decided by §4.6's
+  three cases against the registry before it is written.
+- The evidence trio is deliberately three pages and nothing here adds a
+  fourth: the AST material is a registered summary on `08-detection.md`
+  of the reference page that owns it, and the authority rule becomes a
+  `terminology.yaml` term with one defining page.
 - Every moved or renamed page keeps a redirect; pre-Stage-4 `concepts/…`
   URLs already redirect and must keep doing so.
 - The educational tab keeps abicheck's internal module names out of
   prose (`depends_on` front matter carries traceability instead).
 - Headline counts (change kinds, case count) are pulled from their fact
-  owners, never typed into a learning page.
+  owners, never typed into a learning page. The line, page and row counts
+  *this* plan quotes are a diagnostic snapshot taken at the commit that
+  added it, not fact owners; re-measure rather than trust them when a
+  phase starts.
