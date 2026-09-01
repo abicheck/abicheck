@@ -43,3 +43,9 @@ it should read in CHANGELOG.md. Delete the other sections.
   then raised a raw, unhandled error instead of a clean usage error. This
   exact-path collision is now rejected the same way the per-library-report
   collision already was.
+- **`compare --old-bundle-facts --output-dir` rejects an existing non-
+  directory path** — an `--output-dir` that already existed as a regular
+  file (unrelated to `-o`/`--output`/`--write`) was not caught by the
+  collision checks above; the primary report was written before directory
+  creation raised a raw, unhandled error. `--output-dir` is now validated
+  as a non-file path before any artifact is written.

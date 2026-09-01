@@ -552,6 +552,46 @@ class TestCompareOldBundleFacts:
         assert "collide" in out.lower() or "same path" in out.lower()
         assert not same_path.exists()
 
+    def test_output_dir_that_is_already_an_existing_file_is_rejected(
+        self, tmp_path: Path
+    ) -> None:
+        """Codex review, fresh evidence: an --output-dir that already
+        exists as a regular file -- entirely unrelated to -o/--output/
+        --write -- names neither reserved path, so the collision checks
+        above don't catch it; `output_dir.mkdir(parents=True,
+        exist_ok=True)` still raises a raw FileExistsError for it
+        (`exist_ok=True` only tolerates an existing *directory*), after the
+        primary report has already been written."""
+        old_dir = tmp_path / "old"
+        new_dir = tmp_path / "new"
+        old_dir.mkdir()
+        new_dir.mkdir()
+        body = "int add(int a, int b) { return a + b; }\n"
+        _build_so(old_dir, "libreal.so", body)
+        _build_so(new_dir, "libreal.so", body)
+        facts_path = _write_old_facts(
+            tmp_path, old_dir, old_dir / "libreal.so", "libreal.so"
+        )
+        # A pre-existing regular file at the path --output-dir will name --
+        # not related to -o/--output at all.
+        preexisting_file = tmp_path / "not-a-directory"
+        preexisting_file.write_text("leftover from an earlier run\n")
+
+        code, out = _invoke(
+            "compare",
+            str(facts_path),
+            str(new_dir),
+            "--old-bundle-facts",
+            "--output-dir",
+            str(preexisting_file),
+            "--format",
+            "json",
+        )
+
+        assert code == 64, out
+        assert "not a directory" in out.lower()
+        assert preexisting_file.read_text() == "leftover from an earlier run\n"
+
 
 @pytest.mark.integration
 class TestBundleFactsLibraryManifest:

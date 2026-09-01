@@ -431,6 +431,20 @@ def dispatch(*, compile_context: Any, **kwargs: Any) -> None:
     output_dir = kwargs.get("output_dir")
     if output_dir is not None:
         output_dir = Path(output_dir)
+        # Codex review, fresh evidence: an --output-dir that already exists
+        # as a regular file -- entirely unrelated to -o/--output/--write --
+        # is not caught by the reserved-path collision checks below (it
+        # names neither of them), yet `output_dir.mkdir(parents=True,
+        # exist_ok=True)` still raises a raw, uncaught FileExistsError for
+        # it (`exist_ok=True` tolerates an existing *directory*, not an
+        # existing file), after the primary report has already been
+        # written. Reject it up front instead, as a general precondition
+        # independent of whether -o/--output/--write were even given.
+        if output_dir.exists() and not output_dir.is_dir():
+            raise click.UsageError(
+                f"--output-dir {output_dir}: this path already exists and "
+                "is not a directory -- choose a different --output-dir"
+            )
         # Codex review: --output-dir's per-library filenames
         # (`{safe_name}.json`, derived from diff.library below) are known
         # up front -- reject a collision with -o/--output or --write's own
