@@ -578,5 +578,101 @@ FACT_REGISTRY = FactRegistry(
                 "Function)."
             ),
         ),
+        # ── Phase 5's seventh batch: the three binary-format dataclasses' ──
+        # ── own case-(b) fields (schema-version-driven, not backend- ──
+        # ── driven -- ElfMetadata/PeMetadata/MachoMetadata are parsed by ──
+        # ── exactly one backend each, so producing_backends is a ──
+        # ── singleton rather than a choice among header/DWARF backends) ──
+        _E(
+            owner="ElfMetadata",
+            field="dynamic_flags",
+            value_type="frozenset[str] | None",
+            producing_backends=("elf",),
+            persisted=True,
+            identity_relevant=False,
+            comparable=True,
+            suppressible=False,
+            reportable=True,
+            lifecycle=FactLifecycle.PERSISTED,
+            notes=(
+                "DT_FLAGS/DT_FLAGS_1 symbolic names from PT_DYNAMIC -- None "
+                "already unambiguously means 'not captured' (legacy "
+                "snapshot written before this field existed); an empty "
+                "frozenset means 'parsed ELF carrying no dynamic flags'. "
+                "Plain case (b) conversion, same shape as the other two "
+                "ElfMetadata siblings below."
+            ),
+        ),
+        _E(
+            owner="ElfMetadata",
+            field="has_init",
+            value_type="bool | None",
+            producing_backends=("elf",),
+            persisted=True,
+            identity_relevant=False,
+            comparable=True,
+            suppressible=False,
+            reportable=True,
+            lifecycle=FactLifecycle.PERSISTED,
+            notes=(
+                "Whether the ELF carries a DT_INIT/.init_array constructor "
+                "entry point -- None means 'not captured', False means "
+                "'parsed ELF confirmed to have none'. Plain case (b) "
+                "conversion."
+            ),
+        ),
+        _E(
+            owner="ElfMetadata",
+            field="has_fini",
+            value_type="bool | None",
+            producing_backends=("elf",),
+            persisted=True,
+            identity_relevant=False,
+            comparable=True,
+            suppressible=False,
+            reportable=True,
+            lifecycle=FactLifecycle.PERSISTED,
+            notes=(
+                "Whether the ELF carries a DT_FINI/.fini_array destructor "
+                "entry point -- same shape as has_init_fact above."
+            ),
+        ),
+        _E(
+            owner="PeMetadata",
+            field="delay_imports",
+            value_type="dict[str, list[str]] | None",
+            producing_backends=("pe",),
+            persisted=True,
+            identity_relevant=False,
+            comparable=True,
+            suppressible=False,
+            reportable=True,
+            lifecycle=FactLifecycle.PERSISTED,
+            notes=(
+                "IMAGE_DIRECTORY_ENTRY_DELAY_IMPORT contents -- None means "
+                "'not captured' (legacy snapshot), an empty dict means "
+                "'parsed PE with no delay-load directory'. Plain case (b) "
+                "conversion, the PE analogue of ElfMetadata.dynamic_flags_"
+                "fact above."
+            ),
+        ),
+        _E(
+            owner="MachoMetadata",
+            field="rpaths",
+            value_type="list[str] | None",
+            producing_backends=("macho",),
+            persisted=True,
+            identity_relevant=False,
+            comparable=True,
+            suppressible=False,
+            reportable=True,
+            lifecycle=FactLifecycle.PERSISTED,
+            notes=(
+                "LC_RPATH runtime search paths -- the Mach-O analogue of "
+                "ELF's DT_RUNPATH. None means 'not captured' (legacy "
+                "snapshot), an empty list means 'parsed Mach-O carrying no "
+                "LC_RPATH commands'. Plain case (b) conversion."
+            ),
+        ),
     ]
 )

@@ -24,6 +24,8 @@ from dataclasses import dataclass, field
 from enum import Enum
 from functools import cached_property
 
+from .fact import Fact, bridge_legacy_and_fact
+
 
 class MachoSymbolType(str, Enum):
     EXPORTED = "exported"  # N_EXT: externally visible
@@ -86,6 +88,16 @@ class MachoMetadata:
     # Tri-state: None = not captured (legacy snapshot written before this
     # field existed); [] = parsed Mach-O carrying no LC_RPATH commands.
     rpaths: list[str] | None = None
+
+    # ADR-063 Phase 5 (seventh batch): Fact[...] sibling of rpaths -- the
+    # identical schema-version-driven case-(b) shape as ElfMetadata's/
+    # PeMetadata's own case-(b) fields.
+    rpaths_fact: Fact[list[str] | None] | None = field(default=None, kw_only=True)
+
+    def __post_init__(self) -> None:
+        self.rpaths, self.rpaths_fact = bridge_legacy_and_fact(
+            self.rpaths, self.rpaths_fact, None, None
+        )
 
     @cached_property
     def export_map(self) -> dict[str, MachoExport]:

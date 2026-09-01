@@ -91,6 +91,20 @@ _FUNCTION_FACT_KEYS = (
     "is_compiler_generated_fact",
 )
 
+# ADR-063 Phase 5 (seventh batch): the three binary-format metadata blocks'
+# own case-(b) *_fact siblings. Each is a single nested sub-dict under the
+# top-level "elf"/"pe"/"macho" key (ElfMetadata/PeMetadata/MachoMetadata are
+# not list-of-declaration collections like the four dataclasses above), so
+# `encode_fact_fields` handles them with one `_encode_one` call per key
+# rather than a per-item loop.
+_ELF_FACT_KEYS = (
+    "dynamic_flags_fact",
+    "has_init_fact",
+    "has_fini_fact",
+)
+_PE_FACT_KEYS = ("delay_imports_fact",)
+_MACHO_FACT_KEYS = ("rpaths_fact",)
+
 
 def encode_fact_fields(d: dict[str, Any]) -> None:
     """In-place: encode every ``Fact[...]``-typed field's ``status`` as a string.
@@ -118,6 +132,18 @@ def encode_fact_fields(d: dict[str, Any]) -> None:
     # AbiSnapshot's own case-(b) field -- a single top-level key, not
     # nested in a list like the four declaration dataclasses above.
     _encode_one(d.get("ast_resolved_standard_fact"))
+    elf_dict = d.get("elf")
+    if elf_dict is not None:
+        for fact_key in _ELF_FACT_KEYS:
+            _encode_one(elf_dict.get(fact_key))
+    pe_dict = d.get("pe")
+    if pe_dict is not None:
+        for fact_key in _PE_FACT_KEYS:
+            _encode_one(pe_dict.get(fact_key))
+    macho_dict = d.get("macho")
+    if macho_dict is not None:
+        for fact_key in _MACHO_FACT_KEYS:
+            _encode_one(macho_dict.get(fact_key))
 
 
 def _encode_one(fact_dict: dict[str, Any] | None) -> None:

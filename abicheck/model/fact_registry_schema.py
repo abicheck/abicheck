@@ -301,20 +301,13 @@ _CASE_A_UNCONVERTED: tuple[tuple[str, str], ...] = (
 #: type, with a documented backend/schema-dependence comment, no separate
 #: reliability flag. ``RecordType.is_final`` (the plan's own headline
 #: example) is deliberately absent here — see ``fact_registry_entries.
-#: FACT_REGISTRY``, it is this phase's first real conversion.
-_CASE_B_UNCONVERTED: tuple[tuple[str, str], ...] = (
-    # Schema-version-driven (not backend-driven) tri-state fields on the
-    # three binary-format dataclasses — the identical "resting value can't
-    # distinguish not-captured from confirmed-empty" shape, gated by a
-    # persisted schema_version rather than a per-run backend choice. Named
-    # here rather than silently left for the scan to rediscover, per this
-    # ADR's own Governing Invariant.
-    ("ElfMetadata", "dynamic_flags"),
-    ("ElfMetadata", "has_init"),
-    ("ElfMetadata", "has_fini"),
-    ("PeMetadata", "delay_imports"),
-    ("MachoMetadata", "rpaths"),
-)
+#: FACT_REGISTRY``, it is this phase's first real conversion. The five
+#: binary-format fields on ``ElfMetadata``/``PeMetadata``/``MachoMetadata``
+#: (schema-version-driven, not backend-driven) that used to live here were
+#: converted in Phase 5's seventh batch (schema v36) and are now in
+#: ``FACT_REGISTRY`` instead — see ``model/elf_facts.py``/``pe_facts.py``/
+#: ``macho_facts.py``.
+_CASE_B_UNCONVERTED: tuple[tuple[str, str], ...] = ()
 
 KNOWN_UNCONVERTED_ELIGIBLE_FACTS: frozenset[tuple[str, str]] = frozenset(
     _CASE_A_UNCONVERTED + _CASE_B_UNCONVERTED

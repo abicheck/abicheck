@@ -51,10 +51,9 @@ from .model.elf_facts import (
     SymbolBinding as SymbolBinding,
     SymbolType as SymbolType,
 )
+from .model.fact import sync_present_facts
 
 log = logging.getLogger(__name__)
-
-
 
 # ---------------------------------------------------------------------------
 # Internal constants
@@ -743,6 +742,7 @@ def _parse_dynamic(section: DynamicSection, meta: ElfMetadata) -> None:
             _apply_dt_flags_1(tag.entry.d_val, meta, dyn_flags)
     _apply_init_fini_tags(init_fini_tags, meta)
     meta.dynamic_flags = frozenset(dyn_flags)
+    sync_present_facts(meta, "dynamic_flags", "has_init", "has_fini")
 
 
 def _parse_version_def(section: GNUVerDefSection, meta: ElfMetadata) -> None:

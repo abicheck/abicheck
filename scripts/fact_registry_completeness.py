@@ -519,6 +519,13 @@ def _model_fact_siblings(
 #: site.
 _FACT_CODEC_PATH: Path = PKG / "storage" / "fact_codec.py"
 _SERIALIZATION_PATH: Path = PKG / "serialization.py"
+#: ADR-063 Phase 5 (seventh batch): ElfMetadata/PeMetadata/MachoMetadata's
+#: own ``decode_fact(...)`` call sites live in their ``*_from_dict``
+#: constructors here, not in ``fact_codec.py``/``serialization.py`` --
+#: those three dataclasses are single nested sub-blocks the whole-snapshot
+#: decode delegates to, not one of the list-of-declaration collections the
+#: other two files' receivers cover.
+_SNAPSHOT_PLATFORM_BLOCKS_PATH: Path = PKG / "snapshot_platform_blocks.py"
 
 
 def _string_constant(node: ast.expr | None) -> str | None:
@@ -580,6 +587,16 @@ _OWNER_DECODE_RECEIVER: dict[str, str] = {
     "Variable": "v",
     "Function": "f",
     "AbiSnapshot": "d",
+    # ADR-063 Phase 5 (seventh batch): the three binary-format dataclasses'
+    # own snapshot_platform_blocks.py receivers -- deliberately not "e"/"d"
+    # (elf_from_dict/pe_from_dict/macho_from_dict were renamed off their
+    # original "e" parameter specifically to avoid colliding with
+    # EnumType's/AbiSnapshot's own receiver names above, since this
+    # reverse lookup resolves a receiver name to an owner across every
+    # scanned file with no per-file scoping).
+    "ElfMetadata": "elf",
+    "PeMetadata": "pe",
+    "MachoMetadata": "macho",
 }
 
 #: Module-level fact-key tuples in fact_codec.py, each owning exactly one
@@ -592,6 +609,9 @@ _OWNER_FACT_KEY_TUPLES: dict[str, str] = {
     "_ENUM_FACT_KEYS": "EnumType",
     "_VARIABLE_FACT_KEYS": "Variable",
     "_FUNCTION_FACT_KEYS": "Function",
+    "_ELF_FACT_KEYS": "ElfMetadata",
+    "_PE_FACT_KEYS": "PeMetadata",
+    "_MACHO_FACT_KEYS": "MachoMetadata",
 }
 
 
@@ -669,7 +689,7 @@ def _decode_wired_fact_attrs() -> set[tuple[str, str]]:
     any owner.
     """
     wired: set[tuple[str, str]] = set()
-    for path in (_FACT_CODEC_PATH, _SERIALIZATION_PATH):
+    for path in (_FACT_CODEC_PATH, _SERIALIZATION_PATH, _SNAPSHOT_PLATFORM_BLOCKS_PATH):
         source = _read(path)
         if not source:
             continue

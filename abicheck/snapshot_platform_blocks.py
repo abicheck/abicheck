@@ -40,7 +40,9 @@ from __future__ import annotations
 from typing import Any
 
 
-def elf_from_dict(e: dict[str, Any]) -> Any:
+def elf_from_dict(elf: dict[str, Any], schema_version: int) -> Any:
+    from dataclasses import replace
+
     from .elf_metadata import (
         ElfImport,
         ElfMetadata,
@@ -48,6 +50,21 @@ def elf_from_dict(e: dict[str, Any]) -> Any:
         SymbolBinding,
         SymbolType,
     )
+    from .storage.fact_codec import decode_fact
+
+    # ADR-063 Phase 5 (seventh batch): the schema_version ElfMetadata's own
+    # three case-(b) *_fact siblings started being persisted at.
+    _min_schema = 36
+    dynamic_flags_fact = decode_fact(
+        elf.get("dynamic_flags_fact"), schema_version, min_schema_version=_min_schema
+    )
+    if dynamic_flags_fact is not None and dynamic_flags_fact.value is not None:
+        # JSON has no frozenset -- reconstruct it, matching the legacy
+        # dynamic_flags field's own frozenset(...) reconstruction below,
+        # since Fact[frozenset[str] | None] is the declared value type.
+        dynamic_flags_fact = replace(
+            dynamic_flags_fact, value=frozenset(dynamic_flags_fact.value)
+        )
 
     syms = [
         ElfSymbol(
@@ -60,7 +77,7 @@ def elf_from_dict(e: dict[str, Any]) -> Any:
             visibility=s.get("visibility", "default"),
             value_alignment=s.get("value_alignment", 0),
         )
-        for s in e.get("symbols", [])
+        for s in elf.get("symbols", [])
     ]
     imports = [
         ElfImport(
@@ -71,57 +88,67 @@ def elf_from_dict(e: dict[str, Any]) -> Any:
             is_default=i.get("is_default", True),
             version_soname=i.get("version_soname", ""),
         )
-        for i in e.get("imports", [])
+        for i in elf.get("imports", [])
     ]
     return ElfMetadata(
-        soname=e.get("soname", ""),
-        needed=e.get("needed", []),
-        rpath=e.get("rpath", ""),
-        runpath=e.get("runpath", ""),
-        versions_defined=e.get("versions_defined", []),
-        versions_required=e.get("versions_required", {}),
+        soname=elf.get("soname", ""),
+        needed=elf.get("needed", []),
+        rpath=elf.get("rpath", ""),
+        runpath=elf.get("runpath", ""),
+        versions_defined=elf.get("versions_defined", []),
+        versions_required=elf.get("versions_required", {}),
         symbols=syms,
         imports=imports,
-        interpreter=e.get("interpreter", ""),
-        has_executable_stack=e.get("has_executable_stack", False),
-        relro=e.get("relro", "none"),
-        bind_now=e.get("bind_now", False),
-        is_pie=e.get("is_pie", False),
-        has_stack_canary=e.get("has_stack_canary", False),
-        has_fortify_source=e.get("has_fortify_source", False),
-        has_writable_executable_segment=e.get("has_writable_executable_segment", False),
-        is_symbolic=e.get("is_symbolic", False),
-        has_textrel=e.get("has_textrel", False),
-        pointer_size=e.get("pointer_size", 8),
-        machine=e.get("machine", ""),
+        interpreter=elf.get("interpreter", ""),
+        has_executable_stack=elf.get("has_executable_stack", False),
+        relro=elf.get("relro", "none"),
+        bind_now=elf.get("bind_now", False),
+        is_pie=elf.get("is_pie", False),
+        has_stack_canary=elf.get("has_stack_canary", False),
+        has_fortify_source=elf.get("has_fortify_source", False),
+        has_writable_executable_segment=elf.get(
+            "has_writable_executable_segment", False
+        ),
+        is_symbolic=elf.get("is_symbolic", False),
+        has_textrel=elf.get("has_textrel", False),
+        pointer_size=elf.get("pointer_size", 8),
+        machine=elf.get("machine", ""),
         # Legacy snapshots (written before elf_class existed) carry no class
         # field; derive it from pointer_size (4→32, 8→64) rather than hard-coding
         # 64, so a saved 32-bit baseline does not false-positive elf_class_changed.
-        elf_class=e.get("elf_class", 32 if e.get("pointer_size", 8) == 4 else 64),
-        osabi=e.get("osabi", ""),
-        e_flags=e.get("e_flags", 0),
-        abi_flags=frozenset(e.get("abi_flags", [])),
-        has_static_tls=e.get("has_static_tls", False),
-        has_tls_symbols=e.get("has_tls_symbols", False),
-        gnu_properties=frozenset(e.get("gnu_properties", [])),
-        has_dt_relr=e.get("has_dt_relr", False),
-        hash_styles=frozenset(e.get("hash_styles", [])),
-        ei_data=e.get("ei_data", ""),
-        min_kernel_version=e.get("min_kernel_version", ""),
+        elf_class=elf.get("elf_class", 32 if elf.get("pointer_size", 8) == 4 else 64),
+        osabi=elf.get("osabi", ""),
+        e_flags=elf.get("e_flags", 0),
+        abi_flags=frozenset(elf.get("abi_flags", [])),
+        has_static_tls=elf.get("has_static_tls", False),
+        has_tls_symbols=elf.get("has_tls_symbols", False),
+        gnu_properties=frozenset(elf.get("gnu_properties", [])),
+        has_dt_relr=elf.get("has_dt_relr", False),
+        hash_styles=frozenset(elf.get("hash_styles", [])),
+        ei_data=elf.get("ei_data", ""),
+        min_kernel_version=elf.get("min_kernel_version", ""),
         # Tri-state loader-contract fields: absent key (legacy snapshot) must
         # stay None ("not captured"), not default to a comparable value.
         dynamic_flags=(
-            frozenset(e["dynamic_flags"])
-            if e.get("dynamic_flags") is not None
+            frozenset(elf["dynamic_flags"])
+            if elf.get("dynamic_flags") is not None
             else None
         ),
-        has_init=e.get("has_init"),
-        has_fini=e.get("has_fini"),
+        has_init=elf.get("has_init"),
+        has_fini=elf.get("has_fini"),
+        dynamic_flags_fact=dynamic_flags_fact,
+        has_init_fact=decode_fact(
+            elf.get("has_init_fact"), schema_version, min_schema_version=_min_schema
+        ),
+        has_fini_fact=decode_fact(
+            elf.get("has_fini_fact"), schema_version, min_schema_version=_min_schema
+        ),
     )
 
 
-def pe_from_dict(e: dict[str, Any]) -> Any:
+def pe_from_dict(pe: dict[str, Any], schema_version: int) -> Any:
     from .pe_metadata import PeExport, PeMetadata, PeSymbolType
+    from .storage.fact_codec import decode_fact
 
     exports = [
         PeExport(
@@ -130,24 +157,30 @@ def pe_from_dict(e: dict[str, Any]) -> Any:
             sym_type=PeSymbolType(x.get("sym_type", "exported")),
             forwarder=x.get("forwarder", ""),
         )
-        for x in e.get("exports", [])
+        for x in pe.get("exports", [])
     ]
     return PeMetadata(
-        machine=e.get("machine", ""),
-        characteristics=e.get("characteristics", 0),
-        dll_characteristics=e.get("dll_characteristics", 0),
+        machine=pe.get("machine", ""),
+        characteristics=pe.get("characteristics", 0),
+        dll_characteristics=pe.get("dll_characteristics", 0),
         exports=exports,
-        imports=e.get("imports", {}),
+        imports=pe.get("imports", {}),
         # Tri-state: absent key (legacy snapshot) stays None ("not captured").
-        delay_imports=e.get("delay_imports"),
-        file_version=e.get("file_version", ""),
-        product_version=e.get("product_version", ""),
-        subsystem_version=e.get("subsystem_version", ""),
+        delay_imports=pe.get("delay_imports"),
+        file_version=pe.get("file_version", ""),
+        product_version=pe.get("product_version", ""),
+        subsystem_version=pe.get("subsystem_version", ""),
+        # ADR-063 Phase 5 (seventh batch): the schema_version PeMetadata's
+        # own delay_imports_fact sibling started being persisted at.
+        delay_imports_fact=decode_fact(
+            pe.get("delay_imports_fact"), schema_version, min_schema_version=36
+        ),
     )
 
 
-def macho_from_dict(e: dict[str, Any]) -> Any:
+def macho_from_dict(macho: dict[str, Any], schema_version: int) -> Any:
     from .macho_metadata import MachoExport, MachoMetadata, MachoSymbolType
+    from .storage.fact_codec import decode_fact
 
     exports = [
         MachoExport(
@@ -155,23 +188,28 @@ def macho_from_dict(e: dict[str, Any]) -> Any:
             sym_type=MachoSymbolType(x.get("sym_type", "exported")),
             is_weak=x.get("is_weak", False),
         )
-        for x in e.get("exports", [])
+        for x in macho.get("exports", [])
     ]
     return MachoMetadata(
-        cpu_type=e.get("cpu_type", ""),
-        cpu_types=e.get("cpu_types", []),
-        filetype=e.get("filetype", ""),
-        flags=e.get("flags", 0),
-        install_name=e.get("install_name", ""),
-        dependent_libs=e.get("dependent_libs", []),
-        reexported_libs=e.get("reexported_libs", []),
+        cpu_type=macho.get("cpu_type", ""),
+        cpu_types=macho.get("cpu_types", []),
+        filetype=macho.get("filetype", ""),
+        flags=macho.get("flags", 0),
+        install_name=macho.get("install_name", ""),
+        dependent_libs=macho.get("dependent_libs", []),
+        reexported_libs=macho.get("reexported_libs", []),
         exports=exports,
-        imported_symbols=e.get("imported_symbols", []),
-        current_version=e.get("current_version", ""),
-        compat_version=e.get("compat_version", ""),
-        min_os_version=e.get("min_os_version", ""),
+        imported_symbols=macho.get("imported_symbols", []),
+        current_version=macho.get("current_version", ""),
+        compat_version=macho.get("compat_version", ""),
+        min_os_version=macho.get("min_os_version", ""),
         # Tri-state: absent key (legacy snapshot) stays None ("not captured").
-        rpaths=e.get("rpaths"),
+        rpaths=macho.get("rpaths"),
+        # ADR-063 Phase 5 (seventh batch): the schema_version MachoMetadata's
+        # own rpaths_fact sibling started being persisted at.
+        rpaths_fact=decode_fact(
+            macho.get("rpaths_fact"), schema_version, min_schema_version=36
+        ),
     )
 
 
