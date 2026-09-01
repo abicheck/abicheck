@@ -56,7 +56,12 @@ from .snapshot_platform_blocks import (
     python_ext_from_dict as _python_ext_from_dict,
     sycl_from_dict as _sycl_from_dict,
 )
-from .storage.entity_id_codec import decode_entity_ids, encode_entity_ids
+from .storage.entity_id_codec import (
+    decode_entity_ids,
+    decode_sidecar_entity_ids,
+    encode_entity_ids,
+    encode_sidecar_entity_ids,
+)
 from .storage.enum_codec import encode_platform_enums
 from .storage.fact_codec import (
     apply_legacy_fact_backfill,
@@ -336,7 +341,7 @@ from .storage.surface_graph_codec import decode_surface_graph, encode_surface_gr
 # doesn't hit any producer-specific threshold above stays silent, since every
 # CI baseline is *always* some number of versions behind and warning
 # regardless of relevance would just be noise.
-SCHEMA_VERSION: int = 36  # v36: ElfMetadata.dynamic_flags_fact/has_init_fact/has_fini_fact, PeMetadata.delay_imports_fact, MachoMetadata.rpaths_fact persisted (snapshot_platform_blocks.py/storage/fact_codec.py); v35: AbiSnapshot.ast_resolved_standard_fact persisted (storage/fact_codec.py); v34: Function.contract_attributes_fact/is_explicit_fact/is_hidden_friend_fact/source_header_fact/is_variadic_fact/exception_spec_fact/is_override_fact/hidden_friend_owner_fact/elf_binding_fact/is_compiler_generated_fact persisted (storage/fact_codec.py); v33: Variable.source_header_fact/alignment_bits_fact/elf_binding_fact persisted (storage/fact_codec.py); v32: EnumType.qualified_name_fact/source_header_fact persisted (storage/fact_codec.py); v31: RecordType.is_abstract_fact/data_size_bits_fact/is_standard_layout_fact/is_trivially_copyable_fact/qualified_name_fact/source_header_fact persisted (storage/fact_codec.py); v30: RecordType.is_final_fact persisted (storage/fact_codec.py); v29: AbiSnapshot.surface_graph persisted (storage/surface_graph_codec.py); v28: entity_id carrier persisted (storage/entity_id_codec.py).
+SCHEMA_VERSION: int = 37  # v37: ElfMetadata.dynamic_flags_fact/has_init_fact/has_fini_fact, PeMetadata.delay_imports_fact, MachoMetadata.rpaths_fact persisted (snapshot_platform_blocks.py/storage/fact_codec.py); v36: AbiSnapshot.ast_resolved_standard_fact persisted (storage/fact_codec.py); v35: Function.contract_attributes_fact/is_explicit_fact/is_hidden_friend_fact/source_header_fact/is_variadic_fact/exception_spec_fact/is_override_fact/hidden_friend_owner_fact/elf_binding_fact/is_compiler_generated_fact persisted (storage/fact_codec.py); v34: Variable.source_header_fact/alignment_bits_fact/elf_binding_fact persisted (storage/fact_codec.py); v33: EnumType.qualified_name_fact/source_header_fact persisted (storage/fact_codec.py); v32: RecordType.is_abstract_fact/data_size_bits_fact/is_standard_layout_fact/is_trivially_copyable_fact/qualified_name_fact/source_header_fact persisted (storage/fact_codec.py); v31: typedef/constant entity_id sidecars persisted (storage/entity_id_codec.py); v30: RecordType.is_final_fact persisted (storage/fact_codec.py); v29: AbiSnapshot.surface_graph persisted (storage/surface_graph_codec.py); v28: entity_id carrier persisted (storage/entity_id_codec.py).
 
 # Schema version at which CastXML field CV facts became reliable (see v9 above).
 _MIN_SCHEMA_VERSION_FOR_CV_FACTS = 9
@@ -431,7 +436,9 @@ def snapshot_to_dict(snap: AbiSnapshot) -> dict[str, Any]:
     encode_fact_fields(d)
 
     # Convert all sets → sorted lists (needed for AdvancedDwarfMetadata.packed_structs and ToolchainInfo.abi_flags; json.dumps raises TypeError on set objects), having first encoded the ADR-063 Phase 2 (c1) `entity_id` carrier (storage/entity_id_codec.py).
-    converted: dict[str, Any] = _sets_to_lists(encode_entity_ids(d, snap))
+    converted: dict[str, Any] = _sets_to_lists(
+        encode_sidecar_entity_ids(encode_entity_ids(d, snap), snap)
+    )
 
     # BuildMode enums are (str, Enum), so dataclasses.asdict() carries
     # them through as Enum instances rather than plain strings; normalize
@@ -694,6 +701,7 @@ def snapshot_from_dict(d: dict[str, Any]) -> AbiSnapshot:
     ]
     enums = [_enum_type_from_dict(e, _schema_version) for e in d.get("enums", [])]
     decode_entity_ids(d, functions=funcs, variables=variables, types=types, enums=enums)
+    sidecar_entity_ids = decode_sidecar_entity_ids(d)
     typedefs: dict[str, str] = d.get("typedefs", {})
     typedefs_qualified: dict[str, str] = d.get("typedefs_qualified", {})
     elf_data = d.get("elf")
@@ -1067,6 +1075,8 @@ def snapshot_from_dict(d: dict[str, Any]) -> AbiSnapshot:
         enums=enums,
         typedefs=typedefs,
         typedefs_qualified=typedefs_qualified,
+        typedef_entity_ids=sidecar_entity_ids["typedef_entity_ids"],
+        constant_entity_ids=sidecar_entity_ids["constant_entity_ids"],
         elf=elf,
         pe=pe,
         macho=macho,

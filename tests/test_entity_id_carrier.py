@@ -72,9 +72,11 @@ from abicheck.model.identity import (
     EntityKind,
     Namespace,
     Record,
+    entity_id_for_constant,
     entity_id_for_enum,
     entity_id_for_function,
     entity_id_for_type,
+    entity_id_for_typedef,
     entity_id_for_variable,
 )
 from abicheck.serialization import snapshot_from_dict, snapshot_to_dict
@@ -90,6 +92,7 @@ _PROBE_HEADER = textwrap.dedent(
     struct Outer { struct Inner { int x; }; };
     enum class Color { RED, GREEN };
     typedef int Alias;
+    constexpr int kLimit = 7;
     extern int gVar;
     void f(int);
     void f(double);
@@ -121,7 +124,9 @@ _NESTED_IN_RECORD = "struct B { struct C { int x; }; };\n"
 _NESTED_IN_NAMESPACE = "namespace B { struct C { int x; }; }\n"
 
 
-def _clang_parser(header_text: str, tmp_path: Path, name: str) -> _ClangAstParser:
+def _clang_parser(
+    header_text: str, tmp_path: Path, name: str, *, public: bool = False
+) -> _ClangAstParser:
     header = tmp_path / f"{name}.hpp"
     header.write_text(header_text)
     out = subprocess.run(
@@ -152,10 +157,17 @@ def _clang_parser(header_text: str, tmp_path: Path, name: str) -> _ClangAstParse
         text=True,
         check=True,
     )
-    return _ClangAstParser(json.loads(out.stdout), {"c_fn", "c_var"}, set())
+    return _ClangAstParser(
+        json.loads(out.stdout),
+        {"c_fn", "c_var"},
+        set(),
+        public_header_paths=[str(header)] if public else None,
+    )
 
 
-def _castxml_parser(header_text: str, tmp_path: Path, name: str) -> _CastxmlParser:
+def _castxml_parser(
+    header_text: str, tmp_path: Path, name: str, *, public: bool = False
+) -> _CastxmlParser:
     header = tmp_path / f"{name}.hpp"
     header.write_text(header_text)
     xml_out = tmp_path / f"{name}.xml"
@@ -190,6 +202,7 @@ def _castxml_parser(header_text: str, tmp_path: Path, name: str) -> _CastxmlPars
         parse_xml(xml_out).getroot(),
         exported_dynamic={"c_fn", "c_var"},
         exported_static=set(),
+        public_header_paths=[str(header)] if public else None,
     )
 
 
@@ -258,6 +271,105 @@ class TestCarrierFieldShape:
         assert carrier.kw_only is True
         assert carrier.compare is False
         assert carrier.default is None
+
+
+class TestSidecarFieldShape:
+    """``typedef_entity_ids``/``constant_entity_ids``: the ADR-063 Phase 2
+    closing slice's sidecars, for the two ``dict[str, str]`` collections that
+    have no declaration object to carry an ``entity_id`` on."""
+
+    @pytest.mark.parametrize(
+        "field_name", ["typedef_entity_ids", "constant_entity_ids"]
+    )
+    def test_defaults_to_empty_and_is_keyword_only(self, field_name: str) -> None:
+        snap = AbiSnapshot(library="libx.so", version="1.0")
+        assert getattr(snap, field_name) == {}
+        sidecar = next(
+            f for f in dataclasses.fields(AbiSnapshot) if f.name == field_name
+        )
+        assert sidecar.kw_only is True
+        assert sidecar.default_factory is dict
+
+    @pytest.mark.parametrize(
+        ("field_name", "partner"),
+        [
+            ("typedef_entity_ids", "typedefs_qualified"),
+            ("constant_entity_ids", "constants"),
+        ],
+    )
+    def test_sidecar_shares_its_partner_key_space(
+        self, field_name: str, partner: str
+    ) -> None:
+        # The whole point of the sidecar shape: a consumer joins it against
+        # the dict it annotates by key, with no second key convention.
+        snap = _snapshot_with_sidecars()
+        assert set(getattr(snap, field_name)) == set(getattr(snap, partner))
+
+
+def _snapshot_with_sidecars() -> AbiSnapshot:
+    return AbiSnapshot(
+        library="libx.so",
+        version="1.0",
+        from_headers=True,
+        typedefs={"Alias": "int"},
+        typedefs_qualified={"ns::Alias": "int"},
+        constants={"ns::kLimit": "7"},
+        typedef_entity_ids={
+            "ns::Alias": entity_id_for_typedef((Namespace("ns"),), "Alias")
+        },
+        constant_entity_ids={
+            "ns::kLimit": entity_id_for_constant((Namespace("ns"),), "kLimit")
+        },
+    )
+
+
+class TestSidecarIsPersisted:
+    """The sidecars round-trip losslessly (schema v31)."""
+
+    def test_reload_reconstructs_the_identical_identities(self) -> None:
+        original = _snapshot_with_sidecars()
+        reloaded = snapshot_from_dict(
+            json.loads(json.dumps(snapshot_to_dict(original)))
+        )
+        assert reloaded.typedef_entity_ids == original.typedef_entity_ids
+        assert reloaded.constant_entity_ids == original.constant_entity_ids
+
+    def test_scope_kind_survives_rather_than_a_rendered_string(self) -> None:
+        # The same counterexample the declaration carrier's own round-trip
+        # test pins: a "ns::Alias" spelling cannot say whether "ns" was a
+        # namespace or a record, so the wire form must keep the segment type.
+        snap = AbiSnapshot(
+            library="libx.so",
+            version="1.0",
+            typedef_entity_ids={
+                "ns::Alias": entity_id_for_typedef((Record("ns"),), "Alias")
+            },
+        )
+        reloaded = snapshot_from_dict(json.loads(json.dumps(snapshot_to_dict(snap))))
+        assert (
+            reloaded.typedef_entity_ids["ns::Alias"]
+            == snap.typedef_entity_ids["ns::Alias"]
+        )
+        assert reloaded.typedef_entity_ids["ns::Alias"] != entity_id_for_typedef(
+            (Namespace("ns"),), "Alias"
+        )
+
+    def test_pre_v31_snapshot_loads_with_empty_sidecars(self) -> None:
+        d = snapshot_to_dict(_snapshot_with_sidecars())
+        d["schema_version"] = 30
+        d.pop("typedef_entity_ids", None)
+        d.pop("constant_entity_ids", None)
+        reloaded = snapshot_from_dict(json.loads(json.dumps(d)))
+        assert reloaded.typedef_entity_ids == {}
+        assert reloaded.constant_entity_ids == {}
+        # An absent sidecar must not disturb the dicts it annotates.
+        assert reloaded.typedefs_qualified == {"ns::Alias": "int"}
+        assert reloaded.constants == {"ns::kLimit": "7"}
+
+    def test_schema_version_moved_to_31(self) -> None:
+        from abicheck.serialization import SCHEMA_VERSION
+
+        assert SCHEMA_VERSION >= 31
 
 
 def _snapshot_with_every_kind() -> AbiSnapshot:
@@ -413,6 +525,83 @@ class TestMalformedEntityIdDocumentIsRefused:
             snapshot_from_dict(d)
 
 
+class TestMalformedSidecarEntityIdDocumentIsRefused:
+    """The same bug class as :class:`TestMalformedEntityIdDocumentIsRefused`
+    above, recurring on ``typedef_entity_ids``/``constant_entity_ids``
+    (ADR-063 Phase 2's typedef/constant slice): a present-but-malformed
+    sidecar container or key must be refused, not silently read as an
+    honest absence or as a valid identity (Codex review).
+    """
+
+    @pytest.mark.parametrize(
+        "sidecar_key", ["typedef_entity_ids", "constant_entity_ids"]
+    )
+    @pytest.mark.parametrize(
+        "bogus_sidecar", [[], "", False, 0, ["not", "a", "mapping"]]
+    )
+    def test_non_mapping_sidecar_is_refused_not_treated_as_empty(
+        self, sidecar_key: str, bogus_sidecar: object
+    ) -> None:
+        d = snapshot_to_dict(_snapshot_with_every_kind())
+        d[sidecar_key] = bogus_sidecar
+        with pytest.raises((TypeError, ValueError)):
+            snapshot_from_dict(d)
+
+    @pytest.mark.parametrize(
+        "sidecar_key", ["typedef_entity_ids", "constant_entity_ids"]
+    )
+    def test_non_string_sidecar_key_is_refused(self, sidecar_key: str) -> None:
+        # A well-formed entity-id document, so the only defect under test is
+        # the non-string key -- a document-shape defect must not mask it.
+        valid_document = {
+            "schema_version": 2,
+            "scope": [],
+            "kind": "typedef",
+            "leaf_name": "x",
+            "extra": [],
+        }
+        d = snapshot_to_dict(_snapshot_with_every_kind())
+        d[sidecar_key] = {1: valid_document}
+        with pytest.raises((TypeError, ValueError)):
+            snapshot_from_dict(d)
+
+    @pytest.mark.parametrize(
+        "sidecar_key", ["typedef_entity_ids", "constant_entity_ids"]
+    )
+    def test_non_string_sidecar_key_is_refused_on_encode(
+        self, sidecar_key: str
+    ) -> None:
+        # A caller that constructs AbiSnapshot directly (not through either
+        # header-AST producer) could hand the sidecar a non-string key --
+        # the encode side must refuse it too, or two colliding keys (1 and
+        # "1") would silently collapse onto one JSON key, losing an
+        # identity rather than being rejected up front (Codex review).
+        bad_entity_id = entity_id_for_typedef((), "x")
+        snap = dataclasses.replace(
+            _snapshot_with_every_kind(), **{sidecar_key: {1: bad_entity_id}}
+        )
+        with pytest.raises((TypeError, ValueError)):
+            snapshot_to_dict(snap)
+
+    @pytest.mark.parametrize(
+        "sidecar_key", ["typedef_entity_ids", "constant_entity_ids"]
+    )
+    @pytest.mark.parametrize("bogus_sidecar", [[], "", False, 0])
+    def test_non_mapping_sidecar_is_refused_on_encode(
+        self, sidecar_key: str, bogus_sidecar: object
+    ) -> None:
+        # The mirror of test_non_mapping_sidecar_is_refused_not_treated_as_
+        # empty above, but on the encode path: a caller constructing
+        # AbiSnapshot directly (outside the dataclass's own type
+        # annotation) with a non-mapping sidecar must not leak an
+        # AttributeError from a bare .items() call (Codex review).
+        snap = dataclasses.replace(
+            _snapshot_with_every_kind(), **{sidecar_key: bogus_sidecar}
+        )
+        with pytest.raises((TypeError, ValueError)):
+            snapshot_to_dict(snap)
+
+
 #: Modules allowed to *call* an ``entity_id_for_*`` constructor: the two
 #: header-AST producers and their ``extract`` entity modules. By option
 #: (a)'s own design the identity is computed once, at parse time, and read
@@ -540,6 +729,16 @@ def _assert_probe_identities(parser: Any) -> None:
     assert g_var.entity_id is not None
     assert g_var.entity_id.extra == ("mangled", "_ZN2ns4gVarE")
 
+    # ADR-063 Phase 2's closing slice: typedefs have no declaration object to
+    # carry an identity on, so theirs travels in a sidecar keyed exactly like
+    # `parse_typedefs_qualified()`.
+    assert parser.parse_typedef_entity_ids()["ns::Alias"] == EntityId(
+        scope=(Namespace("ns"),), kind=EntityKind.TYPEDEF, leaf_name="Alias"
+    )
+    assert set(parser.parse_typedef_entity_ids()) == set(
+        parser.parse_typedefs_qualified()
+    )
+
 
 @pytest.mark.integration
 @pytest.mark.skipif(shutil.which("clang") is None, reason="clang not installed")
@@ -551,6 +750,39 @@ def test_live_clang_populates_every_kind(tmp_path: Path) -> None:
 @pytest.mark.skipif(shutil.which("castxml") is None, reason="castxml not installed")
 def test_live_castxml_populates_every_kind(tmp_path: Path) -> None:
     _assert_probe_identities(_castxml_parser(_PROBE_HEADER, tmp_path, "probe"))
+
+
+def _assert_probe_constant_identity(parser: Any) -> None:
+    """The constant sidecar, for a parser given a real public-header set.
+
+    Split from :func:`_assert_probe_identities` because ``parse_constants``
+    is provenance-gated on both backends (it returns ``{}`` outright with no
+    public set), so its sidecar can only be observed by a parser configured
+    the way a real dump configures one.
+    """
+    assert parser.parse_constant_entity_ids()["ns::kLimit"] == EntityId(
+        scope=(Namespace("ns"),), kind=EntityKind.CONSTANT, leaf_name="kLimit"
+    )
+    # The sidecar and the value map are built from one filtering pass, so
+    # they agree on which constants qualify -- the property that lets a
+    # detector join one against the other by key.
+    assert set(parser.parse_constant_entity_ids()) == set(parser.parse_constants())
+
+
+@pytest.mark.integration
+@pytest.mark.skipif(shutil.which("clang") is None, reason="clang not installed")
+def test_live_clang_populates_the_constant_sidecar(tmp_path: Path) -> None:
+    _assert_probe_constant_identity(
+        _clang_parser(_PROBE_HEADER, tmp_path, "probe_const", public=True)
+    )
+
+
+@pytest.mark.integration
+@pytest.mark.skipif(shutil.which("castxml") is None, reason="castxml not installed")
+def test_live_castxml_populates_the_constant_sidecar(tmp_path: Path) -> None:
+    _assert_probe_constant_identity(
+        _castxml_parser(_PROBE_HEADER, tmp_path, "probe_const", public=True)
+    )
 
 
 @pytest.mark.integration

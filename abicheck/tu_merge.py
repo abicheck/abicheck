@@ -67,7 +67,7 @@ from __future__ import annotations
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import replace
 from functools import partial
-from typing import Protocol, TypeVar
+from typing import TYPE_CHECKING, Protocol, TypeVar
 
 from .dumper_castxml import (
     _mangled_name_is_local_linkage as _mangled_name_is_local_linkage,
@@ -92,6 +92,9 @@ from .tu_merge_provenance import (
     _pick_deprecated,
     _with_more_public_provenance,
 )
+
+if TYPE_CHECKING:
+    from .model.identity import EntityId
 
 #: TuMergeError.code values (ADR-050 D4). Kept as plain module constants
 #: (not an enum) since TuMergeError.code is a bare string field, matching
@@ -318,6 +321,8 @@ def merge_fragments(
             typedefs={},
             typedefs_qualified={},
             constants={},
+            typedef_entity_ids={},
+            constant_entity_ids={},
             ast_producer="castxml",
             ast_toolchain={},
             ast_fallback_reason=None,
@@ -505,6 +510,34 @@ def merge_fragments(
         ),
         kind="constant",
     )
+    # `EntityId` sidecars (ADR-063 Phase 2): unioned by
+    # `_merge_entity_id_sidecar`, not `_merge_scalar_group` -- the latter
+    # compares wire *values* (a typedef's underlying-type string, a
+    # constant's value string), which two TUs already had to agree on above
+    # for `typedefs_qualified`/`constants` to merge at all. An `EntityId` is
+    # a *structural* fact instead (scope + kind + leaf name), and two TUs
+    # can agree on a qualified name's string spelling while disagreeing on
+    # its structure -- ADR-063's own motivating collision (`ns::Alias`
+    # nested in a namespace in one TU, nested in a same-named `struct ns`
+    # in another) is exactly this shape, so it needs its own conflict check
+    # rather than inheriting `_merge_scalar_group`'s value-only one (Codex
+    # review).
+    typedef_entity_ids = _merge_entity_id_sidecar(
+        (
+            (f.tu_name, name, eid)
+            for f in ordered
+            for name, eid in f.typedef_entity_ids.items()
+        ),
+        kind="typedef",
+    )
+    constant_entity_ids = _merge_entity_id_sidecar(
+        (
+            (f.tu_name, name, eid)
+            for f in ordered
+            for name, eid in f.constant_entity_ids.items()
+        ),
+        kind="constant",
+    )
 
     # Any contributing fragment's AST provenance is representative: ADR-050
     # D3 rejects a manifest declaring different compilers/target triples
@@ -558,6 +591,8 @@ def merge_fragments(
         typedefs=typedefs,
         typedefs_qualified=typedefs_qualified,
         constants=constants,
+        typedef_entity_ids=typedef_entity_ids,
+        constant_entity_ids=constant_entity_ids,
         ast_producer=representative.ast_producer,
         ast_toolchain=merged_ast_toolchain,
         ast_fallback_reason=representative.ast_fallback_reason,
@@ -722,6 +757,41 @@ def _merge_scalar_group(
                     tu_names=(acc_tu, tu_name),
                 )
         merged[name] = acc_value
+    return merged
+
+
+def _merge_entity_id_sidecar(
+    items: Iterable[tuple[str, str, EntityId]], *, kind: str
+) -> dict[str, EntityId]:
+    """The `EntityId`-sidecar analogue of :func:`_merge_scalar_group`: two
+    TUs contributing the same qualified key must resolve the identical
+    structural identity, or the merge cannot pick one over the other any
+    more safely than :func:`_merge_scalar_group` can pick one disagreeing
+    value over another. Compares by value (`EntityId` is a frozen,
+    structurally-equal dataclass), not by `.key` string, so this stays exact
+    even before `.key`'s own cross-release stability is established
+    elsewhere (`model/identity.py`).
+    """
+    by_name: dict[str, list[tuple[str, EntityId]]] = {}
+    for tu_name, name, eid in items:
+        by_name.setdefault(name, []).append((tu_name, eid))
+
+    merged: dict[str, EntityId] = {}
+    for name, candidates in by_name.items():
+        acc_tu, acc_eid = candidates[0]
+        for tu_name, eid in candidates[1:]:
+            if eid != acc_eid:
+                raise TuMergeError(
+                    f"translation units {acc_tu!r} and {tu_name!r} resolve "
+                    f"different entity identities for {kind} {name!r} "
+                    f"({acc_eid!r} vs {eid!r}) -- two TUs agreeing on this "
+                    "name's spelling while disagreeing on its structural "
+                    "scope cannot be reconciled.",
+                    code=INCONSISTENT_DECLARATION,
+                    entity_key=entity_key(kind, name),
+                    tu_names=(acc_tu, tu_name),
+                )
+        merged[name] = acc_eid
     return merged
 
 

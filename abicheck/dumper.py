@@ -1625,6 +1625,8 @@ def _dump_elf(
         typedefs=ast_result.typedefs,
         typedefs_qualified=ast_result.typedefs_qualified,
         constants=ast_result.constants,
+        typedef_entity_ids=ast_result.typedef_entity_ids,
+        constant_entity_ids=ast_result.constant_entity_ids,
         elf=elf_meta,
         dwarf=dwarf_meta,
         dwarf_advanced=dwarf_adv,
@@ -1806,6 +1808,8 @@ def _dump_macho(
         typedefs=parser.parse_typedefs(),
         typedefs_qualified=parser.parse_typedefs_qualified(),
         constants=parser.parse_constants(),
+        typedef_entity_ids=parser.parse_typedef_entity_ids(),
+        constant_entity_ids=parser.parse_constant_entity_ids(),
         macho=macho_meta,
         # Reached only when headers were supplied and castxml ran (the no-header
         # branch returns earlier): this surface is header-parsed.
@@ -1929,6 +1933,8 @@ def _dump_pe(
         typedefs=parser.parse_typedefs(),
         typedefs_qualified=parser.parse_typedefs_qualified(),
         constants=parser.parse_constants(),
+        typedef_entity_ids=parser.parse_typedef_entity_ids(),
+        constant_entity_ids=parser.parse_constant_entity_ids(),
         pe=pe_meta,
         # Reached only when headers were supplied and castxml ran (the no-header
         # branch returns earlier): this surface is header-parsed.

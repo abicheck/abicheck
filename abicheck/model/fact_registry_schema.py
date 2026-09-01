@@ -304,7 +304,7 @@ _CASE_A_UNCONVERTED: tuple[tuple[str, str], ...] = (
 #: FACT_REGISTRY``, it is this phase's first real conversion. The five
 #: binary-format fields on ``ElfMetadata``/``PeMetadata``/``MachoMetadata``
 #: (schema-version-driven, not backend-driven) that used to live here were
-#: converted in Phase 5's seventh batch (schema v36) and are now in
+#: converted in Phase 5's seventh batch (schema v37) and are now in
 #: ``FACT_REGISTRY`` instead — see ``model/elf_facts.py``/``pe_facts.py``/
 #: ``macho_facts.py``.
 _CASE_B_UNCONVERTED: tuple[tuple[str, str], ...] = ()

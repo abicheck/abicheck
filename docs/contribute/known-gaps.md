@@ -5846,11 +5846,13 @@ looked like the obvious fix and wasn't.
   placement (its own docstring already states the reason and the
   precedent it follows) as accepted debt until that slice is done.
 
-- **ADR-063 Phase 3 (D5) lands the public-surface-as-graph-query
-  infrastructure without migrating `surface.py`/`export_surface.py`'s own
-  traversal algorithms onto it, and without unifying the new graph
-  builder's node ids with the pre-existing L5 graph's — both deliberate,
-  documented scope boundaries, not oversights.** `policy/public_surface.py`'s
+- **[Superseded 2026-09-01 for `surface.py`'s own half — see the correction
+  below; the node-id-namespace half is still accurate.] ADR-063 Phase 3
+  (D5) lands the public-surface-as-graph-query infrastructure without
+  migrating `surface.py`/`export_surface.py`'s own traversal algorithms
+  onto it, and without unifying the new graph builder's node ids with the
+  pre-existing L5 graph's — both deliberate, documented scope boundaries,
+  not oversights.** `policy/public_surface.py`'s
   `PublicSurfaceQuery` delegates to `surface.compute_public_surface()`/
   `export_surface.compute_export_surface()` unchanged rather than
   reimplementing either as a literal graph traversal: both are exactly the
@@ -5881,6 +5883,32 @@ looked like the obvious fix and wasn't.
   note (`docs/contribute/plans/one-semantic-pipeline.md`), and
   `compare/surface_graph.py`'s/`policy/public_surface.py`'s own module
   docstrings for the exact reasoning each carries.
+
+  **Correction (2026-09-01): the traversal-migration half of this entry's
+  own title is now stale — the algorithm was migrated after all, just not
+  in this phase's first landing.** A later round did reimplement
+  `surface.py`'s closure walk as a real traversal rather than leaving it
+  in place: `_index_surface_types`/`_seed_public_roots`/
+  `_walk_type_closure`/`_walk_exact_type_closure`/`_record_exact_identities`/
+  `_record_nested_in_known_record`/`_record_is_confirmed_public_seed` and
+  the `PublicSurface` type moved to `policy/public_surface.py` (dataclass +
+  indexing) and `policy/public_surface_closure.py` (the walk itself, plus
+  `resolve_public_surface()`), and `surface.py`'s own copies were
+  **deleted**, not kept alongside — `surface.compute_public_surface()` is
+  now a thin re-exporting wrapper. `export_surface.py`'s own root-seeding
+  stayed in place, but its final type-closure step now calls the same
+  migrated `_walk_type_closure` the header domain uses, so that domain
+  became graph-native for free. This is the risk the paragraph above
+  named and chose to defer, not a different fix — it just didn't stay
+  deferred through the whole phase. The next two bullets below give the
+  full, three-review-round account of what that migration actually needed
+  to get right (and what it does *not* touch — `snap.surface_graph`/
+  `GraphNode.attrs`, in the design that finally shipped). What is **still**
+  correctly described by the paragraph above, unchanged: `export_surface.py`'s
+  own root-seeding logic, `type_reachability.directly_referenced_stdlib_types()`
+  staying unmigrated (same `policy -> extract` reason), and the two node-id
+  namespaces not deduping onto one node. See ADR-063's Status block for
+  Phase 3's final accounting.
 
 - **ADR-063 Phase 3 (D5)'s traversal migration went through three review
   rounds before landing on a design that reads `AbiSnapshot.surface_graph`

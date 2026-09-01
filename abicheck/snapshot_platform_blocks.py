@@ -54,7 +54,7 @@ def elf_from_dict(elf: dict[str, Any], schema_version: int) -> Any:
 
     # ADR-063 Phase 5 (seventh batch): the schema_version ElfMetadata's own
     # three case-(b) *_fact siblings started being persisted at.
-    _min_schema = 36
+    _min_schema = 37
     dynamic_flags_fact = decode_fact(
         elf.get("dynamic_flags_fact"), schema_version, min_schema_version=_min_schema
     )
@@ -173,7 +173,7 @@ def pe_from_dict(pe: dict[str, Any], schema_version: int) -> Any:
         # ADR-063 Phase 5 (seventh batch): the schema_version PeMetadata's
         # own delay_imports_fact sibling started being persisted at.
         delay_imports_fact=decode_fact(
-            pe.get("delay_imports_fact"), schema_version, min_schema_version=36
+            pe.get("delay_imports_fact"), schema_version, min_schema_version=37
         ),
     )
 
@@ -208,7 +208,7 @@ def macho_from_dict(macho: dict[str, Any], schema_version: int) -> Any:
         # ADR-063 Phase 5 (seventh batch): the schema_version MachoMetadata's
         # own rpaths_fact sibling started being persisted at.
         rpaths_fact=decode_fact(
-            macho.get("rpaths_fact"), schema_version, min_schema_version=36
+            macho.get("rpaths_fact"), schema_version, min_schema_version=37
         ),
     )
 

@@ -879,6 +879,32 @@ def merge_snapshots(castxml_snap: AbiSnapshot, clang_snap: AbiSnapshot) -> AbiSn
             **clang_snap.typedefs_qualified,
             **castxml_snap.typedefs_qualified,
         },
+        # The `EntityId` sidecars (ADR-063 Phase 2) union the same way, in the
+        # same direction, so they cannot desync from the dicts they annotate.
+        typedef_entity_ids={
+            **clang_snap.typedef_entity_ids,
+            **castxml_snap.typedef_entity_ids,
+        },
+        # `constants` itself (unlike `typedefs_qualified`) is NOT merged
+        # above -- it stays castxml_snap's own, verbatim, same as every
+        # other bare-keyed field this function's docstring lists. A clang-
+        # only key unioned into the sidecar the same way `typedef_
+        # entity_ids` is would therefore name a constant `merged.constants`
+        # never retained -- a phantom identity violating the sidecar's own
+        # exact-key contract with its partner dict (Codex review). Keyed
+        # off `castxml_snap.constants` (== `merged.constants`) instead, so
+        # every sidecar key has a real constant behind it; a key clang
+        # alone resolved an identity for, that castxml also kept, still
+        # wins clang's identity as it did before, since clang is spread
+        # first in the union below.
+        constant_entity_ids={
+            key: value
+            for key, value in {
+                **clang_snap.constant_entity_ids,
+                **castxml_snap.constant_entity_ids,
+            }.items()
+            if key in castxml_snap.constants
+        },
         ast_producer="hybrid",
         ast_toolchain={
             **{

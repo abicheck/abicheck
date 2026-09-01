@@ -573,6 +573,7 @@ _LAMBDA_IDENTITY_FIELDS: tuple[str, ...] = (
     "enums",
     "typedefs",
     "typedefs_qualified",
+    "typedef_entity_ids",  # ...and NOT constant_entity_ids: see both fields' own comment.
     "fact_provenance",
 )
 

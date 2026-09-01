@@ -171,25 +171,25 @@ _MIN_SCHEMA_VERSION_FOR_IS_FINAL_FACT = 30
 # persisted at — one shared threshold, since all six land together in the
 # same schema bump. Same reasoning as _MIN_SCHEMA_VERSION_FOR_IS_FINAL_FACT
 # above: a document below this version never carried these keys at all.
-_MIN_SCHEMA_VERSION_FOR_RECORDTYPE_CASE_B_FACTS = 31
+_MIN_SCHEMA_VERSION_FOR_RECORDTYPE_CASE_B_FACTS = 32
 
 # ADR-063 Phase 5 (third batch): the schema_version EnumType's own
 # qualified_name_fact/source_header_fact siblings started being persisted
 # at.
-_MIN_SCHEMA_VERSION_FOR_ENUMTYPE_FACTS = 32
+_MIN_SCHEMA_VERSION_FOR_ENUMTYPE_FACTS = 33
 
 # ADR-063 Phase 5 (fourth batch): the schema_version Variable's own
 # source_header_fact/alignment_bits_fact/elf_binding_fact siblings started
 # being persisted at.
-_MIN_SCHEMA_VERSION_FOR_VARIABLE_CASE_B_FACTS = 33
+_MIN_SCHEMA_VERSION_FOR_VARIABLE_CASE_B_FACTS = 34
 
 # ADR-063 Phase 5 (fifth batch): the schema_version Function's own ten
 # case-(b) *_fact siblings started being persisted at.
-_MIN_SCHEMA_VERSION_FOR_FUNCTION_CASE_B_FACTS = 34
+_MIN_SCHEMA_VERSION_FOR_FUNCTION_CASE_B_FACTS = 35
 
 # ADR-063 Phase 5 (sixth batch): the schema_version AbiSnapshot's own
 # ast_resolved_standard_fact sibling started being persisted at.
-_MIN_SCHEMA_VERSION_FOR_SNAPSHOT_CASE_B_FACTS = 35
+_MIN_SCHEMA_VERSION_FOR_SNAPSHOT_CASE_B_FACTS = 36
 
 
 def decode_fact(
