@@ -355,7 +355,13 @@ def dispatch(*, compile_context: Any, **kwargs: Any) -> None:
             # of how many `/`/`..` segments precede it, so it can never
             # escape `output_dir` on this platform's own separator rules.
             safe_name = Path(diff.library).name or "library"
-            (output_dir / f"{safe_name}.json").write_text(to_json(diff))
+            # Codex review, fresh evidence: same root cause as the -o/
+            # --write fix above -- a direct write_text() here leaked a
+            # traceback for an unwritable output_dir or any other OSError,
+            # after the primary report may have already been emitted.
+            # Routed through the same shared writer the live release
+            # fan-out uses for its own per-library artifacts.
+            _safe_write_output(output_dir / f"{safe_name}.json", to_json(diff))
 
     _exit_compare_release(result.verdict.value, fail_on_removed=False, removed_keys=[])
 

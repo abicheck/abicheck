@@ -485,3 +485,21 @@ def reject_unsupported_options(kwargs: dict[str, Any]) -> None:
             "--old-bundle-facts: OLD_FACTS is already a resolved, stored "
             "snapshot with no header re-extraction available."
         )
+    if kwargs.get("demangle") is not None:
+        # Codex review, fresh evidence: --demangle/--no-demangle is
+        # documented to apply to markdown output, but this dispatcher's
+        # markdown rendering calls bundle.render_bundle_findings_markdown()
+        # directly, which has no demangle parameter at all -- the live
+        # release fan-out's own bundle-findings markdown section
+        # (cli_compare_release_helpers._release_md_bundle_findings) has
+        # this identical pre-existing gap, so implementing it only here
+        # would disagree with what that shared renderer already does.
+        # Rejected only when the flag is given explicitly, matching the
+        # --jobs precedent: the silent default (demangle ON) is left alone
+        # since json/the common per-library table never show a mangled
+        # symbol at all -- only a rare bundle_* finding on a C++ symbol
+        # would show one.
+        raise click.UsageError(
+            "--demangle/--no-demangle is not supported together with "
+            "--old-bundle-facts."
+        )

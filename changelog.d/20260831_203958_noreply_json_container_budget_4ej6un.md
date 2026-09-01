@@ -131,6 +131,16 @@
   already a resolved, stored snapshot with no header re-extraction
   available.
 
+  `--output-dir`'s per-library artifact writes also now route through the
+  same shared writer, matching the live release fan-out's own per-library
+  writes. An explicit `--demangle`/`--no-demangle` is now rejected too:
+  `render_bundle_findings_markdown()` (shared with the live release fan-out's
+  own bundle-findings markdown section, which has this identical
+  pre-existing gap) has no demangle parameter at all, so a bundle finding
+  naming a C++ symbol always rendered mangled regardless of the flag. The
+  silent default (demangle ON) is left un-rejected, matching the `--jobs`
+  precedent.
+
   Separately, `run_plan.py`'s newline-join fix for `RunPlanCheck.header`
   (public_headers reaching a generated run-plan cell) missed the
   single-element case: `"\n".join([x])` for a one-item list contains no

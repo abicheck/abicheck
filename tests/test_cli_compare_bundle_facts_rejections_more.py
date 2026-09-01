@@ -123,6 +123,53 @@ class TestCompareOldBundleFactsEarlyRejections:
         assert code == 64
         assert "--ast-frontend" in out
 
+    def test_explicit_demangle_is_rejected(self, tmp_path: Path) -> None:
+        # Codex review: --demangle is documented to apply to markdown
+        # output, but this dispatcher's markdown rendering calls
+        # bundle.render_bundle_findings_markdown() directly, which has no
+        # demangle parameter at all -- the live release fan-out's own
+        # bundle-findings markdown section has this identical pre-existing
+        # gap, so implementing it only here would disagree with what that
+        # shared renderer already does.
+        facts_path = tmp_path / "old.bundlefacts.json"
+        facts_path.write_text("{}")
+        new_dir = tmp_path / "new"
+        new_dir.mkdir()
+
+        code, out = _invoke(
+            "compare",
+            str(facts_path),
+            str(new_dir),
+            "--old-bundle-facts",
+            "--demangle",
+            "--format",
+            "markdown",
+        )
+
+        assert code == 64
+        assert "--demangle" in out
+
+    def test_default_demangle_is_not_rejected_by_itself(self, tmp_path: Path) -> None:
+        # The silent default (None, "demangle ON") is left un-rejected,
+        # matching the --jobs precedent -- confirmed via a malformed
+        # OLD_FACTS document that fails for an unrelated reason first.
+        facts_path = tmp_path / "old.bundlefacts.json"
+        facts_path.write_text("not json")
+        new_dir = tmp_path / "new"
+        new_dir.mkdir()
+
+        code, out = _invoke(
+            "compare",
+            str(facts_path),
+            str(new_dir),
+            "--old-bundle-facts",
+            "--format",
+            "markdown",
+        )
+
+        assert code == 1, out
+        assert "--demangle" not in out
+
     def test_report_mode_is_rejected(self, tmp_path: Path) -> None:
         # Codex review: every nested per-library report is rendered via
         # reporter.to_json(diff) with no report_mode argument -- always the
