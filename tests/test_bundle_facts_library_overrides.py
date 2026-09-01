@@ -179,6 +179,23 @@ class TestParseBundleFactsLibraryOverrides:
         with pytest.raises(BundleFactsLibraryOverridesError, match=accepted_snippet):
             parse_bundle_facts_library_overrides({"libfoo.so": {field_name: bad_value}})
 
+    @pytest.mark.parametrize("field_name", ["headers", "includes"])
+    def test_empty_path_string_in_list_is_rejected(self, field_name: str) -> None:
+        """Codex review: an empty string is a valid ``str``, so it passed
+        the list-of-strings type check cleanly -- but ``_resolve_path("",
+        base_dir=...)`` resolves an empty *relative* path to ``base_dir``
+        itself (``Path("/x") / Path("") == Path("/x")``), silently turning
+        an accidentally blank ``headers: [""]`` entry into "scan the
+        manifest's own directory" instead of a clean rejection. Regression
+        checked with a real ``base_dir`` so the bug (a *resolved* Path
+        equal to ``base_dir``, not just an unresolved empty string) would
+        actually reproduce against the pre-fix code."""
+        with pytest.raises(BundleFactsLibraryOverridesError, match="empty string"):
+            parse_bundle_facts_library_overrides(
+                {"libfoo.so": {field_name: [""]}},
+                base_dir=Path("/some/manifest/dir"),
+            )
+
     def test_empty_library_name_is_rejected(self) -> None:
         with pytest.raises(BundleFactsLibraryOverridesError, match="non-empty strings"):
             parse_bundle_facts_library_overrides({"": {"headers": ["x"]}})

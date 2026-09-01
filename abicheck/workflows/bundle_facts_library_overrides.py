@@ -109,6 +109,15 @@ def _require_str_list(value: object, *, where: str) -> list[str]:
         raise BundleFactsLibraryOverridesError(
             f"{where}: must be a list of strings, got {type(value).__name__}"
         )
+    if any(not v for v in value):
+        # Codex review: an empty string is a `str`, so it passed the
+        # isinstance check above cleanly -- but `_resolve_path("", base_dir=
+        # ...)` (below) resolves an empty *relative* path to `base_dir`
+        # itself (`Path("/x") / Path("") == Path("/x")`), silently turning
+        # an accidentally blank `headers: [""]` entry into "scan the
+        # manifest's own directory" instead of the clean rejection every
+        # other malformed path value here gets.
+        raise BundleFactsLibraryOverridesError(f"{where}: must not contain an empty string")
     return value
 
 
