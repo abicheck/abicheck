@@ -60,8 +60,7 @@ class PolicyFileParam(click.ParamType):
     name = "policy"
 
     def convert(self, value: Any, param: Any, ctx: Any) -> Path:
-        from ....policies import builtin_policy_names
-        from ....workflows.policy_file import builtin_policy_path
+        from ....workflows.policy_file import builtin_policy_names, builtin_policy_path
 
         value_str = str(value)
         builtin = builtin_policy_path(value_str)

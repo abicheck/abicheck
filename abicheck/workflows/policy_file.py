@@ -45,6 +45,7 @@ resolves.
 
 from __future__ import annotations
 
+from ..policies import builtin_policy_names
 from ..policy_file import (
     PolicyFile,
     builtin_policy_path,
@@ -54,6 +55,7 @@ from ..policy_file import (
 
 __all__ = [
     "PolicyFile",
+    "builtin_policy_names",
     "builtin_policy_path",
     "dedup_validate_overrides_warnings",
     "pending_validate_overrides_warnings",

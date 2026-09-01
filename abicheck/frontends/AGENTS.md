@@ -68,11 +68,18 @@ routes through a `workflows` re-export surface (`gate`, `extraction`,
 other direction closed too, taking `ENGINE_CLI_BOUNDARY_ALLOWLIST` from 15
 entries to 4 over this phase and the last.
 
-`cli_params.py` (452 lines) is still flat, and the reason is the rule to
-remember when adding anything here: **this is a migrated package, so
-`unclassified-import` applies to every module physically inside it.** Check a
-candidate's full first-party import set before moving it, not just whether it
-looks leaf-shaped.
+`cli_params.py` has since physically moved to `cli/options/params.py`
+(ADR-061 Phase 4) — pure relocation, since it was already classified
+`frontends` via `legacy_paths` beforehand, so no reclassification or import
+surprises were involved. The rule that move confirmed still stands for the
+next candidate: **this is a migrated package, so `unclassified-import`
+applies to every module physically inside it.** Check a candidate's full
+first-party import set before moving it, not just whether it looks
+leaf-shaped — a module that reaches a `model`-classified package (like
+`abicheck.policies`) for policy-owned discovery data still routes through
+the matching `workflows` facade (`workflows.policy_file.builtin_policy_names`)
+rather than importing it directly, the same boundary this section's `cli/
+commands` table entries already respect.
 
 **Still open:** `service.py` (1763 lines) has not been thinned, and the reason
 is now specific rather than open-ended. Moving it means classifying the 28 flat

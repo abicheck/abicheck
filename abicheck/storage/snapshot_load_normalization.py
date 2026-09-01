@@ -132,6 +132,27 @@ def backfill_missing_elf_binding(snap: AbiSnapshot) -> None:
                 var.elf_binding = elf_sym.binding
 
 
+def _str_field_mapping(raw: Any) -> dict[str, str]:
+    """A ``dict[str, str]`` extraction-contract field, dropped rather than
+    coerced when the container -- or an individual key/value pair inside it
+    -- is not already string-shaped (storage AGENTS.md invariant 6,
+    ``guards``'s "reject rather than coerce" rule applied here):
+    ``profile_fields``/``scope_fields`` feed ADR-050's comparability gate
+    directly, so ``str()`` collapsing ``1``/``"1"`` onto one entry -- or
+    turning a malformed non-string value into plausible-looking fingerprint
+    text -- would make the gate compare snapshots that were never actually
+    extracted under the same contract as if they were (Codex review). A
+    malformed *pair* is dropped rather than failing the whole snapshot load,
+    matching this function's own established per-field degrade-to-empty
+    contract for ``profile_fingerprint``/``scope_fingerprint`` above --
+    unlike ``guards.decision_key``'s callers, this parses an optional,
+    forward-compatible document field, not a stored record's own identity.
+    """
+    if not isinstance(raw, dict):
+        return {}
+    return {k: v for k, v in raw.items() if isinstance(k, str) and isinstance(v, str)}
+
+
 def extraction_contract_from_dict(raw: Any) -> ExtractionContract | None:
     """Convert a serialized ExtractionContract dict (or None) back into the
     typed dataclass (ADR-050 D1). Returns None when the field is missing
@@ -140,8 +161,6 @@ def extraction_contract_from_dict(raw: Any) -> ExtractionContract | None:
         return None
     profile_fingerprint = raw.get("profile_fingerprint")
     scope_fingerprint = raw.get("scope_fingerprint")
-    profile_fields = raw.get("profile_fields")
-    scope_fields = raw.get("scope_fields")
     return ExtractionContract(
         profile_fingerprint=profile_fingerprint
         if isinstance(profile_fingerprint, str)
@@ -149,12 +168,8 @@ def extraction_contract_from_dict(raw: Any) -> ExtractionContract | None:
         scope_fingerprint=scope_fingerprint
         if isinstance(scope_fingerprint, str)
         else None,
-        profile_fields={str(k): str(v) for k, v in profile_fields.items()}
-        if isinstance(profile_fields, dict)
-        else {},
-        scope_fields={str(k): str(v) for k, v in scope_fields.items()}
-        if isinstance(scope_fields, dict)
-        else {},
+        profile_fields=_str_field_mapping(raw.get("profile_fields")),
+        scope_fields=_str_field_mapping(raw.get("scope_fields")),
     )
 
 

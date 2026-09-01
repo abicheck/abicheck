@@ -67,6 +67,15 @@ from .cli_buildsource_helpers import (  # noqa: F401  (re-exported for API stabi
 )
 from .errors import SnapshotError, ValidationError
 
+# Back-compat alias for the pre-move name: `purge_external_outputs` used to be
+# `cli_buildsource_helpers._purge_external_outputs` (a private helper, but one
+# this module has always re-exported "for API stability / tests" per
+# AGENTS.md's "Moving helpers out of a module that re-exports them?"
+# guidance). A plain assignment, not the lazy `__getattr__` shim below --
+# `purge_external_outputs` is already imported statically above with no
+# cycle risk, unlike the `cli_graph` names that shim exists for.
+_purge_external_outputs = purge_external_outputs
+
 if TYPE_CHECKING:
     from .api_types import DumpRequest
     from .model import AbiSnapshot
