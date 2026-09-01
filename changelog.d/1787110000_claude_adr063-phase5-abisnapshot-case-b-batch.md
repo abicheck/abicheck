@@ -1,7 +1,7 @@
 ### Added
 
 - **ADR-063 Phase 5's fact/capability registry: `AbiSnapshot.ast_resolved_standard`
-  converted to `Fact[T]`** (schema v35) — the last remaining case-(b)
+  converted to `Fact[T]`** (schema v36) — the last remaining case-(b)
   field outside the four declaration dataclasses (`RecordType`,
   `EnumType`, `Variable`, `Function`), closing the case-(b) conversion
   scope this ADR's design section named entirely. Same "`None` already

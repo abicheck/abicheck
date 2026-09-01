@@ -1,7 +1,7 @@
 ### Added
 
 - **ADR-063 Phase 5's fact/capability registry: `Function`'s ten case-(b)
-  fields converted to `Fact[T]`** (schema v34) — `contract_attributes`,
+  fields converted to `Fact[T]`** (schema v35) — `contract_attributes`,
   `is_explicit`, `is_hidden_friend`, `source_header`, `is_variadic`,
   `exception_spec`, `is_override`, `hidden_friend_owner`, `elf_binding`,
   and `is_compiler_generated` now carry `Fact[...]` siblings, the same

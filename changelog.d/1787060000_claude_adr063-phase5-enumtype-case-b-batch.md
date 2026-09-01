@@ -1,7 +1,7 @@
 ### Added
 
 - **ADR-063 Phase 5's fact/capability registry: `EnumType`'s case-(b)
-  fields converted to `Fact[T]`** (schema v32) — `qualified_name`/
+  fields converted to `Fact[T]`** (schema v33) — `qualified_name`/
   `source_header` now carry `Fact[str | None]` siblings
   (`qualified_name_fact`/`source_header_fact`), the same case-(b)
   "`None` already unambiguously means not captured" pattern already

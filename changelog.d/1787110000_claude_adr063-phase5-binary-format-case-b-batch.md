@@ -2,7 +2,7 @@
 
 - **ADR-063 Phase 5's fact/capability registry: the three binary-format
   metadata blocks' own case-(b) fields converted to `Fact[T]`** (schema
-  v36) — `ElfMetadata.dynamic_flags`/`has_init`/`has_fini`,
+  v37) — `ElfMetadata.dynamic_flags`/`has_init`/`has_fini`,
   `PeMetadata.delay_imports`, and `MachoMetadata.rpaths` now carry
   `Fact[...]` siblings, the same case-(b) "`None` already unambiguously
   means not captured" pattern already applied to the four declaration

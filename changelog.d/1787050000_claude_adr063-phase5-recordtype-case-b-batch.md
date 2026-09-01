@@ -9,7 +9,7 @@
   example) and closes the same "not collected vs. confirmed absent"
   ambiguity Phase 0 closed for `bases`/`vtable`/`vptr_offset_bits`/
   `is_va_list`, for six more fields that were already tri-state at their own
-  declared type. Persisted as of snapshot schema v31; a legacy snapshot
+  declared type. Persisted as of snapshot schema v32; a legacy snapshot
   backfills correctly on load. No detector reads these siblings yet — this
   is model/registry/serialization infrastructure only, matching the
   established Phase 5 scope. `abicheck.provenance.tag_provenance` now keeps

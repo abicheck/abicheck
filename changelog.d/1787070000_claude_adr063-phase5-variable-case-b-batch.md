@@ -1,7 +1,7 @@
 ### Added
 
 - **ADR-063 Phase 5's fact/capability registry: `Variable`'s case-(b)
-  fields converted to `Fact[T]`** (schema v33) — `source_header`/
+  fields converted to `Fact[T]`** (schema v34) — `source_header`/
   `alignment_bits`/`elf_binding` now carry `Fact[...]` siblings
   (`source_header_fact`/`alignment_bits_fact`/`elf_binding_fact`), the
   same case-(b) "`None` already unambiguously means not captured"
